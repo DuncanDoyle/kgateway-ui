@@ -17,7 +17,7 @@ These apply to every phase. A phase design that breaks one needs a `decisions.md
    - Envoy/xDS config is evidence, not vocabulary. It is used only where Gateway API objects cannot answer the question, such as filter order or rejected config, and is always mapped back to the Gateway API objects that produced it.
    - The UI must never re-implement kgateway translation logic.
 5. **Built for 1000s of routes.** From Phase 2 on, indexing, filtering and pagination happen on the server. A whole-cluster graph is never a landing page.
-6. **Works without Prometheus**, and gets richer when Prometheus is present.
+6. **Works without an external metrics backend**, and gets richer when one is present. The first integration targets PromQL-compatible backends (Prometheus, Thanos, Mimir, VictoriaMetrics, …), behind an interface that downstreams can implement for others (D-007).
 7. **Extensible.** Resource kinds, health checks, analyzers and pages register through a registry. A downstream distribution adds to it without touching core code (D-003).
 8. **Never handles secret material.** The default RBAC has no Secret read access.
 
@@ -96,8 +96,8 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 **Docs:** `docs/phases/phase-8/`
 
 - Golden metrics (traffic, errors, latency) shown in context on gateway and route pages, sourced from the proxy and controller metrics endpoints.
-- An optional Prometheus integration for longer windows, with links out to Grafana for history.
-- An exploration of access logs.
+- An optional integration with a PromQL-compatible metrics backend for longer windows, with links out to Grafana for history.
+- An exploration of access logs and traces, assuming they are exported via OpenTelemetry (D-007).
 
 **Design question:** where this UI's job stops and the job of the metrics platform starts.
 

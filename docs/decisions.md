@@ -61,3 +61,15 @@ Append-only. Newest at the bottom. Supersede, don't edit.
 **Consequences:**
 - A translation that is wrong but was accepted by Envoy stays invisible to the UI.
 - Health roll-ups (Phase 1 banner, Phase 3 overview) must combine all of these signals, and no single green status can mask another.
+
+## D-007 — Metrics backends are PromQL-first behind an interface; OpenTelemetry covers logs and traces (2026-10-16, roadmap)
+**Context:** Principle 6 named Prometheus. Users run a range of metrics platforms, and OpenTelemetry was suggested as a more generic term.
+**Decision:**
+- The UI works without any external metrics backend. When one is configured, it queries it through a backend interface.
+- The first implementation of that interface targets PromQL-compatible backends (Prometheus, Thanos, Mimir, Cortex, VictoriaMetrics). This fits because kgateway and Envoy expose Prometheus-format metrics, whether those metrics reach the store by scraping or through an OpenTelemetry Collector.
+- Downstreams can implement the interface for other backends.
+- In Phase 8, access-log and trace exploration assumes these are exported via OpenTelemetry.
+**Alternatives:**
+- Naming OpenTelemetry as the metrics source — rejected because OpenTelemetry defines production and transport (SDKs, OTLP, Collector), not a query API, so the UI cannot read metrics "from OTel".
+- Naming Prometheus only — rejected as too narrow.
+**Consequences:** The Phase 8 design defines the metrics backend interface and its extension point.
