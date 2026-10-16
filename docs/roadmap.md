@@ -1,6 +1,6 @@
 # kgateway UI — Roadmap
 
-**Last updated:** 2026-10-15
+**Last updated:** 2026-10-16
 
 ## Goal
 A read-only web UI for kgateway (Envoy data plane) that lets platform operators see at a glance whether their gateways are healthy, understand where traffic goes and which policies apply, and debug misrouted traffic in large deployments (100s of hostnames, 1000s of routes). It layers the higher-level semantics of Gateway API and kgateway policies on top of the cluster state, rather than being yet another Kubernetes resource viewer. The project is built so that downstream distributions can extend it without forking or copying code.
@@ -13,7 +13,7 @@ These apply to every phase. A phase design that breaks one needs a `decisions.md
 3. **Health is the home page.** It starts thin in Phase 1, and every later phase feeds new signals into it.
 4. **Speak Gateway API; never re-implement translation.**
    - Gateway API resources and their status are the primary source, presented in the user's language.
-   - A route that is Accepted and Programmed is treated as active as specified. If the data plane disagrees, that is a kgateway bug, which the UI surfaces rather than hides.
+   - A route that is Accepted and Programmed is treated as active as specified; the UI does not verify the data plane against the spec. It does show every signal that contradicts that status — xDS rejects, dropped or replaced rules, proxy readiness, and (Phase 9) differences between the config the controller sent and the config Envoy accepted — and never reports green while one of them is active (D-006).
    - Envoy/xDS config is evidence, not vocabulary. It is used only where Gateway API objects cannot answer the question, such as filter order or rejected config, and is always mapped back to the Gateway API objects that produced it.
    - The UI must never re-implement kgateway translation logic.
 5. **Built for 1000s of routes.** From Phase 2 on, indexing, filtering and pagination happen on the server. A whole-cluster graph is never a landing page.

@@ -51,3 +51,13 @@ Append-only. Newest at the bottom. Supersede, don't edit.
 **Consequences:**
 - Phase 5 (effective policy) must build on policy ancestor status rather than on its own merge logic.
 - Phase 6 (route tester) may evaluate spec-defined Gateway API precedence, but must decide how to handle kgateway-specific behaviour (delegation, rule replacement).
+
+## D-006 — Contradicting signals are shown, not verified (2026-10-16, roadmap)
+**Context:** D-005 said a data-plane divergence "is a kgateway bug, which the UI surfaces rather than hides". Read literally, that promises the UI verifies the data plane against the spec. Doing that requires predicting the expected Envoy config, which is the translation logic D-005 rules out.
+**Decision:** This narrows the wording of D-005; the rest of D-005 stands.
+- A route that is Accepted and Programmed is treated as active as specified, and the UI does not verify the data plane against the spec.
+- The UI shows every signal that contradicts that status and never reports green while one of them is active. These signals are xDS rejects per gateway, dropped or replaced rules, Gateway `Programmed=False`, proxy readiness, and (Phase 9) differences between the controller's xDS snapshot and the config Envoy accepted.
+**Alternatives:** Verifying the data plane against the spec — rejected because it requires re-implementing translation (D-005).
+**Consequences:**
+- A translation that is wrong but was accepted by Envoy stays invisible to the UI.
+- Health roll-ups (Phase 1 banner, Phase 3 overview) must combine all of these signals, and no single green status can mask another.
