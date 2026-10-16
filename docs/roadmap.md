@@ -21,6 +21,21 @@ These apply to every phase. A phase design that breaks one needs a `decisions.md
 7. **Extensible.** Resource kinds, health checks, analyzers and pages register through a registry. A downstream distribution adds to it without touching core code (D-003).
 8. **Never handles secret material.** The default RBAC has no Secret read access.
 
+## UX & visual design
+**Baseline:** the frontend design and frontend conventions guidelines that the agent tooling applies to this project:
+- motion, layout, themes, contrast (at least WCAG AA), components, designed empty/error/loading states, and UX rules;
+- React + TypeScript code structure.
+
+**Project requirements on top of that baseline:**
+1. **Open component library.** The repo is public, so the UI builds on an open-source component library (or its own components), never a proprietary one. The choice is made in the Phase 1 design.
+2. **Rebrandable by downstreams.** All colour, typography, logo and product-name decisions flow from theme tokens, and a downstream build can override them without forking styles (D-008).
+3. **kgateway identity.** The default theme uses the kgateway project's logo and palette, within the terms of its artwork licence, rather than inventing a new brand.
+4. **One health vocabulary.** There is a fixed set of states (healthy, warning, error, unknown), always expressed as colour + icon + text, never colour alone. It is used identically everywhere: the banner, lists, detail pages and flow diagrams.
+5. **Operator-grade navigation and density.**
+   - Every view, including its filters and selection, has a shareable deep link.
+   - The UI can be navigated with the keyboard.
+   - Dense tables stay usable at 1000s of rows.
+
 ## Phases
 
 ### Phase 1 — Foundation & Overview
@@ -33,7 +48,7 @@ A minimal UI that is deployable and operational and already provides value. It c
 - the list of Gateways with their status;
 - a first health banner: green, or the resources that are not Accepted or Programmed.
 
-It also delivers the build foundation: the Go binary with the embedded SPA, a container image, a Helm chart, CI, and the extension registry seam.
+It also delivers the build foundation: the Go binary with the embedded SPA, a container image, a Helm chart, CI, and the extension registry seam. It also delivers the design foundation: the chosen component library, design tokens and themes (including the downstream override), and the health states.
 
 ### Phase 2 — Gateway & Route Explorer
 **Status:** Not started

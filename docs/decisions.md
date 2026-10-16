@@ -73,3 +73,15 @@ Append-only. Newest at the bottom. Supersede, don't edit.
 - Naming OpenTelemetry as the metrics source — rejected because OpenTelemetry defines production and transport (SDKs, OTLP, Collector), not a query API, so the UI cannot read metrics "from OTel".
 - Naming Prometheus only — rejected as too narrow.
 **Consequences:** The Phase 8 design defines the metrics backend interface and its extension point.
+
+## D-008 — The UI is rebrandable by downstreams through theme tokens (2026-10-16, roadmap)
+**Context:** D-003 lets downstream distributions extend the UI. A downstream build also needs to look like its own product (logo, palette, product name, typography) without forking styles or components. The public repo cannot use proprietary component libraries.
+**Decision:**
+- All visual identity flows from theme tokens: colours, typography, logo, product name and status colours.
+- The default theme carries the kgateway identity.
+- A downstream build supplies its own token set (and may add themes) through the frontend extension package. Core components never hard-code brand values.
+- The UI builds on an open-source component library, chosen in the Phase 1 design. A downstream may use its own component library for the pages it adds.
+**Alternatives:** Downstream forks the stylesheet or overrides CSS selectors — rejected as copy/paste in disguise, which breaks on every upstream change.
+**Consequences:**
+- The token set is part of the public extension API (D-003) and is versioned with it.
+- Phase 1 must deliver the token system and at least one override path, tested.
