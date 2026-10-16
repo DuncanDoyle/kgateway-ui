@@ -2,9 +2,9 @@
 
 ## Phase
 Phase: 1 — Foundation & Overview
-Base: n/a (recorded when Phase 1 starts)
+Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: not started; roadmap approved 2026-10-15
+Status: design in progress (started 2026-10-16)
 
 ### Queue
 - [ ] Q1 Phase 1 design (`design.md`) ← CURRENT

@@ -39,7 +39,7 @@ These apply to every phase. A phase design that breaks one needs a `decisions.md
 ## Phases
 
 ### Phase 1 — Foundation & Overview
-**Status:** Not started
+**Status:** In progress
 **Docs:** `docs/phases/phase-1/`
 
 A minimal UI that is deployable and operational and already provides value. It can be installed with Helm or run locally against a kubeconfig, from the same binary (D-002). An operator sees:
