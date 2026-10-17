@@ -7,8 +7,8 @@ Docs: docs/phases/phase-1/
 Status: design in progress (started 2026-10-16)
 
 ### Queue
-- [ ] Q1 Phase 1 design (`design.md`) — drafted 2026-10-17, awaiting user review ← CURRENT
-- [ ] Q2 Phase 1 implementation plan (`implementation-plan.md`)
+- [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
+- [ ] Q2 Phase 1 implementation plan (`implementation-plan.md`) — drafted 2026-10-17; planned sub-phases 1.1 backend, 1.2 frontend, 1.3 packaging/CI/e2e ← CURRENT
 - [ ] Q3 Cross-model review of design + plan, triage, user approval
 
 ### Exit gates

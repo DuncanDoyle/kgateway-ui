@@ -106,7 +106,7 @@ An **Install** is one kgateway controller deployment. It has:
 - The upstream detector finds controller Deployments by Helm labels: `app.kubernetes.io/component=controller`, plus the kgateway chart's `app.kubernetes.io/name`.
 - It reads the version from `app.kubernetes.io/version`, falling back to the image tag.
 - It sets edition = upstream when the image is the kgateway controller image.
-- It sets `controllerNames` to the upstream defaults: `kgateway.dev/kgateway`, plus the waypoint class's controller name when `KGW_ENABLE_WAYPOINT` is true in the Pod env.
+- It sets `controllerNames` to the upstream default `kgateway.dev/kgateway`. The waypoint GatewayClass (`kgateway-waypoint`) uses the same controller name.
 - A downstream registers its own detector, which recognises its images and env and supplies its controller names, edition label and logo.
 - Each detector also supplies the **label selectors** for its controller Pods/Deployments and its proxy Deployments (upstream: the controller labels above, and `app.kubernetes.io/managed-by=kgateway` for proxies). The cache watches Pods and Deployments only through these selectors, never cluster-wide unfiltered.
 
@@ -136,7 +136,9 @@ An **Install** is one kgateway controller deployment. It has:
 
 ### 4.4 ScopeVerifier
 
-v1 compares, per install and per `(namespace, resource kind)`, the UI's count of namespace-scoped raw objects with the controller's `kgateway_resources_managed` gauge. That is the same population: namespace-filtered and not ownership-filtered.
+v1 compares, per install and per `(namespace, resource kind)`, the UI's count of namespace-scoped raw objects with the controller's `kgateway_resources_managed{namespace,parent,resource}` gauge, summed over `parent`. That is the same population: namespace-filtered and not ownership-filtered.
+- The UI must weight objects the way the gauge does (verified on kgateway main `8a498c6406`, `pkg/krtcollections/metrics/metrics.go`): a Gateway counts 1; a route counts once per `spec.parentRefs` entry, so a route with no parentRefs counts 0; a ListenerSet counts 1 and is reported as `resource="XListenerSet"`; a policy counts 1 under its own kind.
+- A gauge with no samples has no series, so an absent family in a successful scrape means 0, not "unavailable".
 - A mismatch that persists for more than 2 scrape intervals produces `KGWUI-007 scope-mismatch` (warning), showing both numbers.
 - If the metric is absent (renamed or unavailable), the verifier reports `KGWUI-008 signal-unavailable` (info). It does not decide health.
 - The plan's first task confirms the per-replica semantics of this gauge, i.e. whether every replica reports the full set.
@@ -166,7 +168,7 @@ v1 compares, per install and per `(namespace, resource kind)`, the UI's count of
 
 | Code | Slug | Severity | Source |
 |---|---|---|---|
-| KGWUI-001 | xds-rejected | error | `kgateway_envoy_xds_rejects_active{gateway,namespace,type_url} > 0`, summed over controller replicas |
+| KGWUI-001 | xds-rejected | error | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url} > 0`, summed over controller replicas. An absent family in a successful scrape means no rejects. |
 | KGWUI-002 | condition-false | error / warning | GatewayClass `Accepted`; Gateway `Accepted`/`Programmed`; listener conditions; route parent `Accepted`/`ResolvedRefs` (error) and `kgateway.dev/Programmed`; policy ancestor `Accepted`/`Attached` (`Invalid`, `TargetNotFound`, … → error; `PartiallyValid`, `Overridden` → warning) |
 | KGWUI-003 | route-unattached | warning | A route that is in scope but whose parentRefs resolve to no Gateway of the install, or that has no parent status from the install's controller |
 | KGWUI-004 | namespace-not-watched | warning | §4.3 |
