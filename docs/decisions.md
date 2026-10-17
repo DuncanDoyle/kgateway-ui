@@ -85,3 +85,52 @@ Append-only. Newest at the bottom. Supersede, don't edit.
 **Consequences:**
 - The token set is part of the public extension API (D-003) and is versioned with it.
 - Phase 1 must deliver the token system and at least one override path, tested.
+
+## D-009 — Own watches for resources; pluggable, verified scope per controller install (2026-10-17, phase 1)
+**Context:**
+- The kgateway controller does not watch the whole cluster. `discoveryNamespaceSelectors` (env `KGW_DISCOVERY_NAMESPACE_SELECTORS`; a JSON list of label selectors, OR'ed, where empty means all) limits every namespaced kind it watches.
+- Gateways count only if their GatewayClass `controllerName` matches.
+- A resource outside that scope gets no status from kgateway, and previously written status is not cleared when a namespace is deselected. So a UI that ignores scope shows false errors and stale data.
+- As of kgateway main `8a498c6406` (and 2.3/2.4), the controller exposes no effective-scope API. The admin server has no settings endpoint. `/snapshots/krt` is an internal, unbounded debug dump (it includes ConfigMap data) and is localhost-bound. `kgateway_resources_managed{namespace,parent,resource}` counts the namespace-filtered resources but is a metric, not a contract.
+- Label filters for Secrets, ConfigMaps and Services are proposed upstream (kgateway#14530, #14801) and not merged.
+- A cluster can run multiple kgateway installs with different scopes and versions.
+
+Investigated independently by Codex and by a Claude subagent against kgateway main `8a498c6406`, `v2.4.x` and `v2.3.x`; the findings agreed.
+
+**Decision:**
+1. **Resources come from our own Kubernetes watches, permanently.** Informers provide change notification, a local cache and server-side indexing. We will not ask the controller to serve resources or notifications.
+2. **Scope is pluggable.**
+   - A `ScopeProvider` answers, per controller install, which namespaces and which `controllerName`s are in scope.
+   - v1 is `NamespaceSelectorScope`: it reads `KGW_DISCOVERY_NAMESPACE_SELECTORS` from the running controller Pod spec (duplicate env entries resolve last-wins), applies kgateway's semantics (OR'ed selectors, empty means all, cluster-scoped objects always pass), and tracks namespace label changes live.
+   - A later `ControllerScope` asks the controller once it exposes its effective scope.
+   - Downstreams can register their own provider (D-003).
+3. **Scope is verified.**
+   - A pluggable `ScopeVerifier` checks the UI's view against the controller.
+   - v1 compares per-namespace, per-kind counts with `kgateway_resources_managed`. A mismatch is a health warning ("UI scope differs from the controller"), never a silent correction.
+   - The check is soft, because metric names can change upstream.
+4. **Filters on referenced objects are not mirrored** (Secret/ConfigMap/Service label selectors, ServiceEntry/WorkloadEntry exclusions). The UI never resolves references itself; it shows `ResolvedRefs` as kgateway reports it (D-005).
+5. **Scope is per controller install and first-class.**
+   - The backend discovers all installs. Each one is a scope: namespace selector, controller and class names, version, edition and metrics endpoint.
+   - One shared cache serves all scopes.
+   - The API and URLs carry the install (`/api/v1/installs/{ns}/{name}/…`).
+   - The shell shows an install switcher when there is more than one install, and the home page shows a health line per install.
+   - A pinned mode (`--install`, Helm value) restricts the UI to one install for environments where installs isolate teams.
+   - Routes are assigned to an install by the `controllerName` of the Gateway they attach to.
+6. **Unwatched-namespace diagnostic.**
+   - Route parentRefs are watched cluster-wide.
+   - A route in a namespace outside its target Gateway's install scope becomes a warning finding ("targets Gateway X, but its namespace is not watched by the controller").
+   - Such routes never count towards totals or health.
+7. **Upstream proposal.** Propose a small read-only "effective scope" endpoint in kgateway: controller identity, version, `controllerName`s, and the effective namespace scope. It must be reachable without opening the admin server's pprof and log-level handlers.
+
+**Alternatives:**
+- Watching the whole cluster unfiltered — rejected: false errors and stale status.
+- Using `/snapshots/krt` as the scope source — rejected: an unstable internal format, an unbounded dump that includes ConfigMap data, and localhost-bound.
+- Deriving scope from status `controllerName` — rejected: out-of-scope and not-yet-reconciled resources look identical, and stale status survives deselection.
+- Using `resources_managed` as the primary scope source — rejected as primary because it is a metric, not a contract; it is kept as the verifier.
+- Fetching resources from the controller via a new introspection API — rejected: it needs a streaming and notification API upstream, which is a large ask with little gain over watches.
+- Mirroring all controller filters — rejected: referenced-object filters are already reflected in status.
+
+**Consequences:**
+- `NamespaceSelectorScope` duplicates a small, stable piece of controller logic. It is pinned by tests per supported kgateway version, and the verifier exposes drift at runtime.
+- The backend needs cluster-wide read access to the watched kinds and to Pods (for the controller env), plus `services/proxy` on the controller metrics Service for local mode.
+- Open item for the Phase 1 design, to verify on a cluster: whether two installs can share a `controllerName` with disjoint namespace selectors. If they can, install assignment needs another tie-breaker.
