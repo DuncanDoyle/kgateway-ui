@@ -134,3 +134,38 @@ Investigated independently by Codex and by a Claude subagent against kgateway ma
 - `NamespaceSelectorScope` duplicates a small, stable piece of controller logic. It is pinned by tests per supported kgateway version, and the verifier exposes drift at runtime.
 - The backend needs cluster-wide read access to the watched kinds and to Pods (for the controller env), plus `services/proxy` on the controller metrics Service for local mode.
 - Open item for the Phase 1 design, to verify on a cluster: whether two installs can share a `controllerName` with disjoint namespace selectors. If they can, install assignment needs another tie-breaker.
+
+## D-010 — Frontend foundation: React 19, emotion and open primitives (2026-10-17, phase 1)
+**Context:**
+- The OSS shell must host pages contributed by downstream builds (D-003).
+- A known downstream's component library is built on React 19, emotion, `@rc-component/*`, `lucide-react`, `react-router` and SWR, with Vite and Vitest.
+- Proprietary libraries cannot be used in this public repo (D-008).
+**Decision:**
+- React 19, TypeScript and Vite.
+- `@emotion/react` / `@emotion/styled`, `react-router`, `lucide-react` and SWR.
+- TanStack Table with virtualisation for dense tables.
+- Vitest, Testing Library, Playwright and Biome for testing, linting and formatting.
+- Our own small component set, built on open primitives.
+**Alternatives:**
+- MUI — rejected: heavy, and its distinctive look fights rebranding; downstream pages would show two visual languages.
+- Radix/shadcn + Tailwind — rejected: a second styling system next to emotion for downstream pages.
+**Consequences:**
+- Downstream pages built on that library slot into the shell without a second styling system or conflicting React/router versions.
+- The peer versions (React, emotion, router) become part of the extension contract.
+
+## D-011 — Install page layout A, cluster landing C, "Control room" visual direction (2026-10-17, phase 1)
+**Context:** The overview must answer "is it healthy, and if not, why" at a glance, scale to many findings, and handle clusters with several installs. Options were compared as wireframes in the visual companion.
+**Decision:**
+- **Install page (layout A):** a full-width health strip, then the top findings, count tiles and the Gateway table.
+- **Cluster landing (layout C):** one card per install, shown only when there is more than one install and the UI is not pinned.
+- **Visual direction "Control room":**
+  - The dark theme is the default, built on the logo ink and logo blue; a light theme keeps the ink header band.
+  - Figtree for UI text; JetBrains Mono for resource names, with the namespace dimmed.
+  - Health states are always icon + colour + text.
+**Alternatives:**
+- Layout B, the inventory with a findings rail — rejected: the rail truncates findings and does not scale to many of them.
+- Layout C as the only landing page — rejected: an extra click in the common single-install case.
+- The "kgateway native" light-first direction — not chosen; the user preferred an operations-console feel.
+**Consequences:**
+- The theme tokens must support a dark-first default.
+- Additional themes (for example Solarized) arrive later through the same tokens.
