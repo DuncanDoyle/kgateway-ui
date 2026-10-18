@@ -16,7 +16,7 @@
 
 **Spec:** `docs/phases/phase-1/design.md` (decisions D-001 … D-013 in `docs/decisions.md`). Read both before starting any task.
 
-**Revision:** this plan was revised after the cross-model design review (`docs/phases/phase-1/reviews/design-codex.md`, triage rows 1–15, 17, A1–A3). Finding numbers in comments ("finding 5") refer to that file. Row 16 is deferred to Carry-over. A second review (`reviews/design-r2-codex.md`, rows 1–11) is cited as "round 2, finding N".
+**Revision:** this plan was revised after the cross-model design review (`docs/phases/phase-1/reviews/design-codex.md`, triage rows 1–15, 17, A1–A3). Finding numbers in comments ("finding 5") refer to that file. Row 16 is deferred to Carry-over. A second and a third review (`reviews/design-r2-codex.md`, `reviews/design-r3-codex.md`) are cited as "round 2, finding N" and "round 3, finding N".
 
 ## Global Constraints
 
@@ -68,10 +68,10 @@ These failure modes are implied by the spec, but no other task's tests exercise 
 1. **Long Gateway names (more than 63 characters).** The proxy Deployment's `gateway-name` label is truncated. The proxy must still be matched to its Gateway (by ownerReference first, then label); otherwise the UI raises a false "proxy not found". → Task 9.
 2. **Cross-namespace parentRefs.** A route in `shop` targets `infra/edge`. Assignment and the unwatched-namespace check must use the **route's** namespace for scope, not the Gateway's. → Task 7.
 3. **Controller in CrashLoopBackOff (0 ready Pods).** The scope must still be read from the Pod spec, and the report must show controller-not-ready (error) plus metrics unavailable. It must never be silently healthy. → Tasks 6 and 9.
-4. **Stale or missing status.** A condition with `observedGeneration < metadata.generation` describes an old spec, whether it is `True` or `False`; a missing observedGeneration (0) counts as stale. Freshness is checked before status. A stale condition, a missing required condition, a condition with reason `Pending`, a configured listener without a status block, a route parent with no status entry for its exact parentRef (port and section included), and a policy with no ancestor from the install's controller all mean "not yet processed". Inside the 60 s grace period, measured from the last spec change, that is KGWUI-003 at info and the install is unknown; after it, a warning. None of them is ever reported as a current error or a current success (finding 1; round 2, findings 2–5). → Task 9 (unit) and Task 10 (API, isolated cases).
+4. **Stale or missing status.** A condition with `observedGeneration < metadata.generation` describes an old spec, whether it is `True` or `False`; a missing observedGeneration (0) counts as stale. Freshness is checked before status. A stale condition, a missing required condition, a condition with reason `Pending`, a configured listener without a status block, a route parent with no status entry for its exact parentRef (port and section included), and a policy with no ancestor from the install's controller all mean "not yet processed". Inside the 60 s grace period, measured from when the engine first saw the object's current generation, that is KGWUI-003 at info and the install is unknown; after it, a warning. KGWUI-003 is one per (resource, parentRef). None of them is ever reported as a current error or a current success (finding 1; round 2, findings 2–5; round 3, findings 3 and 5). → Task 9 (unit) and Task 10 (API, isolated cases).
 5. **Scale.** 5,000 HTTPRoutes across 200 namespaces must compute a full model (assignment, health and overview) in under 1 s on a laptop, so the 2 s recompute loop never stacks up. → Task 10.
-6. **Watch failures after the initial sync.** `HasSynced()` stays true after later list/watch failures, and client-go retries connection-refused and 429 watch errors without calling the watch error handler. The cache therefore probes: an unreachable API server makes every kind inaccessible, and a kind with a recorded error stays inaccessible until a `limit=1` probe list for it succeeds. The cluster-access check then forces "unknown". Namespaces, Pods and Deployments are covered too (finding 2; round 2, finding 1). → Task 5 (fake-client reactors) and Task 10 (API).
-7. **Old evidence.** A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), however often the model is recomputed. In the frontend, stale data turns the health strip, every gateway row, the cluster cards, the install switcher and the header readiness icon to unknown (finding 3; round 2, finding 6). → Tasks 8, 9, 10, 15, 16 and 17.
+6. **Watch failures after the initial sync.** `HasSynced()` stays true after later list/watch failures, and client-go retries connection-refused and 429 watch errors without calling the watch error handler. Every informer therefore runs over an instrumented ListerWatcher that records each List and Watch call outcome. A kind is unavailable from its last failed call until its next successful Watch call, so a successful list alone never restores it. The cluster-access check then forces "unknown". Namespaces, Pods and Deployments are covered too (finding 2; round 3, finding 1). → Task 5 (fake-client watch reactors) and Task 10 (API).
+7. **Old evidence.** A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), however often the model is recomputed. In the frontend, stale data turns the health strip, every gateway row, the cluster cards, the install switcher and the header readiness icon to unknown, re-evaluated every second by a shared clock even when polls return identical data (finding 3; round 2, finding 6; round 3, finding 4). → Tasks 8, 9, 10, 15, 16 and 17.
 8. **Install switch.** While install B loads, the page never shows install A's strip, findings or gateways (finding 4). → Task 16.
 9. **Partial visibility.** A deny-some `Authorizer` registered through `extension.WithAuthorizer` makes the denied object 404 and drops it from the count tiles. Its finding stays in the list with the same code, severity and resource ref, `restricted: true` and no message or evidence; the roll-up state is unchanged (D-013). → Task 11.
 
@@ -676,7 +676,6 @@ git add pkg/kinds go.mod go.sum && git commit -m "feat(kinds): kind descriptors 
   - `objects.ListenerSetParent(u) ParentRef`;
   - `objects.GatewayAddresses(u) []string`;
   - `objects.GatewaySpecListeners(u) []string` (the names in `spec.listeners`, so a configured listener without a status block is detected; round 2, finding 4);
-  - `objects.SpecChangedAt(u) time.Time` (the latest of `creationTimestamp` and the `managedFields` times of non-status updates: when the current spec was written; the grace period runs from here);
   - `objects.FindCondition(cs []metav1.Condition, typ string) *metav1.Condition`;
   - `objects.IsStale(u, c metav1.Condition) bool` (`observedGeneration` lower than `metadata.generation`; a missing `observedGeneration` (0) on an object with a generation counts as stale, round 2 finding 3).
 
@@ -689,7 +688,6 @@ package objects
 
 import (
 	"testing"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -766,22 +764,14 @@ func TestParentRefKeepsPort(t *testing.T) {
 	}
 }
 
-func TestGatewaySpecListenersAndSpecChangedAt(t *testing.T) {
+func TestGatewaySpecListeners(t *testing.T) {
 	gw := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "gateway.networking.k8s.io/v1", "kind": "Gateway",
-		"metadata": map[string]any{"name": "edge", "namespace": "infra", "creationTimestamp": "2026-10-17T08:00:00Z",
-			"managedFields": []any{
-				map[string]any{"manager": "kubectl", "operation": "Update", "time": "2026-10-17T10:00:00Z"},
-				map[string]any{"manager": "kgateway", "operation": "Update", "subresource": "status", "time": "2026-10-17T11:00:00Z"},
-			}},
-		"spec": map[string]any{"listeners": []any{map[string]any{"name": "http"}, map[string]any{"name": "https"}}},
+		"metadata":   map[string]any{"name": "edge", "namespace": "infra"},
+		"spec":       map[string]any{"listeners": []any{map[string]any{"name": "http"}, map[string]any{"name": "https"}}},
 	}}
 	if got := GatewaySpecListeners(gw); len(got) != 2 || got[0] != "http" || got[1] != "https" {
 		t.Fatalf("spec listeners: %v", got)
-	}
-	// The status write at 11:00 is not a spec change; the kubectl update at 10:00 is.
-	if got := SpecChangedAt(gw); !got.Equal(time.Date(2026, 10, 17, 10, 0, 0, 0, time.UTC)) {
-		t.Fatalf("SpecChangedAt: %s", got)
 	}
 }
 
@@ -822,8 +812,6 @@ Expected: FAIL (`undefined: RouteParentRefs`)
 package objects
 
 import (
-	"time"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1024,22 +1012,6 @@ func GatewaySpecListeners(u *unstructured.Unstructured) []string {
 	return out
 }
 
-// SpecChangedAt returns when u's current spec was written: the latest of its
-// creation time and the times of its managedFields entries that are not
-// status updates. A controller writing status does not restart the clock.
-func SpecChangedAt(u *unstructured.Unstructured) time.Time {
-	t := u.GetCreationTimestamp().Time
-	for _, m := range u.GetManagedFields() {
-		if m.Subresource == "status" || m.Time == nil {
-			continue
-		}
-		if m.Time.After(t) {
-			t = m.Time.Time
-		}
-	}
-	return t
-}
-
 // GatewayClassName returns spec.gatewayClassName of a Gateway.
 func GatewayClassName(u *unstructured.Unstructured) string {
 	s, _, _ := unstructured.NestedString(u.Object, "spec", "gatewayClassName")
@@ -1102,12 +1074,12 @@ git add pkg/objects go.mod go.sum && git commit -m "feat(objects): typed views o
 **Interfaces:**
 - Consumes: `kinds.Served`, `kinds.Upstream()`.
 - Produces:
-  - `cache.Access{OK bool; Err string}` (JSON `ok,error`). `OK` means synced, the API server reachable at the last probe, and no recorded error for the kind. `HasSynced()` alone is not enough, because it stays true after later failures (finding 2). A recorded error (from the reflector or from a probe) clears only when a probe list for that kind succeeds, never by time (round 2, finding 1);
-  - `(*Cache).Probe(ctx)` (one reachability check with `Discovery().ServerVersion()`, then a `limit=1` list of every watched kind) and `(*Cache).RunProbes(ctx, every time.Duration)`. client-go retries connection-refused and 429 watch errors without calling the watch error handler, so `Probe` is what makes those failures visible;
+  - `cache.Access{OK bool; Err string}` (JSON `ok,error`). Every informer is built over an instrumented `ListerWatcher` that records the outcome of each List and Watch call its reflector makes, including the connection-refused and 429 watch retries client-go never reports to the watch error handler. `OK` means synced and no failed call since the last successful Watch call; a kind is unavailable from its last failed call until its next successful Watch call (round 3, finding 1). `HasSynced()` alone is not enough, because it stays true after later failures (finding 2). There is no extra API traffic;
+  - `cache.ListTimeout = time.Minute` (every informer List call is bounded; watches use client-go's own 5–10 minute watch timeout, and a silently stalled watch stream is a documented limit);
   - `cache.NamespacesGVR`, `cache.PodsGVR`, `cache.DeploymentsGVR` (`schema.GroupVersionResource` keys under which the typed informers report their `Access`);
   - `cache.Snapshot{Objects map[schema.GroupVersionResource][]*unstructured.Unstructured; Access map[schema.GroupVersionResource]Access; Namespaces []*corev1.Namespace; Pods []*corev1.Pod; Deployments []*appsv1.Deployment; Synced bool; TakenAt time.Time}`. `Access` holds every served kind plus the three typed GVRs;
   - `cache.Config{Dynamic dynamic.Interface; Kube kubernetes.Interface; Served []kinds.Served; PodSelectors, DeploymentSelectors []labels.Selector}`;
-  - `cache.New(Config) *Cache`, `(*Cache).Start(ctx)`, `(*Cache).Snapshot() *Snapshot` (while the API server is unreachable, every `Access` entry carries the reachability error);
+  - `cache.New(Config) *Cache`, `(*Cache).Start(ctx)`, `(*Cache).Snapshot() *Snapshot`;
   - `cache.Snapshotter` (interface `Snapshot() *Snapshot`).
 - Produces (tests only):
   - `testutil.Clients(t, objs ...runtime.Object) (dynamic.Interface, *kubefake.Clientset)`. Kube objects go to the typed fake; `*unstructured.Unstructured` goes to the dynamic fake; fake discovery serves every `kinds.Upstream()` kind at its first version.
@@ -1436,6 +1408,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clienttesting "k8s.io/client-go/testing"
 
@@ -1495,76 +1468,58 @@ func TestSnapshotContainsWatchedObjectsOnly(t *testing.T) {
 	}
 }
 
-// Round 2, finding 1: client-go retries connection-refused and 429 watch errors
-// without calling the watch error handler, so availability comes from Probe.
-// The failures are injected into the fake clients, exactly as production sees them.
-func TestProbeMarksEveryKindUnavailableWhileTheAPIServerIsUnreachable(t *testing.T) {
-	dyn, kube := testutil.Clients(t, testutil.Namespace("shop", nil))
-	var down atomic.Bool
-	kube.PrependReactor("get", "version", func(clienttesting.Action) (bool, runtime.Object, error) {
-		if down.Load() {
-			return true, nil, fmt.Errorf("dial tcp 10.96.0.1:443: connect: %w", syscall.ECONNREFUSED)
+// waitFor polls cond until it holds or 15 s pass (reflector backoff starts at 0.8 s).
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
 		}
-		return false, nil, nil
-	})
-	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(),
-		PodSelectors: []labels.Selector{podSel}, DeploymentSelectors: []labels.Selector{deploySel}})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	c.Start(ctx)
-	waitSynced(t, c)
-
-	down.Store(true)
-	c.Probe(ctx)
-	s := c.Snapshot()
-	if !s.Synced {
-		t.Fatal("an outage after the initial sync must not reset Synced")
-	}
-	for gvr, a := range s.Access {
-		if a.OK || !strings.Contains(a.Err, "connection refused") {
-			t.Errorf("%s must be unavailable while the API server is unreachable, got %+v", gvr.Resource, a)
-		}
-	}
-	down.Store(false)
-	c.Probe(ctx)
-	for gvr, a := range c.Snapshot().Access {
-		if !a.OK {
-			t.Errorf("%s must be readable again after a successful probe, got %+v", gvr.Resource, a)
-		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-// Round 2, finding 1: a kind whose list fails after the sync (403, or a 429 the
-// reflector would retry silently) stays unavailable until a probe list for that
-// kind succeeds. This covers dynamic and typed informers.
-func TestProbeTracksPerKindFailuresAfterSync(t *testing.T) {
+// Round 3, finding 1: the informers' own List and Watch calls decide access.
+// The watch fails after the sync while list stays allowed; the kind is
+// unavailable from that failed call until a Watch call succeeds again. The
+// failures enter through the fake clients, as production sees them.
+func TestWatchFailureAfterSyncLastsUntilAWatchSucceeds(t *testing.T) {
 	hr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+	refused := fmt.Errorf("dial tcp 10.96.0.1:443: connect: %w", syscall.ECONNREFUSED)
 	cases := []struct {
 		name  string
 		gvr   schema.GroupVersionResource
-		err   error
 		typed bool // inject into the typed clientset instead of the dynamic client
+		err   error
+		want  string // substring of the recorded error
 	}{
-		{"httproutes forbidden", hr, apierrors.NewForbidden(schema.GroupResource{Group: hr.Group, Resource: hr.Resource}, "", nil), false},
-		{"httproutes throttled", hr, apierrors.NewTooManyRequests("slow down", 1), false},
-		{"namespaces forbidden", NamespacesGVR, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil), true},
-		{"pods throttled", PodsGVR, apierrors.NewTooManyRequests("slow down", 1), true},
-		{"deployments forbidden", DeploymentsGVR, apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", nil), true},
+		{"httproutes connection refused (retried silently by client-go)", hr, false, refused, "connection refused"},
+		{"httproutes throttled (retried silently by client-go)", hr, false, apierrors.NewTooManyRequests("slow down", 1), "slow down"},
+		{"httproutes forbidden", hr, false, apierrors.NewForbidden(schema.GroupResource{Group: hr.Group, Resource: hr.Resource}, "", nil), "forbidden"},
+		{"namespaces throttled", NamespacesGVR, true, apierrors.NewTooManyRequests("slow down", 1), "slow down"},
+		{"pods connection refused", PodsGVR, true, refused, "connection refused"},
+		{"deployments forbidden", DeploymentsGVR, true, apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", nil), "forbidden"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dyn, kube := testutil.Clients(t, testutil.Namespace("shop", nil))
 			var fail atomic.Bool
-			react := func(clienttesting.Action) (bool, runtime.Object, error) {
+			var failed atomic.Int32
+			watchers := make(chan *watch.FakeWatcher, 64)
+			react := func(clienttesting.Action) (bool, watch.Interface, error) {
 				if fail.Load() {
+					failed.Add(1)
 					return true, nil, tc.err
 				}
-				return false, nil, nil
+				w := watch.NewFake()
+				watchers <- w
+				return true, w, nil
 			}
 			if tc.typed {
-				kube.PrependReactor("list", tc.gvr.Resource, react)
+				kube.PrependWatchReactor(tc.gvr.Resource, react)
 			} else {
-				dyn.(*dynamicfake.FakeDynamicClient).PrependReactor("list", tc.gvr.Resource, react)
+				dyn.(*dynamicfake.FakeDynamicClient).PrependWatchReactor(tc.gvr.Resource, react)
 			}
 			c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(),
 				PodSelectors: []labels.Selector{podSel}, DeploymentSelectors: []labels.Selector{deploySel}})
@@ -1574,25 +1529,24 @@ func TestProbeTracksPerKindFailuresAfterSync(t *testing.T) {
 			waitSynced(t, c)
 
 			fail.Store(true)
-			c.Probe(ctx)
-			s := c.Snapshot()
-			if s.Access[tc.gvr].OK || s.Access[tc.gvr].Err != tc.err.Error() {
-				t.Fatalf("%s must be unavailable with the probe error, got %+v", tc.gvr.Resource, s.Access[tc.gvr])
+			(<-watchers).Stop() // the established watch ends; the reflector's next Watch call fails
+			waitFor(t, "the failed watch to be recorded", func() bool { return !c.Snapshot().Access[tc.gvr].OK })
+			if a := c.Snapshot().Access[tc.gvr]; !strings.Contains(a.Err, tc.want) {
+				t.Fatalf("recorded error %q, want it to contain %q", a.Err, tc.want)
 			}
-			for gvr, a := range s.Access {
+			for gvr, a := range c.Snapshot().Access {
 				if gvr != tc.gvr && !a.OK {
 					t.Errorf("%s must stay readable, got %+v", gvr.Resource, a)
 				}
 			}
-			c.Probe(ctx) // still failing: still unavailable, however much time passes
+			// Further failed watches (and, for 403, successful relists) keep it unavailable.
+			n := failed.Load()
+			waitFor(t, "another failed watch", func() bool { return failed.Load() > n })
 			if c.Snapshot().Access[tc.gvr].OK {
-				t.Fatal("only a successful probe list may clear the error")
+				t.Fatal("only a successful Watch call may clear the error")
 			}
 			fail.Store(false)
-			c.Probe(ctx)
-			if a := c.Snapshot().Access[tc.gvr]; !a.OK {
-				t.Fatalf("%s must be readable after a successful probe list, got %+v", tc.gvr.Resource, a)
-			}
+			waitFor(t, "recovery after a successful watch", func() bool { return c.Snapshot().Access[tc.gvr].OK })
 		})
 	}
 }
@@ -1654,11 +1608,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	toolscache "k8s.io/client-go/tools/cache"
 
@@ -1670,6 +1624,11 @@ type Access struct {
 	OK  bool   `json:"ok"`
 	Err string `json:"error,omitempty"`
 }
+
+// ListTimeout bounds every List call an informer makes, so a hung list cannot
+// keep the last good evidence alive. Watches rely on client-go's own watch
+// timeout, which re-establishes them every 5–10 minutes.
+const ListTimeout = time.Minute
 
 // GVRs under which the typed informers report their Access.
 var (
@@ -1704,151 +1663,129 @@ type Config struct {
 	DeploymentSelectors []labels.Selector
 }
 
+// calls records the outcome of the List and Watch calls one informer's
+// reflector makes. A failed call marks the kind unavailable; only a later
+// successful Watch call clears it, because that is when the informer is
+// receiving current events again (round 3, finding 1).
+type calls struct {
+	mu  sync.Mutex
+	err string
+}
+
+func (c *calls) record(err error, isWatch bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch {
+	case err != nil:
+		c.err = err.Error()
+	case isWatch:
+		c.err = ""
+	}
+}
+
+func (c *calls) last() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+// tracked is an informer with the record of its own List and Watch calls.
+type tracked struct {
+	inf   toolscache.SharedIndexInformer
+	calls *calls
+}
+
 // Cache is a set of informers whose contents are read through Snapshot.
 type Cache struct {
-	kube    kubernetes.Interface
 	now     func() time.Time
-	dyn     map[schema.GroupVersionResource]toolscache.SharedIndexInformer
-	ns      toolscache.SharedIndexInformer
-	pods    []toolscache.SharedIndexInformer
-	deploys []toolscache.SharedIndexInformer
-	// probes lists each informer's kind with limit=1 (see Probe).
-	probes map[toolscache.SharedIndexInformer]func(context.Context) error
+	dyn     map[schema.GroupVersionResource]tracked
+	ns      tracked
+	pods    []tracked
+	deploys []tracked
+}
 
-	mu sync.Mutex
-	// errs holds each informer's last list/watch or probe error until a probe
-	// list for that kind succeeds. Time alone never clears it.
-	errs map[toolscache.SharedIndexInformer]string
-	// down is the last API server reachability error; "" while reachable.
-	down string
+// instrumented builds an informer whose ListerWatcher records every List and
+// Watch call outcome, including the connection-refused and 429 watch retries
+// that client-go never reports to the watch error handler. client tells the
+// reflector whether the client supports watch-list semantics (fakes do not).
+func instrumented(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
+	cs := &calls{}
+	lw := toolscache.ToListWatcherWithWatchListSemantics(&toolscache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
+			ctx, cancel := context.WithTimeout(ctx, ListTimeout)
+			defer cancel()
+			obj, err := list(ctx, o)
+			cs.record(err, false)
+			return obj, err
+		},
+		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
+			w, err := watchFn(ctx, o)
+			cs.record(err, true)
+			return w, err
+		},
+	}, client)
+	return tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), calls: cs}
 }
 
 // New creates the informers. Nothing runs until Start.
 func New(cfg Config) *Cache {
-	c := &Cache{kube: cfg.Kube, now: time.Now, dyn: map[schema.GroupVersionResource]toolscache.SharedIndexInformer{},
-		probes: map[toolscache.SharedIndexInformer]func(context.Context) error{}, errs: map[toolscache.SharedIndexInformer]string{}}
-	one := metav1.ListOptions{Limit: 1}
-	df := dynamicinformer.NewDynamicSharedInformerFactory(cfg.Dynamic, 0)
+	c := &Cache{now: time.Now, dyn: map[schema.GroupVersionResource]tracked{}}
 	for _, s := range cfg.Served {
-		gvr := s.GVR()
-		inf := df.ForResource(gvr).Informer()
-		c.track(inf, func(ctx context.Context) error { _, err := cfg.Dynamic.Resource(gvr).List(ctx, one); return err })
-		c.dyn[gvr] = inf
+		ri := cfg.Dynamic.Resource(s.GVR())
+		c.dyn[s.GVR()] = instrumented(cfg.Dynamic, &unstructured.Unstructured{},
+			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
+			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) })
 	}
-	c.ns = informers.NewSharedInformerFactory(cfg.Kube, 0).Core().V1().Namespaces().Informer()
-	c.track(c.ns, func(ctx context.Context) error { _, err := cfg.Kube.CoreV1().Namespaces().List(ctx, one); return err })
+	nss := cfg.Kube.CoreV1().Namespaces()
+	c.ns = instrumented(cfg.Kube, &corev1.Namespace{},
+		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return nss.List(ctx, o) },
+		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return nss.Watch(ctx, o) })
+	pods, deploys := cfg.Kube.CoreV1().Pods(""), cfg.Kube.AppsV1().Deployments("")
 	for _, sel := range cfg.PodSelectors {
-		inf := selected(cfg.Kube, sel).Core().V1().Pods().Informer()
-		opts := metav1.ListOptions{LabelSelector: sel.String(), Limit: 1}
-		c.track(inf, func(ctx context.Context) error { _, err := cfg.Kube.CoreV1().Pods("").List(ctx, opts); return err })
-		c.pods = append(c.pods, inf)
+		c.pods = append(c.pods, instrumented(cfg.Kube, &corev1.Pod{},
+			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { o.LabelSelector = sel.String(); return pods.List(ctx, o) },
+			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { o.LabelSelector = sel.String(); return pods.Watch(ctx, o) }))
 	}
 	for _, sel := range cfg.DeploymentSelectors {
-		inf := selected(cfg.Kube, sel).Apps().V1().Deployments().Informer()
-		opts := metav1.ListOptions{LabelSelector: sel.String(), Limit: 1}
-		c.track(inf, func(ctx context.Context) error { _, err := cfg.Kube.AppsV1().Deployments("").List(ctx, opts); return err })
-		c.deploys = append(c.deploys, inf)
+		c.deploys = append(c.deploys, instrumented(cfg.Kube, &appsv1.Deployment{},
+			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { o.LabelSelector = sel.String(); return deploys.List(ctx, o) },
+			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { o.LabelSelector = sel.String(); return deploys.Watch(ctx, o) }))
 	}
 	return c
 }
 
-func selected(kube kubernetes.Interface, sel labels.Selector) informers.SharedInformerFactory {
-	return informers.NewSharedInformerFactoryWithOptions(kube, 0, informers.WithTweakListOptions(func(o *metav1.ListOptions) {
-		o.LabelSelector = sel.String()
-	}))
-}
-
-// track registers inf's probe and records the list/watch errors the reflector
-// reports (e.g. Forbidden), so the snapshot shows the kind as inaccessible
-// instead of silently empty.
-func (c *Cache) track(inf toolscache.SharedIndexInformer, probe func(context.Context) error) {
-	c.probes[inf] = probe
-	_ = inf.SetWatchErrorHandlerWithContext(func(_ context.Context, _ *toolscache.Reflector, err error) { c.recordError(inf, err) })
-}
-
-// recordError stores err as the last error of inf.
-func (c *Cache) recordError(inf toolscache.SharedIndexInformer, err error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.errs[inf] = err.Error()
-}
-
-// Probe checks that the API server answers, then lists every watched kind with
-// limit=1. client-go retries connection-refused and 429 watch errors without
-// calling the watch error handler (reflector.go, isWatchErrorRetriable), so
-// without Probe a failing watch keeps its cached data marked readable (round 2,
-// finding 1). A failed list marks the kind unavailable; only a later successful
-// list clears it.
-func (c *Cache) Probe(ctx context.Context) {
-	if _, err := c.kube.Discovery().ServerVersion(); err != nil {
-		c.mu.Lock()
-		c.down = "API server unreachable: " + err.Error()
-		c.mu.Unlock()
-		return
-	}
-	c.mu.Lock()
-	c.down = ""
-	c.mu.Unlock()
-	for inf, probe := range c.probes {
-		err := probe(ctx)
-		c.mu.Lock()
-		if err != nil {
-			c.errs[inf] = err.Error()
-		} else {
-			delete(c.errs, inf)
-		}
-		c.mu.Unlock()
-	}
-}
-
-// RunProbes calls Probe every interval until ctx is done.
-func (c *Cache) RunProbes(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
-		c.Probe(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-func (c *Cache) all() []toolscache.SharedIndexInformer {
-	out := []toolscache.SharedIndexInformer{c.ns}
-	for _, i := range c.dyn {
-		out = append(out, i)
+func (c *Cache) all() []tracked {
+	out := []tracked{c.ns}
+	for _, t := range c.dyn {
+		out = append(out, t)
 	}
 	return append(append(out, c.pods...), c.deploys...)
 }
 
 // Start runs all informers until ctx is cancelled.
 func (c *Cache) Start(ctx context.Context) {
-	for _, inf := range c.all() {
-		go inf.Run(ctx.Done())
+	for _, t := range c.all() {
+		go t.inf.RunWithContext(ctx)
 	}
 }
 
-// access reports whether inf can currently be read. HasSynced records only the
-// initial sync and stays true after later failures (finding 2), so a recorded
-// error wins over it until a probe list succeeds.
-func (c *Cache) access(inf toolscache.SharedIndexInformer) Access {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if e, ok := c.errs[inf]; ok {
+// access reports whether t can currently be read. HasSynced records only the
+// initial sync and stays true after later failures (finding 2), so the last
+// failed List or Watch call wins over it until a Watch call succeeds.
+func access(t tracked) Access {
+	if e := t.calls.last(); e != "" {
 		return Access{Err: e}
 	}
-	if inf.HasSynced() {
+	if t.inf.HasSynced() {
 		return Access{OK: true}
 	}
 	return Access{}
 }
 
 // accessAll merges several informers of one kind: the first that is not OK wins.
-func (c *Cache) accessAll(infs []toolscache.SharedIndexInformer) Access {
-	for _, inf := range infs {
-		if a := c.access(inf); !a.OK {
+func accessAll(ts []tracked) Access {
+	for _, t := range ts {
+		if a := access(t); !a.OK {
 			return a
 		}
 	}
@@ -1859,49 +1796,39 @@ func (c *Cache) accessAll(infs []toolscache.SharedIndexInformer) Access {
 func (c *Cache) Snapshot() *Snapshot {
 	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: c.now()}
 	settled := func(a Access) bool { return a.OK || a.Err != "" }
-	for gvr, inf := range c.dyn {
-		a := c.access(inf)
+	for gvr, t := range c.dyn {
+		a := access(t)
 		s.Access[gvr] = a
 		s.Synced = s.Synced && settled(a)
-		for _, o := range inf.GetStore().List() {
+		for _, o := range t.inf.GetStore().List() {
 			s.Objects[gvr] = append(s.Objects[gvr], o.(*unstructured.Unstructured))
 		}
 		sort.Slice(s.Objects[gvr], func(i, j int) bool { return key(s.Objects[gvr][i]) < key(s.Objects[gvr][j]) })
 	}
-	s.Access[NamespacesGVR] = c.access(c.ns)
-	s.Access[PodsGVR] = c.accessAll(c.pods)
-	s.Access[DeploymentsGVR] = c.accessAll(c.deploys)
+	s.Access[NamespacesGVR] = access(c.ns)
+	s.Access[PodsGVR] = accessAll(c.pods)
+	s.Access[DeploymentsGVR] = accessAll(c.deploys)
 	s.Synced = s.Synced && settled(s.Access[NamespacesGVR])
-	for _, o := range c.ns.GetStore().List() {
+	for _, o := range c.ns.inf.GetStore().List() {
 		s.Namespaces = append(s.Namespaces, o.(*corev1.Namespace))
 	}
 	seen := map[types.UID]bool{}
-	for _, inf := range c.pods {
-		s.Synced = s.Synced && settled(c.access(inf))
-		for _, o := range inf.GetStore().List() {
+	for _, t := range c.pods {
+		s.Synced = s.Synced && settled(access(t))
+		for _, o := range t.inf.GetStore().List() {
 			if p := o.(*corev1.Pod); !seen[p.UID] {
 				seen[p.UID] = true
 				s.Pods = append(s.Pods, p)
 			}
 		}
 	}
-	for _, inf := range c.deploys {
-		s.Synced = s.Synced && settled(c.access(inf))
-		for _, o := range inf.GetStore().List() {
+	for _, t := range c.deploys {
+		s.Synced = s.Synced && settled(access(t))
+		for _, o := range t.inf.GetStore().List() {
 			if d := o.(*appsv1.Deployment); !seen[d.UID] {
 				seen[d.UID] = true
 				s.Deployments = append(s.Deployments, d)
 			}
-		}
-	}
-	// An unreachable API server makes every kind unavailable. Synced is left as
-	// computed, so an outage before the first sync still reads "connecting".
-	c.mu.Lock()
-	down := c.down
-	c.mu.Unlock()
-	if down != "" {
-		for gvr := range s.Access {
-			s.Access[gvr] = Access{Err: down}
 		}
 	}
 	return s
@@ -1913,7 +1840,9 @@ func key(u *unstructured.Unstructured) string { return u.GetNamespace() + "/" + 
 - [ ] **Step 5: Run the tests and confirm they pass**
 
 Run: `go test ./pkg/cache/... -race`
-Expected: PASS. `SetWatchErrorHandlerWithContext` exists in client-go v0.36.2 (`tools/cache/shared_informer.go`).
+Expected: PASS. `ToListWatcherWithWatchListSemantics`, `ListWatch.ListWithContextFunc`/`WatchFuncWithContext` and `SharedIndexInformer.RunWithContext` exist in client-go v0.36.2 (`tools/cache/listwatch.go`, `shared_informer.go`).
+
+**Known limit (round 3, finding 2).** A watch stream that stalls silently, with the TCP connection open and no events or errors, is not detected until client-go's watch timeout (5–10 minutes) ends it and the next Watch call reports the outcome. Lists are bounded by `ListTimeout`.
 
 - [ ] **Step 6: Commit**
 
@@ -3482,7 +3411,7 @@ git add pkg/ctrlmetrics go.mod go.sum && git commit -m "feat(ctrlmetrics): scrap
   - `health.State` (`StateHealthy`, `StateWarning`, `StateError`, `StateUnknown`);
   - `health.Finding{Code, Slug string; Severity Severity; Install string; Resource *objects.Ref; Message, Detail string; Since *time.Time; Restricted bool}` (`Restricted` is set only by the API's `Authorizer` redaction, D-013; JSON `restricted,omitempty`);
   - `health.CheckResult{Name string; OK, Required bool; CollectedAt time.Time; Error string; Pending bool}` (`Pending`: not OK only because resources are being processed inside the grace period; JSON `pending,omitempty`);
-  - `health.Input{Install install.Resolved; Owned *install.Owned; Assignment install.Assignment; Snapshot *cache.Snapshot; Metrics ctrlmetrics.Result; HasMetrics bool; MetricsMaxAge time.Duration; Verify scopeverify.Result; Now time.Time}`;
+  - `health.Input{Install install.Resolved; Owned *install.Owned; Assignment install.Assignment; Snapshot *cache.Snapshot; Metrics ctrlmetrics.Result; HasMetrics bool; MetricsMaxAge time.Duration; FirstSeen func(u *unstructured.Unstructured) time.Time; Verify scopeverify.Result; Now time.Time}` (`FirstSeen` comes from the engine; nil means the creation time, which the unit tests use);
   - `health.Check` (interface: `Name() string; Run(in Input) ([]Finding, CheckResult)`);
   - `health.Report{Install string; State State; Findings []Finding; Checks []CheckResult; Counts map[Severity]int; CollectedAt time.Time}` (`Install` is the install ID, so the frontend can reject a response for another install; finding 4);
   - `health.Evaluate(in Input, checks []Check) Report`;
@@ -3497,7 +3426,7 @@ git add pkg/ctrlmetrics go.mod go.sum && git commit -m "feat(ctrlmetrics): scrap
   - `scopeverify.Input{Install install.Resolved; Snapshot *cache.Snapshot; Served []kinds.Served; Metrics ctrlmetrics.Result; HasMetrics bool; MetricsMaxAge time.Duration; Now time.Time}`;
   - `scopeverify.NewManagedCountVerifier(persist time.Duration) *ManagedCountVerifier`.
 
-**Condition rules (finding 1, D-006; round 2, findings 2–5).** Freshness is decided before status. For each status block, a missing *required* condition, a present condition with reason `Pending`, or *any* condition (`True` or `False`) with `observedGeneration < metadata.generation` (a missing observedGeneration, 0, counts as lower) makes the resource "not yet processed". Only current conditions are reported. The grace period runs from `objects.SpecChangedAt` (creation or the last non-status update). Inside it, the resource gets KGWUI-003 at **info** ("Being processed by the controller") and the `resource status` check is not OK with `Pending: true`, so the install is unknown, never healthy. After it, the finding is a **warning** and the check is OK again. Required and optional types (optional ones are evaluated only when present):
+**Condition rules (finding 1, D-006; round 2, findings 2–5).** Freshness is decided before status. For each status block, a missing *required* condition, a present condition with reason `Pending`, or *any* condition (`True` or `False`) with `observedGeneration < metadata.generation` (a missing observedGeneration, 0, counts as lower) makes the resource "not yet processed". Only current conditions are reported. The grace period runs from when the engine first saw the object's current (uid, generation): a generation bump restarts it, a label or annotation update does not, and objects already present at UI start get grace from that start (round 3, finding 3). Inside it, the resource gets KGWUI-003 at **info** ("Being processed by the controller") and the `resource status` check is not OK with `Pending: true`, so the install is unknown, never healthy. After it, the finding is a **warning** and the check is OK again. Required and optional types (optional ones are evaluated only when present):
 
 | Status block | Required | Optional |
 |---|---|---|
@@ -3507,7 +3436,7 @@ git add pkg/ctrlmetrics go.mod go.sum && git commit -m "feat(ctrlmetrics): scrap
 | Route parent (one per `OwnedObject.Parents` entry, matched to the `status.parents` entry with the identical parentRef, section name and port included, and the install's controller name; finding 5) | `Accepted`, `ResolvedRefs` | `kgateway.dev/Programmed` |
 | Policy ancestor (entries with the install's controller name) | `Accepted` | `Attached` |
 
-A route parent without a matching status entry, a policy with no ancestor from the install's controller, and an `Unattached` route are "not yet processed" too. Each resource gets at most one KGWUI-003 finding.
+A route parent without a matching status entry, a policy with no ancestor from the install's controller, and an `Unattached` route are "not yet processed" too. KGWUI-003 is deduplicated by (resource, parentRef): one per route parent (owned and pending, or missing), and one per non-route resource (round 3, finding 5).
 
 **Proposed refinement of design §5.2 (needs user approval with this plan):** the policy reason `Overridden` (on `Attached`) maps to **info**, not warning. Overriding is the normal outcome of hierarchical policy; at scale it would flood the warning list. `PartiallyValid` stays a warning. If the user rejects this, change the single entry in `policySeverity` and its test row.
 
@@ -3805,7 +3734,7 @@ func TestStaleTrueIsPendingNotHealthy(t *testing.T) {
 		}
 	}
 	if n != 1 {
-		t.Fatalf("one resource gets at most one KGWUI-003 finding, got %d", n)
+		t.Fatalf("one parent gets at most one KGWUI-003 finding, got %d", n)
 	}
 }
 
@@ -3830,18 +3759,23 @@ func TestResourceInGraceIsBeingProcessedAndNotHealthy(t *testing.T) {
 	}
 }
 
-// Round 2, finding 2: the grace period runs from the last spec change, so an
-// edit to an old object is "being processed" first, not an immediate warning.
-func TestEditedOldResourceRestartsGrace(t *testing.T) {
+// Round 3, finding 5: KGWUI-003 is per (resource, parentRef). Two missing
+// parents give two findings, and a pending owned parent does not hide a missing one.
+func TestNotProcessedIsPerParent(t *testing.T) {
 	w := healthyWorld()
 	gw := testutil.GwRef("infra", "edge")
-	route := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
-	route.SetGeneration(2)
-	edited := metav1.NewTime(testutil.Now.Add(-5 * time.Second))
-	route.SetManagedFields([]metav1.ManagedFieldsEntry{{Manager: "kubectl", Operation: metav1.ManagedFieldsOperationUpdate, Time: &edited}})
-	w.objs[2] = route
-	if r := w.report(t); !has(r, CodeRouteUnattached, SeverityInfo, "shop/cart") || r.State != StateUnknown {
-		t.Fatalf("an edit 5 s ago must be 'being processed': state=%s findings=%+v", r.State, r.Findings)
+	w.objs = append(w.objs,
+		testutil.HTTPRoute("shop", "two-missing", []objects.ParentRef{testutil.GwRef("infra", "gone-1"), testutil.GwRef("infra", "gone-2")}),
+		testutil.HTTPRoute("shop", "mixed", []objects.ParentRef{gw, testutil.GwRef("infra", "gone-3")})) // no status for edge either
+	r := w.report(t)
+	per := map[string]int{}
+	for _, f := range r.Findings {
+		if f.Code == CodeRouteUnattached && f.Resource != nil {
+			per[f.Resource.String()]++
+		}
+	}
+	if per["shop/two-missing"] != 2 || per["shop/mixed"] != 2 {
+		t.Fatalf("want one KGWUI-003 per parent: %v; findings %+v", per, r.Findings)
 	}
 }
 
@@ -4200,6 +4134,8 @@ package health
 import (
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -4285,8 +4221,19 @@ type Input struct {
 	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
 	// interval); zero means no limit.
 	MetricsMaxAge time.Duration
-	Verify        scopeverify.Result
-	Now           time.Time
+	// FirstSeen returns when the engine first saw u's current generation; the
+	// grace period runs from it (round 3, finding 3). Nil means u's creation time.
+	FirstSeen func(u *unstructured.Unstructured) time.Time
+	Verify    scopeverify.Result
+	Now       time.Time
+}
+
+// firstSeen returns when the grace period for u's current generation started.
+func (in Input) firstSeen(u *unstructured.Unstructured) time.Time {
+	if in.FirstSeen != nil {
+		return in.FirstSeen(u)
+	}
+	return u.GetCreationTimestamp().Time
 }
 
 // Check produces findings for one concern.
@@ -4559,32 +4506,43 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		fs = append(fs, Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
 			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)})
 	}
-	reported := map[objects.Ref]bool{} // one KGWUI-003 per resource
-	inGrace := 0
-	// notProcessed reports u once: info while its current spec is younger than
-	// Grace (measured from SpecChangedAt, so an edit restarts it), warning after.
-	notProcessed := func(u *unstructured.Unstructured, msg, why string) {
+	// One KGWUI-003 per (resource, parentRef); parent is the zero value for
+	// everything but route parents (round 3, finding 5).
+	type pendingKey struct {
+		res    objects.Ref
+		parent objects.ParentRef
+	}
+	reported := map[pendingKey]bool{}
+	inGrace := map[objects.Ref]bool{} // resources being processed
+	// notProcessed reports u (for parent) once: info while u's current
+	// generation was first seen less than Grace ago, warning after.
+	notProcessed := func(u *unstructured.Unstructured, parent objects.ParentRef, msg, why string) {
 		r := objects.RefOf(u)
-		if reported[r] {
+		k := pendingKey{r, parent}
+		if reported[k] {
 			return
 		}
-		reported[r] = true
+		reported[k] = true
 		sev := SeverityWarning
-		if in.Now.Sub(objects.SpecChangedAt(u)) < Grace {
+		if in.Now.Sub(in.firstSeen(u)) < Grace {
 			sev, msg = SeverityInfo, "Being processed by the controller"
-			inGrace++
+			inGrace[r] = true
 		}
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
 			Message: msg, Detail: why})
 	}
-	pending := func(u *unstructured.Unstructured, why string) { notProcessed(u, "Not yet processed by the controller", why) }
+	// pendingFor reports a block of u that is not processed; parent is set for route parents.
+	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why string) {
+		notProcessed(u, parent, "Not yet processed by the controller", why)
+	}
+	pending := func(u *unstructured.Unstructured, why string) { pendingFor(u, objects.ParentRef{}, why) }
 	// current reports false when the block is pending: a required condition is
 	// missing, a present condition has reason Pending, or a present condition
 	// may describe an older generation (including observedGeneration 0).
-	current := func(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string, extra string) bool {
+	current := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) bool {
 		for _, t := range required {
 			if objects.FindCondition(cs, t) == nil {
-				pending(u, fmt.Sprintf("no %s condition%s", t, within(extra)))
+				pendingFor(u, parent, fmt.Sprintf("no %s condition%s", t, within(extra)))
 				return false
 			}
 		}
@@ -4594,19 +4552,19 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 				continue
 			}
 			if cond.Reason == "Pending" {
-				pending(u, fmt.Sprintf("%s is Pending%s", t, within(extra)))
+				pendingFor(u, parent, fmt.Sprintf("%s is Pending%s", t, within(extra)))
 				return false
 			}
 			if objects.IsStale(u, *cond) {
-				pending(u, "status describes an older generation"+within(extra))
+				pendingFor(u, parent, "status describes an older generation"+within(extra))
 				return false
 			}
 		}
 		return true
 	}
 	// evaluate reports every present condition of a current block that is not True.
-	evaluate := func(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string, extra string) {
-		if !current(u, cs, required, optional, extra) {
+	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) {
+		if !current(u, parent, cs, required, optional, extra) {
 			return
 		}
 		for _, t := range append(slices.Clone(required), optional...) {
@@ -4616,10 +4574,10 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 	}
 	for _, gc := range in.Owned.GatewayClasses {
-		evaluate(gc, objects.Conditions(gc), classRequired, nil, "")
+		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "")
 	}
 	for _, gw := range in.Owned.Gateways {
-		evaluate(gw, objects.Conditions(gw), gatewayRequired, nil, "")
+		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
 		byName := map[string]objects.ListenerStatus{}
 		for _, l := range objects.GatewayListeners(gw) {
 			byName[l.Name] = l
@@ -4631,7 +4589,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 				pending(gw, "no status for listener "+name)
 				continue
 			}
-			evaluate(gw, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
+			evaluate(gw, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
 			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(gw, *cf) {
 				add(gw, SeverityError, *cf, "listener "+l.Name)
 			}
@@ -4654,15 +4612,15 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 				}
 			}
 			if st == nil {
-				pending(r.Obj, "no status from the controller for "+extra)
+				pendingFor(r.Obj, p, "no status from the controller for "+extra)
 				continue
 			}
-			evaluate(r.Obj, st.Conditions, routeRequired, routeOptional, extra)
+			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra)
 		}
 	}
 	// Routes whose parent does not exist (finding 9).
 	for _, u := range in.Owned.Unattached {
-		notProcessed(u.Route.Obj, "Not attached: parent not found",
+		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
 			fmt.Sprintf("parent %s %s/%s does not exist", u.Parent.Kind, u.Parent.Namespace, u.Parent.Name))
 	}
 	// Policies: ancestors written by this install's controller. None at all is
@@ -4680,7 +4638,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		for _, a := range mine {
 			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Name
-			if !current(p.Obj, a.Conditions, policyRequired, policyOptional, extra) {
+			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
 			for _, cond := range a.Conditions {
@@ -4690,13 +4648,13 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 		}
 	}
-	if inGrace > 0 {
+	if n := len(inGrace); n > 0 {
 		noun := "resources are"
-		if inGrace == 1 {
+		if n == 1 {
 			noun = "resource is"
 		}
 		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt,
-			Error: fmt.Sprintf("%d %s being processed by the controller", inGrace, noun)}
+			Error: fmt.Sprintf("%d %s being processed by the controller", n, noun)}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
@@ -4709,17 +4667,15 @@ func within(extra string) string {
 	return " (" + extra + ")"
 }
 
-// policySeverity maps a policy ancestor condition to a severity (design §5.2,
-// with Overridden as info; see the plan's proposed refinement). Pending never
-// reaches it for Accepted or Attached: current() treats it as not processed.
+// policySeverity maps a current policy ancestor condition to a severity
+// (design §5.2, with Overridden as info; see the plan's proposed refinement).
+// Reason Pending never reaches it: current() treats it as not processed.
 func policySeverity(c metav1.Condition) (Severity, bool) {
 	switch c.Reason {
 	case "PartiallyValid":
 		return SeverityWarning, true
 	case "Overridden":
 		return SeverityInfo, true
-	case "Pending":
-		return "", false
 	}
 	if c.Status == metav1.ConditionFalse {
 		return SeverityError, true
@@ -4883,7 +4839,7 @@ git add pkg/health pkg/scopeverify && git commit -m "feat(health): findings, che
   - `engine.Config{Snapshots cache.Snapshotter; Served []kinds.Served; Detectors []install.Detector; Scope install.ScopeProvider; Verifier scopeverify.Verifier; Metrics ctrlmetrics.Source; Checks []health.Check; Pinned string; MetricsMaxAge time.Duration; Now func() time.Time}` (`MetricsMaxAge` is passed to `health.Input` and `scopeverify.Input`; `app` sets it to 3 × the metrics interval);
   - `engine.InstallModel{Resolved install.Resolved; Owned *install.Owned; Overview overview.Overview; Health health.Report}`;
   - `engine.Model{Snapshot *cache.Snapshot; Served []kinds.Served; Installs []InstallModel; Pinned string; ComputedAt time.Time}`;
-  - `engine.New(Config) *Engine`, `(*Engine).Compute() *Model`, `(*Engine).Current() *Model`, `(*Engine).Installs() []install.Install`, `(*Engine).Run(ctx, every time.Duration)`.
+  - `engine.New(Config) *Engine`, `(*Engine).Compute() *Model`, `(*Engine).Current() *Model`, `(*Engine).Installs() []install.Install`, `(*Engine).Run(ctx, every time.Duration)`. The engine remembers when it first saw each object's (uid, generation) and passes that as `health.Input.FirstSeen`; objects present at the first computation get the UI start time, and entries for objects that are gone are pruned (round 3, finding 3).
 - Produces:
   - `api.ModelSource` (interface `Current() *engine.Model`);
   - `api.Authorizer` (interface `Authorize(r *http.Request, ref objects.Ref) bool`), `api.AllowAll{}` (the Phase 1 default) and `api.AuthorizerFunc` (`func(*http.Request, objects.Ref) bool` adapter) in `pkg/api/authz.go` (D-013);
@@ -4920,6 +4876,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
@@ -4959,6 +4916,11 @@ type setup struct {
 	metrics   ctrlmetrics.Source // nil: okMetrics("kgw/kgateway")
 	immediate bool               // report scope mismatches on the second computation (persistence 0, not 1 h)
 	authz     Authorizer         // nil: AllowAll
+	// prepare runs on the fake clients before the cache starts (failure injection).
+	prepare func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset)
+	// late objects are created after the engine has first seen the rest, so their
+	// generation is first seen at testutil.Now: inside the grace period.
+	late []*unstructured.Unstructured
 }
 
 // harness is a running cache, engine and handler over fake clients, with the
@@ -4972,7 +4934,16 @@ type harness struct {
 	kube  *kubefake.Clientset
 }
 
-// newHarness runs the real cache, engine and handler over fake clients seeded with objs.
+// clock is the engine clock of a harness.
+type clock struct{ t atomic.Pointer[time.Time] }
+
+func (c *clock) set(t time.Time) { c.t.Store(&t) }
+func (c *clock) now() time.Time  { return *c.t.Load() }
+
+// newHarness runs the real cache, engine and handler over fake clients seeded
+// with objs. The engine first computes at testutil.Now minus Grace and 1 s, so
+// the seeded objects' generations are past the grace period at testutil.Now,
+// the time every API response is computed at (D-006: unprocessed means warning).
 func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	t.Helper()
 	if s.served == nil {
@@ -4986,15 +4957,21 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		persist = 0
 	}
 	dyn, kube := testutil.Clients(t, objs...)
+	fd := dyn.(*dynamicfake.FakeDynamicClient)
+	if s.prepare != nil {
+		s.prepare(fd, kube)
+	}
 	det := install.UpstreamDetector{}
 	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served,
 		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
+	clk := &clock{}
+	clk.set(testutil.Now.Add(-health.Grace - time.Second))
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: []install.Detector{det}, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return testutil.Now }})
+		MetricsMaxAge: 30 * time.Second, Now: clk.now})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -5002,9 +4979,41 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	clk.set(testutil.Now)
+	for _, u := range s.late {
+		createAndWait(ctx, t, fd, c, s.served, u)
+	}
+	e.Compute()
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
 	t.Cleanup(srv.Close)
-	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: dyn.(*dynamicfake.FakeDynamicClient), kube: kube}
+	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube}
+}
+
+// createAndWait creates u through the fake dynamic client and waits until the cache holds it.
+func createAndWait(ctx context.Context, t *testing.T, dyn *dynamicfake.FakeDynamicClient, c *cache.Cache, served []kinds.Served, u *unstructured.Unstructured) {
+	t.Helper()
+	gv, _ := schema.ParseGroupVersion(u.GetAPIVersion())
+	for _, k := range served {
+		if k.Group != gv.Group || k.Kind != u.GetKind() {
+			continue
+		}
+		if _, err := dyn.Resource(k.GVR()).Namespace(u.GetNamespace()).Create(ctx, u, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			for _, o := range c.Snapshot().Objects[k.GVR()] {
+				if o.GetNamespace() == u.GetNamespace() && o.GetName() == u.GetName() {
+					return
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s %s/%s never reached the cache", u.GetKind(), u.GetNamespace(), u.GetName())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	t.Fatalf("kind %s is not served", u.GetKind())
 }
 
 // startWith is newHarness for tests that only need the engine, the server and namespace updates.
@@ -5060,12 +5069,6 @@ func worldWith(ctrlReady, proxyReady int32, extra ...runtime.Object) []runtime.O
 		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
 		testutil.HTTPRoute("blog", "posts", []objects.ParentRef{gw}),
 	}, extra...)
-}
-
-// young sets u's creation time inside the grace period.
-func young(u *unstructured.Unstructured) *unstructured.Unstructured {
-	u.SetCreationTimestamp(metav1.NewTime(testutil.Now.Add(-10 * time.Second)))
-	return u
 }
 
 // stale bumps u's generation past its fixture conditions (observed generation 1).
@@ -5252,7 +5255,7 @@ func TestEveryFindingCodeAtTheAPI(t *testing.T) {
 		{"003 required condition absent", setup{}, world(partial), false, health.CodeRouteUnattached, "shop/partial", true, ""},
 		{"003 policy without ancestors", setup{}, world(testutil.TrafficPolicy("shop", "tp-new")), false, health.CodeRouteUnattached, "shop/tp-new", true, ""},
 		{"003 parent gateway missing", setup{}, world(testutil.HTTPRoute("shop", "orphan", []objects.ParentRef{testutil.GwRef("infra", "gone")})), false, health.CodeRouteUnattached, "shop/orphan", true, ""},
-		{"003 being processed inside grace", setup{}, world(young(testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw}))), false, health.CodeRouteUnattached, "shop/young", true, health.StateUnknown},
+		{"003 being processed inside grace", setup{late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})}}, world(), false, health.CodeRouteUnattached, "shop/young", true, health.StateUnknown},
 		{"003 accepted route", setup{}, world(), false, health.CodeRouteUnattached, "shop/cart", false, ""},
 		{"004 unwatched namespace", setup{}, world(), false, health.CodeNamespaceNotWatched, "blog/posts", true, health.StateWarning},
 		{"004 watched namespace", setup{}, world(), false, health.CodeNamespaceNotWatched, "shop/cart", false, ""},
@@ -5356,7 +5359,7 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 			health.StateWarning, &expect{health.CodeRouteUnattached, health.SeverityWarning, "shop/tp-new"}, nil, map[string]int{"TrafficPolicy": 1}},
 		{"new generic policy", setup{}, isolated(testutil.BackendTLSPolicy("shop", "btls-new")),
 			health.StateWarning, &expect{health.CodeRouteUnattached, health.SeverityWarning, "shop/btls-new"}, nil, map[string]int{"BackendTLSPolicy": 1}},
-		{"being processed", setup{}, isolated(young(testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw}))),
+		{"being processed (first seen inside the grace period)", setup{late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})}}, isolated(),
 			health.StateUnknown, &expect{health.CodeRouteUnattached, health.SeverityInfo, "shop/young"}, []expect{{health.CodeRouteUnattached, health.SeverityWarning, "shop/young"}}, map[string]int{"HTTPRoute": 2}},
 		{"status for a removed parent", setup{}, isolated(testutil.HTTPRoute("shop", "moved", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller),
 			testutil.RouteParent{Ref: testutil.GwRef("infra", "old"), Controller: testutil.Controller, Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NoMatchingParent"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})),
@@ -5398,54 +5401,80 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 	}
 }
 
-// Round 2, findings 1 and 10: failures after the initial sync, injected into the
-// fake dynamic and typed clients, make the install unknown at the API until a
-// probe succeeds again.
+// Round 3, finding 1 (and round 2, finding 10): a watch that fails after the
+// initial sync, injected into the fake dynamic and typed clients while list
+// stays allowed, makes the install unknown at the API. It recovers only after
+// a Watch call succeeds again.
 func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 	refused := fmt.Errorf("dial tcp 10.96.0.1:443: connect: %w", syscall.ECONNREFUSED)
 	cases := []struct {
 		name     string
-		verb     string // "get" for the reachability probe, "list" for a kind
 		resource string
 		typed    bool
 		err      error
 	}{
-		{"API server unreachable", "get", "version", true, refused},
-		{"httproutes forbidden", "list", "httproutes", false, apierrors.NewForbidden(schema.GroupResource{Group: "gateway.networking.k8s.io", Resource: "httproutes"}, "", nil)},
-		{"httproutes throttled", "list", "httproutes", false, apierrors.NewTooManyRequests("slow down", 1)},
-		{"namespaces forbidden", "list", "namespaces", true, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil)},
-		{"pods throttled", "list", "pods", true, apierrors.NewTooManyRequests("slow down", 1)},
-		{"deployments forbidden", "list", "deployments", true, apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", nil)},
+		{"httproutes connection refused", "httproutes", false, refused},
+		{"httproutes throttled", "httproutes", false, apierrors.NewTooManyRequests("slow down", 1)},
+		{"httproutes forbidden", "httproutes", false, apierrors.NewForbidden(schema.GroupResource{Group: "gateway.networking.k8s.io", Resource: "httproutes"}, "", nil)},
+		{"namespaces forbidden", "namespaces", true, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil)},
+		{"pods throttled", "pods", true, apierrors.NewTooManyRequests("slow down", 1)},
+		{"deployments connection refused", "deployments", true, refused},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			hn := newHarness(t, setup{}, isolated()...)
 			var fail atomic.Bool
-			react := func(clienttesting.Action) (bool, runtime.Object, error) {
+			var failed atomic.Int32
+			watchers := make(chan *watch.FakeWatcher, 64)
+			react := func(clienttesting.Action) (bool, watch.Interface, error) {
 				if fail.Load() {
+					failed.Add(1)
 					return true, nil, tc.err
 				}
-				return false, nil, nil
+				w := watch.NewFake()
+				watchers <- w
+				return true, w, nil
 			}
-			if tc.typed {
-				hn.kube.PrependReactor(tc.verb, tc.resource, react)
-			} else {
-				hn.dyn.PrependReactor(tc.verb, tc.resource, react)
+			hn := newHarness(t, setup{prepare: func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
+				if tc.typed {
+					kube.PrependWatchReactor(tc.resource, react)
+				} else {
+					dyn.PrependWatchReactor(tc.resource, react)
+				}
+			}}, isolated()...)
+			state := func() health.State {
+				hn.e.Compute()
+				return get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200).State
+			}
+			if s := state(); s != health.StateHealthy {
+				t.Fatalf("baseline must be healthy, got %s", s)
 			}
 			fail.Store(true)
-			hn.cache.Probe(hn.ctx)
-			hn.e.Compute()
+			(<-watchers).Stop() // the established watch ends; the next Watch call fails
+			waitUntil(t, "the install to become unknown", func() bool { return state() == health.StateUnknown })
 			h := get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200)
-			if h.State != health.StateUnknown || !hasSev(h, health.CodeSignalUnavailable, health.SeverityInfo, "") {
-				t.Fatalf("a failure after sync must make the install unknown with KGWUI-008: state=%s findings=%+v", h.State, h.Findings)
+			if !hasSev(h, health.CodeSignalUnavailable, health.SeverityInfo, "") {
+				t.Fatalf("KGWUI-008 missing: %+v", h.Findings)
+			}
+			n := failed.Load()
+			waitUntil(t, "another failed watch", func() bool { return failed.Load() > n })
+			if s := state(); s != health.StateUnknown {
+				t.Fatalf("without a successful watch the install stays unknown, got %s", s)
 			}
 			fail.Store(false)
-			hn.cache.Probe(hn.ctx)
-			hn.e.Compute()
-			if h := get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200); h.State != health.StateHealthy {
-				t.Fatalf("after a successful probe the install is healthy again, got %s: %+v", h.State, h.Findings)
-			}
+			waitUntil(t, "recovery after a successful watch", func() bool { return state() == health.StateHealthy })
 		})
+	}
+}
+
+// waitUntil polls cond until it holds or 15 s pass (reflector backoff starts at 0.8 s).
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -5501,6 +5530,65 @@ type noMetrics struct{}
 
 func (noMetrics) Get(string) (ctrlmetrics.Result, bool) {
 	return ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}}}, true
+}
+
+// Round 3, finding 3: grace runs from when the engine first saw the current
+// (uid, generation). An annotation-only update does not restart it; a
+// generation bump does; objects present at the first computation get grace
+// from UI start even if they were created long before.
+func TestGraceRunsFromFirstSeenGeneration(t *testing.T) {
+	served := testutil.ServedUpstream()
+	gvr := func(kind string) schema.GroupVersionResource {
+		for _, s := range served {
+			if s.Kind == kind {
+				return s.GVR()
+			}
+		}
+		t.Fatal(kind)
+		return schema.GroupVersionResource{}
+	}
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	route := testutil.HTTPRoute("shop", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")}) // created an hour ago, no status
+	snap := &cache.Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{
+		gvr("GatewayClass"): {testutil.GatewayClass("kgateway", testutil.Controller, true)},
+		gvr("Gateway"):      {testutil.Gateway("infra", "edge", "kgateway", nil)},
+		gvr("HTTPRoute"):    {route},
+	}, Access: map[schema.GroupVersionResource]cache.Access{}, Namespaces: []*corev1.Namespace{testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)},
+		Deployments: []*appsv1.Deployment{d, testutil.ProxyDeployment("infra", "edge", 1, 1)}, Pods: []*corev1.Pod{testutil.ControllerPod(d, "p", true)}, Synced: true}
+	now := testutil.Now
+	e := New(Config{Snapshots: staticSnap{snap}, Served: served, Detectors: []install.Detector{install.UpstreamDetector{}},
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: noMetrics{},
+		Checks: health.Upstream(), Now: func() time.Time { return now }})
+	severity := func() health.Severity {
+		t.Helper()
+		for _, f := range e.Compute().Installs[0].Health.Findings {
+			if f.Code == health.CodeRouteUnattached && f.Resource != nil && f.Resource.String() == "shop/r" {
+				return f.Severity
+			}
+		}
+		t.Fatal("no KGWUI-003 on shop/r")
+		return ""
+	}
+	if got := severity(); got != health.SeverityInfo {
+		t.Fatalf("present at UI start: grace runs from start, want info, got %s", got)
+	}
+	now = now.Add(health.Grace + time.Second)
+	if got := severity(); got != health.SeverityWarning {
+		t.Fatalf("after grace: want warning, got %s", got)
+	}
+	route.SetAnnotations(map[string]string{"touched": "yes"}) // metadata-only update: generation unchanged
+	route.SetResourceVersion("2")
+	if got := severity(); got != health.SeverityWarning {
+		t.Fatalf("an annotation update must not restart grace, got %s", got)
+	}
+	route.SetGeneration(2) // spec change
+	if got := severity(); got != health.SeverityInfo {
+		t.Fatalf("a generation bump must restart grace, got %s", got)
+	}
+	now = now.Add(health.Grace + time.Second)
+	if got := severity(); got != health.SeverityWarning {
+		t.Fatalf("after grace for generation 2: want warning, got %s", got)
+	}
 }
 
 func TestComputeAt5000RoutesUnderOneSecond(t *testing.T) {
@@ -5711,6 +5799,9 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -5759,6 +5850,15 @@ type Engine struct {
 	cfg Config
 	mu  sync.RWMutex
 	cur *Model
+	// computeMu serialises Compute; seen is only touched under it.
+	computeMu sync.Mutex
+	seen      map[generation]time.Time
+}
+
+// generation identifies one spec version of one object.
+type generation struct {
+	uid types.UID
+	gen int64
 }
 
 // New returns an Engine.
@@ -5766,13 +5866,47 @@ func New(cfg Config) *Engine {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Engine{cfg: cfg}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}}
+}
+
+// observe records when each (uid, generation) in snap was first seen and
+// forgets the ones that are gone. The grace period runs from that moment: a
+// generation bump restarts it, a label or annotation update does not, and
+// objects present at the first computation get grace from UI start (round 3, finding 3).
+func (e *Engine) observe(snap *cache.Snapshot, now time.Time) {
+	current := map[generation]bool{}
+	for _, objs := range snap.Objects {
+		for _, u := range objs {
+			k := generation{u.GetUID(), u.GetGeneration()}
+			current[k] = true
+			if _, ok := e.seen[k]; !ok {
+				e.seen[k] = now
+			}
+		}
+	}
+	for k := range e.seen {
+		if !current[k] {
+			delete(e.seen, k)
+		}
+	}
+}
+
+// firstSeen returns when the engine first saw u's current generation.
+// It is called during Compute, under computeMu.
+func (e *Engine) firstSeen(u *unstructured.Unstructured) time.Time {
+	if t, ok := e.seen[generation{u.GetUID(), u.GetGeneration()}]; ok {
+		return t
+	}
+	return e.cfg.Now()
 }
 
 // Compute builds a new Model and makes it current.
 func (e *Engine) Compute() *Model {
+	e.computeMu.Lock()
+	defer e.computeMu.Unlock()
 	snap := e.cfg.Snapshots.Snapshot()
 	now := e.cfg.Now()
+	e.observe(snap, now)
 	m := &Model{Snapshot: snap, Served: e.cfg.Served, Pinned: e.cfg.Pinned, ComputedAt: now}
 	all := install.Resolve(install.Discover(snap, e.cfg.Detectors), e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
@@ -5786,7 +5920,7 @@ func (e *Engine) Compute() *Model {
 			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
 		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Metrics: met, HasMetrics: has,
-			MetricsMaxAge: e.cfg.MetricsMaxAge, Verify: ver, Now: now}, e.cfg.Checks)
+			MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: e.firstSeen, Verify: ver, Now: now}, e.cfg.Checks)
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, e.cfg.Served, rep)})
 	}
 	e.mu.Lock()
@@ -6253,7 +6387,7 @@ git add pkg/overview pkg/engine pkg/api && git commit -m "feat(api): engine, ove
   - `app.Options{Listen, Pinned string; PollInterval, MetricsInterval time.Duration; UI fs.FS}`;
   - `app.Clients{Dynamic dynamic.Interface; Kube kubernetes.Interface; Discovery kinds.DiscoveryClient; InCluster bool}`;
   - `app.App{Engine *engine.Engine; Handler http.Handler}`;
-  - `app.Build(c Clients, o Options, reg *extension.Registry) (*App, error)`, `(*App).Start(ctx context.Context)`. `Build` watches Pods with each detector's `ControllerPodSelector()`, sets `engine.Config.MetricsMaxAge` to 3 × `MetricsInterval`, and passes `reg.Authorizer` to `api.NewHandler`; `Start` also runs `cache.RunProbes` every `MetricsInterval`;
+  - `app.Build(c Clients, o Options, reg *extension.Registry) (*App, error)`, `(*App).Start(ctx context.Context)`. `Build` watches Pods with each detector's `ControllerPodSelector()`, sets `engine.Config.MetricsMaxAge` to 3 × `MetricsInterval`, and passes `reg.Authorizer` to `api.NewHandler`;
   - `app.Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Option) error`.
 - Produces (tests only): `testutil.ClientsWith(t, extra []kinds.Descriptor, objs ...runtime.Object)`.
 
@@ -6724,12 +6858,9 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cache: ca, collector: col, opts: o}, nil
 }
 
-// Start runs the cache, its probes, the engine loop and the metrics collector
-// until ctx is done. Probes share the metrics interval: one reachability check
-// plus one limit=1 list per watched kind every 10 s by default (round 2, finding 1).
+// Start runs the cache, the engine loop and the metrics collector until ctx is done.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
-	go a.cache.RunProbes(ctx, a.opts.MetricsInterval)
 	go a.Engine.Run(ctx, a.opts.PollInterval)
 	go a.collector.Run(ctx, a.opts.MetricsInterval, a.Engine.Installs)
 }
@@ -7485,7 +7616,7 @@ git add web && git commit -m "feat(web): Control room theme tokens with contrast
 **Files:**
 - Create: `web/packages/shell/src/health/HealthIcon.tsx`, `web/packages/shell/src/health/HealthBadge.tsx`, `web/packages/shell/src/health/state.ts`
 - Create: `web/packages/shell/src/resource/ResourceName.tsx`
-- Create: `web/packages/shell/src/api/types.ts`, `web/packages/shell/src/api/client.ts`, `web/packages/shell/src/api/hooks.ts`
+- Create: `web/packages/shell/src/api/types.ts`, `web/packages/shell/src/api/client.ts`, `web/packages/shell/src/api/hooks.ts`, `web/packages/shell/src/api/clock.ts`
 - Create: `web/packages/shell/src/test/render.tsx` (test helper)
 - Modify: `web/packages/shell/src/index.ts`
 - Test: `web/packages/shell/src/health/HealthBadge.test.tsx`, `web/packages/shell/src/resource/ResourceName.test.tsx`, `web/packages/shell/src/api/hooks.test.tsx`
@@ -7503,7 +7634,8 @@ git add web && git commit -m "feat(web): Control room theme tokens with contrast
   - `useInstalls()`, `useOverview(id)`, `useHealth(id)`, `useMeta()`, `useResource(id, ref)` (SWR, refresh every 5 s except `useMeta` and `useResource`). None keeps the previous key's data: on an install switch the hooks return no data until the new install's response arrives (finding 4);
   - `POLL_MS = 5000`;
   - `isStale(collectedAt: string, now: number): boolean` (older than 2 × `POLL_MS`);
-  - `isLinkable(meta: MetaResponse | undefined, r: Ref): boolean` (true when `/api/v1/meta` lists `r`'s group and kind; the frontend links only those; finding 11).
+  - `isLinkable(meta: MetaResponse | undefined, r: Ref): boolean` (true when `/api/v1/meta` lists `r`'s group and kind; the frontend links only those; finding 11);
+  - `useNow(): number` in `api/clock.ts`: the current time at 1 s resolution from one shared interval. Every staleness check renders with it, so data ages into the stale state even when SWR returns identical data and does not re-render (round 3, finding 4).
 - The TypeScript mirrors carry `Finding.restricted`, `HealthReport.install`, `CheckResult.pending`, `InstallSummary.controller`, `InstallSummary.computedAt` and the `apps/Deployment` entry in `MetaResponse.kinds` (Task 10).
 - Produces (tests only): `renderWithTheme(ui, opts?)`.
 
@@ -7585,8 +7717,9 @@ it("renders cluster-scoped names without a namespace", () => {
 `web/packages/shell/src/api/hooks.test.tsx`:
 
 ```tsx
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithTheme, stubApi } from "../test/render";
+import { useNow } from "./clock";
 import { isLinkable, isStale, POLL_MS } from "./hooks";
 import { useInstalls } from "./hooks";
 
@@ -7612,6 +7745,21 @@ it("marks data older than two poll intervals as stale", () => {
   const now = Date.parse("2026-10-17T12:00:00Z");
   expect(isStale(new Date(now - POLL_MS).toISOString(), now)).toBe(false);
   expect(isStale(new Date(now - 2 * POLL_MS - 1).toISOString(), now)).toBe(true);
+});
+
+it("useNow ticks every second from one shared clock", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.parse("2026-10-17T12:00:00Z"));
+  function Clock() {
+    return <p>{new Date(useNow()).toISOString()}</p>;
+  }
+  renderWithTheme(<><Clock /><Clock /></>);
+  expect(screen.getAllByText("2026-10-17T12:00:00.000Z")).toHaveLength(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3000);
+  });
+  expect(screen.getAllByText("2026-10-17T12:00:03.000Z")).toHaveLength(2);
+  vi.useRealTimers();
 });
 
 it("links only kinds that /api/v1/meta lists", () => {
@@ -7885,6 +8033,42 @@ export function useResource(id: string, r: Ref) {
 }
 ```
 
+`web/packages/shell/src/api/clock.ts`:
+
+```ts
+import { useSyncExternalStore } from "react";
+
+// region Helpers
+// One interval for the whole app, started by the first subscriber and stopped by the last.
+const listeners = new Set<() => void>();
+let timer: ReturnType<typeof setInterval> | undefined;
+
+function subscribe(onTick: () => void): () => void {
+  listeners.add(onTick);
+  timer ??= setInterval(() => {
+    for (const l of listeners) l();
+  }, 1000);
+  return () => {
+    listeners.delete(onTick);
+    if (listeners.size === 0 && timer !== undefined) {
+      clearInterval(timer);
+      timer = undefined;
+    }
+  };
+}
+
+// Whole seconds, so the snapshot is stable between ticks (useSyncExternalStore requires it).
+function snapshot(): number {
+  return Math.floor(Date.now() / 1000) * 1000;
+}
+
+// region Component
+/** The current time at 1 s resolution. Renders with it re-run every second, so staleness is re-evaluated even when data is unchanged. */
+export function useNow(): number {
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+```
+
 Export all of these from `index.ts`:
 
 ```ts
@@ -7895,6 +8079,7 @@ export { ResourceName } from "./resource/ResourceName";
 export * from "./api/types";
 export { ApiError, apiFetch } from "./api/client";
 export { isLinkable, isStale, POLL_MS, useHealth, useInstalls, useMeta, useOverview, useResource } from "./api/hooks";
+export { useNow } from "./api/clock";
 ```
 
 - [ ] **Step 5: Run the tests and confirm they pass**
@@ -8279,6 +8464,7 @@ import styled from "@emotion/styled";
 import { ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useNow } from "../api/clock";
 import { isStale, useInstalls } from "../api/hooks";
 import { HealthIcon } from "../health/HealthIcon";
 import { ResourceName } from "../resource/ResourceName";
@@ -8310,6 +8496,7 @@ interface InstallSwitcherProps {
 /** Switches between controller installs; hidden when there is only one (D-009 §5). */
 export function InstallSwitcher({ currentId }: InstallSwitcherProps) {
   const { data } = useInstalls();
+  const now = useNow();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   if (!data || data.length < 2) return null;
@@ -8325,7 +8512,7 @@ export function InstallSwitcher({ currentId }: InstallSwitcherProps) {
           {data.map((i) => (
             <button key={i.id} type="button" role="menuitem" aria-current={i.id === currentId}
               onClick={() => { setOpen(false); navigate(`/i/${i.id}`); }}>
-              <HealthIcon state={isStale(i.computedAt) ? "unknown" : i.health.state} />
+              <HealthIcon state={isStale(i.computedAt, now) ? "unknown" : i.health.state} />
               <ResourceName namespace={i.namespace} name={i.name} />
             </button>
           ))}
@@ -8381,6 +8568,7 @@ export function ThemeSwitcher() {
 ```tsx
 import styled from "@emotion/styled";
 import { Link, useMatch } from "react-router-dom";
+import { useNow } from "../api/clock";
 import { isStale, useInstalls } from "../api/hooks";
 import type { ReadyCount } from "../api/types";
 import { HealthIcon } from "../health/HealthIcon";
@@ -8432,6 +8620,7 @@ export function Header() {
   const { brand, navEntries } = useShellExtension();
   const match = useMatch("/i/:ns/:name/*");
   const { data } = useInstalls();
+  const now = useNow();
   const id = match ? `${match.params.ns}/${match.params.name}` : "";
   const current = data?.find((i) => i.id === id);
   return (
@@ -8446,7 +8635,7 @@ export function Header() {
           <Tag data-testid="edition">{current.edition}</Tag>
           <ResourceName namespace={current.namespace} name={current.name} />
           <Ready>
-            <HealthIcon state={isStale(current.computedAt) ? "unknown" : readiness(current.controller)} />
+            <HealthIcon state={isStale(current.computedAt, now) ? "unknown" : readiness(current.controller)} />
             Controller {current.controller.ready}/{current.controller.desired} ready
           </Ready>
         </>
@@ -8626,7 +8815,7 @@ git add web && git commit -m "feat(web): shell with extension registry, routing,
   - `<InstallPage />`;
   - `<FindingRow finding installId stylesOverride? />` (used again by Task 17);
   - `resourcePath(installId: string, r: Ref): string` (exported from `FindingRow.tsx`: `/i/{id}/r/{group|-}/{kind}/{ns|-}/{name}`);
-  - `<HealthStrip health stale />` and `<GatewayTable rows installId stale />` (page-internal; `stale` comes from `InstallPage`).
+  - `<HealthStrip health stale now />` and `<GatewayTable rows installId stale />` (page-internal; `stale` and `now` come from `InstallPage`, which reads `useNow()`).
 
 Behaviour (design §2, §5.3, §6.4–6.5; D-011):
 
@@ -8726,9 +8915,10 @@ export const restricted: HealthReport = {
 `web/packages/shell/src/pages/install/InstallPage.test.tsx`:
 
 ```tsx
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useNavigate } from "react-router-dom";
+import { POLL_MS } from "../../api/hooks";
 import { healthy, meta, overview, processing, restricted, unhealthy, unknown } from "../../test/fixtures";
 import { renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
@@ -8764,6 +8954,22 @@ it("unknown: never green, names the missing signal", async () => {
   const strip = await screen.findByTestId("health-strip");
   expect(strip).toHaveTextContent("xDS rejects could not be checked");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
+});
+
+// Round 3, finding 4: the strip and the gateway rows age into stale without new data.
+it("a healthy page turns stale as it ages while identical responses keep arriving", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const fresh = new Date().toISOString();
+  mount({ ...healthy, collectedAt: fresh }, "/i/kgw/kgateway", { ...overview, collectedAt: fresh });
+  const strip = await screen.findByTestId("health-strip");
+  expect(strip).toHaveTextContent("All healthy");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2 * POLL_MS + 2000);
+  });
+  expect(strip).toHaveTextContent(/Data is stale/);
+  const rows = within(screen.getByRole("table", { name: "Gateways" })).getAllByRole("row").slice(1);
+  for (const r of rows) expect(r).toHaveTextContent("Unknown");
+  vi.useRealTimers();
 });
 
 it("being processed: unknown, never green, and says what is happening", async () => {
@@ -9006,13 +9212,13 @@ function headline(h: HealthReport): string {
 
 // region Component
 /** Full-width health strip; stale data is shown as unknown (D-006). InstallPage decides staleness for the whole page. */
-export function HealthStrip({ health, stale }: { health: HealthReport; stale: boolean }) {
+export function HealthStrip({ health, stale, now }: { health: HealthReport; stale: boolean; now: number }) {
   const state: HealthState = stale ? "unknown" : health.state;
   return (
     <Strip state={state} data-testid="health-strip" role="status">
       <HealthIcon state={state} size={18} />
-      <b>{stale ? `Data is stale — last checked ${ago(health.collectedAt)}` : headline(health)}</b>
-      {!stale ? <span className="when">checked {ago(health.collectedAt)}</span> : null}
+      <b>{stale ? `Data is stale — last checked ${ago(health.collectedAt, now)}` : headline(health)}</b>
+      {!stale ? <span className="when">checked {ago(health.collectedAt, now)}</span> : null}
     </Strip>
   );
 }
@@ -9236,6 +9442,7 @@ export function GatewayTable({ rows, installId, stale }: { rows: GatewayRow[]; i
 
 ```tsx
 import styled from "@emotion/styled";
+import { useNow } from "../../api/clock";
 import { isStale, useHealth, useOverview } from "../../api/hooks";
 import { useInstallId } from "../../shell/extension";
 import { PageState, Shimmer } from "../../states/PageState";
@@ -9261,6 +9468,7 @@ export function InstallPage() {
   const id = useInstallId();
   const ov = useOverview(id);
   const h = useHealth(id);
+  const now = useNow();
   const err = ov.error ?? h.error;
   if (err && err.status === 503) return <PageState kind="connecting" title="Connecting to cluster…" message={err.message} />;
   if (err && !(ov.data && h.data)) return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
@@ -9277,11 +9485,11 @@ export function InstallPage() {
     );
   }
   // Stale health or overview turns the strip and the gateway rows unknown (finding 3).
-  const stale = isStale(h.data.collectedAt) || isStale(ov.data.collectedAt);
+  const stale = isStale(h.data.collectedAt, now) || isStale(ov.data.collectedAt, now);
   const healthy = h.data.state === "healthy";
   return (
     <Page>
-      <HealthStrip health={h.data} stale={stale} />
+      <HealthStrip health={h.data} stale={stale} now={now} />
       {healthy ? (
         <Split>
           <div>
@@ -9347,9 +9555,10 @@ Behaviour:
 `web/packages/shell/src/pages/pages.test.tsx`:
 
 ```tsx
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
+import { POLL_MS } from "../api/hooks";
 import { overview, unhealthy } from "../test/fixtures";
 import { renderWithTheme, stubApi } from "../test/render";
 import { ClusterLanding } from "./ClusterLanding";
@@ -9376,6 +9585,22 @@ it("cluster landing never shows an old healthy summary as healthy", async () => 
   expect(card).toHaveTextContent("Unknown");
   expect(card).toHaveTextContent("Data is stale");
   expect(card).not.toHaveTextContent("Healthy");
+});
+
+// Round 3, finding 4: identical successful polls do not re-render through SWR,
+// so only the shared clock turns an ageing summary stale.
+it("a fresh summary turns unknown as it ages while identical responses keep arriving", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  stubApi({ "/api/v1/installs": [inst("a/one", "healthy", {}, new Date().toISOString())] }); // the same body on every poll
+  renderWithTheme(<ClusterLanding />);
+  const card = await screen.findByRole("link", { name: /a\/one/ });
+  expect(card).toHaveTextContent("Healthy");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2 * POLL_MS + 2000);
+  });
+  expect(card).toHaveTextContent("Unknown");
+  expect(card).toHaveTextContent("Data is stale");
+  vi.useRealTimers();
 });
 
 function findings(path: string) {
@@ -9427,6 +9652,7 @@ Expected: FAIL
 ```tsx
 import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
+import { useNow } from "../api/clock";
 import { isStale, useInstalls } from "../api/hooks";
 import { HealthBadge } from "../health/HealthBadge";
 import { ResourceName } from "../resource/ResourceName";
@@ -9459,13 +9685,14 @@ function summary(c: { error?: number; warning?: number }): string {
 /** One card per controller install (layout C); only shown with more than one install. */
 export function ClusterLanding() {
   const { data, error } = useInstalls();
+  const now = useNow();
   if (error) return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
   if (!data) return <PageState kind="loading" title="Loading…" />;
   return (
     <Grid>
       {data.map((i) => {
         // An old summary is not evidence: unknown, never its last state (round 2, finding 6).
-        const stale = isStale(i.computedAt);
+        const stale = isStale(i.computedAt, now);
         return (
           <Card key={i.id} to={`/i/${i.id}`}>
             <div className="top">

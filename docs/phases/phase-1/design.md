@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Overview: Design
 
-**Status:** Revised after two cross-model reviews (`reviews/design-codex.md`, `reviews/design-r2-codex.md`), for approval
+**Status:** Revised after three cross-model reviews (`reviews/design-codex.md`, `reviews/design-r2-codex.md`, `reviews/design-r3-codex.md`), for approval
 **Date:** 2026-10-17, revised 2026-10-18
 **Base:** `560c393`
 **Roadmap:** `docs/roadmap.md`, Phase 1
@@ -149,7 +149,7 @@ An **Install** is one kgateway controller deployment. It has:
   - Its health comes only from `status.parents[]` entries that meet both conditions: the entry's `controllerName` ∈ I.controllerNames, and its `parentRef` equals a **current** `spec.parentRefs` entry that resolves to a Gateway or ListenerSet owned by I. Equality covers the whole parentRef, `sectionName` and `port` included (unset differs from set), so status for a removed port or section never satisfies the current one.
   - Status left behind for a removed parentRef is ignored. So is status for a parent owned by another install that shares the controller name.
   - A route whose namespace is **outside** the scope of the install owning its target Gateway gets finding `KGWUI-004 namespace-not-watched` (warning). It never counts towards totals or health.
-  - A route whose parentRef targets a Gateway or ListenerSet that **does not exist** gets `KGWUI-003` in every install whose scope contains the route's namespace, once per missing parent. It counts in an install's totals only when at least one other parentRef resolves to a Gateway or ListenerSet owned by that install; a route with no owned parent is a diagnostic candidate and is not counted anywhere.
+  - A route whose parentRef targets a Gateway or ListenerSet that **does not exist** gets `KGWUI-003` in every install whose scope contains the route's namespace, once per missing parent (findings are deduplicated by resource and parentRef). It counts in an install's totals only when at least one other parentRef resolves to a Gateway or ListenerSet owned by that install; a route with no owned parent is a diagnostic candidate and is not counted anywhere.
 - **Policy** (any kind with category `policy`).
   - A policy in the kgateway API group belongs to I when its namespace is in I's scope.
   - Any other policy (for example `BackendTLSPolicy` or a downstream policy) belongs to I when its namespace is in I's scope **and** either it has an ancestor whose `controllerName` ∈ I.controllerNames, or it has no ancestors at all (new, not yet processed). Inventory membership does not wait for status.
@@ -206,7 +206,7 @@ v1 compares, per install and per `(namespace, resource kind)`, the UI's count of
 **Status freshness.** Every status-based check applies these rules, in this order:
 1. **Freshness first.** A condition whose `observedGeneration` is lower than the object's `metadata.generation` is stale. A missing `observedGeneration` (0) on an object with a generation counts as stale too: there is no evidence it describes the current spec. A stale condition describes an old spec, so a stale True is not success and a stale False is not a current error. kgateway sets `observedGeneration` on its conditions; the first plan task confirms this on 2.3 and 2.4.
 2. **Required status.** Each status block has required conditions: GatewayClass `Accepted`; Gateway `Accepted` and `Programmed`; each listener `Accepted` and `Programmed`; route parent `Accepted` and `ResolvedRefs`; policy ancestor `Accepted`. Every listener in `spec.listeners` needs its own status block. A missing block, an absent required condition, or a condition whose reason is `Pending` means "not yet processed" (kgateway writes `Accepted=False/Pending` and `Attached=False/Pending` as policy defaults before translation). Conditions that only some versions write (for example `kgateway.dev/Programmed`, `Attached`) are evaluated when present and are not required.
-3. **Grace period.** The grace period is 60 s, measured from the last spec change (creation, or the latest non-status update in `managedFields`). A resource that is not yet processed inside it gets `KGWUI-003` at **info** ("being processed"), and the `resource status` check is not OK, so the install is **unknown** (§5.3), never healthy. After the grace period the finding is a **warning** and the check is OK again.
+3. **Grace period.** The grace period is 60 s, measured from when the UI first saw the object's current (uid, `metadata.generation`). A spec change bumps the generation and restarts it; a label, annotation or finalizer update does not. Objects that already exist when the UI starts get grace from the UI's start, so after a restart stale status shows "being processed" for 60 s, then a warning. A resource that is not yet processed inside the grace period gets `KGWUI-003` at **info** ("being processed"), and the `resource status` check is not OK, so the install is **unknown** (§5.3), never healthy. After the grace period the finding is a **warning** and the check is OK again. `KGWUI-003` is reported once per resource and parentRef: a route gets one per pending or missing parent.
 4. A check reports OK only on current evidence. Absent, pending or stale status never counts as healthy.
 
 ### 5.3 Roll-up
@@ -226,13 +226,13 @@ Every check reports `{name, ok, collectedAt, error}`. The healthy view renders t
 | Situation | Behaviour |
 |---|---|
 | API server unreachable, or cache not synced | Full-page "Connecting to cluster…" with the cause after a timeout. Numbers are never shown before the first sync. |
-| A watch fails after the initial sync | `HasSynced` stays true after later list/watch failures, so it is not used as availability. client-go also retries connection-refused and 429 watch errors without reporting them to the watch error handler. The cache therefore **probes** every metrics interval (10 s): an API-server reachability check, then a `limit=1` list of every watched kind. While the API server is unreachable, every kind is unavailable. A kind with a recorded error (from the reflector or a probe) stays unavailable until a probe list for it succeeds; time alone never clears it. This covers every watched kind, including Namespaces, Pods and Deployments. An errored informer counts as settled for the startup sync, but the cluster-access check is not OK: KGWUI-008, and the install becomes unknown. |
+| A watch fails after the initial sync | `HasSynced` stays true after later list/watch failures, so it is not used as availability. client-go also retries connection-refused and 429 watch errors without reporting them to the watch error handler. Each informer therefore runs over an **instrumented ListerWatcher** that records the outcome of every List and Watch call its reflector makes. A kind is unavailable from its last failed call until its next successful Watch call; a successful list alone does not restore it, because only a working watch keeps the cache current. This adds no API traffic and covers every watched kind, including Namespaces, Pods and Deployments. Lists have a request timeout (1 min); watches use client-go's own watch timeout, which re-establishes them every 5–10 minutes. **Known limit:** a watch stream that stalls silently (connection open, no events, no error) is detected only when that timeout ends it. An errored informer counts as settled for the startup sync, but the cluster-access check is not OK: KGWUI-008, and the install becomes unknown. |
 | Controller metrics unreachable | KGWUI-008, and the install becomes unknown. The strip reads "No known problems — xDS rejects could not be checked". |
 | Last metrics result too old | A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), even if that scrape succeeded. Recomputing the report never makes old evidence look fresh. |
 | No install found | Designed empty state explaining what the UI looks for and how to pin `--install`. |
 | RBAC denies a kind | Its tile shows "No access", naming the missing verb and resource; KGWUI-008. |
 | A kind's CRD is not served | The tile is hidden. Not a finding. |
-| Data older than 2× the poll interval | "Checked …" turns into a stale warning. The strip **and** every Gateway row's status show unknown. The same rule applies to the cluster cards, the install switcher and the header readiness icon, using the install summary's `computedAt`. No green badge survives on stale data. |
+| Data older than 2× the poll interval | "Checked …" turns into a stale warning. The strip **and** every Gateway row's status show unknown. The same rule applies to the cluster cards, the install switcher and the header readiness icon, using the install summary's `computedAt`. A shared 1 s clock re-evaluates every staleness check, so data ages into stale even when polls keep returning identical responses (which SWR does not re-render). No green badge survives on stale data. |
 
 ## 6. Frontend
 
@@ -296,7 +296,7 @@ Filters and sorting are stored in the query string, so every view can be shared 
 
 - SWR polls the API every 5 s, using the backend's cache (not the API server).
 - The backend scrapes controller metrics every 10 s.
-- Every response carries `collectedAt` (the install list carries `computedAt` per install), which drives the "Checked …" label and the stale state.
+- Every response carries `collectedAt` (the install list carries `computedAt` per install), which drives the "Checked …" label and the stale state. The stale state is computed against a shared clock that ticks every second, not only when new data arrives.
 - **Install identity.** Install-scoped requests never keep the previous install's data while the next one loads. A page renders install data only when the response's install id matches the install in the URL; otherwise it shows its loading state. Switching installs never shows the old install's strip, tiles or Gateways under the new install's URL.
 
 ## 7. API (v1)
@@ -372,7 +372,9 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
   - a Gateway of another controller: ignored;
   - stale kgateway status in a deselected namespace: ignored;
   - metrics unreachable, and a metrics result older than 3 × the metrics interval: state is unknown, never healthy;
-  - failures after the initial sync, injected into the fake dynamic and typed clients (connection refused on the API server, 403 and 429 on a dynamic kind, Namespaces, Pods and Deployments): access unavailable and state unknown until a probe succeeds; the test drives the production probe, not an internal hook;
+  - watch failures after the initial sync, injected through fake-client watch reactors while list stays allowed (connection refused, 429 and 403, on a dynamic kind and on Namespaces, Pods and Deployments): state unknown, still unknown after further failed watches, and healthy again only after a successful watch;
+  - grace: an object's grace runs from when its current generation was first seen; an annotation-only update does not restart it and a generation bump does;
+  - a route with two missing parents, and one with a pending owned parent and a missing one: one 003 per parent;
   - a CRD not served: tile hidden, no finding;
   - two installs with overlapping selectors: finding 009;
   - a pinned install: the others are not visible;
@@ -384,6 +386,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
 - **Frontend.** Vitest and Testing Library for the health primitives, the theme tokens (contrast checked in both themes) and the pages against a mocked API. Required cases include:
   - switching installs never shows the old install's strip, tiles or Gateways;
   - stale data turns the strip and the Gateway rows unknown, and a stale install summary turns the cluster card, the install switcher entry and the header readiness icon unknown;
+  - with fake timers, a fresh response ages past the threshold while identical responses keep arriving, and the page and the cluster card turn stale;
   - resources being processed: the strip is unknown and says how many resources are being processed;
   - the Gateway table's text filter round-trips through the URL;
   - a finding links to the YAML view only when its kind is listed in `/api/v1/meta`;
@@ -425,7 +428,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
 
 This phase generates no data-plane configuration. The cost falls on the control plane and the API server:
 - **Watches.** One cluster-wide watch per registered served kind: about 20 kinds, plus Namespaces, and label-selected watches on Pods (controller only) and Deployments (controller and proxies). That is comparable to a single extra controller's list/watch load.
-- **Probes.** Every metrics interval (10 s): one `/version` request and one `limit=1` list per watched kind, about 25 small requests, so about 2.5 requests per second.
+- **Availability tracking** adds no requests: it records the outcome of the informers' own List and Watch calls.
 - **Memory.** The memory footprint scales with the number of Gateway API and kgateway objects in the cluster. Secrets and ConfigMaps are not cached.
 - **Metrics scraping.** One `GET /metrics` per controller replica every 10 s.
 - **No new data-plane objects or xDS churn.** The metric names the UI depends on are listed in one place (`pkg/ctrlmetrics`), so a rename upstream is a one-line change and shows up as KGWUI-008 until it is made.
