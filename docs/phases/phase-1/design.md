@@ -1,6 +1,6 @@
 # Phase 1 — Foundation & Overview: Design
 
-**Status:** Revised after three cross-model reviews (`reviews/design-codex.md`, `reviews/design-r2-codex.md`, `reviews/design-r3-codex.md`), for approval
+**Status:** Revised after four cross-model reviews (`reviews/design-codex.md` and rounds 2–4), for approval
 **Date:** 2026-10-17, revised 2026-10-18
 **Base:** `560c393`
 **Roadmap:** `docs/roadmap.md`, Phase 1
@@ -226,7 +226,7 @@ Every check reports `{name, ok, collectedAt, error}`. The healthy view renders t
 | Situation | Behaviour |
 |---|---|
 | API server unreachable, or cache not synced | Full-page "Connecting to cluster…" with the cause after a timeout. Numbers are never shown before the first sync. |
-| A watch fails after the initial sync | `HasSynced` stays true after later list/watch failures, so it is not used as availability. client-go also retries connection-refused and 429 watch errors without reporting them to the watch error handler. Each informer therefore runs over an **instrumented ListerWatcher** that records the outcome of every List and Watch call its reflector makes. A kind is unavailable from its last failed call until its next successful Watch call; a successful list alone does not restore it, because only a working watch keeps the cache current. This adds no API traffic and covers every watched kind, including Namespaces, Pods and Deployments. Lists have a request timeout (1 min); watches use client-go's own watch timeout, which re-establishes them every 5–10 minutes. **Known limit:** a watch stream that stalls silently (connection open, no events, no error) is detected only when that timeout ends it. An errored informer counts as settled for the startup sync, but the cluster-access check is not OK: KGWUI-008, and the install becomes unknown. |
+| A watch fails after the initial sync | `HasSynced` stays true after later list/watch failures, so it is not used as availability. client-go also retries connection-refused and 429 watch errors without reporting them to the watch error handler, delivers errors as events inside an open stream, and can return an empty watcher after transport retries. Each informer therefore runs over an **instrumented ListerWatcher** that records every List and Watch call outcome and timestamps every event it delivers, bookmarks included. A kind is **current** only when (1) no failure (a failed List or Watch call, or a `watch.Error` event) happened since its last **catch-up**, and (2) a non-error event or bookmark arrived within the **heartbeat window** (150 s, 2.5 × the API server's one-minute bookmark interval). After a failure the kind catches up on (a) a successful List call (the reflector replaces its store) followed by a first event on the new watch, (b) the `k8s.io/initial-events-end` bookmark of a watch-list stream, or (c) the first event or bookmark on a classic watch opened after the failure: it resumes from the reflector's last resource version and replays every event since, in order (or the server answers 410 and the reflector re-lists by itself). Events of a watch-list stream before its end bookmark, and events on a watch opened before the failure, do not count. The initial sync is the first catch-up. The UI never forces a re-list, so tracking adds no load while the API server is throttling. A silent stream (stalled or blackholed connection, empty watcher) is noticed after the window; the UI then closes it so the reflector opens a new one. **This relies on the API server's periodic watch-cache bookmarks** (verified in the first plan task). A resource whose watch cache is disabled sends none, so an idle kind of that resource would show unknown; `--watch-heartbeat=0` disables the heartbeat check. Lists have a 1 min request timeout. This adds no API traffic and covers every watched kind, including Namespaces, Pods and Deployments. An errored informer counts as settled for the startup sync, but the cluster-access check is not OK: KGWUI-008, and the install becomes unknown. |
 | Controller metrics unreachable | KGWUI-008, and the install becomes unknown. The strip reads "No known problems — xDS rejects could not be checked". |
 | Last metrics result too old | A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), even if that scrape succeeded. Recomputing the report never makes old evidence look fresh. |
 | No install found | Designed empty state explaining what the UI looks for and how to pin `--install`. |
@@ -333,7 +333,8 @@ Anything else returns 404. The endpoint reads only from the shared cache, so it 
   - `--install <ns>/<name>` (pinned mode);
   - `--listen` (default `:8080`; `127.0.0.1:8080` in local mode);
   - `--poll-interval`;
-  - `--metrics-interval`.
+  - `--metrics-interval`;
+  - `--watch-heartbeat` (default 150 s; 0 disables the heartbeat check, for API servers without watch-cache bookmarks).
 - **Image.** A multi-stage build into distroless `static:nonroot`, built for linux/amd64 and linux/arm64, published to `ghcr.io/duncandoyle/kgateway-ui`.
 - **Helm chart** (`deploy/helm/kgateway-ui`, published as OCI on ghcr):
   - Deployment with 1 replica, the restricted pod security context and resource requests.
@@ -372,7 +373,8 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
   - a Gateway of another controller: ignored;
   - stale kgateway status in a deselected namespace: ignored;
   - metrics unreachable, and a metrics result older than 3 × the metrics interval: state is unknown, never healthy;
-  - watch failures after the initial sync, injected through fake-client watch reactors while list stays allowed (connection refused, 429 and 403, on a dynamic kind and on Namespaces, Pods and Deployments): state unknown, still unknown after further failed watches, and healthy again only after a successful watch;
+  - watch failures after the initial sync, through the fake dynamic and typed clients with an injected clock and fake watchers that emit bookmark and error events: a failed Watch call (connection refused, 429, 403) and an error event mid-stream make the state unknown, further failed attempts keep it so, and it recovers on the first event of the next watch (a resumed classic watch, or a new one after a relist); a watch with no event or bookmark for the heartbeat window makes the kind unavailable, and a bookmark brings it back;
+  - at the ListerWatcher level: an empty watcher gives no heartbeat; after a connection-refused watch failure, a resumed classic watch delivering a bookmark recovers without any List call; an event on a watch opened before the failure does not recover; a watch-list stream's initial events do not recover, its initial-events-end bookmark does;
   - grace: an object's grace runs from when its current generation was first seen; an annotation-only update does not restart it and a generation bump does;
   - a route with two missing parents, and one with a pending owned parent and a missing one: one 003 per parent;
   - a CRD not served: tile hidden, no finding;
@@ -428,7 +430,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
 
 This phase generates no data-plane configuration. The cost falls on the control plane and the API server:
 - **Watches.** One cluster-wide watch per registered served kind: about 20 kinds, plus Namespaces, and label-selected watches on Pods (controller only) and Deployments (controller and proxies). That is comparable to a single extra controller's list/watch load.
-- **Availability tracking** adds no requests: it records the outcome of the informers' own List and Watch calls.
+- **Availability tracking** adds no requests: it records the outcome of the informers' own List and Watch calls and the events and bookmarks they receive.
 - **Memory.** The memory footprint scales with the number of Gateway API and kgateway objects in the cluster. Secrets and ConfigMaps are not cached.
 - **Metrics scraping.** One `GET /metrics` per controller replica every 10 s.
 - **No new data-plane objects or xDS churn.** The metric names the UI depends on are listed in one place (`pkg/ctrlmetrics`), so a rename upstream is a one-line change and shows up as KGWUI-008 until it is made.

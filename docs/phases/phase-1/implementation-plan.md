@@ -16,7 +16,7 @@
 
 **Spec:** `docs/phases/phase-1/design.md` (decisions D-001 … D-013 in `docs/decisions.md`). Read both before starting any task.
 
-**Revision:** this plan was revised after the cross-model design review (`docs/phases/phase-1/reviews/design-codex.md`, triage rows 1–15, 17, A1–A3). Finding numbers in comments ("finding 5") refer to that file. Row 16 is deferred to Carry-over. A second and a third review (`reviews/design-r2-codex.md`, `reviews/design-r3-codex.md`) are cited as "round 2, finding N" and "round 3, finding N".
+**Revision:** this plan was revised after the cross-model design review (`docs/phases/phase-1/reviews/design-codex.md`, triage rows 1–15, 17, A1–A3). Finding numbers in comments ("finding 5") refer to that file. Row 16 is deferred to Carry-over. Later reviews (`reviews/design-r2-codex.md` … `design-r4-codex.md`) are cited as "round N, finding M".
 
 ## Global Constraints
 
@@ -52,6 +52,7 @@
   | Scope env | `KGW_DISCOVERY_NAMESPACE_SELECTORS`: a JSON list of `metav1.LabelSelector`, OR'ed; empty or unset means all namespaces |
   | Reject metric | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url}`; `type_url` has the `type.googleapis.com/` prefix stripped (e.g. `envoy.config.listener.v3.Listener`). The series exists only after a first reject and then stays at 0. |
   | Managed metric | `kgateway_resources_managed{namespace,parent,resource}`. Weights: Gateway 1; route 1 per `spec.parentRefs` entry; ListenerSet 1 as `resource="XListenerSet"`; policy 1 under its kind |
+  | Watch bookmarks | The API server's watch cache sends a bookmark on every watch that asks for them about once a minute (`defaultBookmarkFrequency = time.Minute`, `k8s.io/apiserver` `pkg/storage/cacher/cacher.go`); the cache's heartbeat window (150 s) relies on it. Task 1 Step 5 confirms it on the kind cluster. |
   | Condition freshness | kgateway sets `observedGeneration` on its conditions (Task 1 Step 3 confirms on 2.3 and 2.4). A missing observedGeneration counts as stale (round 2, finding 3). |
   | Route conditions | Required: `Accepted`, `ResolvedRefs`. Optional, evaluated when present: `kgateway.dev/Programmed` (v2.4.x and main) with reasons `RouteRuleDropped` and `RouteRuleReplaced`. v2.3.x reports dropped and replaced rules as `Accepted=False` with the same reasons and the rule in the message (A2); any current `Accepted=False` is reported with its reason message. |
   | Policy conditions | Required: `Accepted`. Optional, evaluated when present: `Attached`. Reasons `Valid`, `Invalid`, `Attached`, `Merged`, `Overridden`, `Pending`, `PartiallyValid`. `ancestorRefConditionsWithDefaults` (`pkg/reports/policy.go` on v2.3.11 and v2.4.7) writes `Accepted=False/Pending` and `Attached=False/Pending` before translation; the UI treats reason `Pending` on any block as "not yet processed" (round 2, finding 2). **Main only** (not on v2.3.x or v2.4.x): reason `TargetNotFound` and the synthetic ancestor kind `StatusSummary`, group `gateway.kgateway.dev`. On v2.3.x and v2.4.x a policy whose target is missing has no status, which the UI reports as "not yet processed" (KGWUI-003) after the grace period (finding 7). |
@@ -70,7 +71,7 @@ These failure modes are implied by the spec, but no other task's tests exercise 
 3. **Controller in CrashLoopBackOff (0 ready Pods).** The scope must still be read from the Pod spec, and the report must show controller-not-ready (error) plus metrics unavailable. It must never be silently healthy. → Tasks 6 and 9.
 4. **Stale or missing status.** A condition with `observedGeneration < metadata.generation` describes an old spec, whether it is `True` or `False`; a missing observedGeneration (0) counts as stale. Freshness is checked before status. A stale condition, a missing required condition, a condition with reason `Pending`, a configured listener without a status block, a route parent with no status entry for its exact parentRef (port and section included), and a policy with no ancestor from the install's controller all mean "not yet processed". Inside the 60 s grace period, measured from when the engine first saw the object's current generation, that is KGWUI-003 at info and the install is unknown; after it, a warning. KGWUI-003 is one per (resource, parentRef). None of them is ever reported as a current error or a current success (finding 1; round 2, findings 2–5; round 3, findings 3 and 5). → Task 9 (unit) and Task 10 (API, isolated cases).
 5. **Scale.** 5,000 HTTPRoutes across 200 namespaces must compute a full model (assignment, health and overview) in under 1 s on a laptop, so the 2 s recompute loop never stacks up. → Task 10.
-6. **Watch failures after the initial sync.** `HasSynced()` stays true after later list/watch failures, and client-go retries connection-refused and 429 watch errors without calling the watch error handler. Every informer therefore runs over an instrumented ListerWatcher that records each List and Watch call outcome. A kind is unavailable from its last failed call until its next successful Watch call, so a successful list alone never restores it. The cluster-access check then forces "unknown". Namespaces, Pods and Deployments are covered too (finding 2; round 3, finding 1). → Task 5 (fake-client watch reactors) and Task 10 (API).
+6. **Watch failures after the initial sync.** `HasSynced()` stays true after later list/watch failures, client-go retries connection-refused and 429 watch errors without calling the watch error handler, error events arrive inside an open stream, and a stream can go silent. Every informer therefore runs over an instrumented ListerWatcher that records each List and Watch call outcome and timestamps every event, bookmarks included. A kind is current only with no failure since it last caught up and an event or bookmark within the heartbeat window (150 s). After a failure it catches up on a successful List plus a first event on the new watch, the initial-events-end bookmark of a watch-list stream, or the first event or bookmark on a classic watch opened after the failure (which replays everything since the reflector's last resource version). Initial events of a watch-list stream and events on a watch opened before the failure never recover it. The cluster-access check then forces "unknown". Namespaces, Pods and Deployments are covered too (finding 2; rounds 3 and 4). → Task 5 (wrapper and informer tests, injected clock) and Task 10 (API).
 7. **Old evidence.** A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), however often the model is recomputed. In the frontend, stale data turns the health strip, every gateway row, the cluster cards, the install switcher and the header readiness icon to unknown, re-evaluated every second by a shared clock even when polls return identical data (finding 3; round 2, finding 6; round 3, finding 4). → Tasks 8, 9, 10, 15, 16 and 17.
 8. **Install switch.** While install B loads, the page never shows install A's strip, findings or gateways (finding 4). → Task 16.
 9. **Partial visibility.** A deny-some `Authorizer` registered through `extension.WithAuthorizer` makes the denied object 404 and drops it from the count tiles. Its finding stays in the list with the same code, severity and resource ref, `restricted: true` and no message or evidence; the roll-up state is unchanged (D-013). → Task 11.
@@ -240,7 +241,24 @@ If no reject appears within a minute, STOP and ask the user for another reject t
 
 For v2.3.11, repeat Step 1 with only install A at `--version v2.3.11` (Gateway API v1.5.1) on a fresh cluster, run the observedGeneration check from Step 3, then this step, saving to `pkg/ctrlmetrics/testdata/v2.3.11.txt`.
 
-- [ ] **Step 5: Record the results and clean up**
+- [ ] **Step 5: Confirm periodic watch bookmarks**
+
+The cache's heartbeat rule (Task 5, round 4) assumes the API server sends a watch bookmark on an idle watch about every minute. Confirm it for a Gateway API kind and a kgateway kind, with no changes to those objects while the watch runs:
+
+```bash
+kubectl proxy --port=8001 >/dev/null 2>&1 & PROXY=$!; sleep 2
+for path in apis/gateway.networking.k8s.io/v1/httproutes apis/gateway.kgateway.dev/v1alpha1/trafficpolicies; do
+  rv=$(curl -s "http://127.0.0.1:8001/$path" | jq -r .metadata.resourceVersion)
+  echo "== $path (from resourceVersion $rv)"
+  curl -sN "http://127.0.0.1:8001/$path?watch=1&allowWatchBookmarks=true&resourceVersion=$rv&timeoutSeconds=200" |
+    while IFS= read -r line; do echo "$(date +%T) $(jq -r .type <<<"$line")"; done
+done
+kill $PROXY
+```
+
+Expected: at least three `BOOKMARK` lines per kind, no more than about 60 s apart. If bookmarks are missing or further apart than 150 s, STOP and ask the user: `cache.HeartbeatWindow` and the `--watch-heartbeat` default depend on this. Record the timestamps in D-012.
+
+- [ ] **Step 6: Record the results and clean up**
 
 Append to `docs/decisions.md`:
 
@@ -254,7 +272,7 @@ Append to `docs/decisions.md`:
 
 Then run `kind delete cluster --name kgwui-exp`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add docs && git commit -m "docs: record multi-install and metrics replica observations (D-012)"
@@ -1074,11 +1092,11 @@ git add pkg/objects go.mod go.sum && git commit -m "feat(objects): typed views o
 **Interfaces:**
 - Consumes: `kinds.Served`, `kinds.Upstream()`.
 - Produces:
-  - `cache.Access{OK bool; Err string}` (JSON `ok,error`). Every informer is built over an instrumented `ListerWatcher` that records the outcome of each List and Watch call its reflector makes, including the connection-refused and 429 watch retries client-go never reports to the watch error handler. `OK` means synced and no failed call since the last successful Watch call; a kind is unavailable from its last failed call until its next successful Watch call (round 3, finding 1). `HasSynced()` alone is not enough, because it stays true after later failures (finding 2). There is no extra API traffic;
-  - `cache.ListTimeout = time.Minute` (every informer List call is bounded; watches use client-go's own 5–10 minute watch timeout, and a silently stalled watch stream is a documented limit);
+  - `cache.Access{OK bool; Err string}` (JSON `ok,error`). Every informer is built over an instrumented `ListerWatcher` that records each List and Watch call outcome and wraps the returned `watch.Interface` to timestamp every event, bookmarks included (round 4). A kind is current iff no failure (failed List or Watch call, or `watch.Error` event) since it last caught up, and the last counted event or bookmark is within `Config.Heartbeat`. After a failure it catches up on (a) a successful List followed by a first event on the new watch, (b) the `k8s.io/initial-events-end` bookmark of a watch-list stream, or (c) the first event or bookmark on a classic watch opened after the failure, which resumes from the reflector's last resource version and replays everything since. Events of a watch-list stream before its end bookmark, and events on a watch opened before the failure, do not count. The initial sync is the first catch-up (via `HasSynced`). The wrapper never forces a re-list, so it adds no load while the API server throttles. `HasSynced()` alone is not enough, because it stays true after later failures (finding 2). There is no extra API traffic;
+  - `cache.ListTimeout = time.Minute` (every informer List call is bounded) and `cache.HeartbeatWindow = 150 * time.Second` (the default heartbeat: 2.5 × the API server's one-minute bookmark interval; a silent stream is stopped after it so the reflector opens a new one);
   - `cache.NamespacesGVR`, `cache.PodsGVR`, `cache.DeploymentsGVR` (`schema.GroupVersionResource` keys under which the typed informers report their `Access`);
   - `cache.Snapshot{Objects map[schema.GroupVersionResource][]*unstructured.Unstructured; Access map[schema.GroupVersionResource]Access; Namespaces []*corev1.Namespace; Pods []*corev1.Pod; Deployments []*appsv1.Deployment; Synced bool; TakenAt time.Time}`. `Access` holds every served kind plus the three typed GVRs;
-  - `cache.Config{Dynamic dynamic.Interface; Kube kubernetes.Interface; Served []kinds.Served; PodSelectors, DeploymentSelectors []labels.Selector}`;
+  - `cache.Config{Dynamic dynamic.Interface; Kube kubernetes.Interface; Served []kinds.Served; PodSelectors, DeploymentSelectors []labels.Selector; Heartbeat time.Duration; Now func() time.Time}` (`Heartbeat` 0 disables the heartbeat check, as `--watch-heartbeat=0` does; `Now` nil means `time.Now`);
   - `cache.New(Config) *Cache`, `(*Cache).Start(ctx)`, `(*Cache).Snapshot() *Snapshot`;
   - `cache.Snapshotter` (interface `Snapshot() *Snapshot`).
 - Produces (tests only):
@@ -1397,6 +1415,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -1404,7 +1423,10 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -1480,75 +1502,261 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// Round 3, finding 1: the informers' own List and Watch calls decide access.
-// The watch fails after the sync while list stays allowed; the kind is
-// unavailable from that failed call until a Watch call succeeds again. The
-// failures enter through the fake clients, as production sees them.
-func TestWatchFailureAfterSyncLastsUntilAWatchSucceeds(t *testing.T) {
-	hr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+// testClock is an injectable clock.
+type testClock struct{ t atomic.Pointer[time.Time] }
+
+func (c *testClock) set(t time.Time) { c.t.Store(&t) }
+func (c *testClock) now() time.Time  { return *c.t.Load() }
+
+// bookmark is a watch bookmark for obj's kind; initialEnd marks the end of a watch-list stream.
+func bookmark(obj metav1.Object, initialEnd bool) watch.Event {
+	obj.SetResourceVersion("999")
+	if initialEnd {
+		obj.SetAnnotations(map[string]string{metav1.InitialEventsAnnotationKey: "true"})
+	}
+	return watch.Event{Type: watch.Bookmark, Object: obj.(runtime.Object)}
+}
+
+// drain consumes w until it closes, as the reflector would.
+func drain(w watch.Interface) {
+	go func() {
+		for range w.ResultChan() {
+		}
+	}()
+}
+
+// Round 4: the rules of progress, driven through the instrumented ListWatch
+// itself. These cover the watch-list catch-up and the empty watcher, which the
+// fake clients cannot produce through a reflector.
+func TestInstrumentedListWatchRules(t *testing.T) {
+	clk := &testClock{}
+	t0 := testutil.Now
+	clk.set(t0)
+	watchers := make(chan watch.Interface, 4)
+	var listCalls atomic.Int32
+	var failNext atomic.Pointer[error] // the next Watch call fails with it
+	failOnce := func(err error) { failNext.Store(&err) }
+	p := &progress{}
+	lw := instrument(p, clk.now, HeartbeatWindow,
+		func(context.Context, metav1.ListOptions) (runtime.Object, error) { listCalls.Add(1); return &corev1.NamespaceList{}, nil },
+		func(context.Context, metav1.ListOptions) (watch.Interface, error) {
+			if e := failNext.Swap(nil); e != nil {
+				return nil, *e
+			}
+			return <-watchers, nil
+		})
+	ctx := context.Background()
+	classic := metav1.ListOptions{}
+	initial := true
+	watchList := metav1.ListOptions{SendInitialEvents: &initial}
+
+	if a := p.access(false, t0, HeartbeatWindow); a.OK || a.Err != "" {
+		t.Fatalf("before the initial sync the kind is pending, got %+v", a)
+	}
+	if _, err := lw.ListWithContext(ctx, classic); err != nil {
+		t.Fatal(err)
+	}
+	if a := p.access(true, t0, HeartbeatWindow); !a.OK {
+		t.Fatalf("the initial sync is the first catch-up, got %+v", a)
+	}
+
+	// A silent stream: no event for the heartbeat window.
+	if a := p.access(true, t0.Add(HeartbeatWindow), HeartbeatWindow); a.OK || !strings.Contains(a.Err, "no watch events or bookmarks") {
+		t.Fatalf("no event for %s must be unavailable, got %+v", HeartbeatWindow, a)
+	}
+	// An empty watcher (closed, nil error, no events) produces no heartbeat either.
+	watchers <- watch.NewEmptyWatch()
+	w, err := lw.WatchWithContext(ctx, classic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(w)
+	if a := p.access(true, t0.Add(HeartbeatWindow), HeartbeatWindow); a.OK {
+		t.Fatal("an empty watcher must not count as a heartbeat")
+	}
+
+	// A bookmark on a healthy stream is a heartbeat.
+	fw := watch.NewFake()
+	watchers <- fw
+	w, _ = lw.WatchWithContext(ctx, classic)
+	drain(w)
+	clk.set(t0.Add(HeartbeatWindow))
+	fw.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object)
+	waitFor(t, "the bookmark to count", func() bool { return p.access(true, clk.now(), HeartbeatWindow).OK })
+
+	// An error event inside the stream is a failure.
+	fw.Error(&metav1.Status{Status: metav1.StatusFailure, Code: 429, Reason: metav1.StatusReasonTooManyRequests, Message: "slow down"})
+	waitFor(t, "the error event to count", func() bool { return strings.Contains(p.access(true, clk.now(), HeartbeatWindow).Err, "slow down") })
+
+	// Rule (c): after a connection-refused watch failure, a resumed classic watch
+	// delivering a bookmark recovers, without any List call.
+	lists := listCalls.Load()
 	refused := fmt.Errorf("dial tcp 10.96.0.1:443: connect: %w", syscall.ECONNREFUSED)
+	failOnce(refused)
+	if _, err := lw.WatchWithContext(ctx, classic); err == nil {
+		t.Fatal("the injected Watch failure must surface")
+	}
+	if a := p.access(true, clk.now(), HeartbeatWindow); !strings.Contains(a.Err, "connection refused") {
+		t.Fatalf("a failed Watch call is a failure, got %+v", a)
+	}
+	resumed := watch.NewFake()
+	watchers <- resumed
+	w, err = lw.WatchWithContext(ctx, classic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(w)
+	resumed.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object)
+	waitFor(t, "a resumed classic watch to catch up", func() bool { return p.access(true, clk.now(), HeartbeatWindow).OK })
+	if listCalls.Load() != lists {
+		t.Fatal("recovery through a resumed watch must not need a List call")
+	}
+
+	// A classic watch opened before the latest failure does not recover it.
+	old := watch.NewFake()
+	watchers <- old
+	w, _ = lw.WatchWithContext(ctx, classic)
+	drain(w)
+	failOnce(errors.New("connection reset by peer"))
+	if _, err := lw.WatchWithContext(ctx, classic); err == nil {
+		t.Fatal("the injected Watch failure must surface")
+	}
+	old.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object)
+	old.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object) // once taken, the first was recorded
+	if p.access(true, clk.now(), HeartbeatWindow).OK {
+		t.Fatal("an event on a watch opened before the failure is not a catch-up")
+	}
+
+	// Rule (b): a watch-list stream's initial events and regular bookmarks do not
+	// recover; its initial-events-end bookmark does.
+	fw2 := watch.NewFake()
+	watchers <- fw2
+	w, err = lw.WatchWithContext(ctx, watchList)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(w)
+	fw2.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "shop", ResourceVersion: "5"}})
+	fw2.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object)
+	fw2.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object) // once taken, the earlier ones were recorded
+	if p.access(true, clk.now(), HeartbeatWindow).OK {
+		t.Fatal("initial events of a watch-list stream are not a catch-up")
+	}
+	fw2.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, true).Object)
+	waitFor(t, "the initial-events-end bookmark to catch up", func() bool { return p.access(true, clk.now(), HeartbeatWindow).OK })
+
+	// After a failure, a successful List is a catch-up, but the kind waits for an event.
+	fw2.Error(&metav1.Status{Status: metav1.StatusFailure, Code: 500, Message: "boom"})
+	waitFor(t, "the second failure", func() bool { return !p.access(true, clk.now(), HeartbeatWindow).OK })
+	if _, err := lw.ListWithContext(ctx, classic); err != nil {
+		t.Fatal(err)
+	}
+	if a := p.access(true, clk.now(), HeartbeatWindow); a.OK || !strings.Contains(a.Err, "waiting for the watch") {
+		t.Fatalf("after a relist the kind waits for a watch event, got %+v", a)
+	}
+	fw3 := watch.NewFake()
+	watchers <- fw3
+	w, _ = lw.WatchWithContext(ctx, classic)
+	drain(w)
+	fw3.Action(watch.Bookmark, bookmark(&corev1.Namespace{}, false).Object)
+	waitFor(t, "recovery after relist and an event", func() bool { return p.access(true, clk.now(), HeartbeatWindow).OK })
+}
+
+// Round 4: through the real informers and fake clients. An error event inside
+// an established watch makes the kind unavailable. A retriable error (429)
+// makes the reflector resume a classic watch without listing; its first
+// bookmark recovers the kind. A non-retriable one (403) makes it relist; the
+// kind then waits for the first event on the new watch.
+func TestStreamErrorAfterSyncRecoversOnTheNextWatch(t *testing.T) {
+	hr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+	tooMany := metav1.Status{Status: metav1.StatusFailure, Code: 429, Reason: metav1.StatusReasonTooManyRequests, Message: "slow down"}
+	forbidden := metav1.Status{Status: metav1.StatusFailure, Code: 403, Reason: metav1.StatusReasonForbidden, Message: "watch forbidden"}
 	cases := []struct {
-		name  string
-		gvr   schema.GroupVersionResource
-		typed bool // inject into the typed clientset instead of the dynamic client
-		err   error
-		want  string // substring of the recorded error
+		name     string
+		gvr      schema.GroupVersionResource
+		typed    bool
+		status   metav1.Status
+		relists  bool
+		obj      func() metav1.Object // an object of the kind, for bookmarks
 	}{
-		{"httproutes connection refused (retried silently by client-go)", hr, false, refused, "connection refused"},
-		{"httproutes throttled (retried silently by client-go)", hr, false, apierrors.NewTooManyRequests("slow down", 1), "slow down"},
-		{"httproutes forbidden", hr, false, apierrors.NewForbidden(schema.GroupResource{Group: hr.Group, Resource: hr.Resource}, "", nil), "forbidden"},
-		{"namespaces throttled", NamespacesGVR, true, apierrors.NewTooManyRequests("slow down", 1), "slow down"},
-		{"pods connection refused", PodsGVR, true, refused, "connection refused"},
-		{"deployments forbidden", DeploymentsGVR, true, apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", nil), "forbidden"},
+		{"httproutes 429: resumed watch, no list", hr, false, tooMany, false, func() metav1.Object { return &unstructured.Unstructured{Object: map[string]any{}} }},
+		{"httproutes 403: relist, then an event", hr, false, forbidden, true, func() metav1.Object { return &unstructured.Unstructured{Object: map[string]any{}} }},
+		{"namespaces 429: resumed watch, no list", NamespacesGVR, true, tooMany, false, func() metav1.Object { return &corev1.Namespace{} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dyn, kube := testutil.Clients(t, testutil.Namespace("shop", nil))
-			var fail atomic.Bool
-			var failed atomic.Int32
+			var lists atomic.Int32
 			watchers := make(chan *watch.FakeWatcher, 64)
-			react := func(clienttesting.Action) (bool, watch.Interface, error) {
-				if fail.Load() {
-					failed.Add(1)
-					return true, nil, tc.err
-				}
+			onWatch := func(clienttesting.Action) (bool, watch.Interface, error) {
 				w := watch.NewFake()
 				watchers <- w
 				return true, w, nil
 			}
-			if tc.typed {
-				kube.PrependWatchReactor(tc.gvr.Resource, react)
-			} else {
-				dyn.(*dynamicfake.FakeDynamicClient).PrependWatchReactor(tc.gvr.Resource, react)
+			onList := func(clienttesting.Action) (bool, runtime.Object, error) {
+				lists.Add(1)
+				return false, nil, nil // fall through to the tracker
 			}
-			c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(),
+			if tc.typed {
+				kube.PrependWatchReactor(tc.gvr.Resource, onWatch)
+				kube.PrependReactor("list", tc.gvr.Resource, onList)
+			} else {
+				dyn.(*dynamicfake.FakeDynamicClient).PrependWatchReactor(tc.gvr.Resource, onWatch)
+				dyn.(*dynamicfake.FakeDynamicClient).PrependReactor("list", tc.gvr.Resource, onList)
+			}
+			c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Heartbeat: HeartbeatWindow,
 				PodSelectors: []labels.Selector{podSel}, DeploymentSelectors: []labels.Selector{deploySel}})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			c.Start(ctx)
 			waitSynced(t, c)
 
-			fail.Store(true)
-			(<-watchers).Stop() // the established watch ends; the reflector's next Watch call fails
-			waitFor(t, "the failed watch to be recorded", func() bool { return !c.Snapshot().Access[tc.gvr].OK })
-			if a := c.Snapshot().Access[tc.gvr]; !strings.Contains(a.Err, tc.want) {
-				t.Fatalf("recorded error %q, want it to contain %q", a.Err, tc.want)
+			n := lists.Load()
+			status := tc.status
+			(<-watchers).Error(&status)
+			waitFor(t, "the error event to make the kind unavailable", func() bool { return !c.Snapshot().Access[tc.gvr].OK })
+			w := <-watchers // the next watch: resumed, or opened after a relist
+			if got := lists.Load() > n; got != tc.relists {
+				t.Fatalf("relisted=%v, want %v", got, tc.relists)
 			}
-			for gvr, a := range c.Snapshot().Access {
-				if gvr != tc.gvr && !a.OK {
-					t.Errorf("%s must stay readable, got %+v", gvr.Resource, a)
-				}
-			}
-			// Further failed watches (and, for 403, successful relists) keep it unavailable.
-			n := failed.Load()
-			waitFor(t, "another failed watch", func() bool { return failed.Load() > n })
 			if c.Snapshot().Access[tc.gvr].OK {
-				t.Fatal("only a successful Watch call may clear the error")
+				t.Fatal("the kind waits for the first event on the next watch")
 			}
-			fail.Store(false)
-			waitFor(t, "recovery after a successful watch", func() bool { return c.Snapshot().Access[tc.gvr].OK })
+			w.Action(watch.Bookmark, bookmark(tc.obj(), false).Object)
+			waitFor(t, "recovery on the next watch's first event", func() bool { return c.Snapshot().Access[tc.gvr].OK })
+			if !tc.relists && lists.Load() != n {
+				t.Fatal("recovery through a resumed watch must not need a List call")
+			}
 		})
 	}
+}
+
+// Round 4: a watch that stays open but silent makes the kind unavailable after
+// the heartbeat window; a bookmark brings it back (no failure, so no relist needed).
+func TestSilentWatchIsUnavailableAfterTheHeartbeatWindow(t *testing.T) {
+	hr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+	dyn, kube := testutil.Clients(t, testutil.Namespace("shop", nil))
+	watchers := make(chan *watch.FakeWatcher, 64)
+	dyn.(*dynamicfake.FakeDynamicClient).PrependWatchReactor("httproutes", func(clienttesting.Action) (bool, watch.Interface, error) {
+		w := watch.NewFake()
+		watchers <- w
+		return true, w, nil
+	})
+	clk := &testClock{}
+	clk.set(testutil.Now)
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Heartbeat: HeartbeatWindow, Now: clk.now})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	waitSynced(t, c)
+	w := <-watchers
+
+	clk.set(testutil.Now.Add(HeartbeatWindow))
+	if a := c.Snapshot().Access[hr]; a.OK || !strings.Contains(a.Err, "no watch events or bookmarks") {
+		t.Fatalf("no bookmark for %s must be unavailable, got %+v", HeartbeatWindow, a)
+	}
+	w.Action(watch.Bookmark, bookmark(&unstructured.Unstructured{Object: map[string]any{}}, false).Object)
+	waitFor(t, "the bookmark to restore the kind", func() bool { return c.Snapshot().Access[hr].OK })
 }
 
 func TestForbiddenNamespacesAreReported(t *testing.T) {
@@ -1599,12 +1807,15 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -1625,10 +1836,14 @@ type Access struct {
 	Err string `json:"error,omitempty"`
 }
 
-// ListTimeout bounds every List call an informer makes, so a hung list cannot
-// keep the last good evidence alive. Watches rely on client-go's own watch
-// timeout, which re-establishes them every 5–10 minutes.
+// ListTimeout bounds every List call an informer makes, so a hung list ends
+// as a recorded failure instead of keeping old evidence alive.
 const ListTimeout = time.Minute
+
+// HeartbeatWindow is the default for Config.Heartbeat: 2.5 × the API server's
+// watch-cache bookmark interval (one minute), so one late bookmark is tolerated
+// and a silent stream is noticed within 150 s (round 4).
+const HeartbeatWindow = 150 * time.Second
 
 // GVRs under which the typed informers report their Access.
 var (
@@ -1661,93 +1876,247 @@ type Config struct {
 	Served              []kinds.Served
 	PodSelectors        []labels.Selector
 	DeploymentSelectors []labels.Selector
+	// Heartbeat is how long a kind may go without a watch event or bookmark
+	// before it is unavailable; 0 disables the check (--watch-heartbeat).
+	Heartbeat time.Duration
+	// Now is the clock; nil means time.Now.
+	Now func() time.Time
 }
 
-// calls records the outcome of the List and Watch calls one informer's
-// reflector makes. A failed call marks the kind unavailable; only a later
-// successful Watch call clears it, because that is when the informer is
-// receiving current events again (round 3, finding 1).
-type calls struct {
-	mu  sync.Mutex
-	err string
+// progress tracks whether one informer's cache is current (round 4). A kind
+// is current when no failure happened since it last caught up and its last
+// event or bookmark is within the heartbeat window. Failures are failed List
+// or Watch calls and watch.Error events. After a failure the kind catches up on:
+// (a) a successful List followed by a first event on the new watch, (b) the
+// initial-events-end bookmark of a watch-list stream, or (c) the first event or
+// bookmark on a classic watch opened after the failure: it resumes from the
+// reflector's last resource version and replays everything since, in order
+// (or the server answers 410 and the reflector re-lists by itself). Events of
+// a watch-list stream before its end bookmark do not count. The initial sync
+// is the first catch-up and needs no extra event.
+type progress struct {
+	mu            sync.Mutex
+	err           string    // failure since the last catch-up; "" when none
+	failures      uint64    // failures so far; a watch remembers the count it was opened at
+	awaitingEvent bool      // listed after a failure, no event on a new watch yet
+	caughtUpOnce  bool      // the first catch-up (initial sync) happened
+	lastEvent     time.Time // last counted event, bookmark or catch-up
 }
 
-func (c *calls) record(err error, isWatch bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	switch {
-	case err != nil:
-		c.err = err.Error()
-	case isWatch:
-		c.err = ""
+// stream is what progress needs to know about one observed watch.
+type stream struct {
+	watchList   bool   // opened with sendInitialEvents
+	initialDone bool   // watch-list: the initial-events-end bookmark arrived
+	openedAt    uint64 // progress.failures when the watch was opened
+}
+
+func (p *progress) failure(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.err = err.Error()
+	p.failures++
+}
+
+// catchUp records that the store was replaced from current data. After a
+// failure, a List catch-up still waits for an event on the new watch; the
+// initial-events-end bookmark is itself delivered by the watch (viaStream).
+func (p *progress) catchUp(now time.Time, viaStream bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.awaitingEvent = !viaStream && p.err != "" && p.caughtUpOnce
+	p.err, p.caughtUpOnce, p.lastEvent = "", true, now
+}
+
+// opened describes a watch opened now.
+func (p *progress) opened(watchList bool) *stream {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return &stream{watchList: watchList, openedAt: p.failures}
+}
+
+func (p *progress) event(e watch.Event, now time.Time, st *stream) {
+	if e.Type == watch.Error {
+		p.failure(apierrors.FromObject(e.Object))
+		return
 	}
+	if e.Type == watch.Bookmark {
+		if m, err := meta.Accessor(e.Object); err == nil && m.GetAnnotations()[metav1.InitialEventsAnnotationKey] == "true" {
+			st.initialDone = true
+			p.catchUp(now, true)
+			return
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if st.watchList && !st.initialDone {
+		// Initial events of a watch-list stream: a heartbeat for a current kind, never a catch-up.
+		if p.err == "" && !p.awaitingEvent {
+			p.lastEvent = now
+		}
+		return
+	}
+	if p.err != "" {
+		// Only a classic watch opened after the latest failure is a catch-up (rule c).
+		if st.watchList || st.openedAt != p.failures {
+			return
+		}
+		p.err = ""
+	}
+	p.awaitingEvent, p.lastEvent = false, now
 }
 
-func (c *calls) last() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.err
+// access reports whether the kind is current at now; synced is the informer's HasSynced.
+func (p *progress) access(synced bool, now time.Time, heartbeat time.Duration) Access {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case p.err != "":
+		return Access{Err: p.err}
+	case !synced:
+		return Access{}
+	case p.awaitingEvent:
+		return Access{Err: "caught up after a failure; waiting for the watch to deliver an event"}
+	case heartbeat > 0 && now.Sub(p.lastEvent) >= heartbeat:
+		return Access{Err: fmt.Sprintf("no watch events or bookmarks for %s", heartbeat)}
+	}
+	return Access{OK: true}
 }
 
-// tracked is an informer with the record of its own List and Watch calls.
-type tracked struct {
-	inf   toolscache.SharedIndexInformer
-	calls *calls
-}
-
-// Cache is a set of informers whose contents are read through Snapshot.
-type Cache struct {
-	now     func() time.Time
-	dyn     map[schema.GroupVersionResource]tracked
-	ns      tracked
-	pods    []tracked
-	deploys []tracked
-}
-
-// instrumented builds an informer whose ListerWatcher records every List and
-// Watch call outcome, including the connection-refused and 429 watch retries
-// that client-go never reports to the watch error handler. client tells the
-// reflector whether the client supports watch-list semantics (fakes do not).
-func instrumented(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
-	cs := &calls{}
-	lw := toolscache.ToListWatcherWithWatchListSemantics(&toolscache.ListWatch{
+// instrument wraps list and watch so p sees every outcome the reflector sees,
+// including connection-refused and 429 retries and errors inside a stream. It
+// never changes what the reflector does: no extra calls, no forced re-lists,
+// so it adds no load while the API server is throttling.
+func instrument(p *progress, now func() time.Time, heartbeat time.Duration, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) *toolscache.ListWatch {
+	return &toolscache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 			ctx, cancel := context.WithTimeout(ctx, ListTimeout)
 			defer cancel()
 			obj, err := list(ctx, o)
-			cs.record(err, false)
+			if err != nil {
+				p.failure(err)
+			} else {
+				p.catchUp(now(), false)
+			}
 			return obj, err
 		},
 		WatchFuncWithContext: func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 			w, err := watchFn(ctx, o)
-			cs.record(err, true)
-			return w, err
+			if err != nil {
+				p.failure(err)
+				return nil, err
+			}
+			st := p.opened(o.SendInitialEvents != nil && *o.SendInitialEvents)
+			return observe(w, p, st, now, heartbeat), nil
 		},
-	}, client)
-	return tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), calls: cs}
+	}
+}
+
+// observedWatch forwards a watch's events and records each one. If nothing
+// arrives for the heartbeat window it stops the inner watch, so the reflector
+// opens a new one instead of waiting on a silently stalled connection.
+type observedWatch struct {
+	inner watch.Interface
+	out   chan watch.Event
+	done  chan struct{}
+	once  sync.Once
+}
+
+func observe(w watch.Interface, p *progress, st *stream, now func() time.Time, heartbeat time.Duration) watch.Interface {
+	o := &observedWatch{inner: w, out: make(chan watch.Event), done: make(chan struct{})}
+	go o.run(p, st, now, heartbeat)
+	return o
+}
+
+// ResultChan implements watch.Interface.
+func (o *observedWatch) ResultChan() <-chan watch.Event { return o.out }
+
+// Stop implements watch.Interface.
+func (o *observedWatch) Stop() {
+	o.once.Do(func() { close(o.done) })
+	o.inner.Stop()
+}
+
+func (o *observedWatch) run(p *progress, st *stream, now func() time.Time, heartbeat time.Duration) {
+	defer close(o.out)
+	var idle <-chan time.Time
+	var timer *time.Timer
+	if heartbeat > 0 {
+		timer = time.NewTimer(heartbeat)
+		defer timer.Stop()
+		idle = timer.C
+	}
+	for {
+		select {
+		case e, ok := <-o.inner.ResultChan():
+			if !ok {
+				return
+			}
+			p.event(e, now(), st)
+			if timer != nil {
+				timer.Reset(heartbeat)
+			}
+			select {
+			case o.out <- e:
+			case <-o.done:
+				return
+			}
+		case <-idle:
+			o.inner.Stop()
+			return
+		case <-o.done:
+			return
+		}
+	}
+}
+
+// tracked is an informer with the progress of its own List and Watch calls.
+type tracked struct {
+	inf      toolscache.SharedIndexInformer
+	progress *progress
+}
+
+// Cache is a set of informers whose contents are read through Snapshot.
+type Cache struct {
+	now       func() time.Time
+	heartbeat time.Duration
+	dyn       map[schema.GroupVersionResource]tracked
+	ns        tracked
+	pods      []tracked
+	deploys   []tracked
+}
+
+// informer builds an informer over an instrumented ListerWatcher. client tells
+// the reflector whether the client supports watch-list semantics (fakes do not).
+func (c *Cache) informer(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
+	p := &progress{}
+	lw := toolscache.ToListWatcherWithWatchListSemantics(instrument(p, c.now, c.heartbeat, list, watchFn), client)
+	return tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
 }
 
 // New creates the informers. Nothing runs until Start.
 func New(cfg Config) *Cache {
-	c := &Cache{now: time.Now, dyn: map[schema.GroupVersionResource]tracked{}}
+	c := &Cache{now: cfg.Now, heartbeat: cfg.Heartbeat, dyn: map[schema.GroupVersionResource]tracked{}}
+	if c.now == nil {
+		c.now = time.Now
+	}
 	for _, s := range cfg.Served {
 		ri := cfg.Dynamic.Resource(s.GVR())
-		c.dyn[s.GVR()] = instrumented(cfg.Dynamic, &unstructured.Unstructured{},
+		c.dyn[s.GVR()] = c.informer(cfg.Dynamic, &unstructured.Unstructured{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
 			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) })
 	}
 	nss := cfg.Kube.CoreV1().Namespaces()
-	c.ns = instrumented(cfg.Kube, &corev1.Namespace{},
+	c.ns = c.informer(cfg.Kube, &corev1.Namespace{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return nss.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return nss.Watch(ctx, o) })
 	pods, deploys := cfg.Kube.CoreV1().Pods(""), cfg.Kube.AppsV1().Deployments("")
 	for _, sel := range cfg.PodSelectors {
-		c.pods = append(c.pods, instrumented(cfg.Kube, &corev1.Pod{},
+		c.pods = append(c.pods, c.informer(cfg.Kube, &corev1.Pod{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { o.LabelSelector = sel.String(); return pods.List(ctx, o) },
 			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { o.LabelSelector = sel.String(); return pods.Watch(ctx, o) }))
 	}
 	for _, sel := range cfg.DeploymentSelectors {
-		c.deploys = append(c.deploys, instrumented(cfg.Kube, &appsv1.Deployment{},
+		c.deploys = append(c.deploys, c.informer(cfg.Kube, &appsv1.Deployment{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { o.LabelSelector = sel.String(); return deploys.List(ctx, o) },
 			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { o.LabelSelector = sel.String(); return deploys.Watch(ctx, o) }))
 	}
@@ -1769,23 +2138,16 @@ func (c *Cache) Start(ctx context.Context) {
 	}
 }
 
-// access reports whether t can currently be read. HasSynced records only the
-// initial sync and stays true after later failures (finding 2), so the last
-// failed List or Watch call wins over it until a Watch call succeeds.
-func access(t tracked) Access {
-	if e := t.calls.last(); e != "" {
-		return Access{Err: e}
-	}
-	if t.inf.HasSynced() {
-		return Access{OK: true}
-	}
-	return Access{}
+// access reports whether t is current. HasSynced records only the initial
+// sync and stays true after later failures (finding 2), so progress decides.
+func (c *Cache) access(t tracked, now time.Time) Access {
+	return t.progress.access(t.inf.HasSynced(), now, c.heartbeat)
 }
 
 // accessAll merges several informers of one kind: the first that is not OK wins.
-func accessAll(ts []tracked) Access {
+func (c *Cache) accessAll(ts []tracked, now time.Time) Access {
 	for _, t := range ts {
-		if a := access(t); !a.OK {
+		if a := c.access(t, now); !a.OK {
 			return a
 		}
 	}
@@ -1794,10 +2156,11 @@ func accessAll(ts []tracked) Access {
 
 // Snapshot copies the current cache contents.
 func (c *Cache) Snapshot() *Snapshot {
-	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: c.now()}
+	now := c.now()
+	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: now}
 	settled := func(a Access) bool { return a.OK || a.Err != "" }
 	for gvr, t := range c.dyn {
-		a := access(t)
+		a := c.access(t, now)
 		s.Access[gvr] = a
 		s.Synced = s.Synced && settled(a)
 		for _, o := range t.inf.GetStore().List() {
@@ -1805,16 +2168,16 @@ func (c *Cache) Snapshot() *Snapshot {
 		}
 		sort.Slice(s.Objects[gvr], func(i, j int) bool { return key(s.Objects[gvr][i]) < key(s.Objects[gvr][j]) })
 	}
-	s.Access[NamespacesGVR] = access(c.ns)
-	s.Access[PodsGVR] = accessAll(c.pods)
-	s.Access[DeploymentsGVR] = accessAll(c.deploys)
+	s.Access[NamespacesGVR] = c.access(c.ns, now)
+	s.Access[PodsGVR] = c.accessAll(c.pods, now)
+	s.Access[DeploymentsGVR] = c.accessAll(c.deploys, now)
 	s.Synced = s.Synced && settled(s.Access[NamespacesGVR])
 	for _, o := range c.ns.inf.GetStore().List() {
 		s.Namespaces = append(s.Namespaces, o.(*corev1.Namespace))
 	}
 	seen := map[types.UID]bool{}
 	for _, t := range c.pods {
-		s.Synced = s.Synced && settled(access(t))
+		s.Synced = s.Synced && settled(c.access(t, now))
 		for _, o := range t.inf.GetStore().List() {
 			if p := o.(*corev1.Pod); !seen[p.UID] {
 				seen[p.UID] = true
@@ -1823,7 +2186,7 @@ func (c *Cache) Snapshot() *Snapshot {
 		}
 	}
 	for _, t := range c.deploys {
-		s.Synced = s.Synced && settled(access(t))
+		s.Synced = s.Synced && settled(c.access(t, now))
 		for _, o := range t.inf.GetStore().List() {
 			if d := o.(*appsv1.Deployment); !seen[d.UID] {
 				seen[d.UID] = true
@@ -1842,7 +2205,7 @@ func key(u *unstructured.Unstructured) string { return u.GetNamespace() + "/" + 
 Run: `go test ./pkg/cache/... -race`
 Expected: PASS. `ToListWatcherWithWatchListSemantics`, `ListWatch.ListWithContextFunc`/`WatchFuncWithContext` and `SharedIndexInformer.RunWithContext` exist in client-go v0.36.2 (`tools/cache/listwatch.go`, `shared_informer.go`).
 
-**Known limit (round 3, finding 2).** A watch stream that stalls silently, with the TCP connection open and no events or errors, is not detected until client-go's watch timeout (5–10 minutes) ends it and the next Watch call reports the outcome. Lists are bounded by `ListTimeout`.
+**Bounds (round 4).** A failure is visible as soon as the reflector sees it, including errors inside a stream. A silent stream, from a stalled or blackholed connection or an empty watcher, is visible after `Heartbeat` (default `HeartbeatWindow`, 150 s); the wrapper then stops that watch so the reflector opens a new one. This relies on the API server's watch-cache bookmarks, sent about every minute (`defaultBookmarkFrequency`, `k8s.io/apiserver` `pkg/storage/cacher/cacher.go`; Task 1 Step 5 confirms them). A resource whose watch cache is disabled sends no bookmarks, so an idle kind of that resource shows unknown; `--watch-heartbeat=0` disables the check. Lists are bounded by `ListTimeout`.
 
 - [ ] **Step 6: Commit**
 
@@ -4860,15 +5223,18 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -4921,17 +5287,20 @@ type setup struct {
 	// late objects are created after the engine has first seen the rest, so their
 	// generation is first seen at testutil.Now: inside the grace period.
 	late []*unstructured.Unstructured
+	// heartbeat is cache.Config.Heartbeat (0: off); the cache clock is harness.cacheClock.
+	heartbeat time.Duration
 }
 
 // harness is a running cache, engine and handler over fake clients, with the
 // clients exposed so a test can inject failures after the initial sync.
 type harness struct {
-	ctx   context.Context
-	cache *cache.Cache
-	e     *engine.Engine
-	srv   *httptest.Server
-	dyn   *dynamicfake.FakeDynamicClient
-	kube  *kubefake.Clientset
+	ctx        context.Context
+	cache      *cache.Cache
+	cacheClock *clock
+	e          *engine.Engine
+	srv        *httptest.Server
+	dyn        *dynamicfake.FakeDynamicClient
+	kube       *kubefake.Clientset
 }
 
 // clock is the engine clock of a harness.
@@ -4962,7 +5331,9 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		s.prepare(fd, kube)
 	}
 	det := install.UpstreamDetector{}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served,
+	cacheClock := &clock{}
+	cacheClock.set(testutil.Now)
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, Heartbeat: s.heartbeat, Now: cacheClock.now,
 		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -4986,7 +5357,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	e.Compute()
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
 	t.Cleanup(srv.Close)
-	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube}
+	return &harness{ctx: ctx, cache: c, cacheClock: cacheClock, e: e, srv: srv, dyn: fd, kube: kube}
 }
 
 // createAndWait creates u through the fake dynamic client and waits until the cache holds it.
@@ -5401,44 +5772,74 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 	}
 }
 
-// Round 3, finding 1 (and round 2, finding 10): a watch that fails after the
-// initial sync, injected into the fake dynamic and typed clients while list
-// stays allowed, makes the install unknown at the API. It recovers only after
-// a Watch call succeeds again.
+// Round 4 (and round 2, finding 10): failures after the initial sync, through
+// the fake dynamic and typed clients. A failed Watch call or an error event
+// inside the stream makes the install unknown; further failed attempts keep it
+// so; it recovers on the first event of the next watch, whether the reflector
+// resumed a classic watch or relisted first. A
+// silent stream makes the kind unavailable after the heartbeat window; a bookmark brings it back.
 func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 	refused := fmt.Errorf("dial tcp 10.96.0.1:443: connect: %w", syscall.ECONNREFUSED)
+	bookmarkFor := func(resource string) runtime.Object {
+		var o metav1.Object
+		switch resource {
+		case "namespaces":
+			o = &corev1.Namespace{}
+		case "pods":
+			o = &corev1.Pod{}
+		case "deployments":
+			o = &appsv1.Deployment{}
+		default:
+			o = &unstructured.Unstructured{Object: map[string]any{}}
+		}
+		o.SetResourceVersion("999")
+		return o.(runtime.Object)
+	}
 	cases := []struct {
 		name     string
 		resource string
 		typed    bool
+		mode     string // "call": the Watch call fails; "event": an error event in the stream; "silent": no events
 		err      error
 	}{
-		{"httproutes connection refused", "httproutes", false, refused},
-		{"httproutes throttled", "httproutes", false, apierrors.NewTooManyRequests("slow down", 1)},
-		{"httproutes forbidden", "httproutes", false, apierrors.NewForbidden(schema.GroupResource{Group: "gateway.networking.k8s.io", Resource: "httproutes"}, "", nil)},
-		{"namespaces forbidden", "namespaces", true, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil)},
-		{"pods throttled", "pods", true, apierrors.NewTooManyRequests("slow down", 1)},
-		{"deployments connection refused", "deployments", true, refused},
+		{"httproutes watch call refused", "httproutes", false, "call", refused},
+		{"httproutes watch call throttled", "httproutes", false, "call", apierrors.NewTooManyRequests("slow down", 1)},
+		{"httproutes watch call forbidden", "httproutes", false, "call", apierrors.NewForbidden(schema.GroupResource{Group: "gateway.networking.k8s.io", Resource: "httproutes"}, "", nil)},
+		{"httproutes error event", "httproutes", false, "event", apierrors.NewTooManyRequests("slow down", 1)},
+		{"namespaces error event", "namespaces", true, "event", apierrors.NewInternalError(errors.New("etcd timeout"))},
+		{"pods watch call throttled", "pods", true, "call", apierrors.NewTooManyRequests("slow down", 1)},
+		{"deployments watch call refused", "deployments", true, "call", refused},
+		{"httproutes silent", "httproutes", false, "silent", nil},
+		{"pods silent", "pods", true, "silent", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var fail atomic.Bool
-			var failed atomic.Int32
+			var failedCalls atomic.Int32 // failed Watch and List calls while fail is set
 			watchers := make(chan *watch.FakeWatcher, 64)
-			react := func(clienttesting.Action) (bool, watch.Interface, error) {
-				if fail.Load() {
-					failed.Add(1)
+			onWatch := func(clienttesting.Action) (bool, watch.Interface, error) {
+				if fail.Load() && tc.mode == "call" {
+					failedCalls.Add(1)
 					return true, nil, tc.err
 				}
 				w := watch.NewFake()
 				watchers <- w
 				return true, w, nil
 			}
-			hn := newHarness(t, setup{prepare: func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
+			onList := func(clienttesting.Action) (bool, runtime.Object, error) {
+				if fail.Load() {
+					failedCalls.Add(1)
+					return true, nil, apierrors.NewServiceUnavailable("apiserver restarting")
+				}
+				return false, nil, nil
+			}
+			hn := newHarness(t, setup{heartbeat: cache.HeartbeatWindow, prepare: func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
 				if tc.typed {
-					kube.PrependWatchReactor(tc.resource, react)
+					kube.PrependWatchReactor(tc.resource, onWatch)
+					kube.PrependReactor("list", tc.resource, onList)
 				} else {
-					dyn.PrependWatchReactor(tc.resource, react)
+					dyn.PrependWatchReactor(tc.resource, onWatch)
+					dyn.PrependReactor("list", tc.resource, onList)
 				}
 			}}, isolated()...)
 			state := func() health.State {
@@ -5448,20 +5849,52 @@ func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 			if s := state(); s != health.StateHealthy {
 				t.Fatalf("baseline must be healthy, got %s", s)
 			}
+			w := <-watchers
+			if tc.mode == "silent" {
+				// Every kind's last event is the initial list, so all go silent together;
+				// the assertions follow this kind's own KGWUI-008.
+				noAccess := func() bool {
+					hn.e.Compute()
+					for _, f := range get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200).Findings {
+						if f.Code == health.CodeSignalUnavailable && f.Message == "No access to "+tc.resource {
+							return strings.Contains(f.Detail, "no watch events or bookmarks")
+						}
+					}
+					return false
+				}
+				hn.cacheClock.set(testutil.Now.Add(cache.HeartbeatWindow))
+				if s := state(); s != health.StateUnknown || !noAccess() {
+					t.Fatalf("no event or bookmark for %s must make %s unavailable and the install unknown, got %s", cache.HeartbeatWindow, tc.resource, s)
+				}
+				w.Action(watch.Bookmark, bookmarkFor(tc.resource))
+				waitUntil(t, "a bookmark to restore the kind", func() bool { return !noAccess() })
+				return
+			}
 			fail.Store(true)
-			(<-watchers).Stop() // the established watch ends; the next Watch call fails
+			if tc.mode == "event" {
+				w.Error(&tc.err.(*apierrors.StatusError).ErrStatus)
+			} else {
+				w.Stop() // the established watch ends; the next Watch call fails
+			}
 			waitUntil(t, "the install to become unknown", func() bool { return state() == health.StateUnknown })
 			h := get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200)
 			if !hasSev(h, health.CodeSignalUnavailable, health.SeverityInfo, "") {
 				t.Fatalf("KGWUI-008 missing: %+v", h.Findings)
 			}
-			n := failed.Load()
-			waitUntil(t, "another failed watch", func() bool { return failed.Load() > n })
-			if s := state(); s != health.StateUnknown {
-				t.Fatalf("without a successful watch the install stays unknown, got %s", s)
+			if tc.mode == "call" {
+				n := failedCalls.Load()
+				waitUntil(t, "another failed attempt", func() bool { return failedCalls.Load() > n })
+				if s := state(); s != health.StateUnknown {
+					t.Fatalf("further failed attempts must keep the install unknown, got %s", s)
+				}
 			}
 			fail.Store(false)
-			waitUntil(t, "recovery after a successful watch", func() bool { return state() == health.StateHealthy })
+			w = <-watchers // the next watch: a resumed classic watch, or a new one after a relist
+			if s := state(); s != health.StateUnknown {
+				t.Fatalf("until the next watch delivers an event the install stays unknown, got %s", s)
+			}
+			w.Action(watch.Bookmark, bookmarkFor(tc.resource))
+			waitUntil(t, "recovery on the next watch's first event", func() bool { return state() == health.StateHealthy })
 		})
 	}
 }
@@ -6384,7 +6817,7 @@ git add pkg/overview pkg/engine pkg/api && git commit -m "feat(api): engine, ove
   - `extension.WithKinds(...kinds.Descriptor)`, `WithDetectors(...install.Detector)` (prepended, so downstream detectors win), `WithScopeProvider(install.ScopeProvider)`, `WithScopeVerifier(scopeverify.Verifier)`, `WithChecks(...health.Check)`, `WithAuthorizer(api.Authorizer)` (replaces the default `api.AllowAll{}`; D-013);
   - `extension.New(opts ...Option) *Registry` (upstream defaults plus the options).
 - Produces:
-  - `app.Options{Listen, Pinned string; PollInterval, MetricsInterval time.Duration; UI fs.FS}`;
+  - `app.Options{Listen, Pinned string; PollInterval, MetricsInterval, WatchHeartbeat time.Duration; UI fs.FS}` (`WatchHeartbeat` is `cache.Config.Heartbeat`; flag `--watch-heartbeat`, default `cache.HeartbeatWindow`, 0 disables);
   - `app.Clients{Dynamic dynamic.Interface; Kube kubernetes.Interface; Discovery kinds.DiscoveryClient; InCluster bool}`;
   - `app.App{Engine *engine.Engine; Handler http.Handler}`;
   - `app.Build(c Clients, o Options, reg *extension.Registry) (*App, error)`, `(*App).Start(ctx context.Context)`. `Build` watches Pods with each detector's `ControllerPodSelector()`, sets `engine.Config.MetricsMaxAge` to 3 × `MetricsInterval`, and passes `reg.Authorizer` to `api.NewHandler`;
@@ -6814,7 +7247,10 @@ type Options struct {
 	Pinned          string
 	PollInterval    time.Duration
 	MetricsInterval time.Duration
-	UI              fs.FS
+	// WatchHeartbeat is how long a kind may go without a watch event or
+	// bookmark before it is unavailable; 0 disables the check.
+	WatchHeartbeat time.Duration
+	UI             fs.FS
 }
 
 // Clients are the Kubernetes clients the app uses.
@@ -6846,7 +7282,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		podSel = append(podSel, d.ControllerPodSelector()) // A1: Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
 	}
-	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel})
+	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel,
+		Heartbeat: o.WatchHeartbeat})
 	var scraper ctrlmetrics.Scraper = ctrlmetrics.PodProxyScraper{Kube: c.Kube}
 	if c.InCluster {
 		scraper = ctrlmetrics.HTTPScraper{Client: &http.Client{Timeout: 5 * time.Second}}
@@ -6937,6 +7374,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/webui"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 )
 
 func main() {
@@ -6947,6 +7385,8 @@ func main() {
 	flag.StringVar(&o.Listen, "listen", "", "listen address (default :8080 in-cluster, 127.0.0.1:8080 locally)")
 	flag.DurationVar(&o.PollInterval, "poll-interval", 2*time.Second, "model recompute interval")
 	flag.DurationVar(&o.MetricsInterval, "metrics-interval", 10*time.Second, "controller metrics scrape interval")
+	flag.DurationVar(&o.WatchHeartbeat, "watch-heartbeat", cache.HeartbeatWindow,
+		"a kind with no watch event or bookmark for this long is unavailable; 0 disables (for API servers without watch-cache bookmarks)")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
