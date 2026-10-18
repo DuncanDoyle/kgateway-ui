@@ -8,7 +8,7 @@ Status: design in progress (started 2026-10-16)
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
-- [ ] Q2 Phase 1 implementation plan (`implementation-plan.md`) — drafted 2026-10-17; planned sub-phases 1.1 backend, 1.2 frontend, 1.3 packaging/CI/e2e ← CURRENT
+- [ ] Q2 Phase 1 implementation plan (`implementation-plan.md`) — drafted 2026-10-17, revised after cross-model review 2026-10-18; planned sub-phases 1.1 backend, 1.2 frontend, 1.3 packaging/CI/e2e ← CURRENT
 - [ ] Q3 Cross-model review of design + plan, triage, user approval
 
 ### Exit gates
@@ -23,9 +23,10 @@ Status: design in progress (started 2026-10-16)
 none
 
 ## Carry-over (deferred to later phases)
-n/a
+- (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
 
 ## Notes
+- 2026-10-18: user approved Overridden policies as info (not warning) and subagent-driven execution for Phase 1.
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions" (D-005).
 - Research inputs for the Phase 1 design:
   - The controller admin server (port 9095, localhost-bound by default; the bind address is configurable from kgateway 2.4) serves `/version` and `/snapshots/xds`.

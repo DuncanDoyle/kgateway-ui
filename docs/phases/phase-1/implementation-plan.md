@@ -14,7 +14,9 @@
 - Frontend: React 19, TypeScript, Vite, emotion, react-router, SWR, TanStack Table/Virtual, lucide-react, js-yaml, Vitest, Testing Library, Playwright, Biome.
 - Packaging and test infrastructure: Helm 3, kind.
 
-**Spec:** `docs/phases/phase-1/design.md` (decisions D-001 … D-011 in `docs/decisions.md`). Read both before starting any task.
+**Spec:** `docs/phases/phase-1/design.md` (decisions D-001 … D-013 in `docs/decisions.md`). Read both before starting any task.
+
+**Revision:** this plan was revised after the cross-model design review (`docs/phases/phase-1/reviews/design-codex.md`, triage rows 1–15, 17, A1–A3). Finding numbers in comments ("finding 5") refer to that file. Row 16 is deferred to Carry-over.
 
 ## Global Constraints
 
@@ -22,6 +24,7 @@
   - The CI `hygiene` job reads the pattern from the GitHub repository variable `FORBIDDEN_TERMS` (set once by the repo owner).
   - Before every commit, run the same check locally: `git diff --cached | grep -inE "$FORBIDDEN_TERMS" && echo STOP || true`, with `FORBIDDEN_TERMS` exported in your shell.
 - **Read-only (D-001):** no create/update/patch/delete calls to the Kubernetes API, ever. **No Secrets:** never list, watch or serve Secrets.
+- **Trust model (D-013):** whoever reaches the UI may see everything it shows; there is no login in Phase 1 and no field redaction. Every API handler that returns resources, findings or counts goes through the `api.Authorizer` seam (Phase 1 ships `AllowAll`). A denied object returns 404 and is dropped from resource lists and count tiles. A finding on it is redacted, not dropped: it keeps code, severity and resource ref, carries `restricted: true`, and loses its message and evidence. The health roll-up and severity counts always cover every finding.
 - Never call the controller admin server (`:9095`) or the Envoy admin API.
 - **Go:**
   - Module `github.com/DuncanDoyle/kgateway-ui`, `go 1.26`.
@@ -31,23 +34,26 @@
   - No proprietary component libraries.
   - One React component per file, named export.
   - `// region Styles` / `// region Helpers` / `// region Component` ordering.
-  - emotion styled components, each accepting `stylesOverride`.
+  - emotion styled components. Every exported component accepts `stylesOverride`; page-internal styled parts are not part of the contract (a downstream replaces a whole page through `CorePages`).
+  - Typography comes from theme tokens (`theme.font.size.*`, `theme.font.weight.*`); components never hard-code font sizes or weights (D-008).
   - Text must never rely on colour alone. Health is always icon + colour + text.
 - **Upstream contract** (verified on kgateway `8a498c6406`, v2.4.x and v2.3.x):
 
   | Item | Value |
   |---|---|
-  | Controller labels | `kgateway=kgateway`, `app.kubernetes.io/component=controller` |
+  | Controller Deployment labels | `kgateway=kgateway`, `app.kubernetes.io/component=controller` (plus `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/version`). This is `ControllerSelector()`. |
+  | Controller Pod labels | `kgateway=kgateway`, `app.kubernetes.io/name`, `app.kubernetes.io/instance`; `app.kubernetes.io/component=controller` is added to the Pod template from v2.3.0 ([`9041e96061`](https://github.com/kgateway-dev/kgateway/commit/9041e96061)) and is absent on v2.2 and earlier charts. The cache watches Pods with `ControllerPodSelector()` = `kgateway=kgateway` only, and `Discover` attributes Pods to an install through the controller Deployment's `spec.selector` in the same namespace (A1). |
+  | Controller Deployment name | `kgateway.fullname`: the release name when it contains `kgateway`, else `<release>-kgateway` (so release `kgateway` → Deployment `kgateway`) |
   | Controller image name | last path segment `kgateway` (`cr.kgateway.dev/kgateway-dev/kgateway:<tag>`) |
   | Version label | `app.kubernetes.io/version` |
   | Metrics container port | name `metrics`, default `9092` |
-  | Proxy Deployment labels | `app.kubernetes.io/managed-by=kgateway`, `app.kubernetes.io/component=proxy`, `gateway.networking.k8s.io/gateway-name=<gw>` |
+  | Proxy Deployment labels | `app.kubernetes.io/managed-by=kgateway`, `app.kubernetes.io/component=proxy`, `gateway.networking.k8s.io/gateway-name=<gw>`. For Gateway names over 63 characters the label value is truncated and hashed, so the proxy is matched by ownerReference first (Review Focus 1). |
   | Controller name | `kgateway.dev/kgateway` (including the `kgateway-waypoint` class) |
   | Scope env | `KGW_DISCOVERY_NAMESPACE_SELECTORS`: a JSON list of `metav1.LabelSelector`, OR'ed; empty or unset means all namespaces |
-  | Reject metric | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url}` |
+  | Reject metric | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url}`; `type_url` has the `type.googleapis.com/` prefix stripped (e.g. `envoy.config.listener.v3.Listener`). The series exists only after a first reject and then stays at 0. |
   | Managed metric | `kgateway_resources_managed{namespace,parent,resource}`. Weights: Gateway 1; route 1 per `spec.parentRefs` entry; ListenerSet 1 as `resource="XListenerSet"`; policy 1 under its kind |
-  | Route condition | `kgateway.dev/Programmed`; reasons `RouteRuleDropped` and `RouteRuleReplaced` |
-  | Policy conditions | `Accepted` / `Attached`; reasons `Valid`, `Invalid`, `Attached`, `Merged`, `Overridden`, `Pending`, `PartiallyValid`, `TargetNotFound`; synthetic ancestor kind `StatusSummary`, group `gateway.kgateway.dev` |
+  | Route conditions | Required: `Accepted`, `ResolvedRefs`. Optional, evaluated when present: `kgateway.dev/Programmed` (v2.4.x and main) with reasons `RouteRuleDropped` and `RouteRuleReplaced`. v2.3.x reports dropped and replaced rules as `Accepted=False` with the same reasons and the rule in the message (A2); any current `Accepted=False` is reported with its reason message. |
+  | Policy conditions | Required: `Accepted`. Optional, evaluated when present: `Attached`. Reasons `Valid`, `Invalid`, `Attached`, `Merged`, `Overridden`, `Pending`, `PartiallyValid`. **Main only** (not on v2.3.x or v2.4.x): reason `TargetNotFound` and the synthetic ancestor kind `StatusSummary`, group `gateway.kgateway.dev`. On v2.3.x and v2.4.x a policy whose target is missing has no status, which the UI reports as "not yet processed" (KGWUI-003) after the grace period (finding 7). |
 
 - **Finding codes** are stable: `KGWUI-001` xds-rejected … `KGWUI-009` ambiguous-ownership (design §5.2).
 - **Roll-up:** error > unknown > warning > healthy (design §5.3).
@@ -61,8 +67,12 @@ These failure modes are implied by the spec, but no other task's tests exercise 
 1. **Long Gateway names (more than 63 characters).** The proxy Deployment's `gateway-name` label is truncated. The proxy must still be matched to its Gateway (by ownerReference first, then label); otherwise the UI raises a false "proxy not found". → Task 9.
 2. **Cross-namespace parentRefs.** A route in `shop` targets `infra/edge`. Assignment and the unwatched-namespace check must use the **route's** namespace for scope, not the Gateway's. → Task 7.
 3. **Controller in CrashLoopBackOff (0 ready Pods).** The scope must still be read from the Pod spec, and the report must show controller-not-ready (error) plus metrics unavailable. It must never be silently healthy. → Tasks 6 and 9.
-4. **Stale conditions** (`observedGeneration < metadata.generation`). They describe an old spec. If they are older than the 60 s grace period they show as "not yet processed" (warning); they are never reported as a current error or a current success. → Task 9.
+4. **Stale or missing status.** A condition with `observedGeneration < metadata.generation` describes an old spec, whether it is `True` or `False`. Freshness is checked before status. A stale condition, a missing required condition, a route parent with no status entry, and a policy with no ancestor from the install's controller all show as "not yet processed" (KGWUI-003, warning) once the object is older than the 60 s grace period. None of them is ever reported as a current error or a current success (finding 1). → Task 9 (unit) and Task 10 (API).
 5. **Scale.** 5,000 HTTPRoutes across 200 namespaces must compute a full model (assignment, health and overview) in under 1 s on a laptop, so the 2 s recompute loop never stacks up. → Task 10.
+6. **Watch failures after the initial sync.** `HasSynced()` stays true after later list/watch failures. A kind whose last list/watch error is less than 60 s old is not accessible, so the cluster-access check forces "unknown". Namespaces, Pods and Deployments are reported too (finding 2). → Task 5.
+7. **Old evidence.** A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), however often the model is recomputed. In the frontend, stale data turns the health strip and every gateway row to unknown (finding 3). → Tasks 8, 9, 10 and 16.
+8. **Install switch.** While install B loads, the page never shows install A's strip, findings or gateways (finding 4). → Task 16.
+9. **Partial visibility.** A deny-some `Authorizer` registered through `extension.WithAuthorizer` makes the denied object 404 and drops it from the count tiles. Its finding stays in the list with the same code, severity and resource ref, `restricted: true` and no message or evidence; the roll-up state is unchanged (D-013). → Task 11.
 
 ## Sub-phases
 
@@ -91,14 +101,14 @@ pkg/scopeverify/verify.go               Verifier, ManagedCountVerifier
 pkg/health/{finding.go,messages.go,checks.go,rollup.go}
 pkg/overview/overview.go                header, counts, gateway rows
 pkg/engine/engine.go                    periodic model computation
-pkg/api/{types.go,handlers.go}          HTTP JSON API
+pkg/api/{types.go,handlers.go,authz.go} HTTP JSON API and the Authorizer seam (D-013)
 pkg/extension/extension.go              Registry + functional options
 pkg/app/app.go                          Build/Run wiring (used by upstream and downstream mains)
 internal/webui/{embed.go,dist/index.html}  embedded SPA (placeholder committed)
 internal/testutil/{fixtures.go,clients.go} test fixtures and fake clients
 web/package.json, web/tsconfig.base.json, web/biome.json
 web/packages/shell/…                    reusable shell package
-web/app/…                               upstream entry
+web/app/…                               upstream entry (src/vite-env.d.ts declares Vite asset imports)
 web/e2e/…                               Playwright specs
 deploy/helm/kgateway-ui/…               chart
 deploy/helm/chart_test.go               helm template assertions
@@ -118,8 +128,9 @@ This resolves design §13 items 1 and 2 before any assignment or metrics code is
 **Files:**
 - Modify: `docs/decisions.md` (append D-012 with the observations)
 - Modify: `docs/phases/phase-1/design.md` §13 (mark items 1 and 2 resolved, linking D-012)
+- Create: `pkg/ctrlmetrics/testdata/v2.4.7.txt`, `pkg/ctrlmetrics/testdata/v2.3.11.txt` (captured controller `/metrics` output; committed with Task 8)
 
-**Interfaces:** Produces facts that Tasks 7 and 8 rely on.
+**Interfaces:** Produces facts that Tasks 7 and 8 rely on, and the captured metrics fixtures for Task 8.
 
 - [ ] **Step 1: Create a cluster with two disjoint kgateway installs**
 
@@ -128,10 +139,13 @@ kind create cluster --name kgwui-exp
 kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.1/standard-install.yaml
 helm install kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds --version v2.4.7 -n kgw-a --create-namespace
 # Install A watches team=a namespaces, install B watches team=b namespaces.
-helm install kgw-a oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version v2.4.7 -n kgw-a \
+# Release name "kgateway" in each namespace: kgateway.fullname collapses to the
+# release name, so the controller Deployments are kgw-a/kgateway and kgw-b/kgateway.
+helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version v2.4.7 -n kgw-a \
   --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"a"}}]'
-helm install kgw-b oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version v2.4.7 -n kgw-b --create-namespace \
+helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version v2.4.7 -n kgw-b --create-namespace \
   --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"b"}}]'
+kubectl get deploy -n kgw-a kgateway && kubectl get deploy -n kgw-b kgateway   # confirm the rendered names before continuing
 kubectl create ns app-a && kubectl label ns app-a team=a
 kubectl create ns app-b && kubectl label ns app-b team=b
 for ns in app-a app-b; do cat <<EOF | kubectl apply -f -
@@ -154,7 +168,7 @@ kubectl get gatewayclass kgateway -o yaml | yq '.status'          # who writes i
 kubectl get gateway -A -o wide                                     # both Programmed?
 kubectl get deploy -n app-a -l app.kubernetes.io/component=proxy   # proxy created by A only?
 kubectl get deploy -n app-b -l app.kubernetes.io/component=proxy
-kubectl logs -n kgw-a deploy/kgw-a --since=2m | grep -i -E 'gatewayclass|conflict' | head
+kubectl logs -n kgw-a deploy/kgateway --since=2m | grep -i -E 'gatewayclass|conflict' | head
 kubectl get gatewayclass kgateway -o jsonpath='{.metadata.resourceVersion}'; sleep 30; \
 kubectl get gatewayclass kgateway -o jsonpath='{.metadata.resourceVersion}'   # flapping if it changes repeatedly
 ```
@@ -166,15 +180,19 @@ Expected (to be confirmed):
 - [ ] **Step 3: Observe the metric replica semantics**
 
 ```bash
-kubectl scale -n kgw-a deploy/kgw-a --replicas=2 && kubectl rollout status -n kgw-a deploy/kgw-a
+kubectl scale -n kgw-a deploy/kgateway --replicas=2 && kubectl rollout status -n kgw-a deploy/kgateway
+kubectl get pod -n kgw-a -l kgateway=kgateway --show-labels   # record the Pod labels for the contract table
 for p in $(kubectl get pod -n kgw-a -l kgateway=kgateway -o name); do
   kubectl port-forward -n kgw-a $p 19092:9092 >/dev/null 2>&1 & PF=$!; sleep 2
-  echo "== $p"; curl -s localhost:19092/metrics | grep -E '^kgateway_(resources_managed|envoy_xds_rejects_active)'
+  echo "== $p"; curl -s localhost:19092/metrics | tee /tmp/kgw-metrics.txt | grep -E '^kgateway_(resources_managed|envoy_xds_rejects_active)'
   kill $PF
 done
+mkdir -p pkg/ctrlmetrics/testdata && cp /tmp/kgw-metrics.txt pkg/ctrlmetrics/testdata/v2.4.7.txt
 ```
 
 Record whether both replicas report the same `kgateway_resources_managed` series (expected: yes; krt runs on every replica). Also record that `envoy_xds_rejects_active` is set by the replica serving the proxy's xDS stream, which is why the UI sums it.
+
+For the v2.3.11 capture used by Task 8's contract test, repeat Step 1 with only install A at `--version v2.3.11` (Gateway API v1.5.1) on a fresh cluster, then save one Pod's `/metrics` output to `pkg/ctrlmetrics/testdata/v2.3.11.txt` the same way.
 
 - [ ] **Step 4: Record the results and clean up**
 
@@ -195,6 +213,8 @@ Then run `kind delete cluster --name kgwui-exp`.
 ```bash
 git add docs && git commit -m "docs: record multi-install and metrics replica observations (D-012)"
 ```
+
+Leave the two `testdata` captures uncommitted; Task 8 commits them with the code that reads them.
 
 ---
 
@@ -333,7 +353,7 @@ git commit -m "chore: go module, embedded SPA placeholder, licence"
 
 **Interfaces:**
 - Produces:
-  - `kinds.Category` with the constants `CategoryGatewayClass`, `CategoryGateway`, `CategoryListenerSet`, `CategoryRoute` and `CategoryPolicy`;
+  - `kinds.Category` with the constants `CategoryGatewayClass`, `CategoryGateway`, `CategoryListenerSet`, `CategoryRoute`, `CategoryPolicy` and `CategoryWorkload` (Deployments, read through typed informers and never counted; used by `/api/v1/meta` in Task 10);
   - `kinds.Descriptor{Group, Kind, Resource string; Versions []string; Namespaced bool; Category Category; DisplayName string}`;
   - `kinds.Served{Descriptor; Version string}` with `GVR() schema.GroupVersionResource`;
   - `kinds.DiscoveryClient` (interface: `ServerResourcesForGroupVersion(string) (*metav1.APIResourceList, error)`);
@@ -450,6 +470,9 @@ const (
 	CategoryListenerSet  Category = "listenerset"
 	CategoryRoute        Category = "route"
 	CategoryPolicy       Category = "policy"
+	// CategoryWorkload marks kinds read through typed informers (Deployments).
+	// They are never watched dynamically or counted; findings link to them.
+	CategoryWorkload     Category = "workload"
 )
 
 // Descriptor describes a kind the UI can watch. Versions are in preference order.
@@ -593,7 +616,7 @@ git add pkg/kinds go.mod go.sum && git commit -m "feat(kinds): kind descriptors 
 - Produces:
   - `objects.Ref{Group, Kind, Namespace, Name string}` (JSON `group,kind,namespace,name`) with `String()` returning `"ns/name"` (or `"name"` for cluster-scoped objects);
   - `objects.RefOf(u *unstructured.Unstructured) Ref`;
-  - `objects.ParentRef{Group, Kind, Namespace, Name, SectionName string}`;
+  - `objects.ParentRef{Group, Kind, Namespace, Name, SectionName string}` with `Ref() Ref` (the referenced object's full group/kind/namespace/name identity, section dropped; used for assignment, finding 6);
   - `objects.RouteParentRefs(u) []ParentRef` (defaults applied: group `gateway.networking.k8s.io`, kind `Gateway`, namespace = route namespace);
   - `objects.RouteParentStatus{ParentRef ParentRef; ControllerName string; Conditions []metav1.Condition}`;
   - `objects.RouteParents(u) []RouteParentStatus`;
@@ -668,6 +691,19 @@ func TestRefOf(t *testing.T) {
 		t.Fatalf("got %+v %q", got, got.String())
 	}
 }
+
+// Assignment resolves parents by their full identity (finding 6): the group
+// is part of the key, and the section name is not.
+func TestParentRefIdentityKeepsGroup(t *testing.T) {
+	got := RouteParentRefs(route())[1].Ref()
+	if got != (Ref{Group: "gateway.networking.k8s.io", Kind: "ListenerSet", Namespace: "shop", Name: "ls1"}) {
+		t.Fatalf("got %+v", got)
+	}
+	foreign := ParentRef{Group: "example.com", Kind: "Gateway", Namespace: "infra", Name: "edge"}
+	if foreign.Ref() == RouteParentRefs(route())[0].Ref() {
+		t.Fatal("a foreign-group Gateway must not share an identity with a Gateway API Gateway")
+	}
+}
 ```
 
 - [ ] **Step 2: Run it and confirm it fails**
@@ -724,6 +760,12 @@ type ParentRef struct {
 	Namespace   string `json:"namespace"`
 	Name        string `json:"name"`
 	SectionName string `json:"sectionName,omitempty"`
+}
+
+// Ref returns the identity of the referenced object. The section name is
+// dropped: it selects a listener, not a different object.
+func (p ParentRef) Ref() Ref {
+	return Ref{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name}
 }
 
 type rawRef struct {
@@ -922,15 +964,17 @@ git add pkg/objects go.mod go.sum && git commit -m "feat(objects): typed views o
 **Interfaces:**
 - Consumes: `kinds.Served`, `kinds.Upstream()`.
 - Produces:
-  - `cache.Access{OK bool; Err string}` (JSON `ok,error`);
-  - `cache.Snapshot{Objects map[schema.GroupVersionResource][]*unstructured.Unstructured; Access map[schema.GroupVersionResource]Access; Namespaces []*corev1.Namespace; Pods []*corev1.Pod; Deployments []*appsv1.Deployment; Synced bool; TakenAt time.Time}`;
+  - `cache.Access{OK bool; Err string}` (JSON `ok,error`). `OK` means synced **and** no list/watch error in the last `ErrorWindow`; `HasSynced()` alone is not enough, because it stays true after later failures (finding 2);
+  - `cache.ErrorWindow = 60 * time.Second` (reflector backoff caps at about 30 s, so a persisting failure recurs inside the window);
+  - `cache.NamespacesGVR`, `cache.PodsGVR`, `cache.DeploymentsGVR` (`schema.GroupVersionResource` keys under which the typed informers report their `Access`);
+  - `cache.Snapshot{Objects map[schema.GroupVersionResource][]*unstructured.Unstructured; Access map[schema.GroupVersionResource]Access; Namespaces []*corev1.Namespace; Pods []*corev1.Pod; Deployments []*appsv1.Deployment; Synced bool; TakenAt time.Time}`. `Access` holds every served kind plus the three typed GVRs;
   - `cache.Config{Dynamic dynamic.Interface; Kube kubernetes.Interface; Served []kinds.Served; PodSelectors, DeploymentSelectors []labels.Selector}`;
   - `cache.New(Config) *Cache`, `(*Cache).Start(ctx)`, `(*Cache).Snapshot() *Snapshot`;
   - `cache.Snapshotter` (interface `Snapshot() *Snapshot`).
 - Produces (tests only):
   - `testutil.Clients(t, objs ...runtime.Object) (dynamic.Interface, *kubefake.Clientset)`. Kube objects go to the typed fake; `*unstructured.Unstructured` goes to the dynamic fake; fake discovery serves every `kinds.Upstream()` kind at its first version.
   - `testutil.ServedUpstream() []kinds.Served`.
-  - The fixture builders listed in Step 1.
+  - The fixture builders listed in Step 1, including `testutil.Policy(apiVersion, kind, ns, name string, ancestors ...PolicyAncestor)` and `testutil.BackendTLSPolicy(ns, name string, ancestors ...PolicyAncestor)`. `ControllerDeployment`'s Pod template carries the upstream v2.3/v2.4 Pod labels exactly (`kgateway`, `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/component=controller`), so fixture Pods enter through the production watch (finding 14).
 
 - [ ] **Step 1: Write the test fixtures** (shared by every later backend test)
 
@@ -941,6 +985,7 @@ git add pkg/objects go.mod go.sum && git commit -m "feat(objects): typed views o
 package testutil
 
 import (
+	"maps"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -1088,9 +1133,9 @@ type PolicyAncestor struct {
 	Conds      []metav1.Condition
 }
 
-// TrafficPolicy builds a kgateway TrafficPolicy with status.ancestors.
-func TrafficPolicy(ns, name string, ancestors ...PolicyAncestor) *unstructured.Unstructured {
-	u := obj("gateway.kgateway.dev/v1alpha1", "TrafficPolicy", ns, name)
+// Policy builds a policy of any kind with status.ancestors.
+func Policy(apiVersion, kind, ns, name string, ancestors ...PolicyAncestor) *unstructured.Unstructured {
+	u := obj(apiVersion, kind, ns, name)
 	as := []any{}
 	for _, a := range ancestors {
 		as = append(as, map[string]any{"ancestorRef": refMap(a.Ref), "controllerName": a.Controller, "conditions": conds(a.Conds)})
@@ -1100,17 +1145,31 @@ func TrafficPolicy(ns, name string, ancestors ...PolicyAncestor) *unstructured.U
 	return u
 }
 
-// ControllerDeployment builds a kgateway controller Deployment with the upstream labels.
+// TrafficPolicy builds a kgateway TrafficPolicy with status.ancestors.
+func TrafficPolicy(ns, name string, ancestors ...PolicyAncestor) *unstructured.Unstructured {
+	return Policy("gateway.kgateway.dev/v1alpha1", "TrafficPolicy", ns, name, ancestors...)
+}
+
+// BackendTLSPolicy builds a Gateway API BackendTLSPolicy with status.ancestors.
+func BackendTLSPolicy(ns, name string, ancestors ...PolicyAncestor) *unstructured.Unstructured {
+	return Policy("gateway.networking.k8s.io/v1", "BackendTLSPolicy", ns, name, ancestors...)
+}
+
+// ControllerDeployment builds a kgateway controller Deployment with the upstream
+// labels. The Pod template carries the upstream v2.3/v2.4 Pod labels exactly:
+// the selector labels plus app.kubernetes.io/component=controller.
 func ControllerDeployment(ns, name, image string, desired, ready int32, env ...corev1.EnvVar) *appsv1.Deployment {
 	lbls := map[string]string{"kgateway": "kgateway", "app.kubernetes.io/component": "controller",
 		"app.kubernetes.io/name": "kgateway", "app.kubernetes.io/instance": name, "app.kubernetes.io/version": "2.4.7"}
 	sel := map[string]string{"kgateway": "kgateway", "app.kubernetes.io/name": "kgateway", "app.kubernetes.io/instance": name}
+	podLbls := map[string]string{"kgateway": "kgateway", "app.kubernetes.io/name": "kgateway", "app.kubernetes.io/instance": name,
+		"app.kubernetes.io/component": "controller"}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: lbls, UID: types.UID("deploy/" + ns + "/" + name), CreationTimestamp: Old},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &desired,
 			Selector: &metav1.LabelSelector{MatchLabels: sel},
-			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: sel}, Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: podLbls}, Spec: corev1.PodSpec{Containers: []corev1.Container{{
 				Name: "kgateway", Image: image, Env: env,
 				Ports: []corev1.ContainerPort{{Name: "metrics", ContainerPort: 9092}},
 			}}}},
@@ -1126,7 +1185,7 @@ func ControllerPod(d *appsv1.Deployment, name string, ready bool) *corev1.Pod {
 		phase, st = corev1.PodPending, corev1.ConditionFalse
 	}
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: d.Namespace, Name: name, Labels: d.Spec.Template.Labels, UID: types.UID("pod/" + d.Namespace + "/" + name)},
+		ObjectMeta: metav1.ObjectMeta{Namespace: d.Namespace, Name: name, Labels: maps.Clone(d.Spec.Template.Labels), UID: types.UID("pod/" + d.Namespace + "/" + name)},
 		Spec:       d.Spec.Template.Spec,
 		Status:     corev1.PodStatus{Phase: phase, PodIP: "10.1.0.5", Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: st}}},
 	}
@@ -1218,6 +1277,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -1231,7 +1291,12 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 )
 
-var controllerSel = labels.SelectorFromSet(labels.Set{"kgateway": "kgateway", "app.kubernetes.io/component": "controller"})
+// The production selectors (Task 6): Deployments by kgateway + component,
+// Pods by kgateway only (A1).
+var (
+	deploySel = labels.SelectorFromSet(labels.Set{"kgateway": "kgateway", "app.kubernetes.io/component": "controller"})
+	podSel    = labels.SelectorFromSet(labels.Set{"kgateway": "kgateway"})
+)
 
 func waitSynced(t *testing.T, c *Cache) *Snapshot {
 	t.Helper()
@@ -1256,7 +1321,7 @@ func TestSnapshotContainsWatchedObjectsOnly(t *testing.T) {
 		testutil.Gateway("shop", "edge", "kgateway", nil),
 	)
 	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(),
-		PodSelectors: []labels.Selector{controllerSel}, DeploymentSelectors: []labels.Selector{controllerSel}})
+		PodSelectors: []labels.Selector{podSel}, DeploymentSelectors: []labels.Selector{deploySel}})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.Start(ctx)
@@ -1271,6 +1336,62 @@ func TestSnapshotContainsWatchedObjectsOnly(t *testing.T) {
 	}
 	if len(s.Pods) != 1 || len(s.Namespaces) != 1 {
 		t.Fatalf("pods=%d namespaces=%d", len(s.Pods), len(s.Namespaces))
+	}
+	for _, gvr := range []schema.GroupVersionResource{NamespacesGVR, PodsGVR, DeploymentsGVR} {
+		if !s.Access[gvr].OK {
+			t.Errorf("%s must be reported in Access: %+v", gvr.Resource, s.Access[gvr])
+		}
+	}
+}
+
+// Finding 2: HasSynced stays true after a later list/watch failure, so a recent
+// error must make the kind inaccessible until the error is older than ErrorWindow.
+func TestWatchErrorAfterSyncMarksKindInaccessible(t *testing.T) {
+	dyn, kube := testutil.Clients(t, testutil.Namespace("shop", nil))
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream()})
+	t0 := testutil.Now
+	c.mu.Lock()
+	c.now = func() time.Time { return t0 }
+	c.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	waitSynced(t, c)
+
+	hr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+	c.recordError(c.dyn[hr], errors.New("connection refused"))
+	c.recordError(c.ns, errors.New("connection refused"))
+	s := c.Snapshot()
+	if s.Access[hr].OK || s.Access[hr].Err != "connection refused" {
+		t.Fatalf("a recent watch error must make httproutes inaccessible, got %+v", s.Access[hr])
+	}
+	if s.Access[NamespacesGVR].OK {
+		t.Fatal("a recent watch error must make namespaces inaccessible")
+	}
+	if !s.Synced {
+		t.Fatal("an errored informer still counts as settled for sync")
+	}
+
+	c.mu.Lock()
+	c.now = func() time.Time { return t0.Add(ErrorWindow + time.Second) }
+	c.mu.Unlock()
+	if s := c.Snapshot(); !s.Access[hr].OK || !s.Access[NamespacesGVR].OK {
+		t.Fatalf("an error older than ErrorWindow on a synced informer must clear, got %+v / %+v", s.Access[hr], s.Access[NamespacesGVR])
+	}
+}
+
+func TestForbiddenNamespacesAreReported(t *testing.T) {
+	dyn, kube := testutil.Clients(t, testutil.Namespace("shop", nil))
+	kube.PrependReactor("list", "namespaces", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil)
+	})
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream()})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	s := waitSynced(t, c)
+	if s.Access[NamespacesGVR].OK || s.Access[NamespacesGVR].Err == "" {
+		t.Fatalf("namespaces must be reported as not accessible, got %+v", s.Access[NamespacesGVR])
 	}
 }
 
@@ -1327,15 +1448,28 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 )
 
-// Access reports whether a kind could be listed.
+// Access reports whether a kind can currently be read.
 type Access struct {
 	OK  bool   `json:"ok"`
 	Err string `json:"error,omitempty"`
 }
 
+// ErrorWindow is how long a list/watch error keeps a kind inaccessible after
+// its informer has synced. The reflector's backoff caps at about 30 s, so a
+// failure that persists recurs inside the window.
+const ErrorWindow = 60 * time.Second
+
+// GVRs under which the typed informers report their Access.
+var (
+	NamespacesGVR  = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
+	PodsGVR        = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	DeploymentsGVR = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+)
+
 // Snapshot is an immutable view of the cache at TakenAt. Callers must not mutate it.
 type Snapshot struct {
-	Objects     map[schema.GroupVersionResource][]*unstructured.Unstructured
+	Objects map[schema.GroupVersionResource][]*unstructured.Unstructured
+	// Access holds every served kind plus NamespacesGVR, PodsGVR and DeploymentsGVR.
 	Access      map[schema.GroupVersionResource]Access
 	Namespaces  []*corev1.Namespace
 	Pods        []*corev1.Pod
@@ -1358,20 +1492,26 @@ type Config struct {
 	DeploymentSelectors []labels.Selector
 }
 
+// watchError is the last list/watch error of an informer and when it happened.
+type watchError struct {
+	msg string
+	at  time.Time
+}
+
 // Cache is a set of informers whose contents are read through Snapshot.
 type Cache struct {
 	mu      sync.Mutex
-	errs    map[toolscache.SharedIndexInformer]string
+	errs    map[toolscache.SharedIndexInformer]watchError
 	dyn     map[schema.GroupVersionResource]toolscache.SharedIndexInformer
 	ns      toolscache.SharedIndexInformer
 	pods    []toolscache.SharedIndexInformer
 	deploys []toolscache.SharedIndexInformer
-	now     func() time.Time
+	now     func() time.Time // guarded by mu
 }
 
 // New creates the informers. Nothing runs until Start.
 func New(cfg Config) *Cache {
-	c := &Cache{errs: map[toolscache.SharedIndexInformer]string{}, dyn: map[schema.GroupVersionResource]toolscache.SharedIndexInformer{}, now: time.Now}
+	c := &Cache{errs: map[toolscache.SharedIndexInformer]watchError{}, dyn: map[schema.GroupVersionResource]toolscache.SharedIndexInformer{}, now: time.Now}
 	df := dynamicinformer.NewDynamicSharedInformerFactory(cfg.Dynamic, 0)
 	for _, s := range cfg.Served {
 		inf := df.ForResource(s.GVR()).Informer()
@@ -1402,11 +1542,14 @@ func selected(kube kubernetes.Interface, sel labels.Selector) informers.SharedIn
 // trackErrors records the last list/watch error of inf (e.g. Forbidden) so the
 // snapshot can report the kind as inaccessible instead of silently empty.
 func (c *Cache) trackErrors(inf toolscache.SharedIndexInformer) {
-	_ = inf.SetWatchErrorHandler(func(_ *toolscache.Reflector, err error) {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.errs[inf] = err.Error()
-	})
+	_ = inf.SetWatchErrorHandler(func(_ *toolscache.Reflector, err error) { c.recordError(inf, err) })
+}
+
+// recordError stores err as the last error of inf, stamped with the cache clock.
+func (c *Cache) recordError(inf toolscache.SharedIndexInformer, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.errs[inf] = watchError{msg: err.Error(), at: c.now()}
 }
 
 func (c *Cache) all() []toolscache.SharedIndexInformer {
@@ -1424,22 +1567,39 @@ func (c *Cache) Start(ctx context.Context) {
 	}
 }
 
+// access reports whether inf can currently be read. HasSynced records only the
+// initial sync and stays true after later failures (finding 2), so an error
+// newer than ErrorWindow makes the kind inaccessible even after the sync.
 func (c *Cache) access(inf toolscache.SharedIndexInformer) Access {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if inf.HasSynced() {
-		delete(c.errs, inf) // a later successful list clears an earlier error
+	e, hasErr := c.errs[inf]
+	recent := hasErr && c.now().Sub(e.at) < ErrorWindow
+	switch {
+	case inf.HasSynced() && !recent:
 		return Access{OK: true}
-	}
-	if e, ok := c.errs[inf]; ok {
-		return Access{Err: e}
+	case hasErr:
+		return Access{Err: e.msg}
 	}
 	return Access{}
 }
 
+// accessAll merges several informers of one kind: the first that is not OK wins.
+func (c *Cache) accessAll(infs []toolscache.SharedIndexInformer) Access {
+	for _, inf := range infs {
+		if a := c.access(inf); !a.OK {
+			return a
+		}
+	}
+	return Access{OK: true}
+}
+
 // Snapshot copies the current cache contents.
 func (c *Cache) Snapshot() *Snapshot {
-	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: c.now()}
+	c.mu.Lock()
+	takenAt := c.now()
+	c.mu.Unlock()
+	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: takenAt}
 	settled := func(a Access) bool { return a.OK || a.Err != "" }
 	for gvr, inf := range c.dyn {
 		a := c.access(inf)
@@ -1450,7 +1610,10 @@ func (c *Cache) Snapshot() *Snapshot {
 		}
 		sort.Slice(s.Objects[gvr], func(i, j int) bool { return key(s.Objects[gvr][i]) < key(s.Objects[gvr][j]) })
 	}
-	s.Synced = s.Synced && settled(c.access(c.ns))
+	s.Access[NamespacesGVR] = c.access(c.ns)
+	s.Access[PodsGVR] = c.accessAll(c.pods)
+	s.Access[DeploymentsGVR] = c.accessAll(c.deploys)
+	s.Synced = s.Synced && settled(s.Access[NamespacesGVR])
 	for _, o := range c.ns.GetStore().List() {
 		s.Namespaces = append(s.Namespaces, o.(*corev1.Namespace))
 	}
@@ -1502,7 +1665,7 @@ git add pkg/cache internal/testutil go.mod go.sum && git commit -m "feat(cache):
 - Consumes: `cache.Snapshot`, the `testutil` fixtures.
 - Produces:
   - `install.Install{Namespace, Name, Version, Edition, Container string; ControllerNames []string; Deployment *appsv1.Deployment; Pods []*corev1.Pod; MetricsPort int32}` with `ID() string` (`"ns/name"`);
-  - `install.Detector` (interface: `Name() string; ControllerSelector() labels.Selector; ProxySelector() labels.Selector; Detect(d *appsv1.Deployment) (Install, bool)`);
+  - `install.Detector` (interface: `Name() string; ControllerSelector() labels.Selector; ControllerPodSelector() labels.Selector; ProxySelector() labels.Selector; Detect(d *appsv1.Deployment) (Install, bool)`). `ControllerSelector` selects controller Deployments; `ControllerPodSelector` is the cache's Pod watch (A1); Pods are attributed to an install through the Deployment's `spec.selector` in the same namespace;
   - `install.UpstreamDetector{}`;
   - `install.Discover(snap *cache.Snapshot, detectors []Detector) []Install` (sorted by ID; first matching detector wins);
   - `install.ScopeMode` (`ScopeAll`, `ScopeSelectors`, `ScopeUnknown`);
@@ -1525,6 +1688,8 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -1562,6 +1727,30 @@ func (fixedDetector) Detect(d *appsv1.Deployment) (Install, bool) {
 	in, ok := UpstreamDetector{}.Detect(d)
 	in.Edition = "fixed"
 	return in, ok
+}
+
+// A1: the Pod watch must match the upstream Pod labels of every supported chart
+// (v2.3+ adds app.kubernetes.io/component=controller to Pods; older charts and
+// custom templates do not), and Pods are attributed through the Deployment's selector.
+func TestControllerPodSelectorMatchesUpstreamPods(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 2, 2)
+	current := testutil.ControllerPod(d, "kgateway-a", true)
+	older := testutil.ControllerPod(d, "kgateway-b", true)
+	delete(older.Labels, "app.kubernetes.io/component")
+	det := UpstreamDetector{}
+	for _, p := range []*corev1.Pod{current, older} {
+		if !det.ControllerPodSelector().Matches(labels.Set(p.Labels)) {
+			t.Fatalf("pod %s with labels %v must be watched", p.Name, p.Labels)
+		}
+	}
+	if det.ControllerSelector().Matches(labels.Set(older.Labels)) {
+		t.Fatal("the Deployment selector requires the component label; it must not be used for Pods")
+	}
+	other := testutil.ControllerPod(testutil.ControllerDeployment("kgw", "other", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1), "other-a", true)
+	got := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}, Pods: testutil.PodList(current, older, other)}, []Detector{det})
+	if len(got) != 1 || len(got[0].Pods) != 2 {
+		t.Fatalf("both pods of kgw/kgateway, and only those, must be attributed to it: %+v", got)
+	}
 }
 ```
 
@@ -1723,8 +1912,12 @@ func (i Install) ID() string { return i.Namespace + "/" + i.Name }
 // Detectors are tried in order; the first that matches wins.
 type Detector interface {
 	Name() string
-	// ControllerSelector selects controller Deployments and Pods; the cache watches only these.
+	// ControllerSelector selects controller Deployments; the cache watches only these.
 	ControllerSelector() labels.Selector
+	// ControllerPodSelector selects the controller Pods the cache watches. It may
+	// be broader than the Pod labels of one chart version: Discover attributes
+	// Pods to an install through the Deployment's spec.selector.
+	ControllerPodSelector() labels.Selector
 	// ProxySelector selects the gateway proxy Deployments of this distribution.
 	ProxySelector() labels.Selector
 	// Detect returns the Install for d, or false if d is not this distribution's controller.
@@ -1795,6 +1988,12 @@ func (UpstreamDetector) Name() string { return "kgateway" }
 // ControllerSelector implements Detector.
 func (UpstreamDetector) ControllerSelector() labels.Selector {
 	return labels.SelectorFromSet(labels.Set{"kgateway": "kgateway", "app.kubernetes.io/component": "controller"})
+}
+
+// ControllerPodSelector implements Detector. Controller Pods carry the
+// component label only from chart v2.3.0 on, so the watch uses kgateway=kgateway (A1).
+func (UpstreamDetector) ControllerPodSelector() labels.Selector {
+	return labels.SelectorFromSet(labels.Set{"kgateway": "kgateway"})
 }
 
 // ProxySelector implements Detector.
@@ -2001,7 +2200,7 @@ func Resolve(insts []Install, p ScopeProvider) []Resolved {
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: `go test ./pkg/install/... -run 'Discover|Detector|Selector|Scope'`
+Run: `go test ./pkg/install/... -run 'Discover|Detector|Selector|Scope|PodSelector'`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -2021,14 +2220,20 @@ git add pkg/install internal/testutil && git commit -m "feat(install): controlle
 **Interfaces:**
 - Consumes: `cache.Snapshot`, `kinds.Served`, `kinds.KgatewayGroup`, `objects.*`, `install.Resolved`.
 - Produces:
-  - `install.Owned{GatewayClasses, Gateways, ListenerSets []*unstructured.Unstructured; Routes, Policies []OwnedObject}`;
-  - `install.OwnedObject{Kind kinds.Served; Obj *unstructured.Unstructured}`;
+  - `install.Owned{GatewayClasses, Gateways, ListenerSets []*unstructured.Unstructured; Routes, Policies []OwnedObject; Unattached []UnattachedRoute}`;
+  - `install.OwnedObject{Kind kinds.Served; Obj *unstructured.Unstructured; Parents []objects.ParentRef}`. For a route, `Parents` are its current `spec.parentRefs` that resolve to a Gateway or ListenerSet of this install; only their status entries are evaluated (finding 5). Empty for policies;
+  - `install.UnattachedRoute{Route OwnedObject; Parent objects.ParentRef}` (a diagnostic candidate for KGWUI-003, not counted; finding 9);
   - `install.AmbiguousGateway{Gateway objects.Ref; Installs []string}`;
   - `install.UnwatchedRoute{Install string; Route objects.Ref; Gateway objects.Ref}`;
   - `install.Assignment{PerInstall map[string]*Owned; Ambiguous []AmbiguousGateway; Unwatched []UnwatchedRoute}`;
   - `install.Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assignment`.
 
-**Rules** (design §4.3): A Gateway belongs to install I when its class's `controllerName` ∈ I.ControllerNames and the Gateway's namespace is in I's scope. If more than one install matches, the Gateway is ambiguous and assigned to none. A ListenerSet follows its parent Gateway, but only if the ListenerSet's own namespace is in scope. A route belongs to I when one of its parentRefs resolves (directly, or through a ListenerSet) to a Gateway of I **and the route's own namespace** is in I's scope; otherwise the route is recorded as Unwatched for I. A kgateway-group policy belongs to every install whose scope contains its namespace. Any other policy (e.g. BackendTLSPolicy) belongs to I only if it is in scope and has a `status.ancestors` entry with I's controller name.
+**Rules** (design §4.3): Every reference is resolved by its full group/kind/namespace/name identity (`objects.ParentRef.Ref()`); a parentRef in another API group never matches a Gateway API object (finding 6).
+- **Gateways.** A Gateway belongs to install I when its class's `controllerName` ∈ I.ControllerNames and the Gateway's namespace is in I's scope. If more than one install matches, the Gateway is ambiguous and assigned to none.
+- **ListenerSets.** A ListenerSet follows its parent Gateway, but only if the ListenerSet's own namespace is in scope.
+- **Routes.** A route belongs to I when one of its parentRefs resolves (directly, or through a ListenerSet) to a Gateway of I **and the route's own namespace** is in I's scope; its `Parents` are exactly those parentRefs. If the route's namespace is out of scope, it is recorded as Unwatched for I.
+- **Unattached routes.** A parentRef of a served Gateway or ListenerSet kind whose target does not exist makes the route Unattached in every install whose scope contains the route's namespace (finding 9). A route can be owned through one parent and unattached through another.
+- **Policies.** A kgateway-group policy belongs to every install whose scope contains its namespace. Any other policy (e.g. BackendTLSPolicy) belongs to I when it is in scope and either has a `status.ancestors` entry with I's controller name or has no ancestors at all yet: it is new and not yet processed (finding 10).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2177,6 +2382,90 @@ func TestStaleStatusOutOfScopeIsIgnored(t *testing.T) {
 		t.Fatal("out-of-scope route with stale kgateway status must not be assigned")
 	}
 }
+
+// Finding 6: a parentRef or ListenerSet parent in another API group never
+// resolves to a Gateway API Gateway with the same namespace/name.
+func TestForeignGroupReferencesDoNotResolve(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)}
+	foreignGw := objects.ParentRef{Group: "example.com", Kind: "Gateway", Namespace: "infra", Name: "edge"}
+	ls := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1", "kind": "ListenerSet",
+		"metadata": map[string]any{"name": "ls", "namespace": "shop"},
+		"spec":     map[string]any{"parentRef": map[string]any{"group": "example.com", "kind": "Gateway", "name": "edge", "namespace": "infra"}},
+	}}
+	snap := snapshot(nss,
+		testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), ls,
+		testutil.HTTPRoute("shop", "foreign", []objects.ParentRef{foreignGw}),
+	)
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}).PerInstall["kgw/kgateway"]
+	if len(o.Routes) != 0 || len(o.ListenerSets) != 0 || len(o.Unattached) != 0 {
+		t.Fatalf("foreign-group references must not resolve: routes=%v listenersets=%d unattached=%d", names(o.Routes), len(o.ListenerSets), len(o.Unattached))
+	}
+}
+
+// Finding 5: a route attached to Gateways of two installs carries, per install,
+// only the parentRefs that resolve to that install's Gateways.
+func TestRouteParentsAreScopedToTheInstall(t *testing.T) {
+	nss := []*corev1.Namespace{
+		testutil.Namespace("infra-a", map[string]string{"team": "a"}),
+		testutil.Namespace("infra-b", map[string]string{"env": "x"}),
+		testutil.Namespace("shop", map[string]string{"team": "a", "env": "x"}),
+	}
+	ga, gb := testutil.GwRef("infra-a", "edge"), testutil.GwRef("infra-b", "edge")
+	snap := snapshot(nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra-a", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "both", []objects.ParentRef{ga, gb}))
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"env":"x"}}]`)})
+	for id, want := range map[string]objects.ParentRef{"kgw-a/a": ga, "kgw-b/b": gb} {
+		rs := a.PerInstall[id].Routes
+		if len(rs) != 1 || len(rs[0].Parents) != 1 || rs[0].Parents[0] != want {
+			t.Fatalf("%s: want only parent %+v, got %+v", id, want, rs)
+		}
+	}
+}
+
+// Finding 9: a route whose parent Gateway does not exist is kept as a
+// diagnostic candidate in every install whose scope contains the route.
+func TestRouteToMissingGatewayIsUnattached(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("shop", map[string]string{"team": "a"}),
+		testutil.Namespace("blog", nil)}
+	gone := testutil.GwRef("infra", "gone")
+	snap := snapshot(nss, testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "orphan", []objects.ParentRef{gone}),
+		testutil.HTTPRoute("shop", "half", []objects.ParentRef{testutil.GwRef("infra", "edge"), gone}),
+		testutil.HTTPRoute("blog", "elsewhere", []objects.ParentRef{gone}))
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}).PerInstall["kgw/kgateway"]
+	if got := names(o.Routes); len(got) != 1 || got[0] != "shop/half" {
+		t.Fatalf("only shop/half is owned (through infra/edge): %v", got)
+	}
+	var un []string
+	for _, u := range o.Unattached {
+		if u.Parent != gone {
+			t.Fatalf("unexpected parent %+v", u.Parent)
+		}
+		un = append(un, u.Route.Obj.GetNamespace()+"/"+u.Route.Obj.GetName())
+	}
+	if len(un) != 2 || un[0] != "shop/orphan" || un[1] != "shop/half" {
+		t.Fatalf("unattached: %v (blog/elsewhere is out of scope)", un)
+	}
+}
+
+// Finding 10: a non-kgateway policy in scope belongs to the install while it has
+// no ancestors yet, and stops belonging to it once another controller owns it.
+func TestGenericPolicyWithoutStatusIsOwned(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("shop", nil)}
+	other := testutil.PolicyAncestor{Ref: testutil.GwRef("shop", "mesh"), Controller: "istio.io/gateway-controller"}
+	mine := testutil.PolicyAncestor{Ref: testutil.GwRef("shop", "edge"), Controller: testutil.Controller}
+	snap := snapshot(nss,
+		testutil.BackendTLSPolicy("shop", "new"),
+		testutil.BackendTLSPolicy("shop", "istio", other),
+		testutil.BackendTLSPolicy("shop", "ours", mine))
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}).PerInstall["kgw/kgateway"]
+	if got := names(o.Policies); len(got) != 2 || got[0] != "shop/new" || got[1] != "shop/ours" {
+		t.Fatalf("policies: %v", got)
+	}
+}
 ```
 
 - [ ] **Step 2: Run them and confirm they fail**
@@ -2206,6 +2495,18 @@ import (
 type OwnedObject struct {
 	Kind kinds.Served
 	Obj  *unstructured.Unstructured
+	// Parents are the route's current spec.parentRefs that resolve to a Gateway
+	// or ListenerSet of this install. Only their status entries are evaluated
+	// (finding 5). Empty for policies.
+	Parents []objects.ParentRef
+}
+
+// UnattachedRoute is a route in an install's scope whose parentRef names a
+// Gateway or ListenerSet that does not exist. It is a diagnostic candidate
+// for KGWUI-003 and is not counted as owned (finding 9).
+type UnattachedRoute struct {
+	Route  OwnedObject
+	Parent objects.ParentRef
 }
 
 // Owned is everything assigned to one install.
@@ -2215,6 +2516,7 @@ type Owned struct {
 	ListenerSets   []*unstructured.Unstructured
 	Routes         []OwnedObject
 	Policies       []OwnedObject
+	Unattached     []UnattachedRoute
 }
 
 // AmbiguousGateway is a Gateway claimed by more than one install (finding KGWUI-009).
@@ -2238,9 +2540,8 @@ type Assignment struct {
 	Unwatched  []UnwatchedRoute
 }
 
-type nsName struct{ ns, name string }
-
-// Assign assigns the snapshot's resources to insts.
+// Assign assigns the snapshot's resources to insts. References are resolved
+// by full group/kind/namespace/name identity (finding 6).
 func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assignment {
 	a := Assignment{PerInstall: map[string]*Owned{}}
 	for _, in := range insts {
@@ -2274,8 +2575,11 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 	}
 
 	// Gateways: class controllerName ∩ namespace scope.
-	gwOwner := map[nsName]int{}
+	gwOwner := map[objects.Ref]int{}
+	exists := map[objects.Ref]bool{} // every Gateway and ListenerSet in the snapshot
 	for _, gw := range list(kinds.CategoryGateway) {
+		gref := objects.RefOf(gw.Obj)
+		exists[gref] = true
 		var cands []int
 		for _, i := range classOwners[objects.GatewayClassName(gw.Obj)] {
 			if inScope(insts[i], gw.Obj.GetNamespace()) {
@@ -2285,11 +2589,11 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 		switch len(cands) {
 		case 0:
 		case 1:
-			gwOwner[nsName{gw.Obj.GetNamespace(), gw.Obj.GetName()}] = cands[0]
+			gwOwner[gref] = cands[0]
 			o := a.PerInstall[insts[cands[0]].ID()]
 			o.Gateways = append(o.Gateways, gw.Obj)
 		default:
-			amb := AmbiguousGateway{Gateway: objects.RefOf(gw.Obj)}
+			amb := AmbiguousGateway{Gateway: gref}
 			for _, i := range cands {
 				amb.Installs = append(amb.Installs, insts[i].ID())
 			}
@@ -2298,46 +2602,61 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 	}
 
 	// ListenerSets follow their parent Gateway when they are in scope themselves.
-	lsGateway := map[nsName]nsName{}
+	lsGateway := map[objects.Ref]objects.Ref{}
 	for _, ls := range list(kinds.CategoryListenerSet) {
-		p := objects.ListenerSetParent(ls.Obj)
-		gk := nsName{p.Namespace, p.Name}
-		i, ok := gwOwner[gk]
+		lref := objects.RefOf(ls.Obj)
+		exists[lref] = true
+		gref := objects.ListenerSetParent(ls.Obj).Ref()
+		i, ok := gwOwner[gref]
 		if !ok || !inScope(insts[i], ls.Obj.GetNamespace()) {
 			continue
 		}
-		lsGateway[nsName{ls.Obj.GetNamespace(), ls.Obj.GetName()}] = gk
+		lsGateway[lref] = gref
 		o := a.PerInstall[insts[i].ID()]
 		o.ListenerSets = append(o.ListenerSets, ls.Obj)
 	}
 
+	// parentKinds are the served group/kinds a route parentRef can name; only
+	// for these can the UI tell that the target does not exist.
+	parentKinds := map[[2]string]bool{}
+	for _, k := range append(kinds.ByCategory(served, kinds.CategoryGateway), kinds.ByCategory(served, kinds.CategoryListenerSet)...) {
+		parentKinds[[2]string{k.Group, k.Kind}] = true
+	}
+
 	// Routes: the route's own namespace decides scope (Review Focus 2).
 	for _, r := range list(kinds.CategoryRoute) {
-		assigned := map[int]bool{}
+		parents := map[int][]objects.ParentRef{} // install index → parentRefs resolving to its Gateways
+		gateway := map[int]objects.Ref{}         // install index → first Gateway reached
+		var order []int
 		for _, p := range objects.RouteParentRefs(r.Obj) {
-			gk := nsName{p.Namespace, p.Name}
-			switch p.Kind {
-			case "Gateway":
-			case "ListenerSet", "XListenerSet":
-				g, ok := lsGateway[gk]
-				if !ok {
-					continue
+			pref := p.Ref()
+			gref := pref
+			if g, ok := lsGateway[pref]; ok {
+				gref = g
+			}
+			if i, ok := gwOwner[gref]; ok {
+				if _, seen := parents[i]; !seen {
+					order = append(order, i)
+					gateway[i] = gref
 				}
-				gk = g
-			default:
+				parents[i] = append(parents[i], p)
 				continue
 			}
-			i, ok := gwOwner[gk]
-			if !ok || assigned[i] {
-				continue
+			if parentKinds[[2]string{pref.Group, pref.Kind}] && !exists[pref] {
+				for _, in := range insts {
+					if inScope(in, r.Obj.GetNamespace()) {
+						o := a.PerInstall[in.ID()]
+						o.Unattached = append(o.Unattached, UnattachedRoute{Route: OwnedObject{Kind: r.Kind, Obj: r.Obj}, Parent: p})
+					}
+				}
 			}
-			assigned[i] = true
+		}
+		for _, i := range order {
 			if inScope(insts[i], r.Obj.GetNamespace()) {
 				o := a.PerInstall[insts[i].ID()]
-				o.Routes = append(o.Routes, r)
+				o.Routes = append(o.Routes, OwnedObject{Kind: r.Kind, Obj: r.Obj, Parents: parents[i]})
 			} else {
-				a.Unwatched = append(a.Unwatched, UnwatchedRoute{Install: insts[i].ID(), Route: objects.RefOf(r.Obj),
-					Gateway: objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: gk.ns, Name: gk.name}})
+				a.Unwatched = append(a.Unwatched, UnwatchedRoute{Install: insts[i].ID(), Route: objects.RefOf(r.Obj), Gateway: gateway[i]})
 			}
 		}
 	}
@@ -2348,7 +2667,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 			if !inScope(in, p.Obj.GetNamespace()) {
 				continue
 			}
-			if p.Kind.Group != kinds.KgatewayGroup && !hasAncestorFrom(p.Obj, in.ControllerNames) {
+			if p.Kind.Group != kinds.KgatewayGroup && !claimable(p.Obj, in.ControllerNames) {
 				continue
 			}
 			o := a.PerInstall[in.ID()]
@@ -2358,8 +2677,15 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 	return a
 }
 
-func hasAncestorFrom(u *unstructured.Unstructured, controllers []string) bool {
-	for _, a := range objects.PolicyAncestors(u) {
+// claimable reports whether a policy outside the kgateway group belongs to an
+// install with controllers: it has an ancestor from one of them, or no
+// ancestors at all yet, so it is new and not yet processed (finding 10).
+func claimable(u *unstructured.Unstructured, controllers []string) bool {
+	as := objects.PolicyAncestors(u)
+	if len(as) == 0 {
+		return true
+	}
+	for _, a := range as {
 		if slices.Contains(controllers, a.ControllerName) {
 			return true
 		}
@@ -2385,7 +2711,7 @@ git add pkg/install && git commit -m "feat(install): assign gateways, routes and
 
 **Files:**
 - Create: `pkg/ctrlmetrics/parse.go`, `pkg/ctrlmetrics/scrape.go`
-- Create: `pkg/ctrlmetrics/testdata/v2.4.7.txt`, `pkg/ctrlmetrics/testdata/v2.3.11.txt` (real controller `/metrics` output captured in Task 1's cluster; the captured lines for both metric families are kept verbatim, plus at least 20 other lines)
+- Create: `pkg/ctrlmetrics/testdata/v2.4.7.txt`, `pkg/ctrlmetrics/testdata/v2.3.11.txt` (real controller `/metrics` output captured in Task 1 Step 3; the captured lines for both metric families are kept verbatim, plus at least 20 other lines)
 - Test: `pkg/ctrlmetrics/parse_test.go`, `pkg/ctrlmetrics/scrape_test.go`
 
 **Interfaces:**
@@ -2398,7 +2724,7 @@ git add pkg/install && git commit -m "feat(install): assign gateways, routes and
   - `ctrlmetrics.Aggregate(replicas []Metrics) Metrics` (rejects summed; managed max per key);
   - `ctrlmetrics.Scraper` (interface: `Scrape(ctx context.Context, pod *corev1.Pod, port int32) (io.ReadCloser, error)`);
   - `ctrlmetrics.HTTPScraper{Client *http.Client}`, `ctrlmetrics.PodProxyScraper{Kube kubernetes.Interface}`;
-  - `ctrlmetrics.Result{Metrics Metrics; CollectedAt time.Time; Err string}`;
+  - `ctrlmetrics.Result{Metrics Metrics; CollectedAt time.Time; Err string}` with `Stale(now time.Time, maxAge time.Duration) bool` (collected more than `maxAge` before `now`; a zero `maxAge` never makes a result stale; finding 3);
   - `ctrlmetrics.Collector`, `ctrlmetrics.NewCollector(s Scraper) *Collector`, `(*Collector).Collect(ctx, in install.Install) Result`, `(*Collector).Run(ctx, every time.Duration, installs func() []install.Install)`, `(*Collector).Get(id string) (Result, bool)`;
   - `ctrlmetrics.Source` (interface: `Get(id string) (Result, bool)`).
 
@@ -2411,15 +2737,21 @@ package ctrlmetrics
 
 import (
 	"os"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
+// type_url values carry no "type.googleapis.com/" prefix: the controller strips
+// it (envoy_error.go on v2.3.11, v2.4.7 and main).
 const sample = `# HELP kgateway_envoy_xds_rejects_active Number of xDS responses currently rejected by envoy proxy
 # TYPE kgateway_envoy_xds_rejects_active gauge
-kgateway_envoy_xds_rejects_active{gateway_name="edge",gateway_namespace="infra",type_url="type.googleapis.com/envoy.config.listener.v3.Listener"} 1
-kgateway_envoy_xds_rejects_active{gateway_name="edge",gateway_namespace="infra",type_url="type.googleapis.com/envoy.config.route.v3.RouteConfiguration"} 1
-kgateway_envoy_xds_rejects_active{gateway_name="ok",gateway_namespace="infra",type_url="type.googleapis.com/envoy.config.listener.v3.Listener"} 0
+kgateway_envoy_xds_rejects_active{gateway_name="edge",gateway_namespace="infra",type_url="envoy.config.listener.v3.Listener"} 1
+kgateway_envoy_xds_rejects_active{gateway_name="edge",gateway_namespace="infra",type_url="envoy.config.route.v3.RouteConfiguration"} 1
+kgateway_envoy_xds_rejects_active{gateway_name="ok",gateway_namespace="infra",type_url="envoy.config.listener.v3.Listener"} 0
 # HELP kgateway_resources_managed Current number of resources managed
 # TYPE kgateway_resources_managed gauge
 kgateway_resources_managed{namespace="shop",parent="edge",resource="HTTPRoute"} 3
@@ -2459,9 +2791,28 @@ func TestAggregateSumsRejectsAndMaxesManaged(t *testing.T) {
 	}
 }
 
-// Contract test: the metric names and labels the UI depends on exist in real
-// controller output for every supported version.
-func TestCapturedFixturesContainContractFamilies(t *testing.T) {
+// labelNames returns the sorted label names of every series of family name.
+func labelNames(t *testing.T, text, name string) [][]string {
+	t.Helper()
+	fams, err := expfmt.NewTextParser(model.UTF8Validation).TextToMetricFamilies(strings.NewReader(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out [][]string
+	for _, s := range fams[name].GetMetric() {
+		var ls []string
+		for _, l := range s.GetLabel() {
+			ls = append(ls, l.GetName())
+		}
+		sort.Strings(ls)
+		out = append(out, ls)
+	}
+	return out
+}
+
+// Contract test (finding 15): the metric names, labels and values the UI
+// depends on, checked against real controller output for every supported version.
+func TestCapturedFixturesHonourTheContract(t *testing.T) {
 	for _, f := range []string{"testdata/v2.4.7.txt", "testdata/v2.3.11.txt"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -2473,6 +2824,34 @@ func TestCapturedFixturesContainContractFamilies(t *testing.T) {
 		}
 		if !m.ManagedPresent {
 			t.Errorf("%s: %s missing", f, ResourcesManaged)
+		}
+		for _, ls := range labelNames(t, string(b), ResourcesManaged) {
+			if strings.Join(ls, ",") != "namespace,parent,resource" {
+				t.Errorf("%s: %s labels %v, want namespace,parent,resource", f, ResourcesManaged, ls)
+			}
+		}
+		gateways := 0.0
+		for k, v := range m.Managed {
+			if k.Resource == "Gateway" && k.Namespace != "" {
+				gateways += v
+			}
+		}
+		if gateways < 1 {
+			t.Errorf("%s: the captured install manages a Gateway, but no resource=\"Gateway\" series counts it: %+v", f, m.Managed)
+		}
+		// The reject family only exists after a first reject; when present it must keep its labels.
+		for _, ls := range labelNames(t, string(b), XDSRejectsActive) {
+			if strings.Join(ls, ",") != "gateway_name,gateway_namespace,type_url" {
+				t.Errorf("%s: %s labels %v", f, XDSRejectsActive, ls)
+			}
+		}
+		if strings.Contains(string(b), XDSRejectsActive+"{") && strings.Contains(string(b), `type_url="type.googleapis.com/`) {
+			t.Errorf("%s: type_url is expected without the type.googleapis.com/ prefix", f)
+		}
+	}
+	for _, ls := range labelNames(t, sample, XDSRejectsActive) {
+		if strings.Join(ls, ",") != "gateway_name,gateway_namespace,type_url" {
+			t.Fatalf("sample: %v", ls)
 		}
 	}
 }
@@ -2489,6 +2868,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -2535,12 +2915,26 @@ func TestCollectNoReadyPodsIsError(t *testing.T) {
 		t.Fatal("no ready controller pod must be an error")
 	}
 }
+
+// Finding 3: a result keeps its CollectedAt, so recomputing the model cannot make it look fresh.
+func TestResultStaleness(t *testing.T) {
+	r := Result{CollectedAt: testutil.Now}
+	if r.Stale(testutil.Now.Add(30*time.Second), 30*time.Second) {
+		t.Fatal("exactly maxAge old is not stale")
+	}
+	if !r.Stale(testutil.Now.Add(31*time.Second), 30*time.Second) {
+		t.Fatal("older than maxAge must be stale")
+	}
+	if r.Stale(testutil.Now.Add(time.Hour), 0) {
+		t.Fatal("a zero maxAge never makes a result stale")
+	}
+}
 ```
 
 - [ ] **Step 2: Run them and confirm they fail**
 
 Run: `go get github.com/prometheus/common@latest && go test ./pkg/ctrlmetrics/...`
-Expected: FAIL (`undefined: Parse`). The fixture test also fails until the files from Task 1 are added.
+Expected: FAIL (`undefined: Parse`). The fixture test also fails until the files from Task 1 are added. Commit them with this task.
 
 - [ ] **Step 3: Implement**
 
@@ -2700,6 +3094,13 @@ type Result struct {
 	Err string
 }
 
+// Stale reports whether r was collected more than maxAge before now. A zero
+// maxAge never makes a result stale. Consumers use 3 × the metrics interval,
+// so a stalled collector cannot keep an old zero-reject result green (finding 3).
+func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
+	return maxAge > 0 && now.Sub(r.CollectedAt) > maxAge
+}
+
 // Source returns the latest Result per install ID.
 type Source interface {
 	Get(id string) (Result, bool)
@@ -2803,15 +3204,15 @@ git add pkg/ctrlmetrics go.mod go.sum && git commit -m "feat(ctrlmetrics): scrap
 - Test: `pkg/health/checks_test.go`, `pkg/health/rollup_test.go`, `pkg/scopeverify/verify_test.go`
 
 **Interfaces:**
-- Consumes: `install.Resolved`, `install.Owned`, `install.Assignment`, `cache.Snapshot`, `ctrlmetrics.Result`, `objects.*`.
+- Consumes: `install.Resolved`, `install.Owned` (including `OwnedObject.Parents` and `Unattached`), `install.Assignment`, `cache.Snapshot`, `ctrlmetrics.Result` (including `Stale`), `objects.*`.
 - Produces:
   - `health.Severity` (`SeverityError`, `SeverityWarning`, `SeverityInfo`);
   - `health.State` (`StateHealthy`, `StateWarning`, `StateError`, `StateUnknown`);
-  - `health.Finding{Code, Slug string; Severity Severity; Install string; Resource *objects.Ref; Message, Detail string; Since *time.Time}`;
+  - `health.Finding{Code, Slug string; Severity Severity; Install string; Resource *objects.Ref; Message, Detail string; Since *time.Time; Restricted bool}` (`Restricted` is set only by the API's `Authorizer` redaction, D-013; JSON `restricted,omitempty`);
   - `health.CheckResult{Name string; OK, Required bool; CollectedAt time.Time; Error string}`;
-  - `health.Input{Install install.Resolved; Owned *install.Owned; Assignment install.Assignment; Snapshot *cache.Snapshot; Metrics ctrlmetrics.Result; HasMetrics bool; Verify scopeverify.Result; Now time.Time}`;
+  - `health.Input{Install install.Resolved; Owned *install.Owned; Assignment install.Assignment; Snapshot *cache.Snapshot; Metrics ctrlmetrics.Result; HasMetrics bool; MetricsMaxAge time.Duration; Verify scopeverify.Result; Now time.Time}`;
   - `health.Check` (interface: `Name() string; Run(in Input) ([]Finding, CheckResult)`);
-  - `health.Report{State State; Findings []Finding; Checks []CheckResult; Counts map[Severity]int; CollectedAt time.Time}`;
+  - `health.Report{Install string; State State; Findings []Finding; Checks []CheckResult; Counts map[Severity]int; CollectedAt time.Time}` (`Install` is the install ID, so the frontend can reject a response for another install; finding 4);
   - `health.Evaluate(in Input, checks []Check) Report`;
   - `health.RollUp(fs []Finding, cs []CheckResult) State`;
   - `health.Upstream() []Check`;
@@ -2821,8 +3222,20 @@ git add pkg/ctrlmetrics go.mod go.sum && git commit -m "feat(ctrlmetrics): scrap
   - `scopeverify.Mismatch{Namespace, Resource string; UI, Controller float64; Since time.Time}`;
   - `scopeverify.Result{Available bool; Reason string; Mismatches []Mismatch}`;
   - `scopeverify.Verifier` (interface: `Name() string; Verify(in Input) Result`);
-  - `scopeverify.Input{Install install.Resolved; Snapshot *cache.Snapshot; Served []kinds.Served; Metrics ctrlmetrics.Result; HasMetrics bool; Now time.Time}`;
+  - `scopeverify.Input{Install install.Resolved; Snapshot *cache.Snapshot; Served []kinds.Served; Metrics ctrlmetrics.Result; HasMetrics bool; MetricsMaxAge time.Duration; Now time.Time}`;
   - `scopeverify.NewManagedCountVerifier(persist time.Duration) *ManagedCountVerifier`.
+
+**Condition rules (finding 1, D-006).** Freshness is decided before status. For each status block, a missing *required* condition, or *any* condition (`True` or `False`) with `observedGeneration < metadata.generation`, makes the resource "not yet processed" (KGWUI-003, warning) once it is older than `Grace`; only current conditions are reported. Required and optional types (optional ones are evaluated only when present):
+
+| Status block | Required | Optional |
+|---|---|---|
+| GatewayClass | `Accepted` | — |
+| Gateway | `Accepted`, `Programmed` | — |
+| Gateway listener | `Accepted`, `Programmed` | `ResolvedRefs` (plus `Conflicted=True` is an error) |
+| Route parent (one per `OwnedObject.Parents` entry, matched to the `status.parents` entry with the same parentRef and the install's controller name; finding 5) | `Accepted`, `ResolvedRefs` | `kgateway.dev/Programmed` |
+| Policy ancestor (entries with the install's controller name) | `Accepted` | `Attached` |
+
+A route parent without a matching status entry, a policy with no ancestor from the install's controller, and an `Unattached` route are "not yet processed" too. Each resource gets at most one KGWUI-003 finding.
 
 **Proposed refinement of design §5.2 (needs user approval with this plan):** the policy reason `Overridden` (on `Attached`) maps to **info**, not warning. Overriding is the normal outcome of hierarchical policy; at scale it would flood the warning list. `PartiallyValid` stays a warning. If the user rejects this, change the single entry in `policySeverity` and its test row.
 
@@ -2869,6 +3282,7 @@ package health
 
 import (
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -2893,7 +3307,8 @@ type world struct {
 	ctrl    *appsv1.Deployment
 	pods    []*corev1.Pod
 	scope   string
-	metrics *ctrlmetrics.Result // nil = not collected yet
+	metrics *ctrlmetrics.Result                          // nil = not collected yet
+	access  map[schema.GroupVersionResource]cache.Access // overrides on top of "everything readable"
 }
 
 func healthyWorld() *world {
@@ -2922,6 +3337,12 @@ func (w *world) report(t *testing.T) Report {
 	for _, k := range served {
 		snap.Access[k.GVR()] = cache.Access{OK: true}
 	}
+	for _, gvr := range []schema.GroupVersionResource{cache.NamespacesGVR, cache.PodsGVR, cache.DeploymentsGVR} {
+		snap.Access[gvr] = cache.Access{OK: true}
+	}
+	for gvr, a := range w.access {
+		snap.Access[gvr] = a
+	}
 	for _, o := range w.objs {
 		gv, _ := schema.ParseGroupVersion(o.GetAPIVersion())
 		for _, k := range served {
@@ -2935,7 +3356,7 @@ func (w *world) report(t *testing.T) Report {
 	res := install.Resolved{Install: in, Scope: install.ParseSelectors(w.scope)}
 	a := install.Assign(snap, served, []install.Resolved{res})
 	hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Now: testutil.Now,
-		Verify: scopeverify.Result{Available: true}}
+		MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}}
 	if w.metrics != nil {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
@@ -2984,11 +3405,17 @@ func TestChecks(t *testing.T) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
 		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
-		{"002 rule replaced", func(w *world) {
+		{"002 rule replaced (2.4, optional condition present)", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
-				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleReplaced")}})
+				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
+				testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleReplaced")}})
 		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
-		{"002 policy target not found", func(w *world) {
+		{"002 rule replaced on 2.3 (Accepted=False)", func(w *world) {
+			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionFalse, "RouteRuleReplaced"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
+		// Main only: v2.3.x and v2.4.x write no status for a missing target (see "003 policy without ancestors").
+		{"002 policy target not found (main)", func(w *world) {
 			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{
 				Ref: objects.ParentRef{Group: "gateway.kgateway.dev", Kind: "StatusSummary", Name: "summary"}, Controller: testutil.Controller,
 				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "TargetNotFound")}}))
@@ -2997,6 +3424,10 @@ func TestChecks(t *testing.T) {
 			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
 				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "PartiallyValid")}}))
 		}, CodeConditionFalse, SeverityWarning, "shop/tp", StateWarning},
+		{"002 generic policy rejected", func(w *world) {
+			w.objs = append(w.objs, testutil.BackendTLSPolicy("shop", "btls", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
+				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}}))
+		}, CodeConditionFalse, SeverityError, "shop/btls", StateError},
 		{"002 policy overridden is info", func(w *world) {
 			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
 				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Valid"), testutil.Cond("Attached", metav1.ConditionFalse, "Overridden")}}))
@@ -3004,6 +3435,19 @@ func TestChecks(t *testing.T) {
 		{"003 route not processed", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw})
 		}, CodeRouteUnattached, SeverityWarning, "shop/cart", StateWarning},
+		{"003 required condition absent", func(w *world) {
+			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}})
+		}, CodeRouteUnattached, SeverityWarning, "shop/cart", StateWarning},
+		{"003 policy without ancestors", func(w *world) {
+			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp"))
+		}, CodeRouteUnattached, SeverityWarning, "shop/tp", StateWarning},
+		{"003 generic policy without ancestors", func(w *world) {
+			w.objs = append(w.objs, testutil.BackendTLSPolicy("shop", "btls"))
+		}, CodeRouteUnattached, SeverityWarning, "shop/btls", StateWarning},
+		{"003 parent gateway does not exist", func(w *world) {
+			w.objs = append(w.objs, testutil.HTTPRoute("shop", "orphan", []objects.ParentRef{testutil.GwRef("infra", "gone")}))
+		}, CodeRouteUnattached, SeverityWarning, "shop/orphan", StateWarning},
 		{"004 namespace not watched", func(w *world) {
 			w.scope = `[{"matchLabels":{"team":"a"}}]`
 			w.nss = []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("shop", nil)}
@@ -3018,6 +3462,12 @@ func TestChecks(t *testing.T) {
 			w.metrics = &ctrlmetrics.Result{CollectedAt: testutil.Now, Err: "connection refused"}
 		}, CodeSignalUnavailable, SeverityInfo, "", StateUnknown},
 		{"008 metrics not collected yet forces unknown", func(w *world) { w.metrics = nil }, CodeSignalUnavailable, SeverityInfo, "", StateUnknown},
+		{"008 stale metrics force unknown", func(w *world) {
+			w.metrics.CollectedAt = testutil.Now.Add(-5 * time.Minute) // older than MetricsMaxAge (30 s)
+		}, CodeSignalUnavailable, SeverityInfo, "", StateUnknown},
+		{"008 namespaces not readable forces unknown", func(w *world) {
+			w.access = map[schema.GroupVersionResource]cache.Access{cache.NamespacesGVR: {Err: "connection refused"}}
+		}, CodeSignalUnavailable, SeverityInfo, "", StateUnknown},
 		{"008 scope unknown forces unknown", func(w *world) { w.scope = "[{" }, CodeSignalUnavailable, SeverityInfo, "", StateUnknown},
 	}
 	for _, tc := range cases {
@@ -3047,12 +3497,12 @@ func TestCrashLoopingController(t *testing.T) {
 	}
 }
 
-// Review Focus 4: stale conditions describe an older spec.
+// Review Focus 4: stale conditions describe an older spec, whether False or True.
 func TestStaleConditionIsPendingNotError(t *testing.T) {
 	w := healthyWorld()
 	gw := testutil.GwRef("infra", "edge")
 	route := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
-		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners")}})
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
 	route.SetGeneration(2) // conditions observed generation 1
 	w.objs[2] = route
 	r := w.report(t)
@@ -3061,6 +3511,52 @@ func TestStaleConditionIsPendingNotError(t *testing.T) {
 	}
 	if !has(r, CodeRouteUnattached, SeverityWarning, "shop/cart") {
 		t.Fatalf("a route stale for longer than the grace period must be 'not yet processed': %+v", r.Findings)
+	}
+}
+
+// Finding 1: a stale True condition must not count as a current success.
+func TestStaleTrueIsPendingNotHealthy(t *testing.T) {
+	w := healthyWorld()
+	gw := testutil.GwRef("infra", "edge")
+	route := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+	route.SetGeneration(2) // AcceptedBy's conditions observed generation 1
+	w.objs[2] = route
+	r := w.report(t)
+	if r.State == StateHealthy || !has(r, CodeRouteUnattached, SeverityWarning, "shop/cart") {
+		t.Fatalf("stale True must be 'not yet processed', got state=%s findings=%+v", r.State, r.Findings)
+	}
+	n := 0
+	for _, f := range r.Findings {
+		if f.Code == CodeRouteUnattached {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("one resource gets at most one KGWUI-003 finding, got %d", n)
+	}
+}
+
+// Grace: a resource younger than Grace without status is not reported yet.
+func TestFreshResourceWithoutStatusIsNotReported(t *testing.T) {
+	w := healthyWorld()
+	young := testutil.HTTPRoute("shop", "young", []objects.ParentRef{testutil.GwRef("infra", "edge")})
+	young.SetCreationTimestamp(metav1.NewTime(testutil.Now.Add(-10 * time.Second)))
+	w.objs = append(w.objs, young)
+	if r := w.report(t); has(r, CodeRouteUnattached, SeverityWarning, "shop/young") {
+		t.Fatalf("a route inside the grace period must not be reported: %+v", r.Findings)
+	}
+}
+
+// Finding 5: only status entries for current parentRefs of this install count.
+// An entry left behind for a removed parentRef is ignored.
+func TestStatusForRemovedParentIsIgnored(t *testing.T) {
+	w := healthyWorld()
+	gw, old := testutil.GwRef("infra", "edge"), testutil.GwRef("infra", "old")
+	w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller),
+		testutil.RouteParent{Ref: old, Controller: testutil.Controller, Conds: []metav1.Condition{
+			testutil.Cond("Accepted", metav1.ConditionFalse, "NoMatchingParent"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+	if r := w.report(t); r.State != StateHealthy || len(r.Findings) != 0 {
+		t.Fatalf("status for a removed parentRef must be ignored: state=%s findings=%+v", r.State, r.Findings)
 	}
 }
 
@@ -3159,6 +3655,16 @@ func TestAbsentFamilyWithObjectsIsUnavailable(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// Finding 3: counts from an old scrape must not verify the current scope.
+func TestStaleMetricsAreUnavailable(t *testing.T) {
+	in := input(testutil.Now, matching, true)
+	in.Metrics.CollectedAt = testutil.Now.Add(-5 * time.Minute)
+	in.MetricsMaxAge = 30 * time.Second
+	if r := NewManagedCountVerifier(20 * time.Second).Verify(in); r.Available {
+		t.Fatalf("stale metrics must make the verifier unavailable: %+v", r)
+	}
+}
 ```
 
 - [ ] **Step 2: Run them and confirm they fail**
@@ -3195,7 +3701,9 @@ type Input struct {
 	Served     []kinds.Served
 	Metrics    ctrlmetrics.Result
 	HasMetrics bool
-	Now        time.Time
+	// MetricsMaxAge is the age beyond which Metrics is stale; zero means no limit.
+	MetricsMaxAge time.Duration
+	Now           time.Time
 }
 
 // Mismatch is a (namespace, resource) whose counts have disagreed since Since.
@@ -3241,6 +3749,9 @@ func (*ManagedCountVerifier) Name() string { return "resources-managed" }
 func (v *ManagedCountVerifier) Verify(in Input) Result {
 	if !in.HasMetrics || in.Metrics.Err != "" {
 		return Result{Reason: "controller metrics unavailable"}
+	}
+	if in.Metrics.Stale(in.Now, in.MetricsMaxAge) {
+		return Result{Reason: "controller metrics are stale"}
 	}
 	ui := uiCounts(in)
 	if !in.Metrics.Metrics.ManagedPresent {
@@ -3401,6 +3912,10 @@ type Finding struct {
 	Message  string       `json:"message"`
 	Detail   string       `json:"detail,omitempty"`
 	Since    *time.Time   `json:"since,omitempty"`
+	// Restricted marks a finding on a resource the caller may not view. The
+	// API keeps its code, severity and resource and empties Message, Detail
+	// and Since (D-013). Checks never set it.
+	Restricted bool `json:"restricted,omitempty"`
 }
 
 // CheckResult records whether a check could collect its input. A Required
@@ -3421,8 +3936,11 @@ type Input struct {
 	Snapshot   *cache.Snapshot
 	Metrics    ctrlmetrics.Result
 	HasMetrics bool
-	Verify     scopeverify.Result
-	Now        time.Time
+	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
+	// interval); zero means no limit.
+	MetricsMaxAge time.Duration
+	Verify        scopeverify.Result
+	Now           time.Time
 }
 
 // Check produces findings for one concern.
@@ -3433,6 +3951,8 @@ type Check interface {
 
 // Report is the evaluated health of one install.
 type Report struct {
+	// Install is the install ID, so a client can reject a response for another install.
+	Install     string           `json:"install"`
 	State       State            `json:"state"`
 	Findings    []Finding        `json:"findings"`
 	Checks      []CheckResult    `json:"checks"`
@@ -3473,7 +3993,7 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // Evaluate runs checks and assembles a Report with findings sorted by
 // severity, then code, then resource.
 func Evaluate(in Input, checks []Check) Report {
-	r := Report{Counts: map[Severity]int{}, CollectedAt: in.Now, Findings: []Finding{}}
+	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now, Findings: []Finding{}}
 	for _, c := range checks {
 		fs, cr := c.Run(in)
 		r.Findings = append(r.Findings, fs...)
@@ -3605,7 +4125,8 @@ func unavailable(in Input, name, why string) ([]Finding, CheckResult) {
 		CheckResult{Name: name, Required: true, CollectedAt: in.Now, Error: why}
 }
 
-// cacheCheck: the snapshot is synced and every served kind is readable.
+// cacheCheck: the snapshot is synced and every served kind, plus Namespaces,
+// Pods and Deployments, is currently readable (finding 2).
 type cacheCheck struct{}
 
 func (cacheCheck) Name() string { return "cluster access" }
@@ -3662,7 +4183,23 @@ func notReady(d *appsv1.Deployment, code, slug, what, inst string) (Finding, boo
 		Message: fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)}, true
 }
 
-// conditionsCheck: KGWUI-002 and KGWUI-003.
+// Required and optional condition types per status block (see the condition
+// rules in the plan). Optional types are evaluated only when present.
+var (
+	classRequired    = []string{"Accepted"}
+	gatewayRequired  = []string{"Accepted", "Programmed"}
+	listenerRequired = []string{"Accepted", "Programmed"}
+	listenerOptional = []string{"ResolvedRefs"}
+	routeRequired    = []string{"Accepted", "ResolvedRefs"}
+	routeOptional    = []string{"kgateway.dev/Programmed"}
+	policyRequired   = []string{"Accepted"}
+	policyOptional   = []string{"Attached"}
+)
+
+// conditionsCheck: KGWUI-002 and KGWUI-003. Freshness is decided before
+// status (finding 1, D-006): a missing required condition, or any stale
+// condition, makes the resource "not yet processed"; only current conditions
+// are reported as errors or count as success.
 type conditionsCheck struct{}
 
 func (conditionsCheck) Name() string { return "resource status" }
@@ -3673,70 +4210,114 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		fs = append(fs, Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
 			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)})
 	}
-	pending := func(u *unstructured.Unstructured, why string) {
-		if in.Now.Sub(u.GetCreationTimestamp().Time) < Grace {
+	reported := map[objects.Ref]bool{} // one KGWUI-003 per resource
+	notProcessed := func(u *unstructured.Unstructured, msg, why string) {
+		r := objects.RefOf(u)
+		if reported[r] || in.Now.Sub(u.GetCreationTimestamp().Time) < Grace {
 			return
 		}
-		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: SeverityWarning, Install: id, Resource: ref(u),
-			Message: "Not yet processed by the controller", Detail: why})
+		reported[r] = true
+		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: SeverityWarning, Install: id, Resource: &r,
+			Message: msg, Detail: why})
 	}
-	// falseOrPending reports cond if False and current; a stale condition is pending (Review Focus 4).
-	falseOrPending := func(u *unstructured.Unstructured, cs []metav1.Condition, types []string, extra string) {
-		for _, t := range types {
-			cond := objects.FindCondition(cs, t)
-			if cond == nil || cond.Status == metav1.ConditionTrue {
-				continue
+	pending := func(u *unstructured.Unstructured, why string) { notProcessed(u, "Not yet processed by the controller", why) }
+	// current reports false when the block is pending: a required condition is
+	// missing, or any present condition describes an older generation.
+	current := func(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string, extra string) bool {
+		for _, t := range required {
+			if objects.FindCondition(cs, t) == nil {
+				pending(u, fmt.Sprintf("no %s condition%s", t, within(extra)))
+				return false
 			}
-			if objects.IsStale(u, *cond) {
-				pending(u, "status describes an older generation")
-				return
+		}
+		for _, t := range append(slices.Clone(required), optional...) {
+			if cond := objects.FindCondition(cs, t); cond != nil && objects.IsStale(u, *cond) {
+				pending(u, "status describes an older generation"+within(extra))
+				return false
 			}
-			add(u, SeverityError, *cond, extra)
+		}
+		return true
+	}
+	// evaluate reports every present condition of a current block that is not True.
+	evaluate := func(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string, extra string) {
+		if !current(u, cs, required, optional, extra) {
+			return
+		}
+		for _, t := range append(slices.Clone(required), optional...) {
+			if cond := objects.FindCondition(cs, t); cond != nil && cond.Status != metav1.ConditionTrue {
+				add(u, SeverityError, *cond, extra)
+			}
 		}
 	}
 	for _, gc := range in.Owned.GatewayClasses {
-		falseOrPending(gc, objects.Conditions(gc), []string{"Accepted"}, "")
+		evaluate(gc, objects.Conditions(gc), classRequired, nil, "")
 	}
 	for _, gw := range in.Owned.Gateways {
-		falseOrPending(gw, objects.Conditions(gw), []string{"Accepted", "Programmed"}, "")
+		evaluate(gw, objects.Conditions(gw), gatewayRequired, nil, "")
 		for _, l := range objects.GatewayListeners(gw) {
-			falseOrPending(gw, l.Conditions, []string{"Accepted", "ResolvedRefs", "Programmed"}, "listener "+l.Name)
-			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue {
+			evaluate(gw, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
+			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(gw, *cf) {
 				add(gw, SeverityError, *cf, "listener "+l.Name)
 			}
 		}
 	}
+	// Routes: one status block per current parentRef of this install (finding 5).
 	for _, r := range in.Owned.Routes {
-		var mine []objects.RouteParentStatus
-		for _, p := range objects.RouteParents(r.Obj) {
-			if slices.Contains(in.Install.ControllerNames, p.ControllerName) {
-				mine = append(mine, p)
+		status := objects.RouteParents(r.Obj)
+		for _, p := range r.Parents {
+			extra := "parent " + p.Kind + " " + p.Namespace + "/" + p.Name
+			var st *objects.RouteParentStatus
+			for i := range status {
+				if status[i].ParentRef == p && slices.Contains(in.Install.ControllerNames, status[i].ControllerName) {
+					st = &status[i]
+				}
+			}
+			if st == nil {
+				pending(r.Obj, "no status from the controller for "+extra)
+				continue
+			}
+			evaluate(r.Obj, st.Conditions, routeRequired, routeOptional, extra)
+		}
+	}
+	// Routes whose parent does not exist (finding 9).
+	for _, u := range in.Owned.Unattached {
+		notProcessed(u.Route.Obj, "Not attached: parent not found",
+			fmt.Sprintf("parent %s %s/%s does not exist", u.Parent.Kind, u.Parent.Namespace, u.Parent.Name))
+	}
+	// Policies: ancestors written by this install's controller. None at all is
+	// pending; on v2.3/v2.4 that includes a policy whose target is missing (finding 7).
+	for _, p := range in.Owned.Policies {
+		var mine []objects.AncestorStatus
+		for _, a := range objects.PolicyAncestors(p.Obj) {
+			if slices.Contains(in.Install.ControllerNames, a.ControllerName) {
+				mine = append(mine, a)
 			}
 		}
 		if len(mine) == 0 {
-			pending(r.Obj, "no status from the controller")
+			pending(p.Obj, "no status from the controller")
 			continue
 		}
-		for _, p := range mine {
-			falseOrPending(r.Obj, p.Conditions, []string{"Accepted", "ResolvedRefs", "kgateway.dev/Programmed"}, "parent "+p.ParentRef.Namespace+"/"+p.ParentRef.Name)
-		}
-	}
-	for _, p := range in.Owned.Policies {
-		for _, a := range objects.PolicyAncestors(p.Obj) {
-			if !slices.Contains(in.Install.ControllerNames, a.ControllerName) {
+		for _, a := range mine {
+			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Name
+			if !current(p.Obj, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
 			for _, cond := range a.Conditions {
-				if objects.IsStale(p.Obj, cond) {
-					continue
-				}
 				if sev, report := policySeverity(cond); report {
-					add(p.Obj, sev, cond, "ancestor "+a.AncestorRef.Kind+" "+a.AncestorRef.Name)
+					add(p.Obj, sev, cond, extra)
 				}
 			}
 		}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// within formats extra as a trailing " (extra)", or "" when empty.
+func within(extra string) string {
+	if extra == "" {
+		return ""
+	}
+	return " (" + extra + ")"
 }
 
 // policySeverity maps a policy ancestor condition to a severity (design §5.2,
@@ -3810,6 +4391,10 @@ func (c xdsCheck) Run(in Input) ([]Finding, CheckResult) {
 	}
 	if in.Metrics.Err != "" {
 		return unavailable(in, c.Name(), in.Metrics.Err)
+	}
+	// Recomputing the model must not make an old zero-reject result look fresh (finding 3).
+	if in.Metrics.Stale(in.Now, in.MetricsMaxAge) {
+		return unavailable(in, c.Name(), fmt.Sprintf("controller metrics are stale (last collected %s ago)", in.Now.Sub(in.Metrics.CollectedAt).Round(time.Second)))
 	}
 	var fs []Finding
 	for _, gw := range in.Owned.Gateways {
@@ -3891,7 +4476,7 @@ git add pkg/health pkg/scopeverify && git commit -m "feat(health): findings, che
 ### Task 10: Engine, overview and HTTP API (API boundary tests)
 
 **Files:**
-- Create: `pkg/overview/overview.go`, `pkg/engine/engine.go`, `pkg/api/types.go`, `pkg/api/handlers.go`
+- Create: `pkg/overview/overview.go`, `pkg/engine/engine.go`, `pkg/api/types.go`, `pkg/api/handlers.go`, `pkg/api/authz.go`
 - Test: `pkg/engine/engine_test.go` (scale), `pkg/api/api_test.go` (boundary)
 
 **Interfaces:**
@@ -3903,16 +4488,21 @@ git add pkg/health pkg/scopeverify && git commit -m "feat(health): findings, che
   - `overview.Count{Group, Kind, Category, DisplayName string; Count int; Access cache.Access}`;
   - `overview.GatewayRow{Ref objects.Ref; Class string; State health.State; Listeners int; AttachedRoutes int32; Addresses []string}`;
   - `overview.Overview{Header Header; Counts []Count; Gateways []GatewayRow}`;
-  - `overview.Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report) Overview`.
+  - `overview.Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report) Overview`. It is pure, so the API can rebuild it over an `Authorizer`-filtered owned set. The GatewayClass category gets a tile like every other served kind (finding 12).
 - Produces:
-  - `engine.Config{Snapshots cache.Snapshotter; Served []kinds.Served; Detectors []install.Detector; Scope install.ScopeProvider; Verifier scopeverify.Verifier; Metrics ctrlmetrics.Source; Checks []health.Check; Pinned string; Now func() time.Time}`;
+  - `engine.Config{Snapshots cache.Snapshotter; Served []kinds.Served; Detectors []install.Detector; Scope install.ScopeProvider; Verifier scopeverify.Verifier; Metrics ctrlmetrics.Source; Checks []health.Check; Pinned string; MetricsMaxAge time.Duration; Now func() time.Time}` (`MetricsMaxAge` is passed to `health.Input` and `scopeverify.Input`; `app` sets it to 3 × the metrics interval);
   - `engine.InstallModel{Resolved install.Resolved; Owned *install.Owned; Overview overview.Overview; Health health.Report}`;
   - `engine.Model{Snapshot *cache.Snapshot; Served []kinds.Served; Installs []InstallModel; Pinned string; ComputedAt time.Time}`;
   - `engine.New(Config) *Engine`, `(*Engine).Compute() *Model`, `(*Engine).Current() *Model`, `(*Engine).Installs() []install.Install`, `(*Engine).Run(ctx, every time.Duration)`.
 - Produces:
   - `api.ModelSource` (interface `Current() *engine.Model`);
-  - `api.NewHandler(src ModelSource, ui fs.FS) http.Handler`;
-  - the JSON types in `pkg/api/types.go`.
+  - `api.Authorizer` (interface `Authorize(r *http.Request, ref objects.Ref) bool`), `api.AllowAll{}` (the Phase 1 default) and `api.AuthorizerFunc` (`func(*http.Request, objects.Ref) bool` adapter) in `pkg/api/authz.go` (D-013);
+  - `api.NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler` (a nil `authz` means `AllowAll`);
+  - the JSON types in `pkg/api/types.go`: `InstallSummary` gains `Controller overview.ReadyCount` (finding 12); `HealthResponse` stays an alias of `health.Report`, which carries `install` (finding 4); `MetaResponse.Kinds` lists the served kinds plus `apps/Deployment` (category `workload`), the kinds the resource endpoint can serve (finding 11).
+
+**Resource endpoint (finding 11, D-013).** `GET …/resources/{group}/{kind}/{ns}/{name}` serves an object when the `Authorizer` allows it and it is either owned by the install or referenced by a current finding of the install (in Phase 1: unattached and unprocessed routes for 003, unwatched routes for 004, the controller Deployment for 005, Gateways for 006, ambiguous Gateways for 009). Only `metadata.managedFields` is stripped. Everything else returns 404 with the same message, so a denied object is indistinguishable from an absent one.
+
+**Authorizer (D-013).** Every handler that returns resources, findings or counts goes through it. A denied object returns 404 on the resource endpoint and is left out of the overview's count tiles and gateway rows. A finding on a denied resource stays in the list with its code, severity and resource ref, but `restricted: true` and an empty message, detail and since. The roll-up state and the severity counts cover every finding. Under `AllowAll` the handlers return the precomputed model unchanged.
 
 - [ ] **Step 1: Write the failing boundary tests**
 
@@ -3932,6 +4522,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -3943,6 +4534,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -3952,26 +4544,48 @@ type fakeMetrics map[string]ctrlmetrics.Result
 
 func (f fakeMetrics) Get(id string) (ctrlmetrics.Result, bool) { r, ok := f[id]; return r, ok }
 
+// okMetrics are fresh, reject-free metrics. ManagedPresent lets the scope
+// verifier run; with the default 1 h persistence no mismatch is reported.
 func okMetrics(ids ...string) fakeMetrics {
 	f := fakeMetrics{}
 	for _, id := range ids {
-		f[id] = ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}}}
+		f[id] = ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}
 	}
 	return f
 }
 
-// start runs the real cache, engine and handler over fake clients seeded with objs.
-func start(t *testing.T, served []kinds.Served, pinned string, m ctrlmetrics.Source, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
+// setup configures startWith. Zero values are the defaults.
+type setup struct {
+	served    []kinds.Served     // nil: every upstream kind
+	pinned    string             // pinned install ID
+	metrics   ctrlmetrics.Source // nil: okMetrics("kgw/kgateway")
+	immediate bool               // report scope mismatches on the second computation (persistence 0, not 1 h)
+	authz     Authorizer         // nil: AllowAll
+}
+
+// startWith runs the real cache, engine and handler over fake clients seeded with objs.
+func startWith(t *testing.T, s setup, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
 	t.Helper()
+	if s.served == nil {
+		s.served = testutil.ServedUpstream()
+	}
+	if s.metrics == nil {
+		s.metrics = okMetrics("kgw/kgateway")
+	}
+	persist := time.Hour
+	if s.immediate {
+		persist = 0
+	}
 	dyn, kube := testutil.Clients(t, objs...)
 	det := install.UpstreamDetector{}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: served,
-		PodSelectors: []labels.Selector{det.ControllerSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served,
+		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
-	e := engine.New(engine.Config{Snapshots: c, Served: served, Detectors: []install.Detector{det}, Scope: install.NamespaceSelectorScope{},
-		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: m, Checks: health.Upstream(), Pinned: pinned, Now: func() time.Time { return testutil.Now }})
+	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: []install.Detector{det}, Scope: install.NamespaceSelectorScope{},
+		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
+		MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return testutil.Now }})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -3979,7 +4593,7 @@ func start(t *testing.T, served []kinds.Served, pinned string, m ctrlmetrics.Sou
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}))
+	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
 	t.Cleanup(srv.Close)
 	update := func(n *corev1.Namespace) {
 		if _, err := kube.CoreV1().Namespaces().Update(ctx, n, metav1.UpdateOptions{}); err != nil {
@@ -3987,6 +4601,12 @@ func start(t *testing.T, served []kinds.Served, pinned string, m ctrlmetrics.Sou
 		}
 	}
 	return e, srv, update
+}
+
+// start is startWith with the common settings.
+func start(t *testing.T, served []kinds.Served, pinned string, m ctrlmetrics.Source, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
+	t.Helper()
+	return startWith(t, setup{served: served, pinned: pinned, metrics: m}, objs...)
 }
 
 func get[T any](t *testing.T, srv *httptest.Server, path string, wantStatus int) T {
@@ -4009,18 +4629,33 @@ func get[T any](t *testing.T, srv *httptest.Server, path string, wantStatus int)
 }
 
 // world: install kgw/kgateway scoped to team=a; infra and shop are watched, blog is not.
-func world(extra ...runtime.Object) []runtime.Object {
-	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`))
+func world(extra ...runtime.Object) []runtime.Object { return worldWith(1, 1, extra...) }
+
+// worldWith is world with the number of ready controller and proxy replicas (of 1).
+func worldWith(ctrlReady, proxyReady int32, extra ...runtime.Object) []runtime.Object {
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, ctrlReady, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`))
 	gw := testutil.GwRef("infra", "edge")
 	return append([]runtime.Object{
 		testutil.Namespace("kgw", nil), testutil.Namespace("infra", map[string]string{"team": "a"}),
 		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil),
-		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.ProxyDeployment("infra", "edge", 1, 1),
+		d, testutil.ControllerPod(d, "kgateway-0", ctrlReady > 0), testutil.ProxyDeployment("infra", "edge", 1, proxyReady),
 		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/other", true),
 		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra", "foreign", "other", nil),
 		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
 		testutil.HTTPRoute("blog", "posts", []objects.ParentRef{gw}),
 	}, extra...)
+}
+
+// young sets u's creation time inside the grace period.
+func young(u *unstructured.Unstructured) *unstructured.Unstructured {
+	u.SetCreationTimestamp(metav1.NewTime(testutil.Now.Add(-10 * time.Second)))
+	return u
+}
+
+// stale bumps u's generation past its fixture conditions (observed generation 1).
+func stale(u *unstructured.Unstructured) *unstructured.Unstructured {
+	u.SetGeneration(2)
+	return u
 }
 
 func count(o OverviewResponse, kind string) (int, bool) {
@@ -4047,7 +4682,16 @@ func TestOverviewCountsOnlyWhatTheInstallManages(t *testing.T) {
 	if len(insts) != 1 || insts[0].ID != "kgw/kgateway" || insts[0].Version != "2.4.7" {
 		t.Fatalf("installs: %+v", insts)
 	}
+	if insts[0].Controller != (overview.ReadyCount{Ready: 1, Desired: 1}) {
+		t.Errorf("controller readiness: %+v", insts[0].Controller)
+	}
 	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
+	if o.Header.ID != "kgw/kgateway" {
+		t.Errorf("overview must carry the install id, got %q", o.Header.ID)
+	}
+	if n, ok := count(o, "GatewayClass"); !ok || n != 1 {
+		t.Errorf("GatewayClasses: want a tile counting 1 (class 'other' excluded), got %d (tile %v)", n, ok)
+	}
 	if n, _ := count(o, "Gateway"); n != 1 {
 		t.Errorf("Gateways: want 1 (foreign class excluded), got %d", n)
 	}
@@ -4058,7 +4702,7 @@ func TestOverviewCountsOnlyWhatTheInstallManages(t *testing.T) {
 		t.Errorf("scope watched/total: %+v", o.Header.Scope)
 	}
 	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
-	if !hasFinding(h, health.CodeNamespaceNotWatched, "blog/posts") || h.State != health.StateWarning {
+	if !hasFinding(h, health.CodeNamespaceNotWatched, "blog/posts") || h.State != health.StateWarning || h.Install != "kgw/kgateway" {
 		t.Fatalf("health: %+v", h)
 	}
 }
@@ -4118,15 +4762,107 @@ func TestNamespaceLabelChangeUpdatesScopeWithoutRestart(t *testing.T) {
 	}
 }
 
+// Finding 11: owned objects and objects referenced by a current finding are
+// served (only managedFields stripped); anything else is 404.
 func TestResourceEndpoint(t *testing.T) {
 	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), world()...)
-	r := get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart", 200)
+	const base = "/api/v1/installs/kgw/kgateway/resources/"
+	r := get[map[string]any](t, srv, base+"gateway.networking.k8s.io/HTTPRoute/shop/cart", 200)
 	if md, _ := r["metadata"].(map[string]any); md["managedFields"] != nil || md["name"] != "cart" {
 		t.Fatalf("unexpected object: %+v", r["metadata"])
 	}
-	get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/blog/posts", 404) // out of scope
-	get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/-/Secret/shop/x", 404)                                // never served
-	get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/GatewayClass/-/kgateway", 200)
+	get[map[string]any](t, srv, base+"gateway.networking.k8s.io/HTTPRoute/blog/posts", 200)   // unwatched, referenced by KGWUI-004
+	get[map[string]any](t, srv, base+"gateway.networking.k8s.io/Gateway/infra/foreign", 404)  // another controller's Gateway
+	get[map[string]any](t, srv, base+"-/Secret/shop/x", 404)                                  // never served
+	get[map[string]any](t, srv, base+"apps/Deployment/kgw/kgateway", 404)                     // ready controller: no finding references it
+	get[map[string]any](t, srv, base+"gateway.networking.k8s.io/GatewayClass/-/kgateway", 200)
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	found := false
+	for _, k := range meta.Kinds {
+		found = found || (k.Group == "apps" && k.Kind == "Deployment")
+	}
+	if !found {
+		t.Fatal("/api/v1/meta must list apps/Deployment, which finding links can reach")
+	}
+}
+
+// Finding 11: the controller Deployment referenced by KGWUI-005 is served.
+func TestResourceEndpointServesReferencedDeployment(t *testing.T) {
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), worldWith(0, 1)...)
+	r := get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/apps/Deployment/kgw/kgateway", 200)
+	md, _ := r["metadata"].(map[string]any)
+	if r["kind"] != "Deployment" || r["apiVersion"] != "apps/v1" || md["name"] != "kgateway" || md["managedFields"] != nil {
+		t.Fatalf("unexpected object: kind=%v apiVersion=%v metadata=%+v", r["kind"], r["apiVersion"], md)
+	}
+}
+
+// Finding 15: every finding code at the API boundary, once where it must
+// appear and once where it must not (design §9). Findings 1, 3 and 9 are
+// covered here too: stale True, absent conditions, policies without
+// ancestors, stale metrics and routes to a missing Gateway.
+func TestEveryFindingCodeAtTheAPI(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	rejects := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+		Rejects: map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}}
+	mismatch := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+		Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "HTTPRoute"}: 5}, ManagedPresent: true}}}
+	old := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now.Add(-10 * time.Minute), Metrics: ctrlmetrics.Metrics{
+		Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}}
+	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
+	partial := testutil.HTTPRoute("shop", "partial", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}})
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, "[]"))
+	overlap := world(testutil.Namespace("kgw2", nil), d2, testutil.ControllerPod(d2, "kgateway2-0", true))
+
+	cases := []struct {
+		name      string
+		s         setup
+		objs      []runtime.Object
+		recompute bool // compute once more, for findings that must persist (007)
+		code, res string
+		present   bool
+		state     health.State // "" = not checked
+	}{
+		{"001 rejects", setup{metrics: rejects}, world(), false, health.CodeXDSRejected, "infra/edge", true, health.StateError},
+		{"001 no rejects", setup{}, world(), false, health.CodeXDSRejected, "infra/edge", false, ""},
+		{"002 backend not found", setup{}, world(broken), false, health.CodeConditionFalse, "shop/broken", true, health.StateError},
+		{"002 accepted route", setup{}, world(), false, health.CodeConditionFalse, "shop/cart", false, ""},
+		{"003 route without status", setup{}, world(testutil.HTTPRoute("shop", "new", []objects.ParentRef{gw})), false, health.CodeRouteUnattached, "shop/new", true, ""},
+		{"003 stale True", setup{}, world(stale(testutil.HTTPRoute("shop", "old", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)))), false, health.CodeRouteUnattached, "shop/old", true, ""},
+		{"003 required condition absent", setup{}, world(partial), false, health.CodeRouteUnattached, "shop/partial", true, ""},
+		{"003 policy without ancestors", setup{}, world(testutil.TrafficPolicy("shop", "tp-new")), false, health.CodeRouteUnattached, "shop/tp-new", true, ""},
+		{"003 parent gateway missing", setup{}, world(testutil.HTTPRoute("shop", "orphan", []objects.ParentRef{testutil.GwRef("infra", "gone")})), false, health.CodeRouteUnattached, "shop/orphan", true, ""},
+		{"003 inside grace", setup{}, world(young(testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw}))), false, health.CodeRouteUnattached, "shop/young", false, ""},
+		{"004 unwatched namespace", setup{}, world(), false, health.CodeNamespaceNotWatched, "blog/posts", true, health.StateWarning},
+		{"004 watched namespace", setup{}, world(), false, health.CodeNamespaceNotWatched, "shop/cart", false, ""},
+		{"005 controller not ready", setup{}, worldWith(0, 1), false, health.CodeControllerNotReady, "kgw/kgateway", true, health.StateError},
+		{"005 controller ready", setup{}, world(), false, health.CodeControllerNotReady, "", false, ""},
+		{"006 proxy not ready", setup{}, worldWith(1, 0), false, health.CodeProxyNotReady, "infra/edge", true, health.StateError},
+		{"006 proxy ready", setup{}, world(), false, health.CodeProxyNotReady, "", false, ""},
+		{"007 persistent mismatch", setup{metrics: mismatch, immediate: true}, world(), true, health.CodeScopeMismatch, "", true, ""},
+		{"007 fresh mismatch", setup{metrics: mismatch}, world(), true, health.CodeScopeMismatch, "", false, ""},
+		{"008 metrics unreachable", setup{metrics: fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Err: "connection refused"}}}, world(), false, health.CodeSignalUnavailable, "", true, health.StateUnknown},
+		{"008 stale metrics", setup{metrics: old}, world(), false, health.CodeSignalUnavailable, "", true, health.StateUnknown},
+		{"008 every signal available", setup{}, world(), false, health.CodeSignalUnavailable, "", false, ""},
+		{"009 overlapping installs", setup{metrics: okMetrics("kgw/kgateway", "kgw2/kgateway2")}, overlap, false, health.CodeAmbiguousOwnership, "infra/edge", true, ""},
+		{"009 single install", setup{}, world(), false, health.CodeAmbiguousOwnership, "", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, srv, _ := startWith(t, tc.s, tc.objs...)
+			if tc.recompute {
+				e.Compute()
+			}
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+			if hasFinding(h, tc.code, tc.res) != tc.present {
+				t.Fatalf("%s on %q: want present=%v; findings: %+v", tc.code, tc.res, tc.present, h.Findings)
+			}
+			if tc.state != "" && h.State != tc.state {
+				t.Fatalf("state: want %s, got %s", tc.state, h.State)
+			}
+		})
+	}
 }
 
 func TestSPAFallbackAndProbes(t *testing.T) {
@@ -4304,6 +5040,9 @@ type Overview struct {
 func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report) Overview {
 	o := Overview{Header: header(res, snap), Counts: []Count{}, Gateways: []GatewayRow{}}
 	byKind := map[string]int{}
+	for _, c := range owned.GatewayClasses {
+		byKind[c.GetKind()]++
+	}
 	for _, g := range owned.Gateways {
 		byKind[g.GetKind()]++
 	}
@@ -4316,10 +5055,8 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	for _, p := range owned.Policies {
 		byKind[p.Kind.Kind]++
 	}
+	// One tile per served kind, GatewayClasses included (finding 12).
 	for _, k := range served {
-		if k.Category == kinds.CategoryGatewayClass {
-			continue
-		}
 		o.Counts = append(o.Counts, Count{Group: k.Group, Kind: k.Kind, Category: string(k.Category), DisplayName: k.DisplayName,
 			Count: byKind[k.Kind], Access: snap.Access[k.GVR()]})
 	}
@@ -4410,7 +5147,10 @@ type Config struct {
 	Checks    []health.Check
 	// Pinned restricts the UI to one install ID ("ns/name"); empty shows all.
 	Pinned string
-	Now    func() time.Time
+	// MetricsMaxAge is the age beyond which a metrics result is stale
+	// (3 × the metrics interval); zero means no limit (finding 3).
+	MetricsMaxAge time.Duration
+	Now           func() time.Time
 }
 
 // InstallModel is everything the API serves about one install.
@@ -4458,9 +5198,11 @@ func (e *Engine) Compute() *Model {
 			continue
 		}
 		met, has := e.cfg.Metrics.Get(res.ID())
-		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: e.cfg.Served, Metrics: met, HasMetrics: has, Now: now})
+		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: e.cfg.Served, Metrics: met, HasMetrics: has,
+			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
 		owned := asg.PerInstall[res.ID()]
-		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Metrics: met, HasMetrics: has, Verify: ver, Now: now}, e.cfg.Checks)
+		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Metrics: met, HasMetrics: has,
+			MetricsMaxAge: e.cfg.MetricsMaxAge, Verify: ver, Now: now}, e.cfg.Checks)
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, e.cfg.Served, rep)})
 	}
 	e.mu.Lock()
@@ -4528,6 +5270,7 @@ type InstallSummary struct {
 	Version         string                `json:"version"`
 	Edition         string                `json:"edition"`
 	ControllerNames []string              `json:"controllerNames"`
+	Controller      overview.ReadyCount   `json:"controller"`
 	Scope           overview.ScopeSummary `json:"scope"`
 	Health          HealthSummary         `json:"health"`
 }
@@ -4544,21 +5287,61 @@ type OverviewResponse struct {
 	CollectedAt time.Time `json:"collectedAt"`
 }
 
-// HealthResponse is GET …/health.
+// HealthResponse is GET …/health. It carries the install ID (finding 4).
 type HealthResponse = health.Report
 
 // MetaResponse is GET /api/v1/meta.
 type MetaResponse struct {
-	Version string         `json:"version"`
-	Pinned  string         `json:"pinned,omitempty"`
-	Synced  bool           `json:"synced"`
-	Kinds   []kinds.Served `json:"kinds"`
+	Version string `json:"version"`
+	Pinned  string `json:"pinned,omitempty"`
+	Synced  bool   `json:"synced"`
+	// Kinds are the kinds the resource endpoint can serve: the served kinds
+	// plus apps/Deployment. The frontend links only these (finding 11).
+	Kinds []kinds.Served `json:"kinds"`
 }
+
+// deploymentKind is listed in /api/v1/meta because finding links reach
+// controller Deployments (D-013). It is read through typed informers, not counted.
+var deploymentKind = kinds.Served{Descriptor: kinds.Descriptor{Group: "apps", Kind: "Deployment", Resource: "deployments",
+	Versions: []string{"v1"}, Namespaced: true, Category: kinds.CategoryWorkload, DisplayName: "Deployments"}, Version: "v1"}
 
 // ErrorResponse is the body of every non-2xx API response.
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+```
+
+`pkg/api/authz.go`:
+
+```go
+package api
+
+import (
+	"net/http"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+// Authorizer decides, per request, which objects the caller may see (D-013).
+// Findings are filtered by applying it to each finding's resource. Phase 1
+// ships AllowAll; per-user authorisation plugs in here later.
+type Authorizer interface {
+	// Authorize reports whether the caller of r may view the object ref.
+	Authorize(r *http.Request, ref objects.Ref) bool
+}
+
+// AllowAll lets every caller see everything the UI can read: the Phase 1
+// trust model, in which whoever reaches the UI may view all it shows.
+type AllowAll struct{}
+
+// Authorize implements Authorizer.
+func (AllowAll) Authorize(*http.Request, objects.Ref) bool { return true }
+
+// AuthorizerFunc adapts a function to Authorizer.
+type AuthorizerFunc func(r *http.Request, ref objects.Ref) bool
+
+// Authorize implements Authorizer.
+func (f AuthorizerFunc) Authorize(r *http.Request, ref objects.Ref) bool { return f(r, ref) }
 ```
 
 `pkg/api/handlers.go`:
@@ -4570,11 +5353,19 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/version"
 )
 
@@ -4582,8 +5373,13 @@ import (
 type ModelSource interface{ Current() *engine.Model }
 
 // NewHandler returns the HTTP handler for the API, the probes and the SPA in ui.
-func NewHandler(src ModelSource, ui fs.FS) http.Handler {
-	h := &handler{src: src}
+// Every response with resources, findings or counts goes through authz; a nil
+// authz means AllowAll (D-013).
+func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
+	if authz == nil {
+		authz = AllowAll{}
+	}
+	h := &handler{src: src, authz: authz}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -4597,7 +5393,10 @@ func NewHandler(src ModelSource, ui fs.FS) http.Handler {
 	return mux
 }
 
-type handler struct{ src ModelSource }
+type handler struct {
+	src   ModelSource
+	authz Authorizer
+}
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -4631,23 +5430,75 @@ func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
 
 func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 	m := h.src.Current()
-	resp := MetaResponse{Version: version.Version}
+	resp := MetaResponse{Version: version.Version, Kinds: []kinds.Served{deploymentKind}}
 	if m != nil {
-		resp.Pinned, resp.Synced, resp.Kinds = m.Pinned, m.Snapshot.Synced, m.Served
+		resp.Pinned, resp.Synced = m.Pinned, m.Snapshot.Synced
+		resp.Kinds = append(slices.Clone(m.Served), deploymentKind)
 	}
 	writeJSON(w, resp)
 }
 
-func (h *handler) installs(w http.ResponseWriter, _ *http.Request) {
+// visibleHealth returns the install's report as the caller of r may see it
+// (D-013). A finding on a denied resource keeps its code, severity and ref but
+// is restricted: message, detail and since are emptied. State and counts still
+// cover every finding, so partial visibility never makes an install look healthier.
+func (h *handler) visibleHealth(r *http.Request, i *engine.InstallModel) health.Report {
+	if _, all := h.authz.(AllowAll); all {
+		return i.Health
+	}
+	rep := i.Health
+	rep.Findings = make([]health.Finding, 0, len(i.Health.Findings))
+	for _, f := range i.Health.Findings {
+		if f.Resource != nil && !h.authz.Authorize(r, *f.Resource) {
+			f = health.Finding{Code: f.Code, Slug: f.Slug, Severity: f.Severity, Install: f.Install, Resource: f.Resource, Restricted: true}
+		}
+		rep.Findings = append(rep.Findings, f)
+	}
+	return rep
+}
+
+// visibleOverview rebuilds the overview over the owned objects the caller of r
+// may see: denied objects leave the count tiles and the gateway rows.
+func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.InstallModel, rep health.Report) overview.Overview {
+	if _, all := h.authz.(AllowAll); all {
+		return i.Overview
+	}
+	can := func(u *unstructured.Unstructured) bool { return h.authz.Authorize(r, objects.RefOf(u)) }
+	keep := func(us []*unstructured.Unstructured) []*unstructured.Unstructured {
+		out := []*unstructured.Unstructured{}
+		for _, u := range us {
+			if can(u) {
+				out = append(out, u)
+			}
+		}
+		return out
+	}
+	keepObjs := func(os []install.OwnedObject) []install.OwnedObject {
+		out := []install.OwnedObject{}
+		for _, o := range os {
+			if can(o.Obj) {
+				out = append(out, o)
+			}
+		}
+		return out
+	}
+	o := i.Owned
+	owned := &install.Owned{GatewayClasses: keep(o.GatewayClasses), Gateways: keep(o.Gateways), ListenerSets: keep(o.ListenerSets),
+		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached}
+	return overview.Build(i.Resolved, owned, m.Snapshot, m.Served, rep)
+}
+
+func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 	m := h.model(w)
 	if m == nil {
 		return
 	}
 	out := []InstallSummary{}
-	for _, i := range m.Installs {
-		hd := i.Overview.Header
+	for k := range m.Installs {
+		i := &m.Installs[k]
+		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
 		out = append(out, InstallSummary{ID: hd.ID, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version, Edition: hd.Edition,
-			ControllerNames: hd.ControllerNames, Scope: hd.Scope, Health: HealthSummary{State: i.Health.State, Counts: i.Health.Counts}})
+			ControllerNames: hd.ControllerNames, Controller: hd.Controller, Scope: hd.Scope, Health: HealthSummary{State: rep.State, Counts: rep.Counts}})
 	}
 	writeJSON(w, out)
 }
@@ -4669,21 +5520,23 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Model, *
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if m, i := h.find(w, r); i != nil {
-		writeJSON(w, OverviewResponse{Overview: i.Overview, CollectedAt: m.ComputedAt})
+		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, m, i, h.visibleHealth(r, i)), CollectedAt: m.ComputedAt})
 	}
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if _, i := h.find(w, r); i != nil {
-		writeJSON(w, i.Health)
+		writeJSON(w, h.visibleHealth(r, i))
 	}
 }
 
-// resource serves one object owned by the install. Only owned (in-scope)
-// objects of served kinds are reachable, so Secrets never are. "-" stands for
-// the empty group or namespace.
+// resource serves one object of a served kind, or a Deployment, when the
+// caller may view it and it is owned by the install or referenced by a current
+// finding of the install (finding 11). Only
+// metadata.managedFields is stripped (D-013). Secrets are never watched, so
+// they are never reachable. "-" stands for the empty group or namespace.
 func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
-	_, i := h.find(w, r)
+	m, i := h.find(w, r)
 	if i == nil {
 		return
 	}
@@ -4693,27 +5546,70 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		}
 		return s
 	}
-	group, kind, ns, name := dash(r.PathValue("group")), r.PathValue("kind"), dash(r.PathValue("rns")), r.PathValue("rname")
-	match := func(u *unstructured.Unstructured) bool {
-		return u.GetKind() == kind && u.GetNamespace() == ns && u.GetName() == name && strings.HasPrefix(u.GetAPIVersion(), group+"/")
-	}
-	o := i.Owned
-	cands := append(append(append([]*unstructured.Unstructured{}, o.GatewayClasses...), o.Gateways...), o.ListenerSets...)
-	for _, x := range o.Routes {
-		cands = append(cands, x.Obj)
-	}
-	for _, x := range o.Policies {
-		cands = append(cands, x.Obj)
-	}
-	for _, u := range cands {
-		if match(u) {
-			c := u.DeepCopy()
-			unstructured.RemoveNestedField(c.Object, "metadata", "managedFields")
-			writeJSON(w, c.Object)
+	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
+	if h.authz.Authorize(r, want) {
+		if obj := lookup(m, i, want); obj != nil {
+			writeJSON(w, obj)
 			return
 		}
 	}
+	// Denied and absent objects get the same answer.
 	writeErr(w, http.StatusNotFound, "resource not found in this install's scope")
+}
+
+// lookup returns want as a JSON object, or nil if the install may not serve it.
+func lookup(m *engine.Model, i *engine.InstallModel, want objects.Ref) map[string]any {
+	o := i.Owned
+	owned := append(append(append([]*unstructured.Unstructured{}, o.GatewayClasses...), o.Gateways...), o.ListenerSets...)
+	for _, x := range slices.Concat(o.Routes, o.Policies) {
+		owned = append(owned, x.Obj)
+	}
+	for _, u := range owned {
+		if objects.RefOf(u) == want {
+			return clean(u.Object)
+		}
+	}
+	referenced := slices.ContainsFunc(i.Health.Findings, func(f health.Finding) bool { return f.Resource != nil && *f.Resource == want })
+	if !referenced {
+		return nil
+	}
+	if want.Group == deploymentKind.Group && want.Kind == deploymentKind.Kind {
+		for _, d := range m.Snapshot.Deployments {
+			if d.Namespace == want.Namespace && d.Name == want.Name {
+				return deploymentObject(d)
+			}
+		}
+		return nil
+	}
+	for _, k := range m.Served {
+		if k.Group != want.Group || k.Kind != want.Kind {
+			continue
+		}
+		for _, u := range m.Snapshot.Objects[k.GVR()] {
+			if objects.RefOf(u) == want {
+				return clean(u.Object)
+			}
+		}
+	}
+	return nil
+}
+
+// clean returns a copy of obj without metadata.managedFields.
+func clean(obj map[string]any) map[string]any {
+	c := (&unstructured.Unstructured{Object: obj}).DeepCopy()
+	unstructured.RemoveNestedField(c.Object, "metadata", "managedFields")
+	return c.Object
+}
+
+// deploymentObject returns d as served by the resource endpoint. Typed
+// informers drop apiVersion and kind, so they are set here.
+func deploymentObject(d *appsv1.Deployment) map[string]any {
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(d.DeepCopy())
+	if err != nil {
+		return nil
+	}
+	obj["apiVersion"], obj["kind"] = "apps/v1", "Deployment"
+	return clean(obj)
 }
 
 // spa serves static files and falls back to index.html for client-side routes.
@@ -4762,15 +5658,15 @@ git add pkg/overview pkg/engine pkg/api && git commit -m "feat(api): engine, ove
 **Interfaces:**
 - Consumes: everything from Tasks 2–10.
 - Produces:
-  - `extension.Registry{Kinds []kinds.Descriptor; Detectors []install.Detector; Scope install.ScopeProvider; Verifier scopeverify.Verifier; Checks []health.Check}`;
+  - `extension.Registry{Kinds []kinds.Descriptor; Detectors []install.Detector; Scope install.ScopeProvider; Verifier scopeverify.Verifier; Checks []health.Check; Authorizer api.Authorizer}`;
   - `extension.Option` (`func(*Registry)`);
-  - `extension.WithKinds(...kinds.Descriptor)`, `WithDetectors(...install.Detector)` (prepended, so downstream detectors win), `WithScopeProvider(install.ScopeProvider)`, `WithScopeVerifier(scopeverify.Verifier)`, `WithChecks(...health.Check)`;
+  - `extension.WithKinds(...kinds.Descriptor)`, `WithDetectors(...install.Detector)` (prepended, so downstream detectors win), `WithScopeProvider(install.ScopeProvider)`, `WithScopeVerifier(scopeverify.Verifier)`, `WithChecks(...health.Check)`, `WithAuthorizer(api.Authorizer)` (replaces the default `api.AllowAll{}`; D-013);
   - `extension.New(opts ...Option) *Registry` (upstream defaults plus the options).
 - Produces:
   - `app.Options{Listen, Pinned string; PollInterval, MetricsInterval time.Duration; UI fs.FS}`;
   - `app.Clients{Dynamic dynamic.Interface; Kube kubernetes.Interface; Discovery kinds.DiscoveryClient; InCluster bool}`;
   - `app.App{Engine *engine.Engine; Handler http.Handler}`;
-  - `app.Build(c Clients, o Options, reg *extension.Registry) (*App, error)`, `(*App).Start(ctx context.Context)`;
+  - `app.Build(c Clients, o Options, reg *extension.Registry) (*App, error)`, `(*App).Start(ctx context.Context)`. `Build` watches Pods with each detector's `ControllerPodSelector()`, sets `engine.Config.MetricsMaxAge` to 3 × `MetricsInterval`, and passes `reg.Authorizer` to `api.NewHandler`;
   - `app.Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Option) error`.
 - Produces (tests only): `testutil.ClientsWith(t, extra []kinds.Descriptor, objs ...runtime.Object)`.
 
@@ -4827,10 +5723,13 @@ func ClientsWith(t *testing.T, extra []kinds.Descriptor, objs ...runtime.Object)
 package extension
 
 import (
+	"net/http"
 	"testing"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 type otherDetector struct{ install.UpstreamDetector }
@@ -4848,10 +5747,17 @@ func TestNewAppliesOptionsOnTopOfUpstream(t *testing.T) {
 	if r.Scope == nil || r.Verifier == nil || len(r.Checks) == 0 {
 		t.Fatal("upstream defaults missing")
 	}
+	if _, ok := r.Authorizer.(api.AllowAll); !ok {
+		t.Fatalf("the default authorizer must be AllowAll (D-013), got %T", r.Authorizer)
+	}
+	deny := api.AuthorizerFunc(func(*http.Request, objects.Ref) bool { return false })
+	if _, ok := New(WithAuthorizer(deny)).Authorizer.(api.AuthorizerFunc); !ok {
+		t.Fatal("WithAuthorizer must replace the default")
+	}
 }
 ```
 
-`pkg/app/app_test.go`. This is the extension-seam test (design §9): a test-only downstream registers a detector, a kind and a check, and all three show up in the API output.
+`pkg/app/app_test.go`. This is the extension-seam test (design §9): a test-only downstream registers a detector, a kind and a check, and all three show up in the API output. A second test registers a deny-some `Authorizer` (D-013, Review Focus 9).
 
 ```go
 package app
@@ -4866,6 +5772,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -4885,6 +5792,12 @@ type acmeDetector struct{}
 func (acmeDetector) Name() string                        { return "acme" }
 func (acmeDetector) ControllerSelector() labels.Selector { return labels.SelectorFromSet(labels.Set{"app": "acme-edge"}) }
 func (acmeDetector) ProxySelector() labels.Selector      { return labels.SelectorFromSet(labels.Set{"app": "acme-proxy"}) }
+
+// ControllerPodSelector matches the Pods of the fixture Deployment, whose
+// template comes from testutil.ControllerDeployment.
+func (acmeDetector) ControllerPodSelector() labels.Selector {
+	return labels.SelectorFromSet(labels.Set{"kgateway": "kgateway"})
+}
 func (acmeDetector) Detect(d *appsv1.Deployment) (install.Install, bool) {
 	return install.Install{Namespace: d.Namespace, Name: d.Name, Edition: "acme", Version: "9.9.9", Container: "kgateway",
 		ControllerNames: []string{acmeController}, Deployment: d, MetricsPort: 9092}, true
@@ -4972,6 +5885,91 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	}
 	t.Fatalf("downstream check finding missing: %+v", h.Findings)
 }
+
+// getJSON decodes GET path into v and returns the status code.
+func getJSON(t *testing.T, srv *httptest.Server, path string, v any) int {
+	t.Helper()
+	resp, err := http.Get(srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && v != nil {
+		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return resp.StatusCode
+}
+
+// D-013 / Review Focus 9: a deny-some Authorizer registered through the
+// extension hides the denied resource (404) and restricts its finding, while
+// the roll-up still covers it.
+func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	gw := testutil.GwRef("infra", "edge")
+	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
+	dyn, kube := testutil.Clients(t,
+		testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), testutil.Namespace("shop", nil),
+		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.ProxyDeployment("infra", "edge", 1, 1),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), broken)
+	denied := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "broken"}
+	deny := api.AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != denied })
+
+	reg := extension.New(extension.WithAuthorizer(deny))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()}, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour,
+		UI: fstest.MapFS{"index.html": {Data: []byte("x")}}}, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	defer srv.Close()
+
+	// Wait for the first model: the broken route's KGWUI-002 makes the state error.
+	var h api.HealthResponse
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		h = api.HealthResponse{}
+		if getJSON(t, srv, "/api/v1/installs/kgw/kgateway/health", &h) == http.StatusOK && len(h.Findings) > 0 && h.State == health.StateError {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("health never settled: %+v", h)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	var restricted *health.Finding
+	for i := range h.Findings {
+		if f := h.Findings[i]; f.Resource != nil && *f.Resource == denied {
+			restricted = &h.Findings[i]
+		}
+	}
+	if restricted == nil || !restricted.Restricted || restricted.Code != health.CodeConditionFalse || restricted.Severity != health.SeverityError ||
+		restricted.Message != "" || restricted.Detail != "" || restricted.Since != nil {
+		t.Fatalf("the denied route's finding must stay listed, restricted, with code/severity/ref and no message or evidence: %+v", restricted)
+	}
+	if h.State != health.StateError || h.Counts[health.SeverityError] < 1 {
+		t.Fatalf("the roll-up must still cover the restricted finding: state=%s counts=%v", h.State, h.Counts)
+	}
+	if code := getJSON(t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/broken", nil); code != http.StatusNotFound {
+		t.Fatalf("a denied resource must 404, got %d", code)
+	}
+	if code := getJSON(t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart", nil); code != http.StatusOK {
+		t.Fatalf("an allowed resource must be served, got %d", code)
+	}
+	var o api.OverviewResponse
+	getJSON(t, srv, "/api/v1/installs/kgw/kgateway/overview", &o)
+	for _, c := range o.Counts {
+		if c.Kind == "HTTPRoute" && c.Count != 1 {
+			t.Fatalf("the denied route must leave the HTTPRoute count: %d", c.Count)
+		}
+	}
+}
 ```
 
 - [ ] **Step 3: Run them and confirm they fail**
@@ -4992,6 +5990,7 @@ package extension
 import (
 	"time"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -5005,6 +6004,8 @@ type Registry struct {
 	Scope     install.ScopeProvider
 	Verifier  scopeverify.Verifier
 	Checks    []health.Check
+	// Authorizer decides per request what the caller may see (D-013).
+	Authorizer api.Authorizer
 }
 
 // Option modifies a Registry.
@@ -5032,6 +6033,10 @@ func WithChecks(c ...health.Check) Option {
 	return func(r *Registry) { r.Checks = append(r.Checks, c...) }
 }
 
+// WithAuthorizer replaces the default api.AllowAll. Every API response with
+// resources, findings or counts goes through it (D-013).
+func WithAuthorizer(a api.Authorizer) Option { return func(r *Registry) { r.Authorizer = a } }
+
 // New returns the upstream registry with opts applied.
 func New(opts ...Option) *Registry {
 	r := &Registry{
@@ -5039,8 +6044,9 @@ func New(opts ...Option) *Registry {
 		Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope:     install.NamespaceSelectorScope{},
 		// A mismatch must outlast two 10 s metric scrapes (design §4.4).
-		Verifier: scopeverify.NewManagedCountVerifier(20 * time.Second),
-		Checks:   health.Upstream(),
+		Verifier:   scopeverify.NewManagedCountVerifier(20 * time.Second),
+		Checks:     health.Upstream(),
+		Authorizer: api.AllowAll{},
 	}
 	for _, o := range opts {
 		o(r)
@@ -5116,7 +6122,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	var podSel, depSel []labels.Selector
 	for _, d := range reg.Detectors {
-		podSel = append(podSel, d.ControllerSelector())
+		podSel = append(podSel, d.ControllerPodSelector()) // A1: Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
 	}
 	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel})
@@ -5125,9 +6131,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		scraper = ctrlmetrics.HTTPScraper{Client: &http.Client{Timeout: 5 * time.Second}}
 	}
 	col := ctrlmetrics.NewCollector(scraper)
+	// Metrics older than three scrape intervals are unavailable, not reused (finding 3).
 	eng := engine.New(engine.Config{Snapshots: ca, Served: served, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: reg.Verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: o.Pinned})
-	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI), cache: ca, collector: col, opts: o}, nil
+		Metrics: col, Checks: reg.Checks, Pinned: o.Pinned, MetricsMaxAge: 3 * o.MetricsInterval})
+	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cache: ca, collector: col, opts: o}, nil
 }
 
 // Start runs the cache, the engine loop and the metrics collector until ctx is done.
@@ -5251,14 +6258,14 @@ Update `docs/phase-status.md`: mark sub-phase 1.1 complete and write `docs/phase
 
 # Sub-phase 1.2 — Frontend
 
-All commands run from `web/` unless stated otherwise. The frontend follows the team conventions: one component per file with a named export, `// region Styles` / `// region Helpers` / `// region Component`, emotion styled components with a `stylesOverride` prop, and no native tooltips.
+All commands run from `web/` unless stated otherwise. The frontend follows the team conventions: one component per file with a named export, `// region Styles` / `// region Helpers` / `// region Component`, emotion styled components, a `stylesOverride` prop on every exported component, typography from theme tokens, and no native tooltips.
 
 ### Task 12: Frontend workspace scaffold
 
 **Files:**
 - Create: `web/package.json`, `web/tsconfig.base.json`, `web/biome.json`, `web/vitest.workspace.ts`
 - Create: `web/packages/shell/package.json`, `web/packages/shell/tsconfig.json`, `web/packages/shell/src/index.ts`, `web/packages/shell/src/test/setup.ts`
-- Create: `web/app/package.json`, `web/app/tsconfig.json`, `web/app/vite.config.ts`, `web/app/index.html`, `web/app/src/main.tsx`
+- Create: `web/app/package.json`, `web/app/tsconfig.json`, `web/app/vite.config.ts`, `web/app/index.html`, `web/app/src/main.tsx`, `web/app/src/vite-env.d.ts`
 - Test: `web/packages/shell/src/index.test.ts`
 
 **Interfaces:**
@@ -5372,6 +6379,12 @@ export default defineConfig({
 { "extends": "../tsconfig.base.json", "include": ["src", "vite.config.ts"] }
 ```
 
+`web/app/src/vite-env.d.ts` (finding 8: declares Vite's asset imports, such as the SVG logo in Task 15, for the app's typecheck; `src` is already included):
+
+```ts
+/// <reference types="vite/client" />
+```
+
 `web/app/vite.config.ts`:
 
 ```ts
@@ -5473,7 +6486,9 @@ git add web && git commit -m "chore(web): npm workspace with shell package and a
 - Produces:
   - `type HealthState = "healthy" | "warning" | "error" | "unknown"`;
   - `interface StatusTokens { fg: string; iconBg: string; iconFg: string; stripBg: string; stripBorder: string }`;
-  - `interface Theme { id: string; name: string; mode: "dark" | "light"; color: { bg; surface; surfaceRaised; border; text; textMuted; accent; accentText; headerBg; headerText; focus: string; status: Record<HealthState, StatusTokens> }; font: { ui: string; mono: string }; radius: { sm: string; md: string }; space: (n: number) => string }`;
+  - `interface Theme { id: string; name: string; mode: "dark" | "light"; color: { bg; surface; surfaceRaised; border; text; textMuted; accent; accentText; headerBg; headerText; focus: string; status: Record<HealthState, StatusTokens> }; font: { ui: string; mono: string; size: FontSizes; weight: FontWeights }; radius: { sm: string; md: string }; space: (n: number) => string }`;
+  - `interface FontSizes { xs; sm; code; md; base; lg; xl: string }` and `interface FontWeights { regular; semibold; bold: number }`: the type scale every component uses instead of literal sizes and weights (finding 17, D-008);
+  - the Emotion theme typing (`theme/emotion.d.ts`) is referenced from the shell's `index.ts`, so the app and downstream apps that compile the shell source get it (finding 8);
   - `controlRoomDark: Theme`, `controlRoomLight: Theme`, `defaultThemes: Theme[]`;
   - `contrastRatio(a: string, b: string): number`;
   - `<ThemeProvider themes={Theme[]} defaultThemeId?: string>`;
@@ -5521,6 +6536,11 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
 it("dark is the default and first theme", async () => {
   const { defaultThemes } = await import("./themes");
   expect(defaultThemes[0]?.id).toBe("control-room-dark");
+});
+
+it.each([controlRoomDark, controlRoomLight])("$name defines the full type scale", (t) => {
+  expect(Object.keys(t.font.size).sort()).toEqual(["base", "code", "lg", "md", "sm", "xl", "xs"]);
+  expect(Object.keys(t.font.weight).sort()).toEqual(["bold", "regular", "semibold"]);
 });
 ```
 
@@ -5599,6 +6619,31 @@ export interface StatusTokens {
   stripBorder: string;
 }
 
+/** Type scale. Components never use literal font sizes (D-008). */
+export interface FontSizes {
+  /** Table headers and overlines. */
+  xs: string;
+  /** Secondary text, badges, chips, tooltips. */
+  sm: string;
+  /** Mono resource names and YAML. */
+  code: string;
+  /** Section headings. */
+  md: string;
+  /** Body text. */
+  base: string;
+  /** Page-state titles. */
+  lg: string;
+  /** Count tile numbers. */
+  xl: string;
+}
+
+/** Font weights. Components never use literal weights (D-008). */
+export interface FontWeights {
+  regular: number;
+  semibold: number;
+  bold: number;
+}
+
 /** A complete theme. All visual identity flows from these tokens (D-008). */
 export interface Theme {
   id: string;
@@ -5618,7 +6663,7 @@ export interface Theme {
     focus: string;
     status: Record<HealthState, StatusTokens>;
   };
-  font: { ui: string; mono: string };
+  font: { ui: string; mono: string; size: FontSizes; weight: FontWeights };
   radius: { sm: string; md: string };
   space: (n: number) => string;
 }
@@ -5632,6 +6677,8 @@ import type { Theme } from "./tokens";
 const font = {
   ui: "'Figtree Variable', Figtree, system-ui, sans-serif",
   mono: "'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace",
+  size: { xs: "10px", sm: "12px", code: "12.5px", md: "13px", base: "14px", lg: "18px", xl: "22px" },
+  weight: { regular: 400, semibold: 600, bold: 700 },
 };
 const radius = { sm: "4px", md: "8px" };
 const space = (n: number) => `${n * 4}px`;
@@ -5779,7 +6826,7 @@ export function useThemeSwitch(): ThemeSwitch {
 
 const globalStyles = (t: Theme) => css`
   html, body, #root { height: 100%; margin: 0; }
-  body { background: ${t.color.bg}; color: ${t.color.text}; font-family: ${t.font.ui}; font-size: 14px; }
+  body { background: ${t.color.bg}; color: ${t.color.text}; font-family: ${t.font.ui}; font-size: ${t.font.size.base}; font-weight: ${t.font.weight.regular}; }
   *, *::before, *::after { box-sizing: border-box; }
   :focus-visible { outline: 2px solid ${t.color.focus}; outline-offset: 2px; }
   * { scrollbar-width: thin; scrollbar-color: ${t.color.border} transparent; }
@@ -5820,19 +6867,20 @@ export function ThemeProvider({ themes, defaultThemeId, children }: ThemeProvide
 }
 ```
 
-Add the exports to `web/packages/shell/src/index.ts`:
+Add the exports to `web/packages/shell/src/index.ts`, with the reference directive as the file's first line (triple-slash directives must precede every statement). A `.d.ts` file cannot be imported as a value, so the reference is what carries the Emotion theme typing to every program that compiles the shell source (finding 8):
 
 ```ts
-export type { HealthState, StatusTokens, Theme } from "./theme/tokens";
+/// <reference path="./theme/emotion.d.ts" />
+export type { FontSizes, FontWeights, HealthState, StatusTokens, Theme } from "./theme/tokens";
 export { controlRoomDark, controlRoomLight, defaultThemes } from "./theme/themes";
 export { contrastRatio } from "./theme/contrast";
 export { ThemeProvider, useThemeSwitch } from "./theme/ThemeProvider";
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [ ] **Step 4: Run the tests and the typecheck and confirm they pass**
 
-Run: `npm test`
-Expected: PASS
+Run: `npm test && npm run typecheck`
+Expected: PASS. From Task 15 on, the app's typecheck compiles the shell through its import of `@kgateway-ui/shell`, so it fails on theme properties such as `p.theme.font` if the `emotion.d.ts` reference is missing.
 
 - [ ] **Step 5: Commit**
 
@@ -5855,16 +6903,18 @@ git add web && git commit -m "feat(web): Control room theme tokens with contrast
 **Interfaces:**
 - Consumes: `Theme`, `HealthState`, `ThemeProvider`.
 - Produces:
-  - `<HealthIcon state size?>`, `<HealthBadge state label? stylesOverride?>`;
+  - `<HealthIcon state size? stylesOverride?>`, `<HealthBadge state label? stylesOverride?>`;
   - `stateLabel(state): string`, `severityToState(sev): HealthState`;
   - `<ResourceName namespace? name kind? stylesOverride?>`.
 - Produces (TypeScript mirrors of the Go JSON in Task 10):
   - `Ref`, `Finding`, `CheckResult`, `HealthReport`, `InstallSummary`, `Count`, `GatewayRow`, `OverviewResponse`, `MetaResponse`, `ScopeSummary`, `Severity`.
 - Produces:
   - `apiFetch<T>(path): Promise<T>` (throws `ApiError{status, message}`);
-  - `useInstalls()`, `useOverview(id)`, `useHealth(id)`, `useMeta()`, `useResource(id, ref)` (SWR, refresh every 5 s except `useMeta` and `useResource`);
+  - `useInstalls()`, `useOverview(id)`, `useHealth(id)`, `useMeta()`, `useResource(id, ref)` (SWR, refresh every 5 s except `useMeta` and `useResource`). None keeps the previous key's data: on an install switch the hooks return no data until the new install's response arrives (finding 4);
   - `POLL_MS = 5000`;
-  - `isStale(collectedAt: string, now: number): boolean` (older than 2 × `POLL_MS`).
+  - `isStale(collectedAt: string, now: number): boolean` (older than 2 × `POLL_MS`);
+  - `isLinkable(meta: MetaResponse | undefined, r: Ref): boolean` (true when `/api/v1/meta` lists `r`'s group and kind; the frontend links only those; finding 11).
+- The TypeScript mirrors carry `Finding.restricted`, `HealthReport.install`, `InstallSummary.controller` and the `apps/Deployment` entry in `MetaResponse.kinds` (Task 10).
 - Produces (tests only): `renderWithTheme(ui, opts?)`.
 
 - [ ] **Step 1: Write the test helper and the failing tests**
@@ -5947,7 +6997,7 @@ it("renders cluster-scoped names without a namespace", () => {
 ```tsx
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithTheme, stubApi } from "../test/render";
-import { isStale, POLL_MS } from "./hooks";
+import { isLinkable, isStale, POLL_MS } from "./hooks";
 import { useInstalls } from "./hooks";
 
 function Probe() {
@@ -5972,6 +7022,13 @@ it("marks data older than two poll intervals as stale", () => {
   const now = Date.parse("2026-10-17T12:00:00Z");
   expect(isStale(new Date(now - POLL_MS).toISOString(), now)).toBe(false);
   expect(isStale(new Date(now - 2 * POLL_MS - 1).toISOString(), now)).toBe(true);
+});
+
+it("links only kinds that /api/v1/meta lists", () => {
+  const meta = { version: "dev", synced: true, kinds: [{ group: "apps", kind: "Deployment", category: "workload", displayName: "Deployments" }] };
+  expect(isLinkable(meta, { group: "apps", kind: "Deployment", namespace: "kgw", name: "kgateway" })).toBe(true);
+  expect(isLinkable(meta, { group: "", kind: "Secret", namespace: "kgw", name: "x" })).toBe(false);
+  expect(isLinkable(undefined, { group: "apps", kind: "Deployment", name: "kgateway" })).toBe(false);
 });
 ```
 
@@ -6001,12 +7058,13 @@ export function severityToState(sev: "error" | "warning" | "info"): HealthState 
 `web/packages/shell/src/health/HealthIcon.tsx`:
 
 ```tsx
+import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { AlertTriangle, Check, HelpCircle, X } from "lucide-react";
 import type { HealthState } from "../theme/tokens";
 
 // region Styles
-const Chip = styled.span<{ state: HealthState; size: number }>`
+const Chip = styled.span<{ state: HealthState; size: number; stylesOverride?: SerializedStyles }>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6016,6 +7074,7 @@ const Chip = styled.span<{ state: HealthState; size: number }>`
   border-radius: ${(p) => p.theme.radius.sm};
   background: ${(p) => p.theme.color.status[p.state].iconBg};
   color: ${(p) => p.theme.color.status[p.state].iconFg};
+  ${(p) => p.stylesOverride}
 `;
 
 // region Helpers
@@ -6025,13 +7084,14 @@ const glyphs = { healthy: Check, warning: AlertTriangle, error: X, unknown: Help
 interface HealthIconProps {
   state: HealthState;
   size?: number;
+  stylesOverride?: SerializedStyles;
 }
 
 /** The icon half of the health vocabulary; always paired with text by callers. */
-export function HealthIcon({ state, size = 16 }: HealthIconProps) {
+export function HealthIcon({ state, size = 16, stylesOverride }: HealthIconProps) {
   const Glyph = glyphs[state];
   return (
-    <Chip state={state} size={size} data-testid={`health-icon-${state}`} aria-hidden="true">
+    <Chip state={state} size={size} stylesOverride={stylesOverride} data-testid={`health-icon-${state}`} aria-hidden="true">
       <Glyph size={size - 5} strokeWidth={3} />
     </Chip>
   );
@@ -6052,8 +7112,8 @@ const Badge = styled.span<{ state: HealthState; stylesOverride?: SerializedStyle
   display: inline-flex;
   align-items: center;
   gap: ${(p) => p.theme.space(1.5)};
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: ${(p) => p.theme.font.weight.semibold};
+  font-size: ${(p) => p.theme.font.size.sm};
   white-space: nowrap;
   color: ${(p) => p.theme.color.status[p.state].fg};
   ${(p) => p.stylesOverride}
@@ -6086,7 +7146,7 @@ import type { SerializedStyles } from "@emotion/react";
 // region Styles
 const Name = styled.span<{ stylesOverride?: SerializedStyles }>`
   font-family: ${(p) => p.theme.font.mono};
-  font-size: 12.5px;
+  font-size: ${(p) => p.theme.font.size.code};
   white-space: nowrap;
   [data-part="namespace"] { opacity: 0.55; }
   ${(p) => p.stylesOverride}
@@ -6120,28 +7180,32 @@ import type { HealthState } from "../theme/tokens";
 /** Mirrors pkg/api and pkg/health JSON (Task 10). */
 export type Severity = "error" | "warning" | "info";
 export interface Ref { group: string; kind: string; namespace?: string; name: string }
+/** restricted: the caller may not view the resource; message and detail are empty (D-013). */
 export interface Finding {
   code: string; slug: string; severity: Severity; install: string; resource?: Ref;
-  message: string; detail?: string; since?: string;
+  message: string; detail?: string; since?: string; restricted?: boolean;
 }
 export interface CheckResult { name: string; ok: boolean; required: boolean; collectedAt: string; error?: string }
+/** install is the install ID; a response for another install is never rendered (finding 4). */
 export interface HealthReport {
-  state: HealthState; findings: Finding[]; checks: CheckResult[]; counts: Partial<Record<Severity, number>>; collectedAt: string;
+  install: string; state: HealthState; findings: Finding[]; checks: CheckResult[]; counts: Partial<Record<Severity, number>>; collectedAt: string;
 }
 export interface ScopeSummary { mode: "all" | "selectors" | "unknown"; selectors?: unknown[]; error?: string; watched: number; total: number }
+export interface ReadyCount { ready: number; desired: number }
 export interface InstallSummary {
   id: string; namespace: string; name: string; version: string; edition: string; controllerNames: string[];
-  scope: ScopeSummary; health: { state: HealthState; counts: Partial<Record<Severity, number>> };
+  controller: ReadyCount; scope: ScopeSummary; health: { state: HealthState; counts: Partial<Record<Severity, number>> };
 }
 export interface Count { group: string; kind: string; category: string; displayName: string; count: number; access: { ok: boolean; error?: string } }
 export interface GatewayRow { ref: Ref; class: string; state: HealthState; listeners: number; attachedRoutes: number; addresses: string[] | null }
 export interface OverviewResponse {
   header: {
     id: string; namespace: string; name: string; version: string; edition: string; controllerNames: string[];
-    controller: { ready: number; desired: number }; scope: ScopeSummary;
+    controller: ReadyCount; scope: ScopeSummary;
   };
   counts: Count[]; gateways: GatewayRow[]; collectedAt: string;
 }
+/** kinds: what the resource endpoint can serve (served kinds plus apps/Deployment). */
 export interface MetaResponse { version: string; pinned?: string; synced: boolean; kinds: { group: string; kind: string; category: string; displayName: string }[] }
 ```
 
@@ -6189,11 +7253,17 @@ import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, Ref 
 /** Poll interval for live data (design §6.6). */
 export const POLL_MS = 5000;
 
-const live = { refreshInterval: POLL_MS, keepPreviousData: true };
+// No keepPreviousData: on an install switch it would show the old install's data under the new URL (finding 4).
+const live = { refreshInterval: POLL_MS };
 
 /** True when data collected at collectedAt is older than two poll intervals. */
 export function isStale(collectedAt: string, now: number = Date.now()): boolean {
   return now - Date.parse(collectedAt) > 2 * POLL_MS;
+}
+
+/** True when /api/v1/meta lists r's kind, so its YAML view can resolve (finding 11). */
+export function isLinkable(meta: MetaResponse | undefined, r: Ref): boolean {
+  return !!meta?.kinds.some((k) => k.group === r.group && k.kind === r.kind);
 }
 
 /** GET /api/v1/installs. */
@@ -6232,7 +7302,7 @@ export { severityToState, stateLabel } from "./health/state";
 export { ResourceName } from "./resource/ResourceName";
 export * from "./api/types";
 export { ApiError, apiFetch } from "./api/client";
-export { isStale, POLL_MS, useHealth, useInstalls, useMeta, useOverview, useResource } from "./api/hooks";
+export { isLinkable, isStale, POLL_MS, useHealth, useInstalls, useMeta, useOverview, useResource } from "./api/hooks";
 ```
 
 - [ ] **Step 5: Run the tests and confirm they pass**
@@ -6269,15 +7339,16 @@ git add web && git commit -m "feat(web): health primitives, resource name and AP
   - `interface CorePages { ClusterLanding: ComponentType; InstallPage: ComponentType; FindingsPage: ComponentType; ResourcePage: ComponentType }`. Task 16–17 supply the defaults: `defaultPages`.
   - `useShellExtension(): Required<ShellExtension>` (merged with defaults);
   - `useInstallId(): string` (from `/i/:ns/:name`);
-  - `<PageState kind="loading" | "connecting" | "error" | "empty" title message? action?>`;
-  - `<Tooltip label>`, the app tooltip (never a native `title`).
+  - `<PageState kind="loading" | "connecting" | "error" | "empty" title message? copyText? stylesOverride?>` and `<Shimmer h? stylesOverride?>`;
+  - `<Tooltip label stylesOverride?>`, the app tooltip (never a native `title`);
+  - the header shows, for the current install, the version, the edition and the controller readiness ("Controller {ready}/{desired} ready" with a health icon) from `InstallSummary` (finding 12).
 
 - [ ] **Step 1: Write the failing tests**
 
 `web/packages/shell/src/shell/Shell.test.tsx`:
 
 ```tsx
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import { stubApi } from "../test/render";
@@ -6290,8 +7361,8 @@ const pages: CorePages = {
   FindingsPage: () => <p>findings page</p>,
   ResourcePage: () => <p>resource page</p>,
 };
-const inst = (id: string) => ({ id, namespace: id.split("/")[0], name: id.split("/")[1], version: "2.4.7", edition: "kgateway",
-  controllerNames: [], scope: { mode: "all", watched: 3, total: 3 }, health: { state: "healthy", counts: {} } });
+const inst = (id: string, controller = { ready: 2, desired: 2 }) => ({ id, namespace: id.split("/")[0], name: id.split("/")[1], version: "2.4.7",
+  edition: "kgateway", controllerNames: [], controller, scope: { mode: "all", watched: 3, total: 3 }, health: { state: "healthy", counts: {} } });
 
 function mount(path: string, ext = {}) {
   window.history.pushState({}, "", path);
@@ -6341,6 +7412,14 @@ it("renders extension brand and routes", async () => {
   await waitFor(() => expect(screen.getByText("waf page")).toBeInTheDocument());
   expect(screen.getByText("Acme Edge")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "WAF" })).toHaveAttribute("href", "/i/kgw/kgateway/waf");
+});
+
+it("shows the install's edition and controller readiness in the header", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway", { ready: 1, desired: 2 })], "/api/v1/meta": { version: "dev", synced: true, kinds: [] } });
+  mount("/i/kgw/kgateway");
+  expect(await screen.findByTestId("edition")).toHaveTextContent("kgateway");
+  const ready = screen.getByText("Controller 1/2 ready");
+  expect(within(ready).getByTestId("health-icon-error")).toBeInTheDocument();
 });
 
 it("switches theme from the theme menu", async () => {
@@ -6436,13 +7515,15 @@ export function useInstallId(): string {
 `web/packages/shell/src/shell/Tooltip.tsx`:
 
 ```tsx
+import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { type ReactNode, useId, useState } from "react";
 
 // region Styles
-const Wrap = styled.span`
+const Wrap = styled.span<{ stylesOverride?: SerializedStyles }>`
   position: relative;
   display: inline-flex;
+  ${(p) => p.stylesOverride}
 `;
 const Tip = styled.span`
   position: absolute;
@@ -6455,7 +7536,7 @@ const Tip = styled.span`
   background: ${(p) => p.theme.color.surfaceRaised};
   border: 1px solid ${(p) => p.theme.color.border};
   color: ${(p) => p.theme.color.text};
-  font-size: 12px;
+  font-size: ${(p) => p.theme.font.size.sm};
   white-space: nowrap;
   pointer-events: none;
 `;
@@ -6464,14 +7545,16 @@ const Tip = styled.span`
 interface TooltipProps {
   label: string;
   children: ReactNode;
+  stylesOverride?: SerializedStyles;
 }
 
 /** App tooltip shown on hover and focus. Native title tooltips are not used. */
-export function Tooltip({ label, children }: TooltipProps) {
+export function Tooltip({ label, children, stylesOverride }: TooltipProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
     <Wrap
+      stylesOverride={stylesOverride}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
@@ -6495,14 +7578,14 @@ export function Tooltip({ label, children }: TooltipProps) {
 
 ```tsx
 import styled from "@emotion/styled";
-import { keyframes } from "@emotion/react";
+import { keyframes, type SerializedStyles } from "@emotion/react";
 import { Copy } from "lucide-react";
 import type { ReactNode } from "react";
 import { HealthIcon } from "../health/HealthIcon";
 
 // region Styles
 const shimmer = keyframes`from { opacity: .45 } to { opacity: .9 }`;
-const Center = styled.div`
+const Center = styled.div<{ stylesOverride?: SerializedStyles }>`
   min-height: 60vh;
   display: flex;
   flex-direction: column;
@@ -6511,9 +7594,10 @@ const Center = styled.div`
   gap: ${(p) => p.theme.space(3)};
   text-align: center;
   color: ${(p) => p.theme.color.textMuted};
-  h2 { color: ${(p) => p.theme.color.text}; font-size: 18px; margin: 0; }
+  h2 { color: ${(p) => p.theme.color.text}; font-size: ${(p) => p.theme.font.size.lg}; font-weight: ${(p) => p.theme.font.weight.semibold}; margin: 0; }
   p { max-width: 560px; margin: 0; line-height: 1.5; }
   code { font-family: ${(p) => p.theme.font.mono}; color: ${(p) => p.theme.color.text}; }
+  ${(p) => p.stylesOverride}
 `;
 const Spinner = styled.div`
   width: 28px;
@@ -6527,12 +7611,16 @@ const CopyButton = styled.button`
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer;
   border-radius: ${(p) => p.theme.radius.sm}; border: 1px solid ${(p) => p.theme.color.border};
   background: ${(p) => p.theme.color.surface}; color: ${(p) => p.theme.color.text}; font: inherit;
+  &:hover { border-color: ${(p) => p.theme.color.textMuted}; }
+  &:active { background: ${(p) => p.theme.color.surfaceRaised}; }
 `;
-export const Shimmer = styled.div<{ h?: number }>`
+/** Loading placeholder with the final layout's height. */
+export const Shimmer = styled.div<{ h?: number; stylesOverride?: SerializedStyles }>`
   height: ${(p) => p.h ?? 16}px;
   border-radius: ${(p) => p.theme.radius.sm};
   background: ${(p) => p.theme.color.surfaceRaised};
   animation: ${shimmer} 0.9s ease-in-out infinite alternate;
+  ${(p) => p.stylesOverride}
 `;
 
 // region Component
@@ -6541,12 +7629,13 @@ interface PageStateProps {
   title: string;
   message?: ReactNode;
   copyText?: string;
+  stylesOverride?: SerializedStyles;
 }
 
 /** Designed full-page loading, connecting, error and empty states. */
-export function PageState({ kind, title, message, copyText }: PageStateProps) {
+export function PageState({ kind, title, message, copyText, stylesOverride }: PageStateProps) {
   return (
-    <Center role={kind === "error" ? "alert" : "status"}>
+    <Center role={kind === "error" ? "alert" : "status"} stylesOverride={stylesOverride}>
       {kind === "loading" || kind === "connecting" ? <Spinner aria-hidden="true" /> : null}
       {kind === "error" ? <HealthIcon state="error" size={28} /> : null}
       {kind === "empty" ? <HealthIcon state="unknown" size={28} /> : null}
@@ -6674,6 +7763,8 @@ export function ThemeSwitcher() {
 import styled from "@emotion/styled";
 import { Link, useMatch } from "react-router-dom";
 import { useInstalls } from "../api/hooks";
+import type { ReadyCount } from "../api/types";
+import { HealthIcon } from "../health/HealthIcon";
 import { ResourceName } from "../resource/ResourceName";
 import { useShellExtension } from "./extension";
 import { InstallSwitcher } from "./InstallSwitcher";
@@ -6686,12 +7777,21 @@ const Bar = styled.header`
   border-bottom: 1px solid ${(p) => p.theme.color.border};
 `;
 const Brand = styled(Link)`
-  display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; font-weight: 700; letter-spacing: -0.01em;
+  display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; font-weight: ${(p) => p.theme.font.weight.bold}; letter-spacing: -0.01em;
   img, svg { height: 24px; width: auto; }
+  &:hover { opacity: 0.85; }
+  &:active { opacity: 0.7; }
 `;
 const Chip = styled.span`
-  padding: 2px 8px; border-radius: ${(p) => p.theme.radius.sm}; font-size: 12px;
+  padding: 2px 8px; border-radius: ${(p) => p.theme.radius.sm}; font-size: ${(p) => p.theme.font.size.sm};
   background: ${(p) => p.theme.color.accent}; color: ${(p) => p.theme.color.headerText};
+`;
+const Tag = styled.span`
+  padding: 1px 7px; border-radius: ${(p) => p.theme.radius.sm}; font-size: ${(p) => p.theme.font.size.sm};
+  border: 1px solid ${(p) => p.theme.color.border}; color: ${(p) => p.theme.color.headerText};
+`;
+const Ready = styled.span`
+  display: inline-flex; align-items: center; gap: 6px; font-size: ${(p) => p.theme.font.size.sm}; color: ${(p) => p.theme.color.headerText};
 `;
 const Spacer = styled.div` flex: 1; `;
 const Nav = styled.nav`
@@ -6701,8 +7801,14 @@ const Nav = styled.nav`
   a:hover { background: ${(p) => p.theme.color.surfaceRaised}; }
 `;
 
+// region Helpers
+/** Matches KGWUI-005: fewer ready replicas than desired is an error. */
+function readiness(c: ReadyCount): "healthy" | "error" {
+  return c.ready >= c.desired ? "healthy" : "error";
+}
+
 // region Component
-/** Header: brand, install identity and version, extension navigation, switchers. */
+/** Header: brand, install identity, version, edition and controller readiness, extension navigation, switchers. */
 export function Header() {
   const { brand, navEntries } = useShellExtension();
   const match = useMatch("/i/:ns/:name/*");
@@ -6718,7 +7824,12 @@ export function Header() {
       {current ? (
         <>
           <Chip>v{current.version}</Chip>
+          <Tag data-testid="edition">{current.edition}</Tag>
           <ResourceName namespace={current.namespace} name={current.name} />
+          <Ready>
+            <HealthIcon state={readiness(current.controller)} />
+            Controller {current.controller.ready}/{current.controller.desired} ready
+          </Ready>
         </>
       ) : null}
       <Nav aria-label="Extensions">
@@ -6880,11 +7991,12 @@ git add web && git commit -m "feat(web): shell with extension registry, routing,
 - Test: `web/packages/shell/src/pages/install/InstallPage.test.tsx`
 
 **Interfaces:**
-- Consumes: `useOverview`, `useHealth`, `useInstallId`, `isStale`, `HealthBadge`, `HealthIcon`, `ResourceName`, `Tooltip`, `PageState`, `Shimmer`, `useShellExtension().findingRenderers`.
+- Consumes: `useOverview`, `useHealth`, `useMeta`, `useInstallId`, `isStale`, `isLinkable`, `HealthBadge`, `HealthIcon`, `ResourceName`, `Tooltip`, `PageState`, `Shimmer`, `useShellExtension().findingRenderers`.
 - Produces:
   - `<InstallPage />`;
-  - `<FindingRow finding installId />` (used again by Task 17);
-  - `resourcePath(installId: string, r: Ref): string` (exported from `FindingRow.tsx`: `/i/{id}/r/{group|-}/{kind}/{ns|-}/{name}`).
+  - `<FindingRow finding installId stylesOverride? />` (used again by Task 17);
+  - `resourcePath(installId: string, r: Ref): string` (exported from `FindingRow.tsx`: `/i/{id}/r/{group|-}/{kind}/{ns|-}/{name}`);
+  - `<HealthStrip health stale />` and `<GatewayTable rows installId stale />` (page-internal; `stale` comes from `InstallPage`).
 
 Behaviour (design §2, §5.3, §6.4–6.5; D-011):
 
@@ -6892,26 +8004,36 @@ Behaviour (design §2, §5.3, §6.4–6.5; D-011):
 |---|---|
 | `health.state` = healthy | A slim strip: ✓ "All healthy", "checked 3s ago". The right column lists "What was checked" from `checks`. |
 | error / warning / unknown | Strip in that state's colours: "{n} errors, {m} warnings" (unknown: "No known problems — {failing required check names} could not be checked"). Below it, the top 5 findings by severity, then "Show all ({total})" linking to `/i/{id}/findings`. |
-| `collectedAt` older than 2 × `POLL_MS` | The strip turns unknown, with the text "Data is stale — last checked {relative time}". |
-| finding | A row with a severity badge, `ResourceName` (or the install when there is no resource), the message, and the detail on a second muted line. Clicking the row opens the YAML view; a copy button copies `namespace/name`. A registered finding renderer (by code prefix) adds content below. |
-| counts | One tile per count, in served order. A tile whose `access.ok` is false shows "No access" and the error in a tooltip. Tiles share one height and stretch to fill the row. A scope tile shows "{watched} / {total} namespaces", with the selectors in a tooltip; scope `unknown` shows a warning state. |
-| gateways | A TanStack table with columns Status, Gateway, Class, Listeners, Routes, Addresses. Sort is stored in the query string (`?sort=routes.desc`). Rows link to the Gateway's YAML view in Phase 1. |
-| first load | Shimmer placeholders with the final layout's dimensions (nothing shifts when data arrives). |
+| health or overview `collectedAt` older than 2 × `POLL_MS` | The strip **and every gateway row** turn unknown; the strip reads "Data is stale — last checked {relative time}" (finding 3). |
+| finding | A row with a severity badge, `ResourceName` (or the install when there is no resource), the message, and the detail on a second muted line. The resource is a link to its YAML view only when `/api/v1/meta` lists its kind (finding 11); a copy button copies `namespace/name`. A registered finding renderer (by code prefix) adds content below. |
+| restricted finding (`restricted: true`, D-013) | Severity badge and `ResourceName` as usual, the text "Restricted: ask the owning team" instead of message and detail, and no link. |
+| counts | One tile per count, in served order (the GatewayClass tile first; finding 12). A tile whose `access.ok` is false shows "No access" and the error in a tooltip. Tiles share one height and stretch to fill the row. A scope tile shows "{watched} / {total} namespaces", with the selectors in a tooltip; scope `unknown` shows a warning state. |
+| gateways | A text filter (`aria-label="Filter gateways"`) above a TanStack table with columns Status, Gateway, Class, Listeners, Routes, Addresses. The filter matches name, namespace and class and lives in the query string with the sort (`?q=edge&sort=routes.desc`; finding 12). Rows link to the Gateway's YAML view in Phase 1. |
+| first load, or an install switch | Shimmer placeholders with the final layout's dimensions (nothing shifts when data arrives). The page renders data only when `overview.header.id` and `health.install` both equal the route's install, so install A's data never appears under install B's URL (finding 4). |
 
 - [ ] **Step 1: Write the fixtures and the failing tests**
 
 `web/packages/shell/src/test/fixtures.ts`:
 
 ```ts
-import type { HealthReport, OverviewResponse } from "../api/types";
+import type { HealthReport, MetaResponse, OverviewResponse } from "../api/types";
 
 export const now = new Date().toISOString();
+
+/** Kinds the resource endpoint serves in these fixtures. */
+export const meta: MetaResponse = { version: "dev", synced: true, kinds: [
+  { group: "gateway.networking.k8s.io", kind: "GatewayClass", category: "gatewayclass", displayName: "GatewayClasses" },
+  { group: "gateway.networking.k8s.io", kind: "Gateway", category: "gateway", displayName: "Gateways" },
+  { group: "gateway.networking.k8s.io", kind: "HTTPRoute", category: "route", displayName: "HTTPRoutes" },
+  { group: "apps", kind: "Deployment", category: "workload", displayName: "Deployments" },
+] };
 
 export const overview: OverviewResponse = {
   header: { id: "kgw/kgateway", namespace: "kgw", name: "kgateway", version: "2.4.7", edition: "kgateway",
     controllerNames: ["kgateway.dev/kgateway"], controller: { ready: 2, desired: 2 },
     scope: { mode: "selectors", selectors: [{ matchLabels: { team: "a" } }], watched: 12, total: 40 } },
   counts: [
+    { group: "gateway.networking.k8s.io", kind: "GatewayClass", category: "gatewayclass", displayName: "GatewayClasses", count: 1, access: { ok: true } },
     { group: "gateway.networking.k8s.io", kind: "Gateway", category: "gateway", displayName: "Gateways", count: 3, access: { ok: true } },
     { group: "gateway.networking.k8s.io", kind: "HTTPRoute", category: "route", displayName: "HTTPRoutes", count: 142, access: { ok: true } },
     { group: "gateway.kgateway.dev", kind: "TrafficPolicy", category: "policy", displayName: "TrafficPolicies", count: 0, access: { ok: false, error: "forbidden" } },
@@ -6929,6 +8051,7 @@ const f = (code: string, severity: "error" | "warning" | "info", ns: string, nam
 });
 
 export const unhealthy: HealthReport = {
+  install: "kgw/kgateway",
   state: "error",
   findings: [
     { ...f("KGWUI-001", "error", "prod", "edge", "Configuration rejected by Envoy"), resource: { group: "gateway.networking.k8s.io", kind: "Gateway", namespace: "prod", name: "edge" } },
@@ -6940,7 +8063,7 @@ export const unhealthy: HealthReport = {
 };
 
 export const healthy: HealthReport = {
-  state: "healthy", findings: [], counts: {}, collectedAt: now,
+  install: "kgw/kgateway", state: "healthy", findings: [], counts: {}, collectedAt: now,
   checks: [
     { name: "resource status", ok: true, required: true, collectedAt: now },
     { name: "xDS rejects", ok: true, required: true, collectedAt: now },
@@ -6948,9 +8071,17 @@ export const healthy: HealthReport = {
 };
 
 export const unknown: HealthReport = {
-  state: "unknown", counts: { info: 1 }, collectedAt: now,
+  install: "kgw/kgateway", state: "unknown", counts: { info: 1 }, collectedAt: now,
   findings: [{ code: "KGWUI-008", slug: "signal-unavailable", severity: "info", install: "kgw/kgateway", message: "Could not check xDS rejects", detail: "connection refused" }],
   checks: [{ name: "xDS rejects", ok: false, required: true, collectedAt: now, error: "connection refused" }],
+};
+
+/** A finding on a resource the caller may not view (D-013). */
+export const restricted: HealthReport = {
+  ...unhealthy,
+  findings: [{ code: "KGWUI-002", slug: "condition-false", severity: "error", install: "kgw/kgateway", message: "", restricted: true,
+    resource: { group: "gateway.networking.k8s.io", kind: "HTTPRoute", namespace: "payments", name: "checkout" } }],
+  counts: { error: 1 },
 };
 ```
 
@@ -6958,14 +8089,20 @@ export const unknown: HealthReport = {
 
 ```tsx
 import { screen, waitFor, within } from "@testing-library/react";
-import { Route, Routes } from "react-router-dom";
-import { healthy, overview, unhealthy, unknown } from "../../test/fixtures";
+import userEvent from "@testing-library/user-event";
+import { Route, Routes, useNavigate } from "react-router-dom";
+import { healthy, meta, overview, restricted, unhealthy, unknown } from "../../test/fixtures";
 import { renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
 
-function mount(health: unknown) {
-  stubApi({ "/api/v1/installs/kgw/kgateway/overview": overview, "/api/v1/installs/kgw/kgateway/health": health });
-  return renderWithTheme(<Routes><Route path="/i/:ns/:name" element={<InstallPage />} /></Routes>, { path: "/i/kgw/kgateway" });
+function mount(health: unknown, path = "/i/kgw/kgateway", ov: unknown = overview) {
+  stubApi({ "/api/v1/installs/kgw/kgateway/overview": ov, "/api/v1/installs/kgw/kgateway/health": health, "/api/v1/meta": meta });
+  return renderWithTheme(<Routes><Route path="/i/:ns/:name" element={<InstallPage />} /></Routes>, { path });
+}
+
+function GoTo({ to }: { to: string }) {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate(to)}>go</button>;
 }
 
 it("unhealthy: strip with counts, top 5 findings, show all", async () => {
@@ -6991,18 +8128,77 @@ it("unknown: never green, names the missing signal", async () => {
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
 });
 
-it("stale data turns the strip unknown", async () => {
+it("stale data turns the strip and every gateway row unknown", async () => {
   mount({ ...healthy, collectedAt: new Date(Date.now() - 60_000).toISOString() });
   const strip = await screen.findByTestId("health-strip");
   expect(strip).toHaveTextContent(/Data is stale/);
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
+  const rows = within(screen.getByRole("table", { name: "Gateways" })).getAllByRole("row").slice(1);
+  for (const r of rows) {
+    expect(r).toHaveTextContent("Unknown");
+    expect(within(r).queryByTestId("health-icon-healthy")).toBeNull();
+    expect(within(r).queryByTestId("health-icon-error")).toBeNull();
+  }
 });
 
-it("count tiles, no-access tile and scope tile", async () => {
+it("count tiles, GatewayClass tile, no-access tile and scope tile", async () => {
   mount(healthy);
   expect(await screen.findByText("142")).toBeInTheDocument();
+  expect(screen.getByText("GatewayClasses")).toBeInTheDocument();
   expect(screen.getByText("No access")).toBeInTheDocument();
   expect(screen.getByText("12 / 40")).toBeInTheDocument();
+});
+
+it("gateway filter matches name, namespace and class and lives in the URL", async () => {
+  mount(healthy, "/i/kgw/kgateway?q=internal");
+  const table = await screen.findByRole("table", { name: "Gateways" });
+  expect(within(table).getAllByRole("row")).toHaveLength(2); // header + internal
+  const filter = screen.getByRole("textbox", { name: "Filter gateways" });
+  expect(filter).toHaveValue("internal");
+  await userEvent.clear(filter);
+  await userEvent.type(filter, "prod");
+  expect(within(table).getAllByRole("row")).toHaveLength(3); // namespace matches both
+  await userEvent.clear(filter);
+  await userEvent.type(filter, "nomatch");
+  expect(within(table).getAllByRole("row")).toHaveLength(1);
+});
+
+it("links only finding resources whose kind /api/v1/meta lists", async () => {
+  stubApi({ "/api/v1/installs/kgw/kgateway/overview": overview, "/api/v1/installs/kgw/kgateway/health": unhealthy,
+    "/api/v1/meta": { ...meta, kinds: meta.kinds.filter((k) => k.kind !== "HTTPRoute") } });
+  renderWithTheme(<Routes><Route path="/i/:ns/:name" element={<InstallPage />} /></Routes>, { path: "/i/kgw/kgateway" });
+  const rows = await screen.findAllByTestId("finding-row");
+  await waitFor(() => expect(within(rows[0] as HTMLElement).getByRole("link")).toHaveAttribute("href", "/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge"));
+  expect(within(rows[1] as HTMLElement).queryByRole("link")).toBeNull(); // HTTPRoute is not listed
+});
+
+it("a restricted finding shows its resource and severity, a plain note and no link", async () => {
+  mount(restricted);
+  const row = await screen.findByTestId("finding-row");
+  expect(row).toHaveTextContent("payments/checkout");
+  expect(row).toHaveTextContent("Error");
+  expect(row).toHaveTextContent("Restricted: ask the owning team");
+  expect(within(row).queryByRole("link")).toBeNull();
+});
+
+it("switching installs never shows the previous install's data", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.startsWith("/api/v1/installs/b/two/")) return new Promise<Response>(() => {}); // install B never answers
+    const body = url.endsWith("/overview") ? overview : url.endsWith("/health") ? unhealthy : meta;
+    return new Response(JSON.stringify(body), { status: 200 });
+  }));
+  renderWithTheme(<><Routes><Route path="/i/:ns/:name" element={<InstallPage />} /></Routes><GoTo to="/i/b/two" /></>, { path: "/i/kgw/kgateway" });
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent("1 error");
+  await userEvent.click(screen.getByRole("button", { name: "go" }));
+  await waitFor(() => expect(screen.queryByTestId("health-strip")).toBeNull());
+  expect(screen.queryByRole("table", { name: "Gateways" })).toBeNull();
+  expect(screen.queryAllByTestId("finding-row")).toHaveLength(0);
+});
+
+it("never renders a response that belongs to another install", async () => {
+  mount(healthy, "/i/kgw/kgateway", { ...overview, header: { ...overview.header, id: "other/install" } });
+  await waitFor(() => expect(screen.getByRole("status", { busy: true })).toBeInTheDocument());
+  expect(screen.queryByTestId("health-strip")).toBeNull();
 });
 
 it("gateway table lists gateways with status text", async () => {
@@ -7032,9 +8228,11 @@ Expected: FAIL
 `FindingRow.tsx`:
 
 ```tsx
+import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Copy } from "lucide-react";
 import { Link } from "react-router-dom";
+import { isLinkable, useMeta } from "../../api/hooks";
 import type { Finding, Ref } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
 import { severityToState } from "../../health/state";
@@ -7043,7 +8241,7 @@ import { useShellExtension } from "../../shell/extension";
 import { Tooltip } from "../../shell/Tooltip";
 
 // region Styles
-const Row = styled.div`
+const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   display: grid; grid-template-columns: 96px minmax(180px, 280px) 1fr auto; align-items: start; gap: ${(p) => p.theme.space(3)};
   padding: ${(p) => p.theme.space(2.5)} ${(p) => p.theme.space(3)};
   border-bottom: 1px solid ${(p) => p.theme.color.border};
@@ -7051,13 +8249,15 @@ const Row = styled.div`
   a { color: inherit; text-decoration: none; }
   a:hover [data-part="name"] { text-decoration: underline; }
   .msg { color: ${(p) => p.theme.color.text}; }
-  .detail { color: ${(p) => p.theme.color.textMuted}; font-size: 12px; margin-top: 2px; }
+  .detail { color: ${(p) => p.theme.color.textMuted}; font-size: ${(p) => p.theme.font.size.sm}; margin-top: 2px; }
   @media (max-width: 720px) { grid-template-columns: 1fr; }
+  ${(p) => p.stylesOverride}
 `;
 const IconButton = styled.button`
   width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
   background: transparent; color: ${(p) => p.theme.color.textMuted}; border: 1px solid transparent; border-radius: ${(p) => p.theme.radius.sm};
   &:hover { border-color: ${(p) => p.theme.color.border}; color: ${(p) => p.theme.color.text}; }
+  &:active { background: ${(p) => p.theme.color.surfaceRaised}; }
 `;
 
 // region Helpers
@@ -7070,24 +8270,34 @@ export function resourcePath(installId: string, r: Ref): string {
 interface FindingRowProps {
   finding: Finding;
   installId: string;
+  stylesOverride?: SerializedStyles;
 }
 
-/** One finding: severity, resource, message, detail; click opens the resource. */
-export function FindingRow({ finding: f, installId }: FindingRowProps) {
+/** One finding: severity, resource, message, detail. The resource links to its YAML view when the backend serves its kind. */
+export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
   const { findingRenderers } = useShellExtension();
+  const { data: meta } = useMeta();
   const extra = Object.entries(findingRenderers).find(([prefix]) => f.code.startsWith(prefix))?.[1];
   const name = f.resource ? <ResourceName namespace={f.resource.namespace} name={f.resource.name} /> : <span>{f.install}</span>;
+  // A restricted finding (D-013) never links: its resource would 404 for this caller.
+  const linked = !!f.resource && !f.restricted && isLinkable(meta, f.resource);
   return (
-    <Row data-testid="finding-row">
+    <Row data-testid="finding-row" stylesOverride={stylesOverride}>
       <HealthBadge state={severityToState(f.severity)} label={{ error: "Error", warning: "Warning", info: "Info" }[f.severity]} />
       <div>
-        {f.resource ? <Link to={resourcePath(installId, f.resource)}>{name}</Link> : name}
+        {linked && f.resource ? <Link to={resourcePath(installId, f.resource)}>{name}</Link> : name}
         {f.resource ? <div className="detail">{f.resource.kind}</div> : null}
       </div>
       <div>
-        <div className="msg">{f.message}</div>
-        {f.detail ? <div className="detail">{f.detail}</div> : null}
-        {extra ? extra(f) : null}
+        {f.restricted ? (
+          <div className="detail">Restricted: ask the owning team</div>
+        ) : (
+          <>
+            <div className="msg">{f.message}</div>
+            {f.detail ? <div className="detail">{f.detail}</div> : null}
+            {extra ? extra(f) : null}
+          </>
+        )}
       </div>
       {f.resource ? (
         <Tooltip label="Copy namespace/name">
@@ -7107,7 +8317,6 @@ export function FindingRow({ finding: f, installId }: FindingRowProps) {
 ```tsx
 import styled from "@emotion/styled";
 import type { HealthReport } from "../../api/types";
-import { isStale } from "../../api/hooks";
 import { HealthIcon } from "../../health/HealthIcon";
 import type { HealthState } from "../../theme/tokens";
 
@@ -7116,8 +8325,8 @@ const Strip = styled.div<{ state: HealthState }>`
   display: flex; align-items: center; gap: ${(p) => p.theme.space(3)}; padding: ${(p) => p.theme.space(2.5)} ${(p) => p.theme.space(3)};
   border-radius: ${(p) => p.theme.radius.md};
   background: ${(p) => p.theme.color.status[p.state].stripBg}; border: 1px solid ${(p) => p.theme.color.status[p.state].stripBorder};
-  b { font-weight: 600; }
-  .when { margin-left: auto; color: ${(p) => p.theme.color.textMuted}; font-size: 12px; }
+  b { font-weight: ${(p) => p.theme.font.weight.semibold}; }
+  .when { margin-left: auto; color: ${(p) => p.theme.color.textMuted}; font-size: ${(p) => p.theme.font.size.sm}; }
 `;
 
 // region Helpers
@@ -7146,9 +8355,8 @@ function headline(h: HealthReport): string {
 }
 
 // region Component
-/** Full-width health strip; stale data is shown as unknown (D-006). */
-export function HealthStrip({ health }: { health: HealthReport }) {
-  const stale = isStale(health.collectedAt);
+/** Full-width health strip; stale data is shown as unknown (D-006). InstallPage decides staleness for the whole page. */
+export function HealthStrip({ health, stale }: { health: HealthReport; stale: boolean }) {
   const state: HealthState = stale ? "unknown" : health.state;
   return (
     <Strip state={state} data-testid="health-strip" role="status">
@@ -7236,9 +8444,9 @@ const Grid = styled.div`
 const Tile = styled.div`
   height: 100%; padding: ${(p) => p.theme.space(3)}; background: ${(p) => p.theme.color.surface};
   border: 1px solid ${(p) => p.theme.color.border}; border-radius: ${(p) => p.theme.radius.md};
-  .n { display: block; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
-  .l { color: ${(p) => p.theme.color.textMuted}; font-size: 12px; }
-  .warn { display: inline-flex; gap: 6px; align-items: center; color: ${(p) => p.theme.color.status.unknown.fg}; font-weight: 600; }
+  .n { display: block; font-size: ${(p) => p.theme.font.size.xl}; font-weight: ${(p) => p.theme.font.weight.semibold}; letter-spacing: -0.02em; }
+  .l { color: ${(p) => p.theme.color.textMuted}; font-size: ${(p) => p.theme.font.size.sm}; }
+  .warn { display: inline-flex; gap: 6px; align-items: center; color: ${(p) => p.theme.color.status.unknown.fg}; font-weight: ${(p) => p.theme.font.weight.semibold}; }
 `;
 
 // region Component
@@ -7276,6 +8484,7 @@ export function CountTiles({ overview }: { overview: OverviewResponse }) {
 ```tsx
 import styled from "@emotion/styled";
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, type SortingState, useReactTable } from "@tanstack/react-table";
+import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { GatewayRow } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
@@ -7283,24 +8492,41 @@ import { ResourceName } from "../../resource/ResourceName";
 import { resourcePath } from "./FindingRow";
 
 // region Styles
+const Filter = styled.input`
+  height: 32px; min-width: 260px; margin-bottom: ${(p) => p.theme.space(2)}; padding: 0 10px; font: inherit;
+  color: ${(p) => p.theme.color.text}; background: ${(p) => p.theme.color.surface};
+  border: 1px solid ${(p) => p.theme.color.border}; border-radius: ${(p) => p.theme.radius.sm};
+  &:hover { border-color: ${(p) => p.theme.color.textMuted}; }
+  &:active { border-color: ${(p) => p.theme.color.text}; }
+`;
 const Table = styled.table`
   width: 100%; border-collapse: collapse; background: ${(p) => p.theme.color.surface};
   border: 1px solid ${(p) => p.theme.color.border}; border-radius: ${(p) => p.theme.radius.md};
-  th { text-align: left; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600;
+  th { text-align: left; font-size: ${(p) => p.theme.font.size.xs}; letter-spacing: .06em; text-transform: uppercase; font-weight: ${(p) => p.theme.font.weight.semibold};
        color: ${(p) => p.theme.color.textMuted}; padding: 8px 12px; border-bottom: 1px solid ${(p) => p.theme.color.border}; }
   th button { all: unset; cursor: pointer; }
+  th button:hover { color: ${(p) => p.theme.color.text}; }
   td { padding: 8px 12px; border-bottom: 1px solid ${(p) => p.theme.color.border}; }
   tr:last-of-type td { border-bottom: 0; }
   a { color: inherit; text-decoration: none; }
+  a:hover [data-part="name"] { text-decoration: underline; }
 `;
 
 // region Helpers
 const col = createColumnHelper<GatewayRow>();
 const rank = { error: 0, unknown: 1, warning: 2, healthy: 3 } as const;
 
-function columns(installId: string) {
+/** Rows whose name, namespace or class contains q (case-insensitive). */
+function filterRows(rows: GatewayRow[], q: string): GatewayRow[] {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter((r) => [r.ref.name, r.ref.namespace ?? "", r.class].some((v) => v.toLowerCase().includes(needle)));
+}
+
+// Stale data renders every row as unknown: an old green badge is not evidence (finding 3).
+function columns(installId: string, stale: boolean) {
   return [
-    col.accessor("state", { header: "Status", cell: (c) => <HealthBadge state={c.getValue()} />, sortingFn: (a, b) => rank[a.original.state] - rank[b.original.state] }),
+    col.accessor("state", { header: "Status", cell: (c) => <HealthBadge state={stale ? "unknown" : c.getValue()} />, sortingFn: (a, b) => rank[a.original.state] - rank[b.original.state] }),
     col.accessor((r) => `${r.ref.namespace}/${r.ref.name}`, { id: "gateway", header: "Gateway",
       cell: (c) => <Link to={resourcePath(installId, c.row.original.ref)}><ResourceName namespace={c.row.original.ref.namespace} name={c.row.original.ref.name} /></Link> }),
     col.accessor("class", { header: "Class" }),
@@ -7311,13 +8537,15 @@ function columns(installId: string) {
 }
 
 // region Component
-/** Gateways of the install; sort is kept in the URL (?sort=routes.desc). */
-export function GatewayTable({ rows, installId }: { rows: GatewayRow[]; installId: string }) {
+/** Gateways of the install; the text filter and the sort are kept in the URL (?q=edge&sort=routes.desc). */
+export function GatewayTable({ rows, installId, stale }: { rows: GatewayRow[]; installId: string; stale: boolean }) {
   const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const visible = useMemo(() => filterRows(rows, q), [rows, q]);
   const [id, dir] = (params.get("sort") ?? "state.asc").split(".");
   const sorting: SortingState = [{ id: id ?? "state", desc: dir === "desc" }];
   const table = useReactTable({
-    data: rows, columns: columns(installId), state: { sorting },
+    data: visible, columns: columns(installId, stale), state: { sorting },
     onSortingChange: (u) => {
       const next = typeof u === "function" ? u(sorting) : u;
       const s = next[0];
@@ -7326,26 +8554,30 @@ export function GatewayTable({ rows, installId }: { rows: GatewayRow[]; installI
     getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel(),
   });
   return (
-    <Table aria-label="Gateways">
-      <thead>
-        {table.getHeaderGroups().map((hg) => (
-          <tr key={hg.id}>
-            {hg.headers.map((h) => (
-              <th key={h.id} aria-sort={h.column.getIsSorted() === "asc" ? "ascending" : h.column.getIsSorted() === "desc" ? "descending" : "none"}>
-                {h.column.getCanSort() ? (
-                  <button type="button" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}</button>
-                ) : flexRender(h.column.columnDef.header, h.getContext())}
-              </th>
-            ))}
-          </tr>
-        ))}
-      </thead>
-      <tbody>
-        {table.getRowModel().rows.map((r) => (
-          <tr key={r.id}>{r.getVisibleCells().map((c) => <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>)}</tr>
-        ))}
-      </tbody>
-    </Table>
+    <>
+      <Filter aria-label="Filter gateways" autoComplete="off" placeholder="Filter by name, namespace or class" value={q}
+        onChange={(e) => setParams((p) => { if (e.target.value) p.set("q", e.target.value); else p.delete("q"); return p; }, { replace: true })} />
+      <Table aria-label="Gateways">
+        <thead>
+          {table.getHeaderGroups().map((hg) => (
+            <tr key={hg.id}>
+              {hg.headers.map((h) => (
+                <th key={h.id} aria-sort={h.column.getIsSorted() === "asc" ? "ascending" : h.column.getIsSorted() === "desc" ? "descending" : "none"}>
+                  {h.column.getCanSort() ? (
+                    <button type="button" onClick={h.column.getToggleSortingHandler()}>{flexRender(h.column.columnDef.header, h.getContext())}</button>
+                  ) : flexRender(h.column.columnDef.header, h.getContext())}
+                </th>
+              ))}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map((r) => (
+            <tr key={r.id}>{r.getVisibleCells().map((c) => <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>)}</tr>
+          ))}
+        </tbody>
+      </Table>
+    </>
   );
 }
 ```
@@ -7354,7 +8586,7 @@ export function GatewayTable({ rows, installId }: { rows: GatewayRow[]; installI
 
 ```tsx
 import styled from "@emotion/styled";
-import { useHealth, useOverview } from "../../api/hooks";
+import { isStale, useHealth, useOverview } from "../../api/hooks";
 import { useInstallId } from "../../shell/extension";
 import { PageState, Shimmer } from "../../states/PageState";
 import { CheckedList } from "./CheckedList";
@@ -7366,7 +8598,7 @@ import { TopFindings } from "./TopFindings";
 // region Styles
 const Page = styled.div`
   max-width: 1400px; margin: 0 auto; padding: ${(p) => p.theme.space(4)};
-  h2 { font-size: 13px; font-weight: 600; margin: ${(p) => p.theme.space(5)} 0 ${(p) => p.theme.space(2)}; }
+  h2 { font-size: ${(p) => p.theme.font.size.md}; font-weight: ${(p) => p.theme.font.weight.semibold}; margin: ${(p) => p.theme.space(5)} 0 ${(p) => p.theme.space(2)}; }
 `;
 const Split = styled.div`
   display: grid; grid-template-columns: 1fr 280px; gap: ${(p) => p.theme.space(4)}; align-items: start;
@@ -7382,9 +8614,10 @@ export function InstallPage() {
   const err = ov.error ?? h.error;
   if (err && err.status === 503) return <PageState kind="connecting" title="Connecting to cluster…" message={err.message} />;
   if (err && !(ov.data && h.data)) return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
-  if (!ov.data || !h.data) {
+  // Render only data that belongs to this route's install (finding 4).
+  if (!ov.data || !h.data || ov.data.header.id !== id || h.data.install !== id) {
     return (
-      <Page aria-busy="true">
+      <Page role="status" aria-busy="true" aria-label="Loading install">
         <Shimmer h={44} />
         <div style={{ height: 16 }} />
         <Shimmer h={84} />
@@ -7393,16 +8626,18 @@ export function InstallPage() {
       </Page>
     );
   }
+  // Stale health or overview turns the strip and the gateway rows unknown (finding 3).
+  const stale = isStale(h.data.collectedAt) || isStale(ov.data.collectedAt);
   const healthy = h.data.state === "healthy";
   return (
     <Page>
-      <HealthStrip health={h.data} />
+      <HealthStrip health={h.data} stale={stale} />
       {healthy ? (
         <Split>
           <div>
             <CountTiles overview={ov.data} />
             <h2>Gateways</h2>
-            <GatewayTable rows={ov.data.gateways} installId={id} />
+            <GatewayTable rows={ov.data.gateways} installId={id} stale={stale} />
           </div>
           <div>
             <h2>What was checked</h2>
@@ -7414,7 +8649,7 @@ export function InstallPage() {
           <TopFindings findings={h.data.findings} installId={id} />
           <CountTiles overview={ov.data} />
           <h2>Gateways</h2>
-          <GatewayTable rows={ov.data.gateways} installId={id} />
+          <GatewayTable rows={ov.data.gateways} installId={id} stale={stale} />
         </>
       )}
     </Page>
@@ -7454,7 +8689,8 @@ Behaviour:
   - All filters live in the query string (`?sev=error,warning&kind=HTTPRoute&q=cart`).
   - The list is virtualised (`@tanstack/react-virtual`), so 5,000 findings scroll smoothly.
   - When filters match nothing, a centred empty state appears.
-- **ResourcePage:** `kind`, `ResourceName`, a copy button for `namespace/name`, then YAML (`js-yaml` `dump`, `status` moved before `spec` so the health-relevant part comes first) in a mono `<pre>`. A 404 shows "Not in this install's scope".
+- **ResourcePage:** `kind`, `ResourceName`, a copy button for `namespace/name`, then YAML (`js-yaml` `dump`, `status` moved before `spec` so the health-relevant part comes first) in a mono `<pre>`. A 404 shows "Not in this install's scope"; the backend answers 404 alike for objects it may not serve and objects the caller may not view (D-013).
+- All font sizes and weights come from `theme.font.size` and `theme.font.weight` (finding 17).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -7471,7 +8707,7 @@ import { FindingsPage } from "./FindingsPage";
 import { ResourcePage } from "./ResourcePage";
 
 const inst = (id: string, state: string, counts = {}) => ({ id, namespace: id.split("/")[0], name: id.split("/")[1], version: "2.4.7",
-  edition: "kgateway", controllerNames: [], scope: { mode: "selectors", watched: 12, total: 40 }, health: { state, counts } });
+  edition: "kgateway", controllerNames: [], controller: { ready: 1, desired: 1 }, scope: { mode: "selectors", watched: 12, total: 40 }, health: { state, counts } });
 
 it("cluster landing renders one card per install linking to it", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one", "error", { error: 1, warning: 2 }), inst("b/two", "healthy")] });
@@ -7514,7 +8750,7 @@ it("resource page shows YAML with status first and a copy button", async () => {
 it("resource page 404 says it is out of scope", async () => {
   stubApi({});
   renderWithTheme(<Routes><Route path="/i/:ns/:name/r/:group/:kind/:rns/:rname" element={<ResourcePage />} /></Routes>,
-    { path: "/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/blog/posts" });
+    { path: "/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/infra/foreign" });
   await waitFor(() => expect(screen.getByText("Not in this install's scope")).toBeInTheDocument());
 });
 ```
@@ -7546,8 +8782,9 @@ const Card = styled(Link)`
   color: inherit; text-decoration: none; user-select: none; background: ${(p) => p.theme.color.surface};
   border: 1px solid ${(p) => p.theme.color.border}; border-radius: ${(p) => p.theme.radius.md};
   &:hover { background: ${(p) => p.theme.color.surfaceRaised}; }
+  &:active { border-color: ${(p) => p.theme.color.textMuted}; }
   .top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-  .muted { color: ${(p) => p.theme.color.textMuted}; font-size: 12px; }
+  .muted { color: ${(p) => p.theme.color.textMuted}; font-size: ${(p) => p.theme.font.size.sm}; }
 `;
 
 // region Helpers
@@ -7605,7 +8842,8 @@ const Bar = styled.div`
 const Chip = styled.button`
   height: 32px; padding: 0 12px; cursor: pointer; font: inherit; border-radius: 16px;
   color: ${(p) => p.theme.color.text}; background: ${(p) => p.theme.color.surface}; border: 1px solid ${(p) => p.theme.color.border};
-  &[aria-pressed="true"] { background: ${(p) => p.theme.color.surfaceRaised}; border-color: ${(p) => p.theme.color.textMuted}; font-weight: 600; }
+  &:hover { border-color: ${(p) => p.theme.color.textMuted}; }
+  &[aria-pressed="true"] { background: ${(p) => p.theme.color.surfaceRaised}; border-color: ${(p) => p.theme.color.textMuted}; font-weight: ${(p) => p.theme.font.weight.semibold}; }
 `;
 const Scroller = styled.div`
   height: calc(100vh - 200px); overflow: auto; background: ${(p) => p.theme.color.surface};
@@ -7689,10 +8927,12 @@ const Page = styled.div`
   max-width: 1400px; margin: 0 auto; padding: ${(p) => p.theme.space(4)};
   header { display: flex; align-items: center; gap: 12px; margin-bottom: ${(p) => p.theme.space(3)}; }
   .kind { color: ${(p) => p.theme.color.textMuted}; }
-  pre { margin: 0; padding: ${(p) => p.theme.space(4)}; overflow: auto; font-family: ${(p) => p.theme.font.mono}; font-size: 12.5px; line-height: 1.5;
+  pre { margin: 0; padding: ${(p) => p.theme.space(4)}; overflow: auto; font-family: ${(p) => p.theme.font.mono}; font-size: ${(p) => p.theme.font.size.code}; line-height: 1.5;
         background: ${(p) => p.theme.color.surface}; border: 1px solid ${(p) => p.theme.color.border}; border-radius: ${(p) => p.theme.radius.md}; }
   button { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
            background: transparent; color: ${(p) => p.theme.color.textMuted}; border: 1px solid ${(p) => p.theme.color.border}; border-radius: ${(p) => p.theme.radius.sm}; }
+  button:hover { color: ${(p) => p.theme.color.text}; border-color: ${(p) => p.theme.color.textMuted}; }
+  button:active { background: ${(p) => p.theme.color.surfaceRaised}; }
 `;
 
 // region Helpers
@@ -7786,13 +9026,17 @@ import { controlRoomDark } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
 import { Shell } from "./Shell";
 
-// A test-only downstream: own brand, own theme, own page, own finding renderer (design §9).
-const acmeTheme: Theme = { ...controlRoomDark, id: "acme", name: "Acme", color: { ...controlRoomDark.color, accent: "#7A1FA2" } };
+// A test-only downstream: own brand, own theme (colour and typography), own page, own finding renderer (design §9).
+const acmeTheme: Theme = {
+  ...controlRoomDark, id: "acme", name: "Acme",
+  color: { ...controlRoomDark.color, accent: "#7A1FA2" },
+  font: { ...controlRoomDark.font, ui: "Acme Sans", size: { ...controlRoomDark.font.size, sm: "13px" } },
+};
 
 it("a downstream extension contributes brand, theme, page and finding renderer", async () => {
   stubApi({
     "/api/v1/installs": [{ id: "kgw/kgateway", namespace: "kgw", name: "kgateway", version: "9.9.9", edition: "acme", controllerNames: [],
-      scope: { mode: "all", watched: 1, total: 1 }, health: { state: "error", counts: { error: 1 } } }],
+      controller: { ready: 1, desired: 1 }, scope: { mode: "all", watched: 1, total: 1 }, health: { state: "error", counts: { error: 1 } } }],
     "/api/v1/meta": { version: "dev", synced: true, kinds: [] },
     "/api/v1/installs/kgw/kgateway/overview": overview,
     "/api/v1/installs/kgw/kgateway/health": { ...unhealthy, findings: [{ code: "ACME-001", slug: "demo", severity: "error", install: "kgw/kgateway", message: "Downstream" }] },
@@ -7810,6 +9054,10 @@ it("a downstream extension contributes brand, theme, page and finding renderer",
   );
   expect(await screen.findByText("Acme Edge")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText("acme detail")).toBeInTheDocument());
+  // The contributed tokens actually apply (finding 15): colour, font family and type scale.
+  expect(screen.getByText("v9.9.9")).toHaveStyle({ backgroundColor: "#7A1FA2" });
+  expect(document.body).toHaveStyle({ fontFamily: "Acme Sans" });
+  expect(screen.getAllByText("Error")[0]).toHaveStyle({ fontSize: "13px" });
   window.history.pushState({}, "", "/i/kgw/kgateway/waf");
   window.dispatchEvent(new PopStateEvent("popstate"));
   await waitFor(() => expect(screen.getByText("waf page")).toBeInTheDocument());
@@ -8054,8 +9302,14 @@ image:
   pullPolicy: IfNotPresent
 install:
   pin: ""            # "namespace/name" of one kgateway controller; empty shows all installs
+# Trust model (D-013): the UI has no login. Anyone who reaches it sees everything
+# its ServiceAccount can read (every watched kind, Deployments included, never
+# Secrets), which can be more than their own Kubernetes RBAC allows.
 httpRoute:
-  enabled: false     # expose the UI through an existing Gateway; put authentication in front (see README)
+  # Expose the UI through an existing Gateway. Only enable this with
+  # authentication and authorisation on the route, for example a kgateway
+  # TrafficPolicy with OIDC or external auth that admits only operators.
+  enabled: false
   parentRefs: []
   hostnames: []
 serviceAccount:
@@ -8218,22 +9472,31 @@ spec:
 `templates/NOTES.txt`:
 
 ```
-kgateway UI is installed (read-only; it has no login of its own).
+kgateway UI is installed. It is read-only and has no login of its own.
+
+Trust model: anyone who can reach the UI sees everything it shows, which is
+everything its ServiceAccount can read (never Secrets). That can be more than
+their own Kubernetes RBAC allows. Treat access to the UI as cluster-read access.
 
 Open it with:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kgateway-ui.fullname" . }} 8080:80
   open http://localhost:8080
 {{- if .Values.httpRoute.enabled }}
 
-It is also exposed through an HTTPRoute. Put authentication in front of it,
-for example a kgateway TrafficPolicy with OAuth2/OIDC on that route.
+It is also exposed through an HTTPRoute. Put authentication and authorisation
+on that route, for example a kgateway TrafficPolicy with OIDC or external auth
+that admits only the people who may read the cluster.
 {{- end }}
 
 Controller metrics are read directly from the controller pods on port 9092.
 If a NetworkPolicy blocks that, the UI reports "signal unavailable" instead of green.
 ```
 
-`README.md` (chart): the values table, the RBAC rationale (read-only; no Secrets; Pods and Deployments are read but only watched through label selectors), the NetworkPolicy note, and the authentication guidance for `httpRoute`.
+`README.md` (chart):
+- A **Security and trust model** section at the top (D-013): the UI has no login; whoever reaches it sees everything its ServiceAccount can read, which can exceed their own RBAC; the ClusterRole never grants Secrets and no other field is redacted; port-forward to the ClusterIP Service is the default; `httpRoute.enabled` is for operators who put authentication and authorisation on the route (for example a kgateway TrafficPolicy); per-user authorisation is on the roadmap.
+- The values table, with the `httpRoute` rows pointing at that section.
+- The RBAC rationale (read-only; no Secrets; Pods and Deployments are read but only watched through label selectors).
+- The NetworkPolicy note.
 
 - [ ] **Step 4: Run the tests and lint the chart**
 
@@ -8387,17 +9650,19 @@ git add .github .golangci.yaml && git commit -m "ci: lint, test, build, hygiene 
 - Consumes: the image (Task 19), the chart (Task 20) and the API (Task 10).
 - Produces: `make e2e KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1`.
 
+Each kgateway install uses the Helm release name `kgateway` in its own namespace, so `kgateway.fullname` renders the controller Deployment as `kgateway` and the install IDs are `kgw-a/kgateway` and `kgw-b/kgateway` (finding 13). The policy-target capability is versioned (finding 7): only kgateway `main` writes `TargetNotFound`; on v2.3.x and v2.4.x the policy gets no status and is reported as not yet processed.
+
 Scenario (the fixture names are used in the assertions below):
 
 | Object | Namespace (labels) | Expected in UI |
 |---|---|---|
-| Install A: kgateway, `discoveryNamespaceSelectors=[{matchLabels:{team:a}}]` | `kgw-a` | install `kgw-a/kgw-a` |
+| Install A: kgateway (release `kgateway`), `discoveryNamespaceSelectors=[{matchLabels:{team:a}}]` | `kgw-a` | install `kgw-a/kgateway` |
 | Gateway `edge` (class `kgateway`) | `infra` (team=a) | Gateway count 1; row Healthy |
 | HTTPRoute `good` → httpbin Service | `shop` (team=a) | counted, no finding |
 | HTTPRoute `broken` → Service `missing` | `shop` | KGWUI-002 "Backend not found" |
 | HTTPRoute `posts` → `infra/edge` | `blog` (no label) | not counted; KGWUI-004 |
-| TrafficPolicy `tp-missing-target` targeting HTTPRoute `nope` | `shop` | KGWUI-002 "Policy target not found" |
-| (second scenario) Install B: selector `team=b`, Gateway `edge` in `app-b` (team=b) | `kgw-b` | second install; cluster landing shows 2 cards |
+| TrafficPolicy `tp-missing-target` targeting HTTPRoute `nope` | `shop` | v2.3.x and v2.4.x: KGWUI-003 "Not yet processed by the controller" (no status). `main` (non-blocking job only): KGWUI-002 "Policy target not found" |
+| (second scenario) Install B: release `kgateway`, selector `team=b`, Gateway `edge` in `app-b` (team=b) | `kgw-b` | second install `kgw-b/kgateway`; cluster landing shows 2 cards |
 
 - [ ] **Step 1: Write the setup script**
 
@@ -8413,12 +9678,15 @@ CLUSTER=kgwui-e2e
 kind create cluster --name "$CLUSTER" --wait 120s
 kubectl apply --server-side -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GWAPI_VERSION}/standard-install.yaml"
 helm install kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds --version "$KGW_VERSION" -n kgw-a --create-namespace
-helm install kgw-a oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-a \
+# Release "kgateway" in each namespace: the controller Deployment is <ns>/kgateway (kgateway.fullname).
+helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-a \
   --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"a"}}]' --wait
+kubectl get deploy -n kgw-a kgateway   # fail fast if the rendered name ever changes
 kubectl apply -f test/e2e/fixtures/base.yaml
 if [[ "${SECOND_INSTALL:-}" == 1 ]]; then
-  helm install kgw-b oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-b --create-namespace \
+  helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-b --create-namespace \
     --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"b"}}]' --wait
+  kubectl get deploy -n kgw-b kgateway
   kubectl apply -f test/e2e/fixtures/second-install.yaml
 fi
 kubectl wait -n infra --for=condition=Programmed gateway/edge --timeout=180s
@@ -8572,6 +9840,16 @@ func has(h api.HealthResponse, code, res string) bool {
 	return false
 }
 
+// tpMissingTarget is the finding expected for tp-missing-target. Only kgateway
+// main reports TargetNotFound; v2.3.x and v2.4.x write no status for a policy
+// whose target is missing, so it is "not yet processed" (finding 7).
+func tpMissingTarget() string {
+	if os.Getenv("KGW_MAIN") == "1" {
+		return health.CodeConditionFalse
+	}
+	return health.CodeRouteUnattached
+}
+
 func TestRealCluster(t *testing.T) {
 	var insts []api.InstallSummary
 	get(t, "/api/v1/installs", &insts)
@@ -8583,7 +9861,7 @@ func TestRealCluster(t *testing.T) {
 		t.Fatalf("installs: want %d got %+v", want, insts)
 	}
 	var o api.OverviewResponse
-	get(t, "/api/v1/installs/kgw-a/kgw-a/overview", &o)
+	get(t, "/api/v1/installs/kgw-a/kgateway/overview", &o)
 	counts := map[string]int{}
 	for _, c := range o.Counts {
 		counts[c.Kind] = c.Count
@@ -8595,9 +9873,9 @@ func TestRealCluster(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Minute)
 	for {
 		var h api.HealthResponse
-		get(t, "/api/v1/installs/kgw-a/kgw-a/health", &h)
+		get(t, "/api/v1/installs/kgw-a/kgateway/health", &h)
 		ok := has(h, health.CodeConditionFalse, "shop/broken") && has(h, health.CodeNamespaceNotWatched, "blog/posts") &&
-			has(h, health.CodeConditionFalse, "shop/tp-missing-target")
+			has(h, tpMissingTarget(), "shop/tp-missing-target")
 		xds := false
 		for _, c := range h.Checks {
 			if c.Name == "xDS rejects" && c.OK {
@@ -8638,10 +9916,10 @@ for (const theme of ["Control room", "Control room light"]) {
   test(`install page, findings and YAML view (${theme})`, async ({ page }) => {
     await page.goto("/");
     if (process.env.SECOND_INSTALL === "1") {
-      await expect(page.getByRole("link", { name: /kgw-a\/kgw-a/ })).toBeVisible();
-      await page.getByRole("link", { name: /kgw-a\/kgw-a/ }).click();
+      await expect(page.getByRole("link", { name: /kgw-a\/kgateway/ })).toBeVisible();
+      await page.getByRole("link", { name: /kgw-a\/kgateway/ }).click();
     }
-    await expect(page).toHaveURL(/\/i\/kgw-a\/kgw-a$/);
+    await expect(page).toHaveURL(/\/i\/kgw-a\/kgateway$/);
     await page.getByRole("button", { name: "Theme" }).click();
     await page.getByRole("menuitemradio", { name: theme, exact: true }).click();
     await expect(page.getByTestId("health-strip")).toContainText(/error/);
@@ -8692,9 +9970,25 @@ jobs:
         with: { name: "e2e-${{ matrix.kgw }}-${{ matrix.second }}", path: web/test-results }
       - if: failure()
         run: kubectl logs -n kgateway-ui deploy/ui-kgateway-ui --tail=200; kubectl get gateways,httproutes -A -o wide
+  # Non-blocking: kgateway main is the only line that reports TargetNotFound (finding 7).
+  # It runs once the repository variable KGW_MAIN_VERSION names an installable main-build
+  # chart version; main's go.mod pins Gateway API v1.6.2.
+  kind-main:
+    if: ${{ vars.KGW_MAIN_VERSION != '' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: helm/kind-action@v1
+        with: { install_only: true }
+      - uses: azure/setup-helm@v4
+      - run: KGW_VERSION=${{ vars.KGW_MAIN_VERSION }} GWAPI_VERSION=v1.6.2 bash test/e2e/setup.sh
+      - run: KGW_MAIN=1 go test -tags e2e ./test/e2e/... -v
 ```
 
-Add a non-blocking job for kgateway `main` builds once that version is installable from a chart (track it in Carry-over; not required to close Phase 1).
+Until `KGW_MAIN_VERSION` is set, the `kind-main` job is skipped; track setting it in Carry-over (not required to close Phase 1).
 
 - [ ] **Step 6: Run locally**
 
@@ -8719,14 +10013,19 @@ git add test web/e2e .github/workflows/e2e.yaml && git commit -m "test(e2e): kin
 
 Its sections:
 1. **What it is.** A read-only kgateway UI; health at a glance, why, and the inventory.
-2. **Install.** The Helm OCI command and the port-forward.
-3. **Run locally.** `make web build && ./bin/kgateway-ui --kubeconfig …`.
-4. **What it reads.** Read-only RBAC; no Secrets; controller metrics on port 9092.
-5. **Scope.** It honours `discoveryNamespaceSelectors` and shows "N / M namespaces".
-6. **Extending.** A `pkg/extension` options example and a shell `ShellExtension` example, using a neutral example name (`acme`).
-7. **Supported versions.**
-8. **Contributing.** The SDLC docs live in `docs/`.
-9. **Licence.** Apache-2.0.
+2. **Security and trust model** (D-013), placed before Install so nobody exposes the UI without reading it:
+   - The UI has no login in this release. Whoever can reach it sees everything it shows: everything its ServiceAccount can read across the cluster, Deployments included. That can be more than the viewer's own Kubernetes RBAC allows (the Argo CD model).
+   - It never reads Secrets; the ClusterRole excludes them. No other field is redacted, because a secret can sit in any field (an inline token, a literal env var).
+   - Default exposure is `kubectl port-forward` to the ClusterIP Service. The optional `httpRoute` (off by default) is for operators who put authentication and authorisation on that route, for example a kgateway TrafficPolicy with OIDC or external auth.
+   - Downstream distributions and future releases plug per-user authorisation into the `api.Authorizer` seam (`extension.WithAuthorizer`); a finding on a resource the viewer may not see is shown as restricted, and the health state still counts it. Per-user AuthN/AuthZ is on the roadmap.
+3. **Install.** The Helm OCI command and the port-forward, linking back to section 2 for `httpRoute`.
+4. **Run locally.** `make web build && ./bin/kgateway-ui --kubeconfig …`.
+5. **What it reads.** Read-only RBAC; no Secrets; controller metrics on port 9092.
+6. **Scope.** It honours `discoveryNamespaceSelectors` and shows "N / M namespaces".
+7. **Extending.** A `pkg/extension` options example (including `WithAuthorizer`) and a shell `ShellExtension` example, using a neutral example name (`acme`).
+8. **Supported versions.** v2.3.11 and v2.4.7; note that missing policy targets are reported as "not yet processed" there, and as "Policy target not found" only on kgateway `main`.
+9. **Contributing.** The SDLC docs live in `docs/`.
+10. **Licence.** Apache-2.0.
 
 The README must not contain any of the forbidden terms.
 
@@ -8742,7 +10041,7 @@ Run the `sanitize-kgateway-oss-resources` skill on it, put the AI-assisted note 
 
 - [ ] **Step 3: Close sub-phase 1.3**
 
-Write `docs/phases/phase-1/phase-1.3-complete.md` and update `docs/phase-status.md`. Then request the Phase 1 cross-model review (SDLC "review phase 1"). Closing Phase 1 is a separate step, gated by the exit gates.
+Write `docs/phases/phase-1/phase-1.3-complete.md` and update `docs/phase-status.md`, with these Carry-over items: (1) design-review finding 16, extension seams for analyzers, API routes, per-kind renderers and health cards, for the seam milestone after Phase 2; (2) set the `KGW_MAIN_VERSION` repository variable so the non-blocking `kind-main` e2e job runs; (3) per-user AuthN/AuthZ behind `api.Authorizer` (D-013). Then request the Phase 1 cross-model review (SDLC "review phase 1"). Closing Phase 1 is a separate step, gated by the exit gates.
 
 - [ ] **Step 4: Commit**
 

@@ -1,10 +1,10 @@
 # Phase 1 — Foundation & Overview: Design
 
-**Status:** Draft, for review
-**Date:** 2026-10-17
+**Status:** Revised after cross-model review (`reviews/design-codex.md`), for approval
+**Date:** 2026-10-17, revised 2026-10-18
 **Base:** `560c393`
 **Roadmap:** `docs/roadmap.md`, Phase 1
-**Decisions:** D-001 … D-011 in `docs/decisions.md`
+**Decisions:** D-001 … D-013 in `docs/decisions.md`
 
 ## 1. Goal and scope
 
@@ -18,15 +18,19 @@ A minimal UI that is deployable and operational and already provides value. A pl
   - a pinned mode.
 - **Install page.** Header: logo, version, edition, controller readiness and scope. Then a health strip with findings, count tiles, and the Gateway list (layout A; D-011).
 - **A read-only YAML view** of a single resource, as the link target of a finding until Phase 2 adds detail pages.
-- **Health checks:** status conditions, unattached routes, routes in unwatched namespaces, controller and proxy readiness, xDS rejects, scope verification, and signal availability (D-006).
+- **Health checks:** status conditions (with freshness), resources not yet processed, unattached routes, routes in unwatched namespaces, controller and proxy readiness, xDS rejects, scope verification, and signal availability and age (D-006).
 - **Design foundation:** the Control room visual direction, design tokens, two themes (dark default and light), the health-state primitives, and the frontend extension points (D-008, D-010, D-011).
 - **Build foundation:** container image, Helm chart, CI, Apache-2.0 licence, README.
 - **Extension seam:** Go functional options and registries, a frontend registry, and a test-only extension that exercises both.
+  - Backend: kinds, install detectors, scope provider, scope verifier, checks, finding code prefixes, and the API `Authorizer` (§7.1).
+  - Frontend: brand, themes (including typography tokens), routes, navigation, and finding renderers.
+  - Analyzers, API-route registration, per-kind renderers and health-card contributions are deferred to the seam milestone after Phase 2.
+- **Trust model** (D-013): whoever reaches the UI may see everything it shows. It is documented prominently, and an allow-all `Authorizer` seam is in place for later per-user authorisation.
 
 **Out of scope (later phases)**
 - Gateway and route detail pages, and flows (Phase 2 and later).
 - The controller admin server (`:9095`) and the Envoy admin API.
-- Authentication (Phase 10).
+- Authentication and per-user authorisation (Phase 10; it plugs into the `Authorizer` seam, D-013).
 - Live push (SSE); the UI polls.
 - Publishing the npm package to a registry (seam milestone after Phase 2).
 - Prometheus integration.
@@ -37,9 +41,11 @@ A minimal UI that is deployable and operational and already provides value. A pl
    - Healthy: the strip is a slim green line, and a "What was checked" list proves that each signal was collected.
    - Unhealthy: the strip shows counts per severity, followed by the top 5 findings by severity, then "Show all".
 2. **"What is wrong with X?"** Click a finding to open a read-only YAML view of the resource (status first, `managedFields` stripped), with a copy button for its `namespace/name`.
+   - Every finding whose resource kind is listed in `/api/v1/meta` links to that view, and the link resolves (§7). This includes unwatched routes, ambiguous Gateways and the controller and proxy Deployments.
+   - A finding whose kind is not listed shows its resource as plain text, without a link.
 3. **"What does this install manage?"**
-   - Count tiles: Gateways, routes per kind, policies per kind, and watched namespaces as "N / M".
-   - The Gateway table, which is sortable and filterable, with a deep link per state.
+   - Count tiles: GatewayClasses, Gateways, routes per kind, policies per kind, and watched namespaces as "N / M".
+   - The Gateway table, which is sortable and has a free-text filter, with a deep link per state. Sort and filter live in the URL.
 
 ## 3. Architecture
 
@@ -73,7 +79,7 @@ pkg/install/               Install, InstallDetector, ScopeProvider, ScopeVerifie
 pkg/health/                Check, Finding, codes, roll-up
 pkg/overview/              install overview model
 pkg/ctrlmetrics/           controller metrics scraping + parsing
-pkg/api/                   HTTP handlers, JSON types (versioned)
+pkg/api/                   HTTP handlers, JSON types (versioned), Authorizer seam
 internal/server/           HTTP server, SPA embedding, /healthz, /readyz
 web/                       frontend (see §6)
 deploy/helm/kgateway-ui/   Helm chart
@@ -103,12 +109,21 @@ An **Install** is one kgateway controller deployment. It has:
 - its controller Pods (for metrics).
 
 **InstallDetector** is a registered interface; there can be several.
-- The upstream detector finds controller Deployments by Helm labels: `app.kubernetes.io/component=controller`, plus the kgateway chart's `app.kubernetes.io/name`.
+- The upstream detector finds controller Deployments by the chart's labels `kgateway=kgateway,app.kubernetes.io/component=controller`.
 - It reads the version from `app.kubernetes.io/version`, falling back to the image tag.
 - It sets edition = upstream when the image is the kgateway controller image.
 - It sets `controllerNames` to the upstream default `kgateway.dev/kgateway`. The waypoint GatewayClass (`kgateway-waypoint`) uses the same controller name.
 - A downstream registers its own detector, which recognises its images and env and supplies its controller names, edition label and logo.
-- Each detector also supplies the **label selectors** for its controller Pods/Deployments and its proxy Deployments (upstream: the controller labels above, and `app.kubernetes.io/managed-by=kgateway` for proxies). The cache watches Pods and Deployments only through these selectors, never cluster-wide unfiltered.
+- Each detector supplies three **label selectors**. Controller Pods are selected more loosely than the Deployment, so a chart that omits the component label on Pods still works:
+
+  | Selector | Upstream value | Why |
+  |---|---|---|
+  | Controller Deployments | `kgateway=kgateway,app.kubernetes.io/component=controller` | `component=controller` is set on the Deployment only |
+  | Controller Pods | `kgateway=kgateway` | On 2.3 and later, controller Pods carry `kgateway=kgateway`, `app.kubernetes.io/name`, `app.kubernetes.io/instance` and `app.kubernetes.io/component=controller` (added in kgateway [`9041e96061`](https://github.com/kgateway-dev/kgateway/commit/9041e96061)); 2.2 and earlier lack the component label |
+  | Proxy Deployments | `app.kubernetes.io/managed-by=kgateway` | |
+
+- The cache watches Pods and Deployments only through these selectors, never cluster-wide unfiltered. The Pod watch uses the controller Pod selector.
+- A controller Pod belongs to the install whose Deployment's `spec.selector` matches it in the same namespace. The Pod selector alone does not tell two installs apart.
 
 ### 4.2 ScopeProvider
 
@@ -127,11 +142,19 @@ An **Install** is one kgateway controller deployment. It has:
 - **Gateway.** A Gateway belongs to install I when its GatewayClass `controllerName` ∈ I.controllerNames **and** its namespace is in I's scope.
   - If more than one install matches, it is assigned to none and gets finding `KGWUI-009 ambiguous-ownership`.
   - Whether kgateway allows two installs to share a `controllerName` with disjoint scopes is verified in the first plan task. The rule above is safe either way.
+- **Reference resolution.** Every reference is resolved by its full identity: group, kind, namespace and name.
+  - A parentRef defaults to group `gateway.networking.k8s.io`, kind `Gateway`, and the route's namespace, as the Gateway API defines.
+  - A parentRef with a foreign group never resolves to a Gateway API object of the same kind and name. The same applies to a ListenerSet's parent.
 - **Route** (HTTP, GRPC, TCP, TLS). A route belongs to install I when its namespace is in I's scope and at least one parentRef resolves to a Gateway (or ListenerSet) of I.
+  - Its health comes only from `status.parents[]` entries that meet both conditions: the entry's `controllerName` ∈ I.controllerNames, and its `parentRef` equals a **current** `spec.parentRefs` entry that resolves to a Gateway or ListenerSet owned by I.
+  - Status left behind for a removed parentRef is ignored. So is status for a parent owned by another install that shares the controller name.
   - A route whose namespace is **outside** the scope of the install owning its target Gateway gets finding `KGWUI-004 namespace-not-watched` (warning). It never counts towards totals or health.
-- **Policy** (any kind with category `policy`). A policy belongs to I when its namespace is in I's scope.
-  - Its health comes only from `status.ancestors[]` entries whose `controllerName` ∈ I.controllerNames.
-  - The synthetic ancestor `gateway.kgateway.dev/StatusSummary` is treated as a status summary, not as a Gateway.
+  - A route whose parentRef targets a Gateway or ListenerSet that **does not exist** gets `KGWUI-003` in every install whose scope contains the route's namespace. It is a diagnostic candidate: it gets the finding but is not counted in any install's totals.
+- **Policy** (any kind with category `policy`).
+  - A policy in the kgateway API group belongs to I when its namespace is in I's scope.
+  - Any other policy (for example `BackendTLSPolicy` or a downstream policy) belongs to I when its namespace is in I's scope **and** either it has an ancestor whose `controllerName` ∈ I.controllerNames, or it has no ancestors at all (new, not yet processed). Inventory membership does not wait for status.
+  - Its health comes only from `status.ancestors[]` entries whose `controllerName` ∈ I.controllerNames. A policy with no such ancestor is "not yet processed" after the grace period (§5.2).
+  - The synthetic ancestor `gateway.kgateway.dev/StatusSummary` is treated as a status summary, not as a Gateway. Only kgateway `main` writes it (§10).
 - **Out-of-scope resources** are never counted, even if they carry old kgateway status. This handles stale status left behind when a namespace is deselected.
 
 ### 4.4 ScopeVerifier
@@ -169,16 +192,22 @@ v1 compares, per install and per `(namespace, resource kind)`, the UI's count of
 | Code | Slug | Severity | Source |
 |---|---|---|---|
 | KGWUI-001 | xds-rejected | error | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url} > 0`, summed over controller replicas. An absent family in a successful scrape means no rejects. |
-| KGWUI-002 | condition-false | error / warning | GatewayClass `Accepted`; Gateway `Accepted`/`Programmed`; listener conditions; route parent `Accepted`/`ResolvedRefs` (error) and `kgateway.dev/Programmed`; policy ancestor `Accepted`/`Attached` (`Invalid`, `TargetNotFound`, … → error; `PartiallyValid`, `Overridden` → warning) |
-| KGWUI-003 | route-unattached | warning | A route that is in scope but whose parentRefs resolve to no Gateway of the install, or that has no parent status from the install's controller |
+| KGWUI-002 | condition-false | error / warning / info | A **current** condition (see freshness below) is False: GatewayClass `Accepted`; Gateway `Accepted`/`Programmed`; listener conditions; route parent `Accepted`/`ResolvedRefs` (error) and `kgateway.dev/Programmed`; policy ancestor `Accepted`/`Attached` (`Invalid`, `TargetNotFound`, … → error; `PartiallyValid` → warning; `Overridden` → info, since overriding is normal Gateway API precedence, not a fault) |
+| KGWUI-003 | route-unattached | warning | A route whose parentRef targets a Gateway or ListenerSet that does not exist (§4.3). Also any owned resource **not yet processed** after the grace period: a required condition is absent, its conditions are stale, or (for a policy) it has no ancestor from the install's controller. The message reads "Not yet processed by the controller". |
 | KGWUI-004 | namespace-not-watched | warning | §4.3 |
 | KGWUI-005 | controller-not-ready | error | Controller Deployment has ready replicas < desired replicas |
 | KGWUI-006 | proxy-not-ready | error | The proxy Deployment of an assigned Gateway has ready replicas < desired replicas |
 | KGWUI-007 | scope-mismatch | warning | §4.4 |
-| KGWUI-008 | signal-unavailable | info (forces state `unknown`; see 5.3) | A check could not collect its input: metrics unreachable, RBAC denied, scope unknown, or cache not synced |
+| KGWUI-008 | signal-unavailable | info (forces state `unknown`; see 5.3) | A check could not collect a current input: metrics unreachable, metrics result too old, RBAC denied, a watch failing, scope unknown, or cache not synced (§5.4) |
 | KGWUI-009 | ambiguous-ownership | warning | §4.3 |
 
-`RouteRuleDropped` and `RouteRuleReplaced` reasons are reported under KGWUI-002 with their own message ("Rule replaced by a direct response").
+`RouteRuleDropped` and `RouteRuleReplaced` reasons are reported under KGWUI-002 with their own message ("Rule replaced by a direct response"). On 2.3 the controller reports them through `Accepted=False`; on 2.4 and `main` through `kgateway.dev/Programmed`. Both are reported, because any current False is reported with its reason.
+
+**Status freshness.** Every status-based check applies these rules, in this order:
+1. **Freshness first.** A condition whose `observedGeneration` is lower than the object's `metadata.generation` is stale. It describes an old spec, so a stale True is not success and a stale False is not a current error.
+2. **Required conditions.** Each kind has required conditions: GatewayClass `Accepted`; Gateway `Accepted` and `Programmed`; route parent `Accepted` and `ResolvedRefs`; policy ancestor `Accepted`. An absent required condition means "not yet processed". Conditions that only some versions write (for example `kgateway.dev/Programmed`, `Attached`) are evaluated when present and are not required.
+3. **Grace period.** A resource that is not yet processed (absent required condition, only stale conditions, or a policy with no ancestor from the install's controller) gets `KGWUI-003` once it is older than 60 s. Before that it is neither a finding nor evidence of health.
+4. A check reports OK only on current evidence. Absent or stale status never counts as healthy.
 
 ### 5.3 Roll-up
 
@@ -197,11 +226,13 @@ Every check reports `{name, ok, collectedAt, error}`. The healthy view renders t
 | Situation | Behaviour |
 |---|---|
 | API server unreachable, or cache not synced | Full-page "Connecting to cluster…" with the cause after a timeout. Numbers are never shown before the first sync. |
+| A watch fails after the initial sync | `HasSynced` stays true after later list/watch failures, so it is not used as availability. A kind's access is **unavailable** while its last list/watch error is newer than 60 s; the reflector's backoff caps at about 30 s, so a persisting failure keeps the error fresh. This covers every watched kind, including Namespaces, Pods and Deployments. An errored informer counts as settled for the startup sync, but the cluster-access check is not OK: KGWUI-008, and the install becomes unknown. |
 | Controller metrics unreachable | KGWUI-008, and the install becomes unknown. The strip reads "No known problems — xDS rejects could not be checked". |
+| Last metrics result too old | A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), even if that scrape succeeded. Recomputing the report never makes old evidence look fresh. |
 | No install found | Designed empty state explaining what the UI looks for and how to pin `--install`. |
 | RBAC denies a kind | Its tile shows "No access", naming the missing verb and resource; KGWUI-008. |
 | A kind's CRD is not served | The tile is hidden. Not a finding. |
-| Data older than 2× the poll interval | "Checked …" turns into a stale warning and the strip shows unknown. |
+| Data older than 2× the poll interval | "Checked …" turns into a stale warning. The strip **and** every Gateway row's status show unknown; no green badge survives on stale data. |
 
 ## 6. Frontend
 
@@ -211,7 +242,9 @@ Every check reports `{name, ok, collectedAt, error}`. The healthy view renders t
 - `@emotion/react` / `@emotion/styled`, `react-router`, `lucide-react` and SWR.
 - TanStack Table with virtualisation for the dense tables.
 - Vitest and Testing Library for unit tests, Playwright for e2e, and Biome for linting and formatting.
-- No proprietary component libraries. Components follow the team frontend conventions: one component per file, `// region` organisation, and emotion with `stylesOverride`.
+- No proprietary component libraries. Components follow the team frontend conventions: one component per file, `// region` organisation, and emotion.
+- **Override contract.** Every component exported from `packages/shell` accepts `stylesOverride`. Page-internal styled parts are not part of the contract.
+- **Type declarations.** The app compiles with Vite's client type declarations (for asset imports such as the SVG logo). The shell's public entry carries its emotion theme typing, so the app and downstream builds get the typed theme without copying a declaration file.
 
 ### 6.2 Structure
 
@@ -230,7 +263,8 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 - **Navigation entries.**
 - **Health renderers:** a custom message or detail per finding code prefix.
 - **Kind display metadata.** This is mostly backend-driven through descriptors, so most downstream additions need Go only.
-- **Theme sets and the brand:** logo, product name and tokens (D-008).
+- **Theme sets and the brand:** logo, product name and tokens (D-008). Tokens cover colours and typography: font families, sizes and weights. Every component takes its type from these tokens, never from hard-coded values.
+- **Deferred to the seam milestone after Phase 2:** per-kind renderers and health-card contributions (and, in Go, analyzers and API-route registration). Phase 1 pages need neither.
 
 ### 6.4 Pages and URLs
 
@@ -239,9 +273,9 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 | `/` | Redirects to `/i/:ns/:name` when there is one install (or the UI is pinned); otherwise the cluster landing (layout C) |
 | `/i/:ns/:name` | Install page (layout A) |
 | `/i/:ns/:name/findings` | All findings, filterable by severity, code and kind (the target of "Show all") |
-| `/i/:ns/:name/r/:group/:kind/:namespace/:name` | Read-only YAML view of one resource |
+| `/i/:ns/:name/r/:group/:kind/:namespace/:name` | Read-only YAML view of one resource. The UI links here only for kinds listed in `/api/v1/meta`. |
 
-Filters and sorting are stored in the query string, so every view can be shared as a link.
+Filters and sorting are stored in the query string, so every view can be shared as a link. This includes the Gateway table's text filter.
 
 ### 6.5 Visual direction (D-011)
 
@@ -252,9 +286,9 @@ Filters and sorting are stored in the query string, so every view can be shared 
 - **Signature element.** Resource names are set in mono, with the `namespace/` prefix dimmed.
 - **Health vocabulary.** Healthy ✓, Warning !, Error ✕ and Unknown ? — always icon + colour + text, at WCAG AA in both themes.
 - **Layout A (install page).**
-  - The header carries the logo, version chip, install name, controller readiness, scope and the install switcher.
+  - The header carries the logo, version chip, edition, install name, controller readiness (ready / desired replicas), scope and the install switcher.
   - The health strip is full width. When the install is healthy it is a slim line.
-  - Below it: the top 5 findings, the count tiles, and the Gateway table (status, name, class, listeners, attached routes, addresses).
+  - Below it: the top 5 findings, the count tiles (including GatewayClasses), and the Gateway table (status, name, class, listeners, attached routes, addresses) with a free-text filter on name, namespace and class.
 - **Theme switcher.** A compact icon dropdown. The chosen theme is stored in `localStorage`.
 - **Logo.** The default theme uses the kgateway logo from CNCF artwork, used to identify the project it is a UI for, under the Linux Foundation trademark policy.
 
@@ -263,19 +297,34 @@ Filters and sorting are stored in the query string, so every view can be shared 
 - SWR polls the API every 5 s, using the backend's cache (not the API server).
 - The backend scrapes controller metrics every 10 s.
 - Every response carries `collectedAt`, which drives the "Checked …" label and the stale state.
+- **Install identity.** Install-scoped requests never keep the previous install's data while the next one loads. A page renders install data only when the response's install id matches the install in the URL; otherwise it shows its loading state. Switching installs never shows the old install's strip, tiles or Gateways under the new install's URL.
 
 ## 7. API (v1)
 
-The API is read-only JSON. Every resource payload has `managedFields` removed, and Secrets are never served.
+The API is read-only JSON. Every resource payload has `managedFields` removed as noise. No other field is redacted (D-013). Secrets are never served, because they are never read.
 
 | Endpoint | Returns |
 |---|---|
 | `GET /api/v1/installs` | `[{id, namespace, name, version, edition, controllerNames, scope: {mode, selectors, watched, total}, health: {state, counts}}]` |
-| `GET /api/v1/installs/{ns}/{name}/overview` | Header data, counts per kind (`{kind, count, access}`), and the Gateway list |
-| `GET /api/v1/installs/{ns}/{name}/health` | `{state, findings[], checks[], collectedAt}` |
-| `GET /api/v1/installs/{ns}/{name}/resources/{group}/{kind}/{namespace}/{name}` | One object (in scope only) |
-| `GET /api/v1/meta` | UI version, pinned install, registered kinds and descriptors |
+| `GET /api/v1/installs/{ns}/{name}/overview` | Header data (including edition and controller readiness), counts per kind (`{kind, count, access}`, GatewayClasses included), and the Gateway list. Every response carries the install `id`. |
+| `GET /api/v1/installs/{ns}/{name}/health` | `{id, state, findings[], checks[], collectedAt}` |
+| `GET /api/v1/installs/{ns}/{name}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below) |
+| `GET /api/v1/meta` | UI version, pinned install, registered kinds and descriptors, plus `apps/Deployment`: every kind the resource endpoint can serve, so the UI links exactly these |
 | `GET /healthz`, `GET /readyz` | Liveness; readiness is true once the cache has synced |
+
+**Resource endpoint.** It serves an object of a watched, served kind when either:
+- the install owns it (§4.3); or
+- a current finding of the install references it. This covers unwatched routes (004), routes with a missing parent (003), ambiguous Gateways (009), and the controller and proxy Deployments (005, 006).
+
+Anything else returns 404. The endpoint reads only from the shared cache, so it can never return a kind the UI does not watch.
+
+### 7.1 Authorizer
+
+`pkg/api` has an `Authorizer` seam (D-013). It decides, per request, whether the caller may see a given object, identified by group, kind, namespace and name (for example `Authorize(request, ref) bool`).
+- Every handler that returns resources, findings or counts goes through it: installs, overview, health and resources.
+- A denied object returns 404 from the resource endpoint, the same as an absent one. It is left out of lists and counts, and findings about it are dropped.
+- Phase 1 ships `AllowAll`. A downstream or a later phase registers its own through `extension.WithAuthorizer`; the default is `AllowAll`.
+- The roll-up is always computed over all findings of the install, never only the visible ones: a user must see that something is wrong even when they may not see the details (D-006, D-013). A finding about a resource the caller may not view is redacted, not dropped: it keeps its severity, code and resource identity (kind, namespace, name), so a platform team can tell which team to contact; its message and evidence are removed and it carries `restricted: true`. The UI renders it without a link, as "restricted, ask the owning team".
 
 ## 8. Packaging, RBAC, deployment
 
@@ -291,7 +340,8 @@ The API is read-only JSON. Every resource payload has `managedFields` removed, a
   - A ClusterIP Service.
   - A ServiceAccount, ClusterRole and ClusterRoleBinding.
   - `install.pin`.
-  - `httpRoute.enabled` (default `false`), with `parentRef` and `hostnames`. It creates an HTTPRoute on an existing Gateway. The chart notes recommend putting authentication in front of the UI.
+  - `httpRoute.enabled` (default `false`), with `parentRef` and `hostnames`. It creates an HTTPRoute on an existing Gateway.
+  - **Trust model in the chart** (D-013). The chart README, `NOTES.txt` and the comment on the `httpRoute` values state it plainly: anyone who reaches the UI sees everything its ServiceAccount can read, which can exceed their own RBAC. They recommend authentication and authorisation on the route, for example a kgateway TrafficPolicy attached to it. Without the route, access is a port-forward to the ClusterIP Service.
 - **ClusterRole: get/list/watch only.**
   - `gateway.networking.k8s.io`: gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, referencegrants, backendtlspolicies, listenersets.
   - `gateway.networking.x-k8s.io`: xlistenersets.
@@ -299,48 +349,73 @@ The API is read-only JSON. Every resource payload has `managedFields` removed, a
   - `apiextensions.k8s.io`: customresourcedefinitions.
   - Core: namespaces, pods.
   - `apps`: deployments.
-  - Pods and Deployments are only listed and watched through the detectors' label selectors (§4.1). RBAC cannot express a label restriction, so the ClusterRole grants the verbs, and the code keeps the watches narrow.
-  - **No Secrets** and no `*/proxy` access. In-cluster, controller metrics are scraped directly over the pod network, which requires network access to the controller pods on 9092. Under a restrictive NetworkPolicy this shows up as KGWUI-008, and the chart README documents it.
+  - Pods and Deployments are only listed and watched through the detectors' label selectors (§4.1). RBAC cannot express a label restriction, so the ClusterRole grants the verbs, and the code keeps the watches narrow. The grant is still cluster-wide, and that is part of the trust model the chart documents.
+  - **No Secrets** and no `*/proxy` access. Under D-013, excluding Secrets is the UI's whole secret-handling guarantee; Deployments and other objects are served unredacted. In-cluster, controller metrics are scraped directly over the pod network, which requires network access to the controller pods on 9092. Under a restrictive NetworkPolicy this shows up as KGWUI-008, and the chart README documents it.
 - **Local mode** uses the user's kubeconfig rights. Metrics go through `pods/proxy` on each controller Pod. If that is denied, the result is KGWUI-008, not a failure.
 - **CI** (GitHub Actions): `go vet`, golangci-lint, `go test`, Biome, Vitest and the build. On tags: the image, the chart and a GitHub release. A kind e2e job (§9) runs on PRs.
+- **README.** The project README has a prominent "Security and trust model" section that states D-013: who sees what, that Secrets are never read, the exposure options, and that per-user authorisation is on the roadmap.
 
 ## 9. Testing
 
 Behaviour is tested at the highest practical boundary. The primary boundary is **cluster objects in → API JSON out**.
 
+- **Fixtures mirror upstream exactly.** Fake controller Pods carry exactly the labels upstream 2.3/2.4 Pods carry, and one test uses a Pod without the component label to prove the looser Pod selector. Fixture Pods and Deployments enter through the production label-selected watches, never around them.
 - **API boundary tests (Go).** A fake dynamic client is seeded with fixture objects, the real cache, install, health and overview packages run on top of it, and the HTTP handlers are called. Required cases:
-  - each check KGWUI-001 to KGWUI-009, positive and negative;
+  - each check KGWUI-001 to KGWUI-009, positive and negative, at the API level;
+  - status freshness: a stale True, a stale False, an absent required condition, and a policy with no ancestors, each reported as not yet processed after the grace period and never as healthy;
+  - parent status for a removed parentRef, and for a parent owned by another install with the same controller name: ignored;
+  - a parentRef with a foreign group: does not resolve to a Gateway API object;
+  - a route whose parent does not exist: finding 003 in each install whose scope holds its namespace, not counted;
+  - a new non-kgateway policy without status: counted, then not yet processed after the grace period;
   - a route in an unwatched namespace: not counted, and finding 004 raised;
   - a Gateway of another controller: ignored;
   - stale kgateway status in a deselected namespace: ignored;
-  - metrics unreachable: state is unknown, never healthy;
+  - metrics unreachable, and a metrics result older than 3 × the metrics interval: state is unknown, never healthy;
+  - a watch that fails after the initial sync (including Namespaces, Pods and Deployments): access unavailable, state unknown;
   - a CRD not served: tile hidden, no finding;
   - two installs with overlapping selectors: finding 009;
   - a pinned install: the others are not visible;
-  - namespace labels changed: scope updates without a restart.
+  - namespace labels changed: scope updates without a restart;
+  - every finding's resource link resolves through the resource endpoint, including the controller Deployment, an unwatched route and an ambiguous Gateway; an unrelated object returns 404;
+  - a deny-some `Authorizer` registered through the extension: the denied resource returns 404 and its findings and counts are absent from API output.
 - **NamespaceSelectorScope.** Table tests mirroring kgateway's discovery semantics (OR, empty list, invalid selector, last-wins env) for each supported version.
-- **Metrics parsing.** Fixture `/metrics` payloads captured from kgateway 2.3 and 2.4 controllers.
-- **Frontend.** Vitest and Testing Library for the health primitives, the theme tokens (contrast checked in both themes) and the pages against a mocked API.
+- **Metrics parsing.** Fixture `/metrics` payloads captured from kgateway 2.3 and 2.4 controllers. The contract test asserts the reject metric's labels (`gateway_namespace`, `gateway_name`, `type_url`) and values, not only the presence of the metric families.
+- **Frontend.** Vitest and Testing Library for the health primitives, the theme tokens (contrast checked in both themes) and the pages against a mocked API. Required cases include:
+  - switching installs never shows the old install's strip, tiles or Gateways;
+  - stale data turns the strip and the Gateway rows unknown;
+  - the Gateway table's text filter round-trips through the URL;
+  - a finding links to the YAML view only when its kind is listed in `/api/v1/meta`.
 - **Extension seam.**
-  - In Go, a test-only extension registers an extra kind, detector, check and code prefix; its findings and counts appear in API output.
-  - In the frontend, a test-only app registers a page and a theme; the page renders in the shell and the tokens apply.
-- **e2e** (kind, run against kgateway 2.3 and 2.4 in a matrix):
+  - In Go, a test-only extension registers an extra kind, detector, check, code prefix and authorizer; its findings and counts appear in API output, and the authorizer's denials take effect.
+  - In the frontend, a test-only app registers a page and a theme; the page renders in the shell, and the test asserts that the contributed tokens (colour and typography) are applied to rendered components.
+- **e2e** (kind, run against kgateway 2.3 and 2.4 in a matrix; `main` as a non-blocking job):
   1. Install kgateway and fixture resources, including deliberately broken ones and a namespace outside the selector.
   2. Install the chart.
-  3. Check the API.
+  3. Check the API. The missing-target policy assertion is version-specific: on 2.3 and 2.4 the policy has no status and shows as not yet processed (003); `TargetNotFound` (002) is asserted only in the `main` job (§10).
   4. Run a Playwright smoke test of the landing page, the install page, the findings list and the YAML view, in both themes.
-  - A second scenario runs two installs.
+  - A second scenario runs two installs. Each uses the Helm release name `kgateway` in its own namespace, so the install IDs are `kgw-a/kgateway` and `kgw-b/kgateway`.
 
 ## 10. Supported versions
 
 - kgateway **2.3.x** and **2.4.x** in CI; `main` is tracked as a non-blocking e2e job.
 - Kinds are discovered per cluster, so kinds that exist only in some versions (for example `HTTPListenerPolicy` on 2.3 and 2.4) appear and disappear without code changes.
+- **Status capabilities differ per version** (verified on the v2.3.x and v2.4.x release refs):
+  - The policy reason `TargetNotFound` and the `StatusSummary` ancestor exist only on `main`. On 2.3 and 2.4 a policy whose target is missing gets no status at all, so the UI reports it as not yet processed (§5.2). It never claims a missing target it cannot see.
+  - Dropped and replaced route rules appear as `Accepted=False` on 2.3 and as `kgateway.dev/Programmed=False` on 2.4 and `main`. Both are reported under KGWUI-002.
 
 ## 11. Security
 
-- The UI is read-only (D-001). It never reads Secrets, and resource payloads have `managedFields` removed.
+**Trust model (D-013).** Phase 1 follows the Argo CD model: whoever can reach the UI may see everything it shows.
+- The UI reads the cluster with its own ServiceAccount, so a viewer can see more than their own Kubernetes RBAC allows. This is stated, not hidden.
+- **Secrets are never read.** The ClusterRole excludes them, and this is the whole meaning of "never handles secret material".
+- **No field redaction.** Any field of any resource can hold a secret (an inline token in a policy, a literal env var in a Deployment), so redaction cannot be made reliable. Objects are served as stored, minus `managedFields`. Deployments are served like any other watched kind.
+- **Exposure is the operator's choice.** Either a port-forward to the ClusterIP Service, or the optional HTTPRoute with authentication and authorisation in front of it (for example a kgateway TrafficPolicy on that route). The route stays off by default.
+- **Documented prominently** in the README ("Security and trust model"), the chart README, `NOTES.txt` and the `httpRoute` values comment (§8).
+- **Seam for later.** Every API handler goes through the `Authorizer` (§7.1). Phase 1 ships `AllowAll`. Per-user authentication and authorisation is a roadmap item that plugs in there, not a retrofit through every handler.
+
+**Other properties.**
+- The UI is read-only (D-001). The ClusterRole grants get/list/watch only.
 - It never calls the controller admin server (`:9095`) or the Envoy admin API.
-- It has no authentication of its own in Phase 1 (D-004). Access control is the Service reachability plus whatever the operator puts in front of an optional HTTPRoute.
 - The pod runs as non-root on a read-only root filesystem, with all capabilities dropped.
 
 ## 12. Cost

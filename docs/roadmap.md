@@ -135,6 +135,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - **Extension seam proof (after Phase 2):** a throwaway downstream build, in a separate repository, registers one extra policy kind and edition detection. This validates D-003 before later phases build on it.
 
 ## Deferred / out of roadmap
+- **Per-user authentication and authorisation** (D-013). OIDC login, Kubernetes SubjectAccessReview per request against the shared cache, with health roll-ups that still show which resource is wrong when the user may not see its details (D-013). It plugs into the Phase 1 `Authorizer` seam. Required before the UI reads Secrets (Phase 7 certificate details).
 - **Pre-apply "what-if" analysis of pasted YAML** (like gwctl `analyze -f`). Valuable, but write-path adjacent; revisit after Phase 6.
 - **A CLI sharing the analyzer library.** Possible once the Phase 3 analyzer exists as a package.
 - **A Headlamp plugin.** It would be a second surface; one surface comes first.

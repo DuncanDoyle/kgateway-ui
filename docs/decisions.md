@@ -169,3 +169,21 @@ Investigated independently by Codex and by a Claude subagent against kgateway ma
 **Consequences:**
 - The theme tokens must support a dark-first default.
 - Additional themes (for example Solarized) arrive later through the same tokens.
+
+## D-013 — Trust model: whoever reaches the UI may see everything it shows (2026-10-18, phase 1)
+**Context:** The UI reads the cluster with its own ServiceAccount and has no authentication in Phase 1. Anyone who reaches it sees what that ServiceAccount can read, which can exceed their own Kubernetes RBAC. Any field of any resource can hold a secret (an inline token in an AI `Backend`, a literal env var in a Deployment), so field-level redaction cannot be made reliable.
+**Decision:**
+- Phase 1 follows the Argo CD model: a user who can access the UI is allowed to view everything the UI can show.
+- The UI never reads Secrets; the ClusterRole excludes them. This is what "never handles secret material" means; no other field is redacted.
+- Exposure stays the operator's choice: port-forward to the ClusterIP Service, or the optional HTTPRoute with authentication and authorisation in front of it (for example a kgateway TrafficPolicy on that route).
+- The trust model is documented prominently in the README, the chart README/NOTES and the `httpRoute` values, and later in the docs.
+- `pkg/api` gets an `Authorizer` seam that decides per request which resources and findings a caller may see. Phase 1 ships an allow-all implementation.
+**Alternatives:**
+- Per-user authorisation now (OIDC login plus SubjectAccessReview against a shared cache, like Kiali) — deferred: identity integration differs per cluster (OIDC, cloud IAM, none), and partial visibility needs its own health roll-up design.
+- Port-forward only, no HTTPRoute — rejected by the user: operators can secure the route with the gateway they already run.
+- Hiding Deployments or redacting fields — rejected: secrets can sit in any field, so it suggests a guarantee the UI cannot give.
+**Consequences:**
+- Per-user AuthN/AuthZ becomes a roadmap item that plugs into the `Authorizer` seam rather than a retrofit through every handler.
+- Finding links work for every watched kind, Deployments included.
+- Health stays truthful under partial visibility: the roll-up covers all findings. A finding about a resource the user may not view still shows its severity, code and resource identity (kind, namespace, name) so the platform team knows which team to ask, but not its message or evidence (user, 2026-10-18). This reveals that the named resource exists; a stricter namespace-only variant can be revisited with the per-user design.
+- Phase 7 (TLS posture) must not read Secrets under this model; certificate details wait for per-user authorisation or another source.
