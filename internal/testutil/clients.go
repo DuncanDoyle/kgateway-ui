@@ -33,6 +33,17 @@ func Clients(t *testing.T, objs ...runtime.Object) (dynamic.Interface, *kubefake
 	return clients(t, ServedUpstream(), objs)
 }
 
+// ClientsWith is Clients with extra kinds served at their first version, for
+// downstream-extension tests.
+func ClientsWith(t *testing.T, extra []kinds.Descriptor, objs ...runtime.Object) (dynamic.Interface, *kubefake.Clientset) {
+	t.Helper()
+	served := ServedUpstream()
+	for _, d := range extra {
+		served = append(served, kinds.Served{Descriptor: d, Version: d.Versions[0]})
+	}
+	return clients(t, served, objs)
+}
+
 // clients builds the fakes for served: discovery, list kinds and tracker GVRs.
 func clients(t *testing.T, served []kinds.Served, objs []runtime.Object) (*dynamicfake.FakeDynamicClient, *kubefake.Clientset) {
 	t.Helper()

@@ -65,6 +65,9 @@ func NewManagedCountVerifier(persist time.Duration) *ManagedCountVerifier {
 	return &ManagedCountVerifier{persist: persist, first: map[string]map[ctrlmetrics.ManagedKey]time.Time{}}
 }
 
+// Persist returns how long a mismatch must last before it is reported.
+func (v *ManagedCountVerifier) Persist() time.Duration { return v.persist }
+
 // Name implements Verifier.
 func (*ManagedCountVerifier) Name() string { return "resources-managed" }
 
