@@ -107,7 +107,7 @@ func (NamespaceSelectorScope) Scope(inst Install) Scope {
 	} else if inst.Deployment != nil {
 		spec, source, where = inst.Deployment.Spec.Template.Spec, SourceDeploymentTemplate, "the Deployment template"
 	} else {
-		return Scope{Mode: ScopeUnknown, Err: "no controller pod found"}
+		return Scope{Mode: ScopeUnknown, Err: "no controller pod or deployment found"}
 	}
 	var c *corev1.Container
 	for i := range spec.Containers {

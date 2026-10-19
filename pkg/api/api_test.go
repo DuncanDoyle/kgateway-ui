@@ -797,7 +797,7 @@ func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
 			objs = append(objs, o)
 		}
 	}
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), objs...)
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Err: "no ready controller pod to scrape"}}, objs...)
 	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
 	sc := o.Header.Scope
 	if sc.Mode != string(install.ScopeSelectors) || sc.Source != install.SourceDeploymentTemplate || sc.Watched != 2 {
@@ -810,8 +810,8 @@ func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
 	if !hasFinding(h, health.CodeControllerNotReady, "kgw/kgateway") || h.State != health.StateError {
 		t.Fatalf("want KGWUI-005 and error state, not a false green: %s %+v", h.State, h.Findings)
 	}
-	if hasFinding(h, health.CodeSignalUnavailable, "") {
-		t.Fatalf("scope must not be unavailable: %+v", h.Findings)
+	if hasFinding(h, health.CodeScopeMismatch, "") {
+		t.Fatalf("no KGWUI-007 without metrics to verify against: %+v", h.Findings)
 	}
 	detail := ""
 	for _, c := range h.Checks {
