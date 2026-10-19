@@ -30,6 +30,15 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
     ["header muted text on header band", headerMix(HEADER_MUTED_PCT), c.headerBg],
     ["header muted text on pressed header control", headerMix(HEADER_MUTED_PCT), headerMix(HEADER_PRESS_PCT)],
     ["text on pressed menu item", c.text, mix(c.text, c.surfaceRaised, 0.16)],
+    // Install page tints on surface: muted text sits on rows (pressed 8%); the rest up to 14% (sort, "Show all").
+    ["text on pressed surface control", c.text, mix(c.text, c.surface, 0.14)],
+    ["muted on pressed table row", c.textMuted, mix(c.text, c.surface, 0.08)],
+    ["accent text on pressed surface control", c.accentText, mix(c.text, c.surface, 0.14)],
+    ...states.map((s): [string, string, string] => [
+      `${s} status text on pressed row`,
+      c.status[s].fg,
+      mix(c.text, c.surface, 0.14),
+    ]),
   ])("%s >= 4.5", (_, fg, bg) => {
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(4.5);
   });
