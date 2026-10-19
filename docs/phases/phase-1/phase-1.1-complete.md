@@ -1,7 +1,7 @@
 # Phase 1.1 — Backend (Complete)
 
 **Completed:** 2026-10-19
-**Range:** 1a848bb..41650c0 (branch `duncandoyle/phase1Backend`)
+**Range:** 1a848bb..4abc775 (branch `duncandoyle/phase1Backend`)
 
 ## Summary
 The Go backend of the Phase 1 UI is done: one binary that discovers kgateway installs, watches their Gateway API and kgateway resources through a shared informer cache, scrapes controller metrics, evaluates health findings KGWUI-001…009 without false greens (D-006, D-014), and serves the v1 JSON API behind an `Authorizer` seam (D-013). Downstream builds extend it through `pkg/extension` (kinds, detectors, scope provider, scope verifier, checks, Authorizer). A smoke test on kind with kgateway v2.4.7 passed every expectation: a broken backend gives KGWUI-002, a route in an unwatched namespace gives KGWUI-004 and is not counted, metrics and scope verification are OK, no Secrets are served, and the state recovers when the broken route is removed.
