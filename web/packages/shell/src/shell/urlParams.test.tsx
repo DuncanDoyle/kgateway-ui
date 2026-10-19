@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense, useState } from "react";
-import { Link, MemoryRouter, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useUrlParams, useUrlText } from "./urlParams";
 
 function Where() {
@@ -234,4 +234,39 @@ it("rapid chip and typing keep every param and character", async () => {
   await waitFor(() =>
     expect(screen.getByTestId("location")).toHaveTextContent("?kind=HTTPRoute&sev=error&q=legacy%2Fold"),
   );
+});
+
+// region Path changes
+
+function Switcher() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/i/b/two")}>
+      switch
+    </button>
+  );
+}
+
+function Path() {
+  const l = useLocation();
+  return <output data-testid="path">{l.pathname + l.search}</output>;
+}
+
+it("a navigation to another path, with the hook still mounted, does not carry the old params over", async () => {
+  render(
+    <MemoryRouter initialEntries={["/i/a/one?q=foo&sort=x"]}>
+      <Routes>
+        <Route path="/i/:ns/:name" element={<Probe />} />
+      </Routes>
+      <Switcher />
+      <Path />
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole("textbox", { name: "q" })).toHaveValue("foo");
+  await userEvent.click(screen.getByRole("button", { name: "switch" }));
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/);
+  expect(screen.getByRole("textbox", { name: "q" })).toHaveValue("");
+  // Typing on the new path writes only the new text.
+  await userEvent.type(screen.getByRole("textbox", { name: "q" }), "z");
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two\?q=z$/);
 });

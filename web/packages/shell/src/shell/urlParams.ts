@@ -31,16 +31,23 @@ export function useUrlParams(): [URLSearchParams, (changes: ParamChanges) => voi
   useLayoutEffect(() => {
     if (navType !== "POP" && writer(location.state) === id) return;
     const url = new URLSearchParams(location.search);
-    written.current = url.toString();
-    setParams((prev) => (prev.toString() === written.current ? prev : url));
+    // Compare with this string, not the ref: React may run the updater after the mirror has moved the ref on.
+    const adopted = url.toString();
+    written.current = adopted;
+    setParams((prev) => (prev.toString() === adopted ? prev : url));
   }, [location, navType, id]);
+  // useNavigate() changes identity with the pathname; depending on it would mirror stale params onto a new path.
+  const navigateRef = useRef(navigate);
+  useLayoutEffect(() => {
+    navigateRef.current = navigate;
+  }, [navigate]);
   // Mirrors local state to the URL; it never reads the location, so a late commit of an older write changes nothing.
   useEffect(() => {
     const s = params.toString();
     if (s === written.current) return;
     written.current = s;
-    navigate({ search: s ? `?${s}` : "" }, { replace: true, state: { [WRITER]: id } });
-  }, [params, navigate, id]);
+    navigateRef.current({ search: s ? `?${s}` : "" }, { replace: true, state: { [WRITER]: id } });
+  }, [params, id]);
   const update = useCallback((changes: ParamChanges) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);

@@ -2,7 +2,8 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { POLL_MS } from "../../api/hooks";
-import type { HealthReport, OverviewResponse } from "../../api/types";
+import type { HealthReport, InstallSummary, OverviewResponse } from "../../api/types";
+import { InstallSwitcher } from "../../shell/InstallSwitcher";
 import { healthy, meta, overview, processing, restricted, unhealthy, unknown } from "../../test/fixtures";
 import { renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
@@ -387,4 +388,80 @@ it("a failing optional check leaves gateway rows as reported", async () => {
   mount(h);
   await screen.findByTestId("health-strip");
   expect(gatewayRows()[1]).toHaveTextContent("Healthy");
+});
+
+// region Switching installs
+
+function summary(ov: OverviewResponse): InstallSummary {
+  return { ...ov.header, health: { state: "healthy", counts: {} }, computedAt: new Date().toISOString() };
+}
+
+function Path() {
+  const loc = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="path">{loc.pathname + loc.search}</output>
+      <button type="button" onClick={() => navigate(-1)}>
+        back
+      </button>
+    </>
+  );
+}
+
+async function switchTo(id: string) {
+  await userEvent.click(screen.getByRole("button", { name: /^Switch install/ }));
+  const item = within(screen.getByRole("menu", { name: "Controller installs" }))
+    .getAllByRole("menuitem")
+    .find((el) => el.textContent?.replace(/\s/g, "").includes(id));
+  if (!item) throw new Error(`no menu item for ${id}`);
+  await userEvent.click(item);
+}
+
+const filterBox = () => screen.getByRole("textbox", { name: "Filter gateways" });
+
+it("switching installs does not carry the gateway filter over", async () => {
+  const a = overview();
+  const b = overview();
+  b.header = { ...b.header, id: "b/two", namespace: "b", name: "two" };
+  stubApi({
+    "/api/v1/installs/kgw/kgateway/overview": a,
+    "/api/v1/installs/kgw/kgateway/health": healthy(),
+    "/api/v1/installs/b/two/overview": b,
+    "/api/v1/installs/b/two/health": { ...healthy(), install: "b/two" },
+    "/api/v1/meta": meta,
+  });
+  renderWithTheme(
+    <>
+      <InstallSwitcher installs={[summary(a), summary(b)]} currentId="" />
+      <Routes>
+        <Route path="/i/:ns/:name" element={<InstallPage />} />
+      </Routes>
+      <Path />
+    </>,
+    { path: "/i/kgw/kgateway?q=internal" },
+  );
+  await screen.findByRole("table", { name: "Gateways" });
+  expect(filterBox()).toHaveValue("internal");
+  // Visit B, then go back: both installs are cached, so the table stays mounted from here on.
+  await switchTo("b/two");
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/));
+  await screen.findByRole("table", { name: "Gateways" });
+  await userEvent.click(screen.getByRole("button", { name: "back" }));
+  await waitFor(() => expect(filterBox()).toHaveValue("internal"));
+  expect(gatewayRows()).toHaveLength(1);
+  await switchTo("b/two");
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two/));
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/);
+  expect(filterBox()).toHaveValue("");
+  expect(gatewayRows()).toHaveLength(2);
+  // Typing on A, then switching, leaves B clean too.
+  await switchTo("kgw/kgateway");
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/kgw\/kgateway$/));
+  await userEvent.type(filterBox(), "edge");
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/kgw\/kgateway\?q=edge$/);
+  await switchTo("b/two");
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two/));
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/);
+  expect(filterBox()).toHaveValue("");
 });
