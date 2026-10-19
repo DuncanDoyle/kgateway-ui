@@ -1,7 +1,9 @@
 package ctrlmetrics
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,18 +23,36 @@ type Scraper interface {
 	Scrape(ctx context.Context, pod *corev1.Pod, port int32) (io.ReadCloser, error)
 }
 
-// HTTPScraper scrapes the pod IP directly (in-cluster mode).
+const (
+	// maxBodyBytes caps one /metrics body; a larger body is an error, never parsed.
+	maxBodyBytes = 8 << 20
+	// maxPodTimeout caps the deadline of a single pod scrape.
+	maxPodTimeout = 5 * time.Second
+)
+
+// defaultClient is used when HTTPScraper.Client is nil.
+var defaultClient = &http.Client{Timeout: maxPodTimeout}
+
+// HTTPScraper scrapes the pod IP directly (in-cluster mode). A nil Client
+// uses one with a 5s timeout.
 type HTTPScraper struct{ Client *http.Client }
 
 // Scrape implements Scraper.
 func (s HTTPScraper) Scrape(ctx context.Context, pod *corev1.Pod, port int32) (io.ReadCloser, error) {
+	if pod.Status.PodIP == "" {
+		return nil, fmt.Errorf("pod %s has no IP", pod.Name)
+	}
 	url := "http://" + net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port))) + "/metrics"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/plain;version=0.0.4")
-	resp, err := s.Client.Do(req)
+	client := s.Client
+	if client == nil {
+		client = defaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -76,13 +96,16 @@ type Source interface {
 type Collector struct {
 	scraper Scraper
 	now     func() time.Time
-	mu      sync.RWMutex
-	results map[string]Result
+	// maxBody is the largest accepted body; podTimeout bounds one pod scrape.
+	maxBody    int64
+	podTimeout time.Duration
+	mu         sync.RWMutex
+	results    map[string]Result
 }
 
 // NewCollector returns a Collector using s.
 func NewCollector(s Scraper) *Collector {
-	return &Collector{scraper: s, now: time.Now, results: map[string]Result{}}
+	return &Collector{scraper: s, now: time.Now, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
 }
 
 // Collect scrapes all ready pods of in and aggregates them. It fails if any
@@ -93,14 +116,9 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		if !ready(p) {
 			continue
 		}
-		body, err := c.scraper.Scrape(ctx, p, in.MetricsPort)
+		m, err := c.scrapePod(ctx, p, in.MetricsPort)
 		if err != nil {
 			return Result{CollectedAt: c.now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
-		}
-		m, err := Parse(body)
-		_ = body.Close()
-		if err != nil {
-			return Result{CollectedAt: c.now(), Err: fmt.Sprintf("pod %s: parse: %v", p.Name, err)}
 		}
 		per = append(per, m)
 	}
@@ -108,6 +126,30 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		return Result{CollectedAt: c.now(), Err: "no ready controller pod to scrape"}
 	}
 	return Result{Metrics: Aggregate(per), CollectedAt: c.now()}
+}
+
+// scrapePod scrapes and parses one pod under its own deadline and size cap.
+func (c *Collector) scrapePod(ctx context.Context, p *corev1.Pod, port int32) (Metrics, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.podTimeout)
+	defer cancel()
+	body, err := c.scraper.Scrape(ctx, p, port)
+	if err != nil {
+		return Metrics{}, err
+	}
+	defer func() { _ = body.Close() }()
+	// Read one byte past the cap to tell "exactly at the cap" from "too large".
+	b, err := io.ReadAll(io.LimitReader(body, c.maxBody+1))
+	if err != nil {
+		return Metrics{}, err
+	}
+	if int64(len(b)) > c.maxBody {
+		return Metrics{}, fmt.Errorf("metrics body exceeds %d bytes", c.maxBody)
+	}
+	m, err := Parse(bytes.NewReader(b))
+	if err != nil {
+		return Metrics{}, fmt.Errorf("parse: %v", err)
+	}
+	return m, nil
 }
 
 func ready(p *corev1.Pod) bool {
@@ -119,22 +161,32 @@ func ready(p *corev1.Pod) bool {
 	return false
 }
 
-// Run collects every interval until ctx is done.
-func (c *Collector) Run(ctx context.Context, every time.Duration, installs func() []install.Install) {
+// Run collects every interval until ctx is done and returns nil then. It
+// returns an error if every <= 0. Installs are scraped concurrently, each pod
+// under a deadline of min(every/2, 5s); a tick waits for all installs.
+func (c *Collector) Run(ctx context.Context, every time.Duration, installs func() []install.Install) error {
+	if every <= 0 {
+		return errors.New("ctrlmetrics: collection interval must be positive")
+	}
+	c.podTimeout = min(every/2, maxPodTimeout)
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
+		var wg sync.WaitGroup
 		for _, in := range installs() {
-			sctx, cancel := context.WithTimeout(ctx, every)
-			r := c.Collect(sctx, in)
-			cancel()
-			c.mu.Lock()
-			c.results[in.ID()] = r
-			c.mu.Unlock()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r := c.Collect(ctx, in)
+				c.mu.Lock()
+				c.results[in.ID()] = r
+				c.mu.Unlock()
+			}()
 		}
+		wg.Wait()
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-t.C:
 		}
 	}
