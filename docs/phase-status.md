@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.1 (backend) complete, merged in #2 (99685d5); 1.2 next
+Status: implementing; sub-phase 1.2 (frontend) open
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
@@ -24,7 +24,25 @@ Status: implementing; sub-phase 1.1 (backend) complete, merged in #2 (99685d5); 
 - [ ] phase-1-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 1.2 — Frontend
+Kind: planned
+Base: 1f21b21b3e7f08b51e445fb9effb4326d6afaa2c
+Brief: docs/phases/phase-1/phase-1.2-brief.md
+
+### Allowed work
+Features within the approved design: plan Tasks 12–18.
+
+### Not allowed
+Design changes without a decisions.md entry and user approval.
+
+### Queue
+- [ ] Task 12 Frontend workspace scaffold ← CURRENT
+- [ ] Task 13 Theme tokens, Control room themes, fonts, contrast tests
+- [ ] Task 14 Health primitives, ResourceName, API types and data hooks
+- [ ] Task 15 App shell — extension registry, routing, header, switchers, page states
+- [ ] Task 16 Install page (layout A)
+- [ ] Task 17 Cluster landing, findings page, YAML view, defaultPages
+- [ ] Task 18 Frontend extension-seam test and SPA embedding
 
 ## Carry-over (deferred to later phases)
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
