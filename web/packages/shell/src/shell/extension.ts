@@ -1,7 +1,7 @@
 import { type ComponentType, createContext, type ReactNode, useContext } from "react";
 import { useParams } from "react-router-dom";
 import type { Finding } from "../api/types";
-import { defaultThemes } from "../theme/themes";
+import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
 
 /** Product identity shown in the header (D-008). */
@@ -10,14 +10,17 @@ export interface Brand {
   logo: ReactNode;
 }
 
-/** A page contributed by an extension. Install-scoped paths are relative to /i/:ns/:name/. */
+/**
+ * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
+ * under /i/:ns/:name/. The core owns "findings" and "r/..." there and "/" at the top; a contribution cannot replace them.
+ */
 export interface RouteContribution {
   path: string;
   element: ReactNode;
   scope: "install" | "top";
 }
 
-/** A navigation entry contributed by an extension. Install-scoped targets are relative to /i/:ns/:name/. */
+/** A navigation entry contributed by an extension. Targets are relative, without a leading slash; install-scoped ones resolve under /i/:ns/:name/. */
 export interface NavEntry {
   label: string;
   to: string;
@@ -35,7 +38,7 @@ export interface ShellExtension {
   defaultThemeId?: string;
   routes?: RouteContribution[];
   navEntries?: NavEntry[];
-  /** Keyed by finding code prefix, e.g. "ACME-". */
+  /** Keyed by finding code prefix, e.g. "ACME-"; when several prefixes match a code, the longest wins. */
   findingRenderers?: Record<string, FindingRenderer>;
 }
 
@@ -52,7 +55,7 @@ export const defaultBrand: Brand = { productName: "kgateway", logo: null };
 export const ShellExtensionContext = createContext<Required<ShellExtension>>({
   brand: defaultBrand,
   themes: defaultThemes,
-  defaultThemeId: defaultThemes[0]?.id ?? "",
+  defaultThemeId: defaultThemeIdFor(defaultThemes),
   routes: [],
   navEntries: [],
   findingRenderers: {},
@@ -63,8 +66,8 @@ export function useShellExtension(): Required<ShellExtension> {
   return useContext(ShellExtensionContext);
 }
 
-/** The install ID ("ns/name") of the current /i/:ns/:name route. */
+/** The install ID ("ns/name") of the current /i/:ns/:name/... route; "" outside install routes. */
 export function useInstallId(): string {
   const { ns, name } = useParams();
-  return `${ns}/${name}`;
+  return ns && name ? `${ns}/${name}` : "";
 }

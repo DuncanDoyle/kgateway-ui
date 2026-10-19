@@ -3,9 +3,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import { stubApi } from "../test/render";
+import { useThemeSwitch } from "../theme/ThemeProvider";
 import { THEME_PAINT_KEY } from "../theme/themeStorage";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
-import type { CorePages } from "./extension";
+import { type CorePages, useInstallId, useShellExtension } from "./extension";
 import { Shell } from "./Shell";
 
 const pages: CorePages = {
@@ -114,13 +115,56 @@ it("renders extension brand and routes", async () => {
   expect(screen.getByRole("link", { name: "WAF" })).toHaveAttribute("href", "/i/kgw/kgateway/waf");
 });
 
-it("shows the install's version, edition and controller readiness in the header", async () => {
+it("shows the install's version and controller readiness in the header", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway", { ready: 1, desired: 2 })], "/api/v1/meta": meta });
   mount("/i/kgw/kgateway");
-  expect(await screen.findByTestId("edition")).toHaveTextContent("kgateway");
-  expect(screen.getByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
+  expect(await screen.findByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
   const ready = screen.getByText("Controller 1/2 ready");
   expect(within(ready).getByTestId("health-icon-error")).toBeInTheDocument();
+});
+
+it("shows no edition tag when the edition repeats the product name", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway");
+  await screen.findByTestId("version");
+  expect(screen.queryByTestId("edition")).toBeNull();
+});
+
+it("shows the edition tag when it differs from the product name", async () => {
+  stubApi({ "/api/v1/installs": [{ ...inst("kgw/kgateway"), edition: "acme" }], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway", { brand: { productName: "Acme Edge", logo: null } });
+  expect(await screen.findByTestId("edition")).toHaveTextContent(/^acme$/);
+});
+
+it("hides the identity shimmer when installs cannot load", async () => {
+  stubApi({ "/api/v1/installs": [500, { error: "boom" }], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway");
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/installs", expect.anything()));
+  await waitFor(() => expect(screen.queryByTestId("shimmer")).toBeNull());
+});
+
+it("resolves the default theme once: the context and the provider agree", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  function Probe() {
+    const { defaultThemeId } = useShellExtension();
+    const { current } = useThemeSwitch();
+    return <output data-testid="probe">{`${defaultThemeId}|${current.id}`}</output>;
+  }
+  // The light theme is listed first; with no explicit default, both pick the dark one (D-011).
+  mount("/probe", {
+    themes: [controlRoomLight, controlRoomDark],
+    routes: [{ path: "probe", element: <Probe />, scope: "top" }],
+  });
+  expect(await screen.findByTestId("probe")).toHaveTextContent(`${controlRoomDark.id}|${controlRoomDark.id}`);
+});
+
+it("useInstallId is empty outside install routes", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  function Probe() {
+    return <output data-testid="probe">{`[${useInstallId()}]`}</output>;
+  }
+  mount("/probe", { routes: [{ path: "probe", element: <Probe />, scope: "top" }] });
+  expect(await screen.findByTestId("probe")).toHaveTextContent("[]");
 });
 
 it("does not double the v of a version that already has one", async () => {

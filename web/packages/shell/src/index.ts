@@ -17,7 +17,7 @@ export { HealthBadge } from "./health/HealthBadge";
 export { HealthIcon } from "./health/HealthIcon";
 export { severityToState, stateLabel } from "./health/state";
 export { defaultPages } from "./pages/defaultPages";
-export { FindingRow, rendererFor, resourcePath } from "./pages/install/FindingRow";
+export { FindingRow, resourcePath } from "./pages/install/FindingRow";
 export { CopyNameButton } from "./resource/CopyNameButton";
 export { ResourceName } from "./resource/ResourceName";
 export type { Brand, CorePages, FindingRenderer, NavEntry, RouteContribution, ShellExtension } from "./shell/extension";

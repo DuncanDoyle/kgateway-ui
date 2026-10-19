@@ -62,6 +62,7 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
   );
   expect(await screen.findByText("Acme Edge")).toBeInTheDocument();
   expect(await screen.findByText("acme detail")).toBeInTheDocument();
+  expect(screen.getByTestId("edition")).toHaveTextContent("acme");
   // The contributed tokens apply: colour, font family, type scale, and the pre-React paint record.
   expect(screen.getByTestId("version")).toHaveStyle({ backgroundColor: "#7A1FA2", fontSize: "13px" });
   expect(document.body).toHaveStyle({ fontFamily: "Acme Sans" });

@@ -71,3 +71,8 @@ export const controlRoomLight: Theme = {
 
 /** Upstream themes; the first is the default. */
 export const defaultThemes: Theme[] = [controlRoomDark, controlRoomLight];
+
+/** The theme used when none is stored: the explicit default, else the first dark theme, else the first (D-011). */
+export function defaultThemeIdFor(themes: Theme[], explicit?: string): string {
+  return explicit ?? (themes.find((t) => t.mode === "dark") ?? themes[0])?.id ?? "";
+}

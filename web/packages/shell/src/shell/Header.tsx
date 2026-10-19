@@ -108,7 +108,7 @@ function readiness(c: ReadyCount): "healthy" | "error" {
 export function Header() {
   const { brand, navEntries } = useShellExtension();
   const match = useMatch("/i/:ns/:name/*");
-  const { data } = useInstalls();
+  const { data, error } = useInstalls();
   const now = useNow();
   const id = match ? `${match.params.ns}/${match.params.name}` : "";
   const current = data?.find((i) => i.id === id);
@@ -120,7 +120,7 @@ export function Header() {
         {brand.logo}
         <span>{brand.productName}</span>
       </Brand>
-      {id && !data ? (
+      {id && !data && !error ? (
         <Identity>
           <Shimmer
             h={20}
@@ -143,7 +143,10 @@ export function Header() {
             />
           )}
           {current.version ? <Chip data-testid="version">{versionText(current.version)}</Chip> : null}
-          <Tag data-testid="edition">{current.edition}</Tag>
+          {/* The edition only adds information when it is not the product's own name. */}
+          {current.edition && current.edition !== brand.productName ? (
+            <Tag data-testid="edition">{current.edition}</Tag>
+          ) : null}
           <Ready>
             <HealthIcon state={isStale(current.computedAt, now) ? "unknown" : readiness(current.controller)} />
             Controller {current.controller.ready}/{current.controller.desired} ready

@@ -3,6 +3,7 @@ import "@fontsource-variable/figtree";
 import "@fontsource-variable/jetbrains-mono";
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useState } from "react";
 import { readStoredTheme, storePaint, storeTheme } from "./themeStorage";
+import { defaultThemeIdFor } from "./themes";
 import type { Theme } from "./tokens";
 
 // region Helpers
@@ -39,9 +40,7 @@ interface ThemeProviderProps {
 
 /** Provides the emotion theme, global styles and the theme switch. */
 export function ThemeProvider({ themes, defaultThemeId, children }: ThemeProviderProps) {
-  const [id, setId] = useState(
-    () => readStoredTheme(themes) ?? defaultThemeId ?? (themes.find((t) => t.mode === "dark") ?? themes[0])?.id,
-  );
+  const [id, setId] = useState(() => readStoredTheme(themes) ?? defaultThemeIdFor(themes, defaultThemeId));
   const current = themes.find((t) => t.id === id) ?? (themes[0] as Theme);
   // Native controls and scrollbars follow the theme, matching what index.html set before React loaded.
   useLayoutEffect(() => {

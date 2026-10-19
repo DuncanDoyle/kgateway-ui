@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
-import { defaultThemes } from "../theme/themes";
+import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import { type CorePages, defaultBrand, type ShellExtension, ShellExtensionContext } from "./extension";
 import { Header } from "./Header";
 import { RootRedirect } from "./RootRedirect";
@@ -32,7 +32,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     return {
       brand: extension.brand ?? defaultBrand,
       themes,
-      defaultThemeId: extension.defaultThemeId ?? themes[0]?.id ?? "",
+      defaultThemeId: defaultThemeIdFor(themes, extension.defaultThemeId),
       routes: extension.routes ?? [],
       navEntries: extension.navEntries ?? [],
       findingRenderers: extension.findingRenderers ?? {},
@@ -41,8 +41,8 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
   const { ClusterLanding, InstallPage, FindingsPage, ResourcePage } = pages;
   return (
     <ShellExtensionContext.Provider value={ext}>
-      {/* Only an explicit defaultThemeId goes to the provider, so its D-011 precedence (stored, default, dark) holds. */}
-      <ThemeProvider themes={ext.themes} defaultThemeId={extension.defaultThemeId}>
+      {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}
+      <ThemeProvider themes={ext.themes} defaultThemeId={ext.defaultThemeId}>
         <BrowserRouter>
           <Root data-testid="shell-root" stylesOverride={stylesOverride}>
             <Header />
