@@ -436,6 +436,6 @@ This phase generates no data-plane configuration. The cost falls on the control 
 
 ## 13. Open items
 
-1. **Shared `controllerName` across installs.** Can two kgateway installs share a `controllerName` with disjoint scopes, and how do they behave? This is the first plan task (kind experiment). §4.3 is safe either way.
-2. **Replica semantics of the controller metrics.** Is `kgateway_envoy_xds_rejects_active` per replica (and summed), and does every replica report the full `kgateway_resources_managed`? This is the first plan task, together with item 1.
+1. **Shared `controllerName` across installs.** Can two kgateway installs share a `controllerName` with disjoint scopes, and how do they behave? Resolved (D-012): yes. Both installs ran with one GatewayClass and one `controllerName`, each reconciled only the Gateways in its own namespaces, and the GatewayClass did not flap. §4.3 is unchanged.
+2. **Replica semantics of the controller metrics.** Is `kgateway_envoy_xds_rejects_active` per replica (and summed), and does every replica report the full `kgateway_resources_managed`? Resolved (D-012): yes. Only the replica serving the proxy's xDS stream reports the reject, and every replica reports the full `kgateway_resources_managed`, so rejects are summed and `resources_managed` takes the max.
 3. **Upstream proposal** for an effective-scope endpoint (D-009 §7). It is filed during Phase 1, but it does not block the phase.

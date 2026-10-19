@@ -1,0 +1,432 @@
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 1.4624e-05
+go_gc_duration_seconds{quantile="0.25"} 2.6916e-05
+go_gc_duration_seconds{quantile="0.5"} 0.000141166
+go_gc_duration_seconds{quantile="0.75"} 0.000277208
+go_gc_duration_seconds{quantile="1"} 0.000341042
+go_gc_duration_seconds_sum 0.00148658
+go_gc_duration_seconds_count 10
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 8.307167232e+09
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 753
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.26.9"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 3.6286576e+07
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 8.7765424e+07
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 1.495253e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 540390
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 4.445424e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 3.6286576e+07
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 5.177344e+06
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 4.1680896e+07
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 261022
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 2.62144e+06
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 4.685824e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.7924038340439053e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 801412
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 9184
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 16072
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 554880
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 620160
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 4.8321514e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 1.277435e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 3.473408e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 3.473408e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 5.8185992e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 4
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 9
+# HELP kgateway_controller_reconcile_duration_seconds Reconcile duration for controller
+# TYPE kgateway_controller_reconcile_duration_seconds histogram
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.0005"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.001"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.0025"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.005"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.01"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.025"} 4
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.05"} 5
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.1"} 6
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.25"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="0.5"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="1"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="2.5"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="5"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="gw",namespace="app-a",le="+Inf"} 7
+kgateway_controller_reconcile_duration_seconds_sum{controller="gateway",name="gw",namespace="app-a"} 0.27542561499999996
+kgateway_controller_reconcile_duration_seconds_count{controller="gateway",name="gw",namespace="app-a"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.005"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.01"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.025"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.05"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.1"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.25"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="1"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="2.5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="+Inf"} 1
+kgateway_controller_reconcile_duration_seconds_sum{controller="gatewayclass",name="",namespace=""} 0.00266704
+kgateway_controller_reconcile_duration_seconds_count{controller="gatewayclass",name="",namespace=""} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.005"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.01"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.025"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.05"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.1"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.25"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.5"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="1"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="2.5"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="5"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="+Inf"} 2
+kgateway_controller_reconcile_duration_seconds_sum{controller="gatewayclass",name="kgateway",namespace=""} 0.011206912
+kgateway_controller_reconcile_duration_seconds_count{controller="gatewayclass",name="kgateway",namespace=""} 2
+# HELP kgateway_controller_reconciliations_running Number of reconciliations currently running
+# TYPE kgateway_controller_reconciliations_running gauge
+kgateway_controller_reconciliations_running{controller="gateway",name="gw",namespace="app-a"} 0
+kgateway_controller_reconciliations_running{controller="gatewayclass",name="",namespace=""} 0
+kgateway_controller_reconciliations_running{controller="gatewayclass",name="kgateway",namespace=""} 0
+# HELP kgateway_controller_reconciliations_total Total number of controller reconciliations
+# TYPE kgateway_controller_reconciliations_total counter
+kgateway_controller_reconciliations_total{controller="gateway",name="gw",namespace="app-a",result="error"} 1
+kgateway_controller_reconciliations_total{controller="gateway",name="gw",namespace="app-a",result="success"} 6
+kgateway_controller_reconciliations_total{controller="gatewayclass",name="",namespace="",result="success"} 1
+kgateway_controller_reconciliations_total{controller="gatewayclass",name="kgateway",namespace="",result="error"} 1
+kgateway_controller_reconciliations_total{controller="gatewayclass",name="kgateway",namespace="",result="success"} 1
+# HELP kgateway_envoy_xds_rejects_active Number of xDS responses currently rejected by envoy proxy
+# TYPE kgateway_envoy_xds_rejects_active gauge
+kgateway_envoy_xds_rejects_active{gateway_name="gw",gateway_namespace="app-a",type_url="envoy.config.cluster.v3.Cluster"} 1
+# HELP kgateway_envoy_xds_rejects_total Total number of xDS responses rejected by envoy proxy
+# TYPE kgateway_envoy_xds_rejects_total counter
+kgateway_envoy_xds_rejects_total{gateway_name="gw",gateway_namespace="app-a",type_url="envoy.config.cluster.v3.Cluster"} 1
+# HELP kgateway_resources_managed Current number of resources managed
+# TYPE kgateway_resources_managed gauge
+kgateway_resources_managed{namespace="app-a",parent="",resource="BackendConfigPolicy"} 1
+kgateway_resources_managed{namespace="app-a",parent="gw",resource="Gateway"} 1
+kgateway_resources_managed{namespace="app-a",parent="gw",resource="HTTPRoute"} 1
+# HELP kgateway_resources_status_sync_duration_seconds Duration of time for a resource update to receive a status report
+# TYPE kgateway_resources_status_sync_duration_seconds histogram
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="0.1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="0.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="2.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="10"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="30"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="60"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="120"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="300"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="600"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="1200"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="1800"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="app-a",resource="BackendConfigPolicy",le="+Inf"} 1
+kgateway_resources_status_sync_duration_seconds_sum{gateway="",namespace="app-a",resource="BackendConfigPolicy"} 0.002841203
+kgateway_resources_status_sync_duration_seconds_count{gateway="",namespace="app-a",resource="BackendConfigPolicy"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="0.1"} 0
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="0.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="2.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="10"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="30"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="60"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="120"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="300"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="600"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="1200"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="1800"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="Gateway",le="+Inf"} 2
+kgateway_resources_status_sync_duration_seconds_sum{gateway="gw",namespace="app-a",resource="Gateway"} 106.091850783
+kgateway_resources_status_sync_duration_seconds_count{gateway="gw",namespace="app-a",resource="Gateway"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="0.1"} 0
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="0.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="2.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="10"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="30"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="60"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="120"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="300"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="600"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="1200"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="1800"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",resource="HTTPRoute",le="+Inf"} 1
+kgateway_resources_status_sync_duration_seconds_sum{gateway="gw",namespace="app-a",resource="HTTPRoute"} 0.108846542
+kgateway_resources_status_sync_duration_seconds_count{gateway="gw",namespace="app-a",resource="HTTPRoute"} 1
+# HELP kgateway_resources_status_syncs_completed_total Total number of status syncs completed for resources
+# TYPE kgateway_resources_status_syncs_completed_total counter
+kgateway_resources_status_syncs_completed_total{gateway="",namespace="app-a",resource="BackendConfigPolicy"} 1
+kgateway_resources_status_syncs_completed_total{gateway="gw",namespace="app-a",resource="Gateway"} 2
+kgateway_resources_status_syncs_completed_total{gateway="gw",namespace="app-a",resource="HTTPRoute"} 1
+# HELP kgateway_resources_status_syncs_started_total Total number of status syncs started
+# TYPE kgateway_resources_status_syncs_started_total counter
+kgateway_resources_status_syncs_started_total{gateway="",namespace="app-a",resource="BackendConfigPolicy"} 1
+kgateway_resources_status_syncs_started_total{gateway="gw",namespace="app-a",resource="Gateway"} 3
+kgateway_resources_status_syncs_started_total{gateway="gw",namespace="app-a",resource="HTTPRoute"} 1
+# HELP kgateway_resources_updates_dropped_total Total number of resources metrics updates dropped. If this metric is ever greater than 0, all resources subsystem metrics should be considered invalid until process restart
+# TYPE kgateway_resources_updates_dropped_total counter
+kgateway_resources_updates_dropped_total 0
+# HELP kgateway_routing_domains Number of domains per listener
+# TYPE kgateway_routing_domains gauge
+kgateway_routing_domains{gateway="gw",namespace="app-a",port="8080"} 1
+# HELP kgateway_status_syncer_status_sync_duration_seconds Status sync duration
+# TYPE kgateway_status_syncer_status_sync_duration_seconds histogram
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.0005"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.001"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.0025"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.005"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.01"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.025"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.05"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.1"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.25"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="0.5"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="1"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="2.5"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="5"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer",le="+Inf"} 1
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer"} 0.00267662
+kgateway_status_syncer_status_sync_duration_seconds_count{name="BackendConfigPolicy",namespace="app-a",syncer="PolicyStatusSyncer"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.0005"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.001"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.0025"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.005"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.01"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.025"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.05"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.1"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.25"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="0.5"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="1"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="2.5"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="5"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="GatewayStatusSyncer",le="+Inf"} 2
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="gw",namespace="app-a",syncer="GatewayStatusSyncer"} 0.21365484999999998
+kgateway_status_syncer_status_sync_duration_seconds_count{name="gw",namespace="app-a",syncer="GatewayStatusSyncer"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.0005"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.001"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.0025"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.005"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.01"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.025"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.05"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.1"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.25"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="0.5"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="1"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="2.5"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="5"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="gw",namespace="app-a",syncer="RouteStatusSyncer",le="+Inf"} 1
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="gw",namespace="app-a",syncer="RouteStatusSyncer"} 0.002849119
+kgateway_status_syncer_status_sync_duration_seconds_count{name="gw",namespace="app-a",syncer="RouteStatusSyncer"} 1
+# HELP kgateway_status_syncer_status_syncs_total Total number of status syncs
+# TYPE kgateway_status_syncer_status_syncs_total counter
+kgateway_status_syncer_status_syncs_total{name="BackendConfigPolicy",namespace="app-a",result="success",syncer="PolicyStatusSyncer"} 1
+kgateway_status_syncer_status_syncs_total{name="gw",namespace="app-a",result="success",syncer="GatewayStatusSyncer"} 2
+kgateway_status_syncer_status_syncs_total{name="gw",namespace="app-a",result="success",syncer="RouteStatusSyncer"} 1
+# HELP kgateway_translator_translation_duration_seconds Translation duration
+# TYPE kgateway_translator_translation_duration_seconds histogram
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.0001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.00025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.0005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.0025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.01"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.05"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.25"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="0.5"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateGateway",le="+Inf"} 3
+kgateway_translator_translation_duration_seconds_sum{name="gw",namespace="app-a",translator="TranslateGateway"} 0.000107416
+kgateway_translator_translation_duration_seconds_count{name="gw",namespace="app-a",translator="TranslateGateway"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.0001"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.00025"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.0005"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.001"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.0025"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.005"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.01"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.025"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.05"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.1"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.25"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="0.5"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="1"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateHTTPRoute",le="+Inf"} 2
+kgateway_translator_translation_duration_seconds_sum{name="gw",namespace="app-a",translator="TranslateHTTPRoute"} 4.082e-06
+kgateway_translator_translation_duration_seconds_count{name="gw",namespace="app-a",translator="TranslateHTTPRoute"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.0001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.00025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.0005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.0025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.01"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.05"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.25"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="0.5"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="gw",namespace="app-a",translator="TranslateListeners",le="+Inf"} 3
+kgateway_translator_translation_duration_seconds_sum{name="gw",namespace="app-a",translator="TranslateListeners"} 4.0124e-05
+kgateway_translator_translation_duration_seconds_count{name="gw",namespace="app-a",translator="TranslateListeners"} 3
+# HELP kgateway_translator_translations_running Current number of translations running
+# TYPE kgateway_translator_translations_running gauge
+kgateway_translator_translations_running{name="gw",namespace="app-a",translator="TranslateGateway"} 0
+kgateway_translator_translations_running{name="gw",namespace="app-a",translator="TranslateHTTPRoute"} 0
+kgateway_translator_translations_running{name="gw",namespace="app-a",translator="TranslateListeners"} 0
+# HELP kgateway_translator_translations_total Total number of translations
+# TYPE kgateway_translator_translations_total counter
+kgateway_translator_translations_total{name="gw",namespace="app-a",result="success",translator="TranslateGateway"} 3
+kgateway_translator_translations_total{name="gw",namespace="app-a",result="success",translator="TranslateHTTPRoute"} 2
+kgateway_translator_translations_total{name="gw",namespace="app-a",result="success",translator="TranslateListeners"} 3
+# HELP kgateway_validation_mode Configured validation mode. The active mode series has value 1.
+# TYPE kgateway_validation_mode gauge
+kgateway_validation_mode{mode="STANDARD",validator_mode="CACHE"} 1
+# HELP kgateway_xds_auth_rq_success_total Total number of successful xDS auth requests
+# TYPE kgateway_xds_auth_rq_success_total counter
+kgateway_xds_auth_rq_success_total 1
+# HELP kgateway_xds_auth_rq_total Total number of xDS auth requests
+# TYPE kgateway_xds_auth_rq_total counter
+kgateway_xds_auth_rq_total 1
+# HELP kgateway_xds_snapshot_resources Current number of resources in XDS snapshot
+# TYPE kgateway_xds_snapshot_resources gauge
+kgateway_xds_snapshot_resources{gateway="gw",namespace="app-a",resource="Cluster"} 2
+kgateway_xds_snapshot_resources{gateway="gw",namespace="app-a",resource="Endpoint"} 3
+kgateway_xds_snapshot_resources{gateway="gw",namespace="app-a",resource="Listener"} 1
+kgateway_xds_snapshot_resources{gateway="gw",namespace="app-a",resource="Route"} 1
+kgateway_xds_snapshot_resources{gateway="gw",namespace="app-a",resource="Secret"} 0
+# HELP kgateway_xds_snapshot_sync_duration_seconds Duration of time for a gateway resource update to be synced in an XDS snapshot
+# TYPE kgateway_xds_snapshot_sync_duration_seconds histogram
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.1"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.5"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="1"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="2.5"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="5"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="10"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="30"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="60"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="120"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="300"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="600"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="1200"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="1800"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="gw",namespace="app-a",le="+Inf"} 2
+kgateway_xds_snapshot_sync_duration_seconds_sum{gateway="gw",namespace="app-a"} 8.023273813
+kgateway_xds_snapshot_sync_duration_seconds_count{gateway="gw",namespace="app-a"} 2
+# HELP kgateway_xds_snapshot_syncs_total Total number of XDS snapshot syncs
+# TYPE kgateway_xds_snapshot_syncs_total counter
+kgateway_xds_snapshot_syncs_total{gateway="gw",namespace="app-a"} 2
+# HELP kgateway_xds_snapshot_transform_duration_seconds XDS snapshot transform duration
+# TYPE kgateway_xds_snapshot_transform_duration_seconds histogram
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.0005"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.001"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.0025"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.005"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.01"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.025"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.05"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.1"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.25"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="0.5"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="1"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="2.5"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="5"} 9
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="gw",namespace="app-a",le="+Inf"} 9
+kgateway_xds_snapshot_transform_duration_seconds_sum{gateway="gw",namespace="app-a"} 0.00013050300000000002
+kgateway_xds_snapshot_transform_duration_seconds_count{gateway="gw",namespace="app-a"} 9
+# HELP kgateway_xds_snapshot_transforms_total Total number of XDS snapshot transforms
+# TYPE kgateway_xds_snapshot_transforms_total counter
+kgateway_xds_snapshot_transforms_total{gateway="gw",namespace="app-a",result="success"} 9
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 0.34
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.073741816e+09
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 9.917149e+06
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 281519
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 14
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 1.32644864e+08
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.79240372775e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.43224832e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19
