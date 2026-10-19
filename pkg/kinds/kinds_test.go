@@ -1,0 +1,70 @@
+package kinds
+
+import (
+	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	fakediscovery "k8s.io/client-go/discovery/fake"
+	clienttesting "k8s.io/client-go/testing"
+)
+
+func discovery(lists ...*metav1.APIResourceList) *fakediscovery.FakeDiscovery {
+	return &fakediscovery.FakeDiscovery{Fake: &clienttesting.Fake{Resources: lists}}
+}
+
+func list(gv string, resources ...string) *metav1.APIResourceList {
+	l := &metav1.APIResourceList{GroupVersion: gv}
+	for _, r := range resources {
+		l.APIResources = append(l.APIResources, metav1.APIResource{Name: r})
+	}
+	return l
+}
+
+func TestResolvePicksFirstServedVersionAndSkipsMissing(t *testing.T) {
+	descs := []Descriptor{
+		{Group: "gateway.networking.k8s.io", Kind: "TLSRoute", Resource: "tlsroutes", Versions: []string{"v1", "v1alpha2"}, Namespaced: true, Category: CategoryRoute},
+		{Group: "gateway.kgateway.dev", Kind: "HTTPListenerPolicy", Resource: "httplistenerpolicies", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryPolicy},
+		{Group: "gateway.networking.k8s.io", Kind: "HTTPRoute", Resource: "httproutes", Versions: []string{"v1"}, Namespaced: true, Category: CategoryRoute},
+	}
+	dc := discovery(
+		list("gateway.networking.k8s.io/v1", "httproutes", "gateways"),
+		list("gateway.networking.k8s.io/v1alpha2", "tlsroutes"),
+		// gateway.kgateway.dev/v1alpha1 is served but without httplistenerpolicies (removed on main)
+		list("gateway.kgateway.dev/v1alpha1", "trafficpolicies"),
+	)
+	got, err := Resolve(dc, descs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 served kinds, got %d: %+v", len(got), got)
+	}
+	if got[0].Kind != "TLSRoute" || got[0].Version != "v1alpha2" {
+		t.Errorf("TLSRoute should fall back to v1alpha2, got %+v", got[0])
+	}
+	if got[1].Kind != "HTTPRoute" || got[1].GVR().Resource != "httproutes" {
+		t.Errorf("unexpected %+v", got[1])
+	}
+}
+
+func TestUpstreamDescriptorsAreComplete(t *testing.T) {
+	want := map[string]Category{
+		"GatewayClass": CategoryGatewayClass, "Gateway": CategoryGateway, "ListenerSet": CategoryListenerSet,
+		"XListenerSet": CategoryListenerSet, "HTTPRoute": CategoryRoute, "GRPCRoute": CategoryRoute,
+		"TCPRoute": CategoryRoute, "TLSRoute": CategoryRoute, "BackendTLSPolicy": CategoryPolicy,
+		"TrafficPolicy": CategoryPolicy, "ListenerPolicy": CategoryPolicy, "HTTPListenerPolicy": CategoryPolicy,
+		"BackendConfigPolicy": CategoryPolicy,
+	}
+	got := map[string]Category{}
+	for _, d := range Upstream() {
+		got[d.Kind] = d.Category
+		if d.Resource == "secrets" {
+			t.Fatal("Secrets must never be registered")
+		}
+	}
+	for k, c := range want {
+		if got[k] != c {
+			t.Errorf("%s: want category %q, got %q", k, c, got[k])
+		}
+	}
+}
