@@ -9,7 +9,9 @@ import { severityLabel } from "../health/state";
 import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT, HEADER_H } from "../shell/constants";
 import { useInstallId } from "../shell/extension";
 import { useUrlParams, useUrlText } from "../shell/urlParams";
+import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
+import { DataAge } from "./DataAge";
 import { FindingRow } from "./install/FindingRow";
 import { findingKeys } from "./install/TopFindings";
 
@@ -24,8 +26,15 @@ const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
   max-width: 1400px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
-  h1 {
+  .title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: ${(p) => p.theme.space(1)} ${(p) => p.theme.space(3)};
     margin: 0 0 ${(p) => p.theme.space(3)};
+  }
+  h1 {
+    margin: 0;
     font-size: ${(p) => p.theme.font.size.lg};
     font-weight: ${(p) => p.theme.font.weight.semibold};
   }
@@ -212,14 +221,21 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
     overscan: 10,
     getItemKey: (i) => keys[i] ?? i,
   });
-  if (error?.status === 503)
-    return <PageState kind="connecting" title="Connecting to cluster…" message={error.message} />;
-  if (error)
-    return <PageState kind="error" title="Cannot load findings" message={error.message} copyText={error.message} />;
-  if (!current) return <PageState kind="loading" title="Loading findings…" />;
+  // After a first load, a failed poll keeps the findings on screen under a notice; their age turns stale.
+  if (!current) {
+    if (error?.status === 503)
+      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error)
+      return <PageState kind="error" title="Cannot load findings" message={error.message} copyText={error.message} />;
+    return <PageState kind="loading" title="Loading findings…" />;
+  }
   return (
     <Page stylesOverride={stylesOverride}>
-      <h1>Findings</h1>
+      {error ? <PageNotice error={error} title="Cannot load findings" /> : null}
+      <div className="title">
+        <h1>Findings</h1>
+        <DataAge collectedAt={current.collectedAt} />
+      </div>
       <Bar>
         {SEVERITIES.map((s) => (
           <Chip
@@ -263,7 +279,7 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
       ) : rows.length === 0 ? (
         <PageState kind="empty" title="No findings match these filters" />
       ) : (
-        <Scroller ref={scroller} role="region" aria-label="Findings">
+        <Scroller ref={scroller} role="region" aria-label="Findings" tabIndex={0}>
           <div style={{ height: v.getTotalSize(), position: "relative" }}>
             {v.getVirtualItems().map((it) => {
               const f = rows[it.index];

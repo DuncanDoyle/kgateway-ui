@@ -8,6 +8,7 @@ import { countsText, versionText } from "../format";
 import { HealthBadge } from "../health/HealthBadge";
 import { stateLabel } from "../health/state";
 import { ResourceName } from "../resource/ResourceName";
+import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 import type { HealthState } from "../theme/tokens";
 
@@ -105,13 +106,26 @@ export function ClusterLanding({ stylesOverride }: ClusterLandingProps = {}) {
   const { data, error } = useInstalls();
   const now = useNow();
   const theme = useTheme();
-  if (error?.status === 503)
-    return <PageState kind="connecting" title="Connecting to cluster…" message={error.message} />;
-  if (error)
-    return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
-  if (!data) return <PageState kind="loading" title="Loading…" />;
+  // After a first load, a failed poll keeps the cards under a notice; each card turns stale on its own.
+  if (!data) {
+    if (error?.status === 503)
+      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error)
+      return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
+    return <PageState kind="loading" title="Loading installs…" />;
+  }
   return (
     <Grid stylesOverride={stylesOverride}>
+      {error ? (
+        <PageNotice
+          error={error}
+          title="Cannot load installs"
+          stylesOverride={css`
+            grid-column: 1 / -1;
+            margin-bottom: 0;
+          `}
+        />
+      ) : null}
       {data.map((i) => {
         // An old summary is not evidence: unknown, never its last state.
         const stale = isStale(i.computedAt, now);

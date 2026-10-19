@@ -94,13 +94,13 @@ it("shows a designed empty state when no install is found", async () => {
   expect(screen.getByText(/--install/)).toBeInTheDocument();
 });
 
-it("shows 'Connecting to cluster' while the backend cache is not synced", async () => {
+it("says it is waiting for the cluster while the backend cache is not synced", async () => {
   stubApi({
     "/api/v1/installs": [503, { error: "connecting to cluster: cache not synced" }],
     "/api/v1/meta": { ...meta, synced: false },
   });
   mount("/");
-  await waitFor(() => expect(screen.getByText(/Connecting to cluster/)).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("Waiting for the cluster")).toBeInTheDocument());
 });
 
 it("renders extension brand and routes", async () => {

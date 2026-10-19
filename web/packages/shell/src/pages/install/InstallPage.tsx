@@ -1,7 +1,11 @@
+import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { isStale, useHealth, useMeta, useOverview } from "../../api/hooks";
+import { plural } from "../../format";
 import { useInstallId } from "../../shell/extension";
+import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import { CheckedList } from "./CheckedList";
@@ -11,16 +15,44 @@ import { HealthStrip, STRIP_H } from "./HealthStrip";
 import { TopFindings } from "./TopFindings";
 
 // region Styles
-const Page = styled.div`
+const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
   max-width: 1400px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
+  /* The header names the install; the h1 gives the page its heading for screen readers. */
+  h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   h2 {
     font-size: ${(p) => p.theme.font.size.md};
     font-weight: ${(p) => p.theme.font.weight.semibold};
     line-height: 20px;
     margin: ${(p) => p.theme.space(5)} 0 ${(p) => p.theme.space(2)};
   }
+  .info {
+    display: inline-block;
+    margin-top: ${(p) => p.theme.space(2)};
+    padding: 2px 4px;
+    margin-left: -4px;
+    border-radius: ${(p) => p.theme.radius.sm};
+    color: ${(p) => p.theme.color.accentText};
+    font-weight: ${(p) => p.theme.font.weight.semibold};
+    text-decoration: none;
+  }
+  .info:hover {
+    text-decoration: underline;
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 5%, ${(p) => p.theme.color.bg});
+  }
+  .info:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 12%, ${(p) => p.theme.color.bg});
+  }
+  ${(p) => p.stylesOverride}
 `;
 const Split = styled.div`
   display: grid;
@@ -43,25 +75,29 @@ const TABLE_SKELETON_H = 112;
 const CHECKS_SKELETON_H = 180;
 
 // region Component
+interface InstallPageProps {
+  stylesOverride?: SerializedStyles;
+}
+
 /** The install page (layout A, D-011): health strip, top findings, tiles, gateways. */
-export function InstallPage() {
+export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const id = useInstallId();
   const ov = useOverview(id);
   const h = useHealth(id);
   const { data: meta } = useMeta();
   const now = useNow();
   const err = ov.error ?? h.error;
-  if (err && err.status === 503)
-    return <PageState kind="connecting" title="Connecting to cluster…" message={err.message} />;
-  if (err && !(ov.data && h.data)) {
-    return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
-  }
   // Render only data that belongs to this route's install, never the previous install's (design §6.6).
+  // Once loaded, a failed poll keeps the page under a notice; the strip turns stale on its own.
   if (!ov.data || !h.data || ov.data.header.id !== id || h.data.install !== id) {
+    if (err?.status === 503)
+      return <PageState kind="connecting" title="Waiting for the cluster" message={err.message} />;
+    if (err)
+      return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
     // One tile per counted kind (meta lists Deployments, which have no tile) plus the scope tile.
     const tiles = meta ? meta.kinds.filter((k) => k.category !== "workload").length + 1 : 8;
     return (
-      <Page role="status" aria-busy="true" aria-label="Loading install">
+      <Page role="status" aria-busy="true" aria-label="Loading this install…" stylesOverride={stylesOverride}>
         <Shimmer h={STRIP_H} />
         <Split>
           <div>
@@ -79,7 +115,7 @@ export function InstallPage() {
             <Shimmer h={TABLE_SKELETON_H} />
           </div>
           <div>
-            <h2>What was checked</h2>
+            <h2>Checks</h2>
             <Shimmer h={CHECKS_SKELETON_H} />
           </div>
         </Split>
@@ -95,17 +131,33 @@ export function InstallPage() {
     <>
       <CountTiles overview={ov.data} />
       <h2>Gateways</h2>
-      <GatewayTable rows={ov.data.gateways} installId={id} stale={stale} signalsMissing={signalsMissing} />
+      <GatewayTable
+        rows={ov.data.gateways}
+        findings={h.data.findings}
+        installId={id}
+        stale={stale}
+        signalsMissing={signalsMissing}
+      />
     </>
   );
   return (
-    <Page>
+    <Page data-testid="install-page" stylesOverride={stylesOverride}>
+      <h1>{id}</h1>
+      {err ? <PageNotice error={err} title="Cannot load this install" /> : null}
       <HealthStrip health={h.data} stale={stale} now={now} checkedAt={checkedAt} />
       {h.data.state === "healthy" ? (
         <Split>
-          <div>{gateways}</div>
           <div>
-            <h2>What was checked</h2>
+            {/* Healthy can still carry info findings; they stay one click away. */}
+            {h.data.findings.length > 0 ? (
+              <Link className="info" to={`/i/${id}/findings`}>
+                {plural(h.data.findings.length, "info finding")}
+              </Link>
+            ) : null}
+            {gateways}
+          </div>
+          <div>
+            <h2>Checks</h2>
             <CheckedList checks={h.data.checks} stale={stale} />
           </div>
         </Split>

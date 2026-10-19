@@ -42,6 +42,7 @@ export function useUrlParams(): [URLSearchParams, (changes: ParamChanges) => voi
     navigateRef.current = navigate;
   }, [navigate]);
   // Mirrors local state to the URL; it never reads the location, so a late commit of an older write changes nothing.
+  // Known limit: typing while a route transition is pending writes the old path back and undoes that navigation.
   useEffect(() => {
     const s = params.toString();
     if (s === written.current) return;

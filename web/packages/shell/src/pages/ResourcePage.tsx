@@ -7,6 +7,7 @@ import { useResource } from "../api/hooks";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
 import { useInstallId } from "../shell/extension";
+import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 
 // region Styles
@@ -157,14 +158,18 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
         }
       />
     );
-  if (error?.status === 503)
-    return <PageState kind="connecting" title="Connecting to cluster…" message={error.message} />;
-  if (error)
-    return <PageState kind="error" title="Cannot load resource" message={error.message} copyText={error.message} />;
-  if (!data) return <PageState kind="loading" title="Loading…" />;
+  // After a first load, other errors keep the YAML on screen under a notice.
+  if (!data) {
+    if (error?.status === 503)
+      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error)
+      return <PageState kind="error" title="Cannot load resource" message={error.message} copyText={error.message} />;
+    return <PageState kind="loading" title="Loading resource…" />;
+  }
   const lastApplied = hasLastApplied(data);
   return (
     <Page stylesOverride={stylesOverride}>
+      {error ? <PageNotice error={error} title="Cannot load resource" /> : null}
       <header>
         <h1>
           <span className="kind">{kind}</span>

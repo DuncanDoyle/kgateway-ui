@@ -49,6 +49,14 @@ function inst(
   };
 }
 
+/** Revalidates every SWR key now: SWR refetches on reconnect of a visible page (jsdom reports hidden). */
+function revalidate() {
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+}
+
 function Where() {
   const loc = useLocation();
   return <output data-testid="location">{loc.search}</output>;
@@ -107,6 +115,17 @@ it("cluster landing shows an error state when installs cannot load", async () =>
   stubApi({ "/api/v1/installs": [500, { error: "boom" }] });
   renderWithTheme(<ClusterLanding />);
   expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load installs");
+});
+
+it("cluster landing keeps the loaded cards when a later poll fails", async () => {
+  const routes: Record<string, unknown> = { "/api/v1/installs": [inst("a/one", "healthy")] };
+  stubApi(routes);
+  renderWithTheme(<ClusterLanding />);
+  await screen.findByRole("link", { name: /a\/one/ });
+  routes["/api/v1/installs"] = [500, { error: "boom" }];
+  revalidate();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load installs: boom");
+  expect(screen.getByRole("link", { name: /a\/one/ })).toBeInTheDocument();
 });
 
 // region Findings page
@@ -186,9 +205,42 @@ it("findings free text never matches 'undefined' on a finding without a resource
 it("findings page renders restricted findings without message or link", async () => {
   findings("/i/kgw/kgateway/findings", restricted());
   const row = await screen.findByTestId("finding-row");
-  expect(row).toHaveTextContent("Restricted");
+  expect(row).toHaveTextContent("Restricted: ask the owning team");
   expect(row).toHaveTextContent("KGWUI-002");
   expect(within(row).queryByRole("link")).toBeNull();
+});
+
+it("findings page says when the data was checked", async () => {
+  findings("/i/kgw/kgateway/findings");
+  expect(await screen.findByTestId("data-age")).toHaveTextContent(/^Last checked \d+s ago$/);
+});
+
+it("findings page marks old data as stale", async () => {
+  findings("/i/kgw/kgateway/findings", unhealthy(Date.now() - 75_000));
+  const age = await screen.findByTestId("data-age");
+  expect(age).toHaveTextContent("Data is stale. Last checked 1m ago");
+  expect(within(age).getByTestId("health-icon-unknown")).toBeInTheDocument();
+});
+
+it("findings page keeps the loaded findings when a later poll fails", async () => {
+  const routes: Record<string, unknown> = { "/api/v1/installs/kgw/kgateway/health": unhealthy(), "/api/v1/meta": meta };
+  stubApi(routes);
+  renderWithTheme(
+    <Routes>
+      <Route path="/i/:ns/:name/findings" element={<FindingsPage />} />
+    </Routes>,
+    { path: "/i/kgw/kgateway/findings" },
+  );
+  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(7));
+  routes["/api/v1/installs/kgw/kgateway/health"] = [500, { error: "boom" }];
+  revalidate();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load findings: boom");
+  expect(screen.getAllByTestId("finding-row")).toHaveLength(7);
+});
+
+it("findings list is keyboard scrollable", async () => {
+  findings("/i/kgw/kgateway/findings");
+  expect(await screen.findByRole("region", { name: "Findings" })).toHaveAttribute("tabindex", "0");
 });
 
 it("findings page virtualises a long list", async () => {
@@ -315,6 +367,19 @@ it("resource page 404 says it is out of scope", async () => {
   resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/infra/foreign");
   await waitFor(() => expect(screen.getByText("Not in this install's scope")).toBeInTheDocument());
   expect(screen.getByRole("link", { name: "Back to install" })).toHaveAttribute("href", "/i/kgw/kgateway");
+});
+
+it("resource page keeps the loaded YAML when a later fetch fails", async () => {
+  const routes: Record<string, unknown> = {
+    [cartPath]: { kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } },
+  };
+  stubApi(routes);
+  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  await screen.findByTestId("yaml");
+  routes[cartPath] = [500, { error: "boom" }];
+  revalidate();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load resource: boom");
+  expect(screen.getByTestId("yaml")).toHaveTextContent("name: cart");
 });
 
 it("resource page shows other errors as errors", async () => {

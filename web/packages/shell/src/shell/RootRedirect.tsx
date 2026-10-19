@@ -8,11 +8,14 @@ import type { CorePages } from "./extension";
 export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding">) {
   const { data, error } = useInstalls();
   const { data: meta } = useMeta();
-  if (error?.status === 503)
-    return <PageState kind="connecting" title="Connecting to cluster…" message={error.message} />;
-  if (error)
-    return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
-  if (!data) return <PageState kind="loading" title="Loading…" />;
+  // Loaded installs stay in use after a failed poll; the landing shows the error over them.
+  if (!data) {
+    if (error?.status === 503)
+      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error)
+      return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
+    return <PageState kind="loading" title="Loading installs…" />;
+  }
   if (data.length === 0) {
     return (
       <PageState

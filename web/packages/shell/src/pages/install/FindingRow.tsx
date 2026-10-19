@@ -76,7 +76,7 @@ export function resourcePath(installId: string, r: Ref): string {
   return `/i/${installId}/r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
 }
 
-/** The renderer registered for the longest prefix of code, if any. */
+/** The renderer registered for the longest prefix of code, if any (see ShellExtension.findingRenderers). */
 export function rendererFor(renderers: Record<string, FindingRenderer>, code: string): FindingRenderer | undefined {
   let best: string | undefined;
   for (const prefix of Object.keys(renderers)) {
@@ -117,7 +117,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
       </div>
       <div className="text">
         {f.restricted ? (
-          <div className="muted">Restricted</div>
+          <div className="muted">Restricted: ask the owning team</div>
         ) : (
           <>
             <div className="msg">{f.message}</div>

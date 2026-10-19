@@ -11,7 +11,7 @@ import {
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { type MouseEvent, memo, useDeferredValue, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { GatewayRow } from "../../api/types";
+import type { Finding, GatewayRow, Ref } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
 import { useUrlParams, useUrlText } from "../../shell/urlParams";
@@ -136,6 +136,7 @@ const Empty = styled.p`
 // region Helpers
 const col = createColumnHelper<GatewayRow>();
 const rank = { error: 0, unknown: 1, warning: 2, healthy: 3 } as const;
+const noFindings: Finding[] = [];
 const gatewayKey = (r: GatewayRow) => `${r.ref.namespace ?? ""}/${r.ref.name}`;
 
 /** Rows whose name, namespace or class contains q (case-insensitive). */
@@ -145,10 +146,36 @@ function filterRows(rows: GatewayRow[], q: string): GatewayRow[] {
   return rows.filter((r) => [r.ref.name, r.ref.namespace ?? "", r.class].some((v) => v.toLowerCase().includes(needle)));
 }
 
-/** The state a row shows: unknown on stale data or a missing required signal (unless it has an error), as the backend's rowState (D-006). */
-function shownState(r: GatewayRow, stale: boolean, signalsMissing: boolean): HealthState {
+const refKey = (r: Pick<Ref, "group" | "kind" | "namespace" | "name">) =>
+  [r.group, r.kind, r.namespace ?? "", r.name].join("|");
+
+/** The worst error or warning per resource among the current health findings; info does not change a row. */
+function findingStates(findings: Finding[]): Map<string, HealthState> {
+  const worst = new Map<string, HealthState>();
+  for (const f of findings) {
+    if (!f.resource || f.severity === "info") continue;
+    const k = refKey(f.resource);
+    const prev = worst.get(k);
+    if (!prev || rank[f.severity] < rank[prev]) worst.set(k, f.severity);
+  }
+  return worst;
+}
+
+/**
+ * The state a row shows: the worse of its overview state and its current health findings, so the table agrees
+ * with the findings above it. Unknown on stale data or a missing required signal (unless it has an error), as
+ * the backend's rowState (D-006).
+ */
+function shownState(
+  r: GatewayRow,
+  found: Map<string, HealthState>,
+  stale: boolean,
+  signalsMissing: boolean,
+): HealthState {
   if (stale) return "unknown";
-  return signalsMissing && r.state !== "error" ? "unknown" : r.state;
+  const f = found.get(refKey(r.ref));
+  const state = f && rank[f] < rank[r.state] ? f : r.state;
+  return signalsMissing && state !== "error" ? "unknown" : state;
 }
 
 function columns(installId: string) {
@@ -182,6 +209,8 @@ function columns(installId: string) {
 // region Component
 interface GatewayTableProps {
   rows: GatewayRow[];
+  /** The install's current health findings; a Gateway's errors and warnings fold into its row. */
+  findings?: Finding[];
   installId: string;
   stale: boolean;
   /** A required check is not OK: non-error rows show unknown. */
@@ -192,6 +221,7 @@ interface GatewayTableProps {
 /** Gateways of the install; the text filter and the sort are kept in the URL (?q=edge&sort=routes.desc). Memoised so the page's 1 s clock tick does not re-render it. */
 export const GatewayTable = memo(function GatewayTable({
   rows,
+  findings = noFindings,
   installId,
   stale,
   signalsMissing,
@@ -202,9 +232,10 @@ export const GatewayTable = memo(function GatewayTable({
   const [text, setText] = useUrlText(params, update, "q");
   const q = useDeferredValue(text);
   // The shown state goes into the row data: TanStack caches cell values per row, so a closure would not refresh them.
+  const found = useMemo(() => findingStates(findings), [findings]);
   const visible = useMemo(
-    () => filterRows(rows, q).map((r) => ({ ...r, state: shownState(r, stale, signalsMissing) })),
-    [rows, q, stale, signalsMissing],
+    () => filterRows(rows, q).map((r) => ({ ...r, state: shownState(r, found, stale, signalsMissing) })),
+    [rows, q, found, stale, signalsMissing],
   );
   const sort = params.get("sort") ?? "state.asc";
   // A new sorting array on every render re-runs the table's auto-resets, which re-render it forever.
