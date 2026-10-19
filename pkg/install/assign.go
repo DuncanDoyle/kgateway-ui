@@ -100,11 +100,18 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 	for _, gw := range list(kinds.CategoryGateway) {
 		gref := objects.RefOf(gw.Obj)
 		exists[gref] = true
-		var cands []int
+		// An install with unknown scope competes only when no known scope contains the Gateway.
+		var cands, unknown []int
 		for _, i := range classOwners[objects.GatewayClassName(gw.Obj)] {
-			if inScope(insts[i], gw.Obj.GetNamespace()) {
+			switch {
+			case insts[i].Scope.Mode == ScopeUnknown:
+				unknown = append(unknown, i)
+			case inScope(insts[i], gw.Obj.GetNamespace()):
 				cands = append(cands, i)
 			}
+		}
+		if len(cands) == 0 {
+			cands = unknown
 		}
 		switch len(cands) {
 		case 0:

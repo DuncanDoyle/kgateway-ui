@@ -131,7 +131,7 @@ func TestStaleStatusOutOfScopeIsIgnored(t *testing.T) {
 	}
 }
 
-// a parentRef or ListenerSet parent in another API group never
+// A parentRef or ListenerSet parent in another API group never
 // resolves to a Gateway API Gateway with the same namespace/name.
 func TestForeignGroupReferencesDoNotResolve(t *testing.T) {
 	nss := []*corev1.Namespace{testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)}
@@ -152,7 +152,7 @@ func TestForeignGroupReferencesDoNotResolve(t *testing.T) {
 	}
 }
 
-// a route attached to Gateways of two installs carries, per install,
+// A route attached to Gateways of two installs carries, per install,
 // only the parentRefs that resolve to that install's Gateways.
 func TestRouteParentsAreScopedToTheInstall(t *testing.T) {
 	nss := []*corev1.Namespace{
@@ -173,7 +173,7 @@ func TestRouteParentsAreScopedToTheInstall(t *testing.T) {
 	}
 }
 
-// a route whose parent Gateway does not exist is kept as a
+// A route whose parent Gateway does not exist is kept as a
 // diagnostic candidate in every install whose scope contains the route.
 func TestRouteToMissingGatewayIsUnattached(t *testing.T) {
 	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("shop", map[string]string{"team": "a"}),
@@ -199,7 +199,7 @@ func TestRouteToMissingGatewayIsUnattached(t *testing.T) {
 	}
 }
 
-// a non-kgateway policy in scope belongs to the install while it has
+// A non-kgateway policy in scope belongs to the install while it has
 // no ancestors yet, and stops belonging to it once another controller owns it.
 func TestGenericPolicyWithoutStatusIsOwned(t *testing.T) {
 	nss := []*corev1.Namespace{testutil.Namespace("shop", nil)}
@@ -212,5 +212,41 @@ func TestGenericPolicyWithoutStatusIsOwned(t *testing.T) {
 	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}).PerInstall["kgw/kgateway"]
 	if got := names(o.Policies); len(got) != 2 || got[0] != "shop/new" || got[1] != "shop/ours" {
 		t.Fatalf("policies: %v", got)
+	}
+}
+
+// An install whose scope is unknown does not compete with an install whose
+// known scope contains the Gateway; it only claims Gateways nobody else does.
+func TestUnknownScopeDoesNotMakeGatewaysAmbiguous(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("app-a", map[string]string{"team": "a"}), testutil.Namespace("other", nil)}
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("app-a", "gw", "kgateway", nil), testutil.Gateway("other", "gw", "kgateway", nil))
+	unknown := resolved("kgw-b/b", `[{`)
+	if unknown.Scope.Mode != ScopeUnknown {
+		t.Fatalf("fixture: want unknown scope, got %s", unknown.Scope.Mode)
+	}
+	gwNames := func(o *Owned) []string {
+		var out []string
+		for _, g := range o.Gateways {
+			out = append(out, g.GetNamespace()+"/"+g.GetName())
+		}
+		return out
+	}
+
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), unknown})
+	if len(a.Ambiguous) != 0 {
+		t.Fatalf("known scope wins over unknown, want no ambiguity: %+v", a.Ambiguous)
+	}
+	if got := gwNames(a.PerInstall["kgw-a/a"]); len(got) != 1 || got[0] != "app-a/gw" {
+		t.Fatalf("a: %v", got)
+	}
+	// other/gw is outside a's known scope, so the unknown-scope install claims it.
+	if got := gwNames(a.PerInstall["kgw-b/b"]); len(got) != 1 || got[0] != "other/gw" {
+		t.Fatalf("b: %v", got)
+	}
+
+	both := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{`), unknown})
+	if len(both.Ambiguous) != 2 {
+		t.Fatalf("two unknown scopes: want both gateways ambiguous, got %+v", both.Ambiguous)
 	}
 }
