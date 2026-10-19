@@ -31,6 +31,8 @@ export interface CheckResult {
   detail?: string;
   pending?: boolean;
 }
+/** Health as sent on the wire: checks is null when no check ran. */
+export type RawHealthReport = Omit<HealthReport, "checks"> & { checks: CheckResult[] | null };
 /** install is the install ID; a response for another install is never rendered. */
 export interface HealthReport {
   install: string;

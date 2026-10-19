@@ -18,3 +18,8 @@ it("uses a custom label in place of the state text", () => {
   expect(screen.getByText("2 warnings")).toBeInTheDocument();
   expect(screen.queryByText("Warning")).toBeNull();
 });
+
+it("does not forward the size prop to the DOM", () => {
+  renderWithTheme(<HealthBadge state="healthy" />);
+  expect(screen.getByTestId("health-icon-healthy")).not.toHaveAttribute("size");
+});

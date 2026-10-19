@@ -25,5 +25,9 @@ export async function apiFetch<T>(path: string): Promise<T> {
     }
     throw new ApiError(res.status, msg);
   }
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiError(res.status, "The UI backend sent an unreadable response");
+  }
 }

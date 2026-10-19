@@ -4,17 +4,17 @@ import { AlertTriangle, Check, HelpCircle, X } from "lucide-react";
 import type { HealthState } from "../theme/tokens";
 
 // region Styles
-const Chip = styled.span<{ state: HealthState; size: number; stylesOverride?: SerializedStyles }>`
+const Chip = styled.span<{ $state: HealthState; $size: number; $stylesOverride?: SerializedStyles }>`
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: ${(p) => p.size}px;
-  height: ${(p) => p.size}px;
+  width: ${(p) => p.$size}px;
+  height: ${(p) => p.$size}px;
   border-radius: ${(p) => p.theme.radius.sm};
-  background: ${(p) => p.theme.color.status[p.state].iconBg};
-  color: ${(p) => p.theme.color.status[p.state].iconFg};
-  ${(p) => p.stylesOverride}
+  background: ${(p) => p.theme.color.status[p.$state].iconBg};
+  color: ${(p) => p.theme.color.status[p.$state].iconFg};
+  ${(p) => p.$stylesOverride}
 `;
 
 // region Helpers
@@ -32,9 +32,9 @@ export function HealthIcon({ state, size = 16, stylesOverride }: HealthIconProps
   const Glyph = glyphs[state];
   return (
     <Chip
-      state={state}
-      size={size}
-      stylesOverride={stylesOverride}
+      $state={state}
+      $size={size}
+      $stylesOverride={stylesOverride}
       data-testid={`health-icon-${state}`}
       aria-hidden="true"
     >

@@ -1,6 +1,6 @@
 import useSWR from "swr";
 import { type ApiError, apiFetch } from "./client";
-import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, Ref } from "./types";
+import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, RawHealthReport, Ref } from "./types";
 
 /** Poll interval for live data (design §6.6). */
 export const POLL_MS = 5000;
@@ -10,12 +10,20 @@ const live = { refreshInterval: POLL_MS };
 
 /** True when data collected at collectedAt is older than two poll intervals; pass useNow() as now. */
 export function isStale(collectedAt: string, now: number): boolean {
-  return now - Date.parse(collectedAt) > 2 * POLL_MS;
+  const age = now - Date.parse(collectedAt);
+  // An unparsable timestamp gives NaN; treat it as stale.
+  return Number.isNaN(age) || age > 2 * POLL_MS;
 }
 
 /** True when /api/v1/meta lists r's kind, so its YAML view can resolve. */
 export function isLinkable(meta: MetaResponse | undefined, r: Ref): boolean {
   return !!meta?.kinds.some((k) => k.group === r.group && k.kind === r.kind);
+}
+
+// The backend sends checks as null when no check ran.
+async function fetchHealth(path: string): Promise<HealthReport> {
+  const r = await apiFetch<RawHealthReport>(path);
+  return { ...r, checks: r.checks ?? [] };
 }
 
 /** GET /api/v1/installs. */
@@ -35,7 +43,7 @@ export function useOverview(id: string) {
 
 /** GET /api/v1/installs/{id}/health. */
 export function useHealth(id: string) {
-  return useSWR<HealthReport, ApiError>(`/api/v1/installs/${id}/health`, apiFetch, live);
+  return useSWR<HealthReport, ApiError>(`/api/v1/installs/${id}/health`, fetchHealth, live);
 }
 
 /** GET one resource; "-" stands for an empty group or namespace. */

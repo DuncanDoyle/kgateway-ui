@@ -1,7 +1,8 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithTheme, stubApi } from "../test/render";
+import { ApiError, apiFetch } from "./client";
 import { useNow } from "./clock";
-import { isLinkable, isStale, POLL_MS, useInstalls, useOverview } from "./hooks";
+import { isLinkable, isStale, POLL_MS, useHealth, useInstalls, useOverview } from "./hooks";
 import type { MetaResponse } from "./types";
 
 afterEach(() => {
@@ -99,4 +100,37 @@ it("links only kinds that /api/v1/meta lists", () => {
   expect(isLinkable(meta, { group: "apps", kind: "Deployment", namespace: "kgw", name: "kgateway" })).toBe(true);
   expect(isLinkable(meta, { group: "", kind: "Secret", namespace: "kgw", name: "x" })).toBe(false);
   expect(isLinkable(undefined, { group: "apps", kind: "Deployment", name: "kgateway" })).toBe(false);
+});
+
+it("treats an empty or unparsable collectedAt as stale", () => {
+  const now = Date.parse("2026-10-17T12:00:00Z");
+  expect(isStale("", now)).toBe(true);
+  expect(isStale("not a date", now)).toBe(true);
+});
+
+it("normalises null checks to an empty list", async () => {
+  stubApi({
+    "/api/v1/installs/a/one/health": {
+      install: "a/one",
+      state: "healthy",
+      findings: [],
+      checks: null,
+      counts: {},
+      collectedAt: "2026-10-17T12:00:00Z",
+    },
+  });
+  function HealthProbe() {
+    const { data } = useHealth("a/one");
+    return <p>{data ? `checks=${data.checks.length}` : "loading"}</p>;
+  }
+  renderWithTheme(<HealthProbe />);
+  await waitFor(() => expect(screen.getByText("checks=0")).toBeInTheDocument());
+});
+
+it("wraps a non-JSON 2xx body as an ApiError", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("<html>", { status: 200 })),
+  );
+  await expect(apiFetch("/x")).rejects.toSatisfy((e: unknown) => e instanceof ApiError && e.status === 200);
 });

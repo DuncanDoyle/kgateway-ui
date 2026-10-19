@@ -6,7 +6,7 @@ const Name = styled.span<{ stylesOverride?: SerializedStyles }>`
   font-family: ${(p) => p.theme.font.mono};
   font-size: ${(p) => p.theme.font.size.code};
   white-space: nowrap;
-  [data-part="namespace"] { opacity: 0.55; }
+  [data-part="namespace"] { color: ${(p) => p.theme.color.textMuted}; }
   ${(p) => p.stylesOverride}
 `;
 

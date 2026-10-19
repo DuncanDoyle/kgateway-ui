@@ -1,5 +1,7 @@
 import { screen } from "@testing-library/react";
 import { renderWithTheme } from "../test/render";
+import { contrastRatio } from "../theme/contrast";
+import { defaultThemes } from "../theme/themes";
 import { ResourceName } from "./ResourceName";
 
 it("renders the namespace dimmed and the name in mono", () => {
@@ -26,4 +28,16 @@ it("keeps the accessible name inside a link", () => {
     </a>,
   );
   expect(screen.getByRole("link", { name: "shop/cart" })).toBeInTheDocument();
+});
+
+it.each(defaultThemes)("namespace colour (textMuted) meets 4.5:1 on bg and surface in $id", (t) => {
+  expect(contrastRatio(t.color.textMuted, t.color.bg)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(t.color.textMuted, t.color.surface)).toBeGreaterThanOrEqual(4.5);
+});
+
+it("dims the namespace with the muted text colour, not opacity", () => {
+  renderWithTheme(<ResourceName namespace="shop" name="cart" />);
+  const ns = screen.getByText("shop/");
+  expect(getComputedStyle(ns).opacity).not.toBe("0.55");
+  expect(getComputedStyle(ns).color).not.toBe("");
 });
