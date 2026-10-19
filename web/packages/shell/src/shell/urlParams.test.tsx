@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Suspense, useState } from "react";
-import { Link, MemoryRouter, useLocation, useSearchParams } from "react-router-dom";
+import { Link, MemoryRouter, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useUrlParams, useUrlText } from "./urlParams";
 
 function Where() {
@@ -141,4 +141,97 @@ it("an update that changes nothing does not navigate", async () => {
   const before = screen.getByTestId("key").textContent;
   await userEvent.click(screen.getByRole("button", { name: "same" }));
   expect(screen.getByTestId("key").textContent).toBe(before);
+});
+
+// region Reverted writes
+
+let releaseRevert: () => void = () => {};
+let revertGate: Promise<void> | undefined;
+
+function RevertGate() {
+  if (useLocation().search.includes("q=a") && revertGate) throw revertGate;
+  return null;
+}
+
+function Reverter() {
+  const [params, update] = useUrlParams();
+  return (
+    <>
+      <button type="button" onClick={() => update({ q: "a" })}>
+        set
+      </button>
+      <button type="button" onClick={() => update({ q: null })}>
+        clear
+      </button>
+      <Link to="/?q=a">outside</Link>
+      <output data-testid="latest">{params.toString()}</output>
+      <Suspense fallback={null}>
+        <RevertGate />
+      </Suspense>
+      <Where />
+    </>
+  );
+}
+
+it("a write reverted before commit does not block a later outside navigation to it", async () => {
+  revertGate = new Promise<void>((r) => {
+    releaseRevert = r;
+  });
+  render(
+    <MemoryRouter initialEntries={["/"]}>
+      <Reverter />
+    </MemoryRouter>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "set" }));
+  await userEvent.click(screen.getByRole("button", { name: "clear" }));
+  revertGate = undefined;
+  await act(async () => releaseRevert());
+  await waitFor(() => expect(screen.getByTestId("location")).toBeEmptyDOMElement());
+  await userEvent.click(screen.getByRole("link", { name: "outside" }));
+  expect(screen.getByTestId("location")).toHaveTextContent("?q=a");
+  expect(screen.getByTestId("latest")).toHaveTextContent("q=a");
+});
+
+// region Back and forward
+
+function Nav() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate(-1)}>
+        back
+      </button>
+      <button type="button" onClick={() => navigate(1)}>
+        forward
+      </button>
+    </>
+  );
+}
+
+it("back and forward resync the params and the text", async () => {
+  render(
+    <MemoryRouter initialEntries={["/?q=one&kind=Gateway", "/?q=two"]} initialIndex={1}>
+      <Probe />
+      <Nav />
+    </MemoryRouter>,
+  );
+  const box = screen.getByRole("textbox", { name: "q" });
+  expect(box).toHaveValue("two");
+  await userEvent.click(screen.getByRole("button", { name: "back" }));
+  expect(screen.getByRole("textbox", { name: "q" })).toHaveValue("one");
+  expect(screen.getByTestId("kind")).toHaveTextContent("Gateway");
+  await userEvent.click(screen.getByRole("button", { name: "forward" }));
+  expect(screen.getByRole("textbox", { name: "q" })).toHaveValue("two");
+  expect(screen.getByTestId("kind")).toBeEmptyDOMElement();
+});
+
+it("rapid chip and typing keep every param and character", async () => {
+  mount();
+  const box = screen.getByRole("textbox", { name: "q" });
+  await userEvent.click(screen.getByRole("button", { name: "both" }));
+  await userEvent.type(box, "legacy/old", { delay: null });
+  expect(box).toHaveValue("legacy/old");
+  await waitFor(() =>
+    expect(screen.getByTestId("location")).toHaveTextContent("?kind=HTTPRoute&sev=error&q=legacy%2Fold"),
+  );
 });

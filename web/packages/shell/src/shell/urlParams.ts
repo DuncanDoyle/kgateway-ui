@@ -1,71 +1,66 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 
 // region Helpers
 /** Changes to apply to the query string; "" or null removes the key. */
 export type ParamChanges = Record<string, string | null>;
 
+// Marks a navigation as this hook's own write, in location.state.
+const WRITER = "urlParamsWriter";
+
+function writer(state: unknown): unknown {
+  return typeof state === "object" && state !== null ? (state as Record<string, unknown>)[WRITER] : undefined;
+}
+
 // region Component
 /**
- * Query-string state that never loses an update. The router applies URL changes in a transition, so
- * setSearchParams(fn) sees the last committed params; this builds each update from the latest params written.
+ * Query-string state that never loses an update. Local state is the source of truth, updated synchronously by
+ * handlers and mirrored to the URL (replace) after commit. A committed navigation the hook did not write
+ * (back/forward, a link) is adopted; its own writes, which may commit late, never overwrite newer local state.
+ * One instance per page: two instances would each mirror their own copy of the whole query string.
  */
 export function useUrlParams(): [URLSearchParams, (changes: ParamChanges) => void] {
-  const [committed, setSearchParams] = useSearchParams();
-  const latest = useRef(committed);
-  const reconciled = useRef(committed);
-  const pending = useRef<string[]>([]);
-  // Render stays pure (a transition render may be discarded): our writes catching up keep latest; any other URL wins.
-  const ours = committed === reconciled.current || pending.current.includes(committed.toString());
-  const current = ours ? latest.current : committed;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const navType = useNavigationType();
+  const id = useId();
+  const [params, setParams] = useState(() => new URLSearchParams(location.search));
+  // The last query string written or adopted, so each change reaches the URL once.
+  const written = useRef(params.toString());
+  // Adopt only committed navigations, before paint. Back/forward may return to an entry this hook wrote, so a POP is outside.
   useLayoutEffect(() => {
-    if (committed === reconciled.current) return;
-    reconciled.current = committed;
-    const i = pending.current.lastIndexOf(committed.toString());
-    if (i >= 0) pending.current = pending.current.slice(i + 1);
-    else {
-      pending.current = [];
-      latest.current = committed;
-    }
-  }, [committed]);
-  const update = useCallback(
-    (changes: ParamChanges) => {
-      const next = new URLSearchParams(latest.current);
+    if (navType !== "POP" && writer(location.state) === id) return;
+    const url = new URLSearchParams(location.search);
+    written.current = url.toString();
+    setParams((prev) => (prev.toString() === written.current ? prev : url));
+  }, [location, navType, id]);
+  // Mirrors local state to the URL; it never reads the location, so a late commit of an older write changes nothing.
+  useEffect(() => {
+    const s = params.toString();
+    if (s === written.current) return;
+    written.current = s;
+    navigate({ search: s ? `?${s}` : "" }, { replace: true, state: { [WRITER]: id } });
+  }, [params, navigate, id]);
+  const update = useCallback((changes: ParamChanges) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
       for (const [k, v] of Object.entries(changes)) {
         if (v) next.set(k, v);
         else next.delete(k);
       }
-      // Nothing changed: no navigation, so no pending entry that would never be committed.
-      if (next.toString() === latest.current.toString()) return;
-      latest.current = next;
-      pending.current.push(next.toString());
-      setSearchParams(next, { replace: true });
-    },
-    [setSearchParams],
-  );
-  return [current, update];
+      // Nothing changed: keep the same object, so nothing re-renders or navigates.
+      return next.toString() === prev.toString() ? prev : next;
+    });
+  }, []);
+  return [params, update];
 }
 
-/** A text filter mirrored to ?key=: the input updates synchronously, so no typed character is lost. */
+/** A text filter mirrored to ?key=. The text is part of the synchronous local state, so no character is lost. */
 export function useUrlText(
   params: URLSearchParams,
   update: (changes: ParamChanges) => void,
   key: string,
 ): [string, (v: string) => void] {
-  const fromUrl = params.get(key) ?? "";
-  const [text, setText] = useState(fromUrl);
-  const [prevUrl, setPrevUrl] = useState(fromUrl);
-  // Follow outside navigations during render (no stale frame); our own writes already match.
-  if (fromUrl !== prevUrl) {
-    setPrevUrl(fromUrl);
-    setText(fromUrl);
-  }
-  const set = useCallback(
-    (v: string) => {
-      setText(v);
-      update({ [key]: v });
-    },
-    [update, key],
-  );
-  return [text, set];
+  const set = useCallback((v: string) => update({ [key]: v }), [update, key]);
+  return [params.get(key) ?? "", set];
 }
