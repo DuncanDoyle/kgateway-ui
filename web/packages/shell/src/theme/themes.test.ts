@@ -30,6 +30,9 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
     ["focus on surface", c.focus, c.surface],
     ["focus on surfaceRaised", c.focus, c.surfaceRaised],
     ["focus on header band", c.focus, c.headerBg],
+    ["borderStrong on bg", c.borderStrong, c.bg],
+    ["borderStrong on surface", c.borderStrong, c.surface],
+    ["borderStrong on surfaceRaised", c.borderStrong, c.surfaceRaised],
   ])("%s >= 3 (non-text)", (_, fg, bg) => {
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(3);
   });

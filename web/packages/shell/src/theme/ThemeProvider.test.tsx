@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { ThemeProvider, useThemeSwitch } from "./ThemeProvider";
-import { readStoredTheme, THEME_STORAGE_KEY } from "./themeStorage";
+import { readStoredTheme, THEME_PAINT_KEY, THEME_STORAGE_KEY } from "./themeStorage";
 import { defaultThemes } from "./themes";
 
 function Probe() {
@@ -65,15 +65,41 @@ describe("readStoredTheme", () => {
   });
 });
 
-it("falls back to the OS preference for an unknown stored id", () => {
+it("ignores the OS preference: nothing stored means dark", () => {
+  mockOsLight(true);
+  mount();
+  expect(screen.getByRole("button")).toHaveTextContent("control-room-dark");
+});
+
+it("ignores an unknown stored id", () => {
   mockOsLight(true);
   localStorage.setItem(THEME_STORAGE_KEY, "retired-theme");
   mount();
+  expect(screen.getByRole("button")).toHaveTextContent("control-room-dark");
+});
+
+it("defaultThemeId beats the dark fallback", () => {
+  render(
+    <ThemeProvider themes={defaultThemes} defaultThemeId="control-room-light">
+      <Probe />
+    </ThemeProvider>,
+  );
   expect(screen.getByRole("button")).toHaveTextContent("control-room-light");
 });
 
-it("uses the OS dark preference when nothing is stored", () => {
-  mockOsLight(false);
-  mount();
+it("a stored id beats defaultThemeId", () => {
+  localStorage.setItem(THEME_STORAGE_KEY, "control-room-dark");
+  render(
+    <ThemeProvider themes={defaultThemes} defaultThemeId="control-room-light">
+      <Probe />
+    </ThemeProvider>,
+  );
   expect(screen.getByRole("button")).toHaveTextContent("control-room-dark");
+});
+
+it("writes the paint record for the applied theme", () => {
+  mount();
+  expect(JSON.parse(localStorage.getItem(THEME_PAINT_KEY) ?? "null")).toEqual({ bg: "#0F1220", scheme: "dark" });
+  act(() => screen.getByRole("button").click());
+  expect(JSON.parse(localStorage.getItem(THEME_PAINT_KEY) ?? "null")).toEqual({ bg: "#FFFFFF", scheme: "light" });
 });

@@ -5,22 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>kgateway</title>
     <script>
-      // Paint the theme background before React loads, so there is no colour flash.
-      // Mirrors readStoredTheme: only known theme ids count, anything else follows the OS.
+      // Paint the last applied theme before React loads, so there is no colour flash.
+      // The theme provider writes this record; anything missing or invalid paints dark.
       (() => {
-        var id = null;
+        var bg = "#0F1220";
+        var scheme = "dark";
         try {
-          id = localStorage.getItem("kgateway-ui.theme");
+          const paint = JSON.parse(localStorage.getItem("kgateway-ui.theme.paint"));
+          if (paint && /^#[0-9a-f]{6}$/i.test(paint.bg) && (paint.scheme === "light" || paint.scheme === "dark")) {
+            bg = paint.bg;
+            scheme = paint.scheme;
+          }
         } catch {
-          // storage blocked: fall back to the OS preference
+          // storage blocked or record corrupt: paint dark
         }
-        var light;
-        if (id === "control-room-light") light = true;
-        else if (id === "control-room-dark") light = false;
-        else light = window.matchMedia("(prefers-color-scheme: light)").matches;
         var root = document.documentElement;
-        root.style.background = light ? "#FFFFFF" : "#0F1220";
-        root.style.colorScheme = light ? "light" : "dark";
+        root.style.background = bg;
+        root.style.colorScheme = scheme;
       })();
     </script>
   </head>

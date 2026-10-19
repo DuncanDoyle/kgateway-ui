@@ -48,9 +48,13 @@ export interface Theme {
     bg: string;
     surface: string;
     surfaceRaised: string;
+    /** Decorative dividers only; not contrast-tested. Use borderStrong where a border marks a control. */
     border: string;
+    /** Borders and scrollbar thumbs that must be seen (at least 3:1 on bg, surface and surfaceRaised). */
+    borderStrong: string;
     text: string;
     textMuted: string;
+    /** Fill behind text or icons only; never text on a page background (use accentText). */
     accent: string;
     accentText: string;
     headerBg: string;

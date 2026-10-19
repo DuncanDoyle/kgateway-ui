@@ -1,7 +1,13 @@
 import type { Theme } from "./tokens";
 
-/** localStorage key for the chosen theme id; app/index.html reads the same key before React loads. */
+/** localStorage key for the chosen theme id. */
 export const THEME_STORAGE_KEY = "kgateway-ui.theme";
+
+/**
+ * localStorage key for the last painted theme as {"bg":"#RRGGBB","scheme":"light"|"dark"}.
+ * app/index.html reads only this record before React loads, so any theme set paints without a flash.
+ */
+export const THEME_PAINT_KEY = "kgateway-ui.theme.paint";
 
 /** Returns the stored theme id only when it names a known theme; storage may be blocked. */
 export function readStoredTheme(themes: Theme[]): string | null {
@@ -22,12 +28,11 @@ export function storeTheme(id: string) {
   }
 }
 
-/** The theme whose mode matches the OS colour-scheme preference, if the browser reports one. */
-export function themeForOsPreference(themes: Theme[]): Theme | undefined {
+/** Records the applied theme's background and scheme for the pre-React paint. */
+export function storePaint(theme: Theme) {
   try {
-    const light = window.matchMedia("(prefers-color-scheme: light)").matches;
-    return themes.find((t) => t.mode === (light ? "light" : "dark"));
+    localStorage.setItem(THEME_PAINT_KEY, JSON.stringify({ bg: theme.color.bg, scheme: theme.mode }));
   } catch {
-    return undefined;
+    // ignore
   }
 }
