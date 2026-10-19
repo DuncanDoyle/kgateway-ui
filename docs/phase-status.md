@@ -4,14 +4,14 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.1 (backend) open
+Status: implementing; sub-phase 1.1 (backend) complete on branch duncandoyle/phase1Backend, merge pending; 1.2 next
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
 - [x] Q2 Phase 1 implementation plan (`implementation-plan.md`) — drafted 2026-10-17, revised after cross-model review 2026-10-18; planned sub-phases 1.1 backend, 1.2 frontend, 1.3 packaging/CI/e2e — approved by user 2026-10-19
 - [x] Q3 Cross-model review of design + plan, triage, user approval — five Codex rounds (reviews/design-*codex.md), all findings triaged; approved 2026-10-19
-- [ ] Q4 Sub-phase 1.1 — backend (plan Tasks 1–11) ← CURRENT
-- [ ] Q5 Sub-phase 1.2 — frontend (plan Tasks 12–18)
+- [x] Q4 Sub-phase 1.1 — backend (plan Tasks 1–11) — phases/phase-1/phase-1.1-complete.md
+- [ ] Q5 Sub-phase 1.2 — frontend (plan Tasks 12–18) ← CURRENT
 - [ ] Q6 Sub-phase 1.3 — packaging, CI, e2e (plan Tasks 19–23)
 - [ ] Q7 Phase cross-model review + triage
 
@@ -24,31 +24,10 @@ Status: implementing; sub-phase 1.1 (backend) open
 - [ ] phase-1-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 1.1 — Backend
-Kind: planned
-Base: 8fb0fa564a6cf62b6dd98e5ae120257fd3d4b6a6
-Brief: docs/phases/phase-1/phase-1.1-brief.md
-
-### Allowed work
-Features within the approved design: plan Tasks 1–11.
-
-### Not allowed
-Design changes without a decisions.md entry and user approval.
-
-### Queue
-- [ ] Task 1 Cluster experiment (D-012) ← CURRENT
-- [ ] Task 2 Go module, server skeleton, embedded SPA placeholder, LICENSE
-- [ ] Task 3 Kind descriptors and served-version resolution
-- [ ] Task 4 Typed views over Gateway API objects
-- [ ] Task 5 Shared informer cache, fixtures, fake clients
-- [ ] Task 6 Install discovery and namespace scope
-- [ ] Task 7 Assigning resources to installs
-- [ ] Task 8 Controller metrics
-- [ ] Task 9 Health: findings, checks, scope verifier, roll-up
-- [ ] Task 10 Engine, overview and HTTP API
-- [ ] Task 11 Extension registry, app wiring, main, Go seam test
+none
 
 ## Carry-over (deferred to later phases)
+- (P4) Extension seam: finding-code prefix registry (Phase 1 uses a documented convention) — for the seam milestone after Phase 2 — src: phases/phase-1/phase-1.1-complete.md
 - (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
 
 ## Notes

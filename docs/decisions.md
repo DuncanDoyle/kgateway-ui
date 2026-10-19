@@ -211,6 +211,7 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - Per-user AuthN/AuthZ becomes a roadmap item that plugs into the `Authorizer` seam rather than a retrofit through every handler.
 - Finding links work for every watched kind, Deployments included.
 - Health stays truthful under partial visibility: the roll-up covers all findings. A finding about a resource the user may not view still shows its severity, code and resource identity (kind, namespace, name) so the platform team knows which team to ask, but not its message or evidence (user, 2026-10-18). This reveals that the named resource exists; a stricter namespace-only variant can be revisited with the per-user design.
+- Namespace scope counts and install identity are not filtered by the `Authorizer`; revisit with per-user authorisation.
 - Phase 7 (TLS posture) must not read Secrets under this model; certificate details wait for per-user authorisation or another source.
 
 ## D-014 — Watch freshness trusts informers, with failure detection (2026-10-19, phase 1)
@@ -220,6 +221,8 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - The kind recovers on a successful Watch call opened after the latest failure, or on the initial-events-end bookmark in watch-list mode. No event is required, so idle kinds recover too.
 - Dead connections are detected by client-go's HTTP/2 health check (about 45 s).
 - Known limit: right after recovery, the UI can show the pre-outage state for the few seconds client-go needs to replay missed events. The outage itself shows as unknown.
+- Known limit: a routine 410 Gone / Expired relist counts as a failure, so the kind shows unknown for the relist window.
+- Known limit: a late `watch.Error` from an already-replaced stream can keep a kind unavailable until the next Watch call.
 **Alternatives:**
 - Periodic full relists with list-age freshness — rejected: a permanent API load of one full list per kind per minute, for a few-second window.
 - Heartbeat on watch bookmarks — rejected: bookmarks are not guaranteed on idle watches.
