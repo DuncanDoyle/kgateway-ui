@@ -90,11 +90,11 @@ func TestMismatchPersistenceIsStrict(t *testing.T) {
 	}
 }
 
-// A successful scrape without the managed family is unavailable even when
-// the UI counts nothing: no recognised family is no evidence of a match.
-func TestAbsentFamilyWithoutObjectsIsUnavailable(t *testing.T) {
+// An absent family in a successful scrape means 0 (D-012): with nothing in
+// scope the counts match.
+func TestAbsentFamilyWithoutObjectsIsMatch(t *testing.T) {
 	r := NewManagedCountVerifier(20 * time.Second).Verify(inputWith(t, testutil.Now, nil, false))
-	if r.Available || r.Reason == "" {
+	if !r.Available || len(r.Mismatches) != 0 {
 		t.Fatalf("%+v", r)
 	}
 }

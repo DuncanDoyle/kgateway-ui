@@ -11,7 +11,6 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -120,10 +119,6 @@ var (
 	policyRequired   = []string{"Accepted"}
 	policyOptional   = []string{"Attached"}
 )
-
-// statusSummaryKind is the synthetic policy ancestor kgateway main writes; it
-// summarises the policy's status and is not a Gateway (design §4.3).
-const statusSummaryKind = "StatusSummary"
 
 // conditionsCheck: KGWUI-002 and KGWUI-003. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
@@ -270,16 +265,16 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			"parent "+parentDesc(u.Parent)+" does not exist")
 	}
 	// Policies: ancestors written by this install's controller for a Gateway or
-	// ListenerSet it owns, or the synthetic status summary. None at all is
-	// pending; on v2.3/v2.4 that includes a policy whose target is missing.
+	// ListenerSet it owns, or the synthetic status summary. Assign drops policies
+	// processed only for another install, so none here means not yet processed;
+	// on v2.3/v2.4 that includes a policy whose target is missing.
 	for _, p := range in.Owned.Policies {
 		var mine []objects.AncestorStatus
 		for _, a := range objects.PolicyAncestors(p.Obj) {
 			if !slices.Contains(in.Install.ControllerNames, a.ControllerName) {
 				continue
 			}
-			summary := a.AncestorRef.Group == kinds.KgatewayGroup && a.AncestorRef.Kind == statusSummaryKind
-			if summary || owned[a.AncestorRef.Ref()] {
+			if install.IsStatusSummary(a.AncestorRef) || owned[a.AncestorRef.Ref()] {
 				mine = append(mine, a)
 			}
 		}

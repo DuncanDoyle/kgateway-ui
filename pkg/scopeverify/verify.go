@@ -85,11 +85,16 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 		return unavailable("controller metrics are stale")
 	case in.Install.Scope.Mode == install.ScopeUnknown:
 		return unavailable("controller scope unknown")
-	// A scrape without the family gives no evidence that the counts match.
-	case !in.Metrics.Metrics.ManagedPresent:
-		return unavailable(ctrlmetrics.ResourcesManaged + " not found in controller metrics")
 	}
 	ui := uiCounts(in)
+	// An absent family means 0 (D-012); it is unavailable only when the UI expects more.
+	if !in.Metrics.Metrics.ManagedPresent {
+		if len(ui) > 0 {
+			return unavailable(ctrlmetrics.ResourcesManaged + " not found in controller metrics")
+		}
+		delete(v.first, id)
+		return Result{Available: true}
+	}
 	keys := map[ctrlmetrics.ManagedKey]bool{}
 	for k := range ui {
 		keys[k] = true

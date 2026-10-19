@@ -205,7 +205,7 @@ func TestGenericPolicyWithoutStatusIsOwned(t *testing.T) {
 	nss := []*corev1.Namespace{testutil.Namespace("shop", nil)}
 	other := testutil.PolicyAncestor{Ref: testutil.GwRef("shop", "mesh"), Controller: "istio.io/gateway-controller"}
 	mine := testutil.PolicyAncestor{Ref: testutil.GwRef("shop", "edge"), Controller: testutil.Controller}
-	snap := snapshot(t, nss,
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("shop", "edge", "kgateway", nil),
 		testutil.BackendTLSPolicy("shop", "new"),
 		testutil.BackendTLSPolicy("shop", "istio", other),
 		testutil.BackendTLSPolicy("shop", "ours", mine))
@@ -248,5 +248,26 @@ func TestUnknownScopeDoesNotMakeGatewaysAmbiguous(t *testing.T) {
 	both := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{`), unknown})
 	if len(both.Ambiguous) != 2 {
 		t.Fatalf("two unknown scopes: want both gateways ambiguous, got %+v", both.Ambiguous)
+	}
+}
+
+// Two installs share a controllerName. A policy whose ancestors from that
+// controller name only A's Gateway belongs to A, not to B; a policy without
+// ancestors belongs to both until it is processed.
+func TestPolicyBelongsToTheInstallOwningItsAncestor(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra-a", map[string]string{"a": "yes"}), testutil.Namespace("infra-b", map[string]string{"b": "yes"}),
+		testutil.Namespace("shop", map[string]string{"a": "yes", "b": "yes"})}
+	anc := testutil.PolicyAncestor{Ref: testutil.GwRef("infra-a", "edge"), Controller: testutil.Controller}
+	summary := testutil.PolicyAncestor{Ref: objects.ParentRef{Group: "gateway.kgateway.dev", Kind: "StatusSummary", Name: "summary"}, Controller: testutil.Controller}
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra-a", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.TrafficPolicy("shop", "tp", anc), testutil.BackendTLSPolicy("shop", "btls", anc),
+		testutil.TrafficPolicy("shop", "new"), testutil.TrafficPolicy("shop", "summary", summary))
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{"matchLabels":{"a":"yes"}}]`), resolved("kgw-b/b", `[{"matchLabels":{"b":"yes"}}]`)})
+	if got := names(a.PerInstall["kgw-a/a"].Policies); len(got) != 4 {
+		t.Fatalf("a: %v", got)
+	}
+	if got := names(a.PerInstall["kgw-b/b"].Policies); len(got) != 2 || got[0] != "shop/new" || got[1] != "shop/summary" {
+		t.Fatalf("b: want only the unprocessed policy and the status summary, got %v", got)
 	}
 }

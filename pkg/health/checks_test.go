@@ -420,11 +420,56 @@ func TestPolicyAncestorOfUnownedGatewayIsIgnored(t *testing.T) {
 		t.Fatalf("status for another install's Gateway must be ignored: state=%s findings=%+v", r.State, r.Findings)
 	}
 
+	// Status only for Gateways this install does not own: the policy belongs elsewhere.
 	w = healthyWorld()
 	w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: other, Controller: testutil.Controller, Conds: invalid}))
-	r := w.report(t)
-	if has(r, CodeConditionFalse, "", "shop/tp") || !has(r, CodeRouteUnattached, SeverityWarning, "shop/tp") {
-		t.Fatalf("a policy with status only for unowned Gateways is not yet processed: %+v", r.Findings)
+	if r := w.report(t); r.State != StateHealthy || len(r.Findings) != 0 {
+		t.Fatalf("a policy processed for another install's Gateway gets no finding here: state=%s findings=%+v", r.State, r.Findings)
+	}
+}
+
+// Two installs share a controllerName with disjoint Gateway namespaces. A
+// policy in both scopes that targets only A's Gateway is healthy in A and
+// absent from B: no finding there and not owned.
+func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra-a", map[string]string{"a": "yes"}), testutil.Namespace("infra-b", map[string]string{"b": "yes"}),
+		testutil.Namespace("shop", map[string]string{"a": "yes", "b": "yes"})}
+	ca, cb := testutil.ControllerDeployment("kgw-a", "kgateway", img, 1, 1), testutil.ControllerDeployment("kgw-b", "kgateway", img, 1, 1)
+	pods := []*corev1.Pod{testutil.ControllerPod(ca, "p", true), testutil.ControllerPod(cb, "p", true)}
+	objs := []*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra-a", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: testutil.GwRef("infra-a", "edge"), Controller: testutil.Controller,
+			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Valid")}})}
+	snap := &cache.Snapshot{Objects: testutil.ObjectsByGVR(t, objs...), Access: map[schema.GroupVersionResource]cache.Access{},
+		Namespaces: nss, Pods: pods, Synced: true, TakenAt: testutil.Now,
+		Deployments: []*appsv1.Deployment{ca, cb, testutil.ProxyDeployment("infra-a", "edge", 1, 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1)}}
+	served := testutil.ServedUpstream()
+	for _, k := range served {
+		snap.Access[k.GVR()] = cache.Access{OK: true}
+	}
+	for _, gvr := range []schema.GroupVersionResource{cache.NamespacesGVR, cache.PodsGVR, cache.DeploymentsGVR} {
+		snap.Access[gvr] = cache.Access{OK: true}
+	}
+	var insts []install.Resolved
+	for _, c := range []struct {
+		d     *appsv1.Deployment
+		scope string
+	}{{ca, `[{"matchLabels":{"a":"yes"}}]`}, {cb, `[{"matchLabels":{"b":"yes"}}]`}} {
+		in, _ := install.UpstreamDetector{}.Detect(c.d)
+		insts = append(insts, install.Resolved{Install: in, Scope: install.ParseSelectors(c.scope)})
+	}
+	a := install.Assign(snap, served, insts)
+	for _, res := range insts {
+		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
+			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
+			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}}}}
+		r := Evaluate(hi, Upstream())
+		if r.State != StateHealthy || len(r.Findings) != 0 {
+			t.Fatalf("%s: state=%s findings=%+v", res.ID(), r.State, r.Findings)
+		}
+		if n := len(hi.Owned.Policies); (res.Namespace == "kgw-a") != (n == 1) {
+			t.Fatalf("%s owns %d policies", res.ID(), n)
+		}
 	}
 }
 
