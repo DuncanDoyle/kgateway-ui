@@ -1,3 +1,4 @@
+import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT } from "../pages/FindingsPage";
 import { HEADER_MUTED_PCT, HEADER_PRESS_PCT } from "../shell/headerTint";
 import { contrastRatio } from "./contrast";
 import { controlRoomDark, controlRoomLight, defaultThemes } from "./themes";
@@ -34,6 +35,12 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
     ["text on pressed surface control", c.text, mix(c.text, c.surface, 0.14)],
     ["muted on pressed table row", c.textMuted, mix(c.text, c.surface, 0.08)],
     ["accent text on pressed surface control", c.accentText, mix(c.text, c.surface, 0.14)],
+    // Selected filter chips: accent fill at rest, hover and press.
+    ...[CHIP_PRESSED_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_ACTIVE_PCT].map((pct): [string, string, string] => [
+      `text on selected chip (${pct}%)`,
+      c.text,
+      mix(c.accentText, c.surface, pct / 100),
+    ]),
     ...states.map((s): [string, string, string] => [
       `${s} status text on pressed row`,
       c.status[s].fg,
@@ -51,6 +58,10 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
     ["borderStrong on surface", c.borderStrong, c.surface],
     ["borderStrong on surfaceRaised", c.borderStrong, c.surfaceRaised],
     ["borderStrong on header band", c.borderStrong, c.headerBg],
+    // A selected chip's accent border shows against the page, the unselected fill and its own fill.
+    ["selected chip border on surface", c.accentText, c.surface],
+    ["selected chip border on bg", c.accentText, c.bg],
+    ["selected chip border on its fill", c.accentText, mix(c.accentText, c.surface, CHIP_PRESSED_ACTIVE_PCT / 100)],
     // The readiness icon sits on the ink band in every theme.
     ...states.map((s): [string, string, string] => [`${s} status icon on header band`, c.status[s].iconBg, c.headerBg]),
   ])("%s >= 3 (non-text)", (_, fg, bg) => {

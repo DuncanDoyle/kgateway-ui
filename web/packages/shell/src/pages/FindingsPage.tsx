@@ -2,18 +2,30 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Check, Search } from "lucide-react";
-import { useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useDeferredValue, useMemo, useRef } from "react";
 import { useHealth } from "../api/hooks";
 import type { Finding, Severity } from "../api/types";
 import { severityLabel } from "../health/state";
 import { useInstallId } from "../shell/extension";
+import { HEADER_H } from "../shell/Header";
+import { useUrlParams, useUrlText } from "../shell/urlParams";
 import { PageState } from "../states/PageState";
 import { FindingRow } from "./install/FindingRow";
 import { findingKeys } from "./install/TopFindings";
 
 // region Styles
+/** Accent share of a selected chip's fill (rest, hover, press); contrast-tested in themes.test.ts. */
+export const CHIP_PRESSED_PCT = 16;
+export const CHIP_PRESSED_HOVER_PCT = 22;
+export const CHIP_PRESSED_ACTIVE_PCT = 28;
+
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
+  /* A flex column of the viewport below the header: the list takes what the (possibly wrapping) bar leaves. */
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - ${HEADER_H}px);
+  min-height: 360px;
   max-width: 1400px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
@@ -66,17 +78,18 @@ const Chip = styled.button`
     outline: 2px solid ${(p) => p.theme.color.focus};
     outline-offset: 2px;
   }
-  /* Selected: check icon and bold text, so the state never relies on colour. */
+  /* Selected: accent fill and a doubled accent border, plus a check icon and bold text. */
   &[aria-pressed="true"] {
-    border-color: ${(p) => p.theme.color.text};
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 10%, ${(p) => p.theme.color.surface});
+    border-color: ${(p) => p.theme.color.accentText};
+    box-shadow: inset 0 0 0 1px ${(p) => p.theme.color.accentText};
+    background: color-mix(in srgb, ${(p) => p.theme.color.accentText} ${CHIP_PRESSED_PCT}%, ${(p) => p.theme.color.surface});
     font-weight: ${(p) => p.theme.font.weight.semibold};
   }
   &[aria-pressed="true"]:hover {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 12%, ${(p) => p.theme.color.surface});
+    background: color-mix(in srgb, ${(p) => p.theme.color.accentText} ${CHIP_PRESSED_HOVER_PCT}%, ${(p) => p.theme.color.surface});
   }
   &[aria-pressed="true"]:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
+    background: color-mix(in srgb, ${(p) => p.theme.color.accentText} ${CHIP_PRESSED_ACTIVE_PCT}%, ${(p) => p.theme.color.surface});
   }
 `;
 const SearchBox = styled.label`
@@ -113,9 +126,9 @@ const SearchBox = styled.label`
     outline-offset: 1px;
   }
 `;
-// max-height, so a short list fits its content and a long one scrolls inside the page.
+// Shrinks to fit the page when long; a short list keeps its content height.
 const Scroller = styled.div`
-  max-height: calc(100vh - 220px);
+  flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
   background: ${(p) => p.theme.color.surface};
@@ -131,11 +144,9 @@ const Item = styled.div`
   &[data-last="true"] {
     border-bottom: 0;
   }
+  /* Hover only: the row itself is not clickable (its resource link is). */
   &:hover {
     background: color-mix(in srgb, ${(p) => p.theme.color.text} 4%, ${(p) => p.theme.color.surface});
-  }
-  &:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 8%, ${(p) => p.theme.color.surface});
   }
 `;
 
@@ -167,20 +178,12 @@ interface FindingsPageProps {
 export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
   const id = useInstallId();
   const { data, error } = useHealth(id);
-  const [params, setParams] = useSearchParams();
+  const [params, update] = useUrlParams();
   const sev = listParam(params, "sev");
   const kinds = listParam(params, "kind");
-  const q = params.get("q") ?? "";
-  const set = (key: string, value: string) =>
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (value) next.set(key, value);
-        else next.delete(key);
-        return next;
-      },
-      { replace: true },
-    );
+  const [text, setText] = useUrlText(params, update, "q");
+  // Typing stays responsive on long lists: filtering follows the input at lower priority.
+  const q = useDeferredValue(text);
   // Never render another install's findings while this one loads.
   const current = data?.install === id ? data : undefined;
   const all = current?.findings ?? [];
@@ -227,7 +230,7 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
             key={s}
             type="button"
             aria-pressed={sev.includes(s)}
-            onClick={() => set("sev", toggle(sev, s).join(","))}
+            onClick={() => update({ sev: toggle(sev, s).join(",") })}
           >
             {sev.includes(s) ? <Check size={14} aria-hidden="true" /> : null}
             {severityLabel[s]}
@@ -239,7 +242,7 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
             key={k}
             type="button"
             aria-pressed={kinds.includes(k)}
-            onClick={() => set("kind", toggle(kinds, k).join(","))}
+            onClick={() => update({ kind: toggle(kinds, k).join(",") })}
           >
             {kinds.includes(k) ? <Check size={14} aria-hidden="true" /> : null}
             {k}
@@ -251,15 +254,17 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
             aria-label="Filter findings"
             autoComplete="off"
             placeholder="Filter by name, message or code"
-            value={q}
-            onChange={(e) => set("q", e.target.value)}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
           />
         </SearchBox>
         <span className="count">
           {rows.length} of {all.length}
         </span>
       </Bar>
-      {rows.length === 0 ? (
+      {all.length === 0 ? (
+        <PageState kind="empty" title="No findings" />
+      ) : rows.length === 0 ? (
         <PageState kind="empty" title="No findings match these filters" />
       ) : (
         <Scroller ref={scroller} role="region" aria-label="Findings">

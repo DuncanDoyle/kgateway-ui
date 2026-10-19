@@ -14,11 +14,14 @@ import { InstallSwitcher } from "./InstallSwitcher";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // region Styles
+/** Header band height; full-height pages size themselves against it. */
+export const HEADER_H = 52;
+
 const Bar = styled.header`
   display: flex;
   align-items: center;
   gap: ${(p) => p.theme.space(3)};
-  height: 52px;
+  height: ${HEADER_H}px;
   padding: 0 ${(p) => p.theme.space(4)};
   background: ${(p) => p.theme.color.headerBg};
   color: ${(p) => p.theme.color.headerText};

@@ -153,6 +153,14 @@ it("findings page applies filters from the URL and shows an empty state", async 
   expect(screen.getByRole("textbox", { name: "Filter findings" })).toHaveValue("nothing-matches-this");
 });
 
+it("findings page says No findings when the install has none", async () => {
+  const h = unhealthy();
+  h.findings = [];
+  findings("/i/kgw/kgateway/findings", h);
+  await waitFor(() => expect(screen.getByText("No findings")).toBeInTheDocument());
+  expect(screen.queryByText("No findings match these filters")).toBeNull();
+});
+
 it.each([
   ["message", "rejected by envoy", 1],
   ["code", "kgwui-002", 6],

@@ -9,11 +9,12 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { type MouseEvent, memo, useMemo } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { type MouseEvent, memo, useDeferredValue, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import type { GatewayRow } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
+import { useUrlParams, useUrlText } from "../../shell/urlParams";
 import type { HealthState } from "../../theme/tokens";
 import { resourcePath } from "./FindingRow";
 
@@ -196,9 +197,10 @@ export const GatewayTable = memo(function GatewayTable({
   signalsMissing,
   stylesOverride,
 }: GatewayTableProps) {
-  const [params, setParams] = useSearchParams();
+  const [params, update] = useUrlParams();
   const navigate = useNavigate();
-  const q = params.get("q") ?? "";
+  const [text, setText] = useUrlText(params, update, "q");
+  const q = useDeferredValue(text);
   // The shown state goes into the row data: TanStack caches cell values per row, so a closure would not refresh them.
   const visible = useMemo(
     () => filterRows(rows, q).map((r) => ({ ...r, state: shownState(r, stale, signalsMissing) })),
@@ -221,13 +223,7 @@ export const GatewayTable = memo(function GatewayTable({
     autoResetAll: false,
     onSortingChange: (u) => {
       const s = (typeof u === "function" ? u(sorting) : u)[0];
-      setParams(
-        (p) => {
-          if (s) p.set("sort", `${s.id}.${s.desc ? "desc" : "asc"}`);
-          return p;
-        },
-        { replace: true },
-      );
+      if (s) update({ sort: `${s.id}.${s.desc ? "desc" : "asc"}` });
     },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -243,17 +239,8 @@ export const GatewayTable = memo(function GatewayTable({
         aria-label="Filter gateways"
         autoComplete="off"
         placeholder="Filter by name, namespace or class"
-        value={q}
-        onChange={(e) =>
-          setParams(
-            (p) => {
-              if (e.target.value) p.set("q", e.target.value);
-              else p.delete("q");
-              return p;
-            },
-            { replace: true },
-          )
-        }
+        value={text}
+        onChange={(e) => setText(e.target.value)}
       />
       <Scroll stylesOverride={stylesOverride}>
         <Table aria-label="Gateways">
