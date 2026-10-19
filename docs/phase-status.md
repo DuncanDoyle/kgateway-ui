@@ -8,8 +8,8 @@ Status: design in progress (started 2026-10-16)
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
-- [ ] Q2 Phase 1 implementation plan (`implementation-plan.md`) — drafted 2026-10-17, revised after cross-model review 2026-10-18; planned sub-phases 1.1 backend, 1.2 frontend, 1.3 packaging/CI/e2e ← CURRENT
-- [ ] Q3 Cross-model review of design + plan, triage, user approval
+- [ ] Q2 Phase 1 implementation plan (`implementation-plan.md`) — drafted 2026-10-17, revised after cross-model review 2026-10-18; planned sub-phases 1.1 backend, 1.2 frontend, 1.3 packaging/CI/e2e 
+- [ ] Q3 Cross-model review of design + plan, triage, user approval — five Codex rounds (reviews/design-*codex.md), all findings triaged; awaiting user approval ← CURRENT
 
 ### Exit gates
 - [ ] tests/vet pass (observed)

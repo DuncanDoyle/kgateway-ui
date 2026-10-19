@@ -187,3 +187,17 @@ Investigated independently by Codex and by a Claude subagent against kgateway ma
 - Finding links work for every watched kind, Deployments included.
 - Health stays truthful under partial visibility: the roll-up covers all findings. A finding about a resource the user may not view still shows its severity, code and resource identity (kind, namespace, name) so the platform team knows which team to ask, but not its message or evidence (user, 2026-10-18). This reveals that the named resource exists; a stricter namespace-only variant can be revisited with the per-user design.
 - Phase 7 (TLS posture) must not read Secrets under this model; certificate details wait for per-user authorisation or another source.
+
+## D-014 — Watch freshness trusts informers, with failure detection (2026-10-19, phase 1)
+**Context:** D-006 forbids a false green, so the UI must notice when its cached view of the cluster may be outdated. Five cross-model review rounds showed that exact catch-up detection on top of client-go informers (heartbeats on bookmarks, replay checkpoints) cannot be made correct without tracking client-go internals: bookmark delivery is not guaranteed, and a resumed watch's first event does not mean its backlog is applied.
+**Decision:**
+- Any failed List or Watch call, or a `watch.Error` event, makes that kind unavailable, which turns the install unknown.
+- The kind recovers on a successful Watch call opened after the latest failure, or on the initial-events-end bookmark in watch-list mode. No event is required, so idle kinds recover too.
+- Dead connections are detected by client-go's HTTP/2 health check (about 45 s).
+- Known limit: right after recovery, the UI can show the pre-outage state for the few seconds client-go needs to replay missed events. The outage itself shows as unknown.
+**Alternatives:**
+- Periodic full relists with list-age freshness — rejected: a permanent API load of one full list per kind per minute, for a few-second window.
+- Heartbeat on watch bookmarks — rejected: bookmarks are not guaranteed on idle watches.
+**Consequences:**
+- The UI is as fresh as any controller built on informers, including kgateway's own.
+- No extra API-server load.
