@@ -17,6 +17,7 @@ lint:
 web:
 	cd web && npm ci && npm run build
 	rm -rf internal/webui/dist && cp -r web/app/dist internal/webui/dist && touch internal/webui/dist/.gitkeep
+	find internal/webui/dist -name '*.map' -delete
 build: web
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/kgateway-ui ./cmd/kgateway-ui
 run:

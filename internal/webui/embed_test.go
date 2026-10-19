@@ -44,4 +44,24 @@ func TestEmbeddedSPAWhenBuilt(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `<div id="root">`) {
 		t.Fatalf("built SPA not embedded: %v", err)
 	}
+	// Source maps stay out of the binary; the build emits them for local debugging only.
+	_ = fs.WalkDir(FS(), ".", func(p string, _ fs.DirEntry, err error) error {
+		if err == nil && strings.HasSuffix(p, ".map") {
+			t.Errorf("source map embedded: %s", p)
+		}
+		return err
+	})
+}
+
+// Before the frontend is built, the placeholder paints the same dark background as the SPA's default.
+func TestPlaceholderPaintsDark(t *testing.T) {
+	b, err := fs.ReadFile(placeholder, "placeholder/index.html")
+	if err != nil {
+		t.Fatalf("placeholder not embedded: %v", err)
+	}
+	for _, want := range []string{"background:#0F1220", "color-scheme:dark"} {
+		if !strings.Contains(strings.ReplaceAll(string(b), " ", ""), want) {
+			t.Errorf("placeholder lacks %q", want)
+		}
+	}
 }
