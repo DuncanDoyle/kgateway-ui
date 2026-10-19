@@ -170,6 +170,31 @@ Investigated independently by Codex and by a Claude subagent against kgateway ma
 - The theme tokens must support a dark-first default.
 - Additional themes (for example Solarized) arrive later through the same tokens.
 
+## D-012 — Multi-install and metric replica behaviour, observed (2026-10-19, phase 1)
+**Context:** Design §13 items 1–2; experiment on kind with kgateway v2.4.7 (Gateway API v1.6.1), two installs (`kgw-a/kgateway`, `kgw-b/kgateway`) with disjoint `discoveryNamespaceSelectors` (`team=a`, `team=b`), both on the default `controllerName` `kgateway.dev/kgateway`. The metrics capture and the observedGeneration check were repeated on v2.3.11 (Gateway API v1.5.1, one install, two replicas).
+**Decision:**
+- **Shared `controllerName` works.** Both `helm install`s succeeded with no cluster-scoped conflict. There is one GatewayClass `kgateway` (`spec.controllerName: kgateway.dev/kgateway`), with a single `Accepted=True` condition ("GatewayClass accepted by kgateway controller", `observedGeneration: 1`). Its `resourceVersion` stayed at `683` across a 30 s wait and across the later scale-up, so there is no flapping. Both installs ran `KGW_DISCOVERY_NAMESPACE_SELECTORS` for their own team.
+- **Gateways are reconciled only by the install whose selector matches.** `kubectl get gateway -A -o wide` shows `app-a/gw` and `app-b/gw` both `PROGRAMMED True`. Each namespace got its own `gw` proxy Deployment (`1/1`). The install in `kgw-a` logged nothing about `app-b`, and the install in `kgw-b` logged nothing about `app-a` (0 matching lines each). Proxy `node_id` was `gw-...-9pfwn.app-b` on install B.
+- **Controller Pod labels** (identical on v2.4.7 and v2.3.11): `app.kubernetes.io/component=controller,app.kubernetes.io/instance=kgateway,app.kubernetes.io/name=kgateway,kgateway=kgateway,pod-template-hash=...`. Deployment name is `kgateway` in each install namespace (release name `kgateway`).
+- **Metric replica semantics.** With `kgw-a/kgateway` at 2 replicas, both replicas report the same `kgateway_resources_managed` series (krt runs on every replica):
+  ```
+  kgateway_resources_managed{namespace="app-a",parent="",resource="BackendConfigPolicy"} 1
+  kgateway_resources_managed{namespace="app-a",parent="gw",resource="Gateway"} 1
+  kgateway_resources_managed{namespace="app-a",parent="gw",resource="HTTPRoute"} 1
+  ```
+  Only the replica that serves the proxy's xDS stream reports the reject, the other has no `envoy_xds_rejects_*` series at all (the series appears only after a reject). This is the same on v2.4.7 and v2.3.11:
+  ```
+  kgateway_envoy_xds_rejects_active{gateway_name="gw",gateway_namespace="app-a",type_url="envoy.config.cluster.v3.Cluster"} 1
+  kgateway_envoy_xds_rejects_total{gateway_name="gw",gateway_namespace="app-a",type_url="envoy.config.cluster.v3.Cluster"} 1
+  ```
+  So the UI sums rejects over replicas and takes the max of `resources_managed`. A Gateway with no routes or policies shows only its own `resource="Gateway"` series, which is why the captures were taken after the routes were added.
+- **observedGeneration is set** (v2.4.7 and v2.3.11): `kubectl get gateway -n app-a gw -o jsonpath='{.metadata.generation} {.status.conditions[*].observedGeneration}'` printed `1 1 1 1` (Accepted, Programmed and ResolvedRefs all at generation 1). On v2.4.7 the listener conditions (Accepted, Conflicted, ResolvedRefs, Programmed) were also at 1.
+- **Reject trigger.** The invalid-cipher-suites `BackendConfigPolicy` produced the reject on both versions within seconds of the proxy being connected. Captures are in `pkg/ctrlmetrics/testdata/v2.4.7.txt` and `v2.3.11.txt`.
+
+Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambiguity finding when >1). Metrics: rejects summed over replicas; resources_managed max over replicas.
+**Alternatives:** n/a (observation).
+**Consequences:** No change to design §4.3. Because both installs share one GatewayClass and one `controllerName`, `controllerName` alone cannot tell installs apart, so the namespace scope must. The GatewayClass status is not per install and cannot be used for per-install health. Task 8's contract test can rely on a reject series being present only after a reject, so its absence must read as zero.
+
 ## D-013 — Trust model: whoever reaches the UI may see everything it shows (2026-10-18, phase 1)
 **Context:** The UI reads the cluster with its own ServiceAccount and has no authentication in Phase 1. Anyone who reaches it sees what that ServiceAccount can read, which can exceed their own Kubernetes RBAC. Any field of any resource can hold a secret (an inline token in an AI `Backend`, a literal env var in a Deployment), so field-level redaction cannot be made reliable.
 **Decision:**
@@ -186,6 +211,7 @@ Investigated independently by Codex and by a Claude subagent against kgateway ma
 - Per-user AuthN/AuthZ becomes a roadmap item that plugs into the `Authorizer` seam rather than a retrofit through every handler.
 - Finding links work for every watched kind, Deployments included.
 - Health stays truthful under partial visibility: the roll-up covers all findings. A finding about a resource the user may not view still shows its severity, code and resource identity (kind, namespace, name) so the platform team knows which team to ask, but not its message or evidence (user, 2026-10-18). This reveals that the named resource exists; a stricter namespace-only variant can be revisited with the per-user design.
+- Namespace scope counts and install identity are not filtered by the `Authorizer`; revisit with per-user authorisation.
 - Phase 7 (TLS posture) must not read Secrets under this model; certificate details wait for per-user authorisation or another source.
 
 ## D-014 — Watch freshness trusts informers, with failure detection (2026-10-19, phase 1)
@@ -195,9 +221,25 @@ Investigated independently by Codex and by a Claude subagent against kgateway ma
 - The kind recovers on a successful Watch call opened after the latest failure, or on the initial-events-end bookmark in watch-list mode. No event is required, so idle kinds recover too.
 - Dead connections are detected by client-go's HTTP/2 health check (about 45 s).
 - Known limit: right after recovery, the UI can show the pre-outage state for the few seconds client-go needs to replay missed events. The outage itself shows as unknown.
+- Known limit: a routine 410 Gone / Expired relist counts as a failure, so the kind shows unknown for the relist window.
+- Known limit: a late `watch.Error` from an already-replaced stream can keep a kind unavailable until the next Watch call.
 **Alternatives:**
 - Periodic full relists with list-age freshness — rejected: a permanent API load of one full list per kind per minute, for a few-second window.
 - Heartbeat on watch bookmarks — rejected: bookmarks are not guaranteed on idle watches.
 **Consequences:**
 - The UI is as fresh as any controller built on informers, including kgateway's own.
 - No extra API-server load.
+
+## D-015 — Scope falls back to the Deployment template (2026-10-19, phase 1)
+**Context:** The namespace scope is read from `KGW_DISCOVERY_NAMESPACE_SELECTORS` on a controller Pod. With no Pod (Deployment scaled to 0, Pods deleted, or the Pod watch failing) the scope was unknown, and an install with an unknown scope can only claim Gateways that no other install claims.
+**Decision:**
+- Source order: a Ready controller Pod, then any controller Pod, then the controller Deployment's Pod template.
+- The Pod comes first because it shows what is running; during a rollout the template already holds the new config.
+- The scope records its source, and the scope check names it when the template is used.
+- `valueFrom`, invalid JSON and a downstream provider's unknown still give an unknown scope.
+**Alternatives:**
+- Template first — rejected: during a rollout it describes the future, not the running controller.
+- Pod only (the previous rule) — rejected by the user: a controller scaled to 0 should not lose its scope.
+**Consequences:**
+- A controller scaled to 0 keeps its Gateways and shows red through KGWUI-005, not an ownership change.
+- Known limit: during a rollout that changes the selectors, old and new Pods carry different scopes, so the scope can switch between them and the verifier may briefly report a mismatch.

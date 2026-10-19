@@ -1,1 +1,7 @@
 .superpowers/
+bin/
+web/node_modules/
+web/**/node_modules/
+web/**/dist/
+internal/webui/dist/*
+!internal/webui/dist/index.html

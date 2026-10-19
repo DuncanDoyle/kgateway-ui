@@ -22,7 +22,7 @@ A minimal UI that is deployable and operational and already provides value. A pl
 - **Design foundation:** the Control room visual direction, design tokens, two themes (dark default and light), the health-state primitives, and the frontend extension points (D-008, D-010, D-011).
 - **Build foundation:** container image, Helm chart, CI, Apache-2.0 licence, README.
 - **Extension seam:** Go functional options and registries, a frontend registry, and a test-only extension that exercises both.
-  - Backend: kinds, install detectors, scope provider, scope verifier, checks, finding code prefixes, and the API `Authorizer` (§7.1).
+  - Backend: kinds, install detectors, scope provider, scope verifier, checks, and the API `Authorizer` (§7.1). Finding code prefixes are a documented convention (`WithChecks`), not a registry; a registry is deferred to the seam milestone.
   - Frontend: brand, themes (including typography tokens), routes, navigation, and finding renderers.
   - Analyzers, API-route registration, per-kind renderers and health-card contributions are deferred to the seam milestone after Phase 2.
 - **Trust model** (D-013): whoever reaches the UI may see everything it shows. It is documented prominently, and an allow-all `Authorizer` seam is in place for later per-user authorisation.
@@ -41,7 +41,7 @@ A minimal UI that is deployable and operational and already provides value. A pl
    - Healthy: the strip is a slim green line, and a "What was checked" list proves that each signal was collected.
    - Unhealthy: the strip shows counts per severity, followed by the top 5 findings by severity, then "Show all".
 2. **"What is wrong with X?"** Click a finding to open a read-only YAML view of the resource (status first, `managedFields` stripped), with a copy button for its `namespace/name`.
-   - Every finding whose resource kind is listed in `/api/v1/meta` links to that view, and the link resolves (§7). This includes unwatched routes, ambiguous Gateways and the controller and proxy Deployments.
+   - Every finding whose resource kind is listed in `/api/v1/meta` links to that view, and the link resolves (§7). This includes unwatched routes, ambiguous Gateways, the controller Deployment and the Gateways whose proxy is not ready.
    - A finding whose kind is not listed shows its resource as plain text, without a link.
 3. **"What does this install manage?"**
    - Count tiles: GatewayClasses, Gateways, routes per kind, policies per kind, and watched namespaces as "N / M".
@@ -90,8 +90,9 @@ Everything a downstream needs lives under `pkg/`. `internal/` holds only wiring 
 ### 3.2 Dependencies (backend)
 
 - **client-go** (dynamic client and informers).
-- **`sigs.k8s.io/gateway-api`**: typed Gateway API structs, converted from unstructured objects.
-- **`prometheus/common/expfmt`** to parse metrics.
+- **`k8s.io/api` and `k8s.io/apimachinery`** (Namespaces, Pods, Deployments and unstructured objects).
+- **No `sigs.k8s.io/gateway-api` dependency.** Gateway API objects stay unstructured and are read through the UI's own views in `pkg/objects` (parentRefs, conditions, ancestors).
+- **`prometheus/common/expfmt`** and **`prometheus/client_model`** to parse metrics.
 - **No dependency on the kgateway Go module.**
   - kgateway policies are handled generically: `metadata`, `spec.targetRefs` / `targetSelectors`, and `status.ancestors[]`, which follows the standard Gateway API `PolicyStatus` shape.
   - This avoids coupling the UI's release cadence and dependency tree to kgateway's.
@@ -128,7 +129,7 @@ An **Install** is one kgateway controller deployment. It has:
 ### 4.2 ScopeProvider
 
 `Scope(install) → {namespaces predicate, controllerNames}`. v1 is `NamespaceSelectorScope`:
-- **Input.** It reads `KGW_DISCOVERY_NAMESPACE_SELECTORS` from the spec of a running controller Pod (not the Deployment). Duplicate env entries resolve last-wins. A `valueFrom` reference is not supported: the scope becomes `unknown` with a finding.
+- **Input.** It reads `KGW_DISCOVERY_NAMESPACE_SELECTORS` from a Ready controller Pod, else any controller Pod, else the controller Deployment's Pod template when no Pod exists (D-015). The Pod comes first because it reflects what runs during a rollout; the scope check names the source when the template is used. Duplicate env entries resolve last-wins. A `valueFrom` reference is not supported: the scope becomes `unknown` with a finding.
 - **Semantics** (mirrors kgateway):
   - The value is a JSON list of `metav1.LabelSelector`.
   - A namespace is in scope if **any** selector matches it.
@@ -141,6 +142,7 @@ An **Install** is one kgateway controller deployment. It has:
 
 - **Gateway.** A Gateway belongs to install I when its GatewayClass `controllerName` ∈ I.controllerNames **and** its namespace is in I's scope.
   - If more than one install matches, it is assigned to none and gets finding `KGWUI-009 ambiguous-ownership`.
+  - An install whose scope is unknown competes for a Gateway only when no install with a known scope contains it. With two or more candidates in either group the Gateway is ambiguous, as above.
   - Whether kgateway allows two installs to share a `controllerName` with disjoint scopes is verified in the first plan task. The rule above is safe either way.
 - **Reference resolution.** Every reference is resolved by its full identity: group, kind, namespace and name.
   - A parentRef defaults to group `gateway.networking.k8s.io`, kind `Gateway`, and the route's namespace, as the Gateway API defines.
@@ -149,13 +151,16 @@ An **Install** is one kgateway controller deployment. It has:
   - Its health comes only from `status.parents[]` entries that meet both conditions: the entry's `controllerName` ∈ I.controllerNames, and its `parentRef` equals a **current** `spec.parentRefs` entry that resolves to a Gateway or ListenerSet owned by I. Equality covers the whole parentRef, `sectionName` and `port` included (unset differs from set), so status for a removed port or section never satisfies the current one.
   - Status left behind for a removed parentRef is ignored. So is status for a parent owned by another install that shares the controller name.
   - A route whose namespace is **outside** the scope of the install owning its target Gateway gets finding `KGWUI-004 namespace-not-watched` (warning). It never counts towards totals or health.
+  - A parent is never reported as not found while access to the parent's kind is unavailable: it may only be missing from the cache, and the cluster-access check already reports that.
   - A route whose parentRef targets a Gateway or ListenerSet that **does not exist** gets `KGWUI-003` in every install whose scope contains the route's namespace, once per missing parent (findings are deduplicated by resource and parentRef). It counts in an install's totals only when at least one other parentRef resolves to a Gateway or ListenerSet owned by that install; a route with no owned parent is a diagnostic candidate and is not counted anywhere.
 - **Policy** (any kind with category `policy`).
   - A policy in the kgateway API group belongs to I when its namespace is in I's scope.
   - Any other policy (for example `BackendTLSPolicy` or a downstream policy) belongs to I when its namespace is in I's scope **and** either it has an ancestor whose `controllerName` ∈ I.controllerNames, or it has no ancestors at all (new, not yet processed). Inventory membership does not wait for status.
+  - **Owned-ancestor rule.** An ancestor from I's controller that is a Gateway or ListenerSet must resolve to a Gateway or ListenerSet that I owns; if all such ancestors belong to another install, so does the policy. Any other ancestor from I's controller (a backend, `StatusSummary`) counts by `controllerName`, so the policy belongs to every install whose scope contains it.
   - Its health comes only from `status.ancestors[]` entries whose `controllerName` ∈ I.controllerNames. A policy with no such ancestor is "not yet processed" after the grace period (§5.2).
-  - The synthetic ancestor `gateway.kgateway.dev/StatusSummary` is treated as a status summary, not as a Gateway. Only kgateway `main` writes it (§10).
+  - The synthetic ancestor `gateway.kgateway.dev/StatusSummary` is treated as a status summary, not as a Gateway. It names no Gateway, so it counts by `controllerName`. Only kgateway `main` writes it (§10).
 - **Out-of-scope resources** are never counted, even if they carry old kgateway status. This handles stale status left behind when a namespace is deselected.
+- **Known limit.** A policy whose only status ancestors are deleted Gateways appears in no install until kgateway rewrites its status.
 
 ### 4.4 ScopeVerifier
 
@@ -163,7 +168,8 @@ v1 compares, per install and per `(namespace, resource kind)`, the UI's count of
 - The UI must weight objects the way the gauge does (verified on kgateway main `8a498c6406`, `pkg/krtcollections/metrics/metrics.go`): a Gateway counts 1; a route counts once per `spec.parentRefs` entry, so a route with no parentRefs counts 0; a ListenerSet counts 1 and is reported as `resource="XListenerSet"`; a policy counts 1 under its own kind.
 - A gauge with no samples has no series, so an absent family in a successful scrape means 0, not "unavailable".
 - A mismatch that persists for more than 2 scrape intervals produces `KGWUI-007 scope-mismatch` (warning), showing both numbers.
-- If the metric is absent (renamed or unavailable), the verifier reports `KGWUI-008 signal-unavailable` (info). It does not decide health.
+- For the verifier, an absent `resources_managed` family counts as 0. Whether that is trusted is the xDS check's concern (§5.2).
+- If the metric is unavailable (renamed or unreachable), the verifier reports `KGWUI-008 signal-unavailable` (info). It does not decide health.
 - The plan's first task confirms the per-replica semantics of this gauge, i.e. whether every replica reports the full set.
 
 ## 5. Health
@@ -184,28 +190,31 @@ v1 compares, per install and per `(namespace, resource kind)`, the UI's count of
 ```
 
 - Codes are stable and never reused.
-- Upstream codes use the prefix `KGWUI-`. A downstream registers its codes under its own prefix.
+- Upstream codes use the prefix `KGWUI-`. A downstream uses its own prefix; this is a documented convention (see `WithChecks`), not enforced by a registry (§1).
+- A check emitting a severity other than error, warning or info is reported as warning, with the original named in `detail`.
 - `message` is plain language. The raw condition type, status and reason go in `detail`.
 
 ### 5.2 Phase 1 checks
 
 | Code | Slug | Severity | Source |
 |---|---|---|---|
-| KGWUI-001 | xds-rejected | error | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url} > 0`, summed over controller replicas. An absent family in a successful scrape means no rejects. |
+| KGWUI-001 | xds-rejected | error | `kgateway_envoy_xds_rejects_active{gateway_namespace,gateway_name,type_url} > 0`, summed over controller replicas. An absent reject family in a successful scrape means no rejects, but only when the scrape has a `kgateway_resources_managed` family or the install owns no Gateways; otherwise the check is unavailable (KGWUI-008), because an absent reject family is then indistinguishable from a wrong endpoint. |
 | KGWUI-002 | condition-false | error / warning / info | A **current** condition (see freshness below) is False: GatewayClass `Accepted`; Gateway `Accepted`/`Programmed`; listener conditions; route parent `Accepted`/`ResolvedRefs` (error) and `kgateway.dev/Programmed`; policy ancestor `Accepted`/`Attached` (`Invalid`, `TargetNotFound`, … → error; `PartiallyValid` → warning; `Overridden` → info, since overriding is normal Gateway API precedence, not a fault) |
 | KGWUI-003 | route-unattached | info while being processed, warning after the grace period | A route whose parentRef targets a Gateway or ListenerSet that does not exist (§4.3). Also any owned resource **not yet processed** (see freshness below): a missing status block, an absent required condition, a condition with reason `Pending`, stale conditions, or (for a policy) no ancestor from the install's controller. Inside the grace period the message reads "Being processed by the controller" (info); after it, "Not yet processed by the controller" (warning). |
 | KGWUI-004 | namespace-not-watched | warning | §4.3 |
 | KGWUI-005 | controller-not-ready | error | Controller Deployment has ready replicas < desired replicas |
-| KGWUI-006 | proxy-not-ready | error | The proxy Deployment of an assigned Gateway has ready replicas < desired replicas |
+| KGWUI-006 | proxy-not-ready | error / warning | Error when the proxy Deployment of an assigned Gateway has ready replicas < desired replicas; warning when no proxy Deployment exists after the grace period. The finding references the Gateway, which is the link target. |
 | KGWUI-007 | scope-mismatch | warning | §4.4 |
-| KGWUI-008 | signal-unavailable | info (forces state `unknown`; see 5.3) | A check could not collect a current input: metrics unreachable, metrics result too old, RBAC denied, a watch failing, scope unknown, or cache not synced (§5.4) |
+| KGWUI-008 | signal-unavailable | info (forces state `unknown`; see 5.3) | A check could not collect a current input: metrics unreachable, metrics result too old, RBAC denied, a watch failing, scope unknown, cache not synced, or served kinds changed since startup (§5.4) |
 | KGWUI-009 | ambiguous-ownership | warning | §4.3 |
 
 `RouteRuleDropped` and `RouteRuleReplaced` reasons are reported under KGWUI-002 with their own message ("Rule replaced by a direct response"). On 2.3 the controller reports them through `Accepted=False`; on 2.4 and `main` through `kgateway.dev/Programmed`. Both are reported, because any current False is reported with its reason.
 
+Conditions are either required or optional (below). Optional conditions report only `False`; `Unknown` and absent produce no finding.
+
 **Status freshness.** Every status-based check applies these rules, in this order:
 1. **Freshness first.** A condition whose `observedGeneration` is lower than the object's `metadata.generation` is stale. A missing `observedGeneration` (0) on an object with a generation counts as stale too: there is no evidence it describes the current spec. A stale condition describes an old spec, so a stale True is not success and a stale False is not a current error. kgateway sets `observedGeneration` on its conditions; the first plan task confirms this on 2.3 and 2.4.
-2. **Required status.** Each status block has required conditions: GatewayClass `Accepted`; Gateway `Accepted` and `Programmed`; each listener `Accepted` and `Programmed`; route parent `Accepted` and `ResolvedRefs`; policy ancestor `Accepted`. Every listener in `spec.listeners` needs its own status block. A missing block, an absent required condition, or a condition whose reason is `Pending` means "not yet processed" (kgateway writes `Accepted=False/Pending` and `Attached=False/Pending` as policy defaults before translation). Conditions that only some versions write (for example `kgateway.dev/Programmed`, `Attached`) are evaluated when present and are not required.
+2. **Required status.** Each status block has required conditions: GatewayClass `Accepted`; Gateway `Accepted` and `Programmed`; each listener `Accepted` and `Programmed`; route parent `Accepted` and `ResolvedRefs`; policy ancestor `Accepted`. Every listener in `spec.listeners` needs its own status block. A missing block, an absent required condition, or a condition whose reason is `Pending` means "not yet processed". A current required condition with status `Unknown` and any other reason is also "not yet processed" (KGWUI-003), not an error: only `False` maps to KGWUI-002 (kgateway writes `Accepted=False/Pending` and `Attached=False/Pending` as policy defaults before translation). Conditions that only some versions write (for example `kgateway.dev/Programmed`, `Attached`) are evaluated when present and are not required.
 3. **Grace period.** The grace period is 60 s, measured from when the UI first saw the object's current (uid, `metadata.generation`). A spec change bumps the generation and restarts it; a label, annotation or finalizer update does not. Objects that already exist when the UI starts get grace from the UI's start, so after a restart stale status shows "being processed" for 60 s, then a warning. A resource that is not yet processed inside the grace period gets `KGWUI-003` at **info** ("being processed"), and the `resource status` check is not OK, so the install is **unknown** (§5.3), never healthy. After the grace period the finding is a **warning** and the check is OK again. `KGWUI-003` is reported once per resource and parentRef: a route gets one per pending or missing parent.
 4. A check reports OK only on current evidence. Absent, pending or stale status never counts as healthy.
 
@@ -227,7 +236,9 @@ Every check reports `{name, ok, collectedAt, error}`. The healthy view renders t
 |---|---|
 | API server unreachable, or cache not synced | Full-page "Connecting to cluster…" with the cause after a timeout. Numbers are never shown before the first sync. |
 | A watch fails after the initial sync | `HasSynced` stays true after later list/watch failures, so it is not used as availability. client-go also retries connection-refused and 429 watch errors without reporting them to the watch error handler, and delivers errors as events inside an open stream. Each informer therefore runs over an **instrumented ListerWatcher** that records every List and Watch call outcome and sees every event the watch delivers. A **failure** (a failed List or Watch call, or a `watch.Error` event) makes the kind unavailable. The kind recovers on a **successful classic Watch call opened after the latest failure**: the reflector resumes from its last resource version (or the server answers 410 and the reflector re-lists by itself, then watches), so no event is needed, and an idle kind recovers as soon as its watch works again. In watch-list mode it recovers on the `k8s.io/initial-events-end` bookmark of a stream opened after the failure. A successful List alone does not recover: the Watch call that follows must succeed too, so a kind whose list is allowed but watch forbidden stays unavailable. Events on a watch opened before the failure never recover it. The UI never forces a re-list, so tracking adds no load while the API server is throttling. **Dead connections** are detected by client-go's HTTP/2 connection health check (`ReadIdleTimeout` 30 s plus `PingTimeout` 15 s), so within about 45 s, and the failed watch then counts as a failure. **Known limit:** right after recovery, while client-go replays the events missed during the outage, the UI can briefly show the pre-outage state; the outage itself shows unknown. This is the same trust every controller places in its informers; periodic full relists were rejected as a permanent API load for a few-second window (`reviews/design-r5-codex.md`). Lists have a 1 min request timeout. This covers every watched kind, including Namespaces, Pods and Deployments. An errored informer counts as settled for the startup sync, but the cluster-access check is not OK: KGWUI-008, and the install becomes unknown. |
+| Served kinds change after startup | Served kinds are re-resolved every 60 s. When the served set (or a kind's preferred version) differs from the watched set, each install gets a required KGWUI-008 asking for a restart ("served kinds changed: …; restart the UI to watch them"). Phase 1 never re-watches live. |
 | Controller metrics unreachable | KGWUI-008, and the install becomes unknown. The strip reads "No known problems — xDS rejects could not be checked". |
+| Metrics scrape bounds | Each `/metrics` body is capped at 8 MiB; hitting the cap is an error, never a truncated parse. Each pod has a timeout of min(interval / 2, 5 s). Installs are scraped concurrently, so one hung install cannot starve the others. An install pod without an IP is an error. |
 | Last metrics result too old | A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), even if that scrape succeeded. Recomputing the report never makes old evidence look fresh. |
 | No install found | Designed empty state explaining what the UI looks for and how to pin `--install`. |
 | RBAC denies a kind | Its tile shows "No access", naming the missing verb and resource; KGWUI-008. |
@@ -261,7 +272,7 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 
 - **Pages and routes:** under `/i/:ns/:name/...` or at the top level.
 - **Navigation entries.**
-- **Health renderers:** a custom message or detail per finding code prefix.
+- **Health renderers:** a custom message or detail per finding code prefix. The prefix is a convention, not a registry (§1).
 - **Kind display metadata.** This is mostly backend-driven through descriptors, so most downstream additions need Go only.
 - **Theme sets and the brand:** logo, product name and tokens (D-008). Tokens cover colours and typography: font families, sizes and weights. Every component takes its type from these tokens, never from hard-coded values.
 - **Deferred to the seam milestone after Phase 2:** per-kind renderers and health-card contributions (and, in Go, analyzers and API-route registration). Phase 1 pages need neither.
@@ -314,7 +325,7 @@ The API is read-only JSON. Every resource payload has `managedFields` removed as
 
 **Resource endpoint.** It serves an object of a watched, served kind when either:
 - the install owns it (§4.3); or
-- a current finding of the install references it. This covers unwatched routes (004), routes with a missing parent (003), ambiguous Gateways (009), and the controller and proxy Deployments (005, 006).
+- a current finding of the install references it. This covers unwatched routes (004), routes with a missing parent (003), ambiguous Gateways (009), and the controller Deployment (005). A proxy-not-ready finding (006) references its Gateway.
 
 Anything else returns 404. The endpoint reads only from the shared cache, so it can never return a kind the UI does not watch.
 
@@ -323,6 +334,7 @@ Anything else returns 404. The endpoint reads only from the shared cache, so it 
 `pkg/api` has an `Authorizer` seam (D-013). It decides, per request, whether the caller may see a given object, identified by group, kind, namespace and name (for example `Authorize(request, ref) bool`).
 - Every handler that returns resources, findings or counts goes through it: installs, overview, health and resources.
 - A denied object returns 404 from the resource endpoint, the same as an absent one. It is left out of resource lists and count tiles. Findings about it are **kept but restricted** (next bullet), never dropped.
+- Namespace scope counts (`watched` / `total`) and install identity are not filtered by the `Authorizer`. Revisit with per-user authorisation.
 - Phase 1 ships `AllowAll`. A downstream or a later phase registers its own through `extension.WithAuthorizer`; the default is `AllowAll`.
 - The roll-up is always computed over all findings of the install, never only the visible ones: a user must see that something is wrong even when they may not see the details (D-006, D-013). A finding about a resource the caller may not view is redacted, not dropped: it keeps its severity, code and resource identity (kind, namespace, name), so a platform team can tell which team to contact; its message and evidence are removed and it carries `restricted: true`. The UI renders it without a link, as "restricted, ask the owning team".
 
@@ -393,7 +405,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
   - a finding links to the YAML view only when its kind is listed in `/api/v1/meta`;
   - the `Shell` root applies `stylesOverride`.
 - **Extension seam.**
-  - In Go, a test-only extension registers an extra kind, detector, check, code prefix and authorizer; its findings and counts appear in API output, and the authorizer's denials take effect.
+  - In Go, a test-only extension registers an extra kind, detector, check (with its own code prefix) and authorizer; its findings and counts appear in API output, and the authorizer's denials take effect.
   - In the frontend, a test-only app registers a page and a theme; the page renders in the shell, and the test asserts that the contributed tokens (colour and typography) are applied to rendered components.
 - **e2e** (kind, run against kgateway 2.3 and 2.4 in a matrix; `main` as a non-blocking job):
   1. Install kgateway and fixture resources, including deliberately broken ones and a namespace outside the selector.
@@ -405,7 +417,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
 ## 10. Supported versions
 
 - kgateway **2.3.x** and **2.4.x** in CI; `main` is tracked as a non-blocking e2e job.
-- Kinds are discovered per cluster, so kinds that exist only in some versions (for example `HTTPListenerPolicy` on 2.3 and 2.4) appear and disappear without code changes.
+- Kinds are discovered per cluster, so kinds that exist only in some versions (for example `HTTPListenerPolicy` on 2.3 and 2.4) appear and disappear without code changes. The served set is resolved at startup and re-resolved every 60 s; a change (including a preferred-version change) raises a required KGWUI-008 per install asking for a restart (§5.4).
 - **Status capabilities differ per version** (verified on the v2.3.x and v2.4.x release refs):
   - The policy reason `TargetNotFound` and the `StatusSummary` ancestor exist only on `main`. On 2.3 and 2.4 a policy whose target is missing gets no status at all, so the UI reports it as not yet processed (§5.2). It never claims a missing target it cannot see.
   - Dropped and replaced route rules appear as `Accepted=False` on 2.3 and as `kgateway.dev/Programmed=False` on 2.4 and `main`. Both are reported under KGWUI-002.
@@ -431,11 +443,11 @@ This phase generates no data-plane configuration. The cost falls on the control 
 - **Watches.** One cluster-wide watch per registered served kind: about 20 kinds, plus Namespaces, and label-selected watches on Pods (controller only) and Deployments (controller and proxies). That is comparable to a single extra controller's list/watch load.
 - **Availability tracking** adds no requests: it records the outcome of the informers' own List and Watch calls and the events they receive.
 - **Memory.** The memory footprint scales with the number of Gateway API and kgateway objects in the cluster. Secrets and ConfigMaps are not cached.
-- **Metrics scraping.** One `GET /metrics` per controller replica every 10 s.
+- **Metrics scraping.** One `GET /metrics` per controller replica every 10 s, with an 8 MiB body cap and a per-pod timeout of min(interval / 2, 5 s) (§5.4).
 - **No new data-plane objects or xDS churn.** The metric names the UI depends on are listed in one place (`pkg/ctrlmetrics`), so a rename upstream is a one-line change and shows up as KGWUI-008 until it is made.
 
 ## 13. Open items
 
-1. **Shared `controllerName` across installs.** Can two kgateway installs share a `controllerName` with disjoint scopes, and how do they behave? This is the first plan task (kind experiment). §4.3 is safe either way.
-2. **Replica semantics of the controller metrics.** Is `kgateway_envoy_xds_rejects_active` per replica (and summed), and does every replica report the full `kgateway_resources_managed`? This is the first plan task, together with item 1.
+1. **Shared `controllerName` across installs.** Can two kgateway installs share a `controllerName` with disjoint scopes, and how do they behave? Resolved (D-012): yes. Both installs ran with one GatewayClass and one `controllerName`, each reconciled only the Gateways in its own namespaces, and the GatewayClass did not flap. §4.3 is unchanged.
+2. **Replica semantics of the controller metrics.** Is `kgateway_envoy_xds_rejects_active` per replica (and summed), and does every replica report the full `kgateway_resources_managed`? Resolved (D-012): yes. Only the replica serving the proxy's xDS stream reports the reject, and every replica reports the full `kgateway_resources_managed`, so rejects are summed and `resources_managed` takes the max.
 3. **Upstream proposal** for an effective-scope endpoint (D-009 §7). It is filed during Phase 1, but it does not block the phase.
