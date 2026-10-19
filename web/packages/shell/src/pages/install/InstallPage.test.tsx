@@ -85,18 +85,19 @@ it("what was checked shows a check's detail", async () => {
 it("unknown: never green, names the missing signal", async () => {
   mount(unknown());
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("No known problems — xDS rejects could not be checked");
+  expect(strip).toHaveTextContent("Health unknown — xDS rejects could not be checked");
+  expect(strip).not.toHaveTextContent("No known problems");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
   expect(screen.getByTestId("finding-row")).toHaveTextContent("connection refused");
 });
 
-it("unknown with warnings counts the warnings instead of claiming no problems", async () => {
+it("unknown with warnings names the reason, then the warnings", async () => {
   const h = unknown();
   h.findings.push({ ...(unhealthy().findings[1] as HealthReport["findings"][number]) });
   h.counts = { info: 1, warning: 1 };
   mount(h);
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("1 warning — xDS rejects could not be checked");
+  expect(strip).toHaveTextContent("Health unknown — xDS rejects could not be checked · 1 warning");
   expect(strip).not.toHaveTextContent("No known problems");
 });
 
@@ -128,7 +129,7 @@ it("served kinds changed: the strip names the check and the finding shows its de
     ],
   });
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("No known problems — served kinds could not be checked");
+  expect(strip).toHaveTextContent("Health unknown — served kinds could not be checked");
   const row = screen.getByTestId("finding-row");
   expect(row).toHaveTextContent("Served kinds changed; restart the UI to watch them");
   expect(row).toHaveTextContent("added TLSRoute");
@@ -155,7 +156,8 @@ it("a healthy page turns stale as it ages while identical responses keep arrivin
 it("being processed: unknown, never green, and says what is happening", async () => {
   mount(processing());
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("No known problems — 2 resources are being processed by the controller");
+  expect(strip).toHaveTextContent("Health unknown — 2 resources are being processed by the controller");
+  expect(strip).not.toHaveTextContent("No known problems");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
   expect(strip).not.toHaveTextContent("could not be checked");
 });
@@ -359,4 +361,30 @@ it("API error shows a designed error state", async () => {
     { path: "/i/kgw/kgateway" },
   );
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("install kgw/kgateway not found"));
+});
+
+it.each([
+  ["error", "Error"],
+  ["warning", "Warning"],
+] as const)("a %s install without counts falls back to the state label", async (state, label) => {
+  mount({ ...unhealthy(), state, counts: {} });
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent(label);
+});
+
+// Mirrors the backend's rowState: a missing required signal makes every non-error row unknown (D-006).
+it("a failing required check turns non-error gateway rows unknown", async () => {
+  mount(unknown());
+  await screen.findByTestId("health-strip");
+  const [edge, internal] = gatewayRows() as [HTMLElement, HTMLElement];
+  expect(edge).toHaveTextContent("Error"); // an error finding is still an error
+  expect(internal).toHaveTextContent("Unknown");
+  expect(within(internal).queryByTestId("health-icon-healthy")).toBeNull();
+});
+
+it("a failing optional check leaves gateway rows as reported", async () => {
+  const h = healthy();
+  h.checks.push({ name: "gateway ownership", ok: false, required: false, collectedAt: h.collectedAt });
+  mount(h);
+  await screen.findByTestId("health-strip");
+  expect(gatewayRows()[1]).toHaveTextContent("Healthy");
 });

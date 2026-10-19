@@ -88,13 +88,14 @@ export function InstallPage() {
   }
   // Stale health or overview turns the strip and the gateway rows unknown (D-006).
   const stale = isStale(h.data.collectedAt, now) || isStale(ov.data.collectedAt, now);
+  const signalsMissing = h.data.checks.some((c) => c.required && !c.ok);
   const checkedAt =
     Date.parse(ov.data.collectedAt) < Date.parse(h.data.collectedAt) ? ov.data.collectedAt : h.data.collectedAt;
   const gateways = (
     <>
       <CountTiles overview={ov.data} />
       <h2>Gateways</h2>
-      <GatewayTable rows={ov.data.gateways} installId={id} stale={stale} />
+      <GatewayTable rows={ov.data.gateways} installId={id} stale={stale} signalsMissing={signalsMissing} />
     </>
   );
   return (

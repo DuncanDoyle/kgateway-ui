@@ -1,5 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import { memo } from "react";
 import type { LabelSelector, OverviewResponse, ScopeSummary } from "../../api/types";
 import { HealthIcon } from "../../health/HealthIcon";
 import { Tooltip } from "../../shell/Tooltip";
@@ -81,8 +82,8 @@ interface CountTilesProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** Count tiles per served kind, in served order, plus the scope tile. */
-export function CountTiles({ overview, stylesOverride }: CountTilesProps) {
+/** Count tiles per served kind, in served order, plus the scope tile. Memoised against the page's 1 s clock tick. */
+export const CountTiles = memo(function CountTiles({ overview, stylesOverride }: CountTilesProps) {
   const sc = overview.header.scope;
   return (
     <TileGrid stylesOverride={stylesOverride}>
@@ -121,4 +122,4 @@ export function CountTiles({ overview, stylesOverride }: CountTilesProps) {
       </Tile>
     </TileGrid>
   );
-}
+});

@@ -14,6 +14,7 @@ import { Tooltip } from "../../shell/Tooltip";
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   display: grid;
   grid-template-columns: 112px minmax(180px, 300px) 1fr 28px;
+  grid-template-areas: "sev res msg copy";
   align-items: start;
   gap: ${(p) => p.theme.space(3)};
   padding: ${(p) => p.theme.space(2.5)} ${(p) => p.theme.space(3)};
@@ -48,11 +49,24 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   .code {
     font-family: ${(p) => p.theme.font.mono};
   }
+  .sev {
+    grid-area: sev;
+  }
+  .res {
+    grid-area: res;
+    min-width: 0;
+  }
+  .text {
+    grid-area: msg;
+    min-width: 0;
+  }
+  .copy {
+    grid-area: copy;
+  }
   @media (max-width: 720px) {
-    grid-template-columns: 1fr 28px;
-    > :nth-of-type(3) {
-      grid-column: 1 / -1;
-    }
+    grid-template-columns: minmax(0, 1fr) 28px;
+    grid-template-areas: "sev copy" "res res" "msg msg";
+    row-gap: ${(p) => p.theme.space(1.5)};
   }
   ${(p) => p.stylesOverride}
 `;
@@ -114,15 +128,15 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
   const linked = !!f.resource && !f.restricted && isLinkable(meta, f.resource);
   return (
     <Row data-testid="finding-row" stylesOverride={stylesOverride}>
-      <div>
+      <div className="sev">
         <HealthBadge state={severityToState(f.severity)} label={severityLabel[f.severity]} />
         <div className="muted code">{f.code}</div>
       </div>
-      <div>
+      <div className="res">
         {linked && f.resource ? <Link to={resourcePath(installId, f.resource)}>{name}</Link> : name}
         {f.resource ? <div className="muted">{f.resource.kind}</div> : null}
       </div>
-      <div>
+      <div className="text">
         {f.restricted ? (
           <div className="muted">Restricted</div>
         ) : (
@@ -133,21 +147,21 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
           </>
         )}
       </div>
-      {f.resource ? (
-        <Tooltip label="Copy namespace/name" placement="end">
-          <IconButton
-            type="button"
-            aria-label="Copy resource name"
-            onClick={() => {
-              if (f.resource) void navigator.clipboard?.writeText(copyText(f.resource)).catch(() => {});
-            }}
-          >
-            <Copy size={14} aria-hidden="true" />
-          </IconButton>
-        </Tooltip>
-      ) : (
-        <span />
-      )}
+      <div className="copy">
+        {f.resource ? (
+          <Tooltip label="Copy namespace/name" placement="end">
+            <IconButton
+              type="button"
+              aria-label="Copy resource name"
+              onClick={() => {
+                if (f.resource) void navigator.clipboard?.writeText(copyText(f.resource)).catch(() => {});
+              }}
+            >
+              <Copy size={14} aria-hidden="true" />
+            </IconButton>
+          </Tooltip>
+        ) : null}
+      </div>
     </Row>
   );
 }

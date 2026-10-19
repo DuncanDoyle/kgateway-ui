@@ -9,11 +9,12 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp } from "lucide-react";
-import { type MouseEvent, useMemo } from "react";
+import { type MouseEvent, memo, useMemo } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import type { GatewayRow } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
+import type { HealthState } from "../../theme/tokens";
 import { resourcePath } from "./FindingRow";
 
 // region Styles
@@ -143,12 +144,17 @@ function filterRows(rows: GatewayRow[], q: string): GatewayRow[] {
   return rows.filter((r) => [r.ref.name, r.ref.namespace ?? "", r.class].some((v) => v.toLowerCase().includes(needle)));
 }
 
-// Stale data renders every row as unknown: an old green badge is not evidence (D-006).
-function columns(installId: string, stale: boolean) {
+/** The state a row shows: unknown on stale data or a missing required signal (unless it has an error), as the backend's rowState (D-006). */
+function shownState(r: GatewayRow, stale: boolean, signalsMissing: boolean): HealthState {
+  if (stale) return "unknown";
+  return signalsMissing && r.state !== "error" ? "unknown" : r.state;
+}
+
+function columns(installId: string) {
   return [
     col.accessor("state", {
       header: "Status",
-      cell: (c) => <HealthBadge state={stale ? "unknown" : c.getValue()} />,
+      cell: (c) => <HealthBadge state={c.getValue()} />,
       sortingFn: (a, b) => rank[a.original.state] - rank[b.original.state],
     }),
     col.accessor(gatewayKey, {
@@ -177,22 +183,34 @@ interface GatewayTableProps {
   rows: GatewayRow[];
   installId: string;
   stale: boolean;
+  /** A required check is not OK: non-error rows show unknown. */
+  signalsMissing: boolean;
   stylesOverride?: SerializedStyles;
 }
 
-/** Gateways of the install; the text filter and the sort are kept in the URL (?q=edge&sort=routes.desc). */
-export function GatewayTable({ rows, installId, stale, stylesOverride }: GatewayTableProps) {
+/** Gateways of the install; the text filter and the sort are kept in the URL (?q=edge&sort=routes.desc). Memoised so the page's 1 s clock tick does not re-render it. */
+export const GatewayTable = memo(function GatewayTable({
+  rows,
+  installId,
+  stale,
+  signalsMissing,
+  stylesOverride,
+}: GatewayTableProps) {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const q = params.get("q") ?? "";
-  const visible = useMemo(() => filterRows(rows, q), [rows, q]);
+  // The shown state goes into the row data: TanStack caches cell values per row, so a closure would not refresh them.
+  const visible = useMemo(
+    () => filterRows(rows, q).map((r) => ({ ...r, state: shownState(r, stale, signalsMissing) })),
+    [rows, q, stale, signalsMissing],
+  );
   const sort = params.get("sort") ?? "state.asc";
   // A new sorting array on every render re-runs the table's auto-resets, which re-render it forever.
   const sorting = useMemo<SortingState>(() => {
     const [id, dir] = sort.split(".");
     return [{ id: id || "state", desc: dir === "desc" }];
   }, [sort]);
-  const cols = useMemo(() => columns(installId, stale), [installId, stale]);
+  const cols = useMemo(() => columns(installId), [installId]);
   const table = useReactTable({
     data: visible,
     columns: cols,
@@ -280,4 +298,4 @@ export function GatewayTable({ rows, installId, stale, stylesOverride }: Gateway
       </Scroll>
     </>
   );
-}
+});
