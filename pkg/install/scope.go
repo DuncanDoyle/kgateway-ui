@@ -27,12 +27,14 @@ const (
 	ScopeUnknown ScopeMode = "unknown"
 )
 
-// Scope is the set of namespaces a controller install watches.
+// Scope is the set of namespaces a controller install watches. A Scope built
+// by hand (for example by a downstream ScopeProvider) needs only Mode and Selectors.
 type Scope struct {
 	Mode      ScopeMode              `json:"mode"`
 	Selectors []metav1.LabelSelector `json:"selectors,omitempty"`
 	Err       string                 `json:"error,omitempty"`
-	matchers  []labels.Selector
+	// matchers are Selectors compiled by ParseSelectors; nil means compile on use.
+	matchers []labels.Selector
 }
 
 // Contains reports whether namespace nsName (with object ns, which may be nil
@@ -45,13 +47,29 @@ func (s Scope) Contains(nsName string, ns *corev1.Namespace) bool {
 		if ns == nil {
 			return false
 		}
-		for _, m := range s.matchers {
+		ms := s.matchers
+		if ms == nil {
+			ms = compile(s.Selectors)
+		}
+		for _, m := range ms {
 			if m.Matches(labels.Set(ns.Labels)) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// compile converts sels to selectors, skipping invalid ones: an invalid
+// selector matches no namespace.
+func compile(sels []metav1.LabelSelector) []labels.Selector {
+	out := make([]labels.Selector, 0, len(sels))
+	for i := range sels {
+		if m, err := metav1.LabelSelectorAsSelector(&sels[i]); err == nil {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // ScopeProvider resolves the scope of an install (D-009). Downstreams may register their own.

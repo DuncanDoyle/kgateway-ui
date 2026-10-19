@@ -102,9 +102,11 @@ func (acmeDetector) ProxySelector() labels.Selector {
 func (acmeDetector) ControllerPodSelector() labels.Selector {
 	return labels.SelectorFromSet(labels.Set{"kgateway": "kgateway"})
 }
+
+// Detect leaves Deployment and ProxySelector unset: Discover fills them.
 func (acmeDetector) Detect(d *appsv1.Deployment) (install.Install, bool) {
 	return install.Install{Namespace: d.Namespace, Name: d.Name, Edition: "acme", Version: "9.9.9", Container: "kgateway",
-		ControllerNames: []string{acmeController}, Deployment: d, MetricsPort: 9092}, true
+		ControllerNames: []string{acmeController}, MetricsPort: 9092}, true
 }
 
 type acmeCheck struct{}
@@ -345,4 +347,76 @@ func TestServeDrainsInFlightRequests(t *testing.T) {
 	if err := <-served; err != nil {
 		t.Fatalf("a cancelled serve must return nil, got %v", err)
 	}
+}
+
+// selectorScope is a downstream ScopeProvider that builds its Scope by hand,
+// as a downstream outside pkg/install must.
+type selectorScope struct{}
+
+func (selectorScope) Name() string { return "team-a" }
+func (selectorScope) Scope(install.Install) install.Scope {
+	return install.Scope{Mode: install.ScopeSelectors, Selectors: []metav1.LabelSelector{{MatchLabels: map[string]string{"team": "a"}}}}
+}
+
+// A downstream ScopeProvider returning selectors decides namespace membership
+// through the API: team=a namespaces are watched, others are not.
+func TestDownstreamSelectorScopeSeam(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	gw := testutil.GwRef("infra", "edge")
+	_, srv := start(t, []runtime.Object{
+		testutil.Namespace("kgw", nil), testutil.Namespace("infra", map[string]string{"team": "a"}),
+		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil),
+		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.ProxyDeployment("infra", "edge", 1, 1),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("blog", "posts", []objects.ParentRef{gw}),
+	}, nil, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{}, extension.WithScopeProvider(selectorScope{}))
+
+	var o api.OverviewResponse
+	eventually(t, "overview never appeared", func() bool {
+		o = api.OverviewResponse{}
+		return getJSON(t, srv, "/api/v1/installs/kgw/kgateway/overview", &o) == http.StatusOK
+	})
+	if o.Header.Scope.Watched != 2 || o.Header.Scope.Total != 4 {
+		t.Fatalf("a downstream selector scope must match team=a namespaces: %+v", o.Header.Scope)
+	}
+	for kind, want := range map[string]int{"Gateway": 1, "HTTPRoute": 1} {
+		got := -1
+		for _, c := range o.Counts {
+			if c.Kind == kind {
+				got = c.Count
+			}
+		}
+		if got != want {
+			t.Fatalf("%s count: want %d, got %d (%+v)", kind, want, got, o.Counts)
+		}
+	}
+}
+
+// Proxies are matched with the detector's ProxySelector plus the standard
+// gateway-name label: a downstream proxy without the upstream component label
+// is found, and an upstream-labelled Deployment for the same Gateway is not.
+func TestDownstreamProxySelectorSeam(t *testing.T) {
+	d := testutil.ControllerDeployment("acme-system", "controller", "example.com/acme/controller:9.9.9", 1, 1)
+	d.Labels = map[string]string{"app": "acme-controller"}
+	proxy := testutil.ProxyDeployment("infra", "edge-proxy", 2, 1)
+	proxy.Labels = map[string]string{"app": "acme-proxy", "gateway.networking.k8s.io/gateway-name": "edge"}
+	proxy.OwnerReferences = nil
+	decoy := testutil.ProxyDeployment("infra", "edge", 1, 1) // upstream labels, ready
+	_, srv := start(t, []runtime.Object{
+		testutil.Namespace("acme-system", nil), testutil.Namespace("infra", nil), d, testutil.ControllerPod(d, "controller-0", true),
+		proxy, decoy, testutil.GatewayClass("acme", acmeController, true), testutil.Gateway("infra", "edge", "acme", nil),
+	}, nil, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{}, extension.WithDetectors(acmeDetector{}))
+
+	var h api.HealthResponse
+	eventually(t, "the downstream proxy was never matched", func() bool {
+		h = api.HealthResponse{}
+		getJSON(t, srv, "/api/v1/installs/acme-system/controller/health", &h)
+		for _, f := range h.Findings {
+			if f.Code == health.CodeProxyNotReady && f.Resource != nil && f.Resource.String() == "infra/edge" && f.Message == "Proxy not ready (1 of 2 replicas)" {
+				return true
+			}
+		}
+		return false
+	})
 }

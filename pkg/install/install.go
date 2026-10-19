@@ -25,6 +25,9 @@ type Install struct {
 	Deployment  *appsv1.Deployment
 	Pods        []*corev1.Pod
 	MetricsPort int32
+	// ProxySelector selects this distribution's gateway proxy Deployments; Discover
+	// fills it from the detector when Detect leaves it nil.
+	ProxySelector labels.Selector
 }
 
 // ID returns "namespace/name" of the controller Deployment.
@@ -57,6 +60,13 @@ func Discover(snap *cache.Snapshot, detectors []Detector) []Install {
 			in, ok := det.Detect(d)
 			if !ok {
 				continue
+			}
+			// Checks rely on both; a detector may leave them unset.
+			if in.Deployment == nil {
+				in.Deployment = d
+			}
+			if in.ProxySelector == nil {
+				in.ProxySelector = det.ProxySelector()
 			}
 			in.Pods = podsOf(d, snap.Pods)
 			out = append(out, in)

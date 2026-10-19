@@ -37,6 +37,23 @@ func TestDetectorOrderLetsDownstreamWin(t *testing.T) {
 	}
 }
 
+// Discover fills the Deployment and ProxySelector a detector leaves unset.
+func TestDiscoverBackfillsDeploymentAndProxySelector(t *testing.T) {
+	d := testutil.ControllerDeployment("ns", "c", "example.com/other:1.0", 1, 1)
+	got := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}}, []Detector{bareDetector{}})
+	if len(got) != 1 || got[0].Deployment != d || got[0].ProxySelector == nil ||
+		got[0].ProxySelector.String() != (UpstreamDetector{}).ProxySelector().String() {
+		t.Fatalf("Deployment and ProxySelector must be filled from the detector: %+v", got)
+	}
+}
+
+// bareDetector claims every upstream-labelled Deployment and sets only its identity.
+type bareDetector struct{ UpstreamDetector }
+
+func (bareDetector) Detect(d *appsv1.Deployment) (Install, bool) {
+	return Install{Namespace: d.Namespace, Name: d.Name}, true
+}
+
 type fixedDetector struct{ UpstreamDetector }
 
 func (fixedDetector) Detect(d *appsv1.Deployment) (Install, bool) {

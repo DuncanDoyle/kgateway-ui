@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -380,8 +381,9 @@ func policySeverity(c metav1.Condition) (Severity, bool) {
 	return "", false
 }
 
-// proxyCheck: KGWUI-006. Proxies are matched by ownerReference first, then by
-// the gateway-name label, which is truncated for names over 63 characters.
+// proxyCheck: KGWUI-006. Proxies are Deployments in the Gateway's namespace
+// that match the install's ProxySelector, found by ownerReference first, then
+// by the gateway-name label, which is truncated for names over 63 characters.
 type proxyCheck struct{}
 
 // Name implements Check.
@@ -391,7 +393,7 @@ func (proxyCheck) Name() string { return "gateway proxies" }
 func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
 	for _, gw := range in.Owned.Gateways {
-		d := proxyFor(gw, in.Snapshot.Deployments)
+		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
 		if d == nil {
 			if in.Now.Sub(in.firstSeen(gw)) >= Grace {
 				fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
@@ -407,9 +409,17 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
 
-func proxyFor(gw *unstructured.Unstructured, ds []*appsv1.Deployment) *appsv1.Deployment {
+// gatewayNameLabel is the standard Gateway API label on generated proxy resources.
+const gatewayNameLabel = "gateway.networking.k8s.io/gateway-name"
+
+// proxyFor returns gw's proxy Deployment among ds; a nil sel matches none.
+func proxyFor(gw *unstructured.Unstructured, ds []*appsv1.Deployment, sel labels.Selector) *appsv1.Deployment {
+	if sel == nil {
+		return nil
+	}
+	var byLabel *appsv1.Deployment
 	for _, d := range ds {
-		if d.Namespace != gw.GetNamespace() || d.Labels["app.kubernetes.io/component"] != "proxy" {
+		if d.Namespace != gw.GetNamespace() || !sel.Matches(labels.Set(d.Labels)) {
 			continue
 		}
 		for _, o := range d.OwnerReferences {
@@ -417,14 +427,11 @@ func proxyFor(gw *unstructured.Unstructured, ds []*appsv1.Deployment) *appsv1.De
 				return d
 			}
 		}
-	}
-	for _, d := range ds {
-		if d.Namespace == gw.GetNamespace() && d.Labels["app.kubernetes.io/component"] == "proxy" &&
-			d.Labels["gateway.networking.k8s.io/gateway-name"] == gw.GetName() {
-			return d
+		if byLabel == nil && d.Labels[gatewayNameLabel] == gw.GetName() {
+			byLabel = d
 		}
 	}
-	return nil
+	return byLabel
 }
 
 // xdsCheck: KGWUI-001.

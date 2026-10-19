@@ -43,7 +43,8 @@ func (UpstreamDetector) Detect(d *appsv1.Deployment) (Install, bool) {
 			continue
 		}
 		in := Install{Namespace: d.Namespace, Name: d.Name, Edition: "kgateway", Container: c.Name,
-			ControllerNames: []string{UpstreamControllerName}, Deployment: d, MetricsPort: 9092}
+			ControllerNames: []string{UpstreamControllerName}, Deployment: d, MetricsPort: 9092,
+			ProxySelector: UpstreamDetector{}.ProxySelector()}
 		in.Version = d.Labels["app.kubernetes.io/version"]
 		if in.Version == "" {
 			in.Version = strings.TrimPrefix(tag, "v")
