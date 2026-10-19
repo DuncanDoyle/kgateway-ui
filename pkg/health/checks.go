@@ -440,7 +440,8 @@ type xdsCheck struct{}
 // Name implements Check.
 func (xdsCheck) Name() string { return "xDS rejects" }
 
-// Run implements Check. Missing, failed or stale metrics are KGWUI-008.
+// Run implements Check. Missing, failed or stale metrics, or a scrape without
+// the resources_managed family while Gateways are owned, are KGWUI-008.
 func (c xdsCheck) Run(in Input) ([]Finding, CheckResult) {
 	if !in.HasMetrics {
 		return unavailable(in, c.Name(), "controller metrics not collected yet")
@@ -451,6 +452,12 @@ func (c xdsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// Recomputing the model must not make an old zero-reject result look fresh.
 	if in.Metrics.Stale(in.Now, in.MetricsMaxAge) {
 		return unavailable(in, c.Name(), fmt.Sprintf("controller metrics are stale (last collected %s ago)", in.Now.Sub(in.Metrics.CollectedAt).Round(time.Second)))
+	}
+	// Every owned Gateway has a resources_managed series (D-012); without the
+	// family the endpoint or metric names are wrong, and zero rejects proves nothing.
+	if n := len(in.Owned.Gateways); n > 0 && !in.Metrics.Metrics.ManagedPresent {
+		return unavailable(in, c.Name(), fmt.Sprintf("%s missing from controller metrics although the install owns %d Gateway(s); check the metrics endpoint",
+			ctrlmetrics.ResourcesManaged, n))
 	}
 	var fs []Finding
 	for _, gw := range in.Owned.Gateways {

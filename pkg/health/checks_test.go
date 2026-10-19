@@ -53,7 +53,7 @@ func healthyWorld() *world {
 			testutil.Gateway("infra", "edge", "kgateway", nil),
 			testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
 		},
-		metrics: &ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}}},
+		metrics: &ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}},
 	}
 }
 
@@ -473,7 +473,7 @@ func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
 	for _, res := range insts {
 		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
-			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}}}}
+			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}}
 		r := Evaluate(hi, Upstream())
 		if r.State != StateHealthy || len(r.Findings) != 0 {
 			t.Fatalf("%s: state=%s findings=%+v", res.ID(), r.State, r.Findings)

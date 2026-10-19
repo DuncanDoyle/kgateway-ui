@@ -282,6 +282,36 @@ func TestMetricsUnreachableIsNeverHealthy(t *testing.T) {
 	}
 }
 
+// D-012: every owned Gateway yields a kgateway_resources_managed series, so a
+// scrape without that family while the install owns a Gateway is the wrong
+// endpoint or a renamed metric: xDS rejects are unavailable, not zero.
+func TestScrapeWithoutManagedFamilyIsNeverHealthy(t *testing.T) {
+	empty := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+		Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}}}}
+	xds := func(h HealthResponse) *health.CheckResult {
+		for i := range h.Checks {
+			if h.Checks[i].Name == "xDS rejects" {
+				return &h.Checks[i]
+			}
+		}
+		t.Fatalf("no xDS check: %+v", h.Checks)
+		return nil
+	}
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", empty, isolated()...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+	if c := xds(h); h.State != health.StateUnknown || c.OK || !c.Required || !hasSev(h, health.CodeSignalUnavailable, health.SeverityInfo, "") {
+		t.Fatalf("an owned Gateway without a managed series must make xDS unavailable: %s %+v %+v", h.State, c, h.Findings)
+	}
+
+	// Without owned Gateways an absent family is expected: no series yet.
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1)
+	_, bare, _ := start(t, testutil.ServedUpstream(), "", empty, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+	h = get[HealthResponse](t, bare, "/api/v1/installs/kgw/kgateway/health", 200)
+	if c := xds(h); h.State != health.StateHealthy || !c.OK {
+		t.Fatalf("no owned Gateway: an absent family is not an error: %s %+v %+v", h.State, c, h.Findings)
+	}
+}
+
 func TestUnservedKindHasNoTileAndNoFinding(t *testing.T) {
 	var served []kinds.Served
 	for _, s := range testutil.ServedUpstream() {

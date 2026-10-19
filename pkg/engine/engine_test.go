@@ -28,7 +28,7 @@ func (s staticSnap) Snapshot() *cache.Snapshot { return s.s }
 type metricsAt time.Time
 
 func (m metricsAt) Get(string) (ctrlmetrics.Result, bool) {
-	return ctrlmetrics.Result{CollectedAt: time.Time(m), Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}}}, true
+	return ctrlmetrics.Result{CollectedAt: time.Time(m), Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}, true
 }
 
 // gvr returns the upstream served GVR of kind.
