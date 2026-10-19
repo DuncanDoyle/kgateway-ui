@@ -232,3 +232,6 @@ func ProxyDeployment(gwNS, gwName string, desired, ready int32) *appsv1.Deployme
 
 // Env is a shorthand for a literal env var.
 func Env(name, value string) corev1.EnvVar { return corev1.EnvVar{Name: name, Value: value} }
+
+// PodList converts pods for use in a Snapshot.
+func PodList(ps ...*corev1.Pod) []*corev1.Pod { return ps }
