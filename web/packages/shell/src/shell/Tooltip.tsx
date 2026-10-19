@@ -25,6 +25,26 @@ const Tip = styled.span<{ $placement: "center" | "end" }>`
   pointer-events: none;
 `;
 
+// region Helpers
+// Whether the last input was a pointer press: focus that follows a click (a menu handing focus back) shows no tip.
+let pointerInput = false;
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "pointerdown",
+    () => {
+      pointerInput = true;
+    },
+    true,
+  );
+  document.addEventListener(
+    "keydown",
+    () => {
+      pointerInput = false;
+    },
+    true,
+  );
+}
+
 // region Component
 interface TooltipProps {
   label: string;
@@ -35,10 +55,10 @@ interface TooltipProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** App tooltip shown on hover and focus, hidden on press. Native title tooltips are not used. */
+/** App tooltip shown on hover and keyboard focus, hidden on press. Native title tooltips are not used. */
 export function Tooltip({ label, children, placement = "center", stylesOverride }: TooltipProps) {
   const [open, setOpen] = useState(false);
-  // A press hides the tip until the pointer leaves, so the focus that follows a click does not reopen it.
+  // A press hides the tip until the pointer leaves.
   const pressed = useRef(false);
   const id = useId();
   return (
@@ -49,7 +69,7 @@ export function Tooltip({ label, children, placement = "center", stylesOverride 
         pressed.current = false;
         setOpen(false);
       }}
-      onFocus={() => setOpen(!pressed.current)}
+      onFocus={() => setOpen(!pointerInput)}
       onBlur={() => setOpen(false)}
       onPointerDown={() => {
         pressed.current = true;

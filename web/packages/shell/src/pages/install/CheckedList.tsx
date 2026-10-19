@@ -2,6 +2,8 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import type { CheckResult } from "../../api/types";
 import { HealthIcon } from "../../health/HealthIcon";
+import { stateLabel } from "../../health/state";
+import { VisuallyHidden } from "../../states/VisuallyHidden";
 
 // region Styles
 const List = styled.ul<{ stylesOverride?: SerializedStyles }>`
@@ -37,13 +39,17 @@ interface CheckedListProps {
 /** Proves that green means "checked and fine", not "did not look" (design §5.3). */
 export function CheckedList({ checks, stale = false, stylesOverride }: CheckedListProps) {
   return (
-    <List aria-label="What was checked" stylesOverride={stylesOverride}>
+    <List aria-label="Checks" stylesOverride={stylesOverride}>
       {checks.map((c) => {
         const note = c.detail ?? (c.ok ? undefined : c.error);
+        const state = c.ok && !stale ? "healthy" : "unknown";
         return (
           <li key={c.name}>
-            <HealthIcon state={c.ok && !stale ? "healthy" : "unknown"} />
-            <span>{c.name}</span>
+            <HealthIcon state={state} />
+            <span>
+              <VisuallyHidden>{stateLabel(state)}: </VisuallyHidden>
+              {c.name}
+            </span>
             {note ? <span className="detail">{note}</span> : null}
           </li>
         );

@@ -5,6 +5,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
+import { DocumentTitle } from "./DocumentTitle";
 import { type CorePages, defaultBrand, type ShellExtension, ShellExtensionContext } from "./extension";
 import { Header } from "./Header";
 import { RootRedirect } from "./RootRedirect";
@@ -45,6 +46,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       <ThemeProvider themes={ext.themes} defaultThemeId={ext.defaultThemeId}>
         <BrowserRouter>
           <Root data-testid="shell-root" stylesOverride={stylesOverride}>
+            <DocumentTitle />
             <Header />
             <main>
               <Routes>

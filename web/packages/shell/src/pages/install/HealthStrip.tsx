@@ -76,7 +76,8 @@ export function HealthStrip({ health, stale, now, checkedAt, stylesOverride }: H
   return (
     <Strip $state={state} data-testid="health-strip" stylesOverride={stylesOverride}>
       <HealthIcon state={state} size={18} />
-      <b>{stale ? `Data is stale — last checked ${ago(at, now)}` : headline(health)}</b>
+      {/* Only the headline is live: the age below it ticks every second and would be read out each time. */}
+      <b role="status">{stale ? `Data is stale — last checked ${ago(at, now)}` : headline(health)}</b>
       {stale ? null : <span className="when">checked {ago(at, now)}</span>}
     </Strip>
   );

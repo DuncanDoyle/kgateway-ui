@@ -67,8 +67,24 @@ it("unhealthy: strip with counts, top 5 findings, show all", async () => {
 it("healthy: slim strip and what was checked", async () => {
   mount(healthy());
   expect(await screen.findByTestId("health-strip")).toHaveTextContent("All healthy");
-  const checked = screen.getByRole("list", { name: "What was checked" });
+  const checked = screen.getByRole("list", { name: "Checks" });
   expect(within(checked).getByText("xDS rejects")).toBeInTheDocument();
+});
+
+it("each check names its state in text, not only in the icon", async () => {
+  const h = healthy();
+  h.checks.push({ name: "gateway ownership", ok: false, required: false, collectedAt: h.collectedAt });
+  mount(h);
+  const items = within(await screen.findByRole("list", { name: "Checks" })).getAllByRole("listitem");
+  expect(items[0]).toHaveTextContent(/^Healthy: resource status$/);
+  expect(items[2]).toHaveTextContent(/^Unknown: gateway ownership$/);
+});
+
+it("only the strip headline is a live status, not its ticking age", async () => {
+  mount(healthy());
+  const strip = await screen.findByTestId("health-strip");
+  expect(strip).not.toHaveAttribute("role");
+  expect(within(strip).getByRole("status")).toHaveTextContent(/^All healthy$/);
 });
 
 it("what was checked shows a check's detail", async () => {
@@ -81,7 +97,7 @@ it("what was checked shows a check's detail", async () => {
     detail: "scope from Deployment template; no controller Pod running",
   });
   mount(h);
-  const checked = await screen.findByRole("list", { name: "What was checked" });
+  const checked = await screen.findByRole("list", { name: "Checks" });
   expect(checked).toHaveTextContent("scope from Deployment template; no controller Pod running");
 });
 

@@ -230,6 +230,65 @@ it("shows the app tooltip on hover and links it to the button", async () => {
   expect(button).not.toHaveAttribute("title");
 });
 
+it("a theme picked with the mouse leaves no tooltip behind", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway");
+  const button = await screen.findByRole("button", { name: /theme/i });
+  await userEvent.click(button);
+  // The pointer leaves the button for the menu below it, as it does in a browser.
+  await userEvent.unhover(button);
+  await userEvent.click(screen.getByRole("menuitemradio", { name: /Control room light/ }));
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(button).toHaveFocus();
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+it("keyboard focus shows a button's tooltip", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway");
+  const button = await screen.findByRole("button", { name: /theme/i });
+  await userEvent.click(button);
+  await userEvent.keyboard("{Escape}");
+  expect(button).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent("Theme: Control room");
+});
+
+it("switcher items name each install's state", async () => {
+  stubApi({
+    "/api/v1/installs": [inst("a/one"), { ...inst("b/two"), health: { state: "error", counts: { error: 1 } } }],
+    "/api/v1/meta": meta,
+  });
+  mount("/i/a/one");
+  await userEvent.click(await screen.findByRole("button", { name: /switch install/i }));
+  expect(screen.getByRole("menuitem", { name: /^Error: b\/two/ })).toBeInTheDocument();
+  expect(screen.getByRole("menuitem", { name: /^Healthy: a\/one/ })).toBeInTheDocument();
+});
+
+it.each([
+  ["/i/kgw/kgateway", "kgw/kgateway | kgateway"],
+  ["/i/kgw/kgateway/findings", "Findings: kgw/kgateway | kgateway"],
+  ["/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge", "Gateway prod/edge: kgw/kgateway | kgateway"],
+  [
+    "/i/kgw/kgateway/r/gateway.networking.k8s.io/GatewayClass/-/kgateway",
+    "GatewayClass kgateway: kgw/kgateway | kgateway",
+  ],
+  ["/nope", "Page not found | kgateway"],
+])("sets the document title on %s", async (path, title) => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway"), inst("b/two")], "/api/v1/meta": meta });
+  mount(path);
+  await waitFor(() => expect(document.title).toBe(title));
+});
+
+it("titles an extension page with its nav label", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway/waf", {
+    brand: { productName: "Acme Edge", logo: null },
+    routes: [{ path: "waf", element: <p>waf page</p>, scope: "install" }],
+    navEntries: [{ label: "WAF", to: "waf", scope: "install" }],
+  });
+  await waitFor(() => expect(document.title).toBe("WAF: kgw/kgateway | Acme Edge"));
+});
+
 // region Helpers
 function rgb(hex: string): string {
   const n = Number.parseInt(hex.slice(1), 16);

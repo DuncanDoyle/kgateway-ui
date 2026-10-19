@@ -5,7 +5,9 @@ import { useNow } from "../api/clock";
 import { isStale } from "../api/hooks";
 import type { InstallSummary } from "../api/types";
 import { HealthIcon } from "../health/HealthIcon";
+import { stateLabel } from "../health/state";
 import { ResourceName } from "../resource/ResourceName";
+import { VisuallyHidden } from "../states/VisuallyHidden";
 import { headerResourceName } from "./headerTint";
 import { Anchor, Menu, MenuButton, useMenu } from "./menu";
 import { Tooltip } from "./Tooltip";
@@ -54,23 +56,27 @@ export function InstallSwitcher({ installs, currentId }: InstallSwitcherProps) {
           ref={menu.menuRef}
           onKeyDown={menu.onMenuKeyDown}
         >
-          {installs.map((i) => (
-            <button
-              key={i.id}
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              aria-current={i.id === currentId}
-              onClick={() => {
-                menu.close(false);
-                navigate(`/i/${i.id}`);
-              }}
-            >
-              <HealthIcon state={isStale(i.computedAt, now) ? "unknown" : i.health.state} />
-              <ResourceName namespace={i.namespace} name={i.name} />
-              {i.id === currentId ? <Check data-part="check" size={14} aria-hidden="true" /> : null}
-            </button>
-          ))}
+          {installs.map((i) => {
+            const state = isStale(i.computedAt, now) ? "unknown" : i.health.state;
+            return (
+              <button
+                key={i.id}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                aria-current={i.id === currentId}
+                onClick={() => {
+                  menu.close(false);
+                  navigate(`/i/${i.id}`);
+                }}
+              >
+                <HealthIcon state={state} />
+                <VisuallyHidden>{stateLabel(state)}: </VisuallyHidden>
+                <ResourceName namespace={i.namespace} name={i.name} />
+                {i.id === currentId ? <Check data-part="check" size={14} aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
         </Menu>
       ) : null}
     </Anchor>

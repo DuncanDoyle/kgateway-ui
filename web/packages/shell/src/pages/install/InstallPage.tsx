@@ -8,6 +8,7 @@ import { useInstallId } from "../../shell/extension";
 import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
+import { VisuallyHidden } from "../../states/VisuallyHidden";
 import { CheckedList } from "./CheckedList";
 import { CountTiles, TILE_H, TileGrid } from "./CountTiles";
 import { FILTER_H, GatewayTable } from "./GatewayTable";
@@ -19,16 +20,6 @@ const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
   max-width: 1400px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
-  /* The header names the install; the h1 gives the page its heading for screen readers. */
-  h1 {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
   h2 {
     font-size: ${(p) => p.theme.font.size.md};
     font-weight: ${(p) => p.theme.font.weight.semibold};
@@ -142,7 +133,8 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   );
   return (
     <Page data-testid="install-page" stylesOverride={stylesOverride}>
-      <h1>{id}</h1>
+      {/* The header shows the install; the h1 gives the page its heading for screen readers. */}
+      <VisuallyHidden as="h1">{id}</VisuallyHidden>
       {err ? <PageNotice error={err} title="Cannot load this install" /> : null}
       <HealthStrip health={h.data} stale={stale} now={now} checkedAt={checkedAt} />
       {h.data.state === "healthy" ? (
