@@ -229,3 +229,17 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 **Consequences:**
 - The UI is as fresh as any controller built on informers, including kgateway's own.
 - No extra API-server load.
+
+## D-015 — Scope falls back to the Deployment template (2026-10-19, phase 1)
+**Context:** The namespace scope is read from `KGW_DISCOVERY_NAMESPACE_SELECTORS` on a controller Pod. With no Pod (Deployment scaled to 0, Pods deleted, or the Pod watch failing) the scope was unknown, and an install with an unknown scope can only claim Gateways that no other install claims.
+**Decision:**
+- Source order: a Ready controller Pod, then any controller Pod, then the controller Deployment's Pod template.
+- The Pod comes first because it shows what is running; during a rollout the template already holds the new config.
+- The scope records its source, and the scope check names it when the template is used.
+- `valueFrom`, invalid JSON and a downstream provider's unknown still give an unknown scope.
+**Alternatives:**
+- Template first — rejected: during a rollout it describes the future, not the running controller.
+- Pod only (the previous rule) — rejected by the user: a controller scaled to 0 should not lose its scope.
+**Consequences:**
+- A controller scaled to 0 keeps its Gateways and shows red through KGWUI-005, not an ownership change.
+- Known limit: during a rollout that changes the selectors, old and new Pods carry different scopes, so the scope can switch between them and the verifier may briefly report a mismatch.

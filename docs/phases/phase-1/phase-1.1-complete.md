@@ -18,7 +18,8 @@ none
 - `cmd/kgateway-ui`, `internal/webui` (embedded SPA placeholder), `internal/testutil`.
 - `pkg/{kinds,objects,cache,install,ctrlmetrics,health,scopeverify,overview,engine,api,extension,app,version}`.
 - Fixtures: real controller `/metrics` captures with an xDS reject, v2.4.7 and v2.3.11 (`pkg/ctrlmetrics/testdata`).
-- D-012 recorded; design.md and D-013/D-014 updated to match the code.
+- D-012 and D-015 recorded; design.md and D-013/D-014 updated to match the code.
+- D-015 (user request after the final review): the scope falls back to the controller Deployment's Pod template when no controller Pod exists.
 - Direct dependencies: `k8s.io/{api,apimachinery,client-go}` v0.36.2, `prometheus/common` v0.72.1, `prometheus/client_model` v0.6.3. golangci-lint v2.15.0 via `go run`.
 - `go test -race ./...` passes in about 16 s; `make lint` 0 issues.
 
@@ -28,6 +29,7 @@ none
 - Compute decodes each object view several times per cycle; fine at 5k routes (<1 s), consider caching by (uid, resourceVersion) beyond 20k.
 
 ## Deferred / open
+- Live re-watching of CRDs added or removed after startup: https://github.com/DuncanDoyle/kgateway-ui/issues/1 (the UI asks for a restart meanwhile).
 - Parked: an invalid hand-built downstream selector is silently skipped (`pkg/install/scope.go`); validate in `install.Resolve`.
 - Parked: the served-kinds check reports fresh during a discovery outage; track the last successful refresh.
 - Parked: `kinds.Diff` could be unexported; `Change` JSON tags unused; `Monitor.Run` panics on a non-positive interval.
