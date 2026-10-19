@@ -24,9 +24,11 @@ type Config struct {
 	Snapshots cache.Snapshotter
 	// Served is the one served-kind list given to assignment, checks, the
 	// scope verifier and the overview.
-	Served    []kinds.Served
-	Detectors []install.Detector
-	Scope     install.ScopeProvider
+	Served []kinds.Served
+	// KindsChange, if set, reports how the kinds served now differ from Served.
+	KindsChange func() kinds.Change
+	Detectors   []install.Detector
+	Scope       install.ScopeProvider
 	// Verifier checks scope against the controller; its persistence should be
 	// 2 × the metrics interval (design §4.4).
 	Verifier scopeverify.Verifier
@@ -126,6 +128,10 @@ func (e *Engine) Compute() *Model {
 	e.observe(snap, now)
 	served := e.cfg.Served
 	m := &Model{Snapshot: snap, Served: served, Pinned: e.cfg.Pinned, ComputedAt: now}
+	var kc kinds.Change
+	if e.cfg.KindsChange != nil {
+		kc = e.cfg.KindsChange()
+	}
 	all := install.Resolve(install.Discover(snap, e.cfg.Detectors), e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all)
@@ -138,8 +144,8 @@ func (e *Engine) Compute() *Model {
 		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
 			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
 		owned := asg.PerInstall[res.ID()]
-		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
-			MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now}, e.cfg.Checks)
+		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
+			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now}, e.cfg.Checks)
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep)})
 	}
 	e.mu.Lock()

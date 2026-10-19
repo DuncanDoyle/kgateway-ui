@@ -420,3 +420,95 @@ func TestDownstreamProxySelectorSeam(t *testing.T) {
 		return false
 	})
 }
+
+// hidingDiscovery serves base without the resource named in hidden, so a test
+// can install or remove a CRD after start.
+type hidingDiscovery struct {
+	base   kinds.DiscoveryClient
+	hidden atomic.Pointer[string]
+}
+
+func (h *hidingDiscovery) hide(resource string) { h.hidden.Store(&resource) }
+
+func (h *hidingDiscovery) ServerResourcesForGroupVersion(gv string) (*metav1.APIResourceList, error) {
+	l, err := h.base.ServerResourcesForGroupVersion(gv)
+	hidden := h.hidden.Load()
+	if err != nil || hidden == nil {
+		return l, err
+	}
+	out := &metav1.APIResourceList{GroupVersion: l.GroupVersion}
+	for _, r := range l.APIResources {
+		if r.Name != *hidden {
+			out.APIResources = append(out.APIResources, r)
+		}
+	}
+	return out, nil
+}
+
+// kindsFinding returns the served-kinds finding and check of h, if any.
+func kindsFinding(h api.HealthResponse) (*health.Finding, *health.CheckResult) {
+	var f *health.Finding
+	var c *health.CheckResult
+	for i := range h.Findings {
+		if h.Findings[i].Code == health.CodeSignalUnavailable && h.Findings[i].Message == "Served kinds changed; restart the UI to watch them" {
+			f = &h.Findings[i]
+		}
+	}
+	for i := range h.Checks {
+		if h.Checks[i].Name == "served kinds" {
+			c = &h.Checks[i]
+		}
+	}
+	return f, c
+}
+
+// Served kinds are re-resolved while the UI runs (design §10): a CRD removed
+// or installed after start is a required KGWUI-008 per install until the
+// served set matches the watched one again.
+func TestServedKindChangesAfterStartAreReported(t *testing.T) {
+	cases := []struct {
+		name    string
+		atStart string // resource hidden when the app starts
+		later   string // resource hidden afterwards
+		detail  string
+	}{
+		{"CRD removed", "", "tcproutes", "removed tcproutes.gateway.networking.k8s.io/v1"},
+		{"CRD installed", "tcproutes", "", "added tcproutes.gateway.networking.k8s.io/v1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+			dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+			disc := &hidingDiscovery{base: kube.Discovery()}
+			disc.hide(tc.atStart)
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: disc, Scraper: &stubScraper{}},
+				Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, KindsInterval: 20 * time.Millisecond, UI: ui}, extension.New())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			report := func() api.HealthResponse {
+				var h api.HealthResponse
+				getJSON(t, srv, "/api/v1/installs/kgw/kgateway/health", &h)
+				return h
+			}
+			eventually(t, "the served-kinds check never ran", func() bool { _, c := kindsFinding(report()); return c != nil && c.OK })
+
+			disc.hide(tc.later)
+			var h api.HealthResponse
+			eventually(t, "the served-kinds change was never reported", func() bool { h = report(); f, _ := kindsFinding(h); return f != nil })
+			f, c := kindsFinding(h)
+			if !strings.Contains(f.Detail, tc.detail) || c.OK || !c.Required || h.State != health.StateUnknown {
+				t.Fatalf("want a required KGWUI-008 with %q and state unknown: state=%s finding=%+v check=%+v", tc.detail, h.State, f, c)
+			}
+
+			disc.hide(tc.atStart)
+			eventually(t, "the finding must clear once the served set matches again", func() bool { f, c := kindsFinding(report()); return f == nil && c != nil && c.OK })
+		})
+	}
+}

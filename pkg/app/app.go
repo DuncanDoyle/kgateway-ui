@@ -38,6 +38,8 @@ type Options struct {
 	PollInterval time.Duration
 	// MetricsInterval is the controller metrics scrape interval.
 	MetricsInterval time.Duration
+	// KindsInterval is how often served kinds are re-resolved; zero means 60 s.
+	KindsInterval time.Duration
 	// UI is the single-page application served at /.
 	UI fs.FS
 }
@@ -60,6 +62,7 @@ type App struct {
 	cfg       engine.Config
 	cache     *cache.Cache
 	collector *ctrlmetrics.Collector
+	kinds     *kinds.Monitor
 	opts      Options
 	// discovered is closed after the first model with an install.
 	discovered chan struct{}
@@ -75,9 +78,13 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	if o.KindsInterval <= 0 {
+		o.KindsInterval = 60 * time.Second
+	}
+	mon := kinds.NewMonitor(c.Discovery, reg.Kinds, served)
 	var podSel, depSel []labels.Selector
 	for _, d := range reg.Detectors {
-		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label (A1)
+		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
 	}
 	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel})
@@ -98,7 +105,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	discovered := make(chan struct{})
 	var once sync.Once
 	// Metrics older than three scrape intervals are unavailable, not reused.
-	cfg := engine.Config{Snapshots: ca, Served: served, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
+	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
 		Metrics: col, Checks: reg.Checks, Pinned: o.Pinned, MetricsMaxAge: 3 * o.MetricsInterval,
 		OnCompute: func(m *engine.Model) {
 			if len(m.Installs) > 0 {
@@ -106,16 +113,17 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 			}
 		}}
 	eng := engine.New(cfg)
-	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cfg: cfg, cache: ca, collector: col, opts: o,
+	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
 		discovered: discovered}, nil
 }
 
-// Start runs the cache, the model loop and the metrics collector until ctx
-// is done. The collector starts as soon as the first install is discovered,
+// Start runs the cache, the model loop, the served-kinds monitor and the
+// metrics collector until ctx is done. The collector starts as soon as the first install is discovered,
 // so the first metrics do not wait for a collector tick.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
 	go a.Engine.Run(ctx, a.opts.PollInterval)
+	go a.kinds.Run(ctx, a.opts.KindsInterval)
 	go func() {
 		select {
 		case <-ctx.Done():

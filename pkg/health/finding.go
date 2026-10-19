@@ -91,9 +91,11 @@ type Input struct {
 	Assignment install.Assignment
 	Snapshot   *cache.Snapshot
 	// Served are the served kinds; they map a parentRef's kind to its Access.
-	Served     []kinds.Served
-	Metrics    ctrlmetrics.Result
-	HasMetrics bool
+	Served []kinds.Served
+	// KindsChange is how the kinds served now differ from Served, which the cache watches.
+	KindsChange kinds.Change
+	Metrics     ctrlmetrics.Result
+	HasMetrics  bool
 	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
 	// interval); zero means no limit.
 	MetricsMaxAge time.Duration

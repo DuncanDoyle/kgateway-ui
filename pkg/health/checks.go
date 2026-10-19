@@ -19,7 +19,7 @@ import (
 
 // Upstream returns the Phase 1 checks (design §5.2).
 func Upstream() []Check {
-	return []Check{cacheCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}}
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
@@ -73,6 +73,24 @@ func resourceName(gvr schema.GroupVersionResource) string {
 		return gvr.Resource
 	}
 	return gvr.Resource + "." + gvr.Group
+}
+
+// kindsCheck: the cluster still serves exactly the watched kinds (design §10).
+type kindsCheck struct{}
+
+// Name implements Check.
+func (kindsCheck) Name() string { return "served kinds" }
+
+// Run implements Check: a served-kinds change is KGWUI-008 until the UI restarts
+// or the served set matches again, since the cache does not re-watch.
+func (c kindsCheck) Run(in Input) ([]Finding, CheckResult) {
+	if in.KindsChange.Empty() {
+		return nil, ok(c.Name(), true, in.Now)
+	}
+	why := "served kinds changed: " + in.KindsChange.String()
+	return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
+			Message: "Served kinds changed; restart the UI to watch them", Detail: in.KindsChange.String()}},
+		CheckResult{Name: c.Name(), Required: true, CollectedAt: in.Now, Error: why}
 }
 
 // scopeCheck: the install's scope could be determined.
