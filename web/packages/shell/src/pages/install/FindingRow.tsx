@@ -1,14 +1,13 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import { isLinkable, useMeta } from "../../api/hooks";
 import type { Finding, Ref } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
-import { severityToState } from "../../health/state";
+import { severityLabel, severityToState } from "../../health/state";
+import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
-import { useShellExtension } from "../../shell/extension";
-import { Tooltip } from "../../shell/Tooltip";
+import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 
 // region Styles
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -70,29 +69,6 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   }
   ${(p) => p.stylesOverride}
 `;
-const IconButton = styled.button`
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: transparent;
-  color: ${(p) => p.theme.color.textMuted};
-  border: 1px solid transparent;
-  border-radius: ${(p) => p.theme.radius.sm};
-  &:hover {
-    border-color: ${(p) => p.theme.color.borderStrong};
-    color: ${(p) => p.theme.color.text};
-  }
-  &:active {
-    background: ${(p) => p.theme.color.surfaceRaised};
-    border-color: ${(p) => p.theme.color.text};
-  }
-  &:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-  }
-`;
 
 // region Helpers
 /** Path of the read-only YAML view of r. */
@@ -100,10 +76,13 @@ export function resourcePath(installId: string, r: Ref): string {
   return `/i/${installId}/r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
 }
 
-const severityLabel = { error: "Error", warning: "Warning", info: "Info" } as const;
-
-function copyText(r: Ref): string {
-  return r.namespace ? `${r.namespace}/${r.name}` : r.name;
+/** The renderer registered for the longest prefix of code, if any. */
+export function rendererFor(renderers: Record<string, FindingRenderer>, code: string): FindingRenderer | undefined {
+  let best: string | undefined;
+  for (const prefix of Object.keys(renderers)) {
+    if (code.startsWith(prefix) && (best === undefined || prefix.length > best.length)) best = prefix;
+  }
+  return best === undefined ? undefined : renderers[best];
 }
 
 // region Component
@@ -117,7 +96,7 @@ interface FindingRowProps {
 export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
   const { findingRenderers } = useShellExtension();
   const { data: meta } = useMeta();
-  const extra = Object.entries(findingRenderers).find(([prefix]) => f.code.startsWith(prefix))?.[1];
+  const extra = rendererFor(findingRenderers, f.code);
   const [ins, inn] = f.install.split("/");
   const name = f.resource ? (
     <ResourceName namespace={f.resource.namespace} name={f.resource.name} />
@@ -147,21 +126,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
           </>
         )}
       </div>
-      <div className="copy">
-        {f.resource ? (
-          <Tooltip label="Copy namespace/name" placement="end">
-            <IconButton
-              type="button"
-              aria-label="Copy resource name"
-              onClick={() => {
-                if (f.resource) void navigator.clipboard?.writeText(copyText(f.resource)).catch(() => {});
-              }}
-            >
-              <Copy size={14} aria-hidden="true" />
-            </IconButton>
-          </Tooltip>
-        ) : null}
-      </div>
+      <div className="copy">{f.resource ? <CopyNameButton resource={f.resource} placement="end" /> : null}</div>
     </Row>
   );
 }

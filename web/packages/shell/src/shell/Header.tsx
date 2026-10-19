@@ -4,6 +4,7 @@ import { Link, NavLink, useMatch } from "react-router-dom";
 import { useNow } from "../api/clock";
 import { isStale, useInstalls } from "../api/hooks";
 import type { ReadyCount } from "../api/types";
+import { versionText } from "../format";
 import { HealthIcon } from "../health/HealthIcon";
 import { ResourceName } from "../resource/ResourceName";
 import { Shimmer } from "../states/Shimmer";
@@ -99,11 +100,6 @@ const Nav = styled.nav`
 /** Matches KGWUI-005: fewer ready replicas than desired is an error. */
 function readiness(c: ReadyCount): "healthy" | "error" {
   return c.ready >= c.desired ? "healthy" : "error";
-}
-
-/** The version label may or may not carry a leading "v"; show exactly one. */
-function versionText(v: string): string {
-  return `v${v.replace(/^v/, "")}`;
 }
 
 // region Component

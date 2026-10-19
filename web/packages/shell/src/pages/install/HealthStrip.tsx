@@ -1,6 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import type { HealthReport } from "../../api/types";
+import { countsText, plural } from "../../format";
 import { HealthIcon } from "../../health/HealthIcon";
 import { stateLabel } from "../../health/state";
 import type { HealthState } from "../../theme/tokens";
@@ -41,10 +42,6 @@ export function ago(iso: string, now: number): string {
   return `${Math.round(s / 3600)}h ago`;
 }
 
-function plural(n: number, w: string) {
-  return `${n} ${w}${n === 1 ? "" : "s"}`;
-}
-
 /** The strip's text. Unknown leads with "Health unknown" and its reason, then any warnings; it never claims "No known problems". */
 function headline(h: HealthReport): string {
   if (h.state === "healthy") return "All healthy";
@@ -58,11 +55,8 @@ function headline(h: HealthReport): string {
     const warnings = h.counts.warning ? ` · ${plural(h.counts.warning, "warning")}` : "";
     return `Health unknown — ${parts.join("; ")}${warnings}`;
   }
-  const parts = [];
-  if (h.counts.error) parts.push(plural(h.counts.error, "error"));
-  if (h.counts.warning) parts.push(plural(h.counts.warning, "warning"));
   // Counts can be empty when findings are restricted or absent; never leave the strip blank.
-  return parts.length ? parts.join(", ") : stateLabel(h.state);
+  return countsText(h.counts) || stateLabel(h.state);
 }
 
 // region Component

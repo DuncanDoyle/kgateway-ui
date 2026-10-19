@@ -9,3 +9,6 @@ export function stateLabel(s: HealthState): string {
 export function severityToState(sev: "error" | "warning" | "info"): HealthState {
   return sev === "error" ? "error" : sev === "warning" ? "warning" : "unknown";
 }
+
+/** Display text per finding severity. */
+export const severityLabel = { error: "Error", warning: "Warning", info: "Info" } as const;
