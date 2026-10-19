@@ -73,3 +73,22 @@ func clients(t *testing.T, served []kinds.Served, objs []runtime.Object) (*dynam
 	}
 	return dyn, kube
 }
+
+// ObjectsByGVR groups objs under the upstream served GVR of their kind, as in
+// cache.Snapshot.Objects. It fails the test for an object of an unserved kind.
+func ObjectsByGVR(t *testing.T, objs ...*unstructured.Unstructured) map[schema.GroupVersionResource][]*unstructured.Unstructured {
+	t.Helper()
+	byKind := map[schema.GroupKind]schema.GroupVersionResource{}
+	for _, s := range ServedUpstream() {
+		byKind[schema.GroupKind{Group: s.Group, Kind: s.Kind}] = s.GVR()
+	}
+	out := map[schema.GroupVersionResource][]*unstructured.Unstructured{}
+	for _, o := range objs {
+		gvr, ok := byKind[o.GroupVersionKind().GroupKind()]
+		if !ok {
+			t.Fatalf("testutil.ObjectsByGVR: %s is not a served kind", o.GroupVersionKind())
+		}
+		out[gvr] = append(out[gvr], o)
+	}
+	return out
+}
