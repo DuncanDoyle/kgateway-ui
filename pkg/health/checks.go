@@ -230,13 +230,14 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		return true
 	}
-	// evaluate reports every present condition of a current block that is not True.
+	// evaluate reports every present condition of a current block that is False;
+	// current() has already turned a required Unknown into "not processed".
 	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) {
 		if !current(u, parent, cs, required, optional, extra) {
 			return
 		}
 		for _, t := range append(slices.Clone(required), optional...) {
-			if cond := objects.FindCondition(cs, t); cond != nil && cond.Status != metav1.ConditionTrue {
+			if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
 				add(u, SeverityError, *cond, extra)
 			}
 		}
@@ -324,9 +325,12 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
-			for _, cond := range a.Conditions {
-				if sev, report := policySeverity(cond); report {
-					add(p.Obj, sev, cond, extra)
+			// Only the freshness-checked types are judged; others may be stale.
+			for _, t := range append(slices.Clone(policyRequired), policyOptional...) {
+				if cond := objects.FindCondition(a.Conditions, t); cond != nil {
+					if sev, report := policySeverity(*cond); report {
+						add(p.Obj, sev, *cond, extra)
+					}
 				}
 			}
 		}

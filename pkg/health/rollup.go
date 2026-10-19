@@ -2,12 +2,22 @@ package health
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 var sevRank = map[Severity]int{SeverityError: 0, SeverityWarning: 1, SeverityInfo: 2}
+
+// rank orders severities; one outside the known set ranks last.
+func rank(s Severity) int {
+	if r, ok := sevRank[s]; ok {
+		return r
+	}
+	return len(sevRank)
+}
 
 // RollUp computes the state: error > unknown > warning > healthy (design §5.3).
 func RollUp(fs []Finding, cs []CheckResult) State {
@@ -31,12 +41,21 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 
 // Evaluate runs checks and assembles a Report. Findings are in a fixed
 // order (severity, code, resource, parentRef, message, detail), so a list
-// does not reorder between polls.
+// does not reorder between polls. A finding with a severity outside error,
+// warning and info becomes a warning whose detail names the original, so a
+// check can neither hide a problem from the roll-up nor invent a severity.
 func Evaluate(in Input, checks []Check) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now, Findings: []Finding{}}
 	for _, c := range checks {
 		fs, cr := c.Run(in)
-		r.Findings = append(r.Findings, fs...)
+		for _, f := range fs {
+			if _, known := sevRank[f.Severity]; !known {
+				note := fmt.Sprintf("unrecognised severity %q", f.Severity)
+				f.Detail = strings.TrimSuffix(note+": "+f.Detail, ": ")
+				f.Severity = SeverityWarning
+			}
+			r.Findings = append(r.Findings, f)
+		}
 		r.Checks = append(r.Checks, cr)
 	}
 	slices.SortStableFunc(r.Findings, compareFindings)
@@ -49,7 +68,7 @@ func Evaluate(in Input, checks []Check) Report {
 
 func compareFindings(a, b Finding) int {
 	return cmp.Or(
-		cmp.Compare(sevRank[a.Severity], sevRank[b.Severity]),
+		cmp.Compare(rank(a.Severity), rank(b.Severity)),
 		cmp.Compare(a.Code, b.Code),
 		compareOptRefs(a.Resource, b.Resource),
 		compareParents(a.parent, b.parent),

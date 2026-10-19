@@ -52,10 +52,29 @@ type DiscoveryClient interface {
 	ServerResourcesForGroupVersion(groupVersion string) (*metav1.APIResourceList, error)
 }
 
+// Dedupe returns descs with one descriptor per group and kind: a later
+// descriptor replaces an earlier one in the earlier one's position.
+func Dedupe(descs []Descriptor) []Descriptor {
+	at := map[schema.GroupKind]int{}
+	var out []Descriptor
+	for _, d := range descs {
+		gk := schema.GroupKind{Group: d.Group, Kind: d.Kind}
+		if i, ok := at[gk]; ok {
+			out[i] = d
+			continue
+		}
+		at[gk] = len(out)
+		out = append(out, d)
+	}
+	return out
+}
+
 // Resolve returns, in input order, the descriptors whose resource is served in
 // one of their versions, resolved to the first such version. Kinds that are not
 // served (CRD not installed, or removed in this kgateway version) are omitted.
+// Duplicates are removed as by Dedupe.
 func Resolve(dc DiscoveryClient, descs []Descriptor) ([]Served, error) {
+	descs = Dedupe(descs)
 	cache := map[string]*metav1.APIResourceList{}
 	get := func(gv string) (*metav1.APIResourceList, error) {
 		if l, ok := cache[gv]; ok {

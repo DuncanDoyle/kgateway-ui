@@ -27,9 +27,10 @@ type Registry struct {
 // Option modifies a Registry.
 type Option func(*Registry)
 
-// WithKinds adds kinds to watch, count and serve.
+// WithKinds adds kinds to watch, count and serve. Kinds are unique by group
+// and kind: a descriptor for a registered kind replaces it in place.
 func WithKinds(d ...kinds.Descriptor) Option {
-	return func(r *Registry) { r.Kinds = append(r.Kinds, d...) }
+	return func(r *Registry) { r.Kinds = kinds.Dedupe(append(r.Kinds, d...)) }
 }
 
 // WithDetectors adds install detectors. They are tried before the upstream
@@ -44,7 +45,9 @@ func WithScopeProvider(p install.ScopeProvider) Option { return func(r *Registry
 // WithScopeVerifier replaces the scope verifier.
 func WithScopeVerifier(v scopeverify.Verifier) Option { return func(r *Registry) { r.Verifier = v } }
 
-// WithChecks adds health checks. Downstream finding codes must use their own prefix.
+// WithChecks adds health checks. Finding codes with the KGWUI- prefix are
+// reserved for upstream checks; a downstream uses its own prefix (ACME-001).
+// Severities outside error, warning and info are reported as warnings.
 func WithChecks(c ...health.Check) Option {
 	return func(r *Registry) { r.Checks = append(r.Checks, c...) }
 }

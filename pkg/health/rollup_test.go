@@ -27,3 +27,30 @@ func TestRollUpOrder(t *testing.T) {
 		}
 	}
 }
+
+type fixedCheck []Finding
+
+func (fixedCheck) Name() string { return "fixed" }
+func (c fixedCheck) Run(in Input) ([]Finding, CheckResult) {
+	return c, CheckResult{Name: "fixed", OK: true, CollectedAt: in.Now}
+}
+
+// A downstream check cannot hide a finding behind a severity the roll-up does
+// not know: Evaluate reports it as a warning and names the original severity.
+func TestEvaluateFlagsUnrecognisedSeverity(t *testing.T) {
+	r := Evaluate(Input{}, []Check{fixedCheck{{Code: "ACME-001", Severity: "critical", Message: "m"}, {Code: "ACME-002", Severity: SeverityInfo}}})
+	if r.State != StateWarning || r.Counts["critical"] != 0 || r.Counts[SeverityWarning] != 1 {
+		t.Fatalf("want warning with the finding counted as a warning: state=%s counts=%v", r.State, r.Counts)
+	}
+	f := r.Findings[0]
+	if f.Code != "ACME-001" || f.Severity != SeverityWarning || f.Detail != `unrecognised severity "critical"` {
+		t.Fatalf("finding must be a flagged warning, ordered first: %+v", r.Findings)
+	}
+}
+
+// Severities outside the known set order after info.
+func TestUnknownSeverityRanksLast(t *testing.T) {
+	if compareFindings(Finding{Severity: "critical"}, Finding{Severity: SeverityInfo}) <= 0 {
+		t.Fatal("an unknown severity must order after info")
+	}
+}

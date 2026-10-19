@@ -210,6 +210,41 @@ func TestChecks(t *testing.T) {
 	}
 }
 
+// Only False makes a present optional condition KGWUI-002; Unknown is no
+// finding. Policy severities come only from the freshness-checked types.
+func TestOptionalAndUncheckedConditionsAreNotErrors(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	cases := []struct {
+		name   string
+		mutate func(w *world)
+	}{
+		{"route optional Unknown", func(w *world) {
+			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
+				testutil.Cond("kgateway.dev/Programmed", metav1.ConditionUnknown, "Reconciling")}})
+		}},
+		{"listener optional Unknown", func(w *world) {
+			w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", nil, testutil.Listener{Name: "http", Conds: []metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed"),
+				testutil.Cond("ResolvedRefs", metav1.ConditionUnknown, "Reconciling")}})
+		}},
+		{"policy ancestor with an unchecked condition type False", func(w *world) {
+			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
+				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Valid"), testutil.Cond("example.com/Merged", metav1.ConditionFalse, "NotMerged")}}))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := healthyWorld()
+			tc.mutate(w)
+			r := w.report(t)
+			if r.State != StateHealthy || len(r.Findings) != 0 {
+				t.Fatalf("want healthy without findings: state=%s findings=%+v", r.State, r.Findings)
+			}
+		})
+	}
+}
+
 // A crash-looping controller is an error and metrics are unknown; never healthy.
 func TestCrashLoopingController(t *testing.T) {
 	w := healthyWorld()

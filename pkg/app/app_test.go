@@ -142,7 +142,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 		testutil.GatewayClass("acme", acmeController, true), testutil.Gateway("infra", "edge", "acme", nil),
 		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, acmeController)), widgetPolicy("widget"), widgetPolicy("widget-hidden"),
 	}, []kinds.Descriptor{widgetKind}, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{},
-		extension.WithDetectors(acmeDetector{}), extension.WithKinds(widgetKind), extension.WithChecks(acmeCheck{}), extension.WithAuthorizer(deny))
+		extension.WithDetectors(acmeDetector{}), extension.WithKinds(widgetKind, widgetKind), extension.WithChecks(acmeCheck{}), extension.WithAuthorizer(deny))
 
 	var insts []api.InstallSummary
 	eventually(t, "install never appeared", func() bool {
@@ -165,14 +165,18 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	})
 	var o api.OverviewResponse
 	getJSON(t, srv, "/api/v1/installs/acme-system/controller/overview", &o)
-	found := false
+	// The kind is registered twice; it is watched and counted once.
+	tiles := 0
 	for _, c := range o.Counts {
-		if c.Kind == "WidgetPolicy" && c.Count == 1 {
-			found = true
+		if c.Kind == "WidgetPolicy" {
+			tiles++
+			if c.Count != 1 {
+				t.Fatalf("downstream kind not counted, or the denied one not dropped: %+v", o.Counts)
+			}
 		}
 	}
-	if !found {
-		t.Fatalf("downstream kind not counted, or the denied one not dropped: %+v", o.Counts)
+	if tiles != 1 {
+		t.Fatalf("want one WidgetPolicy tile, got %d: %+v", tiles, o.Counts)
 	}
 	base := "/api/v1/installs/acme-system/controller/resources/widgets.acme.example.com/WidgetPolicy/shop/"
 	if code := getJSON(t, srv, base+"widget", nil); code != http.StatusOK {
@@ -183,7 +187,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	}
 }
 
-// D-013 / Review Focus 9: a deny-some Authorizer registered through the
+// D-013: a deny-some Authorizer registered through the
 // extension hides the denied resource (404) and restricts its finding, while
 // the roll-up still covers it.
 func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
@@ -315,8 +319,11 @@ func TestServeDrainsInFlightRequests(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	a.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(entered)
-		<-release
-		_, _ = io.WriteString(w, "done")
+		select {
+		case <-release:
+			_, _ = io.WriteString(w, "done")
+		case <-time.After(testutil.RecvTimeout):
+		}
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	addr := make(chan net.Addr, 1)
@@ -324,7 +331,14 @@ func TestServeDrainsInFlightRequests(t *testing.T) {
 	go func() { served <- serve(ctx, a, "127.0.0.1:0", func(a net.Addr) { addr <- a }) }()
 	resp := make(chan string, 1)
 	go func() {
-		r, err := http.Get("http://" + (<-addr).String() + "/")
+		var ad net.Addr
+		select {
+		case ad = <-addr:
+		case <-time.After(testutil.RecvTimeout):
+			resp <- "serve never listened"
+			return
+		}
+		r, err := http.Get("http://" + ad.String() + "/")
 		if err != nil {
 			resp <- err.Error()
 			return
@@ -333,7 +347,11 @@ func TestServeDrainsInFlightRequests(t *testing.T) {
 		_ = r.Body.Close()
 		resp <- string(b)
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(testutil.RecvTimeout):
+		t.Fatal("the request never reached the handler")
+	}
 	cancel()
 	select {
 	case err := <-served:
@@ -341,10 +359,10 @@ func TestServeDrainsInFlightRequests(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 	close(release)
-	if got := <-resp; got != "done" {
+	if got := testutil.Recv(t, resp, "the in-flight response"); got != "done" {
 		t.Fatalf("the in-flight request must complete, got %q", got)
 	}
-	if err := <-served; err != nil {
+	if err := testutil.Recv(t, served, "serve to return"); err != nil {
 		t.Fatalf("a cancelled serve must return nil, got %v", err)
 	}
 }

@@ -123,7 +123,12 @@ func TestInstrumentedListWatchRules(t *testing.T) {
 			if e := failNext.Swap(nil); e != nil {
 				return nil, *e
 			}
-			return <-watchers, nil
+			select {
+			case w := <-watchers:
+				return w, nil
+			case <-time.After(testutil.RecvTimeout):
+				return nil, errors.New("no fake watcher queued")
+			}
 		})
 	ctx := context.Background()
 	classic := metav1.ListOptions{}
@@ -262,9 +267,9 @@ func TestStreamErrorAfterSyncRecoversOnTheNextWatch(t *testing.T) {
 
 			n := lists.Load()
 			status := tc.status
-			(<-watchers).Error(&status)
+			testutil.Recv(t, watchers, "the established watch").Error(&status)
 			waitFor(t, "the error event to make the kind unavailable", func() bool { return !c.Snapshot().Access[tc.gvr].OK })
-			<-watchers // the next successful Watch call: resumed, or opened after a relist
+			testutil.Recv(t, watchers, "the next successful Watch call") // resumed, or opened after a relist
 			waitFor(t, "recovery on the next successful watch", func() bool { return c.Snapshot().Access[tc.gvr].OK })
 			if got := lists.Load() > n; got != tc.relists {
 				t.Fatalf("relisted=%v, want %v", got, tc.relists)

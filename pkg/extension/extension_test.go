@@ -42,3 +42,16 @@ func TestNewAppliesOptionsOnTopOfUpstream(t *testing.T) {
 		t.Fatal("WithScopeVerifier must set the verifier")
 	}
 }
+
+// Kinds are unique by group and kind; a later registration replaces the
+// earlier one in its position.
+func TestWithKindsDedupesByGroupKind(t *testing.T) {
+	up := kinds.Upstream()
+	hr := up[4]
+	hr.Versions = []string{"v2", "v1"}
+	extra := kinds.Descriptor{Group: "acme.example.com", Kind: "Extra"}
+	r := New(WithKinds(extra, hr, extra))
+	if len(r.Kinds) != len(up)+1 || r.Kinds[4].Kind != "HTTPRoute" || r.Kinds[4].Versions[0] != "v2" || r.Kinds[len(r.Kinds)-1].Kind != "Extra" {
+		t.Fatalf("want upstream kinds with HTTPRoute replaced in place, plus one Extra: %+v", r.Kinds)
+	}
+}

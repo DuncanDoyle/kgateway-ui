@@ -68,3 +68,12 @@ func TestUpstreamDescriptorsAreComplete(t *testing.T) {
 		}
 	}
 }
+
+// A kind listed twice is resolved once.
+func TestResolveDedupesByGroupKind(t *testing.T) {
+	d := Descriptor{Group: "gateway.networking.k8s.io", Kind: "HTTPRoute", Resource: "httproutes", Versions: []string{"v1"}}
+	got, err := Resolve(discovery(list("gateway.networking.k8s.io/v1", "httproutes")), []Descriptor{d, d})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("want one served kind, got %+v (%v)", got, err)
+	}
+}

@@ -174,7 +174,7 @@ func TestRunConcurrentWithGet(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	cancel()
-	if err := <-done; err != nil {
+	if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -608,6 +608,7 @@ func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var fail atomic.Bool
 			var failedCalls atomic.Int32 // failed Watch and List calls while fail is set
 			watchers := make(chan *watch.FakeWatcher, 64)
@@ -643,7 +644,7 @@ func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 			if s := state(); s != health.StateHealthy {
 				t.Fatalf("baseline must be healthy, got %s", s)
 			}
-			w := <-watchers
+			w := testutil.Recv(t, watchers, "the established watch")
 			fail.Store(true)
 			if tc.mode == "event" {
 				w.Error(&tc.err.(*apierrors.StatusError).ErrStatus)
@@ -662,8 +663,10 @@ func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 					t.Fatalf("further failed attempts must keep the install unknown, got %s", s)
 				}
 			}
+			// Watchers opened before or during the failure must not stand in for the recovery one.
+			testutil.Drain(watchers)
 			fail.Store(false)
-			<-watchers // the next successful Watch call: a resumed classic watch, or a new one after a relist
+			testutil.Recv(t, watchers, "the next successful Watch call") // a resumed classic watch, or a new one after a relist
 			waitUntil(t, "recovery on the next successful watch", func() bool { return state() == health.StateHealthy })
 		})
 	}
