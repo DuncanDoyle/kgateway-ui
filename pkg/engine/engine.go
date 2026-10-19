@@ -39,6 +39,8 @@ type Config struct {
 	MetricsMaxAge time.Duration
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// OnCompute, if set, receives each model Run computes, on Run's goroutine.
+	OnCompute func(*Model)
 }
 
 // InstallModel is everything the API serves about one install.
@@ -166,12 +168,15 @@ func (e *Engine) Installs() []install.Install {
 	return out
 }
 
-// Run computes immediately and then every interval until ctx is done.
+// Run computes immediately and then every interval until ctx is done,
+// passing each model to Config.OnCompute.
 func (e *Engine) Run(ctx context.Context, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
-		e.Compute()
+		if m := e.Compute(); e.cfg.OnCompute != nil {
+			e.cfg.OnCompute(m)
+		}
 		select {
 		case <-ctx.Done():
 			return

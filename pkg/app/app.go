@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -59,6 +61,8 @@ type App struct {
 	cache     *cache.Cache
 	collector *ctrlmetrics.Collector
 	opts      Options
+	// discovered is closed after the first model with an install.
+	discovered chan struct{}
 }
 
 // Build resolves the served kinds and constructs every component. Both
@@ -91,11 +95,19 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		// A mismatch must outlast two scrapes before it is reported (design §4.4).
 		verifier = scopeverify.NewManagedCountVerifier(2 * o.MetricsInterval)
 	}
+	discovered := make(chan struct{})
+	var once sync.Once
 	// Metrics older than three scrape intervals are unavailable, not reused.
 	cfg := engine.Config{Snapshots: ca, Served: served, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: o.Pinned, MetricsMaxAge: 3 * o.MetricsInterval}
+		Metrics: col, Checks: reg.Checks, Pinned: o.Pinned, MetricsMaxAge: 3 * o.MetricsInterval,
+		OnCompute: func(m *engine.Model) {
+			if len(m.Installs) > 0 {
+				once.Do(func() { close(discovered) })
+			}
+		}}
 	eng := engine.New(cfg)
-	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cfg: cfg, cache: ca, collector: col, opts: o}, nil
+	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cfg: cfg, cache: ca, collector: col, opts: o,
+		discovered: discovered}, nil
 }
 
 // Start runs the cache, the model loop and the metrics collector until ctx
@@ -103,36 +115,17 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 // so the first metrics do not wait for a collector tick.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
-	discovered := make(chan struct{})
-	go a.compute(ctx, discovered)
+	go a.Engine.Run(ctx, a.opts.PollInterval)
 	go func() {
 		select {
 		case <-ctx.Done():
 			return
-		case <-discovered:
+		case <-a.discovered:
 		}
 		if err := a.collector.Run(ctx, a.opts.MetricsInterval, a.Engine.Installs); err != nil {
 			slog.Error("metrics collector stopped", "err", err)
 		}
 	}()
-}
-
-// compute recomputes the model every poll interval and closes discovered
-// after the first model with an install.
-func (a *App) compute(ctx context.Context, discovered chan<- struct{}) {
-	t := time.NewTicker(a.opts.PollInterval)
-	defer t.Stop()
-	for found := false; ; {
-		if m := a.Engine.Compute(); !found && len(m.Installs) > 0 {
-			found = true
-			close(discovered)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
 }
 
 // Run builds clients from kubeconfig (or the in-cluster config when empty and
@@ -160,16 +153,36 @@ func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Op
 	if err != nil {
 		return err
 	}
+	return serve(ctx, a, o.Listen, func(addr net.Addr) { slog.Info("kgateway UI listening", "addr", addr.String(), "inCluster", inCluster) })
+}
+
+// serve listens on addr, starts a and serves its handler until ctx is done,
+// then drains in-flight requests for up to 5 s. Everything it started is
+// cancelled when it returns; onListen, if set, receives the bound address.
+func serve(ctx context.Context, a *App, addr string, onListen func(net.Addr)) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	a.Start(ctx)
-	srv := &http.Server{Addr: o.Listen, Handler: a.Handler, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: a.Handler, ReadHeaderTimeout: 10 * time.Second}
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer scancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	slog.Info("kgateway UI listening", "addr", o.Listen, "inCluster", inCluster)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if onListen != nil {
+		onListen(ln.Addr())
+	}
+	err = srv.Serve(ln)
+	cancel()
+	<-drained
+	if !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve: %w", err)
 	}
 	return nil

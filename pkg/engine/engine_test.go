@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -218,4 +219,28 @@ func TestComputeAt5000RoutesUnderOneSecond(t *testing.T) {
 		t.Fatalf("unexpected model: %d installs", len(m.Installs))
 	}
 	t.Logf("Compute over 5000 routes: %s", time.Since(start))
+}
+
+// Run hands every model it computes to OnCompute, the first one immediately.
+func TestRunCallsOnComputeWithEachModel(t *testing.T) {
+	cfg := config(snapshot(t), metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+	models := make(chan *Model, 8)
+	cfg.OnCompute = func(m *Model) {
+		select {
+		case models <- m:
+		default:
+		}
+	}
+	e := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.Run(ctx, time.Hour)
+	select {
+	case m := <-models:
+		if m != e.Current() || len(m.Installs) != 1 {
+			t.Fatalf("OnCompute must receive the current model: %+v", m)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnCompute was not called for the first model")
+	}
 }

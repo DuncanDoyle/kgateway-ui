@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,13 +85,13 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-const acmeController = "acme.example.com/edge"
+const acmeController = "acme.example.com/controller"
 
 type acmeDetector struct{}
 
 func (acmeDetector) Name() string { return "acme" }
 func (acmeDetector) ControllerSelector() labels.Selector {
-	return labels.SelectorFromSet(labels.Set{"app": "acme-edge"})
+	return labels.SelectorFromSet(labels.Set{"app": "acme-controller"})
 }
 func (acmeDetector) ProxySelector() labels.Selector {
 	return labels.SelectorFromSet(labels.Set{"app": "acme-proxy"})
@@ -114,13 +115,13 @@ func (acmeCheck) Run(in health.Input) ([]health.Finding, health.CheckResult) {
 		health.CheckResult{Name: "acme demo", OK: true, CollectedAt: in.Now}
 }
 
-var wafKind = kinds.Descriptor{Group: "policy.acme.example.com", Kind: "WafPolicy", Resource: "wafpolicies", Versions: []string{"v1"},
-	Namespaced: true, Category: kinds.CategoryPolicy, DisplayName: "WAF policies"}
+var widgetKind = kinds.Descriptor{Group: "widgets.acme.example.com", Kind: "WidgetPolicy", Resource: "widgetpolicies", Versions: []string{"v1"},
+	Namespaced: true, Category: kinds.CategoryPolicy, DisplayName: "Widget policies"}
 
-func wafPolicy(name string) *unstructured.Unstructured {
+func widgetPolicy(name string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "policy.acme.example.com/v1", "kind": "WafPolicy",
-		"metadata": map[string]any{"name": name, "namespace": "shop", "uid": "waf/" + name},
+		"apiVersion": "widgets.acme.example.com/v1", "kind": "WidgetPolicy",
+		"metadata": map[string]any{"name": name, "namespace": "shop", "uid": "widget/" + name},
 		"status": map[string]any{"ancestors": []any{map[string]any{
 			"ancestorRef": map[string]any{"name": "edge", "namespace": "infra"}, "controllerName": acmeController, "conditions": []any{}}}},
 	}}
@@ -129,17 +130,17 @@ func wafPolicy(name string) *unstructured.Unstructured {
 // A downstream registers a detector, a kind, a check and an Authorizer
 // through pkg/extension, and each shows up in the API output (design §9).
 func TestDownstreamExtensionSeam(t *testing.T) {
-	d := testutil.ControllerDeployment("acme-system", "edge", "example.com/acme/edge-controller:9.9.9", 1, 1)
-	d.Labels = map[string]string{"app": "acme-edge"}
+	d := testutil.ControllerDeployment("acme-system", "controller", "example.com/acme/controller:9.9.9", 1, 1)
+	d.Labels = map[string]string{"app": "acme-controller"}
 	gw := testutil.GwRef("infra", "edge")
-	hidden := objects.Ref{Group: wafKind.Group, Kind: "WafPolicy", Namespace: "shop", Name: "waf-hidden"}
+	hidden := objects.Ref{Group: widgetKind.Group, Kind: "WidgetPolicy", Namespace: "shop", Name: "widget-hidden"}
 	deny := api.AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != hidden })
 	_, srv := start(t, []runtime.Object{
-		testutil.Namespace("infra", nil), testutil.Namespace("shop", nil), d, testutil.ControllerPod(d, "edge-0", true),
+		testutil.Namespace("infra", nil), testutil.Namespace("shop", nil), d, testutil.ControllerPod(d, "controller-0", true),
 		testutil.GatewayClass("acme", acmeController, true), testutil.Gateway("infra", "edge", "acme", nil),
-		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, acmeController)), wafPolicy("waf"), wafPolicy("waf-hidden"),
-	}, []kinds.Descriptor{wafKind}, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{},
-		extension.WithDetectors(acmeDetector{}), extension.WithKinds(wafKind), extension.WithChecks(acmeCheck{}), extension.WithAuthorizer(deny))
+		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, acmeController)), widgetPolicy("widget"), widgetPolicy("widget-hidden"),
+	}, []kinds.Descriptor{widgetKind}, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{},
+		extension.WithDetectors(acmeDetector{}), extension.WithKinds(widgetKind), extension.WithChecks(acmeCheck{}), extension.WithAuthorizer(deny))
 
 	var insts []api.InstallSummary
 	eventually(t, "install never appeared", func() bool {
@@ -152,7 +153,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	var h api.HealthResponse
 	eventually(t, "downstream check finding missing", func() bool {
 		h = api.HealthResponse{}
-		getJSON(t, srv, "/api/v1/installs/acme-system/edge/health", &h)
+		getJSON(t, srv, "/api/v1/installs/acme-system/controller/health", &h)
 		for _, f := range h.Findings {
 			if f.Code == "ACME-001" {
 				return true
@@ -161,21 +162,21 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 		return false
 	})
 	var o api.OverviewResponse
-	getJSON(t, srv, "/api/v1/installs/acme-system/edge/overview", &o)
+	getJSON(t, srv, "/api/v1/installs/acme-system/controller/overview", &o)
 	found := false
 	for _, c := range o.Counts {
-		if c.Kind == "WafPolicy" && c.Count == 1 {
+		if c.Kind == "WidgetPolicy" && c.Count == 1 {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatalf("downstream kind not counted, or the denied one not dropped: %+v", o.Counts)
 	}
-	base := "/api/v1/installs/acme-system/edge/resources/policy.acme.example.com/WafPolicy/shop/"
-	if code := getJSON(t, srv, base+"waf", nil); code != http.StatusOK {
+	base := "/api/v1/installs/acme-system/controller/resources/widgets.acme.example.com/WidgetPolicy/shop/"
+	if code := getJSON(t, srv, base+"widget", nil); code != http.StatusOK {
 		t.Fatalf("an allowed downstream resource must be served, got %d", code)
 	}
-	if code := getJSON(t, srv, base+"waf-hidden", nil); code != http.StatusNotFound {
+	if code := getJSON(t, srv, base+"widget-hidden", nil); code != http.StatusNotFound {
 		t.Fatalf("the downstream Authorizer must hide the denied resource, got %d", code)
 	}
 }
@@ -224,10 +225,17 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 	}
 	var o api.OverviewResponse
 	getJSON(t, srv, "/api/v1/installs/kgw/kgateway/overview", &o)
+	tile := false
 	for _, c := range o.Counts {
-		if c.Kind == "HTTPRoute" && c.Count != 1 {
-			t.Fatalf("the denied route must leave the HTTPRoute count: %d", c.Count)
+		if c.Kind == "HTTPRoute" {
+			tile = true
+			if c.Count != 1 {
+				t.Fatalf("the denied route must leave the HTTPRoute count: %d", c.Count)
+			}
 		}
+	}
+	if !tile {
+		t.Fatalf("HTTPRoute tile missing: %+v", o.Counts)
 	}
 }
 
@@ -266,5 +274,75 @@ func TestBuildDerivesMetricsTimingsFromTheInterval(t *testing.T) {
 		if _, err := Build(c, o, extension.New()); err == nil {
 			t.Fatalf("Build must reject a zero interval: %+v", o)
 		}
+	}
+}
+
+// build builds the app over fake clients without starting it.
+func build(t *testing.T, objs ...runtime.Object) *App {
+	t.Helper()
+	dyn, kube := testutil.Clients(t, objs...)
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 10 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// A listen failure returns an error and starts nothing that outlives serve.
+func TestServeListenFailureStartsNothing(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	a := build(t)
+	if err := serve(context.Background(), a, ln.Addr().String(), nil); err == nil {
+		t.Fatal("serve must fail when the address is in use")
+	}
+	// The compute loop runs every 10 ms; a leaked one would publish a model.
+	time.Sleep(100 * time.Millisecond)
+	if a.Engine.Current() != nil {
+		t.Fatal("no component may run after serve returned an error")
+	}
+}
+
+// Cancelling ctx drains an in-flight request before serve returns.
+func TestServeDrainsInFlightRequests(t *testing.T) {
+	a := build(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	a.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		_, _ = io.WriteString(w, "done")
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	addr := make(chan net.Addr, 1)
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, a, "127.0.0.1:0", func(a net.Addr) { addr <- a }) }()
+	resp := make(chan string, 1)
+	go func() {
+		r, err := http.Get("http://" + (<-addr).String() + "/")
+		if err != nil {
+			resp <- err.Error()
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		resp <- string(b)
+	}()
+	<-entered
+	cancel()
+	select {
+	case err := <-served:
+		t.Fatalf("serve returned with a request in flight: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if got := <-resp; got != "done" {
+		t.Fatalf("the in-flight request must complete, got %q", got)
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("a cancelled serve must return nil, got %v", err)
 	}
 }
