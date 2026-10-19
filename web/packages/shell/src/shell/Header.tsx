@@ -8,15 +8,13 @@ import { versionText } from "../format";
 import { HealthIcon } from "../health/HealthIcon";
 import { ResourceName } from "../resource/ResourceName";
 import { Shimmer } from "../states/Shimmer";
+import { HEADER_H } from "./constants";
 import { useShellExtension } from "./extension";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerResourceName, headerTint } from "./headerTint";
 import { InstallSwitcher } from "./InstallSwitcher";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // region Styles
-/** Header band height; full-height pages size themselves against it. */
-export const HEADER_H = 52;
-
 const Bar = styled.header`
   display: flex;
   align-items: center;

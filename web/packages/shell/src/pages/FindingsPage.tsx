@@ -6,19 +6,14 @@ import { useDeferredValue, useMemo, useRef } from "react";
 import { useHealth } from "../api/hooks";
 import type { Finding, Severity } from "../api/types";
 import { severityLabel } from "../health/state";
+import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT, HEADER_H } from "../shell/constants";
 import { useInstallId } from "../shell/extension";
-import { HEADER_H } from "../shell/Header";
 import { useUrlParams, useUrlText } from "../shell/urlParams";
 import { PageState } from "../states/PageState";
 import { FindingRow } from "./install/FindingRow";
 import { findingKeys } from "./install/TopFindings";
 
 // region Styles
-/** Accent share of a selected chip's fill (rest, hover, press); contrast-tested in themes.test.ts. */
-export const CHIP_PRESSED_PCT = 16;
-export const CHIP_PRESSED_HOVER_PCT = 22;
-export const CHIP_PRESSED_ACTIVE_PCT = 28;
-
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
   /* A flex column of the viewport below the header: the list takes what the (possibly wrapping) bar leaves. */
   box-sizing: border-box;
@@ -61,6 +56,7 @@ const Chip = styled.button`
   height: 32px;
   padding: 0 12px;
   cursor: pointer;
+  user-select: none;
   font: inherit;
   font-size: ${(p) => p.theme.font.size.sm};
   border-radius: 16px;

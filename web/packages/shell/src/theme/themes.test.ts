@@ -1,4 +1,4 @@
-import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT } from "../pages/FindingsPage";
+import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT } from "../shell/constants";
 import { HEADER_MUTED_PCT, HEADER_PRESS_PCT } from "../shell/headerTint";
 import { contrastRatio } from "./contrast";
 import { controlRoomDark, controlRoomLight, defaultThemes } from "./themes";
