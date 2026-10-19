@@ -6,6 +6,7 @@
     <title>kgateway</title>
     <script>
       // Paint the theme background before React loads, so there is no colour flash.
+      // Mirrors readStoredTheme: only known theme ids count, anything else follows the OS.
       (() => {
         var id = null;
         try {
@@ -13,8 +14,13 @@
         } catch {
           // storage blocked: fall back to the OS preference
         }
-        var light = id ? id.indexOf("light") !== -1 : window.matchMedia("(prefers-color-scheme: light)").matches;
-        document.documentElement.style.background = light ? "#FFFFFF" : "#0F1220";
+        var light;
+        if (id === "control-room-light") light = true;
+        else if (id === "control-room-dark") light = false;
+        else light = window.matchMedia("(prefers-color-scheme: light)").matches;
+        var root = document.documentElement;
+        root.style.background = light ? "#FFFFFF" : "#0F1220";
+        root.style.colorScheme = light ? "light" : "dark";
       })();
     </script>
   </head>
