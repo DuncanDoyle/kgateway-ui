@@ -134,7 +134,7 @@ export function Header() {
       {current ? (
         <Identity>
           {data && data.length > 1 ? (
-            <InstallSwitcher installs={data} currentId={id} />
+            <InstallSwitcher installs={data} currentId={id} unconfirmed={!!error} />
           ) : (
             <ResourceName
               namespace={current.namespace}
@@ -148,7 +148,7 @@ export function Header() {
             <Tag data-testid="edition">{current.edition}</Tag>
           ) : null}
           <Ready>
-            <HealthIcon state={isStale(current.computedAt, now) ? "unknown" : readiness(current.controller)} />
+            <HealthIcon state={error || isStale(current.computedAt, now) ? "unknown" : readiness(current.controller)} />
             Controller: {current.controller.ready} of {current.controller.desired} ready
           </Ready>
         </Identity>

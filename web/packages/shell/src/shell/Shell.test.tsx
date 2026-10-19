@@ -1,5 +1,5 @@
 import { css } from "@emotion/react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import { stubApi } from "../test/render";
@@ -40,6 +40,7 @@ function mount(path: string, ext = {}) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   localStorage.clear();
 });
 
@@ -291,14 +292,12 @@ it("switcher items name each install's state", async () => {
 });
 
 it.each([
-  ["/i/kgw/kgateway", "kgw/kgateway | kgateway"],
-  ["/i/kgw/kgateway/findings", "Findings: kgw/kgateway | kgateway"],
-  ["/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge", "Gateway prod/edge: kgw/kgateway | kgateway"],
-  [
-    "/i/kgw/kgateway/r/gateway.networking.k8s.io/GatewayClass/-/kgateway",
-    "GatewayClass kgateway: kgw/kgateway | kgateway",
-  ],
-  ["/nope", "Page not found | kgateway"],
+  ["/", "kgateway"],
+  ["/i/kgw/kgateway", "kgw/kgateway"],
+  ["/i/kgw/kgateway/findings", "Findings: kgw/kgateway"],
+  ["/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge", "Gateway prod/edge: kgw/kgateway"],
+  ["/i/kgw/kgateway/r/gateway.networking.k8s.io/GatewayClass/-/kgateway", "GatewayClass kgateway: kgw/kgateway"],
+  ["/nope", "Page not found"],
 ])("sets the document title on %s", async (path, title) => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway"), inst("b/two")], "/api/v1/meta": meta });
   mount(path);
@@ -312,7 +311,25 @@ it("titles an extension page with its nav label", async () => {
     routes: [{ path: "waf", element: <p>waf page</p>, scope: "install" }],
     navEntries: [{ label: "WAF", to: "waf", scope: "install" }],
   });
-  await waitFor(() => expect(document.title).toBe("WAF: kgw/kgateway | Acme Edge"));
+  await waitFor(() => expect(document.title).toBe("WAF: kgw/kgateway"));
+});
+
+it("a failing installs poll turns the header readiness and switcher items unknown", async () => {
+  const routes: Record<string, unknown> = { "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta };
+  stubApi(routes);
+  mount("/i/a/one");
+  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  expect(within(ready).getByTestId("health-icon-healthy")).toBeInTheDocument();
+  routes["/api/v1/installs"] = [500, { error: "boom" }];
+  // SWR refetches on reconnect of a visible page (jsdom reports hidden).
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+  await waitFor(() => expect(within(ready).getByTestId("health-icon-unknown")).toBeInTheDocument());
+  await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
+  for (const item of screen.getAllByRole("menuitem")) expect(item).toHaveAccessibleName(/^Unknown: /);
+  expect(screen.queryAllByTestId("health-icon-healthy")).toHaveLength(0);
 });
 
 // region Helpers

@@ -16,10 +16,12 @@ import { Tooltip } from "./Tooltip";
 interface InstallSwitcherProps {
   installs: InstallSummary[];
   currentId: string;
+  /** The latest installs poll failed: every item shows unknown (D-006). */
+  unconfirmed?: boolean;
 }
 
 /** Shows the current install and switches between installs (D-009 §5). */
-export function InstallSwitcher({ installs, currentId }: InstallSwitcherProps) {
+export function InstallSwitcher({ installs, currentId, unconfirmed = false }: InstallSwitcherProps) {
   const now = useNow();
   const navigate = useNavigate();
   const menu = useMenu();
@@ -51,7 +53,7 @@ export function InstallSwitcher({ installs, currentId }: InstallSwitcherProps) {
       {menu.open ? (
         <Menu role="menu" aria-label="Installs" $align="start" ref={menu.menuRef} onKeyDown={menu.onMenuKeyDown}>
           {installs.map((i) => {
-            const state = isStale(i.computedAt, now) ? "unknown" : i.health.state;
+            const state = unconfirmed || isStale(i.computedAt, now) ? "unknown" : i.health.state;
             return (
               <button
                 key={i.id}

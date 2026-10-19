@@ -33,12 +33,12 @@ function pageTitle(
 }
 
 // region Component
-/** Keeps document.title in step with the route: "{page} | {product}". */
+/** Keeps document.title in step with the route: the page part (e.g. "Findings: ns/name"), else the product name. */
 export function DocumentTitle() {
   const { pathname } = useLocation();
   const { brand, routes, navEntries } = useShellExtension();
   const page = pageTitle(pathname, { routes, navEntries });
-  const title = page ? `${page} | ${brand.productName}` : brand.productName;
+  const title = page ?? brand.productName;
   useEffect(() => {
     document.title = title;
   }, [title]);

@@ -101,7 +101,7 @@ export function ClusterLanding({ stylesOverride }: ClusterLandingProps = {}) {
   const { data, error } = useInstalls();
   const now = useNow();
   const theme = useTheme();
-  // After a first load, a failed poll keeps the cards under a notice; each card turns stale on its own.
+  // After a first load, a failed poll keeps the cards under a notice, with their health shown unknown.
   if (!data) {
     if (error?.status === 503)
       return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
@@ -123,7 +123,8 @@ export function ClusterLanding({ stylesOverride }: ClusterLandingProps = {}) {
       ) : null}
       {data.map((i) => {
         // An old summary is not evidence: unknown, never its last state.
-        const stale = isStale(i.computedAt, now);
+        // A failing poll leaves the summary unconfirmed: unknown as well.
+        const stale = !!error || isStale(i.computedAt, now);
         const state: HealthState = stale ? "unknown" : i.health.state;
         return (
           <Card key={i.id} to={`/i/${i.id}`} $state={state} data-testid="install-card">

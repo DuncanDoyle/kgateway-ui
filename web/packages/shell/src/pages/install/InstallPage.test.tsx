@@ -164,11 +164,15 @@ it("a healthy page turns stale as it ages while identical responses keep arrivin
   // vi.waitFor polls on real timers, so it works while setInterval is faked.
   await vi.waitFor(() => expect(screen.getByTestId("health-strip")).toHaveTextContent("All healthy"));
   for (const r of gatewayRows()) expect(r).not.toHaveTextContent("Unknown");
+  const live = within(screen.getByTestId("health-strip")).getByRole("status");
   vi.setSystemTime(base + 2 * POLL_MS + 1000);
   act(() => {
     vi.advanceTimersByTime(1000);
   });
   expect(screen.getByTestId("health-strip")).toHaveTextContent(/Data is stale/);
+  // One live region, updated in place, so screen readers announce the change.
+  expect(within(screen.getByTestId("health-strip")).getByRole("status")).toBe(live);
+  expect(live).toHaveTextContent(/^Data is stale$/);
   for (const r of gatewayRows()) expect(r).toHaveTextContent("Unknown");
 });
 
@@ -521,9 +525,14 @@ it("after a first load, a failing poll keeps the page and says so", async () => 
   act(() => {
     window.dispatchEvent(new Event("online"));
   });
-  expect(await screen.findByTestId("page-notice")).toHaveTextContent("Waiting for the cluster");
+  expect(await screen.findByTestId("page-notice")).toHaveTextContent(
+    /^Waiting for the cluster: connecting to cluster: cache not synced$/,
+  );
   expect(screen.getByTestId("health-strip")).toBeInTheDocument();
   expect(screen.getByRole("table", { name: "Gateways" })).toBeInTheDocument();
+  // Unconfirmed data is not evidence: no green survives while a poll fails (D-006).
+  expect(screen.queryAllByTestId("health-icon-healthy")).toHaveLength(0);
+  for (const r of gatewayRows()) expect(r).toHaveTextContent("Unknown");
 });
 
 it("the install page has an h1 and accepts stylesOverride", async () => {

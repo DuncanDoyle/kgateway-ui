@@ -94,7 +94,7 @@ it("cluster landing names a scope error and a scope read from the Deployment tem
   renderWithTheme(<ClusterLanding />);
   expect(await screen.findByRole("link", { name: /a\/one/ })).toHaveTextContent("Scope unknown: uses valueFrom");
   expect(screen.getByRole("link", { name: /b\/two/ })).toHaveTextContent(
-    "12 of 40 namespaces. Source: Deployment template",
+    "12 of 40 namespaces. Source: Deployment template.",
   );
 });
 
@@ -139,7 +139,9 @@ it("cluster landing keeps the loaded cards when a later poll fails", async () =>
   routes["/api/v1/installs"] = [500, { error: "boom" }];
   revalidate();
   expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load installs: boom");
-  expect(screen.getByRole("link", { name: /a\/one/ })).toBeInTheDocument();
+  const card = screen.getByRole("link", { name: /a\/one/ });
+  expect(card).toHaveTextContent("Unknown");
+  expect(screen.queryAllByTestId("health-icon-healthy")).toHaveLength(0);
 });
 
 // region Findings page

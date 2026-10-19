@@ -79,7 +79,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const now = useNow();
   const err = ov.error ?? h.error;
   // Render only data that belongs to this route's install, never the previous install's (design §6.6).
-  // Once loaded, a failed poll keeps the page under a notice; the strip turns stale on its own.
+  // Once loaded, a failed poll keeps the page under a notice, with its health shown unknown.
   if (!ov.data || !h.data || ov.data.header.id !== id || h.data.install !== id) {
     if (err?.status === 503)
       return <PageState kind="connecting" title="Waiting for the cluster" message={err.message} />;
@@ -114,7 +114,8 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
     );
   }
   // Stale health or overview turns the strip and the gateway rows unknown (D-006).
-  const stale = isStale(h.data.collectedAt, now) || isStale(ov.data.collectedAt, now);
+  // A failing poll leaves the data unconfirmed, which is not evidence either.
+  const stale = !!err || isStale(h.data.collectedAt, now) || isStale(ov.data.collectedAt, now);
   const signalsMissing = h.data.checks.some((c) => c.required && !c.ok);
   const checkedAt =
     Date.parse(ov.data.collectedAt) < Date.parse(h.data.collectedAt) ? ov.data.collectedAt : h.data.collectedAt;

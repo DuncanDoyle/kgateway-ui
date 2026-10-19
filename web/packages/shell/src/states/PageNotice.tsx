@@ -41,7 +41,7 @@ export function PageNotice({ error, title, stylesOverride }: PageNoticeProps) {
       stylesOverride={stylesOverride}
     >
       <HealthIcon state={connecting ? "unknown" : "error"} />
-      {connecting ? "Waiting for the cluster" : `${title}: ${error.message}`}
+      {connecting ? `Waiting for the cluster: ${error.message}` : `${title}: ${error.message}`}
     </Box>
   );
 }

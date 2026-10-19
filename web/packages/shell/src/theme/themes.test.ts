@@ -1,10 +1,16 @@
 import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT } from "../shell/constants";
 import { HEADER_MUTED_PCT, HEADER_PRESS_PCT } from "../shell/headerTint";
 import { contrastRatio } from "./contrast";
-import { controlRoomDark, controlRoomLight, defaultThemes } from "./themes";
+import { controlRoomDark, controlRoomLight, defaultThemeIdFor, defaultThemes } from "./themes";
 import type { HealthState } from "./tokens";
 
 const states: HealthState[] = ["healthy", "warning", "error", "unknown"];
+
+it("the default theme ignores an explicit id that is not listed", () => {
+  expect(defaultThemeIdFor(defaultThemes, "nope")).toBe(controlRoomDark.id);
+  expect(defaultThemeIdFor([controlRoomLight, controlRoomDark], controlRoomLight.id)).toBe(controlRoomLight.id);
+  expect(defaultThemeIdFor([controlRoomLight, controlRoomDark])).toBe(controlRoomDark.id);
+});
 
 it("computes WCAG contrast", () => {
   expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 0);

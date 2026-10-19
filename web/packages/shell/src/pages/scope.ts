@@ -19,12 +19,13 @@ function selectorText(s: LabelSelector): string {
 /**
  * The scope of an install in words, shared by the landing card ("summary") and the scope tile's tooltip ("detail").
  * Both name a scope error; the summary names only the Deployment-template source, the detail names any source.
+ * A trailing period follows only an added "Source:" sentence, in both forms.
  */
 export function scopeText(sc: ScopeSummary, form: "summary" | "detail"): string {
   if (sc.mode === "unknown") return sc.error ? `Scope unknown: ${sc.error}` : "Scope unknown";
   if (form === "summary") {
     const which = sc.mode === "all" ? "All namespaces" : `${sc.watched} of ${sc.total} namespaces`;
-    return sc.source === DEPLOYMENT_TEMPLATE ? `${which}. Source: ${sourceLabel(sc.source)}` : which;
+    return sc.source === DEPLOYMENT_TEMPLATE ? `${which}. Source: ${sourceLabel(sc.source)}.` : which;
   }
   const which =
     sc.mode === "all" ? "All namespaces" : `Namespaces matching ${(sc.selectors ?? []).map(selectorText).join(" or ")}`;
