@@ -2,6 +2,7 @@
 
 export { contrastRatio } from "./theme/contrast";
 export { ThemeProvider, useThemeSwitch } from "./theme/ThemeProvider";
+export { THEME_PAINT_KEY } from "./theme/themeStorage";
 export { controlRoomDark, controlRoomLight, defaultThemes } from "./theme/themes";
 export type { FontSizes, FontWeights, HealthState, StatusTokens, Theme } from "./theme/tokens";
 

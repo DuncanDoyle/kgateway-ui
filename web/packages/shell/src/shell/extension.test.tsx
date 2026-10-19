@@ -1,15 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { SWRConfig } from "swr";
-import { defaultPages } from "../pages/defaultPages";
+import { controlRoomDark, defaultPages, Shell, THEME_PAINT_KEY, type Theme } from "../index";
 import { overview, unhealthy } from "../test/fixtures";
 import { stubApi } from "../test/render";
-import { THEME_PAINT_KEY } from "../theme/themeStorage";
-import { controlRoomDark } from "../theme/themes";
-import type { Theme } from "../theme/tokens";
-import { Shell } from "./Shell";
 
 // A downstream with its own brand, theme, page, nav entry and finding renderer, registered through the public shell API only.
-const widgetsTheme: Theme = {
+const acmeTheme: Theme = {
   ...controlRoomDark,
   id: "acme",
   name: "Acme",
@@ -55,7 +51,7 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
         pages={defaultPages}
         extension={{
           brand: { productName: "Acme Edge", logo: <span>A</span> },
-          themes: [widgetsTheme],
+          themes: [acmeTheme],
           defaultThemeId: "acme",
           routes: [{ path: "widgets", element: <p>widgets page</p>, scope: "install" }],
           navEntries: [{ label: "Widgets", to: "widgets", scope: "install" }],
