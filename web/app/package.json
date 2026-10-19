@@ -1,0 +1,24 @@
+{
+  "name": "kgateway-ui-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build"
+  },
+  "dependencies": {
+    "@emotion/react": "^11",
+    "@emotion/styled": "^11",
+    "@kgateway-ui/shell": "*",
+    "lucide-react": "^1",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-router-dom": "^7",
+    "swr": "^2",
+    "@tanstack/react-table": "^8",
+    "@tanstack/react-virtual": "^3",
+    "js-yaml": "^4",
+    "@fontsource-variable/figtree": "^5",
+    "@fontsource-variable/jetbrains-mono": "^5"
+  }
+}

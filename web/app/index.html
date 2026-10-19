@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>kgateway</title>
+    <script>
+      // Paint the theme background before React loads, so there is no colour flash.
+      (() => {
+        var id = null;
+        try {
+          id = localStorage.getItem("kgateway-ui.theme");
+        } catch {
+          // storage blocked: fall back to the OS preference
+        }
+        var light = id ? id.indexOf("light") !== -1 : window.matchMedia("(prefers-color-scheme: light)").matches;
+        document.documentElement.style.background = light ? "#FFFFFF" : "#0F1220";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

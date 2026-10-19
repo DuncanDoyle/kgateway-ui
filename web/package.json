@@ -1,0 +1,31 @@
+{
+  "name": "kgateway-ui-web",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "app"
+  ],
+  "scripts": {
+    "build": "npm run build -w kgateway-ui-app",
+    "dev": "npm run dev -w kgateway-ui-app",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "typecheck": "tsc -p packages/shell && tsc -p app"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2",
+    "@playwright/test": "^1.64.1",
+    "@testing-library/dom": "^10",
+    "@testing-library/jest-dom": "^7",
+    "@testing-library/react": "^16",
+    "@testing-library/user-event": "^14",
+    "@types/js-yaml": "^4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "jsdom": "^26.1.0",
+    "typescript": "^5",
+    "vite": "^7",
+    "vitest": "^4.1.12"
+  }
+}
