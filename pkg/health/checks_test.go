@@ -19,6 +19,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
@@ -26,15 +27,16 @@ import (
 const img = "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7"
 
 type world struct {
-	nss     []*corev1.Namespace
-	objs    []*unstructured.Unstructured
-	deploys []*appsv1.Deployment
-	ctrl    *appsv1.Deployment
-	pods    []*corev1.Pod
-	scope   string
-	fromPod bool                                         // resolve the scope from the controller Pod env instead of scope
-	metrics *ctrlmetrics.Result                          // nil = not collected yet
-	access  map[schema.GroupVersionResource]cache.Access // overrides on top of "everything readable"
+	nss       []*corev1.Namespace
+	objs      []*unstructured.Unstructured
+	deploys   []*appsv1.Deployment
+	ctrl      *appsv1.Deployment
+	pods      []*corev1.Pod
+	scope     string
+	firstSeen func(u *unstructured.Unstructured) time.Time // nil = creation time
+	fromPod   bool                                         // resolve the scope from the controller Pod env instead of scope
+	metrics   *ctrlmetrics.Result                          // nil = not collected yet
+	access    map[schema.GroupVersionResource]cache.Access // overrides on top of "everything readable"
 }
 
 func healthyWorld() *world {
@@ -81,6 +83,7 @@ func (w *world) report(t *testing.T) Report {
 	if w.metrics != nil {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
+	hi.FirstSeen = w.firstSeen
 	return Evaluate(hi, Upstream())
 }
 
@@ -314,6 +317,14 @@ func TestUnprocessedEvidenceIsNeverHealthy(t *testing.T) {
 			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
 				Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Pending"), testutil.Cond("Attached", metav1.ConditionFalse, "Pending")}}))
 		}, "shop/tp"},
+		{"gateway Programmed=Unknown with a non-Pending reason", func(w *world) {
+			w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionUnknown, "NoResources")})
+		}, "infra/edge"},
+		{"route ResolvedRefs=Unknown", func(w *world) {
+			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionUnknown, "Unknown")}})
+		}, "shop/cart"},
 		{"gateway Programmed=Unknown/Pending", func(w *world) {
 			w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionUnknown, "Pending")})
@@ -522,7 +533,7 @@ func TestFindingsOrderIsDeterministic(t *testing.T) {
 			testutil.HTTPRoute("shop", "c", []objects.ParentRef{withSection("infra", "gone-4", "z"), withSection("infra", "gone-4", "a")}))
 		w.ctrl.Status.ReadyReplicas = 0
 		w.access = map[schema.GroupVersionResource]cache.Access{}
-		for _, k := range testutil.ServedUpstream()[8:] { // the policy kinds
+		for _, k := range kinds.ByCategory(testutil.ServedUpstream(), kinds.CategoryPolicy) {
 			w.access[k.GVR()] = cache.Access{Err: "forbidden"}
 		}
 		return w
@@ -552,7 +563,7 @@ func TestFindingsOrderIsDeterministic(t *testing.T) {
 		"warning KGWUI-003 shop/c gone-4 a",
 		"warning KGWUI-003 shop/c gone-4 z",
 	}
-	for range testutil.ServedUpstream()[8:] {
+	for range kinds.ByCategory(testutil.ServedUpstream(), kinds.CategoryPolicy) {
 		want = append(want, "info KGWUI-008")
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -581,5 +592,68 @@ func TestCheckMethodsAreDocumented(t *testing.T) {
 		if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv != nil && fn.Doc == nil {
 			t.Errorf("method %s has no doc comment", fn.Name.Name)
 		}
+	}
+}
+
+// backendAncestor is the ancestorRef kgateway writes for a policy attached to
+// a backend: the backend itself, in the core group.
+func backendAncestor(t *testing.T, u *unstructured.Unstructured) *unstructured.Unstructured {
+	t.Helper()
+	as, _, _ := unstructured.NestedSlice(u.Object, "status", "ancestors")
+	for _, a := range as {
+		a.(map[string]any)["ancestorRef"] = map[string]any{"group": "", "kind": "Service", "namespace": "shop", "name": "svc"}
+	}
+	if err := unstructured.SetNestedSlice(u.Object, as, "status", "ancestors"); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+// A policy attached to a backend has the backend as ancestor; its status
+// counts by controller name, so a rejected backend policy is an error.
+func TestBackendPolicyStatusCounts(t *testing.T) {
+	invalid := testutil.PolicyAncestor{Controller: testutil.Controller, Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}}
+	for _, p := range []*unstructured.Unstructured{
+		testutil.Policy("gateway.kgateway.dev/v1alpha1", "BackendConfigPolicy", "shop", "bcp", invalid),
+		testutil.BackendTLSPolicy("shop", "bcp", invalid),
+	} {
+		t.Run(p.GetKind(), func(t *testing.T) {
+			w := healthyWorld()
+			w.objs = append(w.objs, backendAncestor(t, p))
+			r := w.report(t)
+			if !has(r, CodeConditionFalse, SeverityError, "shop/bcp") || r.State != StateError {
+				t.Fatalf("state=%s findings=%+v", r.State, r.Findings)
+			}
+			for _, f := range r.Findings {
+				if f.Code == CodeConditionFalse && !strings.Contains(f.Detail, "ancestor Service shop/svc") {
+					t.Fatalf("detail must name the ancestor with its namespace: %q", f.Detail)
+				}
+			}
+		})
+	}
+}
+
+// A missing proxy gets the same grace as status: from when the engine first
+// saw the Gateway's generation, not from its creation.
+func TestMissingProxyGraceStartsAtFirstSeen(t *testing.T) {
+	w := healthyWorld()
+	w.deploys = w.deploys[:1]
+	w.firstSeen = func(*unstructured.Unstructured) time.Time { return testutil.Now.Add(-10 * time.Second) }
+	if r := w.report(t); has(r, CodeProxyNotReady, "", "infra/edge") {
+		t.Fatalf("a proxy missing inside the grace period is not reported: %+v", r.Findings)
+	}
+}
+
+// Access findings name the resource with its group, kubectl style.
+func TestAccessFindingNamesGroup(t *testing.T) {
+	w := healthyWorld()
+	w.access = map[schema.GroupVersionResource]cache.Access{testutil.ServedUpstream()[1].GVR(): {Err: "forbidden"}, cache.NamespacesGVR: {Err: "forbidden"}}
+	r := w.report(t)
+	msgs := map[string]bool{}
+	for _, f := range r.Findings {
+		msgs[f.Message] = true
+	}
+	if !msgs["No access to gateways.gateway.networking.k8s.io"] || !msgs["No access to namespaces"] {
+		t.Fatalf("messages: %v", msgs)
 	}
 }

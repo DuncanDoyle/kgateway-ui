@@ -8,9 +8,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -55,13 +57,21 @@ func (c cacheCheck) Run(in Input) ([]Finding, CheckResult) {
 	for gvr, a := range in.Snapshot.Access {
 		if !a.OK {
 			fs = append(fs, Finding{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-				Message: "No access to " + gvr.Resource, Detail: a.Err})
+				Message: "No access to " + resourceName(gvr), Detail: a.Err})
 		}
 	}
 	if len(fs) > 0 {
 		return fs, CheckResult{Name: c.Name(), Required: true, CollectedAt: in.Snapshot.TakenAt, Error: fmt.Sprintf("%d kinds not readable", len(fs))}
 	}
 	return nil, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// resourceName returns "resource.group", or "resource" for the core group.
+func resourceName(gvr schema.GroupVersionResource) string {
+	if gvr.Group == "" {
+		return gvr.Resource
+	}
+	return gvr.Resource + "." + gvr.Group
 }
 
 // scopeCheck: the install's scope could be determined.
@@ -170,8 +180,8 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	}
 	pending := func(u *unstructured.Unstructured, why string) { pendingFor(u, objects.ParentRef{}, why) }
 	// current reports false when the block is pending: a required condition is
-	// missing, a present condition has reason Pending, or a present condition
-	// may describe an older generation (including observedGeneration 0).
+	// missing or Unknown, a present condition has reason Pending, or a present
+	// condition may describe an older generation (including observedGeneration 0).
 	current := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) bool {
 		for _, t := range required {
 			if objects.FindCondition(cs, t) == nil {
@@ -190,6 +200,12 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 			if objects.IsStale(u, *cond) {
 				pendingFor(u, parent, "status describes an older generation"+within(extra))
+				return false
+			}
+		}
+		for _, t := range required {
+			if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
+				pendingFor(u, parent, fmt.Sprintf("%s is Unknown%s", t, within(extra)))
 				return false
 			}
 		}
@@ -264,8 +280,8 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
 			"parent "+parentDesc(u.Parent)+" does not exist")
 	}
-	// Policies: ancestors written by this install's controller for a Gateway or
-	// ListenerSet it owns, or the synthetic status summary. Assign drops policies
+	// Policies: ancestors written by this install's controller, for a Gateway
+	// or ListenerSet it owns or for any other kind. Assign drops policies
 	// processed only for another install, so none here means not yet processed;
 	// on v2.3/v2.4 that includes a policy whose target is missing.
 	for _, p := range in.Owned.Policies {
@@ -274,7 +290,9 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			if !slices.Contains(in.Install.ControllerNames, a.ControllerName) {
 				continue
 			}
-			if install.IsStatusSummary(a.AncestorRef) || owned[a.AncestorRef.Ref()] {
+			// Gateway-like ancestors must be this install's; others (backends,
+			// the status summary) count by controller name.
+			if !in.parentKind(a.AncestorRef.Group, a.AncestorRef.Kind) || owned[a.AncestorRef.Ref()] {
 				mine = append(mine, a)
 			}
 		}
@@ -283,7 +301,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			continue
 		}
 		for _, a := range mine {
-			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Name
+			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Ref().String()
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
@@ -328,6 +346,16 @@ func parentDesc(p objects.ParentRef) string {
 	return d
 }
 
+// parentKind reports whether group/kind is a served Gateway or ListenerSet kind.
+func (in Input) parentKind(group, kind string) bool {
+	for _, k := range in.Served {
+		if k.Group == group && k.Kind == kind && (k.Category == kinds.CategoryGateway || k.Category == kinds.CategoryListenerSet) {
+			return true
+		}
+	}
+	return false
+}
+
 // within formats extra as a trailing " (extra)", or "" when empty.
 func within(extra string) string {
 	if extra == "" {
@@ -365,7 +393,7 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	for _, gw := range in.Owned.Gateways {
 		d := proxyFor(gw, in.Snapshot.Deployments)
 		if d == nil {
-			if in.Now.Sub(gw.GetCreationTimestamp().Time) >= Grace {
+			if in.Now.Sub(in.firstSeen(gw)) >= Grace {
 				fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
 					Resource: ref(gw), Message: "Proxy deployment not found"})
 			}

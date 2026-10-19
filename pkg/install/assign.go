@@ -203,7 +203,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 			if !inScope(in, p.Obj.GetNamespace()) {
 				continue
 			}
-			if !claimable(p, i, in.ControllerNames, ownerOf) {
+			if !claimable(p, i, in.ControllerNames, parentKinds, ownerOf) {
 				continue
 			}
 			o := a.PerInstall[in.ID()]
@@ -213,23 +213,23 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 	return a
 }
 
-// claimable reports whether an in-scope policy belongs to install i. With
-// ancestors from i's controller names, one of them must be a Gateway or
-// ListenerSet that i owns, or the synthetic status summary; otherwise the
-// policy belongs to another install sharing the controller name. Without
-// such ancestors a kgateway policy belongs to i, and any other policy only
-// when it has no ancestors at all (new, not yet processed).
-func claimable(p OwnedObject, i int, controllers []string, ownerOf map[objects.Ref]int) bool {
+// claimable reports whether an in-scope policy belongs to install i. An
+// ancestor from i's controller names that is a Gateway or ListenerSet must be
+// one i owns; if all such ancestors belong elsewhere, so does the policy. Any
+// other ancestor from i's controller names (a backend, the status summary)
+// claims the policy for i. Without such ancestors a kgateway policy belongs
+// to i, and any other policy only when it has no ancestors at all.
+func claimable(p OwnedObject, i int, controllers []string, parentKinds map[[2]string]bool, ownerOf map[objects.Ref]int) bool {
 	as := objects.PolicyAncestors(p.Obj)
 	mineByName := false
 	for _, a := range as {
 		if !slices.Contains(controllers, a.ControllerName) {
 			continue
 		}
-		mineByName = true
-		if IsStatusSummary(a.AncestorRef) {
+		if !parentKinds[[2]string{a.AncestorRef.Group, a.AncestorRef.Kind}] {
 			return true
 		}
+		mineByName = true
 		if j, ok := ownerOf[a.AncestorRef.Ref()]; ok && j == i {
 			return true
 		}
@@ -238,10 +238,4 @@ func claimable(p OwnedObject, i int, controllers []string, ownerOf map[objects.R
 		return false
 	}
 	return p.Kind.Group == kinds.KgatewayGroup || len(as) == 0
-}
-
-// IsStatusSummary reports whether r is the synthetic StatusSummary ancestor
-// kgateway main writes on policies; it names no Gateway (design §4.3).
-func IsStatusSummary(r objects.ParentRef) bool {
-	return r.Group == kinds.KgatewayGroup && r.Kind == "StatusSummary"
 }
