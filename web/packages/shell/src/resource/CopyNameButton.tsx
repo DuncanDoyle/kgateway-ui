@@ -49,7 +49,7 @@ export function CopyNameButton({ resource, placement = "center", stylesOverride 
     <Tooltip label="Copy namespace/name" placement={placement}>
       <IconButton
         type="button"
-        aria-label="Copy resource name"
+        aria-label="Copy namespace/name"
         stylesOverride={stylesOverride}
         onClick={() => void navigator.clipboard?.writeText(copyName(resource)).catch(() => {})}
       >

@@ -311,7 +311,7 @@ export const GatewayTable = memo(function GatewayTable({
           </tbody>
         </Table>
         {visible.length === 0 ? (
-          <Empty>{rows.length === 0 ? "This install has no Gateways." : "No Gateways match the filter."}</Empty>
+          <Empty>{rows.length === 0 ? "No Gateways in this install." : "No Gateways match the filter."}</Empty>
         ) : null}
       </Scroll>
     </>

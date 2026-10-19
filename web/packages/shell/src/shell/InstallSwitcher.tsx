@@ -18,7 +18,7 @@ interface InstallSwitcherProps {
   currentId: string;
 }
 
-/** Shows the current install and switches between controller installs (D-009 §5). */
+/** Shows the current install and switches between installs (D-009 §5). */
 export function InstallSwitcher({ installs, currentId }: InstallSwitcherProps) {
   const now = useNow();
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ export function InstallSwitcher({ installs, currentId }: InstallSwitcherProps) {
   const current = installs.find((i) => i.id === currentId);
   return (
     <Anchor ref={menu.anchorRef}>
-      <Tooltip label="Switch controller install">
+      <Tooltip label={`Switch install: ${currentId}`}>
         <MenuButton
           ref={menu.buttonRef}
           type="button"
@@ -49,13 +49,7 @@ export function InstallSwitcher({ installs, currentId }: InstallSwitcherProps) {
         </MenuButton>
       </Tooltip>
       {menu.open ? (
-        <Menu
-          role="menu"
-          aria-label="Controller installs"
-          $align="start"
-          ref={menu.menuRef}
-          onKeyDown={menu.onMenuKeyDown}
-        >
+        <Menu role="menu" aria-label="Installs" $align="start" ref={menu.menuRef} onKeyDown={menu.onMenuKeyDown}>
           {installs.map((i) => {
             const state = isStale(i.computedAt, now) ? "unknown" : i.health.state;
             return (

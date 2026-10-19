@@ -57,7 +57,7 @@ it("unhealthy: strip with counts, top 5 findings, show all", async () => {
   const strip = await screen.findByTestId("health-strip");
   expect(strip).toHaveTextContent("1 error, 6 warnings");
   expect(screen.getAllByTestId("finding-row")).toHaveLength(5);
-  expect(screen.getByRole("link", { name: "Show all (7)" })).toHaveAttribute("href", "/i/kgw/kgateway/findings");
+  expect(screen.getByRole("link", { name: "Show all 7 findings" })).toHaveAttribute("href", "/i/kgw/kgateway/findings");
   const first = screen.getAllByTestId("finding-row")[0] as HTMLElement;
   expect(first).toHaveTextContent("Configuration rejected by Envoy");
   expect(first).toHaveTextContent("2 active rejects");
@@ -104,7 +104,7 @@ it("what was checked shows a check's detail", async () => {
 it("unknown: never green, names the missing signal", async () => {
   mount(unknown());
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("Health unknown — xDS rejects could not be checked");
+  expect(strip).toHaveTextContent("Health unknown: Cannot check xDS rejects");
   expect(strip).not.toHaveTextContent("No known problems");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
   expect(screen.getByTestId("finding-row")).toHaveTextContent("connection refused");
@@ -116,7 +116,7 @@ it("unknown with warnings names the reason, then the warnings", async () => {
   h.counts = { info: 1, warning: 1 };
   mount(h);
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("Health unknown — xDS rejects could not be checked · 1 warning");
+  expect(strip).toHaveTextContent("Health unknown: Cannot check xDS rejects. 1 warning");
   expect(strip).not.toHaveTextContent("No known problems");
 });
 
@@ -148,7 +148,7 @@ it("served kinds changed: the strip names the check and the finding shows its de
     ],
   });
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("Health unknown — served kinds could not be checked");
+  expect(strip).toHaveTextContent("Health unknown: Cannot check served kinds");
   const row = screen.getByTestId("finding-row");
   expect(row).toHaveTextContent("Served kinds changed; restart the UI to watch them");
   expect(row).toHaveTextContent("added TLSRoute");
@@ -172,13 +172,58 @@ it("a healthy page turns stale as it ages while identical responses keep arrivin
   for (const r of gatewayRows()) expect(r).toHaveTextContent("Unknown");
 });
 
+it("a fresh strip says when it was checked", async () => {
+  mount(healthy());
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent(/All healthy\s*Last checked \d+s ago$/);
+});
+
+it("a pending check without a message says it is still reading", async () => {
+  const h = processing();
+  h.checks = [{ name: "resource status", ok: false, required: true, pending: true, collectedAt: h.collectedAt }];
+  mount(h);
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent("Health unknown: Still reading resource status");
+});
+
+it("unknown without a failing required check says some checks did not finish", async () => {
+  mount({ ...unknown(), checks: [] });
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent("Health unknown: Some checks did not finish");
+});
+
+it("tile tooltips name the access problem and the scope source", async () => {
+  const ov = overview();
+  const denied = ov.counts[3];
+  if (denied) denied.access = { ok: false };
+  mount(healthy(), "/i/kgw/kgateway", ov);
+  const noAccess = await screen.findByText("No access");
+  await userEvent.hover(noAccess);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(/^No permission to read this$/);
+  await userEvent.unhover(noAccess);
+  await userEvent.hover(within(screen.getByTestId("scope-tile")).getByText("12 of 40"));
+  expect(screen.getByRole("tooltip")).toHaveTextContent(/^Namespaces matching team=a\. Source: pod kgateway-abc\.$/);
+});
+
+it("a selector without labels matches any label", async () => {
+  const ov = overview();
+  ov.header.scope = { ...ov.header.scope, selectors: [{}], source: "deployment template" };
+  mount(healthy(), "/i/kgw/kgateway", ov);
+  await userEvent.hover(within(await screen.findByTestId("scope-tile")).getByText("12 of 40"));
+  expect(screen.getByRole("tooltip")).toHaveTextContent(
+    /^Namespaces matching any label\. Source: Deployment template\.$/,
+  );
+});
+
+it("an install without Gateways says so", async () => {
+  mount(healthy(), "/i/kgw/kgateway", { ...overview(), gateways: [] });
+  expect(await screen.findByText("No Gateways in this install.")).toBeInTheDocument();
+});
+
 it("being processed: unknown, never green, and says what is happening", async () => {
   mount(processing());
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("Health unknown — 2 resources are being processed by the controller");
+  expect(strip).toHaveTextContent("Health unknown: 2 resources are being processed by the controller");
   expect(strip).not.toHaveTextContent("No known problems");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
-  expect(strip).not.toHaveTextContent("could not be checked");
+  expect(strip).not.toHaveTextContent("Cannot check");
 });
 
 it("stale data turns the strip and every gateway row unknown", async () => {
@@ -198,7 +243,7 @@ it("stale data turns the strip and every gateway row unknown", async () => {
 it("stale overview alone also turns the page unknown", async () => {
   mount(healthy(), "/i/kgw/kgateway", overview(Date.now() - 75_000));
   // The age shown is that of the older response.
-  expect(await screen.findByTestId("health-strip")).toHaveTextContent("Data is stale — last checked 1m ago");
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent("Data is stale. Last checked 1m ago");
 });
 
 it("count tiles, GatewayClass tile first, no-access tile and scope tile", async () => {
@@ -208,7 +253,7 @@ it("count tiles, GatewayClass tile first, no-access tile and scope tile", async 
   expect(tiles[0]).toHaveTextContent("GatewayClasses");
   expect(screen.getByText("No access")).toBeInTheDocument();
   const scope = screen.getByTestId("scope-tile");
-  expect(scope).toHaveTextContent("12 / 40");
+  expect(scope).toHaveTextContent("12 of 40");
   expect(scope).toHaveTextContent("Namespaces watched");
   expect(scope).not.toHaveTextContent("Deployment template");
 });
@@ -217,7 +262,7 @@ it("scope tile says when the scope comes from the Deployment template", async ()
   const ov = overview();
   ov.header.scope.source = "deployment template";
   mount(healthy(), "/i/kgw/kgateway", ov);
-  expect(await screen.findByTestId("scope-tile")).toHaveTextContent("From the Deployment template");
+  expect(await screen.findByTestId("scope-tile")).toHaveTextContent("Source: Deployment template");
 });
 
 it("scope unknown shows an unknown scope tile", async () => {
@@ -227,7 +272,7 @@ it("scope unknown shows an unknown scope tile", async () => {
   const scope = await screen.findByTestId("scope-tile");
   expect(scope).toHaveTextContent("Unknown");
   expect(within(scope).getByTestId("health-icon-unknown")).toBeInTheDocument();
-  expect(scope).not.toHaveTextContent("0 / 40");
+  expect(scope).not.toHaveTextContent("0 of 40");
 });
 
 it("gateway filter matches name, namespace and class and lives in the URL", async () => {
@@ -528,7 +573,7 @@ function Path() {
 
 async function switchTo(id: string) {
   await userEvent.click(screen.getByRole("button", { name: /^Switch install/ }));
-  const item = within(screen.getByRole("menu", { name: "Controller installs" }))
+  const item = within(screen.getByRole("menu", { name: "Installs" }))
     .getAllByRole("menuitem")
     .find((el) => el.textContent?.replace(/\s/g, "").includes(id));
   if (!item) throw new Error(`no menu item for ${id}`);

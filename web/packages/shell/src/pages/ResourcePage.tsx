@@ -179,7 +179,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
         <span className="spacer" />
         {lastApplied ? (
           <TextButton type="button" aria-expanded={showLastApplied} onClick={() => setShowLastApplied((s) => !s)}>
-            {showLastApplied ? "Hide last-applied configuration" : "Show last-applied configuration"}
+            {showLastApplied ? "Hide last-applied config" : "Show last-applied config"}
           </TextButton>
         ) : null}
       </header>

@@ -20,20 +20,20 @@ export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding
     return (
       <PageState
         kind="empty"
-        title="No kgateway installation found"
+        title="No kgateway install found"
         message={
           <>
-            The UI looks for controller Deployments labelled <code>kgateway=kgateway</code> and{" "}
+            An install is a controller Deployment with the labels <code>kgateway=kgateway</code> and{" "}
             <code>app.kubernetes.io/component=controller</code>.
             {meta?.pinned ? (
               <>
                 {" "}
-                It is pinned to <code>{meta.pinned}</code> with <code>--install</code>, which was not found.
+                <code>--install {meta.pinned}</code> was set, but that install was not found.
               </>
             ) : (
               <>
                 {" "}
-                To show one specific install, start the UI with <code>--install namespace/name</code>.
+                To pin one install, start the UI with <code>--install namespace/name</code>.
               </>
             )}
           </>

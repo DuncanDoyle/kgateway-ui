@@ -11,6 +11,7 @@ import { ResourceName } from "../resource/ResourceName";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 import type { HealthState } from "../theme/tokens";
+import { scopeText } from "./scope";
 
 // region Styles
 const Grid = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -86,14 +87,8 @@ function summary(i: InstallSummary, state: HealthState, stale: boolean): string 
   if (stale) return "Data is stale";
   const counts = countsText(i.health.counts);
   if (counts) return counts;
-  if (state === "healthy") return "No problems";
+  if (state === "healthy") return "All healthy";
   return state === "unknown" ? "Health unknown" : stateLabel(state);
-}
-
-function scopeText(s: InstallSummary["scope"]): string {
-  if (s.mode === "all") return "All namespaces";
-  if (s.mode === "unknown") return "Scope unknown";
-  return `${s.watched} / ${s.total} namespaces`;
 }
 
 // region Component
@@ -138,7 +133,7 @@ export function ClusterLanding({ stylesOverride }: ClusterLandingProps = {}) {
             </div>
             <ResourceName namespace={i.namespace} name={i.name} stylesOverride={nameStyle(theme.font.size.base)} />
             <span className="summary">{summary(i, state, stale)}</span>
-            <span className="muted">{scopeText(i.scope)}</span>
+            <span className="muted">{scopeText(i.scope, "summary")}</span>
           </Card>
         );
       })}

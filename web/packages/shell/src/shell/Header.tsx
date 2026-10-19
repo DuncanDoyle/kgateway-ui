@@ -149,7 +149,7 @@ export function Header() {
           ) : null}
           <Ready>
             <HealthIcon state={isStale(current.computedAt, now) ? "unknown" : readiness(current.controller)} />
-            Controller {current.controller.ready}/{current.controller.desired} ready
+            Controller: {current.controller.ready} of {current.controller.desired} ready
           </Ready>
         </Identity>
       ) : null}

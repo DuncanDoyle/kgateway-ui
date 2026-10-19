@@ -90,8 +90,18 @@ it("closes a menu on a click outside it", async () => {
 it("shows a designed empty state when no install is found", async () => {
   stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
   mount("/");
-  await waitFor(() => expect(screen.getByText(/No kgateway installation found/)).toBeInTheDocument());
-  expect(screen.getByText(/--install/)).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText("No kgateway install found")).toBeInTheDocument());
+  expect(screen.getByText(/To pin one install, start the UI with/)).toBeInTheDocument();
+});
+
+it("says when the pinned install was not found", async () => {
+  stubApi({ "/api/v1/installs": [], "/api/v1/meta": { ...meta, pinned: "kgw/gone" } });
+  mount("/");
+  const state = await screen.findByRole("status");
+  await waitFor(() => expect(state).toHaveTextContent("--install kgw/gone was set, but that install was not found."));
+  expect(state).toHaveTextContent(
+    "An install is a controller Deployment with the labels kgateway=kgateway and app.kubernetes.io/component=controller.",
+  );
 });
 
 it("says it is waiting for the cluster while the backend cache is not synced", async () => {
@@ -119,7 +129,7 @@ it("shows the install's version and controller readiness in the header", async (
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway", { ready: 1, desired: 2 })], "/api/v1/meta": meta });
   mount("/i/kgw/kgateway");
   expect(await screen.findByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
-  const ready = screen.getByText("Controller 1/2 ready");
+  const ready = screen.getByText("Controller: 1 of 2 ready");
   expect(within(ready).getByTestId("health-icon-error")).toBeInTheDocument();
 });
 
@@ -180,7 +190,7 @@ it("renders a stale install summary as unknown in the switcher and the header", 
     "/api/v1/meta": meta,
   });
   mount("/i/a/one");
-  const ready = await screen.findByText("Controller 2/2 ready");
+  const ready = await screen.findByText("Controller: 2 of 2 ready");
   expect(within(ready).getByTestId("health-icon-unknown")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
   const item = screen.getByRole("menuitem", { name: /b\/two/ });
@@ -217,6 +227,22 @@ it("switches theme from the theme menu and applies the new tokens", async () => 
   expect(JSON.parse(localStorage.getItem(THEME_PAINT_KEY) ?? "{}")).toEqual({ bg: "#FFFFFF", scheme: "light" });
   await userEvent.click(screen.getByRole("button", { name: /theme/i }));
   expect(screen.getByRole("menuitemradio", { name: /Control room light/ })).toHaveAttribute("aria-checked", "true");
+});
+
+it("the theme button's name and tooltip say the same", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw/kgateway");
+  expect(await screen.findByRole("button", { name: "Theme: Control room" })).toBeInTheDocument();
+});
+
+it("the install switcher's name and tooltip say the same", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/i/a/one");
+  const button = await screen.findByRole("button", { name: "Switch install: a/one" });
+  await userEvent.hover(button);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(/^Switch install: a\/one$/);
+  await userEvent.click(button);
+  expect(screen.getByRole("menu", { name: "Installs" })).toBeInTheDocument();
 });
 
 it("shows the app tooltip on hover and links it to the button", async () => {

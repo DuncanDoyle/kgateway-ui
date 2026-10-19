@@ -14,7 +14,7 @@ export function ThemeSwitcher() {
         <MenuButton
           ref={menu.buttonRef}
           type="button"
-          aria-label="Theme"
+          aria-label={`Theme: ${current.name}`}
           aria-haspopup="menu"
           aria-expanded={menu.open}
           onClick={menu.toggle}

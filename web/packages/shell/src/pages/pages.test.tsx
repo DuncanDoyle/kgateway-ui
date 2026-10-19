@@ -70,18 +70,32 @@ it("cluster landing renders one card per install linking to it", async () => {
   const card = await screen.findByRole("link", { name: /a\/one/ });
   expect(card).toHaveAttribute("href", "/i/a/one");
   expect(card).toHaveTextContent("1 error, 2 warnings");
-  expect(card).toHaveTextContent("12 / 40 namespaces");
+  expect(card).toHaveTextContent("12 of 40 namespaces");
   // The version label already carries a "v"; it is shown once.
   expect(within(card).getByText("v2.4.7")).toBeInTheDocument();
   const two = screen.getByRole("link", { name: /b\/two/ });
   expect(two).toHaveTextContent("Healthy");
-  expect(two).toHaveTextContent("No problems");
+  expect(two).toHaveTextContent("All healthy");
 });
 
 it("cluster landing says all namespaces for an install that watches everything", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one", "healthy", {}, undefined, { mode: "all" })] });
   renderWithTheme(<ClusterLanding />);
   expect(await screen.findByRole("link", { name: /a\/one/ })).toHaveTextContent("All namespaces");
+});
+
+it("cluster landing names a scope error and a scope read from the Deployment template", async () => {
+  stubApi({
+    "/api/v1/installs": [
+      inst("a/one", "healthy", {}, undefined, { mode: "unknown", error: "uses valueFrom" }),
+      inst("b/two", "healthy", {}, undefined, { source: "deployment template" }),
+    ],
+  });
+  renderWithTheme(<ClusterLanding />);
+  expect(await screen.findByRole("link", { name: /a\/one/ })).toHaveTextContent("Scope unknown: uses valueFrom");
+  expect(screen.getByRole("link", { name: /b\/two/ })).toHaveTextContent(
+    "12 of 40 namespaces. Source: Deployment template",
+  );
 });
 
 it("cluster landing never shows an old healthy summary as healthy", async () => {
@@ -329,7 +343,7 @@ it("resource page shows YAML with status first and a copy button", async () => {
   expect(text.indexOf("status:")).toBeLessThan(text.indexOf("spec:"));
   // Status leads the document.
   expect(text.startsWith("status:")).toBe(true);
-  expect(screen.getByRole("button", { name: "Copy resource name" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Copy namespace/name" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("shop/cart");
 });
 
@@ -345,14 +359,11 @@ it("resource page hides the last-applied annotation until asked", async () => {
   const pre = await screen.findByTestId("yaml");
   expect(pre).not.toHaveTextContent(lastApplied);
   expect(pre).toHaveTextContent("team: a");
-  const toggle = screen.getByRole("button", { name: "Show last-applied configuration" });
+  const toggle = screen.getByRole("button", { name: "Show last-applied config" });
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   await userEvent.click(toggle);
   expect(screen.getByTestId("yaml")).toHaveTextContent(lastApplied);
-  expect(screen.getByRole("button", { name: "Hide last-applied configuration" })).toHaveAttribute(
-    "aria-expanded",
-    "true",
-  );
+  expect(screen.getByRole("button", { name: "Hide last-applied config" })).toHaveAttribute("aria-expanded", "true");
 });
 
 it("resource page without the annotation offers no toggle", async () => {

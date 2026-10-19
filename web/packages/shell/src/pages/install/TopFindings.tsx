@@ -64,7 +64,7 @@ export function TopFindings({ findings, installId, stylesOverride }: TopFindings
         <FindingRow key={keys[i]} finding={f} installId={installId} />
       ))}
       <Link className="more" to={`/i/${installId}/findings`}>
-        Show all ({findings.length})
+        Show all {findings.length} findings
       </Link>
     </Box>
   );

@@ -42,18 +42,22 @@ export function ago(iso: string, now: number): string {
   return `${Math.round(s / 3600)}h ago`;
 }
 
-/** The strip's text. Unknown leads with "Health unknown" and its reason, then any warnings; it never claims "No known problems". */
+function sentence(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** The strip's text. Unknown leads with "Health unknown" and its reasons, then any warnings; it never claims "No known problems". */
 function headline(h: HealthReport): string {
   if (h.state === "healthy") return "All healthy";
   if (h.state === "unknown") {
     const failing = h.checks.filter((c) => c.required && !c.ok);
     const missing = failing.filter((c) => !c.pending).map((c) => c.name);
     // A pending check was collected; its error says how many resources are being processed.
-    const parts = failing.filter((c) => c.pending).map((c) => c.error ?? `${c.name} is being processed`);
-    if (missing.length) parts.unshift(`${missing.join(", ")} could not be checked`);
-    if (!parts.length) parts.push("some checks did not complete");
-    const warnings = h.counts.warning ? ` · ${plural(h.counts.warning, "warning")}` : "";
-    return `Health unknown — ${parts.join("; ")}${warnings}`;
+    const parts = failing.filter((c) => c.pending).map((c) => sentence(c.error ?? `Still reading ${c.name}`));
+    if (missing.length) parts.unshift(`Cannot check ${missing.join(", ")}`);
+    if (!parts.length) parts.push("Some checks did not finish");
+    if (h.counts.warning) parts.push(plural(h.counts.warning, "warning"));
+    return `Health unknown: ${parts.join(". ")}`;
   }
   // Counts can be empty when findings are restricted or absent; never leave the strip blank.
   return countsText(h.counts) || stateLabel(h.state);
@@ -76,9 +80,17 @@ export function HealthStrip({ health, stale, now, checkedAt, stylesOverride }: H
   return (
     <Strip $state={state} data-testid="health-strip" stylesOverride={stylesOverride}>
       <HealthIcon state={state} size={18} />
-      {/* Only the headline is live: the age below it ticks every second and would be read out each time. */}
-      <b role="status">{stale ? `Data is stale — last checked ${ago(at, now)}` : headline(health)}</b>
-      {stale ? null : <span className="when">checked {ago(at, now)}</span>}
+      {/* Only the headline is live: the age ticks every second and would be read out each time. */}
+      {stale ? (
+        <b>
+          <span role="status">Data is stale</span>. Last checked {ago(at, now)}
+        </b>
+      ) : (
+        <>
+          <b role="status">{headline(health)}</b>
+          <span className="when">Last checked {ago(at, now)}</span>
+        </>
+      )}
     </Strip>
   );
 }
