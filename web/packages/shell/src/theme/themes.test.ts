@@ -1,3 +1,4 @@
+import { HEADER_MUTED_PCT, HEADER_PRESS_PCT } from "../shell/headerTint";
 import { contrastRatio } from "./contrast";
 import { controlRoomDark, controlRoomLight, defaultThemes } from "./themes";
 import type { HealthState } from "./tokens";
@@ -11,6 +12,7 @@ it("computes WCAG contrast", () => {
 
 describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", (t) => {
   const c = t.color;
+  const headerMix = (pct: number) => mix(c.headerText, c.headerBg, pct / 100);
   it.each([
     ["text on bg", c.text, c.bg],
     ["text on surface", c.text, c.surface],
@@ -22,10 +24,16 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
     ["accent text on bg", c.accentText, c.bg],
     ["accent text on surface", c.accentText, c.surface],
     ["accent text on surfaceRaised", c.accentText, c.surfaceRaised],
+    ["header text on accent chip", c.headerText, c.accent],
+    // Pressed header controls and menu items (the strongest tints the shell applies).
+    ["header text on pressed header control", c.headerText, headerMix(HEADER_PRESS_PCT)],
+    ["header muted text on header band", headerMix(HEADER_MUTED_PCT), c.headerBg],
+    ["header muted text on pressed header control", headerMix(HEADER_MUTED_PCT), headerMix(HEADER_PRESS_PCT)],
+    ["text on pressed menu item", c.text, mix(c.text, c.surfaceRaised, 0.16)],
   ])("%s >= 4.5", (_, fg, bg) => {
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(4.5);
   });
-  it.each([
+  it.each<[string, string, string]>([
     ["focus on bg", c.focus, c.bg],
     ["focus on surface", c.focus, c.surface],
     ["focus on surfaceRaised", c.focus, c.surfaceRaised],
@@ -33,6 +41,9 @@ describe.each([controlRoomDark, controlRoomLight])("$name theme meets WCAG AA", 
     ["borderStrong on bg", c.borderStrong, c.bg],
     ["borderStrong on surface", c.borderStrong, c.surface],
     ["borderStrong on surfaceRaised", c.borderStrong, c.surfaceRaised],
+    ["borderStrong on header band", c.borderStrong, c.headerBg],
+    // The readiness icon sits on the ink band in every theme.
+    ...states.map((s): [string, string, string] => [`${s} status icon on header band`, c.status[s].iconBg, c.headerBg]),
   ])("%s >= 3 (non-text)", (_, fg, bg) => {
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(3);
   });
@@ -66,3 +77,11 @@ it("names the families the bundled variable fonts register", () => {
   expect(controlRoomDark.font.ui).toContain("'Figtree Variable'");
   expect(controlRoomDark.font.mono).toContain("'JetBrains Mono Variable'");
 });
+
+// region Helpers
+// Same result as CSS color-mix(in srgb, a w, b) for #RRGGBB inputs.
+function mix(a: string, b: string, w: number): string {
+  const ch = (h: string, i: number) => Number.parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16);
+  const out = [0, 1, 2].map((i) => Math.round(ch(a, i) * w + ch(b, i) * (1 - w)));
+  return `#${out.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
