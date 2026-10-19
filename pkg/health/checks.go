@@ -105,7 +105,11 @@ func (c scopeCheck) Run(in Input) ([]Finding, CheckResult) {
 	if in.Install.Scope.Mode == install.ScopeUnknown {
 		return unavailable(in, c.Name(), in.Install.Scope.Err)
 	}
-	return nil, ok(c.Name(), true, in.Now)
+	r := ok(c.Name(), true, in.Now)
+	if in.Install.Scope.Source == install.SourceDeploymentTemplate {
+		r.Detail = "scope from Deployment template; no controller Pod running"
+	}
+	return nil, r
 }
 
 // controllerCheck: KGWUI-005.

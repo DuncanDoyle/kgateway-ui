@@ -24,8 +24,10 @@ type ScopeSummary struct {
 	Mode      string                 `json:"mode"`
 	Selectors []metav1.LabelSelector `json:"selectors,omitempty"`
 	Error     string                 `json:"error,omitempty"`
-	Watched   int                    `json:"watched"`
-	Total     int                    `json:"total"`
+	// Source is where the scope was read from, for example "deployment template".
+	Source  string `json:"source,omitempty"`
+	Watched int    `json:"watched"`
+	Total   int    `json:"total"`
 }
 
 // Header is the install page header.
@@ -112,7 +114,7 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 
 func header(res install.Resolved, snap *cache.Snapshot) Header {
 	h := Header{ID: res.ID(), Namespace: res.Namespace, Name: res.Name, Version: res.Version, Edition: res.Edition, ControllerNames: res.ControllerNames,
-		Scope: ScopeSummary{Mode: string(res.Scope.Mode), Selectors: res.Scope.Selectors, Error: res.Scope.Err, Total: len(snap.Namespaces)}}
+		Scope: ScopeSummary{Mode: string(res.Scope.Mode), Selectors: res.Scope.Selectors, Error: res.Scope.Err, Source: res.Scope.Source, Total: len(snap.Namespaces)}}
 	if h.ControllerNames == nil {
 		h.ControllerNames = []string{}
 	}

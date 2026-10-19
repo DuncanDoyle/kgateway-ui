@@ -33,6 +33,9 @@ type Scope struct {
 	Mode      ScopeMode              `json:"mode"`
 	Selectors []metav1.LabelSelector `json:"selectors,omitempty"`
 	Err       string                 `json:"error,omitempty"`
+	// Source says where the scope was read from, such as "pod <name>" or
+	// "deployment template"; empty for a hand-built Scope.
+	Source string `json:"source,omitempty"`
 	// matchers are Selectors compiled by ParseSelectors; nil means compile on use.
 	matchers []labels.Selector
 }
@@ -86,22 +89,34 @@ type NamespaceSelectorScope struct{}
 // Name implements ScopeProvider.
 func (NamespaceSelectorScope) Name() string { return "namespace-selectors" }
 
-// Scope implements ScopeProvider. It reads the env of a controller Pod, not
-// the Deployment, so a rollout in progress reflects what actually runs. Ready
-// pods are preferred, but any pod's spec is used if none is ready.
+// SourceDeploymentTemplate is the Scope.Source used when no controller Pod exists.
+const SourceDeploymentTemplate = "deployment template"
+
+// Scope implements ScopeProvider. It reads the env from, in order: a Ready
+// controller Pod, any controller Pod, then the Deployment's Pod template when
+// no Pod exists (for example scaled to zero). A Pod comes first because it
+// reflects what is running during a rollout; the template is only what will run.
 func (NamespaceSelectorScope) Scope(inst Install) Scope {
-	pod := pickPod(inst.Pods)
-	if pod == nil {
+	var (
+		spec   corev1.PodSpec
+		source string
+		where  string
+	)
+	if pod := pickPod(inst.Pods); pod != nil {
+		spec, source, where = pod.Spec, "pod "+pod.Name, "pod "+pod.Name
+	} else if inst.Deployment != nil {
+		spec, source, where = inst.Deployment.Spec.Template.Spec, SourceDeploymentTemplate, "the Deployment template"
+	} else {
 		return Scope{Mode: ScopeUnknown, Err: "no controller pod found"}
 	}
 	var c *corev1.Container
-	for i := range pod.Spec.Containers {
-		if pod.Spec.Containers[i].Name == inst.Container {
-			c = &pod.Spec.Containers[i]
+	for i := range spec.Containers {
+		if spec.Containers[i].Name == inst.Container {
+			c = &spec.Containers[i]
 		}
 	}
 	if c == nil {
-		return Scope{Mode: ScopeUnknown, Err: fmt.Sprintf("container %q not found in pod %s", inst.Container, pod.Name)}
+		return Scope{Mode: ScopeUnknown, Source: source, Err: fmt.Sprintf("container %q not found in %s", inst.Container, where)}
 	}
 	var val string
 	found := false
@@ -110,14 +125,18 @@ func (NamespaceSelectorScope) Scope(inst Install) Scope {
 			continue
 		}
 		if e.ValueFrom != nil {
-			return Scope{Mode: ScopeUnknown, Err: DiscoveryNamespaceSelectorsEnv + " uses valueFrom, which the UI cannot resolve"}
+			return Scope{Mode: ScopeUnknown, Source: source, Err: DiscoveryNamespaceSelectorsEnv + " uses valueFrom, which the UI cannot resolve"}
 		}
 		val, found = e.Value, true
 	}
-	if !found {
-		return Scope{Mode: ScopeAll}
+	var sc Scope
+	if found {
+		sc = ParseSelectors(val)
+	} else {
+		sc = Scope{Mode: ScopeAll}
 	}
-	return ParseSelectors(val)
+	sc.Source = source
+	return sc
 }
 
 func pickPod(pods []*corev1.Pod) *corev1.Pod {

@@ -3,6 +3,7 @@ package install
 import (
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
@@ -93,8 +94,75 @@ func TestScopeFromNotReadyPod(t *testing.T) {
 	if got := (NamespaceSelectorScope{}).Scope(in).Mode; got != ScopeSelectors {
 		t.Fatalf("want selectors from the not-ready pod's spec, got %s", got)
 	}
-	in.Pods = nil
-	if got := (NamespaceSelectorScope{}).Scope(in).Mode; got != ScopeUnknown {
-		t.Fatalf("no pods at all must be unknown, got %s", got)
+}
+
+// podWithEnv is a controller Pod whose selector env is val, ready or not.
+func podWithEnv(d *appsv1.Deployment, name string, ready bool, val string) *corev1.Pod {
+	p := testutil.ControllerPod(d, name, ready)
+	for i := range p.Spec.Containers {
+		p.Spec.Containers[i].Env = []corev1.EnvVar{testutil.Env(DiscoveryNamespaceSelectorsEnv, val)}
 	}
+	return p
+}
+
+// The source order is: Ready Pod, any Pod, Deployment template.
+func TestScopeSourceOrder(t *testing.T) {
+	img := "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7"
+	tmpl := `[{"matchLabels":{"from":"template"}}]`
+	newInstall := func(env ...corev1.EnvVar) (Install, *appsv1.Deployment) {
+		d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 0, env...)
+		in, _ := UpstreamDetector{}.Detect(d)
+		return in, d
+	}
+	label := func(s Scope) string {
+		if s.Mode != ScopeSelectors || len(s.Selectors) != 1 {
+			return string(s.Mode)
+		}
+		return s.Selectors[0].MatchLabels["from"]
+	}
+	t.Run("ready pod beats not-ready pod and template", func(t *testing.T) {
+		in, d := newInstall(testutil.Env(DiscoveryNamespaceSelectorsEnv, tmpl))
+		in.Pods = []*corev1.Pod{
+			podWithEnv(d, "unready", false, `[{"matchLabels":{"from":"unready"}}]`),
+			podWithEnv(d, "ready", true, `[{"matchLabels":{"from":"ready"}}]`)}
+		s := (NamespaceSelectorScope{}).Scope(in)
+		if label(s) != "ready" || s.Source != "pod ready" {
+			t.Fatalf("got %s source %q", label(s), s.Source)
+		}
+	})
+	t.Run("not-ready pod beats template", func(t *testing.T) {
+		in, d := newInstall(testutil.Env(DiscoveryNamespaceSelectorsEnv, tmpl))
+		in.Pods = []*corev1.Pod{podWithEnv(d, "unready", false, `[{"matchLabels":{"from":"unready"}}]`)}
+		s := (NamespaceSelectorScope{}).Scope(in)
+		if label(s) != "unready" || s.Source != "pod unready" {
+			t.Fatalf("got %s source %q", label(s), s.Source)
+		}
+	})
+	t.Run("template used with zero pods", func(t *testing.T) {
+		in, _ := newInstall(testutil.Env(DiscoveryNamespaceSelectorsEnv, tmpl))
+		s := (NamespaceSelectorScope{}).Scope(in)
+		if label(s) != "template" || s.Source != SourceDeploymentTemplate {
+			t.Fatalf("got %s source %q", label(s), s.Source)
+		}
+	})
+	t.Run("template last env wins", func(t *testing.T) {
+		in, _ := newInstall(testutil.Env(DiscoveryNamespaceSelectorsEnv, tmpl), testutil.Env(DiscoveryNamespaceSelectorsEnv, "[]"))
+		if s := (NamespaceSelectorScope{}).Scope(in); s.Mode != ScopeAll || s.Source != SourceDeploymentTemplate {
+			t.Fatalf("got %+v", s)
+		}
+	})
+	t.Run("template valueFrom is unknown", func(t *testing.T) {
+		in, _ := newInstall(corev1.EnvVar{Name: DiscoveryNamespaceSelectorsEnv,
+			ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}})
+		if s := (NamespaceSelectorScope{}).Scope(in); s.Mode != ScopeUnknown {
+			t.Fatalf("got %+v", s)
+		}
+	})
+	t.Run("nil deployment and no pods is unknown", func(t *testing.T) {
+		in, _ := newInstall()
+		in.Deployment = nil
+		if s := (NamespaceSelectorScope{}).Scope(in); s.Mode != ScopeUnknown {
+			t.Fatalf("got %+v", s)
+		}
+	})
 }

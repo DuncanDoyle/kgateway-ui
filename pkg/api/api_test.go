@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -786,3 +787,39 @@ func TestNotSyncedIsServiceUnavailable(t *testing.T) {
 type staticModel struct{ m *engine.Model }
 
 func (s staticModel) Current() *engine.Model { return s.m }
+
+// A controller scaled to zero has no Pod; the scope comes from the Deployment
+// template, its Gateways stay owned and KGWUI-005 reports it is not ready.
+func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
+	var objs []runtime.Object
+	for _, o := range worldWith(0, 1) {
+		if _, isPod := o.(*corev1.Pod); !isPod {
+			objs = append(objs, o)
+		}
+	}
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), objs...)
+	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
+	sc := o.Header.Scope
+	if sc.Mode != string(install.ScopeSelectors) || sc.Source != install.SourceDeploymentTemplate || sc.Watched != 2 {
+		t.Fatalf("scope must come from the template: %+v", sc)
+	}
+	if n, _ := count(o, "Gateway"); n != 1 {
+		t.Errorf("Gateways: want 1 still owned, got %d", n)
+	}
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+	if !hasFinding(h, health.CodeControllerNotReady, "kgw/kgateway") || h.State != health.StateError {
+		t.Fatalf("want KGWUI-005 and error state, not a false green: %s %+v", h.State, h.Findings)
+	}
+	if hasFinding(h, health.CodeSignalUnavailable, "") {
+		t.Fatalf("scope must not be unavailable: %+v", h.Findings)
+	}
+	detail := ""
+	for _, c := range h.Checks {
+		if c.Name == "controller scope" {
+			detail = c.Detail
+		}
+	}
+	if !strings.Contains(detail, "Deployment template") {
+		t.Errorf("scope check must say where the scope came from, got %q", detail)
+	}
+}

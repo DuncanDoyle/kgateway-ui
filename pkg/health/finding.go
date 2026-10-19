@@ -79,6 +79,8 @@ type CheckResult struct {
 	Required    bool      `json:"required"`
 	CollectedAt time.Time `json:"collectedAt"`
 	Error       string    `json:"error,omitempty"`
+	// Detail is extra context for an OK check, such as where a scope was read from.
+	Detail string `json:"detail,omitempty"`
 	// Pending marks a check that is not OK only because resources are still
 	// being processed inside the grace period.
 	Pending bool `json:"pending,omitempty"`
