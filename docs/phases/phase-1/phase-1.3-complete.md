@@ -45,20 +45,20 @@ none
   - A dot-import of `pkg/kinds` evades its discovery-client check.
 
 ## Rulings made during execution
-- - PF1 T24 api_test.go:201 comment — Ruling: T24 updates it too — trivial — none.
-- - PF2 T24 KGWUI-005 message loop vacuous — Ruling: assert the finding exists before checking wording — test hygiene — none.
-- - PF3 T24 Platform.Name=="" default — Ruling: Kubernetes default only when the whole Platform is the zero value (IsZero), never on name — D-016 "capabilities, not mode strings" — low.
-- - PF4 T24 new backend messages skip wording pass — Ruling: Task 27's wording pass also picks "Controller not ready"/"Proxy not ready"; T27 updates the Go strings and their tests — keeps one wording pass — a second small edit in Go.
-- - PF5 KGWUI-005 keeps an apps/Deployment ref without workloads — Ruling: allowed; only the Kubernetes provider (which has workloads) produces Deployment-backed installs, so the combination cannot occur in Phase 1 — cost if wrong: a stray "Deployment" label in a future provider, caught when the provider seam lands.
-- - PF6 T25 "ClusterRole already grants" — Ruling: reword to "Task 20 grants" — none.
-- - PF7 T25 RBAC-denied GatewayParameters → install unknown vs Review Focus 12 promising KGWUI-006 — Ruling: keep T25 behaviour (denied kind → KGWUI-008, unknown, same as every other denied kind); T25 updates Review Focus 12 and design §14.3 H5 to say so — consistent with D-014 — cost: a local run with a kubeconfig lacking GatewayParameters access shows unknown (explained by KGWUI-008).
-- - PF8 T26 pages.test.tsx:307 installId — Ruling: edit by hand — none.
-- - PF9 T26 InstallPage.test.tsx:267 optional scope assignment — Ruling: cast-and-spread form — none.
-- - PF10 T26 Header unused ResourceName import — Ruling: remove it — none.
-- - PF11 T26 H3 test passes while /meta loading — Ruling: wait for a /meta-dependent element first — test hygiene — none.
-- - PF12 T26 synchronous asserts in InstallPage.test.tsx:155, Shell.test.tsx:133 — Ruling: findBy/waitFor — flake risk — none.
-- - PF13 T26 skeleton reads meta.capabilities unguarded — Ruling: use useCapabilities() and add a no-scope skeleton test — none.
-- - PF14 T27 claim that typecheck rejects `vocabulary` key — Ruling: drop the claim — none.
+- PF1 T24 api_test.go:201 comment — Ruling: T24 updates it too — trivial — none.
+- PF2 T24 KGWUI-005 message loop vacuous — Ruling: assert the finding exists before checking wording — test hygiene — none.
+- PF3 T24 Platform.Name=="" default — Ruling: Kubernetes default only when the whole Platform is the zero value (IsZero), never on name — D-016 "capabilities, not mode strings" — low.
+- PF4 T24 new backend messages skip wording pass — Ruling: Task 27's wording pass also picks "Controller not ready"/"Proxy not ready"; T27 updates the Go strings and their tests — keeps one wording pass — a second small edit in Go.
+- PF5 KGWUI-005 keeps an apps/Deployment ref without workloads — Ruling: allowed; only the Kubernetes provider (which has workloads) produces Deployment-backed installs, so the combination cannot occur in Phase 1 — cost if wrong: a stray "Deployment" label in a future provider, caught when the provider seam lands.
+- PF6 T25 "ClusterRole already grants" — Ruling: reword to "Task 20 grants" — none.
+- PF7 T25 RBAC-denied GatewayParameters → install unknown vs Review Focus 12 promising KGWUI-006 — Ruling: keep T25 behaviour (denied kind → KGWUI-008, unknown, same as every other denied kind); T25 updates Review Focus 12 and design §14.3 H5 to say so — consistent with D-014 — cost: a local run with a kubeconfig lacking GatewayParameters access shows unknown (explained by KGWUI-008).
+- PF8 T26 pages.test.tsx:307 installId — Ruling: edit by hand — none.
+- PF9 T26 InstallPage.test.tsx:267 optional scope assignment — Ruling: cast-and-spread form — none.
+- PF10 T26 Header unused ResourceName import — Ruling: remove it — none.
+- PF11 T26 H3 test passes while /meta loading — Ruling: wait for a /meta-dependent element first — test hygiene — none.
+- PF12 T26 synchronous asserts in InstallPage.test.tsx:155, Shell.test.tsx:133 — Ruling: findBy/waitFor — flake risk — none.
+- PF13 T26 skeleton reads meta.capabilities unguarded — Ruling: use useCapabilities() and add a no-scope skeleton test — none.
+- PF14 T27 claim that typecheck rejects `vocabulary` key — Ruling: drop the claim — none.
 - Task 26: Ruling: Header does not call decodeInstallId on route params (deviation from brief) — React Router 7 already decodes useParams/useMatch, so a second decode corrupts IDs with % escapes; only DocumentTitle (raw pathname) decodes, with a test — cost if wrong: a mis-decoded title for exotic IDs.
 - Task 26: Ruling: SHELL_API_VERSION stays 1 — nothing has been released and H11 excludes the Go/extension API from the compatibility promise until the seam milestone — cost: a downstream built pre-release must rebuild.
 - Task 26: Ruling: RootRedirect empty-state copy is Task 27's (vocabulary) — the brief's scope — none.
