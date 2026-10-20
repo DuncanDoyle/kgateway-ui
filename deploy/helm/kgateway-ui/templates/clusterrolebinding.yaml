@@ -1,0 +1,8 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kgateway-ui.fullname" . }}
+  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "kgateway-ui.fullname" . }} }
+subjects:
+  - { kind: ServiceAccount, name: {{ include "kgateway-ui.sa" . }}, namespace: {{ .Release.Namespace }} }

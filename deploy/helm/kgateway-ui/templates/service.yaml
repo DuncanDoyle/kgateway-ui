@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kgateway-ui.fullname" . }}
+  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "kgateway-ui.selector" . | nindent 4 }}
+  ports:
+    - { name: http, port: 80, targetPort: http }

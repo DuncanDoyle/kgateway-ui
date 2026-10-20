@@ -1,0 +1,18 @@
+kgateway UI is installed. It is read-only and has no login of its own.
+
+Trust model: anyone who can reach the UI sees everything it shows, which is
+everything its ServiceAccount can read (never Secrets). That can be more than
+their own Kubernetes RBAC allows. Treat access to the UI as cluster-read access.
+
+Open it with:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kgateway-ui.fullname" . }} 8080:80
+  open http://localhost:8080
+{{- if .Values.httpRoute.enabled }}
+
+It is also exposed through an HTTPRoute. Put authentication and authorisation
+on that route, for example a kgateway TrafficPolicy with OIDC or external auth
+that admits only the people who may read the cluster.
+{{- end }}
+
+Controller metrics are read directly from the controller pods on port 9092.
+If a NetworkPolicy blocks that, the UI reports "signal unavailable" instead of green.

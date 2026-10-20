@@ -1,0 +1,31 @@
+image:
+  repository: ghcr.io/duncandoyle/kgateway-ui
+  tag: ""            # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+install:
+  # Pin the UI to one kgateway controller install: an install ID (e.g. kgw.kgateway)
+  # or the controller's namespace/name. Empty shows all installs.
+  pin: ""
+# Trust model (D-013): the UI has no login. Anyone who reaches it sees everything
+# its ServiceAccount can read (every watched kind, Deployments included, never
+# Secrets), which can be more than their own Kubernetes RBAC allows.
+httpRoute:
+  # Expose the UI through an existing Gateway. Only enable this with
+  # authentication and authorisation on the route, for example a kgateway
+  # TrafficPolicy with OIDC or external auth that admits only operators.
+  enabled: false
+  parentRefs: []
+  hostnames: []
+serviceAccount:
+  create: true
+  name: ""
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 512Mi }
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: [ALL] }

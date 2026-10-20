@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kgateway-ui.fullname" . }}
+  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "kgateway-ui.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "kgateway-ui.selector" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kgateway-ui.sa" . }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: kgateway-ui
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --listen=:8080
+            {{- with .Values.install.pin }}
+            - --install={{ . }}
+            {{- end }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}

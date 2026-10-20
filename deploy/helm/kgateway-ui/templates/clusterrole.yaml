@@ -1,0 +1,25 @@
+# Read-only; no Secrets, ConfigMaps or */proxy (design §8, D-013).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kgateway-ui.fullname" . }}
+  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, referencegrants, backendtlspolicies, listenersets]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.x-k8s.io]
+    resources: [xlistenersets]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.kgateway.dev]
+    resources: ["*"]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [namespaces, pods]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
