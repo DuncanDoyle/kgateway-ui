@@ -14,21 +14,48 @@ jobs:
       FORBIDDEN_TERMS: ${{ vars.FORBIDDEN_TERMS }}
       EVENT_NAME: ${{ github.event_name }}
       BASE_REF: ${{ github.base_ref }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      REPO: ${{ github.repository }}
+      BEFORE: ${{ github.event.before }}
+      AFTER: ${{ github.event.after }}
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: forbidden terms
+        shell: bash
         run: |
           # The pattern lives in a repository variable so the list never lands here; never echo it.
           if [ -z "$FORBIDDEN_TERMS" ]; then
-            echo "::warning::repository variable FORBIDDEN_TERMS is not available (fork PR?); skipping"; exit 0
+            if [ "$EVENT_NAME" = pull_request ] && [ "$HEAD_REPO" != "$REPO" ]; then
+              echo "::warning::FORBIDDEN_TERMS is not available to fork PRs; skipping"; exit 0
+            fi
+            echo "::error::repository variable FORBIDDEN_TERMS is not set"; exit 1
           fi
+          # Report masked paths and commit SHAs only, never the matched text.
+          mask() { perl -pe 's/$ENV{FORBIDDEN_TERMS}/***/gi'; }
           fail=0
-          if git grep -inE -e "$FORBIDDEN_TERMS" -- . ':!web/package-lock.json' ':!go.sum'; then
-            echo "::error::forbidden term found in tree"; fail=1
+          files=$(git grep -lIiE -e "$FORBIDDEN_TERMS" -- . ':!web/package-lock.json' ':!go.sum' || true)
+          if [ -n "$files" ]; then echo "::error::forbidden term in file content:"; mask <<<"$files"; fail=1; fi
+          names=$(git ls-files | grep -iE -e "$FORBIDDEN_TERMS" || true)
+          if [ -n "$names" ]; then echo "::error::forbidden term in file or directory name:"; mask <<<"$names"; fail=1; fi
+          range=()
+          if [ "$EVENT_NAME" = pull_request ]; then
+            range=("origin/$BASE_REF..HEAD")
+          elif [ "$EVENT_NAME" = push ]; then
+            # New branch (all-zero before) or rewritten history: scan just the pushed head.
+            if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              range=(-1 "$AFTER")
+            else
+              range=("$BEFORE..$AFTER")
+            fi
           fi
-          if [ "$EVENT_NAME" = pull_request ] && git log --format=%B "origin/$BASE_REF..HEAD" | grep -inE -e "$FORBIDDEN_TERMS"; then
-            echo "::error::forbidden term found in a commit message"; fail=1
+          if [ "${#range[@]}" -gt 0 ]; then
+            while read -r sha; do
+              msg=$(git log -1 --format=%B "$sha")
+              if grep -qiE -e "$FORBIDDEN_TERMS" <<<"$msg"; then
+                echo "::error::forbidden term in commit message: $sha"; fail=1
+              fi
+            done < <(git rev-list "${range[@]}")
           fi
           exit "$fail"
   web:
@@ -88,3 +115,5 @@ jobs:
           context: .
           push: false
           platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
