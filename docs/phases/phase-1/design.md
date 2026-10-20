@@ -44,7 +44,7 @@ A minimal UI that is deployable and operational and already provides value. A pl
    - Every finding whose resource kind is listed in `/api/v1/meta` links to that view, and the link resolves (§7). This includes unwatched routes, ambiguous Gateways, the controller Deployment and the Gateways whose proxy is not ready.
    - A finding whose kind is not listed shows its resource as plain text, without a link.
 3. **"What does this install manage?"**
-   - Count tiles: GatewayClasses, Gateways, routes per kind, policies per kind, and watched namespaces as "N / M".
+   - Count tiles: GatewayClasses, Gateways, routes per kind, policies per kind, and watched namespaces as "N of M namespaces".
    - The Gateway table, which is sortable and has a free-text filter, with a deep link per state. Sort and filter live in the URL.
 
 ## 3. Architecture
