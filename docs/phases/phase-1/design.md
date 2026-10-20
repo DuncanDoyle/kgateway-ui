@@ -452,9 +452,9 @@ This phase generates no data-plane configuration. The cost falls on the control 
 2. **Replica semantics of the controller metrics.** Is `kgateway_envoy_xds_rejects_active` per replica (and summed), and does every replica report the full `kgateway_resources_managed`? Resolved (D-012): yes. Only the replica serving the proxy's xDS stream reports the reject, and every replica reports the full `kgateway_resources_managed`, so rejects are summed and `resources_managed` takes the max.
 3. **Upstream proposal** for an effective-scope endpoint (D-009 §7). It is filed during Phase 1, but it does not block the phase.
 
-## 14. Platform neutrality (D-016) — PROPOSED, pending user approval
+## 14. Platform neutrality (D-016)
 
-The UI will later run on kgateway without Kubernetes workloads: **kube-lite** (local apiserver with CRDs and status, but no Pods, Deployments or Services; host-process controller and Envoy; `selfManaged` Gateways) and **file mode** (no apiserver, YAML files, status in controller memory, possibly embedded in the standalone binary). This section maps each constraint to today's code and says what changes, and when. Pointers are against `c2c52b8`.
+Kubernetes is the product focus; this section only keeps a later standalone integration possible. The UI will later run on kgateway without Kubernetes workloads: **kube-lite** (local apiserver with CRDs and status, but no Pods, Deployments or Services; host-process controller and Envoy; `selfManaged` Gateways) and **file mode** (no apiserver, YAML files, status in controller memory, possibly embedded in the standalone binary). This section maps each constraint to today's code and says what changes, and when. Pointers are against `c2c52b8`.
 
 ### 14.1 Constraints
 
@@ -556,8 +556,8 @@ These are requirements for the standalone project, not a design.
 - **Metrics:** URLs for the controller's Prometheus endpoint (today `localhost:9092`, hard-coded in kgateway) and Envoy admin.
 - **Scope:** whether namespace scoping exists and, if so, the effective namespaces.
 
-### 14.7 Open questions
+### 14.7 Decisions (user, 2026-10-20)
 
-1. **Placement.** Recommendation: a new planned sub-phase 1.3 "platform-neutral contract" (H1–H5, H8, H11), with packaging, CI and e2e becoming 1.4. The alternative is to fold the hedges into 1.3.
-2. **Self-managed severity.** Recommendation: info, as in R3. The alternative is unknown, which keeps every self-managed install out of green.
-3. **`Backend` timing.** Recommendation: the Phase 2 design (R11 row). The alternative is to register it now as watched and counted but unassigned.
+1. **Placement:** a new planned sub-phase 1.3 "platform-neutral contract" (H1–H5, H8, H11). Packaging, CI and e2e become sub-phase 1.4, which also carries H9 and H10.
+2. **Self-managed severity:** info (KGWUI-010).
+3. **`Backend`:** registered in the Phase 2 design.

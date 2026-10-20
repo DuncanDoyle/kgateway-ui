@@ -244,8 +244,9 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - A controller scaled to 0 keeps its Gateways and shows red through KGWUI-005, not an ownership change.
 - Known limit: during a rollout that changes the selectors, old and new Pods carry different scopes, so the scope can switch between them and the verifier may briefly report a mismatch.
 
-## D-016 — Platform neutrality is a design principle (2026-10-20, phase 1) — PROPOSED, pending user approval
+## D-016 — Platform neutrality is a design principle (2026-10-20, phase 1)
 **Context:**
+- The product focus stays kgateway (and later downstream distributions) installed on Kubernetes. Standalone is a separate project; UI integration comes later. This decision only keeps that future open.
 - A separate project will run kgateway (controller and Envoy) on hosts without Kubernetes workloads, and the UI should later work on top of it. Two future modes:
   - **kube-lite**: a local kube-apiserver serves Gateway API and kgateway CRDs and their status, but no Pods, Deployments, Services or EndpointSlices exist. The controller and Envoy are host processes; Gateways use `GatewayParameters.spec.selfManaged`.
   - **file mode**: no apiserver. Config is a folder of YAML files, status lives in the controller's memory, objects have no UID, `resourceVersion` or `generation`, and the UI may be embedded in the standalone binary.
@@ -277,3 +278,4 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - A self-managed Gateway no longer gets a false "proxy Deployment not found" warning. The UI says it cannot see that proxy's readiness instead, and every observed failure still shows.
 - Later phases design against capabilities, not Kubernetes (design §14.5). Phase 3 "pod health" becomes "process health"; Phase 4 must work with `Backend` and Envoy cluster health alone; Phase 10 authorisation is K8s-only through a capability unless a neutral story exists.
 - What a standalone status source must provide is recorded as requirements for that project, not designed here (design §14.6).
+- User decisions (2026-10-20): the hedges are a new planned sub-phase 1.3, and packaging, CI and e2e become 1.4. Self-managed readiness is info. `Backend` is registered in the Phase 2 design.

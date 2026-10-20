@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 next
+Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) next — plan amendment in progress
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
@@ -12,8 +12,10 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [x] Q3 Cross-model review of design + plan, triage, user approval — five Codex rounds (reviews/design-*codex.md), all findings triaged; approved 2026-10-19
 - [x] Q4 Sub-phase 1.1 — backend (plan Tasks 1–11) — phases/phase-1/phase-1.1-complete.md
 - [x] Q5 Sub-phase 1.2 — frontend (plan Tasks 12–18) — phases/phase-1/phase-1.2-complete.md
-- [ ] Q6 Sub-phase 1.3 — packaging, CI, e2e (plan Tasks 19–23) ← CURRENT
-- [ ] Q7 Phase cross-model review + triage
+- [x] Q6a Platform neutrality design change (D-016, design §14) — Codex review + triage: reviews/neutrality-codex.md; approved by user 2026-10-20
+- [ ] Q6 Sub-phase 1.3 — platform-neutral contract (design §14.3: H1–H5, H8, H11) ← CURRENT (plan amendment + cross-model review, then user approval)
+- [ ] Q7 Sub-phase 1.4 — packaging, CI, e2e (plan Tasks 19–23, plus H9, H10)
+- [ ] Q8 Phase cross-model review + triage
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -32,6 +34,7 @@ none
 - (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
 
 ## Notes
+- 2026-10-20: user approved D-016 (platform neutrality). Kubernetes stays the product focus; standalone is a separate project, and Phase 1 only adds the hedges in design §14.3.
 - 2026-10-20: user confirmed D-011's dark default (no OS-preference step).
 - 2026-10-18: user approved Overridden policies as info (not warning) and subagent-driven execution for Phase 1.
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions" (D-005).
