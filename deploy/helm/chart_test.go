@@ -161,6 +161,17 @@ func TestHTTPRouteIsOptIn(t *testing.T) {
 	}
 }
 
+func TestHTTPRouteRequiresParentRefs(t *testing.T) {
+	render(t) // skips without helm
+	out, err := exec.Command("helm", "template", "ui", "./kgateway-ui", "-n", "kgateway-ui", "--set", "httpRoute.enabled=true").CombinedOutput()
+	if err == nil {
+		t.Fatalf("want render failure without parentRefs, got:\n%s", out)
+	}
+	if !strings.Contains(string(out), "httpRoute.parentRefs is required") {
+		t.Fatalf("unclear error:\n%s", out)
+	}
+}
+
 func TestPinnedInstallIsPassedAsFlag(t *testing.T) {
 	deploy := func(args ...string) string {
 		ds := kind(render(t, args...), "Deployment")
@@ -184,7 +195,7 @@ func TestPodIsHardened(t *testing.T) {
 		t.Fatalf("want 1 Deployment, got %d", len(ds))
 	}
 	b, _ := yaml.Marshal(ds[0])
-	for _, want := range []string{"runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "path: /readyz", "path: /healthz", "--listen=:8080", "containerPort: 8080"} {
+	for _, want := range []string{"runAsNonRoot: true", "readOnlyRootFilesystem: true", "allowPrivilegeEscalation: false", "type: RuntimeDefault", "- ALL", "path: /readyz", "path: /healthz", "--listen=:8080", "containerPort: 8080"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("deployment lacks %q", want)
 		}

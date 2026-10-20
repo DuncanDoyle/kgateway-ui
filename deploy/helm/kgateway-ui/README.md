@@ -47,6 +47,8 @@ The ClusterRole grants only `get`, `list` and `watch`:
 
 No Secrets, no ConfigMaps and no `*/proxy` access. Pods and Deployments are only listed and watched through the controller detectors' label selectors. RBAC cannot express a label restriction, so the grant itself is cluster-wide.
 
+Kinds added downstream through `extension.WithKinds` need matching rules in this ClusterRole.
+
 ## NetworkPolicy
 
 In-cluster, the UI scrapes controller metrics directly from the controller pods on port 9092. If a NetworkPolicy blocks that traffic, the UI reports the signal as unavailable (KGWUI-008) instead of showing it green. Allow ingress from the UI pod to the controller pods on 9092 to get metrics-based checks.

@@ -1,5 +1,4 @@
-{{- define "kgateway-ui.name" -}}kgateway-ui{{- end }}
-{{- define "kgateway-ui.fullname" -}}{{ .Release.Name }}-kgateway-ui{{- end }}
+{{- define "kgateway-ui.fullname" -}}{{ printf "%s-kgateway-ui" .Release.Name | trunc 63 | trimSuffix "-" }}{{- end }}
 {{- define "kgateway-ui.labels" -}}
 app.kubernetes.io/name: kgateway-ui
 app.kubernetes.io/instance: {{ .Release.Name }}

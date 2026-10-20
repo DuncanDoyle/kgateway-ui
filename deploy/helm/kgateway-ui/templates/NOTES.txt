@@ -6,7 +6,7 @@ their own Kubernetes RBAC allows. Treat access to the UI as cluster-read access.
 
 Open it with:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kgateway-ui.fullname" . }} 8080:80
-  open http://localhost:8080
+then browse to http://localhost:8080
 {{- if .Values.httpRoute.enabled }}
 
 It is also exposed through an HTTPRoute. Put authentication and authorisation
