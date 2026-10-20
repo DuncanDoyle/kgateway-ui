@@ -80,9 +80,9 @@ These failure modes are implied by the spec, but no other task's tests exercise 
 7. **Old evidence.** A metrics result older than 3 × the metrics interval is unavailable (KGWUI-008), however often the model is recomputed. In the frontend, stale data turns the health strip, every gateway row, the cluster cards, the install switcher and the header readiness icon to unknown, re-evaluated every second by a shared clock even when polls return identical data (finding 3; round 2, finding 6; round 3, finding 4). → Tasks 8, 9, 10, 15, 16 and 17.
 8. **Install switch.** While install B loads, the page never shows install A's strip, findings or gateways (finding 4). → Task 16.
 9. **Partial visibility.** A deny-some `Authorizer` registered through `extension.WithAuthorizer` makes the denied object 404 and drops it from the count tiles. Its finding stays in the list with the same code, severity and resource ref, `restricted: true` and no message or evidence; the roll-up state is unchanged (D-013). → Task 11.
-10. **Install IDs at URL edges.** An ID with `.`, `~` or `_`, or percent-encoded by a client, survives a reload and a deep link. The old two-segment form (`/i/ns/name`, `/api/v1/installs/ns/name/…`) never resolves to an install. A provider ID with `/`, `%`, `.` or `..` is rejected and logged once, not on every recompute. → Tasks 24 and 26.
+10. **Install IDs at URL edges.** An ID with `.`, `~` or `_`, or percent-encoded by a client, survives a reload and a deep link. The old two-segment form (`/i/ns/name`, `/api/v1/installs/ns/name/…`) never resolves to an install. A provider ID with `/`, `%`, `.` or `..` is left out, logged once (not on every recompute) and turns `/readyz` to 503. → Tasks 24 and 26.
 11. **`--install` in the old form.** `--install kgw/kgateway` still pins the same install after the ID change; `a/b/c`, `kgw/` and `..` fail at startup. → Task 24.
-12. **GatewayParameters not readable.** RBAC denies GatewayParameters, or the CRD is not served, or a reference names another kind: the UI cannot tell, so a self-managed class falls back to today's KGWUI-006 warning and never claims KGWUI-010. → Task 25.
+12. **GatewayParameters not readable.** RBAC denies GatewayParameters, or the CRD is not served, or the Gateway's reference names another kind: the UI cannot tell, so a self-managed class falls back to today's KGWUI-006 warning and never claims KGWUI-010. → Task 25.
 13. **A self-managed Gateway that still has a proxy Deployment** (for example one left from before `selfManaged` was set): the Deployment that exists is judged as before, KGWUI-006 when not ready. → Task 25.
 14. **Absent optional fields in the SPA.** An install without `scope`, `namespace`/`name` or replica counts renders the header, switcher, landing card, install page and finding rows without a crash and without empty labels. → Task 26.
 
@@ -10217,7 +10217,8 @@ H1, H2 and H3 on the Go side. The Kubernetes install ID becomes `<namespace>.<na
 - Modify: `pkg/install/install.go:16-78` (`Install` fields, `ID`, `Display`, `Discover`)
 - Modify: `pkg/overview/overview.go:16-43,74-133` (`Readiness`, optional `Header` fields, `Build` signature)
 - Modify: `pkg/engine/engine.go:22-87,122-155` (`Platform`, `Logger`, rejected-ID logging, `Platform()`)
-- Modify: `pkg/api/types.go:12-55`, `pkg/api/handlers.go:23-45,85-93,146-175`
+- Modify: `pkg/api/types.go:12-55`, `pkg/api/handlers.go:23-45,77-93,146-175`
+- Modify: `pkg/health/finding.go:89-115`, `pkg/health/checks.go:121-141` (replica wording only under `workloads`)
 - Modify: `pkg/app/app.go:31-36,73-118`, `cmd/kgateway-ui/main.go:21`
 - Modify: `docs/phases/phase-1/design.md` §7, §8 and §9 (paths, flag, e2e IDs)
 - Test: `pkg/api/api_test.go`, `pkg/app/app_test.go`; mechanical ID updates in `pkg/install/install_test.go`, `pkg/install/assign_test.go`, `pkg/engine/engine_test.go`, `pkg/ctrlmetrics/scrape_test.go`
@@ -10232,14 +10233,47 @@ H1, H2 and H3 on the Go side. The Kubernetes install ID becomes `<namespace>.<na
   - `overview.Readiness{State ReadinessState; Ready, Desired *int32}` with states `ReadinessReady` `"ready"`, `ReadinessNotReady` `"not-ready"`, `ReadinessUnknown` `"unknown"`, `ReadinessNotObserved` `"not-observed"`.
   - `overview.Header{ID, DisplayName, Namespace?, Name?, Version, Edition, ControllerNames, Readiness, Scope *ScopeSummary}`; `overview.ReadyCount` is removed.
   - `overview.Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report, plat platform.Info) Overview`.
-  - `engine.Config.Platform platform.Info` (zero means `platform.Kubernetes()`), `engine.Config.Logger *slog.Logger` (nil means `slog.Default()`), `(*engine.Engine).Platform() platform.Info`.
+  - `engine.Config.Platform platform.Info` (zero means `platform.Kubernetes()`), `engine.Config.Logger *slog.Logger` (nil means `slog.Default()`), `(*engine.Engine).Platform() platform.Info`, `engine.Model.Rejected []string` (this computation's install rejections).
+  - `health.Input.Platform platform.Info` (zero means Kubernetes): KGWUI-005 and KGWUI-006 messages carry replica counts only under `workloads`.
+  - `/readyz` returns 503 with `{"error": "install rejected: …"}` while any install is rejected (design §14.3 H1).
   - `api.ModelSource` gains `Platform() platform.Info`.
   - JSON: `GET /api/v1/installs/{id}/overview|health|resources/...`; install entries `{id, displayName, namespace?, name?, version, edition, controllerNames, readiness: {state, ready?, desired?}, scope?, health, computedAt}`; `/meta` adds `platform` and `capabilities`, and lists `apps/Deployment` in `kinds` only under `workloads`.
   - `app.Options.Pinned` accepts an install ID or `namespace/name`; `app.Build` normalises it and fails on anything else.
 
-- [ ] **Step 1: Write the failing API boundary tests**
+- [ ] **Step 1: Move the existing tests to the new ID form**
 
-Add to the imports of `pkg/api/api_test.go`: `"bytes"`, `"log/slog"`, `"slices"`, `appsv1 "k8s.io/api/apps/v1"` and `"github.com/DuncanDoyle/kgateway-ui/pkg/platform"`.
+Do this step first: the line numbers are against `9e78849`, before any other edit. Install IDs move from `ns/name` to `ns.name`. Resource refs (`f.Resource.String()`, which stays `namespace/name`), resource paths after `/resources/`, and the `resolved("ns/name", …)` helper input (the helper splits it into namespace and name) do not change.
+
+| File | Lines | Change |
+|---|---|---|
+| `pkg/api/api_test.go` | 255, 271, 280, 302, 310, 327, 331, 337, 361, 376, 399, 464, 566, 578, 643, 656, 715, 776, 801, 809 | install path `/api/v1/installs/kgw/kgateway` → `/api/v1/installs/kgw.kgateway`. 715 is `const base = "/api/v1/installs/kgw/kgateway"` without a trailing slash. At 399 only the install segment changes; the trailing `apps/Deployment/kgw/kgateway` is a resource path. |
+| `pkg/api/api_test.go` | 344, 352 | `/api/v1/installs/kgw2/kgateway2` → `/api/v1/installs/kgw2.kgateway2` |
+| `pkg/api/api_test.go` | 690 | SPA paths `/i/kgw/kgateway` and `/i/kgw/kgateway/findings` → `/i/kgw.kgateway` and `/i/kgw.kgateway/findings` |
+| `pkg/api/api_test.go` | 61, 98, 244, 246, 256, 272, 278, 290, 326, 343, 348, 349, 356, 375, 398, 411, 413, 415, 452, 455, 560, 689, 713, 800 | install ID literals: `"kgw/kgateway"` → `"kgw.kgateway"`, `"kgw2/kgateway2"` → `"kgw2.kgateway2"` (`okMetrics`/`fakeMetrics` keys, the comment at 61, the engine `pinned` argument at 348, ID assertions) |
+| `pkg/api/api_test.go` | 446, 810 | unchanged: `"kgw/kgateway"` is the controller Deployment's resource ref |
+| `pkg/app/app_test.go` | 158, 167, 181, 432 | `/api/v1/installs/acme-system/controller` → `/api/v1/installs/acme-system.controller` |
+| `pkg/app/app_test.go` | 211, 226, 229, 233, 396, 515 | `/api/v1/installs/kgw/kgateway` → `/api/v1/installs/kgw.kgateway` |
+| `pkg/app/app_test.go` | 256 | `a.collector.Get("kgw/kgateway")` → `a.collector.Get("kgw.kgateway")` |
+| `pkg/install/install_test.go` | 21, 34, 43, 83 | `got := Discover(` → `got, _ := Discover(` |
+| `pkg/install/install_test.go` | 26 | `"kgateway-system/kgateway"` → `"kgateway-system.kgateway"` |
+| `pkg/install/assign_test.go` | 63, 93, 108, 118, 119, 129, 149, 186, 212, 240, 244, 267, 270 | `PerInstall["x/y"]` → `PerInstall["x.y"]`; the `resolved("x/y", …)` arguments on the same lines stay |
+| `pkg/install/assign_test.go` | 168 | map keys `"kgw-a/a"`, `"kgw-b/b"` → `"kgw-a.a"`, `"kgw-b.b"` |
+| `pkg/engine/engine_test.go` | 179, 182, 189 | `"kgw2/kgateway2"` → `"kgw2.kgateway2"` |
+| `pkg/ctrlmetrics/scrape_test.go` | 168 | `c.Get("kgw/good")` → `c.Get("kgw.good")` |
+| `pkg/health/checks_test.go` | 182 | unchanged: resource ref |
+
+Check that nothing was missed:
+
+```bash
+grep -nE 'installs/(kgw2?|acme-system)/[a-z0-9-]+' pkg/*/*_test.go
+grep -nE '"(kgw2?|kgateway-system|acme-system|kgw-a|kgw-b)/[a-z0-9-]+"' pkg/*/*_test.go
+```
+
+Expected: the first prints nothing; the second prints only `api_test.go:446`, `api_test.go:810`, `checks_test.go:182` and the `resolved(` lines of `assign_test.go`. The new tests of Step 2 are added after this check, and keep their deliberate `ns/name` values (the `DisplayName` expectation and the legacy `--install kgw/kgateway` input).
+
+- [ ] **Step 2: Write the failing API boundary tests**
+
+Add to the imports of `pkg/api/api_test.go`: `"bytes"`, `"log/slog"`, `"slices"`, `"strconv"`, `appsv1 "k8s.io/api/apps/v1"` and `"github.com/DuncanDoyle/kgateway-ui/pkg/platform"`.
 
 Extend `setup` (after the `late` field):
 
@@ -10322,8 +10356,9 @@ func TestOpaqueInstallIDsAtTheAPI(t *testing.T) {
 }
 
 // H1: a provider ID outside the URL-unreserved set, or a dot segment, is
-// rejected. The install is left out and the rejection is logged once, not on
-// every recompute.
+// rejected. Installs are discovered at runtime, so it cannot fail startup: the
+// install is left out, the rejection is logged once (not on every recompute),
+// and /readyz is 503 naming the detector and the raw ID.
 func TestInvalidInstallIDsAreRejected(t *testing.T) {
 	for _, id := range []string{"a/b", "50%", ".", ".."} {
 		t.Run(id, func(t *testing.T) {
@@ -10338,6 +10373,18 @@ func TestInvalidInstallIDsAreRejected(t *testing.T) {
 			}
 			if !strings.Contains(logs.String(), "Deployment kgw/kgateway") {
 				t.Fatalf("the rejection must name the Deployment:\n%s", logs.String())
+			}
+			resp, err := http.Get(srv.URL + "/readyz")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			var body ErrorResponse
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("/readyz: status %d, body %+v, %v", resp.StatusCode, body, err)
+			}
+			if !strings.Contains(body.Error, "detector kgateway") || !strings.Contains(body.Error, strconv.Quote(id)) {
+				t.Fatalf("/readyz must name the detector and the raw ID %s: %q", strconv.Quote(id), body.Error)
 			}
 		})
 	}
@@ -10370,6 +10417,13 @@ func TestPlatformWithoutScopeOrWorkloadsAtTheAPI(t *testing.T) {
 	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
 	if meta.Platform != "Test" || meta.Capabilities == nil || len(meta.Capabilities) != 0 || slices.ContainsFunc(meta.Kinds, isDeployment) {
 		t.Fatalf("meta must report no capabilities and no Deployment kind: %+v", meta)
+	}
+	// Without workloads, a not-ready finding carries no replica wording either.
+	_, down, _ := startWith(t, s, worldWith(0, 1)...)
+	for _, f := range get[HealthResponse](t, down, "/api/v1/installs/acme~edge_1/health", 200).Findings {
+		if f.Code == health.CodeControllerNotReady && f.Message != "Controller not ready" {
+			t.Fatalf("KGWUI-005 without workloads: %q", f.Message)
+		}
 	}
 }
 
@@ -10489,19 +10543,6 @@ func TestInstallIDAndDisplay(t *testing.T) {
 	}
 }
 ```
-
-- [ ] **Step 2: Update the existing tests to the new ID form**
-
-Install IDs in tests move from `ns/name` to `ns.name`; resource refs (`f.Resource.String()`, which stays `namespace/name`) and the `resolved("ns/name", …)` helper input do not. Run from the repo root:
-
-```bash
-perl -pi -e 's#PerInstall\["([a-z0-9-]+)/([a-z0-9-]+)"\]#PerInstall["$1.$2"]#g; next if /CodeControllerNotReady|resolved\(/; s#installs/(kgw2?|acme-system)/([a-z0-9-]+)/#installs/$1.$2/#g; s#"(kgw2?|kgateway-system|acme-system|kgw-a|kgw-b)/([a-z0-9-]+)"#"$1.$2"#g' \
-  pkg/api/api_test.go pkg/app/app_test.go pkg/install/install_test.go pkg/install/assign_test.go pkg/engine/engine_test.go pkg/ctrlmetrics/scrape_test.go pkg/health/checks_test.go
-perl -pi -e 's/got := Discover\(/got, _ := Discover(/' pkg/install/install_test.go
-grep -nE '"(kgw2?|kgateway-system|acme-system|kgw-a|kgw-b)/[a-z0-9-]+"' pkg/*/*_test.go
-```
-
-Expected: the final `grep` prints only lines with `CodeControllerNotReady` (the controller Deployment's resource ref) and `resolved(` (the helper splits its input into namespace and name). `pkg/install/assign_test.go:168` (the `map[string]objects.ParentRef{...}` of install IDs) is rewritten by the generic rule.
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
@@ -10791,7 +10832,43 @@ In `Compute`, replace `all := install.Resolve(install.Discover(snap, e.cfg.Detec
 	all := install.Resolve(found, e.cfg.Scope)
 ```
 
-and pass the platform to the overview: `Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)`.
+Then, inside the loop over `errs`, record every rejection of this computation (logged or not) with `m.Rejected = append(m.Rejected, err.Error())`, and add the field to `Model`:
+
+```go
+	// Rejected are this computation's install rejections (invalid IDs); /readyz reports them.
+	Rejected []string
+```
+
+Pass the platform to the overview, `Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)`, and to the checks, `Platform: e.cfg.Platform` in the `health.Input` literal.
+
+In `pkg/health/finding.go`, add the import `"github.com/DuncanDoyle/kgateway-ui/pkg/platform"` and this field at the end of `Input`:
+
+```go
+	// Platform decides the wording of readiness findings; zero means Kubernetes.
+	Platform platform.Info
+```
+
+In `pkg/health/checks.go`, replica counts are workload wording, so `notReady` gets a `workloads bool` parameter and both callers pass `in.workloads()`:
+
+```go
+// workloads reports whether replica wording applies; a zero Platform is Kubernetes.
+func (in Input) workloads() bool { return in.Platform.Name == "" || in.Platform.Has(platform.Workloads) }
+
+func notReady(d *appsv1.Deployment, code, slug, what, inst string, workloads bool) (Finding, bool) {
+	want := int32(1)
+	if d.Spec.Replicas != nil {
+		want = *d.Spec.Replicas
+	}
+	if d.Status.ReadyReplicas >= want {
+		return Finding{}, false
+	}
+	msg := what + " not ready"
+	if workloads {
+		msg = fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)
+	}
+	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst, Message: msg}, true
+}
+```
 
 - [ ] **Step 8: Serve one `{id}` segment, the neutral DTO and the capabilities**
 
@@ -10873,7 +10950,23 @@ In `visibleOverview`, the last line becomes `return overview.Build(i.Resolved, o
 			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: m.ComputedAt})
 ```
 
-In `find`, replace `id := r.PathValue("ns") + "/" + r.PathValue("name")` with `id := r.PathValue("id")`.
+In `find`, replace `id := r.PathValue("ns") + "/" + r.PathValue("name")` with `id := r.PathValue("id")`. Replace `readyz`:
+
+```go
+func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
+	m := h.src.Current()
+	if !synced(m) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	// An install with an invalid ID is a detector bug; it must not pass silently (D-016).
+	if len(m.Rejected) > 0 {
+		writeErr(w, http.StatusServiceUnavailable, "install rejected: "+strings.Join(m.Rejected, "; "))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+```
 
 - [ ] **Step 9: Normalise `--install` at startup**
 
@@ -10894,13 +10987,14 @@ In `cmd/kgateway-ui/main.go`, the flag help becomes `"pin the UI to one controll
 
 In `docs/phases/phase-1/design.md`:
 - §7 table: `GET /api/v1/installs/{ns}/{name}/…` becomes `GET /api/v1/installs/{id}/…` in the three install rows, and the installs row returns `[{id, displayName, namespace?, name?, version, edition, controllerNames, readiness: {state, ready?, desired?}, scope?: {mode, selectors, watched, total}, health: {state, counts}, computedAt}]`. The `/meta` row reads: "UI version, pinned install, `platform`, `capabilities`, registered kinds and descriptors, plus `apps/Deployment` under the `workloads` capability: every kind the resource endpoint can serve, so the UI links exactly these".
+- §7, probes row: "readiness is true once the cache has synced and no install was rejected for an invalid ID (§14.3 H1)".
 - §8: `--install <ns>/<name> (pinned mode)` becomes `--install <id or namespace/name> (pinned mode)`.
 - §9, last e2e bullet: "so the install IDs are `kgw-a.kgateway` and `kgw-b.kgateway`".
 
 - [ ] **Step 11: Run the tests to verify they pass**
 
 Run: `go vet ./... && go test ./... -race`
-Expected: all PASS, including `TestOpaqueInstallIDsAtTheAPI`, `TestInvalidInstallIDsAreRejected` (four subtests), `TestPlatformWithoutScopeOrWorkloadsAtTheAPI`, `TestKubernetesPlatformAtTheAPI` and `TestPinnedFlagAcceptsIDOrNamespaceName`.
+Expected: all PASS, including `TestOpaqueInstallIDsAtTheAPI`, `TestInvalidInstallIDsAreRejected` (four subtests, each asserting `/installs`, the log and `/readyz`), `TestPlatformWithoutScopeOrWorkloadsAtTheAPI`, `TestKubernetesPlatformAtTheAPI` and `TestPinnedFlagAcceptsIDOrNamespaceName`.
 
 - [ ] **Step 12: Commit**
 
@@ -10915,12 +11009,12 @@ git commit -m "feat(api): opaque install IDs, optional platform fields, /meta ca
 
 A Gateway whose kgateway parameters make it self-managed has no proxy Deployment by design. Today it gets a false KGWUI-006 "Proxy deployment not found" warning. After this task the UI follows kgateway's own parameter resolution, and for a self-managed Gateway without a proxy Deployment it reports info finding KGWUI-010 instead. Every other check is unchanged (D-006). The resolution mirrors controller logic, so it sits behind a pluggable `proxymode.Resolver` with an upstream ask (§14.6).
 
-kgateway's rule (`pkg/deployer/merge.go:12-28` and `pkg/kgateway/deployer/gateway_parameters.go:224-306` at kgateway `556b4ce`, identical on v2.3.11 and v2.4.7): the GatewayClass `spec.parametersRef` layer is merged first, then the Gateway's `spec.infrastructure.parametersRef` layer (looked up in the Gateway's namespace). A layer with `spec.selfManaged` set makes the result self-managed and drops `kube`; a later layer with only `kube` returns early because the merged `kube` is nil, so it does not undo it. A referenced GatewayParameters that cannot be found is an error, and kgateway sets `Accepted=False` with reason `InvalidParameters`.
+kgateway's rule (`pkg/deployer/merge.go:12-28` and `pkg/kgateway/deployer/gateway_parameters.go:224-306` at kgateway `556b4ce`, identical on v2.3.11 and v2.4.7): the GatewayClass `spec.parametersRef` layer is merged first; `resolveGatewayClassParameters` looks it up as a GatewayParameters by namespace and name and does not check its group or kind (an empty name is an error). Then the Gateway's `spec.infrastructure.parametersRef` layer, which must name `gateway.kgateway.dev/GatewayParameters` and is looked up in the Gateway's namespace. A layer with `spec.selfManaged` set makes the result self-managed and drops `kube`; a later layer with only `kube` returns early because the merged `kube` is nil, so it does not undo it. A referenced GatewayParameters that cannot be found is an error, and kgateway sets `Accepted=False` with reason `InvalidParameters`.
 
 | Outcome | When | Proxy check |
 |---|---|---|
 | self-managed | every referenced GatewayParameters resolves and the merge is selfManaged | no Deployment: KGWUI-010 info; a Deployment that is not ready: KGWUI-006 as today |
-| unresolved | a reference names another kind, has no name, or its object is missing, unreadable or of an unserved kind; or the GatewayClass is missing | today's behaviour |
+| unresolved | a reference has no name, or the GatewayParameters it names is missing, unreadable or of an unserved kind; the Gateway's reference names another group or kind; or the GatewayClass is missing | today's behaviour |
 | managed | otherwise | today's behaviour |
 
 **Files:**
@@ -10941,7 +11035,7 @@ kgateway's rule (`pkg/deployer/merge.go:12-28` and `pkg/kgateway/deployer/gatewa
   - `kinds.CategoryParameters = "parameters"`: watched and served, never counted or attributed.
   - `health.CodeSelfManagedProxy = "KGWUI-010"`, slug `self-managed-proxy`, severity info, message "Self-managed proxy: the UI cannot see its readiness".
   - `health.Input.ProxyMode`, `engine.Config.ProxyMode`, `extension.Registry.ProxyMode` (nil means `proxymode.GatewayParameters{}`), `extension.WithProxyModeResolver(r proxymode.Resolver) extension.Option`.
-  - `testutil.GatewayParameters(ns, name string, selfManaged bool)`, `testutil.SetClassParameters(class *unstructured.Unstructured, ns, name string)`, `testutil.SetGatewayParameters(gw *unstructured.Unstructured, group, kind, name string)`.
+  - `testutil.GatewayParameters(ns, name string, selfManaged bool)`, `testutil.SetClassParameters(class *unstructured.Unstructured, group, kind, ns, name string)`, `testutil.SetGatewayParameters(gw *unstructured.Unstructured, group, kind, name string)`.
 
 - [ ] **Step 1: Add the fixtures**
 
@@ -10960,10 +11054,10 @@ func GatewayParameters(ns, name string, selfManaged bool) *unstructured.Unstruct
 	return u
 }
 
-// SetClassParameters points class's spec.parametersRef at GatewayParameters ns/name.
-func SetClassParameters(class *unstructured.Unstructured, ns, name string) {
+// SetClassParameters sets class's spec.parametersRef.
+func SetClassParameters(class *unstructured.Unstructured, group, kind, ns, name string) {
 	class.Object["spec"].(map[string]any)["parametersRef"] = map[string]any{
-		"group": "gateway.kgateway.dev", "kind": "GatewayParameters", "namespace": ns, "name": name}
+		"group": group, "kind": kind, "namespace": ns, "name": name}
 }
 
 // SetGatewayParameters sets gw's spec.infrastructure.parametersRef.
@@ -10981,6 +11075,7 @@ Add `"slices"` to the imports of `pkg/api/api_test.go` if Task 24 did not. Add:
 // proxySetup shapes proxyWorld. The zero value is a managed Gateway with a ready proxy.
 type proxySetup struct {
 	classParams, gwParams string             // GatewayParameters names in infra; "" = no reference
+	classRefKind          string             // group "example.com" and this kind on the class reference; "" = GatewayParameters
 	gwRefKind             string             // kind of the Gateway's reference; "" = GatewayParameters
 	noProxy               bool               // no proxy Deployment
 	proxyNotReady         bool               // the proxy Deployment has 0 of 1 ready replicas
@@ -11005,7 +11100,11 @@ func proxyWorld(p proxySetup, extra ...runtime.Object) []runtime.Object {
 			}
 		case *unstructured.Unstructured:
 			if v.GetKind() == "GatewayClass" && v.GetName() == "kgateway" && p.classParams != "" {
-				testutil.SetClassParameters(v, "infra", p.classParams)
+				group, kind := kinds.KgatewayGroup, "GatewayParameters"
+				if p.classRefKind != "" {
+					group, kind = "example.com", p.classRefKind
+				}
+				testutil.SetClassParameters(v, group, kind, "infra", p.classParams)
 			}
 			if v.GetKind() == "Gateway" && v.GetName() == "edge" {
 				if p.gwConds != nil {
@@ -11073,6 +11172,9 @@ func TestSelfManagedProxiesAtTheAPI(t *testing.T) {
 			health.StateError, []expect{{health.CodeXDSRejected, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
 		{"managed Gateway without a proxy", setup{}, proxyWorld(proxySetup{noProxy: true}),
 			health.StateWarning, []expect{missing}, []expect{anySelf}},
+		// kgateway does not check a class reference's group or kind; it looks up GatewayParameters by namespace and name.
+		{"class reference of another group and kind still resolves", setup{}, proxyWorld(proxySetup{classParams: "sm", classRefKind: "OtherParameters", noProxy: true}, sm),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
 		{"Gateway parameters of another kind", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "sm", gwRefKind: "OtherParameters", noProxy: true}, sm),
 			health.StateWarning, []expect{missing}, []expect{anySelf}},
 		{"GatewayParameters not readable", setup{prepare: forbidParams}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
@@ -11227,7 +11329,8 @@ func (GatewayParameters) Resolve(gw *unstructured.Unstructured, snap *cache.Snap
 	}
 	classSelf := false
 	if r, ok := paramsRef(class, "spec", "parametersRef"); ok {
-		p := r.resolve(snap, served, r.namespace)
+		// Like kgateway, a class reference is not checked for group or kind.
+		p := r.lookup(snap, served, r.namespace)
 		if p == nil {
 			return Unresolved
 		}
@@ -11262,13 +11365,21 @@ func paramsRef(u *unstructured.Unstructured, path ...string) (ref, bool) {
 	return ref{s("group"), s("kind"), s("namespace"), s("name")}, true
 }
 
-// resolve returns the referenced GatewayParameters in ns, or nil when the
-// reference names another kind, has no name, or the object cannot be read.
-func (r ref) resolve(snap *cache.Snapshot, served []kinds.Served, ns string) *unstructured.Unstructured {
-	if r.group != kinds.KgatewayGroup || r.kind != paramsKind || r.name == "" {
+// lookup returns the GatewayParameters r names in ns, or nil when r has no
+// name or the object cannot be read.
+func (r ref) lookup(snap *cache.Snapshot, served []kinds.Served, ns string) *unstructured.Unstructured {
+	if r.name == "" {
 		return nil
 	}
 	return find(snap, served, kinds.KgatewayGroup, paramsKind, ns, r.name)
+}
+
+// resolve is lookup for a Gateway reference, which must name GatewayParameters.
+func (r ref) resolve(snap *cache.Snapshot, served []kinds.Served, ns string) *unstructured.Unstructured {
+	if r.group != kinds.KgatewayGroup || r.kind != paramsKind {
+		return nil
+	}
+	return r.lookup(snap, served, ns)
 }
 
 // find returns the object, or nil when its kind is not served or not readable,
@@ -11342,7 +11453,7 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 			continue
 		}
-		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID()); bad {
+		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
 			f.Resource = ref(gw)
 			fs = append(fs, f)
 		}
@@ -11392,7 +11503,7 @@ In `docs/phases/phase-1/design.md` §5.2, add after the KGWUI-009 row:
 - [ ] **Step 9: Run the tests to verify they pass**
 
 Run: `go vet ./... && go test ./... -race`
-Expected: all PASS, including the thirteen subtests of `TestSelfManagedProxiesAtTheAPI` and `TestDownstreamProxyModeResolverSeam`. The scale test of Task 10 still computes in under 1 s.
+Expected: all PASS, including the fourteen subtests of `TestSelfManagedProxiesAtTheAPI` and `TestDownstreamProxyModeResolverSeam`. The scale test of Task 10 still computes in under 1 s.
 
 - [ ] **Step 10: Commit**
 
@@ -11506,6 +11617,8 @@ function inst(
 
 (import `ScopeSummary`).
 
+`api/hooks.test.tsx`: the local `meta` of "links only kinds that /api/v1/meta lists" gets `platform: "Kubernetes", capabilities: ["scope", "workloads"],`.
+
 `pages/install/InstallPage.test.tsx`: add `"/api/v1/installs": [installSummary()],` to the `stubApi` call in `mount` (finding rows name the install from the installs list); in the switching test add `displayName: "b/two"` to `b.header`; and where a test spreads `ov.header.scope`, write `{ ...(ov.header.scope as ScopeSummary), … }`.
 
 - [ ] **Step 2: Write the failing boundary tests**
@@ -11602,7 +11715,11 @@ it("H2: an install without scope, namespace, name or replica counts renders ever
     "/api/v1/installs": [one.summary, two.summary],
     "/api/v1/meta": noCaps,
     "/api/v1/installs/acme~edge_1/overview": one.ov,
-    "/api/v1/installs/acme~edge_1/health": { ...unknown(), install: one.summary.id },
+    "/api/v1/installs/acme~edge_1/health": {
+      ...unknown(),
+      install: one.summary.id,
+      findings: unknown().findings.map((f) => ({ ...f, install: one.summary.id })),
+    },
   });
   const landing = mount("/");
   const cards = await screen.findAllByTestId("install-card");
@@ -11629,7 +11746,8 @@ it("H3: without the workloads capability there is no replica wording and no Depl
         slug: "controller-not-ready",
         severity: "error" as const,
         install: "kgw.kgateway",
-        message: "Controller not ready (1 of 2 replicas)",
+        // What the backend sends without workloads (Task 24): no replica counts.
+        message: "Controller not ready",
         resource: { group: "apps", kind: "Deployment", namespace: "kgw", name: "kgateway" },
       },
     ],
@@ -11645,7 +11763,8 @@ it("H3: without the workloads capability there is no replica wording and no Depl
   expect(within(row).queryByRole("link")).toBeNull();
   const ready = await screen.findByTestId("controller-readiness");
   expect(ready).toHaveTextContent("Controller not ready");
-  expect(ready).not.toHaveTextContent("of 2 ready");
+  // No replica wording anywhere on the page, the header and finding rows included.
+  expect(document.body).not.toHaveTextContent(/replica|of 2 ready/i);
 });
 ```
 
@@ -11851,6 +11970,16 @@ and the nav link target becomes:
   const label = `Switch install: ${current ? installLabel(current) : currentId}`;
 ```
 
+and replace the two expressions that build the same text from `currentId`:
+
+```tsx
+      <Tooltip label={label}>
+        <MenuButton
+          ref={menu.buttonRef}
+          type="button"
+          aria-label={label}
+```
+
 The button content becomes `{current ? <InstallName install={current} stylesOverride={headerResourceName(theme)} /> : currentId}`; each menu item renders `<InstallName install={i} />` in place of its `ResourceName` and navigates with `navigate(installPath(i.id))`.
 
 `shell/DocumentTitle.tsx`: replace with:
@@ -12005,7 +12134,7 @@ Platform copy moves into one module. The Kubernetes vocabulary is the default, a
 - Create: `packages/shell/src/shell/vocabulary.tsx`
 - Modify: `packages/shell/src/shell/{extension.ts,Shell.tsx,RootRedirect.tsx}`, `packages/shell/src/pages/{ClusterLanding.tsx,FindingsPage.tsx,ResourcePage.tsx}`, `packages/shell/src/pages/install/InstallPage.tsx`, `packages/shell/src/states/PageNotice.tsx`, `packages/shell/src/resource/CopyNameButton.tsx`
 - Modify: `packages/shell/src/index.ts`, `packages/shell/src/index.test.ts`
-- Test: `packages/shell/src/shell/Shell.test.tsx`, `packages/shell/src/pages/pages.test.tsx`
+- Test: `packages/shell/src/shell/Shell.test.tsx`, `packages/shell/src/pages/pages.test.tsx` (including its hand-built `ShellExtensionContext` value)
 
 **Interfaces:**
 - Consumes: Task 26's routes and `ShellExtension`.
@@ -12131,6 +12260,8 @@ export function useVocabulary(): Vocabulary {
 ```
 
 `shell/Shell.tsx`: import `kubernetesVocabulary` from `./vocabulary` and `type ResolvedShellExtension` from `./extension`; the memo becomes `useMemo<ResolvedShellExtension>(…)` and returns, in addition, `vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },`.
+
+`pages/pages.test.tsx` builds a `ShellExtensionContext.Provider` value by hand in "the longest matching finding renderer prefix wins"; add `vocabulary: kubernetesVocabulary,` to it (import from `../shell/vocabulary`). The `FindingRow` it renders reads the vocabulary through `CopyNameButton`.
 
 - [ ] **Step 5: Use the vocabulary everywhere the copy appeared**
 
