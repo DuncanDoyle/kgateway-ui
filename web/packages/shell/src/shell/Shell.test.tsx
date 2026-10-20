@@ -102,7 +102,7 @@ it("shows a designed empty state when no install is found", async () => {
   stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
   mount("/");
   await waitFor(() => expect(screen.getByText("No kgateway install found")).toBeInTheDocument());
-  expect(screen.getByText(/To pin one install, start the UI with/)).toBeInTheDocument();
+  expect(screen.getByText(/To always open one install, start the UI with/)).toBeInTheDocument();
 });
 
 it("says when the pinned install was not found", async () => {
@@ -134,7 +134,7 @@ it("H4: a downstream vocabulary replaces platform copy and leaves the rest at th
   mount("/", { vocabulary: { noInstallsTitle: "No Acme install found" } });
   expect(await screen.findByText("No Acme install found")).toBeInTheDocument();
   // Entries the override leaves out fall back to the Kubernetes defaults.
-  expect(screen.getByText(/To pin one install, start the UI with/)).toBeInTheDocument();
+  expect(screen.getByText(/To always open one install, start the UI with/)).toBeInTheDocument();
 });
 
 it("renders extension brand and routes", async () => {

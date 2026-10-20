@@ -35,7 +35,8 @@ export const kubernetesVocabulary: Vocabulary = {
       </>
     ) : (
       <>
-        To pin one install, start the UI with <code>--install</code> and the install ID or <code>namespace/name</code>.
+        To always open one install, start the UI with <code>--install &lt;id&gt;</code> or{" "}
+        <code>--install &lt;namespace&gt;/&lt;name&gt;</code>.
       </>
     ),
   copyName: "Copy namespace/name",
