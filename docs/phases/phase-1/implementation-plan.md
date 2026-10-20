@@ -10848,7 +10848,7 @@ In `pkg/health/finding.go`, add the import `"github.com/DuncanDoyle/kgateway-ui/
 	Platform platform.Info
 ```
 
-In `pkg/health/checks.go`, replica counts are workload wording, so `notReady` gets a `workloads bool` parameter and both callers pass `in.workloads()`:
+In `pkg/health/checks.go`, add the import `"github.com/DuncanDoyle/kgateway-ui/pkg/platform"`. Replica counts are workload wording, so `notReady` gets a `workloads bool` parameter and both callers pass `in.workloads()`:
 
 ```go
 // workloads reports whether replica wording applies; a zero Platform is Kubernetes.
