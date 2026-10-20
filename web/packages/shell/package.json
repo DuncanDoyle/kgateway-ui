@@ -1,0 +1,33 @@
+{
+  "name": "@kgateway-ui/shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@fontsource-variable/figtree": "^5",
+    "@fontsource-variable/jetbrains-mono": "^5",
+    "@tanstack/react-table": "^8",
+    "@tanstack/react-virtual": "^3",
+    "js-yaml": "^4"
+  },
+  "peerDependencies": {
+    "@emotion/react": "^11",
+    "@emotion/styled": "^11",
+    "lucide-react": "^1",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-router-dom": "^7",
+    "swr": "^2"
+  },
+  "devDependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "@emotion/react": "^11",
+    "@emotion/styled": "^11",
+    "react-router-dom": "^7",
+    "swr": "^2",
+    "lucide-react": "^1"
+  }
+}

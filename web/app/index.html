@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>kgateway</title>
+    <script>
+      // Paint the last applied theme before React loads, so there is no colour flash.
+      // The theme provider writes this record; anything missing or invalid paints dark.
+      (() => {
+        var bg = "#0F1220";
+        var scheme = "dark";
+        try {
+          const paint = JSON.parse(localStorage.getItem("kgateway-ui.theme.paint"));
+          if (paint && /^#[0-9a-f]{6}$/i.test(paint.bg) && (paint.scheme === "light" || paint.scheme === "dark")) {
+            bg = paint.bg;
+            scheme = paint.scheme;
+          }
+        } catch {
+          // storage blocked or record corrupt: paint dark
+        }
+        var root = document.documentElement;
+        root.style.background = bg;
+        root.style.colorScheme = scheme;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
