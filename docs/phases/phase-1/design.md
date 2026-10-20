@@ -502,7 +502,7 @@ Each hedge is small and lands before the first release, which freezes API v1 and
 | H4 | **SPA vocabulary.** One module holds the platform copy: "Waiting for the cluster", the cluster landing title, the no-install empty state (how an install is found, the `--install` hint) and "Copy namespace/name". The Kubernetes vocabulary is the default; `ShellExtension` gets an optional `vocabulary` override. Strings go through the wording pass. | R7 |
 | H5 | **Self-managed proxies.** Register `GatewayParameters` (`gateway.kgateway.dev`). The UI follows kgateway's own resolution: class parameters, then Gateway parameters, where a selfManaged layer wins and a later `kube` layer does not undo it (`pkg/deployer/merge.go:12-28`, `pkg/kgateway/deployer/gateway_parameters.go:224-306`, kgateway `556b4ce`). Outcomes: **self-managed** when every referenced GatewayParameters resolves and the merge is selfManaged; **unresolved** when a referenced one is missing or unreadable, which keeps today's behaviour (kgateway also sets `Accepted=False`, reason `InvalidParameters`); otherwise **managed**. When RBAC denies GatewayParameters, it is like any other denied kind: KGWUI-008 and the install unknown, never KGWUI-010. Only one thing changes: for a self-managed Gateway, the "no proxy Deployment found" case becomes info finding KGWUI-010 "Self-managed proxy: the UI cannot see its readiness". A proxy Deployment that exists but is not ready is still KGWUI-006, and `Programmed=False`, xDS rejects and every other check are unchanged (D-006). The resolution sits behind a pluggable interface, because it mirrors controller logic; the upstream proposal asks the controller to report it (§14.6). | R3, R11 |
 | H8 | **Import boundary test.** A Go test fails when a non-test file outside today's per-file allowlist imports `k8s.io/api/core/v1`, `apps/v1`, `k8s.io/client-go` or `pkg/kinds`' discovery client. The allowlist names files, not packages, and only shrinks; a file that must be added needs a reviewed reason. The test cannot see semantic assumptions, such as a new Pod-shaped field, so the review checklist asks for them. | R1 |
-| H9 | **Upstream proposal** (plan Task 23) adds three asks: platform-neutral controller identity (controller names, version, edition), self-managed status per Gateway, and connected-proxy state per Gateway. No Kubernetes Pod introspection required. | R2, R3 |
+| H9 | **Upstream proposal** (plan Task 23) adds two asks: `controllerName` in the admin `/version` response, and connected-proxy state per Gateway. `Programmed` semantics for self-managed Gateways are left to the standalone project's planned issue, so only one is filed (§14.8). Edition is not an upstream concern: a downstream build reports it. No Kubernetes Pod introspection required. | R2, R3 |
 | H10 | **Docs.** The README states that Kubernetes is today's only provider. The roadmap entries for Phases 3, 4, 7, 9 and 10 carry the notes in §14.5. | — |
 | H11 | **Compatibility policy.** The README and `pkg/extension` doc state that API v1 (paths and JSON) is stable from the first release. The Go extension API (`Detector`, `Install`, `ScopeProvider`, `Registry`) may change until the extension-seam milestone. When the provider seam arrives, the Kubernetes `Detector` keeps working as that provider's adapter. | R2, R9 |
 
@@ -534,7 +534,8 @@ Placement: a new planned sub-phase before packaging (§14.7 Q1). H1–H4 touch a
 | Metrics by URL | Same | `Scraper.Scrape(ctx, url)`; the Kubernetes provider turns Pods into URLs (or `pods/proxy`). |
 | Injection in `app.Build` | Embedding | `Build` takes a `Provider` and optional `Source`; `Run` keeps the kubeconfig and in-cluster path. |
 | Kinds without discovery | File mode | The provider reports served kinds; the discovery client is a Kubernetes detail. |
-| Object revision and incarnation | File mode | Providers give each object a revision (the spec changes) and an incarnation (delete and recreate), so grace, dedupe and freshness keys work without UIDs or generations. Today's `{uid, generation}` keys stay in the Kubernetes provider. |
+| Object revision and incarnation | File mode | Met by Kubernetes metadata the standalone binary synthesises (§14.8): `generation` per spec change, a new `uid` per create, `resourceVersion` as the store revision. Today's `{uid, generation}` keys and freshness logic then work unchanged; the provider must reject objects without them. |
+| Static install definition | kube-lite | An install read from a definition file (proposed `--install-file`): ID, controller names, version source, metrics and admin URLs. Controller liveness probes those URLs. |
 | Exported SPA embed | An embedding binary | Export the embed as a public package; additive. |
 | Selector scope with missing Namespace objects | A provider with selectors but no Namespace objects | Report "membership unknown" instead of out-of-scope. |
 | D-009 §1 for file mode | File-mode provider | Objects and status come from the controller (D-016 §5). |
@@ -553,7 +554,7 @@ Placement: a new planned sub-phase before packaging (§14.7 Q1). H1–H4 touch a
 These are requirements for the standalone project, not a design.
 - **Objects:** each Gateway API and kgateway object with spec, status and conditions, plus a stable key (group, kind, namespace, name). A UID and a generation are optional.
 - **List and change notification:** a full list plus ordered changes (watch, stream or polling with a revision), with a way to tell "source down" from "no changes".
-- **Freshness:** either `generation`/`observedGeneration`, or a per-object statement that status was computed for the current spec revision. A provider-supplied revision and incarnation per object, so edits and delete/recreate are visible without UIDs.
+- **Freshness:** `generation`/`observedGeneration` with Kubernetes semantics (generation changes on spec edits only), a `uid` that changes on delete and recreate, and `resourceVersion` as a monotonic revision. Agreed with the standalone project (§14.8).
 - **Install identity:** controller names, version, edition and an ID that is stable across restarts.
 - **Liveness:** controller liveness, and per Gateway the proxies connected over xDS and whether they accept the config.
 - **Metrics:** URLs for the controller's Prometheus endpoint (today `localhost:9092`, hard-coded in kgateway) and Envoy admin.
@@ -564,3 +565,22 @@ These are requirements for the standalone project, not a design.
 1. **Placement:** a new planned sub-phase 1.3 "platform-neutral contract" (H1–H5, H8, H11). Packaging, CI and e2e become sub-phase 1.4, which also carries H9 and H10.
 2. **Self-managed severity:** info (KGWUI-010).
 3. **`Backend`:** registered in the Phase 2 design.
+
+### 14.8 Standalone project's answer (2026-10-20)
+
+The standalone project checked §14.6 against its design. Its roadmap: kube-lite PoC with the stock controller, then a single binary that imports kgateway as a Go module, as downstream builds do.
+
+| Topic | Agreed |
+|---|---|
+| Objects, list and watch | kube-lite: apiserver objects. File mode: Kubernetes list/watch semantics with a monotonic revision; unreachable shows as a transport error or missed heartbeat. |
+| Freshness | File mode synthesises Kubernetes metadata (`generation`, `uid`, `resourceVersion`) instead of new fields. Accepted: it keeps D-014-style freshness unchanged. |
+| Install identity | kube-lite: a definition file the UI reads by flag; no fake Deployment, because it would show 0/1 replicas. File mode: an identity endpoint owned by the binary, which also carries edition. |
+| Controller liveness | kube-lite: the UI probes the metrics or admin URL. File mode: the identity endpoint. |
+| Proxy readiness | kube-lite: not observable (stock controller, `Programmed=True` regardless of Envoy), so KGWUI-010 is right. File mode: per-Gateway connected proxies and ACK/NACK through xDS callbacks. |
+| Metrics | kube-lite: one controller per host on 9092. File mode: set in code. A configurable port upstream is nice to have. |
+| Scope | Always "all"; Namespace objects exist (apiserver-created, or synthesised in file mode). |
+| Embedding | The single binary will likely embed `pkg/...` and serve the SPA from its own `fs.FS`. `pkg/...` stays free of globals and in-cluster assumptions (R9, H8). |
+| Authorisation | No identity story yet; localhost-bound. A later one plugs into `Authorizer`. |
+
+Effect here: H9's asks shrink (no edition, `Programmed` semantics filed by the standalone project), and §14.4's revision row is met by synthesised metadata. No Phase 1 task changes.
+

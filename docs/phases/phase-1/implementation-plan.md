@@ -13489,7 +13489,7 @@ git add test web/e2e .github/workflows/e2e.yaml && git commit -m "test(e2e): kin
 
 ### Task 23: README, roadmap notes, upstream proposal draft, and closing Phase 1
 
-This task also carries hedges H9 and H10 of design §14.3.
+This task also carries hedges H9 and H10 of design §14.3 (H9 as narrowed in §14.8).
 
 **Files:**
 - Modify: `README.md` (the stub from Task 28), `docs/roadmap.md`, `docs/phase-status.md`
@@ -13531,9 +13531,8 @@ Write the issue text for `kgateway-dev/kgateway`: "Expose the controller's effec
 - **Proposal:** a read-only endpoint that does not expose pprof or `/logging`. It returns controller identity, version, `controllerName`s, the parsed selectors, the selected namespaces, and the enabled kinds.
 - **Alternatives:** admin `/snapshots/krt` (unstable, includes ConfigMap data); the metrics.
 - **Further asks (H9, design §14.6),** none of which needs Kubernetes Pod introspection:
-  1. Platform-neutral controller identity: controller names, version and edition, from the controller itself.
-  2. Self-managed status per Gateway, so tools stop mirroring the GatewayParameters merge (the UI's interim is `proxymode.GatewayParameters`).
-  3. Connected-proxy state per Gateway: the proxies connected over xDS and whether they accept the config.
+  1. `controllerName` in the admin `/version` response. Edition is not asked for: a downstream build reports it (design §14.8).
+  2. Connected-proxy state per Gateway: the proxies connected over xDS and whether they accept the config. Reference, not duplicate, the standalone project's issue on `Programmed` semantics for self-managed Gateways if it is filed first (design §14.8).
 - **Open questions:** which port; how to authenticate.
 
 Run the `sanitize-kgateway-oss-resources` skill on it, put the AI-assisted note at the top, and **hand it to the user to file**. Never post it.
