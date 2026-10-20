@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) complete, merged in #4 (cc8ba71); 1.4 next
+Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) complete, merged in #4 (cc8ba71); 1.4 (packaging, CI, e2e) in progress
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
@@ -26,7 +26,11 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [ ] phase-1-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 1.4 — Packaging, CI, e2e (planned)
+Base: cab3faeebe0d917f553aa5ec06e2c949cbf3af37
+Brief: docs/phases/phase-1/phase-1.4-brief.md
+Branch: duncandoyle/packaging
+Status: implementing (Tasks 19–23, subagent-driven)
 
 ## Carry-over (deferred to later phases)
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
