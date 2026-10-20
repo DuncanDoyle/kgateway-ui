@@ -12,7 +12,7 @@ export interface Brand {
 
 /**
  * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:ns/:name/. The core owns "findings" and "r/..." there and "/" at the top; a contribution cannot replace them.
+ * under /i/:id/. The core owns "findings" and "r/..." there and "/" at the top; a contribution cannot replace them.
  */
 export interface RouteContribution {
   path: string;
@@ -20,7 +20,7 @@ export interface RouteContribution {
   scope: "install" | "top";
 }
 
-/** A navigation entry contributed by an extension. Targets are relative, without a leading slash; install-scoped ones resolve under /i/:ns/:name/. */
+/** A navigation entry contributed by an extension. Targets are relative, without a leading slash; install-scoped ones resolve under /i/:id/. */
 export interface NavEntry {
   label: string;
   to: string;
@@ -66,8 +66,7 @@ export function useShellExtension(): Required<ShellExtension> {
   return useContext(ShellExtensionContext);
 }
 
-/** The install ID ("ns/name") of the current /i/:ns/:name/... route; "" outside install routes. */
+/** The opaque install ID of the current /i/:id/... route, decoded by the router; "" outside install routes. Never split it (D-016). */
 export function useInstallId(): string {
-  const { ns, name } = useParams();
-  return ns && name ? `${ns}/${name}` : "";
+  return useParams().id ?? "";
 }

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import useSWR from "swr";
 import { type ApiError, apiFetch } from "./client";
 import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, RawHealthReport, Ref } from "./types";
@@ -36,18 +37,27 @@ export function useMeta() {
   return useSWR<MetaResponse, ApiError>("/api/v1/meta", apiFetch);
 }
 
+/** API base of one install; the ID is encoded, never parsed. */
+const installApi = (id: string) => `/api/v1/installs/${encodeURIComponent(id)}`;
+
 /** GET /api/v1/installs/{id}/overview. */
 export function useOverview(id: string) {
-  return useSWR<OverviewResponse, ApiError>(`/api/v1/installs/${id}/overview`, apiFetch, live);
+  return useSWR<OverviewResponse, ApiError>(`${installApi(id)}/overview`, apiFetch, live);
 }
 
 /** GET /api/v1/installs/{id}/health. */
 export function useHealth(id: string) {
-  return useSWR<HealthReport, ApiError>(`/api/v1/installs/${id}/health`, fetchHealth, live);
+  return useSWR<HealthReport, ApiError>(`${installApi(id)}/health`, fetchHealth, live);
 }
 
 /** GET one resource; "-" stands for an empty group or namespace. */
 export function useResource(id: string, r: Ref) {
-  const path = `/api/v1/installs/${id}/resources/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
+  const path = `${installApi(id)}/resources/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
   return useSWR<Record<string, unknown>, ApiError>(path, apiFetch);
+}
+
+/** The platform's capabilities from /api/v1/meta (D-016); undefined until meta loads. */
+export function useCapabilities(): ReadonlySet<string> | undefined {
+  const { data } = useMeta();
+  return useMemo(() => (data ? new Set(data.capabilities ?? []) : undefined), [data]);
 }

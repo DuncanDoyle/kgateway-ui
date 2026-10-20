@@ -1,4 +1,4 @@
-import type { Category, HealthReport, MetaResponse, OverviewResponse, ServedKind } from "../api/types";
+import type { Category, HealthReport, InstallSummary, MetaResponse, OverviewResponse, ServedKind } from "../api/types";
 
 // Builders take the collection time, so timestamps follow the test clock and are never fixed at import time.
 
@@ -20,6 +20,8 @@ export function kind(group: string, k: string, category: Category, displayName: 
 export const meta: MetaResponse = {
   version: "dev",
   synced: true,
+  platform: "Kubernetes",
+  capabilities: ["scope", "workloads"],
   kinds: [
     kind("gateway.networking.k8s.io", "GatewayClass", "gatewayclass", "GatewayClasses"),
     kind("gateway.networking.k8s.io", "Gateway", "gateway", "Gateways"),
@@ -35,13 +37,14 @@ const gw = "gateway.networking.k8s.io";
 export function overview(at = Date.now()): OverviewResponse {
   return {
     header: {
-      id: "kgw/kgateway",
+      id: "kgw.kgateway",
+      displayName: "kgw/kgateway",
       namespace: "kgw",
       name: "kgateway",
       version: "2.4.7",
       edition: "kgateway",
       controllerNames: ["kgateway.dev/kgateway"],
-      controller: { ready: 2, desired: 2 },
+      readiness: { state: "ready", ready: 2, desired: 2 },
       scope: {
         mode: "selectors",
         selectors: [{ matchLabels: { team: "a" } }],
@@ -96,7 +99,7 @@ const f = (code: string, severity: "error" | "warning" | "info", ns: string, nam
   code,
   slug: code,
   severity,
-  install: "kgw/kgateway",
+  install: "kgw.kgateway",
   message,
   resource: { group: gw, kind: "HTTPRoute", namespace: ns, name },
 });
@@ -104,7 +107,7 @@ const f = (code: string, severity: "error" | "warning" | "info", ns: string, nam
 export function unhealthy(at = Date.now()): HealthReport {
   const t = new Date(at).toISOString();
   return {
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     state: "error",
     findings: [
       {
@@ -123,7 +126,7 @@ export function unhealthy(at = Date.now()): HealthReport {
 export function healthy(at = Date.now()): HealthReport {
   const t = new Date(at).toISOString();
   return {
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     state: "healthy",
     findings: [],
     counts: {},
@@ -138,7 +141,7 @@ export function healthy(at = Date.now()): HealthReport {
 export function unknown(at = Date.now()): HealthReport {
   const t = new Date(at).toISOString();
   return {
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     state: "unknown",
     counts: { info: 1 },
     collectedAt: t,
@@ -147,7 +150,7 @@ export function unknown(at = Date.now()): HealthReport {
         code: "KGWUI-008",
         slug: "signal-unavailable",
         severity: "info",
-        install: "kgw/kgateway",
+        install: "kgw.kgateway",
         message: "Could not check xDS rejects",
         detail: "connection refused",
       },
@@ -160,7 +163,7 @@ export function unknown(at = Date.now()): HealthReport {
 export function processing(at = Date.now()): HealthReport {
   const t = new Date(at).toISOString();
   return {
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     state: "unknown",
     counts: { info: 2 },
     collectedAt: t,
@@ -168,7 +171,7 @@ export function processing(at = Date.now()): HealthReport {
       code: "KGWUI-003",
       slug: "route-unattached",
       severity: "info" as const,
-      install: "kgw/kgateway",
+      install: "kgw.kgateway",
       message: "Being processed by the controller",
       resource: { group: gw, kind: "HTTPRoute", namespace: "shop", name },
     })),
@@ -194,12 +197,21 @@ export function restricted(at = Date.now()): HealthReport {
         code: "KGWUI-002",
         slug: "condition-false",
         severity: "error",
-        install: "kgw/kgateway",
+        install: "kgw.kgateway",
         message: "",
         restricted: true,
         resource: { group: gw, kind: "HTTPRoute", namespace: "payments", name: "checkout" },
       },
     ],
     counts: { error: 1 },
+  };
+}
+
+/** The install summary that matches overview(). */
+export function installSummary(at = Date.now()): InstallSummary {
+  return {
+    ...overview(at).header,
+    health: { state: "error", counts: { error: 1, warning: 6 } },
+    computedAt: new Date(at).toISOString(),
   };
 }

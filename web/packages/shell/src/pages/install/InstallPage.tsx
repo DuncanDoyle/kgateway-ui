@@ -2,9 +2,10 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
-import { isStale, useHealth, useMeta, useOverview } from "../../api/hooks";
+import { isStale, useCapabilities, useHealth, useMeta, useOverview } from "../../api/hooks";
 import { plural } from "../../format";
 import { useInstallId } from "../../shell/extension";
+import { installPath } from "../../shell/paths";
 import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
@@ -76,6 +77,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const ov = useOverview(id);
   const h = useHealth(id);
   const { data: meta } = useMeta();
+  const caps = useCapabilities();
   const now = useNow();
   const err = ov.error ?? h.error;
   // Render only data that belongs to this route's install, never the previous install's (design §6.6).
@@ -85,9 +87,10 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
       return <PageState kind="connecting" title="Waiting for the cluster" message={err.message} />;
     if (err)
       return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
-    // One tile per counted kind (meta lists Deployments and parameters kinds, which have no tile) plus the scope tile.
+    // One tile per counted kind (Deployments and parameters kinds have none) plus the scope tile where the platform has scope.
     const tiles = meta
-      ? meta.kinds.filter((k) => k.category !== "workload" && k.category !== "parameters").length + 1
+      ? meta.kinds.filter((k) => k.category !== "workload" && k.category !== "parameters").length +
+        (caps?.has("scope") ? 1 : 0)
       : 8;
     return (
       <Page role="status" aria-busy="true" aria-label="Loading this install…" stylesOverride={stylesOverride}>
@@ -137,7 +140,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   return (
     <Page data-testid="install-page" stylesOverride={stylesOverride}>
       {/* The header shows the install; the h1 gives the page its heading for screen readers. */}
-      <VisuallyHidden as="h1">{id}</VisuallyHidden>
+      <VisuallyHidden as="h1">{ov.data.header.displayName || id}</VisuallyHidden>
       {err ? <PageNotice error={err} title="Cannot load this install" /> : null}
       <HealthStrip health={h.data} stale={stale} now={now} checkedAt={checkedAt} />
       {h.data.state === "healthy" ? (
@@ -145,7 +148,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
           <div>
             {/* Healthy can still carry info findings; they stay one click away. */}
             {h.data.findings.length > 0 ? (
-              <Link className="info" to={`/i/${id}/findings`}>
+              <Link className="info" to={installPath(id, "findings")}>
                 {plural(h.data.findings.length, "info finding")}
               </Link>
             ) : null}

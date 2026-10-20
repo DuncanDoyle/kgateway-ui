@@ -64,7 +64,7 @@ interface CountTilesProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** Count tiles per served kind, in served order, plus the scope tile. Memoised against the page's 1 s clock tick. */
+/** Count tiles per served kind, in served order, plus the scope tile where the platform has scope. Memoised against the page's 1 s clock tick. */
 export const CountTiles = memo(function CountTiles({ overview, stylesOverride }: CountTilesProps) {
   const sc = overview.header.scope;
   return (
@@ -85,23 +85,25 @@ export const CountTiles = memo(function CountTiles({ overview, stylesOverride }:
           <span className="l">{c.displayName}</span>
         </Tile>
       ))}
-      <Tile data-testid="scope-tile">
-        <Tooltip label={scopeText(sc, "detail")} placement="end">
-          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focusable so keyboard users can read the tooltip */}
-          <span className={sc.mode === "unknown" ? "n warn" : "n"} tabIndex={0}>
-            {sc.mode === "unknown" ? (
-              <>
-                <HealthIcon state="unknown" />
-                Unknown
-              </>
-            ) : (
-              `${sc.watched} of ${sc.total}`
-            )}
-          </span>
-        </Tooltip>
-        <span className="l">Namespaces watched</span>
-        {sc.source === DEPLOYMENT_TEMPLATE ? <span className="s">Source: Deployment template</span> : null}
-      </Tile>
+      {sc ? (
+        <Tile data-testid="scope-tile">
+          <Tooltip label={scopeText(sc, "detail")} placement="end">
+            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focusable so keyboard users can read the tooltip */}
+            <span className={sc.mode === "unknown" ? "n warn" : "n"} tabIndex={0}>
+              {sc.mode === "unknown" ? (
+                <>
+                  <HealthIcon state="unknown" />
+                  Unknown
+                </>
+              ) : (
+                `${sc.watched} of ${sc.total}`
+              )}
+            </span>
+          </Tooltip>
+          <span className="l">Namespaces watched</span>
+          {sc.source === DEPLOYMENT_TEMPLATE ? <span className="s">Source: Deployment template</span> : null}
+        </Tile>
+      ) : null}
     </TileGrid>
   );
 });

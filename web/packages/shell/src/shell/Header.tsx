@@ -2,16 +2,18 @@ import { css, useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link, NavLink, useMatch } from "react-router-dom";
 import { useNow } from "../api/clock";
-import { isStale, useInstalls } from "../api/hooks";
-import type { ReadyCount } from "../api/types";
+import { isStale, useCapabilities, useInstalls } from "../api/hooks";
+import type { Readiness } from "../api/types";
 import { versionText } from "../format";
 import { HealthIcon } from "../health/HealthIcon";
-import { ResourceName } from "../resource/ResourceName";
 import { Shimmer } from "../states/Shimmer";
+import type { HealthState } from "../theme/tokens";
 import { HEADER_H } from "./constants";
 import { useShellExtension } from "./extension";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerResourceName, headerTint } from "./headerTint";
+import { InstallName } from "./InstallName";
 import { InstallSwitcher } from "./InstallSwitcher";
+import { installPath } from "./paths";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 // region Styles
@@ -98,19 +100,30 @@ const Nav = styled.nav`
 `;
 
 // region Helpers
-/** Matches KGWUI-005: fewer ready replicas than desired is an error. */
-function readiness(c: ReadyCount): "healthy" | "error" {
-  return c.ready >= c.desired ? "healthy" : "error";
+/** Matches KGWUI-005: not ready is an error; readiness the platform cannot tell is unknown. */
+function readinessState(r: Readiness): HealthState {
+  if (r.state === "ready") return "healthy";
+  return r.state === "not-ready" ? "error" : "unknown";
+}
+
+/** Replica counts only where the platform runs workloads (D-016). */
+function readinessText(r: Readiness, workloads: boolean): string {
+  if (workloads && r.ready !== undefined && r.desired !== undefined)
+    return `Controller: ${r.ready} of ${r.desired} ready`;
+  if (r.state === "ready") return "Controller ready";
+  return r.state === "not-ready" ? "Controller not ready" : "Controller readiness unknown";
 }
 
 // region Component
 /** Header: brand, install identity, version, edition and controller readiness, extension navigation, theme switcher. */
 export function Header() {
   const { brand, navEntries } = useShellExtension();
-  const match = useMatch("/i/:ns/:name/*");
+  const match = useMatch("/i/:id/*");
   const { data, error } = useInstalls();
+  const caps = useCapabilities();
   const now = useNow();
-  const id = match ? `${match.params.ns}/${match.params.name}` : "";
+  // useMatch decodes the parameter already; decoding again would corrupt an ID containing "%".
+  const id = match?.params.id ?? "";
   const current = data?.find((i) => i.id === id);
   const theme = useTheme();
   const nav = navEntries.filter((n) => n.scope === "top" || id);
@@ -136,27 +149,28 @@ export function Header() {
           {data && data.length > 1 ? (
             <InstallSwitcher installs={data} currentId={id} unconfirmed={!!error} />
           ) : (
-            <ResourceName
-              namespace={current.namespace}
-              name={current.name}
-              stylesOverride={headerResourceName(theme)}
-            />
+            <InstallName install={current} stylesOverride={headerResourceName(theme)} />
           )}
           {current.version ? <Chip data-testid="version">{versionText(current.version)}</Chip> : null}
           {/* The edition only adds information when it is not the product's own name. */}
           {current.edition && current.edition !== brand.productName ? (
             <Tag data-testid="edition">{current.edition}</Tag>
           ) : null}
-          <Ready>
-            <HealthIcon state={error || isStale(current.computedAt, now) ? "unknown" : readiness(current.controller)} />
-            Controller: {current.controller.ready} of {current.controller.desired} ready
-          </Ready>
+          {/* A platform that cannot observe readiness shows none; that is not a failure (D-016). */}
+          {current.readiness.state !== "not-observed" ? (
+            <Ready data-testid="controller-readiness">
+              <HealthIcon
+                state={error || isStale(current.computedAt, now) ? "unknown" : readinessState(current.readiness)}
+              />
+              {readinessText(current.readiness, !!caps?.has("workloads"))}
+            </Ready>
+          ) : null}
         </Identity>
       ) : null}
       {nav.length > 0 ? (
         <Nav aria-label="Extensions">
           {nav.map((n) => (
-            <NavLink key={`${n.scope}:${n.to}`} to={n.scope === "install" ? `/i/${id}/${n.to}` : `/${n.to}`}>
+            <NavLink key={`${n.scope}:${n.to}`} to={n.scope === "install" ? installPath(id, n.to) : `/${n.to}`}>
               {n.icon}
               {n.label}
             </NavLink>

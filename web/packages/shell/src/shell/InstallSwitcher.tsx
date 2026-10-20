@@ -6,10 +6,11 @@ import { isStale } from "../api/hooks";
 import type { InstallSummary } from "../api/types";
 import { HealthIcon } from "../health/HealthIcon";
 import { stateLabel } from "../health/state";
-import { ResourceName } from "../resource/ResourceName";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import { headerResourceName } from "./headerTint";
+import { InstallName, installLabel } from "./InstallName";
 import { Anchor, Menu, MenuButton, useMenu } from "./menu";
+import { installPath } from "./paths";
 import { Tooltip } from "./Tooltip";
 
 // region Component
@@ -27,26 +28,20 @@ export function InstallSwitcher({ installs, currentId, unconfirmed = false }: In
   const menu = useMenu();
   const theme = useTheme();
   const current = installs.find((i) => i.id === currentId);
+  // Used for both the Tooltip label and the button's aria-label.
+  const label = `Switch install: ${current ? installLabel(current) : currentId}`;
   return (
     <Anchor ref={menu.anchorRef}>
-      <Tooltip label={`Switch install: ${currentId}`}>
+      <Tooltip label={label}>
         <MenuButton
           ref={menu.buttonRef}
           type="button"
-          aria-label={`Switch install: ${currentId}`}
+          aria-label={label}
           aria-haspopup="menu"
           aria-expanded={menu.open}
           onClick={menu.toggle}
         >
-          {current ? (
-            <ResourceName
-              namespace={current.namespace}
-              name={current.name}
-              stylesOverride={headerResourceName(theme)}
-            />
-          ) : (
-            currentId
-          )}
+          {current ? <InstallName install={current} stylesOverride={headerResourceName(theme)} /> : currentId}
           <ChevronsUpDown size={14} aria-hidden="true" />
         </MenuButton>
       </Tooltip>
@@ -63,12 +58,12 @@ export function InstallSwitcher({ installs, currentId, unconfirmed = false }: In
                 aria-current={i.id === currentId}
                 onClick={() => {
                   menu.close(false);
-                  navigate(`/i/${i.id}`);
+                  navigate(installPath(i.id));
                 }}
               >
                 <HealthIcon state={state} />
                 <VisuallyHidden>{stateLabel(state)}: </VisuallyHidden>
-                <ResourceName namespace={i.namespace} name={i.name} />
+                <InstallName install={i} />
                 {i.id === currentId ? <Check data-part="check" size={14} aria-hidden="true" /> : null}
               </button>
             );

@@ -2,6 +2,7 @@ import { Navigate } from "react-router-dom";
 import { useInstalls, useMeta } from "../api/hooks";
 import { PageState } from "../states/PageState";
 import type { CorePages } from "./extension";
+import { installPath } from "./paths";
 
 // region Component
 /** "/" → the single (or pinned) install, else the cluster landing (design §6.4). */
@@ -41,6 +42,6 @@ export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding
       />
     );
   }
-  if (data.length === 1) return <Navigate to={`/i/${data[0]?.id}`} replace />;
+  if (data.length === 1 && data[0]) return <Navigate to={installPath(data[0].id)} replace />;
   return <ClusterLanding />;
 }

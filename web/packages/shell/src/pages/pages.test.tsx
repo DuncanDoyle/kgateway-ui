@@ -2,7 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { POLL_MS } from "../api/hooks";
-import type { Finding, HealthReport, InstallSummary } from "../api/types";
+import type { Finding, HealthReport, InstallSummary, ScopeSummary } from "../api/types";
 import { defaultBrand, ShellExtensionContext } from "../shell/extension";
 import { meta, overview, restricted, unhealthy } from "../test/fixtures";
 import { renderWithTheme, stubApi } from "../test/render";
@@ -27,22 +27,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// Fixture only: it takes "ns/name" for brevity; the UI itself never splits an ID.
 function inst(
-  id: string,
+  nsName: string,
   state: InstallSummary["health"]["state"],
   counts: InstallSummary["health"]["counts"] = {},
   computedAt = new Date().toISOString(),
-  scope: Partial<InstallSummary["scope"]> = {},
+  scope: Partial<ScopeSummary> = {},
 ): InstallSummary {
-  const [namespace = "", name = ""] = id.split("/");
+  const [namespace = "", name = ""] = nsName.split("/");
   return {
-    id,
+    id: `${namespace}.${name}`,
+    displayName: nsName,
     namespace,
     name,
     version: "v2.4.7",
     edition: "kgateway",
     controllerNames: [],
-    controller: { ready: 1, desired: 1 },
+    readiness: { state: "ready", ready: 1, desired: 1 },
     scope: { mode: "selectors", watched: 12, total: 40, ...scope },
     health: { state, counts },
     computedAt,
@@ -68,7 +70,7 @@ it("cluster landing renders one card per install linking to it", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one", "error", { error: 1, warning: 2 }), inst("b/two", "healthy")] });
   renderWithTheme(<ClusterLanding />);
   const card = await screen.findByRole("link", { name: /a\/one/ });
-  expect(card).toHaveAttribute("href", "/i/a/one");
+  expect(card).toHaveAttribute("href", "/i/a.one");
   expect(card).toHaveTextContent("1 error, 2 warnings");
   expect(card).toHaveTextContent("12 of 40 namespaces");
   // The version label already carries a "v"; it is shown once.
@@ -148,14 +150,14 @@ it("cluster landing keeps the loaded cards when a later poll fails", async () =>
 
 function findings(path: string, health: HealthReport = unhealthy()) {
   stubApi({
-    "/api/v1/installs/kgw/kgateway/health": health,
-    "/api/v1/installs/kgw/kgateway/overview": overview(),
+    "/api/v1/installs/kgw.kgateway/health": health,
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
     "/api/v1/meta": meta,
   });
   return renderWithTheme(
     <>
       <Routes>
-        <Route path="/i/:ns/:name/findings" element={<FindingsPage />} />
+        <Route path="/i/:id/findings" element={<FindingsPage />} />
       </Routes>
       <Where />
     </>,
@@ -164,7 +166,7 @@ function findings(path: string, health: HealthReport = unhealthy()) {
 }
 
 it("findings page filters by severity chip and keeps it in the URL", async () => {
-  findings("/i/kgw/kgateway/findings");
+  findings("/i/kgw.kgateway/findings");
   await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(7));
   await userEvent.click(screen.getByRole("button", { name: "Error" }));
   await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(1));
@@ -176,14 +178,14 @@ it("findings page filters by severity chip and keeps it in the URL", async () =>
 });
 
 it("findings page builds kind chips from the findings and applies them from the URL", async () => {
-  findings("/i/kgw/kgateway/findings?kind=Gateway");
+  findings("/i/kgw.kgateway/findings?kind=Gateway");
   await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(1));
   expect(screen.getByRole("button", { name: "Gateway" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "HTTPRoute" })).toHaveAttribute("aria-pressed", "false");
 });
 
 it("findings page applies filters from the URL and shows an empty state", async () => {
-  findings("/i/kgw/kgateway/findings?q=nothing-matches-this");
+  findings("/i/kgw.kgateway/findings?q=nothing-matches-this");
   await waitFor(() => expect(screen.getByText("No findings match these filters")).toBeInTheDocument());
   expect(screen.getByRole("textbox", { name: "Filter findings" })).toHaveValue("nothing-matches-this");
 });
@@ -191,7 +193,7 @@ it("findings page applies filters from the URL and shows an empty state", async 
 it("findings page says No findings when the install has none", async () => {
   const h = unhealthy();
   h.findings = [];
-  findings("/i/kgw/kgateway/findings", h);
+  findings("/i/kgw.kgateway/findings", h);
   await waitFor(() => expect(screen.getByText("No findings")).toBeInTheDocument());
   expect(screen.queryByText("No findings match these filters")).toBeNull();
 });
@@ -201,7 +203,7 @@ it.each([
   ["code", "kgwui-002", 6],
   ["namespace/name", "shop/route-3", 1],
 ])("findings free text matches the %s", async (_what, q, n) => {
-  findings(`/i/kgw/kgateway/findings?q=${encodeURIComponent(q)}`);
+  findings(`/i/kgw.kgateway/findings?q=${encodeURIComponent(q)}`);
   await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(n));
 });
 
@@ -211,15 +213,15 @@ it("findings free text never matches 'undefined' on a finding without a resource
     code: "KGWUI-008",
     slug: "signal-unavailable",
     severity: "info",
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     message: "Could not check xDS rejects",
   });
-  findings("/i/kgw/kgateway/findings?q=undefined", h);
+  findings("/i/kgw.kgateway/findings?q=undefined", h);
   await waitFor(() => expect(screen.getByText("No findings match these filters")).toBeInTheDocument());
 });
 
 it("findings page renders restricted findings without message or link", async () => {
-  findings("/i/kgw/kgateway/findings", restricted());
+  findings("/i/kgw.kgateway/findings", restricted());
   const row = await screen.findByTestId("finding-row");
   expect(row).toHaveTextContent("Restricted: ask the owning team");
   expect(row).toHaveTextContent("KGWUI-002");
@@ -227,35 +229,35 @@ it("findings page renders restricted findings without message or link", async ()
 });
 
 it("findings page says when the data was checked", async () => {
-  findings("/i/kgw/kgateway/findings");
+  findings("/i/kgw.kgateway/findings");
   expect(await screen.findByTestId("data-age")).toHaveTextContent(/^Last checked \d+s ago$/);
 });
 
 it("findings page marks old data as stale", async () => {
-  findings("/i/kgw/kgateway/findings", unhealthy(Date.now() - 75_000));
+  findings("/i/kgw.kgateway/findings", unhealthy(Date.now() - 75_000));
   const age = await screen.findByTestId("data-age");
   expect(age).toHaveTextContent("Data is stale. Last checked 1m ago");
   expect(within(age).getByTestId("health-icon-unknown")).toBeInTheDocument();
 });
 
 it("findings page keeps the loaded findings when a later poll fails", async () => {
-  const routes: Record<string, unknown> = { "/api/v1/installs/kgw/kgateway/health": unhealthy(), "/api/v1/meta": meta };
+  const routes: Record<string, unknown> = { "/api/v1/installs/kgw.kgateway/health": unhealthy(), "/api/v1/meta": meta };
   stubApi(routes);
   renderWithTheme(
     <Routes>
-      <Route path="/i/:ns/:name/findings" element={<FindingsPage />} />
+      <Route path="/i/:id/findings" element={<FindingsPage />} />
     </Routes>,
-    { path: "/i/kgw/kgateway/findings" },
+    { path: "/i/kgw.kgateway/findings" },
   );
   await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(7));
-  routes["/api/v1/installs/kgw/kgateway/health"] = [500, { error: "boom" }];
+  routes["/api/v1/installs/kgw.kgateway/health"] = [500, { error: "boom" }];
   revalidate();
   expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load findings: boom");
   expect(screen.getAllByTestId("finding-row")).toHaveLength(7);
 });
 
 it("findings list is keyboard scrollable", async () => {
-  findings("/i/kgw/kgateway/findings");
+  findings("/i/kgw.kgateway/findings");
   expect(await screen.findByRole("region", { name: "Findings" })).toHaveAttribute("tabindex", "0");
 });
 
@@ -265,11 +267,11 @@ it("findings page virtualises a long list", async () => {
     code: "KGWUI-002",
     slug: "condition-false",
     severity: "warning" as const,
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     message: "Backend not found",
     resource: { group: "gateway.networking.k8s.io", kind: "HTTPRoute", namespace: "shop", name: `route-${i}` },
   }));
-  findings("/i/kgw/kgateway/findings", h);
+  findings("/i/kgw.kgateway/findings", h);
   const rows = await screen.findAllByTestId("finding-row");
   expect(rows.length).toBeGreaterThan(0);
   expect(rows.length).toBeLessThan(100);
@@ -278,7 +280,7 @@ it("findings page virtualises a long list", async () => {
 it("findings page never shows another install's findings", async () => {
   const h = unhealthy();
   h.install = "other/install";
-  findings("/i/kgw/kgateway/findings", h);
+  findings("/i/kgw.kgateway/findings", h);
   await waitFor(() => expect(screen.getByText("Loading findings…")).toBeInTheDocument());
   expect(screen.queryAllByTestId("finding-row")).toHaveLength(0);
 });
@@ -304,7 +306,7 @@ it("the longest matching finding renderer prefix wins", () => {
     >
       <ThemeProvider themes={defaultThemes}>
         <MemoryRouter>
-          <FindingRow finding={f} installId="kgw/kgateway" />
+          <FindingRow finding={f} installId="kgw.kgateway" />
         </MemoryRouter>
       </ThemeProvider>
     </ShellExtensionContext.Provider>,
@@ -316,13 +318,13 @@ it("the longest matching finding renderer prefix wins", () => {
 
 // region Resource page
 
-const cartPath = "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart";
+const cartPath = "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart";
 const lastApplied = "kubectl.kubernetes.io/last-applied-configuration";
 
 function resource(path: string) {
   return renderWithTheme(
     <Routes>
-      <Route path="/i/:ns/:name/r/:group/:kind/:rns/:rname" element={<ResourcePage />} />
+      <Route path="/i/:id/r/:group/:kind/:rns/:rname" element={<ResourcePage />} />
     </Routes>,
     { path },
   );
@@ -338,7 +340,7 @@ it("resource page shows YAML with status first and a copy button", async () => {
       status: { parents: [] },
     },
   });
-  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
   const pre = await screen.findByTestId("yaml");
   const text = pre.textContent ?? "";
   expect(text.indexOf("status:")).toBeGreaterThan(-1);
@@ -357,7 +359,7 @@ it("resource page hides the last-applied annotation until asked", async () => {
       spec: {},
     },
   });
-  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
   const pre = await screen.findByTestId("yaml");
   expect(pre).not.toHaveTextContent(lastApplied);
   expect(pre).toHaveTextContent("team: a");
@@ -370,16 +372,16 @@ it("resource page hides the last-applied annotation until asked", async () => {
 
 it("resource page without the annotation offers no toggle", async () => {
   stubApi({ [cartPath]: { kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } } });
-  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
   await screen.findByTestId("yaml");
   expect(screen.queryByRole("button", { name: /last-applied/ })).toBeNull();
 });
 
 it("resource page 404 says it is out of scope", async () => {
   stubApi({});
-  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/infra/foreign");
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/infra/foreign");
   await waitFor(() => expect(screen.getByText("Not in this install's scope")).toBeInTheDocument());
-  expect(screen.getByRole("link", { name: "Back to install" })).toHaveAttribute("href", "/i/kgw/kgateway");
+  expect(screen.getByRole("link", { name: "Back to install" })).toHaveAttribute("href", "/i/kgw.kgateway");
 });
 
 it("resource page keeps the loaded YAML when a later fetch fails", async () => {
@@ -387,7 +389,7 @@ it("resource page keeps the loaded YAML when a later fetch fails", async () => {
     [cartPath]: { kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } },
   };
   stubApi(routes);
-  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
   await screen.findByTestId("yaml");
   routes[cartPath] = [500, { error: "boom" }];
   revalidate();
@@ -397,6 +399,6 @@ it("resource page keeps the loaded YAML when a later fetch fails", async () => {
 
 it("resource page shows other errors as errors", async () => {
   stubApi({ [cartPath]: [500, { error: "boom" }] });
-  resource("/i/kgw/kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
   expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load resource");
 });

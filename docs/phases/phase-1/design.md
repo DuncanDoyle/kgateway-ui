@@ -271,7 +271,7 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 
 ### 6.3 Frontend extension points
 
-- **Pages and routes:** under `/i/:ns/:name/...` or at the top level.
+- **Pages and routes:** under `/i/:id/...` or at the top level.
 - **Navigation entries.**
 - **Health renderers:** a custom message or detail per finding code prefix. The prefix is a convention, not a registry (§1).
 - **Kind display metadata.** This is mostly backend-driven through descriptors, so most downstream additions need Go only.
@@ -282,10 +282,12 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 
 | URL | Page |
 |---|---|
-| `/` | Redirects to `/i/:ns/:name` when there is one install (or the UI is pinned); otherwise the cluster landing (layout C) |
-| `/i/:ns/:name` | Install page (layout A) |
-| `/i/:ns/:name/findings` | All findings, filterable by severity, code and kind (the target of "Show all") |
-| `/i/:ns/:name/r/:group/:kind/:namespace/:name` | Read-only YAML view of one resource. The UI links here only for kinds listed in `/api/v1/meta`. |
+| `/` | Redirects to `/i/:id` when there is one install (or the UI is pinned); otherwise the cluster landing (layout C) |
+| `/i/:id` | Install page (layout A) |
+| `/i/:id/findings` | All findings, filterable by severity, code and kind (the target of "Show all") |
+| `/i/:id/r/:group/:kind/:namespace/:name` | Read-only YAML view of one resource. The UI links here only for kinds listed in `/api/v1/meta`. |
+
+The install ID is opaque: the SPA encodes it in URLs and never splits it (§14.3 H1).
 
 Filters and sorting are stored in the query string, so every view can be shared as a link. This includes the Gateway table's text filter.
 

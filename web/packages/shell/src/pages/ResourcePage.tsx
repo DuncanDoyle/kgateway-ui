@@ -7,6 +7,7 @@ import { useResource } from "../api/hooks";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
 import { useInstallId } from "../shell/extension";
+import { installPath } from "../shell/paths";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 
@@ -153,7 +154,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
           <>
             {kind} <ResourceName namespace={ref.namespace} name={rname} />
             <br />
-            <BackLink to={`/i/${id}`}>Back to install</BackLink>
+            <BackLink to={installPath(id)}>Back to install</BackLink>
           </>
         }
       />

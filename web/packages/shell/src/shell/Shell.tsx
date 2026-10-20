@@ -51,13 +51,13 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
             <main>
               <Routes>
                 <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
-                <Route path="/i/:ns/:name" element={<InstallPage />} />
-                <Route path="/i/:ns/:name/findings" element={<FindingsPage />} />
-                <Route path="/i/:ns/:name/r/:group/:kind/:rns/:rname" element={<ResourcePage />} />
+                <Route path="/i/:id" element={<InstallPage />} />
+                <Route path="/i/:id/findings" element={<FindingsPage />} />
+                <Route path="/i/:id/r/:group/:kind/:rns/:rname" element={<ResourcePage />} />
                 {ext.routes.map((r) => (
                   <Route
                     key={`${r.scope}:${r.path}`}
-                    path={r.scope === "install" ? `/i/:ns/:name/${r.path}` : `/${r.path}`}
+                    path={r.scope === "install" ? `/i/:id/${r.path}` : `/${r.path}`}
                     element={r.element}
                   />
                 ))}
