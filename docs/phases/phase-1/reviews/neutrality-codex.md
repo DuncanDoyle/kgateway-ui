@@ -37,3 +37,20 @@ The **§14.2 code pointers substantively check out** across backend and SPA; som
 | — | H7 can wait; `Options.UI` already takes an `fs.FS` | reviewer | accept | H7 moved to §14.4. |
 | — | H6 is not a Kubernetes production bug | reviewer | accept | D-016 no longer calls it one. |
 | — | Precedence claim and §14.2 pointers correct | reviewer | n/a | Line refs are approximate in two SPA files; acceptable for a proposal. |
+
+## Re-review (scoped, Codex, diff 5db5856..7564da5)
+
+| Finding | Status | Evidence |
+|---|---|---|
+| 1 | Resolved | `docs/phases/phase-1/design.md:500` — unresolved references preserve diagnostics. |
+| 2 | Resolved | `docs/phases/phase-1/design.md:500` — observed proxy failures remain visible. |
+| 3 | Resolved | `docs/phases/phase-1/design.md:504` — explicit Go extension compatibility exclusion. |
+| 4 | Resolved | `docs/phases/phase-1/design.md:501` — per-file allowlist plus semantic review. |
+| 5 | Resolved | `docs/phases/phase-1/design.md:467` — current-revision confirmation required for green. |
+| 6 | Resolved | `docs/phases/phase-1/design.md:510` — acceptance cases added for retained hedges; H6 deferred. |
+| 7 | Resolved | `docs/phases/phase-1/design.md:534` — revision/incarnation contract explicitly deferred. |
+
+**New P2 — H1’s permitted character set still allows dot-segment IDs.** `docs/phases/phase-1/design.md:496`: `.` and `..` satisfy the new validation contract, but `encodeURIComponent` leaves them unchanged. URL normalization turns `/i/../overview` into `/overview`, breaking navigation and API requests for an accepted ID. Explicitly reject these two IDs and add acceptance cases.
+| # | Finding | Source | Decision | Note |
+|---|---|---|---|---|
+| R2-1 | Dot-segment IDs `.` and `..` pass the character set | reviewer | accept | H1 rejects both; acceptance case added. |

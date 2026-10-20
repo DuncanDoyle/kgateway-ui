@@ -493,7 +493,7 @@ Each hedge is small and lands before the first release, which freezes API v1 and
 
 | # | Behaviour | Constraint |
 |---|---|---|
-| H1 | **Opaque install ID.** One path segment everywhere: `GET /api/v1/installs/{id}/…` and SPA `/i/:id/…`. By contract an ID uses only URL-unreserved characters (`A-Z a-z 0-9 . _ ~ -`), and the backend rejects a provider ID outside that set. The SPA still encodes it and never parses it. The Kubernetes ID is `<namespace>.<name>`: namespace names cannot contain dots and Deployment names are DNS subdomains, so it is unique and in the set. Clients must not rely on that structure. `--install` accepts the ID or `namespace/name`. | R2, R7 |
+| H1 | **Opaque install ID.** One path segment everywhere: `GET /api/v1/installs/{id}/…` and SPA `/i/:id/…`. By contract an ID uses only URL-unreserved characters (`A-Z a-z 0-9 . _ ~ -`), and the backend rejects a provider ID outside that set, or equal to `.` or `..`, which URL normalisation would remove. The SPA still encodes it and never parses it. The Kubernetes ID is `<namespace>.<name>`: namespace names cannot contain dots and Deployment names are DNS subdomains, so it is unique and in the set. Clients must not rely on that structure. `--install` accepts the ID or `namespace/name`. | R2, R7 |
 | H2 | **Platform fields are optional; absent means not applicable.** The install DTO gets a neutral `readiness: {state, ready?, desired?}`, where state is ready, not-ready, unknown or not-observed. `namespace`, `name` and `scope` become optional, plus a `displayName`. The SPA renders the scope tile and replica text only when present and never crashes on absence. | R2, R3, R6 |
 | H3 | **`/meta` reports `platform` and `capabilities`.** Platform is a display string such as "Kubernetes". Capabilities are a string set; Phase 1 defines only the ones the SPA reads: `scope` (namespace scope tile and filters) and `workloads` (Deployment links and replica wording). `apps/Deployment` stays in `kinds` only under `workloads`. A `useCapabilities()` hook in the shell. | R7 |
 | H4 | **SPA vocabulary.** One module holds the platform copy: "Waiting for the cluster", the cluster landing title, the no-install empty state (how an install is found, the `--install` hint) and "Copy namespace/name". The Kubernetes vocabulary is the default; `ShellExtension` gets an optional `vocabulary` override. Strings go through the wording pass. | R7 |
@@ -508,7 +508,7 @@ Acceptance, at the API and SPA boundary:
 | Hedge | Case | Expected |
 |---|---|---|
 | H1 | Install ID `ns.name`, and a test provider ID with `~` and `_` | Navigation, reload, deep links and every API call resolve the install. The ID is never split. |
-| H1 | Provider ID containing `/` or `%` | The backend rejects it at startup with a clear error. |
+| H1 | Provider ID containing `/` or `%`, or equal to `.` or `..` | The backend rejects it at startup with a clear error. |
 | H2 | Install with no `scope`, no `namespace`/`name`, `readiness.state=not-observed` | `/installs` and the overview header render; no scope tile, no replica text, no crash. |
 | H3 | `capabilities` without `workloads` | No Deployment links, no replica wording; `apps/Deployment` absent from `kinds`. |
 | H4 | Downstream `vocabulary` override | Overridden strings show; others fall back to the defaults. |
