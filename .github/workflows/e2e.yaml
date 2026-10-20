@@ -1,0 +1,84 @@
+name: e2e
+on:
+  pull_request:
+  push: { branches: [main] }
+  workflow_dispatch:
+    inputs:
+      kgw_main_version:
+        description: kgateway main-build chart version for the optional kind-main job (chart source unverified)
+        required: false
+        default: ""
+permissions: { contents: read }
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  kind:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { kgw: v2.4.7, gwapi: v1.6.1, second: "0" }
+          - { kgw: v2.3.11, gwapi: v1.5.1, second: "0" }
+          - { kgw: v2.4.7, gwapi: v1.6.1, second: "1" }
+    runs-on: ubuntu-latest
+    env:
+      KGW_VERSION: ${{ matrix.kgw }}
+      GWAPI_VERSION: ${{ matrix.gwapi }}
+      SECOND_INSTALL: ${{ matrix.second }}
+      E2E_DIR: ${{ github.workspace }}/.e2e
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - uses: helm/kind-action@v1
+        with: { install_only: true }
+      - uses: azure/setup-helm@v5
+      - name: setup
+        run: bash test/e2e/setup.sh
+      - name: api
+        run: go test -tags e2e ./test/e2e/... -v -count=1
+      - name: playwright
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test -c e2e/playwright.config.ts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.kgw }}-${{ matrix.second }}
+          path: |
+            web/test-results
+            web/playwright-report
+          if-no-files-found: ignore
+      - name: diagnostics
+        if: failure()
+        env: { KUBECONFIG: "${{ github.workspace }}/.e2e/kubeconfig" }
+        run: |
+          kubectl logs -n kgateway-ui deploy/ui-kgateway-ui --tail=200 || true
+          kubectl get gateways,httproutes -A -o wide || true
+  # Optional and manual: only kgateway main reports TargetNotFound (finding 7).
+  # The main-build chart source is unverified; main's go.mod pins Gateway API v1.6.2.
+  kind-main:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.kgw_main_version != '' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    env:
+      KGW_VERSION: ${{ inputs.kgw_main_version }}
+      GWAPI_VERSION: v1.6.2
+      KGW_MAIN: "1"
+      E2E_DIR: ${{ github.workspace }}/.e2e
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - uses: helm/kind-action@v1
+        with: { install_only: true }
+      - uses: azure/setup-helm@v5
+      - name: setup
+        run: bash test/e2e/setup.sh
+      - name: api
+        run: go test -tags e2e ./test/e2e/... -v -count=1

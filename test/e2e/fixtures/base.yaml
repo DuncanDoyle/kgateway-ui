@@ -1,0 +1,81 @@
+# Scenario for install A (kgw-a, selector team=a); the API and Playwright tests assert on these names.
+apiVersion: v1
+kind: Namespace
+metadata: { name: infra, labels: { team: a } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: shop, labels: { team: a } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: blog }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: edge, namespace: infra }
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+      allowedRoutes: { namespaces: { from: All } }
+---
+# Self-managed Gateway: kgateway provisions no proxy Deployment, so the UI reports KGWUI-010.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata: { name: self-managed, namespace: infra }
+spec: { selfManaged: {} }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: self, namespace: infra }
+spec:
+  gatewayClassName: kgateway
+  infrastructure:
+    parametersRef: { group: gateway.kgateway.dev, kind: GatewayParameters, name: self-managed }
+  listeners: [{ name: http, port: 8080, protocol: HTTP }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: httpbin, namespace: shop }
+spec:
+  selector: { matchLabels: { app: httpbin } }
+  template:
+    metadata: { labels: { app: httpbin } }
+    spec: { containers: [{ name: httpbin, image: mccutchen/go-httpbin:v2.15.0, ports: [{ containerPort: 8080 }] }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: httpbin, namespace: shop }
+spec: { selector: { app: httpbin }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: good, namespace: shop }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: broken, namespace: shop }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /broken } }], backendRefs: [{ name: missing, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: posts, namespace: blog }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# timeouts.request exists in both the v2.3.x and v2.4.x TrafficPolicy schema.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: tp-missing-target, namespace: shop }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: nope }]
+  timeouts: { request: 10s }
