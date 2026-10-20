@@ -21,7 +21,7 @@
 ## Global Constraints
 
 - The repo is **PUBLIC**. The forbidden brand terms of the public-repo hygiene rule must not appear in code, comments, file names, docs, commit messages or PR text. The agent tooling's `public-repo-hygiene` skill holds the list; this repo never spells it out. Downstreams are called "downstream distributions".
-  - The CI `hygiene` job reads the pattern from the GitHub repository variable `FORBIDDEN_TERMS` (set once by the repo owner).
+  - The CI `hygiene` job reads the pattern from the GitHub repository secret `FORBIDDEN_TERMS` (set once by the repo owner; secrets are masked in the public logs, variables are not).
   - Before every commit, run the same check locally: `git diff --cached | grep -inE "$FORBIDDEN_TERMS" && echo STOP || true`, with `FORBIDDEN_TERMS` exported in your shell.
 - **Read-only (D-001):** no create/update/patch/delete calls to the Kubernetes API, ever. **No Secrets:** never list, watch or serve Secrets.
 - **Trust model (D-013):** whoever reaches the UI may see everything it shows; there is no login in Phase 1 and no field redaction. Every API handler that returns resources, findings or counts goes through the `api.Authorizer` seam (Phase 1 ships `AllowAll`). A denied object returns 404 and is dropped from resource lists and count tiles. A finding on it is redacted, not dropped: it keeps code, severity and resource ref, carries `restricted: true`, and loses its message and evidence. The health roll-up and severity counts always cover every finding.

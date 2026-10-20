@@ -11,7 +11,6 @@ jobs:
     # Public repo: forbidden brand terms must never land (docs/phase-status.md, public-repo note).
     runs-on: ubuntu-latest
     env:
-      FORBIDDEN_TERMS: ${{ vars.FORBIDDEN_TERMS }}
       EVENT_NAME: ${{ github.event_name }}
       BASE_REF: ${{ github.base_ref }}
       HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
@@ -23,13 +22,16 @@ jobs:
         with: { fetch-depth: 0 }
       - name: forbidden terms
         shell: bash
+        # A secret, not a variable: Actions masks secrets in the public logs. Never echo it.
+        env:
+          FORBIDDEN_TERMS: ${{ secrets.FORBIDDEN_TERMS }}
         run: |
-          # The pattern lives in a repository variable so the list never lands here; never echo it.
+          # Fork PRs get no secrets, so they warn and skip; everything else fails closed.
           if [ -z "$FORBIDDEN_TERMS" ]; then
             if [ "$EVENT_NAME" = pull_request ] && [ "$HEAD_REPO" != "$REPO" ]; then
               echo "::warning::FORBIDDEN_TERMS is not available to fork PRs; skipping"; exit 0
             fi
-            echo "::error::repository variable FORBIDDEN_TERMS is not set"; exit 1
+            echo "::error::repository secret FORBIDDEN_TERMS is not set"; exit 1
           fi
           # Report masked paths and commit SHAs only, never the matched text.
           mask() { perl -pe 's/$ENV{FORBIDDEN_TERMS}/***/gi'; }
@@ -100,6 +102,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
+      # Lints the workflows; ubuntu runners ship shellcheck, so run: blocks are checked too.
+      - run: make actionlint
       - uses: azure/setup-helm@v5
       - run: helm lint deploy/helm/kgateway-ui
       - run: REQUIRE_HELM=1 go test ./deploy/...
@@ -108,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v4
+      # No qemu: both builder stages run on the build platform and the final stage has no RUN.
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:

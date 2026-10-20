@@ -1,7 +1,11 @@
 name: e2e
 on:
+  # Docs-only changes skip the kind jobs; workflow_dispatch still runs them on demand.
   pull_request:
-  push: { branches: [main] }
+    paths-ignore: ["docs/**", "**.md"]
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
     inputs:
       kgw_main_version:

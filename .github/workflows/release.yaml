@@ -10,10 +10,11 @@ jobs:
     permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v7
+        with: { persist-credentials: false }
       - id: v
         # Tag vX.Y.Z publishes image X.Y.Z, matching the chart appVersion default.
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v4
+      # No qemu: both builder stages run on the build platform and the final stage has no RUN.
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
@@ -30,6 +31,7 @@ jobs:
     permissions: { contents: read, packages: write }
     steps:
       - uses: actions/checkout@v7
+        with: { persist-credentials: false }
       - uses: azure/setup-helm@v5
       - name: package and push
         env:
@@ -46,5 +48,6 @@ jobs:
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@v7
+        with: { persist-credentials: false }
       - run: gh release create "$GITHUB_REF_NAME" --generate-notes
         env: { GH_TOKEN: "${{ github.token }}" }
