@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) next — plan amendment in progress
+Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) in progress
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
@@ -13,7 +13,7 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [x] Q4 Sub-phase 1.1 — backend (plan Tasks 1–11) — phases/phase-1/phase-1.1-complete.md
 - [x] Q5 Sub-phase 1.2 — frontend (plan Tasks 12–18) — phases/phase-1/phase-1.2-complete.md
 - [x] Q6a Platform neutrality design change (D-016, design §14) — Codex review + triage: reviews/neutrality-codex.md; approved by user 2026-10-20
-- [ ] Q6 Sub-phase 1.3 — platform-neutral contract (design §14.3: H1–H5, H8, H11) ← CURRENT (plan amendment + cross-model review, then user approval)
+- [ ] Q6 Sub-phase 1.3 — platform-neutral contract (design §14.3: H1–H5, H8, H11) ← CURRENT (plan approved by user 2026-10-20)
 - [ ] Q7 Sub-phase 1.4 — packaging, CI, e2e (plan Tasks 19–23, plus H9, H10)
 - [ ] Q8 Phase cross-model review + triage
 
@@ -26,7 +26,11 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [ ] phase-1-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 1.3 — Platform-neutral contract (planned)
+Base: 6188284eb2abc0abb88a9d65717bf720cae9ec2c
+Brief: docs/phases/phase-1/phase-1.3-brief.md
+Branch: duncandoyle/platformNeutral
+Status: implementing (Tasks 24–28, subagent-driven)
 
 ## Carry-over (deferred to later phases)
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
