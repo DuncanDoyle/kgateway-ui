@@ -18,7 +18,7 @@ As specified in the per-task steps of Tasks 19–23. Key observable cases:
 | `install.pin=kgw/kgateway` | The container gets `--install kgw/kgateway` |
 | Pull request | CI runs Go vet/test/lint, the web gates, chart tests and the image build |
 | Tag push | Release workflow publishes the multi-arch image and chart |
-| kind e2e, kgateway 2.3 and 2.4, two installs | `/api/v1/installs` lists both by opaque ID; overview, findings and objects work per ID; the SPA smoke test loads `/i/<id>` with reload and deep link |
+| kind e2e on kgateway 2.3 and 2.4 (second install on 2.4) | `/api/v1/installs` lists both by opaque ID; overview, findings and objects work per ID; the SPA smoke test loads `/i/<id>` with reload and deep link |
 | README | States the trust model and that Kubernetes is today's only provider |
 
 ## Root cause (if known)
