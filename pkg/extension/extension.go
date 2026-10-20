@@ -1,6 +1,15 @@
 // Package extension is the public seam through which downstream distributions
 // extend the UI backend without forking it (D-003). A downstream main calls
 // app.Run with options from this package.
+//
+// # Compatibility
+//
+// API v1 (the /api/v1 paths and their JSON) and the SPA URLs are stable from
+// the first release. This Go API (Registry and its options, and the
+// install.Detector, install.Install and install.ScopeProvider types it
+// carries) may change until the extension-seam milestone after Phase 2. When
+// the provider seam arrives, a Kubernetes Detector keeps working as that
+// provider's adapter (D-016).
 package extension
 
 import (
