@@ -23,7 +23,7 @@ none
 - 257 Vitest tests; `go test ./...` (with REQUIRE_SPA after `make build`) passes; `git status` clean after `make build`.
 
 ## Notes for later phases
-- The theme default is dark unless stored or set by a downstream (D-011 as written); following the OS preference is a small switch if wanted.
+- The theme default is dark unless stored or set by a downstream (D-011; confirmed by the user 2026-10-20).
 - One `useUrlParams` instance per page by design.
 - Visual evidence (Playwright clips and screenshots): /var/folders/l9/kvw9vb8121720jclk572xwpw0000gp/T/ui-loop/kgateway-ui-claude/ (local only).
 

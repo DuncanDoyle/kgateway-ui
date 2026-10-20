@@ -32,6 +32,7 @@ none
 - (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
 
 ## Notes
+- 2026-10-20: user confirmed D-011's dark default (no OS-preference step).
 - 2026-10-18: user approved Overridden policies as info (not warning) and subagent-driven execution for Phase 1.
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions" (D-005).
 - Research inputs for the Phase 1 design:
