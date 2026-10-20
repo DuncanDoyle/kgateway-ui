@@ -355,7 +355,7 @@ Anything else returns 404. The endpoint reads only from the shared cache, so it 
   - A ClusterIP Service.
   - A ServiceAccount, ClusterRole and ClusterRoleBinding.
   - `install.pin`.
-  - `httpRoute.enabled` (default `false`), with `parentRef` and `hostnames`. It creates an HTTPRoute on an existing Gateway.
+  - `httpRoute.enabled` (default `false`), with `parentRefs` and `hostnames`. It creates an HTTPRoute on an existing Gateway.
   - **Trust model in the chart** (D-013). The chart README, `NOTES.txt` and the comment on the `httpRoute` values state it plainly: anyone who reaches the UI sees everything its ServiceAccount can read, which can exceed their own RBAC. They recommend authentication and authorisation on the route, for example a kgateway TrafficPolicy attached to it. Without the route, access is a port-forward to the ClusterIP Service.
 - **ClusterRole: get/list/watch only.**
   - `gateway.networking.k8s.io`: gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, referencegrants, backendtlspolicies, listenersets.
