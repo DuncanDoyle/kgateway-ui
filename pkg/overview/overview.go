@@ -109,6 +109,9 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	}
 	// One tile per served kind, GatewayClasses included.
 	for _, k := range served {
+		if k.Category == kinds.CategoryParameters {
+			continue // read to resolve proxies, not part of the inventory
+		}
 		o.Counts = append(o.Counts, Count{Group: k.Group, Kind: k.Kind, Category: string(k.Category), DisplayName: k.DisplayName,
 			Count: byKind[schema.GroupKind{Group: k.Group, Kind: k.Kind}], Access: snap.Access[k.GVR()]})
 	}

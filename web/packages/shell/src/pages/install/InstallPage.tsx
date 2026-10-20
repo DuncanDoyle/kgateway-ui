@@ -85,8 +85,10 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
       return <PageState kind="connecting" title="Waiting for the cluster" message={err.message} />;
     if (err)
       return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
-    // One tile per counted kind (meta lists Deployments, which have no tile) plus the scope tile.
-    const tiles = meta ? meta.kinds.filter((k) => k.category !== "workload").length + 1 : 8;
+    // One tile per counted kind (meta lists Deployments and parameters kinds, which have no tile) plus the scope tile.
+    const tiles = meta
+      ? meta.kinds.filter((k) => k.category !== "workload" && k.category !== "parameters").length + 1
+      : 8;
     return (
       <Page role="status" aria-busy="true" aria-label="Loading this install…" stylesOverride={stylesOverride}>
         <Shimmer h={STRIP_H} />

@@ -112,7 +112,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	var once sync.Once
 	// Metrics older than three scrape intervals are unavailable, not reused.
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: 3 * o.MetricsInterval,
+		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: 3 * o.MetricsInterval, ProxyMode: reg.ProxyMode,
 		OnCompute: func(m *engine.Model) {
 			if len(m.Installs) > 0 {
 				once.Do(func() { close(discovered) })

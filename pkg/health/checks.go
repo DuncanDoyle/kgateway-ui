@@ -16,6 +16,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 )
 
 // Upstream returns the Phase 1 checks (design §5.2).
@@ -423,12 +424,20 @@ type proxyCheck struct{}
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
-// Run implements Check. A missing proxy is reported only after the grace period.
+// Run implements Check. A missing proxy is reported after the grace period,
+// except for a self-managed Gateway: KGWUI-010 (info) says the UI cannot see
+// that proxy's readiness, so it never drives the roll-up (D-016). A proxy
+// Deployment that exists is judged the same either way.
 func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
 	for _, gw := range in.Owned.Gateways {
 		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
 		if d == nil {
+			if in.proxyMode(gw) == proxymode.SelfManaged {
+				fs = append(fs, Finding{Code: CodeSelfManagedProxy, Slug: "self-managed-proxy", Severity: SeverityInfo, Install: in.Install.ID(),
+					Resource: ref(gw), Message: "Self-managed proxy: the UI cannot see its readiness"})
+				continue
+			}
 			if in.Now.Sub(in.firstSeen(gw)) >= Grace {
 				fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
 					Resource: ref(gw), Message: "Proxy deployment not found"})

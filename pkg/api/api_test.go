@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -981,5 +982,145 @@ func TestKubernetesPlatformAtTheAPI(t *testing.T) {
 	_, down, _ := start(t, testutil.ServedUpstream(), "", nil, worldWith(0, 1)...)
 	if r := get[[]InstallSummary](t, down, "/api/v1/installs", 200)[0].Readiness; r.State != overview.ReadinessNotReady || *r.Ready != 0 {
 		t.Fatalf("a controller with 0 of 1 ready replicas must be not-ready: %+v", r)
+	}
+}
+
+// proxySetup shapes proxyWorld. The zero value is a managed Gateway with a ready proxy.
+type proxySetup struct {
+	classParams, gwParams string             // GatewayParameters names in infra; "" = no reference
+	classRefKind          string             // group "example.com" and this kind on the class reference; "" = GatewayParameters
+	gwRefKind             string             // kind of the Gateway's reference; "" = GatewayParameters
+	noProxy               bool               // no proxy Deployment
+	proxyNotReady         bool               // the proxy Deployment has 0 of 1 ready replicas
+	gwConds               []metav1.Condition // nil: Accepted and Programmed
+}
+
+// proxyWorld is isolated() with the parameters and proxy Deployment of p.
+func proxyWorld(p proxySetup, extra ...runtime.Object) []runtime.Object {
+	var out []runtime.Object
+	for _, o := range isolated() {
+		switch v := o.(type) {
+		case *appsv1.Deployment:
+			if v.Namespace == "infra" && v.Name == "edge" {
+				if p.noProxy {
+					continue
+				}
+				ready := int32(1)
+				if p.proxyNotReady {
+					ready = 0
+				}
+				o = testutil.ProxyDeployment("infra", "edge", 1, ready)
+			}
+		case *unstructured.Unstructured:
+			if v.GetKind() == "GatewayClass" && v.GetName() == "kgateway" && p.classParams != "" {
+				group, kind := kinds.KgatewayGroup, "GatewayParameters"
+				if p.classRefKind != "" {
+					group, kind = "example.com", p.classRefKind
+				}
+				testutil.SetClassParameters(v, group, kind, "infra", p.classParams)
+			}
+			if v.GetKind() == "Gateway" && v.GetName() == "edge" {
+				if p.gwConds != nil {
+					v = testutil.Gateway("infra", "edge", "kgateway", p.gwConds)
+					o = v
+				}
+				if p.gwParams != "" {
+					kind := cmp.Or(p.gwRefKind, "GatewayParameters")
+					testutil.SetGatewayParameters(v, kinds.KgatewayGroup, kind, p.gwParams)
+				}
+			}
+		}
+		out = append(out, o)
+	}
+	return append(out, extra...)
+}
+
+const selfManagedMsg = "Self-managed proxy: the UI cannot see its readiness"
+
+// H5 acceptance (design §14.3) at the health endpoint: a self-managed Gateway
+// without a proxy Deployment gets KGWUI-010 (info) instead of KGWUI-006, and
+// nothing else about its health changes.
+func TestSelfManagedProxiesAtTheAPI(t *testing.T) {
+	sm, kube := testutil.GatewayParameters("infra", "sm", true), testutil.GatewayParameters("infra", "kube", false)
+	cond := testutil.Cond
+	notProgrammed := []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionFalse, "AddressNotAssigned")}
+	invalidParams := []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "InvalidParameters"), cond("Programmed", metav1.ConditionFalse, "Invalid")}
+	rejects := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+		Rejects: map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}}
+	forbidParams := func(dyn *dynamicfake.FakeDynamicClient, _ *kubefake.Clientset) {
+		dyn.PrependReactor("list", "gatewayparameters", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: kinds.KgatewayGroup, Resource: "gatewayparameters"}, "", nil)
+		})
+	}
+	noParamsKind := slices.DeleteFunc(testutil.ServedUpstream(), func(k kinds.Served) bool { return k.Kind == "GatewayParameters" })
+	selfManaged := expect{health.CodeSelfManagedProxy, health.SeverityInfo, "infra/edge"}
+	missing := expect{health.CodeProxyNotReady, health.SeverityWarning, "infra/edge"}
+	anySelf, anyProxy := expect{health.CodeSelfManagedProxy, "", ""}, expect{health.CodeProxyNotReady, "", ""}
+
+	cases := []struct {
+		name   string
+		s      setup
+		objs   []runtime.Object
+		state  health.State
+		want   []expect
+		forbid []expect
+	}{
+		{"class selfManaged, Gateway without parameters, no proxy", setup{}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"class selfManaged, Gateway parameters kube", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "kube", noProxy: true}, sm, kube),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"class kube, Gateway parameters selfManaged", setup{}, proxyWorld(proxySetup{classParams: "kube", gwParams: "sm", noProxy: true}, sm, kube),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"class selfManaged, Gateway references missing parameters", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "nope", noProxy: true, gwConds: invalidParams}, sm),
+			health.StateError, []expect{missing, {health.CodeConditionFalse, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"self-managed with a proxy Deployment that is not ready", setup{}, proxyWorld(proxySetup{classParams: "sm", proxyNotReady: true}, sm),
+			health.StateError, []expect{{health.CodeProxyNotReady, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"self-managed and Programmed=False", setup{}, proxyWorld(proxySetup{classParams: "sm", noProxy: true, gwConds: notProgrammed}, sm),
+			health.StateError, []expect{{health.CodeConditionFalse, health.SeverityError, "infra/edge"}, selfManaged}, nil},
+		{"managed and Programmed=False", setup{}, proxyWorld(proxySetup{gwConds: notProgrammed}),
+			health.StateError, []expect{{health.CodeConditionFalse, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"self-managed with an active xDS reject", setup{metrics: rejects}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
+			health.StateError, []expect{{health.CodeXDSRejected, health.SeverityError, "infra/edge"}, selfManaged}, nil},
+		{"managed with an active xDS reject", setup{metrics: rejects}, proxyWorld(proxySetup{}),
+			health.StateError, []expect{{health.CodeXDSRejected, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"managed Gateway without a proxy", setup{}, proxyWorld(proxySetup{noProxy: true}),
+			health.StateWarning, []expect{missing}, []expect{anySelf}},
+		// kgateway does not check a class reference's group or kind; it looks up GatewayParameters by namespace and name.
+		{"class reference of another group and kind still resolves", setup{}, proxyWorld(proxySetup{classParams: "sm", classRefKind: "OtherParameters", noProxy: true}, sm),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"Gateway parameters of another kind", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "sm", gwRefKind: "OtherParameters", noProxy: true}, sm),
+			health.StateWarning, []expect{missing}, []expect{anySelf}},
+		{"GatewayParameters not readable", setup{prepare: forbidParams}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
+			health.StateUnknown, []expect{missing, {health.CodeSignalUnavailable, health.SeverityInfo, ""}}, []expect{anySelf}},
+		{"GatewayParameters not served", setup{served: noParamsKind}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}),
+			health.StateWarning, []expect{missing}, []expect{anySelf}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, tc.s, tc.objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state: want %s, got %s; findings: %+v", tc.state, h.State, h.Findings)
+			}
+			for _, w := range tc.want {
+				if !hasSev(h, w.code, w.sev, w.res) {
+					t.Fatalf("missing %s/%s on %s; findings: %+v", w.code, w.sev, w.res, h.Findings)
+				}
+			}
+			for _, f := range tc.forbid {
+				if hasSev(h, f.code, f.sev, f.res) {
+					t.Fatalf("unexpected %s on %q; findings: %+v", f.code, f.res, h.Findings)
+				}
+			}
+			for _, f := range h.Findings {
+				if f.Code == health.CodeSelfManagedProxy && f.Message != selfManagedMsg {
+					t.Errorf("KGWUI-010 message: %q", f.Message)
+				}
+			}
+			// GatewayParameters are watched, never counted.
+			if _, tile := count(get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200), "GatewayParameters"); tile {
+				t.Error("GatewayParameters must not get a count tile")
+			}
+		})
 	}
 }

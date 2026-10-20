@@ -2,7 +2,7 @@ import type { HealthState } from "../theme/tokens";
 
 /** Mirrors pkg/api, pkg/overview, pkg/health JSON as built (sub-phase 1.1). */
 export type Severity = "error" | "warning" | "info";
-export type Category = "gatewayclass" | "gateway" | "listenerset" | "route" | "policy" | "workload";
+export type Category = "gatewayclass" | "gateway" | "listenerset" | "route" | "policy" | "workload" | "parameters";
 export interface Ref {
   group: string;
   kind: string;

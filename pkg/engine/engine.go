@@ -18,6 +18,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -40,6 +41,8 @@ type Config struct {
 	Pinned string
 	// Platform is the platform the snapshots come from; zero means platform.Kubernetes().
 	Platform platform.Info
+	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
+	ProxyMode proxymode.Resolver
 	// Logger receives install rejections; nil means slog.Default().
 	Logger *slog.Logger
 	// MetricsMaxAge is the age beyond which a metrics result is stale
@@ -172,7 +175,7 @@ func (e *Engine) Compute() *Model {
 			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
 		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
-			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform}, e.cfg.Checks)
+			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
 	}
 	e.mu.Lock()

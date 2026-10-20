@@ -25,6 +25,7 @@ export const meta: MetaResponse = {
     kind("gateway.networking.k8s.io", "Gateway", "gateway", "Gateways"),
     kind("gateway.networking.k8s.io", "HTTPRoute", "route", "HTTPRoutes"),
     kind("gateway.kgateway.dev", "TrafficPolicy", "policy", "TrafficPolicies"),
+    kind("gateway.kgateway.dev", "GatewayParameters", "parameters", "GatewayParameters"),
     kind("apps", "Deployment", "workload", "Deployments"),
   ],
 };

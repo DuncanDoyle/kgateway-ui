@@ -404,7 +404,7 @@ it("the loading skeleton reserves one tile per served kind plus the scope tile",
     </Routes>,
     { path: "/i/kgw/kgateway" },
   );
-  // meta lists 4 countable kinds (Deployment is not counted) + the scope tile.
+  // meta lists 4 countable kinds (Deployment and GatewayParameters are not counted) + the scope tile.
   await waitFor(() => expect(screen.getAllByTestId("tile-shimmer")).toHaveLength(5));
 });
 

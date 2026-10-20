@@ -82,7 +82,7 @@ These failure modes are implied by the spec, but no other task's tests exercise 
 9. **Partial visibility.** A deny-some `Authorizer` registered through `extension.WithAuthorizer` makes the denied object 404 and drops it from the count tiles. Its finding stays in the list with the same code, severity and resource ref, `restricted: true` and no message or evidence; the roll-up state is unchanged (D-013). → Task 11.
 10. **Install IDs at URL edges.** An ID with `.`, `~` or `_`, or percent-encoded by a client, survives a reload and a deep link. The old two-segment form (`/i/ns/name`, `/api/v1/installs/ns/name/…`) never resolves to an install. A provider ID with `/`, `%`, `.` or `..` is left out, logged once (not on every recompute) and turns `/readyz` to 503. → Tasks 24 and 26.
 11. **`--install` in the old form.** `--install kgw/kgateway` still pins the same install after the ID change; `a/b/c`, `kgw/` and `..` fail at startup. → Task 24.
-12. **GatewayParameters not readable.** RBAC denies GatewayParameters, or the CRD is not served, or the Gateway's reference names another kind: the UI cannot tell, so a self-managed class falls back to today's KGWUI-006 warning and never claims KGWUI-010. → Task 25.
+12. **GatewayParameters not readable.** RBAC denies GatewayParameters: like any other denied kind, KGWUI-008 and the install unknown. The CRD is not served, or the Gateway's reference names another kind: today's KGWUI-006 warning. In every case the UI cannot tell, so it never claims KGWUI-010. → Task 25.
 13. **A self-managed Gateway that still has a proxy Deployment** (for example one left from before `selfManaged` was set): the Deployment that exists is judged as before, KGWUI-006 when not ready. → Task 25.
 14. **Absent optional fields in the SPA.** An install without `scope`, `namespace`/`name` or replica counts renders the header, switcher, landing card, install page and finding rows without a crash and without empty labels. → Task 26.
 
@@ -11272,7 +11272,7 @@ In `pkg/overview/overview.go`, the first line inside `for _, k := range served {
 		}
 ```
 
-The chart's ClusterRole already grants `gateway.kgateway.dev: *` (Task 20), so no RBAC change is needed.
+Task 20 grants `gateway.kgateway.dev: *` in the chart's ClusterRole, so this task needs no RBAC change.
 
 - [ ] **Step 5: Implement the resolver**
 
