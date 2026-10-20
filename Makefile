@@ -12,13 +12,13 @@ help:
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
 	@echo "make run    run the server from source (placeholder page unless make web ran)"
-	@echo "make e2e    kind cluster with kgateway KGW_VERSION, then the API and Playwright tests"
+	@echo "make e2e    kind cluster with kgateway KGW_VERSION, then the API and Playwright tests (installs web deps and Chromium if needed)"
 	@echo "make e2e-down  delete the e2e kind cluster"
 test:
 	go test ./...
 lint:
 	go vet ./...
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...
 web:
 	cd web && npm ci && npm run build
 	rm -rf internal/webui/dist && cp -r web/app/dist internal/webui/dist && touch internal/webui/dist/.gitkeep
@@ -30,6 +30,7 @@ run:
 e2e:
 	KGW_VERSION=$(KGW_VERSION) GWAPI_VERSION=$(GWAPI_VERSION) SECOND_INSTALL=$(SECOND_INSTALL) bash test/e2e/setup.sh
 	SECOND_INSTALL=$(SECOND_INSTALL) go test -tags e2e ./test/e2e/... -v -count=1
+	cd web && { [ -d node_modules ] || npm ci; } && npx playwright install chromium
 	cd web && SECOND_INSTALL=$(SECOND_INSTALL) npx playwright test -c e2e/playwright.config.ts
 e2e-down:
 	bash test/e2e/setup.sh down

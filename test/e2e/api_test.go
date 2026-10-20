@@ -6,6 +6,8 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -29,6 +31,7 @@ var base = func() string {
 func get(t *testing.T, path string, v any) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Minute)
+	var last string // last error, or status and start of body, for the timeout message
 	for {
 		resp, err := http.Get(base + path)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -38,11 +41,15 @@ func get(t *testing.T, path string, v any) {
 			}
 			return
 		}
-		if resp != nil {
+		if err != nil {
+			last = err.Error()
+		} else {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 			_ = resp.Body.Close()
+			last = fmt.Sprintf("status %d: %s", resp.StatusCode, body)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("GET %s never succeeded: %v", path, err)
+			t.Fatalf("GET %s never succeeded: %s", path, last)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -125,15 +132,22 @@ func TestRealCluster(t *testing.T) {
 		t.Fatalf("resource: metadata %+v", route["metadata"])
 	}
 	if secondInstall() {
-		if code := status(t, "/api/v1/installs/kgw-a.kgateway/resources/gateway.networking.k8s.io/Gateway/app-b/edge"); code != http.StatusNotFound {
+		// Positive control: the same route serves app-b/edge under its own install.
+		const gw = "/resources/gateway.networking.k8s.io/Gateway/app-b/edge"
+		if code := status(t, "/api/v1/installs/kgw-b.kgateway"+gw); code != http.StatusOK {
+			t.Fatalf("kgw-b's Gateway not served by kgw-b: status %d", code)
+		}
+		if code := status(t, "/api/v1/installs/kgw-a.kgateway"+gw); code != http.StatusNotFound {
 			t.Fatalf("kgw-b's Gateway served by kgw-a: status %d", code)
 		}
 		var ob api.OverviewResponse
 		get(t, "/api/v1/installs/kgw-b.kgateway/overview", &ob)
+		countsB := map[string]int{}
 		for _, c := range ob.Counts {
-			if c.Kind == "Gateway" && c.Count != 1 {
-				t.Fatalf("kgw-b Gateway count: %d", c.Count)
-			}
+			countsB[c.Kind] = c.Count
+		}
+		if countsB["Gateway"] != 1 {
+			t.Fatalf("kgw-b counts: %+v", countsB)
 		}
 	}
 

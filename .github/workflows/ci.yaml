@@ -89,7 +89,7 @@ jobs:
         with: { name: spa, path: internal/webui/dist }
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@v9
-        with: { version: v2.15.0 }
+        with: { version: v2.15.0, args: --build-tags e2e }
       # Chart tests run once, in the helm job.
       - run: |
           mapfile -t pkgs < <(go list ./... | grep -v /deploy/)

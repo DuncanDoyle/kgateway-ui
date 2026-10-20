@@ -59,6 +59,7 @@ jobs:
         env: { KUBECONFIG: "${{ github.workspace }}/.e2e/kubeconfig" }
         run: |
           kubectl logs -n kgateway-ui deploy/ui-kgateway-ui --tail=200 || true
+          for ns in kgw-a kgw-b; do kubectl logs -n "$ns" deploy/kgateway --tail=200 || true; done
           kubectl get gateways,httproutes -A -o wide || true
   # Optional and manual: only kgateway main reports TargetNotFound (finding 7).
   # The main-build chart source is unverified; main's go.mod pins Gateway API v1.6.2.
@@ -82,3 +83,10 @@ jobs:
         run: bash test/e2e/setup.sh
       - name: api
         run: go test -tags e2e ./test/e2e/... -v -count=1
+      - name: diagnostics
+        if: failure()
+        env: { KUBECONFIG: "${{ github.workspace }}/.e2e/kubeconfig" }
+        run: |
+          kubectl logs -n kgateway-ui deploy/ui-kgateway-ui --tail=200 || true
+          kubectl logs -n kgw-a deploy/kgateway --tail=200 || true
+          kubectl get gateways,httproutes -A -o wide || true

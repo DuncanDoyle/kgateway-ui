@@ -77,5 +77,8 @@ kubectl -n kgateway-ui rollout status deploy/ui-kgateway-ui --timeout=120s
 
 nohup kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui "$PORT:80" >"$E2E_DIR/port-forward.log" 2>&1 &
 echo $! >"$E2E_DIR/port-forward.pid"
-poll 60 curl -fsS "http://127.0.0.1:$PORT/readyz"
+if ! poll 60 curl -fsS "http://127.0.0.1:$PORT/readyz"; then
+  cat "$E2E_DIR/port-forward.log" >&2
+  exit 1
+fi
 echo "UI at http://127.0.0.1:$PORT (kubeconfig: $KUBECONFIG)"

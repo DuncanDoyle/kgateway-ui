@@ -43,7 +43,11 @@ for (const theme of themes) {
       .first()
       .click();
     await expect(page.getByTestId("yaml")).toContainText("BackendNotFound");
-    await page.screenshot({ path: `test-results/smoke-${theme.name.replace(/ /g, "-")}.png`, fullPage: true });
+    // outputDir is resolved from the config, so the path does not depend on the cwd.
+    await page.screenshot({
+      path: `${test.info().project.outputDir}/smoke-${theme.name.replace(/ /g, "-")}.png`,
+      fullPage: true,
+    });
   });
 }
 
