@@ -251,7 +251,7 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
   - **kube-lite**: a local kube-apiserver serves Gateway API and kgateway CRDs and their status, but no Pods, Deployments, Services or EndpointSlices exist. The controller and Envoy are host processes; Gateways use `GatewayParameters.spec.selfManaged`.
   - **file mode**: no apiserver. Config is a folder of YAML files, status lives in the controller's memory, objects have no UID, `resourceVersion` or `generation`, and the UI may be embedded in the standalone binary.
 - An audit at `c2c52b8` found that the shared object model (`pkg/objects`, `pkg/kinds`), the `Authorizer` and the read-only stance are already neutral. Install identity, readiness, metrics targets, scope, freshness keys, `/meta`, the API v1 install paths and SPA copy assume Kubernetes workloads (design §14.2).
-- The first release (sub-phase 1.3) freezes API v1 paths and SPA URLs. Anything client-visible is cheap to neutralise before it and a breaking change after it.
+- The first release (sub-phase 1.4) freezes API v1 paths and SPA URLs. Anything client-visible is cheap to neutralise before it and a breaking change after it.
 - `selfManaged` Gateways exist in Kubernetes mode too. Today each one gets a false KGWUI-006 "Proxy deployment not found" warning.
 
 **Decision:**
