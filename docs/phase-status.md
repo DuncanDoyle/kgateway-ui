@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.2 (frontend) complete on branch duncandoyle/phase1Frontend, merge pending; 1.3 next
+Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 next
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
