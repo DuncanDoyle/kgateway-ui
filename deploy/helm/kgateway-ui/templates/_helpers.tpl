@@ -9,4 +9,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: kgateway-ui
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
-{{- define "kgateway-ui.sa" -}}{{ default (include "kgateway-ui.fullname" .) .Values.serviceAccount.name }}{{- end }}
+{{- define "kgateway-ui.sa" -}}
+{{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.name) -}}
+{{- fail "serviceAccount.name is required when serviceAccount.create is false" -}}
+{{- end -}}
+{{ default (include "kgateway-ui.fullname" .) .Values.serviceAccount.name }}
+{{- end }}

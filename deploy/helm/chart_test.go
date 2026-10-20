@@ -172,6 +172,25 @@ func TestHTTPRouteRequiresParentRefs(t *testing.T) {
 	}
 }
 
+func TestExistingServiceAccountRequiresName(t *testing.T) {
+	render(t) // skips without helm
+	out, err := exec.Command("helm", "template", "ui", "./kgateway-ui", "-n", "kgateway-ui", "--set", "serviceAccount.create=false").CombinedOutput()
+	if err == nil {
+		t.Fatalf("want render failure without serviceAccount.name, got:\n%s", out)
+	}
+	if !strings.Contains(string(out), "serviceAccount.name is required") {
+		t.Fatalf("unclear error:\n%s", out)
+	}
+	ds := kind(render(t, "--set", "serviceAccount.create=false", "--set", "serviceAccount.name=existing"), "Deployment")
+	if len(ds) != 1 {
+		t.Fatalf("want 1 Deployment, got %d", len(ds))
+	}
+	spec := ds[0]["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	if spec["serviceAccountName"] != "existing" {
+		t.Fatalf("serviceAccountName = %v, want existing", spec["serviceAccountName"])
+	}
+}
+
 func TestPinnedInstallIsPassedAsFlag(t *testing.T) {
 	deploy := func(args ...string) string {
 		ds := kind(render(t, args...), "Deployment")
