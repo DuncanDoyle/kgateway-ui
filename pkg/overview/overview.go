@@ -11,12 +11,27 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 )
 
-// ReadyCount is ready versus desired replicas.
-type ReadyCount struct {
-	Ready   int32 `json:"ready"`
-	Desired int32 `json:"desired"`
+// ReadinessState is the controller readiness a provider reports (D-016).
+type ReadinessState string
+
+// Readiness states. Not observed means the platform cannot see readiness,
+// which is not a failure.
+const (
+	ReadinessReady       ReadinessState = "ready"
+	ReadinessNotReady    ReadinessState = "not-ready"
+	ReadinessUnknown     ReadinessState = "unknown"
+	ReadinessNotObserved ReadinessState = "not-observed"
+)
+
+// Readiness is the controller's readiness; replica counts are present only
+// where the platform runs workloads.
+type Readiness struct {
+	State   ReadinessState `json:"state"`
+	Ready   *int32         `json:"ready,omitempty"`
+	Desired *int32         `json:"desired,omitempty"`
 }
 
 // ScopeSummary describes an install's namespace scope.
@@ -30,16 +45,18 @@ type ScopeSummary struct {
 	Total   int    `json:"total"`
 }
 
-// Header is the install page header.
+// Header is the install page header. Namespace, Name and Scope are absent
+// where the platform has no such notion (D-016).
 type Header struct {
-	ID              string       `json:"id"`
-	Namespace       string       `json:"namespace"`
-	Name            string       `json:"name"`
-	Version         string       `json:"version"`
-	Edition         string       `json:"edition"`
-	ControllerNames []string     `json:"controllerNames"`
-	Controller      ReadyCount   `json:"controller"`
-	Scope           ScopeSummary `json:"scope"`
+	ID              string        `json:"id"`
+	DisplayName     string        `json:"displayName"`
+	Namespace       string        `json:"namespace,omitempty"`
+	Name            string        `json:"name,omitempty"`
+	Version         string        `json:"version"`
+	Edition         string        `json:"edition"`
+	ControllerNames []string      `json:"controllerNames"`
+	Readiness       Readiness     `json:"readiness"`
+	Scope           *ScopeSummary `json:"scope,omitempty"`
 }
 
 // Count is one count tile.
@@ -71,8 +88,11 @@ type Overview struct {
 
 // Build assembles the overview of one install from the objects it owns. It is
 // pure, so the API can rebuild it over the owned objects a caller may see.
-func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report) Overview {
-	o := Overview{Header: header(res, snap), Counts: []Count{}, Gateways: []GatewayRow{}}
+func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report, plat platform.Info) Overview {
+	if plat.IsZero() {
+		plat = platform.Kubernetes() // same default as health
+	}
+	o := Overview{Header: header(res, snap, plat), Counts: []Count{}, Gateways: []GatewayRow{}}
 	byKind := map[schema.GroupKind]int{}
 	add := func(u *unstructured.Unstructured) {
 		r := objects.RefOf(u)
@@ -92,6 +112,9 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	}
 	// One tile per served kind, GatewayClasses included.
 	for _, k := range served {
+		if k.Category == kinds.CategoryParameters {
+			continue // read to resolve proxies, not part of the inventory
+		}
 		o.Counts = append(o.Counts, Count{Group: k.Group, Kind: k.Kind, Category: string(k.Category), DisplayName: k.DisplayName,
 			Count: byKind[schema.GroupKind{Group: k.Group, Kind: k.Kind}], Access: snap.Access[k.GVR()]})
 	}
@@ -112,22 +135,31 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	return o
 }
 
-func header(res install.Resolved, snap *cache.Snapshot) Header {
-	h := Header{ID: res.ID(), Namespace: res.Namespace, Name: res.Name, Version: res.Version, Edition: res.Edition, ControllerNames: res.ControllerNames,
-		Scope: ScopeSummary{Mode: string(res.Scope.Mode), Selectors: res.Scope.Selectors, Error: res.Scope.Err, Source: res.Scope.Source, Total: len(snap.Namespaces)}}
+func header(res install.Resolved, snap *cache.Snapshot, plat platform.Info) Header {
+	h := Header{ID: res.ID(), DisplayName: res.Display(), Namespace: res.Namespace, Name: res.Name, Version: res.Version, Edition: res.Edition,
+		ControllerNames: res.ControllerNames, Readiness: Readiness{State: ReadinessNotObserved}}
 	if h.ControllerNames == nil {
 		h.ControllerNames = []string{}
 	}
-	if d := res.Deployment; d != nil {
-		h.Controller = ReadyCount{Ready: d.Status.ReadyReplicas, Desired: 1}
+	// Same rule as KGWUI-005: fewer ready replicas than desired is not ready.
+	if d := res.Deployment; d != nil && plat.Has(platform.Workloads) {
+		ready, desired := d.Status.ReadyReplicas, int32(1)
 		if d.Spec.Replicas != nil {
-			h.Controller.Desired = *d.Spec.Replicas
+			desired = *d.Spec.Replicas
+		}
+		h.Readiness = Readiness{State: ReadinessReady, Ready: &ready, Desired: &desired}
+		if ready < desired {
+			h.Readiness.State = ReadinessNotReady
 		}
 	}
-	for _, n := range snap.Namespaces {
-		if res.Scope.Contains(n.Name, n) {
-			h.Scope.Watched++
+	if plat.Has(platform.Scope) {
+		sc := ScopeSummary{Mode: string(res.Scope.Mode), Selectors: res.Scope.Selectors, Error: res.Scope.Err, Source: res.Scope.Source, Total: len(snap.Namespaces)}
+		for _, n := range snap.Namespaces {
+			if res.Scope.Contains(n.Name, n) {
+				sc.Watched++
+			}
 		}
+		h.Scope = &sc
 	}
 	return h
 }

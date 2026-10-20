@@ -2,7 +2,7 @@ import type { HealthState } from "../theme/tokens";
 
 /** Mirrors pkg/api, pkg/overview, pkg/health JSON as built (sub-phase 1.1). */
 export type Severity = "error" | "warning" | "info";
-export type Category = "gatewayclass" | "gateway" | "listenerset" | "route" | "policy" | "workload";
+export type Category = "gatewayclass" | "gateway" | "listenerset" | "route" | "policy" | "workload" | "parameters";
 export interface Ref {
   group: string;
   kind: string;
@@ -60,19 +60,24 @@ export interface ScopeSummary {
   watched: number;
   total: number;
 }
-export interface ReadyCount {
-  ready: number;
-  desired: number;
+/** Controller readiness (D-016). not-observed: the platform cannot see it, which is not a failure. */
+export interface Readiness {
+  state: "ready" | "not-ready" | "unknown" | "not-observed";
+  ready?: number;
+  desired?: number;
 }
 export interface InstallHeader {
+  /** Opaque: encode it in URLs, never split or parse it (D-016). */
   id: string;
-  namespace: string;
-  name: string;
+  displayName: string;
+  namespace?: string;
+  name?: string;
   version: string;
   edition: string;
   controllerNames: string[];
-  controller: ReadyCount;
-  scope: ScopeSummary;
+  readiness: Readiness;
+  /** Absent where the platform has no namespace scope. */
+  scope?: ScopeSummary;
 }
 /** computedAt: when the backend computed this health; stale summaries render as unknown. */
 export interface InstallSummary extends InstallHeader {
@@ -115,11 +120,13 @@ export interface ServedKind {
   displayName: string;
   version: string;
 }
-/** kinds: what the resource endpoint can serve (served kinds plus apps/Deployment). */
+/** kinds: what the resource endpoint can serve (apps/Deployment only with workloads). capabilities: branch on these, never on platform (D-016). */
 export interface MetaResponse {
   version: string;
   pinned?: string;
   synced: boolean;
+  platform: string;
+  capabilities: string[];
   kinds: ServedKind[];
 }
 export interface ErrorResponse {

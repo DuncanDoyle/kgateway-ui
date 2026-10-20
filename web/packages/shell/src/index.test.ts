@@ -50,11 +50,13 @@ it("keeps the public export surface", () => {
         "controlRoomLight",
         "defaultPages",
         "defaultThemes",
+        "installPath",
         "isLinkable",
         "isStale",
         "resourcePath",
         "severityToState",
         "stateLabel",
+        "useCapabilities",
         "useHealth",
         "useInstallId",
         "useInstalls",
@@ -64,6 +66,7 @@ it("keeps the public export surface", () => {
         "useResource",
         "useShellExtension",
         "useThemeSwitch",
+        "useVocabulary",
       ],
       "types": [
         "Access",
@@ -88,7 +91,7 @@ it("keeps the public export surface", () => {
         "NavEntry",
         "OverviewResponse",
         "RawHealthReport",
-        "ReadyCount",
+        "Readiness",
         "Ref",
         "RouteContribution",
         "ScopeSummary",
@@ -97,6 +100,7 @@ it("keeps the public export surface", () => {
         "ShellExtension",
         "StatusTokens",
         "Theme",
+        "Vocabulary",
       ],
     }
   `);

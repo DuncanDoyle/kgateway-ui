@@ -15,6 +15,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 )
 
 // Upstream returns the Phase 1 checks (design §5.2).
@@ -121,14 +123,18 @@ func (controllerCheck) Name() string { return "controller pods" }
 // Run implements Check.
 func (c controllerCheck) Run(in Input) ([]Finding, CheckResult) {
 	d := in.Install.Deployment
-	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID()); bad {
+	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
 		return []Finding{f}, ok(c.Name(), true, in.Now)
 	}
 	return nil, ok(c.Name(), true, in.Now)
 }
 
-func notReady(d *appsv1.Deployment, code, slug, what, inst string) (Finding, bool) {
+// workloads reports whether replica wording applies; only the zero Platform
+// defaults to Kubernetes, so the platform name is never consulted.
+func (in Input) workloads() bool { return in.Platform.IsZero() || in.Platform.Has(platform.Workloads) }
+
+func notReady(d *appsv1.Deployment, code, slug, what, inst string, workloads bool) (Finding, bool) {
 	want := int32(1)
 	if d.Spec.Replicas != nil {
 		want = *d.Spec.Replicas
@@ -136,8 +142,11 @@ func notReady(d *appsv1.Deployment, code, slug, what, inst string) (Finding, boo
 	if d.Status.ReadyReplicas >= want {
 		return Finding{}, false
 	}
-	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst,
-		Message: fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)}, true
+	msg := what + " not ready"
+	if workloads {
+		msg = fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)
+	}
+	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst, Message: msg}, true
 }
 
 // Required and optional condition types per status block (design §5.2).
@@ -415,19 +424,27 @@ type proxyCheck struct{}
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
-// Run implements Check. A missing proxy is reported only after the grace period.
+// Run implements Check. A missing proxy is reported after the grace period,
+// except for a self-managed Gateway: KGWUI-010 (info) says the UI cannot see
+// that proxy's readiness, so it never drives the roll-up (D-016). A proxy
+// Deployment that exists is judged the same either way.
 func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
 	for _, gw := range in.Owned.Gateways {
 		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
 		if d == nil {
+			if in.proxyMode(gw) == proxymode.SelfManaged {
+				fs = append(fs, Finding{Code: CodeSelfManagedProxy, Slug: "self-managed-proxy", Severity: SeverityInfo, Install: in.Install.ID(),
+					Resource: ref(gw), Message: "Self-managed proxy: the UI cannot see its readiness"})
+				continue
+			}
 			if in.Now.Sub(in.firstSeen(gw)) >= Grace {
 				fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
 					Resource: ref(gw), Message: "Proxy deployment not found"})
 			}
 			continue
 		}
-		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID()); bad {
+		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
 			f.Resource = ref(gw)
 			fs = append(fs, f)
 		}

@@ -241,7 +241,7 @@ it("rapid chip and typing keep every param and character", async () => {
 function Switcher() {
   const navigate = useNavigate();
   return (
-    <button type="button" onClick={() => navigate("/i/b/two")}>
+    <button type="button" onClick={() => navigate("/i/b.two")}>
       switch
     </button>
   );
@@ -254,9 +254,9 @@ function Path() {
 
 it("a navigation to another path, with the hook still mounted, does not carry the old params over", async () => {
   render(
-    <MemoryRouter initialEntries={["/i/a/one?q=foo&sort=x"]}>
+    <MemoryRouter initialEntries={["/i/a.one?q=foo&sort=x"]}>
       <Routes>
-        <Route path="/i/:ns/:name" element={<Probe />} />
+        <Route path="/i/:id" element={<Probe />} />
       </Routes>
       <Switcher />
       <Path />
@@ -264,9 +264,9 @@ it("a navigation to another path, with the hook still mounted, does not carry th
   );
   expect(screen.getByRole("textbox", { name: "q" })).toHaveValue("foo");
   await userEvent.click(screen.getByRole("button", { name: "switch" }));
-  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/);
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two$/);
   expect(screen.getByRole("textbox", { name: "q" })).toHaveValue("");
   // Typing on the new path writes only the new text.
   await userEvent.type(screen.getByRole("textbox", { name: "q" }), "z");
-  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two\?q=z$/);
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two\?q=z$/);
 });

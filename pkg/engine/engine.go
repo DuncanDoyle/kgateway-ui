@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -34,8 +37,14 @@ type Config struct {
 	Verifier scopeverify.Verifier
 	Metrics  ctrlmetrics.Source
 	Checks   []health.Check
-	// Pinned restricts the UI to one install ID ("ns/name"); empty shows all.
+	// Pinned restricts the UI to one install ID; empty shows all.
 	Pinned string
+	// Platform is the platform the snapshots come from; zero means platform.Kubernetes().
+	Platform platform.Info
+	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
+	ProxyMode proxymode.Resolver
+	// Logger receives install rejections; nil means slog.Default().
+	Logger *slog.Logger
 	// MetricsMaxAge is the age beyond which a metrics result is stale
 	// (3 × the metrics interval). Zero disables staleness: never use it in production.
 	MetricsMaxAge time.Duration
@@ -60,6 +69,8 @@ type Model struct {
 	Installs   []InstallModel
 	Pinned     string
 	ComputedAt time.Time
+	// Rejected are this computation's install rejections (invalid IDs); /readyz reports them.
+	Rejected []string
 }
 
 // Engine computes Models.
@@ -70,6 +81,7 @@ type Engine struct {
 	// computeMu serialises Compute; seen is only touched under it.
 	computeMu sync.Mutex
 	seen      map[generation]time.Time
+	rejected  map[string]bool // install errors already logged; only touched under computeMu
 }
 
 // generation identifies one spec version of one object.
@@ -83,8 +95,17 @@ func New(cfg Config) *Engine {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}}
+	if cfg.Platform.IsZero() {
+		cfg.Platform = platform.Kubernetes()
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}}
 }
+
+// Platform returns the platform the engine computes models for.
+func (e *Engine) Platform() platform.Info { return e.cfg.Platform }
 
 // observe records when each (uid, generation) in snap was first seen and
 // forgets the ones that are gone. The grace period runs from that moment: a
@@ -132,7 +153,16 @@ func (e *Engine) Compute() *Model {
 	if e.cfg.KindsChange != nil {
 		kc = e.cfg.KindsChange()
 	}
-	all := install.Resolve(install.Discover(snap, e.cfg.Detectors), e.cfg.Scope)
+	found, errs := install.Discover(snap, e.cfg.Detectors)
+	for _, err := range errs {
+		m.Rejected = append(m.Rejected, err.Error())
+		// Logged once per distinct error, not on every recompute.
+		if msg := err.Error(); !e.rejected[msg] {
+			e.rejected[msg] = true
+			e.cfg.Logger.Error("install rejected", "err", err)
+		}
+	}
+	all := install.Resolve(found, e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all)
 	seen := e.firstSeen(now)
@@ -145,8 +175,8 @@ func (e *Engine) Compute() *Model {
 			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
 		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
-			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now}, e.cfg.Checks)
-		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep)})
+			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)
+		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
 	}
 	e.mu.Lock()
 	e.cur = m

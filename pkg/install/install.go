@@ -3,6 +3,7 @@
 package install
 
 import (
+	"fmt"
 	"sort"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -15,8 +16,13 @@ import (
 
 // Install is one kgateway controller deployment and what the UI knows about it.
 type Install struct {
-	Namespace       string
-	Name            string
+	Namespace string
+	Name      string
+	// CustomID, when set, is the install ID; empty means "<namespace>.<name>".
+	// It must pass ValidateID, or Discover leaves the install out (D-016).
+	CustomID string
+	// DisplayName names the install in the UI; empty means "namespace/name".
+	DisplayName     string
 	Version         string
 	Edition         string
 	ControllerNames []string
@@ -30,8 +36,27 @@ type Install struct {
 	ProxySelector labels.Selector
 }
 
-// ID returns "namespace/name" of the controller Deployment.
-func (i Install) ID() string { return i.Namespace + "/" + i.Name }
+// ID returns the opaque install ID: CustomID, else "<namespace>.<name>".
+// Namespace names hold no dots, so the Kubernetes ID is unique; clients must
+// not rely on its structure (D-016).
+func (i Install) ID() string {
+	if i.CustomID != "" {
+		return i.CustomID
+	}
+	return i.Namespace + "." + i.Name
+}
+
+// Display returns DisplayName, else "namespace/name", else the ID when there
+// is no namespace or name to show.
+func (i Install) Display() string {
+	if i.DisplayName != "" {
+		return i.DisplayName
+	}
+	if i.Namespace == "" || i.Name == "" {
+		return i.ID()
+	}
+	return i.Namespace + "/" + i.Name
+}
 
 // Detector recognises the controller Deployments of one distribution.
 // Detectors are tried in order; the first that matches wins.
@@ -50,8 +75,8 @@ type Detector interface {
 }
 
 // Discover returns one Install per controller Deployment in snap, sorted by ID.
-func Discover(snap *cache.Snapshot, detectors []Detector) []Install {
-	var out []Install
+// An install whose ID fails ValidateID is left out and reported in errs.
+func Discover(snap *cache.Snapshot, detectors []Detector) (out []Install, errs []error) {
 	for _, d := range snap.Deployments {
 		for _, det := range detectors {
 			if !det.ControllerSelector().Matches(labels.Set(d.Labels)) {
@@ -60,6 +85,10 @@ func Discover(snap *cache.Snapshot, detectors []Detector) []Install {
 			in, ok := det.Detect(d)
 			if !ok {
 				continue
+			}
+			if err := ValidateID(in.ID()); err != nil {
+				errs = append(errs, fmt.Errorf("detector %s, Deployment %s/%s: %w", det.Name(), d.Namespace, d.Name, err))
+				break
 			}
 			// Checks rely on both; a detector may leave them unset.
 			if in.Deployment == nil {
@@ -74,7 +103,7 @@ func Discover(snap *cache.Snapshot, detectors []Detector) []Install {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID() < out[j].ID() })
-	return out
+	return out, errs
 }
 
 func podsOf(d *appsv1.Deployment, pods []*corev1.Pod) []*corev1.Pod {

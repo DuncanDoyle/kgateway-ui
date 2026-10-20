@@ -1,6 +1,15 @@
 // Package extension is the public seam through which downstream distributions
 // extend the UI backend without forking it (D-003). A downstream main calls
 // app.Run with options from this package.
+//
+// # Compatibility
+//
+// API v1 (the /api/v1 paths and their JSON) and the SPA URLs are stable from
+// the first release. This Go API (Registry and its options, and the
+// install.Detector, install.Install and install.ScopeProvider types it
+// carries) may change until the extension-seam milestone after Phase 2. When
+// the provider seam arrives, a Kubernetes Detector keeps working as that
+// provider's adapter (D-016).
 package extension
 
 import (
@@ -8,6 +17,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -22,6 +32,9 @@ type Registry struct {
 	Checks   []health.Check
 	// Authorizer decides per request what the caller may see (D-013).
 	Authorizer api.Authorizer
+	// ProxyMode decides whether a Gateway's proxy is self-managed. It mirrors
+	// controller logic, so a downstream with its own parameters kind replaces it.
+	ProxyMode proxymode.Resolver
 }
 
 // Option modifies a Registry.
@@ -56,6 +69,9 @@ func WithChecks(c ...health.Check) Option {
 // resources, findings or counts goes through it (D-013).
 func WithAuthorizer(a api.Authorizer) Option { return func(r *Registry) { r.Authorizer = a } }
 
+// WithProxyModeResolver replaces the upstream GatewayParameters resolution.
+func WithProxyModeResolver(p proxymode.Resolver) Option { return func(r *Registry) { r.ProxyMode = p } }
+
 // New returns the upstream registry with opts applied.
 func New(opts ...Option) *Registry {
 	r := &Registry{
@@ -64,6 +80,7 @@ func New(opts ...Option) *Registry {
 		Scope:      install.NamespaceSelectorScope{},
 		Checks:     health.Upstream(),
 		Authorizer: api.AllowAll{},
+		ProxyMode:  proxymode.GatewayParameters{},
 	}
 	for _, o := range opts {
 		o(r)

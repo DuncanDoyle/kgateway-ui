@@ -12,6 +12,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -47,6 +49,7 @@ const (
 	CodeScopeMismatch       = "KGWUI-007"
 	CodeSignalUnavailable   = "KGWUI-008"
 	CodeAmbiguousOwnership  = "KGWUI-009"
+	CodeSelfManagedProxy    = "KGWUI-010"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -106,6 +109,10 @@ type Input struct {
 	FirstSeen func(u *unstructured.Unstructured) time.Time
 	Verify    scopeverify.Result
 	Now       time.Time
+	// Platform decides the wording of readiness findings; zero means Kubernetes.
+	Platform platform.Info
+	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
+	ProxyMode proxymode.Resolver
 }
 
 // firstSeen returns when the grace period for u's current generation started.
@@ -114,6 +121,15 @@ func (in Input) firstSeen(u *unstructured.Unstructured) time.Time {
 		return in.FirstSeen(u)
 	}
 	return u.GetCreationTimestamp().Time
+}
+
+// proxyMode returns how gw's proxy is run.
+func (in Input) proxyMode(gw *unstructured.Unstructured) proxymode.Mode {
+	r := in.ProxyMode
+	if r == nil {
+		r = proxymode.GatewayParameters{}
+	}
+	return r.Resolve(gw, in.Snapshot, in.Served)
 }
 
 // Check produces findings for one concern.

@@ -18,12 +18,12 @@ func TestDiscoverUpstreamInstall(t *testing.T) {
 	unknown := testutil.ControllerDeployment("x", "other", "example.com/another-controller:1.0", 1, 1)
 	snap := &cache.Snapshot{Deployments: []*appsv1.Deployment{unknown, mirrored, d}, Pods: testutil.PodList(p1, p2)}
 
-	got := Discover(snap, []Detector{UpstreamDetector{}})
+	got, _ := Discover(snap, []Detector{UpstreamDetector{}})
 	if len(got) != 2 {
 		t.Fatalf("want 2 installs (upstream image and its mirror), got %d", len(got))
 	}
 	in := got[0] // sorted by ID: kgateway-system/kgateway < kgw-b/kgw-b
-	if in.ID() != "kgateway-system/kgateway" || in.Version != "2.4.7" || in.Edition != "kgateway" ||
+	if in.ID() != "kgateway-system.kgateway" || in.Version != "2.4.7" || in.Edition != "kgateway" ||
 		in.MetricsPort != 9092 || len(in.Pods) != 2 || in.ControllerNames[0] != "kgateway.dev/kgateway" {
 		t.Fatalf("unexpected install %+v", in)
 	}
@@ -31,7 +31,7 @@ func TestDiscoverUpstreamInstall(t *testing.T) {
 
 func TestDetectorOrderLetsDownstreamWin(t *testing.T) {
 	d := testutil.ControllerDeployment("ns", "c", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
-	got := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}}, []Detector{fixedDetector{}, UpstreamDetector{}})
+	got, _ := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}}, []Detector{fixedDetector{}, UpstreamDetector{}})
 	if len(got) != 1 || got[0].Edition != "fixed" {
 		t.Fatalf("first matching detector must win, got %+v", got)
 	}
@@ -40,7 +40,7 @@ func TestDetectorOrderLetsDownstreamWin(t *testing.T) {
 // Discover fills the Deployment and ProxySelector a detector leaves unset.
 func TestDiscoverBackfillsDeploymentAndProxySelector(t *testing.T) {
 	d := testutil.ControllerDeployment("ns", "c", "example.com/other:1.0", 1, 1)
-	got := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}}, []Detector{bareDetector{}})
+	got, _ := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}}, []Detector{bareDetector{}})
 	if len(got) != 1 || got[0].Deployment != d || got[0].ProxySelector == nil ||
 		got[0].ProxySelector.String() != (UpstreamDetector{}).ProxySelector().String() {
 		t.Fatalf("Deployment and ProxySelector must be filled from the detector: %+v", got)
@@ -80,8 +80,25 @@ func TestControllerPodSelectorMatchesUpstreamPods(t *testing.T) {
 		t.Fatal("the Deployment selector requires the component label; it must not be used for Pods")
 	}
 	other := testutil.ControllerPod(testutil.ControllerDeployment("kgw", "other", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1), "other-a", true)
-	got := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}, Pods: testutil.PodList(current, older, other)}, []Detector{det})
+	got, _ := Discover(&cache.Snapshot{Deployments: []*appsv1.Deployment{d}, Pods: testutil.PodList(current, older, other)}, []Detector{det})
 	if len(got) != 1 || len(got[0].Pods) != 2 {
 		t.Fatalf("both pods of kgw/kgateway, and only those, must be attributed to it: %+v", got)
+	}
+}
+
+func TestDisplayNeverReturnsABareSlash(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   Install
+		want string
+	}{
+		{"display name wins", Install{CustomID: "x", DisplayName: "Edge"}, "Edge"},
+		{"namespace/name", Install{Namespace: "kgw", Name: "kgateway"}, "kgw/kgateway"},
+		{"custom ID only", Install{CustomID: "acme~edge_1"}, "acme~edge_1"},
+		{"name only", Install{CustomID: "acme~edge_1", Name: "edge"}, "acme~edge_1"},
+	} {
+		if got := c.in.Display(); got != c.want {
+			t.Errorf("%s: Display() = %q, want %q", c.name, got, c.want)
+		}
 	}
 }

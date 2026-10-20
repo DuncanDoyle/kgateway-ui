@@ -9,17 +9,19 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 )
 
-// InstallSummary is one entry of GET /api/v1/installs.
+// InstallSummary is one entry of GET /api/v1/installs. Namespace, Name and
+// Scope are absent where the platform has no such notion (D-016).
 type InstallSummary struct {
-	ID              string                `json:"id"`
-	Namespace       string                `json:"namespace"`
-	Name            string                `json:"name"`
-	Version         string                `json:"version"`
-	Edition         string                `json:"edition"`
-	ControllerNames []string              `json:"controllerNames"`
-	Controller      overview.ReadyCount   `json:"controller"`
-	Scope           overview.ScopeSummary `json:"scope"`
-	Health          HealthSummary         `json:"health"`
+	ID              string                 `json:"id"`
+	DisplayName     string                 `json:"displayName"`
+	Namespace       string                 `json:"namespace,omitempty"`
+	Name            string                 `json:"name,omitempty"`
+	Version         string                 `json:"version"`
+	Edition         string                 `json:"edition"`
+	ControllerNames []string               `json:"controllerNames"`
+	Readiness       overview.Readiness     `json:"readiness"`
+	Scope           *overview.ScopeSummary `json:"scope,omitempty"`
+	Health          HealthSummary          `json:"health"`
 	// ComputedAt is when the model behind Health was computed; clients apply the stale rule to it.
 	ComputedAt time.Time `json:"computedAt"`
 }
@@ -44,8 +46,13 @@ type MetaResponse struct {
 	Version string `json:"version"`
 	Pinned  string `json:"pinned,omitempty"`
 	Synced  bool   `json:"synced"`
-	// Kinds are the kinds the resource endpoint can serve: the served kinds
-	// plus apps/Deployment. The frontend links only these.
+	// Platform names the platform for display, for example "Kubernetes".
+	Platform string `json:"platform"`
+	// Capabilities are what the platform offers (platform.Scope,
+	// platform.Workloads). Clients branch on these, never on Platform.
+	Capabilities []string `json:"capabilities"`
+	// Kinds are the kinds the resource endpoint can serve: the served kinds,
+	// plus apps/Deployment under the workloads capability. The frontend links only these.
 	Kinds []kinds.Served `json:"kinds"`
 }
 

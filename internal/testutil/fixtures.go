@@ -235,3 +235,27 @@ func Env(name, value string) corev1.EnvVar { return corev1.EnvVar{Name: name, Va
 
 // PodList converts pods for use in a Snapshot.
 func PodList(ps ...*corev1.Pod) []*corev1.Pod { return ps }
+
+// GatewayParameters builds a kgateway GatewayParameters. selfManaged sets
+// spec.selfManaged; otherwise it carries only a spec.kube block.
+func GatewayParameters(ns, name string, selfManaged bool) *unstructured.Unstructured {
+	u := obj("gateway.kgateway.dev/v1alpha1", "GatewayParameters", ns, name)
+	if selfManaged {
+		u.Object["spec"] = map[string]any{"selfManaged": map[string]any{}}
+	} else {
+		u.Object["spec"] = map[string]any{"kube": map[string]any{"deployment": map[string]any{"replicas": int64(1)}}}
+	}
+	return u
+}
+
+// SetClassParameters sets class's spec.parametersRef.
+func SetClassParameters(class *unstructured.Unstructured, group, kind, ns, name string) {
+	class.Object["spec"].(map[string]any)["parametersRef"] = map[string]any{
+		"group": group, "kind": kind, "namespace": ns, "name": name}
+}
+
+// SetGatewayParameters sets gw's spec.infrastructure.parametersRef.
+func SetGatewayParameters(gw *unstructured.Unstructured, group, kind, name string) {
+	gw.Object["spec"].(map[string]any)["infrastructure"] = map[string]any{
+		"parametersRef": map[string]any{"group": group, "kind": kind, "name": name}}
+}

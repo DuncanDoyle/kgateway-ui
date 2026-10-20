@@ -23,6 +23,9 @@ const (
 	// CategoryWorkload marks kinds read through typed informers (Deployments).
 	// They are never watched dynamically or counted; findings link to them.
 	CategoryWorkload Category = "workload"
+	// CategoryParameters marks kinds read only to resolve other objects
+	// (GatewayParameters). They are watched but never counted or attributed.
+	CategoryParameters Category = "parameters"
 )
 
 // Descriptor describes a kind the UI can watch. Versions are in preference order.

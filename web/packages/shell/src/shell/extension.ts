@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import type { Finding } from "../api/types";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
+import { kubernetesVocabulary, type Vocabulary } from "./vocabulary";
 
 /** Product identity shown in the header (D-008). */
 export interface Brand {
@@ -12,7 +13,7 @@ export interface Brand {
 
 /**
  * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:ns/:name/. The core owns "findings" and "r/..." there and "/" at the top; a contribution cannot replace them.
+ * under /i/:id/. The core owns "findings" and "r/..." there and "/" at the top; a contribution cannot replace them.
  */
 export interface RouteContribution {
   path: string;
@@ -20,7 +21,7 @@ export interface RouteContribution {
   scope: "install" | "top";
 }
 
-/** A navigation entry contributed by an extension. Targets are relative, without a leading slash; install-scoped ones resolve under /i/:ns/:name/. */
+/** A navigation entry contributed by an extension. Targets are relative, without a leading slash; install-scoped ones resolve under /i/:id/. */
 export interface NavEntry {
   label: string;
   to: string;
@@ -40,6 +41,8 @@ export interface ShellExtension {
   navEntries?: NavEntry[];
   /** Keyed by finding code prefix, e.g. "ACME-"; when several prefixes match a code, the longest wins. */
   findingRenderers?: Record<string, FindingRenderer>;
+  /** Platform copy; entries left out keep the Kubernetes defaults (D-016). */
+  vocabulary?: Partial<Vocabulary>;
 }
 
 /** The core pages; the upstream implementations are exported as defaultPages. */
@@ -52,22 +55,30 @@ export interface CorePages {
 
 export const defaultBrand: Brand = { productName: "kgateway", logo: null };
 
-export const ShellExtensionContext = createContext<Required<ShellExtension>>({
+/** The extension merged with the upstream defaults; the vocabulary is complete. */
+export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary">> & { vocabulary: Vocabulary };
+
+export const ShellExtensionContext = createContext<ResolvedShellExtension>({
   brand: defaultBrand,
   themes: defaultThemes,
   defaultThemeId: defaultThemeIdFor(defaultThemes),
   routes: [],
   navEntries: [],
   findingRenderers: {},
+  vocabulary: kubernetesVocabulary,
 });
 
 /** The extension merged with the upstream defaults. */
-export function useShellExtension(): Required<ShellExtension> {
+export function useShellExtension(): ResolvedShellExtension {
   return useContext(ShellExtensionContext);
 }
 
-/** The install ID ("ns/name") of the current /i/:ns/:name/... route; "" outside install routes. */
+/** The platform copy in effect. */
+export function useVocabulary(): Vocabulary {
+  return useContext(ShellExtensionContext).vocabulary;
+}
+
+/** The opaque install ID of the current /i/:id/... route, decoded by the router; "" outside install routes. Never split it (D-016). */
 export function useInstallId(): string {
-  const { ns, name } = useParams();
-  return ns && name ? `${ns}/${name}` : "";
+  return useParams().id ?? "";
 }

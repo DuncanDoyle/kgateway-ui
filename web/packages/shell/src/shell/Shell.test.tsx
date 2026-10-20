@@ -2,6 +2,7 @@ import { css } from "@emotion/react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
+import type { Readiness } from "../api/types";
 import { stubApi } from "../test/render";
 import { useThemeSwitch } from "../theme/ThemeProvider";
 import { THEME_PAINT_KEY } from "../theme/themeStorage";
@@ -15,19 +16,28 @@ const pages: CorePages = {
   FindingsPage: () => <p>findings page</p>,
   ResourcePage: () => <p>resource page</p>,
 };
-const meta = { version: "dev", synced: true, kinds: [] };
-const inst = (id: string, controller = { ready: 2, desired: 2 }, computedAt = new Date().toISOString()) => ({
-  id,
-  namespace: id.split("/")[0],
-  name: id.split("/")[1],
-  version: "2.4.7",
-  edition: "kgateway",
-  controllerNames: [],
-  controller,
-  scope: { mode: "all", watched: 3, total: 3 },
-  health: { state: "healthy", counts: {} },
-  computedAt,
-});
+const meta = { version: "dev", synced: true, platform: "Kubernetes", capabilities: ["scope", "workloads"], kinds: [] };
+// Fixture only: it takes "ns/name" for brevity; the UI itself never splits an ID.
+const inst = (
+  nsName: string,
+  readiness: Readiness = { state: "ready", ready: 2, desired: 2 },
+  computedAt = new Date().toISOString(),
+) => {
+  const [namespace, name] = nsName.split("/");
+  return {
+    id: `${namespace}.${name}`,
+    displayName: nsName,
+    namespace,
+    name,
+    version: "2.4.7",
+    edition: "kgateway",
+    controllerNames: [],
+    readiness,
+    scope: { mode: "all", watched: 3, total: 3 },
+    health: { state: "healthy", counts: {} },
+    computedAt,
+  };
+};
 
 function mount(path: string, ext = {}) {
   window.history.pushState({}, "", path);
@@ -48,30 +58,30 @@ it("redirects / to the only install", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
   mount("/");
   await waitFor(() => expect(screen.getByText("install page")).toBeInTheDocument());
-  expect(window.location.pathname).toBe("/i/kgw/kgateway");
+  expect(window.location.pathname).toBe("/i/kgw.kgateway");
 });
 
 it("shows the cluster landing and an install switcher when there are several installs", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
   mount("/");
   await waitFor(() => expect(screen.getByText("cluster landing")).toBeInTheDocument());
-  mount("/i/a/one");
+  mount("/i/a.one");
   await userEvent.click(await screen.findByRole("button", { name: /switch install/i }));
   expect(screen.getByRole("menuitem", { name: /b\/two/ })).toBeInTheDocument();
 });
 
 it("navigates to the chosen install and closes the menu", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
-  mount("/i/a/one");
+  mount("/i/a.one");
   await userEvent.click(await screen.findByRole("button", { name: /switch install/i }));
   await userEvent.click(screen.getByRole("menuitem", { name: /b\/two/ }));
-  expect(window.location.pathname).toBe("/i/b/two");
+  expect(window.location.pathname).toBe("/i/b.two");
   expect(screen.queryByRole("menu")).toBeNull();
 });
 
 it("closes a menu on Escape and returns focus to its button", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
-  mount("/i/a/one");
+  mount("/i/a.one");
   const button = await screen.findByRole("button", { name: /switch install/i });
   await userEvent.click(button);
   expect(screen.getByRole("menu")).toBeInTheDocument();
@@ -82,7 +92,7 @@ it("closes a menu on Escape and returns focus to its button", async () => {
 
 it("closes a menu on a click outside it", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
-  mount("/i/a/one");
+  mount("/i/a.one");
   await userEvent.click(await screen.findByRole("button", { name: /switch install/i }));
   await userEvent.click(screen.getByText("install page"));
   expect(screen.queryByRole("menu")).toBeNull();
@@ -92,7 +102,7 @@ it("shows a designed empty state when no install is found", async () => {
   stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
   mount("/");
   await waitFor(() => expect(screen.getByText("No kgateway install found")).toBeInTheDocument());
-  expect(screen.getByText(/To pin one install, start the UI with/)).toBeInTheDocument();
+  expect(screen.getByText(/To always open one install, start the UI with/)).toBeInTheDocument();
 });
 
 it("says when the pinned install was not found", async () => {
@@ -114,42 +124,59 @@ it("says it is waiting for the cluster while the backend cache is not synced", a
   await waitFor(() => expect(screen.getByText("Waiting for the cluster")).toBeInTheDocument());
 });
 
+it("H4: a downstream vocabulary replaces platform copy and leaves the rest at the defaults", async () => {
+  stubApi({ "/api/v1/installs": [503, { error: "cache not synced" }], "/api/v1/meta": meta });
+  const view = mount("/", { vocabulary: { connecting: "Waiting for the controller" } });
+  expect(await screen.findByText("Waiting for the controller")).toBeInTheDocument();
+  expect(screen.queryByText("Waiting for the cluster")).toBeNull();
+  view.unmount();
+  stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
+  mount("/", { vocabulary: { noInstallsTitle: "No Acme install found" } });
+  expect(await screen.findByText("No Acme install found")).toBeInTheDocument();
+  // Entries the override leaves out fall back to the Kubernetes defaults.
+  expect(screen.getByText(/To always open one install, start the UI with/)).toBeInTheDocument();
+});
+
 it("renders extension brand and routes", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway/waf", {
+  mount("/i/kgw.kgateway/waf", {
     brand: { productName: "Acme Edge", logo: <span>A</span> },
     routes: [{ path: "waf", element: <p>waf page</p>, scope: "install" }],
     navEntries: [{ label: "WAF", to: "waf", scope: "install" }],
   });
   await waitFor(() => expect(screen.getByText("waf page")).toBeInTheDocument());
   expect(screen.getByText("Acme Edge")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "WAF" })).toHaveAttribute("href", "/i/kgw/kgateway/waf");
+  expect(screen.getByRole("link", { name: "WAF" })).toHaveAttribute("href", "/i/kgw.kgateway/waf");
 });
 
 it("shows the install's version and controller readiness in the header", async () => {
-  stubApi({ "/api/v1/installs": [inst("kgw/kgateway", { ready: 1, desired: 2 })], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  stubApi({
+    "/api/v1/installs": [inst("kgw/kgateway", { state: "not-ready", ready: 1, desired: 2 })],
+    "/api/v1/meta": meta,
+  });
+  mount("/i/kgw.kgateway");
   expect(await screen.findByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
-  const ready = screen.getByText("Controller: 1 of 2 ready");
+  // Replica wording needs /meta's workloads capability, so it can appear after the version.
+  const ready = await screen.findByText("Controller: 1 of 2 ready");
   expect(within(ready).getByTestId("health-icon-error")).toBeInTheDocument();
 });
 
 it("shows no edition tag when the edition repeats the product name", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   await screen.findByTestId("version");
   expect(screen.queryByTestId("edition")).toBeNull();
 });
 
 it("shows the edition tag when it differs from the product name", async () => {
   stubApi({ "/api/v1/installs": [{ ...inst("kgw/kgateway"), edition: "acme" }], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway", { brand: { productName: "Acme Edge", logo: null } });
+  mount("/i/kgw.kgateway", { brand: { productName: "Acme Edge", logo: null } });
   expect(await screen.findByTestId("edition")).toHaveTextContent(/^acme$/);
 });
 
 it("hides the identity shimmer when installs cannot load", async () => {
   stubApi({ "/api/v1/installs": [500, { error: "boom" }], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/v1/installs", expect.anything()));
   await waitFor(() => expect(screen.queryByTestId("shimmer")).toBeNull());
 });
@@ -180,17 +207,20 @@ it("useInstallId is empty outside install routes", async () => {
 
 it("does not double the v of a version that already has one", async () => {
   stubApi({ "/api/v1/installs": [{ ...inst("kgw/kgateway"), version: "v2.4.7" }], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   expect(await screen.findByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
 });
 
 it("renders a stale install summary as unknown in the switcher and the header", async () => {
   const old = new Date(Date.now() - 60_000).toISOString();
   stubApi({
-    "/api/v1/installs": [inst("a/one", { ready: 2, desired: 2 }, old), inst("b/two", { ready: 2, desired: 2 }, old)],
+    "/api/v1/installs": [
+      inst("a/one", { state: "ready", ready: 2, desired: 2 }, old),
+      inst("b/two", { state: "ready", ready: 2, desired: 2 }, old),
+    ],
     "/api/v1/meta": meta,
   });
-  mount("/i/a/one");
+  mount("/i/a.one");
   const ready = await screen.findByText("Controller: 2 of 2 ready");
   expect(within(ready).getByTestId("health-icon-unknown")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
@@ -201,7 +231,7 @@ it("renders a stale install summary as unknown in the switcher and the header", 
 
 it("applies stylesOverride to the shell root", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  window.history.pushState({}, "", "/i/kgw/kgateway");
+  window.history.pushState({}, "", "/i/kgw.kgateway");
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
       <Shell
@@ -217,7 +247,7 @@ it("applies stylesOverride to the shell root", async () => {
 
 it("switches theme from the theme menu and applies the new tokens", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   expect(getComputedStyle(document.body).backgroundColor).toBe(rgb(controlRoomDark.color.bg));
   await userEvent.click(await screen.findByRole("button", { name: /theme/i }));
   expect(screen.getByRole("menuitemradio", { name: /^Control room$/ })).toHaveAttribute("aria-checked", "true");
@@ -232,13 +262,13 @@ it("switches theme from the theme menu and applies the new tokens", async () => 
 
 it("the theme button's name and tooltip say the same", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   expect(await screen.findByRole("button", { name: "Theme: Control room" })).toBeInTheDocument();
 });
 
 it("the install switcher's name and tooltip say the same", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
-  mount("/i/a/one");
+  mount("/i/a.one");
   const button = await screen.findByRole("button", { name: "Switch install: a/one" });
   await userEvent.hover(button);
   expect(screen.getByRole("tooltip")).toHaveTextContent(/^Switch install: a\/one$/);
@@ -248,7 +278,7 @@ it("the install switcher's name and tooltip say the same", async () => {
 
 it("shows the app tooltip on hover and links it to the button", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   const button = await screen.findByRole("button", { name: /theme/i });
   await userEvent.hover(button);
   const tip = screen.getByRole("tooltip");
@@ -259,7 +289,7 @@ it("shows the app tooltip on hover and links it to the button", async () => {
 
 it("a theme picked with the mouse leaves no tooltip behind", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   const button = await screen.findByRole("button", { name: /theme/i });
   await userEvent.click(button);
   // The pointer leaves the button for the menu below it, as it does in a browser.
@@ -272,7 +302,7 @@ it("a theme picked with the mouse leaves no tooltip behind", async () => {
 
 it("keyboard focus shows a button's tooltip", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway");
+  mount("/i/kgw.kgateway");
   const button = await screen.findByRole("button", { name: /theme/i });
   await userEvent.click(button);
   await userEvent.keyboard("{Escape}");
@@ -285,7 +315,7 @@ it("switcher items name each install's state", async () => {
     "/api/v1/installs": [inst("a/one"), { ...inst("b/two"), health: { state: "error", counts: { error: 1 } } }],
     "/api/v1/meta": meta,
   });
-  mount("/i/a/one");
+  mount("/i/a.one");
   await userEvent.click(await screen.findByRole("button", { name: /switch install/i }));
   expect(screen.getByRole("menuitem", { name: /^Error: b\/two/ })).toBeInTheDocument();
   expect(screen.getByRole("menuitem", { name: /^Healthy: a\/one/ })).toBeInTheDocument();
@@ -293,10 +323,10 @@ it("switcher items name each install's state", async () => {
 
 it.each([
   ["/", "kgateway"],
-  ["/i/kgw/kgateway", "kgw/kgateway"],
-  ["/i/kgw/kgateway/findings", "Findings: kgw/kgateway"],
-  ["/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge", "Gateway prod/edge: kgw/kgateway"],
-  ["/i/kgw/kgateway/r/gateway.networking.k8s.io/GatewayClass/-/kgateway", "GatewayClass kgateway: kgw/kgateway"],
+  ["/i/kgw.kgateway", "kgw/kgateway"],
+  ["/i/kgw.kgateway/findings", "Findings: kgw/kgateway"],
+  ["/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge", "Gateway prod/edge: kgw/kgateway"],
+  ["/i/kgw.kgateway/r/gateway.networking.k8s.io/GatewayClass/-/kgateway", "GatewayClass kgateway: kgw/kgateway"],
   ["/nope", "Page not found"],
 ])("sets the document title on %s", async (path, title) => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway"), inst("b/two")], "/api/v1/meta": meta });
@@ -306,7 +336,7 @@ it.each([
 
 it("titles an extension page with its nav label", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw/kgateway/waf", {
+  mount("/i/kgw.kgateway/waf", {
     brand: { productName: "Acme Edge", logo: null },
     routes: [{ path: "waf", element: <p>waf page</p>, scope: "install" }],
     navEntries: [{ label: "WAF", to: "waf", scope: "install" }],
@@ -317,7 +347,7 @@ it("titles an extension page with its nav label", async () => {
 it("a failing installs poll turns the header readiness and switcher items unknown", async () => {
   const routes: Record<string, unknown> = { "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta };
   stubApi(routes);
-  mount("/i/a/one");
+  mount("/i/a.one");
   const ready = await screen.findByText("Controller: 2 of 2 ready");
   expect(within(ready).getByTestId("health-icon-healthy")).toBeInTheDocument();
   routes["/api/v1/installs"] = [500, { error: "boom" }];

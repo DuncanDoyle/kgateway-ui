@@ -22,7 +22,7 @@ function OverviewProbe({ id }: { id: string }) {
 }
 
 it("loads installs", async () => {
-  stubApi({ "/api/v1/installs": [{ id: "kgw/kgateway" }] });
+  stubApi({ "/api/v1/installs": [{ id: "kgw.kgateway" }] });
   renderWithTheme(<Probe />);
   await waitFor(() => expect(screen.getByText("n=1")).toBeInTheDocument());
 });
@@ -41,18 +41,18 @@ it("drops the previous install's data when the install changes", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      if (url.includes("/b/two")) await gate;
-      const id = url.includes("/a/one") ? "a/one" : "b/two";
+      if (url.includes("/b.two")) await gate;
+      const id = url.includes("/a.one") ? "a.one" : "b.two";
       return new Response(JSON.stringify({ header: { id } }), { status: 200 });
     }),
   );
-  const { rerender } = renderWithTheme(<OverviewProbe id="a/one" />);
-  await waitFor(() => expect(screen.getByText("overview a/one")).toBeInTheDocument());
-  rerender(<OverviewProbe id="b/two" />);
-  expect(screen.queryByText("overview a/one")).toBeNull();
+  const { rerender } = renderWithTheme(<OverviewProbe id="a.one" />);
+  await waitFor(() => expect(screen.getByText("overview a.one")).toBeInTheDocument());
+  rerender(<OverviewProbe id="b.two" />);
+  expect(screen.queryByText("overview a.one")).toBeNull();
   expect(screen.getByText("loading")).toBeInTheDocument();
   release?.();
-  await waitFor(() => expect(screen.getByText("overview b/two")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("overview b.two")).toBeInTheDocument());
 });
 
 it("marks data older than two poll intervals as stale", () => {
@@ -84,6 +84,8 @@ it("links only kinds that /api/v1/meta lists", () => {
   const meta: MetaResponse = {
     version: "dev",
     synced: true,
+    platform: "Kubernetes",
+    capabilities: ["scope", "workloads"],
     kinds: [
       {
         group: "apps",
@@ -110,8 +112,8 @@ it("treats an empty or unparsable collectedAt as stale", () => {
 
 it("normalises null checks to an empty list", async () => {
   stubApi({
-    "/api/v1/installs/a/one/health": {
-      install: "a/one",
+    "/api/v1/installs/a.one/health": {
+      install: "a.one",
       state: "healthy",
       findings: [],
       checks: null,
@@ -120,7 +122,7 @@ it("normalises null checks to an empty list", async () => {
     },
   });
   function HealthProbe() {
-    const { data } = useHealth("a/one");
+    const { data } = useHealth("a.one");
     return <p>{data ? `checks=${data.checks.length}` : "loading"}</p>;
   }
   renderWithTheme(<HealthProbe />);

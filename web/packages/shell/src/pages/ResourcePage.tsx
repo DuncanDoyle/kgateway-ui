@@ -6,7 +6,8 @@ import { Link, useParams } from "react-router-dom";
 import { useResource } from "../api/hooks";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
-import { useInstallId } from "../shell/extension";
+import { useInstallId, useVocabulary } from "../shell/extension";
+import { installPath } from "../shell/paths";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 
@@ -132,6 +133,7 @@ interface ResourcePageProps {
 /** Read-only YAML view of one resource. */
 export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
   const id = useInstallId();
+  const vocab = useVocabulary();
   const { group = "-", kind = "", rns = "-", rname = "" } = useParams();
   const ref = { group: group === "-" ? "" : group, kind, namespace: rns === "-" ? undefined : rns, name: rname };
   const { data, error } = useResource(id, ref);
@@ -153,15 +155,14 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
           <>
             {kind} <ResourceName namespace={ref.namespace} name={rname} />
             <br />
-            <BackLink to={`/i/${id}`}>Back to install</BackLink>
+            <BackLink to={installPath(id)}>Back to install</BackLink>
           </>
         }
       />
     );
   // After a first load, other errors keep the YAML on screen under a notice.
   if (!data) {
-    if (error?.status === 503)
-      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error?.status === 503) return <PageState kind="connecting" title={vocab.connecting} message={error.message} />;
     if (error)
       return <PageState kind="error" title="Cannot load resource" message={error.message} copyText={error.message} />;
     return <PageState kind="loading" title="Loading resource…" />;

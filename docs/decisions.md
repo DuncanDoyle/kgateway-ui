@@ -243,3 +243,39 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 **Consequences:**
 - A controller scaled to 0 keeps its Gateways and shows red through KGWUI-005, not an ownership change.
 - Known limit: during a rollout that changes the selectors, old and new Pods carry different scopes, so the scope can switch between them and the verifier may briefly report a mismatch.
+
+## D-016 — Platform neutrality is a design principle (2026-10-20, phase 1)
+**Context:**
+- The product focus stays kgateway (and later downstream distributions) installed on Kubernetes. Standalone is a separate project; UI integration comes later. This decision only keeps that future open.
+- A separate project will run kgateway (controller and Envoy) on hosts without Kubernetes workloads, and the UI should later work on top of it. Two future modes:
+  - **kube-lite**: a local kube-apiserver serves Gateway API and kgateway CRDs and their status, but no Pods, Deployments, Services or EndpointSlices exist. The controller and Envoy are host processes; Gateways use `GatewayParameters.spec.selfManaged`.
+  - **file mode**: no apiserver. Config is a folder of YAML files, status lives in the controller's memory, objects have no UID, `resourceVersion` or `generation`, and the UI may be embedded in the standalone binary.
+- An audit at `c2c52b8` found that the shared object model (`pkg/objects`, `pkg/kinds`), the `Authorizer` and the read-only stance are already neutral. Install identity, readiness, metrics targets, scope, freshness keys, `/meta`, the API v1 install paths and SPA copy assume Kubernetes workloads (design §14.2).
+- The first release (sub-phase 1.4) freezes API v1 paths and SPA URLs. Anything client-visible is cheap to neutralise before it and a breaking change after it.
+- `selfManaged` Gateways exist in Kubernetes mode too. Today each one gets a false KGWUI-006 "Proxy deployment not found" warning.
+
+**Decision:**
+1. Platform neutrality is a design principle with eleven constraints, R1–R11 (design §14.1). Kubernetes is the first platform, not an assumption of core code.
+2. "Core" means object assignment, checks, roll-up, overview, the API handlers and the SPA. Kubernetes workload types (`corev1`, `appsv1`), discovery and client-go live in a **provider**. Today that boundary is the `cache.Snapshot` plus `pkg/install`; making it a real provider interface waits until standalone exists (design §14.4).
+3. Client-visible contracts are neutralised **now**, before the first release (design §14.3):
+   - opaque install IDs;
+   - optional platform-specific fields meaning "not applicable";
+   - a platform plus capability set in `/meta`;
+   - a SPA vocabulary for platform copy.
+   Internal refactors wait. The exception is self-managed proxies, a bug in Kubernetes mode today. The Go extension API is excluded from the first release's compatibility promise until the extension-seam milestone.
+4. **No new hard dependencies.** No new `corev1`/`appsv1` import, Pod or Deployment assumption, or discovery-API dependency enters core code. A per-file import-boundary test enforces the imports, and review checks the semantic assumptions.
+5. **Supersedes part of D-009 §1.** "Resources come from our own Kubernetes watches" becomes the rule *for the Kubernetes and kube-lite providers*. A file-mode provider may get objects and status from the controller, because file mode has no other source. D-009's other rules, D-012 and D-015 are rules of the Kubernetes provider.
+6. **D-014 is the Kubernetes provider's freshness contract.** Other providers state their own. A provider that cannot confirm status matches the current spec cannot report green.
+7. Mirroring controller logic stays a pluggable interim with an upstream ask, including the self-managed detection (design §14.3, H5).
+
+**Alternatives:**
+- Do nothing until standalone is real. Rejected: install IDs, API paths, DTO required fields and the extension `Detector` signature would ship in v1 and need a breaking change later.
+- Build the provider interface and a neutral `Install` now. Rejected: designing it without a second implementation guesses its shape, and it is a large refactor of approved, merged scope.
+- A mode string (`platform: kubernetes|standalone`) the SPA branches on. Rejected: capabilities compose (kube-lite has scope but no workloads) and downstreams can add their own.
+
+**Consequences:**
+- Phase 1 gains a small set of hedges (design §14.3). They change the API v1 install path from `{ns}/{name}` to `{id}`, which is a public interface change before its first release.
+- A self-managed Gateway no longer gets a false "proxy Deployment not found" warning. The UI says it cannot see that proxy's readiness instead, and every observed failure still shows.
+- Later phases design against capabilities, not Kubernetes (design §14.5). Phase 3 "pod health" becomes "process health"; Phase 4 must work with `Backend` and Envoy cluster health alone; Phase 10 authorisation is K8s-only through a capability unless a neutral story exists.
+- What a standalone status source must provide is recorded as requirements for that project, not designed here (design §14.6).
+- User decisions (2026-10-20): the hedges are a new planned sub-phase 1.3, and packaging, CI and e2e become 1.4. Self-managed readiness is info. `Backend` is registered in the Phase 2 design.

@@ -3,9 +3,18 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { POLL_MS } from "../../api/hooks";
-import type { HealthReport, InstallSummary, OverviewResponse } from "../../api/types";
+import type { HealthReport, InstallSummary, OverviewResponse, ScopeSummary } from "../../api/types";
 import { InstallSwitcher } from "../../shell/InstallSwitcher";
-import { healthy, meta, overview, processing, restricted, unhealthy, unknown } from "../../test/fixtures";
+import {
+  healthy,
+  installSummary,
+  meta,
+  overview,
+  processing,
+  restricted,
+  unhealthy,
+  unknown,
+} from "../../test/fixtures";
 import { renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
 
@@ -20,16 +29,18 @@ function Where() {
   return <output data-testid="location">{loc.search}</output>;
 }
 
-function mount(health: HealthReport, path = "/i/kgw/kgateway", ov: OverviewResponse = overview()) {
+function mount(health: HealthReport, path = "/i/kgw.kgateway", ov: OverviewResponse = overview()) {
   stubApi({
-    "/api/v1/installs/kgw/kgateway/overview": ov,
-    "/api/v1/installs/kgw/kgateway/health": health,
+    // Finding rows name the install from the installs list.
+    "/api/v1/installs": [installSummary()],
+    "/api/v1/installs/kgw.kgateway/overview": ov,
+    "/api/v1/installs/kgw.kgateway/health": health,
     "/api/v1/meta": meta,
   });
   return renderWithTheme(
     <>
       <Routes>
-        <Route path="/i/:ns/:name" element={<InstallPage />} />
+        <Route path="/i/:id" element={<InstallPage />} />
       </Routes>
       <Where />
     </>,
@@ -57,7 +68,7 @@ it("unhealthy: strip with counts, top 5 findings, show all", async () => {
   const strip = await screen.findByTestId("health-strip");
   expect(strip).toHaveTextContent("1 error, 6 warnings");
   expect(screen.getAllByTestId("finding-row")).toHaveLength(5);
-  expect(screen.getByRole("link", { name: "Show all 7 findings" })).toHaveAttribute("href", "/i/kgw/kgateway/findings");
+  expect(screen.getByRole("link", { name: "Show all 7 findings" })).toHaveAttribute("href", "/i/kgw.kgateway/findings");
   const first = screen.getAllByTestId("finding-row")[0] as HTMLElement;
   expect(first).toHaveTextContent("Configuration rejected by Envoy");
   expect(first).toHaveTextContent("2 active rejects");
@@ -123,7 +134,7 @@ it("unknown with warnings names the reason, then the warnings", async () => {
 it("served kinds changed: the strip names the check and the finding shows its detail", async () => {
   const t = new Date().toISOString();
   mount({
-    install: "kgw/kgateway",
+    install: "kgw.kgateway",
     state: "unknown",
     counts: { info: 1 },
     collectedAt: t,
@@ -132,7 +143,7 @@ it("served kinds changed: the strip names the check and the finding shows its de
         code: "KGWUI-008",
         slug: "signal-unavailable",
         severity: "info",
-        install: "kgw/kgateway",
+        install: "kgw.kgateway",
         message: "Served kinds changed; restart the UI to watch them",
         detail: "added TLSRoute",
       },
@@ -152,7 +163,8 @@ it("served kinds changed: the strip names the check and the finding shows its de
   const row = screen.getByTestId("finding-row");
   expect(row).toHaveTextContent("Served kinds changed; restart the UI to watch them");
   expect(row).toHaveTextContent("added TLSRoute");
-  expect(row).toHaveTextContent("kgw/kgateway"); // no resource: the install stands in
+  // No resource: the install stands in, named once the installs list loads.
+  await waitFor(() => expect(row).toHaveTextContent("kgw/kgateway"));
 });
 
 // The strip and the gateway rows age into stale on the shared clock, without new data.
@@ -160,7 +172,7 @@ it("a healthy page turns stale as it ages while identical responses keep arrivin
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   const base = Date.parse("2026-10-19T12:00:00Z");
   vi.setSystemTime(base);
-  mount(healthy(base), "/i/kgw/kgateway", overview(base));
+  mount(healthy(base), "/i/kgw.kgateway", overview(base));
   // vi.waitFor polls on real timers, so it works while setInterval is faked.
   await vi.waitFor(() => expect(screen.getByTestId("health-strip")).toHaveTextContent("All healthy"));
   for (const r of gatewayRows()) expect(r).not.toHaveTextContent("Unknown");
@@ -197,7 +209,7 @@ it("tile tooltips name the access problem and the scope source", async () => {
   const ov = overview();
   const denied = ov.counts[3];
   if (denied) denied.access = { ok: false };
-  mount(healthy(), "/i/kgw/kgateway", ov);
+  mount(healthy(), "/i/kgw.kgateway", ov);
   const noAccess = await screen.findByText("No access");
   await userEvent.hover(noAccess);
   expect(screen.getByRole("tooltip")).toHaveTextContent(/^No permission to read this$/);
@@ -208,8 +220,8 @@ it("tile tooltips name the access problem and the scope source", async () => {
 
 it("a selector without labels matches any label", async () => {
   const ov = overview();
-  ov.header.scope = { ...ov.header.scope, selectors: [{}], source: "deployment template" };
-  mount(healthy(), "/i/kgw/kgateway", ov);
+  ov.header.scope = { ...(ov.header.scope as ScopeSummary), selectors: [{}], source: "deployment template" };
+  mount(healthy(), "/i/kgw.kgateway", ov);
   await userEvent.hover(within(await screen.findByTestId("scope-tile")).getByText("12 of 40"));
   expect(screen.getByRole("tooltip")).toHaveTextContent(
     /^Namespaces matching any label\. Source: Deployment template\.$/,
@@ -217,7 +229,7 @@ it("a selector without labels matches any label", async () => {
 });
 
 it("an install without Gateways says so", async () => {
-  mount(healthy(), "/i/kgw/kgateway", { ...overview(), gateways: [] });
+  mount(healthy(), "/i/kgw.kgateway", { ...overview(), gateways: [] });
   expect(await screen.findByText("No Gateways in this install.")).toBeInTheDocument();
 });
 
@@ -245,7 +257,7 @@ it("stale data turns the strip and every gateway row unknown", async () => {
 });
 
 it("stale overview alone also turns the page unknown", async () => {
-  mount(healthy(), "/i/kgw/kgateway", overview(Date.now() - 75_000));
+  mount(healthy(), "/i/kgw.kgateway", overview(Date.now() - 75_000));
   // The age shown is that of the older response.
   expect(await screen.findByTestId("health-strip")).toHaveTextContent("Data is stale. Last checked 1m ago");
 });
@@ -264,15 +276,15 @@ it("count tiles, GatewayClass tile first, no-access tile and scope tile", async 
 
 it("scope tile says when the scope comes from the Deployment template", async () => {
   const ov = overview();
-  ov.header.scope.source = "deployment template";
-  mount(healthy(), "/i/kgw/kgateway", ov);
+  ov.header.scope = { ...(ov.header.scope as ScopeSummary), source: "deployment template" };
+  mount(healthy(), "/i/kgw.kgateway", ov);
   expect(await screen.findByTestId("scope-tile")).toHaveTextContent("Source: Deployment template");
 });
 
 it("scope unknown shows an unknown scope tile", async () => {
   const ov = overview();
   ov.header.scope = { mode: "unknown", error: "uses valueFrom", watched: 0, total: 40 };
-  mount(healthy(), "/i/kgw/kgateway", ov);
+  mount(healthy(), "/i/kgw.kgateway", ov);
   const scope = await screen.findByTestId("scope-tile");
   expect(scope).toHaveTextContent("Unknown");
   expect(within(scope).getByTestId("health-icon-unknown")).toBeInTheDocument();
@@ -289,7 +301,7 @@ it("gateway filter matches name, namespace and class and lives in the URL", asyn
     attachedRoutes: 0,
     addresses: [],
   });
-  mount(healthy(), "/i/kgw/kgateway?q=internal", ov);
+  mount(healthy(), "/i/kgw.kgateway?q=internal", ov);
   const table = await screen.findByRole("table", { name: "Gateways" });
   expect(within(table).getAllByRole("row")).toHaveLength(2); // header + internal
   const filter = screen.getByRole("textbox", { name: "Filter gateways" });
@@ -309,7 +321,7 @@ it("gateway filter matches name, namespace and class and lives in the URL", asyn
 });
 
 it("gateway sort lives in the URL", async () => {
-  mount(healthy(), "/i/kgw/kgateway?sort=routes.asc");
+  mount(healthy(), "/i/kgw.kgateway?sort=routes.asc");
   await screen.findByRole("table", { name: "Gateways" });
   expect(gatewayRows()[0]).toHaveTextContent("internal");
   await userEvent.click(screen.getByRole("button", { name: "Routes" }));
@@ -322,27 +334,27 @@ it("gateway names link to their YAML view", async () => {
   await screen.findByRole("table", { name: "Gateways" });
   expect(within(gatewayRows()[0] as HTMLElement).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
     "href",
-    "/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge",
+    "/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge",
   );
 });
 
 it("links only finding resources whose kind /api/v1/meta lists", async () => {
   stubApi({
-    "/api/v1/installs/kgw/kgateway/overview": overview(),
-    "/api/v1/installs/kgw/kgateway/health": unhealthy(),
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
+    "/api/v1/installs/kgw.kgateway/health": unhealthy(),
     "/api/v1/meta": { ...meta, kinds: meta.kinds.filter((k) => k.kind !== "HTTPRoute") },
   });
   renderWithTheme(
     <Routes>
-      <Route path="/i/:ns/:name" element={<InstallPage />} />
+      <Route path="/i/:id" element={<InstallPage />} />
     </Routes>,
-    { path: "/i/kgw/kgateway" },
+    { path: "/i/kgw.kgateway" },
   );
   const rows = await screen.findAllByTestId("finding-row");
   await waitFor(() =>
     expect(within(rows[0] as HTMLElement).getByRole("link")).toHaveAttribute(
       "href",
-      "/i/kgw/kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge",
+      "/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge",
     ),
   );
   expect(within(rows[1] as HTMLElement).queryByRole("link")).toBeNull(); // HTTPRoute is not listed
@@ -362,7 +374,8 @@ it("switching installs never shows the previous install's data", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
-      if (url.startsWith("/api/v1/installs/b/two/")) return new Promise<Response>(() => {}); // install B never answers
+      if (url.startsWith("/api/v1/installs/b.two/")) return new Promise<Response>(() => {}); // install B never answers
+      if (url === "/api/v1/installs") return new Response(JSON.stringify([installSummary()]), { status: 200 });
       const body = url.endsWith("/overview") ? overview() : url.endsWith("/health") ? unhealthy() : meta;
       return new Response(JSON.stringify(body), { status: 200 });
     }),
@@ -370,11 +383,11 @@ it("switching installs never shows the previous install's data", async () => {
   renderWithTheme(
     <>
       <Routes>
-        <Route path="/i/:ns/:name" element={<InstallPage />} />
+        <Route path="/i/:id" element={<InstallPage />} />
       </Routes>
-      <GoTo to="/i/b/two" />
+      <GoTo to="/i/b.two" />
     </>,
-    { path: "/i/kgw/kgateway" },
+    { path: "/i/kgw.kgateway" },
   );
   expect(await screen.findByTestId("health-strip")).toHaveTextContent("1 error");
   await userEvent.click(screen.getByRole("button", { name: "go" }));
@@ -386,7 +399,7 @@ it("switching installs never shows the previous install's data", async () => {
 
 it("never renders a response that belongs to another install", async () => {
   const ov = overview();
-  mount(healthy(), "/i/kgw/kgateway", { ...ov, header: { ...ov.header, id: "other/install" } });
+  mount(healthy(), "/i/kgw.kgateway", { ...ov, header: { ...ov.header, id: "other.install" } });
   await waitFor(() => expect(screen.getByRole("status", { name: "Loading this install…" })).toBeInTheDocument());
   expect(screen.queryByTestId("health-strip")).toBeNull();
 });
@@ -400,12 +413,30 @@ it("the loading skeleton reserves one tile per served kind plus the scope tile",
   );
   renderWithTheme(
     <Routes>
-      <Route path="/i/:ns/:name" element={<InstallPage />} />
+      <Route path="/i/:id" element={<InstallPage />} />
     </Routes>,
-    { path: "/i/kgw/kgateway" },
+    { path: "/i/kgw.kgateway" },
   );
-  // meta lists 4 countable kinds (Deployment is not counted) + the scope tile.
+  // meta lists 4 countable kinds (Deployment and GatewayParameters are not counted) + the scope tile.
   await waitFor(() => expect(screen.getAllByTestId("tile-shimmer")).toHaveLength(5));
+});
+
+it("the loading skeleton reserves no scope tile where the platform has no scope", async () => {
+  const noScope = { ...meta, capabilities: ["workloads"] };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === "/api/v1/meta" ? new Response(JSON.stringify(noScope), { status: 200 }) : new Promise<Response>(() => {}),
+    ),
+  );
+  renderWithTheme(
+    <Routes>
+      <Route path="/i/:id" element={<InstallPage />} />
+    </Routes>,
+    { path: "/i/kgw.kgateway" },
+  );
+  // 4 countable kinds and no scope tile.
+  await waitFor(() => expect(screen.getAllByTestId("tile-shimmer")).toHaveLength(4));
 });
 
 it("gateway table lists gateways with status text", async () => {
@@ -419,14 +450,14 @@ it("gateway table lists gateways with status text", async () => {
 
 it("API error shows a designed error state", async () => {
   stubApi({
-    "/api/v1/installs/kgw/kgateway/overview": [404, { error: "install kgw/kgateway not found" }],
-    "/api/v1/installs/kgw/kgateway/health": [404, { error: "install kgw/kgateway not found" }],
+    "/api/v1/installs/kgw.kgateway/overview": [404, { error: "install kgw/kgateway not found" }],
+    "/api/v1/installs/kgw.kgateway/health": [404, { error: "install kgw/kgateway not found" }],
   });
   renderWithTheme(
     <Routes>
-      <Route path="/i/:ns/:name" element={<InstallPage />} />
+      <Route path="/i/:id" element={<InstallPage />} />
     </Routes>,
-    { path: "/i/kgw/kgateway" },
+    { path: "/i/kgw.kgateway" },
   );
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("install kgw/kgateway not found"));
 });
@@ -464,7 +495,7 @@ it("a healthy install with info findings links to them", async () => {
   mount(h);
   expect(await screen.findByRole("link", { name: "3 info findings" })).toHaveAttribute(
     "href",
-    "/i/kgw/kgateway/findings",
+    "/i/kgw.kgateway/findings",
   );
 });
 
@@ -484,7 +515,7 @@ it("gateway rows take the worst of their row state and their current health find
       code: "KGWUI-002",
       slug: "condition-false",
       severity: "warning",
-      install: "kgw/kgateway",
+      install: "kgw.kgateway",
       message: "Listener conflicted",
       resource: { group: gw, kind: "Gateway", namespace: "prod", name: "internal" },
     },
@@ -493,7 +524,7 @@ it("gateway rows take the worst of their row state and their current health find
       code: "KGWUI-002",
       slug: "condition-false",
       severity: "error",
-      install: "kgw/kgateway",
+      install: "kgw.kgateway",
       message: "Backend not found",
       resource: { group: gw, kind: "HTTPRoute", namespace: "prod", name: "internal" },
     },
@@ -507,19 +538,19 @@ it("gateway rows take the worst of their row state and their current health find
 
 it("after a first load, a failing poll keeps the page and says so", async () => {
   const routes: Record<string, unknown> = {
-    "/api/v1/installs/kgw/kgateway/overview": overview(),
-    "/api/v1/installs/kgw/kgateway/health": healthy(),
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
+    "/api/v1/installs/kgw.kgateway/health": healthy(),
     "/api/v1/meta": meta,
   };
   stubApi(routes);
   renderWithTheme(
     <Routes>
-      <Route path="/i/:ns/:name" element={<InstallPage />} />
+      <Route path="/i/:id" element={<InstallPage />} />
     </Routes>,
-    { path: "/i/kgw/kgateway" },
+    { path: "/i/kgw.kgateway" },
   );
   await screen.findByTestId("health-strip");
-  routes["/api/v1/installs/kgw/kgateway/health"] = [503, { error: "connecting to cluster: cache not synced" }];
+  routes["/api/v1/installs/kgw.kgateway/health"] = [503, { error: "connecting to cluster: cache not synced" }];
   // SWR refetches on reconnect of a visible page (jsdom reports hidden).
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   act(() => {
@@ -537,14 +568,14 @@ it("after a first load, a failing poll keeps the page and says so", async () => 
 
 it("the install page has an h1 and accepts stylesOverride", async () => {
   stubApi({
-    "/api/v1/installs/kgw/kgateway/overview": overview(),
-    "/api/v1/installs/kgw/kgateway/health": healthy(),
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
+    "/api/v1/installs/kgw.kgateway/health": healthy(),
     "/api/v1/meta": meta,
   });
   renderWithTheme(
     <Routes>
       <Route
-        path="/i/:ns/:name"
+        path="/i/:id"
         element={
           <InstallPage
             stylesOverride={css`
@@ -554,7 +585,7 @@ it("the install page has an h1 and accepts stylesOverride", async () => {
         }
       />
     </Routes>,
-    { path: "/i/kgw/kgateway" },
+    { path: "/i/kgw.kgateway" },
   );
   const h1 = await screen.findByRole("heading", { level: 1 });
   expect(h1).toHaveTextContent("kgw/kgateway");
@@ -594,45 +625,45 @@ const filterBox = () => screen.getByRole("textbox", { name: "Filter gateways" })
 it("switching installs does not carry the gateway filter over", async () => {
   const a = overview();
   const b = overview();
-  b.header = { ...b.header, id: "b/two", namespace: "b", name: "two" };
+  b.header = { ...b.header, id: "b.two", displayName: "b/two", namespace: "b", name: "two" };
   stubApi({
-    "/api/v1/installs/kgw/kgateway/overview": a,
-    "/api/v1/installs/kgw/kgateway/health": healthy(),
-    "/api/v1/installs/b/two/overview": b,
-    "/api/v1/installs/b/two/health": { ...healthy(), install: "b/two" },
+    "/api/v1/installs/kgw.kgateway/overview": a,
+    "/api/v1/installs/kgw.kgateway/health": healthy(),
+    "/api/v1/installs/b.two/overview": b,
+    "/api/v1/installs/b.two/health": { ...healthy(), install: "b.two" },
     "/api/v1/meta": meta,
   });
   renderWithTheme(
     <>
       <InstallSwitcher installs={[summary(a), summary(b)]} currentId="" />
       <Routes>
-        <Route path="/i/:ns/:name" element={<InstallPage />} />
+        <Route path="/i/:id" element={<InstallPage />} />
       </Routes>
       <Path />
     </>,
-    { path: "/i/kgw/kgateway?q=internal" },
+    { path: "/i/kgw.kgateway?q=internal" },
   );
   await screen.findByRole("table", { name: "Gateways" });
   expect(filterBox()).toHaveValue("internal");
   // Visit B, then go back: both installs are cached, so the table stays mounted from here on.
   await switchTo("b/two");
-  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/));
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two$/));
   await screen.findByRole("table", { name: "Gateways" });
   await userEvent.click(screen.getByRole("button", { name: "back" }));
   await waitFor(() => expect(filterBox()).toHaveValue("internal"));
   expect(gatewayRows()).toHaveLength(1);
   await switchTo("b/two");
-  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two/));
-  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/);
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two/));
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two$/);
   expect(filterBox()).toHaveValue("");
   expect(gatewayRows()).toHaveLength(2);
   // Typing on A, then switching, leaves B clean too.
   await switchTo("kgw/kgateway");
-  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/kgw\/kgateway$/));
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/kgw\.kgateway$/));
   await userEvent.type(filterBox(), "edge");
-  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/kgw\/kgateway\?q=edge$/);
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/kgw\.kgateway\?q=edge$/);
   await switchTo("b/two");
-  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two/));
-  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\/two$/);
+  await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two/));
+  expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two$/);
   expect(filterBox()).toHaveValue("");
 });

@@ -1,13 +1,15 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
-import { isLinkable, useMeta } from "../../api/hooks";
+import { isLinkable, useInstalls, useMeta } from "../../api/hooks";
 import type { Finding, Ref } from "../../api/types";
 import { HealthBadge } from "../../health/HealthBadge";
 import { severityLabel, severityToState } from "../../health/state";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
+import { InstallName } from "../../shell/InstallName";
+import { installPath } from "../../shell/paths";
 
 // region Styles
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -73,7 +75,7 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
 // region Helpers
 /** Path of the read-only YAML view of r. */
 export function resourcePath(installId: string, r: Ref): string {
-  return `/i/${installId}/r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
+  return installPath(installId, `r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`);
 }
 
 /** The renderer registered for the longest prefix of code, if any (see ShellExtension.findingRenderers). */
@@ -97,11 +99,15 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
   const { findingRenderers } = useShellExtension();
   const { data: meta } = useMeta();
   const extra = rendererFor(findingRenderers, f.code);
-  const [ins, inn] = f.install.split("/");
+  const { data: installs } = useInstalls();
+  // A finding without a resource is about the install; it is named, never split from its ID.
+  const install = installs?.find((i) => i.id === f.install);
   const name = f.resource ? (
     <ResourceName namespace={f.resource.namespace} name={f.resource.name} />
+  ) : install ? (
+    <InstallName install={install} />
   ) : (
-    <ResourceName namespace={ins} name={inn ?? f.install} />
+    <ResourceName name={f.install} />
   );
   // A restricted finding (D-013) never links: its resource would 404 for this caller.
   const linked = !!f.resource && !f.restricted && isLinkable(meta, f.resource);

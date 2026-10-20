@@ -23,28 +23,35 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
   stubApi({
     "/api/v1/installs": [
       {
-        id: "kgw/kgateway",
+        id: "kgw.kgateway",
+        displayName: "kgw/kgateway",
         namespace: "kgw",
         name: "kgateway",
         version: "9.9.9",
         edition: "acme",
         controllerNames: [],
-        controller: { ready: 1, desired: 1 },
+        readiness: { state: "ready", ready: 1, desired: 1 },
         scope: { mode: "all", watched: 1, total: 1 },
         health: { state: "error", counts: { error: 1 } },
         computedAt: new Date(now).toISOString(),
       },
     ],
-    "/api/v1/meta": { version: "dev", synced: true, kinds: [] },
-    "/api/v1/installs/kgw/kgateway/overview": overview(now),
-    "/api/v1/installs/kgw/kgateway/health": {
+    "/api/v1/meta": {
+      version: "dev",
+      synced: true,
+      platform: "Kubernetes",
+      capabilities: ["scope", "workloads"],
+      kinds: [],
+    },
+    "/api/v1/installs/kgw.kgateway/overview": overview(now),
+    "/api/v1/installs/kgw.kgateway/health": {
       ...unhealthy(now),
       findings: [
-        { code: "ACME-001", slug: "demo", severity: "error", install: "kgw/kgateway", message: "Downstream finding" },
+        { code: "ACME-001", slug: "demo", severity: "error", install: "kgw.kgateway", message: "Downstream finding" },
       ],
     },
   });
-  window.history.pushState({}, "", "/i/kgw/kgateway");
+  window.history.pushState({}, "", "/i/kgw.kgateway");
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
       <Shell
@@ -68,8 +75,8 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
   expect(document.body).toHaveStyle({ fontFamily: "Acme Sans" });
   expect(JSON.parse(localStorage.getItem(THEME_PAINT_KEY) ?? "{}")).toEqual({ bg: "#101820", scheme: "dark" });
   // The nav entry links to the contributed page, which renders on navigation.
-  expect(screen.getByRole("link", { name: "Widgets" })).toHaveAttribute("href", "/i/kgw/kgateway/widgets");
-  window.history.pushState({}, "", "/i/kgw/kgateway/widgets");
+  expect(screen.getByRole("link", { name: "Widgets" })).toHaveAttribute("href", "/i/kgw.kgateway/widgets");
+  window.history.pushState({}, "", "/i/kgw.kgateway/widgets");
   window.dispatchEvent(new PopStateEvent("popstate"));
   await waitFor(() => expect(screen.getByText("widgets page")).toBeInTheDocument());
 });

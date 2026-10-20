@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,11 +23,13 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -155,7 +158,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	var h api.HealthResponse
 	eventually(t, "downstream check finding missing", func() bool {
 		h = api.HealthResponse{}
-		getJSON(t, srv, "/api/v1/installs/acme-system/controller/health", &h)
+		getJSON(t, srv, "/api/v1/installs/acme-system.controller/health", &h)
 		for _, f := range h.Findings {
 			if f.Code == "ACME-001" {
 				return true
@@ -164,7 +167,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 		return false
 	})
 	var o api.OverviewResponse
-	getJSON(t, srv, "/api/v1/installs/acme-system/controller/overview", &o)
+	getJSON(t, srv, "/api/v1/installs/acme-system.controller/overview", &o)
 	// The kind is registered twice; it is watched and counted once.
 	tiles := 0
 	for _, c := range o.Counts {
@@ -178,7 +181,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	if tiles != 1 {
 		t.Fatalf("want one WidgetPolicy tile, got %d: %+v", tiles, o.Counts)
 	}
-	base := "/api/v1/installs/acme-system/controller/resources/widgets.acme.example.com/WidgetPolicy/shop/"
+	base := "/api/v1/installs/acme-system.controller/resources/widgets.acme.example.com/WidgetPolicy/shop/"
 	if code := getJSON(t, srv, base+"widget", nil); code != http.StatusOK {
 		t.Fatalf("an allowed downstream resource must be served, got %d", code)
 	}
@@ -208,7 +211,7 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 	var h api.HealthResponse
 	eventually(t, "health never settled", func() bool {
 		h = api.HealthResponse{}
-		return getJSON(t, srv, "/api/v1/installs/kgw/kgateway/health", &h) == http.StatusOK && len(h.Findings) > 0 && h.State == health.StateError
+		return getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h) == http.StatusOK && len(h.Findings) > 0 && h.State == health.StateError
 	})
 	var restricted *health.Finding
 	for i := range h.Findings {
@@ -223,14 +226,14 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 	if h.State != health.StateError || h.Counts[health.SeverityError] < 1 {
 		t.Fatalf("the roll-up must still cover the restricted finding: state=%s counts=%v", h.State, h.Counts)
 	}
-	if code := getJSON(t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/broken", nil); code != http.StatusNotFound {
+	if code := getJSON(t, srv, "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/broken", nil); code != http.StatusNotFound {
 		t.Fatalf("a denied resource must 404, got %d", code)
 	}
-	if code := getJSON(t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart", nil); code != http.StatusOK {
+	if code := getJSON(t, srv, "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart", nil); code != http.StatusOK {
 		t.Fatalf("an allowed resource must be served, got %d", code)
 	}
 	var o api.OverviewResponse
-	getJSON(t, srv, "/api/v1/installs/kgw/kgateway/overview", &o)
+	getJSON(t, srv, "/api/v1/installs/kgw.kgateway/overview", &o)
 	tile := false
 	for _, c := range o.Counts {
 		if c.Kind == "HTTPRoute" {
@@ -253,7 +256,7 @@ func TestFirstMetricsCollectionFollowsDiscovery(t *testing.T) {
 	a, _ := start(t, []runtime.Object{testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true)}, nil,
 		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, sc)
 	eventually(t, "the controller was never scraped after discovery", func() bool { return sc.calls.Load() > 0 })
-	eventually(t, "no metrics result for the install", func() bool { _, ok := a.collector.Get("kgw/kgateway"); return ok })
+	eventually(t, "no metrics result for the install", func() bool { _, ok := a.collector.Get("kgw.kgateway"); return ok })
 }
 
 // The scope verifier must wait 2 × and metrics expire after 3 × the metrics
@@ -393,7 +396,7 @@ func TestDownstreamSelectorScopeSeam(t *testing.T) {
 	var o api.OverviewResponse
 	eventually(t, "overview never appeared", func() bool {
 		o = api.OverviewResponse{}
-		return getJSON(t, srv, "/api/v1/installs/kgw/kgateway/overview", &o) == http.StatusOK
+		return getJSON(t, srv, "/api/v1/installs/kgw.kgateway/overview", &o) == http.StatusOK
 	})
 	if o.Header.Scope.Watched != 2 || o.Header.Scope.Total != 4 {
 		t.Fatalf("a downstream selector scope must match team=a namespaces: %+v", o.Header.Scope)
@@ -429,7 +432,7 @@ func TestDownstreamProxySelectorSeam(t *testing.T) {
 	var h api.HealthResponse
 	eventually(t, "the downstream proxy was never matched", func() bool {
 		h = api.HealthResponse{}
-		getJSON(t, srv, "/api/v1/installs/acme-system/controller/health", &h)
+		getJSON(t, srv, "/api/v1/installs/acme-system.controller/health", &h)
 		for _, f := range h.Findings {
 			if f.Code == health.CodeProxyNotReady && f.Resource != nil && f.Resource.String() == "infra/edge" && f.Message == "Proxy not ready (1 of 2 replicas)" {
 				return true
@@ -512,7 +515,7 @@ func TestServedKindChangesAfterStartAreReported(t *testing.T) {
 			t.Cleanup(srv.Close)
 			report := func() api.HealthResponse {
 				var h api.HealthResponse
-				getJSON(t, srv, "/api/v1/installs/kgw/kgateway/health", &h)
+				getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h)
 				return h
 			}
 			eventually(t, "the served-kinds check never ran", func() bool { _, c := kindsFinding(report()); return c != nil && c.OK })
@@ -529,4 +532,55 @@ func TestServedKindChangesAfterStartAreReported(t *testing.T) {
 			eventually(t, "the finding must clear once the served set matches again", func() bool { f, c := kindsFinding(report()); return f == nil && c != nil && c.OK })
 		})
 	}
+}
+
+// --install takes the install ID or the namespace/name form and pins the same
+// install either way (D-016); anything else fails at startup.
+func TestPinnedFlagAcceptsIDOrNamespaceName(t *testing.T) {
+	const image = "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7"
+	d1, d2 := testutil.ControllerDeployment("kgw", "kgateway", image, 1, 1), testutil.ControllerDeployment("kgw2", "kgateway2", image, 1, 1)
+	objs := []runtime.Object{testutil.Namespace("kgw", nil), testutil.Namespace("kgw2", nil), d1, d2,
+		testutil.ControllerPod(d1, "kgateway-0", true), testutil.ControllerPod(d2, "kgateway2-0", true)}
+	for _, pin := range []string{"kgw/kgateway", "kgw.kgateway"} {
+		t.Run(pin, func(t *testing.T) {
+			_, srv := start(t, objs, nil, Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, Pinned: pin}, &stubScraper{})
+			var insts []api.InstallSummary
+			eventually(t, "the pinned install was never listed alone", func() bool {
+				return getJSON(t, srv, "/api/v1/installs", &insts) == http.StatusOK && len(insts) == 1 && insts[0].ID == "kgw.kgateway"
+			})
+			var meta api.MetaResponse
+			if getJSON(t, srv, "/api/v1/meta", &meta); meta.Pinned != "kgw.kgateway" {
+				t.Fatalf("meta must report the normalised pin, got %q", meta.Pinned)
+			}
+		})
+	}
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	for _, bad := range []string{"a/b/c", "kgw/", "/kgateway", "..", "a%b"} {
+		if _, err := Build(c, Options{PollInterval: time.Second, MetricsInterval: time.Second, UI: ui, Pinned: bad}, extension.New()); err == nil {
+			t.Errorf("--install %q must fail at startup", bad)
+		}
+	}
+}
+
+type alwaysSelfManaged struct{}
+
+func (alwaysSelfManaged) Resolve(*unstructured.Unstructured, *cache.Snapshot, []kinds.Served) proxymode.Mode {
+	return proxymode.SelfManaged
+}
+
+// A downstream replaces the self-managed resolution through pkg/extension,
+// because it mirrors controller logic (D-016 decision 7).
+func TestDownstreamProxyModeResolverSeam(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	_, srv := start(t, []runtime.Object{testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d, testutil.ControllerPod(d, "kgateway-0", true),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil)},
+		nil, Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{}, extension.WithProxyModeResolver(alwaysSelfManaged{}))
+	eventually(t, "the downstream resolver was not used", func() bool {
+		var h api.HealthResponse
+		if getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h) != http.StatusOK {
+			return false
+		}
+		return slices.ContainsFunc(h.Findings, func(f health.Finding) bool { return f.Code == health.CodeSelfManagedProxy })
+	})
 }

@@ -1,12 +1,17 @@
 package api
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -14,6 +19,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +41,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -58,7 +65,7 @@ func okMetrics(ids ...string) fakeMetrics {
 type setup struct {
 	served    []kinds.Served     // nil: every upstream kind
 	pinned    string             // pinned install ID
-	metrics   ctrlmetrics.Source // nil: okMetrics("kgw/kgateway")
+	metrics   ctrlmetrics.Source // nil: okMetrics("kgw.kgateway")
 	immediate bool               // report scope mismatches on the second computation (persistence 0, not 1 h)
 	authz     Authorizer         // nil: AllowAll
 	// prepare runs on the fake clients before the cache starts (failure injection).
@@ -66,6 +73,12 @@ type setup struct {
 	// late objects are created after the engine has first seen the rest, so their
 	// generation is first seen at testutil.Now: inside the grace period.
 	late []*unstructured.Unstructured
+	// detectors replace the upstream detector; nil keeps it.
+	detectors []install.Detector
+	// platform is the engine's platform; zero is Kubernetes.
+	platform platform.Info
+	// logger receives install rejections; nil is slog.Default().
+	logger *slog.Logger
 }
 
 // harness is a running cache, engine and handler over fake clients, with the
@@ -95,7 +108,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		s.served = testutil.ServedUpstream()
 	}
 	if s.metrics == nil {
-		s.metrics = okMetrics("kgw/kgateway")
+		s.metrics = okMetrics("kgw.kgateway")
 	}
 	persist := time.Hour
 	if s.immediate {
@@ -106,17 +119,24 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if s.prepare != nil {
 		s.prepare(fd, kube)
 	}
-	det := install.UpstreamDetector{}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served,
-		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
+	dets := s.detectors
+	if dets == nil {
+		dets = []install.Detector{install.UpstreamDetector{}}
+	}
+	var podSel, depSel []labels.Selector
+	for _, d := range dets {
+		podSel = append(podSel, d.ControllerPodSelector())
+		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
+	}
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
 	clk := &clock{}
 	clk.set(testutil.Now.Add(-health.Grace - time.Second))
-	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: []install.Detector{det}, Scope: install.NamespaceSelectorScope{},
+	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: clk.now})
+		MetricsMaxAge: 30 * time.Second, Now: clk.now, Platform: s.platform, Logger: s.logger})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -198,7 +218,7 @@ func get[T any](t *testing.T, srv *httptest.Server, path string, wantStatus int)
 	return v
 }
 
-// world: install kgw/kgateway scoped to team=a; infra and shop are watched, blog is not.
+// world: install kgw.kgateway scoped to team=a; infra and shop are watched, blog is not.
 func world(extra ...runtime.Object) []runtime.Object { return worldWith(1, 1, extra...) }
 
 // worldWith is world with the number of ready controller and proxy replicas (of 1).
@@ -241,19 +261,19 @@ func hasFinding(h HealthResponse, code, res string) bool {
 }
 
 func TestOverviewCountsOnlyWhatTheInstallManages(t *testing.T) {
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), world()...)
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world()...)
 	insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
-	if len(insts) != 1 || insts[0].ID != "kgw/kgateway" || insts[0].Version != "2.4.7" {
+	if len(insts) != 1 || insts[0].ID != "kgw.kgateway" || insts[0].Version != "2.4.7" {
 		t.Fatalf("installs: %+v", insts)
 	}
-	if insts[0].Controller != (overview.ReadyCount{Ready: 1, Desired: 1}) {
-		t.Errorf("controller readiness: %+v", insts[0].Controller)
+	if r := insts[0].Readiness; r.State != overview.ReadinessReady || *r.Ready != 1 || *r.Desired != 1 {
+		t.Errorf("controller readiness: %+v", r)
 	}
 	if !insts[0].ComputedAt.Equal(testutil.Now) {
 		t.Errorf("installs must carry the model's computation time, got %s", insts[0].ComputedAt)
 	}
-	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
-	if o.Header.ID != "kgw/kgateway" {
+	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
+	if o.Header.ID != "kgw.kgateway" {
 		t.Errorf("overview must carry the install id, got %q", o.Header.ID)
 	}
 	if n, ok := count(o, "GatewayClass"); !ok || n != 1 {
@@ -268,16 +288,16 @@ func TestOverviewCountsOnlyWhatTheInstallManages(t *testing.T) {
 	if o.Header.Scope.Watched != 2 || o.Header.Scope.Total != 4 {
 		t.Errorf("scope watched/total: %+v", o.Header.Scope)
 	}
-	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
-	if !hasFinding(h, health.CodeNamespaceNotWatched, "blog/posts") || h.State != health.StateWarning || h.Install != "kgw/kgateway" {
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	if !hasFinding(h, health.CodeNamespaceNotWatched, "blog/posts") || h.State != health.StateWarning || h.Install != "kgw.kgateway" {
 		t.Fatalf("health: %+v", h)
 	}
 }
 
 func TestMetricsUnreachableIsNeverHealthy(t *testing.T) {
-	m := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Err: "dial tcp: connection refused"}}
+	m := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Err: "dial tcp: connection refused"}}
 	_, srv, _ := start(t, testutil.ServedUpstream(), "", m, world()[:len(world())-1]...) // without blog/posts
-	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	if h.State != health.StateUnknown || !hasFinding(h, health.CodeSignalUnavailable, "") {
 		t.Fatalf("want unknown with signal-unavailable, got %s %+v", h.State, h.Findings)
 	}
@@ -287,7 +307,7 @@ func TestMetricsUnreachableIsNeverHealthy(t *testing.T) {
 // scrape without that family while the install owns a Gateway is the wrong
 // endpoint or a renamed metric: xDS rejects are unavailable, not zero.
 func TestScrapeWithoutManagedFamilyIsNeverHealthy(t *testing.T) {
-	empty := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+	empty := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
 		Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}}}}
 	xds := func(h HealthResponse) *health.CheckResult {
 		for i := range h.Checks {
@@ -299,7 +319,7 @@ func TestScrapeWithoutManagedFamilyIsNeverHealthy(t *testing.T) {
 		return nil
 	}
 	_, srv, _ := start(t, testutil.ServedUpstream(), "", empty, isolated()...)
-	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	if c := xds(h); h.State != health.StateUnknown || c.OK || !c.Required || !hasSev(h, health.CodeSignalUnavailable, health.SeverityInfo, "") {
 		t.Fatalf("an owned Gateway without a managed series must make xDS unavailable: %s %+v %+v", h.State, c, h.Findings)
 	}
@@ -307,7 +327,7 @@ func TestScrapeWithoutManagedFamilyIsNeverHealthy(t *testing.T) {
 	// Without owned Gateways an absent family is expected: no series yet.
 	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1)
 	_, bare, _ := start(t, testutil.ServedUpstream(), "", empty, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
-	h = get[HealthResponse](t, bare, "/api/v1/installs/kgw/kgateway/health", 200)
+	h = get[HealthResponse](t, bare, "/api/v1/installs/kgw.kgateway/health", 200)
 	if c := xds(h); h.State != health.StateHealthy || !c.OK {
 		t.Fatalf("no owned Gateway: an absent family is not an error: %s %+v %+v", h.State, c, h.Findings)
 	}
@@ -323,42 +343,42 @@ func TestUnservedKindHasNoTileAndNoFinding(t *testing.T) {
 	// Without status this route would be KGWUI-003 if TCPRoute were served.
 	tcp := testutil.HTTPRoute("shop", "db", []objects.ParentRef{testutil.GwRef("infra", "edge")})
 	tcp.SetKind("TCPRoute")
-	_, srv, _ := start(t, served, "", okMetrics("kgw/kgateway"), world(tcp)...)
-	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
+	_, srv, _ := start(t, served, "", okMetrics("kgw.kgateway"), world(tcp)...)
+	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
 	if _, ok := count(o, "TCPRoute"); ok {
 		t.Fatal("an unserved kind must not have a tile")
 	}
-	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	for _, f := range h.Findings {
 		if f.Resource != nil && f.Resource.Kind == "TCPRoute" {
 			t.Fatalf("an unserved kind must not produce a finding: %+v", f)
 		}
 	}
-	get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/gateway.networking.k8s.io/TCPRoute/shop/db", 404)
+	get[map[string]any](t, srv, "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/TCPRoute/shop/db", 404)
 }
 
 func TestOverlappingInstallsAndPinning(t *testing.T) {
 	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, "[]"))
 	objs := world(testutil.Namespace("kgw2", nil), d2, testutil.ControllerPod(d2, "kgateway2-0", true))
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway", "kgw2/kgateway2"), objs...)
-	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw2/kgateway2/health", 200)
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway", "kgw2.kgateway2"), objs...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw2.kgateway2/health", 200)
 	if !hasFinding(h, health.CodeAmbiguousOwnership, "infra/edge") {
 		t.Fatalf("overlapping scopes must report ambiguous ownership: %+v", h.Findings)
 	}
-	_, pinned, _ := start(t, testutil.ServedUpstream(), "kgw/kgateway", okMetrics("kgw/kgateway", "kgw2/kgateway2"), objs...)
-	if insts := get[[]InstallSummary](t, pinned, "/api/v1/installs", 200); len(insts) != 1 || insts[0].ID != "kgw/kgateway" {
+	_, pinned, _ := start(t, testutil.ServedUpstream(), "kgw.kgateway", okMetrics("kgw.kgateway", "kgw2.kgateway2"), objs...)
+	if insts := get[[]InstallSummary](t, pinned, "/api/v1/installs", 200); len(insts) != 1 || insts[0].ID != "kgw.kgateway" {
 		t.Fatalf("pinned: %+v", insts)
 	}
-	get[HealthResponse](t, pinned, "/api/v1/installs/kgw2/kgateway2/health", 404)
+	get[HealthResponse](t, pinned, "/api/v1/installs/kgw2.kgateway2/health", 404)
 }
 
 func TestNamespaceLabelChangeUpdatesScopeWithoutRestart(t *testing.T) {
-	e, srv, update := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), world()...)
+	e, srv, update := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world()...)
 	update(testutil.Namespace("blog", map[string]string{"team": "a"}))
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		e.Compute()
-		o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
+		o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
 		if n, _ := count(o, "HTTPRoute"); n == 2 {
 			return
 		}
@@ -372,8 +392,8 @@ func TestNamespaceLabelChangeUpdatesScopeWithoutRestart(t *testing.T) {
 // Owned objects and objects referenced by a current finding are
 // served (only managedFields stripped); anything else is 404.
 func TestResourceEndpoint(t *testing.T) {
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), world()...)
-	const base = "/api/v1/installs/kgw/kgateway/resources/"
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world()...)
+	const base = "/api/v1/installs/kgw.kgateway/resources/"
 	r := get[map[string]any](t, srv, base+"gateway.networking.k8s.io/HTTPRoute/shop/cart", 200)
 	if md, _ := r["metadata"].(map[string]any); md["managedFields"] != nil || md["name"] != "cart" {
 		t.Fatalf("unexpected object: %+v", r["metadata"])
@@ -395,8 +415,8 @@ func TestResourceEndpoint(t *testing.T) {
 
 // The controller Deployment referenced by KGWUI-005 is served.
 func TestResourceEndpointServesReferencedDeployment(t *testing.T) {
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), worldWith(0, 1)...)
-	r := get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway/resources/apps/Deployment/kgw/kgateway", 200)
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), worldWith(0, 1)...)
+	r := get[map[string]any](t, srv, "/api/v1/installs/kgw.kgateway/resources/apps/Deployment/kgw/kgateway", 200)
 	md, _ := r["metadata"].(map[string]any)
 	if r["kind"] != "Deployment" || r["apiVersion"] != "apps/v1" || md["name"] != "kgateway" || md["managedFields"] != nil {
 		t.Fatalf("unexpected object: kind=%v apiVersion=%v metadata=%+v", r["kind"], r["apiVersion"], md)
@@ -408,11 +428,11 @@ func TestResourceEndpointServesReferencedDeployment(t *testing.T) {
 // policies without ancestors, stale metrics and routes to a missing Gateway.
 func TestEveryFindingCodeAtTheAPI(t *testing.T) {
 	gw := testutil.GwRef("infra", "edge")
-	rejects := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+	rejects := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
 		Rejects: map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}}
-	mismatch := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+	mismatch := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
 		Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "HTTPRoute"}: 5}, ManagedPresent: true}}}
-	old := fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now.Add(-10 * time.Minute), Metrics: ctrlmetrics.Metrics{
+	old := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now.Add(-10 * time.Minute), Metrics: ctrlmetrics.Metrics{
 		Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}}
 	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
 		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
@@ -449,10 +469,10 @@ func TestEveryFindingCodeAtTheAPI(t *testing.T) {
 		{"006 proxy ready", setup{}, world(), false, health.CodeProxyNotReady, "", false, ""},
 		{"007 persistent mismatch", setup{metrics: mismatch, immediate: true}, world(), true, health.CodeScopeMismatch, "", true, ""},
 		{"007 fresh mismatch", setup{metrics: mismatch}, world(), true, health.CodeScopeMismatch, "", false, ""},
-		{"008 metrics unreachable", setup{metrics: fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Err: "connection refused"}}}, world(), false, health.CodeSignalUnavailable, "", true, health.StateUnknown},
+		{"008 metrics unreachable", setup{metrics: fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Err: "connection refused"}}}, world(), false, health.CodeSignalUnavailable, "", true, health.StateUnknown},
 		{"008 stale metrics", setup{metrics: old}, world(), false, health.CodeSignalUnavailable, "", true, health.StateUnknown},
 		{"008 every signal available", setup{}, world(), false, health.CodeSignalUnavailable, "", false, ""},
-		{"009 overlapping installs", setup{metrics: okMetrics("kgw/kgateway", "kgw2/kgateway2")}, overlap, false, health.CodeAmbiguousOwnership, "infra/edge", true, ""},
+		{"009 overlapping installs", setup{metrics: okMetrics("kgw.kgateway", "kgw2.kgateway2")}, overlap, false, health.CodeAmbiguousOwnership, "infra/edge", true, ""},
 		{"009 single install", setup{}, world(), false, health.CodeAmbiguousOwnership, "", false, ""},
 	}
 	for _, tc := range cases {
@@ -461,7 +481,7 @@ func TestEveryFindingCodeAtTheAPI(t *testing.T) {
 			if tc.recompute {
 				e.Compute()
 			}
-			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 			if hasFinding(h, tc.code, tc.res) != tc.present {
 				t.Fatalf("%s on %q: want present=%v; findings: %+v", tc.code, tc.res, tc.present, h.Findings)
 			}
@@ -557,13 +577,13 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 		// A route owned through one parent counts; its missing parent still raises KGWUI-003.
 		{"one parent owned, one missing", setup{}, isolated(testutil.HTTPRoute("shop", "half", []objects.ParentRef{gw, testutil.GwRef("infra", "gone")}, testutil.AcceptedBy(gw, testutil.Controller))),
 			health.StateWarning, &expect{health.CodeRouteUnattached, health.SeverityWarning, "shop/half"}, []expect{{health.CodeConditionFalse, "", "shop/half"}}, map[string]int{"HTTPRoute": 2}},
-		{"parent status of another install", setup{metrics: okMetrics("kgw/kgateway", "kgw2/kgateway2")}, twoInstalls,
+		{"parent status of another install", setup{metrics: okMetrics("kgw.kgateway", "kgw2.kgateway2")}, twoInstalls,
 			health.StateHealthy, nil, []expect{{health.CodeConditionFalse, "", "shop/both"}, {health.CodeRouteUnattached, "", "shop/both"}}, map[string]int{"HTTPRoute": 2, "Gateway": 1}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, srv, _ := startWith(t, tc.s, tc.objs...)
-			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 			if h.State != tc.state {
 				t.Fatalf("state: want %s, got %s; findings: %+v", tc.state, h.State, h.Findings)
 			}
@@ -575,7 +595,7 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
 				}
 			}
-			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
+			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
 			for kind, n := range tc.counts {
 				if got, _ := count(o, kind); got != n {
 					t.Errorf("%s count: want %d, got %d", kind, n, got)
@@ -640,7 +660,7 @@ func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 			}}, isolated()...)
 			state := func() health.State {
 				hn.e.Compute()
-				return get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200).State
+				return get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw.kgateway/health", 200).State
 			}
 			if s := state(); s != health.StateHealthy {
 				t.Fatalf("baseline must be healthy, got %s", s)
@@ -653,7 +673,7 @@ func TestWatchFailuresAfterSyncAtTheAPI(t *testing.T) {
 				w.Stop() // the established watch ends; the next Watch call fails
 			}
 			waitUntil(t, "the install to become unknown", func() bool { return state() == health.StateUnknown })
-			h := get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw/kgateway/health", 200)
+			h := get[HealthResponse](t, hn.srv, "/api/v1/installs/kgw.kgateway/health", 200)
 			if !hasSev(h, health.CodeSignalUnavailable, health.SeverityInfo, "") {
 				t.Fatalf("KGWUI-008 missing: %+v", h.Findings)
 			}
@@ -686,8 +706,8 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 }
 
 func TestSPAFallbackAndProbes(t *testing.T) {
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), world()...)
-	for _, p := range []string{"/", "/i/kgw/kgateway", "/i/kgw/kgateway/findings", "/healthz", "/readyz"} {
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world()...)
+	for _, p := range []string{"/", "/i/kgw.kgateway", "/i/kgw.kgateway/findings", "/healthz", "/readyz"} {
 		resp, err := http.Get(srv.URL + p)
 		if err != nil {
 			t.Fatal(err)
@@ -710,9 +730,9 @@ func TestAuthorizerRestrictsDeniedObjects(t *testing.T) {
 		return ref.Namespace == "shop" || (ref.Kind == "Gateway" && ref.Name == "edge")
 	}
 	authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return !denied(ref) })
-	_, all, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw/kgateway"), world(broken)...)
+	_, all, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world(broken)...)
 	_, some, _ := startWith(t, setup{authz: authz}, world(broken)...)
-	const base = "/api/v1/installs/kgw/kgateway"
+	const base = "/api/v1/installs/kgw.kgateway"
 
 	full := get[HealthResponse](t, all, base+"/health", 200)
 	part := get[HealthResponse](t, some, base+"/health", 200)
@@ -773,7 +793,7 @@ func TestAuthorizerRestrictsDeniedObjects(t *testing.T) {
 func TestNotSyncedIsServiceUnavailable(t *testing.T) {
 	srv := httptest.NewServer(NewHandler(staticModel{&engine.Model{Snapshot: &cache.Snapshot{}}}, fstest.MapFS{}, nil))
 	t.Cleanup(srv.Close)
-	for _, p := range []string{"/api/v1/installs", "/api/v1/installs/kgw/kgateway/health", "/readyz"} {
+	for _, p := range []string{"/api/v1/installs", "/api/v1/installs/kgw.kgateway/health", "/readyz"} {
 		get[map[string]any](t, srv, p, http.StatusServiceUnavailable)
 	}
 	nilSrv := httptest.NewServer(NewHandler(staticModel{}, fstest.MapFS{}, nil))
@@ -788,6 +808,8 @@ type staticModel struct{ m *engine.Model }
 
 func (s staticModel) Current() *engine.Model { return s.m }
 
+func (staticModel) Platform() platform.Info { return platform.Kubernetes() }
+
 // A controller scaled to zero has no Pod; the scope comes from the Deployment
 // template, its Gateways stay owned and KGWUI-005 reports it is not ready.
 func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
@@ -797,8 +819,8 @@ func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
 			objs = append(objs, o)
 		}
 	}
-	_, srv, _ := start(t, testutil.ServedUpstream(), "", fakeMetrics{"kgw/kgateway": {CollectedAt: testutil.Now, Err: "no ready controller pod to scrape"}}, objs...)
-	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw/kgateway/overview", 200)
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Err: "no ready controller pod to scrape"}}, objs...)
+	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
 	sc := o.Header.Scope
 	if sc.Mode != string(install.ScopeSelectors) || sc.Source != install.SourceDeploymentTemplate || sc.Watched != 2 {
 		t.Fatalf("scope must come from the template: %+v", sc)
@@ -806,7 +828,7 @@ func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
 	if n, _ := count(o, "Gateway"); n != 1 {
 		t.Errorf("Gateways: want 1 still owned, got %d", n)
 	}
-	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw/kgateway/health", 200)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	if !hasFinding(h, health.CodeControllerNotReady, "kgw/kgateway") || h.State != health.StateError {
 		t.Fatalf("want KGWUI-005 and error state, not a false green: %s %+v", h.State, h.Findings)
 	}
@@ -821,5 +843,284 @@ func TestScaledToZeroControllerKeepsScopeFromTemplate(t *testing.T) {
 	}
 	if !strings.Contains(detail, "Deployment template") {
 		t.Errorf("scope check must say where the scope came from, got %q", detail)
+	}
+}
+
+// idDetector is the upstream detector reporting a provider-chosen install ID
+// and no namespace or name, as a non-Kubernetes provider would (D-016).
+type idDetector struct {
+	install.UpstreamDetector
+	id string
+}
+
+// Detect implements install.Detector.
+func (d idDetector) Detect(dep *appsv1.Deployment) (install.Install, bool) {
+	in, ok := d.UpstreamDetector.Detect(dep)
+	in.CustomID, in.DisplayName, in.Namespace, in.Name = d.id, "Edge one", "", ""
+	return in, ok
+}
+
+func isDeployment(k kinds.Served) bool { return k.Group == "apps" && k.Kind == "Deployment" }
+
+// H1: an install ID is one opaque path segment. The Kubernetes ID and a
+// provider ID with ~ and _ resolve on every endpoint, a percent-encoded ID
+// reaches the same install, and the old two-segment path resolves to nothing.
+func TestOpaqueInstallIDsAtTheAPI(t *testing.T) {
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world()...)
+	insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
+	if len(insts) != 1 || insts[0].ID != "kgw.kgateway" || insts[0].DisplayName != "kgw/kgateway" || insts[0].Namespace != "kgw" || insts[0].Name != "kgateway" {
+		t.Fatalf("installs: %+v", insts)
+	}
+	for _, p := range []string{"/overview", "/health", "/resources/gateway.networking.k8s.io/Gateway/infra/edge"} {
+		get[map[string]any](t, srv, "/api/v1/installs/kgw.kgateway"+p, 200)
+		get[map[string]any](t, srv, "/api/v1/installs/kgw/kgateway"+p, 404)
+	}
+
+	_, csrv, _ := startWith(t, setup{detectors: []install.Detector{idDetector{id: "acme~edge_1"}}, metrics: okMetrics("acme~edge_1")}, world()...)
+	h := get[HealthResponse](t, csrv, "/api/v1/installs/acme~edge_1/health", 200)
+	if h.Install != "acme~edge_1" || !hasFinding(h, health.CodeNamespaceNotWatched, "blog/posts") {
+		t.Fatalf("custom ID health: %+v", h)
+	}
+	if o := get[OverviewResponse](t, csrv, "/api/v1/installs/acme%7Eedge_1/overview", 200); o.Header.ID != "acme~edge_1" {
+		t.Fatalf("a percent-encoded ID must reach the same install: %+v", o.Header)
+	}
+	get[map[string]any](t, csrv, "/api/v1/installs/acme~edge_1/resources/gateway.networking.k8s.io/Gateway/infra/edge", 200)
+}
+
+// H1: a provider ID outside the URL-unreserved set, or a dot segment, is
+// rejected. Installs are discovered at runtime, so it cannot fail startup: the
+// install is left out, the rejection is logged once (not on every recompute),
+// and /readyz is 503 naming the detector and the raw ID.
+func TestInvalidInstallIDsAreRejected(t *testing.T) {
+	for _, id := range []string{"a/b", "50%", ".", ".."} {
+		t.Run(id, func(t *testing.T) {
+			var logs bytes.Buffer
+			e, srv, _ := startWith(t, setup{detectors: []install.Detector{idDetector{id: id}}, logger: slog.New(slog.NewTextHandler(&logs, nil))}, world()...)
+			e.Compute()
+			if insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200); len(insts) != 0 {
+				t.Fatalf("an invalid ID must not be served: %+v", insts)
+			}
+			if n := strings.Count(logs.String(), "install rejected"); n != 1 {
+				t.Fatalf("want exactly one rejection log across repeated computations, got %d:\n%s", n, logs.String())
+			}
+			if !strings.Contains(logs.String(), "Deployment kgw/kgateway") {
+				t.Fatalf("the rejection must name the Deployment:\n%s", logs.String())
+			}
+			resp, err := http.Get(srv.URL + "/readyz")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			var body ErrorResponse
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("/readyz: status %d, body %+v, %v", resp.StatusCode, body, err)
+			}
+			if !strings.Contains(body.Error, "detector kgateway") || !strings.Contains(body.Error, strconv.Quote(id)) {
+				t.Fatalf("/readyz must name the detector and the raw ID %s: %q", strconv.Quote(id), body.Error)
+			}
+		})
+	}
+}
+
+// H2 and H3: a platform without scope or workloads, and an install without a
+// namespace or name, give JSON without those fields and a readiness that says
+// "not observed" (D-016).
+func TestPlatformWithoutScopeOrWorkloadsAtTheAPI(t *testing.T) {
+	s := setup{detectors: []install.Detector{idDetector{id: "acme~edge_1"}}, metrics: okMetrics("acme~edge_1"), platform: platform.Info{Name: "Test"}}
+	_, srv, _ := startWith(t, s, world()...)
+	insts := get[[]map[string]any](t, srv, "/api/v1/installs", 200)
+	if len(insts) != 1 {
+		t.Fatalf("installs: %+v", insts)
+	}
+	hd := get[map[string]any](t, srv, "/api/v1/installs/acme~edge_1/overview", 200)["header"].(map[string]any)
+	for what, obj := range map[string]map[string]any{"install": insts[0], "header": hd} {
+		for _, k := range []string{"namespace", "name", "scope"} {
+			if v, ok := obj[k]; ok {
+				t.Errorf("%s: %s must be absent, got %v", what, k, v)
+			}
+		}
+		if obj["displayName"] != "Edge one" {
+			t.Errorf("%s: displayName %v", what, obj["displayName"])
+		}
+		if r, _ := obj["readiness"].(map[string]any); len(r) != 1 || r["state"] != "not-observed" {
+			t.Errorf("%s: readiness must be only {state: not-observed}, got %v", what, obj["readiness"])
+		}
+	}
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	if meta.Platform != "Test" || meta.Capabilities == nil || len(meta.Capabilities) != 0 || slices.ContainsFunc(meta.Kinds, isDeployment) {
+		t.Fatalf("meta must report no capabilities and no Deployment kind: %+v", meta)
+	}
+	// Without workloads, a not-ready finding carries no replica wording either.
+	_, down, _ := startWith(t, s, worldWith(0, 1)...)
+	h := get[HealthResponse](t, down, "/api/v1/installs/acme~edge_1/health", 200)
+	if !hasFinding(h, health.CodeControllerNotReady, "kgw/kgateway") {
+		t.Fatalf("a controller with 0 of 1 ready replicas must give KGWUI-005: %+v", h.Findings)
+	}
+	for _, f := range h.Findings {
+		if f.Code == health.CodeControllerNotReady && f.Message != "Controller not ready" {
+			t.Fatalf("KGWUI-005 without workloads: %q", f.Message)
+		}
+	}
+}
+
+// H3: Kubernetes reports both capabilities, Deployments are linkable, and the
+// install carries replica counts and its scope.
+func TestKubernetesPlatformAtTheAPI(t *testing.T) {
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", nil, world()...)
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	if meta.Platform != "Kubernetes" || !slices.Equal(meta.Capabilities, []string{platform.Scope, platform.Workloads}) || !slices.ContainsFunc(meta.Kinds, isDeployment) {
+		t.Fatalf("meta: %+v", meta)
+	}
+	in := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)[0]
+	r := in.Readiness
+	if r.State != overview.ReadinessReady || r.Ready == nil || *r.Ready != 1 || r.Desired == nil || *r.Desired != 1 {
+		t.Fatalf("readiness: %+v", r)
+	}
+	if in.Scope == nil || in.Scope.Watched != 2 || in.Scope.Total != 4 {
+		t.Fatalf("scope: %+v", in.Scope)
+	}
+	_, down, _ := start(t, testutil.ServedUpstream(), "", nil, worldWith(0, 1)...)
+	if r := get[[]InstallSummary](t, down, "/api/v1/installs", 200)[0].Readiness; r.State != overview.ReadinessNotReady || *r.Ready != 0 {
+		t.Fatalf("a controller with 0 of 1 ready replicas must be not-ready: %+v", r)
+	}
+}
+
+// proxySetup shapes proxyWorld. The zero value is a managed Gateway with a ready proxy.
+type proxySetup struct {
+	classParams, gwParams string             // GatewayParameters names in infra; "" = no reference
+	classRefKind          string             // group "example.com" and this kind on the class reference; "" = GatewayParameters
+	gwRefKind             string             // kind of the Gateway's reference; "" = GatewayParameters
+	noProxy               bool               // no proxy Deployment
+	proxyNotReady         bool               // the proxy Deployment has 0 of 1 ready replicas
+	gwConds               []metav1.Condition // nil: Accepted and Programmed
+}
+
+// proxyWorld is isolated() with the parameters and proxy Deployment of p.
+func proxyWorld(p proxySetup, extra ...runtime.Object) []runtime.Object {
+	var out []runtime.Object
+	for _, o := range isolated() {
+		switch v := o.(type) {
+		case *appsv1.Deployment:
+			if v.Namespace == "infra" && v.Name == "edge" {
+				if p.noProxy {
+					continue
+				}
+				ready := int32(1)
+				if p.proxyNotReady {
+					ready = 0
+				}
+				o = testutil.ProxyDeployment("infra", "edge", 1, ready)
+			}
+		case *unstructured.Unstructured:
+			if v.GetKind() == "GatewayClass" && v.GetName() == "kgateway" && p.classParams != "" {
+				group, kind := kinds.KgatewayGroup, "GatewayParameters"
+				if p.classRefKind != "" {
+					group, kind = "example.com", p.classRefKind
+				}
+				testutil.SetClassParameters(v, group, kind, "infra", p.classParams)
+			}
+			if v.GetKind() == "Gateway" && v.GetName() == "edge" {
+				if p.gwConds != nil {
+					v = testutil.Gateway("infra", "edge", "kgateway", p.gwConds)
+					o = v
+				}
+				if p.gwParams != "" {
+					kind := cmp.Or(p.gwRefKind, "GatewayParameters")
+					testutil.SetGatewayParameters(v, kinds.KgatewayGroup, kind, p.gwParams)
+				}
+			}
+		}
+		out = append(out, o)
+	}
+	return append(out, extra...)
+}
+
+const selfManagedMsg = "Self-managed proxy: the UI cannot see its readiness"
+
+// H5 acceptance (design §14.3) at the health endpoint: a self-managed Gateway
+// without a proxy Deployment gets KGWUI-010 (info) instead of KGWUI-006, and
+// nothing else about its health changes.
+func TestSelfManagedProxiesAtTheAPI(t *testing.T) {
+	sm, kube := testutil.GatewayParameters("infra", "sm", true), testutil.GatewayParameters("infra", "kube", false)
+	cond := testutil.Cond
+	notProgrammed := []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionFalse, "AddressNotAssigned")}
+	invalidParams := []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "InvalidParameters"), cond("Programmed", metav1.ConditionFalse, "Invalid")}
+	rejects := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+		Rejects: map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}}
+	forbidParams := func(dyn *dynamicfake.FakeDynamicClient, _ *kubefake.Clientset) {
+		dyn.PrependReactor("list", "gatewayparameters", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: kinds.KgatewayGroup, Resource: "gatewayparameters"}, "", nil)
+		})
+	}
+	noParamsKind := slices.DeleteFunc(testutil.ServedUpstream(), func(k kinds.Served) bool { return k.Kind == "GatewayParameters" })
+	selfManaged := expect{health.CodeSelfManagedProxy, health.SeverityInfo, "infra/edge"}
+	missing := expect{health.CodeProxyNotReady, health.SeverityWarning, "infra/edge"}
+	anySelf, anyProxy := expect{health.CodeSelfManagedProxy, "", ""}, expect{health.CodeProxyNotReady, "", ""}
+
+	cases := []struct {
+		name   string
+		s      setup
+		objs   []runtime.Object
+		state  health.State
+		want   []expect
+		forbid []expect
+	}{
+		{"class selfManaged, Gateway without parameters, no proxy", setup{}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"class selfManaged, Gateway parameters kube", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "kube", noProxy: true}, sm, kube),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"class kube, Gateway parameters selfManaged", setup{}, proxyWorld(proxySetup{classParams: "kube", gwParams: "sm", noProxy: true}, sm, kube),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"class selfManaged, Gateway references missing parameters", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "nope", noProxy: true, gwConds: invalidParams}, sm),
+			health.StateError, []expect{missing, {health.CodeConditionFalse, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"self-managed with a proxy Deployment that is not ready", setup{}, proxyWorld(proxySetup{classParams: "sm", proxyNotReady: true}, sm),
+			health.StateError, []expect{{health.CodeProxyNotReady, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"self-managed and Programmed=False", setup{}, proxyWorld(proxySetup{classParams: "sm", noProxy: true, gwConds: notProgrammed}, sm),
+			health.StateError, []expect{{health.CodeConditionFalse, health.SeverityError, "infra/edge"}, selfManaged}, nil},
+		{"managed and Programmed=False", setup{}, proxyWorld(proxySetup{gwConds: notProgrammed}),
+			health.StateError, []expect{{health.CodeConditionFalse, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"self-managed with an active xDS reject", setup{metrics: rejects}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
+			health.StateError, []expect{{health.CodeXDSRejected, health.SeverityError, "infra/edge"}, selfManaged}, nil},
+		{"managed with an active xDS reject", setup{metrics: rejects}, proxyWorld(proxySetup{}),
+			health.StateError, []expect{{health.CodeXDSRejected, health.SeverityError, "infra/edge"}}, []expect{anySelf}},
+		{"managed Gateway without a proxy", setup{}, proxyWorld(proxySetup{noProxy: true}),
+			health.StateWarning, []expect{missing}, []expect{anySelf}},
+		// kgateway does not check a class reference's group or kind; it looks up GatewayParameters by namespace and name.
+		{"class reference of another group and kind still resolves", setup{}, proxyWorld(proxySetup{classParams: "sm", classRefKind: "OtherParameters", noProxy: true}, sm),
+			health.StateHealthy, []expect{selfManaged}, []expect{anyProxy}},
+		{"Gateway parameters of another kind", setup{}, proxyWorld(proxySetup{classParams: "sm", gwParams: "sm", gwRefKind: "OtherParameters", noProxy: true}, sm),
+			health.StateWarning, []expect{missing}, []expect{anySelf}},
+		{"GatewayParameters not readable", setup{prepare: forbidParams}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}, sm),
+			health.StateUnknown, []expect{missing, {health.CodeSignalUnavailable, health.SeverityInfo, ""}}, []expect{anySelf}},
+		{"GatewayParameters not served", setup{served: noParamsKind}, proxyWorld(proxySetup{classParams: "sm", noProxy: true}),
+			health.StateWarning, []expect{missing}, []expect{anySelf}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, tc.s, tc.objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state: want %s, got %s; findings: %+v", tc.state, h.State, h.Findings)
+			}
+			for _, w := range tc.want {
+				if !hasSev(h, w.code, w.sev, w.res) {
+					t.Fatalf("missing %s/%s on %s; findings: %+v", w.code, w.sev, w.res, h.Findings)
+				}
+			}
+			for _, f := range tc.forbid {
+				if hasSev(h, f.code, f.sev, f.res) {
+					t.Fatalf("unexpected %s on %q; findings: %+v", f.code, f.res, h.Findings)
+				}
+			}
+			for _, f := range h.Findings {
+				if f.Code == health.CodeSelfManagedProxy && f.Message != selfManagedMsg {
+					t.Errorf("KGWUI-010 message: %q", f.Message)
+				}
+			}
+			// GatewayParameters are watched, never counted.
+			if _, tile := count(get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200), "GatewayParameters"); tile {
+				t.Error("GatewayParameters must not get a count tile")
+			}
+		})
 	}
 }

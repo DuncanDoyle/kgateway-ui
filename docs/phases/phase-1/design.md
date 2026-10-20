@@ -207,6 +207,7 @@ v1 compares, per install and per `(namespace, resource kind)`, the UI's count of
 | KGWUI-007 | scope-mismatch | warning | §4.4 |
 | KGWUI-008 | signal-unavailable | info (forces state `unknown`; see 5.3) | A check could not collect a current input: metrics unreachable, metrics result too old, RBAC denied, a watch failing, scope unknown, cache not synced, or served kinds changed since startup (§5.4) |
 | KGWUI-009 | ambiguous-ownership | warning | §4.3 |
+| KGWUI-010 | self-managed-proxy | info | An owned Gateway is self-managed (§14.3 H5) and has no proxy Deployment: the UI cannot see that proxy's readiness. It never drives the roll-up; a proxy Deployment that exists is still judged under KGWUI-006. |
 
 `RouteRuleDropped` and `RouteRuleReplaced` reasons are reported under KGWUI-002 with their own message ("Rule replaced by a direct response"). On 2.3 the controller reports them through `Accepted=False`; on 2.4 and `main` through `kgateway.dev/Programmed`. Both are reported, because any current False is reported with its reason.
 
@@ -270,7 +271,7 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 
 ### 6.3 Frontend extension points
 
-- **Pages and routes:** under `/i/:ns/:name/...` or at the top level.
+- **Pages and routes:** under `/i/:id/...` or at the top level.
 - **Navigation entries.**
 - **Health renderers:** a custom message or detail per finding code prefix. The prefix is a convention, not a registry (§1).
 - **Kind display metadata.** This is mostly backend-driven through descriptors, so most downstream additions need Go only.
@@ -281,10 +282,12 @@ A downstream build has its own `app/`, which imports `packages/shell` and regist
 
 | URL | Page |
 |---|---|
-| `/` | Redirects to `/i/:ns/:name` when there is one install (or the UI is pinned); otherwise the cluster landing (layout C) |
-| `/i/:ns/:name` | Install page (layout A) |
-| `/i/:ns/:name/findings` | All findings, filterable by severity, code and kind (the target of "Show all") |
-| `/i/:ns/:name/r/:group/:kind/:namespace/:name` | Read-only YAML view of one resource. The UI links here only for kinds listed in `/api/v1/meta`. |
+| `/` | Redirects to `/i/:id` when there is one install (or the UI is pinned); otherwise the cluster landing (layout C) |
+| `/i/:id` | Install page (layout A) |
+| `/i/:id/findings` | All findings, filterable by severity, code and kind (the target of "Show all") |
+| `/i/:id/r/:group/:kind/:namespace/:name` | Read-only YAML view of one resource. The UI links here only for kinds listed in `/api/v1/meta`. |
+
+The install ID is opaque: the SPA encodes it in URLs and never splits it (§14.3 H1).
 
 Filters and sorting are stored in the query string, so every view can be shared as a link. This includes the Gateway table's text filter.
 
@@ -316,12 +319,12 @@ The API is read-only JSON. Every resource payload has `managedFields` removed as
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/v1/installs` | `[{id, namespace, name, version, edition, controllerNames, controller: {ready, desired}, scope: {mode, selectors, watched, total}, health: {state, counts}, computedAt}]` |
-| `GET /api/v1/installs/{ns}/{name}/overview` | Header data (including edition and controller readiness), counts per kind (`{kind, count, access}`, GatewayClasses included), and the Gateway list. Every response carries the install `id`. |
-| `GET /api/v1/installs/{ns}/{name}/health` | `{install, state, findings[], checks[], counts, collectedAt}`; `install` is the install id |
-| `GET /api/v1/installs/{ns}/{name}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below) |
-| `GET /api/v1/meta` | UI version, pinned install, registered kinds and descriptors, plus `apps/Deployment`: every kind the resource endpoint can serve, so the UI links exactly these |
-| `GET /healthz`, `GET /readyz` | Liveness; readiness is true once the cache has synced |
+| `GET /api/v1/installs` | `[{id, displayName, namespace?, name?, version, edition, controllerNames, readiness: {state, ready?, desired?}, scope?: {mode, selectors, watched, total}, health: {state, counts}, computedAt}]` |
+| `GET /api/v1/installs/{id}/overview` | Header data (including edition and controller readiness), counts per kind (`{kind, count, access}`, GatewayClasses included), and the Gateway list. Every response carries the install `id`. |
+| `GET /api/v1/installs/{id}/health` | `{install, state, findings[], checks[], counts, collectedAt}`; `install` is the install id |
+| `GET /api/v1/installs/{id}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below) |
+| `GET /api/v1/meta` | UI version, pinned install, `platform`, `capabilities`, registered kinds and descriptors, plus `apps/Deployment` under the `workloads` capability: every kind the resource endpoint can serve, so the UI links exactly these |
+| `GET /healthz`, `GET /readyz` | Liveness; readiness is true once the cache has synced and no install was rejected for an invalid ID (§14.3 H1) |
 
 **Resource endpoint.** It serves an object of a watched, served kind when either:
 - the install owns it (§4.3); or
@@ -342,7 +345,7 @@ Anything else returns 404. The endpoint reads only from the shared cache, so it 
 
 - **Binary flags:**
   - `--kubeconfig`;
-  - `--install <ns>/<name>` (pinned mode);
+  - `--install <id or namespace/name>` (pinned mode);
   - `--listen` (default `:8080`; `127.0.0.1:8080` in local mode);
   - `--poll-interval`;
   - `--metrics-interval`.
@@ -373,7 +376,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
 
 - **Fixtures mirror upstream exactly.** Fake controller Pods carry exactly the labels upstream 2.3/2.4 Pods carry, and one test uses a Pod without the component label to prove the looser Pod selector. Fixture Pods and Deployments enter through the production label-selected watches, never around them.
 - **API boundary tests (Go).** A fake dynamic client is seeded with fixture objects, the real cache, install, health and overview packages run on top of it, and the HTTP handlers are called. Required cases:
-  - each check KGWUI-001 to KGWUI-009, positive and negative, at the API level;
+  - each check KGWUI-001 to KGWUI-010, positive and negative, at the API level;
   - status freshness, each on an isolated input that is healthy without it, asserting the state, the finding and its severity, the absence of a wrong current-error finding, and the inventory counts: a stale True, a stale False, a missing `observedGeneration`, an absent required condition, reason `Pending`, a listener without a status block, a parent status for another port, a policy with no ancestors and a new non-kgateway policy, each not yet processed (warning) after the grace period; and a resource inside the grace period, being processed (info) with the install unknown;
   - parent status for a removed parentRef, and for a parent owned by another install with the same controller name: ignored, install healthy;
   - a route with one owned parent and one missing parent: counted, and finding 003 for the missing parent;
@@ -412,7 +415,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
   2. Install the chart.
   3. Check the API. The missing-target policy assertion is version-specific: on 2.3 and 2.4 the policy has no status and shows as not yet processed (003); `TargetNotFound` (002) is asserted only in the `main` job (§10).
   4. Run a Playwright smoke test of the landing page, the install page, the findings list and the YAML view, in both themes.
-  - A second scenario runs two installs. Each uses the Helm release name `kgateway` in its own namespace, so the install IDs are `kgw-a/kgateway` and `kgw-b/kgateway`.
+  - A second scenario runs two installs. Each uses the Helm release name `kgateway` in its own namespace, so the install IDs are `kgw-a.kgateway` and `kgw-b.kgateway`.
 
 ## 10. Supported versions
 
@@ -451,3 +454,133 @@ This phase generates no data-plane configuration. The cost falls on the control 
 1. **Shared `controllerName` across installs.** Can two kgateway installs share a `controllerName` with disjoint scopes, and how do they behave? Resolved (D-012): yes. Both installs ran with one GatewayClass and one `controllerName`, each reconciled only the Gateways in its own namespaces, and the GatewayClass did not flap. §4.3 is unchanged.
 2. **Replica semantics of the controller metrics.** Is `kgateway_envoy_xds_rejects_active` per replica (and summed), and does every replica report the full `kgateway_resources_managed`? Resolved (D-012): yes. Only the replica serving the proxy's xDS stream reports the reject, and every replica reports the full `kgateway_resources_managed`, so rejects are summed and `resources_managed` takes the max.
 3. **Upstream proposal** for an effective-scope endpoint (D-009 §7). It is filed during Phase 1, but it does not block the phase.
+
+## 14. Platform neutrality (D-016)
+
+Kubernetes is the product focus; this section only keeps a later standalone integration possible. The UI will later run on kgateway without Kubernetes workloads: **kube-lite** (local apiserver with CRDs and status, but no Pods, Deployments or Services; host-process controller and Envoy; `selfManaged` Gateways) and **file mode** (no apiserver, YAML files, status in controller memory, possibly embedded in the standalone binary). This section maps each constraint to today's code and says what changes, and when. Pointers are against `c2c52b8`.
+
+### 14.1 Constraints
+
+| # | Constraint | Our reading |
+|---|---|---|
+| R1 | The data source is pluggable; core logic needs no `corev1`/`appsv1` objects and no live apiserver. | Agree. The interface waits for a second implementation (§14.4); no new coupling meanwhile (H8). |
+| R2 | An install is a controller instance: opaque ID, version/edition, controller names, metrics endpoints, readiness. Statically configured installs must be possible. | Agree. Opaque ID now (H1). A neutral `Install` comes later, as a separate provider seam; today's `Detector` stays as the Kubernetes provider's adapter. The extension API is excluded from the first release's compatibility promise until the seam milestone (H11). |
+| R3 | Readiness comes from a provider signal. A self-managed Gateway gets no "proxy deployment not found". "Not observed" is distinct from "failing". | Agree, and it is a Kubernetes bug today (H5). Refinement: "not observed" is **info** and does not drive the roll-up to unknown. Otherwise every standalone install is unknown forever. D-006 still holds, because an unobserved signal is not a contradicting one. |
+| R4 | Metrics are addressed by URL; no "no ready controller pod" dead end. | Agree. Part of the neutral `Install` (§14.4). |
+| R5 | Status may come from the controller. Missing UID, `generation` or `observedGeneration` must not break freshness or keys. | Agree, with a refinement. Freshness is a provider contract: either `generation`/`observedGeneration`, or the provider confirms that status matches the current spec revision. A provider that does neither cannot reach green, because status kept after a file edit could be green for the old spec (§5.2). Keys and grace need a provider revision or incarnation, not just ref-based keys (§14.4). |
+| R6 | Namespaces and scope are optional; a single implicit namespace works; nothing is dropped silently without Namespace objects. | Partly. kube-lite always has Namespace objects, because the apiserver creates `default`. "Scope not applicable" is H2. Selector scope with a missing Namespace object still drops objects (`pkg/install/scope.go:50`). That rule only applies where selectors exist, so it is deferred (§14.4). |
+| R7 | Capabilities, not mode strings; opaque IDs in API and SPA URLs; a vocabulary for platform copy. | Agree (H1–H4). Only capabilities the SPA reads are defined, because unread capabilities are untested. |
+| R8 | Read-only; no server-side-apply assumptions. | Already holds: no write calls in non-test code; `managedFields` is only stripped (`pkg/api/handlers.go:252`). |
+| R9 | `pkg/...` is embeddable; no globals or flags in core; providers injected; the SPA embed is reusable. | Mostly holds: no `init()`, no `os.Getenv`, flags only in `cmd/`. The SPA embed is in `internal/webui`, but `Options.UI` already takes any `fs.FS`, and exporting the embed later is additive (§14.4). `app.Build` cannot take a `Snapshotter` or metrics `Source` yet (§14.4). |
+| R10 | AuthZ stays a seam. | Already holds: `Authorize(r *http.Request, ref objects.Ref) bool` (`pkg/api/authz.go:12`). |
+| R11 | Register `Backend` and `GatewayParameters`. | `GatewayParameters` now (H5 needs it). `Backend` in the Phase 2 design: a kind with no assignment rule is watched and counted but never attributed to an install (`ByCategory`), and attribution needs route references. |
+
+### 14.2 Where Kubernetes leaks in today
+
+| Area | Today | Seam that exists |
+|---|---|---|
+| Data input | `cache.Snapshot` carries typed `Namespaces`, `Pods`, `Deployments` (`pkg/cache/cache.go:47-57`) | `cache.Snapshotter` (`cache.go:60`) is the engine's only input |
+| Wiring | `app.Build` always builds `cache.New`, `kinds.Resolve` and `ctrlmetrics.NewCollector` (`pkg/app/app.go:73-118`) | `engine.Config` accepts any `Snapshotter` and `Source` |
+| Install | ID = Deployment `ns/name` (`pkg/install/install.go:34`); `Install` carries Deployment and Pods (`:17-31`); `Detector.Detect(*appsv1.Deployment)` (`:49`) | `extension.Registry` Detectors |
+| Readiness | Controller: replicas (`pkg/health/checks.go:131-141`). Proxy: Deployment lookup, KGWUI-006 warning after grace (`:419-461`) | `extension.Registry` Checks (append-only) |
+| Metrics | Pod IP or `pods/proxy` (`pkg/ctrlmetrics/scrape.go:22-73, 113-162`) | `ctrlmetrics.Source` (`:91`) |
+| Scope | Pod env or Deployment template (`pkg/install/scope.go:99-140`) | `ScopeProvider`, `ScopeVerifier` |
+| Freshness keys | Grace keyed on `{uid, generation}` (`pkg/engine/engine.go:76-120`); Pod/Deployment dedupe by UID (`pkg/cache/cache.go:285-302`). Empty UIDs collide. | — |
+| API | Paths `/installs/{ns}/{name}` (`pkg/api/handlers.go:39-41,167`); required `namespace`, `name`, `controller{ready,desired}`, `scope{selectors,watched,total}`; `/meta` hard-codes `apps/Deployment` (`pkg/api/types.go:54`) | Handlers depend on `engine.Model` |
+| SPA | Routes `/i/:ns/:name` and the ID rebuilt by joining params in four places (`shell/Shell.tsx:54-60`, `shell/extension.ts:70`, `shell/Header.tsx:110`, `shell/DocumentTitle.tsx:6`); IDs not URL-encoded; `scope` and `controller` are dereferenced unguarded (`pages/install/CountTiles.tsx:80`, `pages/ClusterLanding.tsx:140`); "Waiting for the cluster" in six files; the RootRedirect empty state explains Deployment labels | `ShellExtension`, `CorePages` |
+| Kinds | Served versions via the discovery API (`pkg/kinds/kinds.go:76-107`); no `Backend`/`GatewayParameters` (`pkg/kinds/upstream.go:11-27`) | `extension.WithKinds` |
+
+### 14.3 Hedges for Phase 1
+
+Each hedge is small and lands before the first release, which freezes API v1 and the SPA URLs. H5 is also a bug fix in Kubernetes mode.
+
+| # | Behaviour | Constraint |
+|---|---|---|
+| H1 | **Opaque install ID.** One path segment everywhere: `GET /api/v1/installs/{id}/…` and SPA `/i/:id/…`. By contract an ID uses only URL-unreserved characters (`A-Z a-z 0-9 . _ ~ -`), and an ID outside that set, or equal to `.` or `..` (which URL normalisation would remove), is invalid. Installs are discovered at runtime, so an install with an invalid provider ID is excluded, an error naming the detector and the raw ID is logged, and `/readyz` reports not ready with that error, so a broken downstream detector is loud. The Kubernetes detector cannot produce an invalid ID. An invalid `--install` value fails at startup. The SPA still encodes it and never parses it. The Kubernetes ID is `<namespace>.<name>`: namespace names cannot contain dots and Deployment names are DNS subdomains, so it is unique and in the set. Clients must not rely on that structure. `--install` accepts the ID or `namespace/name`. | R2, R7 |
+| H2 | **Platform fields are optional; absent means not applicable.** The install DTO gets a neutral `readiness: {state, ready?, desired?}`, where state is ready, not-ready, unknown or not-observed. `namespace`, `name` and `scope` become optional, plus a `displayName`. The SPA renders the scope tile and replica text only when present and never crashes on absence. | R2, R3, R6 |
+| H3 | **`/meta` reports `platform` and `capabilities`.** Platform is a display string such as "Kubernetes". Capabilities are a string set; Phase 1 defines only the ones the SPA reads: `scope` (namespace scope tile and filters) and `workloads` (Deployment links and replica wording, in the UI and in finding messages). `apps/Deployment` stays in `kinds` only under `workloads`. A `useCapabilities()` hook in the shell. | R7 |
+| H4 | **SPA vocabulary.** One module holds the platform copy: "Waiting for the cluster", the cluster landing title, the no-install empty state (how an install is found, the `--install` hint) and "Copy namespace/name". The Kubernetes vocabulary is the default; `ShellExtension` gets an optional `vocabulary` override. Strings go through the wording pass. | R7 |
+| H5 | **Self-managed proxies.** Register `GatewayParameters` (`gateway.kgateway.dev`). The UI follows kgateway's own resolution: class parameters, then Gateway parameters, where a selfManaged layer wins and a later `kube` layer does not undo it (`pkg/deployer/merge.go:12-28`, `pkg/kgateway/deployer/gateway_parameters.go:224-306`, kgateway `556b4ce`). Outcomes: **self-managed** when every referenced GatewayParameters resolves and the merge is selfManaged; **unresolved** when a referenced one is missing or unreadable, which keeps today's behaviour (kgateway also sets `Accepted=False`, reason `InvalidParameters`); otherwise **managed**. When RBAC denies GatewayParameters, it is like any other denied kind: KGWUI-008 and the install unknown, never KGWUI-010. Only one thing changes: for a self-managed Gateway, the "no proxy Deployment found" case becomes info finding KGWUI-010 "Self-managed proxy: the UI cannot see its readiness". A proxy Deployment that exists but is not ready is still KGWUI-006, and `Programmed=False`, xDS rejects and every other check are unchanged (D-006). The resolution sits behind a pluggable interface, because it mirrors controller logic; the upstream proposal asks the controller to report it (§14.6). | R3, R11 |
+| H8 | **Import boundary test.** A Go test fails when a non-test file outside today's per-file allowlist imports `k8s.io/api/core/v1`, `apps/v1`, `k8s.io/client-go` or `pkg/kinds`' discovery client. The allowlist names files, not packages, and only shrinks; a file that must be added needs a reviewed reason. The test cannot see semantic assumptions, such as a new Pod-shaped field, so the review checklist asks for them. | R1 |
+| H9 | **Upstream proposal** (plan Task 23) adds two asks: `controllerName` in the admin `/version` response, and connected-proxy state per Gateway. `Programmed` semantics for self-managed Gateways are left to the standalone project's planned issue, so only one is filed (§14.8). Edition is not an upstream concern: a downstream build reports it. No Kubernetes Pod introspection required. | R2, R3 |
+| H10 | **Docs.** The README states that Kubernetes is today's only provider. The roadmap entries for Phases 3, 4, 7, 9 and 10 carry the notes in §14.5. | — |
+| H11 | **Compatibility policy.** The README and `pkg/extension` doc state that API v1 (paths and JSON) is stable from the first release. The Go extension API (`Detector`, `Install`, `ScopeProvider`, `Registry`) may change until the extension-seam milestone. When the provider seam arrives, the Kubernetes `Detector` keeps working as that provider's adapter. | R2, R9 |
+
+Acceptance, at the API and SPA boundary:
+
+| Hedge | Case | Expected |
+|---|---|---|
+| H1 | Install ID `ns.name`, and a test provider ID with `~` and `_` | Navigation, reload, deep links and every API call resolve the install. The ID is never split. |
+| H1 | Provider ID containing `/` or `%`, or equal to `.` or `..` | The install is left out of `/installs`, an error naming the detector and the raw ID is logged, and `/readyz` returns 503 with that error. An invalid `--install` value fails at startup. |
+| H2 | Install with no `scope`, no `namespace`/`name`, `readiness.state=not-observed` | `/installs` and the overview header render; no scope tile, no replica text, no crash. |
+| H3 | `capabilities` without `workloads` | No Deployment links and no replica wording, in the UI or in finding messages; `apps/Deployment` absent from `kinds`. |
+| H4 | Downstream `vocabulary` override | Overridden strings show; others fall back to the defaults. |
+| H5 | Class selfManaged, Gateway without parameters, no proxy Deployment | KGWUI-010 info; the roll-up is unaffected. |
+| H5 | Class selfManaged, Gateway parameters `kube` | Self-managed (KGWUI-010). |
+| H5 | Class parameters `kube`, Gateway parameters selfManaged | Self-managed (KGWUI-010). |
+| H5 | Class selfManaged, Gateway references missing GatewayParameters | Unresolved: KGWUI-006 as today, plus the controller's `Accepted=False`. |
+| H5 | Self-managed Gateway whose matching proxy Deployment exists and is not ready | KGWUI-006, not KGWUI-010. |
+| H5 | Self-managed Gateway with `Programmed=False` or an active xDS reject | Same findings and roll-up as a managed Gateway. |
+| H8 | A new core file importing `k8s.io/api/core/v1` | The test fails. |
+
+Placement: a new planned sub-phase before packaging (§14.7 Q1). H1–H4 touch about 25 files across the API and SPA, so the plan amendment goes through review and approval first.
+
+### 14.4 Refactors that wait until standalone is real
+
+| Refactor | Trigger | Shape |
+|---|---|---|
+| Provider interface | The kube-lite PoC needs installs | A `Provider` yields objects, installs and access; the engine stops seeing typed objects. The Kubernetes provider owns informers, discovery, Pod/Deployment detection and D-014. |
+| Neutral `Install` and `Detector` | Same trigger, and **before the extension-seam milestone** (after Phase 2), so the seam proof uses the final signature | `Install{ID, DisplayName, Version, Edition, ControllerNames, MetricsTargets []URL, Readiness}`; a static install from flags or config; `Detector` takes provider data, not `*appsv1.Deployment`. |
+| Metrics by URL | Same | `Scraper.Scrape(ctx, url)`; the Kubernetes provider turns Pods into URLs (or `pods/proxy`). |
+| Injection in `app.Build` | Embedding | `Build` takes a `Provider` and optional `Source`; `Run` keeps the kubeconfig and in-cluster path. |
+| Kinds without discovery | File mode | The provider reports served kinds; the discovery client is a Kubernetes detail. |
+| Object revision and incarnation | File mode | Met by Kubernetes metadata the standalone binary synthesises (§14.8): `generation` per spec change, a new `uid` per create, `resourceVersion` as the store revision. Today's `{uid, generation}` keys and freshness logic then work unchanged; the provider must reject objects without them. |
+| Static install definition | kube-lite | An install read from a definition file (proposed `--install-file`): ID, controller names, version source, metrics and admin URLs. Controller liveness probes those URLs. |
+| Exported SPA embed | An embedding binary | Export the embed as a public package; additive. |
+| Selector scope with missing Namespace objects | A provider with selectors but no Namespace objects | Report "membership unknown" instead of out-of-scope. |
+| D-009 §1 for file mode | File-mode provider | Objects and status come from the controller (D-016 §5). |
+
+### 14.5 Notes for later phases
+
+- **Phase 2:** register `Backend` with its `Accepted` condition and an assignment rule.
+- **Phase 3:** "pod health" is "process health"; restarts and readiness come from the provider.
+- **Phase 4:** must work with `Backend` and Envoy cluster health alone; Services and EndpointSlices are optional.
+- **Phase 7:** certificates may come from files, not Secrets.
+- **Phase 9:** easier standalone, because the admin server (9095) and Envoy admin are local.
+- **Phase 10:** SubjectAccessReview and impersonation are one `Authorizer`, behind a `kubernetes-rbac` capability. A neutral authorisation story is a Phase 10 design question.
+
+### 14.6 What a standalone status source must provide
+
+These are requirements for the standalone project, not a design.
+- **Objects:** each Gateway API and kgateway object with spec, status and conditions, plus a stable key (group, kind, namespace, name). A UID and a generation are optional.
+- **List and change notification:** a full list plus ordered changes (watch, stream or polling with a revision), with a way to tell "source down" from "no changes".
+- **Freshness:** `generation`/`observedGeneration` with Kubernetes semantics (generation changes on spec edits only), a `uid` that changes on delete and recreate, and `resourceVersion` as a monotonic revision. Agreed with the standalone project (§14.8).
+- **Install identity:** controller names, version, edition and an ID that is stable across restarts.
+- **Liveness:** controller liveness, and per Gateway the proxies connected over xDS and whether they accept the config.
+- **Metrics:** URLs for the controller's Prometheus endpoint (today `localhost:9092`, hard-coded in kgateway) and Envoy admin.
+- **Scope:** whether namespace scoping exists and, if so, the effective namespaces.
+
+### 14.7 Decisions (user, 2026-10-20)
+
+1. **Placement:** a new planned sub-phase 1.3 "platform-neutral contract" (H1–H5, H8, H11). Packaging, CI and e2e become sub-phase 1.4, which also carries H9 and H10.
+2. **Self-managed severity:** info (KGWUI-010).
+3. **`Backend`:** registered in the Phase 2 design.
+
+### 14.8 Standalone project's answer (2026-10-20)
+
+The standalone project checked §14.6 against its design. Its roadmap: kube-lite PoC with the stock controller, then a single binary that imports kgateway as a Go module, as downstream builds do.
+
+| Topic | Agreed |
+|---|---|
+| Objects, list and watch | kube-lite: apiserver objects. File mode: Kubernetes list/watch semantics with a monotonic revision; unreachable shows as a transport error or missed heartbeat. |
+| Freshness | File mode synthesises Kubernetes metadata (`generation`, `uid`, `resourceVersion`) instead of new fields. Accepted: it keeps D-014-style freshness unchanged. |
+| Install identity | kube-lite: a definition file the UI reads by flag; no fake Deployment, because it would show 0/1 replicas. File mode: an identity endpoint owned by the binary, which also carries edition. |
+| Controller liveness | kube-lite: the UI probes the metrics or admin URL. File mode: the identity endpoint. |
+| Proxy readiness | kube-lite: not observable (stock controller, `Programmed=True` regardless of Envoy), so KGWUI-010 is right. File mode: per-Gateway connected proxies and ACK/NACK through xDS callbacks. |
+| Metrics | kube-lite: one controller per host on 9092. File mode: set in code. A configurable port upstream is nice to have. |
+| Scope | Always "all"; Namespace objects exist (apiserver-created, or synthesised in file mode). |
+| Embedding | The single binary will likely embed `pkg/...` and serve the SPA from its own `fs.FS`. `pkg/...` stays free of globals and in-cluster assumptions (R9, H8). |
+| Authorisation | No identity story yet; localhost-bound. A later one plugs into `Authorizer`. |
+
+Effect here: H9's asks shrink (no edition, `Programmed` semantics filed by the standalone project), and §14.4's revision row is met by synthesised metadata. No Phase 1 task changes.
+

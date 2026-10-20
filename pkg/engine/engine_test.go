@@ -176,17 +176,17 @@ func TestPinnedKeepsOneInstall(t *testing.T) {
 	snap.Deployments = append(snap.Deployments, d2)
 	snap.Pods = append(snap.Pods, testutil.ControllerPod(d2, "p2", true))
 	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
-	cfg.Pinned = "kgw2/kgateway2"
+	cfg.Pinned = "kgw2.kgateway2"
 	e := New(cfg)
 	m := e.Compute()
-	if len(m.Installs) != 1 || m.Installs[0].Resolved.ID() != "kgw2/kgateway2" || m.Pinned != "kgw2/kgateway2" {
+	if len(m.Installs) != 1 || m.Installs[0].Resolved.ID() != "kgw2.kgateway2" || m.Pinned != "kgw2.kgateway2" {
 		t.Fatalf("pinned model: %+v", m.Installs)
 	}
 	// Ambiguity is still computed over every install.
 	if !hasFinding(m.Installs[0].Health, health.CodeAmbiguousOwnership, "infra/edge", "") {
 		t.Fatalf("pinning must not hide ambiguous ownership: %+v", m.Installs[0].Health.Findings)
 	}
-	if ids := e.Installs(); len(ids) != 1 || ids[0].ID() != "kgw2/kgateway2" {
+	if ids := e.Installs(); len(ids) != 1 || ids[0].ID() != "kgw2.kgateway2" {
 		t.Fatalf("Installs: %+v", ids)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -37,6 +38,7 @@ type world struct {
 	fromPod   bool                                         // resolve the scope from the controller Pod env instead of scope
 	metrics   *ctrlmetrics.Result                          // nil = not collected yet
 	access    map[schema.GroupVersionResource]cache.Access // overrides on top of "everything readable"
+	platform  platform.Info                                // zero = Kubernetes
 }
 
 func healthyWorld() *world {
@@ -79,7 +81,7 @@ func (w *world) report(t *testing.T) Report {
 	}
 	a := install.Assign(snap, served, []install.Resolved{res})
 	hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
-		MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}}
+		MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, Platform: w.platform}
 	if w.metrics != nil {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
@@ -690,5 +692,36 @@ func TestAccessFindingNamesGroup(t *testing.T) {
 	}
 	if !msgs["No access to gateways.gateway.networking.k8s.io"] || !msgs["No access to namespaces"] {
 		t.Fatalf("messages: %v", msgs)
+	}
+}
+
+// Replica counts in KGWUI-005 and KGWUI-006 are workload wording (D-016). Only
+// the zero Info defaults to Kubernetes; an unnamed Info is judged by its capabilities.
+func TestReadinessWordingFollowsWorkloads(t *testing.T) {
+	cases := []struct {
+		name       string
+		plat       platform.Info
+		ctrl, prox string
+	}{
+		{"zero is Kubernetes", platform.Info{}, "Controller not ready (0 of 1 replicas)", "Proxy not ready (1 of 2 replicas)"},
+		{"Kubernetes", platform.Kubernetes(), "Controller not ready (0 of 1 replicas)", "Proxy not ready (1 of 2 replicas)"},
+		{"named without workloads", platform.Info{Name: "Test"}, "Controller not ready", "Proxy not ready"},
+		{"unnamed with workloads", platform.Info{Capabilities: []string{platform.Workloads}}, "Controller not ready (0 of 1 replicas)", "Proxy not ready (1 of 2 replicas)"},
+		{"unnamed without workloads", platform.Info{Capabilities: []string{platform.Scope}}, "Controller not ready", "Proxy not ready"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := healthyWorld()
+			w.platform = tc.plat
+			w.ctrl.Status.ReadyReplicas = 0
+			w.deploys[1] = testutil.ProxyDeployment("infra", "edge", 2, 1)
+			got := map[string]string{}
+			for _, f := range w.report(t).Findings {
+				got[f.Code] = f.Message
+			}
+			if got[CodeControllerNotReady] != tc.ctrl || got[CodeProxyNotReady] != tc.prox {
+				t.Fatalf("want %q and %q, got %q and %q", tc.ctrl, tc.prox, got[CodeControllerNotReady], got[CodeProxyNotReady])
+			}
+		})
 	}
 }

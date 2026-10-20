@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
 import type { Finding } from "../../api/types";
+import { installPath } from "../../shell/paths";
 import { FindingRow } from "./FindingRow";
 
 // region Styles
@@ -63,7 +64,7 @@ export function TopFindings({ findings, installId, stylesOverride }: TopFindings
       {top.map((f, i) => (
         <FindingRow key={keys[i]} finding={f} installId={installId} />
       ))}
-      <Link className="more" to={`/i/${installId}/findings`}>
+      <Link className="more" to={installPath(installId, "findings")}>
         Show all {findings.length} findings
       </Link>
     </Box>
