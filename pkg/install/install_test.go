@@ -85,3 +85,20 @@ func TestControllerPodSelectorMatchesUpstreamPods(t *testing.T) {
 		t.Fatalf("both pods of kgw/kgateway, and only those, must be attributed to it: %+v", got)
 	}
 }
+
+func TestDisplayNeverReturnsABareSlash(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   Install
+		want string
+	}{
+		{"display name wins", Install{CustomID: "x", DisplayName: "Edge"}, "Edge"},
+		{"namespace/name", Install{Namespace: "kgw", Name: "kgateway"}, "kgw/kgateway"},
+		{"custom ID only", Install{CustomID: "acme~edge_1"}, "acme~edge_1"},
+		{"name only", Install{CustomID: "acme~edge_1", Name: "edge"}, "acme~edge_1"},
+	} {
+		if got := c.in.Display(); got != c.want {
+			t.Errorf("%s: Display() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

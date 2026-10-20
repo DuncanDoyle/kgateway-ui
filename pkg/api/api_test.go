@@ -901,7 +901,7 @@ func TestInvalidInstallIDsAreRejected(t *testing.T) {
 				t.Fatalf("an invalid ID must not be served: %+v", insts)
 			}
 			if n := strings.Count(logs.String(), "install rejected"); n != 1 {
-				t.Fatalf("want exactly one rejection log over three computations, got %d:\n%s", n, logs.String())
+				t.Fatalf("want exactly one rejection log across repeated computations, got %d:\n%s", n, logs.String())
 			}
 			if !strings.Contains(logs.String(), "Deployment kgw/kgateway") {
 				t.Fatalf("the rejection must name the Deployment:\n%s", logs.String())

@@ -2,7 +2,7 @@ import { css, useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link, NavLink, useMatch } from "react-router-dom";
 import { useNow } from "../api/clock";
-import { isStale, useCapabilities, useInstalls } from "../api/hooks";
+import { isStale, useInstalls } from "../api/hooks";
 import type { Readiness } from "../api/types";
 import { versionText } from "../format";
 import { HealthIcon } from "../health/HealthIcon";
@@ -106,10 +106,9 @@ function readinessState(r: Readiness): HealthState {
   return r.state === "not-ready" ? "error" : "unknown";
 }
 
-/** Replica counts only where the platform runs workloads (D-016). */
-function readinessText(r: Readiness, workloads: boolean): string {
-  if (workloads && r.ready !== undefined && r.desired !== undefined)
-    return `Controller: ${r.ready} of ${r.desired} ready`;
+/** The backend sends replica counts only where the platform runs workloads (D-016), so their presence decides the wording. */
+function readinessText(r: Readiness): string {
+  if (r.ready !== undefined && r.desired !== undefined) return `Controller: ${r.ready} of ${r.desired} ready`;
   if (r.state === "ready") return "Controller: ready";
   return r.state === "not-ready" ? "Controller: not ready" : "Controller: unknown";
 }
@@ -120,7 +119,6 @@ export function Header() {
   const { brand, navEntries } = useShellExtension();
   const match = useMatch("/i/:id/*");
   const { data, error } = useInstalls();
-  const caps = useCapabilities();
   const now = useNow();
   // useMatch decodes the parameter already; decoding again would corrupt an ID containing "%".
   const id = match?.params.id ?? "";
@@ -162,7 +160,7 @@ export function Header() {
               <HealthIcon
                 state={error || isStale(current.computedAt, now) ? "unknown" : readinessState(current.readiness)}
               />
-              {readinessText(current.readiness, !!caps?.has("workloads"))}
+              {readinessText(current.readiness)}
             </Ready>
           ) : null}
         </Identity>

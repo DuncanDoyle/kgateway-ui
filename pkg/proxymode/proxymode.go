@@ -21,8 +21,9 @@ const (
 	Managed Mode = "managed"
 	// SelfManaged means the proxy runs outside the controller's Deployments.
 	SelfManaged Mode = "self-managed"
-	// Unresolved means a referenced GatewayParameters could not be resolved;
-	// the UI keeps the managed behaviour and kgateway reports InvalidParameters.
+	// Unresolved means the referenced GatewayParameters, or the GatewayClass
+	// that names them, could not be resolved. The UI keeps the managed
+	// behaviour; kgateway surfaces the problem on the Gateway or its class.
 	Unresolved Mode = "unresolved"
 )
 

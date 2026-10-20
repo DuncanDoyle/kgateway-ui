@@ -32,7 +32,11 @@ function standalone(id = "acme~edge_1", displayName = "Edge one") {
     readiness: { state: "not-observed" },
   };
   return {
-    summary: { ...header, health: { state: "healthy" as const, counts: {} }, computedAt: new Date().toISOString() },
+    summary: {
+      ...header,
+      health: { state: "healthy" as const, counts: {} },
+      computedAt: new Date().toISOString(),
+    },
     ov: { ...overview(), header },
   };
 }
@@ -51,7 +55,10 @@ it("H1: an opaque ID survives the redirect, a reload and a deep link, and is nev
     "/api/v1/installs": [summary],
     "/api/v1/meta": noCaps,
     "/api/v1/installs/acme~edge_1/overview": ov,
-    "/api/v1/installs/acme~edge_1/health": { ...healthy(), install: summary.id },
+    "/api/v1/installs/acme~edge_1/health": {
+      ...healthy(),
+      install: summary.id,
+    },
   });
   const first = mount("/");
   await screen.findByTestId("install-page");
@@ -73,7 +80,7 @@ it("H1: a Kubernetes ID with a dot resolves, and the old two-segment URL is not 
   });
   const view = mount("/i/kgw.kgateway");
   await screen.findByTestId("install-page");
-  expect(screen.getByRole("banner")).toHaveTextContent("kgw/kgateway");
+  await waitFor(() => expect(screen.getByRole("banner")).toHaveTextContent("kgw/kgateway"));
   view.unmount();
   mount("/i/kgw/kgateway");
   expect(await screen.findByText("Page not found")).toBeInTheDocument();
@@ -90,7 +97,7 @@ it("H1: an ID containing an escape sequence is decoded exactly once", async () =
   });
   mount(installPath("a%20b"));
   await screen.findByTestId("install-page");
-  expect(screen.getByRole("banner")).toHaveTextContent("Edge pct");
+  await waitFor(() => expect(screen.getByRole("banner")).toHaveTextContent("Edge pct"));
   await waitFor(() => expect(document.title).toBe("Edge pct"));
 });
 
@@ -109,7 +116,10 @@ it("H2: an install without scope, namespace, name or replica counts renders ever
     "/api/v1/installs/acme~edge_1/health": {
       ...unknown(),
       install: one.summary.id,
-      findings: unknown().findings.map((f) => ({ ...f, install: one.summary.id })),
+      findings: unknown().findings.map((f) => ({
+        ...f,
+        install: one.summary.id,
+      })),
     },
   });
   const landing = mount("/");
@@ -122,13 +132,44 @@ it("H2: an install without scope, namespace, name or replica counts renders ever
   await screen.findByTestId("install-page");
   expect(screen.queryByTestId("scope-tile")).toBeNull();
   expect(screen.queryByTestId("controller-readiness")).toBeNull();
-  expect(screen.getByRole("button", { name: "Switch install: Edge one" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Switch install: Edge one" })).toBeInTheDocument();
   // The install-level finding names the install by its display name.
-  expect(screen.getByTestId("finding-row")).toHaveTextContent("Edge one");
+  await waitFor(() => expect(screen.getByTestId("finding-row")).toHaveTextContent("Edge one"));
+});
+
+it("the header readiness wording does not change when /meta arrives", async () => {
+  stubApi({
+    "/api/v1/installs": [installSummary()],
+    "/api/v1/meta": meta,
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
+    "/api/v1/installs/kgw.kgateway/health": healthy(),
+  });
+  // Hold /meta pending, so the header renders before capabilities are known.
+  const answer = fetch;
+  let release: () => void = () => {};
+  const held = new Promise<void>((res) => (release = res));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url === "/api/v1/meta") await held;
+      return answer(url);
+    }),
+  );
+  mount("/i/kgw.kgateway");
+  const ready = await screen.findByTestId("controller-readiness");
+  const before = ready.textContent;
+  expect(before).toBe("Controller: 2 of 2 ready");
+  release();
+  await waitFor(() => expect(fetched()).toContain("/api/v1/meta"));
+  await screen.findByRole("banner");
+  expect(screen.getByTestId("controller-readiness").textContent).toBe(before);
 });
 
 it("H3: without the workloads capability there is no replica wording and no Deployment link", async () => {
-  const s = { ...installSummary(), readiness: { state: "not-ready" as const, ready: 1, desired: 2 } };
+  const s = {
+    ...installSummary(),
+    readiness: { state: "not-ready" as const },
+  };
   const h = {
     ...unhealthy(),
     findings: [
@@ -139,7 +180,12 @@ it("H3: without the workloads capability there is no replica wording and no Depl
         install: "kgw.kgateway",
         // What the backend sends without workloads (Task 24): no replica counts.
         message: "Controller not ready",
-        resource: { group: "apps", kind: "Deployment", namespace: "kgw", name: "kgateway" },
+        resource: {
+          group: "apps",
+          kind: "Deployment",
+          namespace: "kgw",
+          name: "kgateway",
+        },
       },
       {
         code: "KGWUI-001",
@@ -147,13 +193,22 @@ it("H3: without the workloads capability there is no replica wording and no Depl
         severity: "error" as const,
         install: "kgw.kgateway",
         message: "Gateway not programmed",
-        resource: { group: "gateway.networking.k8s.io", kind: "Gateway", namespace: "prod", name: "edge" },
+        resource: {
+          group: "gateway.networking.k8s.io",
+          kind: "Gateway",
+          namespace: "prod",
+          name: "edge",
+        },
       },
     ],
   };
   stubApi({
     "/api/v1/installs": [s],
-    "/api/v1/meta": { ...meta, capabilities: ["scope"], kinds: meta.kinds.filter((k) => k.kind !== "Deployment") },
+    "/api/v1/meta": {
+      ...meta,
+      capabilities: ["scope"],
+      kinds: meta.kinds.filter((k) => k.kind !== "Deployment"),
+    },
     "/api/v1/installs/kgw.kgateway/overview": overview(),
     "/api/v1/installs/kgw.kgateway/health": h,
   });

@@ -89,6 +89,9 @@ type Overview struct {
 // Build assembles the overview of one install from the objects it owns. It is
 // pure, so the API can rebuild it over the owned objects a caller may see.
 func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, rep health.Report, plat platform.Info) Overview {
+	if plat.IsZero() {
+		plat = platform.Kubernetes() // same default as health
+	}
 	o := Overview{Header: header(res, snap, plat), Counts: []Count{}, Gateways: []GatewayRow{}}
 	byKind := map[schema.GroupKind]int{}
 	add := func(u *unstructured.Unstructured) {

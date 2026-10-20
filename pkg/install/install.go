@@ -46,10 +46,14 @@ func (i Install) ID() string {
 	return i.Namespace + "." + i.Name
 }
 
-// Display returns DisplayName, else "namespace/name".
+// Display returns DisplayName, else "namespace/name", else the ID when there
+// is no namespace or name to show.
 func (i Install) Display() string {
 	if i.DisplayName != "" {
 		return i.DisplayName
+	}
+	if i.Namespace == "" || i.Name == "" {
+		return i.ID()
 	}
 	return i.Namespace + "/" + i.Name
 }
