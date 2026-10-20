@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import type { ApiError } from "../api/client";
 import { HealthIcon } from "../health/HealthIcon";
+import { useVocabulary } from "../shell/extension";
 import type { HealthState } from "../theme/tokens";
 
 // region Styles
@@ -33,6 +34,7 @@ interface PageNoticeProps {
 /** Inline notice over data that is still shown after a poll failed. */
 export function PageNotice({ error, title, stylesOverride }: PageNoticeProps) {
   const connecting = error.status === 503;
+  const { connecting: waiting } = useVocabulary();
   return (
     <Box
       $state={connecting ? "unknown" : "error"}
@@ -41,7 +43,7 @@ export function PageNotice({ error, title, stylesOverride }: PageNoticeProps) {
       stylesOverride={stylesOverride}
     >
       <HealthIcon state={connecting ? "unknown" : "error"} />
-      {connecting ? `Waiting for the cluster: ${error.message}` : `${title}: ${error.message}`}
+      {connecting ? `${waiting}: ${error.message}` : `${title}: ${error.message}`}
     </Box>
   );
 }

@@ -165,7 +165,7 @@ it("H3: without the workloads capability there is no replica wording and no Depl
   const deployment = rows.find((r) => r.textContent?.includes("Controller not ready")) as HTMLElement;
   expect(within(deployment).queryByRole("link")).toBeNull();
   const ready = await screen.findByTestId("controller-readiness");
-  expect(ready).toHaveTextContent("Controller not ready");
+  expect(ready).toHaveTextContent("Controller: not ready");
   // No replica wording anywhere on the page, the header and finding rows included.
   expect(document.body).not.toHaveTextContent(/replica|of 2 ready/i);
 });

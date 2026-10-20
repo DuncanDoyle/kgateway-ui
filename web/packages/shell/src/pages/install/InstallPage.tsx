@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { isStale, useCapabilities, useHealth, useMeta, useOverview } from "../../api/hooks";
 import { plural } from "../../format";
-import { useInstallId } from "../../shell/extension";
+import { useInstallId, useVocabulary } from "../../shell/extension";
 import { installPath } from "../../shell/paths";
 import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
@@ -74,6 +74,7 @@ interface InstallPageProps {
 /** The install page (layout A, D-011): health strip, top findings, tiles, gateways. */
 export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const id = useInstallId();
+  const vocab = useVocabulary();
   const ov = useOverview(id);
   const h = useHealth(id);
   const { data: meta } = useMeta();
@@ -83,8 +84,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   // Render only data that belongs to this route's install, never the previous install's (design §6.6).
   // Once loaded, a failed poll keeps the page under a notice, with its health shown unknown.
   if (!ov.data || !h.data || ov.data.header.id !== id || h.data.install !== id) {
-    if (err?.status === 503)
-      return <PageState kind="connecting" title="Waiting for the cluster" message={err.message} />;
+    if (err?.status === 503) return <PageState kind="connecting" title={vocab.connecting} message={err.message} />;
     if (err)
       return <PageState kind="error" title="Cannot load this install" message={err.message} copyText={err.message} />;
     // One tile per counted kind (Deployments and parameters kinds have none) plus the scope tile where the platform has scope.

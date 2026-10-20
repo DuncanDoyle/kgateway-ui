@@ -7,10 +7,12 @@ import type { InstallSummary } from "../api/types";
 import { countsText, versionText } from "../format";
 import { HealthBadge } from "../health/HealthBadge";
 import { stateLabel } from "../health/state";
+import { useVocabulary } from "../shell/extension";
 import { InstallName } from "../shell/InstallName";
 import { installPath } from "../shell/paths";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
+import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { HealthState } from "../theme/tokens";
 import { scopeText } from "./scope";
 
@@ -102,16 +104,17 @@ export function ClusterLanding({ stylesOverride }: ClusterLandingProps = {}) {
   const { data, error } = useInstalls();
   const now = useNow();
   const theme = useTheme();
+  const vocab = useVocabulary();
   // After a first load, a failed poll keeps the cards under a notice, with their health shown unknown.
   if (!data) {
-    if (error?.status === 503)
-      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error?.status === 503) return <PageState kind="connecting" title={vocab.connecting} message={error.message} />;
     if (error)
       return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
     return <PageState kind="loading" title="Loading installs…" />;
   }
   return (
     <Grid stylesOverride={stylesOverride}>
+      <VisuallyHidden as="h1">{vocab.landingTitle}</VisuallyHidden>
       {error ? (
         <PageNotice
           error={error}

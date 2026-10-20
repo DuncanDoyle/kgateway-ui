@@ -124,6 +124,19 @@ it("says it is waiting for the cluster while the backend cache is not synced", a
   await waitFor(() => expect(screen.getByText("Waiting for the cluster")).toBeInTheDocument());
 });
 
+it("H4: a downstream vocabulary replaces platform copy and leaves the rest at the defaults", async () => {
+  stubApi({ "/api/v1/installs": [503, { error: "cache not synced" }], "/api/v1/meta": meta });
+  const view = mount("/", { vocabulary: { connecting: "Waiting for the controller" } });
+  expect(await screen.findByText("Waiting for the controller")).toBeInTheDocument();
+  expect(screen.queryByText("Waiting for the cluster")).toBeNull();
+  view.unmount();
+  stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
+  mount("/", { vocabulary: { noInstallsTitle: "No Acme install found" } });
+  expect(await screen.findByText("No Acme install found")).toBeInTheDocument();
+  // Entries the override leaves out fall back to the Kubernetes defaults.
+  expect(screen.getByText(/To pin one install, start the UI with/)).toBeInTheDocument();
+});
+
 it("renders extension brand and routes", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
   mount("/i/kgw.kgateway/waf", {

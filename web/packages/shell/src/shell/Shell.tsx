@@ -6,9 +6,16 @@ import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import { DocumentTitle } from "./DocumentTitle";
-import { type CorePages, defaultBrand, type ShellExtension, ShellExtensionContext } from "./extension";
+import {
+  type CorePages,
+  defaultBrand,
+  type ResolvedShellExtension,
+  type ShellExtension,
+  ShellExtensionContext,
+} from "./extension";
 import { Header } from "./Header";
 import { RootRedirect } from "./RootRedirect";
+import { kubernetesVocabulary } from "./vocabulary";
 
 // region Styles
 const Root = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -28,7 +35,7 @@ interface ShellProps {
 
 /** The application shell. Upstream and downstream apps render this with their own extension. */
 export function Shell({ extension = noExtension, pages, stylesOverride }: ShellProps) {
-  const ext = useMemo<Required<ShellExtension>>(() => {
+  const ext = useMemo<ResolvedShellExtension>(() => {
     const themes = extension.themes ?? defaultThemes;
     return {
       brand: extension.brand ?? defaultBrand,
@@ -37,6 +44,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       routes: extension.routes ?? [],
       navEntries: extension.navEntries ?? [],
       findingRenderers: extension.findingRenderers ?? {},
+      vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },
     };
   }, [extension]);
   const { ClusterLanding, InstallPage, FindingsPage, ResourcePage } = pages;

@@ -7,7 +7,7 @@ import { useHealth } from "../api/hooks";
 import type { Finding, Severity } from "../api/types";
 import { severityLabel } from "../health/state";
 import { CHIP_PRESSED_ACTIVE_PCT, CHIP_PRESSED_HOVER_PCT, CHIP_PRESSED_PCT, HEADER_H } from "../shell/constants";
-import { useInstallId } from "../shell/extension";
+import { useInstallId, useVocabulary } from "../shell/extension";
 import { useUrlParams, useUrlText } from "../shell/urlParams";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
@@ -182,6 +182,7 @@ interface FindingsPageProps {
 /** Every finding of the install, with URL-backed severity, kind and text filters over a virtualised list. */
 export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
   const id = useInstallId();
+  const vocab = useVocabulary();
   const { data, error } = useHealth(id);
   const [params, update] = useUrlParams();
   const sev = listParam(params, "sev");
@@ -223,8 +224,7 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
   });
   // After a first load, a failed poll keeps the findings on screen under a notice; their age turns stale.
   if (!current) {
-    if (error?.status === 503)
-      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error?.status === 503) return <PageState kind="connecting" title={vocab.connecting} message={error.message} />;
     if (error)
       return <PageState kind="error" title="Cannot load findings" message={error.message} copyText={error.message} />;
     return <PageState kind="loading" title="Loading findings…" />;

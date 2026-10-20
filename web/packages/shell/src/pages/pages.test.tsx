@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { POLL_MS } from "../api/hooks";
 import type { Finding, HealthReport, InstallSummary, ScopeSummary } from "../api/types";
 import { defaultBrand, ShellExtensionContext } from "../shell/extension";
+import { kubernetesVocabulary } from "../shell/vocabulary";
 import { meta, overview, restricted, unhealthy } from "../test/fixtures";
 import { renderWithTheme, stubApi } from "../test/render";
 import { ThemeProvider } from "../theme/ThemeProvider";
@@ -297,6 +298,7 @@ it("the longest matching finding renderer prefix wins", () => {
         defaultThemeId: "",
         routes: [],
         navEntries: [],
+        vocabulary: kubernetesVocabulary,
         findingRenderers: {
           KGWUI: () => <span>short</span>,
           "KGWUI-00": () => <span>longest</span>,
@@ -314,6 +316,12 @@ it("the longest matching finding renderer prefix wins", () => {
   expect(screen.getByText("longest")).toBeInTheDocument();
   expect(screen.queryByText("short")).toBeNull();
   expect(screen.queryByText("middle")).toBeNull();
+});
+
+it("the cluster landing is headed by the vocabulary's landing title", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one", "healthy"), inst("b/two", "healthy")] });
+  renderWithTheme(<ClusterLanding />);
+  expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Installs in this cluster");
 });
 
 // region Resource page

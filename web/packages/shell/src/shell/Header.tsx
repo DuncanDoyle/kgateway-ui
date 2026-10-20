@@ -110,8 +110,8 @@ function readinessState(r: Readiness): HealthState {
 function readinessText(r: Readiness, workloads: boolean): string {
   if (workloads && r.ready !== undefined && r.desired !== undefined)
     return `Controller: ${r.ready} of ${r.desired} ready`;
-  if (r.state === "ready") return "Controller ready";
-  return r.state === "not-ready" ? "Controller not ready" : "Controller readiness unknown";
+  if (r.state === "ready") return "Controller: ready";
+  return r.state === "not-ready" ? "Controller: not ready" : "Controller: unknown";
 }
 
 // region Component

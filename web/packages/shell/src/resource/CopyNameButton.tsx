@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Copy } from "lucide-react";
 import type { Ref } from "../api/types";
+import { useVocabulary } from "../shell/extension";
 import { Tooltip } from "../shell/Tooltip";
 
 // region Styles
@@ -45,11 +46,12 @@ interface CopyNameButtonProps {
 
 /** Icon button that copies a resource's namespace/name. */
 export function CopyNameButton({ resource, placement = "center", stylesOverride }: CopyNameButtonProps) {
+  const { copyName: label } = useVocabulary();
   return (
-    <Tooltip label="Copy namespace/name" placement={placement}>
+    <Tooltip label={label} placement={placement}>
       <IconButton
         type="button"
-        aria-label="Copy namespace/name"
+        aria-label={label}
         stylesOverride={stylesOverride}
         onClick={() => void navigator.clipboard?.writeText(copyName(resource)).catch(() => {})}
       >

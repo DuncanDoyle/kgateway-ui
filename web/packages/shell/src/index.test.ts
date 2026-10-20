@@ -66,6 +66,7 @@ it("keeps the public export surface", () => {
         "useResource",
         "useShellExtension",
         "useThemeSwitch",
+        "useVocabulary",
       ],
       "types": [
         "Access",
@@ -99,6 +100,7 @@ it("keeps the public export surface", () => {
         "ShellExtension",
         "StatusTokens",
         "Theme",
+        "Vocabulary",
       ],
     }
   `);

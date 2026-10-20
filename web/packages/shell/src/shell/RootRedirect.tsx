@@ -1,7 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useInstalls, useMeta } from "../api/hooks";
 import { PageState } from "../states/PageState";
-import type { CorePages } from "./extension";
+import { type CorePages, useVocabulary } from "./extension";
 import { installPath } from "./paths";
 
 // region Component
@@ -9,10 +9,10 @@ import { installPath } from "./paths";
 export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding">) {
   const { data, error } = useInstalls();
   const { data: meta } = useMeta();
+  const vocab = useVocabulary();
   // Loaded installs stay in use after a failed poll; the landing shows the error over them.
   if (!data) {
-    if (error?.status === 503)
-      return <PageState kind="connecting" title="Waiting for the cluster" message={error.message} />;
+    if (error?.status === 503) return <PageState kind="connecting" title={vocab.connecting} message={error.message} />;
     if (error)
       return <PageState kind="error" title="Cannot load installs" message={error.message} copyText={error.message} />;
     return <PageState kind="loading" title="Loading installs…" />;
@@ -21,22 +21,10 @@ export function RootRedirect({ ClusterLanding }: Pick<CorePages, "ClusterLanding
     return (
       <PageState
         kind="empty"
-        title="No kgateway install found"
+        title={vocab.noInstallsTitle}
         message={
           <>
-            An install is a controller Deployment with the labels <code>kgateway=kgateway</code> and{" "}
-            <code>app.kubernetes.io/component=controller</code>.
-            {meta?.pinned ? (
-              <>
-                {" "}
-                <code>--install {meta.pinned}</code> was set, but that install was not found.
-              </>
-            ) : (
-              <>
-                {" "}
-                To pin one install, start the UI with <code>--install namespace/name</code>.
-              </>
-            )}
+            {vocab.noInstallsHelp} {vocab.pinHint(meta?.pinned)}
           </>
         }
       />
