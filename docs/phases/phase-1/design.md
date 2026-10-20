@@ -316,12 +316,12 @@ The API is read-only JSON. Every resource payload has `managedFields` removed as
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/v1/installs` | `[{id, namespace, name, version, edition, controllerNames, controller: {ready, desired}, scope: {mode, selectors, watched, total}, health: {state, counts}, computedAt}]` |
-| `GET /api/v1/installs/{ns}/{name}/overview` | Header data (including edition and controller readiness), counts per kind (`{kind, count, access}`, GatewayClasses included), and the Gateway list. Every response carries the install `id`. |
-| `GET /api/v1/installs/{ns}/{name}/health` | `{install, state, findings[], checks[], counts, collectedAt}`; `install` is the install id |
-| `GET /api/v1/installs/{ns}/{name}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below) |
-| `GET /api/v1/meta` | UI version, pinned install, registered kinds and descriptors, plus `apps/Deployment`: every kind the resource endpoint can serve, so the UI links exactly these |
-| `GET /healthz`, `GET /readyz` | Liveness; readiness is true once the cache has synced |
+| `GET /api/v1/installs` | `[{id, displayName, namespace?, name?, version, edition, controllerNames, readiness: {state, ready?, desired?}, scope?: {mode, selectors, watched, total}, health: {state, counts}, computedAt}]` |
+| `GET /api/v1/installs/{id}/overview` | Header data (including edition and controller readiness), counts per kind (`{kind, count, access}`, GatewayClasses included), and the Gateway list. Every response carries the install `id`. |
+| `GET /api/v1/installs/{id}/health` | `{install, state, findings[], checks[], counts, collectedAt}`; `install` is the install id |
+| `GET /api/v1/installs/{id}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below) |
+| `GET /api/v1/meta` | UI version, pinned install, `platform`, `capabilities`, registered kinds and descriptors, plus `apps/Deployment` under the `workloads` capability: every kind the resource endpoint can serve, so the UI links exactly these |
+| `GET /healthz`, `GET /readyz` | Liveness; readiness is true once the cache has synced and no install was rejected for an invalid ID (§14.3 H1) |
 
 **Resource endpoint.** It serves an object of a watched, served kind when either:
 - the install owns it (§4.3); or
@@ -342,7 +342,7 @@ Anything else returns 404. The endpoint reads only from the shared cache, so it 
 
 - **Binary flags:**
   - `--kubeconfig`;
-  - `--install <ns>/<name>` (pinned mode);
+  - `--install <id or namespace/name>` (pinned mode);
   - `--listen` (default `:8080`; `127.0.0.1:8080` in local mode);
   - `--poll-interval`;
   - `--metrics-interval`.
@@ -412,7 +412,7 @@ Behaviour is tested at the highest practical boundary. The primary boundary is *
   2. Install the chart.
   3. Check the API. The missing-target policy assertion is version-specific: on 2.3 and 2.4 the policy has no status and shows as not yet processed (003); `TargetNotFound` (002) is asserted only in the `main` job (§10).
   4. Run a Playwright smoke test of the landing page, the install page, the findings list and the YAML view, in both themes.
-  - A second scenario runs two installs. Each uses the Helm release name `kgateway` in its own namespace, so the install IDs are `kgw-a/kgateway` and `kgw-b/kgateway`.
+  - A second scenario runs two installs. Each uses the Helm release name `kgateway` in its own namespace, so the install IDs are `kgw-a.kgateway` and `kgw-b.kgateway`.
 
 ## 10. Supported versions
 

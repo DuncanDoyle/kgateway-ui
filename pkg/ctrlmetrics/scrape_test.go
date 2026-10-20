@@ -165,7 +165,7 @@ func TestRunConcurrentWithGet(t *testing.T) {
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if r, ok := c.Get("kgw/good"); ok && r.Err == "" {
+		if r, ok := c.Get("kgw.good"); ok && r.Err == "" {
 			break
 		}
 		if time.Now().After(deadline) {

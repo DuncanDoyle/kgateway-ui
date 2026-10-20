@@ -24,7 +24,9 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -32,7 +34,7 @@ import (
 type Options struct {
 	// Listen is the HTTP address; empty means :8080 in-cluster and 127.0.0.1:8080 locally.
 	Listen string
-	// Pinned restricts the UI to one install ID ("namespace/name").
+	// Pinned restricts the UI to one install: its ID, or namespace/name (D-016).
 	Pinned string
 	// PollInterval is the model recompute interval.
 	PollInterval time.Duration
@@ -74,6 +76,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.PollInterval <= 0 || o.MetricsInterval <= 0 {
 		return nil, fmt.Errorf("poll interval (%v) and metrics interval (%v) must be positive", o.PollInterval, o.MetricsInterval)
 	}
+	pinned, err := install.ParsePinned(o.Pinned)
+	if err != nil {
+		return nil, err
+	}
 	served, err := kinds.Resolve(c.Discovery, reg.Kinds)
 	if err != nil {
 		return nil, err
@@ -106,7 +112,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	var once sync.Once
 	// Metrics older than three scrape intervals are unavailable, not reused.
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: o.Pinned, MetricsMaxAge: 3 * o.MetricsInterval,
+		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: 3 * o.MetricsInterval,
 		OnCompute: func(m *engine.Model) {
 			if len(m.Installs) > 0 {
 				once.Do(func() { close(discovered) })

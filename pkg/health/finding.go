@@ -12,6 +12,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -106,6 +107,8 @@ type Input struct {
 	FirstSeen func(u *unstructured.Unstructured) time.Time
 	Verify    scopeverify.Result
 	Now       time.Time
+	// Platform decides the wording of readiness findings; zero means Kubernetes.
+	Platform platform.Info
 }
 
 // firstSeen returns when the grace period for u's current generation started.

@@ -17,11 +17,15 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/version"
 )
 
-// ModelSource provides the current model.
-type ModelSource interface{ Current() *engine.Model }
+// ModelSource provides the current model and the platform it is computed for.
+type ModelSource interface {
+	Current() *engine.Model
+	Platform() platform.Info
+}
 
 // NewHandler returns the HTTP handler for the API, the probes and the SPA in ui.
 // Every response with resources, findings or counts goes through authz; a nil
@@ -36,9 +40,9 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
 	mux.HandleFunc("GET /readyz", h.readyz)
 	mux.HandleFunc("GET /api/v1/meta", h.meta)
 	mux.HandleFunc("GET /api/v1/installs", h.installs)
-	mux.HandleFunc("GET /api/v1/installs/{ns}/{name}/overview", h.overview)
-	mux.HandleFunc("GET /api/v1/installs/{ns}/{name}/health", h.health)
-	mux.HandleFunc("GET /api/v1/installs/{ns}/{name}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
+	mux.HandleFunc("GET /api/v1/installs/{id}/overview", h.overview)
+	mux.HandleFunc("GET /api/v1/installs/{id}/health", h.health)
+	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	mux.Handle("/", spa(ui))
 	return mux
@@ -75,19 +79,29 @@ func (h *handler) model(w http.ResponseWriter) *engine.Model {
 func synced(m *engine.Model) bool { return m != nil && m.Snapshot != nil && m.Snapshot.Synced }
 
 func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
-	if !synced(h.src.Current()) {
+	m := h.src.Current()
+	if !synced(m) {
 		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	// An install with an invalid ID is a detector bug; it must not pass silently (D-016).
+	if len(m.Rejected) > 0 {
+		writeErr(w, http.StatusServiceUnavailable, "install rejected: "+strings.Join(m.Rejected, "; "))
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
-	m := h.src.Current()
-	resp := MetaResponse{Version: version.Version, Kinds: []kinds.Served{deploymentKind}}
+	m, plat := h.src.Current(), h.src.Platform()
+	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{}}
 	if m != nil {
 		resp.Pinned, resp.Synced = m.Pinned, synced(m)
-		resp.Kinds = append(slices.Clone(m.Served), deploymentKind)
+		resp.Kinds = append(resp.Kinds, m.Served...)
+	}
+	// Deployments are linkable only where the platform runs workloads.
+	if plat.Has(platform.Workloads) {
+		resp.Kinds = append(resp.Kinds, deploymentKind)
 	}
 	writeJSON(w, resp)
 }
@@ -140,7 +154,7 @@ func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.In
 	o := i.Owned
 	owned := &install.Owned{GatewayClasses: keep(o.GatewayClasses), Gateways: keep(o.Gateways), ListenerSets: keep(o.ListenerSets),
 		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached}
-	return overview.Build(i.Resolved, owned, m.Snapshot, m.Served, rep)
+	return overview.Build(i.Resolved, owned, m.Snapshot, m.Served, rep, h.src.Platform())
 }
 
 func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
@@ -152,9 +166,9 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 	for k := range m.Installs {
 		i := &m.Installs[k]
 		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
-		out = append(out, InstallSummary{ID: hd.ID, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version, Edition: hd.Edition,
-			ControllerNames: hd.ControllerNames, Controller: hd.Controller, Scope: hd.Scope, Health: HealthSummary{State: rep.State, Counts: rep.Counts},
-			ComputedAt: m.ComputedAt})
+		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
+			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
+			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: m.ComputedAt})
 	}
 	writeJSON(w, out)
 }
@@ -164,7 +178,7 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Model, *
 	if m == nil {
 		return nil, nil
 	}
-	id := r.PathValue("ns") + "/" + r.PathValue("name")
+	id := r.PathValue("id")
 	for i := range m.Installs {
 		if m.Installs[i].Resolved.ID() == id {
 			return m, &m.Installs[i]

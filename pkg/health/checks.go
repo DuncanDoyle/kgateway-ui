@@ -15,6 +15,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 )
 
 // Upstream returns the Phase 1 checks (design §5.2).
@@ -121,14 +122,18 @@ func (controllerCheck) Name() string { return "controller pods" }
 // Run implements Check.
 func (c controllerCheck) Run(in Input) ([]Finding, CheckResult) {
 	d := in.Install.Deployment
-	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID()); bad {
+	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
 		return []Finding{f}, ok(c.Name(), true, in.Now)
 	}
 	return nil, ok(c.Name(), true, in.Now)
 }
 
-func notReady(d *appsv1.Deployment, code, slug, what, inst string) (Finding, bool) {
+// workloads reports whether replica wording applies; only the zero Platform
+// defaults to Kubernetes, so the platform name is never consulted.
+func (in Input) workloads() bool { return in.Platform.IsZero() || in.Platform.Has(platform.Workloads) }
+
+func notReady(d *appsv1.Deployment, code, slug, what, inst string, workloads bool) (Finding, bool) {
 	want := int32(1)
 	if d.Spec.Replicas != nil {
 		want = *d.Spec.Replicas
@@ -136,8 +141,11 @@ func notReady(d *appsv1.Deployment, code, slug, what, inst string) (Finding, boo
 	if d.Status.ReadyReplicas >= want {
 		return Finding{}, false
 	}
-	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst,
-		Message: fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)}, true
+	msg := what + " not ready"
+	if workloads {
+		msg = fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)
+	}
+	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst, Message: msg}, true
 }
 
 // Required and optional condition types per status block (design §5.2).
@@ -427,7 +435,7 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 			continue
 		}
-		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID()); bad {
+		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
 			f.Resource = ref(gw)
 			fs = append(fs, f)
 		}
