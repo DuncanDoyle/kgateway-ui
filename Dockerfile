@@ -24,6 +24,10 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags "-s -w -X github.com/DuncanDoyle/kgateway-ui/pkg/version.Version=${VERSION}" -o /out/kgateway-ui ./cmd/kgateway-ui
 
 FROM gcr.io/distroless/static:nonroot
+# image.source links the ghcr package to the repo.
+LABEL org.opencontainers.image.source="https://github.com/DuncanDoyle/kgateway-ui" \
+      org.opencontainers.image.description="Read-only web UI for kgateway" \
+      org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=go /out/kgateway-ui /kgateway-ui
 USER 65532:65532
 EXPOSE 8080

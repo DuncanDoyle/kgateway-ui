@@ -14,8 +14,17 @@ The UI has no login. Whoever reaches it sees everything its ServiceAccount can r
 ## Install
 
 ```sh
-helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace
+# Install a released chart; --version picks the chart and the matching image
+helm install ui oci://ghcr.io/duncandoyle/charts/kgateway-ui --version 0.1.0 \
+  -n kgateway-ui --create-namespace
 kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui 8080:80
+```
+
+To install from a checkout, set the image tag to a released version. The in-repo `appVersion` is not bumped on release, so without it the templates from your checkout run an older image.
+
+```sh
+helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
+  --set image.tag=<version>
 ```
 
 ## Values
@@ -23,7 +32,7 @@ kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui 8080:80
 | Key | Default | Description |
 |---|---|---|
 | `image.repository` | `ghcr.io/duncandoyle/kgateway-ui` | Image repository. |
-| `image.tag` | `""` | Image tag; defaults to the chart `appVersion`. |
+| `image.tag` | `""` | Image tag; defaults to the chart `appVersion`. Required for a local-path install. |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `install.pin` | `""` | Pin the UI to one controller install: an install ID (e.g. `kgw.kgateway`) or `namespace/name`. Empty shows all installs. |
 | `httpRoute.enabled` | `false` | Create an HTTPRoute on an existing Gateway. Read [Security and trust model](#security-and-trust-model) first. |

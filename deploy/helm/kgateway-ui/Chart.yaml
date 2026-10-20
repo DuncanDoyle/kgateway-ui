@@ -4,3 +4,7 @@ description: Read-only web UI for kgateway
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+home: https://github.com/DuncanDoyle/kgateway-ui
+# helm push turns sources[0] into the OCI image.source annotation, which links the ghcr package to the repo.
+sources:
+  - https://github.com/DuncanDoyle/kgateway-ui

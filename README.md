@@ -24,7 +24,7 @@ helm install ui oci://ghcr.io/duncandoyle/charts/kgateway-ui --version 0.1.0 \
 kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui 8080:80
 ```
 
-The image is `ghcr.io/duncandoyle/kgateway-ui`. To pin the UI to one install, set `install.pin`. To expose it through a Gateway, read [Security and trust model](#security-and-trust-model) first, then set `httpRoute.enabled`, `httpRoute.parentRefs` and `httpRoute.hostnames`. The [chart README](deploy/helm/kgateway-ui/README.md) lists every value.
+The image is `ghcr.io/duncandoyle/kgateway-ui`. Installing from a checkout needs `--set image.tag=<version>`; see the [chart README](deploy/helm/kgateway-ui/README.md#install). To pin the UI to one install, set `install.pin`. To expose it through a Gateway, read [Security and trust model](#security-and-trust-model) first, then set `httpRoute.enabled`, `httpRoute.parentRefs` and `httpRoute.hostnames`. The [chart README](deploy/helm/kgateway-ui/README.md) lists every value.
 
 ## Run locally
 
@@ -142,6 +142,21 @@ kgateway v2.3.11 and v2.4.7, tested on kind in CI. On these versions a policy wh
 ## Contributing
 
 The design, implementation plans, decisions and roadmap live in [`docs/`](docs/). Start with [`docs/roadmap.md`](docs/roadmap.md) and [`docs/phase-status.md`](docs/phase-status.md).
+
+CI's `hygiene` job reads its term list from the repository secret `FORBIDDEN_TERMS`. Same-repo PRs and pushes fail without it; fork PRs, which get no secrets, skip the check with a warning.
+
+### Releasing
+
+Push a semver tag (`vX.Y.Z`). The release workflow publishes the image `ghcr.io/duncandoyle/kgateway-ui:X.Y.Z` and the chart `oci://ghcr.io/duncandoyle/charts/kgateway-ui` version `X.Y.Z`, then creates the GitHub release.
+
+ghcr creates both packages as private on their first push. After the first tag, make them public once: open each package's settings (`kgateway-ui` and `charts/kgateway-ui`) and set its visibility to public. Then check that an anonymous pull works:
+
+```sh
+# Run logged out of ghcr.io
+docker logout ghcr.io; helm registry logout ghcr.io
+docker pull ghcr.io/duncandoyle/kgateway-ui:X.Y.Z
+helm show chart oci://ghcr.io/duncandoyle/charts/kgateway-ui --version X.Y.Z
+```
 
 ## Licence
 
