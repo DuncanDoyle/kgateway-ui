@@ -1183,3 +1183,79 @@ func TestWorkloadsAtZeroReplicasAtTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// D-017 §2: owned ListenerSet status is required, like a Gateway's. kgateway
+// writes some failures (rejectDeniedListenerSets) only on the ListenerSet, and
+// writes no listener status for a rejected one.
+func TestListenerSetStatusAtTheAPI(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	cond := testutil.Cond
+	accepted := []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionTrue, "Programmed")}
+	denied := []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowed"), cond("Programmed", metav1.ConditionFalse, "NotAllowed")}
+	// A rejected ListenerSet has no listener status blocks.
+	deniedLS := testutil.ListenerSet("infra", "ls1", gw, denied, testutil.Listener{Name: "extra"})
+	badListener := testutil.ListenerSet("infra", "ls1", gw, []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "ListenersNotValid"), cond("Programmed", metav1.ConditionTrue, "Programmed")},
+		testutil.Listener{Name: "extra", Conds: []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionFalse, "PortUnavailable")}})
+	noListenerStatus := testutil.ListenerSet("infra", "ls1", gw, accepted, testutil.Listener{Name: "extra"})
+	noStatus := func() *unstructured.Unstructured {
+		u := testutil.ListenerSet("infra", "ls1", gw, nil)
+		delete(u.Object, "status")
+		return u
+	}
+	xDenied := testutil.ListenerSet("infra", "xls1", gw, denied, testutil.Listener{Name: "extra"})
+	xDenied.SetAPIVersion("gateway.networking.x-k8s.io/v1alpha1")
+	xDenied.SetKind("XListenerSet")
+	ls1 := "infra/ls1"
+
+	cases := []struct {
+		name   string
+		s      setup
+		objs   []runtime.Object
+		state  health.State
+		want   []expect
+		forbid []expect
+	}{
+		{"accepted ListenerSet stays green", setup{}, isolated(testutil.ListenerSet("infra", "ls1", gw, nil)), health.StateHealthy,
+			nil, []expect{{health.CodeConditionFalse, "", ls1}, {health.CodeRouteUnattached, "", ls1}}},
+		{"denied ListenerSet", setup{}, isolated(deniedLS), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, []expect{{health.CodeRouteUnattached, "", ls1}}},
+		{"denied XListenerSet", setup{}, isolated(xDenied), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, "infra/xls1"}}, nil},
+		{"listener not programmed", setup{}, isolated(badListener), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, nil},
+		{"listener without a status block", setup{}, isolated(noListenerStatus), health.StateWarning,
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, []expect{{health.CodeConditionFalse, "", ls1}}},
+		{"no status after grace", setup{}, isolated(noStatus()), health.StateWarning,
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, nil},
+		{"no status inside grace", setup{late: []*unstructured.Unstructured{noStatus()}}, isolated(), health.StateUnknown,
+			[]expect{{health.CodeRouteUnattached, health.SeverityInfo, ls1}}, []expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}},
+		{"stale denial is pending, not an error", setup{}, isolated(stale(testutil.ListenerSet("infra", "ls1", gw, denied, testutil.Listener{Name: "extra"}))), health.StateWarning,
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, []expect{{health.CodeConditionFalse, "", ls1}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, tc.s, tc.objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state: want %s, got %s; findings: %+v", tc.state, h.State, h.Findings)
+			}
+			for _, w := range tc.want {
+				if !hasSev(h, w.code, w.sev, w.res) {
+					t.Fatalf("missing %s/%s on %s; findings: %+v", w.code, w.sev, w.res, h.Findings)
+				}
+			}
+			for _, f := range tc.forbid {
+				if hasSev(h, f.code, f.sev, f.res) {
+					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
+				}
+			}
+			// The ListenerSet is owned, so a green result is not vacuous.
+			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
+			ls, _ := count(o, "ListenerSet")
+			xls, _ := count(o, "XListenerSet")
+			if ls+xls != 1 {
+				t.Fatalf("want one owned ListenerSet, got counts %+v", o.Counts)
+			}
+		})
+	}
+}

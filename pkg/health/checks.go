@@ -268,31 +268,47 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	for _, gc := range in.Owned.GatewayClasses {
 		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "")
 	}
+	// listeners evaluates the status of every configured listener of a Gateway
+	// or ListenerSet; both share the listener status shape.
+	listeners := func(u *unstructured.Unstructured) {
+		byName := map[string]objects.ListenerStatus{}
+		for _, l := range objects.GatewayListeners(u) {
+			byName[l.Name] = l
+		}
+		// Every configured listener needs a status block.
+		for _, name := range objects.GatewaySpecListeners(u) {
+			l, ok := byName[name]
+			if !ok {
+				pending(u, "no status for listener "+name)
+				continue
+			}
+			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
+			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(u, *cf) {
+				add(u, SeverityError, *cf, "listener "+l.Name)
+			}
+		}
+	}
 	// owned are the Gateways and ListenerSets of this install: the only
 	// ancestors whose policy status counts here.
 	owned := map[objects.Ref]bool{}
+	// ListenerSet status is required like a Gateway's (D-017 §2). kgateway
+	// writes no listener status for a rejected ListenerSet, so its listeners
+	// are judged only when it is not currently Accepted=False.
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
+		cs := objects.Conditions(ls)
+		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
+			continue
+		}
+		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "")
+		if objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse {
+			listeners(ls)
+		}
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
 		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
-		byName := map[string]objects.ListenerStatus{}
-		for _, l := range objects.GatewayListeners(gw) {
-			byName[l.Name] = l
-		}
-		// Every configured listener needs a status block.
-		for _, name := range objects.GatewaySpecListeners(gw) {
-			l, ok := byName[name]
-			if !ok {
-				pending(gw, "no status for listener "+name)
-				continue
-			}
-			evaluate(gw, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
-			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(gw, *cf) {
-				add(gw, SeverityError, *cf, "listener "+l.Name)
-			}
-		}
+		listeners(gw)
 	}
 	// Routes: one status block per current parentRef of this install, matched on
 	// the full parentRef including section name and port.
