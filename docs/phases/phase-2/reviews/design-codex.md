@@ -87,3 +87,63 @@ For §15, **Q12 needs the declared-versus-observed and health decisions above be
 | 11 | Q12 compatibility tests too weak | reviewer | accept | Before/after cases for mixed-role routes, dedup, shared controllers, removed refs, scope changes, stale edges. |
 | 12 | Version fixtures must test status production | reviewer | accept | Cluster observation on both tags for omitted namespace, section/port, empty parentRefs, filtered hostname-bearing children. |
 | 13 | Cursor and performance acceptance too weak | reviewer | accept | More cursor cases, a latency-sampling method, an absolute compute and allocation budget. |
+
+## Re-review (scoped, Codex, diff 29c1ecd..bf76ff4)
+
+The 13 original findings are addressed, but the revision introduces **3 new P2 findings**. §15 is substantially clearer; Q12 still depends on resolving the reported-edge contradiction below. No files were edited.
+
+All design line references below refer to [the revised design](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/design.md). Tagged kgateway evidence was checked with `git show` in the supplied source repository.
+
+| # | Result | Section / line evidence |
+|---|---|---|
+| 1 | **Resolved** | §4.3:197–209 requires controller status for reported edges and separates declarations into diagnostic candidates. §5.2:258–274 applies that distinction to children and named-ref states. |
+| 2 | **Resolved** | §4.3:202–204 limits implicit fallback to an entirely empty parentRefs list. §9.1:621 tests removed parents and gaining a Gateway parent. |
+| 3 | **Resolved** | §7.1:396–409 admits finding-referenced and directly referenced candidates. §4.3:219–223 gives no-parent rows a YAML serving contract; §8.1:547 uses the row’s link choice. A newly exposed secondary-navigation case remains below. |
+| 4 | **Resolved** | §7.4:493–494 removes filtered denied counts; `deniedInInstall` is independent of filters. §9.1:630 explicitly tests hostname probing. |
+| 5 | **Resolved** | §7.4:495–501 requires authorization for dereferenced data and derived counts. §7.3:473–479 defines identity-free restricted ancestor and Backend shapes. |
+| 6 | **Resolved** | §6.3:364–372 specifies state computation and precedence. §7.2:423 exposes `unknown`, with no `info` health state. |
+| 7 | **Resolved** | §6.3:374–377 explicitly limits propagation to install health and the child’s row. Ancestor badges retain their own-object semantics; Q12:796 repeats this. |
+| 8 | **Resolved** | §6.2:348–358 uses condition generation evidence directly and makes stale/absent/generation-less states unknown. Q11:795 now covers both `True` and `False`, plus absent status. |
+| 9 | **Resolved** | §3.3:124 removes stored up-chains. §5.2:281–286 bounds traversal and replaces exact remainder counts with truncation. §9.6:682,698 includes a lattice fixture and detail latency budget. |
+| 10 | **Resolved** | §7.3:463–466,486 pages ListenerSets separately. `ParentSummary` includes condition type, reason and message at 442–445; 487 specifies their selection. |
+| 11 | **Resolved** | §4.3:195 corrects the mixed-role claim. §9.1:624 requires before/after counts, findings and roll-up for the requested transition and isolation cases. |
+| 12 | **Resolved** | §5.1:254 records section/port loss on 2.3. §5.5:310 records matcher filtering before hostname rejection. §9.5:666–674 explicitly gates implementation on status-production observations at both tags. |
+| 13 | **Resolved** | §9.1:617 adds deletion, descending ties, reverse traversal and moving sort values. §9.6:686–702 adds absolute compute, allocation, heap and sustained-load budgets, plus an explicit percentile-sampling method. |
+
+These results assess the original defects; they do not imply that the revised contracts are mutually consistent.
+
+**New findings, ranked**
+
+1. **P2 — Stale status simultaneously qualifies as reported and “not reported.”**  
+   **Design:** §4.3:199–208; §6.2:340–342; §15 Q12:796.
+
+   The reported-edge predicate requires an eligible status entry, but contains no freshness requirement. Consequently, an explicit child with a matching stale entry is owned, counted and excluded from declared candidates. §6.2 then says KGWUI-011 applies when no **current** status reports the child and explicitly says a stale entry counts as not reported.
+
+   This is a real transition: after a child generation changes, an existing parent entry can describe its previous generation. kgateway stamps route status with the report’s generation: `v2.4.7:pkg/reports/status.go:475–480`.
+
+   **Why:** The same input has conflicting ownership, count, table and finding outcomes. Choose whether stale entries retain reported relationships, then specify their pending/finding behavior separately. Q12’s default needs that choice and a boundary test for a matching stale explicit-parent entry.
+
+2. **P2 — Candidate detail pages can generate links that admission rejects.**  
+   **Design:** §7.1:396–406; §5.2:271; §8.2:553; §8.4:575–576.
+
+   Admission extends to objects named by an **owned** object, while candidate pages render their own references and target links. For example, candidate C is admitted through KGWUI-011 and names existing HTTPRoute D through a delegation backendRef. If D has no independent admission reason, C’s promised `not-reported` target link opens a 404: C is not owned, so its reference does not admit D.
+
+   D can legitimately exist without reporting C because selection is followed by attachment eligibility checking: `v2.4.7:pkg/kgateway/query/route.go:258–268`; equivalent behavior at `v2.3.11:pkg/kgateway/query/route.go:231–241`.
+
+   **Why:** Kind-based `objectPath` cannot determine object admission. Define link behavior for references rendered on candidate pages—either explicit admission-aware link metadata or a bounded additional serving rule—and test this second navigation step.
+
+3. **P2 — Declared candidates now include unwatched routes, causing conflicting diagnostics and potentially unknown install health.**  
+   **Design:** §4.3:206–215; §6.2:339–345.
+
+   Reported edges explicitly require C’s namespace to be in scope, but the new declared-candidate definition does not. An out-of-scope route naming an owned HTTPRoute therefore satisfies both KGWUI-004 and KGWUI-011. During KGWUI-011’s grace period, it also makes the resource-status check pending.
+
+   Phase 1 deliberately separates these cases: in-scope routes enter ownership; out-of-scope routes enter `Unwatched` instead (`pkg/install/assign.go:181–186`). Missing status for an unwatched route is expected.
+
+   **Why:** Editing a route the controller does not watch can introduce a misleading “waiting for parent” diagnostic and turn the install unknown. Require scope eligibility for KGWUI-011, or explicitly define precedence over it for KGWUI-004. Add an assertion that an unwatched declared route produces only the intended scope diagnostic.
+
+For **§15**, Q6 now supplies meaningful scale and performance defaults; Q10 supplies a usable serving contract; Q11 resolves the original freshness ambiguity; and Q2/Q3/Q8 correctly identify decision amendments. **Q12 remains insufficiently settled until finding 1 defines what stale status means for reported ownership and counts.**
+| # | Finding | Source | Decision | Note |
+|---|---|---|---|---|
+| R2-1 | Stale status both reported and "not reported" | reviewer | accept | Our call: an eligible status entry, current or stale, keeps the reported edge (ownership and counts stay stable); freshness sets the row's pending or unknown state per Phase 1; KGWUI-011 only when no eligible entry exists. |
+| R2-2 | Candidate pages render links that admission rejects | reviewer | accept | Our call: every rendered reference carries server-computed link metadata (detail, YAML or none) from the same admission function; test the second navigation step. |
+| R2-3 | Unwatched routes become declared candidates | reviewer | accept | KGWUI-011 requires the child's namespace in scope; out of scope gives KGWUI-004 only. |
