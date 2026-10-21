@@ -286,7 +286,7 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - Some fixes need a choice the design did not make.
 
 **Decision:**
-1. **Workloads at zero.** A controller Deployment with 0 desired replicas is red KGWUI-005 (D-015 already says so). A managed proxy Deployment with 0 desired replicas is warning KGWUI-006, the same as an unready proxy: the Gateway serves no traffic, but scaling to zero may be intentional.
+1. **Workloads at zero.** A controller Deployment with 0 desired replicas is red KGWUI-005 (D-015 already says so). A managed proxy Deployment with 0 desired replicas is warning KGWUI-006: the Gateway serves no traffic, but scaling to zero may be intentional. A proxy with fewer ready than desired replicas stays an error.
 2. **ListenerSet status is required.** Owned ListenerSets join design §5.2's required-status list, because kgateway writes some failures (`rejectDeniedListenerSets`) only on the ListenerSet (D-006).
 3. **Grace keeps a check pending.** During a missing proxy's grace period, the required proxy check is pending, not OK, so the install cannot show green.
 4. **Scope verification compares stable kinds only.** Kinds that kgateway only watches with experimental features on (pre-v1 TCPRoute and TLSRoute, XListenerSet) are left out of KGWUI-007's comparison. We do not read the experimental-features flag. When the upstream scope endpoint reports enabled kinds (D-009 §7), the verifier uses that list, so experimental Gateway API support works across kgateway and downstream distributions.
