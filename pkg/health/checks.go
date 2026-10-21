@@ -299,6 +299,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
 		cs := objects.Conditions(ls)
+		// ListenerSet status has no controllerName, so any status counts; safe because only owned ListenerSets reach here.
 		if in.experimentalOnly(ls) && len(cs) == 0 && len(objects.GatewayListeners(ls)) == 0 {
 			continue
 		}
