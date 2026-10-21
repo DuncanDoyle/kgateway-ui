@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) complete, merged in #4 (cc8ba71); 1.4 (packaging, CI, e2e) complete on branch duncandoyle/packaging; phase review next
+Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) complete, merged in #4 (cc8ba71); 1.4 (packaging, CI, e2e) complete, merged in #5 (911452d); phase review in progress
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
@@ -39,7 +39,6 @@ none
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
-- 2026-10-20 (resume here): PR #5 (sub-phase 1.4) is open as a draft with all CI checks green, waiting for the user's go-ahead to mark it ready and merge (merge commit, as for #4). After the merge, record it here, then run Q8: the Codex cross-model review of the whole phase (`560c393..HEAD`). The `FORBIDDEN_TERMS` secret is set and the variable is deleted.
 - 2026-10-20: user approved D-016 (platform neutrality). Kubernetes stays the product focus; standalone is a separate project, and Phase 1 only adds the hedges in design §14.3.
 - 2026-10-20: user confirmed D-011's dark default (no OS-preference step).
 - 2026-10-18: user approved Overridden policies as info (not warning) and subagent-driven execution for Phase 1.
