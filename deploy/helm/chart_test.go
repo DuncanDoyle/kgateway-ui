@@ -143,6 +143,22 @@ func TestClusterRoleGrantsEveryReadKind(t *testing.T) {
 	}
 }
 
+// TestClusterRoleOmitsUnreadKinds guards D-017 §5: nothing reads ReferenceGrants
+// or CRDs, and discovery needs neither.
+func TestClusterRoleOmitsUnreadKinds(t *testing.T) {
+	cr := clusterRole(t)
+	for _, c := range []struct{ group, resource string }{
+		{"gateway.networking.k8s.io", "referencegrants"},
+		{"apiextensions.k8s.io", "customresourcedefinitions"},
+	} {
+		for _, v := range []string{"get", "list", "watch"} {
+			if grants(cr.Rules, c.group, c.resource, v) {
+				t.Errorf("ClusterRole must not grant %s on %s (group %q)", v, c.resource, c.group)
+			}
+		}
+	}
+}
+
 func TestHTTPRouteIsOptIn(t *testing.T) {
 	if n := len(kind(render(t), "HTTPRoute")); n != 0 {
 		t.Fatalf("HTTPRoute must be off by default, got %d", n)

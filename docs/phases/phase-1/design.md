@@ -359,10 +359,9 @@ Anything else returns 404. The endpoint reads only from the shared cache, so it 
   - `httpRoute.enabled` (default `false`), with `parentRefs` and `hostnames`. It creates an HTTPRoute on an existing Gateway.
   - **Trust model in the chart** (D-013). The chart README, `NOTES.txt` and the comment on the `httpRoute` values state it plainly: anyone who reaches the UI sees everything its ServiceAccount can read, which can exceed their own RBAC. They recommend authentication and authorisation on the route, for example a kgateway TrafficPolicy attached to it. Without the route, access is a port-forward to the ClusterIP Service.
 - **ClusterRole: get/list/watch only.**
-  - `gateway.networking.k8s.io`: gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, referencegrants, backendtlspolicies, listenersets.
+  - `gateway.networking.k8s.io`: gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, backendtlspolicies, listenersets.
   - `gateway.networking.x-k8s.io`: xlistenersets.
   - `gateway.kgateway.dev`: `*`.
-  - `apiextensions.k8s.io`: customresourcedefinitions.
   - Core: namespaces, pods.
   - `apps`: deployments.
   - Pods and Deployments are only listed and watched through the detectors' label selectors (§4.1). RBAC cannot express a label restriction, so the ClusterRole grants the verbs, and the code keeps the watches narrow. The grant is still cluster-wide, and that is part of the trust model the chart documents.

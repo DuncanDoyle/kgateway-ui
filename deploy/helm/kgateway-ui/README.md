@@ -48,10 +48,9 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 
 The ClusterRole grants only `get`, `list` and `watch`:
 
-- `gateway.networking.k8s.io`: gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, referencegrants, backendtlspolicies, listenersets.
+- `gateway.networking.k8s.io`: gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, backendtlspolicies, listenersets.
 - `gateway.networking.x-k8s.io`: xlistenersets.
 - `gateway.kgateway.dev`: all resources.
-- `apiextensions.k8s.io`: customresourcedefinitions.
 - Core: namespaces, pods. `apps`: deployments.
 
 No Secrets, no ConfigMaps and no `*/proxy` access. Pods and Deployments are only listed and watched through the controller detectors' label selectors. RBAC cannot express a label restriction, so the grant itself is cluster-wide.
