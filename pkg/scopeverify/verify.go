@@ -89,7 +89,7 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 	case in.Install.Scope.Mode == install.ScopeUnknown:
 		return unavailable("controller scope unknown")
 	}
-	ui := uiCounts(in)
+	ui, skip := uiCounts(in)
 	// An absent family means 0 (D-012); it is unavailable only when the UI expects more.
 	if !in.Metrics.Metrics.ManagedPresent {
 		if len(ui) > 0 {
@@ -103,7 +103,7 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 		keys[k] = true
 	}
 	for k := range in.Metrics.Metrics.Managed {
-		if counted(k.Resource, in.Served) {
+		if counted(k.Resource, in.Served) && !skip[k] {
 			keys[k] = true
 		}
 	}
@@ -159,13 +159,17 @@ func counted(resource string, served []kinds.Served) bool {
 	return false
 }
 
-// uiCounts counts the in-scope objects per (namespace, resource label) with the gauge's weights.
-func uiCounts(in Input) map[ctrlmetrics.ManagedKey]float64 {
+// uiCounts counts the in-scope objects per (namespace, resource label) with the
+// gauge's weights. It leaves out, and returns as skip, every key holding an
+// experimental-only object: the gauge counts those only with experimental
+// features on, which the UI does not read (D-017 §4). Once the upstream scope
+// endpoint reports enabled kinds, the verifier uses it instead.
+func uiCounts(in Input) (out map[ctrlmetrics.ManagedKey]float64, skip map[ctrlmetrics.ManagedKey]bool) {
 	nsByName := map[string]*corev1.Namespace{}
 	for _, n := range in.Snapshot.Namespaces {
 		nsByName[n.Name] = n
 	}
-	out := map[ctrlmetrics.ManagedKey]float64{}
+	out, skip = map[ctrlmetrics.ManagedKey]float64{}, map[ctrlmetrics.ManagedKey]bool{}
 	for _, k := range in.Served {
 		label := resourceLabel(k)
 		if label == "" {
@@ -175,14 +179,22 @@ func uiCounts(in Input) map[ctrlmetrics.ManagedKey]float64 {
 			if !in.Install.Scope.Contains(o.GetNamespace(), nsByName[o.GetNamespace()]) {
 				continue
 			}
+			key := ctrlmetrics.ManagedKey{Namespace: o.GetNamespace(), Resource: label}
+			if k.ExperimentalOnly() {
+				skip[key] = true // ListenerSet shares this label, so it is skipped here too
+				continue
+			}
 			w := 1.0
 			if k.Category == kinds.CategoryRoute {
 				w = float64(len(objects.RouteParentRefs(o)))
 			}
 			if w > 0 {
-				out[ctrlmetrics.ManagedKey{Namespace: o.GetNamespace(), Resource: label}] += w
+				out[key] += w
 			}
 		}
 	}
-	return out
+	for key := range skip {
+		delete(out, key)
+	}
+	return out, skip
 }

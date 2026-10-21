@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -1516,6 +1517,62 @@ func TestDuplicateScopeEnvIsLastWinsAtTheAPI(t *testing.T) {
 				if c.Name == "controller scope" && !c.OK {
 					t.Errorf("controller scope check must be OK: %+v", c)
 				}
+			}
+		})
+	}
+}
+
+// Q13, D-017 §4: KGWUI-007 compares stable kinds only. kgateway counts
+// XListenerSet and pre-v1 TCPRoute/TLSRoute only with experimental features on.
+func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	xls := testutil.ListenerSet("infra", "xls1", gw, nil)
+	xls.SetAPIVersion("gateway.networking.x-k8s.io/v1alpha1")
+	xls.SetKind("XListenerSet")
+	delete(xls.Object, "status")
+	preV1 := slices.Clone(testutil.ServedUpstream())
+	for i := range preV1 {
+		if preV1[i].Kind == "TCPRoute" {
+			preV1[i].Version = "v1alpha2"
+		}
+	}
+	// managed is the gauge for isolated(): 2 Gateways in infra (any class), 1 HTTPRoute parentRef in shop.
+	managed := func(extra map[ctrlmetrics.ManagedKey]float64) fakeMetrics {
+		m := map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 2, {Namespace: "shop", Resource: "HTTPRoute"}: 1}
+		maps.Copy(m, extra)
+		return fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+			Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: m, ManagedPresent: true}}}
+	}
+	experimental := []runtime.Object{xls, tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw})}
+	cases := []struct {
+		name    string
+		served  []kinds.Served
+		metrics fakeMetrics
+		objs    []runtime.Object
+		want    string // the one mismatching "namespace, resource"; "" means no KGWUI-007
+	}{
+		{"matching stable counts", nil, managed(nil), isolated(), ""},
+		{"experimental-only objects the gauge omits", preV1, managed(nil), isolated(experimental...), ""},
+		{"experimental-only counts the UI does not match", preV1,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "XListenerSet"}: 3, {Namespace: "shop", Resource: "TCPRoute"}: 4}), isolated(experimental...), ""},
+		{"stable mismatch alongside experimental-only objects", preV1,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "HTTPRoute"}: 5}), isolated(experimental...), "namespace shop, HTTPRoute:"},
+		{"v1 TCPRoute the gauge omits", nil, managed(nil), isolated(tcpRoute("v1", "shop", "tcp", []objects.ParentRef{gw})), "namespace shop, TCPRoute:"},
+		{"ListenerSet the gauge omits, no XListenerSet beside it", nil, managed(nil), isolated(testutil.ListenerSet("infra", "ls1", gw, nil)), "namespace infra, XListenerSet:"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, srv, _ := startWith(t, setup{served: tc.served, metrics: tc.metrics, immediate: true}, tc.objs...)
+			e.Compute() // a mismatch must persist across two computations
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			var got []string
+			for _, f := range h.Findings {
+				if f.Code == health.CodeScopeMismatch {
+					got = append(got, f.Detail)
+				}
+			}
+			if tc.want == "" && len(got) > 0 || tc.want != "" && (len(got) != 1 || !strings.HasPrefix(got[0], tc.want)) {
+				t.Fatalf("KGWUI-007: want %q, got %q", tc.want, got)
 			}
 		})
 	}

@@ -164,7 +164,8 @@ An **Install** is one kgateway controller deployment. It has:
 
 ### 4.4 ScopeVerifier
 
-v1 compares, per install and per `(namespace, resource kind)`, the UI's count of namespace-scoped raw objects with the controller's `kgateway_resources_managed{namespace,parent,resource}` gauge, summed over `parent`. That is the same population: namespace-filtered and not ownership-filtered.
+v1 compares, per install and per `(namespace, resource kind)`, the UI's count of namespace-scoped raw objects with the controller's `kgateway_resources_managed{namespace,parent,resource}` gauge, summed over `parent`. Both counts are namespace-filtered and not ownership-filtered.
+- Only stable kinds are compared (D-017 §4). kgateway watches XListenerSet and pre-v1 TCPRoute/TLSRoute only with experimental Gateway API features on, and the UI does not read that flag. A `(namespace, resource)` that holds such an object is left out on both sides; because ListenerSet shares the `XListenerSet` label, it is left out there too. When the upstream scope endpoint reports enabled kinds (D-009 §7), the verifier uses that list.
 - The UI must weight objects the way the gauge does (verified on kgateway main `8a498c6406`, `pkg/krtcollections/metrics/metrics.go`): a Gateway counts 1; a route counts once per `spec.parentRefs` entry, so a route with no parentRefs counts 0; a ListenerSet counts 1 and is reported as `resource="XListenerSet"`; a policy counts 1 under its own kind.
 - A gauge with no samples has no series, so an absent family in a successful scrape means 0, not "unavailable".
 - A mismatch that persists for more than 2 scrape intervals produces `KGWUI-007 scope-mismatch` (warning), showing both numbers.
