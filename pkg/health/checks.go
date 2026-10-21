@@ -216,9 +216,10 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
 			Message: msg, Detail: why, parent: parent})
 	}
-	// pendingFor reports a block of u that is not processed; parent is set for route parents.
+	// pendingFor reports a block of u that is not processed; parent is set for
+	// route parents. An experimental-only kind gets a hint (D-018 §2).
 	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why string) {
-		notProcessed(u, parent, "Not yet processed by the controller", why)
+		notProcessed(u, parent, "Not yet processed by the controller", why+in.experimentalHint(u))
 	}
 	pending := func(u *unstructured.Unstructured, why string) { pendingFor(u, objects.ParentRef{}, why) }
 	// current reports false when the block is pending: a required condition is
@@ -299,10 +300,6 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
 		cs := objects.Conditions(ls)
-		// ListenerSet status has no controllerName, so any status counts; safe because only owned ListenerSets reach here.
-		if in.experimentalOnly(ls) && len(cs) == 0 && len(objects.GatewayListeners(ls)) == 0 {
-			continue
-		}
 		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
 			continue
 		}
@@ -392,31 +389,45 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
 
-// experimentalOnly reports whether kgateway watches u's kind, at its served
-// version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
-func (in Input) experimentalOnly(u *unstructured.Unstructured) bool {
+// experimentalKind returns u's served kind when kgateway watches it, at its
+// served version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
+func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bool) {
 	gvk := u.GroupVersionKind()
 	for _, k := range in.Served {
 		if k.Group == gvk.Group && k.Kind == gvk.Kind {
-			return k.ExperimentalOnly()
+			return k, k.ExperimentalOnly()
 		}
 	}
-	return false
+	return kinds.Served{}, false
+}
+
+// ExperimentalHint is appended to the detail of a "not processed" finding on
+// an experimental-only kind (D-018 §2); %s is the kind and served version.
+const ExperimentalHint = "; the controller watches %s only with its experimental Gateway API features on, and they may be off"
+
+// experimentalHint returns ExperimentalHint for u's kind, or "" for a stable kind.
+func (in Input) experimentalHint(u *unstructured.Unstructured) string {
+	k, exp := in.experimentalKind(u)
+	if !exp {
+		return ""
+	}
+	return fmt.Sprintf(ExperimentalHint, k.Kind+" "+k.Version)
 }
 
 // ignored reports whether route u is left unjudged: its kind is
-// experimental-only and it has no status from this install's controller, so
-// the controller may not watch it at all.
+// experimental-only and only other controllers wrote its status. A route
+// with no status at all follows the normal rule (D-018 §1).
 func (in Input) ignored(u *unstructured.Unstructured) bool {
-	if !in.experimentalOnly(u) {
+	if _, exp := in.experimentalKind(u); !exp {
 		return false
 	}
-	for _, p := range objects.RouteParents(u) {
+	status := objects.RouteParents(u)
+	for _, p := range status {
 		if slices.Contains(in.Install.ControllerNames, p.ControllerName) {
 			return false
 		}
 	}
-	return true
+	return len(status) > 0
 }
 
 // readable reports whether the served kind group/kind can currently be read.

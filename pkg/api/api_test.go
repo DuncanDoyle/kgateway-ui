@@ -1417,10 +1417,11 @@ func tcpRoute(version, ns, name string, parents []objects.ParentRef, status ...t
 	return u
 }
 
-// D-017 §4 and the round-1 ruling: kgateway watches XListenerSet and pre-v1
-// TCPRoute/TLSRoute only with experimental features on, which the UI cannot
-// see. Such an object without status from the controller is not judged; one
-// that carries the controller's status is judged as usual.
+// D-018 §1–2: an experimental-only object (XListenerSet, pre-v1 TCPRoute and
+// TLSRoute) without status follows the normal rule: pending within grace, a
+// KGWUI-003 warning after it, with a hint in the detail that the controller's
+// experimental features may be off. Status only from another controller is
+// still not judged.
 func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 	gw := testutil.GwRef("infra", "edge")
 	cond := testutil.Cond
@@ -1458,7 +1459,9 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 	anyFinding := func(res string) []expect {
 		return []expect{{health.CodeRouteUnattached, "", res}, {health.CodeConditionFalse, "", res}}
 	}
-	anyPending := func(res string) expect { return expect{health.CodeRouteUnattached, "", res} }
+	hint := func(kindVersion string) string { return fmt.Sprintf(health.ExperimentalHint, kindVersion) }
+	warn := func(res string) []expect { return []expect{{health.CodeRouteUnattached, health.SeverityWarning, res}} }
+	info := func(res string) []expect { return []expect{{health.CodeRouteUnattached, health.SeverityInfo, res}} }
 
 	cases := []struct {
 		name   string
@@ -1467,24 +1470,30 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 		state  health.State
 		want   []expect
 		forbid []expect
-		orphan bool // a route whose parent does not exist is not counted
+		hint   string // the hint the KGWUI-003 detail must end with; "" means no hint on any finding
+		orphan bool   // a route whose parent does not exist is not counted
 	}{
-		{"XListenerSet without status", setup{}, isolated(bare()), health.StateHealthy, nil, []expect{anyPending("infra/xls1")}, false},
-		{"XListenerSet without status inside grace", setup{late: []*unstructured.Unstructured{bare()}}, isolated(), health.StateHealthy, nil, []expect{anyPending("infra/xls1")}, false},
+		{"XListenerSet without status", setup{}, isolated(bare()), health.StateWarning, warn("infra/xls1"), nil, hint("XListenerSet v1alpha1"), false},
+		{"XListenerSet without status inside grace", setup{late: []*unstructured.Unstructured{bare()}}, isolated(), health.StateUnknown,
+			info("infra/xls1"), warn("infra/xls1"), hint("XListenerSet v1alpha1"), false},
 		{"XListenerSet rejected by the controller", setup{}, isolated(xls(denied, testutil.Listener{Name: "extra"})), health.StateError,
-			[]expect{{health.CodeConditionFalse, health.SeverityError, "infra/xls1"}}, nil, false},
-		{"pre-v1 TCPRoute without status", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw})), health.StateHealthy,
-			nil, []expect{anyPending("shop/tcp")}, false},
-		{"pre-v1 TCPRoute with a missing parent and no status", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{testutil.GwRef("infra", "gone")})), health.StateHealthy,
-			nil, []expect{anyPending("shop/tcp")}, true},
+			[]expect{{health.CodeConditionFalse, health.SeverityError, "infra/xls1"}}, nil, "", false},
+		{"pre-v1 TCPRoute without status", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw})), health.StateWarning,
+			warn("shop/tcp"), nil, hint("TCPRoute v1alpha2"), false},
+		{"pre-v1 TCPRoute without status inside grace", setup{served: preV1, late: []*unstructured.Unstructured{tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw})}}, isolated(), health.StateUnknown,
+			info("shop/tcp"), warn("shop/tcp"), hint("TCPRoute v1alpha2"), false},
+		{"pre-v1 TLSRoute without status", setup{served: preV1}, isolated(tlsRoute()), health.StateWarning, warn("shop/tls"), nil, hint("TLSRoute v1alpha3"), false},
+		// "Parent not found" holds whether or not the controller watches the kind, so it carries no hint.
+		{"pre-v1 TCPRoute with a missing parent and no status", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{testutil.GwRef("infra", "gone")})), health.StateWarning,
+			warn("shop/tcp"), nil, "", true},
 		{"pre-v1 TCPRoute rejected by the controller", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw}, rejected)), health.StateError,
-			[]expect{{health.CodeConditionFalse, health.SeverityError, "shop/tcp"}}, nil, false},
+			[]expect{{health.CodeConditionFalse, health.SeverityError, "shop/tcp"}}, nil, "", false},
 		{"pre-v1 TCPRoute with status only from another controller", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw}, foreign)), health.StateHealthy,
-			nil, anyFinding("shop/tcp"), false},
+			nil, anyFinding("shop/tcp"), "", false},
 		{"pre-v1 TLSRoute with status only from another controller", setup{served: preV1}, isolated(tlsRoute(foreign)), health.StateHealthy,
-			nil, anyFinding("shop/tls"), false},
+			nil, anyFinding("shop/tls"), "", false},
 		{"v1 TCPRoute without status is still required", setup{}, isolated(tcpRoute("v1", "shop", "tcp", []objects.ParentRef{gw})), health.StateWarning,
-			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, "shop/tcp"}}, nil, false},
+			warn("shop/tcp"), nil, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1503,10 +1512,22 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
 				}
 			}
+			// The hint goes in the detail, never the short message.
+			for _, f := range h.Findings {
+				if strings.Contains(f.Message, "experimental") {
+					t.Fatalf("hint in the message: %+v", f)
+				}
+				if tc.hint == "" && strings.Contains(f.Detail, "experimental") {
+					t.Fatalf("unexpected hint: %+v", f)
+				}
+				if tc.hint != "" && f.Code == health.CodeRouteUnattached && !strings.HasSuffix(f.Detail, tc.hint) {
+					t.Fatalf("detail %q lacks the hint %q", f.Detail, tc.hint)
+				}
+			}
 			if tc.orphan {
 				return
 			}
-			// The object is counted, so a green result is not vacuous.
+			// The object is counted, so the result is about it.
 			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
 			xn, _ := count(o, "XListenerSet")
 			tn, _ := count(o, "TCPRoute")
