@@ -114,7 +114,16 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if s.immediate {
 		persist = 0
 	}
-	dyn, kube := testutil.Clients(t, objs...)
+	// The fakes serve every upstream kind, at the version s.served picks for it.
+	fakeServed := testutil.ServedUpstream()
+	for i, f := range fakeServed {
+		for _, k := range s.served {
+			if k.Group == f.Group && k.Kind == f.Kind {
+				fakeServed[i].Version = k.Version
+			}
+		}
+	}
+	dyn, kube := testutil.ClientsFor(t, fakeServed, objs...)
 	fd := dyn.(*dynamicfake.FakeDynamicClient)
 	if s.prepare != nil {
 		s.prepare(fd, kube)
@@ -1202,6 +1211,10 @@ func TestListenerSetStatusAtTheAPI(t *testing.T) {
 		delete(u.Object, "status")
 		return u
 	}
+	notProgrammed := testutil.ListenerSet("infra", "ls1", gw, []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionFalse, "Invalid")})
+	// "No valid listeners": rejected, but kgateway still writes listener status.
+	noValid := testutil.ListenerSet("infra", "ls1", gw, []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "ListenersNotValid"), cond("Programmed", metav1.ConditionFalse, "ListenersNotValid")},
+		testutil.Listener{Name: "extra", Conds: []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionFalse, "PortUnavailable")}})
 	xDenied := testutil.ListenerSet("infra", "xls1", gw, denied, testutil.Listener{Name: "extra"})
 	xDenied.SetAPIVersion("gateway.networking.x-k8s.io/v1alpha1")
 	xDenied.SetKind("XListenerSet")
@@ -1214,23 +1227,28 @@ func TestListenerSetStatusAtTheAPI(t *testing.T) {
 		state  health.State
 		want   []expect
 		forbid []expect
+		detail string // a finding on ls1 must have a detail containing this
 	}{
 		{"accepted ListenerSet stays green", setup{}, isolated(testutil.ListenerSet("infra", "ls1", gw, nil)), health.StateHealthy,
-			nil, []expect{{health.CodeConditionFalse, "", ls1}, {health.CodeRouteUnattached, "", ls1}}},
+			nil, []expect{{health.CodeConditionFalse, "", ls1}, {health.CodeRouteUnattached, "", ls1}}, ""},
 		{"denied ListenerSet", setup{}, isolated(deniedLS), health.StateError,
-			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, []expect{{health.CodeRouteUnattached, "", ls1}}},
+			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, []expect{{health.CodeRouteUnattached, "", ls1}}, ""},
 		{"denied XListenerSet", setup{}, isolated(xDenied), health.StateError,
-			[]expect{{health.CodeConditionFalse, health.SeverityError, "infra/xls1"}}, nil},
+			[]expect{{health.CodeConditionFalse, health.SeverityError, "infra/xls1"}}, nil, ""},
 		{"listener not programmed", setup{}, isolated(badListener), health.StateError,
-			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, nil},
+			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, nil, ""},
 		{"listener without a status block", setup{}, isolated(noListenerStatus), health.StateWarning,
-			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, []expect{{health.CodeConditionFalse, "", ls1}}},
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, []expect{{health.CodeConditionFalse, "", ls1}}, ""},
 		{"no status after grace", setup{}, isolated(noStatus()), health.StateWarning,
-			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, nil},
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, nil, ""},
 		{"no status inside grace", setup{late: []*unstructured.Unstructured{noStatus()}}, isolated(), health.StateUnknown,
-			[]expect{{health.CodeRouteUnattached, health.SeverityInfo, ls1}}, []expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}},
+			[]expect{{health.CodeRouteUnattached, health.SeverityInfo, ls1}}, []expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, ""},
+		{"Programmed=False with Accepted=True", setup{}, isolated(notProgrammed), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, nil, "Programmed=False"},
+		{"no valid listeners keeps listener detail", setup{}, isolated(noValid), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, ls1}}, []expect{{health.CodeRouteUnattached, "", ls1}}, "listener extra"},
 		{"stale denial is pending, not an error", setup{}, isolated(stale(testutil.ListenerSet("infra", "ls1", gw, denied, testutil.Listener{Name: "extra"}))), health.StateWarning,
-			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, []expect{{health.CodeConditionFalse, "", ls1}}},
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, ls1}}, []expect{{health.CodeConditionFalse, "", ls1}}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1248,6 +1266,11 @@ func TestListenerSetStatusAtTheAPI(t *testing.T) {
 				if hasSev(h, f.code, f.sev, f.res) {
 					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
 				}
+			}
+			if tc.detail != "" && !slices.ContainsFunc(h.Findings, func(f health.Finding) bool {
+				return f.Resource != nil && f.Resource.String() == ls1 && strings.Contains(f.Detail, tc.detail)
+			}) {
+				t.Fatalf("no finding on %s with detail %q; findings: %+v", ls1, tc.detail, h.Findings)
 			}
 			// The ListenerSet is owned, so a green result is not vacuous.
 			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
@@ -1313,6 +1336,96 @@ func TestMissingProxyInGraceIsPendingAtTheAPI(t *testing.T) {
 				if hasSev(h, f.code, f.sev, f.res) {
 					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
 				}
+			}
+		})
+	}
+}
+
+// tcpRoute is an HTTPRoute fixture as a TCPRoute of version.
+func tcpRoute(version, ns, name string, parents []objects.ParentRef, status ...testutil.RouteParent) *unstructured.Unstructured {
+	u := testutil.HTTPRoute(ns, name, parents, status...)
+	u.SetAPIVersion("gateway.networking.k8s.io/" + version)
+	u.SetKind("TCPRoute")
+	return u
+}
+
+// D-017 §4 and the round-1 ruling: kgateway watches XListenerSet and pre-v1
+// TCPRoute/TLSRoute only with experimental features on, which the UI cannot
+// see. Such an object without status from the controller is not judged; one
+// that carries the controller's status is judged as usual.
+func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	cond := testutil.Cond
+	denied := []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowed"), cond("Programmed", metav1.ConditionFalse, "NotAllowed")}
+	xls := func(cs []metav1.Condition, ls ...testutil.Listener) *unstructured.Unstructured {
+		u := testutil.ListenerSet("infra", "xls1", gw, cs, ls...)
+		u.SetAPIVersion("gateway.networking.x-k8s.io/v1alpha1")
+		u.SetKind("XListenerSet")
+		return u
+	}
+	bare := func() *unstructured.Unstructured {
+		u := xls(nil)
+		delete(u.Object, "status")
+		return u
+	}
+	preV1 := slices.Clone(testutil.ServedUpstream())
+	for i := range preV1 {
+		if preV1[i].Kind == "TCPRoute" {
+			preV1[i].Version = "v1alpha2"
+		}
+	}
+	rejected := testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	anyPending := func(res string) expect { return expect{health.CodeRouteUnattached, "", res} }
+
+	cases := []struct {
+		name   string
+		s      setup
+		objs   []runtime.Object
+		state  health.State
+		want   []expect
+		forbid []expect
+		orphan bool // a route whose parent does not exist is not counted
+	}{
+		{"XListenerSet without status", setup{}, isolated(bare()), health.StateHealthy, nil, []expect{anyPending("infra/xls1")}, false},
+		{"XListenerSet without status inside grace", setup{late: []*unstructured.Unstructured{bare()}}, isolated(), health.StateHealthy, nil, []expect{anyPending("infra/xls1")}, false},
+		{"XListenerSet rejected by the controller", setup{}, isolated(xls(denied, testutil.Listener{Name: "extra"})), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, "infra/xls1"}}, nil, false},
+		{"pre-v1 TCPRoute without status", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw})), health.StateHealthy,
+			nil, []expect{anyPending("shop/tcp")}, false},
+		{"pre-v1 TCPRoute with a missing parent and no status", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{testutil.GwRef("infra", "gone")})), health.StateHealthy,
+			nil, []expect{anyPending("shop/tcp")}, true},
+		{"pre-v1 TCPRoute rejected by the controller", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw}, rejected)), health.StateError,
+			[]expect{{health.CodeConditionFalse, health.SeverityError, "shop/tcp"}}, nil, false},
+		{"v1 TCPRoute without status is still required", setup{}, isolated(tcpRoute("v1", "shop", "tcp", []objects.ParentRef{gw})), health.StateWarning,
+			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, "shop/tcp"}}, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, tc.s, tc.objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state: want %s, got %s; findings: %+v", tc.state, h.State, h.Findings)
+			}
+			for _, w := range tc.want {
+				if !hasSev(h, w.code, w.sev, w.res) {
+					t.Fatalf("missing %s/%s on %s; findings: %+v", w.code, w.sev, w.res, h.Findings)
+				}
+			}
+			for _, f := range tc.forbid {
+				if hasSev(h, f.code, f.sev, f.res) {
+					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
+				}
+			}
+			if tc.orphan {
+				return
+			}
+			// The object is counted, so a green result is not vacuous.
+			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
+			xn, _ := count(o, "XListenerSet")
+			tn, _ := count(o, "TCPRoute")
+			if xn+tn != 1 {
+				t.Fatalf("want the object counted once, got %+v", o.Counts)
 			}
 		})
 	}

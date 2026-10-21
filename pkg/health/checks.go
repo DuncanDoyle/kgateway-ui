@@ -268,18 +268,20 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	for _, gc := range in.Owned.GatewayClasses {
 		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "")
 	}
-	// listeners evaluates the status of every configured listener of a Gateway
-	// or ListenerSet; both share the listener status shape.
-	listeners := func(u *unstructured.Unstructured) {
+	// listeners evaluates the listener status of a Gateway or ListenerSet; both
+	// share the listener status shape. With all, every configured listener
+	// needs a status block; otherwise only present blocks are judged.
+	listeners := func(u *unstructured.Unstructured, all bool) {
 		byName := map[string]objects.ListenerStatus{}
 		for _, l := range objects.GatewayListeners(u) {
 			byName[l.Name] = l
 		}
-		// Every configured listener needs a status block.
 		for _, name := range objects.GatewaySpecListeners(u) {
 			l, ok := byName[name]
 			if !ok {
-				pending(u, "no status for listener "+name)
+				if all {
+					pending(u, "no status for listener "+name)
+				}
 				continue
 			}
 			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
@@ -291,28 +293,32 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// owned are the Gateways and ListenerSets of this install: the only
 	// ancestors whose policy status counts here.
 	owned := map[objects.Ref]bool{}
-	// ListenerSet status is required like a Gateway's (D-017 §2). kgateway
-	// writes no listener status for a rejected ListenerSet, so its listeners
-	// are judged only when it is not currently Accepted=False.
+	// ListenerSet status is required like a Gateway's (D-017 §2). A rejected
+	// ListenerSet may have no listener status (reason NotAllowed), so while it
+	// is Accepted=False only the listener blocks present are judged.
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
 		cs := objects.Conditions(ls)
+		if in.experimentalOnly(ls) && len(cs) == 0 && len(objects.GatewayListeners(ls)) == 0 {
+			continue
+		}
 		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
 			continue
 		}
 		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "")
-		if objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse {
-			listeners(ls)
-		}
+		listeners(ls, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
 		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
-		listeners(gw)
+		listeners(gw, true)
 	}
 	// Routes: one status block per current parentRef of this install, matched on
 	// the full parentRef including section name and port.
 	for _, r := range in.Owned.Routes {
+		if in.ignored(r.Obj) {
+			continue
+		}
 		status := objects.RouteParents(r.Obj)
 		for _, p := range r.Parents {
 			extra := "parent " + parentDesc(p)
@@ -333,7 +339,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// Routes whose parent does not exist. A parent of a kind the cache cannot
 	// read may only be missing from the cache; cluster access already reports it.
 	for _, u := range in.Owned.Unattached {
-		if !in.readable(u.Parent.Group, u.Parent.Kind) {
+		if !in.readable(u.Parent.Group, u.Parent.Kind) || in.ignored(u.Route.Obj) {
 			continue
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
@@ -383,6 +389,33 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			Error: fmt.Sprintf("%d %s being processed by the controller", n, noun)}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// experimentalOnly reports whether kgateway watches u's kind, at its served
+// version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
+func (in Input) experimentalOnly(u *unstructured.Unstructured) bool {
+	gvk := u.GroupVersionKind()
+	for _, k := range in.Served {
+		if k.Group == gvk.Group && k.Kind == gvk.Kind {
+			return k.ExperimentalOnly()
+		}
+	}
+	return false
+}
+
+// ignored reports whether route u is left unjudged: its kind is
+// experimental-only and it has no status from this install's controller, so
+// the controller may not watch it at all.
+func (in Input) ignored(u *unstructured.Unstructured) bool {
+	if !in.experimentalOnly(u) {
+		return false
+	}
+	for _, p := range objects.RouteParents(u) {
+		if slices.Contains(in.Install.ControllerNames, p.ControllerName) {
+			return false
+		}
+	}
+	return true
 }
 
 // readable reports whether the served kind group/kind can currently be read.

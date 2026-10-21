@@ -1,5 +1,7 @@
 package kinds
 
+import "slices"
+
 const (
 	gwGroup  = "gateway.networking.k8s.io"
 	gwxGroup = "gateway.networking.x-k8s.io"
@@ -29,3 +31,31 @@ func Upstream() []Descriptor {
 
 // KgatewayGroup is the API group of kgateway's own CRDs.
 const KgatewayGroup = kgwGroup
+
+// experimentalOnly lists the kinds kgateway v2.3/v2.4 watches only with
+// experimental Gateway API features on (pluginsdk/collections/setup.go), with
+// the versions it watches regardless. Only the controller knows the flag (D-017 §4).
+var experimentalOnly = []struct {
+	group, kind string
+	stable      []string
+}{
+	{gwxGroup, "XListenerSet", nil},
+	{gwGroup, "TCPRoute", []string{"v1"}},
+	{gwGroup, "TLSRoute", []string{"v1"}},
+}
+
+// ExperimentalOnly reports whether kgateway watches group/kind at version only
+// with experimental Gateway API features on: XListenerSet, and TCPRoute and
+// TLSRoute before v1.
+func ExperimentalOnly(group, kind, version string) bool {
+	for _, e := range experimentalOnly {
+		if e.group == group && e.kind == kind {
+			return !slices.Contains(e.stable, version)
+		}
+	}
+	return false
+}
+
+// ExperimentalOnly reports whether kgateway watches s, at its served version,
+// only with experimental Gateway API features on.
+func (s Served) ExperimentalOnly() bool { return ExperimentalOnly(s.Group, s.Kind, s.Version) }

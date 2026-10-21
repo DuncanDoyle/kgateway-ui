@@ -77,3 +77,27 @@ func TestResolveDedupesByGroupKind(t *testing.T) {
 		t.Fatalf("want one served kind, got %+v (%v)", got, err)
 	}
 }
+
+// The experimental-only kinds match kgateway v2.3.11 and v2.4.7
+// pluginsdk/collections/setup.go (D-017 §4).
+func TestExperimentalOnly(t *testing.T) {
+	cases := []struct {
+		group, kind, version string
+		want                 bool
+	}{
+		{gwxGroup, "XListenerSet", "v1alpha1", true},
+		{gwGroup, "ListenerSet", "v1", false},
+		{gwGroup, "TCPRoute", "v1alpha2", true},
+		{gwGroup, "TCPRoute", "v1", false},
+		{gwGroup, "TLSRoute", "v1alpha2", true},
+		{gwGroup, "TLSRoute", "v1alpha3", true},
+		{gwGroup, "TLSRoute", "v1", false},
+		{gwGroup, "HTTPRoute", "v1", false},
+	}
+	for _, tc := range cases {
+		s := Served{Descriptor: Descriptor{Group: tc.group, Kind: tc.kind}, Version: tc.version}
+		if got := s.ExperimentalOnly(); got != tc.want {
+			t.Errorf("%s/%s %s: want %v, got %v", tc.group, tc.kind, tc.version, tc.want, got)
+		}
+	}
+}
