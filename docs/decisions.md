@@ -301,3 +301,21 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 **Consequences:**
 - Stabilization sub-phase 1.5 implements these with queue items Q9–Q17.
 - The upstream scope proposal should ask for enabled kinds, as the draft already does; the verifier switches to it when it exists.
+
+## D-018 — Status-less experimental objects warn, with a hint (2026-10-21, phase 1)
+**Context:**
+- Sub-phase 1.5 first skipped experimental-only objects (XListenerSet, pre-v1 TCPRoute and TLSRoute) that carry no status from the controller, so installs with experimental features off stayed quiet.
+- The 1.5 cross-model review (reviews/1.5-codex.md #1) showed this hides a real failure: kgateway enables experimental features by default, so a never-processed object looked healthy.
+
+**Decision:**
+1. Status-less experimental-only objects follow the normal rule: KGWUI-003 "not yet processed" warning after the grace period.
+2. The finding adds a hint that the controller's experimental Gateway API features may be off.
+3. Which kinds are experimental-only depends on the controller version: kgateway 2.3 watches no TCPRoute without experimental features; 2.4 watches v1 TCPRoute always. When the version is unknown, a kind counts as experimental-only if any supported version gates it.
+4. D-017 §4 (scope verification on stable kinds only) is unchanged and applies on the metrics side too.
+
+**Alternatives:**
+- Info only, roll-up green. Rejected: a failure on a default install stays green.
+- Health unknown while such objects exist. Rejected: installs with experimental features off stay unknown forever.
+
+**Consequences:**
+- Installs with experimental features off show a steady, explained warning for those objects until the upstream scope endpoint reports enabled kinds (D-017 §4).

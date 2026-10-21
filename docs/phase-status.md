@@ -25,6 +25,11 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [ ] Q15 (P2) YAML view does not poll; no collection time — src: reviews/phase-codex.md#7
 - [ ] Q16 (P2) README extension example exits at once — src: reviews/phase-codex.md#8
 - [ ] Q17 (P3) API tests don't pin the v1 wire format — src: reviews/phase-codex.md#9
+- [ ] Q18 (P1) Status-less experimental objects make a broken install green — warn with a hint (D-018) — src: reviews/1.5-codex.md#1
+- [ ] Q19 (P1) TCPRoute v1 is experimental-gated on kgateway 2.3 — src: reviews/1.5-codex.md#2
+- [ ] Q20 (P2) Experimental metric keys still drive KGWUI-007 — src: reviews/1.5-codex.md#3
+- [ ] Q21 (P3) Goldens never pin a finding's since — src: reviews/1.5-codex.md#4
+- [ ] Q22 (P3) README test does not compile the example — src: reviews/1.5-codex.md#5
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -54,6 +59,7 @@ Status: implementing (Q9–Q17, subagent-driven)
 
 ## Notes
 - 2026-10-21: user decided D-017 (proxy at zero is a warning; scope verification on stable kinds now, experimental kinds later via upstream enabled kinds; YAML age via a response header) and approved stabilization sub-phase 1.5.
+- 2026-10-21: the 1.5 Codex review found 2 P1, 1 P2, 2 P3 (reviews/1.5-codex.md); user decided D-018 (status-less experimental objects warn with a hint).
 - 2026-10-20: user approved D-016 (platform neutrality). Kubernetes stays the product focus; standalone is a separate project, and Phase 1 only adds the hedges in design §14.3.
 - 2026-10-20: user confirmed D-011's dark default (no OS-preference step).
 - 2026-10-18: user approved Overridden policies as info (not warning) and subagent-driven execution for Phase 1.
