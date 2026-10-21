@@ -2,7 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithTheme, stubApi } from "../test/render";
 import { ApiError, apiFetch } from "./client";
 import { useNow } from "./clock";
-import { isLinkable, isStale, POLL_MS, useHealth, useInstalls, useOverview } from "./hooks";
+import { isLinkable, isStale, POLL_MS, useHealth, useInstalls, useOverview, useResource } from "./hooks";
 import type { MetaResponse } from "./types";
 
 afterEach(() => {
@@ -135,4 +135,24 @@ it("wraps a non-JSON 2xx body as an ApiError", async () => {
     vi.fn(async () => new Response("<html>", { status: 200 })),
   );
   await expect(apiFetch("/x")).rejects.toSatisfy((e: unknown) => e instanceof ApiError && e.status === 200);
+});
+
+it("does not re-render useResource consumers on a revalidation with unchanged data", async () => {
+  stubApi({ "/api/v1/installs/a.one/resources/-/Service/shop/web": { kind: "Service" } });
+  let renders = 0;
+  let res: ReturnType<typeof useResource> | undefined;
+  function ResourceProbe() {
+    renders++;
+    res = useResource("a.one", { group: "", kind: "Service", namespace: "shop", name: "web" });
+    return <p>{res.data ? `kind=${String(res.data.kind)}` : "loading"}</p>;
+  }
+  renderWithTheme(<ResourceProbe />);
+  await waitFor(() => expect(screen.getByText("kind=Service")).toBeInTheDocument());
+  expect(Object.keys(res ?? {}).sort()).toEqual(["collectedAt", "data", "error", "mutate"]);
+  const before = renders;
+  await act(async () => {
+    await res?.mutate();
+  });
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  expect(renders).toBe(before);
 });

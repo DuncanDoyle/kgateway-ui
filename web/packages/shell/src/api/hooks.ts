@@ -64,8 +64,9 @@ async function fetchResource(path: string): Promise<ResourceData> {
 /** GET one resource, polled; "-" stands for an empty group or namespace. collectedAt is undefined until it loads. */
 export function useResource(id: string, r: Ref) {
   const path = `${installApi(id)}/resources/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
-  const res = useSWR<ResourceData, ApiError>(path, fetchResource, live);
-  return { ...res, data: res.data?.object, collectedAt: res.data?.collectedAt };
+  // Read only these fields: SWR re-renders for each one read, and spreading reads isValidating too.
+  const { data, error, mutate } = useSWR<ResourceData, ApiError>(path, fetchResource, live);
+  return { data: data?.object, error, mutate, collectedAt: data?.collectedAt };
 }
 
 /** The platform's capabilities from /api/v1/meta (D-016); undefined until meta loads. */
