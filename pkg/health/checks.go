@@ -450,12 +450,14 @@ type proxyCheck struct{}
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
-// Run implements Check. A missing proxy is reported after the grace period,
-// except for a self-managed Gateway: KGWUI-010 (info) says the UI cannot see
-// that proxy's readiness, so it never drives the roll-up (D-016). A proxy
+// Run implements Check. A missing proxy is reported after the grace period;
+// inside it the check is pending, so the install is unknown (D-017 §3). A
+// self-managed Gateway is the exception: KGWUI-010 (info) says the UI cannot
+// see that proxy's readiness, so it never drives the roll-up (D-016). A proxy
 // Deployment that exists is judged the same either way.
 func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
+	inGrace := 0
 	for _, gw := range in.Owned.Gateways {
 		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
 		if d == nil {
@@ -464,10 +466,12 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 					Resource: ref(gw), Message: "Self-managed proxy: the UI cannot see its readiness"})
 				continue
 			}
-			if in.Now.Sub(in.firstSeen(gw)) >= Grace {
-				fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
-					Resource: ref(gw), Message: "Proxy deployment not found"})
+			if in.Now.Sub(in.firstSeen(gw)) < Grace {
+				inGrace++
+				continue
 			}
+			fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
+				Resource: ref(gw), Message: "Proxy deployment not found"})
 			continue
 		}
 		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
@@ -478,6 +482,13 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 			fs = append(fs, f)
 		}
+	}
+	if inGrace > 0 {
+		msg := fmt.Sprintf("%d proxies are being deployed", inGrace)
+		if inGrace == 1 {
+			msg = "1 proxy is being deployed"
+		}
+		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt, Error: msg}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }

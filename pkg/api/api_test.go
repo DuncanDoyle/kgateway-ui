@@ -1259,3 +1259,61 @@ func TestListenerSetStatusAtTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// D-017 §3: during a missing proxy's grace period the required proxy check is
+// pending, not OK, so the install is unknown; after grace it is KGWUI-006.
+func TestMissingProxyInGraceIsPendingAtTheAPI(t *testing.T) {
+	young := func() *unstructured.Unstructured { return testutil.Gateway("infra", "young", "kgateway", nil) }
+	check := func(t *testing.T, h HealthResponse, name string) health.CheckResult {
+		t.Helper()
+		for _, c := range h.Checks {
+			if c.Name == name {
+				return c
+			}
+		}
+		t.Fatalf("no %q check: %+v", name, h.Checks)
+		return health.CheckResult{}
+	}
+	cases := []struct {
+		name    string
+		s       setup
+		objs    []runtime.Object
+		state   health.State
+		pending bool
+		want    []expect
+		forbid  []expect
+	}{
+		{"managed, inside grace", setup{late: []*unstructured.Unstructured{young()}}, isolated(), health.StateUnknown, true,
+			nil, []expect{{health.CodeProxyNotReady, "", ""}}},
+		{"managed, after grace", setup{}, isolated(young()), health.StateWarning, false,
+			[]expect{{health.CodeProxyNotReady, health.SeverityWarning, "infra/young"}}, nil},
+		{"self-managed, inside grace", setup{late: []*unstructured.Unstructured{young()}}, proxyWorld(proxySetup{classParams: "sm"}, testutil.GatewayParameters("infra", "sm", true)),
+			health.StateHealthy, false, []expect{{health.CodeSelfManagedProxy, health.SeverityInfo, "infra/young"}}, []expect{{health.CodeProxyNotReady, "", ""}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, tc.s, tc.objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state: want %s, got %s; findings: %+v; checks: %+v", tc.state, h.State, h.Findings, h.Checks)
+			}
+			if c := check(t, h, "gateway proxies"); c.Pending != tc.pending || c.OK == tc.pending || !c.Required {
+				t.Fatalf("proxy check: want pending=%v, got %+v", tc.pending, c)
+			}
+			// The young Gateway's own status is current, so only the proxy check can hold the install back.
+			if c := check(t, h, "resource status"); !c.OK {
+				t.Fatalf("resource status must be OK: %+v", c)
+			}
+			for _, w := range tc.want {
+				if !hasSev(h, w.code, w.sev, w.res) {
+					t.Fatalf("missing %s/%s on %s; findings: %+v", w.code, w.sev, w.res, h.Findings)
+				}
+			}
+			for _, f := range tc.forbid {
+				if hasSev(h, f.code, f.sev, f.res) {
+					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
+				}
+			}
+		})
+	}
+}
