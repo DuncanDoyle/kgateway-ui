@@ -33,6 +33,13 @@ func Clients(t *testing.T, objs ...runtime.Object) (dynamic.Interface, *kubefake
 	return clients(t, ServedUpstream(), objs)
 }
 
+// ClientsFor is Clients with fake discovery and list kinds for served, for
+// tests that serve a kind at a version other than its first.
+func ClientsFor(t *testing.T, served []kinds.Served, objs ...runtime.Object) (dynamic.Interface, *kubefake.Clientset) {
+	t.Helper()
+	return clients(t, served, objs)
+}
+
 // ClientsWith is Clients with extra kinds served at their first version, for
 // downstream-extension tests.
 func ClientsWith(t *testing.T, extra []kinds.Descriptor, objs ...runtime.Object) (dynamic.Interface, *kubefake.Clientset) {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -168,7 +169,7 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
-			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: m.ComputedAt})
+			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt)})
 	}
 	writeJSON(w, out)
 }
@@ -190,13 +191,35 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Model, *
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if m, i := h.find(w, r); i != nil {
-		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, m, i, h.visibleHealth(r, i)), CollectedAt: m.ComputedAt})
+		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, m, i, h.visibleHealth(r, i)), CollectedAt: wireTime(m.ComputedAt)})
 	}
+}
+
+// wireTime is t as the API emits it: UTC. Internal clocks keep their zone and
+// monotonic reading, which grace and staleness durations rely on.
+func wireTime(t time.Time) time.Time { return t.UTC() }
+
+// wireHealth is rep with every time in wire form. It copies the slices, since
+// rep may share them with the model.
+func wireHealth(rep health.Report) health.Report {
+	rep.CollectedAt = wireTime(rep.CollectedAt)
+	rep.Findings = slices.Clone(rep.Findings)
+	for i, f := range rep.Findings {
+		if f.Since != nil {
+			at := wireTime(*f.Since)
+			rep.Findings[i].Since = &at
+		}
+	}
+	rep.Checks = slices.Clone(rep.Checks)
+	for i := range rep.Checks {
+		rep.Checks[i].CollectedAt = wireTime(rep.Checks[i].CollectedAt)
+	}
+	return rep
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if _, i := h.find(w, r); i != nil {
-		writeJSON(w, h.visibleHealth(r, i))
+		writeJSON(w, wireHealth(h.visibleHealth(r, i)))
 	}
 }
 
@@ -218,6 +241,8 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
 	if h.authz.Authorize(r, want) {
 		if obj := lookup(m, i, want); obj != nil {
+			// The body is the raw object, so the collection time travels in a header (D-017 §6).
+			w.Header().Set("Collected-At", wireTime(m.ComputedAt).Format(time.RFC3339Nano))
 			writeJSON(w, obj)
 			return
 		}

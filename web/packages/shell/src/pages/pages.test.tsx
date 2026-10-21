@@ -405,6 +405,57 @@ it("resource page keeps the loaded YAML when a later fetch fails", async () => {
   expect(screen.getByTestId("yaml")).toHaveTextContent("name: cart");
 });
 
+/** Stubs fetch to serve body() for cartPath with a Collected-At header of at(). */
+function stubResource(body: () => unknown, at: () => string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === cartPath
+        ? new Response(JSON.stringify(body()), { status: 200, headers: { "Collected-At": at() } })
+        : new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
+    ),
+  );
+}
+
+it("resource page picks up a status change within one poll interval", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  vi.setSystemTime(Date.parse("2026-10-21T12:00:00Z"));
+  // SWR only polls a visible page; jsdom reports hidden.
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  let reason = "Pending";
+  stubResource(
+    () => ({ kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" }, status: { reason } }),
+    () => new Date().toISOString(),
+  );
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  await vi.waitFor(() => expect(screen.getByTestId("yaml")).toHaveTextContent("reason: Pending"));
+  reason = "Accepted";
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS);
+  });
+  expect(screen.getByTestId("yaml")).toHaveTextContent("reason: Accepted");
+});
+
+it("resource page says when the data was checked, from the Collected-At header", async () => {
+  stubResource(
+    () => ({ kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } }),
+    () => new Date().toISOString(),
+  );
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  expect(await screen.findByTestId("data-age")).toHaveTextContent(/^Last checked \d+s ago$/);
+});
+
+it("resource page marks old data as stale", async () => {
+  stubResource(
+    () => ({ kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } }),
+    () => new Date(Date.now() - 75_000).toISOString(),
+  );
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  const age = await screen.findByTestId("data-age");
+  expect(age).toHaveTextContent("Data is stale. Last checked 1m ago");
+  expect(within(age).getByTestId("health-icon-unknown")).toBeInTheDocument();
+});
+
 it("resource page shows other errors as errors", async () => {
   stubApi({ [cartPath]: [500, { error: "boom" }] });
   resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");

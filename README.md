@@ -58,7 +58,7 @@ The UI honours the controller's `discoveryNamespaceSelectors`. It only counts re
 
 ## Extending
 
-Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`:
+Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds:
 
 ```go
 package main
@@ -67,7 +67,9 @@ import (
 	"context"
 	"embed"
 	"io/fs"
+	"log"
 	"net/http"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -91,8 +93,24 @@ func (acmeProxyMode) Resolve(gw *unstructured.Unstructured, snap *cache.Snapshot
 }
 
 func main() {
-	ui, _ := fs.Sub(dist, "dist")
-	_ = app.Run(context.Background(), "", app.Options{UI: ui},
+	ui, err := fs.Sub(dist, "dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := app.Run(context.Background(), "", options(ui), extensions()...); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// options are the backend settings. Both intervals must be positive; these
+// are the stock binary's defaults.
+func options(ui fs.FS) app.Options {
+	return app.Options{UI: ui, PollInterval: 2 * time.Second, MetricsInterval: 10 * time.Second}
+}
+
+// extensions are what this build adds to the stock UI.
+func extensions() []extension.Option {
+	return []extension.Option{
 		// Watch, count and serve an extra policy kind
 		extension.WithKinds(kinds.Descriptor{
 			Group: "acme.example.com", Kind: "AcmePolicy", Resource: "acmepolicies",
@@ -104,7 +122,7 @@ func main() {
 		})),
 		// Replace the upstream GatewayParameters resolution
 		extension.WithProxyModeResolver(acmeProxyMode{}),
-	)
+	}
 }
 ```
 

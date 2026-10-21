@@ -671,13 +671,23 @@ func TestBackendPolicyStatusCounts(t *testing.T) {
 }
 
 // A missing proxy gets the same grace as status: from when the engine first
-// saw the Gateway's generation, not from its creation.
+// saw the Gateway's generation, not from its creation. Inside it the proxy
+// check is pending, so the install is unknown, not healthy (D-017 §3).
 func TestMissingProxyGraceStartsAtFirstSeen(t *testing.T) {
 	w := healthyWorld()
 	w.deploys = w.deploys[:1]
 	w.firstSeen = func(*unstructured.Unstructured) time.Time { return testutil.Now.Add(-10 * time.Second) }
-	if r := w.report(t); has(r, CodeProxyNotReady, "", "infra/edge") {
+	r := w.report(t)
+	if has(r, CodeProxyNotReady, "", "infra/edge") {
 		t.Fatalf("a proxy missing inside the grace period is not reported: %+v", r.Findings)
+	}
+	if r.State != StateUnknown {
+		t.Fatalf("state: want unknown inside the grace period, got %s", r.State)
+	}
+	for _, c := range r.Checks {
+		if c.Name == "gateway proxies" && (!c.Pending || c.OK || c.Error != "1 proxy not found yet") {
+			t.Fatalf("proxy check must be pending: %+v", c)
+		}
 	}
 }
 

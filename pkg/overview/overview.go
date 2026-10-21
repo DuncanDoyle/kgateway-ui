@@ -141,14 +141,11 @@ func header(res install.Resolved, snap *cache.Snapshot, plat platform.Info) Head
 	if h.ControllerNames == nil {
 		h.ControllerNames = []string{}
 	}
-	// Same rule as KGWUI-005: fewer ready replicas than desired is not ready.
+	// Same rule as KGWUI-005: fewer ready replicas than desired, or 0 desired, is not ready.
 	if d := res.Deployment; d != nil && plat.Has(platform.Workloads) {
-		ready, desired := d.Status.ReadyReplicas, int32(1)
-		if d.Spec.Replicas != nil {
-			desired = *d.Spec.Replicas
-		}
+		ready, desired := d.Status.ReadyReplicas, health.Desired(d)
 		h.Readiness = Readiness{State: ReadinessReady, Ready: &ready, Desired: &desired}
-		if ready < desired {
+		if desired == 0 || ready < desired {
 			h.Readiness.State = ReadinessNotReady
 		}
 	}

@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "resource not found in this install's scope"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "status": 404
+}

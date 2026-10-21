@@ -98,6 +98,29 @@ func AddSpecListener(gw *unstructured.Unstructured, name string) {
 	spec["listeners"] = append(spec["listeners"].([]any), map[string]any{"name": name, "port": int64(8443), "protocol": "HTTP"})
 }
 
+// ListenerSet builds a ListenerSet attached to parent. With no conditions
+// given it is Accepted and Programmed; with no listeners it has one accepted
+// listener "extra". A listener with nil Conds has no status block.
+func ListenerSet(ns, name string, parent objects.ParentRef, cs []metav1.Condition, listeners ...Listener) *unstructured.Unstructured {
+	u := obj("gateway.networking.k8s.io/v1", "ListenerSet", ns, name)
+	if cs == nil {
+		cs = []metav1.Condition{Cond("Accepted", metav1.ConditionTrue, "Accepted"), Cond("Programmed", metav1.ConditionTrue, "Programmed")}
+	}
+	if len(listeners) == 0 {
+		listeners = []Listener{{Name: "extra", Conds: []metav1.Condition{Cond("Accepted", metav1.ConditionTrue, "Accepted"), Cond("Programmed", metav1.ConditionTrue, "Programmed")}}}
+	}
+	ls, specLs := []any{}, []any{}
+	for _, l := range listeners {
+		if l.Conds != nil {
+			ls = append(ls, map[string]any{"name": l.Name, "attachedRoutes": int64(l.Attached), "conditions": conds(l.Conds), "supportedKinds": []any{}})
+		}
+		specLs = append(specLs, map[string]any{"name": l.Name, "port": int64(8081), "protocol": "HTTP"})
+	}
+	u.Object["spec"] = map[string]any{"parentRef": refMap(parent), "listeners": specLs}
+	u.Object["status"] = map[string]any{"conditions": conds(cs), "listeners": ls}
+	return u
+}
+
 // RouteParent is a status.parents entry for route fixtures.
 type RouteParent struct {
 	Ref        objects.ParentRef

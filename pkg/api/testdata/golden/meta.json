@@ -1,0 +1,202 @@
+{
+  "body": {
+    "capabilities": [
+      "scope",
+      "workloads"
+    ],
+    "kinds": [
+      {
+        "category": "gatewayclass",
+        "displayName": "GatewayClasses",
+        "group": "gateway.networking.k8s.io",
+        "kind": "GatewayClass",
+        "namespaced": false,
+        "resource": "gatewayclasses",
+        "version": "v1",
+        "versions": [
+          "v1"
+        ]
+      },
+      {
+        "category": "gateway",
+        "displayName": "Gateways",
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "namespaced": true,
+        "resource": "gateways",
+        "version": "v1",
+        "versions": [
+          "v1"
+        ]
+      },
+      {
+        "category": "listenerset",
+        "displayName": "ListenerSets",
+        "group": "gateway.networking.k8s.io",
+        "kind": "ListenerSet",
+        "namespaced": true,
+        "resource": "listenersets",
+        "version": "v1",
+        "versions": [
+          "v1"
+        ]
+      },
+      {
+        "category": "listenerset",
+        "displayName": "ListenerSets (experimental)",
+        "group": "gateway.networking.x-k8s.io",
+        "kind": "XListenerSet",
+        "namespaced": true,
+        "resource": "xlistenersets",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "route",
+        "displayName": "HTTPRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "namespaced": true,
+        "resource": "httproutes",
+        "version": "v1",
+        "versions": [
+          "v1"
+        ]
+      },
+      {
+        "category": "route",
+        "displayName": "GRPCRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "GRPCRoute",
+        "namespaced": true,
+        "resource": "grpcroutes",
+        "version": "v1",
+        "versions": [
+          "v1"
+        ]
+      },
+      {
+        "category": "route",
+        "displayName": "TCPRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "TCPRoute",
+        "namespaced": true,
+        "resource": "tcproutes",
+        "version": "v1",
+        "versions": [
+          "v1",
+          "v1alpha2"
+        ]
+      },
+      {
+        "category": "route",
+        "displayName": "TLSRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "TLSRoute",
+        "namespaced": true,
+        "resource": "tlsroutes",
+        "version": "v1",
+        "versions": [
+          "v1",
+          "v1alpha3",
+          "v1alpha2"
+        ]
+      },
+      {
+        "category": "policy",
+        "displayName": "BackendTLSPolicies",
+        "group": "gateway.networking.k8s.io",
+        "kind": "BackendTLSPolicy",
+        "namespaced": true,
+        "resource": "backendtlspolicies",
+        "version": "v1",
+        "versions": [
+          "v1",
+          "v1alpha3"
+        ]
+      },
+      {
+        "category": "policy",
+        "displayName": "TrafficPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "TrafficPolicy",
+        "namespaced": true,
+        "resource": "trafficpolicies",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "policy",
+        "displayName": "ListenerPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "ListenerPolicy",
+        "namespaced": true,
+        "resource": "listenerpolicies",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "policy",
+        "displayName": "HTTPListenerPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "HTTPListenerPolicy",
+        "namespaced": true,
+        "resource": "httplistenerpolicies",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "policy",
+        "displayName": "BackendConfigPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "BackendConfigPolicy",
+        "namespaced": true,
+        "resource": "backendconfigpolicies",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "parameters",
+        "displayName": "GatewayParameters",
+        "group": "gateway.kgateway.dev",
+        "kind": "GatewayParameters",
+        "namespaced": true,
+        "resource": "gatewayparameters",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "workload",
+        "displayName": "Deployments",
+        "group": "apps",
+        "kind": "Deployment",
+        "namespaced": true,
+        "resource": "deployments",
+        "version": "v1",
+        "versions": [
+          "v1"
+        ]
+      }
+    ],
+    "platform": "Kubernetes",
+    "synced": true,
+    "version": "<build version>"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,5 +243,13 @@ func TestRunCallsOnComputeWithEachModel(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("OnCompute was not called for the first model")
+	}
+}
+
+// The default clock keeps time.Now's monotonic reading for grace and
+// staleness durations; the API converts to UTC on the wire.
+func TestComputedAtKeepsMonotonicReading(t *testing.T) {
+	if at := New(config(snapshot(t), metricsAt(testutil.Now), nil)).Compute().ComputedAt; !strings.Contains(at.String(), " m=") {
+		t.Fatalf("ComputedAt lost its monotonic reading: %s", at)
 	}
 }

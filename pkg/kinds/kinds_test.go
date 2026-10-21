@@ -77,3 +77,38 @@ func TestResolveDedupesByGroupKind(t *testing.T) {
 		t.Fatalf("want one served kind, got %+v (%v)", got, err)
 	}
 }
+
+// The experimental-only kinds match kgateway v2.3.11 and v2.4.7
+// pluginsdk/collections/setup.go (D-018 §3): v2.3 gates every TCPRoute, v2.4
+// and later watch v1 TCPRoute always. An unknown version is conservative.
+func TestExperimentalOnly(t *testing.T) {
+	cases := []struct {
+		group, kind, version        string
+		want23, want24, wantUnknown bool
+	}{
+		{gwxGroup, "XListenerSet", "v1alpha1", true, true, true},
+		{gwGroup, "ListenerSet", "v1", false, false, false},
+		{gwGroup, "TCPRoute", "v1alpha2", true, true, true},
+		{gwGroup, "TCPRoute", "v1", true, false, true},
+		{gwGroup, "TLSRoute", "v1alpha2", true, true, true},
+		{gwGroup, "TLSRoute", "v1alpha3", true, true, true},
+		{gwGroup, "TLSRoute", "v1", false, false, false},
+		{gwGroup, "HTTPRoute", "v1", false, false, false},
+	}
+	for _, tc := range cases {
+		s := Served{Descriptor: Descriptor{Group: tc.group, Kind: tc.kind}, Version: tc.version}
+		for _, c := range []struct {
+			ctrl string
+			want bool
+		}{
+			{"2.3.11", tc.want23}, {"v2.3.0", tc.want23}, {"2.3.0-beta.1", tc.want23},
+			{"2.2.4", tc.want23},
+			{"2.4.7", tc.want24}, {"v2.4.0", tc.want24}, {"2.5.0", tc.want24}, {"2.34.0", tc.want24}, {"3.0.0", tc.want24},
+			{"", tc.wantUnknown}, {"main", tc.wantUnknown}, {"dev", tc.wantUnknown},
+		} {
+			if got := s.ExperimentalOnly(c.ctrl); got != c.want {
+				t.Errorf("%s/%s %s on controller %q: want %v, got %v", tc.group, tc.kind, tc.version, c.ctrl, c.want, got)
+			}
+		}
+	}
+}

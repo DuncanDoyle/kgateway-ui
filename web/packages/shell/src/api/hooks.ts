@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import useSWR from "swr";
-import { type ApiError, apiFetch } from "./client";
+import { type ApiError, apiFetch, apiFetchWithHeaders } from "./client";
 import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, RawHealthReport, Ref } from "./types";
 
 /** Poll interval for live data (design §6.6). */
@@ -50,10 +50,23 @@ export function useHealth(id: string) {
   return useSWR<HealthReport, ApiError>(`${installApi(id)}/health`, fetchHealth, live);
 }
 
-/** GET one resource; "-" stands for an empty group or namespace. */
+interface ResourceData {
+  object: Record<string, unknown>;
+  collectedAt?: string;
+}
+
+// The resource body is the raw object, so the collection time comes in a header (D-017 §6).
+async function fetchResource(path: string): Promise<ResourceData> {
+  const { body, headers } = await apiFetchWithHeaders<Record<string, unknown>>(path);
+  return { object: body, collectedAt: headers.get("Collected-At") ?? undefined };
+}
+
+/** GET one resource, polled; "-" stands for an empty group or namespace. collectedAt is undefined until it loads. */
 export function useResource(id: string, r: Ref) {
   const path = `${installApi(id)}/resources/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
-  return useSWR<Record<string, unknown>, ApiError>(path, apiFetch);
+  // Read only these fields: SWR re-renders for each one read, and spreading reads isValidating too.
+  const { data, error, mutate } = useSWR<ResourceData, ApiError>(path, fetchResource, live);
+  return { data: data?.object, error, mutate, collectedAt: data?.collectedAt };
 }
 
 /** The platform's capabilities from /api/v1/meta (D-016); undefined until meta loads. */

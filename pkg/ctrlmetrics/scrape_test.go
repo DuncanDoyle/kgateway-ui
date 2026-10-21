@@ -189,3 +189,11 @@ func (b blockingScraper) Scrape(ctx context.Context, p *corev1.Pod, _ int32) (io
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+
+// CollectedAt keeps time.Now's monotonic reading for the staleness check.
+func TestCollectedAtKeepsMonotonicReading(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "img", 1, 1)
+	if at := NewCollector(fakeScraper{}).Collect(context.Background(), inst(testutil.ControllerPod(d, "a", false))).CollectedAt; !strings.Contains(at.String(), " m=") {
+		t.Fatalf("CollectedAt lost its monotonic reading: %s", at)
+	}
+}

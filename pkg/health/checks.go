@@ -134,19 +134,29 @@ func (c controllerCheck) Run(in Input) ([]Finding, CheckResult) {
 // defaults to Kubernetes, so the platform name is never consulted.
 func (in Input) workloads() bool { return in.Platform.IsZero() || in.Platform.Has(platform.Workloads) }
 
+// notReady reports d as not ready when it has fewer ready replicas than
+// desired, or 0 desired replicas (D-017 §1). The finding is an error.
 func notReady(d *appsv1.Deployment, code, slug, what, inst string, workloads bool) (Finding, bool) {
-	want := int32(1)
-	if d.Spec.Replicas != nil {
-		want = *d.Spec.Replicas
-	}
-	if d.Status.ReadyReplicas >= want {
+	want := Desired(d)
+	if want > 0 && d.Status.ReadyReplicas >= want {
 		return Finding{}, false
 	}
 	msg := what + " not ready"
-	if workloads {
+	switch {
+	case workloads && want == 0:
+		msg = what + " scaled to 0 replicas"
+	case workloads:
 		msg = fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)
 	}
 	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst, Message: msg}, true
+}
+
+// Desired returns d's desired replicas; an unset count defaults to 1.
+func Desired(d *appsv1.Deployment) int32 {
+	if d.Spec.Replicas != nil {
+		return *d.Spec.Replicas
+	}
+	return 1
 }
 
 // Required and optional condition types per status block (design §5.2).
@@ -206,9 +216,10 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
 			Message: msg, Detail: why, parent: parent})
 	}
-	// pendingFor reports a block of u that is not processed; parent is set for route parents.
+	// pendingFor reports a block of u that is not processed; parent is set for
+	// route parents. An experimental-only kind gets a hint (D-018 §2).
 	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why string) {
-		notProcessed(u, parent, "Not yet processed by the controller", why)
+		notProcessed(u, parent, "Not yet processed by the controller", why+in.experimentalHint(u))
 	}
 	pending := func(u *unstructured.Unstructured, why string) { pendingFor(u, objects.ParentRef{}, why) }
 	// current reports false when the block is pending: a required condition is
@@ -258,35 +269,54 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	for _, gc := range in.Owned.GatewayClasses {
 		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "")
 	}
+	// listeners evaluates the listener status of a Gateway or ListenerSet; both
+	// share the listener status shape. With all, every configured listener
+	// needs a status block; otherwise only present blocks are judged.
+	listeners := func(u *unstructured.Unstructured, all bool) {
+		byName := map[string]objects.ListenerStatus{}
+		for _, l := range objects.GatewayListeners(u) {
+			byName[l.Name] = l
+		}
+		for _, name := range objects.GatewaySpecListeners(u) {
+			l, ok := byName[name]
+			if !ok {
+				if all {
+					pending(u, "no status for listener "+name)
+				}
+				continue
+			}
+			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
+			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(u, *cf) {
+				add(u, SeverityError, *cf, "listener "+l.Name)
+			}
+		}
+	}
 	// owned are the Gateways and ListenerSets of this install: the only
 	// ancestors whose policy status counts here.
 	owned := map[objects.Ref]bool{}
+	// ListenerSet status is required like a Gateway's (D-017 §2). A rejected
+	// ListenerSet may have no listener status (reason NotAllowed), so while it
+	// is Accepted=False only the listener blocks present are judged.
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
+		cs := objects.Conditions(ls)
+		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
+			continue
+		}
+		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "")
+		listeners(ls, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
 		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
-		byName := map[string]objects.ListenerStatus{}
-		for _, l := range objects.GatewayListeners(gw) {
-			byName[l.Name] = l
-		}
-		// Every configured listener needs a status block.
-		for _, name := range objects.GatewaySpecListeners(gw) {
-			l, ok := byName[name]
-			if !ok {
-				pending(gw, "no status for listener "+name)
-				continue
-			}
-			evaluate(gw, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
-			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(gw, *cf) {
-				add(gw, SeverityError, *cf, "listener "+l.Name)
-			}
-		}
+		listeners(gw, true)
 	}
 	// Routes: one status block per current parentRef of this install, matched on
 	// the full parentRef including section name and port.
 	for _, r := range in.Owned.Routes {
+		if in.ignored(r.Obj) {
+			continue
+		}
 		status := objects.RouteParents(r.Obj)
 		for _, p := range r.Parents {
 			extra := "parent " + parentDesc(p)
@@ -307,7 +337,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// Routes whose parent does not exist. A parent of a kind the cache cannot
 	// read may only be missing from the cache; cluster access already reports it.
 	for _, u := range in.Owned.Unattached {
-		if !in.readable(u.Parent.Group, u.Parent.Kind) {
+		if !in.readable(u.Parent.Group, u.Parent.Kind) || in.ignored(u.Route.Obj) {
 			continue
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
@@ -357,6 +387,47 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			Error: fmt.Sprintf("%d %s being processed by the controller", n, noun)}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// experimentalKind returns u's served kind when kgateway watches it, at its
+// served version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
+func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bool) {
+	gvk := u.GroupVersionKind()
+	for _, k := range in.Served {
+		if k.Group == gvk.Group && k.Kind == gvk.Kind {
+			return k, k.ExperimentalOnly(in.Install.KgatewayVersion())
+		}
+	}
+	return kinds.Served{}, false
+}
+
+// ExperimentalHint is appended to the detail of a "not processed" finding on
+// an experimental-only kind (D-018 §2); %s is the kind and served version.
+const ExperimentalHint = "; the controller watches %s only when its experimental Gateway API features are on, and they may be off here"
+
+// experimentalHint returns ExperimentalHint for u's kind, or "" for a stable kind.
+func (in Input) experimentalHint(u *unstructured.Unstructured) string {
+	k, exp := in.experimentalKind(u)
+	if !exp {
+		return ""
+	}
+	return fmt.Sprintf(ExperimentalHint, k.Kind+" "+k.Version)
+}
+
+// ignored reports whether route u is left unjudged: its kind is
+// experimental-only and only other controllers wrote its status. A route
+// with no status at all follows the normal rule (D-018 §1).
+func (in Input) ignored(u *unstructured.Unstructured) bool {
+	if _, exp := in.experimentalKind(u); !exp {
+		return false
+	}
+	status := objects.RouteParents(u)
+	for _, p := range status {
+		if slices.Contains(in.Install.ControllerNames, p.ControllerName) {
+			return false
+		}
+	}
+	return len(status) > 0
 }
 
 // readable reports whether the served kind group/kind can currently be read.
@@ -424,12 +495,14 @@ type proxyCheck struct{}
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
-// Run implements Check. A missing proxy is reported after the grace period,
-// except for a self-managed Gateway: KGWUI-010 (info) says the UI cannot see
-// that proxy's readiness, so it never drives the roll-up (D-016). A proxy
+// Run implements Check. A missing proxy is reported after the grace period;
+// inside it the check is pending, so the install is unknown (D-017 §3). A
+// self-managed Gateway is the exception: KGWUI-010 (info) says the UI cannot
+// see that proxy's readiness, so it never drives the roll-up (D-016). A proxy
 // Deployment that exists is judged the same either way.
 func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
+	inGrace := 0
 	for _, gw := range in.Owned.Gateways {
 		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
 		if d == nil {
@@ -438,16 +511,32 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 					Resource: ref(gw), Message: "Self-managed proxy: the UI cannot see its readiness"})
 				continue
 			}
-			if in.Now.Sub(in.firstSeen(gw)) >= Grace {
-				fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
-					Resource: ref(gw), Message: "Proxy deployment not found"})
+			if in.Now.Sub(in.firstSeen(gw)) < Grace {
+				inGrace++
+				continue
 			}
+			fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
+				Resource: ref(gw), Message: "Proxy deployment not found"})
 			continue
 		}
 		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
 			f.Resource = ref(gw)
+			// A proxy scaled to zero may be deliberate (D-017 §1).
+			if Desired(d) == 0 {
+				f.Severity = SeverityWarning
+				if in.workloads() {
+					f.Message = "Proxy has 0 replicas"
+				}
+			}
 			fs = append(fs, f)
 		}
+	}
+	if inGrace > 0 {
+		msg := fmt.Sprintf("%d proxies not found yet", inGrace)
+		if inGrace == 1 {
+			msg = "1 proxy not found yet"
+		}
+		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt, Error: msg}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }

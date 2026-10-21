@@ -308,3 +308,13 @@ func TestForbiddenKindIsReportedAndDoesNotBlockSync(t *testing.T) {
 		t.Fatalf("httproutes must be reported as not accessible, got %+v", s.Access[hr])
 	}
 }
+
+// TakenAt keeps time.Now's monotonic reading; the API converts it to UTC
+// when it writes JSON, so durations never see a wall-clock jump.
+func TestSnapshotTakenAtKeepsMonotonicReading(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream()})
+	if at := c.Snapshot().TakenAt; !strings.Contains(at.String(), " m=") {
+		t.Fatalf("TakenAt lost its monotonic reading: %s", at)
+	}
+}

@@ -102,3 +102,13 @@ func TestDisplayNeverReturnsABareSlash(t *testing.T) {
 		}
 	}
 }
+
+// D-018 §3: only the upstream edition's version is a kgateway version.
+func TestKgatewayVersion(t *testing.T) {
+	if v := (Install{Edition: "kgateway", Version: "2.3.11"}).KgatewayVersion(); v != "2.3.11" {
+		t.Errorf("upstream: got %q", v)
+	}
+	if v := (Install{Edition: "downstream", Version: "2.3.11"}).KgatewayVersion(); v != "" {
+		t.Errorf("other edition: got %q", v)
+	}
+}

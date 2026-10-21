@@ -118,22 +118,24 @@ func (NamespaceSelectorScope) Scope(inst Install) Scope {
 	if c == nil {
 		return Scope{Mode: ScopeUnknown, Source: source, Err: fmt.Sprintf("container %q not found in %s", inst.Container, where)}
 	}
-	var val string
-	found := false
-	for _, e := range c.Env { // duplicate entries: the last one wins, as in Kubernetes
-		if e.Name != DiscoveryNamespaceSelectorsEnv {
-			continue
+	var last *corev1.EnvVar
+	for i := range c.Env { // duplicate entries: the last one wins, as in Kubernetes
+		if c.Env[i].Name == DiscoveryNamespaceSelectorsEnv {
+			last = &c.Env[i]
 		}
-		if e.ValueFrom != nil {
-			return Scope{Mode: ScopeUnknown, Source: source, Err: DiscoveryNamespaceSelectorsEnv + " uses valueFrom, which the UI cannot resolve"}
-		}
-		val, found = e.Value, true
 	}
 	var sc Scope
-	if found {
-		sc = ParseSelectors(val)
-	} else {
+	switch {
+	case last == nil && len(c.EnvFrom) > 0:
+		// The env may come from a ConfigMap or Secret the UI does not read.
+		// An explicit entry would win, since env is applied after envFrom.
+		sc = Scope{Mode: ScopeUnknown, Err: "container uses envFrom, which may set " + DiscoveryNamespaceSelectorsEnv + "; the UI cannot resolve it"}
+	case last == nil:
 		sc = Scope{Mode: ScopeAll}
+	case last.ValueFrom != nil:
+		sc = Scope{Mode: ScopeUnknown, Err: DiscoveryNamespaceSelectorsEnv + " uses valueFrom, which the UI cannot resolve"}
+	default:
+		sc = ParseSelectors(last.Value)
 	}
 	sc.Source = source
 	return sc

@@ -188,6 +188,29 @@ export function processing(at = Date.now()): HealthReport {
   };
 }
 
+/** A managed Gateway whose proxy is missing inside the grace period: unknown, no finding yet (D-017 §3). */
+export function proxyPending(at = Date.now()): HealthReport {
+  const t = new Date(at).toISOString();
+  return {
+    install: "kgw.kgateway",
+    state: "unknown",
+    counts: {},
+    collectedAt: t,
+    findings: [],
+    checks: [
+      { name: "resource status", ok: true, required: true, collectedAt: t },
+      {
+        name: "gateway proxies",
+        ok: false,
+        required: true,
+        pending: true,
+        collectedAt: t,
+        error: "1 proxy not found yet",
+      },
+    ],
+  };
+}
+
 /** A finding on a resource the caller may not view (D-013). */
 export function restricted(at = Date.now()): HealthReport {
   return {

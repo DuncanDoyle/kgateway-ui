@@ -1,5 +1,11 @@
 package kinds
 
+import (
+	"regexp"
+	"slices"
+	"strconv"
+)
+
 const (
 	gwGroup  = "gateway.networking.k8s.io"
 	gwxGroup = "gateway.networking.x-k8s.io"
@@ -29,3 +35,66 @@ func Upstream() []Descriptor {
 
 // KgatewayGroup is the API group of kgateway's own CRDs.
 const KgatewayGroup = kgwGroup
+
+// experimentalOnly lists the kinds kgateway watches only with experimental
+// Gateway API features on (pluginsdk/collections/setup.go), with the versions
+// each supported controller minor watches regardless. Only the controller
+// knows the flag (D-017 §4); the classification depends on its version (D-018 §3).
+var experimentalOnly = []struct {
+	group, kind string
+	stable      map[string][]string // controller minor → versions watched regardless
+}{
+	{gwxGroup, "XListenerSet", nil},
+	{gwGroup, "TCPRoute", map[string][]string{"2.3": nil, "2.4": {"v1"}}}, // v2.3 gates every TCPRoute
+	{gwGroup, "TLSRoute", map[string][]string{"2.3": {"v1"}, "2.4": {"v1"}}},
+}
+
+// supportedMinors are the kgateway minors experimentalOnly describes.
+var supportedMinors = []string{"2.3", "2.4"}
+
+var minorRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.+-]|$)`)
+
+// controllerMinor returns the supported minor whose rules apply to controller
+// version v: 2.4 for 2.4 and later, 2.3 for earlier versions. It returns ""
+// when v is empty or unparsable.
+func controllerMinor(v string) string {
+	m := minorRE.FindStringSubmatch(v)
+	if m == nil {
+		return ""
+	}
+	major, _ := strconv.Atoi(m[1])
+	minor, _ := strconv.Atoi(m[2])
+	if major > 2 || major == 2 && minor >= 4 {
+		return "2.4"
+	}
+	return "2.3"
+}
+
+// ExperimentalOnly reports whether a kgateway controller at version controller
+// watches group/kind at version only with experimental Gateway API features
+// on. An unknown or unparsable controller version counts a kind as experimental-only when
+// any supported minor gates it (D-018 §3).
+func ExperimentalOnly(group, kind, version, controller string) bool {
+	minor := controllerMinor(controller)
+	for _, e := range experimentalOnly {
+		if e.group != group || e.kind != kind {
+			continue
+		}
+		if minor != "" {
+			return !slices.Contains(e.stable[minor], version)
+		}
+		for _, m := range supportedMinors {
+			if !slices.Contains(e.stable[m], version) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// ExperimentalOnly reports whether a kgateway controller at version controller
+// watches s, at its served version, only with experimental Gateway API features on.
+func (s Served) ExperimentalOnly(controller string) bool {
+	return ExperimentalOnly(s.Group, s.Kind, s.Version, controller)
+}

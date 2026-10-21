@@ -10,6 +10,7 @@ import { useInstallId, useVocabulary } from "../shell/extension";
 import { installPath } from "../shell/paths";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
+import { DataAge } from "./DataAge";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -136,7 +137,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
   const vocab = useVocabulary();
   const { group = "-", kind = "", rns = "-", rname = "" } = useParams();
   const ref = { group: group === "-" ? "" : group, kind, namespace: rns === "-" ? undefined : rns, name: rname };
-  const { data, error } = useResource(id, ref);
+  const { data, error, collectedAt } = useResource(id, ref);
   const [showLastApplied, setShowLastApplied] = useState(false);
   const yaml = useMemo(
     () =>
@@ -178,6 +179,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
         </h1>
         <CopyNameButton resource={ref} />
         <span className="spacer" />
+        {collectedAt ? <DataAge collectedAt={collectedAt} /> : null}
         {lastApplied ? (
           <TextButton type="button" aria-expanded={showLastApplied} onClick={() => setShowLastApplied((s) => !s)}>
             {showLastApplied ? "Hide last-applied config" : "Show last-applied config"}
