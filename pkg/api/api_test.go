@@ -1584,6 +1584,9 @@ func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 		return fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
 			Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: m, ManagedPresent: true}}}
 	}
+	shopXLS := xls.DeepCopy()
+	shopXLS.SetNamespace("shop")
+	shopXLS.SetName("xls2")
 	experimental := []runtime.Object{xls, tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw})}
 	cases := []struct {
 		name    string
@@ -1600,6 +1603,12 @@ func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "HTTPRoute"}: 5}), isolated(experimental...), "namespace shop, HTTPRoute:"},
 		{"v1 TCPRoute the gauge omits", nil, managed(nil), isolated(tcpRoute("v1", "shop", "tcp", []objects.ParentRef{gw})), "namespace shop, TCPRoute:"},
 		{"ListenerSet the gauge omits, no XListenerSet beside it", nil, managed(nil), isolated(testutil.ListenerSet("infra", "ls1", gw, nil)), "namespace infra, XListenerSet:"},
+		// Design §4.4: ListenerSet shares the XListenerSet label, so an XListenerSet beside it skips the pair.
+		{"ListenerSet beside an XListenerSet, gauge omits both", nil, managed(nil), isolated(testutil.ListenerSet("infra", "ls1", gw, nil), xls), ""},
+		{"ListenerSet beside an XListenerSet, gauge counts both", nil,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "XListenerSet"}: 2}), isolated(testutil.ListenerSet("infra", "ls1", gw, nil), xls), ""},
+		{"ListenerSet beside an XListenerSet in another namespace", nil, managed(nil),
+			isolated(testutil.ListenerSet("infra", "ls1", gw, nil), shopXLS), "namespace infra, XListenerSet:"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
