@@ -1307,6 +1307,10 @@ func TestMissingProxyInGraceIsPendingAtTheAPI(t *testing.T) {
 		t.Fatalf("no %q check: %+v", name, h.Checks)
 		return health.CheckResult{}
 	}
+	ctrlDown := slices.DeleteFunc(worldWith(0, 1), func(o runtime.Object) bool {
+		u, ok := o.(*unstructured.Unstructured)
+		return ok && u.GetNamespace() == "blog"
+	})
 	cases := []struct {
 		name    string
 		s       setup
@@ -1320,6 +1324,9 @@ func TestMissingProxyInGraceIsPendingAtTheAPI(t *testing.T) {
 			nil, []expect{{health.CodeProxyNotReady, "", ""}}},
 		{"managed, after grace", setup{}, isolated(young()), health.StateWarning, false,
 			[]expect{{health.CodeProxyNotReady, health.SeverityWarning, "infra/young"}}, nil},
+		// Pending never masks red: the roll-up checks errors first.
+		{"managed, inside grace, controller not ready", setup{late: []*unstructured.Unstructured{young()}}, ctrlDown, health.StateError, true,
+			[]expect{{health.CodeControllerNotReady, health.SeverityError, "kgw/kgateway"}}, []expect{{health.CodeProxyNotReady, "", ""}}},
 		{"self-managed, inside grace", setup{late: []*unstructured.Unstructured{young()}}, proxyWorld(proxySetup{classParams: "sm"}, testutil.GatewayParameters("infra", "sm", true)),
 			health.StateHealthy, false, []expect{{health.CodeSelfManagedProxy, health.SeverityInfo, "infra/young"}}, []expect{{health.CodeProxyNotReady, "", ""}}},
 	}
@@ -1332,6 +1339,8 @@ func TestMissingProxyInGraceIsPendingAtTheAPI(t *testing.T) {
 			}
 			if c := check(t, h, "gateway proxies"); c.Pending != tc.pending || c.OK == tc.pending || !c.Required {
 				t.Fatalf("proxy check: want pending=%v, got %+v", tc.pending, c)
+			} else if tc.pending && c.Error != "1 proxy not found yet" {
+				t.Fatalf("proxy check error: want %q, got %q", "1 proxy not found yet", c.Error)
 			}
 			// The young Gateway's own status is current, so only the proxy check can hold the install back.
 			if c := check(t, h, "resource status"); !c.OK {

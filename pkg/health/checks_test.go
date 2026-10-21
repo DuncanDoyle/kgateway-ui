@@ -685,7 +685,7 @@ func TestMissingProxyGraceStartsAtFirstSeen(t *testing.T) {
 		t.Fatalf("state: want unknown inside the grace period, got %s", r.State)
 	}
 	for _, c := range r.Checks {
-		if c.Name == "gateway proxies" && (!c.Pending || c.OK || c.Error != "1 proxy is being deployed") {
+		if c.Name == "gateway proxies" && (!c.Pending || c.OK || c.Error != "1 proxy not found yet") {
 			t.Fatalf("proxy check must be pending: %+v", c)
 		}
 	}

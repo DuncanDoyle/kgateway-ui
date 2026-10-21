@@ -520,9 +520,9 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 	}
 	if inGrace > 0 {
-		msg := fmt.Sprintf("%d proxies are being deployed", inGrace)
+		msg := fmt.Sprintf("%d proxies not found yet", inGrace)
 		if inGrace == 1 {
-			msg = "1 proxy is being deployed"
+			msg = "1 proxy not found yet"
 		}
 		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt, Error: msg}
 	}

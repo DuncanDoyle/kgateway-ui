@@ -11,6 +11,7 @@ import {
   meta,
   overview,
   processing,
+  proxyPending,
   restricted,
   unhealthy,
   unknown,
@@ -240,6 +241,14 @@ it("being processed: unknown, never green, and says what is happening", async ()
   expect(strip).not.toHaveTextContent("No known problems");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
   expect(strip).not.toHaveTextContent("Cannot check");
+});
+
+it("a missing proxy inside the grace period: unknown, and says the proxy is not found yet", async () => {
+  mount(proxyPending());
+  const strip = await screen.findByTestId("health-strip");
+  expect(strip).toHaveTextContent("Health unknown: 1 proxy not found yet");
+  expect(strip).not.toHaveTextContent("Cannot check");
+  expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
 });
 
 it("stale data turns the strip and every gateway row unknown", async () => {
