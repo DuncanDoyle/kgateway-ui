@@ -47,7 +47,7 @@
           "ok": true
         },
         "category": "route",
-        "count": 2,
+        "count": 3,
         "displayName": "HTTPRoutes",
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute"

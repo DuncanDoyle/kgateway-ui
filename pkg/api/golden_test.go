@@ -30,12 +30,15 @@ var update = flag.Bool("update", false, "rewrite the golden files under testdata
 // and UIDs of internal/testutil, so only the build version is normalised.
 func TestGoldenWireFormat(t *testing.T) {
 	gw := testutil.GwRef("infra", "edge")
-	// broken: error (KGWUI-002), restricted below; blog/posts: warning
+	// broken: error (KGWUI-002), restricted below; denied: error, unrestricted; blog/posts: warning
 	// (KGWUI-004); young, created inside the grace period: info (KGWUI-003).
 	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
 		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
+	// denied: an unrestricted KGWUI-002, so the goldens pin a finding's "since".
+	denied := testutil.HTTPRoute("shop", "denied", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")}})
 	authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Namespace != "shop" || ref.Name != "broken" })
-	_, kube, _ := startWith(t, setup{authz: authz, late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})}}, world(broken)...)
+	_, kube, _ := startWith(t, setup{authz: authz, late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})}}, world(broken, denied)...)
 	// D-016 H2/H3: no namespace, name, scope or replica counts.
 	_, bare, _ := startWith(t, setup{detectors: []install.Detector{idDetector{id: "acme~edge_1"}}, metrics: okMetrics("acme~edge_1"), platform: platform.Info{Name: "Test"}}, world()...)
 
