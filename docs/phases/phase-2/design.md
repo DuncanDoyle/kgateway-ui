@@ -203,10 +203,14 @@ Phase 1 assigns a route to an install only through a parentRef that resolves to 
 
 The empty-list fallback matches kgateway, which allows implicit attachment only when the whole list is empty (`v2.4.7 pkg/kgateway/utils/delegation/delegation.go:25-31`; `v2.3.11` same file `:25-45`), and whose status builder falls back to report refs only then (`v2.4.7 pkg/reports/status.go:489-496`). A child that moved from P to Q keeps no edge to P: its old P status has no matching spec entry, as Phase 1 ignores removed refs (`pkg/health/checks.go:314`). **(our call)**
 
-**Declared candidate.** A current `spec.parentRefs` entry of C that resolves to an HTTPRoute P owned by I, with no reported edge to P. It is a diagnostic candidate only:
+**Freshness does not decide the edge.** An eligible status entry keeps the reported edge whether it is current or stale. kgateway stamps route status with the generation of the report it was built from (`v2.4.7 pkg/reports/status.go:475-480`), so right after a child edit its entry describes the previous generation. Ownership and counts stay stable through that window. Freshness then sets the child's state with Phase 1's rules (design §5.2): a stale or `Pending` entry is "being processed" (KGWUI-003 info, check pending, row `unknown`) inside the grace period and "not yet processed" (KGWUI-003 warning) after it. **(our call)**
+
+**Declared candidate.** A current `spec.parentRefs` entry of C that resolves to an HTTPRoute P owned by I, where C's namespace is in I's scope and C has **no eligible status entry** for P at all, current or stale. It is a diagnostic candidate only:
 - It is not a child. It never appears in Child routes or the up-chain, and never makes a `name` ref "reported".
 - It gets KGWUI-011 (§6.2). It is listed on P's page under "Routes that name this parent but are not reported".
 - It is not counted, unless C is owned another way.
+
+**Out-of-scope routes are never candidates.** A route outside I's scope whose parentRef names a route of I gets KGWUI-004 only, as Phase 1's unwatched routes do (`pkg/install/assign.go:181-186`). It never gets KGWUI-011 and never makes the resource-status check pending, since missing status is expected there.
 
 **Ownership rules.**
 - A breadth-first pass starts at the Gateway-attached HTTPRoutes and follows **reported edges only**, over a reverse index built once per compute. A visited set stops cycles; diamonds give a child two parents (§5.4). Cost is linear in routes plus edges.
@@ -268,7 +272,7 @@ The tree is built from §4.3's **reported edges** only. Declared candidates are 
 | Ref state | Shown as |
 |---|---|
 | `name` ref, named route has a reported edge to this parent | `reported`: the child row |
-| `name` ref, named route exists, no reported edge | `not-reported`: "This route does not report this parent", with a link to the route |
+| `name` ref, named route exists, no reported edge | `not-reported`: "This route does not report this parent", linked per its `link` (§7.1) |
 | `name` ref, no such route | `not-found`: "Route not found" (identity lookup, like a missing Gateway in Phase 1) |
 | `name` ref, the caller may not view the named route | `restricted`: no state shown (§7.4) |
 | `wildcard` or `label` ref | the ref as written. Children are listed for the parent as a whole, not per ref. |
@@ -337,9 +341,11 @@ Each route row carries flags from its **current** status entries for this instal
 | KGWUI-002 | condition-false | error (unchanged) | Now also covers the status entries of reported edges (§4.3) and Backend `Accepted` (below). |
 | KGWUI-003 | route-unattached | info / warning (unchanged) | Also fires for a parentRef to an HTTPRoute that does not exist. |
 | KGWUI-004 | namespace-not-watched | warning (unchanged) | Also fires for a route in an unwatched namespace that names an owned route. |
-| **KGWUI-011** | **delegated-route-not-reported** | info inside the grace period, warning after | **New.** A declared candidate (§4.3): a parentRef names an owned HTTPRoute, and no current status from this install's controller reports it. |
+| **KGWUI-011** | **delegated-route-not-reported** | info inside the grace period, warning after | **New.** A declared candidate (§4.3): an in-scope route's parentRef names an owned HTTPRoute, and it has no eligible status entry for it from this install's controller, current or stale. |
 
-**KGWUI-011** replaces KGWUI-003 for this case. "Not yet processed" would mislead here: the controller has processed the parent, it just did not report the child. The finding references the candidate route, which makes it servable (§7.1). A stale entry for that parent counts as not reported. The grace period runs from the later of the candidate's and the parent's current generation, since editing either can change the outcome. **(our call)**
+**KGWUI-011** replaces KGWUI-003 for this case. "Not yet processed" would mislead here: the controller has processed the parent, it just did not report the child. The finding references the candidate route, which makes it servable (§7.1). The grace period runs from the later of the candidate's and the parent's current generation, since editing either can change the outcome. **(our call)**
+- An eligible but stale entry is not KGWUI-011. It keeps the edge and follows Phase 1's freshness rules (KGWUI-003 "being processed" or "not yet processed", §4.3).
+- A route outside the install's scope never gets KGWUI-011. It gets KGWUI-004 only, and it never makes the resource-status check pending.
 - Message draft: "Parent route does not list this route"
 - Detail draft: "No status from HTTPRoute `shop/api`. The parent may not select this route, or none of its rules fit the parent's match."
 - Inside the grace period: "Waiting for the parent route to report this route" (info), and the resource-status check is pending, as for KGWUI-003.
@@ -408,7 +414,14 @@ All additions are new paths or new optional fields. No existing path, body or in
 - A ListenerSet whose parent Gateway is missing is never assigned (`pkg/install/assign.go:136-139`), and nothing owned names it. It stays out of the install, as in Phase 1. A route naming it gets KGWUI-003, which makes the route servable.
 - The resource endpoint change is additive: it serves a superset of what it serves today, and every denial is still a 404 (D-013).
 - The ListenerSets list is not in the roadmap text. It is added because 2,000 ListenerSets need a server-side list too. **(our call)**
-- `/api/v1/meta` gains an optional `views` field: the group/kinds that have a detail page (`Gateway`, every `listenerset` kind, `HTTPRoute`). The SPA links detail pages only for these, as it links YAML only for `kinds` today (`web/packages/shell/src/api/hooks.ts:19-22`).
+- `/api/v1/meta` gains an optional `views` field: the group/kinds that have a detail page (`Gateway`, every `listenerset` kind, `HTTPRoute`). It is informational. The SPA does not derive links from it.
+
+**Link metadata.** One function, `admit(install, caller, ref) → detail | yaml | none`, implements the admission table and the Authorizer. The detail and resource endpoints call it to answer, and every payload calls it to label each reference it renders **(our call)**:
+- Every reference in a list or detail body is a `LinkedRef`: the ref plus its `link`. This covers row refs, parents, `via`, parent routes, ancestor steps, backendRefs, delegation `name` targets, ExtensionRef filters, the ListenerSet's parent Gateway and the candidate's `by`.
+- `detail`: the object is admitted and its kind has a detail view. `yaml`: admitted, no detail view (or a `no-parent` row). `none`: not admitted, denied, absent, or never served (Secret certificateRefs, Services). Denied and absent both give `none`, so the label reveals nothing extra (D-013).
+- Admission does not follow chains. A candidate C is admitted through its finding, but a route D that only C names is not. D's ref on C's page is `none` and renders as text with "Not part of this install". A link that the endpoint would reject is never rendered.
+- Phase 1 findings gain an optional `link` on their resource, from the same function, so finding rows need no kind lookup either. The field is additive.
+- The SPA never derives a link from a kind. It renders `link` as given.
 
 ### 7.2 Query parameters
 
@@ -437,10 +450,13 @@ Field names are the wire names. `?` marks optional fields. Every time is UTC (D-
 
 ```jsonc
 // Shared
+Link            "detail" | "yaml" | "none"                           // from admit(), §7.1
+LinkedRef       { group, kind, namespace?, name, link: Link }        // every rendered reference
 Condition       { type, status, reason, message, observedGeneration, lastTransitionTime, stale }
-ParentStatus    { parentRef: ParentRef, controllerName, ours, conditions: Condition[] }  // ours: from this install's controller
-ParentSummary   { ref: Ref, sectionName?, port?,
-                  via?: Ref, viaRestricted?: true,                   // via: the ListenerSet a Gateway was reached through
+ParentStatus    { parentRef: ParentRef, target: LinkedRef, controllerName, ours, conditions: Condition[] }
+                // ours: from this install's controller
+ParentSummary   { ref: LinkedRef, sectionName?, port?,
+                  via?: LinkedRef, viaRestricted?: true,             // via: the ListenerSet a Gateway was reached through
                   attachment: "accepted"|"not-accepted"|"pending"|"unwatched"|"declared",
                   conditionType?, reason?, message? }                // the deciding condition for this parent
 Page<T>         { install, items: T[], total, next?, prev?, deniedInInstall?, collectedAt }
@@ -448,15 +464,15 @@ Page<T>         { install, items: T[], total, next?, prev?, deniedInInstall?, co
                 // may not view; independent of every filter; absent under AllowAll
 
 // Lists
-RouteRow        { ref: Ref, hostnames: string[], parents: ParentSummary[], parentRoutes: Ref[],
-                  children: number, flags: string[], health: State, link: "detail"|"yaml"|"none" }
-GatewayRow2     { ref, class, health, listeners, attachedRoutes /*status sum*/, routes /*accepted, UI*/,
+RouteRow        { ref: LinkedRef, hostnames: string[], parents: ParentSummary[], parentRoutes: LinkedRef[],
+                  children: number, flags: string[], health: State }
+GatewayRow2     { ref: LinkedRef, class, health, listeners, attachedRoutes /*status sum*/, routes /*accepted, UI*/,
                   notAccepted, listenerSets, addresses: string[] }
-ListenerSetRow  { ref, parent: Ref, health, listeners, acceptedReason?, routes }
+ListenerSetRow  { ref: LinkedRef, parent: LinkedRef, health, listeners, acceptedReason?, routes }
 RouteList = Page<RouteRow>; GatewayList = Page<GatewayRow2>; ListenerSetList = Page<ListenerSetRow>
 
 // Details
-ListenerDTO     { name, port?, protocol, hostname?, tls?: { mode, certificateRefs: Ref[] },
+ListenerDTO     { name, port?, protocol, hostname?, tls?: { mode, certificateRefs: LinkedRef[] /*link always none*/ },
                   allowedRoutes: { namespaces: { from, selector? }, kinds: GroupKind[] },
                   status?: { attachedRoutes, supportedKinds: GroupKind[], conditions: Condition[] },
                   namedBy: number }                                  // routes naming it by sectionName
@@ -464,20 +480,22 @@ GatewayDetail   { install, ref, generation, class, health, candidate?, condition
                   addresses: {type?, value}[], listeners: ListenerDTO[], attachedListenerSets?,
                   routeCounts: { accepted, notAccepted, pending, unwatched }, collectedAt }
                 // ListenerSets come from GET …/listenersets?parent=… (paged), not from this body
-ListenerSetDetail { install, ref, generation, health, candidate?, parent: Ref, parentFound, conditions,
+ListenerSetDetail { install, ref, generation, health, candidate?, parent: LinkedRef, parentFound, conditions,
                   listeners: ListenerDTO[], experimentalHint?, routeCounts, collectedAt }
 RouteDetail     { install, ref, generation, health, candidate?, hostnames: string[],
                   annotations: { inheritParentMatcher? }, parentRefs: ParentRef[], parents: ParentStatus[],
                   rules: RuleDTO[], ancestors: AncestorPath[], ancestorsTruncated: boolean,
                   childCount, declaredCount, collectedAt }
 AncestorPath    { steps: AncestorStep[], cycle: boolean }
-AncestorStep    { ref: Ref } | { restricted: true }                  // a restricted step carries no identity
+AncestorStep    { ref: LinkedRef } | { restricted: true }            // a restricted step carries no identity
 RuleDTO         { index, name?, matches: MatchDTO[], filters: FilterDTO[], backendRefs: BackendRefDTO[] }
-BackendRefDTO   { ref: Ref, port?, weight, filters: FilterDTO[],
+FilterDTO       { type, extensionRef?: LinkedRef, config? }
+BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
                   delegation?: { mode, namespace, name?, label?,
                                  state?: "reported"|"not-reported"|"not-found"|"restricted" },
                   backend?: { state: State, accepted?: Condition } | { restricted: true } }  // kind Backend only
-// candidate: { reason: "finding"|"referenced", by?: Ref } — set for a diagnostic candidate (§7.1)
+// candidate: { reason: "finding"|"referenced", by?: LinkedRef } — set for a diagnostic candidate (§7.1)
+// Finding.resource gains an optional link: Link (additive, §7.1)
 ```
 
 - `GatewayRow2` is a new type. Phase 1's overview `GatewayRow` stays exactly as it is (`pkg/overview/overview.go:73-80`). The final Go name is the plan's choice.
@@ -511,12 +529,12 @@ GET /api/v1/installs/kgw.kgateway/routes?parent=gateway.networking.k8s.io/Gatewa
 {
   "install": "kgw.kgateway",
   "items": [
-    {"ref": {"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": "shop", "name": "cart"},
+    {"ref": {"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": "shop", "name": "cart", "link": "detail"},
      "hostnames": ["shop.example.com"],
-     "parents": [{"ref": {"group": "gateway.networking.k8s.io", "kind": "Gateway", "namespace": "infra", "name": "edge"},
+     "parents": [{"ref": {"group": "gateway.networking.k8s.io", "kind": "Gateway", "namespace": "infra", "name": "edge", "link": "detail"},
                   "sectionName": "https", "attachment": "not-accepted", "conditionType": "Accepted",
                   "reason": "NoMatchingListenerHostname", "message": "no hostname matches the listener"}],
-     "parentRoutes": [], "children": 0, "flags": ["not-accepted"], "health": "error", "link": "detail"}
+     "parentRoutes": [], "children": 0, "flags": ["not-accepted"], "health": "error"}
   ],
   "total": 1,
   "collectedAt": "2026-10-21T09:12:03Z"
@@ -525,7 +543,7 @@ GET /api/v1/installs/kgw.kgateway/routes?parent=gateway.networking.k8s.io/Gatewa
 
 ### 7.6 Goldens
 
-New golden fixtures in `pkg/api/testdata/golden`: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json`, `route-detail.json` (with delegation, a cycle, a truncated up-chain and a Backend ref), `route-detail-candidate.json`, `bad-request.json` and a restricted variant (restricted Backend, ancestor step and `via`, plus `deniedInInstall`). The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens must not change, except `meta.json` gaining the optional `views` field and the Backend kind.
+New golden fixtures in `pkg/api/testdata/golden`: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json`, `route-detail.json` (with delegation, a cycle, a truncated up-chain and a Backend ref), `route-detail-candidate.json`, `bad-request.json` and a restricted variant (restricted Backend, ancestor step and `via`, plus `deniedInInstall`). The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens must not change, except two additive ones: `meta.json` gains the optional `views` field and the Backend kind, and `health.json` gains the optional `link` on finding resources.
 
 ## 8. Frontend
 
@@ -544,19 +562,19 @@ New golden fixtures in `pkg/api/testdata/golden`: `routes.json`, `routes-filtere
 - Detail pages have two tabs, **Overview** and **YAML**, held in `?tab=yaml`. The YAML tab reuses the YAML view's body (`web/packages/shell/src/pages/ResourcePage.tsx:135-192`) and its polling and `Collected-At` handling.
 - The header gains install-scoped nav entries: Overview, Gateways, Routes, ListenerSets, Findings.
 - List filters, sort and cursor live in the query string, like the Gateway table today (`pages/install/GatewayTable.tsx:221-260`).
-- Routes of other kinds link to the YAML view. The link choice comes from `/meta` `views` (§7.1) and the row's `link` field: `no-parent` rows open the YAML view.
+- Every link comes from the reference's server-computed `link` (§7.1): `detail` opens the detail page, `yaml` the YAML view, and `none` renders plain text. Routes of other kinds and `no-parent` rows arrive as `yaml`. The SPA never picks a target from the kind.
 
 ### 8.2 Extension contract
 
 - `CorePages` (`shell/extension.ts:49-54`) gains **optional** slots: `GatewaysPage`, `GatewayPage`, `ListenerSetsPage`, `ListenerSetPage`, `RoutesPage`, `RoutePage`. A missing slot falls back to the upstream page, so a downstream app that passes today's four still compiles and gets the new pages.
 - The core reserves the paths `gateways`, `listenersets` and `routes` under `/i/:id/`. The doc on `RouteContribution` (`extension.ts:14-22`) lists them, and a test proves a contribution cannot replace them.
-- New exports: `objectPath(installId, ref, meta)` (detail page when listed in `views`, else the YAML view), the list hooks and DTO types. `resourcePath` stays and keeps meaning the YAML view (`pages/install/FindingRow.tsx:76-79`).
+- New exports: `objectPath(installId, linkedRef)` (the path for its `link`, or `undefined` for `none`), the list hooks and DTO types. `resourcePath` stays and keeps meaning the YAML view (`pages/install/FindingRow.tsx:76-79`).
 - `Vocabulary` gains `getCommand(ref, resource)`, returning the copy text or `undefined` to hide the button. The default is `kubectl get <resource>.<group> -n <ns> <name> -o yaml`; the plural and group come from `/meta`, so two CRDs with one kind name never clash. A platform without kubectl overrides or hides it (D-016 H4).
 - `SHELL_API_VERSION` stays **1**. Every change is additive, and no release has frozen the contract yet (phase-1-complete.md). **(our call)**
 
 ### 8.3 Finding links retarget
 
-`FindingRow` (`FindingRow.tsx:34,42`), the Gateway table row (`GatewayTable.tsx:192,265`) and the top findings use `objectPath`. A Gateway, ListenerSet or HTTPRoute finding opens its detail page; anything else opens the YAML view as before. Every finding resource is admitted by the detail endpoint (owned, or a diagnostic candidate, §7.1), so these links never 404. A restricted finding still never links.
+`FindingRow` (`FindingRow.tsx:34,42`), the Gateway table row (`GatewayTable.tsx:192,265`) and the top findings use `objectPath` on the finding's server-computed `link` (§7.1). A Gateway, ListenerSet or HTTPRoute finding gets `detail`; anything else `yaml` as before. The link comes from the same admission function the endpoints use, so it never 404s. A restricted finding still never links.
 
 ### 8.4 Page content
 
@@ -572,8 +590,8 @@ All detail pages: a diagnostic candidate shows its banner (§7.1) above the head
 **HTTPRoute detail.**
 1. Up-chain breadcrumb (§5.2). A restricted step reads "A parent you cannot view". A truncated walk ends with "More paths not shown".
 2. Hostnames, or "Inherits the listener's hostnames", or for a child "Inherits the parent route's hostnames".
-3. Parents: one card per parentRef. It shows the target link, section or port, and every condition. Entries from other controllers are collapsed under "Status from other controllers".
-4. Rules: one block per rule. It shows matches (path type and value, headers, query params, method), filters (type plus the config as written; ExtensionRef as a link when linkable) and backendRefs (kind, namespace/name, port, weight). A delegation ref shows its mode, and a Backend shows its state and `Accepted` condition, or "Restricted" when the caller may not view it.
+3. Parents: one card per parentRef. It shows the target (linked per its `link`), section or port, and every condition. Entries from other controllers are collapsed under "Status from other controllers".
+4. Rules: one block per rule. It shows matches (path type and value, headers, query params, method), filters (type plus the config as written; ExtensionRef linked per its `link`) and backendRefs (kind, namespace/name, port, weight). A delegation ref shows its mode, and a Backend shows its state and `Accepted` condition, or "Restricted" when the caller may not view it.
 5. Child routes (paged), when the route has delegation refs or children.
 6. Routes that name this parent but are not reported (paged), when there are any.
 
@@ -618,6 +636,8 @@ Seed the fake dynamic client, run the real cache, install, health, explore and A
 - **Attachment:** a route with `sectionName`, `port`, and neither. A route attached through a ListenerSet shows `via`. A route with `Accepted=False` and each of the three reasons, with the reason and message in its `ParentSummary`. A pending route. An unwatched route in `attachment=unwatched`.
 - **Stale status:** a stale `Accepted=True` is not `accepted`, and a stale `False` is not `not-accepted`.
 - **Reported vs declared:** a child with a matching spec parentRef and status is a child. A child with a spec parentRef and no status is a declared candidate: not in Child routes, `name` ref `not-reported`, KGWUI-011, not counted. A parent with no delegation refs at all, named by a child's parentRef, gets no children.
+- **Stale matching entry:** an explicit child whose matching status entry is stale (its generation bumped) stays a child. It stays owned and counted, with no KGWUI-011. Inside the grace period it gets KGWUI-003 info, the check is pending, and its row is `unknown`; after the grace period it gets KGWUI-003 warning. The counts are the same before and after the edit.
+- **Unwatched declared route:** a route outside the scope whose parentRef names an owned HTTPRoute gets exactly one finding, KGWUI-004. It gets no KGWUI-011, the resource-status check stays OK, and install health is unchanged.
 - **Implicit fallback:** a child with empty parentRefs and status is a child. A child that moves its parentRef from P to Q while old P status remains has no edge to P, and P's page does not list it. A child that gains a parentRef to a Gateway loses its implicit edge.
 - **Delegation shapes:** a wildcard parent, a label parent, a three-level chain, a diamond (one child, two paths), a repeated-diamond lattice (the up-chain stops at 5 paths with `ancestorsTruncated`), a cycle (`RefNotPermitted` shown, `cycle: true`), and a parent with refs and no reported child.
 - **Delegation findings:** a declared candidate gets KGWUI-011 (info in grace, warning after). A child with hostnames and `UnsupportedValue` gets KGWUI-002. A route in an unwatched namespace that names an owned route gets KGWUI-004. A parentRef to a missing HTTPRoute gets KGWUI-003. An HTTPRoute with no parent lands in `state=no-parent`, uncounted, with no finding, and its YAML view resolves.
@@ -627,6 +647,8 @@ Seed the fake dynamic client, run the real cache, install, health, explore and A
 - **Row state:** an object with a warning finding while a required check is pending is `unknown`; an info-only object is `healthy`; a Gateway whose routes fail keeps its own state.
 - **ListenerSet:** `Accepted=True/ListenersNotValid` with one failed listener; `Accepted=False` with no listener entries; an XListenerSet without status shows the experimental hint; a ListenerSet whose parent Gateway is missing stays out of the install. The Gateway page pages 2,000 ListenerSets.
 - **Admission:** every finding resource opens its detail (or YAML) view; an object named by an owned route's parentRef or backendRef is served as a candidate; an unrelated object returns 404 from both endpoints.
+- **Link metadata:** for every reference in every golden payload, `link` agrees with the endpoint. `detail` → the detail endpoint returns 200; `yaml` → the resource endpoint returns 200; `none` → both return 404. One test walks every rendered link of a fixture world.
+- **Second navigation step:** candidate C (admitted through KGWUI-011) names route D through a delegation backendRef, and nothing else admits D. On C's page, D's ref has `link: none` and both endpoints return 404 for D. When D is owned, the same ref has `link: detail` and resolves.
 - **Authorizer:** a deny-some authorizer hides list rows, nested ListenerSets and children. `total` counts only visible rows. `deniedInInstall` stays the same under every filter (a hostname probe changes nothing). A denied Backend gives `{restricted: true}` inside an allowed route, with no condition message. A denied `name`-ref target gives `restricted`. A denied ancestor is `{restricted: true}` with no identity. Derived counts drop denied objects. A denied detail returns 404. Health and flags are unchanged.
 - **Compatibility:** every Phase 1 golden passes unchanged, except `meta.json` (§7.6). The delegation cases above cover the numbers that do change.
 
@@ -639,7 +661,7 @@ Seed the fake dynamic client, run the real cache, install, health, explore and A
 - Filters, sort and cursor round-trip through the URL; a 400 drops the cursor.
 - Each state of §8.5, including stale turning every badge unknown with fake timers.
 - An install switch never shows the previous install's rows.
-- `objectPath` picks detail or YAML from `views`; restricted findings never link.
+- `objectPath` follows `link` only: `detail`, `yaml`, and `none` as plain text, for every kind; restricted findings never link.
 - `CorePages` with only the four Phase 1 slots still renders the new pages.
 - A contribution at `routes` cannot replace the core page.
 - `getCommand` returning `undefined` hides the copy button.
@@ -721,7 +743,7 @@ Numbers are measured and written into the sub-phase record, with the machine and
 
 ## 11. Security
 
-- **No Secret reads.** The ClusterRole stays without Secrets (D-013). Listener `certificateRefs` are shown as `kind namespace/name` text. They are never fetched, resolved or linked; `isLinkable` already refuses kinds outside `/meta` (`hooks.ts:19-22`).
+- **No Secret reads.** The ClusterRole stays without Secrets (D-013). Listener `certificateRefs` are shown as `kind namespace/name` text. They are never fetched, resolved or linked: their `link` is always `none` (§7.1).
 - **No TLS options.** `tls.options` is not decoded for the Overview tab (§4.1); the YAML tab shows the object as stored, as today.
 - **Authorizer everywhere** (§7.4). Denied and absent look the same. Every dereferenced object is authorized. Lists never report filtered counts of denied rows; only an unfiltered per-kind count, `deniedInInstall`.
 - **Admission is bounded** (§7.1). The detail and resource endpoints serve owned objects, finding-referenced objects, objects named by an owned object's spec, and the install's no-parent rows. Nothing else.
@@ -793,4 +815,4 @@ The pending "effective discovery scope" proposal (phase-status carry-over) could
 | Q9 | Keyset cursors without page numbers (§3.5)? | **Yes.** | Offsets add "page N" links; pages shift as the model changes every 2 s. |
 | Q10 | HTTPRoutes with empty parentRefs and no status (§4.3). Serving contract: listed under the `no-parent` filter in every install whose scope holds them; not counted; no finding; the row opens the YAML view, which serves them; no detail page; the Authorizer applies. Accept? | **Yes.** | Either drop them (silent delegation misses stay invisible) or add an info finding per route (noisy where they are intentional, and it makes them findings-admitted for detail pages). |
 | Q11 | Backend freshness (§6.2). The rule reads the condition's own `observedGeneration`. Current `False` → error; current `True` → healthy; stale → unknown, no finding; no evidence (2.3, `observedGeneration` 0): `False` → warning, `True` → unknown; absent → unknown. No-evidence states never show green and never turn the install unknown. Accept? | **Yes.** | `False` without evidence as an error: a stale False after an edit shows red. No finding: an invalid 2.3 Backend is never flagged. Treating a no-evidence `True` as healthy breaks the "never green without evidence" rule (D-016 §6). Making no-evidence states turn the install unknown keeps 2.3 installs with Backends unknown forever. |
-| Q12 | Delegated children now count in tiles and install health (§4.3). This rests on two rules above: only **reported** edges make a child (declared refs stay candidates with KGWUI-011), and a parent or Gateway badge keeps Phase 1 semantics while failures show on the child's row and in install health (§6.3). Accept the changed numbers? | **Yes.** Children were invisible, which hid real failures. | Keep counts Phase 1-style and show children only on route pages. Their failures then never reach the health strip. If the declared-vs-reported or row-state rule changes, this default must be re-decided. |
+| Q12 | Delegated children now count in tiles and install health (§4.3). This rests on three rules above. Only **reported** edges make a child; declared refs from in-scope routes stay candidates with KGWUI-011, and out-of-scope ones get KGWUI-004 only. An eligible status entry keeps the edge whether current or stale, so counts stay stable across edits, and freshness only sets the child's pending or unknown state (§4.3). A parent or Gateway badge keeps Phase 1 semantics, while failures show on the child's row and in install health (§6.3). Accept the changed numbers? | **Yes.** Children were invisible, which hid real failures. | Keep counts Phase 1-style and show children only on route pages. Their failures then never reach the health strip. If the declared-vs-reported or row-state rule changes, this default must be re-decided. |
