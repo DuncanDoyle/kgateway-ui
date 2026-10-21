@@ -4,7 +4,7 @@
 Phase: 1 — Foundation & Overview
 Base: 560c39392a8aa326d0645f24593b1b16577459b5
 Docs: docs/phases/phase-1/
-Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) complete, merged in #4 (cc8ba71); 1.4 (packaging, CI, e2e) complete, merged in #5 (911452d); phase review done (reviews/phase-codex.md); stabilization 1.5 in progress
+Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3); 1.3 (platform-neutral contract, D-016) complete, merged in #4 (cc8ba71); 1.4 (packaging, CI, e2e) complete, merged in #5 (911452d); phase review done (reviews/phase-codex.md); stabilization 1.5 complete on branch duncandoyle/stabilize (phase-1.5-complete.md); PR and merge next, then phase close
 
 ### Queue
 - [x] Q1 Phase 1 design (`design.md`) — approved by user 2026-10-17
@@ -16,20 +16,20 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [x] Q6 Sub-phase 1.3 — platform-neutral contract (design §14.3: H1–H5, H8, H11) — phases/phase-1/phase-1.3-complete.md
 - [x] Q7 Sub-phase 1.4 — packaging, CI, e2e (plan Tasks 19–23, plus H9, H10) — phases/phase-1/phase-1.4-complete.md
 - [x] Q8 Phase cross-model review + triage — reviews/phase-codex.md (5 P1, 3 P2, 1 P3; all accepted, D-017)
-- [ ] Q9 (P1) Workloads at 0 desired replicas count as ready — controller red KGWUI-005, proxy warning KGWUI-006 — src: reviews/phase-codex.md#1 ← CURRENT
-- [ ] Q10 (P1) ListenerSet failures never enter health — src: reviews/phase-codex.md#2
-- [ ] Q11 (P1) Missing proxy passes its required check during grace — src: reviews/phase-codex.md#3
-- [ ] Q12 (P1) Duplicate selector env entries not last-wins when an earlier one uses valueFrom — src: reviews/phase-codex.md#4
-- [ ] Q13 (P2) Scope verifier compares experimental-gated kinds — src: reviews/phase-codex.md#5
-- [ ] Q14 (P2) Drop unused ReferenceGrant and CRD reads from the ClusterRole — src: reviews/phase-codex.md#6
-- [ ] Q15 (P2) YAML view does not poll; no collection time — src: reviews/phase-codex.md#7
-- [ ] Q16 (P2) README extension example exits at once — src: reviews/phase-codex.md#8
-- [ ] Q17 (P3) API tests don't pin the v1 wire format — src: reviews/phase-codex.md#9
-- [ ] Q18 (P1) Status-less experimental objects make a broken install green — warn with a hint (D-018) — src: reviews/1.5-codex.md#1
-- [ ] Q19 (P1) TCPRoute v1 is experimental-gated on kgateway 2.3 — src: reviews/1.5-codex.md#2
-- [ ] Q20 (P2) Experimental metric keys still drive KGWUI-007 — src: reviews/1.5-codex.md#3
-- [ ] Q21 (P3) Goldens never pin a finding's since — src: reviews/1.5-codex.md#4
-- [ ] Q22 (P3) README test does not compile the example — src: reviews/1.5-codex.md#5
+- [x] Q9 (P1) Workloads at 0 desired replicas count as ready — controller red KGWUI-005, proxy warning KGWUI-006 — src: reviews/phase-codex.md#1
+- [x] Q10 (P1) ListenerSet failures never enter health — src: reviews/phase-codex.md#2
+- [x] Q11 (P1) Missing proxy passes its required check during grace — src: reviews/phase-codex.md#3
+- [x] Q12 (P1) Duplicate selector env entries not last-wins when an earlier one uses valueFrom — src: reviews/phase-codex.md#4
+- [x] Q13 (P2) Scope verifier compares experimental-gated kinds — src: reviews/phase-codex.md#5
+- [x] Q14 (P2) Drop unused ReferenceGrant and CRD reads from the ClusterRole — src: reviews/phase-codex.md#6
+- [x] Q15 (P2) YAML view does not poll; no collection time — src: reviews/phase-codex.md#7
+- [x] Q16 (P2) README extension example exits at once — src: reviews/phase-codex.md#8
+- [x] Q17 (P3) API tests don't pin the v1 wire format — src: reviews/phase-codex.md#9
+- [x] Q18 (P1) Status-less experimental objects make a broken install green — warn with a hint (D-018) — src: reviews/1.5-codex.md#1
+- [x] Q19 (P1) TCPRoute v1 is experimental-gated on kgateway 2.3 — src: reviews/1.5-codex.md#2
+- [x] Q20 (P2) Experimental metric keys still drive KGWUI-007 — src: reviews/1.5-codex.md#3
+- [x] Q21 (P3) Goldens never pin a finding's since — src: reviews/1.5-codex.md#4
+- [x] Q22 (P3) README test does not compile the example — src: reviews/1.5-codex.md#5
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -40,13 +40,11 @@ Status: implementing; sub-phase 1.2 (frontend) complete, merged in #3 (ce37ea3);
 - [ ] phase-1-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 1.5 — Phase review fixes (stabilization)
-Base: acee415bfd5025c19839689bfdc88fb1cf80c856
-Brief: docs/phases/phase-1/phase-1.5-brief.md
-Branch: duncandoyle/stabilize
-Status: implementing (Q9–Q17, subagent-driven)
+none
 
 ## Carry-over (deferred to later phases)
+- (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
+- (P4) Possible flake: pkg/app TestFirstMetricsCollectionFollowsDiscovery (5 s timeout under parallel load) — src: phases/phase-1/phase-1.5-complete.md
 - (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: reviews/phase-codex.md#5
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
