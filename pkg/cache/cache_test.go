@@ -308,3 +308,15 @@ func TestForbiddenKindIsReportedAndDoesNotBlockSync(t *testing.T) {
 		t.Fatalf("httproutes must be reported as not accessible, got %+v", s.Access[hr])
 	}
 }
+
+// TakenAt reaches the API as checks[].collectedAt, so it is UTC like every
+// other time on the wire, whatever the server's local zone.
+func TestSnapshotTakenAtIsUTC(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream()})
+	local := time.Date(2026, 10, 17, 14, 0, 0, 0, time.FixedZone("CEST", 2*3600))
+	c.now = func() time.Time { return local }
+	if got := c.Snapshot().TakenAt; got.Location() != time.UTC || !got.Equal(local) {
+		t.Fatalf("TakenAt: want %s in UTC, got %s", local.UTC(), got)
+	}
+}

@@ -76,7 +76,9 @@ func TestGoldenWireFormat(t *testing.T) {
 
 // normalise replaces the two volatile values, keeping their key and type: the
 // build version (set by ldflags) and a check's collectedAt taken from the cache
-// snapshot, which runs on the wall clock (cache.Config takes no clock).
+// snapshot, which runs on the wall clock (cache.Config takes no clock). Only a
+// UTC RFC 3339 value as time.Time encodes it is replaced, so a zone or format
+// regression still fails the compare.
 func normalise(body any, path string) {
 	m, ok := body.(map[string]any)
 	if !ok {
@@ -89,7 +91,7 @@ func normalise(body any, path string) {
 	for _, c := range checks {
 		c, _ := c.(map[string]any)
 		s, _ := c["collectedAt"].(string)
-		if at, err := time.Parse(time.RFC3339Nano, s); err == nil && !at.Equal(testutil.Now) {
+		if at, err := time.Parse(time.RFC3339Nano, s); err == nil && !at.Equal(testutil.Now) && s == at.UTC().Format(time.RFC3339Nano) {
 			c["collectedAt"] = "<snapshot time>"
 		}
 	}
