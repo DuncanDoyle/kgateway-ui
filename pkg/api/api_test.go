@@ -1431,12 +1431,26 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 	}
 	preV1 := slices.Clone(testutil.ServedUpstream())
 	for i := range preV1 {
-		if preV1[i].Kind == "TCPRoute" {
+		switch preV1[i].Kind {
+		case "TCPRoute":
 			preV1[i].Version = "v1alpha2"
+		case "TLSRoute":
+			preV1[i].Version = "v1alpha3"
 		}
 	}
 	rejected := testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
 		Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	// Status written only by another controller does not show this one watches the kind.
+	foreign := rejected
+	foreign.Controller = "example.com/other-controller"
+	tlsRoute := func(status ...testutil.RouteParent) *unstructured.Unstructured {
+		u := tcpRoute("v1alpha3", "shop", "tls", []objects.ParentRef{gw}, status...)
+		u.SetKind("TLSRoute")
+		return u
+	}
+	anyFinding := func(res string) []expect {
+		return []expect{{health.CodeRouteUnattached, "", res}, {health.CodeConditionFalse, "", res}}
+	}
 	anyPending := func(res string) expect { return expect{health.CodeRouteUnattached, "", res} }
 
 	cases := []struct {
@@ -1458,6 +1472,10 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 			nil, []expect{anyPending("shop/tcp")}, true},
 		{"pre-v1 TCPRoute rejected by the controller", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw}, rejected)), health.StateError,
 			[]expect{{health.CodeConditionFalse, health.SeverityError, "shop/tcp"}}, nil, false},
+		{"pre-v1 TCPRoute with status only from another controller", setup{served: preV1}, isolated(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{gw}, foreign)), health.StateHealthy,
+			nil, anyFinding("shop/tcp"), false},
+		{"pre-v1 TLSRoute with status only from another controller", setup{served: preV1}, isolated(tlsRoute(foreign)), health.StateHealthy,
+			nil, anyFinding("shop/tls"), false},
 		{"v1 TCPRoute without status is still required", setup{}, isolated(tcpRoute("v1", "shop", "tcp", []objects.ParentRef{gw})), health.StateWarning,
 			[]expect{{health.CodeRouteUnattached, health.SeverityWarning, "shop/tcp"}}, nil, false},
 	}
@@ -1485,7 +1503,8 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
 			xn, _ := count(o, "XListenerSet")
 			tn, _ := count(o, "TCPRoute")
-			if xn+tn != 1 {
+			sn, _ := count(o, "TLSRoute")
+			if xn+tn+sn != 1 {
 				t.Fatalf("want the object counted once, got %+v", o.Counts)
 			}
 		})
