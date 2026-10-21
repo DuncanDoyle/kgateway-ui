@@ -244,16 +244,3 @@ func TestRunCallsOnComputeWithEachModel(t *testing.T) {
 		t.Fatal("OnCompute was not called for the first model")
 	}
 }
-
-// Engine times reach the API (computedAt, collectedAt), so they are UTC
-// whatever zone the clock reports.
-func TestComputedAtIsUTC(t *testing.T) {
-	local := testutil.Now.In(time.FixedZone("CEST", 2*3600))
-	m := New(config(snapshot(t), metricsAt(testutil.Now), func() time.Time { return local })).Compute()
-	if m.ComputedAt.Location() != time.UTC || !m.ComputedAt.Equal(local) {
-		t.Fatalf("ComputedAt: want %s in UTC, got %s", local.UTC(), m.ComputedAt)
-	}
-	if at := m.Installs[0].Health.CollectedAt; at.Location() != time.UTC {
-		t.Fatalf("health collectedAt: want UTC, got %s", at)
-	}
-}

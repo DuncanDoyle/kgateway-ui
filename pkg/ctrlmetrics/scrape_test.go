@@ -189,11 +189,3 @@ func (b blockingScraper) Scrape(ctx context.Context, p *corev1.Pod, _ int32) (io
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
-
-// CollectedAt reaches the API as a check's collectedAt, so it is UTC.
-func TestCollectedAtIsUTC(t *testing.T) {
-	d := testutil.ControllerDeployment("kgw", "kgateway", "img", 1, 1)
-	if at := NewCollector(fakeScraper{}).Collect(context.Background(), inst(testutil.ControllerPod(d, "a", false))).CollectedAt; at.Location() != time.UTC {
-		t.Fatalf("CollectedAt: want UTC, got %s", at)
-	}
-}

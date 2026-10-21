@@ -145,7 +145,7 @@ func (e *Engine) Compute() *Model {
 	e.computeMu.Lock()
 	defer e.computeMu.Unlock()
 	snap := e.cfg.Snapshots.Snapshot()
-	now := e.cfg.Now().UTC() // every time on the wire is UTC
+	now := e.cfg.Now()
 	e.observe(snap, now)
 	served := e.cfg.Served
 	m := &Model{Snapshot: snap, Served: served, Pinned: e.cfg.Pinned, ComputedAt: now}
