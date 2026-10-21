@@ -1449,3 +1449,74 @@ func TestExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// envWorld is world with the controller env replaced by env. Without a Pod the
+// scope comes from the Deployment template (D-015).
+func envWorld(withPod bool, env ...corev1.EnvVar) []runtime.Object {
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1, env...)
+	var out []runtime.Object
+	for _, o := range world() {
+		switch v := o.(type) {
+		case *appsv1.Deployment:
+			if v.Name == "kgateway" {
+				o = d
+			}
+		case *corev1.Pod:
+			if !withPod {
+				continue
+			}
+			o = testutil.ControllerPod(d, "kgateway-0", true)
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// Q12, D-009 §2: duplicate env entries resolve last-wins, as in Kubernetes;
+// only a last entry using valueFrom makes the scope unknown.
+func TestDuplicateScopeEnvIsLastWinsAtTheAPI(t *testing.T) {
+	ref := corev1.EnvVar{Name: install.DiscoveryNamespaceSelectorsEnv, ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}
+	lit := testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`)
+	cases := []struct {
+		name    string
+		withPod bool
+		env     []corev1.EnvVar
+		mode    install.ScopeMode
+	}{
+		{"pod: valueFrom then literal", true, []corev1.EnvVar{ref, lit}, install.ScopeSelectors},
+		{"pod: literal then valueFrom", true, []corev1.EnvVar{lit, ref}, install.ScopeUnknown},
+		{"template: valueFrom then literal", false, []corev1.EnvVar{ref, lit}, install.ScopeSelectors},
+		{"template: literal then valueFrom", false, []corev1.EnvVar{lit, ref}, install.ScopeUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), envWorld(tc.withPod, tc.env...)...)
+			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
+			if len(insts) != 1 || insts[0].Scope == nil {
+				t.Fatalf("installs: %+v", insts)
+			}
+			want := install.SourceDeploymentTemplate
+			if tc.withPod {
+				want = "pod kgateway-0"
+			}
+			if sc := insts[0].Scope; sc.Mode != string(tc.mode) || sc.Source != want {
+				t.Fatalf("install scope: want %s from %q, got %+v", tc.mode, want, *sc)
+			}
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if tc.mode == install.ScopeUnknown {
+				if h.State != health.StateUnknown || !hasFinding(h, health.CodeSignalUnavailable, "") {
+					t.Fatalf("unknown scope must force unknown health with KGWUI-008: %s %+v", h.State, h.Findings)
+				}
+				return
+			}
+			if insts[0].Scope.Watched != 2 {
+				t.Errorf("watched: want 2 (infra, shop), got %+v", insts[0].Scope)
+			}
+			for _, c := range h.Checks {
+				if c.Name == "controller scope" && !c.OK {
+					t.Errorf("controller scope check must be OK: %+v", c)
+				}
+			}
+		})
+	}
+}
