@@ -105,7 +105,7 @@ type Collector struct {
 
 // NewCollector returns a Collector using s.
 func NewCollector(s Scraper) *Collector {
-	return &Collector{scraper: s, now: time.Now, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+	return &Collector{scraper: s, now: func() time.Time { return time.Now().UTC() }, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
 }
 
 // Collect scrapes all ready pods of in and aggregates them. It fails if any
