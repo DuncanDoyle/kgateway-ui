@@ -223,17 +223,27 @@ func world(extra ...runtime.Object) []runtime.Object { return worldWith(1, 1, ex
 
 // worldWith is world with the number of ready controller and proxy replicas (of 1).
 func worldWith(ctrlReady, proxyReady int32, extra ...runtime.Object) []runtime.Object {
-	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, ctrlReady, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`))
+	return replicaWorld(1, ctrlReady, 1, proxyReady, extra...)
+}
+
+// replicaWorld is world with desired and ready replicas for the controller and
+// the proxy. A controller with 0 desired replicas has no Pod.
+func replicaWorld(ctrlDesired, ctrlReady, proxyDesired, proxyReady int32, extra ...runtime.Object) []runtime.Object {
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, ctrlDesired, ctrlReady, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`))
 	gw := testutil.GwRef("infra", "edge")
-	return append([]runtime.Object{
-		testutil.Namespace("kgw", nil), testutil.Namespace("infra", map[string]string{"team": "a"}),
-		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil),
-		d, testutil.ControllerPod(d, "kgateway-0", ctrlReady > 0), testutil.ProxyDeployment("infra", "edge", 1, proxyReady),
+	objs := []runtime.Object{testutil.Namespace("kgw", nil), testutil.Namespace("infra", map[string]string{"team": "a"}),
+		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil), d}
+	if ctrlDesired > 0 {
+		objs = append(objs, testutil.ControllerPod(d, "kgateway-0", ctrlReady > 0))
+	}
+	// blog/posts stays last: isolated() drops it.
+	return append(append(objs,
+		testutil.ProxyDeployment("infra", "edge", proxyDesired, proxyReady),
 		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/other", true),
 		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra", "foreign", "other", nil),
 		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
 		testutil.HTTPRoute("blog", "posts", []objects.ParentRef{gw}),
-	}, extra...)
+	), extra...)
 }
 
 // stale bumps u's generation past its fixture conditions (observed generation 1).
@@ -1120,6 +1130,55 @@ func TestSelfManagedProxiesAtTheAPI(t *testing.T) {
 			// GatewayParameters are watched, never counted.
 			if _, tile := count(get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200), "GatewayParameters"); tile {
 				t.Error("GatewayParameters must not get a count tile")
+			}
+		})
+	}
+}
+
+// D-017 §1: a workload with 0 desired replicas is not ready. A controller at
+// zero is red (KGWUI-005); a managed proxy at zero is a warning (KGWUI-006).
+func TestWorkloadsAtZeroReplicasAtTheAPI(t *testing.T) {
+	// withoutBlog drops the unwatched blog/posts route, so the baseline is healthy.
+	withoutBlog := func(objs []runtime.Object) []runtime.Object { return objs[: len(objs)-1 : len(objs)-1] }
+	cases := []struct {
+		name      string
+		objs      []runtime.Object
+		state     health.State
+		want      *expect
+		msg       string
+		readiness overview.ReadinessState
+	}{
+		{"controller at zero", withoutBlog(replicaWorld(0, 0, 1, 1)), health.StateError,
+			&expect{health.CodeControllerNotReady, health.SeverityError, "kgw/kgateway"}, "Controller scaled to 0 replicas", overview.ReadinessNotReady},
+		{"proxy at zero", withoutBlog(replicaWorld(1, 1, 0, 0)), health.StateWarning,
+			&expect{health.CodeProxyNotReady, health.SeverityWarning, "infra/edge"}, "Proxy scaled to 0 replicas", overview.ReadinessReady},
+		{"proxy 1 of 2 ready stays an error", withoutBlog(replicaWorld(1, 1, 2, 1)), health.StateError,
+			&expect{health.CodeProxyNotReady, health.SeverityError, "infra/edge"}, "Proxy not ready (1 of 2 replicas)", overview.ReadinessReady},
+		{"1 of 1 ready stays green", withoutBlog(replicaWorld(1, 1, 1, 1)), health.StateHealthy, nil, "", overview.ReadinessReady},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), tc.objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state: want %s, got %s; findings: %+v", tc.state, h.State, h.Findings)
+			}
+			if tc.want != nil && !hasSev(h, tc.want.code, tc.want.sev, tc.want.res) {
+				t.Fatalf("missing %s/%s on %s; findings: %+v", tc.want.code, tc.want.sev, tc.want.res, h.Findings)
+			}
+			if tc.want != nil && h.Findings[0].Message != tc.msg {
+				t.Errorf("message: want %q, got %q", tc.msg, h.Findings[0].Message)
+			}
+			if tc.want == nil && len(h.Findings) != 0 {
+				t.Fatalf("want no findings, got %+v", h.Findings)
+			}
+			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
+			if o.Header.Readiness.State != tc.readiness {
+				t.Fatalf("header readiness: want %s, got %+v", tc.readiness, o.Header.Readiness)
+			}
+			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
+			if len(insts) != 1 || insts[0].Readiness.State != tc.readiness {
+				t.Fatalf("installs readiness: want %s, got %+v", tc.readiness, insts)
 			}
 		})
 	}

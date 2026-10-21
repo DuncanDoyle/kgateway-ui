@@ -134,19 +134,29 @@ func (c controllerCheck) Run(in Input) ([]Finding, CheckResult) {
 // defaults to Kubernetes, so the platform name is never consulted.
 func (in Input) workloads() bool { return in.Platform.IsZero() || in.Platform.Has(platform.Workloads) }
 
+// notReady reports d as not ready when it has fewer ready replicas than
+// desired, or 0 desired replicas (D-017 §1). The finding is an error.
 func notReady(d *appsv1.Deployment, code, slug, what, inst string, workloads bool) (Finding, bool) {
-	want := int32(1)
-	if d.Spec.Replicas != nil {
-		want = *d.Spec.Replicas
-	}
-	if d.Status.ReadyReplicas >= want {
+	want := Desired(d)
+	if want > 0 && d.Status.ReadyReplicas >= want {
 		return Finding{}, false
 	}
 	msg := what + " not ready"
-	if workloads {
+	switch {
+	case workloads && want == 0:
+		msg = what + " scaled to 0 replicas"
+	case workloads:
 		msg = fmt.Sprintf("%s not ready (%d of %d replicas)", what, d.Status.ReadyReplicas, want)
 	}
 	return Finding{Code: code, Slug: slug, Severity: SeverityError, Install: inst, Message: msg}, true
+}
+
+// Desired returns d's desired replicas; an unset count defaults to 1.
+func Desired(d *appsv1.Deployment) int32 {
+	if d.Spec.Replicas != nil {
+		return *d.Spec.Replicas
+	}
+	return 1
 }
 
 // Required and optional condition types per status block (design §5.2).
@@ -446,6 +456,10 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
 			f.Resource = ref(gw)
+			// A proxy scaled to zero may be deliberate (D-017 §1).
+			if Desired(d) == 0 {
+				f.Severity = SeverityWarning
+			}
 			fs = append(fs, f)
 		}
 	}
