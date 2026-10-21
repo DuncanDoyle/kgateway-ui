@@ -129,7 +129,7 @@ An **Install** is one kgateway controller deployment. It has:
 ### 4.2 ScopeProvider
 
 `Scope(install) → {namespaces predicate, controllerNames}`. v1 is `NamespaceSelectorScope`:
-- **Input.** It reads `KGW_DISCOVERY_NAMESPACE_SELECTORS` from a Ready controller Pod, else any controller Pod, else the controller Deployment's Pod template when no Pod exists (D-015). The Pod comes first because it reflects what runs during a rollout; the scope check names the source when the template is used. Duplicate env entries resolve last-wins. A `valueFrom` reference is not supported: the scope becomes `unknown` with a finding.
+- **Input.** It reads `KGW_DISCOVERY_NAMESPACE_SELECTORS` from a Ready controller Pod, else any controller Pod, else the controller Deployment's Pod template when no Pod exists (D-015). The Pod comes first because it reflects what runs during a rollout; the scope check names the source when the template is used. Duplicate env entries resolve last-wins. A `valueFrom` reference is not supported: the scope becomes `unknown` with a finding. The same holds for a container with `envFrom` and no explicit entry, since the value may come from a ConfigMap or Secret; an explicit entry wins because env is applied after `envFrom`.
 - **Semantics** (mirrors kgateway):
   - The value is a JSON list of `metav1.LabelSelector`.
   - A namespace is in scope if **any** selector matches it.

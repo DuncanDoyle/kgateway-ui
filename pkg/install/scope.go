@@ -126,6 +126,10 @@ func (NamespaceSelectorScope) Scope(inst Install) Scope {
 	}
 	var sc Scope
 	switch {
+	case last == nil && len(c.EnvFrom) > 0:
+		// The env may come from a ConfigMap or Secret the UI does not read.
+		// An explicit entry would win, since env is applied after envFrom.
+		sc = Scope{Mode: ScopeUnknown, Err: "container uses envFrom, which may set " + DiscoveryNamespaceSelectorsEnv + "; the UI cannot resolve it"}
 	case last == nil:
 		sc = Scope{Mode: ScopeAll}
 	case last.ValueFrom != nil:

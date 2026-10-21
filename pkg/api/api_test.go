@@ -1618,3 +1618,54 @@ func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// D-009 §2: the selector env may come from an envFrom ConfigMap/Secret the UI
+// does not read, so envFrom without an explicit env entry makes the scope
+// unknown; an explicit entry still wins because env is applied after envFrom.
+func TestScopeEnvFromIsUnknownUnlessExplicitAtTheAPI(t *testing.T) {
+	lit := testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`)
+	from := []corev1.EnvFromSource{{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "kgw-env"}}}}
+	cases := []struct {
+		name    string
+		withPod bool
+		env     []corev1.EnvVar
+		mode    install.ScopeMode
+	}{
+		{"pod: envFrom only", true, nil, install.ScopeUnknown},
+		{"pod: envFrom and explicit env", true, []corev1.EnvVar{lit}, install.ScopeSelectors},
+		{"template: envFrom only", false, nil, install.ScopeUnknown},
+		{"template: envFrom and explicit env", false, []corev1.EnvVar{lit}, install.ScopeSelectors},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := envWorld(tc.withPod, tc.env...)
+			for _, o := range objs {
+				var spec *corev1.PodSpec
+				switch v := o.(type) {
+				case *appsv1.Deployment:
+					spec = &v.Spec.Template.Spec
+				case *corev1.Pod:
+					spec = &v.Spec
+				}
+				if spec != nil {
+					for i := range spec.Containers {
+						spec.Containers[i].EnvFrom = from
+					}
+				}
+			}
+			_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), objs...)
+			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
+			if len(insts) != 1 || insts[0].Scope == nil {
+				t.Fatalf("installs: %+v", insts)
+			}
+			if sc := insts[0].Scope; sc.Mode != string(tc.mode) {
+				t.Fatalf("install scope: want %s, got %+v", tc.mode, *sc)
+			}
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			unknown := h.State == health.StateUnknown && hasFinding(h, health.CodeSignalUnavailable, "")
+			if (tc.mode == install.ScopeUnknown) != unknown {
+				t.Fatalf("unknown scope must force unknown health with KGWUI-008, and only then: %s %+v", h.State, h.Findings)
+			}
+		})
+	}
+}
