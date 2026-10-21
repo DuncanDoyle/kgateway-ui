@@ -309,9 +309,9 @@ Filters and sorting are stored in the query string, so every view can be shared 
 
 ### 6.6 Data fetching
 
-- SWR polls the API every 5 s, using the backend's cache (not the API server).
+- SWR polls the API every 5 s, using the backend's cache (not the API server). The YAML view polls too (D-017).
 - The backend scrapes controller metrics every 10 s.
-- Every response carries `collectedAt` (the install list carries `computedAt` per install), which drives the "Checked …" label and the stale state. The stale state is computed against a shared clock that ticks every second, not only when new data arrives.
+- Every response carries `collectedAt` (the install list carries `computedAt` per install; the resource endpoint sends it as a `Collected-At` header, D-017), which drives the "Checked …" label and the stale state. The stale state is computed against a shared clock that ticks every second, not only when new data arrives.
 - **Install identity.** Install-scoped requests never keep the previous install's data while the next one loads. A page renders install data only when the response's install id matches the install in the URL; otherwise it shows its loading state. Switching installs never shows the old install's strip, tiles or Gateways under the new install's URL.
 
 ## 7. API (v1)
@@ -323,7 +323,7 @@ The API is read-only JSON. Every resource payload has `managedFields` removed as
 | `GET /api/v1/installs` | `[{id, displayName, namespace?, name?, version, edition, controllerNames, readiness: {state, ready?, desired?}, scope?: {mode, selectors, watched, total}, health: {state, counts}, computedAt}]` |
 | `GET /api/v1/installs/{id}/overview` | Header data (including edition and controller readiness), counts per kind (`{kind, count, access}`, GatewayClasses included), and the Gateway list. Every response carries the install `id`. |
 | `GET /api/v1/installs/{id}/health` | `{install, state, findings[], checks[], counts, collectedAt}`; `install` is the install id |
-| `GET /api/v1/installs/{id}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below) |
+| `GET /api/v1/installs/{id}/resources/{group}/{kind}/{namespace}/{name}` | One object (rules below); the `Collected-At` header carries the collection time in RFC 3339 UTC |
 | `GET /api/v1/meta` | UI version, pinned install, `platform`, `capabilities`, registered kinds and descriptors, plus `apps/Deployment` under the `workloads` capability: every kind the resource endpoint can serve, so the UI links exactly these |
 | `GET /healthz`, `GET /readyz` | Liveness; readiness is true once the cache has synced and no install was rejected for an invalid ID (§14.3 H1) |
 

@@ -443,6 +443,47 @@ func TestResourceEndpointServesReferencedDeployment(t *testing.T) {
 	}
 }
 
+// The resource endpoint reports the model's collection time in a Collected-At
+// header (D-017 §6); the body stays the raw object.
+func TestResourceEndpointReportsCollectedAt(t *testing.T) {
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), world()...)
+	resp, err := http.Get(srv.URL + "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	raw := resp.Header.Get("Collected-At")
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		t.Fatalf("Collected-At %q is not RFC 3339: %v", raw, err)
+	}
+	if !strings.HasSuffix(raw, "Z") || !at.Equal(testutil.Now) {
+		t.Errorf("Collected-At = %q, want the model's computation time %s in UTC", raw, testutil.Now.UTC().Format(time.RFC3339Nano))
+	}
+	if o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200); !o.CollectedAt.Equal(at) {
+		t.Errorf("Collected-At %s differs from the overview's collectedAt %s", at, o.CollectedAt)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	keys := slices.Sorted(maps.Keys(body))
+	if want := []string{"apiVersion", "kind", "metadata", "spec", "status"}; !slices.Equal(keys, want) {
+		t.Errorf("body keys = %v, want the raw object's %v", keys, want)
+	}
+	nf, err := http.Get(srv.URL + "/api/v1/installs/kgw.kgateway/resources/-/Secret/shop/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = nf.Body.Close()
+	if h := nf.Header.Get("Collected-At"); nf.StatusCode != http.StatusNotFound || h != "" {
+		t.Errorf("404: status %d, Collected-At %q; want 404 without the header", nf.StatusCode, h)
+	}
+}
+
 // Every finding code at the API boundary, once where it must appear and once
 // where it must not (design §9), including stale True, absent conditions,
 // policies without ancestors, stale metrics and routes to a missing Gateway.

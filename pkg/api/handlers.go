@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -218,6 +219,8 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
 	if h.authz.Authorize(r, want) {
 		if obj := lookup(m, i, want); obj != nil {
+			// The body is the raw object, so the collection time travels in a header (D-017 §6).
+			w.Header().Set("Collected-At", m.ComputedAt.UTC().Format(time.RFC3339Nano))
 			writeJSON(w, obj)
 			return
 		}
