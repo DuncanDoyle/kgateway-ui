@@ -1631,6 +1631,12 @@ func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 		return fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
 			Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: m, ManagedPresent: true}}}
 	}
+	var noLS []kinds.Served
+	for _, k := range testutil.ServedUpstream() {
+		if k.Kind != "ListenerSet" {
+			noLS = append(noLS, k)
+		}
+	}
 	shopXLS := xls.DeepCopy()
 	shopXLS.SetNamespace("shop")
 	shopXLS.SetName("xls2")
@@ -1656,6 +1662,16 @@ func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "XListenerSet"}: 2}), isolated(testutil.ListenerSet("infra", "ls1", gw, nil), xls), ""},
 		{"ListenerSet beside an XListenerSet in another namespace", nil, managed(nil),
 			isolated(testutil.ListenerSet("infra", "ls1", gw, nil), shopXLS), "namespace infra, XListenerSet:"},
+		// D-018 §4: experimental-only series are left out on the metrics side too, in any namespace.
+		{"pre-v1 TCPRoute counted outside the UI's scope", preV1,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "blog", Resource: "TCPRoute"}: 1}), isolated(experimental...), ""},
+		{"stable kind counted outside the UI's scope", preV1,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "blog", Resource: "HTTPRoute"}: 1}), isolated(experimental...), "namespace blog, HTTPRoute:"},
+		{"XListenerSet label counted outside the UI's scope, no ListenerSet served", noLS,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "blog", Resource: "XListenerSet"}: 1}), isolated(xls), ""},
+		// The label also counts stable ListenerSets, so only namespaces holding an XListenerSet are skipped (design §4.4).
+		{"XListenerSet label counted outside the UI's scope, ListenerSet served", nil,
+			managed(map[ctrlmetrics.ManagedKey]float64{{Namespace: "blog", Resource: "XListenerSet"}: 1}), isolated(xls), "namespace blog, XListenerSet:"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

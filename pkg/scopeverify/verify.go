@@ -102,8 +102,9 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 	for k := range ui {
 		keys[k] = true
 	}
+	exp := experimentalLabels(in)
 	for k := range in.Metrics.Metrics.Managed {
-		if counted(k.Resource, in.Served) && !skip[k] {
+		if counted(k.Resource, in.Served) && !skip[k] && !exp[k.Resource] {
 			keys[k] = true
 		}
 	}
@@ -157,6 +158,28 @@ func counted(resource string, served []kinds.Served) bool {
 		}
 	}
 	return false
+}
+
+// experimentalLabels returns the gauge labels whose served kinds are all
+// experimental-only for this install. Their series are left out in every
+// namespace (D-018 §4); a label shared with a stable kind is skipped per
+// namespace in uiCounts instead.
+func experimentalLabels(in Input) map[string]bool {
+	ctrl := in.Install.KgatewayVersion()
+	stable, out := map[string]bool{}, map[string]bool{}
+	for _, k := range in.Served {
+		if label := resourceLabel(k); label != "" {
+			if k.ExperimentalOnly(ctrl) {
+				out[label] = true
+			} else {
+				stable[label] = true
+			}
+		}
+	}
+	for label := range stable {
+		delete(out, label)
+	}
+	return out
 }
 
 // uiCounts counts the in-scope objects per (namespace, resource label) with the
