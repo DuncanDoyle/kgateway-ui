@@ -2,9 +2,9 @@
 
 ## Phase
 Phase: 2 — Gateway & Route Explorer
-Base: (set at "start phase 2")
+Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
 Docs: docs/phases/phase-2/
-Status: not started; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Status: design in progress; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
 - [ ] Q1 Phase 2 design (`design.md`) ← CURRENT
