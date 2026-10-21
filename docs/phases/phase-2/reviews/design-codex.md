@@ -147,3 +147,27 @@ For **§15**, Q6 now supplies meaningful scale and performance defaults; Q10 sup
 | R2-1 | Stale status both reported and "not reported" | reviewer | accept | Our call: an eligible status entry, current or stale, keeps the reported edge (ownership and counts stay stable); freshness sets the row's pending or unknown state per Phase 1; KGWUI-011 only when no eligible entry exists. |
 | R2-2 | Candidate pages render links that admission rejects | reviewer | accept | Our call: every rendered reference carries server-computed link metadata (detail, YAML or none) from the same admission function; test the second navigation step. |
 | R2-3 | Unwatched routes become declared candidates | reviewer | accept | KGWUI-011 requires the child's namespace in scope; out of scope gives KGWUI-004 only. |
+
+## Re-review 2 (scoped, Codex, diff a89c187..04a5d8e)
+
+Reviewed `a89c187..HEAD` (`04a5d8e`) for `docs/phases/phase-2/design.md`. No files edited.
+
+| Finding | Result | Section / line evidence |
+|---|---|---|
+| R2-1 | **Resolved** | §4.3:206–208 explicitly retains eligible stale edges and separates freshness from ownership. §6.2:344–347 excludes stale entries from KGWUI-011. §9.1:639 tests stable ownership/counts and grace-period behavior. |
+| R2-2 | **Resolved** | §7.1:419–424 specifies admission-aware `detail` / `yaml` / `none` metadata without recursive admission. §8.2:571 makes `objectPath` consume it. §9.1:650–651 tests endpoint agreement and the second navigation step. |
+| R2-3 | **Resolved** | §4.3:208–213 requires scope eligibility for declared candidates. §6.2:348 explicitly permits KGWUI-004 only, without pending status. §9.1:640 adds the corresponding boundary test. |
+
+New findings, ranked:
+
+1. **P2 — Existing overview Gateway links lack the newly required metadata.**  
+   **Evidence:** §8.3 ([line 577](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/design.md:577)) directs the existing Gateway table row to use `objectPath` with the finding’s server-computed link. However, §7.3:501 explicitly keeps Phase 1’s overview `GatewayRow` unchanged, and §7.6:546 allows existing payload changes only to metadata and finding resources. A healthy Gateway row has no finding from which to obtain its link.  
+   **Why:** The promised overview-to-detail navigation cannot follow the new server-only link contract. Specify additive link metadata for existing overview Gateway rows and update their golden exception.
+
+2. **P3 — Compatibility acceptance still forbids the required health golden change.**  
+   **Evidence:** §7.6 ([line 546](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/design.md:546)) now requires `health.json` to gain finding-resource links, but §9.1:653 still requires every Phase 1 golden except `meta.json` to pass unchanged.  
+   **Why:** These acceptance requirements conflict; implementing the new finding links violates the stated compatibility check. Add `health.json` to §9.1’s exceptions.
+| # | Finding | Source | Decision | Note |
+|---|---|---|---|---|
+| R3-1 | Overview Gateway rows lack link metadata | reviewer | accept | Phase 1 `GatewayRow` gains an optional `link`; overview goldens listed as additive (§7.3, §7.6, §8.3). |
+| R3-2 | Compatibility check forbids the health golden change | reviewer | accept | §9.1 lists every additive golden change and asserts the diffs only add optional fields. |

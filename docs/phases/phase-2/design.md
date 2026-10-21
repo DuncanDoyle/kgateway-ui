@@ -498,7 +498,7 @@ BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
 // Finding.resource gains an optional link: Link (additive, §7.1)
 ```
 
-- `GatewayRow2` is a new type. Phase 1's overview `GatewayRow` stays exactly as it is (`pkg/overview/overview.go:73-80`). The final Go name is the plan's choice.
+- `GatewayRow2` is a new type. Phase 1's overview `GatewayRow` (`pkg/overview/overview.go:73-80`) keeps every field and gains one optional field, `link: Link`, computed by the same admission function (§7.1), so the overview Gateway table can link to the detail page without a finding (our call). The final Go name is the plan's choice.
 - `delegation.state` is set only for `name` refs (§5.2).
 - A route page lists children through `GET …/routes?parent=gateway.networking.k8s.io/HTTPRoute/{ns}/{name}`, and declared candidates with `&attachment=declared`. The same paged list code serves Gateways, ListenerSets and parents.
 - The Gateway page pages its ListenerSets through `GET …/listenersets?parent=…`, so no detail body is unbounded. **(our call)**
@@ -543,7 +543,7 @@ GET /api/v1/installs/kgw.kgateway/routes?parent=gateway.networking.k8s.io/Gatewa
 
 ### 7.6 Goldens
 
-New golden fixtures in `pkg/api/testdata/golden`: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json`, `route-detail.json` (with delegation, a cycle, a truncated up-chain and a Backend ref), `route-detail-candidate.json`, `bad-request.json` and a restricted variant (restricted Backend, ancestor step and `via`, plus `deniedInInstall`). The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens must not change, except two additive ones: `meta.json` gains the optional `views` field and the Backend kind, and `health.json` gains the optional `link` on finding resources.
+New golden fixtures in `pkg/api/testdata/golden`: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json`, `route-detail.json` (with delegation, a cycle, a truncated up-chain and a Backend ref), `route-detail-candidate.json`, `bad-request.json` and a restricted variant (restricted Backend, ancestor step and `via`, plus `deniedInInstall`). The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens must not change, except two additive ones: `meta.json` gains the optional `views` field and the Backend kind, `health.json` gains the optional `link` on finding resources, and `overview.json` and `bare-overview.json` gain the optional `link` on Gateway rows.
 
 ## 8. Frontend
 
@@ -574,7 +574,7 @@ New golden fixtures in `pkg/api/testdata/golden`: `routes.json`, `routes-filtere
 
 ### 8.3 Finding links retarget
 
-`FindingRow` (`FindingRow.tsx:34,42`), the Gateway table row (`GatewayTable.tsx:192,265`) and the top findings use `objectPath` on the finding's server-computed `link` (§7.1). A Gateway, ListenerSet or HTTPRoute finding gets `detail`; anything else `yaml` as before. The link comes from the same admission function the endpoints use, so it never 404s. A restricted finding still never links.
+`FindingRow` (`FindingRow.tsx:34,42`), and the top findings use `objectPath` on the finding's server-computed `link`; the Gateway table row uses the row's own `link` (§7.1, §7.3). A Gateway, ListenerSet or HTTPRoute finding gets `detail`; anything else `yaml` as before. The link comes from the same admission function the endpoints use, so it never 404s. A restricted finding still never links.
 
 ### 8.4 Page content
 
@@ -650,7 +650,7 @@ Seed the fake dynamic client, run the real cache, install, health, explore and A
 - **Link metadata:** for every reference in every golden payload, `link` agrees with the endpoint. `detail` → the detail endpoint returns 200; `yaml` → the resource endpoint returns 200; `none` → both return 404. One test walks every rendered link of a fixture world.
 - **Second navigation step:** candidate C (admitted through KGWUI-011) names route D through a delegation backendRef, and nothing else admits D. On C's page, D's ref has `link: none` and both endpoints return 404 for D. When D is owned, the same ref has `link: detail` and resolves.
 - **Authorizer:** a deny-some authorizer hides list rows, nested ListenerSets and children. `total` counts only visible rows. `deniedInInstall` stays the same under every filter (a hostname probe changes nothing). A denied Backend gives `{restricted: true}` inside an allowed route, with no condition message. A denied `name`-ref target gives `restricted`. A denied ancestor is `{restricted: true}` with no identity. Derived counts drop denied objects. A denied detail returns 404. Health and flags are unchanged.
-- **Compatibility:** every Phase 1 golden passes unchanged, except `meta.json` (§7.6). The delegation cases above cover the numbers that do change.
+- **Compatibility:** every Phase 1 golden passes unchanged, except the additive changes listed in §7.6 (`meta.json`, `health.json`, `overview.json`, `bare-overview.json`); a test asserts those diffs only add optional fields. The delegation cases above cover the numbers that do change.
 
 ### 9.2 Goldens
 
