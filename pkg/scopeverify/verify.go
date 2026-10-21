@@ -180,7 +180,7 @@ func uiCounts(in Input) (out map[ctrlmetrics.ManagedKey]float64, skip map[ctrlme
 				continue
 			}
 			key := ctrlmetrics.ManagedKey{Namespace: o.GetNamespace(), Resource: label}
-			if k.ExperimentalOnly() {
+			if k.ExperimentalOnly(in.Install.KgatewayVersion()) {
 				skip[key] = true // ListenerSet shares this label, so it is skipped here too
 				continue
 			}

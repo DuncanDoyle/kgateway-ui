@@ -395,7 +395,7 @@ func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bo
 	gvk := u.GroupVersionKind()
 	for _, k := range in.Served {
 		if k.Group == gvk.Group && k.Kind == gvk.Kind {
-			return k, k.ExperimentalOnly()
+			return k, k.ExperimentalOnly(in.Install.KgatewayVersion())
 		}
 	}
 	return kinds.Served{}, false

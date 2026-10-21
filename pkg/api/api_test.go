@@ -1675,6 +1675,66 @@ func TestScopeVerifierSkipsExperimentalOnlyKindsAtTheAPI(t *testing.T) {
 	}
 }
 
+// withControllerVersion is objs with the controller Deployment's version label
+// set to v; the upstream detector reads the install version from it.
+func withControllerVersion(v string, objs []runtime.Object) []runtime.Object {
+	out := slices.Clone(objs)
+	for i, o := range out {
+		if d, ok := o.(*appsv1.Deployment); ok && d.Name == "kgateway" {
+			d = d.DeepCopy()
+			d.Labels["app.kubernetes.io/version"] = v
+			out[i] = d
+		}
+	}
+	return out
+}
+
+// D-018 §3: which kinds are experimental-only depends on the controller
+// version. kgateway v2.3 watches no TCPRoute without experimental features,
+// v2.4 watches v1 TCPRoute always; an unknown version is conservative.
+func TestExperimentalOnlyDependsOnControllerVersionAtTheAPI(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	// The gauge for isolated(): 2 Gateways in infra, 1 HTTPRoute parentRef in shop; no TCPRoute.
+	gauge := fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{},
+		Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 2, {Namespace: "shop", Resource: "HTTPRoute"}: 1}, ManagedPresent: true}}}
+	hint := fmt.Sprintf(health.ExperimentalHint, "TCPRoute v1")
+	cases := []struct {
+		version      string
+		experimental bool // hint on the warning; left out of KGWUI-007
+	}{
+		{"2.3.11", true},
+		{"2.4.7", false},
+		{"dev", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.version, func(t *testing.T) {
+			objs := withControllerVersion(tc.version, isolated(tcpRoute("v1", "shop", "tcp", []objects.ParentRef{gw})))
+			e, srv, _ := startWith(t, setup{metrics: gauge, immediate: true}, objs...)
+			e.Compute() // a mismatch must persist across two computations
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			var pending *health.Finding
+			mismatch := false
+			for i, f := range h.Findings {
+				if f.Code == health.CodeRouteUnattached && f.Resource != nil && f.Resource.String() == "shop/tcp" {
+					pending = &h.Findings[i]
+				}
+				if f.Code == health.CodeScopeMismatch && strings.HasPrefix(f.Detail, "namespace shop, TCPRoute:") {
+					mismatch = true
+				}
+			}
+			if pending == nil || pending.Severity != health.SeverityWarning {
+				t.Fatalf("want a KGWUI-003 warning on shop/tcp; findings: %+v", h.Findings)
+			}
+			if got := strings.HasSuffix(pending.Detail, hint); got != tc.experimental {
+				t.Errorf("hint: want %v, got detail %q", tc.experimental, pending.Detail)
+			}
+			if mismatch == tc.experimental {
+				t.Errorf("KGWUI-007 for TCPRoute: want %v; findings: %+v", !tc.experimental, h.Findings)
+			}
+		})
+	}
+}
+
 // D-009 §2: the selector env may come from an envFrom ConfigMap/Secret the UI
 // does not read, so envFrom without an explicit env entry makes the scope
 // unknown; an explicit entry still wins because env is applied after envFrom.
