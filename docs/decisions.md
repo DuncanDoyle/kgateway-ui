@@ -279,3 +279,25 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - Later phases design against capabilities, not Kubernetes (design §14.5). Phase 3 "pod health" becomes "process health"; Phase 4 must work with `Backend` and Envoy cluster health alone; Phase 10 authorisation is K8s-only through a capability unless a neutral story exists.
 - What a standalone status source must provide is recorded as requirements for that project, not designed here (design §14.6).
 - User decisions (2026-10-20): the hedges are a new planned sub-phase 1.3, and packaging, CI and e2e become 1.4. Self-managed readiness is info. `Backend` is registered in the Phase 2 design.
+
+## D-017 — Phase 1 review fixes: health gaps, RBAC, YAML freshness (2026-10-21, phase 1)
+**Context:**
+- The Phase 1 cross-model review (reviews/phase-codex.md) found health false greens and two smaller contract gaps. A separate verifier confirmed each against the code and kgateway v2.3.11/v2.4.7.
+- Some fixes need a choice the design did not make.
+
+**Decision:**
+1. **Workloads at zero.** A controller Deployment with 0 desired replicas is red KGWUI-005 (D-015 already says so). A managed proxy Deployment with 0 desired replicas is warning KGWUI-006, the same as an unready proxy: the Gateway serves no traffic, but scaling to zero may be intentional.
+2. **ListenerSet status is required.** Owned ListenerSets join design §5.2's required-status list, because kgateway writes some failures (`rejectDeniedListenerSets`) only on the ListenerSet (D-006).
+3. **Grace keeps a check pending.** During a missing proxy's grace period, the required proxy check is pending, not OK, so the install cannot show green.
+4. **Scope verification compares stable kinds only.** Kinds that kgateway only watches with experimental features on (pre-v1 TCPRoute and TLSRoute, XListenerSet) are left out of KGWUI-007's comparison. We do not read the experimental-features flag. When the upstream scope endpoint reports enabled kinds (D-009 §7), the verifier uses that list, so experimental Gateway API support works across kgateway and downstream distributions.
+5. **Least-privilege RBAC.** The ClusterRole drops the ReferenceGrant and CRD reads. No code reads them, and discovery needs neither. This supersedes design §8's list and pre-flight ruling PF11.
+6. **YAML freshness.** The YAML view polls like the other pages. The resource endpoint reports the collection time in a response header, so the v1 JSON body is unchanged.
+
+**Alternatives:**
+- Proxy at zero as error. Rejected: scaling a Gateway to zero can be deliberate.
+- Read the experimental-features env from the controller Pod. Rejected: it mirrors more controller logic; the upstream endpoint is the right source.
+- Add a `collectedAt` field to the resource body. Rejected: the body is the raw object, and wrapping it breaks v1.
+
+**Consequences:**
+- Stabilization sub-phase 1.5 implements these with queue items Q9–Q17.
+- The upstream scope proposal should ask for enabled kinds, as the draft already does; the verifier switches to it when it exists.
