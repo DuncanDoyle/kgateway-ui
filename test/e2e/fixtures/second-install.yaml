@@ -1,0 +1,11 @@
+# Scenario for install B (kgw-b, selector team=b).
+apiVersion: v1
+kind: Namespace
+metadata: { name: app-b, labels: { team: b } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: edge, namespace: app-b }
+spec:
+  gatewayClassName: kgateway
+  listeners: [{ name: http, port: 8080, protocol: HTTP }]

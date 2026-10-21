@@ -67,6 +67,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - an analyzer with stable finding codes: unresolved references, missing ReferenceGrant, rules dropped or replaced, policies whose target is not found, conflicting listeners;
 - xDS rejects (NACKs) per gateway;
 - controller and proxy pod health.
+- "Pod health" is "process health": restarts and readiness come from the provider (D-016).
 
 ### Phase 4 — Traffic Flow & Backends
 **Status:** Not started
@@ -74,6 +75,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 
 - Where a route actually sends traffic: Services and Backends, weights, endpoint health and endpoint discovery status.
 - A scoped flow diagram centred on a single gateway or route.
+- Must work with `Backend` and Envoy cluster health alone; Services and EndpointSlices are optional (D-016).
 
 ### Phase 5 — Policies & Filters
 **Status:** Not started
@@ -105,6 +107,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - Listener TLS modes.
 - Routes without authentication or authorization.
 - An opt-in certificate inventory with expiry dates (opt-in because it needs Secret access, see principle 8).
+- Certificates may come from files, not Secrets (D-016).
 
 ### Phase 8 — Metrics & Insights
 **Status:** Not started
@@ -123,6 +126,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - The actual Envoy HTTP filter chain and filter order per route, mapped back to the Gateway API and policy resources that produced it.
 - Intended configuration (the controller's xDS snapshot) compared with the configuration Envoy accepted.
 - Builds on [krp](https://github.com/DuncanDoyle/krp) as a Go library, which first requires moving its parser, model and filter packages out of `internal/`.
+- Easier standalone, because the admin server (9095) and Envoy admin are local (D-016).
 
 ### Phase 10 — App-Team Views
 **Status:** Not started
@@ -130,6 +134,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 - OIDC login and impersonation.
 - Namespace-scoped views, so an application developer sees only their own routes and their health.
+- SubjectAccessReview and impersonation are one `Authorizer`, behind a `kubernetes-rbac` capability; a neutral authorisation story is a Phase 10 design question (D-016).
 
 ## Milestones outside the phase sequence
 - **Extension seam proof (after Phase 2):** a throwaway downstream build, in a separate repository, registers one extra policy kind and edition detection. This validates D-003 before later phases build on it.

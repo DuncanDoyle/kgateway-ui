@@ -1,0 +1,18 @@
+{{- if .Values.httpRoute.enabled }}
+{{- if not .Values.httpRoute.parentRefs }}
+{{- fail "httpRoute.parentRefs is required when httpRoute.enabled is true" }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "kgateway-ui.fullname" . }}
+  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+spec:
+  parentRefs: {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  {{- with .Values.httpRoute.hostnames }}
+  hostnames: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - backendRefs:
+        - { name: {{ include "kgateway-ui.fullname" . }}, port: 80 }
+{{- end }}

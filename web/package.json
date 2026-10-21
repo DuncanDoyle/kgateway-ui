@@ -10,7 +10,7 @@
     "dev": "npm run dev -w kgateway-ui-app",
     "test": "vitest run",
     "lint": "biome check .",
-    "typecheck": "tsc -p packages/shell && tsc -p app"
+    "typecheck": "tsc -p packages/shell && tsc -p app && tsc -p e2e"
   },
   "devDependencies": {
     "@biomejs/biome": "^2",

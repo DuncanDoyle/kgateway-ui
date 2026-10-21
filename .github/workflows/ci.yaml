@@ -1,0 +1,123 @@
+name: ci
+on:
+  pull_request:
+  push: { branches: [main] }
+permissions: { contents: read }
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  hygiene:
+    # Public repo: forbidden brand terms must never land (docs/phase-status.md, public-repo note).
+    runs-on: ubuntu-latest
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      BASE_REF: ${{ github.base_ref }}
+      HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      REPO: ${{ github.repository }}
+      BEFORE: ${{ github.event.before }}
+      AFTER: ${{ github.event.after }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - name: forbidden terms
+        shell: bash
+        # A secret, not a variable: Actions masks secrets in the public logs. Never echo it.
+        env:
+          FORBIDDEN_TERMS: ${{ secrets.FORBIDDEN_TERMS }}
+        run: |
+          # Fork PRs get no secrets, so they warn and skip; everything else fails closed.
+          if [ -z "$FORBIDDEN_TERMS" ]; then
+            if [ "$EVENT_NAME" = pull_request ] && [ "$HEAD_REPO" != "$REPO" ]; then
+              echo "::warning::FORBIDDEN_TERMS is not available to fork PRs; skipping"; exit 0
+            fi
+            echo "::error::repository secret FORBIDDEN_TERMS is not set"; exit 1
+          fi
+          # Report masked paths and commit SHAs only, never the matched text.
+          mask() { perl -pe 's/$ENV{FORBIDDEN_TERMS}/***/gi'; }
+          fail=0
+          files=$(git grep -lIiE -e "$FORBIDDEN_TERMS" -- . ':!web/package-lock.json' ':!go.sum' || true)
+          if [ -n "$files" ]; then echo "::error::forbidden term in file content:"; mask <<<"$files"; fail=1; fi
+          names=$(git ls-files | grep -iE -e "$FORBIDDEN_TERMS" || true)
+          if [ -n "$names" ]; then echo "::error::forbidden term in file or directory name:"; mask <<<"$names"; fail=1; fi
+          range=()
+          if [ "$EVENT_NAME" = pull_request ]; then
+            range=("origin/$BASE_REF..HEAD")
+          elif [ "$EVENT_NAME" = push ]; then
+            # New branch (all-zero before) or rewritten history: scan just the pushed head.
+            if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              range=(-1 "$AFTER")
+            else
+              range=("$BEFORE..$AFTER")
+            fi
+          fi
+          if [ "${#range[@]}" -gt 0 ]; then
+            while read -r sha; do
+              msg=$(git log -1 --format=%B "$sha")
+              if grep -qiE -e "$FORBIDDEN_TERMS" <<<"$msg"; then
+                echo "::error::forbidden term in commit message: $sha"; fail=1
+              fi
+            done < <(git rev-list "${range[@]}")
+          fi
+          exit "$fail"
+  web:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: web } }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: spa
+          # Hidden source maps stay out of the embedded SPA (internal/webui/embed_test.go).
+          path: |
+            web/app/dist
+            !web/app/dist/**/*.map
+          if-no-files-found: error
+  go:
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - uses: actions/download-artifact@v8
+        with: { name: spa, path: internal/webui/dist }
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v9
+        with: { version: v2.15.0, args: --build-tags e2e }
+      # Chart tests run once, in the helm job.
+      - run: |
+          mapfile -t pkgs < <(go list ./... | grep -v /deploy/)
+          REQUIRE_SPA=1 go test -race "${pkgs[@]}"
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      # Lints the workflows; ubuntu runners ship shellcheck, so run: blocks are checked too.
+      - run: make actionlint
+      - uses: azure/setup-helm@v5
+      - run: helm lint deploy/helm/kgateway-ui
+      - run: REQUIRE_HELM=1 go test ./deploy/...
+  image:
+    # Multi-arch build check; nothing is pushed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # No qemu: both builder stages run on the build platform and the final stage has no RUN.
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

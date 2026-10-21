@@ -5,3 +5,6 @@ web/**/node_modules/
 web/**/dist/
 internal/webui/dist/*
 !internal/webui/dist/.gitkeep
+web/test-results/
+web/playwright-report/
+.e2e/

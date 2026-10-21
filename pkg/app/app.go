@@ -183,7 +183,7 @@ func serve(ctx context.Context, a *App, addr string, onListen func(net.Addr)) er
 	a.Start(ctx)
 	srv := &http.Server{Handler: a.Handler, ReadHeaderTimeout: 10 * time.Second}
 	drained := make(chan struct{})
-	go func() {
+	go func() { //nolint:gosec // shutdown must outlive the cancelled serve context
 		defer close(drained)
 		<-ctx.Done()
 		sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)

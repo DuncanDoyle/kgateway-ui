@@ -1,1 +1,12 @@
 version: "2"
+linters:
+  enable: [errcheck, govet, staticcheck, unused, revive, gosec]
+  settings:
+    revive:
+      rules:
+        - name: exported   # every exported identifier needs a doc comment (Go doc standard)
+  exclusions:
+    rules:
+      # Tests use fixed paths, loopback servers and short-lived temp files.
+      - path: _test\.go
+        linters: [gosec]
