@@ -309,14 +309,12 @@ func TestForbiddenKindIsReportedAndDoesNotBlockSync(t *testing.T) {
 	}
 }
 
-// TakenAt reaches the API as checks[].collectedAt, so it is UTC like every
-// other time on the wire, whatever the server's local zone.
-func TestSnapshotTakenAtIsUTC(t *testing.T) {
+// TakenAt keeps time.Now's monotonic reading; the API converts it to UTC
+// when it writes JSON, so durations never see a wall-clock jump.
+func TestSnapshotTakenAtKeepsMonotonicReading(t *testing.T) {
 	dyn, kube := testutil.Clients(t)
 	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream()})
-	local := time.Date(2026, 10, 17, 14, 0, 0, 0, time.FixedZone("CEST", 2*3600))
-	c.now = func() time.Time { return local }
-	if got := c.Snapshot().TakenAt; got.Location() != time.UTC || !got.Equal(local) {
-		t.Fatalf("TakenAt: want %s in UTC, got %s", local.UTC(), got)
+	if at := c.Snapshot().TakenAt; !strings.Contains(at.String(), " m=") {
+		t.Fatalf("TakenAt lost its monotonic reading: %s", at)
 	}
 }

@@ -264,7 +264,7 @@ func accessAll(ts []tracked) Access {
 
 // Snapshot copies the current cache contents.
 func (c *Cache) Snapshot() *Snapshot {
-	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: c.now().UTC()}
+	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, Access: map[schema.GroupVersionResource]Access{}, Synced: true, TakenAt: c.now()}
 	settled := func(a Access) bool { return a.OK || a.Err != "" }
 	for gvr, t := range c.dyn {
 		a := access(t)

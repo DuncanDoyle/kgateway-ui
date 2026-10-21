@@ -80,6 +80,8 @@ type setup struct {
 	platform platform.Info
 	// logger receives install rejections; nil is slog.Default().
 	logger *slog.Logger
+	// zone, when set, is the zone the engine clock reports its times in.
+	zone *time.Location
 }
 
 // harness is a running cache, engine and handler over fake clients, with the
@@ -146,7 +148,12 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	clk.set(testutil.Now.Add(-health.Grace - time.Second))
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: clk.now, Platform: s.platform, Logger: s.logger})
+		MetricsMaxAge: 30 * time.Second, Now: func() time.Time {
+			if s.zone != nil {
+				return clk.now().In(s.zone)
+			}
+			return clk.now()
+		}, Platform: s.platform, Logger: s.logger})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -1695,5 +1702,54 @@ func TestScopeEnvFromIsUnknownUnlessExplicitAtTheAPI(t *testing.T) {
 				t.Fatalf("unknown scope must force unknown health with KGWUI-008, and only then: %s %+v", h.State, h.Findings)
 			}
 		})
+	}
+}
+
+// Every time on the wire is UTC, though internal clocks keep their zone and
+// monotonic reading. Run also under TZ=Europe/Amsterdam for the snapshot time.
+func TestWireTimesAreUTCAtTheAPI(t *testing.T) {
+	cest := time.FixedZone("CEST", 2*3600)
+	metrics := okMetrics("kgw.kgateway")
+	r := metrics["kgw.kgateway"]
+	r.CollectedAt = r.CollectedAt.In(cest)
+	metrics["kgw.kgateway"] = r
+	gw := testutil.GwRef("infra", "edge")
+	// A rejected route gives a finding with a since time.
+	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
+	_, srv, _ := startWith(t, setup{zone: cest, metrics: metrics}, world(broken)...)
+	var n int
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			for k, c := range v {
+				if s, ok := c.(string); ok && (k == "computedAt" || k == "collectedAt" || k == "since") {
+					n++
+					if at, err := time.Parse(time.RFC3339Nano, s); err != nil || s != at.UTC().Format(time.RFC3339Nano) {
+						t.Errorf("%s.%s: want a UTC RFC 3339 time, got %q", path, k, s)
+					}
+				}
+				walk(path+"."+k, c)
+			}
+		case []any:
+			for i, c := range v {
+				walk(fmt.Sprintf("%s[%d]", path, i), c)
+			}
+		}
+	}
+	for _, p := range []string{"/api/v1/installs", "/api/v1/installs/kgw.kgateway/overview", "/api/v1/installs/kgw.kgateway/health"} {
+		walk(p, get[any](t, srv, p, 200))
+	}
+	if n < 5 {
+		t.Fatalf("want computedAt, collectedAt, checks and since times on the wire, saw %d", n)
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if h := resp.Header.Get("Collected-At"); !strings.HasSuffix(h, "Z") {
+		t.Errorf("Collected-At: want UTC, got %q", h)
 	}
 }
