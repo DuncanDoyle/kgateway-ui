@@ -67,7 +67,9 @@ import (
 	"context"
 	"embed"
 	"io/fs"
+	"log"
 	"net/http"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -91,8 +93,12 @@ func (acmeProxyMode) Resolve(gw *unstructured.Unstructured, snap *cache.Snapshot
 }
 
 func main() {
-	ui, _ := fs.Sub(dist, "dist")
-	_ = app.Run(context.Background(), "", app.Options{UI: ui},
+	ui, err := fs.Sub(dist, "dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Both intervals must be positive; these are the stock binary's defaults
+	err = app.Run(context.Background(), "", app.Options{UI: ui, PollInterval: 2 * time.Second, MetricsInterval: 10 * time.Second},
 		// Watch, count and serve an extra policy kind
 		extension.WithKinds(kinds.Descriptor{
 			Group: "acme.example.com", Kind: "AcmePolicy", Resource: "acmepolicies",
@@ -105,6 +111,9 @@ func main() {
 		// Replace the upstream GatewayParameters resolution
 		extension.WithProxyModeResolver(acmeProxyMode{}),
 	)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 

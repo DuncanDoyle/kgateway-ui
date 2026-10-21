@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -583,4 +584,25 @@ func TestDownstreamProxyModeResolverSeam(t *testing.T) {
 		}
 		return slices.ContainsFunc(h.Findings, func(f health.Finding) bool { return f.Code == health.CodeSelfManagedProxy })
 	})
+}
+
+// readmeOptions is the app.Options literal in the README's extension example.
+// Keep it identical to the README; the test below fails if they drift.
+const readmeOptions = "app.Options{UI: ui, PollInterval: 2 * time.Second, MetricsInterval: 10 * time.Second}"
+
+// TestReadmeExtensionOptionsBuild guards the README example: its Options must
+// start (the previous zero-interval example was rejected by Build).
+func TestReadmeExtensionOptionsBuild(t *testing.T) {
+	b, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), readmeOptions) {
+		t.Fatalf("README extension example no longer uses %s; update it and readmeOptions together", readmeOptions)
+	}
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	if _, err := Build(c, Options{UI: ui, PollInterval: 2 * time.Second, MetricsInterval: 10 * time.Second}, extension.New()); err != nil {
+		t.Fatalf("README Options must build: %v", err)
+	}
 }
