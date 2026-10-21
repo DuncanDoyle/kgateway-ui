@@ -512,6 +512,9 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 			// A proxy scaled to zero may be deliberate (D-017 §1).
 			if Desired(d) == 0 {
 				f.Severity = SeverityWarning
+				if in.workloads() {
+					f.Message = "Proxy has 0 replicas"
+				}
 			}
 			fs = append(fs, f)
 		}

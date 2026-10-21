@@ -1148,7 +1148,12 @@ func TestSelfManagedProxiesAtTheAPI(t *testing.T) {
 // zero is red (KGWUI-005); a managed proxy at zero is a warning (KGWUI-006).
 func TestWorkloadsAtZeroReplicasAtTheAPI(t *testing.T) {
 	// withoutBlog drops the unwatched blog/posts route, so the baseline is healthy.
-	withoutBlog := func(objs []runtime.Object) []runtime.Object { return objs[: len(objs)-1 : len(objs)-1] }
+	withoutBlog := func(objs []runtime.Object) []runtime.Object {
+		return slices.DeleteFunc(objs, func(o runtime.Object) bool {
+			u, ok := o.(*unstructured.Unstructured)
+			return ok && u.GetNamespace() == "blog" && u.GetName() == "posts"
+		})
+	}
 	cases := []struct {
 		name      string
 		objs      []runtime.Object
@@ -1160,7 +1165,7 @@ func TestWorkloadsAtZeroReplicasAtTheAPI(t *testing.T) {
 		{"controller at zero", withoutBlog(replicaWorld(0, 0, 1, 1)), health.StateError,
 			&expect{health.CodeControllerNotReady, health.SeverityError, "kgw/kgateway"}, "Controller scaled to 0 replicas", overview.ReadinessNotReady},
 		{"proxy at zero", withoutBlog(replicaWorld(1, 1, 0, 0)), health.StateWarning,
-			&expect{health.CodeProxyNotReady, health.SeverityWarning, "infra/edge"}, "Proxy scaled to 0 replicas", overview.ReadinessReady},
+			&expect{health.CodeProxyNotReady, health.SeverityWarning, "infra/edge"}, "Proxy has 0 replicas", overview.ReadinessReady},
 		{"proxy 1 of 2 ready stays an error", withoutBlog(replicaWorld(1, 1, 2, 1)), health.StateError,
 			&expect{health.CodeProxyNotReady, health.SeverityError, "infra/edge"}, "Proxy not ready (1 of 2 replicas)", overview.ReadinessReady},
 		{"1 of 1 ready stays green", withoutBlog(replicaWorld(1, 1, 1, 1)), health.StateHealthy, nil, "", overview.ReadinessReady},
@@ -1175,8 +1180,13 @@ func TestWorkloadsAtZeroReplicasAtTheAPI(t *testing.T) {
 			if tc.want != nil && !hasSev(h, tc.want.code, tc.want.sev, tc.want.res) {
 				t.Fatalf("missing %s/%s on %s; findings: %+v", tc.want.code, tc.want.sev, tc.want.res, h.Findings)
 			}
-			if tc.want != nil && h.Findings[0].Message != tc.msg {
-				t.Errorf("message: want %q, got %q", tc.msg, h.Findings[0].Message)
+			if tc.want != nil {
+				i := slices.IndexFunc(h.Findings, func(f health.Finding) bool {
+					return f.Code == tc.want.code && f.Resource != nil && f.Resource.String() == tc.want.res
+				})
+				if i < 0 || h.Findings[i].Message != tc.msg {
+					t.Errorf("message: want %q; findings: %+v", tc.msg, h.Findings)
+				}
 			}
 			if tc.want == nil && len(h.Findings) != 0 {
 				t.Fatalf("want no findings, got %+v", h.Findings)
