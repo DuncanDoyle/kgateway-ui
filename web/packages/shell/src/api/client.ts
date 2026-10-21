@@ -10,6 +10,11 @@ export class ApiError extends Error {
 
 /** Fetches JSON from the backend API. */
 export async function apiFetch<T>(path: string): Promise<T> {
+  return (await apiFetchWithHeaders<T>(path)).body;
+}
+
+/** apiFetch, plus the response headers. */
+export async function apiFetchWithHeaders<T>(path: string): Promise<{ body: T; headers: Headers }> {
   let res: Response;
   try {
     res = await fetch(path, { headers: { Accept: "application/json" } });
@@ -26,7 +31,7 @@ export async function apiFetch<T>(path: string): Promise<T> {
     throw new ApiError(res.status, msg);
   }
   try {
-    return (await res.json()) as T;
+    return { body: (await res.json()) as T, headers: res.headers };
   } catch {
     throw new ApiError(res.status, "The UI backend sent an unreadable response");
   }
