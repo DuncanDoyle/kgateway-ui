@@ -30,7 +30,7 @@ none
 
 ## Notes for later phases
 - The upstream scope endpoint should report enabled kinds; the verifier and the experimental hint switch to it (D-017 §4, D-018).
-- Q16 evidence of the YAML freshness fix: /var/folders/l9/kvw9vb8121720jclk572xwpw0000gp/T/ui-loop/kgateway-ui-claude/q15-yaml-freshness/ (local only).
+- Q15 evidence of the YAML freshness fix: /var/folders/l9/kvw9vb8121720jclk572xwpw0000gp/T/ui-loop/kgateway-ui-claude/q15-yaml-freshness/ (local only).
 
 ## Deferred / open
 - Stricter metric comparison (gauge equals stable or stable plus experimental counts), until the upstream enabled-kinds endpoint lands.
