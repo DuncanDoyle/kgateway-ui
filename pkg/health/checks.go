@@ -403,7 +403,7 @@ func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bo
 
 // ExperimentalHint is appended to the detail of a "not processed" finding on
 // an experimental-only kind (D-018 §2); %s is the kind and served version.
-const ExperimentalHint = "; the controller watches %s only with its experimental Gateway API features on, and they may be off"
+const ExperimentalHint = "; the controller watches %s only when its experimental Gateway API features are on, and they may be off here"
 
 // experimentalHint returns ExperimentalHint for u's kind, or "" for a stable kind.
 func (in Input) experimentalHint(u *unstructured.Unstructured) string {

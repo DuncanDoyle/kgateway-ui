@@ -1707,7 +1707,7 @@ func withControllerVersion(v string, objs []runtime.Object) []runtime.Object {
 
 // D-018 §3: which kinds are experimental-only depends on the controller
 // version. kgateway v2.3 watches no TCPRoute without experimental features,
-// v2.4 watches v1 TCPRoute always; an unknown version is conservative.
+// v2.4 and later watch v1 TCPRoute always; an unknown version is conservative.
 func TestExperimentalOnlyDependsOnControllerVersionAtTheAPI(t *testing.T) {
 	gw := testutil.GwRef("infra", "edge")
 	// The gauge for isolated(): 2 Gateways in infra, 1 HTTPRoute parentRef in shop; no TCPRoute.
@@ -1720,6 +1720,7 @@ func TestExperimentalOnlyDependsOnControllerVersionAtTheAPI(t *testing.T) {
 	}{
 		{"2.3.11", true},
 		{"2.4.7", false},
+		{"2.5.0", false},
 		{"dev", true},
 	}
 	for _, tc := range cases {
