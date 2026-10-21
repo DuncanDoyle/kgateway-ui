@@ -1,0 +1,28 @@
+{
+  "body": [
+    {
+      "computedAt": "2026-10-17T12:00:00Z",
+      "controllerNames": [
+        "kgateway.dev/kgateway"
+      ],
+      "displayName": "Edge one",
+      "edition": "kgateway",
+      "health": {
+        "counts": {
+          "warning": 1
+        },
+        "state": "warning"
+      },
+      "id": "acme~edge_1",
+      "readiness": {
+        "state": "not-observed"
+      },
+      "version": "2.4.7"
+    }
+  ],
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

@@ -1,0 +1,188 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "counts": [
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "gatewayclass",
+        "count": 1,
+        "displayName": "GatewayClasses",
+        "group": "gateway.networking.k8s.io",
+        "kind": "GatewayClass"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "gateway",
+        "count": 1,
+        "displayName": "Gateways",
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "listenerset",
+        "count": 0,
+        "displayName": "ListenerSets",
+        "group": "gateway.networking.k8s.io",
+        "kind": "ListenerSet"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "listenerset",
+        "count": 0,
+        "displayName": "ListenerSets (experimental)",
+        "group": "gateway.networking.x-k8s.io",
+        "kind": "XListenerSet"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "route",
+        "count": 2,
+        "displayName": "HTTPRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "route",
+        "count": 0,
+        "displayName": "GRPCRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "GRPCRoute"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "route",
+        "count": 0,
+        "displayName": "TCPRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "TCPRoute"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "route",
+        "count": 0,
+        "displayName": "TLSRoutes",
+        "group": "gateway.networking.k8s.io",
+        "kind": "TLSRoute"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "policy",
+        "count": 0,
+        "displayName": "BackendTLSPolicies",
+        "group": "gateway.networking.k8s.io",
+        "kind": "BackendTLSPolicy"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "policy",
+        "count": 0,
+        "displayName": "TrafficPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "TrafficPolicy"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "policy",
+        "count": 0,
+        "displayName": "ListenerPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "ListenerPolicy"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "policy",
+        "count": 0,
+        "displayName": "HTTPListenerPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "HTTPListenerPolicy"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "policy",
+        "count": 0,
+        "displayName": "BackendConfigPolicies",
+        "group": "gateway.kgateway.dev",
+        "kind": "BackendConfigPolicy"
+      }
+    ],
+    "gateways": [
+      {
+        "addresses": [
+          "10.0.0.1"
+        ],
+        "attachedRoutes": 0,
+        "class": "kgateway",
+        "listeners": 1,
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "state": "unknown"
+      }
+    ],
+    "header": {
+      "controllerNames": [
+        "kgateway.dev/kgateway"
+      ],
+      "displayName": "kgw/kgateway",
+      "edition": "kgateway",
+      "id": "kgw.kgateway",
+      "name": "kgateway",
+      "namespace": "kgw",
+      "readiness": {
+        "desired": 1,
+        "ready": 1,
+        "state": "ready"
+      },
+      "scope": {
+        "mode": "selectors",
+        "selectors": [
+          {
+            "matchLabels": {
+              "team": "a"
+            }
+          }
+        ],
+        "source": "pod kgateway-0",
+        "total": 4,
+        "watched": 2
+      },
+      "version": "2.4.7"
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}
