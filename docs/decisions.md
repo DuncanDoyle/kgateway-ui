@@ -319,3 +319,76 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 
 **Consequences:**
 - Installs with experimental features off show a steady, explained warning for those objects until the upstream scope endpoint reports enabled kinds (D-017 §4).
+
+## D-019 — Event-driven model recompute (2026-10-22, phase 2)
+**Status:** proposed 2026-10-22, from the user's design review; approved with the Phase 2 design
+**Context:**
+- Phase 1 recomputes the whole model on a fixed ticker, `--poll-interval`, default 2 s (`pkg/engine/engine.go:209-222`, `cmd/kgateway-ui/main.go:23`). Most recomputes see an unchanged cache.
+- Phase 2 adds computed views and indexes per recompute (D-020, Phase 2 design §3). A fixed 2 s cost at the Large tier is waste on an idle cluster and still adds up to 2 s of latency on a busy one.
+- Informers already deliver every change. Time-driven state (grace expiry, metrics staleness) and access transitions (D-014) do not arrive as object events.
+
+**Decision:**
+1. The engine recomputes on triggers:
+   - informer add, update and delete events for every watched kind, including Namespaces, Pods and Deployments;
+   - access transitions, found by a 1 s confirm tick;
+   - metrics scrape results; the scrape cadence (`--metrics-interval`) stays separate;
+   - served-kinds changes;
+   - scheduled deadlines for grace expiry and metrics staleness;
+   - a slow safety timer.
+2. **Debounce:** a 250 ms trailing quiet window, bounded to 1 s from the first trigger of a burst. One `kubectl apply` or Helm upgrade becomes one recompute, and a continuous stream still recomputes at least once a second. Recomputes are single-flight: triggers during a recompute cause exactly one more.
+3. **`--poll-interval`** keeps its name and type. Its meaning becomes "recompute at least this often" (the safety timer). The default rises from 2 s to 30 s. A user who set 2 s gets Phase 1's cadence as a floor, so existing settings stay valid.
+4. **Freshness:** `collectedAt` (and `Collected-At`) means "when the backend last confirmed this model matches its cache". The confirm tick advances it every second while no trigger is pending. A hung recompute stops it, so the SPA's stale rule still fires (D-006).
+5. **The SPA keeps its 5 s poll.** Responses are served from memory and are cheap. Polling also renews `collectedAt`, which is how the client notices a stuck backend. Push stays out of scope.
+
+**Alternatives:**
+- Keep the fixed ticker. Rejected: a constant full recompute on idle clusters, and latency bounded by the interval.
+- Incremental per-object index updates. Rejected for now: much more complex than an immutable rebuild, and unnecessary at the Large tier. Revisit if the Extreme tier numbers demand it.
+- No debounce (recompute per event). Rejected: a Helm upgrade would cause hundreds of recomputes.
+- Replace `--poll-interval` with a new flag. Rejected: it breaks existing invocations for no gain.
+
+**Consequences:**
+- The Model stays immutable and is swapped atomically. Between changes the Model, and so list order and cursors, stays the same.
+- `pkg/cache` registers event handlers and exposes a trigger source. The engine takes a clock and a trigger source, so tests are deterministic with a fake clock.
+- Budgets are stated per recompute and per change burst, not per fixed interval (Phase 2 design §9.6).
+- The README and chart notes describe the new meaning of `--poll-interval`.
+
+## D-020 — Computed views, labelled and cross-checked (2026-10-22, phase 2)
+**Status:** proposed 2026-10-22, from the user's design review; approved with the Phase 2 design
+**Context:**
+- D-005, D-016 §7 and the memory rule keep the UI from re-implementing controller logic, except as a pluggable, verified interim with an upstream ask.
+- Three questions at the core of Gateway API observability have no answer in kgateway's status:
+  - which listener a route attached to, and with which effective hostnames (status is per parentRef; listener status has only `attachedRoutes`);
+  - which children a delegation ref selected, and which it dropped (a child dropped by the matcher fit gets no status, `v2.4.7 pkg/kgateway/translator/httproute/delegation_helpers.go:33-107`);
+  - a delegated child's effective matcher.
+- The only controller source is the admin server's `/snapshots/xds`. It binds to localhost, shares a port with `/logging` and pprof, and needs `pods/portforward` (Phase 2 design §3.8).
+
+**Decision:** the user overrides the strict boundary for three views:
+- **(A) route → listener attachment:** sectionName and port, allowedRoutes namespaces (including `Selector` on Namespace labels), kinds, and hostname intersection;
+- **(B) delegation child selection:** name, `*` and label, with the namespace including the `DELEGATION_WILDCARD_NAMESPACE` controller env, read from the controller Pod like the scope selector, with D-015's fallback. Also the child's parentRef permission and the matcher fit, so the UI can show children that were selected but dropped;
+- **(C) the effective matcher** of delegated children, in inherit-parent-matcher and default mode.
+
+Rules for each view:
+1. Every computed fact is labelled "computed by the UI", with the rule applied and the rule set.
+2. It is cross-checked against what the controller reports:
+   - per-listener `attachedRoutes`, with kgateway's exact counting semantics;
+   - parentRef `Accepted` reasons;
+   - child status entries;
+   - the parent's `ResolvedRefs` (`BackendNotFound`, `RefNotPermitted`).
+   A persistent disagreement is shown as "computed view disagrees with controller" and raises KGWUI-012 (warning). It is never hidden.
+3. The computation sits behind a pluggable interface (`pkg/computed`, like `pkg/proxymode`). It is pinned and tested per kgateway minor (rule sets `kgateway-2.3` and `kgateway-2.4`), with per-version golden fixtures.
+4. Ownership, counts and install health stay status-based. A computed view explains and cross-checks; it never owns an object.
+5. Each view has an upstream ask, and the computation becomes a cross-check once kgateway reports the fact.
+
+Shadowed-match detection stays the controller's job: an upstream ask, consumed later. Hostname intersection (view A) is also recorded as a limitation: the UI shows status-level hostnames, not 2.4's listener isolation.
+
+**Alternatives:**
+- Status only, with "All listeners" and observed children only. Rejected by the user: it leaves the most common questions unanswered.
+- Read `/snapshots/xds`. Rejected for Phase 2: write-class RBAC, a debug surface, and no reliable source attribution on 2.3.
+- Compute without cross-check. Rejected: a silent UI bug would look like controller truth.
+
+**Consequences:**
+- The UI reads Namespace labels (already watched), and two controller env settings (`DELEGATION_WILDCARD_NAMESPACE`, `KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES`), for the computed views only. D-017 §4 is unchanged for the scope verifier.
+- A new kgateway minor needs a rule-set review before it is supported.
+- The kind e2e asserts that computed and controller counts agree on 2.3 and 2.4.
+- New finding KGWUI-012. KGWUI-011 gains a computed trigger.
+- Upstream asks: resolved route → listener relationships, delegation resolution per child, a controller-written state CRD outside Gateway API, shadowed-match conditions, and hostname resolution (Phase 2 design §14).
