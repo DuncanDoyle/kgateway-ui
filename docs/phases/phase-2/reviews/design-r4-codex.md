@@ -297,3 +297,62 @@ The document split improves ownership of the contracts. The remaining authoritat
 | N5 | Effective-matcher execution and budget conflict | reviewer | accept | computed-rules.md is the one home: what the model retains, how details project it, one budget and truncation policy. |
 | N6 | Delegation cursor not unique | reviewer | accept | Row identity includes rule and ref indexes; test a page boundary between rows of the same child. |
 | N7 | Timestamp test contradicts initial publication | reviewer | accept | Test each timestamp's meaning and the transition after an idle confirmation tick. |
+
+## Re-review 2 (scoped, Codex, diff f0ddf62..0c1e429)
+
+Reviewed `f0ddf62..HEAD` across the three requested files, against the re-review and its triage. **N1–N7 are resolved as originally reported. Three new P2 findings remain.** No files edited.
+
+D = [design.md](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/design.md), R = [computed-rules.md](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/computed-rules.md). Lines refer to HEAD.
+
+| Finding | Result | Section/line evidence |
+|---|---|---|
+| N1 | **Resolved** | D §3.1:91–106 replaces callback counters with fingerprints of the actual snapshot and live stores. §9.3:685–687 tests paused notification delivery and access changes. This addresses client-go v0.36.2’s store-before-callback ordering (`tools/cache/controller.go:639–649`, `shared_informer.go:1356–1360`). D-019:338–341 agrees. |
+| N2 | **Resolved** | R §5.5:219–224 prevents incomplete negative row outcomes; §8.5:364–379 defines completeness and gates absence conclusions. D §6.2:359–362 gates KGWUI-011/012 accordingly. A separate reason-comparison problem appears below. |
+| N3 | **Resolved** | R §5.6:229–232 propagates view-A root dependencies and the status-root target into descendant contexts, aggregates and findings. D §7.4:527 matches. |
+| N4 | **Resolved** | R §9.2:399–409 separates fingerprints by check kind and explicitly excludes child `ResolvedRefs` from `child-entry` and parent `Accepted` from `parent-resolvedrefs`. |
+| N5 | **Resolved** | R §5.7:234–251 makes recompute, retention and projection authoritative. D §3.5:191, §7.3:516 and §12:796 consistently make requests project retained results. |
+| N6 | **Resolved** | D §3.6:196 includes rule/ref indexes in delegation cursors and defines their fixed ordering; §7.1:437 excludes delegation sorting. §9.1:655 tests boundaries between rows sharing a child. |
+| N7 | **Resolved** | D §3.1:127 and §9.3:693 distinguish snapshot-time confirmation from compute time and test the subsequent idle confirmation transition. |
+
+New findings, ranked:
+
+1. **P2 — Incomplete parent aggregates can still demand an unjustified failure reason.**
+
+   **Location:** R §8.5, [lines 366–376](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/computed-rules.md:366), interacting with §8.2:333.
+
+   The new table permits an incomplete aggregate with a known parent failure to be “compared as usual.” However, §8.2 also compares the reason when all failures share one reason. Finding one failure proves `ResolvedRefs=False`; it does not prove that omitted contexts cannot introduce another reason.
+
+   Example: the retained work finds an unresolved ref (`BackendNotFound`); omitted work encounters a cycle (`RefNotPermitted`). With no ordinary backendRefs or ExtensionRef filters, comparing against the retained reason can dispute correct controller status.
+
+   **Tagged source evidence:** inspected through `git show` in the supplied kgateway checkout: `v2.4.7:pkg/kgateway/query/utils.go:38–50` assigns those distinct reasons; `pkg/kgateway/translator/httproute/gateway_http_route_translator.go:190–208` writes failures through the same reporter; `pkg/reports/reporter.go:505–512` updates the same condition type. Corresponding 2.3 behavior is at `v2.3.11:pkg/kgateway/query/utils.go:37–49` and `pkg/reports/reporter.go:447–454`.
+
+   **Why:** A stable truncation can produce a false KGWUI-012. Incomplete positive evidence should establish only the false status; reason comparison needs complete failure coverage.
+
+2. **P2 — Splitting the fingerprints removes a relevant annotation from the parent check.**
+
+   **Location:** R §9.2, [line 406](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/computed-rules.md:406), and the exclusion at line 409.
+
+   Before this diff, the shared fingerprint included the child’s inheritance annotation. The new `parent-resolvedrefs` definition omits it and explicitly excludes unlisted annotations. That annotation decides whether the selected child is dropped or attached, which can change the parent’s expected delegation failure.
+
+   For example, changing inheritance can change the expectation from `False/BackendNotFound` to no delegation failure. An observed `False/RefNotPermitted` contradicts both expectations, so the candidate remains active; without the annotation in its fingerprint, the old persistence window carries over instead of restarting.
+
+   **Tagged source evidence:** `v2.4.7:pkg/kgateway/translator/httproute/delegation_helpers.go:58–102` uses inheritance to decide whether rules survive; `pkg/kgateway/translator/httproute/delegation.go:98–99` reports unresolved when no valid children remain. Equivalent behavior appears at `v2.3.11:…/delegation_helpers.go:59–103` and `…/delegation.go:105–106`.
+
+   **Why:** This contradicts §9.2’s semantic-input contract and can mature a warning prematurely after a relevant edit.
+
+3. **P2 — Effective-context truncation now has no defined wire representation.**
+
+   **Location:** R §5.7, [lines 243–247](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/computed-rules.md:243); D §7.3, [lines 494–497](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/design.md:494) and 516.
+
+   The new retention policy truncates contexts per row and per install using `contextsTruncated`. But `EffectiveDTO` has no such field. Meanwhile, R now assigns `effectiveTruncated` specifically to exceeding 20 parent edges. D says effective details project the retained contexts and their truncation flags, without defining where that context flag goes.
+
+   A route with one parent and 21 contexts therefore returns only 20 contexts with no defined indication that another exists. At the install retention cap, an effective edge can have no retained contexts at all.
+
+   **Why:** The route detail cannot faithfully expose the new retention policy and can present partial matcher results as complete. Define context truncation on `EffectiveDTO`, including how multiple rows belonging to one parent edge combine.
+
+No new P1, P3 or P4 findings.
+| # | Finding | Source | Decision | Note |
+|---|---|---|---|---|
+| M1 | Incomplete parent aggregates compare a failure reason | reviewer | accept | Incomplete positive evidence establishes only `ResolvedRefs=False`; the reason is compared only with complete failure coverage. |
+| M2 | Parent fingerprint omits the inheritance annotation | reviewer | accept | `parent-resolvedrefs` includes every child input that changes the parent's expected delegation failure, incl. the inheritance annotation. |
+| M3 | No wire form for context truncation | reviewer | accept | `EffectiveDTO` gains `contextsTruncated`, defined per parent edge across rows, incl. the install-cap case. |
