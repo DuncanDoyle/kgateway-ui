@@ -7,7 +7,7 @@ Docs: docs/phases/phase-2/
 Status: design drafted and cross-model reviewed, waiting for the user's answers to design §15 and approval; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
-- [ ] Q1 Phase 2 design (`design.md`) — drafted from research (user skipped the interview), three Codex rounds (reviews/design-codex.md); open questions in design §15 ← CURRENT
+- [ ] Q1 Phase 2 design (`design.md`) — drafted from research, revised after the user's review (D-019, D-020) into design.md + computed-rules.md; Codex rounds in reviews/design-codex.md and design-r4-codex.md, last round clean; open questions in design §15.2 ← CURRENT
 - [ ] Q2 Phase 2 implementation plan (`implementation-plan.md`)
 - [ ] Q3 Cross-model review of design + plan, triage, user approval
 
@@ -36,7 +36,7 @@ none
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
-- 2026-10-21 (resume here): user to answer design §15 (Q1–Q12) and approve the design. Then the plan (writing-plans), its Codex review, and approval. Support research covered Slack only; the Zendesk/knowledge-base pass failed (VPN) and is Q7.
+- 2026-10-22 (resume here): design converged (last Codex round clean). User to answer design §15.2 and approve design.md + computed-rules.md + D-019/D-020. Then the plan (writing-plans) per the 2.1–2.4 split, its Codex review, approval. Zendesk/knowledge-base research still not run (VPN).
 - 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions".

@@ -356,3 +356,7 @@ No new P1, P3 or P4 findings.
 | M1 | Incomplete parent aggregates compare a failure reason | reviewer | accept | Incomplete positive evidence establishes only `ResolvedRefs=False`; the reason is compared only with complete failure coverage. |
 | M2 | Parent fingerprint omits the inheritance annotation | reviewer | accept | `parent-resolvedrefs` includes every child input that changes the parent's expected delegation failure, incl. the inheritance annotation. |
 | M3 | No wire form for context truncation | reviewer | accept | `EffectiveDTO` gains `contextsTruncated`, defined per parent edge across rows, incl. the install-cap case. |
+
+## Re-review 3 (scoped, Codex, diff 226e974..c62211a)
+
+M1, M2 and M3 resolved; no new findings at P1–P4.
