@@ -244,7 +244,7 @@ This is the one policy for how much is computed, kept and served **(our call)**.
 | Retain | contexts kept per install | 100,000 | later rows keep their outcome with no contexts and `contextsTruncated` |
 | Project | rows per delegation page | the page `limit` (≤ 200) | cursor (design §3.6) |
 | Project | parent edges in a route's `effective` | 20, sorted by parent (namespace, name) | `effectiveTruncated` |
-| Project | contexts per edge in `effective` | the row's retained contexts | the row's `contextsTruncated` |
+| Project | contexts per parent edge in `effective` | the union of the retained contexts of every row with that (parent, child), in traversal order, at most 20 | the edge's `contextsTruncated`: true when any of those rows is truncated (per-row or install cap) or the union exceeds 20. At the install cap an edge can have no contexts; it is then sent with `contexts: []` and `contextsTruncated: true`, never as complete |
 
 - Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). A cut is deterministic, so the same Model gives the same cut, and the install's computed summary records which cap was hit.
 - An effective matcher shown on a page is exactly the one the traversal used for the outcome and the cross-check in the same Model.
@@ -330,7 +330,7 @@ kgateway merges every write for one report key into one entry, and a later write
 | `listener-count` | (resource, listener) | the computed count (§4.4) |
 | `route-accepted` | (route, report key of the parentRef) | refs sharing a key are merged: if any member is rejected, `Accepted=False` with one of the members' attachment reasons; else not `False` with an attachment reason |
 | `child-entry` | (child, report key under P, §7) | an entry iff **any** context, over every rule and ref of P and every root, gives `attached` or `rejected-hostnames`. With a rejection: `Accepted=False/UnsupportedValue`. With an attachment: no `UnsupportedValue`. No entry when every context gives `dropped`, `forbidden`, `cycle` or `unresolved`. |
-| `parent-resolvedrefs` | (P, P's reporter key) | `False` when any context with that key records a delegation failure. The reason is compared only when all such failures share one reason **and** P has no non-delegation backendRef and no `ExtensionRef` filter; otherwise only the status is compared. A computed "no delegation failure" against an observed `False` contradicts only under the same condition; otherwise it is compatible. |
+| `parent-resolvedrefs` | (P, P's reporter key) | `False` when any context with that key records a delegation failure. The reason is compared only when the aggregate is **complete** (§8.5), all its failures share one reason, **and** P has no non-delegation backendRef and no `ExtensionRef` filter. An incomplete aggregate with a known failure establishes only `ResolvedRefs=False`, because an omitted context could add another reason (`query/utils.go` V4:38-50, V3:37-49), and writes to one key replace each other (`pkg/reports/reporter.go` V4:505-512, V3:447-454); otherwise only the status is compared. A computed "no delegation failure" against an observed `False` contradicts only under the same condition; otherwise it is compatible. |
 
 Individual rows keep their own outcomes. A row whose outcome the aggregated signal cannot confirm says "Status cannot confirm this path". It is never a disagreement on its own. Every negative expectation in this table (no entry, no delegation failure) also needs a complete aggregate (§8.5).
 
@@ -373,7 +373,8 @@ An aggregate (§8.2) is **complete** when every context that could contribute to
 |---|---|---|
 | Child entry present (some context attached or rejected) | no | compared as usual |
 | No child entry (every context dropped, forbidden, cycle or unresolved) | yes | `unknown`, "Not all paths computed"; no KGWUI-012 |
-| Parent `ResolvedRefs=False` (some context failed) | no | compared as usual |
+| Parent `ResolvedRefs=False` (some context failed) | no, for the status | the status is compared; the reason is not |
+| The parent's failure reason | yes | not compared |
 | No delegation failure on the parent | yes | `unknown`; no KGWUI-012 |
 | KGWUI-011 computed trigger (dropped or forbidden everywhere) | yes | no finding |
 | Listener count, parentRef outcome (view A) | no traversal; unknown inputs only (§3.3) | — |
@@ -403,7 +404,7 @@ Each check kind has its own fingerprint: a hash over exactly the decoded inputs 
 | `listener-count` | the listener's spec (name, port, protocol, hostname, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; candidate namespaces' labels when the listener uses `Selector`; the experimental setting | `attachedRoutes`; the listener conditions' `observedGeneration` |
 | `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs; namespace labels when `Selector` is used | for the key: `Accepted` status, reason and `observedGeneration`, but the reason only when it is an attachment reason (another reason is compatible and is hashed as "other") |
 | `child-entry` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; the aggregate's completeness | for the key: entry presence; `Accepted` status and `observedGeneration`, with the reason only when it is `UnsupportedValue`. **Not** `ResolvedRefs` or `Programmed`. |
-| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; each selected child's matches, hostnames and parentRefs; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
+| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
 | `delegated-not-attached` | as `child-entry` | none |
 
 Not in any fingerprint: `resourceVersion`, `managedFields`, labels and annotations not listed, conditions not listed for that kind, `lastTransitionTime`, metrics, Pods and Deployments. A child's backend `ResolvedRefs` toggling never restarts its `child-entry` window. An unrelated status write, annotation edit or metrics arrival never restarts any window.
@@ -473,6 +474,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | An owned parent not reached from a root | `not-reached`; selection still shown |
 | Dense selection: 100 wildcard parents over a namespace of 1,000 routes | `too-large` after the edge cap, deterministic cut |
 | Contexts per row above 20; retained contexts above 100,000 | `contextsTruncated`; outcomes unchanged |
+| One parent edge with 21 contexts; an edge from two rows, one truncated; an edge with no contexts kept at the install cap | `effective` edge has 20 contexts and `contextsTruncated`; flag set; `contexts: []` with `contextsTruncated` |
 | A cut after a context that drops C, before one that would attach it | row `unknown`, not `dropped`; `child-entry` incomplete, no KGWUI-012 on an existing entry; no computed KGWUI-011 |
 | A cut before any context reaches C, and an attached context already computed | row `attached`, "Some paths not computed"; entry expected |
 | A label ref with an unknown wildcard setting above C | C in the reach closure; negative checks `unknown` |
@@ -504,6 +506,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Attached child with a replaced rule: 2.4 `Programmed=False`, 2.3 `Accepted=False/RouteRuleReplaced` | compatible |
 | TCP conflict on both versions | compatible |
 | Parent with two delegation refs, one unresolved | `parent-resolvedrefs` expects `False`; reason compared |
+| Truncated parent aggregate: the retained work finds `BackendNotFound`, the omitted work holds a cycle; observed `False/RefNotPermitted` | status compared and compatible; reason not compared; no KGWUI-012 |
 | Parent with a missing Service backend and all delegation refs fine | observed `False` compatible |
 | Computed-attached child, no entry, P current | `pending` until `max(since + 30 s, graceEnd)`, then KGWUI-012 on the child |
 | The same with P stale | stays `pending`; no KGWUI-012 |
@@ -521,6 +524,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | An annotation edit, an unrelated condition write, a `resourceVersion`-only update, a metrics arrival during the window | no reset |
 | A child's `ResolvedRefs` toggles during a `child-entry` window; a child's `Accepted` reason changes between non-attachment reasons during a `route-accepted` window | no reset |
 | A parent's `Accepted` changes during a `parent-resolvedrefs` window | no reset |
+| A selected child's `inherit-parent-matcher` annotation changes while `parent-resolvedrefs` still contradicts (expectation `False/BackendNotFound` → no failure, observed `False/RefNotPermitted`) | reset; the old window does not carry over |
 | A change to a listed field, or to the observed value | reset |
 | Rule set switch | reset |
 | Subject deleted | entry pruned, finding gone |

@@ -491,7 +491,7 @@ RouteDetail     { install, ref, generation, health, candidate?, ruleSet?, hostna
                   rules: RuleDTO[], effective?: EffectiveDTO[], effectiveTruncated?: boolean,             // 2.4
                   ancestors: AncestorPath[], ancestorsTruncated: boolean,
                   childCount, declaredCount, collectedAt }
-EffectiveDTO    { parent: LinkedRef, mode: "default"|"inherit",
+EffectiveDTO    { parent: LinkedRef, mode: "default"|"inherit", contextsTruncated?: true,   // per parent edge, computed-rules.md §5.7
                   contexts: ({ parentMatch: MatchDTO, rules: { index, kept, matches: MatchDTO[], reason? }[] }
                              | { restricted: true })[],
                   computed: Computed }                                  // coverage always not-verified
@@ -513,7 +513,7 @@ BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
 - `ParentSummary.computed` carries the same `Attachment` for list rows. Failed-route tables render reason, message and explanation without a detail request.
 - `GatewayRow2` is new. Phase 1's overview `GatewayRow` (`pkg/overview/overview.go:73-80`) gains only an optional `link`. The final Go name is the plan's choice.
 - `delegation.state` is status-based and set only for `name` refs: `reported` needs a reported edge. `selected` and `attached` are computed counts (2.4).
-- `effective` and `DelegationRow.contexts` project what the model retained, with the limits and truncation flags of `computed-rules.md` §5.7. A detail request never re-runs the traversal.
+- `effective` and `DelegationRow.contexts` project what the model retained, with the limits and truncation flags of `computed-rules.md` §5.7. A detail request never re-runs the traversal. An `EffectiveDTO` covers one parent edge, so it merges the contexts of every delegation row with that parent and child; its `contextsTruncated` is set when any of them was cut, and an edge with no kept contexts is sent as `contexts: []` with the flag, never as complete.
 - The Gateway page pages its ListenerSets through `GET …/listenersets?parent=…`, so no detail body is unbounded.
 - `ParentSummary` picks the deciding condition: the first current `False` among `Accepted`, `ResolvedRefs`, `kgateway.dev/Programmed`, else the pending reason.
 
@@ -564,7 +564,7 @@ kgateway writes no message on attachment failures (`translator/gateway/gateway_t
 New fixtures in `pkg/api/testdata/golden`, added per sub-phase:
 - 2.2: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json`, `route-detail.json` (delegation refs, reported children, a cycle in the up-chain, a truncated up-chain, a Backend ref), `route-detail-candidate.json`, `bad-request.json`, and a restricted variant (Backend, ancestor step, `via`, `deniedInInstall`).
 - 2.3: `routes-by-listener.json`; `gateway-detail.json` gains one listener per check state; a restricted variant with a `Selector` listener over a hidden Namespace.
-- 2.4: `route-delegation.json` (every outcome, `partial`, contexts), `route-detail.json` gains effective matchers in both modes; a restricted variant with a hidden ancestor and `evidenceRestricted`.
+- 2.4: `route-delegation.json` (every outcome, `partial`, contexts), `route-detail.json` gains effective matchers in both modes, an edge with `contextsTruncated` and an edge with `contexts: []` at the install cap; a restricted variant with a hidden ancestor and `evidenceRestricted`.
 
 The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens change only by optional fields, and a test asserts the diffs add nothing else:
 - `installs.json`, `bare-installs.json`: `confirmedAt` (2.1);
