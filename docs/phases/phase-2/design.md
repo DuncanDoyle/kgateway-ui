@@ -1,6 +1,6 @@
 # Phase 2 — Gateway & Route Explorer: Design
 
-**Status:** Revised after the fourth cross-model review (`reviews/design-r4-codex.md`: 14 findings, all accepted) and the user's scope decision (2026-10-22). Earlier reviews: `reviews/design-codex.md` (13 findings and 5 re-review findings, all accepted). For approval.
+**Status:** Revised after the fourth cross-model review (`reviews/design-r4-codex.md`: 14 findings, then 7 re-review findings N1–N7, all accepted) and the user's scope decision (2026-10-22). Earlier reviews: `reviews/design-codex.md` (13 findings and 5 re-review findings, all accepted). For approval.
 **Date:** 2026-10-21, revised 2026-10-22
 **Base:** `2c25e35`
 **Roadmap:** `docs/roadmap.md`, Phase 2
@@ -63,12 +63,12 @@ All URLs are under `/i/:id/` (§8.1). The sub-phase that delivers each step is i
 ```
  informer events ─┐  access transitions ─┐  metrics result ─┐  served kinds ─┐  deadlines ─┐  safety timer
                   ▼                      ▼                  ▼                ▼             ▼
-            source revision (cache rev, metrics rev, kinds rev)  →  scheduler (debounce, single flight)   D-019
+            triggers (latency only)  →  scheduler (debounce, single flight)                              D-019
                   ▼
- engine.Compute(snapshot @ rev r)
+ engine.Compute(snapshot with source fingerprint F)
    install.Discover/Resolve/Assign → computed views (A, B, C) → health.Evaluate → overview.Build → explore.Build
                   ▼
- Published{Model, Rev r, ConfirmedAt}   immutable, swapped atomically; confirm tick republishes ConfirmedAt only
+ Published{Model, Source F, ConfirmedAt}   immutable, swapped atomically; confirm tick republishes ConfirmedAt only
                   ▼
  api handlers: Load Published once → filter → authorize (dependencies) → sort → page
 ```
@@ -79,29 +79,34 @@ This is the only definition of when the model is recomputed and what its timesta
 
 **Triggers.**
 
-| Trigger | Source | Revision |
-|---|---|---|
-| Object added, updated or deleted | event handler on every informer in `pkg/cache`: dynamic kinds, Namespaces, Pods, Deployments | cache rev +1 |
-| Access transition (D-014) | the list/watch progress hooks and initial sync; a 1 s confirm tick also compares access states as a fallback | cache rev +1 |
-| Metrics scrape result | the collector notifies the engine; the scrape cadence (`--metrics-interval`) stays separate | metrics rev +1 |
-| Served kinds change | the kinds monitor | kinds rev +1 |
-| Time-driven deadline | the earliest of: grace expiry (design §5.2), metrics staleness (design §5.4), KGWUI-012 and computed KGWUI-011 maturation (`computed-rules.md` §9.3) | none |
-| Safety timer | `--poll-interval`, now "maximum time between recomputes" | none |
+| Trigger | Source |
+|---|---|
+| Object added, updated or deleted | event handler on every informer in `pkg/cache`: dynamic kinds, Namespaces, Pods, Deployments |
+| Access transition (D-014) | the list/watch progress hooks and initial sync; a 1 s confirm tick also compares access states as a fallback |
+| Metrics scrape result | the collector notifies the engine; the scrape cadence (`--metrics-interval`) stays separate |
+| Served kinds change | the kinds monitor |
+| Time-driven deadline | the earliest of: grace expiry (design §5.2), metrics staleness (design §5.4), KGWUI-012 and computed KGWUI-011 maturation (`computed-rules.md` §9.3) |
+| Safety timer | `--poll-interval`, now "maximum time between recomputes" |
 
-**Source revision.** The cache keeps a counter that its event handlers increment after the store is updated. `Snapshot()` reads the counter **before** it copies the stores (`pkg/cache/cache.go:265-305`). Any change counted at or below the snapshot's revision is in the copy. A change counted later triggers again. The source revision is the tuple (cache rev, metrics rev, kinds rev).
+**Triggers give latency, not proof.** client-go updates the informer store first and calls event handlers later, from a separate listener goroutine with its own buffer (`k8s.io/client-go@v0.36.2 tools/cache/controller.go:639-644`, `shared_informer.go:961-965,1356-1360`). A counter bumped in a handler therefore lags the data, and a backlog of notifications could let an old model look current. So triggers only start recomputes. Freshness is decided by the data itself.
 
-**Scheduler.** One goroutine owns the scheduler state. Its states are idle, pending (with a due time) and running (with the revision being computed).
+**Source fingerprint (our call).** `Snapshot()` already walks every store (`pkg/cache/cache.go:265-305`). In the same pass it computes, per kind, the object count and an order-independent 64-bit hash over each object's (uid, `resourceVersion`), plus every access state. The engine adds the identity of the metrics result and the served-kinds list it read. This tuple is the **source fingerprint** of the snapshot, and it describes exactly the data copied.
+- Chosen over an engine-owned mirror store with its own revision: the mirror would itself be filled by the lagging handlers, so it would confirm what the handlers had delivered, not what the informers hold.
+- Cost: one pass over the stores per confirm tick, with no decoding and no copying. It is benchmarked in 2.1 (≤ 5 ms per tick at Large, reported at Extreme) **(our call)**.
+- A hash collision could hide a change until the next trigger or the safety timer. At 64 bits per kind this is accepted.
+
+**Scheduler.** One goroutine owns the scheduler state. Its states are idle, pending (with a due time) and running.
 - **Debounce.** A trigger makes the state pending. The due time is 250 ms after the last trigger, but at most 1 s after the first trigger of the burst **(our call; §15 Q14)**. One `kubectl apply` or Helm upgrade gives one recompute; a continuous stream still recomputes about once a second.
 - **Deadlines** are due at their instant, with no debounce. A deadline whose predicate is strict (metrics staleness uses `age > maxAge`, `pkg/ctrlmetrics/scrape.go:86-87`) is due at the first clock reading after the boundary; one that uses `≥` (maturation) is due at the boundary.
 - **Single flight.** At most one recompute runs. Triggers during a run keep the state pending; their due time follows the same rules; one more run follows.
-- After a run, the state is pending if the source revision moved past the run's revision, or a trigger arrived during it. Completing an old snapshot never clears a newer trigger.
+- After a run, the state is pending if a trigger arrived during it. Completing an old snapshot never clears a newer trigger.
 
-**Publication.** A run computes a new immutable `Model` from a snapshot at revision `r`. It then swaps in one `Published{Model, Rev: r, ConfirmedAt: snapshot.TakenAt}` with an atomic pointer. Today's `Current()` returns the shared pointer (`engine.go:188-191`); it now returns the `Published` value. No field of a published value is ever changed.
+**Publication.** A run computes a new immutable `Model` from a snapshot with fingerprint `F`. It then swaps in one `Published{Model, Source: F, ConfirmedAt: snapshot.TakenAt}` with an atomic pointer. Today's `Current()` returns the shared pointer (`engine.go:188-191`); it now returns the `Published` value. No field of a published value is ever changed.
 
-**Confirmation.** The confirm tick runs every second on the scheduler goroutine. When the state is idle, not running, and the current source revision equals `Published.Rev`, it swaps in a new `Published` with the same Model and Rev and `ConfirmedAt = now`. Otherwise it does nothing. So:
+**Confirmation.** The confirm tick runs every second on the scheduler goroutine. When the state is idle and not running, it computes the live source fingerprint. If it equals `Published.Source`, it swaps in a new `Published` with the same Model and Source and `ConfirmedAt = now`. If it differs, it does not confirm and makes the state pending, so a change whose notification has not arrived is still picked up. So:
 - an idle, exact model keeps a fresh `ConfirmedAt`;
 - a hung or slow recompute stops confirmation, `ConfirmedAt` ages, and the SPA's stale rule fires after 2 × 5 s. D-006 holds: stuck data is never shown green;
-- a model built from an old snapshot is never stamped as current.
+- a model built from an old snapshot, or one whose store has moved on before its handler ran, is never stamped as current.
 
 **Polling only reads.** Each request loads `Published` once and serves the Model and `ConfirmedAt` from that one value. A request never renews anything. The SPA keeps its 5 s poll; push (SSE) stays out of scope.
 
@@ -119,7 +124,7 @@ This is the only definition of when the model is recomputed and what its timesta
 | `findings[].since` | health | unchanged | finding rows |
 | `Collected-At` header | resource endpoint (`handlers.go:245`) | `Published.ConfirmedAt` | `ResourcePage.tsx:140,182` |
 
-Without `confirmedAt`, the cluster cards, switcher and header would turn unknown 10 s after each recompute on an idle cluster. A frontend served by an older backend falls back to `computedAt`. `installs.json` and `bare-installs.json` gain the optional field (§7.6).
+At publication `confirmedAt` is the snapshot time, so it is slightly **earlier** than `computedAt`, which is taken after the snapshot (`engine.go:147-151`). The first idle confirm tick moves it past `computedAt`. Without `confirmedAt`, the cluster cards, switcher and header would turn unknown 10 s after each recompute on an idle cluster. A frontend served by an older backend falls back to `computedAt`. `installs.json` and `bare-installs.json` gain the optional field (§7.6).
 
 ### 3.2 Where the index lives
 
@@ -183,12 +188,12 @@ type Rules interface {
 | Delegation | (parent route, rule, ref) | view B rows with contexts | Delegation tab | 2.4 |
 
 - The findings map replaces today's per-row scan (`pkg/overview/overview.go:166-187`).
-- Up-chains and per-path effective matchers are computed per detail request with a bounded walk, not stored (§5.3) **(our call)**.
+- Up-chains follow reported edges and are walked per detail request with a bound, not stored (§5.3) **(our call)**. Delegation contexts and effective matchers are computed in the recompute and retained as `computed-rules.md` §5.7 says; detail responses only project them.
 - Name and hostname search is a scan over pre-lowercased strings **(our call)**.
 
 ### 3.6 Pagination: keyset cursors
 
-- A cursor is opaque base64url: the sort key, the direction and the last row's tuple (sort value, namespace, name, group, kind). `next` starts strictly after it in the current Model; `prev` ends strictly before the first row. Both are binary searches.
+- A cursor is opaque base64url: the sort key, the direction and the last row's unique tuple: (sort value, namespace, name, group, kind) for object lists, and (rule, ref, namespace, name, group, kind) for delegation rows, whose only order is by rule, ref, then child. One child can have several rows, so the rule and ref indexes are part of the key. `next` starts strictly after it in the current Model; `prev` ends strictly before the first row. Both are binary searches.
 - Every sort ends with the tie-break (namespace, name, group, kind), so the same Model gives the same order.
 - A row whose sort value changes moves; a pager may see it twice or miss it, as with offsets. A vanished anchor still works: the search finds where its tuple would sort.
 - Responses carry `total` (after filters and the Authorizer). There is no "jump to page N" **(our call; §15 Q9)**. Kubernetes `limit`/`continue` expires on compaction, so it is not an option.
@@ -351,10 +356,10 @@ Each row carries flags from its **current** status entries for this install's pa
 
 **KGWUI-011.** One finding per (route, parent HTTPRoute). Message draft: "Parent route does not use this route".
 - **Status trigger** (2.2): a declared candidate (§4.2). The grace period runs from the later of the route's and the parent's current generation first-seen time **(our call)**. **Inside it the finding is info and the `resource status` required check is pending, so the install is unknown, as for any resource being processed** (Phase 1 design §5.2; restored from the earlier design). After it, the finding is a warning and the check is OK again. This holds for every ref mode: an explicit declared parent always gets the diagnostic, even when only a wildcard ref selects the route (§15 Q15). Detail draft: "No status from HTTPRoute `shop/api`", plus the computed reason when 2.4 has one.
-- **Computed trigger** (2.4): view B computes an in-scope route, with no eligible entry, as selected by an owned parent's `name` or `label` ref with outcome `dropped` or `forbidden` in every known context. It is a warning once mature (`computed-rules.md` §9.3, 30 s). **It never makes a check pending**: a computed outcome waits on no controller output, and health stays status-based (D-020) **(our call)**. Routes selected only by a `wildcard` ref get no computed finding; they show in the Delegation tab (§15 Q15).
+- **Computed trigger** (2.4): view B computes an in-scope route, with no eligible entry, as selected by an owned parent's `name` or `label` ref with outcome `dropped` or `forbidden` in every context, and the traversal for that (route, parent) is **complete** (`computed-rules.md` §8.5). An incomplete traversal gives no computed finding. It is a warning once mature (`computed-rules.md` §9.3, 30 s). **It never makes a check pending**: a computed outcome waits on no controller output, and health stays status-based (D-020) **(our call)**. Routes selected only by a `wildcard` ref get no computed finding; they show in the Delegation tab (§15 Q15).
 - `rejected-hostnames` already has KGWUI-002 from status. An eligible but stale entry is not KGWUI-011; it follows Phase 1's freshness rules. An out-of-scope route gets KGWUI-004 only.
 
-**KGWUI-012.** Raised when a check matures under `computed-rules.md` §8.3 and §9.3. The resource is the object whose status disagrees. Message draft: "The UI's computed view disagrees with the controller". Detail draft: "Listener `https`: computed 12 routes, controller reports 11. Rule set kgateway-2.4." A warning: it can turn the install yellow, never red. Unknown, skipped, stale and not-verified checks never raise it.
+**KGWUI-012.** Raised when a check matures under `computed-rules.md` §8.3 and §9.3. The resource is the object whose status disagrees. Message draft: "The UI's computed view disagrees with the controller". Detail draft: "Listener `https`: computed 12 routes, controller reports 11. Rule set kgateway-2.4." A warning: it can turn the install yellow, never red. Unknown, skipped, stale, not-verified and incomplete checks never raise it. A conclusion that needs absence (no entry expected, no delegation failure) needs a complete traversal (`computed-rules.md` §8.5).
 
 **Backend `Accepted`** (2.2). kgateway 2.4 stamps `observedGeneration` (`v2.4.7 pkg/reports/status.go:410-415`); 2.3 does not (`v2.3.11 extensions2/pluginutils/status.go:10-40`). The rule reads the condition's own evidence, not the version **(our call; §15 Q11)**:
 
@@ -429,7 +434,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `q` | all | case-insensitive substring of namespace/name; routes also hostnames |
 | `sort` | all | `name` (default), `kind`, `health`, Gateways also `routes`; suffix `.asc` or `.desc` |
 | `limit`, `cursor` | all | 1–200, default 50; an opaque `next` or `prev` value |
-| `rule`, `ref`, `outcome` (2.4) | delegation | rule index, ref index, a row outcome |
+| `rule`, `ref`, `outcome` (2.4) | delegation | rule index, ref index, a row outcome; no `sort` (fixed order, §3.6) |
 
 **Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
 
@@ -508,7 +513,7 @@ BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
 - `ParentSummary.computed` carries the same `Attachment` for list rows. Failed-route tables render reason, message and explanation without a detail request.
 - `GatewayRow2` is new. Phase 1's overview `GatewayRow` (`pkg/overview/overview.go:73-80`) gains only an optional `link`. The final Go name is the plan's choice.
 - `delegation.state` is status-based and set only for `name` refs: `reported` needs a reported edge. `selected` and `attached` are computed counts (2.4).
-- `effective` lists at most 20 parent edges, each with at most 20 contexts; more sets `effectiveTruncated` **(our call)**.
+- `effective` and `DelegationRow.contexts` project what the model retained, with the limits and truncation flags of `computed-rules.md` §5.7. A detail request never re-runs the traversal.
 - The Gateway page pages its ListenerSets through `GET …/listenersets?parent=…`, so no detail body is unbounded.
 - `ParentSummary` picks the deciding condition: the first current `False` among `Accepted`, `ResolvedRefs`, `kgateway.dev/Programmed`, else the pending reason.
 
@@ -519,7 +524,7 @@ This is the only definition of what a caller may see. Every new handler goes thr
 1. **Objects.** A denied detail object returns 404, as an absent one does. List rows are filtered per ref before paging; `total` counts only visible rows.
 2. **No filtered hidden counts.** Lists report at most `deniedInInstall`: the unfiltered number of objects of the listed kinds in the install that the caller may not view. It is independent of every filter, so a hostname probe changes nothing, and it is shown once per list page.
 3. **Dereferenced objects.** Data that comes from another object is sent only if the caller may view that object: a Backend's state and condition (`{restricted: true}`), a `name` ref's state (`restricted`), a delegation row's child (the row is dropped), `via` (`viaRestricted`), an ancestor step (`{restricted: true}`, no identity).
-4. **Computed facts are dependency-based.** Every computed result carries its dependency set: the objects whose data decided it (`computed-rules.md` §4.6, §5.1, §6). For a listener membership that includes the route's Namespace when the listener uses `Selector`. For an effective matcher it includes every route on the path, because the parent's match and inherited headers come from them. A fact is sent only if the caller may view **every** dependency. Otherwise its `Computed.state` is `restricted`, and its value, reason and note are omitted: no hostnames, no outcome, no match, no partial value. Quoted strings are never redacted piecemeal.
+4. **Computed facts are dependency-based.** Every computed result carries its dependency set: the objects whose data decided it (`computed-rules.md` §4.6, §5.6). For a listener membership that includes the route's Namespace when the listener uses `Selector`. For a delegation context or an effective matcher it includes every route on the path, because the parent's match and inherited headers come from them, plus the facts that made the root a root: the Gateways, ListenerSets and Namespaces behind its view A outcome, or for a status root the entry's target (`computed-rules.md` §5.1). A fact is sent only if the caller may view **every** dependency. Otherwise its `Computed.state` is `restricted`, and its value, reason and note are omitted: no hostnames, no outcome, no match, no partial value. Quoted strings are never redacted piecemeal.
 5. **Derived counts** (`routes`, `notAccepted`, `listenerSets`, `routeCounts`, `children`, `childCount`, `declaredCount`, `computedRoutes`, `selected`, `attached`) count only visible objects and are recounted per request. A computed count whose dependencies are not all visible, for example a listener with a hidden member or a hidden Namespace behind a `Selector`, is `restricted` and its cross-check is not shown.
 6. **Computed flags** (`listener-unknown`, `dropped`) follow rule 4 per caller.
 7. **Finding evidence.** Phase 1 redacts a finding only by its resource (`pkg/api/handlers.go:121-124`). Phase 2 findings carry their evidence's dependency set. When the caller may view the resource but not every dependency, the finding is listed with its code, severity and resource, its detail is replaced by "Details depend on objects you cannot view", and `evidenceRestricted: true` is set (additive). This covers KGWUI-011 and KGWUI-012 details that quote a parent's match, a hidden route or a Namespace's labels.
@@ -647,6 +652,7 @@ The boundary stays **cluster objects in → API JSON out** (design §9). The rul
 
 Seed the fake dynamic client, run the real cache, install, computed, health, explore and API packages, and call the handlers.
 - **Lists (2.2):** each filter alone and combined; each sort both ways; malformed cursor, cursor from another sort, `limit=0` and `limit=201` → 400; `listener` without a suitable `parent` → 400.
+- **Delegation cursor (2.4):** a page that ends between two rows of the same child under different rules or refs; `next` returns the remaining rows, and backward paging returns the same set.
 - **Cursors across recomputes (2.2):** a page boundary both ways; insertion before the anchor; anchor deleted; descending ties; backward paging equals forward; a row whose sort value changes.
 - **Attachment from status (2.2):** `via`; each of the three reasons with reason and message in `ParentSummary`; pending; unwatched. A stale `Accepted=True` is not `accepted`; a stale `False` is not `not-accepted`.
 - **Reported vs declared (2.2):** a child with matching spec parentRef and status is a child. One with a spec parentRef and no status is a declared candidate: not in Child routes, `name` ref `not-reported`, KGWUI-011 info **with the `resource status` check pending and the install unknown inside the grace period**, warning and check OK after it, not counted. A parent with no delegation refs gets no children.
@@ -671,21 +677,20 @@ Fixture directories per rule set under `pkg/computed/testdata/<rules>/`, case li
 
 ### 9.3 D-019 engine tests (deterministic, fake clock; 2.1)
 
-The engine takes a clock, a trigger source and a revision source. Tests drive them directly; nothing sleeps.
+The engine takes a clock, a trigger source and a snapshot source that can pause handler delivery. Tests drive them directly; nothing sleeps.
 - **Debounce:** 500 events within 100 ms give one recompute, 250 ms after the last; a stream of one event per 100 ms for 5 s gives one per 1 s window.
 - **Single flight:** a trigger during a run gives exactly one more run.
 - **Safety timer:** no trigger for 29 s, no recompute; one at 30 s; `--poll-interval 2s` gives one every 2 s.
 - **Interleavings:**
-  - snapshot at rev 5; an event (rev 6) arrives during the run; the run publishes Rev 5; the state stays pending; the confirm tick does not advance `ConfirmedAt`; the next run publishes Rev 6;
-  - an event lands in the store before the snapshot copies it but bumps the revision after the snapshot read it: the model includes the change and one extra recompute follows;
-  - an event between publication and the next confirm tick: no confirmation, a recompute follows;
+  - snapshot taken; an object changes during the run; the run publishes the old fingerprint; the trigger keeps the state pending; the confirm tick sees a different live fingerprint and does not confirm; the next run publishes the change;
+  - **notification delivery paused:** the informer store changes while its handler is blocked; the confirm tick sees the new fingerprint, does not confirm, and makes the state pending; the next run includes the change, with no handler having run; when the handler finally runs, it only triggers one more recompute with an equal fingerprint;
+  - an access transition with no object event changes the fingerprint and blocks confirmation;
   - a run blocked indefinitely: `ConfirmedAt` stops, the API serves it ageing, `computedAt` stays at the last completed run;
-  - two requests during a swap each read one consistent `Published` (Model, Rev and `ConfirmedAt` from the same value);
-  - an access transition with no object event bumps the revision and triggers.
+  - two requests during a swap each read one consistent `Published` (Model, Source and `ConfirmedAt` from the same value).
 - **Confirmation:** idle, `ConfirmedAt` advances each second; `computedAt` does not.
 - **Deadlines:** a grace expiry 60 s after first-seen triggers a recompute at that instant and the finding turns from info to warning. Metrics staleness with strict `age > maxAge`: a recompute at exactly `collectedAt + maxAge` does not mark it stale; the scheduler then runs at the next reading after the boundary, and that run does. A KGWUI-012 maturation deadline raises the finding with no other event (2.3).
 - **Metrics:** a result arrival triggers one recompute.
-- **Timestamps:** `/installs` carries `confirmedAt` ≥ `computedAt`; the overview, health and resource header carry `ConfirmedAt`; `checks[].collectedAt` is unchanged.
+- **Timestamps, per meaning:** `computedAt` equals the run's compute time and never moves without a run; at publication `confirmedAt` equals the snapshot's `TakenAt` (≤ `computedAt`); after the first idle confirm tick `confirmedAt` equals the tick time (> `computedAt`) while `computedAt` is unchanged; while pending or running `confirmedAt` is frozen. The overview, health and resource header carry `ConfirmedAt`; `checks[].collectedAt` and `since` keep their own values.
 - Phase 1's engine tests run unchanged against the new loop.
 
 ### 9.4 Frontend (Vitest)
@@ -761,7 +766,7 @@ Every tier also has 5 % each of GRPC, TCP and TLS routes, labelled namespaces be
 | `pkg/explore`, `pkg/computed` | read objects only through `pkg/objects` and unstructured; no `corev1`, `appsv1` or client-go; covered by `internal/boundary/imports_test.go` |
 | Namespace labels | a `map[string]map[string]string` built in `pkg/install` (allowlisted) |
 | Controller settings | read from the Pod spec in `pkg/install`; `install.Resolved.Settings`; another provider supplies the keys or none ("unknown") |
-| D-019 triggers and revisions | an abstract trigger and revision source; a file-mode provider feeds it from its own change stream (design §14.6) |
+| D-019 triggers and fingerprint | an abstract trigger source and a snapshot fingerprint; a file-mode provider feeds it from its own change stream (design §14.6) |
 | Assignment | stays in `pkg/install/assign.go` |
 | Decode cache | keyed by `uid` and `resourceVersion`, synthesised in file mode (design §14.8); missing keys bypass it |
 | `Backend`, Service backendRefs | a kgateway CRD on every platform; Services shown as written, never watched |
@@ -784,10 +789,11 @@ This phase generates no data-plane configuration and no xDS churn.
 | Item | Cost |
 |---|---|
 | API server | one more cluster-wide watch (`backends`); event handlers add no API calls |
-| Recompute | only on change, debounced, plus the safety timer and deadlines. Ownership BFS, view A and `explore.Build` are linear in objects and parentRefs × listeners. Views B and C are capped by the selected-edge, context and matcher bounds of `computed-rules.md` §5.5. |
-| Idle | a 1 s confirm tick compares revisions and republishes `ConfirmedAt`; no recompute |
+| Recompute | only on change, debounced, plus the safety timer and deadlines. Ownership BFS, view A and `explore.Build` are linear in objects and parentRefs × listeners. Views B and C are capped by the selected-edge, context and matcher bounds of `computed-rules.md` §5.7. |
+| Idle | a 1 s confirm tick hashes the stores, compares the source fingerprint and republishes `ConfirmedAt`; no recompute |
 | Persistence state | one map entry per candidate check, pruned with its subject |
-| Up-chain and effective matchers | per detail request, at most 256 node visits, 20 parent edges and 20 contexts each |
+| Up-chain | per detail request, at most 256 node visits (§5.3) |
+| Retained contexts and effective matchers | in the Model, capped by `computed-rules.md` §5.7 |
 | Decode | once per object change (§3.3) |
 | Memory | index rows, computed views, decode cache and, briefly, the previous Model; measured per kind (§9.6) |
 | Per request | one atomic load, one index lookup, a filter scan, dependency checks under non-`AllowAll`, an optional sort, one page |
@@ -799,7 +805,7 @@ The user decided all of views A, B and C are in Phase 2, staged **(user, 2026-10
 
 | Sub-phase | Content | Ships |
 |---|---|---|
-| **2.1 Engine and timestamps** | The cluster observation task (§9.5, `computed-rules.md` §10). The Phase 1 baseline benchmark, on Phase 1 code. D-019: revision source, scheduler, debounce, single flight, publication, confirmation, deadlines (§3.1). `confirmedAt` and the SPA's three consumers. §9.3 tests. README and chart notes on `--poll-interval`. | Same pages as Phase 1, event-driven, with honest freshness |
+| **2.1 Engine and timestamps** | The cluster observation task (§9.5, `computed-rules.md` §10). The Phase 1 baseline benchmark, on Phase 1 code. D-019: source fingerprint, scheduler, debounce, single flight, publication, confirmation, deadlines (§3.1). `confirmedAt` and the SPA's three consumers. §9.3 tests. README and chart notes on `--poll-interval`. | Same pages as Phase 1, event-driven, with honest freshness |
 | **2.2 Explorer on observed status** | Q12's status-based ownership: reported edges, declared candidates, KGWUI-011 status trigger with pending in grace, no-parent rows, KGWUI-003/004 extensions. The `Backend` kind and rules. Typed views and the decode cache. `pkg/explore` indexes. Admission and link metadata. List and detail APIs, the Authorizer, goldens. Frontend: Gateways, ListenerSets and Routes lists; Gateway, ListenerSet and HTTPRoute pages with status, parent cards, rules, reported children and the up-chain; finding retargeting; copy helpers; `CorePages` slots; wording pass. Release note on changed counts. | Every page, with listener `attachedRoutes` from status and no computed facts |
 | **2.3 View A** | `pkg/computed` seam, both rule sets for view A, the experimental setting read, per-listener and per-parentRef DTOs, the listener filter, the explanation, the cross-check for `listener-count` and `route-accepted`, the KGWUI-012 persistence map and maturation deadline, coverage badges, dependency-based authorization for view A. Matrix `computed-rules.md` §11.1, §11.4 (view A rows), §11.5. kind e2e count assertions. | Routes per listener with effective hostnames, labelled and cross-checked |
 | **2.4 Views B and C** | Context-aware traversal, bounds and truncation, the wildcard setting read, the Delegation endpoint and tab, effective matchers per path, the 2.3 and 2.4 report keys, `child-entry` and `parent-resolvedrefs` checks, KGWUI-011's computed trigger, dependency-based authorization for contexts and evidence. Matrix §11.2-§11.4. The dense-selection benchmark. kind e2e for the controller-backed cases. | Delegation selection, outcomes and effective matchers |

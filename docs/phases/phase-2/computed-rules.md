@@ -11,7 +11,7 @@
 
 1. **One rule set per kgateway minor.** A rule set reproduces what that minor does. A change in kgateway gives a new rule set, never an edit of a shipped one. A new set starts as a copy, plus a diff review of every file cited here between the two tags.
 2. **Every result says what it is.** Each result carries its value, the rule applied, the rule set, its **dependencies** (the objects whose data decided it) and its **check** (§8.4). The design's Authorizer uses the dependencies (design §7.4).
-3. **Unknown, never a guess.** When an input or a context cannot be resolved, the result is `unknown` with a reason (§3.3). Its value is absent and its cross-check is skipped. A partial answer is never shown as a full one.
+3. **Unknown, never a guess.** When an input or a context cannot be resolved, the result is `unknown` with a reason (§3.3). Its value is absent and its cross-check is skipped. A partial answer is never shown as a full one. A bound reduces certainty; it never turns a missing path into a negative conclusion (§5.5, §8.5).
 4. **Explain, never own.** Results never decide ownership, counts or install health. They feed two findings only: KGWUI-011's computed trigger and KGWUI-012 (design §6.2).
 5. **Staged.** View A ships in sub-phase 2.3; views B and C ship in 2.4 (design §13) **(user, 2026-10-22)**. Each section's tests (§11) gate its sub-phase.
 
@@ -60,7 +60,7 @@
 | `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs whose namespace could be the wildcard |
 | `not-reached` | an owned parent route is not reached from any root (§5.1) | its contexts, so its delegation outcomes; selection and permission stay known |
 | `context-unknown` | an ancestor on the path is unknown or was cut by a bound | everything below that point |
-| `too-large` | a bound of §5.5 stopped the computation | everything not yet computed, in the deterministic order of §5.5 |
+| `too-large` | a compute bound of §5.7 stopped the computation | everything not yet computed, in the deterministic order of §5.7 |
 
 Missing objects are rules, not unknowns. A missing Namespace matches only an empty selector (§4.2). A missing `name` target is an unresolved reference (§5.2).
 
@@ -143,7 +143,7 @@ kgateway flattens delegation **once per parent match and delegation ref**, with 
 Example: root R delegates under `/api` to P. P has matches `/api` and `/other` on a rule that delegates to C, whose only match is `/other/item`. R's fit reduces P to `/api`, so C is dropped. Evaluating P → C from P's own matches would wrongly attach C through `/other`. The rules carry the context to get this right.
 
 - **Root.** An owned top-level HTTPRoute that view A accepts on at least one listener. When view A is unknown for all its parentRefs, a current `Accepted=True` from status makes it a root, labelled "root from status". Otherwise it is not a root. Roots do not depend on the listener: view B never reads hostnames, only the child's own `spec.hostnames`.
-- **Context.** One `HTTPRouteMatch` (the incoming parent match), the path of routes from the root, the report key of the parent's reporter (§7), and the dependency set (every route on the path).
+- **Context.** One `HTTPRouteMatch` (the incoming parent match), the path of routes from the root, the report key of the parent's reporter (§7), and the dependency set (§5.6): the root's eligibility dependencies plus every route on the path.
 - **Root contexts.** Each match of each root rule that has a delegation ref, with the CRD default when `matches` is omitted.
 - **Child contexts.** Each effective match (view C) of each kept child rule that has a delegation ref.
 
@@ -202,8 +202,8 @@ flatten(P, i, ref, ctx):                               # V4 translator/httproute
     for (k, rule) in eff.keptRules:
       for m in rule.matches:                           # the effective matches
         for ref2 in delegationRefs(rule):
-          if not budget.take(): stop(too-large)        # §5.5
-          flatten(c, k, ref2, {match: m, path: ctx.path + c, reporterKey: key(c, P), deps: ctx.deps + c})
+          if not budget.take(): stop(too-large)        # §5.7
+          flatten(c, k, ref2, {match: m, path: ctx.path + c, reporterKey: key(c, P), deps: ctx.deps + c})   # deps start at the root's eligibility set, §5.6
   if valid == 0: parentSignal(ctx.reporterKey, unresolved)        # V4 :98-100, V3 :105-107
 ```
 
@@ -212,32 +212,45 @@ flatten(P, i, ref, ctx):                               # V4 translator/httproute
 - Memoising `selectTree` per parent and filtering the path afterwards is allowed. The results must equal the definition above.
 - **The two quirks are reproduced as written and flagged as unverified on a cluster** (§10, item 7).
 
-### 5.5 Bounds
+### 5.5 Outcomes and rows
 
-Selection can be dense: many wildcard or label refs, each selecting many routes. Contexts multiply with depth and with the number of matches. The computation is capped per install per recompute **(our call)**:
+Per context, a row (parent, rule index, ref index, child) gets one outcome: `attached`, `dropped` (with the failing match), `forbidden`, `rejected-hostnames`, `cycle` (the ref failed), `unresolved` (the ref selected nothing usable) or `unknown` (with a reason). The rule and ref indexes are part of the row's identity, because one child can be selected by several rules and refs of one parent.
 
-| Bound | Cap | Counts |
-|---|---|---|
-| Selected edges | 50,000 | (parent, rule, ref, child) rows, including forbidden ones |
-| Contexts | 20,000 | `flatten` calls |
-| Matcher evaluations | 200,000 | (child match, context) fit or merge steps |
-| Contexts kept per row | 20 | per (parent, rule, ref, child); more sets `contextsTruncated` |
+The row aggregates its contexts **(our call)**. A bound reduces certainty; it never changes a conclusion:
+- every context known and the same → that outcome;
+- `attached` in some contexts and `dropped` in others → `partial`, "Attached under some parent matches";
+- `attached` in a known context while others are unknown → `attached`, with "Some paths not computed". A positive outcome stays true whatever the other paths do;
+- no `attached` context and some contexts unknown, or the row's aggregate incomplete (§8.5) → `unknown`, "Dropped on the paths computed; other paths not computed". Never `dropped`;
+- `forbidden` does not depend on context and is always known.
 
-- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). When a cap is reached, the rest is `unknown` with `too-large`, and the install's computed summary records which cap was hit.
-- A cut is deterministic, so the same Model gives the same cut.
+### 5.6 Dependencies
+
+Every result carries the set of objects whose data decided it; the design's Authorizer filters on it (design §7.4).
+- **Root eligibility.** A view A root depends on the union of the dependencies of all its parentRef outcomes (§4.6): the route, each Gateway or ListenerSet, and each Namespace a `Selector` evaluated. A status root depends on the route and the target of the `Accepted=True` entry it used.
+- **Context.** A context depends on its root's eligibility set plus every route on its path. Each child context inherits its parent context's set and adds the child.
+- **Row and effective matcher.** The union of the sets of its contexts. A context the caller may not view is projected as `{restricted: true}`; an outcome that aggregates over a hidden context is `restricted` as a whole, so the presence of a hidden path is never revealed.
+- **Aggregate checks** (§8.2) and the findings they raise: the union over every context in the aggregate.
+
+### 5.7 Budget, retention and projection
+
+This is the one policy for how much is computed, kept and served **(our call)**. All of view B and C is computed in the recompute; the Model keeps what this table allows; a detail or delegation response projects the kept results and never re-runs the traversal.
+
+| Stage | Bound | Cap | On reaching it |
+|---|---|---|---|
+| Compute | selected edges: (parent, rule, ref, child) rows, forbidden included | 50,000 per install | the rest is `unknown`, `too-large` |
+| Compute | contexts: `flatten` calls | 20,000 per install | the rest is `unknown`, `too-large` |
+| Compute | matcher evaluations: (child match, context) fit or merge steps | 200,000 per install | the rest is `unknown`, `too-large` |
+| Retain | contexts kept per row, each with its incoming match, path, outcome and effective rules | first 20 in traversal order | `contextsTruncated` on the row; the outcome still aggregates all contexts |
+| Retain | contexts kept per install | 100,000 | later rows keep their outcome with no contexts and `contextsTruncated` |
+| Project | rows per delegation page | the page `limit` (≤ 200) | cursor (design §3.6) |
+| Project | parent edges in a route's `effective` | 20, sorted by parent (namespace, name) | `effectiveTruncated` |
+| Project | contexts per edge in `effective` | the row's retained contexts | the row's `contextsTruncated` |
+
+- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). A cut is deterministic, so the same Model gives the same cut, and the install's computed summary records which cap was hit.
+- An effective matcher shown on a page is exactly the one the traversal used for the outcome and the cross-check in the same Model.
+- Retained contexts are counted in the heap budget (design §9.6).
 - View A has no cap. It is linear in parentRefs × listeners.
 - The design's benchmarks include a dense-selection shape, separate from the diamond lattice (design §9.6).
-
-### 5.6 Outcomes and rows
-
-Per context, a (parent, rule, ref, child) gets one outcome: `attached`, `dropped` (with the failing match), `forbidden`, `rejected-hostnames`, `cycle` (the ref failed), `unresolved` (the ref selected nothing usable) or `unknown` (with a reason).
-
-The row aggregates its contexts **(our call)**:
-- the same outcome in every context → that outcome;
-- `attached` in some contexts and `dropped` in others → `partial`, "Attached under some parent matches";
-- some contexts unknown → the known outcome with "Some paths unknown", or `unknown` when none is known.
-
-Each row lists its contexts (at most 20): the incoming parent match, the path, the outcome and the reason. `forbidden` does not depend on context.
 
 ## 6. View C — effective matcher
 
@@ -319,7 +332,7 @@ kgateway merges every write for one report key into one entry, and a later write
 | `child-entry` | (child, report key under P, §7) | an entry iff **any** context, over every rule and ref of P and every root, gives `attached` or `rejected-hostnames`. With a rejection: `Accepted=False/UnsupportedValue`. With an attachment: no `UnsupportedValue`. No entry when every context gives `dropped`, `forbidden`, `cycle` or `unresolved`. |
 | `parent-resolvedrefs` | (P, P's reporter key) | `False` when any context with that key records a delegation failure. The reason is compared only when all such failures share one reason **and** P has no non-delegation backendRef and no `ExtensionRef` filter; otherwise only the status is compared. A computed "no delegation failure" against an observed `False` contradicts only under the same condition; otherwise it is compatible. |
 
-Individual rows keep their own outcomes. A row whose outcome the aggregated signal cannot confirm says "Status cannot confirm this path". It is never a disagreement on its own.
+Individual rows keep their own outcomes. A row whose outcome the aggregated signal cannot confirm says "Status cannot confirm this path". It is never a disagreement on its own. Every negative expectation in this table (no entry, no delegation failure) also needs a complete aggregate (§8.5).
 
 ### 8.3 Evidence classes
 
@@ -348,6 +361,23 @@ A result may carry several labels. A route's listener membership carries the lis
 
 Check states on the wire are `checked`, `disagrees`, `pending`, `unknown` and `restricted`. `restricted` is set at serve time when the caller may not view a dependency (design §7.4).
 
+### 8.5 Completeness
+
+An aggregate (§8.2) is **complete** when every context that could contribute to it was evaluated. Positive evidence needs no completeness; negative evidence does.
+
+- **Uncertain points.** A cut by a compute bound (the (parent, ref) not flattened), a context or selection that is `unknown` (§3.3), and an owned top-level route whose root eligibility is unknown.
+- **Reach closure.** From each uncertain point, follow selection and permission only, without the matcher fit: (parent → permitted selected child), transitively. This over-approximates every route the missing work could reach. It is linear in selected edges. If the edge cap itself was hit, every aggregate in the install is incomplete.
+- An aggregate whose child (for `child-entry`), parent P (for `parent-resolvedrefs`) or route (for KGWUI-011) is in a reach closure is **incomplete**.
+
+| Expectation | Needs completeness | If incomplete |
+|---|---|---|
+| Child entry present (some context attached or rejected) | no | compared as usual |
+| No child entry (every context dropped, forbidden, cycle or unresolved) | yes | `unknown`, "Not all paths computed"; no KGWUI-012 |
+| Parent `ResolvedRefs=False` (some context failed) | no | compared as usual |
+| No delegation failure on the parent | yes | `unknown`; no KGWUI-012 |
+| KGWUI-011 computed trigger (dropped or forbidden everywhere) | yes | no finding |
+| Listener count, parentRef outcome (view A) | no traversal; unknown inputs only (§3.3) | — |
+
 ## 9. Persistence of KGWUI-012 and the computed KGWUI-011
 
 ### 9.1 Check identity
@@ -366,16 +396,17 @@ A rule set change gives a new identity.
 
 ### 9.2 Semantic fingerprint
 
-The fingerprint is a hash over exactly the decoded fields the check read, plus the observed signal. Nothing else resets the window:
+Each check kind has its own fingerprint: a hash over exactly the decoded inputs its expectation read, plus exactly the observed evidence its comparison uses (§8.1). Nothing else resets the window.
 
-| Kind | Fields |
-|---|---|
-| `listener-count` | the listener's spec (name, port, protocol, hostname, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; the labels of candidate namespaces when the listener uses `Selector`; the experimental setting; observed `attachedRoutes` and the listener conditions' `observedGeneration` |
-| `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs; namespace labels when `Selector` is used; observed `Accepted` status, reason and `observedGeneration` for the key |
-| `child-entry`, `parent-resolvedrefs` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; for the parent check, P's backendRef kinds and filters; the observed entry's presence, `Accepted` and `ResolvedRefs` status and reason, and `observedGeneration` |
-| `delegated-not-attached` | as `child-entry`, without the observed signal |
+| Kind | Inputs | Observed evidence |
+|---|---|---|
+| `listener-count` | the listener's spec (name, port, protocol, hostname, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; candidate namespaces' labels when the listener uses `Selector`; the experimental setting | `attachedRoutes`; the listener conditions' `observedGeneration` |
+| `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs; namespace labels when `Selector` is used | for the key: `Accepted` status, reason and `observedGeneration`, but the reason only when it is an attachment reason (another reason is compatible and is hashed as "other") |
+| `child-entry` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; the aggregate's completeness | for the key: entry presence; `Accepted` status and `observedGeneration`, with the reason only when it is `UnsupportedValue`. **Not** `ResolvedRefs` or `Programmed`. |
+| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; each selected child's matches, hostnames and parentRefs; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
+| `delegated-not-attached` | as `child-entry` | none |
 
-Not in any fingerprint: `resourceVersion`, `managedFields`, labels and annotations not listed, other conditions, `lastTransitionTime`, metrics, Pods and Deployments. An unrelated status write, annotation edit or metrics arrival never restarts the window.
+Not in any fingerprint: `resourceVersion`, `managedFields`, labels and annotations not listed, conditions not listed for that kind, `lastTransitionTime`, metrics, Pods and Deployments. A child's backend `ResolvedRefs` toggling never restarts its `child-entry` window. An unrelated status write, annotation edit or metrics arrival never restarts any window.
 
 ### 9.3 State, maturation and clearing
 
@@ -441,7 +472,14 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | The two quirks of §5.4 | as written, flagged |
 | An owned parent not reached from a root | `not-reached`; selection still shown |
 | Dense selection: 100 wildcard parents over a namespace of 1,000 routes | `too-large` after the edge cap, deterministic cut |
-| Contexts per row above 20 | `contextsTruncated` |
+| Contexts per row above 20; retained contexts above 100,000 | `contextsTruncated`; outcomes unchanged |
+| A cut after a context that drops C, before one that would attach it | row `unknown`, not `dropped`; `child-entry` incomplete, no KGWUI-012 on an existing entry; no computed KGWUI-011 |
+| A cut before any context reaches C, and an attached context already computed | row `attached`, "Some paths not computed"; entry expected |
+| A label ref with an unknown wildcard setting above C | C in the reach closure; negative checks `unknown` |
+| Root behind a `Selector` listener; caller denied that Namespace | every descendant context, row and effective matcher `restricted` |
+| Status root; caller denied the entry's target Gateway | descendants `restricted` |
+| Two rows of one child under rules 0 and 1 | separate identities; both listed |
+| An effective matcher on the route page | equal to the one the traversal used in the same Model |
 | Default fit: each clause, raw prefix `/apiv2`, child path type ignored, omitted `matches` under `/api` | kept or the failing clause |
 | Inherit: `path.Join` cleaning, child type kept, nil child path, header and query union with the parent winning, method, explicit `matches: []` | effective matches |
 | A three-level chain where the grandchild's context is the child's merged match | grandchild evaluated against the merged match |
@@ -481,6 +519,8 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Disagreement clears at 29 s | no finding |
 | No events after the disagreement starts | the scheduled recompute at exactly `since + 30 s` raises it; at `since + 30 s − 1 ns` it is absent |
 | An annotation edit, an unrelated condition write, a `resourceVersion`-only update, a metrics arrival during the window | no reset |
+| A child's `ResolvedRefs` toggles during a `child-entry` window; a child's `Accepted` reason changes between non-attachment reasons during a `route-accepted` window | no reset |
+| A parent's `Accepted` changes during a `parent-resolvedrefs` window | no reset |
 | A change to a listed field, or to the observed value | reset |
 | Rule set switch | reset |
 | Subject deleted | entry pruned, finding gone |
