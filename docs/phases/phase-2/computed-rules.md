@@ -1,0 +1,489 @@
+# Phase 2 — Computed rules specification (D-020)
+
+**Status:** draft with the Phase 2 design, for approval
+**Date:** 2026-10-22
+**Rule sets:** `kgateway-2.3` (tag `v2.3.11`, `c2af2887`) and `kgateway-2.4` (tag `v2.4.7`, `b4a2bf74`)
+**Design:** `design.md`. This document is the only definition of the computed views (D-020 views A, B and C), their cross-check against the controller and the persistence rules of KGWUI-012. The design refers to it and does not repeat it. Scheduling is defined once in design §3.1, and authorization once in design §7.4.
+
+`V3` is v2.3.11 and `V4` is v2.4.7. Paths are under `pkg/kgateway/` unless they start with `pkg/` or `api/`. A line range written once with "both" is the same at both tags. Choices made without the user are marked **(our call)**; the user's are marked **(user, 2026-10-22)**.
+
+## 1. Principles
+
+1. **One rule set per kgateway minor.** A rule set reproduces what that minor does. A change in kgateway gives a new rule set, never an edit of a shipped one. A new set starts as a copy, plus a diff review of every file cited here between the two tags.
+2. **Every result says what it is.** Each result carries its value, the rule applied, the rule set, its **dependencies** (the objects whose data decided it) and its **check** (§8.4). The design's Authorizer uses the dependencies (design §7.4).
+3. **Unknown, never a guess.** When an input or a context cannot be resolved, the result is `unknown` with a reason (§3.3). Its value is absent and its cross-check is skipped. A partial answer is never shown as a full one.
+4. **Explain, never own.** Results never decide ownership, counts or install health. They feed two findings only: KGWUI-011's computed trigger and KGWUI-012 (design §6.2).
+5. **Staged.** View A ships in sub-phase 2.3; views B and C ship in 2.4 (design §13) **(user, 2026-10-22)**. Each section's tests (§11) gate its sub-phase.
+
+## 2. Rule sets and version selection
+
+| Behaviour | `kgateway-2.3` | `kgateway-2.4` |
+|---|---|---|
+| Attachment (view A) | same behaviour; `query/route.go` V3:397-508 | `query/route.go` V4:437-547 |
+| Selection, permission, matcher fit (views B, C) | same behaviour; line numbers in §5 and §6 | same |
+| Report key of a delegated child (§7) | always synthesized | the child's own parentRef, as written |
+| Success conditions filled in by default | `Accepted`, `ResolvedRefs` | adds `kgateway.dev/Programmed` (`pkg/reports/status.go` V4:752-780; `api/conditions/conditions.go` absent at V3) |
+| Rule replaced or dropped | `Accepted=False`, `RouteRuleReplaced`/`RouteRuleDropped` (`translator/irtranslator/route.go` V3:291-313) | `kgateway.dev/Programmed=False`, same reasons (V4:325-350) |
+| TCP or TLS route conflict | `Accepted=False/Conflicted` (`translator/listener/gateway_listener_translator.go` V3:645-656, called at :463) | `kgateway.dev/Programmed=False/Conflicted` (V4:648-660, called at :466) |
+| Old status of a matcher-dropped child | not yet observed (§10, item 6) | cleared to `parents: []` (`pkg/krtcollections/policy.go` V4:1150-1178) |
+| Plain-HTTP listener isolation (programming only, §4.5) | none | `translator/listener/gateway_listener_translator.go` V4:689-747 |
+
+**Selection.** The rule set follows the controller minor, as `kinds.ExperimentalOnly` does (`pkg/kinds/upstream.go:55-94`).
+- An unknown version uses the newest set, labelled "Controller version unknown; using the 2.4 rules".
+- A minor newer than the newest set uses the newest set, labelled "Rules not yet verified for 2.5".
+- The cross-check runs in both cases. The label is part of every result's check note.
+
+## 3. Inputs
+
+### 3.1 What the rules read
+
+- **Decoded views** of Gateways, ListenerSets and routes (design §4.1). Only routes in namespaces the controller watches are candidates; the controller cannot see others (`pkg/pluginsdk/collections/collections.go` V4:105).
+- **Namespace labels** as a map from namespace to labels, with a flag that says whether Namespace access is OK. Never a `corev1` type (design §10).
+- **Settings** (design §3.4): `DELEGATION_WILDCARD_NAMESPACE` and `KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES`. Each is a known value or unknown.
+- **ListenerSet acceptance**, taken from the ListenerSet's own current status: `Accepted` not `False`. It is not computed. A denied ListenerSet is never evaluated by kgateway (`pkg/krtcollections/policy.go` V4:607-622) **(our call)**.
+- **Controller status**, read only for the cross-check (§8) and for roots when view A is unknown (§5.1).
+
+### 3.2 Defaults applied when decoding
+
+- parentRef: group and kind default to Gateway; namespace to the route's own (`pkg/krtcollections/policy.go` V4:1247-1274).
+- Delegation backendRef: namespace defaults to the parent route's (`pkg/krtcollections/policy.go` V4:1575-1590). Group and kind must be explicit; an omitted kind means Service (`translator/backendref/types.go` V4:14-28).
+- Header and query matches default to type `Exact`, so equality compares like with like, as kgateway's `DeepEqual` does on typed structs.
+- A rule with omitted `matches` has the CRD default `PathPrefix /`. An explicit `matches: []` stays empty.
+- `inherit-parent-matcher` is true for `true`, `yes` or `enabled`, case-insensitive, read from the child (`api/annotations/delegation.go:7`; `utils/delegation/delegation.go` V4:59-71, V3:48-60; `pkg/krtcollections/policy.go` V4:1429).
+
+### 3.3 Unknown reasons
+
+| Reason | When | What is unknown |
+|---|---|---|
+| `namespace-labels-unavailable` | Namespace access is not OK and a listener uses `From: Selector` | that listener's count, its members and their parentRef outcomes |
+| `listenerset-no-status` | a ListenerSet has no current `Accepted` | that ListenerSet's listeners |
+| `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs whose namespace could be the wildcard |
+| `not-reached` | an owned parent route is not reached from any root (§5.1) | its contexts, so its delegation outcomes; selection and permission stay known |
+| `context-unknown` | an ancestor on the path is unknown or was cut by a bound | everything below that point |
+| `too-large` | a bound of §5.5 stopped the computation | everything not yet computed, in the deterministic order of §5.5 |
+
+Missing objects are rules, not unknowns. A missing Namespace matches only an empty selector (§4.2). A missing `name` target is an unresolved reference (§5.2).
+
+## 4. View A — route → listener attachment
+
+### 4.1 Algorithm
+
+For each Gateway, and for each **allowed** ListenerSet of it (`query/route.go` V4:393-410, V3:353-370), kgateway runs `processRoute` on every candidate route. Candidates are routes with a parentRef whose (group, kind, namespace, name) names the resource. A Gateway parentRef never reaches ListenerSet listeners, and a ListenerSet parentRef never reaches Gateway listeners.
+
+```
+viewA(resource, route):                               # processRoute: V4 query/route.go:437-547, V3:397-508
+  for ref in route.parentRefs where names(ref, resource):    # query/query.go:201-229, both
+    allowed = matched = hosts = false
+    for l in resource.listeners:
+      kinds, nsOK, err = allowedRoutes(resource, l)    # V4 query/route.go:157-221, V3:130-194
+      if err: listenerError(l); continue               # From=Selector with a nil selector
+      if route.kind not in kinds: continue             # Kind compared, group ignored
+      if not nsOK(route.namespace): continue
+      allowed = true                                   # set BEFORE the section check
+      if ref.port and ref.port != l.port: continue     # query/query.go:170-178, both
+      if ref.sectionName and ref.sectionName != l.name: continue
+      matched = true
+      ok, eff = intersect(l.hostname, route.hostnames) # HTTPRoute, GRPCRoute, TLSRoute; query/query.go:231-296, both
+      if not ok: continue
+      hosts = true
+      member(resource, l) += (route, ref, eff)          # one entry per (route, parentRef)
+    outcome(route, ref) = not allowed → NotAllowedByListeners      # V4 query/route.go:526-543, V3:486-503
+                          not matched → NoMatchingParent
+                          not hosts   → NoMatchingListenerHostname
+                          else        → accepted on the listeners that passed
+```
+
+**The `allowed` quirk is reproduced exactly.** `allowed` is decided across all listeners before the section check. A parentRef with `sectionName: b`, where listener `a` allows the route's namespace and `b` does not, gives `NoMatchingParent`.
+
+### 4.2 Allowed routes
+
+- **Kinds.** Protocol defaults: HTTP and HTTPS → HTTPRoute, GRPCRoute; TLS with mode Terminate → TLSRoute, TCPRoute; any other TLS mode → TLSRoute; TCP → TCPRoute; UDP → none; any other protocol → HTTPRoute (`query/route.go` V4:198-221). A set `allowedRoutes.kinds` is intersected with those defaults; a nil group means `gateway.networking.k8s.io` (V4:163-175).
+- **Namespaces.** The default `Same` means the namespace of the resource; for a ListenerSet listener that is the ListenerSet's. `All` allows every namespace. `Selector` is evaluated against the Namespace object's labels. A missing Namespace matches only an empty selector (`pkg/krtcollections/namespaceselector.go` V4:20-28).
+- **Experimental kinds.** A route of an experimental-only kind (D-018) is a candidate only when the experimental setting is true.
+
+### 4.3 Hostname intersection
+
+From `query/query.go` V4:231-296 (both). Matching is a case-sensitive string suffix match.
+- A route with no hostnames attaches. Its effective hostname is the listener's, or none.
+- A listener with no hostname gives the route's hostnames.
+- Otherwise, per pair: two exact names must be equal (result: the listener's); a `*.x` listener matches an exact route name ending in `.x` at any depth (result: the route's); an exact listener matches a `*.x` route when it ends in `.x` (result: the listener's); two wildcards give the more specific.
+- Duplicates are removed. Attachment fails only when the result is empty.
+- The result is the **effective hostnames per (parentRef, listener)**. Each listener has its own list (`query/route.go` V4:457-521, V3:417-481).
+
+### 4.4 Listener count
+
+`attachedRoutes` is `len(listenerResult.Routes)` for each listener of the Gateway and of each allowed ListenerSet (`translator/gateway/gateway_translator.go` V4:110-121, same in V3). So the computed count is:
+- one entry per (route, parentRef) that passed on that listener; a route with two matching parentRefs counts twice;
+- top-level routes only, never delegated children;
+- counted before backend resolution, delegation outcomes, rule translation and listener validation.
+
+### 4.5 Programming-only rules (not part of view A)
+
+Two things narrow what Envoy serves without changing status or counts:
+- 2.4's plain-HTTP listener isolation drops a hostname from a less specific listener on the same port (`translator/listener/gateway_listener_translator.go` V4:689-747; V3 has none);
+- listeners that fail validation are dropped later (`TranslateListeners`, V4:62). Their routes still count and keep `Accepted=True`.
+
+View A shows status semantics. On 2.4, a listener that shares its port with a more specific listener carries the note "Envoy may serve fewer hostnames on this listener" **(our call)**.
+
+### 4.6 Output
+
+| Result | Key | Value | Dependencies |
+|---|---|---|---|
+| Listener membership | (resource, listener, route, parentRef index) | effective hostnames | route, resource, the route's Namespace when the listener uses `Selector` |
+| ParentRef outcome | (route, parentRef index) | accepted with listeners, or one of three reasons | route, resource; Namespaces evaluated by `Selector` on any listener of the resource |
+| Listener count | (resource, listener) | number | resource, every candidate route, every Namespace evaluated by `Selector` |
+| Explanation | per non-accepted outcome | the listener facts that failed, e.g. "listener `https` allows namespaces with `team=web`; namespace `shop` has `team=retail`" | as the outcome |
+
+## 5. View B — delegation selection, permission and fit with ancestor context
+
+### 5.1 Roots and contexts
+
+kgateway flattens delegation **once per parent match and delegation ref**, with the parent's match as it stands **after its ancestors filtered or merged it** (`translator/httproute/gateway_http_route_translator.go` V4:119,190-210, V3:119,195-207). A kept child is cloned with its rules replaced by the fitting matches (`translator/httproute/delegation_helpers.go` V4:91-102, V3:92-103), and that clone is translated recursively (`translator/httproute/delegation.go` V4:93-95, V3:100-103). So an outcome depends on the path, not just the edge.
+
+Example: root R delegates under `/api` to P. P has matches `/api` and `/other` on a rule that delegates to C, whose only match is `/other/item`. R's fit reduces P to `/api`, so C is dropped. Evaluating P → C from P's own matches would wrongly attach C through `/other`. The rules carry the context to get this right.
+
+- **Root.** An owned top-level HTTPRoute that view A accepts on at least one listener. When view A is unknown for all its parentRefs, a current `Accepted=True` from status makes it a root, labelled "root from status". Otherwise it is not a root. Roots do not depend on the listener: view B never reads hostnames, only the child's own `spec.hostnames`.
+- **Context.** One `HTTPRouteMatch` (the incoming parent match), the path of routes from the root, the report key of the parent's reporter (§7), and the dependency set (every route on the path).
+- **Root contexts.** Each match of each root rule that has a delegation ref, with the CRD default when `matches` is omitted.
+- **Child contexts.** Each effective match (view C) of each kept child rule that has a delegation ref.
+
+### 5.2 Selection
+
+| Mode | Spec | Selects (`query/route.go` fetchRoutesByRef V4:315-361, V3:275-321) |
+|---|---|---|
+| `name` | `name: x` | the HTTPRoute ns/x; missing → unresolved reference |
+| `wildcard` | `name: "*"` or empty | every HTTPRoute in ns |
+| `label` | group `delegation.kgateway.dev`, kind `label`, `name: v` | HTTPRoutes in ns whose label `delegation.kgateway.dev/label` is exactly `v` (`api/labels/delegation.go:7`) |
+| `label`, namespace equals the wildcard setting | `name: v` | that label value in every namespace. The setting defaults to `all`; an empty value also means `all` (`api/labels/delegation.go:12`) |
+
+An empty result is an unresolved reference. No ReferenceGrant is involved. Out-of-scope routes are never selected; a `name` ref to one shows "Not watched by the controller".
+
+### 5.3 Permission
+
+`ChildRouteCanAttachToParentRef` (`utils/delegation/delegation.go` V4:20-34, V3:20-47):
+- a child with an empty `parentRefs` list may be selected by any parent;
+- otherwise it needs a parentRef with **explicit** `group: gateway.networking.k8s.io` and `kind: HTTPRoute` (nil does not match), the parent's name, and a namespace equal to the parent's (nil means the child's own);
+- sectionName and port are ignored.
+
+A forbidden child is skipped silently, with no status, before the cycle check (`query/route.go` V4:266-269, V3:240-242).
+
+### 5.4 Algorithm
+
+```
+selectTree(P, path):                                   # getDelegatedChildren: V4 query/route.go:233-292, V3:206-269
+  items, errs = {}, {}
+  for rule in P.rules:
+    acc = []                                           # quirk 1: accumulated per RULE, not per ref
+    for ref in delegationRefs(rule):
+      routes, err = fetch(ref)                         # §5.2
+      if err: errs[key(ref)] = err; continue
+      for c in routes:
+        if not permits(c, P): row(P, ref, c, forbidden); continue
+        if c in path: errs[key(ref)] = cycle; continue # path-scoped, so diamonds are valid
+        acc += c
+      items[key(ref)] = copy(acc)                      # quirk 2: keyed per parent ROUTE; a later rule overwrites
+  return items, errs                                   # errors are never cleared (query/backendmap.go V4:39-54, both)
+
+childrenFor(P, ref, path):                             # BackendMap.get
+  items, errs = selectTree(P, path)
+  if key(ref) in errs: return error errs[key(ref)]     # one cycle fails the whole ref and its siblings
+  if key(ref) not in items: return error unresolved
+  return items[key(ref)]
+
+flatten(P, i, ref, ctx):                               # V4 translator/httproute/delegation.go:26-102, V3:28-109
+  kids, err = childrenFor(P, ref, ctx.path)
+  if err: parentSignal(ctx.reporterKey, err); rows(P, i, ref, ctx, err); return
+  valid = 0
+  for c in kids:
+    eff = viewC(c, ctx.match)                          # §6; ctx.match is already pruned by the ancestors
+    if eff.keptRules is empty: row(P, i, ref, c, ctx, dropped, eff.reason); continue
+    if c.hostnames: row(..., rejected-hostnames); childSignal(c, key(c, P), rejected); continue   # V4 :83-91, V3 :90-98
+    row(..., attached, eff); childSignal(c, key(c, P), attached); valid += 1
+    for (k, rule) in eff.keptRules:
+      for m in rule.matches:                           # the effective matches
+        for ref2 in delegationRefs(rule):
+          if not budget.take(): stop(too-large)        # §5.5
+          flatten(c, k, ref2, {match: m, path: ctx.path + c, reporterKey: key(c, P), deps: ctx.deps + c})
+  if valid == 0: parentSignal(ctx.reporterKey, unresolved)        # V4 :98-100, V3 :105-107
+```
+
+- `parentSignal` maps an error as `ProcessBackendError` does: a cycle gives `ResolvedRefs=False/RefNotPermitted`; an unresolved reference gives `ResolvedRefs=False/BackendNotFound` (`query/utils.go` V4:38-51, V3:37-50). Under STANDARD or STRICT validation the parent rule becomes a 500 response (`translator/irtranslator/route.go` V4:315-372).
+- Child hostnames are checked **after** the fit. A hostname-bearing child whose rules all fail the fit is `dropped`, not `rejected-hostnames`.
+- Memoising `selectTree` per parent and filtering the path afterwards is allowed. The results must equal the definition above.
+- **The two quirks are reproduced as written and flagged as unverified on a cluster** (§10, item 7).
+
+### 5.5 Bounds
+
+Selection can be dense: many wildcard or label refs, each selecting many routes. Contexts multiply with depth and with the number of matches. The computation is capped per install per recompute **(our call)**:
+
+| Bound | Cap | Counts |
+|---|---|---|
+| Selected edges | 50,000 | (parent, rule, ref, child) rows, including forbidden ones |
+| Contexts | 20,000 | `flatten` calls |
+| Matcher evaluations | 200,000 | (child match, context) fit or merge steps |
+| Contexts kept per row | 20 | per (parent, rule, ref, child); more sets `contextsTruncated` |
+
+- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). When a cap is reached, the rest is `unknown` with `too-large`, and the install's computed summary records which cap was hit.
+- A cut is deterministic, so the same Model gives the same cut.
+- View A has no cap. It is linear in parentRefs × listeners.
+- The design's benchmarks include a dense-selection shape, separate from the diamond lattice (design §9.6).
+
+### 5.6 Outcomes and rows
+
+Per context, a (parent, rule, ref, child) gets one outcome: `attached`, `dropped` (with the failing match), `forbidden`, `rejected-hostnames`, `cycle` (the ref failed), `unresolved` (the ref selected nothing usable) or `unknown` (with a reason).
+
+The row aggregates its contexts **(our call)**:
+- the same outcome in every context → that outcome;
+- `attached` in some contexts and `dropped` in others → `partial`, "Attached under some parent matches";
+- some contexts unknown → the known outcome with "Some paths unknown", or `unknown` when none is known.
+
+Each row lists its contexts (at most 20): the incoming parent match, the path, the outcome and the reason. `forbidden` does not depend on context.
+
+## 6. View C — effective matcher
+
+Per kept child rule, given the incoming parent match of the context (`translator/httproute/delegation_helpers.go` V4:33-107, V3:34-108):
+
+```
+viewC(child, parentMatch):
+  kept = []
+  for rule in child.rules:
+    valid = []
+    if inherit(child) and rule.matches == []: valid += parentMatch       # explicit empty list only
+    for m in rule.matches:
+      if inherit(child): valid += merge(parentMatch, m)                  # V4 :117-196, V3 :118-196
+      elif fits(parentMatch, m): valid += m                              # used unchanged
+    if valid: kept += rule with matches = valid
+    else: reason(rule) = the clause of fits() that failed
+  return kept                                                            # child kept iff kept is not empty
+```
+
+**Default mode, `fits`** (`IsDelegatedRouteMatch`, `utils/delegation/delegation.go` V4:82-133, V3:72-123):
+- the parent path type must be `PathPrefix`; with an Exact or Regex parent every child match fails;
+- the child path value must start with the parent value as a raw string, so `/api` accepts `/apiv2`; the child's path type is not checked;
+- every parent header and query param must appear in the child, equal in name, type and value;
+- a parent method must be matched by the same child method.
+
+A rule with omitted `matches` has the default `PathPrefix /`, which fails under any parent prefix but `/`. The reason reads "This rule has no matches, so it defaults to `/`, which is outside the parent's `/api`".
+
+**Inherit mode, `merge`** (`mergeParentChildRouteMatch`, `delegation_helpers.go` V4:117-142, V3:118-146). The parent path type is not checked.
+- Path: `path.Join(parent, child)`, keeping the child's path type. A nil child path counts as Prefix `""`. `path.Join` cleans the result, so `/api` + `/` gives `/api`.
+- Headers and query params: the union by name, the parent winning on a conflict, sorted by name (V4:146-196, V3:147-196).
+- Method: the parent's, if set.
+- Nothing is dropped.
+
+The **context carries the result down.** A grandchild's parent match is one of the child's effective matches, never the child's spec match. Each effective match depends on every route on the path.
+
+## 7. Report keys per version
+
+kgateway keys a status report on (group, kind, namespace, name, sectionName) **as written**, with nil as empty and **no port** (`getParentRefKey`, `pkg/reports/reporter.go` V4:424-450, V3:369-394). The status builder walks the route's `spec.parentRefs` (or, when that list is empty, the report's own refs with the namespace filled in) and writes an entry for each spec ref whose key has a report. The entry carries the spec ref as written, port included (`pkg/reports/status.go` V4:489-496,531-543, V3:437-442,471-483).
+
+| Route | Reporter ref | Entry written |
+|---|---|---|
+| Top-level route, both | the parentRef as written | for every parentRef the translation reported |
+| Child with empty `parentRefs`, both | synthesized `{gateway.networking.k8s.io, HTTPRoute, P.namespace, P.name}` | yes, under the synthesized ref |
+| Child with an explicit permitting ref, 2.4 | the child's matching ref as written (`childParentRef`, `query/route.go` V4:300-310; reporter at `delegation.go` V4:81) | yes, under that ref |
+| Child with an explicit permitting ref, 2.3 | always synthesized (`query/route.go` V3:252-259; reporter at `delegation.go` V3:83-88) | **only** when some spec ref has the same key: explicit group and kind, an **explicit** namespace equal to P's, and no sectionName. A port is allowed; the entry then carries it. |
+
+Consequences, applied to **every** outcome that writes child status, `attached` and `rejected-hostnames` alike:
+- On 2.3, a child whose permitting ref omits the namespace or sets `sectionName` gets **no entry at all**. The 2.3 rule set expects none, and the check is `not-verified` (nothing can be observed), never a disagreement.
+- On 2.3, a child whose ref differs from the synthesized one only by a port **does** get an entry, written with its port.
+- Two spec refs that differ only by port share one key. Both get the same entry content. The check compares them as one.
+
+## 8. Cross-check contract
+
+### 8.1 Which signal checks which stage
+
+A controller signal checks a computed result only when the signal is written by the stage the rules model. Failures of later stages are never disagreements.
+
+| Signal | Written by | Checks | Never a disagreement |
+|---|---|---|---|
+| Listener `attachedRoutes` | attachment (`gateway_translator.go` V4:110-121, both) | view A listener count | — (it is counted before every later stage) |
+| Route `Accepted=False` with `NotAllowedByListeners`, `NoMatchingParent` or `NoMatchingListenerHostname` | attachment (`gateway_translator.go` V4:80-87, both) | view A parentRef outcome | — |
+| Route `Accepted=False` with any other reason | later stages: rule replacement on 2.3, TCP/TLS conflict on 2.3 (§2) | nothing | compatible with a computed `accepted` |
+| `ResolvedRefs=False` on a top-level route or a child | backend resolution (`gateway_http_route_translator.go` V4:214-216; `query/utils.go` V4:45-57) | nothing on its own | compatible with every computed outcome |
+| `kgateway.dev/Programmed=False` | rule translation, conflicts (2.4) | nothing | compatible |
+| Child entry for P, present or absent | delegation flatten (§5.4) | view B child outcome, aggregated (§8.2) | — |
+| Child `Accepted=False/UnsupportedValue` | hostname validation (`delegation.go` V4:83-91, V3:90-98) | view B `rejected-hostnames` | — |
+| Parent `ResolvedRefs=False/BackendNotFound` or `RefNotPermitted` | delegation failures and backend failures share it | view B parent signal, aggregated (§8.2) | see §8.2 |
+| Effective matchers | nowhere | nothing | always `not-verified` |
+| Effective hostnames | nowhere | nothing | always `not-verified` |
+
+### 8.2 Aggregation at the controller's reporting granularity
+
+kgateway merges every write for one report key into one entry, and a later write of a condition type replaces an earlier one (`SetCondition`, `pkg/reports/reporter.go` V4:505-512, V3:447-454). Per-rule, per-ref and per-match outcomes are therefore not separately visible. Expected signals are aggregated per report key before they are compared:
+
+| Check | Key | Expected |
+|---|---|---|
+| `listener-count` | (resource, listener) | the computed count (§4.4) |
+| `route-accepted` | (route, report key of the parentRef) | refs sharing a key are merged: if any member is rejected, `Accepted=False` with one of the members' attachment reasons; else not `False` with an attachment reason |
+| `child-entry` | (child, report key under P, §7) | an entry iff **any** context, over every rule and ref of P and every root, gives `attached` or `rejected-hostnames`. With a rejection: `Accepted=False/UnsupportedValue`. With an attachment: no `UnsupportedValue`. No entry when every context gives `dropped`, `forbidden`, `cycle` or `unresolved`. |
+| `parent-resolvedrefs` | (P, P's reporter key) | `False` when any context with that key records a delegation failure. The reason is compared only when all such failures share one reason **and** P has no non-delegation backendRef and no `ExtensionRef` filter; otherwise only the status is compared. A computed "no delegation failure" against an observed `False` contradicts only under the same condition; otherwise it is compatible. |
+
+Individual rows keep their own outcomes. A row whose outcome the aggregated signal cannot confirm says "Status cannot confirm this path". It is never a disagreement on its own.
+
+### 8.3 Evidence classes
+
+"Current" means the condition's `observedGeneration` equals the generation of the object that carries it. A current signal proves the controller processed that object's spec, not every other object the check depends on. The persistence window (§9) covers that gap.
+
+| Class | When | Check state | KGWUI-012 |
+|---|---|---|---|
+| Contradicting current status | the signal exists, is current, and contradicts the expectation | `pending` until mature, then `disagrees` | when mature (§9.3) |
+| Stale status | the signal exists and is stale | `pending`, "Waiting for the controller" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
+| Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route is Phase 1's KGWUI-003, and the check stays `pending`. |
+| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (2.4 matcher drop); otherwise `not-verified`, "The controller may keep old status" | where verified, when mature |
+| Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
+| Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
+
+### 8.4 Coverage labels
+
+A cross-check that passes says what it verified. "Agrees" is never shown for a fact the controller does not report **(our call)**.
+
+| Coverage | Means | Shown as (draft) |
+|---|---|---|
+| `count-agrees` | the listener's count equals `attachedRoutes`; membership and effective hostnames are not verified | "Count agrees with the controller" |
+| `status-compatible` | the parentRef's or child's status is consistent with the outcome | "Status agrees" |
+| `not-verified` | nothing the controller writes covers this fact | "Not checked by the controller" |
+
+A result may carry several labels. A route's listener membership carries the listener's `count-agrees` and the parentRef's `status-compatible`, and stays `not-verified` for which listener it is on when its parentRef matched several. An effective matcher is always `not-verified`.
+
+Check states on the wire are `checked`, `disagrees`, `pending`, `unknown` and `restricted`. `restricted` is set at serve time when the caller may not view a dependency (design §7.4).
+
+## 9. Persistence of KGWUI-012 and the computed KGWUI-011
+
+### 9.1 Check identity
+
+A check's identity is (install, rule set, check kind, subject):
+
+| Kind | Subject |
+|---|---|
+| `listener-count` | resource ref, listener name |
+| `route-accepted` | route ref, report key |
+| `child-entry` | child ref, parent ref, report key |
+| `parent-resolvedrefs` | parent ref, reporter key |
+| `delegated-not-attached` (KGWUI-011 computed) | route ref, parent ref |
+
+A rule set change gives a new identity.
+
+### 9.2 Semantic fingerprint
+
+The fingerprint is a hash over exactly the decoded fields the check read, plus the observed signal. Nothing else resets the window:
+
+| Kind | Fields |
+|---|---|
+| `listener-count` | the listener's spec (name, port, protocol, hostname, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; the labels of candidate namespaces when the listener uses `Selector`; the experimental setting; observed `attachedRoutes` and the listener conditions' `observedGeneration` |
+| `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs; namespace labels when `Selector` is used; observed `Accepted` status, reason and `observedGeneration` for the key |
+| `child-entry`, `parent-resolvedrefs` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; for the parent check, P's backendRef kinds and filters; the observed entry's presence, `Accepted` and `ResolvedRefs` status and reason, and `observedGeneration` |
+| `delegated-not-attached` | as `child-entry`, without the observed signal |
+
+Not in any fingerprint: `resourceVersion`, `managedFields`, labels and annotations not listed, other conditions, `lastTransitionTime`, metrics, Pods and Deployments. An unrelated status write, annotation edit or metrics arrival never restarts the window.
+
+### 9.3 State, maturation and clearing
+
+The engine keeps a map from identity to (fingerprint, `since`) under its compute lock, carried across recomputes like Phase 1's grace map (`pkg/engine/engine.go:83,110-130`). Each recompute:
+1. For a check in a candidate class (contradicting, missing expected, unexpected where verified): if its identity is new or its fingerprint changed, `since` = now.
+2. **Contradicting current or unexpected status** is mature when `now − since ≥ 30 s`.
+3. **Missing expected child status** is mature when `now ≥ max(since + 30 s, graceEnd)` **and** P's own entry under its reporter key is current. `graceEnd` is 60 s (Phase 1's grace period) after the latest first-seen time of the current generation of the child, P and every route on a contributing path. If P's entry is not current, the check stays `pending`; P has Phase 1's KGWUI-003.
+4. A mature check raises KGWUI-012 on the object whose status disagrees: the Gateway or ListenerSet for a count, the route for a parentRef, the child for a child entry, P for its `ResolvedRefs`.
+5. **Clearing.** When the check is no longer in a candidate class (it agrees, turns unknown or is skipped), its entry is deleted and the finding goes on that same recompute.
+6. Entries whose subject no longer exists are pruned. A UI restart loses the map, so windows restart, as grace does in Phase 1.
+7. **Deadline.** Each recompute reports the earliest future maturation instant to the scheduler (design §3.1). The predicate becomes true at exactly that instant, so a recompute then raises the finding with no further event.
+
+**Computed KGWUI-011** (design §6.2) uses the same map with kind `delegated-not-attached`. It is mature 30 s after `since`. It never makes a check pending, because it waits on no controller output **(our call)**.
+
+## 10. Observations that may change these rules
+
+The first task of sub-phase 2.1 records, on 2.3.11 and 2.4.7, whether status is produced, and under which parentRef (design §9.5):
+1. an implicit child (empty `parentRefs`) after the parent stops selecting it: is the old entry removed?
+2. an explicit child whose parentRef omits the namespace (§7);
+3. an explicit child whose parentRef sets `sectionName`, and one that sets only `port` (§7);
+4. an implicit child selected by name, wildcard and label;
+5. a hostname-bearing child whose rules all fail the fit (§5.4);
+6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4?
+7. the two quirks of §5.4: a second delegation ref in one rule, and the same ref in two rules;
+8. a parent with both a Service backendRef and a delegation ref: which `ResolvedRefs` reason wins (§8.2)?
+9. a child kept under one parent match and dropped under another: one entry (§8.2)?
+10. listener `attachedRoutes` for delegated children (expected: not counted) and for ListenerSet routes.
+
+Each result becomes a decision entry. A rule set, and the `verified` mark of §8.3, change before the sub-phase that depends on them.
+
+## 11. Test matrix
+
+Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settings, controller status) with the expected outputs of the views and the cross-check. Fixtures live in `pkg/computed/testdata/<rule set>/`. Where possible the expected controller signals are copied from kgateway's own translator test outputs at that tag (`translator/gateway/testutils/outputs/…`), with the source file named. The cases that need a real controller also run in the kind e2e (design §9.5); they are marked **e2e**.
+
+### 11.1 View A (sub-phase 2.3)
+
+| Case | Expect |
+|---|---|
+| Each protocol's default kinds; `allowedRoutes.kinds` intersection with a nil group | members per kind |
+| `Same` on a Gateway and on a ListenerSet listener; `All`; `Selector` matching, not matching, Namespace missing; nil selector | membership; listener error |
+| Namespace access unavailable with a `Selector` listener | `unknown`, `namespace-labels-unavailable`; check skipped |
+| `port`; `sectionName`; the `NoMatchingParent` quirk **e2e** | outcomes |
+| Every hostname case of §4.3, with per-listener effective hostnames on a parentRef that matches two listeners | separate lists per listener |
+| Two parentRefs of one route matching one listener **e2e** | counted twice |
+| Two parentRefs that differ only by port | one `route-accepted` check |
+| A Gateway parentRef never reaching ListenerSet listeners; a denied ListenerSet's routes not evaluated **e2e** | no members |
+| ListenerSet without status | `listenerset-no-status` |
+| Experimental kind with the setting true, false and unknown | candidate, not a candidate, `unknown` |
+| 2.4 isolation note on a shared plain-HTTP port | note, count unchanged |
+
+### 11.2 View B and C (sub-phase 2.4)
+
+| Case | Expect |
+|---|---|
+| Name, wildcard, label refs; a label ref with the wildcard namespace under the default, a set value and `valueFrom` | selection; `setting-unknown` |
+| Permission: empty list, by name, forbidden, nil group or kind in the child's ref | permitted, forbidden |
+| **Ancestor-pruned parent match:** R `/api` → P {`/api`, `/other`} → C `/other/item` **e2e** | C `dropped` under the only context; no child entry expected |
+| **One child, two matches:** P {`/api`, `/v2`} → C `/api/x`, in one rule **e2e** | row `partial`; `child-entry` expects an entry; `status-compatible` |
+| **One child, two rules:** P's rule 1 drops C, rule 2 attaches it | rows `dropped` and `attached`; one entry expected |
+| Hostname-bearing child that fits; one that does not | `rejected-hostnames`; `dropped` |
+| Cycle: the ref fails, its siblings drop, parent `RefNotPermitted` | as stated |
+| Diamond A→B1→C, A→B2→C | two child entries, one per parent |
+| The two quirks of §5.4 | as written, flagged |
+| An owned parent not reached from a root | `not-reached`; selection still shown |
+| Dense selection: 100 wildcard parents over a namespace of 1,000 routes | `too-large` after the edge cap, deterministic cut |
+| Contexts per row above 20 | `contextsTruncated` |
+| Default fit: each clause, raw prefix `/apiv2`, child path type ignored, omitted `matches` under `/api` | kept or the failing clause |
+| Inherit: `path.Join` cleaning, child type kept, nil child path, header and query union with the parent winning, method, explicit `matches: []` | effective matches |
+| A three-level chain where the grandchild's context is the child's merged match | grandchild evaluated against the merged match |
+
+### 11.3 Report keys (sub-phase 2.4)
+
+| Case | 2.3 | 2.4 |
+|---|---|---|
+| Child with empty `parentRefs` | entry, synthesized ref | entry, synthesized ref |
+| Explicit, full ref | entry | entry as written |
+| Explicit ref with only a **port** **e2e** | entry, written with the port | entry as written |
+| Explicit ref omitting the namespace, attached and hostname-rejected | no entry; `not-verified` | entry as written |
+| Explicit ref with `sectionName` | no entry; `not-verified` | entry as written |
+
+### 11.4 Cross-check (sub-phases 2.3 and 2.4)
+
+| Case | Expect |
+|---|---|
+| Listener count equal; off by one with current status | `count-agrees`; `disagrees` after 30 s |
+| Computed accepted; observed `Accepted=False/NoMatchingParent`, current | `disagrees` after 30 s |
+| **Attached child with a missing Service backend** (`ResolvedRefs=False/BackendNotFound`) **e2e** | `status-compatible`, no KGWUI-012 |
+| Attached child with a replaced rule: 2.4 `Programmed=False`, 2.3 `Accepted=False/RouteRuleReplaced` | compatible |
+| TCP conflict on both versions | compatible |
+| Parent with two delegation refs, one unresolved | `parent-resolvedrefs` expects `False`; reason compared |
+| Parent with a missing Service backend and all delegation refs fine | observed `False` compatible |
+| Computed-attached child, no entry, P current | `pending` until `max(since + 30 s, graceEnd)`, then KGWUI-012 on the child |
+| The same with P stale | stays `pending`; no KGWUI-012 |
+| Stale child entry contradicting | `pending`; never KGWUI-012 |
+| 2.4 matcher-dropped child with a current entry left | `disagrees` after 30 s |
+| Forbidden child with a current entry left | `not-verified` |
+| Effective matcher | always `not-verified` |
+
+### 11.5 Persistence and deadlines (sub-phase 2.3; extended in 2.4)
+
+| Case | Expect |
+|---|---|
+| Disagreement clears at 29 s | no finding |
+| No events after the disagreement starts | the scheduled recompute at exactly `since + 30 s` raises it; at `since + 30 s − 1 ns` it is absent |
+| An annotation edit, an unrelated condition write, a `resourceVersion`-only update, a metrics arrival during the window | no reset |
+| A change to a listed field, or to the observed value | reset |
+| Rule set switch | reset |
+| Subject deleted | entry pruned, finding gone |
+| Disagreement turns unknown (Namespace access lost) | finding cleared the same recompute |
+| Missing expected entry: `graceEnd` later than `since + 30 s`, and the reverse | matures at the later instant |
+| Computed KGWUI-011: matures at 30 s; never makes a check pending | as stated |

@@ -330,25 +330,31 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 **Decision:**
 1. The engine recomputes on triggers:
    - informer add, update and delete events for every watched kind, including Namespaces, Pods and Deployments;
-   - access transitions, found by a 1 s confirm tick;
+   - access transitions, from the list/watch progress hooks, with a 1 s confirm tick as a fallback;
    - metrics scrape results; the scrape cadence (`--metrics-interval`) stays separate;
    - served-kinds changes;
-   - scheduled deadlines for grace expiry and metrics staleness;
+   - scheduled deadlines: grace expiry, metrics staleness, and the maturation of KGWUI-012 and the computed KGWUI-011;
    - a slow safety timer.
-2. **Debounce:** a 250 ms trailing quiet window, bounded to 1 s from the first trigger of a burst. One `kubectl apply` or Helm upgrade becomes one recompute, and a continuous stream still recomputes at least once a second. Recomputes are single-flight: triggers during a recompute cause exactly one more.
-3. **`--poll-interval`** keeps its name and type. Its meaning becomes "recompute at least this often" (the safety timer). The default rises from 2 s to 30 s. A user who set 2 s gets Phase 1's cadence as a floor, so existing settings stay valid.
-4. **Freshness:** `collectedAt` (and `Collected-At`) means "when the backend last confirmed this model matches its cache". The confirm tick advances it every second while no trigger is pending. A hung recompute stops it, so the SPA's stale rule still fires (D-006).
-5. **The SPA keeps its 5 s poll.** Responses are served from memory and are cheap. Polling also renews `collectedAt`, which is how the client notices a stuck backend. Push stays out of scope.
+2. **Revision.** Every trigger source keeps a counter: cache, metrics and kinds. The cache increments its counter after the store is updated, and a snapshot reads the counter before it copies the stores. A model records the revision of the snapshot it was computed from.
+3. **Scheduler.** One goroutine owns the state: idle, pending (with a due time) or running (with a revision). Debounce: a 250 ms trailing quiet window, bounded to 1 s from the first trigger of a burst. Deadlines run at their instant without debounce. Single flight: triggers during a run keep the state pending, and one more run follows. A run that finishes with an older revision than the current one never clears the pending state.
+4. **Publication.** A run publishes one immutable value, `{Model, Rev, ConfirmedAt}`, through an atomic pointer. `ConfirmedAt` starts as the snapshot time. Nothing in a published value is changed afterwards.
+5. **Confirmation.** Every second, when nothing is pending or running and the current revision equals the published one, the confirm tick publishes a new value with the same Model and `ConfirmedAt = now`. Otherwise it does nothing. A hung recompute stops confirmation, so the SPA's stale rule still fires (D-006).
+6. **Timestamps.** `computedAt` on the install list keeps its meaning: when the model behind health was computed. A new optional `confirmedAt` carries `ConfirmedAt`, and the cluster cards, install switcher and header read it, falling back to `computedAt`. `collectedAt` on the overview, health and every Phase 2 body, and the `Collected-At` header, carry `ConfirmedAt`. Per-check `collectedAt` and finding `since` are unchanged. The Phase 2 design §3.1 lists every field and consumer.
+7. **`--poll-interval`** keeps its name and type. Its meaning becomes "recompute at least this often" (the safety timer). The default rises from 2 s to 30 s. A user who set 2 s gets Phase 1's cadence as a floor, so existing settings stay valid.
+8. **Polling only reads.** The SPA keeps its 5 s poll. A request loads the published value once and serves its Model and `ConfirmedAt`; it renews nothing. Push stays out of scope.
 
 **Alternatives:**
 - Keep the fixed ticker. Rejected: a constant full recompute on idle clusters, and latency bounded by the interval.
 - Incremental per-object index updates. Rejected for now: much more complex than an immutable rebuild, and unnecessary at the Large tier. Revisit if the Extreme tier numbers demand it.
 - No debounce (recompute per event). Rejected: a Helm upgrade would cause hundreds of recomputes.
 - Replace `--poll-interval` with a new flag. Rejected: it breaks existing invocations for no gain.
+- Redefine `computedAt` as the confirmation time. Rejected: it has a documented meaning, and clients may rely on it.
+- Stamp the confirmation time on the published Model. Rejected: it breaks immutability and can stamp an old model as current.
 
 **Consequences:**
 - The Model stays immutable and is swapped atomically. Between changes the Model, and so list order and cursors, stays the same.
-- `pkg/cache` registers event handlers and exposes a trigger source. The engine takes a clock and a trigger source, so tests are deterministic with a fake clock.
+- `pkg/cache` registers event handlers and exposes a trigger and revision source. The engine takes a clock, a trigger source and a revision source, so tests are deterministic with a fake clock, including the interleavings of snapshot, event, publication and confirmation.
+- `installs.json` and `bare-installs.json` gain the optional `confirmedAt`; the change is additive.
 - Budgets are stated per recompute and per change burst, not per fixed interval (Phase 2 design §9.6).
 - The README and chart notes describe the new meaning of `--poll-interval`.
 
@@ -360,7 +366,7 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
   - which listener a route attached to, and with which effective hostnames (status is per parentRef; listener status has only `attachedRoutes`);
   - which children a delegation ref selected, and which it dropped (a child dropped by the matcher fit gets no status, `v2.4.7 pkg/kgateway/translator/httproute/delegation_helpers.go:33-107`);
   - a delegated child's effective matcher.
-- The only controller source is the admin server's `/snapshots/xds`. It binds to localhost, shares a port with `/logging` and pprof, and needs `pods/portforward` (Phase 2 design §3.8).
+- The only controller source is the admin server's `/snapshots/xds`. It binds to localhost, shares a port with `/logging` and pprof, and needs `pods/portforward` (Phase 2 design §3.7).
 
 **Decision:** the user overrides the strict boundary for three views:
 - **(A) route → listener attachment:** sectionName and port, allowedRoutes namespaces (including `Selector` on Namespace labels), kinds, and hostname intersection;
@@ -374,8 +380,8 @@ Rules for each view:
    - parentRef `Accepted` reasons;
    - child status entries;
    - the parent's `ResolvedRefs` (`BackendNotFound`, `RefNotPermitted`).
-   A persistent disagreement is shown as "computed view disagrees with controller" and raises KGWUI-012 (warning). It is never hidden.
-3. The computation sits behind a pluggable interface (`pkg/computed`, like `pkg/proxymode`). It is pinned and tested per kgateway minor (rule sets `kgateway-2.3` and `kgateway-2.4`), with per-version golden fixtures.
+   A signal checks only the stage the rules model; later failures, such as backend resolution, are never disagreements. Expected signals are aggregated at the controller's reporting granularity. A passing check says what it covered ("count agrees", "status compatible" or "not independently verified"). A persistent disagreement is shown as "computed view disagrees with controller" and raises KGWUI-012 (warning). It is never hidden. `docs/phases/phase-2/computed-rules.md` §8-9 defines the contract.
+3. The computation sits behind a pluggable interface (`pkg/computed`, like `pkg/proxymode`). It is pinned and tested per kgateway minor (rule sets `kgateway-2.3` and `kgateway-2.4`), with per-version golden fixtures. The rules are specified in `docs/phases/phase-2/computed-rules.md`. Delegation is evaluated with the parent's match as its ancestors left it; where that context cannot be resolved, the result is unknown.
 4. Ownership, counts and install health stay status-based. A computed view explains and cross-checks; it never owns an object.
 5. Each view has an upstream ask, and the computation becomes a cross-check once kgateway reports the fact.
 
