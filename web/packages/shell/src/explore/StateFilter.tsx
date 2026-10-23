@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Check, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { listCopy } from "../copy/explorer";
 import { Chip } from "../states/controls";
 
 // region Styles
@@ -89,7 +90,7 @@ export function FilterTag({ text, onRemove }: FilterTagProps) {
   return (
     <Tag>
       {text}
-      <button type="button" aria-label={`Remove filter ${text}`} onClick={onRemove}>
+      <button type="button" aria-label={listCopy.removeFilter(text)} onClick={onRemove}>
         <X size={14} aria-hidden="true" />
       </button>
     </Tag>

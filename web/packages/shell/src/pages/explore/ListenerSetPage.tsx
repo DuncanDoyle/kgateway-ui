@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useListenerSetDetail } from "../../api/exploreHooks";
 import type { AllowedListeners, Condition, LinkedRef } from "../../api/types";
+import { detailCopy, gatewayCopy, listenerSetCopy } from "../../copy/explorer";
 import { ConditionList } from "../../explore/ConditionList";
 import { LinkedName } from "../../explore/LinkedName";
 import { ResourceName } from "../../resource/ResourceName";
@@ -48,18 +49,16 @@ function AllowedListenersBlock({ a }: { a: AllowedListeners }) {
   return (
     <Allowed data-testid="allowed-listeners">
       <h3>
-        Parent Gateway's <code>allowedListeners</code>
+        {listenerSetCopy.allowedTitle} <code>{listenerSetCopy.allowedField}</code>
       </h3>
       {a.set ? (
         <YamlBlock>{dump(a.value ?? {}, { noRefs: true, lineWidth: 140 })}</YamlBlock>
       ) : (
-        <p>Not set: the Gateway allows no ListenerSets.</p>
+        <p>{listenerSetCopy.allowedUnset}</p>
       )}
       {a.crdHint ? (
         <p>
-          If you set <code>allowedListeners</code> and it is missing here, the Gateway CRD in this cluster may not have
-          the field. The API server drops fields its CRD does not define. Install a Gateway CRD from the same Gateway
-          API channel and version as the ListenerSet CRD.
+          {listenerSetCopy.crdHintBefore} <code>{listenerSetCopy.allowedField}</code> {listenerSetCopy.crdHintAfter}
         </p>
       ) : null}
     </Allowed>
@@ -89,9 +88,9 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
     >
       {data ? (
         <>
-          <Section aria-label="Parent">
+          <Section aria-label={listenerSetCopy.parent}>
             <Facts>
-              <dt>Parent Gateway</dt>
+              <dt>{listenerSetCopy.parentGateway}</dt>
               <dd>
                 {/* parentFound is false for a hidden parent too, so the page never says it does not exist (D-013). */}
                 {data.parentFound ? (
@@ -99,14 +98,14 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
                 ) : (
                   <>
                     <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
-                    <Muted>Not available</Muted>
+                    <Muted>{listenerSetCopy.notAvailable}</Muted>
                   </>
                 )}
               </dd>
             </Facts>
           </Section>
           <Section aria-labelledby="ls-conditions">
-            <h2 id="ls-conditions">Conditions</h2>
+            <h2 id="ls-conditions">{detailCopy.conditions}</h2>
             <ConditionList
               conditions={data.conditions}
               generation={data.generation}
@@ -118,7 +117,7 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
           </Section>
           <Section aria-labelledby="ls-listeners">
             <h2 id="ls-listeners">
-              Listeners <span className="note">{data.listeners.length}</span>
+              {gatewayCopy.listeners} <span className="note">{data.listeners.length}</span>
             </h2>
             <ListenerTable listeners={data.listeners} generation={data.generation} />
           </Section>

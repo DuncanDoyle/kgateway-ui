@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useRouteDetail } from "../../api/exploreHooks";
 import type { LinkedRef, RouteDetail } from "../../api/types";
+import { detailCopy, routeCopy } from "../../copy/explorer";
 import { useInstallId } from "../../shell/extension";
 import { DetailFrame, Facts, Section } from "./detailParts";
 import { Muted } from "./listParts";
@@ -25,14 +26,14 @@ const Cards = styled.div`
 function hostnameText(d: RouteDetail) {
   if (d.hostnames.length) return d.hostnames.join(", ");
   const child = d.parentRefs.some(isRouteRef) || d.parents.some((p) => isRouteRef(p.target));
-  return <Muted>{child ? "Inherits the parent route's hostnames" : "Inherits the listener's hostnames"}</Muted>;
+  return <Muted>{child ? routeCopy.inheritsParent : routeCopy.inheritsListener}</Muted>;
 }
 
 /** Which parent routes may delegate here, from the spec's parentRefs (computed-rules §5.3). */
 function permissionText(d: RouteDetail) {
-  if (!d.parentRefs.length) return "Allows any parent";
+  if (!d.parentRefs.length) return routeCopy.allowsAny;
   const routes = d.parentRefs.filter(isRouteRef).map((p) => `${p.namespace}/${p.name}`);
-  return routes.length ? `Allows: ${routes.join(", ")}` : "Allows no parent route";
+  return routes.length ? routeCopy.allows(routes) : routeCopy.allowsNone;
 }
 
 // region Component
@@ -59,17 +60,17 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
       {data ? (
         <>
           <UpChain installId={id} self={ref} paths={data.ancestors} truncated={data.ancestorsTruncated} />
-          <Section aria-label="Summary">
+          <Section aria-label={detailCopy.summary}>
             <Facts>
-              <dt>Hostnames</dt>
+              <dt>{routeCopy.hostnames}</dt>
               <dd>{hostnameText(data)}</dd>
-              <dt>Parent routes</dt>
+              <dt>{routeCopy.parentRoutes}</dt>
               <dd>{permissionText(data)}</dd>
             </Facts>
           </Section>
           <Section aria-labelledby="route-parents">
             <h2 id="route-parents">
-              Parents <span className="note">{data.parentRefs.length}</span>
+              {routeCopy.parents} <span className="note">{data.parentRefs.length}</span>
             </h2>
             {data.parentRefs.length ? (
               <Cards>
@@ -85,12 +86,12 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
                 ))}
               </Cards>
             ) : (
-              <Muted>No parentRefs.</Muted>
+              <Muted>{routeCopy.noParentRefs}</Muted>
             )}
           </Section>
           <Section aria-labelledby="route-rules">
             <h2 id="route-rules">
-              Rules <span className="note">{data.rules.length}</span>
+              {routeCopy.rules} <span className="note">{data.rules.length}</span>
             </h2>
             <RuleList installId={id} rules={data.rules} />
           </Section>

@@ -10,7 +10,7 @@ import (
 // BackendNoEvidenceDetail is KGWUI-002's detail when a False Backend
 // Accepted condition carries no observedGeneration (design §6.2). Draft
 // wording, finalised in the wording pass.
-const BackendNoEvidenceDetail = "The controller does not say which version of this Backend it checked"
+const BackendNoEvidenceDetail = "the controller does not report which Backend version it checked"
 
 // backendAccepted returns the Accepted condition and its evidence: current
 // (observedGeneration at or above the generation), stale (lower, above 0), or

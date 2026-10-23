@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useParams } from "react-router-dom";
 import { useResource } from "../api/hooks";
+import { detailCopy } from "../copy/explorer";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
 import { LastAppliedToggle, useYaml, YamlBlock } from "../resource/ResourceYaml";
@@ -96,7 +97,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
         {/* The resource endpoint serves only admitted Backends (design §7.1); Services have no YAML view. */}
         {isBackend(ref) ? (
           <InlineLink to={`${installPath(id, "routes")}?${new URLSearchParams({ backend: backendParam(ref) })}`}>
-            Routes that send traffic here
+            {detailCopy.backendLookup}
           </InlineLink>
         ) : null}
         <span className="spacer" />

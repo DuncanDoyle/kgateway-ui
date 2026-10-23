@@ -13,6 +13,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from "lucide-react";
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { LinkedRef, Page } from "../api/types";
+import { listCopy } from "../copy/explorer";
 import { useMedia } from "../shell/useMedia";
 import { QuietButton } from "../states/controls";
 import { Shimmer } from "../states/Shimmer";
@@ -273,7 +274,7 @@ export function ObjectTable<T>({
             type="button"
             className="expand"
             aria-expanded={open}
-            aria-label={`${open ? "Hide" : "Show"} details for ${nameOf(r)}`}
+            aria-label={listCopy.toggleDetails(open, nameOf(r))}
             onClick={() => toggle(refKey(r))}
           >
             {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
@@ -353,7 +354,7 @@ export function ObjectTable<T>({
                       {s === "desc" ? <ArrowDown size={12} aria-hidden="true" /> : null}
                     </button>
                   ) : (
-                    (col?.header ?? <VisuallyHidden>Details</VisuallyHidden>)
+                    (col?.header ?? <VisuallyHidden>{listCopy.details}</VisuallyHidden>)
                   )}
                 </th>
               );
@@ -377,7 +378,7 @@ export function ObjectTable<T>({
                   {emptyTitle}
                   {onClearFilters ? (
                     <QuietButton type="button" onClick={onClearFilters}>
-                      Clear filters
+                      {listCopy.clearFilters}
                     </QuietButton>
                   ) : null}
                 </Empty>
@@ -424,9 +425,7 @@ export function ObjectTable<T>({
       </Table>
       <Footer data-testid="list-footer">
         <span className="denied">
-          {showDenied && page?.deniedInInstall
-            ? `You cannot view ${count(page.deniedInInstall, noun)} in this install.`
-            : null}
+          {showDenied && page?.deniedInInstall ? listCopy.denied(page.deniedInInstall, noun) : null}
         </span>
         {/* Once loaded, a single page has no pager; the footer keeps its height. */}
         {!page || page.prev || page.next ? <Pager prev={page?.prev} next={page?.next} onPage={onPage} /> : null}

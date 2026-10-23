@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useGatewayDetail, useListenerSets } from "../../api/exploreHooks";
 import type { LinkedRef, ListenerSetRow } from "../../api/types";
+import { columnCopy, detailCopy, gatewayCopy } from "../../copy/explorer";
 import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
@@ -18,10 +19,10 @@ const LS_NOUN = ["ListenerSet", "ListenerSets"] as const;
 
 function lsColumns(installId: string): ObjectColumn<ListenerSetRow>[] {
   return [
-    { id: "health", header: "Status", width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
-    { id: "name", header: "ListenerSet", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
-    { id: "kind", header: "Kind", width: "140px", secondary: true, cell: (r) => r.ref.kind },
-    { id: "listeners", header: "Listeners", width: "100px", cell: (r) => r.listeners },
+    { id: "health", header: columnCopy.status, width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
+    { id: "name", header: columnCopy.listenerSet, cell: (r) => <NameCell r={r.ref} installId={installId} /> },
+    { id: "kind", header: columnCopy.kind, width: "140px", secondary: true, cell: (r) => r.ref.kind },
+    { id: "listeners", header: columnCopy.listeners, width: "100px", cell: (r) => r.listeners },
   ];
 }
 const lsRef = (r: ListenerSetRow) => r.ref;
@@ -47,39 +48,39 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
       {data ? (
         <>
           <Section aria-labelledby="gw-conditions">
-            <h2 id="gw-conditions">Conditions</h2>
+            <h2 id="gw-conditions">{detailCopy.conditions}</h2>
             <ConditionList conditions={data.conditions} generation={data.generation} />
           </Section>
-          <Section aria-label="Summary">
+          <Section aria-label={detailCopy.summary}>
             <Facts>
-              <dt>Class</dt>
+              <dt>{columnCopy.class}</dt>
               <dd>{data.class}</dd>
-              <dt>Addresses</dt>
-              <dd>{data.addresses.length ? data.addresses.join(", ") : <Muted>None</Muted>}</dd>
+              <dt>{columnCopy.addresses}</dt>
+              <dd>{data.addresses.length ? data.addresses.join(", ") : <Muted>{columnCopy.none}</Muted>}</dd>
             </Facts>
           </Section>
           <Section aria-labelledby="gw-listeners">
             <h2 id="gw-listeners">
-              Listeners <span className="note">{data.listeners.length}</span>
+              {gatewayCopy.listeners} <span className="note">{data.listeners.length}</span>
             </h2>
             <ListenerTable listeners={data.listeners} generation={data.generation} />
           </Section>
           <Section aria-labelledby="gw-listenersets">
             <h2 id="gw-listenersets">
-              ListenerSets
+              {gatewayCopy.listenerSets}
               {data.attachedListenerSets !== undefined ? (
-                <span className="note">Attached ListenerSets (status): {data.attachedListenerSets}</span>
+                <span className="note">{gatewayCopy.attachedListenerSets(data.attachedListenerSets)}</span>
               ) : null}
             </h2>
             <SubList
               installId={id}
-              label="ListenerSets"
+              label={gatewayCopy.listenerSets}
               noun={LS_NOUN}
               useList={useListenerSets}
               query={lsQuery}
               columns={lsCols}
               rowRef={lsRef}
-              emptyTitle="No ListenerSets name this Gateway."
+              emptyTitle={gatewayCopy.noListenerSets}
               // The status count is a hint: the list counts visible ListenerSets, the status all attached ones.
               skeletonRows={expectedRows(data.attachedListenerSets ?? 1)}
             />

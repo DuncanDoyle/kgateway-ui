@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Ref } from "../api/types";
+import { navCopy } from "../copy/explorer";
 
 // region Helpers
 /** Platform copy (D-016). The defaults describe Kubernetes; a downstream overrides any entry through ShellExtension.vocabulary. */
@@ -51,5 +52,5 @@ export const kubernetesVocabulary: Vocabulary = {
     const ns = ref.namespace ? ` -n ${ref.namespace}` : "";
     return `kubectl get ${type}${ns} ${ref.name} -o yaml`;
   },
-  copyCommand: "Copy kubectl command",
+  copyCommand: navCopy.copyCommand,
 };

@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
 import type { Candidate, LinkedRef, Page } from "../../api/types";
+import { detailCopy, listCopy } from "../../copy/explorer";
 import { CandidateBanner } from "../../explore/CandidateBanner";
 import { CopyCommandButton } from "../../explore/CopyCommandButton";
 import { DetailTabs } from "../../explore/DetailTabs";
@@ -99,8 +100,8 @@ const Skeleton = styled.div`
 
 // region Helpers
 const TABS = [
-  { id: "overview", label: "Overview" },
-  { id: "yaml", label: "YAML" },
+  { id: "overview", label: detailCopy.overview },
+  { id: "yaml", label: detailCopy.yaml },
 ];
 
 /** group/Kind/namespace/name, as the list endpoints take a parent (design §7.2). */
@@ -124,18 +125,18 @@ export function DetailFrame({ installId, refValue, noun, data, error, children, 
   const vocab = useVocabulary();
   const [params, update] = useUrlParams();
   const tab = params.get("tab") === "yaml" ? "yaml" : "overview";
-  const errorTitle = `Cannot load ${noun}`;
+  const errorTitle = listCopy.cannotLoad(noun);
   // A hidden object 404s as an absent one does (D-013).
   if (error?.status === 404 && !data)
     return (
       <PageState
         kind="empty"
-        title="Not in this install's scope"
+        title={listCopy.notInScope}
         message={
           <>
             {refValue.kind} <ResourceName namespace={refValue.namespace} name={refValue.name} />
             <br />
-            <BackLink to={installPath(installId)}>Back to install</BackLink>
+            <BackLink to={installPath(installId)}>{listCopy.backToInstall}</BackLink>
           </>
         }
       />
@@ -169,7 +170,7 @@ export function DetailFrame({ installId, refValue, noun, data, error, children, 
         {data ? <DataAge collectedAt={data.collectedAt} /> : null}
       </header>
       <DetailTabs
-        label={`${refValue.kind} views`}
+        label={detailCopy.views(refValue.kind)}
         tabs={TABS}
         selected={tab}
         onSelect={(t) => update({ tab: t === "yaml" ? t : null })}
@@ -234,7 +235,7 @@ export function SubList<T extends { health: HealthState }>({
   const page = useShownPage(l.data, !!l.error);
   return (
     <>
-      {l.error && !l.data ? <PageNotice error={l.error} title={`Cannot load ${noun[1]}`} /> : null}
+      {l.error && !l.data ? <PageNotice error={l.error} title={listCopy.cannotLoad(noun[1])} /> : null}
       <ObjectTable
         label={label}
         installId={installId}

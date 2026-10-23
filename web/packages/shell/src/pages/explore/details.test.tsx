@@ -133,10 +133,10 @@ it("a stale condition says which generation it describes", async () => {
   expect(await screen.findByText("Describes generation 1; the object is at 2.")).toBeInTheDocument();
 });
 
-it("failed-route table has Not accepted, Waiting for status and Unwatched namespace sub-filters", async () => {
+it("failed-route table has Not accepted, Waiting for status and Namespace not watched sub-filters", async () => {
   serve(api());
   mount(GW_PATH);
-  await screen.findByRole("table", { name: "Routes that failed to attach" });
+  await screen.findByRole("table", { name: "Routes not attached" });
   const parent = `${GW}/Gateway/infra/edge`;
   const attachments = () =>
     listCalls("routes")
@@ -144,23 +144,23 @@ it("failed-route table has Not accepted, Waiting for status and Unwatched namesp
       .map((u) => u.searchParams.getAll("attachment"));
   // Attached routes and the first sub-filter, each with exactly one attachment value (single-valued, §7.2).
   await waitFor(() => expect(attachments()).toEqual(expect.arrayContaining([["accepted"], ["not-accepted"]])));
-  const group = screen.getByRole("group", { name: "Failed routes" });
+  const group = screen.getByRole("group", { name: "Not attached" });
   const chips = within(group).getAllByRole("button");
   expect(chips.map((c) => c.textContent)).toEqual([
     "Not accepted (1)",
     "Waiting for status (1)",
-    "Unwatched namespace (1)",
+    "Namespace not watched (1)",
   ]);
   expect(chips[0]).toHaveAttribute("aria-pressed", "true");
   // The deciding condition's reason as written, for this Gateway's parent entry.
-  const failed = table("Routes that failed to attach");
+  const failed = table("Routes not attached");
   expect(within(rowOf(failed, "rejected")).getByText("NotAllowedByListeners")).toBeInTheDocument();
   // A pending reason is ours, not the controller's: it is never shown as a code.
   expect(within(failed).queryByText("no status from the controller")).toBeNull();
   await userEvent.click(within(group).getByRole("button", { name: /Waiting for status/ }));
   await waitFor(() => expect(attachments().at(-1)).toEqual(["pending"]));
   expect(within(group).getByRole("button", { name: /Waiting for status/ })).toHaveAttribute("aria-pressed", "true");
-  await userEvent.click(within(group).getByRole("button", { name: /Unwatched namespace/ }));
+  await userEvent.click(within(group).getByRole("button", { name: /Namespace not watched/ }));
   await waitFor(() => expect(attachments().at(-1)).toEqual(["unwatched"]));
   // Sub-tables never send unknown params; the server is strict.
   for (const u of listCalls("routes")) expect([...u.searchParams.keys()].sort()).toEqual(["attachment", "parent"]);
@@ -403,7 +403,7 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
     const els = [
       screen.getByRole("tab", { name: "Overview" }),
       within(rowOf(listeners, "http")).getByRole("button", { name: /Show conditions/ }),
-      within(screen.getByRole("group", { name: "Failed routes" })).getAllByRole("button")[0] as HTMLElement,
+      within(screen.getByRole("group", { name: "Not attached" })).getAllByRole("button")[0] as HTMLElement,
       screen.getByRole("button", { name: "Copy namespace/name" }),
     ];
     for (const el of els)
@@ -474,8 +474,8 @@ it("sub-table skeletons have the loaded row count, so the sections below keep th
   // ListenerSets: the status count; attached: routeCounts.accepted; failed (Not accepted, 0): one blank row.
   expect(skeletons("ListenerSets")).toBe(1);
   expect(skeletons("Attached routes")).toBe(5);
-  expect(skeletons("Routes that failed to attach")).toBe(1);
-  const blank = within(table("Routes that failed to attach")).getByTestId("skeleton-row");
+  expect(skeletons("Routes not attached")).toBe(1);
+  const blank = within(table("Routes not attached")).getByTestId("skeleton-row");
   expect(blank.querySelector("[data-testid=shimmer]")).toBeNull();
   expect(getComputedStyle(blank).height).toBe(`${ROW_H}px`);
   await act(async () => release?.());
@@ -483,7 +483,7 @@ it("sub-table skeletons have the loaded row count, so the sections below keep th
   expect(loaded("Attached routes")).toBe(5);
   expect(loaded("ListenerSets")).toBe(2);
   // The empty state takes the blank row's place at the same height.
-  const empty = await within(table("Routes that failed to attach")).findByTestId("empty-row");
+  const empty = await within(table("Routes not attached")).findByTestId("empty-row");
   expect(getComputedStyle(empty).height).toBe(`${ROW_H}px`);
 });
 
@@ -496,6 +496,6 @@ it("the hidden-routes line shows once for the route sections, and single pages h
   mount(GW_PATH);
   await within(await screen.findByRole("table", { name: "Attached routes" })).findByText("cart");
   expect(screen.getAllByText("You cannot view 2 routes in this install.")).toHaveLength(1);
-  expect(table("Routes that failed to attach").parentElement).toHaveTextContent("You cannot view 2 routes");
+  expect(table("Routes not attached").parentElement).toHaveTextContent("You cannot view 2 routes");
   expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
 });

@@ -2313,7 +2313,7 @@ func TestKGWUI011OnKgateway23ForUnreportedRefForms(t *testing.T) {
 	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	for _, res := range []string{"shop/no-ns", "shop/section"} {
 		fs := findingsOn(h, res)
-		if len(fs) != 1 || fs[0].Code != health.CodeDelegatedNotAttached || fs[0].Severity != health.SeverityWarning || fs[0].Detail != "No status from HTTPRoute shop/api" {
+		if len(fs) != 1 || fs[0].Code != health.CodeDelegatedNotAttached || fs[0].Severity != health.SeverityWarning || fs[0].Detail != "No status entry for parent HTTPRoute shop/api" {
 			t.Fatalf("%s: want the KGWUI-011 warning: %+v", res, fs)
 		}
 	}

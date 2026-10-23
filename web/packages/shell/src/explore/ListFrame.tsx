@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { Search } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ApiError } from "../api/client";
+import { listCopy } from "../copy/explorer";
 import { DataAge } from "../pages/DataAge";
 import { useVocabulary } from "../shell/extension";
 import { installPath } from "../shell/paths";
@@ -80,14 +81,14 @@ export function ListFrame({
   stylesOverride,
 }: ListFrameProps) {
   const vocab = useVocabulary();
-  const errorTitle = `Cannot load ${noun[1]}`;
+  const errorTitle = listCopy.cannotLoad(noun[1]);
   // A list 404s only for an unknown install (design §7.2).
   if (error?.status === 404)
     return (
       <PageState
         kind="empty"
-        title="Not in this install's scope"
-        message={<BackLink to={installPath(installId)}>Back to install</BackLink>}
+        title={listCopy.notInScope}
+        message={<BackLink to={installPath(installId)}>{listCopy.backToInstall}</BackLink>}
       />
     );
   // A query that failed before loading keeps its title and filters, so its filters can still be changed or cleared.
@@ -115,7 +116,7 @@ export function ListFrame({
         {filters}
         {onClearFilters ? (
           <QuietButton type="button" onClick={onClearFilters}>
-            Clear filters
+            {listCopy.clearFilters}
           </QuietButton>
         ) : null}
       </Bar>

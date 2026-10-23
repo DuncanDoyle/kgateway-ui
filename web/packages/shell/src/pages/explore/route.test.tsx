@@ -5,7 +5,7 @@ import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.
 import candidateGolden from "../../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
 import restrictedGolden from "../../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
-import type { RouteDetail, RouteList, RouteRow } from "../../api/types";
+import type { Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
@@ -137,7 +137,7 @@ it("hostnames or inherited text for a child", async () => {
   expect(screen.getByText("Inherits the listener's hostnames")).toBeInTheDocument();
 });
 
-it("permission line: Allows any parent / Allows: shop/api", async () => {
+it("permission line: Allows any parent route / Allows: shop/api", async () => {
   serve(api());
   const first = mount(MID);
   await loaded();
@@ -151,7 +151,7 @@ it("permission line: Allows any parent / Allows: shop/api", async () => {
   serve(api({ mid: open }));
   const second = mount(MID);
   await loaded();
-  expect(screen.getByText("Allows any parent")).toBeInTheDocument();
+  expect(screen.getByText("Allows any parent route")).toBeInTheDocument();
   second.unmount();
 
   // Only non-route parentRefs: no parent route may delegate here.
@@ -208,7 +208,7 @@ it("a route with no children says so and fetches nothing", async () => {
   serve(api({ mid: none }));
   mount(MID);
   await loaded();
-  expect(screen.getByText("No child routes.")).toBeInTheDocument();
+  expect(screen.getByText("No reported child routes.")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Show child routes" })).toBeNull();
   expect(routeCalls()).toHaveLength(0);
 });
@@ -229,7 +229,7 @@ it("other controllers' entries are collapsed", async () => {
   expect(more).toHaveAttribute("aria-expanded", "true");
   expect(within(card).getByText("example.com/other")).toBeInTheDocument();
   // An empty up-chain says so.
-  expect(screen.getByText("No reported path to a Gateway.")).toBeInTheDocument();
+  expect(screen.getByText("No reported path to a Gateway or ListenerSet.")).toBeInTheDocument();
 });
 
 it("each backendRef links to Other routes using this backend (routes?backend=…)", async () => {
@@ -249,7 +249,8 @@ it("each backendRef links to Other routes using this backend (routes?backend=…
     "href",
     `/i/${ID}/r/gateway.kgateway.dev/Backend/shop/be1`,
   );
-  expect(within(backend("be1")).getByTestId("condition-Accepted")).toHaveTextContent("Accepted: True");
+  // A current Accepted=True reads "Configuration accepted", never "working".
+  expect(within(backend("be1")).getByTestId("condition-Accepted")).toHaveTextContent("Configuration accepted");
   // Services have no page: their names are text.
   expect(within(backend("cart-svc")).queryAllByRole("link")).toHaveLength(1);
   // Delegation refs never match the backend filter, so they get no lookup.
@@ -365,7 +366,7 @@ it("a BackendNotFound next to a delegation ref gets a hedged note", async () => 
   await loaded();
   const card = screen.getByRole("article", { name: "Parent infra/edge" });
   expect(within(card).getByTestId("condition-ResolvedRefs")).toHaveTextContent(
-    "This can mean a missing backend or a delegation ref that selects no route.",
+    "A backend may be missing, or a delegation ref may select no route.",
   );
 });
 
@@ -422,4 +423,36 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
           `${el.textContent || el.getAttribute("aria-label")} ${pseudo}`,
         ).toBeGreaterThan(0);
   });
+});
+
+/** mid's detail with Backend be1's state and Accepted condition replaced. */
+function withBe1(state: "healthy" | "unknown", accepted: Partial<Condition>) {
+  const d = detail(routeGolden);
+  for (const r of d.rules)
+    for (const b of r.backendRefs)
+      if (b.ref.name === "be1" && b.backend?.accepted)
+        b.backend = { state, accepted: { ...b.backend.accepted, ...accepted } };
+  return d;
+}
+
+it("an evidence-less Backend condition shows the unknown icon and says the version is not reported", async () => {
+  serve(api({ mid: withBe1("unknown", { observedGeneration: 0 }) }));
+  mount(MID);
+  await loaded();
+  const c = within(backend("be1")).getByTestId("condition-Accepted");
+  expect(c).toHaveTextContent("Accepted: True");
+  expect(c).toHaveTextContent("The controller does not say which version it checked.");
+  expect(c).not.toHaveTextContent("Configuration accepted");
+  expect(within(c).getByTestId("health-icon-unknown")).toBeInTheDocument();
+  expect(within(c).queryByTestId("health-icon-healthy")).toBeNull();
+});
+
+it("a stale Backend condition shows the unknown icon, not Configuration accepted", async () => {
+  serve(api({ mid: withBe1("unknown", { stale: true }) }));
+  mount(MID);
+  await loaded();
+  const c = within(backend("be1")).getByTestId("condition-Accepted");
+  expect(c).toHaveTextContent("Accepted: True");
+  expect(c).toHaveTextContent("Describes an older generation of the Backend.");
+  expect(within(c).queryByTestId("health-icon-healthy")).toBeNull();
 });

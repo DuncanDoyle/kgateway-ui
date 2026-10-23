@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { dump } from "js-yaml";
 import type { BackendRef, Condition, DelegationRef, Filter, Match, Rule } from "../../../api/types";
+import { routeCopy } from "../../../copy/explorer";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
 import { HealthBadge } from "../../../health/HealthBadge";
@@ -117,15 +118,19 @@ function MatchLine({ m }: { m: Match }) {
       ) : null}
       {m.headers?.map((h) => (
         <span key={`h-${h.name}`}>
-          Header {h.name} {h.type} {h.value}
+          {routeCopy.header} {h.name} {h.type} {h.value}
         </span>
       ))}
       {m.queryParams?.map((q) => (
         <span key={`q-${q.name}`}>
-          Query {q.name} {q.type} {q.value}
+          {routeCopy.query} {q.name} {q.type} {q.value}
         </span>
       ))}
-      {m.method ? <span>Method {m.method}</span> : null}
+      {m.method ? (
+        <span>
+          {routeCopy.method} {m.method}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -147,9 +152,13 @@ function FilterItem({ f, installId }: { f: Filter; installId: string }) {
         {f.mirror ? (
           <>
             <span>
-              Mirror to <LinkedName refValue={f.mirror.backendRef} installId={installId} />
+              {routeCopy.mirrorTo} <LinkedName refValue={f.mirror.backendRef} installId={installId} />
             </span>
-            {f.mirror.port ? <span>Port {f.mirror.port}</span> : null}
+            {f.mirror.port ? (
+              <span>
+                {routeCopy.port} {f.mirror.port}
+              </span>
+            ) : null}
             {share ? <span>{share}</span> : null}
           </>
         ) : null}
@@ -178,10 +187,10 @@ function FilterList({ filters, installId }: { filters: Filter[]; installId: stri
 }
 
 const delegationState: Record<NonNullable<DelegationRef["state"]>, { label: string; state: HealthState }> = {
-  reported: { label: "Reported by the controller", state: "healthy" },
-  "not-reported": { label: "Not reported by the controller", state: "unknown" },
-  "not-found": { label: "No such route", state: "error" },
-  restricted: { label: "Restricted", state: "unknown" },
+  reported: { label: routeCopy.delegation.reported, state: "healthy" },
+  "not-reported": { label: routeCopy.delegation["not-reported"], state: "unknown" },
+  "not-found": { label: routeCopy.delegation["not-found"], state: "error" },
+  restricted: { label: routeCopy.delegation.restricted, state: "unknown" },
 };
 
 function Delegation({ b, installId }: { b: BackendRef & { delegation: DelegationRef }; installId: string }) {
@@ -189,17 +198,15 @@ function Delegation({ b, installId }: { b: BackendRef & { delegation: Delegation
   const s = d.state ? delegationState[d.state] : undefined;
   return (
     <span className="line">
-      <span className="muted">Delegates to</span>
+      <span className="muted">{routeCopy.delegatesTo}</span>
       {d.mode === "name" ? (
         <span>
-          Route <LinkedName refValue={b.ref} installId={installId} />
+          {routeCopy.delegateRoute} <LinkedName refValue={b.ref} installId={installId} />
         </span>
       ) : d.mode === "wildcard" ? (
-        <span>Every route in {d.namespace}</span>
+        <span>{routeCopy.delegateWildcard(d.namespace)}</span>
       ) : (
-        <span>
-          Routes in {d.namespace} with label {d.label}
-        </span>
+        <span>{routeCopy.delegateLabel(d.namespace, d.label ?? "")}</span>
       )}
       {s ? (
         <span className="state">
@@ -211,13 +218,21 @@ function Delegation({ b, installId }: { b: BackendRef & { delegation: Delegation
   );
 }
 
-/** The Backend's Accepted condition; the body has no Backend generation, so staleness is said in words. */
-function BackendCondition({ c }: { c: Condition }) {
+/**
+ * The Backend's Accepted condition. The body has no Backend generation, so staleness is said in words. The icon
+ * follows the Backend's state, so a stale or evidence-less condition is unknown; only a current True is "accepted".
+ */
+function BackendCondition({ c, state }: { c: Condition; state: HealthState }) {
+  const noEvidence = c.observedGeneration === 0;
+  const accepted = !noEvidence && !c.stale && c.status === "True";
+  const note = c.stale ? routeCopy.backendStale : noEvidence ? routeCopy.backendNoEvidence : undefined;
   return (
     <ConditionList
       conditions={[{ ...c, stale: false }]}
       generation={c.observedGeneration}
-      extra={() => (c.stale ? <span className="muted">Describes an older generation of the Backend.</span> : null)}
+      stateOf={() => state}
+      headOf={accepted ? () => routeCopy.backendAccepted : undefined}
+      extra={() => (note ? <span className="muted">{note}</span> : null)}
     />
   );
 }
@@ -234,28 +249,31 @@ function BackendItem({ b, installId }: { b: BackendRef; installId: string }) {
             <span>
               <span className="muted">{b.ref.kind}</span> <LinkedName refValue={b.ref} installId={installId} />
             </span>
-            {b.port ? <span>Port {b.port}</span> : null}
-            <span data-testid="weight">
-              Weight {b.weight}
-              {b.weightDefaulted ? " (default)" : ""}
-            </span>
+            {b.port ? (
+              <span>
+                {routeCopy.port} {b.port}
+              </span>
+            ) : null}
+            <span data-testid="weight">{routeCopy.weight(b.weight, b.weightDefaulted)}</span>
             {b.backend?.restricted ? (
               <span className="state">
                 <HealthIcon state="unknown" size={14} />
-                Restricted
+                {routeCopy.restricted}
               </span>
             ) : b.backend?.state ? (
               <HealthBadge state={b.backend.state} />
             ) : null}
             {/* Delegation refs never match the backend filter (design §7.2), so only real backends get it. */}
-            <InlineLink to={lookup}>Other routes using this backend</InlineLink>
+            <InlineLink to={lookup}>{routeCopy.otherRoutes}</InlineLink>
           </span>
-          {b.backend?.accepted ? <BackendCondition c={b.backend.accepted} /> : null}
+          {b.backend?.accepted ? (
+            <BackendCondition c={b.backend.accepted} state={b.backend.state ?? "unknown"} />
+          ) : null}
         </>
       )}
       {b.filters.length ? (
         <div className="nested">
-          <h4>Filters on this backend</h4>
+          <h4>{routeCopy.backendRefFilters}</h4>
           <FilterList filters={b.filters} installId={installId} />
         </div>
       ) : null}
@@ -272,38 +290,38 @@ interface RuleListProps {
 
 /** Each spec rule as written: matches, filters with their config, and backendRefs or delegation refs. */
 export function RuleList({ installId, rules, stylesOverride }: RuleListProps) {
-  if (!rules.length) return <p>No rules.</p>;
+  if (!rules.length) return <p>{routeCopy.noRules}</p>;
   return (
     <Rules stylesOverride={stylesOverride}>
       {rules.map((r) => {
-        const title = `Rule ${r.index + 1}${r.name ? ` ${r.name}` : ""}`;
+        const title = `${routeCopy.rule(r.index + 1)}${r.name ? ` ${r.name}` : ""}`;
         const matches = r.matches.length ? r.matches : [DEFAULT_MATCH];
         return (
           <RuleBox key={r.index} aria-label={title}>
             <h3>
-              Rule {r.index + 1}
+              {routeCopy.rule(r.index + 1)}
               {r.name ? <span className="name">{r.name}</span> : null}
             </h3>
             <div>
-              <h4>Matches</h4>
+              <h4>{routeCopy.matches}</h4>
               <ul>
                 {matches.map((m, i) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: positional
                   <li key={i} className="line" data-testid="match">
                     <MatchLine m={m} />
-                    {r.matches.length ? null : <span className="muted">Default match</span>}
+                    {r.matches.length ? null : <span className="muted">{routeCopy.defaultMatch}</span>}
                   </li>
                 ))}
               </ul>
             </div>
             {r.filters.length ? (
               <div>
-                <h4>Filters</h4>
+                <h4>{routeCopy.filters}</h4>
                 <FilterList filters={r.filters} installId={installId} />
               </div>
             ) : null}
             <div>
-              <h4>Backends</h4>
+              <h4>{routeCopy.backendRefs}</h4>
               {r.backendRefs.length ? (
                 <ul>
                   {r.backendRefs.map((b, i) => (
@@ -312,7 +330,7 @@ export function RuleList({ installId, rules, stylesOverride }: RuleListProps) {
                   ))}
                 </ul>
               ) : (
-                <span className="muted">No backends.</span>
+                <span className="muted">{routeCopy.noBackendRefs}</span>
               )}
             </div>
           </RuleBox>

@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import type { ReactNode } from "react";
 import type { Condition } from "../api/types";
+import { detailCopy } from "../copy/explorer";
 import { HealthIcon } from "../health/HealthIcon";
 import type { HealthState } from "../theme/tokens";
 
@@ -60,9 +61,9 @@ const None = styled.p`
 /** Gateway API condition types where True is the problem. */
 const NEGATIVE = new Set(["Conflicted", "OverlappingTLSConfig"]);
 
-/** The state a condition shows: True is good unless the type is a problem flag; Unknown is unknown. */
-export function conditionState(c: Pick<Condition, "type" | "status">): HealthState {
-  if (c.status !== "True" && c.status !== "False") return "unknown";
+/** The state a condition shows: True is good unless the type is a problem flag; Unknown or stale is unknown. */
+export function conditionState(c: Pick<Condition, "type" | "status"> & { stale?: boolean }): HealthState {
+  if (c.stale || (c.status !== "True" && c.status !== "False")) return "unknown";
   return (c.status === "True") !== NEGATIVE.has(c.type) ? "healthy" : "error";
 }
 
@@ -75,28 +76,38 @@ interface ConditionListProps {
   empty?: ReactNode;
   /** Extra content under one condition, e.g. the parent's allowedListeners next to NotAllowed. */
   extra?: (c: Condition) => ReactNode;
+  /** The icon state per condition, when it follows something other than the condition (e.g. a Backend's state). */
+  stateOf?: (c: Condition) => HealthState;
+  /** The head text per condition; defaults to "<Type>: <Status>". */
+  headOf?: (c: Condition) => ReactNode;
   stylesOverride?: SerializedStyles;
 }
 
 /** Status conditions as the controller wrote them: icon and status text, reason as written, message and freshness. */
-export function ConditionList({ conditions, generation, empty, extra, stylesOverride }: ConditionListProps) {
-  if (!conditions.length) return <None>{empty ?? "No conditions reported."}</None>;
+export function ConditionList({
+  conditions,
+  generation,
+  empty,
+  extra,
+  stateOf = conditionState,
+  headOf,
+  stylesOverride,
+}: ConditionListProps) {
+  if (!conditions.length) return <None>{empty ?? detailCopy.noConditions}</None>;
   return (
     <List stylesOverride={stylesOverride}>
       {conditions.map((c) => (
         <li key={c.type} data-testid={`condition-${c.type}`}>
-          <HealthIcon state={conditionState(c)} />
+          <HealthIcon state={stateOf(c)} />
           <span className="head">
-            <span className="type">
-              {c.type}: {c.status}
-            </span>
+            <span className="type">{headOf ? headOf(c) : `${c.type}: ${c.status}`}</span>
             {c.reason ? <span className="reason">{c.reason}</span> : null}
           </span>
           {c.message ? <span className="message">{c.message}</span> : null}
           {c.stale ? (
             <span className="fresh">
               <HealthIcon state="unknown" size={14} />
-              Describes generation {c.observedGeneration}; the object is at {generation}.
+              {detailCopy.stale(c.observedGeneration, generation)}
             </span>
           ) : null}
           {extra?.(c)}

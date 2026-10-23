@@ -2,6 +2,7 @@ import styled from "@emotion/styled";
 import { useId, useMemo, useState } from "react";
 import { useRoutes } from "../../../api/exploreHooks";
 import type { LinkedRef, RouteRow } from "../../../api/types";
+import { columnCopy, routeCopy } from "../../../copy/explorer";
 import type { ObjectColumn } from "../../../explore/ObjectTable";
 import { HealthBadge } from "../../../health/HealthBadge";
 import { TextButton } from "../../../states/controls";
@@ -19,14 +20,14 @@ const rowRef = (r: RouteRow) => r.ref;
 
 function columns(installId: string): ObjectColumn<RouteRow>[] {
   return [
-    { id: "health", header: "Status", width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
-    { id: "name", header: "Route", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
+    { id: "health", header: columnCopy.status, width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
+    { id: "name", header: columnCopy.route, cell: (r) => <NameCell r={r.ref} installId={installId} /> },
     {
       id: "hostnames",
-      header: "Hostnames",
+      header: columnCopy.hostnames,
       width: "24%",
       secondary: true,
-      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>Inherited</Muted>),
+      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>{columnCopy.inherited}</Muted>),
     },
   ];
 }
@@ -48,10 +49,10 @@ export function ChildRoutes({ installId, route, expected }: ChildRoutesProps) {
   return (
     <Section aria-labelledby="child-routes">
       <h2 id="child-routes">
-        Child routes <span className="note">{expected}</span>
+        {routeCopy.childRoutes} <span className="note">{expected}</span>
       </h2>
       {expected === 0 ? (
-        <Muted>No child routes.</Muted>
+        <Muted>{routeCopy.noChildRoutes}</Muted>
       ) : (
         <>
           <Toggle
@@ -60,19 +61,19 @@ export function ChildRoutes({ installId, route, expected }: ChildRoutesProps) {
             aria-controls={open ? bodyId : undefined}
             onClick={() => setOpen((o) => !o)}
           >
-            {open ? "Hide child routes" : "Show child routes"}
+            {routeCopy.toggleChildren(open)}
           </Toggle>
           {open ? (
             <div id={bodyId}>
               <SubList
                 installId={installId}
-                label="Child routes"
+                label={routeCopy.childRoutes}
                 noun={NOUN}
                 useList={useRoutes}
                 query={query}
                 columns={cols}
                 rowRef={rowRef}
-                emptyTitle="No child routes."
+                emptyTitle={routeCopy.noChildRoutes}
                 skeletonRows={expectedRows(expected)}
               />
             </div>

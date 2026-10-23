@@ -97,7 +97,7 @@ func TestKGWUI011AfterGraceIsWarningAndCheckOK(t *testing.T) {
 			if len(fs) != 1 || fs[0].Severity != want {
 				t.Fatalf("want one KGWUI-011 %s: %+v", want, r.Findings)
 			}
-			if fs[0].Message != "Parent route does not use this route" || fs[0].Detail != "No status from HTTPRoute shop/api" {
+			if fs[0].Message != "No status for the named parent route" || fs[0].Detail != "No status entry for parent HTTPRoute shop/api" {
 				t.Fatalf("wording: %q / %q", fs[0].Message, fs[0].Detail)
 			}
 			// ResourceSince is the route's own clock, whatever the parent's.
@@ -159,7 +159,7 @@ func TestKGWUI011IsPerParent(t *testing.T) {
 		testutil.HTTPRoute("shop", "web", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
 		testutil.HTTPRoute("shop", "c", []objects.ParentRef{testutil.HTTPRouteRef("shop", "web"), testutil.HTTPRouteRef("shop", "api")}))
 	fs := findingsFor(w.report(t), CodeDelegatedNotAttached, "shop/c")
-	if len(fs) != 2 || fs[0].Detail != "No status from HTTPRoute shop/api" || fs[1].Detail != "No status from HTTPRoute shop/web" {
+	if len(fs) != 2 || fs[0].Detail != "No status entry for parent HTTPRoute shop/api" || fs[1].Detail != "No status entry for parent HTTPRoute shop/web" {
 		t.Fatalf("want two findings ordered by parent: %+v", fs)
 	}
 }

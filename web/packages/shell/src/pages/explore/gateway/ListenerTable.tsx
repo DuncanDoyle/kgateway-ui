@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Fragment, type ReactNode, useState } from "react";
 import type { AllowedRoutes, LabelSelector, Listener } from "../../../api/types";
+import { columnCopy, detailCopy, listCopy, listenerCopy } from "../../../copy/explorer";
 import { ConditionList, conditionState } from "../../../explore/ConditionList";
 import { TableFrame, TableStyles } from "../../../explore/ObjectTable";
 import { HealthIcon } from "../../../health/HealthIcon";
@@ -38,14 +39,15 @@ function selectorText(s: LabelSelector): string {
   const exprs = (s.matchExpressions ?? []).map(
     (e) => `${e.key} ${e.operator}${e.values ? ` (${e.values.join(", ")})` : ""}`,
   );
-  return [...labels, ...exprs].join(", ") || "Any labels";
+  return [...labels, ...exprs].join(", ") || listenerCopy.anyLabels;
 }
 
 function namespacesText(a: AllowedRoutes): string {
   const { from, selector } = a.namespaces;
-  if (from === "Same") return "Same namespace";
-  if (from === "All") return "All namespaces";
-  if (from === "Selector") return `Namespaces with ${selector ? selectorText(selector) : "any labels"}`;
+  if (from === "Same") return listenerCopy.sameNamespace;
+  if (from === "All") return listenerCopy.allNamespaces;
+  if (from === "Selector")
+    return listenerCopy.namespacesWith(selector ? selectorText(selector) : listenerCopy.anyLabelsInline);
   return from;
 }
 
@@ -69,7 +71,7 @@ const tls = (l: Listener): ReactNode =>
       ))}
     </>
   ) : (
-    <Muted>None</Muted>
+    <Muted>{columnCopy.none}</Muted>
   );
 
 const allowed = (l: Listener): ReactNode => (
@@ -79,7 +81,7 @@ const allowed = (l: Listener): ReactNode => (
       {l.allowedRoutes.kinds.length ? (
         l.allowedRoutes.kinds.map((k) => k.kind).join(", ")
       ) : (
-        <Muted>Kinds for the protocol</Muted>
+        <Muted>{listenerCopy.defaultKinds}</Muted>
       )}
     </div>
   </>
@@ -109,7 +111,7 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
   const cols = narrow ? 7 : 9;
   return (
     <TableFrame stylesOverride={css`${tableExtra}${stylesOverride}`}>
-      <TableStyles aria-label="Listeners">
+      <TableStyles aria-label={listenerCopy.table}>
         <colgroup>
           <col style={{ width: "40px" }} />
           <col style={{ width: "130px" }} />
@@ -124,16 +126,16 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
         <thead>
           <tr>
             <th scope="col">
-              <VisuallyHidden>Details</VisuallyHidden>
+              <VisuallyHidden>{listCopy.details}</VisuallyHidden>
             </th>
-            <th scope="col">Status</th>
-            <th scope="col">Listener</th>
-            <th scope="col">Port</th>
-            <th scope="col">Protocol</th>
-            <th scope="col">Hostname</th>
-            {narrow ? null : <th scope="col">TLS</th>}
-            {narrow ? null : <th scope="col">Allowed routes</th>}
-            <th scope="col">Attached routes</th>
+            <th scope="col">{columnCopy.status}</th>
+            <th scope="col">{listenerCopy.listener}</th>
+            <th scope="col">{listenerCopy.port}</th>
+            <th scope="col">{listenerCopy.protocol}</th>
+            <th scope="col">{listenerCopy.hostname}</th>
+            {narrow ? null : <th scope="col">{listenerCopy.tls}</th>}
+            {narrow ? null : <th scope="col">{listenerCopy.allowedRoutes}</th>}
+            <th scope="col">{columnCopy.attachedRoutes}</th>
           </tr>
         </thead>
         <tbody>
@@ -148,7 +150,7 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                       type="button"
                       className="expand"
                       aria-expanded={isOpen}
-                      aria-label={`${isOpen ? "Hide" : "Show"} conditions for listener ${l.name}`}
+                      aria-label={listenerCopy.toggle(isOpen, l.name)}
                       onClick={() => toggle(l.name)}
                     >
                       {isOpen ? (
@@ -161,37 +163,33 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                   <td>
                     <State>
                       <HealthIcon state={s.state} />
-                      {l.status ? stateLabel(s.state) : "No status"}
+                      {l.status ? stateLabel(s.state) : listenerCopy.noStatus}
                     </State>
                     {s.failing.length ? <Muted className="failing">{s.failing.join(", ")}</Muted> : null}
                   </td>
                   <td>{l.name}</td>
-                  <td>{l.port ?? <Muted>Not set</Muted>}</td>
+                  <td>{l.port ?? <Muted>{listenerCopy.notSet}</Muted>}</td>
                   <td>{l.protocol}</td>
-                  <td>{l.hostname ?? <Muted>Any hostname</Muted>}</td>
+                  <td>{l.hostname ?? <Muted>{listenerCopy.anyHostname}</Muted>}</td>
                   {narrow ? null : <td>{tls(l)}</td>}
                   {narrow ? null : <td>{allowed(l)}</td>}
-                  <td>{l.status ? l.status.attachedRoutes : <Muted>Not reported</Muted>}</td>
+                  <td>{l.status ? l.status.attachedRoutes : <Muted>{listenerCopy.notReported}</Muted>}</td>
                 </tr>
                 {isOpen ? (
                   <tr data-testid={`listener-${l.name}-details`}>
                     <td colSpan={cols}>
                       {narrow ? (
                         <dl className="spec">
-                          <dt>TLS</dt>
+                          <dt>{listenerCopy.tls}</dt>
                           <dd>{tls(l)}</dd>
-                          <dt>Allowed routes</dt>
+                          <dt>{listenerCopy.allowedRoutes}</dt>
                           <dd>{allowed(l)}</dd>
                         </dl>
                       ) : null}
                       <ConditionList
                         conditions={l.status?.conditions ?? []}
                         generation={generation}
-                        empty={
-                          l.status
-                            ? "No conditions reported."
-                            : "The controller has not written status for this listener."
-                        }
+                        empty={l.status ? detailCopy.noConditions : listenerCopy.noStatusWritten}
                       />
                     </td>
                   </tr>

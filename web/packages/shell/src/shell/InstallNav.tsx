@@ -1,5 +1,6 @@
 import styled from "@emotion/styled";
 import { NavLink } from "react-router-dom";
+import { navCopy } from "../copy/explorer";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerTint } from "./headerTint";
 import { installPath } from "./paths";
 
@@ -41,11 +42,11 @@ export interface InstallNavEntry {
 
 /** The install nav, in order. An entry shows only once its page's route exists. */
 export const installNavEntries: InstallNavEntry[] = [
-  { label: "Overview", to: "" },
-  { label: "Gateways", to: "gateways" },
-  { label: "Routes", to: "routes" },
-  { label: "ListenerSets", to: "listenersets" },
-  { label: "Findings", to: "findings" },
+  { label: navCopy.overview, to: "" },
+  { label: navCopy.gateways, to: "gateways" },
+  { label: navCopy.routes, to: "routes" },
+  { label: navCopy.listenerSets, to: "listenersets" },
+  { label: navCopy.findings, to: "findings" },
 ];
 
 // region Component
@@ -60,7 +61,7 @@ interface InstallNavProps {
 export function InstallNav({ installId, paths, entries = installNavEntries }: InstallNavProps) {
   const shown = entries.filter((e) => paths.includes(e.to));
   return (
-    <Nav aria-label="Install">
+    <Nav aria-label={navCopy.label}>
       {shown.map((e) => (
         // The overview is the install's root, so it is active only on its own path.
         <NavLink key={e.to} to={installPath(installId, e.to)} end={e.to === ""}>

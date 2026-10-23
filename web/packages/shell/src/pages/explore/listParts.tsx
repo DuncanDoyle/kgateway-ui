@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
 import type { Attachment, LinkedRef, Page } from "../../api/types";
+import { attachmentCopy, listCopy, tagCopy } from "../../copy/explorer";
 import { LinkedName } from "../../explore/LinkedName";
 import { listValues } from "../../explore/listQuery";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
@@ -30,22 +31,20 @@ const healthOptions: FilterOption[] = HEALTH.map((h) => ({
 }));
 
 /** How a parent took the route, in words; the raw condition reason is never shown (design §8.8 owns the copy). */
-export const attachmentLabel: Record<Attachment, string> = {
-  accepted: "Accepted",
-  "not-accepted": "Not accepted",
-  pending: "Waiting for status",
-  unwatched: "Namespace not watched",
-  declared: "Parent route has no status",
-};
+export const attachmentLabel: Record<Attachment, string> = attachmentCopy;
 
 /** Labels of the filters a link can set but the bar has no control for. */
-const TAG_LABELS: Record<string, string> = {
-  namespace: "Namespace",
-  kind: "Kind",
-  parent: "Parent",
-  attachment: "Attachment",
-  backend: "Backend",
-};
+const TAG_LABELS: Record<string, string> = tagCopy;
+
+/** A tag's value in words: refs as "Kind ns/name", attachments by their label; anything else as written. */
+export function tagValue(key: string, v: string): string {
+  if (key === "attachment") return attachmentLabel[v as Attachment] ?? v;
+  if (key === "parent" || key === "backend") {
+    const parts = v.split("/");
+    if (parts.length === 4 && parts.every(Boolean)) return `${parts[1]} ${parts[2]}/${parts[3]}`;
+  }
+  return v;
+}
 
 /** The page with every health shown unknown when its data is stale or its last poll failed (design §8.6, as the install page). */
 export function useShownPage<T extends { health: HealthState }>(
@@ -75,7 +74,7 @@ export function ListFilters({ params, setFilter, tags, children }: FiltersProps)
   return (
     <>
       <StateFilter
-        label="Health"
+        label={listCopy.health}
         options={healthOptions}
         selected={listValues(params, "health")}
         onChange={(v) => setFilter({ health: v.join(",") })}
@@ -87,7 +86,7 @@ export function ListFilters({ params, setFilter, tags, children }: FiltersProps)
           return (
             <FilterTag
               key={`${key}=${v}`}
-              text={`${TAG_LABELS[key]}: ${v}`}
+              text={`${TAG_LABELS[key]}: ${tagValue(key, v)}`}
               onRemove={() => setFilter({ [key]: rest.join(",") })}
             />
           );

@@ -429,6 +429,10 @@ func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bo
 // an experimental-only kind (D-018 §2); %s is the kind and served version.
 const ExperimentalHint = "; the controller watches %s only when its experimental Gateway API features are on, and they may be off here"
 
+// ExperimentalSentence is the same hint as a page sentence, for an experimental-only
+// object with no status (design §6.2); %s is the kind and served version.
+const ExperimentalSentence = "The controller watches %s only with its experimental Gateway API features on. They may be off here."
+
 // experimentalHint returns ExperimentalHint for u's kind, or "" for a stable kind.
 func (in Input) experimentalHint(u *unstructured.Unstructured) string {
 	k, exp := in.experimentalKind(u)

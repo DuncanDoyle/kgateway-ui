@@ -100,7 +100,10 @@ it("filters, sort and cursor round-trip through the URL", async () => {
     ["cursor", "c1"],
   ]);
   expect(screen.getByRole("columnheader", { name: /Status/ })).toHaveAttribute("aria-sort", "descending");
-  expect(screen.getByRole("button", { name: /Parent route has no status/ })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: /No status entry for the parent route/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   expect(screen.getByText("Namespace: shop")).toBeInTheDocument();
   // A reload restores the same view from the URL.
   const saved = location();
@@ -247,7 +250,7 @@ it("text search reaches the API as q", async () => {
   serve((u) => (u.pathname.endsWith("/gateways") ? fresh(gatewaysGolden.body as GatewayList) : undefined));
   mountWithLocation(`/i/${ID}/gateways`);
   await screen.findByText("edge");
-  await userEvent.type(screen.getByRole("searchbox", { name: "Filter gateways" }), "ed");
+  await userEvent.type(screen.getByRole("searchbox", { name: "Filter Gateways" }), "ed");
   await waitFor(() => expect(listCalls("gateways").at(-1)?.searchParams.get("q")).toBe("ed"));
   expect(search().get("q")).toBe("ed");
   // Gateways take no route-only params.
@@ -426,7 +429,7 @@ it("parent cells say how each parent took the route, in words", async () => {
   expect(within(rowOf("rejected")).getByText("Not accepted")).toBeInTheDocument();
   // The raw condition reason is never shown as a code.
   expect(within(rowOf("rejected")).queryByText("NotAllowedByListeners")).toBeNull();
-  expect(within(rowOf("via-ls")).getByText(/through/)).toHaveTextContent("through infra/edge");
+  expect(within(rowOf("via-ls")).getByText(/on Gateway/)).toHaveTextContent("on Gateway infra/edge");
 });
 
 describe("below 900 px", () => {
@@ -485,4 +488,28 @@ describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => 
       expect(rules(":focus-visible"), `${name} :focus-visible`).toContain(t.color.focus);
     }
   });
+});
+
+it("URL filter tags show refs as Kind ns/name and attachments in words", async () => {
+  serve((u) => (u.pathname.endsWith("/routes") ? routes() : undefined));
+  const p = new URLSearchParams({
+    parent: "gateway.networking.k8s.io/HTTPRoute/shop/api",
+    attachment: "not-accepted",
+    backend: "gateway.kgateway.dev/Backend/shop/be1",
+    kind: "GRPCRoute",
+  });
+  mount(`/i/${ID}/routes?${p}`);
+  await screen.findByText("rejected");
+  expect(screen.getByText("Parent: HTTPRoute shop/api")).toBeInTheDocument();
+  expect(screen.getByText("Attachment: Not accepted")).toBeInTheDocument();
+  expect(screen.getByText("Backend: Backend shop/be1")).toBeInTheDocument();
+  expect(screen.getByText("Kind: GRPCRoute")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Remove filter Parent: HTTPRoute shop/api" })).toBeInTheDocument();
+});
+
+it("a tag value that is not a full ref stays as written", async () => {
+  serve((u) => (u.pathname.endsWith("/routes") ? routes() : undefined));
+  mount(`/i/${ID}/routes?backend=shop/be1`);
+  await screen.findByText("rejected");
+  expect(screen.getByText("Backend: shop/be1")).toBeInTheDocument();
 });

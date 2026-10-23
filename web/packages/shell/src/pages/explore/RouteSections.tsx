@@ -2,6 +2,7 @@ import styled from "@emotion/styled";
 import { useMemo, useState } from "react";
 import { useRoutes } from "../../api/exploreHooks";
 import type { Attachment, LinkedRef, RouteCounts, RouteRow } from "../../api/types";
+import { columnCopy, gatewayCopy } from "../../copy/explorer";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { Chip } from "../../states/controls";
@@ -46,9 +47,9 @@ const Bar = styled.div`
 const NOUN = ["route", "routes"] as const;
 type Failed = Extract<Attachment, "not-accepted" | "pending" | "unwatched">;
 const FAILED: { value: Failed; label: string; count: keyof RouteCounts }[] = [
-  { value: "not-accepted", label: "Not accepted", count: "notAccepted" },
-  { value: "pending", label: "Waiting for status", count: "pending" },
-  { value: "unwatched", label: "Unwatched namespace", count: "unwatched" },
+  { value: "not-accepted", label: gatewayCopy.subFilter["not-accepted"], count: "notAccepted" },
+  { value: "pending", label: gatewayCopy.subFilter.pending, count: "pending" },
+  { value: "unwatched", label: gatewayCopy.subFilter.unwatched, count: "unwatched" },
 ];
 
 const same = (a: LinkedRef | undefined, b: LinkedRef) =>
@@ -56,15 +57,15 @@ const same = (a: LinkedRef | undefined, b: LinkedRef) =>
 
 function baseColumns(installId: string): ObjectColumn<RouteRow>[] {
   return [
-    { id: "health", header: "Status", width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
-    { id: "name", header: "Route", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
-    { id: "kind", header: "Kind", width: "120px", secondary: true, cell: (r) => r.ref.kind },
+    { id: "health", header: columnCopy.status, width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
+    { id: "name", header: columnCopy.route, cell: (r) => <NameCell r={r.ref} installId={installId} /> },
+    { id: "kind", header: columnCopy.kind, width: "120px", secondary: true, cell: (r) => r.ref.kind },
     {
       id: "hostnames",
-      header: "Hostnames",
+      header: columnCopy.hostnames,
       width: "22%",
       secondary: true,
-      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>Inherited</Muted>),
+      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>{columnCopy.inherited}</Muted>),
     },
   ];
 }
@@ -73,7 +74,7 @@ function baseColumns(installId: string): ObjectColumn<RouteRow>[] {
 function whyColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
   return {
     id: "why",
-    header: "Why",
+    header: columnCopy.why,
     width: "34%",
     cell: (r) => (
       <Why>
@@ -113,25 +114,25 @@ export function RouteSections({ installId, parent, counts }: RouteSectionsProps)
     <>
       <Section aria-labelledby="attached-routes">
         <h2 id="attached-routes">
-          Attached routes <span className="note">{counts.accepted}</span>
+          {gatewayCopy.attachedRoutes} <span className="note">{counts.accepted}</span>
         </h2>
         <SubList
           installId={installId}
-          label="Attached routes"
+          label={gatewayCopy.attachedRoutes}
           noun={NOUN}
           useList={useRoutes}
           query={attachedQuery}
           columns={base}
           rowRef={rowRef}
-          emptyTitle="No routes attached."
+          emptyTitle={gatewayCopy.noRoutesAttached}
           skeletonRows={expectedRows(counts.accepted)}
           // The install-wide hidden-routes line shows once, under the failed table.
           showDenied={false}
         />
       </Section>
       <Section aria-labelledby="failed-routes">
-        <h2 id="failed-routes">Routes that failed to attach</h2>
-        <Bar role="group" aria-label="Failed routes">
+        <h2 id="failed-routes">{gatewayCopy.notAttached}</h2>
+        <Bar role="group" aria-label={gatewayCopy.notAttachedGroup}>
           {FAILED.map((f) => (
             <Chip key={f.value} type="button" aria-pressed={failed === f.value} onClick={() => setFailed(f.value)}>
               {f.label} ({counts[f.count]})
@@ -140,13 +141,13 @@ export function RouteSections({ installId, parent, counts }: RouteSectionsProps)
         </Bar>
         <SubList
           installId={installId}
-          label="Routes that failed to attach"
+          label={gatewayCopy.notAttached}
           noun={NOUN}
           useList={useRoutes}
           query={failedQuery}
           columns={failedCols}
           rowRef={rowRef}
-          emptyTitle="No routes in this state."
+          emptyTitle={gatewayCopy.noRoutesInState}
           skeletonRows={expectedRows(counts[FAILED.find((f) => f.value === failed)?.count ?? "notAccepted"])}
         />
       </Section>

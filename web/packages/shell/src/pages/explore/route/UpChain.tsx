@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { EyeOff, Repeat } from "lucide-react";
 import type { AncestorPath, LinkedRef } from "../../../api/types";
+import { routeCopy } from "../../../copy/explorer";
 import { LinkedName } from "../../../explore/LinkedName";
 import { ResourceName } from "../../../resource/ResourceName";
 import { sameRef } from "./refs";
@@ -67,7 +68,7 @@ interface UpChainProps {
 /** Paths from a Gateway or ListenerSet down to this route, root first, over reported edges (design §5.3). */
 export function UpChain({ installId, self, paths, truncated, stylesOverride }: UpChainProps) {
   return (
-    <Nav aria-label="Route parents" stylesOverride={stylesOverride}>
+    <Nav aria-label={routeCopy.upChain} stylesOverride={stylesOverride}>
       {paths.length ? (
         <ol className="paths">
           {paths.map((p, i) => (
@@ -86,7 +87,8 @@ export function UpChain({ installId, self, paths, truncated, stylesOverride }: U
                     {!s.ref ? (
                       // Restricted: no identity at all (design §7.4 rule 3).
                       <span className="hidden">
-                        <EyeOff size={14} aria-hidden="true" />A parent you cannot view
+                        <EyeOff size={14} aria-hidden="true" />
+                        {routeCopy.hiddenParent}
                       </span>
                     ) : j === p.steps.length - 1 && sameRef(s.ref, self) ? (
                       <span aria-current="page">
@@ -103,7 +105,7 @@ export function UpChain({ installId, self, paths, truncated, stylesOverride }: U
                 {p.cycle ? (
                   <li className="cycle">
                     <Repeat size={14} aria-hidden="true" />
-                    Cycle
+                    {routeCopy.cycle}
                   </li>
                 ) : null}
               </ol>
@@ -111,9 +113,9 @@ export function UpChain({ installId, self, paths, truncated, stylesOverride }: U
           ))}
         </ol>
       ) : (
-        <p className="note">No reported path to a Gateway.</p>
+        <p className="note">{routeCopy.noPath}</p>
       )}
-      {truncated ? <p className="note">More paths not shown</p> : null}
+      {truncated ? <p className="note">{routeCopy.truncated}</p> : null}
     </Nav>
   );
 }

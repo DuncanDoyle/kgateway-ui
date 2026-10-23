@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import { useMemo } from "react";
 import { useGateways } from "../../api/exploreHooks";
 import type { GatewayListRow } from "../../api/types";
+import { columnCopy, listCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -16,23 +17,34 @@ function columns(installId: string): ObjectColumn<GatewayListRow>[] {
   return [
     {
       id: "health",
-      header: "Status",
+      header: columnCopy.status,
       width: "120px",
       sortKey: "health",
       cell: (r) => <HealthBadge state={r.health} />,
     },
-    { id: "name", header: "Gateway", sortKey: "name", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
-    { id: "class", header: "Class", width: "14%", secondary: true, cell: (r) => r.class },
-    { id: "listeners", header: "Listeners", width: "100px", cell: (r) => r.listeners },
-    { id: "attachedRoutes", header: "Attached routes", width: "140px", cell: (r) => r.attachedRoutes },
-    { id: "notAccepted", header: "Not accepted", width: "120px", secondary: true, cell: (r) => r.notAccepted },
-    { id: "listenerSets", header: "ListenerSets", width: "120px", secondary: true, cell: (r) => r.listenerSets },
+    {
+      id: "name",
+      header: columnCopy.gateway,
+      sortKey: "name",
+      cell: (r) => <NameCell r={r.ref} installId={installId} />,
+    },
+    { id: "class", header: columnCopy.class, width: "14%", secondary: true, cell: (r) => r.class },
+    { id: "listeners", header: columnCopy.listeners, width: "100px", cell: (r) => r.listeners },
+    { id: "attachedRoutes", header: columnCopy.attachedRoutes, width: "140px", cell: (r) => r.attachedRoutes },
+    { id: "notAccepted", header: columnCopy.notAccepted, width: "120px", secondary: true, cell: (r) => r.notAccepted },
+    {
+      id: "listenerSets",
+      header: columnCopy.listenerSets,
+      width: "120px",
+      secondary: true,
+      cell: (r) => r.listenerSets,
+    },
     {
       id: "addresses",
-      header: "Addresses",
+      header: columnCopy.addresses,
       width: "18%",
       secondary: true,
-      cell: (r) => (r.addresses.length ? r.addresses.join(", ") : <Muted>None</Muted>),
+      cell: (r) => (r.addresses.length ? r.addresses.join(", ") : <Muted>{columnCopy.none}</Muted>),
     },
   ];
 }
@@ -50,7 +62,7 @@ export function GatewaysPage({ stylesOverride }: GatewaysPageProps = {}) {
   const cols = useMemo(() => columns(l.id), [l.id]);
   return (
     <ListFrame
-      title="Gateways"
+      title={listCopy.gateways.title}
       installId={l.id}
       noun={NOUN}
       collectedAt={l.data?.collectedAt}
@@ -58,8 +70,8 @@ export function GatewaysPage({ stylesOverride }: GatewaysPageProps = {}) {
       error={l.error}
       loaded={!!l.data}
       search={{
-        label: "Filter gateways",
-        placeholder: "Filter by name or namespace",
+        label: listCopy.gateways.search,
+        placeholder: listCopy.searchByName,
         value: l.text,
         onChange: l.setText,
       }}
@@ -68,7 +80,7 @@ export function GatewaysPage({ stylesOverride }: GatewaysPageProps = {}) {
       stylesOverride={stylesOverride}
     >
       <ObjectTable
-        label="Gateways"
+        label={listCopy.gateways.title}
         installId={l.id}
         noun={NOUN}
         columns={cols}
@@ -76,7 +88,7 @@ export function GatewaysPage({ stylesOverride }: GatewaysPageProps = {}) {
         page={page}
         loading={!l.data}
         busy={l.busy}
-        emptyTitle={l.filtered ? "No Gateways match these filters." : "No Gateways in this install."}
+        emptyTitle={l.filtered ? listCopy.emptyFiltered(NOUN[1]) : listCopy.empty(NOUN[1])}
         onClearFilters={l.filtered ? l.clearFilters : undefined}
         sort={l.sort}
         onSort={l.setSort}

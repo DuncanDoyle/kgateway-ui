@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import { useMemo } from "react";
 import { useListenerSets } from "../../api/exploreHooks";
 import type { ListenerSetRow } from "../../api/types";
+import { columnCopy, listCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -15,15 +16,20 @@ function columns(installId: string): ObjectColumn<ListenerSetRow>[] {
   return [
     {
       id: "health",
-      header: "Status",
+      header: columnCopy.status,
       width: "120px",
       sortKey: "health",
       cell: (r) => <HealthBadge state={r.health} />,
     },
-    { id: "name", header: "ListenerSet", sortKey: "name", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
-    { id: "kind", header: "Kind", width: "140px", sortKey: "kind", secondary: true, cell: (r) => r.ref.kind },
-    { id: "parent", header: "Parent Gateway", cell: (r) => <NameCell r={r.parent} installId={installId} /> },
-    { id: "listeners", header: "Listeners", width: "100px", cell: (r) => r.listeners },
+    {
+      id: "name",
+      header: columnCopy.listenerSet,
+      sortKey: "name",
+      cell: (r) => <NameCell r={r.ref} installId={installId} />,
+    },
+    { id: "kind", header: columnCopy.kind, width: "140px", sortKey: "kind", secondary: true, cell: (r) => r.ref.kind },
+    { id: "parent", header: columnCopy.parentGateway, cell: (r) => <NameCell r={r.parent} installId={installId} /> },
+    { id: "listeners", header: columnCopy.listeners, width: "100px", cell: (r) => r.listeners },
   ];
 }
 const rowRef = (r: ListenerSetRow) => r.ref;
@@ -40,7 +46,7 @@ export function ListenerSetsPage({ stylesOverride }: ListenerSetsPageProps = {})
   const cols = useMemo(() => columns(l.id), [l.id]);
   return (
     <ListFrame
-      title="ListenerSets"
+      title={listCopy.listenerSets.title}
       installId={l.id}
       noun={NOUN}
       collectedAt={l.data?.collectedAt}
@@ -48,8 +54,8 @@ export function ListenerSetsPage({ stylesOverride }: ListenerSetsPageProps = {})
       error={l.error}
       loaded={!!l.data}
       search={{
-        label: "Filter ListenerSets",
-        placeholder: "Filter by name or namespace",
+        label: listCopy.listenerSets.search,
+        placeholder: listCopy.searchByName,
         value: l.text,
         onChange: l.setText,
       }}
@@ -58,7 +64,7 @@ export function ListenerSetsPage({ stylesOverride }: ListenerSetsPageProps = {})
       stylesOverride={stylesOverride}
     >
       <ObjectTable
-        label="ListenerSets"
+        label={listCopy.listenerSets.title}
         installId={l.id}
         noun={NOUN}
         columns={cols}
@@ -66,7 +72,7 @@ export function ListenerSetsPage({ stylesOverride }: ListenerSetsPageProps = {})
         page={page}
         loading={!l.data}
         busy={l.busy}
-        emptyTitle={l.filtered ? "No ListenerSets match these filters." : "No ListenerSets in this install."}
+        emptyTitle={l.filtered ? listCopy.emptyFiltered(NOUN[1]) : listCopy.empty(NOUN[1])}
         onClearFilters={l.filtered ? l.clearFilters : undefined}
         sort={l.sort}
         onSort={l.setSort}

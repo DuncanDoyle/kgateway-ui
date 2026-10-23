@@ -1,6 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { listCopy } from "../copy/explorer";
 
 // region Styles
 const Nav = styled.nav<{ stylesOverride?: SerializedStyles }>`
@@ -51,13 +52,13 @@ interface PagerProps {
 /** Previous and next page buttons over keyset cursors; both render, disabled, while there is no data. */
 export function Pager({ prev, next, onPage, stylesOverride }: PagerProps) {
   return (
-    <Nav aria-label="Pages" stylesOverride={stylesOverride}>
-      <button type="button" aria-label="Previous page" disabled={!prev} onClick={() => prev && onPage(prev)}>
+    <Nav aria-label={listCopy.pages} stylesOverride={stylesOverride}>
+      <button type="button" aria-label={listCopy.previousPage} disabled={!prev} onClick={() => prev && onPage(prev)}>
         <ChevronLeft size={14} aria-hidden="true" />
-        Previous
+        {listCopy.previous}
       </button>
-      <button type="button" aria-label="Next page" disabled={!next} onClick={() => next && onPage(next)}>
-        Next
+      <button type="button" aria-label={listCopy.nextPage} disabled={!next} onClick={() => next && onPage(next)}>
+        {listCopy.next}
         <ChevronRight size={14} aria-hidden="true" />
       </button>
     </Nav>

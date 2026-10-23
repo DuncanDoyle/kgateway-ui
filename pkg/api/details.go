@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -186,9 +183,7 @@ func servedListenerSet(m *engine.Model, group, kind string) (kinds.Served, bool)
 // experimentalHint is D-018's hint as a sentence, for a ListenerSet with no
 // status whose kind the controller watches only with experimental features.
 func experimentalHint(k kinds.Served) string {
-	s := strings.TrimPrefix(fmt.Sprintf(health.ExperimentalHint, k.Kind+" "+k.Version), "; ")
-	r, n := utf8.DecodeRuneInString(s)
-	return string(unicode.ToUpper(r)) + s[n:]
+	return fmt.Sprintf(health.ExperimentalSentence, k.Kind+" "+k.Version)
 }
 
 func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {

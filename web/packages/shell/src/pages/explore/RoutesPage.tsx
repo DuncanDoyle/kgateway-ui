@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { useMemo } from "react";
 import { useRoutes } from "../../api/exploreHooks";
 import type { ParentSummary, RouteRow } from "../../api/types";
+import { columnCopy, listCopy, parentLineCopy, routeStateCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -35,15 +36,7 @@ const Parents = styled.ul`
 const NOUN = ["route", "routes"] as const;
 
 /** The 2.2 route state flags (design §6.1); the wording pass (Task 31) finalises the labels. */
-const stateOptions: FilterOption[] = [
-  { value: "accepted", label: "Accepted" },
-  { value: "not-accepted", label: "Not accepted" },
-  { value: "refs-unresolved", label: "References not resolved" },
-  { value: "not-programmed", label: "Rules replaced or dropped" },
-  { value: "pending", label: "Waiting for status" },
-  { value: "declared", label: "Parent route has no status" },
-  { value: "no-parent", label: "No parent" },
-];
+const stateOptions: FilterOption[] = Object.entries(routeStateCopy).map(([value, label]) => ({ value, label }));
 
 function ParentLine({ p, installId }: { p: ParentSummary; installId: string }) {
   return (
@@ -52,10 +45,11 @@ function ParentLine({ p, installId }: { p: ParentSummary; installId: string }) {
       {p.via ? (
         <Muted>
           {" "}
-          through <ResourceName namespace={p.via.namespace} name={p.via.name} stylesOverride={wrapName} />
+          {parentLineCopy.onGateway}{" "}
+          <ResourceName namespace={p.via.namespace} name={p.via.name} stylesOverride={wrapName} />
         </Muted>
       ) : null}
-      {p.viaRestricted ? <Muted> through a Gateway you cannot view</Muted> : null}
+      {p.viaRestricted ? <Muted> {parentLineCopy.onHiddenGateway}</Muted> : null}
     </li>
   );
 }
@@ -64,26 +58,26 @@ function columns(installId: string): ObjectColumn<RouteRow>[] {
   return [
     {
       id: "health",
-      header: "Status",
+      header: columnCopy.status,
       width: "120px",
       sortKey: "health",
       cell: (r) => <HealthBadge state={r.health} />,
     },
     {
       id: "name",
-      header: "Route",
+      header: columnCopy.route,
       sortKey: "name",
       cell: (r) => (
         <>
           <NameCell r={r.ref} installId={installId} />
-          {r.mirror ? <Tag>Mirror</Tag> : null}
+          {r.mirror ? <Tag>{columnCopy.mirror}</Tag> : null}
         </>
       ),
     },
-    { id: "kind", header: "Kind", width: "120px", sortKey: "kind", secondary: true, cell: (r) => r.ref.kind },
+    { id: "kind", header: columnCopy.kind, width: "120px", sortKey: "kind", secondary: true, cell: (r) => r.ref.kind },
     {
       id: "parents",
-      header: "Parents",
+      header: columnCopy.parents,
       cell: (r) =>
         r.parents.length ? (
           <Parents>
@@ -96,17 +90,17 @@ function columns(installId: string): ObjectColumn<RouteRow>[] {
             ))}
           </Parents>
         ) : (
-          <Muted>None</Muted>
+          <Muted>{columnCopy.none}</Muted>
         ),
     },
     {
       id: "hostnames",
-      header: "Hostnames",
+      header: columnCopy.hostnames,
       width: "18%",
       secondary: true,
-      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>Inherited</Muted>),
+      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>{columnCopy.inherited}</Muted>),
     },
-    { id: "children", header: "Child routes", width: "110px", secondary: true, cell: (r) => r.children },
+    { id: "children", header: columnCopy.childRoutes, width: "110px", secondary: true, cell: (r) => r.children },
   ];
 }
 
@@ -122,7 +116,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
   const cols = useMemo(() => columns(l.id), [l.id]);
   return (
     <ListFrame
-      title="Routes"
+      title={listCopy.routes.title}
       installId={l.id}
       noun={NOUN}
       collectedAt={l.data?.collectedAt}
@@ -130,8 +124,8 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
       error={l.error}
       loaded={!!l.data}
       search={{
-        label: "Filter routes",
-        placeholder: "Filter by name, namespace or hostname",
+        label: listCopy.routes.search,
+        placeholder: listCopy.searchRoutes,
         value: l.text,
         onChange: l.setText,
       }}
@@ -142,7 +136,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
           tags={["namespace", "kind", "parent", "attachment", "backend"]}
         >
           <StateFilter
-            label="Route state"
+            label={listCopy.routeState}
             options={stateOptions}
             selected={listValues(l.params, "state")}
             onChange={(v) => l.setFilter({ state: v.join(",") })}
@@ -153,7 +147,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
       stylesOverride={stylesOverride}
     >
       <ObjectTable
-        label="Routes"
+        label={listCopy.routes.title}
         installId={l.id}
         noun={NOUN}
         columns={cols}
@@ -161,7 +155,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
         page={page}
         loading={!l.data}
         busy={l.busy}
-        emptyTitle={l.filtered ? "No routes match these filters." : "No routes in this install."}
+        emptyTitle={l.filtered ? listCopy.emptyFiltered(NOUN[1]) : listCopy.empty(NOUN[1])}
         onClearFilters={l.filtered ? l.clearFilters : undefined}
         sort={l.sort}
         onSort={l.setSort}

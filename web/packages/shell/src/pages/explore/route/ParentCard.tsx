@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useId, useState } from "react";
 import type { Condition, ParentRef, ParentStatus } from "../../../api/types";
+import { routeCopy } from "../../../copy/explorer";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
 import { TextButton } from "../../../states/controls";
@@ -85,22 +86,30 @@ export function ParentCard({
   // Interim wording (Task 31): with a delegation ref, BackendNotFound may not mean a missing Service.
   const extra = (c: Condition) =>
     hasDelegation && c.type === "ResolvedRefs" && c.status === "False" && c.reason === "BackendNotFound" ? (
-      <span className="hint">This can mean a missing backend or a delegation ref that selects no route.</span>
+      <span className="hint">{routeCopy.mixedParentHint}</span>
     ) : null;
   return (
-    <Card aria-label={`Parent ${name}`} stylesOverride={stylesOverride}>
+    <Card aria-label={routeCopy.parentCard(name)} stylesOverride={stylesOverride}>
       <h3>
         <span className="muted">{parentRef.kind}</span>
         <LinkedName refValue={target} installId={installId} />
-        {parentRef.sectionName ? <span className="muted">Section {parentRef.sectionName}</span> : null}
-        {parentRef.port ? <span className="muted">Port {parentRef.port}</span> : null}
+        {parentRef.sectionName ? (
+          <span className="muted">
+            {routeCopy.section} {parentRef.sectionName}
+          </span>
+        ) : null}
+        {parentRef.port ? (
+          <span className="muted">
+            {routeCopy.port} {parentRef.port}
+          </span>
+        ) : null}
       </h3>
       {ours.length ? (
         ours.map((e) => (
           <ConditionList key={e.controllerName} conditions={e.conditions} generation={generation} extra={extra} />
         ))
       ) : (
-        <span className="hint">No status from this install's controllers.</span>
+        <span className="hint">{routeCopy.noOwnStatus}</span>
       )}
       {others.length ? (
         <>
@@ -110,7 +119,7 @@ export function ParentCard({
             aria-controls={open ? listId : undefined}
             onClick={() => setOpen((o) => !o)}
           >
-            Other controllers ({others.length})
+            {routeCopy.otherControllers(others.length)}
           </Toggle>
           {open ? (
             <ul className="others" id={listId}>

@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Info } from "lucide-react";
 import type { Candidate } from "../api/types";
+import { detailCopy } from "../copy/explorer";
 import { LinkedName } from "./LinkedName";
 
 // region Styles
@@ -37,18 +38,20 @@ interface CandidateBannerProps {
 export function CandidateBanner({ candidate, installId, stylesOverride }: CandidateBannerProps) {
   const why =
     candidate.reason === "finding" ? (
-      "a finding of this install names it."
+      detailCopy.bannerFinding
     ) : candidate.by ? (
       <>
-        {candidate.by.kind} <LinkedName refValue={candidate.by} installId={installId} /> refers to it.
+        {candidate.by.kind} <LinkedName refValue={candidate.by} installId={installId} /> {detailCopy.bannerRefersTo}
       </>
     ) : (
-      "an object of this install refers to it."
+      detailCopy.bannerObject
     );
   return (
     <Banner role="note" data-testid="candidate-banner" stylesOverride={stylesOverride}>
       <Info size={16} aria-hidden="true" />
-      <span>Not part of this install. Shown because {why}</span>
+      <span>
+        {detailCopy.bannerLead} {why}
+      </span>
     </Banner>
   );
 }
