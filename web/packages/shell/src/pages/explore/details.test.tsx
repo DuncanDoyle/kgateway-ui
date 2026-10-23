@@ -10,6 +10,7 @@ import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
 import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList } from "../../api/types";
 import { TABS_H } from "../../explore/DetailTabs";
+import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { HEADER_H } from "./detailParts";
@@ -191,17 +192,21 @@ it("ListenerSets are paged through the list endpoint", async () => {
 });
 
 it("ListenerSet page says when the parent Gateway is missing", async () => {
-  const hidden = {
-    ...ls(lsInvalidGolden),
-    parentFound: false,
-    parent: { ...ls(lsInvalidGolden).parent, link: "none" as const },
-  };
-  serve(api({ ls: hidden }));
-  mount(LS_PATH("partial"));
-  // Hidden and absent read alike, so the page says "not available", never "not found" (design §7.3).
-  expect(await screen.findByText("Not available")).toBeInTheDocument();
-  expect(screen.queryByText(/not found/i)).toBeNull();
-  expect(screen.queryByRole("link", { name: "infra/edge" })).toBeNull();
+  // NotAllowed with a parent the caller cannot view: the server sends no allowedListeners; the UI also gates on parentFound.
+  const base = ls(lsGolden);
+  const hidden = { ...base, parentFound: false, parent: { ...base.parent, link: "none" as const } };
+  for (const body of [{ ...hidden, parentAllowedListeners: undefined }, hidden]) {
+    serve(api({ ls: body }));
+    const view = mount(LS_PATH("na"));
+    // Hidden and absent read alike, so the page says "not available", never "not found" (design §7.3).
+    expect(await screen.findByText("Not available")).toBeInTheDocument();
+    expect(screen.getByText("Not available").closest("dd")).toHaveTextContent("infra/edge");
+    expect(screen.queryByText(/not found/i)).toBeNull();
+    expect(screen.queryByRole("link", { name: "infra/edge" })).toBeNull();
+    expect(screen.getByTestId("condition-Accepted")).toHaveTextContent("NotAllowed");
+    expect(screen.queryByTestId("allowed-listeners")).toBeNull();
+    view.unmount();
+  }
 });
 
 it("a found parent Gateway links to its page", async () => {
@@ -249,6 +254,14 @@ it("an accepted ListenerSet shows no allowed-listeners block", async () => {
   ).toBeInTheDocument();
 });
 
+it("an accepted ListenerSet never shows the block, even when the body carries allowedListeners", async () => {
+  serve(api({ ls: { ...ls(lsInvalidGolden), parentAllowedListeners: { set: false, crdHint: true } } }));
+  mount(LS_PATH("partial"));
+  await screen.findByRole("table", { name: "Listeners" });
+  expect(screen.getByTestId("condition-Accepted")).toHaveTextContent("Accepted: True");
+  expect(screen.queryByTestId("allowed-listeners")).toBeNull();
+});
+
 it("candidate banner above the header", async () => {
   const g = {
     ...gateway(),
@@ -277,7 +290,18 @@ it("an owned object shows no candidate banner", async () => {
 });
 
 it("polling keeps scroll, focus and expanded rows", async () => {
-  serve(api());
+  // The second response changes one listener's count, so a reset keyed on the listeners would show.
+  let polls = 0;
+  const base = api();
+  serve((u) => {
+    if (u.pathname !== `${API}/gateways/infra/edge`) return base(u);
+    const g = gateway();
+    if (polls++ > 0)
+      g.listeners = g.listeners.map((l) =>
+        l.name === "http" && l.status ? { ...l, status: { ...l.status, attachedRoutes: 4 } } : l,
+      );
+    return g;
+  });
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   mount(GW_PATH);
@@ -292,6 +316,7 @@ it("polling keeps scroll, focus and expanded rows", async () => {
   });
   // A poll ran, and the page kept its nodes: nothing remounted, so scroll, focus and expansion stay.
   expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(before);
+  expect(await within(rowOf(listeners, "http")).findByText("4")).toBeInTheDocument();
   expect(screen.getByRole("heading", { level: 1 })).toBe(heading);
   expect(toggle).toHaveFocus();
   expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -408,4 +433,69 @@ it("below 900 px the listener table moves TLS and allowed routes into the expand
   const details = screen.getByTestId("listener-https-details");
   expect(within(details).getByText("TLS")).toBeInTheDocument();
   expect(details).toHaveTextContent("Terminate");
+});
+
+it("sub-table skeletons have the loaded row count, so the sections below keep their place", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const reply = api();
+  const g = { ...gateway(), routeCounts: { accepted: 5, notAccepted: 0, pending: 1, unwatched: 1 } };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const u = new URL(url, "http://ui");
+      if (u.pathname === `${API}/gateways/infra/edge`) return new Response(JSON.stringify(g), { status: 200 });
+      // Lists wait, so their skeletons can be counted.
+      await gate;
+      const a = u.searchParams.get("attachment");
+      const body = reply(u) as RouteList;
+      if (u.pathname === `${API}/routes`) {
+        // The visible count matches routeCounts: none not accepted.
+        const items =
+          a === "not-accepted"
+            ? []
+            : body.items.filter((r) =>
+                r.parents.some((p) => p.attachment === a && [p.ref.name, p.via?.name].includes("edge")),
+              );
+        return new Response(JSON.stringify({ ...body, items, total: items.length }), { status: 200 });
+      }
+      return new Response(JSON.stringify(body), { status: 200 });
+    }),
+  );
+  mount(GW_PATH);
+  await screen.findByRole("table", { name: "Listeners" });
+  const skeletons = (name: string) => within(table(name)).queryAllByTestId("skeleton-row").length;
+  const loaded = (name: string) =>
+    within(table(name))
+      .queryAllByRole("row")
+      .filter((r) => r.closest("tbody") && r.dataset.row !== undefined).length;
+  // ListenerSets: the status count; attached: routeCounts.accepted; failed (Not accepted, 0): one blank row.
+  expect(skeletons("ListenerSets")).toBe(1);
+  expect(skeletons("Attached routes")).toBe(5);
+  expect(skeletons("Routes that failed to attach")).toBe(1);
+  const blank = within(table("Routes that failed to attach")).getByTestId("skeleton-row");
+  expect(blank.querySelector("[data-testid=shimmer]")).toBeNull();
+  expect(getComputedStyle(blank).height).toBe(`${ROW_H}px`);
+  await act(async () => release?.());
+  await within(table("Attached routes")).findByText("cart");
+  expect(loaded("Attached routes")).toBe(5);
+  expect(loaded("ListenerSets")).toBe(2);
+  // The empty state takes the blank row's place at the same height.
+  const empty = await within(table("Routes that failed to attach")).findByTestId("empty-row");
+  expect(getComputedStyle(empty).height).toBe(`${ROW_H}px`);
+});
+
+it("the hidden-routes line shows once for the route sections, and single pages have no pager", async () => {
+  const base = api();
+  serve((u) => {
+    const b = base(u);
+    return u.pathname === `${API}/routes` ? { ...(b as RouteList), deniedInInstall: 2 } : b;
+  });
+  mount(GW_PATH);
+  await within(await screen.findByRole("table", { name: "Attached routes" })).findByText("cart");
+  expect(screen.getAllByText("You cannot view 2 routes in this install.")).toHaveLength(1);
+  expect(table("Routes that failed to attach").parentElement).toHaveTextContent("You cannot view 2 routes");
+  expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
 });

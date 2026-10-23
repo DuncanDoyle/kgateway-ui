@@ -607,6 +607,7 @@ The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) i
 - Detail pages have **Overview** and **YAML** tabs (`?tab=yaml`); the YAML tab reuses the YAML view's body (`web/packages/shell/src/pages/ResourcePage.tsx:135-192`).
 - The header gains install-scoped nav: Overview, Gateways, Routes, ListenerSets, Findings.
 - Filters, sort and cursor live in the query string, as in the Gateway table (`pages/install/GatewayTable.tsx:221-260`).
+- On detail pages only `?tab` is in the URL; sub-table filters and cursors are page-local, so a reload returns to page one and the default sub-filter **(our call, 2.2)**.
 - Every link comes from the reference's `link` (§7.1).
 
 ### 8.2 Extension contract
@@ -645,7 +646,7 @@ A diagnostic candidate shows its banner above the header.
 
 | State | Behaviour |
 |---|---|
-| Loading | skeleton rows at the final row height; fixed-height header and tabs |
+| Loading | skeleton rows at the final row height, sub-tables sized from the detail's counts; fixed-height header and tabs. The candidate banner is the one allowed load-time shift: it appears only once the body says the object is a candidate **(our call, 2.2)** |
 | Empty | per table, with a Clear filters action where filters apply |
 | Error after data | keep the data, show `PageNotice` (`ResourcePage.tsx:174` pattern) |
 | 404 | "Not in this install's scope", with a link back |

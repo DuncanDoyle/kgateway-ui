@@ -111,7 +111,9 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
               conditions={data.conditions}
               generation={data.generation}
               empty={data.experimentalHint}
-              extra={(c) => (allowed && isNotAllowed(c) ? <AllowedListenersBlock a={allowed} /> : null)}
+              extra={(c) =>
+                data.parentFound && allowed && isNotAllowed(c) ? <AllowedListenersBlock a={allowed} /> : null
+              }
             />
           </Section>
           <Section aria-labelledby="ls-listeners">

@@ -195,9 +195,16 @@ interface SubListProps<T> {
   columns: ObjectColumn<T>[];
   rowRef: (row: T) => LinkedRef;
   emptyTitle: string;
+  /** The expected row count, so the skeleton has the loaded table's height. */
+  skeletonRows: number;
+  showDenied?: boolean;
 }
 
 const NO_SORT = { key: "name", desc: false };
+/** The server's default page size (design §7.2): a sub-table never shows more rows than this. */
+export const PAGE_LIMIT = 50;
+/** Skeleton rows for an expected count: at most one page. */
+export const expectedRows = (n: number) => Math.min(Math.max(0, n), PAGE_LIMIT);
 
 /** A paged list under a detail page, through the list endpoint; its cursor is local, so the page URL stays short. */
 export function SubList<T extends { health: HealthState }>({
@@ -209,6 +216,8 @@ export function SubList<T extends { health: HealthState }>({
   columns,
   rowRef,
   emptyTitle,
+  skeletonRows,
+  showDenied,
 }: SubListProps<T>) {
   const key = new URLSearchParams(query).toString();
   const [cursor, setCursor] = useState<{ key: string; c: string }>();
@@ -236,6 +245,8 @@ export function SubList<T extends { health: HealthState }>({
         loading={!l.data && !l.error}
         busy={l.isLaggy}
         emptyTitle={emptyTitle}
+        skeletonRows={skeletonRows}
+        showDenied={showDenied}
         sort={NO_SORT}
         onSort={() => {}}
         onPage={(next) => setCursor({ key, c: next })}

@@ -5,7 +5,7 @@ import type { Attachment, LinkedRef, RouteCounts, RouteRow } from "../../api/typ
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { Chip } from "../../states/controls";
-import { refParam, Section, SubList } from "./detailParts";
+import { expectedRows, refParam, Section, SubList } from "./detailParts";
 import { attachmentLabel, Muted, NameCell } from "./listParts";
 
 // region Styles
@@ -17,7 +17,12 @@ const Why = styled.ul`
   li + li {
     margin-top: 4px;
   }
+  .label {
+    white-space: nowrap;
+  }
+  /* A whole code moves to the next line rather than breaking mid-word. */
   .reason {
+    display: inline-block;
     margin-left: 6px;
     font-family: ${(p) => p.theme.font.mono};
     font-size: ${(p) => p.theme.font.size.code};
@@ -76,7 +81,7 @@ function whyColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
           .filter((p) => same(p.ref, parent) || same(p.via, parent))
           .map((p) => (
             <li key={[p.ref.kind, p.ref.namespace, p.ref.name, p.sectionName, p.port].join("/")}>
-              {attachmentLabel[p.attachment]}
+              <span className="label">{attachmentLabel[p.attachment]}</span>
               {p.sectionName ? <Muted> · {p.sectionName}</Muted> : null}
               {/* A reason without a condition type is ours, not the controller's: never shown as a code. */}
               {p.conditionType && p.reason ? <span className="reason">{p.reason}</span> : null}
@@ -119,6 +124,9 @@ export function RouteSections({ installId, parent, counts }: RouteSectionsProps)
           columns={base}
           rowRef={rowRef}
           emptyTitle="No routes attached."
+          skeletonRows={expectedRows(counts.accepted)}
+          // The install-wide hidden-routes line shows once, under the failed table.
+          showDenied={false}
         />
       </Section>
       <Section aria-labelledby="failed-routes">
@@ -139,6 +147,7 @@ export function RouteSections({ installId, parent, counts }: RouteSectionsProps)
           columns={failedCols}
           rowRef={rowRef}
           emptyTitle="No routes in this state."
+          skeletonRows={expectedRows(counts[FAILED.find((f) => f.value === failed)?.count ?? "notAccepted"])}
         />
       </Section>
     </>

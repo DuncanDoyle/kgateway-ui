@@ -8,7 +8,7 @@ import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json"
 import routesByBackendGolden from "../../../../../../pkg/api/testdata/golden/routes-by-backend.json";
 import routesRestrictedGolden from "../../../../../../pkg/api/testdata/golden/routes-restricted.json";
 import type { GatewayList, ListenerSetList, RouteList, RouteRow } from "../../api/types";
-import { ROW_H } from "../../explore/ObjectTable";
+import { FOOTER_H, ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { GatewaysPage } from "./GatewaysPage";
@@ -221,12 +221,13 @@ it("a failed query keeps its title and filters, and Clear filters recovers", asy
   expect(search().has("health")).toBe(false);
 });
 
-it("the pager is disabled after load when the page has no cursors", async () => {
+it("the pager hides after load when the page has no cursors, and the footer keeps its height", async () => {
   serve((u) => (u.pathname.endsWith("/gateways") ? fresh(gatewaysGolden.body as GatewayList) : undefined));
   mount(`/i/${ID}/gateways`);
   await screen.findByText("edge");
-  expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Previous page" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+  expect(getComputedStyle(screen.getByTestId("list-footer")).height).toBe(`${FOOTER_H}px`);
 });
 
 it("row hover underlines only the row's own name, not other links", async () => {

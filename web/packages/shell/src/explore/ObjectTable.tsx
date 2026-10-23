@@ -83,7 +83,8 @@ const Table = styled.table`
     font-variant-numeric: tabular-nums;
   }
   /* Table rows grow to fit, so this is a minimum: a long wrapped name only adds height. */
-  tbody tr[data-row] {
+  tbody tr[data-row],
+  tbody tr[data-empty] {
     height: ${ROW_H}px;
   }
   tbody {
@@ -153,7 +154,7 @@ const Empty = styled.div`
   flex-wrap: wrap;
   align-items: center;
   gap: ${(p) => p.theme.space(2)};
-  padding: ${(p) => p.theme.space(2)} 0;
+  /* No vertical padding: the empty row keeps the skeleton row's ROW_H height. */
   color: ${(p) => p.theme.color.textMuted};
 `;
 const Footer = styled.div`
@@ -214,6 +215,10 @@ interface ObjectTableProps<T> {
   sort: SortState;
   onSort: (key: string) => void;
   onPage: (cursor: string) => void;
+  /** Skeleton rows while loading; set it to the expected row count so nothing below moves. 0 reserves the empty row. */
+  skeletonRows?: number;
+  /** Whether the footer says how many objects the caller cannot view; one table per page should. */
+  showDenied?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
@@ -235,6 +240,8 @@ export function ObjectTable<T>({
   sort,
   onSort,
   onPage,
+  skeletonRows = SKELETON_ROWS,
+  showDenied = true,
   stylesOverride,
 }: ObjectTableProps<T>) {
   const navigate = useNavigate();
@@ -355,16 +362,16 @@ export function ObjectTable<T>({
         </thead>
         <tbody data-busy={busy || undefined}>
           {!page && loading
-            ? Array.from({ length: SKELETON_ROWS }, (_, i) => `s${i}`).map((k) => (
+            ? Array.from({ length: Math.max(1, skeletonRows) }, (_, i) => `s${i}`).map((k) => (
                 <tr key={k} data-row="" data-testid="skeleton-row">
                   {shown.map((c) => (
-                    <td key={c.id}>{c.id === "expand" ? null : <Shimmer h={14} />}</td>
+                    <td key={c.id}>{c.id === "expand" || skeletonRows === 0 ? null : <Shimmer h={14} />}</td>
                   ))}
                 </tr>
               ))
             : null}
           {page && rows.length === 0 ? (
-            <tr>
+            <tr data-empty="" data-testid="empty-row">
               <td colSpan={shown.length}>
                 <Empty>
                   {emptyTitle}
@@ -417,9 +424,12 @@ export function ObjectTable<T>({
       </Table>
       <Footer data-testid="list-footer">
         <span className="denied">
-          {page?.deniedInInstall ? `You cannot view ${count(page.deniedInInstall, noun)} in this install.` : null}
+          {showDenied && page?.deniedInInstall
+            ? `You cannot view ${count(page.deniedInInstall, noun)} in this install.`
+            : null}
         </span>
-        <Pager prev={page?.prev} next={page?.next} onPage={onPage} />
+        {/* Once loaded, a single page has no pager; the footer keeps its height. */}
+        {!page || page.prev || page.next ? <Pager prev={page?.prev} next={page?.next} onPage={onPage} /> : null}
       </Footer>
     </Frame>
   );

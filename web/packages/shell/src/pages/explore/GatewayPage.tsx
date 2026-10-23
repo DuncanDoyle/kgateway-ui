@@ -7,7 +7,7 @@ import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { useInstallId } from "../../shell/extension";
-import { DetailFrame, Facts, refParam, Section, SubList } from "./detailParts";
+import { DetailFrame, expectedRows, Facts, refParam, Section, SubList } from "./detailParts";
 import { ListenerTable } from "./gateway/ListenerTable";
 import { Muted, NameCell } from "./listParts";
 import { RouteSections } from "./RouteSections";
@@ -80,6 +80,8 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
               columns={lsCols}
               rowRef={lsRef}
               emptyTitle="No ListenerSets name this Gateway."
+              // The status count is a hint: the list counts visible ListenerSets, the status all attached ones.
+              skeletonRows={expectedRows(data.attachedListenerSets ?? 1)}
             />
           </Section>
           <RouteSections installId={id} parent={ref} counts={data.routeCounts} />
