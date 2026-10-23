@@ -325,6 +325,17 @@ func backendRefs(u *unstructured.Unstructured, refs ...map[string]any) *unstruct
 	return testutil.WithRules(u, r)
 }
 
+// asKind turns a route fixture into kind (GRPCRoute, TCPRoute, TLSRoute) at its first upstream version.
+func asKind(u *unstructured.Unstructured, kind string) *unstructured.Unstructured {
+	for _, k := range testutil.ServedUpstream() {
+		if k.Kind == kind {
+			u.SetAPIVersion(k.Group + "/" + k.Version)
+		}
+	}
+	u.SetKind(kind)
+	return u
+}
+
 func backendRef(ns, name string) map[string]any {
 	return map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "namespace": ns, "name": name}
 }
@@ -348,13 +359,18 @@ func TestBackendAssignment(t *testing.T) {
 		testutil.Backend("shop", "used", nil), testutil.Backend("blog", "outside", nil), testutil.Backend("shop", "svc-named", nil),
 		testutil.Backend("shop", "idle", nil), testutil.Backend("shop", "by-loose", nil), testutil.Backend("shop", "mirrored", nil),
 		testutil.Backend("shop", "deep", nil),
+		// Other route kinds: a GRPCRoute (backendRef and mirror) and a TCPRoute.
+		asKind(backendRefs(testutil.HTTPRoute("shop", "grpc", []objects.ParentRef{gw}, ok(gw)), backendRef("shop", "by-grpc"),
+			map[string]any{"name": "grpc-svc", "filters": []any{map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": backendRef("shop", "grpc-mirror")}}}}), "GRPCRoute"),
+		asKind(backendRefs(testutil.HTTPRoute("shop", "tcp", []objects.ParentRef{gw}, ok(gw)), map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "name": "by-tcp"}), "TCPRoute"),
+		testutil.Backend("shop", "by-grpc", nil), testutil.Backend("shop", "grpc-mirror", nil), testutil.Backend("shop", "by-tcp", nil),
 	)
 	var got []string
 	for _, b := range o.Backends {
 		got = append(got, objects.RefOf(b).String())
 	}
 	slices.Sort(got)
-	if want := []string{"shop/deep", "shop/mirrored", "shop/used"}; !slices.Equal(got, want) {
+	if want := []string{"shop/by-grpc", "shop/by-tcp", "shop/deep", "shop/grpc-mirror", "shop/mirrored", "shop/used"}; !slices.Equal(got, want) {
 		t.Fatalf("Backends %v, want %v", got, want)
 	}
 	var refs []string
@@ -365,7 +381,42 @@ func TestBackendAssignment(t *testing.T) {
 		refs = append(refs, r.String())
 	}
 	slices.Sort(refs)
-	if want := []string{"blog/outside", "shop/deep", "shop/mirrored", "shop/missing", "shop/used"}; !slices.Equal(refs, want) {
+	if want := []string{"blog/outside", "shop/by-grpc", "shop/by-tcp", "shop/deep", "shop/grpc-mirror", "shop/mirrored", "shop/missing", "shop/used"}; !slices.Equal(refs, want) {
 		t.Fatalf("ReferencedBackends %v, want %v (each once)", refs, want)
+	}
+}
+
+// With two installs, each install's candidates and Unwatched use only its own
+// owned routes, even though most refs miss its index.
+func TestCandidatesPerInstall(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("shop-b", map[string]string{"team": "b"})}
+	gwA, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	pa, pb := testutil.HTTPRouteRef("shop", "pa"), testutil.HTTPRouteRef("shop-b", "pb")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "pa", []objects.ParentRef{gwA}, ok(gwA)),
+		testutil.HTTPRoute("shop-b", "pb", []objects.ParentRef{gwB}, ok(gwB)),
+		testutil.HTTPRoute("shop", "ca", nil, ok(pa)),
+		testutil.HTTPRoute("shop", "decl-a", []objects.ParentRef{pa}),
+		testutil.HTTPRoute("shop-b", "decl-b", []objects.ParentRef{pb}),
+		// Out of a's scope, naming a's child: unwatched for a only.
+		testutil.HTTPRoute("shop-b", "to-ca", []objects.ParentRef{testutil.HTTPRouteRef("shop", "ca")}),
+	)
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"team":"b"}}]`)}, objects.Direct{})
+	if got := declared(a.PerInstall["kgw-a.a"]); !slices.Equal(got, []string{"shop/decl-a→shop/pa"}) {
+		t.Errorf("a declared %v", got)
+	}
+	if got := declared(a.PerInstall["kgw-b.b"]); !slices.Equal(got, []string{"shop-b/decl-b→shop-b/pb"}) {
+		t.Errorf("b declared %v", got)
+	}
+	var unw []string
+	for _, u := range a.Unwatched {
+		unw = append(unw, u.Install+" "+u.Route.String()+"→"+u.Gateway.String())
+	}
+	// Phase 1: each route outside the other install's scope names no Gateway of it.
+	if want := []string{"kgw-a.a shop-b/to-ca→shop/ca"}; !slices.Equal(unw, want) {
+		t.Errorf("unwatched %v, want %v", unw, want)
 	}
 }

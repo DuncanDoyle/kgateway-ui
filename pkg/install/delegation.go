@@ -68,6 +68,15 @@ func decodeHTTPRoutes(snap *cache.Snapshot, served []kinds.Served, dec objects.D
 	return h
 }
 
+// index returns r's position in h when r is a served HTTPRoute.
+func (h *httpRoutes) index(r OwnedObject) (int, bool) {
+	if h == nil || r.Kind.Group != h.kind.Group || r.Kind.Kind != h.kind.Kind {
+		return 0, false
+	}
+	i, ok := h.byRef[objects.RefOf(r.Obj)]
+	return i, ok
+}
+
 // isHTTPRoute reports whether group/kind is HTTPRoute.
 func isHTTPRoute(group, kind string) bool {
 	return group == objects.GatewayAPIGroup && kind == "HTTPRoute"
@@ -145,7 +154,8 @@ func ownedHTTPRoute(o *Owned, ref objects.Ref) bool {
 	if !isHTTPRoute(ref.Group, ref.Kind) {
 		return false
 	}
-	_, ok := o.Route(ref)
+	// delegate leaves routeIdx complete, so a miss needs no scan.
+	_, ok := o.routeIdx[ref]
 	return ok
 }
 
@@ -218,11 +228,11 @@ func candidates(h *httpRoutes, insts []Resolved, a *Assignment, inScope func(Res
 }
 
 // assignBackends gives each install the in-scope Backends that a backendRef
-// or mirror of an owned HTTPRoute names by full identity, and records every
-// such ref (design §4.3).
+// or mirror of an owned route of any kind names by full identity, and
+// records every such ref (design §4.3). h is nil when HTTPRoute is not served.
 func assignBackends(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, a *Assignment, inScope func(Resolved, string) bool, h *httpRoutes) {
 	bks := kinds.ByCategory(served, kinds.CategoryBackend)
-	if h == nil || len(bks) == 0 {
+	if len(bks) == 0 {
 		return
 	}
 	isBackend := func(r objects.Ref) bool {
@@ -232,11 +242,13 @@ func assignBackends(snap *cache.Snapshot, served []kinds.Served, insts []Resolve
 		o := a.PerInstall[in.ID()]
 		refs := map[objects.Ref]bool{}
 		for _, r := range o.Routes {
-			i, ok := h.byRef[objects.RefOf(r.Obj)]
-			if !ok || r.Kind.Group != h.kind.Group || r.Kind.Kind != h.kind.Kind {
-				continue
+			var ts []objects.BackendTarget
+			if i, ok := h.index(r); ok {
+				ts = objects.BackendTargets(h.views[i])
+			} else {
+				ts = objects.RouteBackendTargets(r.Obj)
 			}
-			for _, t := range objects.BackendTargets(h.views[i]) {
+			for _, t := range ts {
 				if isBackend(t.Ref) && !refs[t.Ref] {
 					refs[t.Ref] = true
 					o.ReferencedBackends = append(o.ReferencedBackends, t.Ref)

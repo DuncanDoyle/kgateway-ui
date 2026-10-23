@@ -26,3 +26,36 @@ func DecodeBackend(u *unstructured.Unstructured) *BackendView {
 func DecodeRouteHostnames(u *unstructured.Unstructured) *RouteHostnames {
 	return &RouteHostnames{Hostnames: stringList(field(u, "spec", "hostnames"))}
 }
+
+// RouteBackendTargets returns the spec.rules[].backendRefs and RequestMirror
+// targets of any route kind (GRPCRoute, TCPRoute, TLSRoute), with Gateway API
+// defaults applied. Use BackendTargets for a decoded HTTPRoute. It never fails.
+func RouteBackendTargets(u *unstructured.Unstructured) []BackendTarget {
+	ns := u.GetNamespace()
+	var out []BackendTarget
+	mirrors := func(fs any) {
+		for _, f := range decodeFilters(fs, ns) {
+			if f.Mirror != nil {
+				out = append(out, BackendTarget{Ref: f.Mirror.Backend, Mirror: true})
+			}
+		}
+	}
+	for _, r := range list(field(u, "spec", "rules")) {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		mirrors(m["filters"])
+		for _, b := range list(m["backendRefs"]) {
+			var raw rawBackendRef
+			if !decodeInto(b, &raw) {
+				continue
+			}
+			out = append(out, BackendTarget{Ref: raw.ref("Service", ns)})
+			if bm, ok := b.(map[string]any); ok {
+				mirrors(bm["filters"])
+			}
+		}
+	}
+	return out
+}

@@ -2241,14 +2241,28 @@ func TestBackendTileCountsInUseBackends(t *testing.T) {
 	r["backendRefs"] = []any{map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "name": "used"},
 		map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "name": "hidden"}}
 	objs := isolated(testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), r),
-		testutil.Backend("shop", "used", nil), testutil.Backend("shop", "hidden", nil), testutil.Backend("shop", "idle", nil))
+		testutil.Backend("shop", "used", nil), testutil.Backend("shop", "hidden", nil), testutil.Backend("shop", "idle", nil),
+		// Used only by a GRPCRoute and a TCPRoute.
+		backendOnly("GRPCRoute", "v1", "grpc", "by-grpc"), backendOnly("TCPRoute", "v1", "tcp", "by-tcp"),
+		testutil.Backend("shop", "by-grpc", nil), testutil.Backend("shop", "by-tcp", nil))
 	_, all, _ := startWith(t, setup{}, objs...)
-	if n, _ := count(get[OverviewResponse](t, all, "/api/v1/installs/kgw.kgateway/overview", 200), "Backend"); n != 2 {
-		t.Fatalf("Backend tile %d, want 2 (used, hidden; idle is not in use)", n)
+	if n, _ := count(get[OverviewResponse](t, all, "/api/v1/installs/kgw.kgateway/overview", 200), "Backend"); n != 4 {
+		t.Fatalf("Backend tile %d, want 4 (used, hidden, by-grpc, by-tcp; idle is not in use)", n)
 	}
 	authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "hidden" })
 	_, some, _ := startWith(t, setup{authz: authz}, objs...)
-	if n, _ := count(get[OverviewResponse](t, some, "/api/v1/installs/kgw.kgateway/overview", 200), "Backend"); n != 1 {
+	if n, _ := count(get[OverviewResponse](t, some, "/api/v1/installs/kgw.kgateway/overview", 200), "Backend"); n != 3 {
 		t.Fatalf("Backend tile %d for a caller denied shop/hidden, want 1", n)
 	}
+}
+
+// backendOnly is an accepted route of kind in shop whose one rule sends to Backend shop/backend.
+func backendOnly(kind, version, name, backend string) *unstructured.Unstructured {
+	gw := testutil.GwRef("infra", "edge")
+	r := testutil.Rule()
+	r["backendRefs"] = []any{map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "name": backend}}
+	u := testutil.WithRules(testutil.HTTPRoute("shop", name, []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), r)
+	u.SetAPIVersion("gateway.networking.k8s.io/" + version)
+	u.SetKind(kind)
+	return u
 }
