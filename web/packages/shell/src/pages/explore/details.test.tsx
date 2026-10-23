@@ -8,6 +8,7 @@ import lsInvalidGolden from "../../../../../../pkg/api/testdata/golden/listeners
 import listenersetsGolden from "../../../../../../pkg/api/testdata/golden/listenersets.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
+import { POLL_MS } from "../../api/hooks";
 import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList } from "../../api/types";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
@@ -190,6 +191,34 @@ it("a failed poll turns states unknown, keeps the notice's error icon, and fresh
   await waitFor(() => expect(screen.queryByText(/Cannot load Gateway/)).toBeNull());
   expect(within(header).getByText("Warning")).toBeInTheDocument();
   expect(accepted().getByTestId("health-icon-healthy")).toBeInTheDocument();
+});
+
+it("a sub-table keeps its rows and shows the notice when a poll fails, until a good poll", async () => {
+  let polls = 0;
+  const base = api();
+  serve((u) => {
+    if (u.pathname !== `${API}/listenersets`) return base(u);
+    return polls++ === 1 ? [500, { error: "boom" }] : lsList();
+  });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mount(GW_PATH);
+  const t = await screen.findByRole("table", { name: "ListenerSets" });
+  await within(t).findByText("partial");
+  expect(screen.queryByText(/Cannot load ListenerSets/)).toBeNull();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+  });
+  expect(polls).toBe(2);
+  expect(await screen.findByText(/Cannot load ListenerSets/)).toBeInTheDocument();
+  expect(within(t).getByText("partial")).toBeInTheDocument();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+  });
+  expect(polls).toBe(3);
+  await waitFor(() => expect(screen.queryByText(/Cannot load ListenerSets/)).toBeNull());
+  expect(within(t).getByText("partial")).toBeInTheDocument();
 });
 
 it("on a stale page the YAML tab's error keeps its error icon", async () => {

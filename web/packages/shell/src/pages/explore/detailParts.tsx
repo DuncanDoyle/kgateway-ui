@@ -243,7 +243,7 @@ export function SubList<T extends { health: HealthState }>({
   const page = useShownPage(l.data, !!l.error);
   return (
     <>
-      {l.error && !l.data ? <PageNotice error={l.error} title={listCopy.cannotLoad(noun[1])} /> : null}
+      {l.error ? <PageNotice error={l.error} title={listCopy.cannotLoad(noun[1])} /> : null}
       <ObjectTable
         label={label}
         installId={installId}
