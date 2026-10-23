@@ -230,7 +230,23 @@ func TestAncestorsHiddenParentsCollapse(t *testing.T) {
 	ix := upIx(map[string][]string{"c": {"h1", "h2", "v"}, "v": {}}, "v", "h1", "h2")
 	got, _ := ix.Ancestors(routeRef("shop", "c"), func(r objects.Ref) bool { return r.Name != "h1" && r.Name != "h2" })
 	// One redacted path, so the number of hidden parents is not shown.
-	if want := []string{"?>c", "edge>v>c"}; !reflect.DeepEqual(renders(got), want) {
+	if want := []string{"edge>v>c", "?>c"}; !reflect.DeepEqual(renders(got), want) {
 		t.Fatalf("paths %v, want %v", renders(got), want)
+	}
+}
+
+func TestAncestorsOrderIgnoresHiddenNames(t *testing.T) {
+	run := func(hiddenName string) []string {
+		ix := upIx(map[string][]string{"c": {hiddenName, "m", "v"}, "m": {hiddenName + "2"}}, "m", "v", hiddenName, hiddenName+"2")
+		got, _ := ix.Ancestors(routeRef("shop", "c"), func(r objects.Ref) bool { return !strings.HasPrefix(r.Name, hiddenName) })
+		return renders(got)
+	}
+	// "a" sorts before the visible parents, "z" after.
+	a, z := run("a"), run("z")
+	if !reflect.DeepEqual(a, z) {
+		t.Fatalf("renaming a hidden parent changed the response: %v vs %v", a, z)
+	}
+	if want := []string{"edge>m>c", "edge>v>c", "?>m>c", "?>c"}; !reflect.DeepEqual(a, want) {
+		t.Fatalf("paths %v, want %v", a, want)
 	}
 }

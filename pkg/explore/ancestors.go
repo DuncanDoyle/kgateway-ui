@@ -1,6 +1,7 @@
 package explore
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -51,6 +52,10 @@ func (ix *Index) Ancestors(route objects.Ref, visible func(objects.Ref) bool) (p
 func (ix *Index) walkUp(route objects.Ref, visible func(objects.Ref) bool) ([]AncestorPath, bool, int) {
 	w := &walker{ix: ix, visible: visible, seen: map[string]bool{}}
 	w.visit(route, true)
+	// Fully visible paths first; restricted ones keep their relative order.
+	slices.SortStableFunc(w.paths, func(a, b AncestorPath) int {
+		return cmp.Compare(btoi(restricted(a)), btoi(restricted(b)))
+	})
 	return w.paths, w.truncated, w.visits
 }
 
@@ -84,7 +89,18 @@ func (w *walker) parents(route objects.Ref) []candidate {
 			out = append(out, candidate{l.Target, false})
 		}
 	}
-	slices.SortFunc(out, func(a, b candidate) int { return compareRefs(a.ref, b.ref) })
+	// Visible parents first in name order; hidden ones last and unordered, so
+	// the order never reflects hidden names.
+	hidden := map[objects.Ref]bool{}
+	for _, c := range out {
+		hidden[c.ref] = !w.visible(c.ref)
+	}
+	slices.SortStableFunc(out, func(a, b candidate) int {
+		if ha, hb := hidden[a.ref], hidden[b.ref]; ha || hb {
+			return cmp.Compare(btoi(ha), btoi(hb))
+		}
+		return compareRefs(a.ref, b.ref)
+	})
 	return slices.CompactFunc(out, func(a, b candidate) bool { return a == b })
 }
 
@@ -152,4 +168,15 @@ func (w *walker) emit(tail AncestorStep, cycle bool) {
 	}
 	w.seen[string(key)] = true
 	w.paths = append(w.paths, AncestorPath{Steps: steps, Cycle: cycle})
+}
+
+func restricted(p AncestorPath) bool {
+	return slices.ContainsFunc(p.Steps, func(s AncestorStep) bool { return s.Restricted })
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

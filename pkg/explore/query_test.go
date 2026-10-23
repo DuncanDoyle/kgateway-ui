@@ -110,7 +110,9 @@ func TestEachFilterAloneAndCombined(t *testing.T) {
 	).build(t)
 	service := func(name string) objects.Ref { return objects.Ref{Kind: "Service", Namespace: "shop", Name: name} }
 	backend := objects.Ref{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "shop", Name: "be1"}
-	gk := func(kind string) objects.GroupKind { return objects.GroupKind{Group: objects.GatewayAPIGroup, Kind: kind} }
+	gk := func(kind string) objects.GroupKind {
+		return objects.GroupKind{Group: objects.GatewayAPIGroup, Kind: kind}
+	}
 	apiRef := routeRef("shop", "api")
 	for _, tc := range []struct {
 		name string
