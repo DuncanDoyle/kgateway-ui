@@ -121,3 +121,81 @@ I found no substantial product scope creep: mirror/defaulted-weight fields, reve
 | 20 | Bound cases excluded from API matrix | reviewer | accept | Representative cut, empty-retention and hidden-context cases in the handler matrix. |
 | 21 | Retention after large materialization | reviewer | accept | Streaming aggregation with bounded samples, keeping dependency and completeness data. |
 | — | Spec-gap resolutions | reviewer | accept 7, object 1 | The seven accepted go into computed-rules.md; the eighth is #9. |
+
+## Re-review (scoped, Codex, diff c55f263..c316e90)
+
+Reviewed `c55f263..c316e90` against the original review and binding triage. **20 findings are resolved; finding 7 remains incomplete.** I found four new P2 issues. This was a static review; no files were edited or tests run.
+
+“Resolved” below means the revised plan supplies the agreed instruction or contract, not that implementation has been verified.
+
+| # | Status | Task/section evidence |
+|---|---|---|
+| 1 | **Resolved** | Task 19 explicitly skips sorting only for `name.asc`; adds descending-order and cursor assertions ([plan:846](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:846)). |
+| 2 | **Resolved** | Task 12 introduces written spec and status refs; Tasks 37/41/42 carry them into attachment checks and written report keys. Design §4.1 and rules §7 agree ([plan:611](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:611)). |
+| 3 | **Resolved** | Task 2 places typed Namespace construction in the already allowlisted `fixtures.go`; `scale.go` returns unstructured objects and runs the boundary gate ([plan:186](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:186)). |
+| 4 | **Resolved** | Task 1 explicitly replaces the standard Gateway API bundle with the version-pinned experimental bundle, retained for later e2e runs ([plan:168](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:168)). |
+| 5 | **Resolved** | Task 6 lists `Engine.Installs()`, existing test consumers and preservation of `OnCompute` for metrics startup ([plan:380](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:380)). |
+| 6 | **Resolved** | Task 6 adds increasing model sequence numbers, guarded publication and confirmation CAS against the exact previous pointer; includes the old-model restoration test ([plan:391](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:391)). |
+| 7 | **Not resolved** | Task 6 now hashes presence and metric content, fixing collisions. However, `metricsIdentity(src, ids)` reads the live source independently of the values consumed by health/verifier checks. It does not establish that the fingerprint identifies **the evidence actually read**. See explanation below ([plan:402](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:402)). |
+| 8 | **Resolved** | Task 14 explicitly populates HTTPRoute existence before the missing-parent branch and adds an existing-parent regression case ([plan:661](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:661)). |
+| 9 | **Resolved** | Task 41 and rules §§8.1–8.2 classify rejection versus a later-stage reason, and shared written keys with differing outcomes, as inconclusive and never KGWUI-012 ([plan:1405](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1405)). |
+| 10 | **Resolved** | `CheckResult.Since` is explicitly populated by persistence and consumed by KGWUI-012 and both computed KGWUI-011 kinds; tests assert window-start timestamps ([plan:1446](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1446)). |
+| 11 | **Resolved** | Task 57 specifies an independent reach graph over every in-scope delegating HTTPRoute, including dropped/non-owned/unreached routes. Tasks 55/57/58 preserve uncertain-selection reachability without treating it as selection; rules §8.5 agrees ([plan:1802](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1802)). |
+| 12 | **Resolved** | Design §7.4 rule 4a and Tasks 43/63 require dependency-authorized predicates before totals and paging. Tasks 44/64 add listener, outcome and state probe tests ([plan:1494](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1494)). |
+| 13 | **Resolved** | Design §7.6 explicitly permits the appended checks and Backend tile, with stable ordering; Tasks 17/25/42 name their golden changes. The new additive-check implementation instruction has a separate defect, N3 below ([design:579](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/design.md:579)). |
+| 14 | **Resolved** | All five cited dependencies are addressed: fallback slots/tests move to Task 30; Task 43 owns explorer wiring; `DelegationInput` is stubbed in `delegation.go` at Task 37; Task 40 supplies fixture `Bounds`; Task 42 names `finding.go` for `health.Input` ([plan:1092](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1092)). |
+| 15 | **Resolved** | The Lifecycle paragraph specifies active status, base recording and base extraction. Close tasks update roadmap/status and provide upgrade-note steps; the plan records the Q7 refresh and its evidence commit ([plan:52](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:52)). |
+| 16 | **Resolved** | Task 6 replaces waiter-count synchronization with synchronous transition events and bounded event acknowledgements; publications and confirmations have distinct events ([plan:399](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:399)). |
+| 17 | **Resolved** | Task 9 holds both confirmation and safety at one hour and requires the trigger→arm→run→publication sequence ([plan:528](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:528)). |
+| 18 | **Resolved** | Task 25 checks advertised destinations, no longer infers detail unavailability from `yaml`, and handles never-served kinds separately ([plan:1008](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1008)). |
+| 19 | **Resolved** | Tasks 42/62 place safety beyond maturation; Task 50 uses bounded eventual assertions and cleanup restoration. Its newly added rollout causes a separate harness problem, N4 below ([plan:1454](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1454)). |
+| 20 | **Resolved** | Task 60 retains three representative bound/authorization fixtures in the API matrix; Tasks 62/65 supply engine bounds and handler assertions ([plan:1893](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1893)). |
+| 21 | **Resolved** | Task 56 introduces capped streaming retention, exercised at each addition; rules §5.7 explicitly preserves full dependencies/completeness while discarding samples. The new accumulator contract has additional gaps below ([plan:1772](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1772)). |
+
+For **finding 7**, the current engine reads `met, has := Metrics.Get(...)` and passes those values to verifier and health ([engine.go:173](/Users/ddoyle/Development/claude/kgateway-ui-claude/pkg/engine/engine.go:173)). With the revised helper, checks can consume result A while the fingerprint reads subsequent result B. A confirmation reading B can then renew a model computed from A. Capture each result once for computation and fingerprint that captured evidence; use the same content-encoding function on live results during confirmation. Add a source that changes between reads to the regression test.
+
+**New findings, ranked**
+
+1. **P2 — Task 56’s accumulator cannot receive required row metadata.**  
+   **Evidence:** The new interface accepts only `newAccumulator(bounds)` and `add(RowKey, Context)`. Neither input contains `RefAsWritten`, `Allows`, unresolved `Note` or `Quirk`, although `rows(...)` returns rows requiring those fields ([plan:1769](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1769)). Task 57 still requires unresolved notes and quirk annotations, and Task 64 serves permission/ref metadata.  
+   **Why:** The reorder creates a producer/consumer gap: Task 56 cannot construct its promised rows through the declared interface, and no later metadata-fill contract is specified. Supply row metadata through initialization/addition, or explicitly assign the enrichment step and its inputs to traversal.
+
+2. **P2 — Streaming retention does not export the semantic aggregates needed for fingerprints.**  
+   **Evidence:** Task 56 preserves outcome counters, unioned `Deps` and `Reporters`, then discards excess contexts. Its exported `Row` has retained contexts and those unions, but no full-context semantic digest or equivalent aggregate ([plan:1771](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1771)). Task 61 requires fingerprints over every contributing incoming match and path, per rules §9.2 ([plan:1907](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1907)).  
+   **Why:** Change an unretained context’s incoming match while preserving its outcome, dependencies and reporter: the specified exported data can remain identical although the required fingerprint must change. The checker cannot recover discarded paths without repeating traversal. Define streaming semantic aggregates/digests and expose them to Task 61, with an unretained-context reset test.
+
+3. **P2 — Task 7’s new array allowlist rejects approved golden changes.**  
+   **Evidence:** The exact allowlist names only `health.checks` and `overview.counts` ([plan:463](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:463)). The helper starts with each fixture name, including `bare-overview`; existing fixtures also wrap payloads in `body`. Moreover, design §7.6 permits adding the Backend descriptor to `meta.kinds`, which the array allowlist omits.  
+   **Why:** Literal execution rejects approved changes to `meta`, `bare-overview`, and—without undocumented path normalization—the named health/overview arrays. Specify actual fixture paths or normalize them explicitly, covering Backend-kind additions and both overview variants while retaining existing element ordering.
+
+4. **P2 — Task 50’s new UI rollout terminates the e2e API connection.**  
+   **Evidence:** Task 50 now patches UI Deployment arguments and waits for replacement Pods before polling the API ([plan:1640](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1640)). Existing setup starts one background `kubectl port-forward svc/ui-kgateway-ui`; e2e tests use that forwarded address ([setup.sh](/Users/ddoyle/Development/claude/kgateway-ui-claude/test/e2e/setup.sh), [api_test.go:27](/Users/ddoyle/Development/claude/kgateway-ui-claude/test/e2e/api_test.go:27)). Local `kubectl port-forward --help` confirms that forwarding ends when its selected Pod terminates and must be restarted.  
+   **Why:** The rollout removes the Pod backing the existing forward, so subsequent API polling fails independently of maturation. Set the safety interval before establishing the forward, or explicitly restart and verify forwarding after both the test rollout and cleanup rollout.
+
+The **Task 26→30 move is internally consistent** for the cited fallback dependency: page creation precedes slot registration and fallback tests. The **Task 56–58 reorder correctly separates streaming retention, traversal and completeness**, but its new metadata and fingerprint interfaces need the contracts identified in N1–N2.
+## Re-review 2 (scoped, Codex, diff c316e90..93b2811)
+
+Reviewed only `c316e90..HEAD` changes to the implementation plan. “Resolved” refers to the plan contract, not verified implementation.
+
+| Finding | Status | Task evidence |
+|---|---|---|
+| F7 | **Resolved** | Task 6 captures metrics once per install, supplies those values to health/verifier, and fingerprints the captured evidence. Adds the A→B regression test ([plan:402](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:402)). |
+| N1 | **Resolved** | Task 56 adds `RowMeta` and `open`; Task 57 supplies metadata before contexts. `TestRowMetaCarried` checks emitted fields ([plan:1775](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1775)). |
+| N2 | **Not resolved** | The digest preserves unretained inputs, but one digest per row cannot supply the required **per-reporter-key** inputs for `parent-resolvedrefs`. Details below. |
+| N3 | **Resolved** | Task 7 defines fixture-independent `body.*` paths, correct identity fields, Backend-kind allowance and helper tests. Task 11 explicitly appends Backend last ([plan:465](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:465)). |
+| N4 | **Resolved** | Task 50 starts and checks a local forward after rollout, then restores and checks the shared forward after cleanup rollout ([plan:1643](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1643)). |
+
+**N2 remaining gap — P2:** Task 56’s `ContextDigest` combines every context’s match, path, reporter and outcome into one sum; Task 61 consumes that digest ([plan:1775](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1775), [plan:1913](/Users/ddoyle/Development/claude/kgateway-ui-claude/docs/phases/phase-2/implementation-plan.md:1913)). However, rules §9.2 requires `parent-resolvedrefs` inputs only from contexts with **P’s particular reporter key**. Two roots reaching P can contribute different reporter keys to the same P→C row. Changing an unretained context under one key changes the shared digest, incorrectly resetting the other key’s window.
+
+Expose digests partitioned by reporter key alongside the whole-row digest, and test that changing an unretained context resets only its applicable parent check.
+
+**New findings introduced by this diff:** None beyond the remaining N2 gap.
+
+No files edited; static review only.
+| # | Finding | Source | Decision | Note |
+|---|---|---|---|---|
+| F7 | Metrics fingerprint not the evidence read | reviewer | accept | Fixed in 93b2811: metrics captured once per compute and fingerprinted. |
+| N1 | Accumulator lacks row metadata | reviewer | accept | Fixed in 93b2811: `RowMeta` and `open`. |
+| N2 | Fingerprints need full-context aggregates per reporter key | reviewer | accept | Whole-row digest in 93b2811; per-reporter-key digests in bbc1ecf. |
+| N3 | Golden allowlist rejects approved changes | reviewer | accept | Fixed in 93b2811: real `body.*` paths. |
+| N4 | e2e rollout breaks the port-forward | reviewer | accept | Fixed in 93b2811: test-local forward, shared forward restored. |
