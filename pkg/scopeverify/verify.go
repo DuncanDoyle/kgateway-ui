@@ -43,6 +43,9 @@ type Result struct {
 	Available  bool
 	Reason     string
 	Mismatches []Mismatch
+	// Matures, if set, is the earliest instant after which a pending mismatch
+	// will be reported (a strict "after" deadline). The engine recomputes then (D-019).
+	Matures time.Time
 }
 
 // Verifier compares the UI's scope with the controller's. Downstreams may register their own.
@@ -123,6 +126,8 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 		next[k] = since
 		if in.Now.Sub(since) > v.persist {
 			res.Mismatches = append(res.Mismatches, Mismatch{Namespace: k.Namespace, Resource: k.Resource, UI: u, Controller: c, Since: since})
+		} else if at := since.Add(v.persist); res.Matures.IsZero() || at.Before(res.Matures) {
+			res.Matures = at
 		}
 	}
 	v.first[id] = next

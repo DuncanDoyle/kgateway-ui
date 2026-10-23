@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -207,9 +208,9 @@ func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	in := install.Install{Namespace: "kgw", Name: "kgateway", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
 	var body atomic.Pointer[string]
 	body.Store(new(sample))
-	c := NewCollector(scraperFunc(func() string { return *body.Load() }))
 	clk := testutil.FakeClock()
-	c.Clock, c.OnResult = clk, trigger.New()
+	c := NewCollector(scraperFunc(func() string { return *body.Load() }), WithClock(clk))
+	c.OnResult = trigger.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- c.Run(ctx, 10*time.Second, func() []install.Install { return []install.Install{in} }) }()
@@ -274,5 +275,10 @@ func TestSameContentIgnoresCollectedAt(t *testing.T) {
 	m2, _ := Parse(strings.NewReader(strings.Replace(sample, "} 3\n", "} 4\n", 1)))
 	if a.SameContent(Result{Metrics: m2, CollectedAt: a.CollectedAt}) {
 		t.Fatal("Managed values are content")
+	}
+	// NaN equals NaN by bits, as in the engine's identity; else every scrape would notify.
+	nan := Result{Metrics: Metrics{Rejects: map[GatewayKey]float64{{"infra", "edge"}: math.NaN()}}}
+	if !nan.SameContent(nan) {
+		t.Fatal("a NaN sample must equal itself")
 	}
 }

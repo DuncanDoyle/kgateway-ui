@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -94,8 +95,12 @@ func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
 // CollectedAt is not content: freshness is a deadline, not a change (D-019).
 func (r Result) SameContent(o Result) bool {
 	return r.Err == o.Err && r.Metrics.ManagedPresent == o.Metrics.ManagedPresent &&
-		maps.Equal(r.Metrics.Rejects, o.Metrics.Rejects) && maps.Equal(r.Metrics.Managed, o.Metrics.Managed)
+		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits)
 }
+
+// sameBits compares samples by bit pattern, so NaN equals NaN, as the engine's
+// metrics identity hashes them.
+func sameBits(a, b float64) bool { return math.Float64bits(a) == math.Float64bits(b) }
 
 // Source returns the latest Result per install ID.
 type Source interface {
@@ -105,8 +110,8 @@ type Source interface {
 // Collector periodically scrapes every install's ready controller pods.
 type Collector struct {
 	scraper Scraper
-	// Clock stamps results and drives Run's ticker; NewCollector sets the real clock.
-	Clock clock.WithTicker
+	// clock stamps results and drives Run's ticker.
+	clock clock.WithTicker
 	// maxBody is the largest accepted body; podTimeout bounds one pod scrape.
 	maxBody    int64
 	podTimeout time.Duration
@@ -118,9 +123,19 @@ type Collector struct {
 	OnResult *trigger.Signal
 }
 
-// NewCollector returns a Collector using s.
-func NewCollector(s Scraper) *Collector {
-	return &Collector{scraper: s, Clock: clock.RealClock{}, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+// CollectorOption adjusts a Collector at construction.
+type CollectorOption func(*Collector)
+
+// WithClock makes the collector stamp results and tick with clk (tests).
+func WithClock(clk clock.WithTicker) CollectorOption { return func(c *Collector) { c.clock = clk } }
+
+// NewCollector returns a Collector using s and the real clock unless an option says otherwise.
+func NewCollector(s Scraper, opts ...CollectorOption) *Collector {
+	c := &Collector{scraper: s, clock: clock.RealClock{}, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // Collect scrapes all ready pods of in and aggregates them. It fails if any
@@ -133,14 +148,14 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		}
 		m, err := c.scrapePod(ctx, p, in.MetricsPort)
 		if err != nil {
-			return Result{CollectedAt: c.Clock.Now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
+			return Result{CollectedAt: c.clock.Now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
 		}
 		per = append(per, m)
 	}
 	if len(per) == 0 {
-		return Result{CollectedAt: c.Clock.Now(), Err: "no ready controller pod to scrape"}
+		return Result{CollectedAt: c.clock.Now(), Err: "no ready controller pod to scrape"}
 	}
-	return Result{Metrics: Aggregate(per), CollectedAt: c.Clock.Now()}
+	return Result{Metrics: Aggregate(per), CollectedAt: c.clock.Now()}
 }
 
 // scrapePod scrapes and parses one pod under its own deadline and size cap.
@@ -184,7 +199,7 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 		return errors.New("ctrlmetrics: collection interval must be positive")
 	}
 	c.podTimeout = min(every/2, maxPodTimeout)
-	t := c.Clock.NewTicker(every)
+	t := c.clock.NewTicker(every)
 	defer t.Stop()
 	for {
 		var wg sync.WaitGroup

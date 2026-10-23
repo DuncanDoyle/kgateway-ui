@@ -86,7 +86,8 @@ type Model struct {
 	Rejected []string
 	// Seq orders computations; it strictly increases.
 	Seq uint64
-	// Next is the earliest deadline not yet due at ComputedAt: a grace expiry or metrics staleness.
+	// Next is the earliest deadline not yet due at ComputedAt: a grace expiry,
+	// metrics staleness or a scope mismatch maturing.
 	Next Deadline
 	// MetricsRead are the metrics results this computation used, one per install, in install order.
 	MetricsRead []MetricsRead
@@ -230,6 +231,9 @@ func (e *Engine) compute() *Published {
 		}
 		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
 			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
+		if !ver.Matures.IsZero() {
+			next.add(ver.Matures, true) // reported once now − since > persist
+		}
 		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)

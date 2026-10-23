@@ -18,6 +18,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
@@ -666,7 +667,12 @@ func TestInstallsReadsCurrent(t *testing.T) {
 // Minor 1: grace deadlines only for objects health reads while in grace.
 func TestAllGreenSchedulesNoGraceRecompute(t *testing.T) {
 	route := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{testutil.GwRef("infra", "edge")}, testutil.AcceptedBy(testutil.GwRef("infra", "edge"), testutil.Controller))
-	h := newHarness(t, nil)
+	// The controller agrees with the UI's counts, so no scope mismatch is pending either.
+	agree := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true,
+		Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 1, {Namespace: "shop", Resource: "HTTPRoute"}: 1}}}
+	h := newHarness(t, func(c *Config) {
+		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return agree, true })
+	})
 	h.src.base = snapshot(t, route)
 	h.start(time.Hour)
 	p := h.e.Current()
@@ -747,24 +753,33 @@ func (b bodyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser,
 
 const managedBody = "# TYPE kgateway_resources_managed gauge\nkgateway_resources_managed{namespace=\"shop\",parent=\"edge\",resource=\"HTTPRoute\"} 3\n"
 
-// scrapeEvery runs col every interval on its own fake clock, which starts at the
-// engine clock's time, and returns that clock after the first result is stored.
-func scrapeEvery(t *testing.T, col *ctrlmetrics.Collector, every time.Duration, installs func() []install.Install, id string) *clocktesting.FakeClock {
+// newScraping returns a collector of body on its own fake clock, which starts
+// at testutil.Now like the engine's.
+func newScraping(body string) (*ctrlmetrics.Collector, bodyScraper, *clocktesting.FakeClock) {
+	sc, cc := newBodyScraper(body), testutil.FakeClock()
+	return ctrlmetrics.NewCollector(sc, ctrlmetrics.WithClock(cc)), sc, cc
+}
+
+// scrapeEvery runs col every interval until the returned stop (or the test
+// end) and waits for the first result.
+func scrapeEvery(t *testing.T, col *ctrlmetrics.Collector, cc *clocktesting.FakeClock, every time.Duration, installs func() []install.Install, id string) (stop func()) {
 	t.Helper()
-	clk := testutil.FakeClock()
-	col.Clock = clk
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
 		_ = col.Run(ctx, every, installs)
 	}()
-	t.Cleanup(func() {
-		cancel()
-		testutil.Recv(t, stopped, "the collector to stop")
-	})
-	waitCollected(t, col, id, clk.Now())
-	return clk
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			cancel()
+			testutil.Recv(t, stopped, "the collector to stop")
+		})
+	}
+	t.Cleanup(stop)
+	waitCollected(t, col, id, cc.Now())
+	return stop
 }
 
 // waitCollected waits until id's stored result was collected at at.
@@ -780,29 +795,41 @@ func waitCollected(t *testing.T, col *ctrlmetrics.Collector, id string, at time.
 	}
 }
 
-// idleCounts tallies driveIdle's window.
-type idleCounts struct{ runs, onDeadline, onSafety, confirms, scrapes int }
+// idleCounts tallies driveIdle's window by the cause of each run.
+type idleCounts struct{ runs, onDeadline, onSafety, onBoth, confirms, scrapes, stale int }
 
-// driveIdle steps the collector clock, then the engine clock, one second at a
-// time for steps seconds; a scrape due at a second is stored before the engine
-// sees it. prev is the last publication. It fails on a trigger, a refused
-// confirmation, a run neither the safety timer nor Model.Next explains, and a
-// published model with stale metrics.
-func driveIdle(t *testing.T, ev <-chan LoopEvent, eng, col *clocktesting.FakeClock, c *ctrlmetrics.Collector, id string,
-	prev LoopEvent, safety, every time.Duration, steps int) idleCounts {
+// idleDrive is one driveIdle window. A nil col means the collector has stopped.
+type idleDrive struct {
+	ev            <-chan LoopEvent
+	eng, colClk   *clocktesting.FakeClock
+	col           *ctrlmetrics.Collector
+	id            string
+	safety, every time.Duration
+	// allowStale accepts publications with stale metrics (a stopped collector).
+	allowStale bool
+}
+
+// run steps the collector clock, then the engine clock, one second at a time
+// for steps seconds; a scrape due at a second is stored before the engine
+// sees it. prev is the last publication. A run counts on the safety timer only
+// at exactly prev + safety, and on its deadline only at the first step at
+// which Model.Next is due; anything else, a trigger or a refused confirmation
+// fails the test, as does stale metrics unless allowStale.
+func (d idleDrive) run(t *testing.T, prev LoopEvent, steps int) (idleCounts, LoopEvent) {
 	t.Helper()
 	var n idleCounts
-	first := testutil.Now // scrapeEvery's clock starts there
 	for range steps {
-		col.Step(time.Second)
-		if col.Now().Sub(first)%every == 0 {
-			waitCollected(t, c, id, col.Now())
-			n.scrapes++
+		if d.col != nil {
+			d.colClk.Step(time.Second)
+			if d.colClk.Now().Sub(testutil.Now)%d.every == 0 {
+				waitCollected(t, d.col, d.id, d.colClk.Now())
+				n.scrapes++
+			}
 		}
-		eng.Step(time.Second)
+		d.eng.Step(time.Second)
 		// A step ends at EvArmed with no run in flight; PF14: the tick goes first.
 		for inFlight := false; ; {
-			e := testutil.Recv(t, ev, "loop event")
+			e := testutil.Recv(t, d.ev, "loop event")
 			switch e.Kind {
 			case EvConfirmed:
 				n.confirms++
@@ -813,17 +840,25 @@ func driveIdle(t *testing.T, ev <-chan LoopEvent, eng, col *clocktesting.FakeClo
 			case EvPublished:
 				inFlight = false
 				n.runs++
-				switch next := prev.Published.Model.Next; {
-				case !next.IsZero() && next.Due(e.At):
-					n.onDeadline++
-				case e.At.Equal(prev.At.Add(safety)):
+				next := prev.Published.Model.Next
+				onSafety := e.At.Equal(prev.At.Add(d.safety))
+				onDeadline := !next.IsZero() && next.Due(e.At) && !next.Due(e.At.Add(-time.Second))
+				switch {
+				case onSafety && onDeadline:
+					n.onBoth++
+				case onSafety:
 					n.onSafety++
+				case onDeadline:
+					n.onDeadline++
 				default:
-					t.Errorf("run at +%v: neither 30 s after the last (+%v) nor at its deadline %+v",
-						e.At.Sub(testutil.Now), prev.At.Sub(testutil.Now), next)
+					t.Errorf("run at +%v: neither exactly %v after the last (+%v) nor at the first step its deadline %+v is due",
+						e.At.Sub(testutil.Now), d.safety, prev.At.Sub(testutil.Now), next)
 				}
 				if stale(e.Published) {
-					t.Errorf("run at +%v shows metrics stale while scrapes arrive", e.At.Sub(testutil.Now))
+					n.stale++
+					if !d.allowStale {
+						t.Errorf("run at +%v shows metrics stale while scrapes arrive", e.At.Sub(testutil.Now))
+					}
 				}
 				prev = e
 			}
@@ -832,14 +867,14 @@ func driveIdle(t *testing.T, ev <-chan LoopEvent, eng, col *clocktesting.FakeClo
 			}
 		}
 	}
-	return n
+	return n, prev
 }
 
-// startScraping starts the collector on h's installs and waits for the run its
-// first result triggers; it returns the collector clock and that publication.
-func startScraping(t *testing.T, h *harness, col *ctrlmetrics.Collector, every time.Duration) (*clocktesting.FakeClock, LoopEvent) {
+// startScraping starts col on h's installs and waits for the run its first
+// result triggers; it returns the collector's stop and that publication.
+func startScraping(t *testing.T, h *harness, col *ctrlmetrics.Collector, cc *clocktesting.FakeClock, every time.Duration) (func(), LoopEvent) {
 	t.Helper()
-	cc := scrapeEvery(t, col, every, h.e.Installs, "kgw.kgateway")
+	stop := scrapeEvery(t, col, cc, every, h.e.Installs, "kgw.kgateway")
 	h.await(EvTriggered)
 	h.await(EvArmed)
 	cc.Step(time.Second) // keeps the two clocks equal
@@ -849,30 +884,50 @@ func startScraping(t *testing.T, h *harness, col *ctrlmetrics.Collector, every t
 	if !p.Published.Model.MetricsRead[0].Present {
 		t.Fatal("the first result must be read")
 	}
-	return cc, p
+	return stop, p
 }
 
-// (a), (c): an idle cluster scraped every 10 s with unchanged content
-// recomputes only at the strict staleness deadline (the safety instant falls on
-// the same one-second step) and never shows metrics stale.
+// (a), (c): an idle cluster scraped every 10 s with unchanged content and no
+// safety timer within reach recomputes only at the strict staleness deadline,
+// and never shows metrics stale.
 func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
-	col := ctrlmetrics.NewCollector(newBodyScraper(managedBody))
+	col, _, cc := newScraping(managedBody)
 	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 30*time.Second; col.OnResult = c.Triggers })
-	h.start(30 * time.Second)
-	cc, p := startScraping(t, h, col, 10*time.Second)
-	n := driveIdle(t, h.ev, h.c, cc, col, "kgw.kgateway", p, 30*time.Second, 10*time.Second, 600)
+	h.start(time.Hour)
+	_, p := startScraping(t, h, col, cc, 10*time.Second)
+	d := idleDrive{ev: h.ev, eng: h.c, colClk: cc, col: col, id: "kgw.kgateway", safety: time.Hour, every: 10 * time.Second}
+	n, _ := d.run(t, p, 600)
 	if n.runs != 20 || n.onDeadline != 20 || n.confirms != 600 || n.scrapes != 60 {
 		t.Fatalf("10 min idle: %+v; want 20 runs, all at the deadline, 600 confirmations, 60 scrapes", n)
 	}
 }
 
+// Minor 2: once the collector stops, the first run after the last scrape's
+// strict max-age boundary shows metrics stale.
+func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
+	col, _, cc := newScraping(managedBody)
+	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 30*time.Second; col.OnResult = c.Triggers })
+	h.start(time.Hour)
+	stop, p := startScraping(t, h, col, cc, 10*time.Second)
+	d := idleDrive{ev: h.ev, eng: h.c, colClk: cc, col: col, id: "kgw.kgateway", safety: time.Hour, every: 10 * time.Second}
+	n, p := d.run(t, p, 20) // scrapes at +10 s and +20 s, no run
+	stop()
+	d.col, d.allowStale = nil, true
+	m, p2 := d.run(t, p, 31) // to +52 s: runs at +31 s (reads +20 s) and +51 s
+	if n.runs != 0 || m.runs != 2 || m.onDeadline != 2 || m.stale != 1 {
+		t.Fatalf("scraping %+v, stopped %+v; want no run, then two deadline runs, the second stale", n, m)
+	}
+	if want := testutil.Now.Add(20*time.Second + 30*time.Second + time.Second); !p2.At.Equal(want) || !stale(p2.Published) {
+		t.Fatalf("stale run at +%v, want +%v: the first step after last scrape + max age", p2.At.Sub(testutil.Now), want.Sub(testutil.Now))
+	}
+}
+
 // (b): a scrape with changed content triggers one recompute; unchanged ones do not.
 func TestMetricsContentChangeTriggersRecompute(t *testing.T) {
-	sc := newBodyScraper(managedBody)
-	col := ctrlmetrics.NewCollector(sc)
+	col, sc, cc := newScraping(managedBody)
 	h := newHarness(t, func(c *Config) { c.Metrics = col; col.OnResult = c.Triggers })
 	h.start(time.Hour)
-	cc, _ := startScraping(t, h, col, 10*time.Second)
+	startScraping(t, h, col, cc, 10*time.Second)
 	h.runs = 0
 	// Two unchanged scrapes: seeing the second stored means the first has decided.
 	for range 2 {
@@ -914,4 +969,30 @@ func TestConfirmIgnoresCollectedAtOnly(t *testing.T) {
 	cur.Store(&changed)
 	h.c.Step(ConfirmEvery)
 	h.await(EvConfirmRefused)
+}
+
+// Fix 2.1: a scope mismatch matures at its own strict deadline, since +
+// persist, with unchanged metrics and no other run.
+func TestScopeMismatchMaturesAtItsDeadline(t *testing.T) {
+	const persist = 20 * time.Second
+	h := newHarness(t, func(c *Config) { c.Verifier = scopeverify.NewManagedCountVerifier(persist) })
+	h.start(time.Hour) // metricsAt: the controller manages nothing, the UI counts the Gateway
+	p := h.e.Current()
+	if hasFinding(p.Model.Installs[0].Health, health.CodeScopeMismatch, "", "") {
+		t.Fatal("a fresh mismatch must not be reported")
+	}
+	if want := (Deadline{At: testutil.Now.Add(persist), Strict: true}); p.Model.Next != want {
+		t.Fatalf("Next %+v, want %+v", p.Model.Next, want)
+	}
+	for range 20 {
+		h.tickIdle()
+	}
+	if h.runs != 0 {
+		t.Fatalf("runs by since + persist = %d, want 0 (strict)", h.runs)
+	}
+	h.c.Step(time.Nanosecond)
+	e := h.await(EvPublished)
+	if !e.At.Equal(testutil.Now.Add(persist+time.Nanosecond)) || !hasFinding(e.Published.Model.Installs[0].Health, health.CodeScopeMismatch, "", "") {
+		t.Fatalf("maturation run at +%v; want KGWUI-007 at +%v", e.At.Sub(testutil.Now), persist+time.Nanosecond)
+	}
 }

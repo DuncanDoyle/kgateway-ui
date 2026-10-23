@@ -22,7 +22,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -36,7 +35,7 @@ type world struct {
 	dyn    *dynamicfake.FakeDynamicClient
 	sig    *trigger.Signal
 	routes []*unstructured.Unstructured // the seeded HTTPRoutes
-	gvr    schema.GroupVersionResource // HTTPRoutes
+	gvr    schema.GroupVersionResource  // HTTPRoutes
 }
 
 // newWorld seeds fake clients with tier's world, one kgateway controller and a
@@ -236,31 +235,33 @@ func TestBudgetBurst(t *testing.T) {
 
 // TestBudgetIdleTenMinutes: on fake clocks, 600 one-second steps with no
 // object change and a real collector scraping unchanged metrics every 10 s
-// (production defaults: safety 30 s, metrics max age 3 × 10 s) recompute only
-// at the safety instants and Model.Next deadlines, never show metrics stale,
-// and confirm every second.
+// recompute only on the safety timer and Model.Next deadlines, never show
+// metrics stale, and confirm every second. Safety 30 s and metrics max age
+// 45 s differ, so every run has one cause: the safety timer, as each run reads
+// a scrape at most 10 s old and the deadline is ≥ 35 s away.
 func TestBudgetIdleTenMinutes(t *testing.T) {
-	const safety, every = 30 * time.Second, 10 * time.Second
+	const safety, every, maxAge = 30 * time.Second, 10 * time.Second, 45 * time.Second
 	clk := testutil.FakeClock()
 	w := newWorld(t, scale.Large, clk.Now)
-	col := ctrlmetrics.NewCollector(newBodyScraper(managedBody))
+	col, _, cc := newScraping(managedBody)
 	col.OnResult = w.sig
-	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 3*every })
+	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, maxAge })
 	runLoop(t, e, safety)
 	awaitKind(t, ev, EvPublished) // the start-up publication, before any scrape
 	awaitKind(t, ev, EvArmed)
-	cc := scrapeEvery(t, col, every, e.Installs, "kgw.kgateway")
+	scrapeEvery(t, col, cc, every, e.Installs, "kgw.kgateway")
 	awaitKind(t, ev, EvTriggered) // the first result; this run is not counted either
 	awaitKind(t, ev, EvArmed)
 	cc.Step(time.Second)
 	clk.Step(time.Second)
 	prev := awaitKind(t, ev, EvPublished)
 	awaitKind(t, ev, EvArmed)
-	n := driveIdle(t, ev, clk, cc, col, "kgw.kgateway", prev, safety, every, 600)
-	t.Logf("idle 10 min: %d recomputes (%d at the metrics staleness deadline, %d on the safety timer alone), %d confirmations, %d scrapes",
-		n.runs, n.onDeadline, n.onSafety, n.confirms, n.scrapes)
-	if n.runs != 20 || n.onDeadline != 20 || n.confirms != 600 || n.scrapes != 60 {
-		t.Errorf("idle 10 min: %+v; want 20 recomputes, all at the deadline, 600 confirmations, 60 scrapes", n)
+	d := idleDrive{ev: ev, eng: clk, colClk: cc, col: col, id: "kgw.kgateway", safety: safety, every: every}
+	n, _ := d.run(t, prev, 600)
+	t.Logf("idle 10 min: %d recomputes (%d safety timer, %d staleness deadline, %d both), %d confirmations, %d scrapes",
+		n.runs, n.onSafety, n.onDeadline, n.onBoth, n.confirms, n.scrapes)
+	if n.runs != 20 || n.onSafety != 20 || n.confirms != 600 || n.scrapes != 60 {
+		t.Errorf("idle 10 min: %+v; want 20 recomputes, all on the safety timer, 600 confirmations, 60 scrapes", n)
 	}
 }
 
