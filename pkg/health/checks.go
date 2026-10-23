@@ -21,7 +21,7 @@ import (
 
 // Upstream returns the Phase 1 checks (design §5.2).
 func Upstream() []Check {
-	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}}
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
