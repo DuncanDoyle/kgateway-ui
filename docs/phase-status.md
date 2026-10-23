@@ -25,7 +25,11 @@ Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #
 - [ ] phase-2-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 2.2 Explorer on observed status
+Status: active
+Base: 77fc4dce94f54ed3662c0943ff93e78166243f38
+Brief: docs/phases/phase-2/phase-2.2-brief.md
+Branch: duncandoyle/explorer
 
 ## Carry-over (deferred to later phases)
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
