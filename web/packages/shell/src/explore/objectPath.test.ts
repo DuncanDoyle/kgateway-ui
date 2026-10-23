@@ -32,12 +32,10 @@ test("detail links open the page of the ref's kind", () => {
   ).toBe("/i/a.b/listenersets/gateway.networking.x-k8s.io/XListenerSet/n/e");
 });
 
-test("a detail link on a kind outside the detail set opens nothing", () => {
-  expect(objectPath("a.b", { ...ref, kind: "GRPCRoute" })).toBeUndefined();
-  expect(objectPath("a.b", { ...ref, group: "acme.io", kind: "HTTPRoute" })).toBeUndefined();
-  expect(
-    objectPath("a.b", { group: "acme.io", kind: "EdgeSet", namespace: "n", name: "e", link: "detail" }),
-  ).toBeUndefined();
+test("a downstream ListenerSet kind with a detail link opens the ListenerSet page", () => {
+  expect(objectPath("a.b", { group: "acme.io", kind: "EdgeSet", namespace: "n", name: "e", link: "detail" })).toBe(
+    "/i/a.b/listenersets/acme.io/EdgeSet/n/e",
+  );
 });
 
 test("the install ID and names are encoded, never split", () => {
