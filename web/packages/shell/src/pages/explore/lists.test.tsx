@@ -205,6 +205,22 @@ it("an error on a new query never shows the previous query's rows", async () => 
   expect(screen.queryByTestId("data-age")).toBeNull();
 });
 
+it("a failed query keeps its title and filters, and Clear filters recovers", async () => {
+  serve((u) =>
+    u.pathname.endsWith("/routes") ? (u.searchParams.has("health") ? [500, { error: "boom" }] : routes()) : undefined,
+  );
+  mountWithLocation(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  await userEvent.click(screen.getByRole("button", { name: /Error/ }));
+  expect(await screen.findByRole("heading", { name: "Cannot load routes" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Routes", level: 1 })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Error/ })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByTestId("page-notice")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(await screen.findByText("rejected")).toBeInTheDocument();
+  expect(search().has("health")).toBe(false);
+});
+
 it("the pager is disabled after load when the page has no cursors", async () => {
   serve((u) => (u.pathname.endsWith("/gateways") ? fresh(gatewaysGolden.body as GatewayList) : undefined));
   mount(`/i/${ID}/gateways`);

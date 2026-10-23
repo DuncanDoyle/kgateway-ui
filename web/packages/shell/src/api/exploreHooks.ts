@@ -55,6 +55,7 @@ function useList<T>(id: string, list: string, query: URLSearchParams) {
   const rKey = cursorRejected ? withQuery(path, pageOne) : key;
   // With keepPreviousData the rows may belong to the previous query. They show only while the new one loads
   // (laggy, marked busy); once the new query fails they are dropped, so its error never sits over another's rows.
+  // Relies on SWR keying its cache by the same withQuery string passed to useSWR.
   const own = cache.get(rKey)?.data !== undefined;
   const data = own || !r.error ? forInstall(r.data, id) : undefined;
   return { data, error: r.error, mutate: r.mutate, cursorRejected, isLaggy: !own && data !== undefined };

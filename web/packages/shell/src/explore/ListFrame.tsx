@@ -90,17 +90,15 @@ export function ListFrame({
         message={<BackLink to={installPath(installId)}>Back to install</BackLink>}
       />
     );
-  if (!loaded && error) {
-    if (error.status === 503) return <PageState kind="connecting" title={vocab.connecting} message={error.message} />;
-    return <PageState kind="error" title={errorTitle} message={error.message} copyText={error.message} />;
-  }
+  // A query that failed before loading keeps its title and filters, so its filters can still be changed or cleared.
+  const failed = !loaded && error;
   return (
     <Page stylesOverride={stylesOverride}>
-      {error ? <PageNotice error={error} title={errorTitle} /> : null}
+      {error && !failed ? <PageNotice error={error} title={errorTitle} /> : null}
       <div className="title">
         <h1>{title}</h1>
-        {collectedAt ? <DataAge collectedAt={collectedAt} /> : null}
-        {total !== undefined ? <span className="count">{count(total, noun)}</span> : null}
+        {collectedAt && !failed ? <DataAge collectedAt={collectedAt} /> : null}
+        {total !== undefined && !failed ? <span className="count">{count(total, noun)}</span> : null}
       </div>
       <Bar>
         <SearchBox>
@@ -121,7 +119,13 @@ export function ListFrame({
           </QuietButton>
         ) : null}
       </Bar>
-      {children}
+      {!failed ? (
+        children
+      ) : error.status === 503 ? (
+        <PageState kind="connecting" title={vocab.connecting} message={error.message} />
+      ) : (
+        <PageState kind="error" title={errorTitle} message={error.message} copyText={error.message} />
+      )}
     </Page>
   );
 }
