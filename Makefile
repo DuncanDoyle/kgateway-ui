@@ -8,11 +8,12 @@ PORT ?= 18080
 UI_URL ?= http://127.0.0.1:$(PORT)
 ACTIONLINT_VERSION := v1.7.12
 
-.PHONY: help test lint actionlint build web run e2e e2e-down bench
+.PHONY: help test lint actionlint build web run e2e e2e-down bench bench-stream
 help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
 	@echo "make bench  run the scale benchmarks and budget tests, after the Go version, machine and host load"
+	@echo "make bench-stream  run the 10-minute sustained-stream budget (make bench runs the 60 s -short one)"
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
@@ -26,7 +27,12 @@ bench:
 	@go version
 	@echo "machine: $$(uname -sm), $$(getconf _NPROCESSORS_ONLN) CPUs"
 	@echo "load: $$(uptime)"
-	go test -tags bench -v -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache ./pkg/api
+	go test -tags bench -v -short -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache
+	@# The API budgets take 10,000 samples per case, so they run once; -short keeps the stream at 60 s.
+	go test -tags bench -v -short -run 'Budget' -count 1 -timeout 20m ./pkg/api
+	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/api
+bench-stream:
+	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 15m ./pkg/api
 lint:
 	go vet ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...

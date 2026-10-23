@@ -28,16 +28,13 @@ type staticSnap struct{ s *cache.Snapshot }
 
 func (s staticSnap) Snapshot() *cache.Snapshot { return s.s }
 
-// largeHandler is the handler over a Large-tier model under AllowAll. The
-// snapshot is sorted as the cache sorts it.
-func largeHandler(b *testing.B) (http.Handler, *engine.Model) { return largeHandlerWith(b, nil) }
-
 // restricting denies every object in a namespace whose name ends in 1,
 // about a tenth of them, so every request pays the per-ref checks.
 var restricting = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return !strings.HasSuffix(ref.Namespace, "1") })
 
-// largeHandlerWith is largeHandler under authz.
-func largeHandlerWith(b *testing.B, authz Authorizer) (http.Handler, *engine.Model) {
+// largeHandlerWith is the handler over a Large-tier model under authz (nil:
+// AllowAll). The snapshot is sorted as the cache sorts it.
+func largeHandlerWith(b testing.TB, authz Authorizer) (http.Handler, *engine.Model) {
 	b.Helper()
 	snap := scale.Snapshot(scale.Large, 1)
 	for _, objs := range snap.Objects {
@@ -100,6 +97,24 @@ func BenchmarkDetailsLargeRestricted(b *testing.B) { benchDetails(b, restricting
 func benchDetails(b *testing.B, authz Authorizer) {
 	h, m := largeHandlerWith(b, authz)
 	ix := m.Installs[0].Index
+	// Under authz only an object the caller may view opens.
+	can := func(r objects.Ref) bool { return authz == nil || authz.Authorize(nil, r) }
+	deepest, depth := deepestChild(ix, can)
+	if depth == 0 {
+		b.Fatal("the Large tier has no delegated child")
+	}
+	b.Logf("deepest delegated child %s at depth %d", deepest, depth)
+	gw := ix.Gateways[slices.IndexFunc(ix.Gateways, func(g explore.GatewayRow) bool { return can(g.Ref) })].Ref
+	base := "/api/v1/installs/" + m.Installs[0].Resolved.ID()
+	serve(b, h, []struct{ name, path string }{
+		{"gateway", base + "/gateways/" + gw.Namespace + "/" + gw.Name},
+		{"route-deepest-child", base + "/routes/gateway.networking.k8s.io/HTTPRoute/" + deepest.Namespace + "/" + deepest.Name},
+	})
+}
+
+// deepestChild is the viewable route with the longest up-chain of reported
+// parent routes, and that chain's length.
+func deepestChild(ix *explore.Index, can func(objects.Ref) bool) (objects.Ref, int) {
 	depth := map[objects.Ref]int{}
 	var depthOf func(objects.Ref) int
 	depthOf = func(r objects.Ref) int {
@@ -114,22 +129,11 @@ func benchDetails(b *testing.B, authz Authorizer) {
 		depth[r] = d
 		return d
 	}
-	// Under authz only an object the caller may view opens.
-	can := func(r objects.Ref) bool { return authz == nil || authz.Authorize(nil, r) }
 	var deepest objects.Ref
 	for _, r := range ix.Routes {
 		if can(r.Ref) && (deepest.Name == "" || depthOf(r.Ref) > depthOf(deepest)) {
 			deepest = r.Ref
 		}
 	}
-	if depthOf(deepest) == 0 {
-		b.Fatal("the Large tier has no delegated child")
-	}
-	b.Logf("deepest delegated child %s at depth %d", deepest, depthOf(deepest))
-	gw := ix.Gateways[slices.IndexFunc(ix.Gateways, func(g explore.GatewayRow) bool { return can(g.Ref) })].Ref
-	base := "/api/v1/installs/" + m.Installs[0].Resolved.ID()
-	serve(b, h, []struct{ name, path string }{
-		{"gateway", base + "/gateways/" + gw.Namespace + "/" + gw.Name},
-		{"route-deepest-child", base + "/routes/gateway.networking.k8s.io/HTTPRoute/" + deepest.Namespace + "/" + deepest.Name},
-	})
+	return deepest, depthOf(deepest)
 }
