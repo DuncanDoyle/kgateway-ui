@@ -27,7 +27,17 @@ type countingAuthz struct {
 	asked map[objects.Ref]int
 }
 
-func (a *countingAuthz) allowsAll() bool { return a.all }
+func init() {
+	allowsAllHook = func(a Authorizer) bool {
+		c, ok := a.(*countingAuthz)
+		return ok && c.all
+	}
+}
+
+// embedsAllowAll embeds AllowAll but denies hiddenSome, so it must be called.
+type embedsAllowAll struct{ AllowAll }
+
+func (embedsAllowAll) Authorize(_ *http.Request, ref objects.Ref) bool { return !hiddenSome(ref) }
 
 func (a *countingAuthz) Authorize(_ *http.Request, ref objects.Ref) bool {
 	a.mu.Lock()
@@ -83,6 +93,25 @@ func TestAllowAllMakesNoAuthorizerCalls(t *testing.T) {
 		}
 		if n := len(a.take()); n != 0 {
 			t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
+		}
+	}
+}
+
+// An Authorizer embedding AllowAll is not AllowAll: it is called and its
+// denials hold.
+func TestAllowAllEmbedderIsAsked(t *testing.T) {
+	_, srv, _ := startWith(t, setup{authz: embedsAllowAll{}}, visWorld()...)
+	if p := get[Page[RouteRow]](t, srv, listBase+"/routes", 200); p.DeniedInInstall != 3 {
+		t.Errorf("deniedInInstall %d, want 3", p.DeniedInInstall)
+	}
+	for _, a := range []Authorizer{embedsAllowAll{}, &embedsAllowAll{}} {
+		if allowsAll(a) {
+			t.Errorf("allowsAll(%T) = true", a)
+		}
+	}
+	for _, a := range []Authorizer{AllowAll{}, &AllowAll{}} {
+		if !allowsAll(a) {
+			t.Errorf("allowsAll(%T) = false", a)
 		}
 	}
 }
