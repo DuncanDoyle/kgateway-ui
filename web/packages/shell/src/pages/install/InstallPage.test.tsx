@@ -526,7 +526,7 @@ it("gateway rows take the worst of their row state and their current health find
       severity: "warning",
       install: "kgw.kgateway",
       message: "Listener conflicted",
-      resource: { group: gw, kind: "Gateway", namespace: "prod", name: "internal" },
+      resource: { group: gw, kind: "Gateway", namespace: "prod", name: "internal", link: "yaml" },
     },
     // A finding on another kind with the same name does not count for the Gateway.
     {
@@ -535,7 +535,7 @@ it("gateway rows take the worst of their row state and their current health find
       severity: "error",
       install: "kgw.kgateway",
       message: "Backend not found",
-      resource: { group: gw, kind: "HTTPRoute", namespace: "prod", name: "internal" },
+      resource: { group: gw, kind: "HTTPRoute", namespace: "prod", name: "internal", link: "yaml" },
     },
   ];
   mount(h);

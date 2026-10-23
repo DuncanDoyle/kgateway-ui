@@ -149,6 +149,24 @@ it("renders extension brand and routes", async () => {
   expect(screen.getByRole("link", { name: "WAF" })).toHaveAttribute("href", "/i/kgw.kgateway/waf");
 });
 
+it("the header's install nav links only to pages that exist, and navigates", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw.kgateway");
+  const nav = await screen.findByRole("navigation", { name: "Install" });
+  const links = within(nav).getAllByRole("link");
+  expect(links.map((a) => a.getAttribute("href"))).toEqual(["/i/kgw.kgateway", "/i/kgw.kgateway/findings"]);
+  await userEvent.click(within(nav).getByRole("link", { name: "Findings" }));
+  expect(await screen.findByText("findings page")).toBeInTheDocument();
+  expect(within(nav).getByRole("link", { name: "Findings" })).toHaveAttribute("aria-current", "page");
+});
+
+it("shows no install nav outside an install", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/");
+  await screen.findByText("cluster landing");
+  expect(screen.queryByRole("navigation", { name: "Install" })).toBeNull();
+});
+
 it("shows the install's version and controller readiness in the header", async () => {
   stubApi({
     "/api/v1/installs": [inst("kgw/kgateway", { state: "not-ready", ready: 1, desired: 2 })],

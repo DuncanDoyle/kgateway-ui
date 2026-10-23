@@ -282,7 +282,13 @@ it("findings page virtualises a long list", async () => {
     severity: "warning" as const,
     install: "kgw.kgateway",
     message: "Backend not found",
-    resource: { group: "gateway.networking.k8s.io", kind: "HTTPRoute", namespace: "shop", name: `route-${i}` },
+    resource: {
+      group: "gateway.networking.k8s.io",
+      kind: "HTTPRoute",
+      namespace: "shop",
+      name: `route-${i}`,
+      link: "yaml",
+    },
   }));
   findings("/i/kgw.kgateway/findings", h);
   const rows = await screen.findAllByTestId("finding-row");

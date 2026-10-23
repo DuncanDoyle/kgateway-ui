@@ -1,4 +1,7 @@
 import type { HealthState } from "../theme/tokens";
+import type { Link, LinkedRef } from "./exploreTypes";
+
+export * from "./exploreTypes";
 
 /** Mirrors pkg/api, pkg/overview, pkg/health JSON as built (sub-phase 1.1). */
 export type Severity = "error" | "warning" | "info";
@@ -16,12 +19,6 @@ export interface Ref {
   kind: string;
   namespace?: string;
   name: string;
-}
-/** How a reference may be opened; rendered as given, never derived from a kind (design §7.1). */
-export type Link = "detail" | "yaml" | "none";
-/** A reference with its server-computed link; link is optional until the explorer types land. */
-export interface LinkedRef extends Ref {
-  link?: Link;
 }
 /**
  * restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013).

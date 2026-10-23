@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { Ref } from "../api/types";
 
 // region Helpers
 /** Platform copy (D-016). The defaults describe Kubernetes; a downstream overrides any entry through ShellExtension.vocabulary. */
@@ -15,6 +16,10 @@ export interface Vocabulary {
   pinHint: (pinned?: string) => ReactNode;
   /** Label of the button that copies a resource's name. */
   copyName: string;
+  /** The command that prints ref; resource is its plural from /api/v1/meta. Return undefined to hide the copy button. */
+  getCommand: (ref: Ref, resource: string) => string | undefined;
+  /** Label of the button that copies that command. */
+  copyCommand: string;
 }
 
 /** The Kubernetes vocabulary, the default. */
@@ -40,4 +45,11 @@ export const kubernetesVocabulary: Vocabulary = {
       </>
     ),
   copyName: "Copy namespace/name",
+  getCommand: (ref, resource) => {
+    // The core group has no ".<group>" suffix; a cluster-scoped resource has no namespace flag.
+    const type = ref.group ? `${resource}.${ref.group}` : resource;
+    const ns = ref.namespace ? ` -n ${ref.namespace}` : "";
+    return `kubectl get ${type}${ns} ${ref.name} -o yaml`;
+  },
+  copyCommand: "Copy kubectl command",
 };

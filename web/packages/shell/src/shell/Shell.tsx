@@ -1,6 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { useMemo } from "react";
+import { type ComponentType, useMemo } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
@@ -48,6 +48,12 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     };
   }, [extension]);
   const { ClusterLanding, InstallPage, FindingsPage, ResourcePage } = pages;
+  // Core pages under /i/:id/; the install nav shows an entry only when its path is listed here.
+  const installRoutes: [string, ComponentType][] = [
+    ["", InstallPage],
+    ["findings", FindingsPage],
+    ["r/:group/:kind/:rns/:rname", ResourcePage],
+  ];
   return (
     <ShellExtensionContext.Provider value={ext}>
       {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}
@@ -55,13 +61,13 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
         <BrowserRouter>
           <Root data-testid="shell-root" stylesOverride={stylesOverride}>
             <DocumentTitle />
-            <Header />
+            <Header installPaths={installRoutes.map(([path]) => path)} />
             <main>
               <Routes>
                 <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
-                <Route path="/i/:id" element={<InstallPage />} />
-                <Route path="/i/:id/findings" element={<FindingsPage />} />
-                <Route path="/i/:id/r/:group/:kind/:rns/:rname" element={<ResourcePage />} />
+                {installRoutes.map(([path, Page]) => (
+                  <Route key={path} path={path ? `/i/:id/${path}` : "/i/:id"} element={<Page />} />
+                ))}
                 {ext.routes.map((r) => (
                   <Route
                     key={`${r.scope}:${r.path}`}

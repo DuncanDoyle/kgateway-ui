@@ -7,7 +7,7 @@ import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, RawH
 export const POLL_MS = 5000;
 
 // No keepPreviousData: on an install switch it would show the old install's data under the new URL.
-const live = { refreshInterval: POLL_MS };
+export const live = { refreshInterval: POLL_MS };
 
 /** True when data collected at collectedAt is older than two poll intervals; pass useNow() as now. */
 export function isStale(collectedAt: string, now: number): boolean {
@@ -38,7 +38,7 @@ export function useMeta() {
 }
 
 /** API base of one install; the ID is encoded, never parsed. */
-const installApi = (id: string) => `/api/v1/installs/${encodeURIComponent(id)}`;
+export const installApi = (id: string) => `/api/v1/installs/${encodeURIComponent(id)}`;
 
 /** GET /api/v1/installs/{id}/overview. */
 export function useOverview(id: string) {

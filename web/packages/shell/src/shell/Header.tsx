@@ -13,6 +13,7 @@ import { HEADER_H } from "./constants";
 import { useShellExtension } from "./extension";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerResourceName, headerTint } from "./headerTint";
 import { InstallName } from "./InstallName";
+import { InstallNav } from "./InstallNav";
 import { InstallSwitcher } from "./InstallSwitcher";
 import { installPath } from "./paths";
 import { ThemeSwitcher } from "./ThemeSwitcher";
@@ -115,8 +116,8 @@ function readinessText(r: Readiness): string {
 }
 
 // region Component
-/** Header: brand, install identity, version, edition and controller readiness, extension navigation, theme switcher. */
-export function Header() {
+/** Header: brand, install identity, version, edition and controller readiness, install and extension navigation, theme switcher. */
+export function Header({ installPaths }: { installPaths: readonly string[] }) {
   const { brand, navEntries } = useShellExtension();
   const match = useMatch("/i/:id/*");
   const { data, error } = useInstalls();
@@ -168,6 +169,7 @@ export function Header() {
           ) : null}
         </Identity>
       ) : null}
+      {id ? <InstallNav installId={id} paths={installPaths} /> : null}
       {nav.length > 0 ? (
         <Nav aria-label="Extensions">
           {nav.map((n) => (
