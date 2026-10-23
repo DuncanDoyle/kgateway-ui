@@ -48,3 +48,16 @@ func detail(c metav1.Condition, extra string) string {
 	}
 	return d
 }
+
+// Draft wording for delegation findings (design §6.2); finalised in the wording pass.
+const (
+	// DelegatedNotAttachedMessage is KGWUI-011's message.
+	DelegatedNotAttachedMessage = "Parent route does not use this route"
+	// DelegatedNotAttachedDetail is KGWUI-011's status-trigger detail; %s is the parent.
+	DelegatedNotAttachedDetail = "No status from HTTPRoute %s"
+	// DelegationNoChildMessage replaces "Backend not found" on a parent whose
+	// backendRefs all delegate (D-021 item 9).
+	DelegationNoChildMessage = "No child route kept by a delegating rule"
+	// DelegationNoChildDetail starts that finding's detail; the raw condition follows.
+	DelegationNoChildDetail = "A delegating rule selects no child route the controller accepted"
+)

@@ -40,16 +40,17 @@ const (
 
 // Stable finding codes. Never reuse a code (design §5.1).
 const (
-	CodeXDSRejected         = "KGWUI-001"
-	CodeConditionFalse      = "KGWUI-002"
-	CodeRouteUnattached     = "KGWUI-003"
-	CodeNamespaceNotWatched = "KGWUI-004"
-	CodeControllerNotReady  = "KGWUI-005"
-	CodeProxyNotReady       = "KGWUI-006"
-	CodeScopeMismatch       = "KGWUI-007"
-	CodeSignalUnavailable   = "KGWUI-008"
-	CodeAmbiguousOwnership  = "KGWUI-009"
-	CodeSelfManagedProxy    = "KGWUI-010"
+	CodeXDSRejected          = "KGWUI-001"
+	CodeConditionFalse       = "KGWUI-002"
+	CodeRouteUnattached      = "KGWUI-003"
+	CodeNamespaceNotWatched  = "KGWUI-004"
+	CodeControllerNotReady   = "KGWUI-005"
+	CodeProxyNotReady        = "KGWUI-006"
+	CodeScopeMismatch        = "KGWUI-007"
+	CodeSignalUnavailable    = "KGWUI-008"
+	CodeAmbiguousOwnership   = "KGWUI-009"
+	CodeSelfManagedProxy     = "KGWUI-010"
+	CodeDelegatedNotAttached = "KGWUI-011"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -70,6 +71,9 @@ type Finding struct {
 	// API keeps its code, severity and resource and empties Message, Detail
 	// and Since (D-013). Checks never set it.
 	Restricted bool `json:"restricted,omitempty"`
+	// Evidence are the objects, other than Resource, whose data Detail quotes
+	// (KGWUI-011: the parent route). Never serialised.
+	Evidence []objects.Ref `json:"-"`
 	// parent is the route parentRef a KGWUI-003 finding is about; it orders findings.
 	parent objects.ParentRef
 }

@@ -172,7 +172,7 @@ var (
 	policyOptional   = []string{"Attached"}
 )
 
-// conditionsCheck: KGWUI-002 and KGWUI-003. Freshness is decided before
+// conditionsCheck: KGWUI-002, KGWUI-003 and KGWUI-011's status trigger. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
 // condition with reason Pending, or any stale condition makes the resource
 // "not yet processed"; only current conditions are reported or count as
@@ -188,8 +188,10 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
 	id := in.Install.ID()
 	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string) {
-		fs = append(fs, Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
-			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)})
+		f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
+			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)}
+		delegationCondition(&f, u, cond)
+		fs = append(fs, f)
 	}
 	// One KGWUI-003 per (resource, parentRef); parent is the zero value for
 	// everything but route parents.
@@ -342,6 +344,15 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
 			"parent "+parentDesc(u.Parent)+" does not exist")
+	}
+	// Declared candidates: KGWUI-011's status trigger. Inside its grace the
+	// route is being processed, so this check is pending (design §6.2).
+	for _, d := range in.Owned.Declared {
+		f := declaredFinding(in, d)
+		if f.Severity == SeverityInfo {
+			inGrace[*f.Resource] = true
+		}
+		fs = append(fs, f)
 	}
 	// Policies: ancestors written by this install's controller, for a Gateway
 	// or ListenerSet it owns or for any other kind. Assign drops policies

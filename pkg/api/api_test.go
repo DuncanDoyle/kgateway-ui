@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -2160,7 +2161,8 @@ func findingsOn(h HealthResponse, res string) []health.Finding {
 }
 
 // Candidates are never counted: a declared route and a route with no parent
-// leave the HTTPRoute tile and the roll-up as they were.
+// leave the HTTPRoute tile as it was. The declared one's only finding is the
+// KGWUI-011 warning, so the install is yellow, not pending.
 func TestCandidatesAreNotCounted(t *testing.T) {
 	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
 	_, srv, _ := startWith(t, setup{}, isolated(
@@ -2173,8 +2175,11 @@ func TestCandidatesAreNotCounted(t *testing.T) {
 		t.Fatalf("HTTPRoute count %d, want 2 (cart, api)", n)
 	}
 	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
-	if h.State != health.StateHealthy || checkPending(h, "resource status") {
+	if h.State != health.StateWarning || checkPending(h, "resource status") {
 		t.Fatalf("state %s; findings %+v", h.State, h.Findings)
+	}
+	if fs := findingsOn(h, "shop/declared"); len(fs) != 1 || fs[0].Code != health.CodeDelegatedNotAttached || fs[0].Severity != health.SeverityWarning {
+		t.Fatalf("a declared route gets only the KGWUI-011 warning: %+v", fs)
 	}
 	if fs := findingsOn(h, "shop/lonely"); len(fs) != 0 {
 		t.Fatalf("a no-parent route has no status finding: %+v", fs)
@@ -2265,4 +2270,54 @@ func backendOnly(kind, version, name, backend string) *unstructured.Unstructured
 	u.SetAPIVersion("gateway.networking.k8s.io/" + version)
 	u.SetKind(kind)
 	return u
+}
+
+// A declared route created inside its grace period gets KGWUI-011 info, and
+// the resource-status check is pending, so the install is unknown (design §6.2).
+func TestDeclaredRouteInGraceIsPendingAtTheAPI(t *testing.T) {
+	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	_, srv, _ := startWith(t, setup{late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "c", []objects.ParentRef{api})}},
+		isolated(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)))...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	fs := findingsOn(h, "shop/c")
+	if len(fs) != 1 || fs[0].Code != health.CodeDelegatedNotAttached || fs[0].Severity != health.SeverityInfo {
+		t.Fatalf("want KGWUI-011 info on shop/c: %+v", fs)
+	}
+	if !checkPending(h, "resource status") || h.State != health.StateUnknown {
+		t.Fatalf("state %s, checks %+v; want unknown and pending", h.State, h.Checks)
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/installs/kgw.kgateway/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if b, _ := io.ReadAll(resp.Body); bytes.Contains(bytes.ToLower(b), []byte("evidence")) {
+		t.Fatalf("Evidence is never serialised: %s", b)
+	}
+}
+
+// PF15: on kgateway 2.3 a child whose parentRef omits the namespace or sets
+// sectionName gets no entry (D-021 items 2 and 3), so it is a declared
+// candidate and gets the KGWUI-011 warning after grace, as on every version.
+func TestKGWUI011OnKgateway23ForUnreportedRefForms(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	noNS := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "api"}
+	section := testutil.HTTPRouteRef("shop", "api")
+	section.SectionName = "http"
+	objs := withControllerVersion("2.3.11", isolated(
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "no-ns", []objects.ParentRef{noNS}),
+		testutil.HTTPRoute("shop", "section", []objects.ParentRef{section}),
+	))
+	_, srv, _ := startWith(t, setup{}, objs...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	for _, res := range []string{"shop/no-ns", "shop/section"} {
+		fs := findingsOn(h, res)
+		if len(fs) != 1 || fs[0].Code != health.CodeDelegatedNotAttached || fs[0].Severity != health.SeverityWarning || fs[0].Detail != "No status from HTTPRoute shop/api" {
+			t.Fatalf("%s: want the KGWUI-011 warning: %+v", res, fs)
+		}
+	}
+	if h.State != health.StateWarning || checkPending(h, "resource status") {
+		t.Fatalf("state %s; findings %+v", h.State, h.Findings)
+	}
 }

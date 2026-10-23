@@ -1084,3 +1084,46 @@ func TestDelayedCollectorRecoversFresh(t *testing.T) {
 		t.Fatalf("on time again: %+v; want 2 deadline runs, never stale, 6 scrapes", again)
 	}
 }
+
+// KGWUI-011's grace matures through the in-grace FirstSeen deadline: the
+// info turns into a warning exactly at grace end, with no other trigger.
+func TestDeclaredCandidateMaturesAtItsGraceInstant(t *testing.T) {
+	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	parent := testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+	sev := func(p *Published) health.Severity {
+		for _, f := range p.Model.Installs[0].Health.Findings {
+			if f.Code == health.CodeDelegatedNotAttached && f.Resource != nil && f.Resource.String() == "shop/c" {
+				return f.Severity
+			}
+		}
+		return ""
+	}
+	h := newHarness(t, nil)
+	h.src.base = snapshot(t, parent)
+	h.start(time.Hour)
+	// The parent's own grace is long over before the child appears.
+	h.c.Step(2 * health.Grace)
+	h.await(EvConfirmed)
+	h.await(EvArmed)
+	added := h.c.Now()
+	h.src.setBase(snapshot(t, parent, testutil.HTTPRoute("shop", "c", []objects.ParentRef{api})), fprint(2, accessOK))
+	h.notify()
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	p := h.await(EvPublished).Published
+	seen := added.Add(Quiet)
+	if sev(p) != health.SeverityInfo || p.Model.Next != (Deadline{At: seen.Add(health.Grace)}) {
+		t.Fatalf("declared child: severity %q, Next %+v; want info and %v", sev(p), p.Model.Next, seen.Add(health.Grace))
+	}
+	h.await(EvArmed)
+	h.c.Step(seen.Add(health.Grace - time.Nanosecond).Sub(h.c.Now()))
+	h.await(EvConfirmed)
+	h.await(EvArmed)
+	h.c.Step(time.Nanosecond)
+	e := h.await(EvPublished)
+	if !e.At.Equal(seen.Add(health.Grace)) || sev(e.Published) != health.SeverityWarning {
+		t.Fatalf("maturation run at %v severity %q; want %v warning", e.At, sev(e.Published), seen.Add(health.Grace))
+	}
+	if h.runs != 2 {
+		t.Fatalf("runs = %d, want 2", h.runs)
+	}
+}
