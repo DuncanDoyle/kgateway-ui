@@ -212,10 +212,93 @@ async function expectStableLayout(page: Page, release: () => void, names: string
   }
 }
 
+/** Holds the detail response (not lists, YAML or meta) until release is called. */
+async function holdDetail(page: Page): Promise<() => void> {
+  let release = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const detail =
+    /^\/api\/v1\/installs\/[^/]+\/(gateways\/[^/]+\/[^/]+|(listenersets|routes)\/[^/]+\/[^/]+\/[^/]+\/[^/]+)$/;
+  await page.route(
+    (u) => detail.test(u.pathname),
+    async (route) => {
+      await gate;
+      await route.continue();
+    },
+  );
+  return release;
+}
+
+type Head = { header: Box; tabs: Box; first: Box; banner: Box | null };
+/** Header, tabs, the first element of the Overview panel and the candidate banner, in page coordinates. */
+function measureHead(page: Page): Promise<Head> {
+  return page.evaluate(() => {
+    const box = (el: Element | null) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
+    };
+    const q = (sel: string) => document.querySelector(sel);
+    return {
+      header: box(q('[data-testid="detail-header"]')),
+      tabs: box(q('[data-testid="detail-tabs"]')),
+      first: box(q('[role="tabpanel"] > *')),
+      banner: box(q('[data-testid="candidate-banner"]')),
+    } as Head;
+  });
+}
+
+/** Loads path with its detail held, and checks the header, tabs and panel start do not move once data arrives. */
+async function expectStableHead(page: Page, path: string, detailApi: string) {
+  const body: { candidate?: unknown } = await (await page.request.get(detailApi)).json();
+  const release = await holdDetail(page);
+  await page.goto(path);
+  await expect(page.getByTestId("detail-skeleton")).toBeVisible();
+  const before = await measureHead(page);
+  expect(before.banner).toBeNull();
+  release();
+  await expect(page.getByTestId("detail-skeleton")).toHaveCount(0);
+  await expect(page.getByTestId("detail-header").getByTestId(/^health-icon-/)).toBeVisible();
+  const after = await measureHead(page);
+  // Design §8.6: the candidate banner is the one allowed shift; it takes the header's old place.
+  let dy = 0;
+  if (body.candidate) {
+    expect(after.banner, "a candidate shows its banner").not.toBeNull();
+    expect.soft(after.banner?.y, "the banner starts where the header was").toBe(before.header.y);
+    dy = after.header.y - before.header.y;
+  } else {
+    expect(after.banner, "no banner for an owned object").toBeNull();
+  }
+  const moved = (b: Box) => ({ ...b, y: b.y - dy });
+  expect.soft(moved(after.header), "header").toEqual(before.header);
+  expect.soft(moved(after.tabs), "tabs").toEqual(before.tabs);
+  // The panel's first child is the skeleton, then the first section: same start and width.
+  const start = (b: Box) => ({ x: b.x, y: b.y, width: b.width });
+  expect.soft(start(moved(after.first)), "first section").toEqual(start(before.first));
+  return !!body.candidate;
+}
+
 const LONG = "shop/a-route-with-a-deliberately-long-name-that-must-not-wrap-or-shift-the-table";
 for (const width of [1280, 720]) {
   test.describe(`layout at ${width} px`, () => {
     test.use({ viewport: { width, height: 900 } });
+
+    test("detail headers and tabs do not move when the detail loads", async ({ page }) => {
+      const routes = `${install}/routes/gateway.networking.k8s.io/HTTPRoute`;
+      const routeApi = `${api}/routes/gateway.networking.k8s.io/HTTPRoute`;
+      const ls = "listenersets/gateway.networking.k8s.io/ListenerSet/infra/extra";
+      await expectStableHead(page, `${install}/gateways/infra/edge`, `${api}/gateways/infra/edge`);
+      await expectStableHead(page, `${install}/${ls}`, `${api}/${ls}`);
+      // The long name stresses the header at 720 px.
+      await expectStableHead(page, `${routes}/${LONG}`, `${routeApi}/${LONG}`);
+      await shot(page, `layout-route-head-${width}`);
+      // A declared candidate: its banner is the only shift allowed.
+      expect(
+        await expectStableHead(page, `${routes}/deleg/c-forbidden`, `${routeApi}/deleg/c-forbidden`),
+        "deleg/c-forbidden is a candidate, so the banner case is covered",
+      ).toBe(true);
+    });
 
     test("Gateway sub-tables do not move when their rows load", async ({ page }) => {
       const release = await holdLists(page);
