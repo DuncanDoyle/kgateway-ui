@@ -148,6 +148,24 @@ createRoot(document.getElementById("root") as HTMLElement).render(<Shell extensi
 
 A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`.
 
+## Upgrade notes
+
+### Gateway & Route Explorer (sub-phase 2.2)
+
+Counts and colours change on clusters that use route delegation:
+
+- A delegated child route with a controller status entry for its parent HTTPRoute now counts in the HTTPRoute tile and in install health. Its failures can turn the install yellow or red.
+- A route that names an HTTPRoute parent but has no status entry for it gets KGWUI-011: info while the controller may still be processing it, a warning after that. On kgateway 2.3, a child ref that omits the namespace or sets `sectionName` gets no status entry, so it always gets this warning.
+- Known limitation: after a child edit drops its parent, the child keeps the controller's stale status entry. It stays owned and counted, and gets KGWUI-003 until the controller updates its status.
+- The KGWUI-004 detail names the target's kind, so a route targeting a ListenerSet reads "targets ListenerSet `<ns/name>`".
+
+For downstream builds:
+
+- `CorePages` gains optional `GatewaysPage`, `GatewayPage`, `ListenerSetsPage`, `ListenerSetPage`, `RoutesPage` and `RoutePage` slots. A build that leaves them out gets the upstream pages.
+- The install paths `gateways`, `listenersets` and `routes`, and everything below them, are reserved. A `routes` contribution at one of them is dropped, with a console warning.
+
+Pages now retry a failed request every 5 seconds, so they recover within one poll after an API outage. A 400 is not retried.
+
 ## Compatibility
 
 - **API v1** (`/api/v1/...` paths and JSON) and the **SPA URLs** (`/i/{id}/...`) are stable from the first release. Install IDs are opaque: clients must not split or parse them.
