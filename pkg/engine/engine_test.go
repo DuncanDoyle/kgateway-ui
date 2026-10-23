@@ -255,3 +255,23 @@ func TestComputedAtKeepsMonotonicReading(t *testing.T) {
 		t.Fatalf("ComputedAt lost its monotonic reading: %s", at)
 	}
 }
+
+// Each install's model carries the explorer index, decoded through the
+// engine's cache: an unchanged route keeps its view across recomputes.
+func TestComputeStoresIndexFromDecodeCache(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	r := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+	r.SetResourceVersion("7")
+	e := New(config(snapshot(t, r), metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+	view := func(m *Model) *objects.HTTPRouteView {
+		t.Helper()
+		ix := m.Installs[0].Index
+		if ix == nil || len(ix.Routes) != 1 || ix.Routes[0].View == nil || len(ix.Gateways) != 1 {
+			t.Fatalf("index %+v", ix)
+		}
+		return ix.Routes[0].View
+	}
+	if a, b := view(e.Compute()), view(e.Compute()); a != b {
+		t.Fatal("the index decoded an unchanged route again")
+	}
+}

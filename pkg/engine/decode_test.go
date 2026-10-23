@@ -67,8 +67,9 @@ func TestDecodeCachePrunedWithObserve(t *testing.T) {
 	keep2 := gw("keep", "u1", "2")
 	e.cfg.Snapshots = staticSnap{snapshot(t, keep2)}
 	e.Compute()
-	if n := e.decode.size(); n != 0 {
-		t.Fatalf("%d entries survived observe", n)
+	// The index decodes keep2 during Compute; no stale entry survives.
+	if n, c := e.decode.size(), e.decode.gateways["u1"]; n > 1 || n == 1 && c.rv != "2" {
+		t.Fatalf("%d entries survived observe (keep at rv %q)", n, c.rv)
 	}
 	// An unchanged live object keeps its entry.
 	v := e.decode.Gateway(keep2)
