@@ -2,7 +2,9 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { type ComponentType, useMemo } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { GatewayPage } from "../pages/explore/GatewayPage";
 import { GatewaysPage } from "../pages/explore/GatewaysPage";
+import { ListenerSetPage } from "../pages/explore/ListenerSetPage";
 import { ListenerSetsPage } from "../pages/explore/ListenerSetsPage";
 import { RoutesPage } from "../pages/explore/RoutesPage";
 import { PageState } from "../states/PageState";
@@ -57,6 +59,8 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     ["gateways", GatewaysPage],
     ["routes", RoutesPage],
     ["listenersets", ListenerSetsPage],
+    ["gateways/:ns/:name", GatewayPage],
+    ["listenersets/:group/:kind/:ns/:name", ListenerSetPage],
     ["findings", FindingsPage],
     ["r/:group/:kind/:rns/:rname", ResourcePage],
   ];

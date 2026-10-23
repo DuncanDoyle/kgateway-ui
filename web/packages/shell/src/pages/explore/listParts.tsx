@@ -2,7 +2,7 @@ import { css } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
-import type { LinkedRef, Page } from "../../api/types";
+import type { Attachment, LinkedRef, Page } from "../../api/types";
 import { LinkedName } from "../../explore/LinkedName";
 import { listValues } from "../../explore/listQuery";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
@@ -28,6 +28,15 @@ const healthOptions: FilterOption[] = HEALTH.map((h) => ({
   label: stateLabel(h),
   icon: <HealthIcon state={h} />,
 }));
+
+/** How a parent took the route, in words; the raw condition reason is never shown (design §8.8 owns the copy). */
+export const attachmentLabel: Record<Attachment, string> = {
+  accepted: "Accepted",
+  "not-accepted": "Not accepted",
+  pending: "Waiting for status",
+  unwatched: "Namespace not watched",
+  declared: "Parent route has no status",
+};
 
 /** Labels of the filters a link can set but the bar has no control for. */
 const TAG_LABELS: Record<string, string> = {

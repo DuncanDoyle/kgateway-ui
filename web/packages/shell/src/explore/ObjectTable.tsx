@@ -424,3 +424,6 @@ export function ObjectTable<T>({
     </Frame>
   );
 }
+
+/** The table's frame and styles, for a detail table that is not a server list (e.g. listeners). */
+export { Frame as TableFrame, Table as TableStyles };

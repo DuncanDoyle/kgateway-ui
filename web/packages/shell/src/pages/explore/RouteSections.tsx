@@ -1,0 +1,146 @@
+import styled from "@emotion/styled";
+import { useMemo, useState } from "react";
+import { useRoutes } from "../../api/exploreHooks";
+import type { Attachment, LinkedRef, RouteCounts, RouteRow } from "../../api/types";
+import type { ObjectColumn } from "../../explore/ObjectTable";
+import { HealthBadge } from "../../health/HealthBadge";
+import { Chip } from "../../states/controls";
+import { refParam, Section, SubList } from "./detailParts";
+import { attachmentLabel, Muted, NameCell } from "./listParts";
+
+// region Styles
+const Why = styled.ul`
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: ${(p) => p.theme.font.size.sm};
+  li + li {
+    margin-top: 4px;
+  }
+  .reason {
+    margin-left: 6px;
+    font-family: ${(p) => p.theme.font.mono};
+    font-size: ${(p) => p.theme.font.size.code};
+    color: ${(p) => p.theme.color.textMuted};
+  }
+  .message {
+    display: block;
+    color: ${(p) => p.theme.color.textMuted};
+    overflow-wrap: anywhere;
+  }
+`;
+
+const Bar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${(p) => p.theme.space(1)};
+  margin-bottom: ${(p) => p.theme.space(2)};
+`;
+
+// region Helpers
+const NOUN = ["route", "routes"] as const;
+type Failed = Extract<Attachment, "not-accepted" | "pending" | "unwatched">;
+const FAILED: { value: Failed; label: string; count: keyof RouteCounts }[] = [
+  { value: "not-accepted", label: "Not accepted", count: "notAccepted" },
+  { value: "pending", label: "Waiting for status", count: "pending" },
+  { value: "unwatched", label: "Unwatched namespace", count: "unwatched" },
+];
+
+const same = (a: LinkedRef | undefined, b: LinkedRef) =>
+  !!a && a.group === b.group && a.kind === b.kind && a.namespace === b.namespace && a.name === b.name;
+
+function baseColumns(installId: string): ObjectColumn<RouteRow>[] {
+  return [
+    { id: "health", header: "Status", width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
+    { id: "name", header: "Route", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
+    { id: "kind", header: "Kind", width: "120px", secondary: true, cell: (r) => r.ref.kind },
+    {
+      id: "hostnames",
+      header: "Hostnames",
+      width: "22%",
+      secondary: true,
+      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>Inherited</Muted>),
+    },
+  ];
+}
+
+/** Why the route did not attach to parent: the deciding condition's reason as written, and its message. */
+function whyColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
+  return {
+    id: "why",
+    header: "Why",
+    width: "34%",
+    cell: (r) => (
+      <Why>
+        {r.parents
+          .filter((p) => same(p.ref, parent) || same(p.via, parent))
+          .map((p) => (
+            <li key={[p.ref.kind, p.ref.namespace, p.ref.name, p.sectionName, p.port].join("/")}>
+              {attachmentLabel[p.attachment]}
+              {p.sectionName ? <Muted> · {p.sectionName}</Muted> : null}
+              {/* A reason without a condition type is ours, not the controller's: never shown as a code. */}
+              {p.conditionType && p.reason ? <span className="reason">{p.reason}</span> : null}
+              {p.conditionType && p.message ? <span className="message">{p.message}</span> : null}
+            </li>
+          ))}
+      </Why>
+    ),
+  };
+}
+const rowRef = (r: RouteRow) => r.ref;
+
+// region Component
+interface RouteSectionsProps {
+  installId: string;
+  parent: LinkedRef;
+  counts: RouteCounts;
+}
+
+/** Attached routes, and routes that failed to attach with Not accepted, Waiting and Unwatched sub-filters. */
+export function RouteSections({ installId, parent, counts }: RouteSectionsProps) {
+  const [failed, setFailed] = useState<Failed>("not-accepted");
+  const p = refParam(parent);
+  const attachedQuery = useMemo(() => ({ parent: p, attachment: "accepted" }), [p]);
+  const failedQuery = useMemo(() => ({ parent: p, attachment: failed }), [p, failed]);
+  const base = useMemo(() => baseColumns(installId), [installId]);
+  const failedCols = useMemo(() => [...base, whyColumn(parent)], [base, parent]);
+  return (
+    <>
+      <Section aria-labelledby="attached-routes">
+        <h2 id="attached-routes">
+          Attached routes <span className="note">{counts.accepted}</span>
+        </h2>
+        <SubList
+          installId={installId}
+          label="Attached routes"
+          noun={NOUN}
+          useList={useRoutes}
+          query={attachedQuery}
+          columns={base}
+          rowRef={rowRef}
+          emptyTitle="No routes attached."
+        />
+      </Section>
+      <Section aria-labelledby="failed-routes">
+        <h2 id="failed-routes">Routes that failed to attach</h2>
+        <Bar role="group" aria-label="Failed routes">
+          {FAILED.map((f) => (
+            <Chip key={f.value} type="button" aria-pressed={failed === f.value} onClick={() => setFailed(f.value)}>
+              {f.label} ({counts[f.count]})
+            </Chip>
+          ))}
+        </Bar>
+        <SubList
+          installId={installId}
+          label="Routes that failed to attach"
+          noun={NOUN}
+          useList={useRoutes}
+          query={failedQuery}
+          columns={failedCols}
+          rowRef={rowRef}
+          emptyTitle="No routes in this state."
+        />
+      </Section>
+    </>
+  );
+}

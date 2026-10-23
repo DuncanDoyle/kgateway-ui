@@ -2,14 +2,14 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useMemo } from "react";
 import { useRoutes } from "../../api/exploreHooks";
-import type { Attachment, ParentSummary, RouteRow } from "../../api/types";
+import type { ParentSummary, RouteRow } from "../../api/types";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { type FilterOption, StateFilter } from "../../explore/StateFilter";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
-import { ListFilters, Muted, NameCell, useShownPage, wrapName } from "./listParts";
+import { attachmentLabel, ListFilters, Muted, NameCell, useShownPage, wrapName } from "./listParts";
 
 // region Styles
 const Tag = styled.span`
@@ -33,15 +33,6 @@ const Parents = styled.ul`
 
 // region Helpers
 const NOUN = ["route", "routes"] as const;
-
-/** How a parent took the route, in words; the raw condition reason is never shown (design §8.8 owns the copy). */
-const attachmentLabel: Record<Attachment, string> = {
-  accepted: "Accepted",
-  "not-accepted": "Not accepted",
-  pending: "Waiting for status",
-  unwatched: "Namespace not watched",
-  declared: "Parent route has no status",
-};
 
 /** The 2.2 route state flags (design §6.1); the wording pass (Task 31) finalises the labels. */
 const stateOptions: FilterOption[] = [
