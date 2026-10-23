@@ -187,9 +187,9 @@ export const routeCopy = {
   parents: "Parents",
   parentCard: (name: string) => `Parent ${name}`,
   // Status entries no spec parentRef names: an implicit parent (empty parentRefs) or a leftover entry.
-  implicitParent: "Implicit parent", // S97
+  implicitParent: "Implicit parent", // S108
   implicitParentCard: (name: string) => `Implicit parent ${name}`,
-  notInParentRefs: "Not in parentRefs", // S98
+  notInParentRefs: "Not in parentRefs", // S109
   notInParentRefsCard: (name: string) => `Parent ${name}, not in parentRefs`,
   section: "Section",
   port: "Port",
