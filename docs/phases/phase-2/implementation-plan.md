@@ -399,7 +399,8 @@ func TestSafetyTimer(t *testing.T) {
   - `type LoopEventKind int` (`EvTriggered`, `EvArmed`, `EvRunStarted`, `EvPublished`, `EvConfirmed`, `EvConfirmRefused`); `type LoopEvent struct { Kind LoopEventKind; At time.Time; Published *Published }`; `Config.OnLoop func(LoopEvent)` — test hook, called synchronously on the loop goroutine after each transition. Tests wait for the event a transition produces before they advance the fake clock, and count runs by `EvPublished`, never by confirmations.
   - Tests set `Config.Now` to the fake clock's `Now` and `cache.Config.Now` likewise, so snapshot, compute and confirmation times share one clock.
   - `internal/testutil`: `func FakeClock() *clocktesting.FakeClock` at `Now`; `loop_test.go`: `func awaitThenStep(t *testing.T, ev <-chan LoopEvent, want LoopEventKind, c *clocktesting.FakeClock, d time.Duration)` — receives up to `want` (bounded by `testutil.Recv`), then steps
-  - `func metricsIdentity(src ctrlmetrics.Source, ids []string) uint64` — FNV-64a over, per install ID in order: the ID, the `Get` presence, and for a present result `CollectedAt.UnixNano`, `Err`, `ManagedPresent` and every `Rejects` and `Managed` entry in sorted key order. `Compute` and the confirm tick both call it. Kinds identity: `KindsChange().String()`.
+  - `type MetricsRead struct { ID string; Result ctrlmetrics.Result; Present bool }`; `Model.MetricsRead []MetricsRead` — `Compute` calls `Metrics.Get` exactly once per install and hands those captured values to the verifier and health, never a second read
+  - `func encodeMetrics(reads []MetricsRead) uint64` — FNV-64a over, per read in install order: the ID, `Present`, and for a present result `CollectedAt.UnixNano`, `Err`, `ManagedPresent` and every `Rejects` and `Managed` entry in sorted key order. `Source.Metrics` is `encodeMetrics(m.MetricsRead)`, the evidence the model used; the confirm tick reads the live results for the same IDs once and applies the same encoding. Kinds identity: `KindsChange().String()`.
 
 - [ ] **Step 1: Write the failing tests** (fake clock; a `fakeSource` implementing `cache.Snapshotter` and `cache.Fingerprinter` whose store can change without notifying, and whose `Snapshot` can block on a channel)
 
@@ -441,7 +442,8 @@ func TestStrictMetricsDeadline(t *testing.T) {
 }
 func TestMetricsResultTriggersOneRecompute(t *testing.T) // Collector.OnResult shares Config.Triggers → one run
 func TestConfirmNeverRestoresOlderModel(t *testing.T)  // confirm reads p1; a direct Compute publishes p2 before the swap (test seam between read and CAS) → EvConfirmRefused, Current().Model is p2's
-func TestMetricsIdentityCoversContent(t *testing.T)    // same CollectedAt, different Rejects → different identity; absent vs present empty result → different; equal results → equal
+func TestMetricsIdentityCoversContent(t *testing.T)    // same CollectedAt, different Rejects → different encoding; absent vs present empty result → different; equal results → equal
+func TestMetricsFingerprintIsEvidenceRead(t *testing.T) // a Source that returns A on its first Get and B after: health saw A, Source.Metrics == encodeMetrics(A); the next confirm tick reads B → EvConfirmRefused and one run that uses B
 func TestOnComputeOnlyOnRecompute(t *testing.T)        // OnCompute once per EvPublished, never on EvConfirmed
 ```
 
@@ -460,7 +462,7 @@ func TestOnComputeOnlyOnRecompute(t *testing.T)        // OnCompute once per EvP
 
 **Interfaces:**
 - Consumes: `engine.Published` (Task 6).
-- Produces: wire field `confirmedAt` on each install; `func handler.load(w) *engine.Published` (503 when not synced); `func additive(t *testing.T, old, cur any, path string)` (test helper: every key and value of `old` exists in `cur`; a `"<snapshot time>"` string in `old` matches any UTC RFC 3339 value; an array in `cur` keeps `old`'s elements at their indexes and may append only the elements its path lists in `var appended = map[string][]string{"health.checks": {"backend status", "computed views"}, "overview.counts": {"Backends"}}`, in that order (design §7.6))
+- Produces: wire field `confirmedAt` on each install; `func handler.load(w) *engine.Published` (503 when not synced); `func additive(t *testing.T, old, cur any, path string)` (test helper: every key and value of `old` exists in `cur`; a `"<snapshot time>"` string in `old` matches any UTC RFC 3339 value; an array in `cur` keeps `old`'s elements at their indexes, in their order, and may append only the elements listed for its path. Paths are JSON paths inside the fixture document, including the `body` wrapper, independent of the fixture name; appended elements are identified by a key field: `var appended = map[string]struct{ Key string; Values []string }{"body.checks": {"name", []string{"backend status", "computed views"}}, "body.counts": {"kind", []string{"Backend"}}, "body.kinds": {"kind", []string{"Backend"}}}`, in that order (design §7.6). This covers `meta`, `bare-meta`, `overview`, `bare-overview` and `health`.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -475,6 +477,7 @@ func TestTimestampsPerMeaningAtTheAPI(t *testing.T) {
 	// installs: computedAt == T0, confirmedAt == T0+5 s; overview, health collectedAt and the
 	// Collected-At header == T0+5 s; health checks[].collectedAt and findings[].since keep their own values.
 }
+func TestAdditiveHelper(t *testing.T)   // unit: an appended Backend kind in body.kinds and a computed views check in body.checks pass; a reordered element, an appended unlisted element, or a removed key fails
 func TestRequestReadsOnePublished(t *testing.T) // a ModelSource whose Current() counts calls: each handler calls it once
 ```
 
@@ -579,7 +582,7 @@ codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.1-codex.md "Revi
 - Modify: `web/packages/shell/src/api/types.ts:5` (`"backend"` in `Category`)
 - Test: `pkg/kinds/kinds_test.go`, `pkg/scopeverify/verify_test.go`, `deploy/helm/chart_test.go`
 
-**Interfaces:** Produces `kinds.CategoryBackend`; descriptor `{Group: "gateway.kgateway.dev", Kind: "Backend", Resource: "backends", Versions: ["v1alpha1"], Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"}`.
+**Interfaces:** Produces `kinds.CategoryBackend`; descriptor `{Group: "gateway.kgateway.dev", Kind: "Backend", Resource: "backends", Versions: ["v1alpha1"], Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"}`. Appended last to `kinds.Upstream()`, so `meta.kinds` gains it at the end (Task 7's `appended`).
 
 - [ ] **Step 1: Record the sub-phase and write `docs/phases/phase-2/phase-2.2-brief.md`** (Lifecycle above; agentic-engineering-sdlc format): goal, Tasks 11–34, exit criteria, file list, the Q12 count change.
 - [ ] **Step 2: Write the failing tests** `TestUpstreamHasBackend` (descriptor as above), `TestVerifierIgnoresBackend` (a Backend in scope does not change KGWUI-007's comparison) and `TestClusterRoleCoversBackends` (rendered ClusterRole grants get/list/watch on `gateway.kgateway.dev` `*` or `backends`).
@@ -1637,7 +1640,7 @@ it("ListenerSet page shows computed counts per listener", ...);
 
 - [ ] **Step 1: Add fixtures** (design §9.5, 2.3): the `sectionName` quirk route (D-021 item 3's manifest from `test/e2e/fixtures/observe/` where it fits), a route with two parentRefs to one listener, a `Selector` listener over labelled namespaces, a ListenerSet with routes and a denied ListenerSet with a route, an HTTPS `*.example.com` listener with matching and non-matching routes.
 - [ ] **Step 2: Write `TestComputedAgreesWithController`:** on each tag, for every listener of every owned Gateway and ListenerSet, `computedRoutes == status.attachedRoutes` and coverage holds `count-agrees`; every `ParentSummary.computed` is `checked` with `status-compatible`; the quirk route is `NoMatchingParent`; the two-ref route counts twice; health holds no KGWUI-012.
-- [ ] **Step 3: Write `TestForcedDisagreementRaisesKGWUI012`:** the test sets the UI's safety timer to 10 minutes by patching the Deployment's container args (`kubectl patch deploy/ui-kgateway-ui --type=json` adding `--poll-interval=10m`, waiting for the rollout, restored in `t.Cleanup`), so the safety timer cannot explain a run; the chart gains no value for it. Scale the controller to 0; relabel the `Selector` namespace so the computed outcome flips; poll every second until the route's check reads `pending`; KGWUI-012 appears on the route and on the Gateway no earlier than its `since` + 30 s and within `since` + 90 s; scale back to 1; KGWUI-012 clears within 2 min. `t.Cleanup` restores the label and the replica count. The exact instant is proven by Task 42's fake-clock test, not here.
+- [ ] **Step 3: Write `TestForcedDisagreementRaisesKGWUI012`:** the test sets the UI's safety timer to 10 minutes by patching the Deployment's container args (`kubectl patch deploy/ui-kgateway-ui --type=json` adding `--poll-interval=10m`, waiting for the rollout, restored in `t.Cleanup`), so the safety timer cannot explain a run; the chart gains no value for it. Scale the controller to 0; relabel the `Selector` namespace so the computed outcome flips; poll every second until the route's check reads `pending`; KGWUI-012 appears on the route and on the Gateway no earlier than its `since` + 30 s and within `since` + 90 s; scale back to 1; KGWUI-012 clears within 2 min. `t.Cleanup` restores the label, the replica count and the args. The shared port-forward from `setup.sh` dies with the old Pod, so `test/e2e/api_test.go` gains `func forward(t *testing.T) string`: after each rollout it starts a test-local `kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui` on a free port, polls `/readyz` until 200 (bounded, 2 min), and this test reads through that address; after the cleanup rollout, `restartSharedForward(t)` reruns the setup's forward on 127.0.0.1:18080 with its pid file and polls `/readyz`, so later tests keep working. The chart does not change. The exact instant is proven by Task 42's fake-clock test, not here.
 - [ ] **Step 4: Extend `explorer.spec.ts`:** open `infra/edge`, select listener `https`, the URL holds `?listener=https`, rows show effective hostnames and the badge.
 - [ ] **Step 5: Run** `make e2e KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1` and `make e2e KGW_VERSION=v2.3.11 GWAPI_VERSION=v1.5.1` → PASS (or the CI matrix).
 - [ ] **Step 6: Run the `/ui-loop` skill** on the Gateway, ListenerSet and HTTPRoute pages with computed facts: light and dark, 1280 px and 720 px, pending, unknown and disagreeing states; list the recording paths in the 2.3 record.
@@ -1769,7 +1772,8 @@ Retention is streaming (computed-rules §5.7): each context is folded into its r
   - `type RowKey struct { Parent objects.Ref; Rule, Ref int; Child objects.Ref }` — a ref that selects nothing gives one row with a zero `Child` and outcome `unresolved` (computed-rules §5.5)
   - `type Context struct { ParentMatch objects.Match; Path []objects.Ref; Reporter ReportKey; Outcome RowOutcome; Unknown UnknownReason; Reason *FitFailure; Rules []EffectiveRule; Deps []objects.Ref }`
   - `type Row struct { Key RowKey; RefAsWritten objects.DelegationRef; Allows Allows; Outcome RowOutcome; Unknown UnknownReason; SomeNotComputed, Unconfirmable bool; Reason *FitFailure; Note, Quirk string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref; Reporters []ReportKey; ChildKey ReportKey; WritesEntry bool }` — `Deps` and `Reporters` cover every context, retained or not; `Note` holds the `unresolved` reason; `Quirk` names the §5.4 quirk a row reproduces, unless D-021 item 7 verified it
-  - `kgw23`: `func newAccumulator(b computed.Bounds) *accumulator`; `func (a *accumulator) add(key computed.RowKey, c computed.Context)` — always updates the row's outcome counters, `Deps` and `Reporters`; keeps `c` only while the row holds fewer than `ContextsPerRow` and the install fewer than `ContextsPerInstall`, else sets `ContextsTruncated`; `func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row` — final outcomes per computed-rules §5.5 (all known and equal → that outcome; `attached` and `dropped` → `partial`; `attached` with unknown → `attached` and `SomeNotComputed`; no `attached` with unknown or an incomplete child → `unknown`, never `dropped`; `forbidden` always known), in `RowKey` order
+  - `type RowMeta struct { RefAsWritten objects.DelegationRef; Allows Allows; Note, Quirk string }`; `Row.ContextDigest uint64` — order-independent wrapping sum of a 64-bit hash of every contributing context's incoming match, path, reporter and outcome, retained or not; Task 61's fingerprints read it for the per-context inputs of computed-rules §9.2
+  - `kgw23`: `func newAccumulator(b computed.Bounds) *accumulator`; `func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta)` — called once per row before any `add` (an `unresolved` zero-child row gets only `open`); `func (a *accumulator) add(key computed.RowKey, c computed.Context)` — always updates the row's outcome counters, `Deps`, `Reporters` and `ContextDigest`; keeps `c` only while the row holds fewer than `ContextsPerRow` and the install fewer than `ContextsPerInstall`, else sets `ContextsTruncated`; `func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row` — final outcomes per computed-rules §5.5 (all known and equal → that outcome; `attached` and `dropped` → `partial`; `attached` with unknown → `attached` and `SomeNotComputed`; no `attached` with unknown or an incomplete child → `unknown`, never `dropped`; `forbidden` always known), in `RowKey` order
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1779,11 +1783,13 @@ func TestContextsPerRowCap(t *testing.T)               // 21 contexts → 20 kep
 func TestInstallContextCap(t *testing.T)               // small ContextsPerInstall: later rows keep outcomes, no contexts, truncated
 func TestRetentionIsStreaming(t *testing.T)            // 10,000 adds with ContextsPerInstall 100: live retained contexts never exceed 100 at any add (test counter)
 func TestDepsAndReportersSurviveRetention(t *testing.T) // a context dropped by a cap still adds its Deps and Reporter
+func TestUnretainedContextChangesDigest(t *testing.T)  // change only the incoming match of the 21st (unretained) context, same outcome, deps and reporter → ContextDigest differs
+func TestRowMetaCarried(t *testing.T)                 // RefAsWritten, Allows, Note and Quirk from open appear on the emitted Row
 func TestTwoRowsOfOneChildAreSeparate(t *testing.T)    // rows (0,0,C) and (1,0,C) both present with their own outcomes
 func TestUnresolvedRowHasZeroChild(t *testing.T)
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Aggregate|ContextsPerRow|InstallContext|Streaming|Survive|TwoRows|ZeroChild'` → FAIL.
+- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Aggregate|ContextsPerRow|InstallContext|Streaming|Survive|ChangesDigest|RowMeta|TwoRows|ZeroChild'` → FAIL.
 - [ ] **Step 3: Commit** `feat(computed): streaming row accumulator with bounded retention`.
 
 ### Task 57: Context-aware traversal, compute bounds and the reach graph
@@ -1798,7 +1804,7 @@ func TestUnresolvedRowHasZeroChild(t *testing.T)
   - `type ParentSignal struct { Parent objects.Ref; Key ReportKey; Reasons []string; Deps []objects.Ref }` — `BackendNotFound`, `RefNotPermitted` in first-seen order
   - `type Edge struct { Parent, Child objects.Ref }`; `type Uncertain struct { Route objects.Ref; Rule, Ref int; Reason UnknownReason }` (a cut or unknown (parent, ref); an unknown root with `Rule == -1`; a route an uncertain selection might reach, with `Rule == -2`)
   - `DelegationResult` gains `Rows []Row; Signals []ParentSignal; Reach []Edge; Uncertain []Uncertain; Cap string` (`""`, `"edges"`, `"contexts"` or `"matchers"`, the first cap hit) `; ClearsDroppedStatus bool`
-  - `kgw23.Rules.Delegation` — computed-rules §5.1 roots and contexts; §5.4 `selectTree`, `childrenFor`, `flatten` as written (both quirks, path-scoped cycle check, errors never cleared, hostnames after the fit; memoising `selectTree` per parent allowed), each context handed to the accumulator as it is produced; the three compute caps of §5.7 in the fixed order (roots by (namespace, name), rules and refs by index, children by (namespace, name)), everything after a cap `unknown`/`too-large`; owned parents no root reaches get their selection and permission rows with `unknown`/`not-reached`; context deps per §5.6
+  - `kgw23.Rules.Delegation` — computed-rules §5.1 roots and contexts; §5.4 `selectTree`, `childrenFor`, `flatten` as written (both quirks, path-scoped cycle check, errors never cleared, hostnames after the fit; memoising `selectTree` per parent allowed), each row opened with its `RowMeta` (the ref as written, `Allows` from `permits`, the unresolved reason, the quirk name) before its first context, and each context handed to the accumulator as it is produced; the three compute caps of §5.7 in the fixed order (roots by (namespace, name), rules and refs by index, children by (namespace, name)), everything after a cap `unknown`/`too-large`; owned parents no root reaches get their selection and permission rows with `unknown`/`not-reached`; context deps per §5.6
   - The reach graph (computed-rules §8.5): `Reach` holds (route → permitted selected child) for **every** in-scope HTTPRoute with delegation refs, owned or not, kept, dropped or unreached, from selection and permission alone, so edges below a dropped non-owned route and below a context or matcher cut are present; it counts against the edge cap. An uncertain selection adds no edge: its parent, and each route it might select (`possible`, Task 55), become `Uncertain`.
 
 - [ ] **Step 1: Write the failing tests** (computed-rules §11.2)
@@ -1904,7 +1910,7 @@ func TestChildKeys(t *testing.T) {
 - Produces:
   - `KindChildEntry`, `KindParentResolvedRefs`
   - `func CheckDelegation(install string, sel Selection, in DelegationInput, r *DelegationResult, c Completeness) []CheckResult` — rules §8.1–§8.5 for both kinds: aggregation per report key over every row, context and root; a negative expectation on an incomplete subject is `ClassUnknown`, note "Not all paths computed"; a 2.3 row with `WritesEntry` false is `ClassNotObservable` (`not-verified`); a current entry nobody expects is `ClassUnexpected` with `Verified = r.ClearsDroppedStatus` for a matcher drop and false for `forbidden`; the parent's reason is compared only when complete, single, and P has no non-delegation backendRef and no `ExtensionRef` filter; `Contributors` = child, P and every route on a contributing path; `ParentCurrent` = P's entry under its reporter key is current; sets `Row.Unconfirmable` when the aggregated signal cannot confirm the row's own outcome ("Status cannot confirm this path")
-  - `childEntryPrint`, `parentResolvedRefsPrint` — exactly the rules §9.2 fields
+  - `childEntryPrint`, `parentResolvedRefsPrint` — exactly the rules §9.2 fields; the per-context inputs (incoming match, path) come from the contributing rows' `ContextDigest`, so unretained contexts count
 
 - [ ] **Step 1: Write the failing tests** (rules §11.2 expectations, §11.4)
 
@@ -1924,6 +1930,7 @@ func TestNoEntryIncompleteIsUnknown(t *testing.T)     // §11.2 cut row; unknown
 func Test23ChildWithoutEntryNotVerified(t *testing.T) // §11.3: namespace omitted, sectionName set
 func TestUnconfirmableRow(t *testing.T)               // a dropped row whose child key expects an entry from another context
 func TestDelegationFingerprints(t *testing.T) {
+	// child-entry changes when only an unretained context's incoming match changes (via ContextDigest).
 	// child-entry unchanged by: the child's ResolvedRefs or Programmed, an annotation other than inherit-parent-matcher;
 	// changed by: the child's matches, hostnames, parentRefs or inherit annotation, a context's incoming match or path, the ref, the wildcard setting, completeness, entry presence, Accepted/UnsupportedValue.
 	// parent-resolvedrefs unchanged by: P's Accepted or Programmed; changed by: a selected child's inherit annotation, matches or labels used by a label ref, P's backendRef kinds, ExtensionRef filters.
