@@ -11,7 +11,7 @@
 
 **Tech Stack:** Go 1.26, client-go v0.36, `k8s.io/utils/clock` (already in the module graph, promoted to a direct dependency for the fake clock), React 19, TypeScript, emotion, react-router, SWR, TanStack Table, Vitest, Testing Library, Playwright, kind.
 
-**Spec:** `docs/phases/phase-2/design.md`, `docs/phases/phase-2/computed-rules.md`, `docs/decisions.md` D-017 … D-020 (approved 2026-10-23, with the addendum of commit `172a5a4`). Section numbers below (§3.1, §7.4, rules §9.3) refer to these. Phase 1's plan (`docs/phases/phase-1/implementation-plan.md`) holds the project conventions this plan does not repeat.
+**Spec:** `docs/phases/phase-2/design.md`, `docs/phases/phase-2/computed-rules.md`, `docs/decisions.md` D-017 … D-020 (approved 2026-10-23, with the addendum of commit `172a5a4`). Section numbers below (§3.1, §7.4, rules §9.3) refer to these. Phase 1's plan (`docs/phases/phase-1/implementation-plan.md`) holds the project conventions this plan does not repeat. Design Q7's research refresh ran on 2026-10-23; its results are the addendum `172a5a4`. The spec updates from the plan review are commit `8b381c5`; the review and its binding triage are `reviews/plan-codex.md`.
 
 ## Global Constraints
 
@@ -49,6 +49,10 @@ Each sub-phase starts with a brief (`docs/phases/phase-2/phase-2.N-brief.md`, pe
 | **2.2 Explorer on observed status** | Every explorer page and list, from status only | 11–34 | Q12 ownership with before/after tests; KGWUI-011 status trigger; Backend kind; list and detail APIs with Authorizer and goldens (Go and TS); Gateways, ListenerSets, Routes lists and the three detail pages; wording pass; 2.2 budgets met at Large; kind e2e green on v2.3.11 and v2.4.7; ui-loop recordings; release note; Codex review triaged |
 | **2.3 View A** | Routes per listener with effective hostnames, labelled and cross-checked | 35–51 | D-021 view A items applied; `pkg/computed` seam and both rule sets with per-version fixtures; experimental setting read; `listener-count` and `route-accepted` checks; KGWUI-012 persistence with scheduled maturation; listener and attachment DTOs, `listener` filter, Authorizer rules 4–7 for view A; goldens (Go and TS); `ComputedBadge` and pages; rules §11.1, §11.4 (view A rows), §11.5 rows 1–4, 7–10; wording pass; 2.3 budgets at Large; kind e2e: computed equals `attachedRoutes` on both tags and a forced disagreement; Codex review triaged |
 | **2.4 Views B and C** | Delegation selection, outcomes and effective matchers | 52–70 | D-021 delegation items applied; wildcard setting read; traversal with bounds, completeness, retention and projection; report keys per version; `child-entry` and `parent-resolvedrefs` checks; KGWUI-011 computed and orphan triggers; delegation endpoint and tab, effective matchers; Authorizer for contexts and evidence; goldens; rules §11.2–§11.5; wording pass; 2.4 budgets and the dense-selection benchmark; kind e2e for the controller-backed cases; Codex review triaged |
+
+**Lifecycle.** A sub-phase's first task records it in `docs/phase-status.md` under `## Sub-phase` (`2.N <name>`, `Status: active`, `Base: <git rev-parse HEAD>` taken before that task's first commit). Its review command diffs from that base: `BASE=$(awk '/^## Sub-phase/{f=1} f && /^Base:/{print $2; exit}' docs/phase-status.md)`. Its close task writes the README upgrade notes, updates `docs/roadmap.md` and resets `## Sub-phase`.
+
+**Step convention.** A code task runs: the failing tests; the run command, which must fail for the stated reason; the implementation; the same run plus the task's gates, which must pass; the commit with the task's message and the trailer line. Steps list only what decides something. Web tasks gate on `cd web && npm test && npm run typecheck && npm run lint`.
 
 ## File Structure
 
@@ -93,7 +97,7 @@ pkg/explore/ancestors.go            bounded up-chain walk (2.2)
 pkg/computed/rules.go               Rules seam, Selection, shared result types, Views (2.3)
 pkg/computed/attach.go              view A input and result types (2.3)
 pkg/computed/check.go, fingerprint.go  cross-check, evidence classes, fingerprints (2.3, 2.4)
-pkg/computed/delegation.go          view B and C input and result types (2.4)
+pkg/computed/delegation.go          view B and C input and result types (stub 2.3, filled 2.4)
 pkg/computed/complete.go            completeness by reach closure (2.4)
 pkg/computed/rulesets/rulesets.go   upstream RulesFor: version selection (2.3)
 pkg/computed/kgw23/, kgw24/         rule sets kgateway-2.3, kgateway-2.4; kgw24 starts as a copy (2.3, 2.4)
@@ -153,20 +157,22 @@ Answers rules §10 items 1–10 on both tags before any rule depends on them (de
 
 **Files:**
 - Create: `docs/phases/phase-2/phase-2.1-brief.md`
+- Modify: `docs/phase-status.md` (sub-phase 2.1 active, base SHA), `test/e2e/setup.sh` (experimental CRDs)
 - Modify: `docs/decisions.md` (append D-021)
 - Modify: `docs/phases/phase-2/computed-rules.md` §10 (mark each item answered, link D-021)
 - Create: `test/e2e/fixtures/observe/*.yaml` (one manifest per item, reused by 2.3/2.4 e2e)
 
 **Interfaces:** Produces facts for 2.3 and 2.4 (rule sets, the `verified` mark of rules §8.3) and the observation manifests.
 
-- [ ] **Step 0: Write `docs/phases/phase-2/phase-2.1-brief.md`** (agentic-engineering-sdlc format): goal, Tasks 1–10, exit criteria from the Sub-phases table, file list.
-- [ ] **Step 1: Write one manifest per item** under `test/e2e/fixtures/observe/` (Gateway `infra/edge` with listeners `http` 8080 and `https` 8443 hostname `*.example.com`; parent HTTPRoute `shop/api` with delegation backendRefs; children as each item needs).
-- [ ] **Step 2: Run each item on v2.4.7, then v2.3.11** (`KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 bash test/e2e/setup.sh`, then the pair `v2.3.11`/`v1.5.1`). For each: `kubectl apply`, wait for `observedGeneration` to match, record `kubectl get httproute -A -o json | jq '[.items[] | {n:.metadata.name, gen:.metadata.generation, parents:.status.parents}]'` and the Gateway's `status.listeners[].attachedRoutes`. Item 1 and 6 need a second apply that changes the selection; record status before and after.
-- [ ] **Step 3: Append D-021** to `docs/decisions.md` in the existing format: Context (rules §10), Decision (per item: tag, observed parentRef of the entry, entry present or cleared, `attachedRoutes`, verbatim excerpt), Alternatives "n/a (observation)", Consequences (rule-set or `verified` changes for 2.3/2.4). If an observation contradicts design §4.2 (reported-edge eligibility) STOP and ask the user before Task 14.
-- [ ] **Step 4: Commit**
+- [ ] **Step 1: Record the sub-phase and write `docs/phases/phase-2/phase-2.1-brief.md`** (Lifecycle above; agentic-engineering-sdlc format): goal, Tasks 1–10, exit criteria from the Sub-phases table, file list.
+- [ ] **Step 2: Install the experimental Gateway API CRDs** in `test/e2e/setup.sh`: the `experimental-install.yaml` bundle of `$GWAPI_VERSION` replaces `standard-install.yaml`, so XListenerSet, ListenerSet, TCPRoute and TLSRoute exist for the observations and for every later e2e. After setup, `kubectl get crd xlistenersets.gateway.networking.x-k8s.io tcproutes.gateway.networking.k8s.io tlsroutes.gateway.networking.k8s.io` succeeds on both pairs, and the Phase 1 e2e suite still passes.
+- [ ] **Step 3: Write one manifest per item** under `test/e2e/fixtures/observe/` (Gateway `infra/edge` with listeners `http` 8080 and `https` 8443 hostname `*.example.com`; parent HTTPRoute `shop/api` with delegation backendRefs; children as each item needs).
+- [ ] **Step 4: Run each item on v2.4.7, then v2.3.11** (`KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 bash test/e2e/setup.sh`, then the pair `v2.3.11`/`v1.5.1`). For each: `kubectl apply`, wait for `observedGeneration` to match, record `kubectl get httproute -A -o json | jq '[.items[] | {n:.metadata.name, gen:.metadata.generation, parents:.status.parents}]'` and the Gateway's `status.listeners[].attachedRoutes`. Item 1 and 6 need a second apply that changes the selection; record status before and after.
+- [ ] **Step 5: Append D-021** to `docs/decisions.md` in the existing format: Context (rules §10), Decision (per item: tag, observed parentRef of the entry, entry present or cleared, `attachedRoutes`, verbatim excerpt), Alternatives "n/a (observation)", Consequences (rule-set or `verified` changes for 2.3/2.4). If an observation contradicts design §4.2 (reported-edge eligibility) STOP and ask the user before Task 14.
+- [ ] **Step 6: Commit**
 
 ```bash
-git add docs test/e2e/fixtures/observe
+git add docs test/e2e/setup.sh test/e2e/fixtures/observe
 git commit -m "docs: record delegation and attachment status observations (D-021)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -178,34 +184,34 @@ Runs on Phase 1 code, before Task 3 touches the engine.
 
 **Files:**
 - Create: `internal/testutil/scale.go`, `internal/testutil/scale_test.go`, `pkg/engine/bench_test.go`, `docs/phases/phase-2/bench/2.1-baseline.txt`
-- Modify: `Makefile` (target `bench`)
+- Modify: `Makefile` (target `bench`), `internal/testutil/fixtures.go` (`ScaleNamespaces`; the file is already on the boundary allowlist, so `scale.go` never imports `k8s.io/api`)
 
 **Interfaces:**
 - Produces:
   - `type Tier struct { Name string; Gateways, ListenersPerGateway, HTTPRoutes int; ParentRefsMean float64; ListenerSets int; DelegatedPct float64; MaxDepth, MaxFanOut, ParentMatches int; Namespaces, Backends int; LatticeDepth int }`
   - `var Typical, Large, Extreme Tier` (values from Global Constraints)
-  - `func ScaleWorld(t Tier, seed int64) (objs []*unstructured.Unstructured, nss []*corev1.Namespace)` — deterministic per seed; every route carries `AcceptedBy` status for its parents except the 5 % failed parentRefs (`Accepted=False/NotAllowedByListeners`); delegated children carry a reported status entry for their parent route; Backends are referenced by backendRefs.
+  - `func ScaleWorld(t Tier, seed int64) []*unstructured.Unstructured` (in `scale.go`) and `func ScaleNamespaces(t Tier, seed int64) []*corev1.Namespace` (in `fixtures.go`) — deterministic per seed; every route carries `AcceptedBy` status for its parents except the 5 % failed parentRefs (`Accepted=False/NotAllowedByListeners`); delegated children carry a reported status entry for their parent route; Backends are referenced by backendRefs.
   - `func ScaleSnapshot(t Tier, seed int64) *cache.Snapshot`
 
 - [ ] **Step 1: Write the failing shape test**
 
 ```go
 func TestScaleWorldMatchesTier(t *testing.T) {
-	objs, nss := ScaleWorld(Large, 1)
+	objs, nss := ScaleWorld(Large, 1), ScaleNamespaces(Large, 1)
 	c := countKinds(objs) // test helper: kind → count
 	if c["Gateway"] != 100 || c["ListenerSet"] != 200 || c["Backend"] != 200 || len(nss) != 100 { t.Fatalf("%v", c) }
 	if got := c["HTTPRoute"]; got != 2000 { t.Fatalf("HTTPRoutes %d", got) }
 	for _, k := range []string{"GRPCRoute", "TCPRoute", "TLSRoute"} { if c[k] != 100 { t.Fatalf("%s %d, want 5%% of 2000", k, c[k]) } }
 	if d := delegatedChildren(objs); d < 190 || d > 210 { t.Fatalf("delegated %d", d) }
 	if maxDepth(objs) > 3 || maxFanOut(objs) > 50 { t.Fatal("delegation shape") }
-	a, _ := ScaleWorld(Large, 1); b, _ := ScaleWorld(Large, 1)
+	a, b := ScaleWorld(Large, 1), ScaleWorld(Large, 1)
 	if !reflect.DeepEqual(a, b) { t.Fatal("not deterministic") }
 }
 ```
 
 - [ ] **Step 2: Run** `go test ./internal/testutil -run TestScaleWorldMatchesTier` → FAIL (`undefined: ScaleWorld`).
 - [ ] **Step 3: Implement `ScaleWorld`** with `math/rand/v2` seeded by `seed`; names `ns-%03d`, `gw-%03d`, `r-%05d`; parentRef count per route drawn so the mean matches `ParentRefsMean`; one in four namespaces labelled `team=web` with one `Selector` listener per Gateway selecting it.
-- [ ] **Step 4: Run** the test → PASS.
+- [ ] **Step 4: Run** the test and `go test ./internal/boundary` → PASS.
 - [ ] **Step 5: Write `BenchmarkCompute/{typical,large,extreme}`** in `pkg/engine/bench_test.go` over `ScaleSnapshot` with `b.ReportAllocs()`, one `Compute` per iteration, plus `TestScaleComputeSanity` asserting one install and 2,000 owned HTTPRoutes at Large minus the delegated-only children (Phase 1 does not own them).
 - [ ] **Step 6: Add the Makefile target** `bench: go test -tags bench -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache ./pkg/api`.
 - [ ] **Step 7: Record the baseline:** `go test -run '^$' -bench BenchmarkCompute -benchmem -count 5 ./pkg/engine | tee docs/phases/phase-2/bench/2.1-baseline.txt`, prefixed with `go version`, CPU model and commit.
@@ -304,8 +310,7 @@ func objHash(uid types.UID, rv string) uint64 {
 - [ ] **Step 1: Write the failing tests** `TestCollectorNotifiesOnEachResult` (one `Run` tick with a stub scraper → one receive on `OnResult.C()`) and `TestMonitorNotifiesOnlyOnChange` (two `Refresh` calls with the same discovery answer → one receive; a third with a removed kind → a second receive).
 - [ ] **Step 2: Run** `go test ./pkg/ctrlmetrics ./pkg/kinds -run Notif` → FAIL.
 - [ ] **Step 3: Implement** the two fields and notifies.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(engine): metrics and served-kind triggers (D-019)`.
+- [ ] **Step 4: Commit** `feat(engine): metrics and served-kind triggers (D-019)`.
 
 ### Task 5: Scheduler state machine
 
@@ -368,15 +373,14 @@ func TestSafetyTimer(t *testing.T) {
 
 - [ ] **Step 2: Run** `go test ./pkg/engine -run 'Debounce|SingleFlight|Deadlines|Safety'` → FAIL.
 - [ ] **Step 3: Implement `sched`.** Pending due time = `min(last+Quiet, first+MaxDelay)`; a run's `start` is allowed when that time, the deadline or the safety instant is due.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(engine): scheduler with debounce, deadlines and single flight (D-019)`.
+- [ ] **Step 4: Commit** `feat(engine): scheduler with debounce, deadlines and single flight (D-019)`.
 
 ### Task 6: Engine loop, publication, confirmation and deadlines
 
 **Files:**
 - Create: `pkg/engine/loop.go`, `pkg/engine/loop_test.go`, `internal/testutil/clock.go`
-- Modify: `pkg/engine/engine.go:25-55` (Config), `:65-74` (Model.Next), `:76-91` (atomic pointer), `:143-185` (Compute publishes and collects deadlines), `:187-192` (Current), `:207-222` (Run replaced by loop.go)
-- Modify: `pkg/engine/engine_test.go:226-249` (`TestRunCallsOnComputeWithEachModel` reads `Current().Model`), `pkg/app/app_test.go` (one `Current()` call), `go.mod` (`k8s.io/utils` direct)
+- Modify: `pkg/engine/engine.go:25-55` (Config), `:65-74` (Model.Next, Model.Seq), `:76-91` (atomic pointer), `:143-185` (Compute publishes through `publish` and collects deadlines), `:187-192` (Current), `:194-205` (`Installs()` reads `Current().Model.Installs`), `:207-222` (Run replaced by loop.go)
+- Modify: `pkg/engine/engine_test.go:136` and `:226-249` (read `Current().Model`; `TestRunCallsOnComputeWithEachModel` keeps asserting `OnCompute`), `pkg/app/app_test.go` (one `Current()` call), `go.mod` (`k8s.io/utils` direct)
 
 **Interfaces:**
 - Consumes: `sched`, `Deadline` (Task 5); `cache.Fingerprinter`, `Snapshot.Source` (Task 3); `trigger.Signal`.
@@ -384,18 +388,23 @@ func TestSafetyTimer(t *testing.T) {
   - `type Source struct { Cache cache.Fingerprint; Metrics uint64; Kinds string }`; `func (s Source) Equal(o Source) bool`
   - `type Published struct { Model *Model; Source Source; ConfirmedAt time.Time }` — never mutated after publication
   - `func (e *Engine) Current() *Published` (nil before the first publication)
-  - `func (e *Engine) Compute() *Model` — computes and publishes `Published{m, src, snap.TakenAt}`
+  - `Model.Seq uint64` — assigned under `computeMu`, strictly increasing
+  - `func (e *Engine) Compute() *Model` — computes and publishes `Published{m, src, snap.TakenAt}` through `publish`. Once `Run` starts, only the loop goroutine calls it; `app` never does.
+  - `func (e *Engine) publish(next *Published)` — a compare-and-swap loop that never replaces a value with a higher `Model.Seq`
+  - `func (e *Engine) confirm(prev *Published, now time.Time) bool` — `CompareAndSwap(prev, &Published{prev.Model, prev.Source, now})`; false when anything was published after `prev` was read, so a confirmation never restores an older model
+  - `Engine.Installs()` reads `Current().Model.Installs` (nil-safe); `Config.OnCompute` stays and is called after each recompute publication, never after a confirmation (`app.Build` closes `discovered` with it, which starts the metrics collector)
   - `func (e *Engine) Run(ctx context.Context, safety time.Duration)` — the scheduler goroutine
   - `Model.Next Deadline` — earliest future grace expiry (`firstSeen + health.Grace`, non-strict) and metrics staleness (`CollectedAt + MetricsMaxAge`, strict); 2.3 adds KGWUI-012 maturation through `func (d *deadlines) add(at time.Time, strict bool)`
-  - `Config.Triggers *trigger.Signal`; `Config.Clock clock.WithTicker` (nil: `clock.RealClock{}`); `Config.OnPublish func(*Published)` (test hook, called on the loop goroutine after each swap)
+  - `Config.Triggers *trigger.Signal`; `Config.Clock clock.WithTicker` (nil: `clock.RealClock{}`); `Config.ConfirmEvery time.Duration` (zero: `ConfirmEvery`)
+  - `type LoopEventKind int` (`EvTriggered`, `EvArmed`, `EvRunStarted`, `EvPublished`, `EvConfirmed`, `EvConfirmRefused`); `type LoopEvent struct { Kind LoopEventKind; At time.Time; Published *Published }`; `Config.OnLoop func(LoopEvent)` — test hook, called synchronously on the loop goroutine after each transition. Tests wait for the event a transition produces before they advance the fake clock, and count runs by `EvPublished`, never by confirmations.
   - Tests set `Config.Now` to the fake clock's `Now` and `cache.Config.Now` likewise, so snapshot, compute and confirmation times share one clock.
-  - `internal/testutil`: `func FakeClock() *clocktesting.FakeClock` at `Now`; `func StepUntil(t *testing.T, c *clocktesting.FakeClock, d time.Duration)` steps once waiters are registered (`HasWaiters`), bounded by `RecvTimeout`
-- Metrics identity: FNV-64a over `(install ID, CollectedAt.UnixNano, Err)` of every `Metrics.Get` the run made, in install order. Kinds identity: `KindsChange().String()`.
+  - `internal/testutil`: `func FakeClock() *clocktesting.FakeClock` at `Now`; `loop_test.go`: `func awaitThenStep(t *testing.T, ev <-chan LoopEvent, want LoopEventKind, c *clocktesting.FakeClock, d time.Duration)` — receives up to `want` (bounded by `testutil.Recv`), then steps
+  - `func metricsIdentity(src ctrlmetrics.Source, ids []string) uint64` — FNV-64a over, per install ID in order: the ID, the `Get` presence, and for a present result `CollectedAt.UnixNano`, `Err`, `ManagedPresent` and every `Rejects` and `Managed` entry in sorted key order. `Compute` and the confirm tick both call it. Kinds identity: `KindsChange().String()`.
 
 - [ ] **Step 1: Write the failing tests** (fake clock; a `fakeSource` implementing `cache.Snapshotter` and `cache.Fingerprinter` whose store can change without notifying, and whose `Snapshot` can block on a channel)
 
 ```go
-func TestOneRecomputePerBurst(t *testing.T)            // 500 Notify within 100 ms → exactly one OnPublish, at last+250 ms
+func TestOneRecomputePerBurst(t *testing.T)            // 500 Notify within 100 ms → exactly one EvPublished, at last+250 ms
 func TestStreamRecomputesOncePerSecond(t *testing.T)   // Notify every 100 ms for 5 s → 5 publications
 func TestTriggerDuringRunGivesOneMoreRun(t *testing.T) // block Snapshot, Notify ×3, unblock → exactly 2 runs
 func TestSafetyTimerOnly(t *testing.T) {               // no triggers: none at 29 s, one at 30 s; safety 2s → one per 2 s
@@ -407,8 +416,8 @@ func TestChangeDuringRunPublishesOldThenNew(t *testing.T) {
 }
 func TestConfirmTickCatchesChangeBeforeHandler(t *testing.T) {
 	// Review Focus 1. Idle, published F1. src.setPrint(F2) without Notify (handler paused).
-	// StepUntil 1 s: no confirmation (ConfirmedAt unchanged), state pending.
-	// StepUntil 250 ms: a run publishes F2 although Notify never fired.
+	// step 1 s: EvConfirmRefused, ConfirmedAt unchanged, state pending.
+	// awaitThenStep(EvArmed, 250 ms): EvPublished with F2 although Notify never fired.
 	// Later Notify (handler resumes): one more run, publishing an equal Source.
 }
 func TestAccessTransitionBlocksConfirmation(t *testing.T) // only Access changes in the fingerprint → no confirm, one run
@@ -431,10 +440,13 @@ func TestStrictMetricsDeadline(t *testing.T) {
 	// the scheduler runs at the next reading after the boundary and that run raises KGWUI-008 stale.
 }
 func TestMetricsResultTriggersOneRecompute(t *testing.T) // Collector.OnResult shares Config.Triggers → one run
+func TestConfirmNeverRestoresOlderModel(t *testing.T)  // confirm reads p1; a direct Compute publishes p2 before the swap (test seam between read and CAS) → EvConfirmRefused, Current().Model is p2's
+func TestMetricsIdentityCoversContent(t *testing.T)    // same CollectedAt, different Rejects → different identity; absent vs present empty result → different; equal results → equal
+func TestOnComputeOnlyOnRecompute(t *testing.T)        // OnCompute once per EvPublished, never on EvConfirmed
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/engine -race -run 'Burst|Stream|Trigger|Safety|Change|Confirm|Access|Blocked|Concurrent|Deadline|Metrics'` → FAIL.
-- [ ] **Step 3: Implement.** `Compute` keeps `computeMu`; publication is `atomic.Pointer[Published]`. `Run` owns one `sched`; it selects on `ctx.Done()`, `Triggers.C()`, a timer reset to `sched.wake()`, a `ConfirmEvery` ticker and a `done` channel from the run goroutine. A run executes `Compute` in its own goroutine so the loop keeps receiving triggers; after it, `setDeadline(m.Next)` and `setSafety(now + safety)`. The confirm tick runs only when `sched.idle()`: it builds the live `Source` (`Fingerprint()` when the snapshotter implements `cache.Fingerprinter`, else `Snapshot().Source`) and either swaps `Published{p.Model, p.Source, now}` or calls `sched.trigger(now)`. `Run` computes immediately once at start, as Phase 1 does.
+- [ ] **Step 2: Run** `go test ./pkg/engine -race -run 'Burst|Stream|Trigger|Safety|Change|Confirm|Access|Blocked|Concurrent|Deadline|Metrics|OnCompute'` → FAIL.
+- [ ] **Step 3: Implement.** `Compute` keeps `computeMu`; publication is `atomic.Pointer[Published]`. `Run` owns one `sched`; it selects on `ctx.Done()`, `Triggers.C()`, a timer reset to `sched.wake()`, a `ConfirmEvery` ticker and a `done` channel from the run goroutine. A run executes `Compute` in its own goroutine so the loop keeps receiving triggers; after it, `setDeadline(m.Next)` and `setSafety(now + safety)`. The confirm tick runs only when `sched.idle()`: it builds the live `Source` (`Fingerprint()` when the snapshotter implements `cache.Fingerprinter`, else `Snapshot().Source`) and either calls `confirm(p, now)` or `sched.trigger(now)`. `Run` computes immediately once at start, as Phase 1 does.
 - [ ] **Step 4: Run** the new tests and `go test ./pkg/engine ./pkg/app -race` → PASS (Phase 1 engine tests unchanged apart from `Current().Model`).
 - [ ] **Step 5: Commit** `feat(engine): event-driven recompute with atomic publication and confirmation (D-019)`.
 
@@ -448,7 +460,7 @@ func TestMetricsResultTriggersOneRecompute(t *testing.T) // Collector.OnResult s
 
 **Interfaces:**
 - Consumes: `engine.Published` (Task 6).
-- Produces: wire field `confirmedAt` on each install; `func handler.load(w) *engine.Published` (503 when not synced); `func additive(t *testing.T, old, cur any, path string)` (test helper: every key and value of `old` exists in `cur`; a `"<snapshot time>"` string in `old` matches any UTC RFC 3339 value).
+- Produces: wire field `confirmedAt` on each install; `func handler.load(w) *engine.Published` (503 when not synced); `func additive(t *testing.T, old, cur any, path string)` (test helper: every key and value of `old` exists in `cur`; a `"<snapshot time>"` string in `old` matches any UTC RFC 3339 value; an array in `cur` keeps `old`'s elements at their indexes and may append only the elements its path lists in `var appended = map[string][]string{"health.checks": {"backend status", "computed views"}, "overview.counts": {"Backends"}}`, in that order (design §7.6))
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -502,13 +514,12 @@ test("confirmedOrComputed prefers confirmedAt", () => {
 
 - [ ] **Step 2: Run** `cd web && npx vitest run packages/shell/src/api/freshness.test.ts packages/shell/src/pages/pages.test.tsx` → FAIL.
 - [ ] **Step 3: Implement**; the three consumers call `isStale(confirmedOrComputed(i), now)`.
-- [ ] **Step 4: Run** `cd web && npm test && npm run typecheck && npm run lint` → PASS.
-- [ ] **Step 5: Commit** `feat(shell): freshness reads confirmedAt with a computedAt fallback (D-019)`.
+- [ ] **Step 4: Commit** `feat(shell): freshness reads confirmedAt with a computedAt fallback (D-019)`.
 
 ### Task 9: Wiring, the safety-timer flag and the 2.1 budgets
 
 **Files:**
-- Modify: `pkg/app/app.go:39-40` (doc: maximum time between recomputes), `:96` (`cache.Config.Changes`), `:105` (`col.OnResult`), `:90` (`mon.OnChange`), `:114-121` (`engine.Config.Triggers`), `:131` (`Run(ctx, PollInterval)` as the safety timer)
+- Modify: `pkg/app/app.go:39-40` (doc: maximum time between recomputes; test-only `Config.ConfirmEvery` and `Config.OnLoop` passed to the engine; `OnCompute` still closes `discovered`), `:96` (`cache.Config.Changes`), `:105` (`col.OnResult`), `:90` (`mon.OnChange`), `:114-121` (`engine.Config.Triggers`), `:131` (`Run(ctx, PollInterval)` as the safety timer)
 - Modify: `cmd/kgateway-ui/main.go:23` (default `30*time.Second`, help "maximum time between model recomputes (safety timer)")
 - Modify: `README.md:44`, `deploy/helm/kgateway-ui/README.md` (a "Recompute" note: event-driven, `--poll-interval` is the safety timer, 2s restores Phase 1's cadence as a floor)
 - Create: `pkg/engine/budget_test.go` (`//go:build bench`)
@@ -516,7 +527,7 @@ test("confirmedOrComputed prefers confirmedAt", () => {
 
 **Interfaces:** Consumes Tasks 3–6. Produces `make bench` output for the 2.1 record.
 
-- [ ] **Step 1: Write the failing wiring test** `TestAppRecomputesOnObjectChange`: build the app over fake clients with `PollInterval: time.Hour`; create an HTTPRoute; `testutil.Recv` on a channel fed by `OnPublish` until a published snapshot contains it (no safety timer can explain it).
+- [ ] **Step 1: Write the failing wiring test** `TestAppRecomputesOnObjectChange`: build the app over fake clients with `PollInterval: time.Hour` and `ConfirmEvery: time.Hour`, so neither the safety timer nor a confirmation scan can explain a run; create an HTTPRoute; receive `OnLoop` events: `EvTriggered`, `EvArmed`, `EvRunStarted`, then `EvPublished` whose snapshot holds the route, and no `EvConfirmed` or `EvConfirmRefused`.
 - [ ] **Step 2: Run** `go test ./pkg/app -run RecomputesOnObjectChange` → FAIL (times out: ticker is an hour).
 - [ ] **Step 3: Implement** the wiring and the flag default.
 - [ ] **Step 4: Run** `go test ./... -race` → PASS.
@@ -543,17 +554,17 @@ func TestBudgetConfirmTick(t *testing.T) { // Fingerprint at Large: median of 50
 
 **Files:**
 - Create: `docs/phases/phase-2/phase-2.1-complete.md`, `docs/phases/phase-2/reviews/2.1-codex.md`
-- Modify: `docs/phase-status.md`, `docs/phases/phase-2/design.md` (only where the code deviates)
+- Modify: `docs/phase-status.md`, `docs/roadmap.md`, `docs/phases/phase-2/design.md` (only where the code deviates)
 
 - [ ] **Step 1: Run the gates** and paste the outputs into the record: `go vet ./... && go vet -tags e2e ./...`, `go test ./... -race`, `TZ=Europe/Amsterdam go test ./pkg/api`, `make lint`, `cd web && npm test && npm run typecheck && npm run lint && npm run build`, the forbidden-terms check, and the kind e2e matrix (CI or `make e2e` for both pairs).
 - [ ] **Step 2: Request the cross-model review**
 
 ```bash
-codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.1-codex.md "Review sub-phase 2.1 of the kgateway UI (diff <base>..HEAD) against docs/phases/phase-2/design.md §3.1, §9.3, §9.6 and D-019. Focus: confirmation can never stamp an old model as current; single flight; deadlines strict vs non-strict; atomic publication; additive-only goldens; SPA fallback. Test output: <paste>. Rank findings P1–P4 with file:line." < /dev/null
+codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.1-codex.md "Review sub-phase 2.1 of the kgateway UI (diff $BASE..HEAD) against docs/phases/phase-2/design.md §3.1, §9.3, §9.6 and D-019. Focus: confirmation can never stamp an old model as current; single flight; deadlines strict vs non-strict; atomic publication; additive-only goldens; SPA fallback. Test output: <paste>. Rank findings P1–P4 with file:line." < /dev/null
 ```
 
 - [ ] **Step 3: Triage** every finding in the review file (accept, reject with reason, defer to Carry-over); fix accepted ones with tests; rerun Step 1.
-- [ ] **Step 4: Write `phase-2.1-complete.md`** in the Phase 1 record format (Summary, Reviews, Waivers, Deliverables with gate outputs, benchmark table: baseline vs 2.1 per tier) and update `docs/phase-status.md` (queue, sub-phase none, next 2.2).
+- [ ] **Step 4: Write `phase-2.1-complete.md`** in the Phase 1 record format (Summary, Reviews, Waivers, Deliverables with gate outputs, benchmark table: baseline vs 2.1 per tier) and update `docs/phase-status.md` (queue, `## Sub-phase` none, next 2.2) and `docs/roadmap.md` (2.1 shipped).
 - [ ] **Step 5: Commit** `docs: close sub-phase 2.1`.
 
 ---
@@ -563,17 +574,16 @@ codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.1-codex.md "Revi
 ### Task 11: The `Backend` kind and the ListenerSet kind contract
 
 **Files:**
-- Create: `docs/phases/phase-2/phase-2.2-brief.md`
+- Create: `docs/phases/phase-2/phase-2.2-brief.md`; Modify: `docs/phase-status.md`
 - Modify: `pkg/kinds/kinds.go:1-3` (package doc: a downstream ListenerSet kind registers with `CategoryListenerSet` and follows `spec.parentRef`, `spec.listeners[]`, `status.listeners[]`), `:17-29` (`CategoryBackend Category = "backend"`), `pkg/kinds/upstream.go:17-34` (Backend descriptor)
 - Modify: `web/packages/shell/src/api/types.ts:5` (`"backend"` in `Category`)
 - Test: `pkg/kinds/kinds_test.go`, `pkg/scopeverify/verify_test.go`, `deploy/helm/chart_test.go`
 
 **Interfaces:** Produces `kinds.CategoryBackend`; descriptor `{Group: "gateway.kgateway.dev", Kind: "Backend", Resource: "backends", Versions: ["v1alpha1"], Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"}`.
 
-- [ ] **Step 0: Write `docs/phases/phase-2/phase-2.2-brief.md`** (agentic-engineering-sdlc format): goal, Tasks 11–34, exit criteria, file list, the Q12 count change.
-- [ ] **Step 1: Write the failing tests** `TestUpstreamHasBackend` (descriptor as above), `TestVerifierIgnoresBackend` (a Backend in scope does not change KGWUI-007's comparison) and `TestClusterRoleCoversBackends` (rendered ClusterRole grants get/list/watch on `gateway.kgateway.dev` `*` or `backends`).
-- [ ] **Step 2: Run** `go test ./pkg/kinds ./pkg/scopeverify ./deploy/helm -run 'Backend'` → FAIL.
-- [ ] **Step 3: Implement.**
+- [ ] **Step 1: Record the sub-phase and write `docs/phases/phase-2/phase-2.2-brief.md`** (Lifecycle above; agentic-engineering-sdlc format): goal, Tasks 11–34, exit criteria, file list, the Q12 count change.
+- [ ] **Step 2: Write the failing tests** `TestUpstreamHasBackend` (descriptor as above), `TestVerifierIgnoresBackend` (a Backend in scope does not change KGWUI-007's comparison) and `TestClusterRoleCoversBackends` (rendered ClusterRole grants get/list/watch on `gateway.kgateway.dev` `*` or `backends`).
+- [ ] **Step 3: Run** `go test ./pkg/kinds ./pkg/scopeverify ./deploy/helm -run 'Backend'` → FAIL.
 - [ ] **Step 4: Run** → PASS. `meta.json` gains the Backend kind in Task 25.
 - [ ] **Step 5: Commit** `feat(kinds): register the Backend kind`.
 
@@ -598,6 +608,7 @@ codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.1-codex.md "Revi
   - `type DelegationMode string` (`DelegationName`, `DelegationWildcard`, `DelegationLabel`); `type DelegationRef struct { Mode DelegationMode; Namespace, Name, Label string }` — Namespace defaults to the parent's; classification exactly as computed-rules §3.2: `name`/`wildcard` only when group is `gateway.networking.k8s.io` and kind `HTTPRoute`, both set (name `""` or `"*"` is wildcard); `label` only when group `delegation.kgateway.dev` and kind `label`, both set, with `name` as the label value; anything else is an ordinary backend
   - `func BackendTargets(v *HTTPRouteView) []BackendTarget`; `type BackendTarget struct { Ref Ref; Mirror bool }` — every rule backendRef and every `RequestMirror` target after defaults; delegation refs excluded
   - `type BackendView struct { Type string; Conditions []metav1.Condition }`; `type RouteHostnames struct { Hostnames []string }`
+  - `type WrittenRef struct { Group, Kind, Namespace, Name, SectionName string; Port *int32 }` — a parentRef as written, omitted fields as empty strings (design §4.1, computed-rules §7); `func WrittenParentRefs(u) []WrittenRef` for any route kind, index-aligned with `RouteParentRefs`; `HTTPRouteView.WrittenRefs []WrittenRef`; `RouteParentStatus.Written WrittenRef` (the status parentRef as written, `json:"-"`). Report keys and persistence identities use the written form; lookup and ownership use the resolved one.
   - `func DecodeGateway(u) *GatewayView`, `DecodeListenerSet`, `DecodeHTTPRoute`, `DecodeBackend`, `DecodeRouteHostnames` (all `u *unstructured.Unstructured`)
   - `type Decoder interface { Gateway(u) *GatewayView; ListenerSet(u) *ListenerSetView; HTTPRoute(u) *HTTPRouteView; Backend(u) *BackendView; RouteHostnames(u) *RouteHostnames }`; `type Direct struct{}` (decodes every call)
   - testutil: `Rule(matches ...map[string]any) map[string]any`, `DelegateTo(ns, name string) map[string]any`, `DelegateWildcard(ns string)`, `DelegateLabel(ns, label string)`, `WithRules(u, rules ...map[string]any)`, `WithHostnames(u, h ...string)`, `Backend(ns, name string, conds []metav1.Condition)`, `HTTPRouteRef(ns, name string) objects.ParentRef`
@@ -616,6 +627,7 @@ func TestDecodeMirrorWeightPortOrder(t *testing.T) // RequestMirror with percent
 func TestBackendTargets(t *testing.T)              // Service, Backend and mirror target listed, mirror marked; delegation refs absent
 func TestAllowedListenersAsWritten(t *testing.T)   // absent → nil; set → the map as written
 func TestDecodeHeaderTypeDefaultsExact(t *testing.T)
+func TestWrittenAndResolvedRefs(t *testing.T)  // spec and status refs with omitted group, kind and namespace: Written has "", the resolved ref has the defaults; an explicit namespace equal to the default stays distinct in Written
 func TestInheritParentMatcherValues(t *testing.T) // true/yes/enabled any case → true; "on", "" → false
 func TestDecodeListenerDefaults(t *testing.T)     // Port 0 when unset; From "Same"; TLS refs only, never resolved
 func TestMalformedFieldsGiveZeroValues(t *testing.T) // listeners: "x" → empty view, no panic
@@ -640,14 +652,13 @@ func TestDirectDecodesEveryCall(t *testing.T)     // two calls → two distinct 
 - [ ] **Step 1: Write the failing tests** `TestDecodeCacheReusesUnchangedObjects` (same uid/rv twice → same pointer), `TestDecodeCacheMissesOnNewResourceVersion`, `TestDecodeCacheBypassWithoutKeys` (no uid → two distinct pointers), `TestDecodeCachePrunedWithObserve` (object removed from the snapshot → entry gone after `Compute`).
 - [ ] **Step 2: Run** `go test ./pkg/engine -run DecodeCache` → FAIL.
 - [ ] **Step 3: Implement**; the cache is only touched under `computeMu`.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(engine): decode cache keyed by uid and resourceVersion`.
+- [ ] **Step 4: Commit** `feat(engine): decode cache keyed by uid and resourceVersion`.
 
 ### Task 14: Reported edges and status-based ownership of delegated children (Q12)
 
 **Files:**
 - Create: `pkg/install/delegation.go`, `pkg/install/delegation_test.go`
-- Modify: `pkg/install/assign.go:14-22` (`OwnedObject.RouteParents`), `:32-40` (Owned fields of Task 15 declared here as empty), `:146-151` (HTTPRoute joins the parent kinds), `:153-189` (Gateway-attached routes seed the BFS), end of `Assign` (call `delegate`)
+- Modify: `pkg/install/assign.go:14-22` (`OwnedObject.RouteParents`), `:32-40` (Owned fields of Task 15 declared here as empty), `:99-135` (`exists` also holds every HTTPRoute in the snapshot, built before the missing-parent branch at `:172`), `:146-151` (HTTPRoute joins the parent kinds), `:153-189` (Gateway-attached routes seed the BFS), end of `Assign` (call `delegate`)
 - Test: `pkg/api/api_test.go` (new tests below)
 
 **Interfaces:**
@@ -675,6 +686,7 @@ func TestStaleEligibleEntryKeepsEdge(t *testing.T) { // Review Focus 3, at the A
 	// warning after; no KGWUI-011.
 }
 func TestDelegationShapesOwnership(t *testing.T)  // three-level chain, diamond (C owned once, two RouteParents), cycle stops
+func TestExistingHTTPRouteParentIsNotMissing(t *testing.T) // a child naming an existing HTTPRoute gets no KGWUI-003; a missing one does
 func TestImplicitEdgeRules(t *testing.T)          // empty parentRefs + status → child; gaining a Gateway parentRef removes the implicit edge
 func TestChildReportedByAnotherInstall(t *testing.T) // not owned here; a child reported by parents in two installs is owned by both
 func TestQ12CountsBeforeAndAfter(t *testing.T) {
@@ -717,10 +729,8 @@ func TestBackendAssignment(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/install ./pkg/api ./pkg/health` → PASS.
-- [ ] **Step 5: Commit** `feat(install): declared, no-parent and Backend candidates`.
+- [ ] **Step 2: Run** `go test ./pkg/install ./pkg/api ./pkg/health` → PASS.
+- [ ] **Step 3: Commit** `feat(install): declared, no-parent and Backend candidates`.
 
 ### Task 16: Health for reported edges and KGWUI-011's status trigger
 
@@ -754,17 +764,15 @@ func TestWildcardOnlyParentStillGetsDiagnostic(t *testing.T)   // explicit decla
 
 **Files:**
 - Create: `pkg/health/backend.go`, `pkg/health/backend_test.go`
-- Modify: `pkg/health/checks.go:23-25` (register `backendCheck`, not required)
+- Modify: `pkg/health/checks.go:23-25` (register `backendCheck`, named `backend status`, not required, appended after Phase 1's checks; design §7.6)
 
 **Interfaces:**
 - Consumes: `Owned.Backends` (Task 15), `objects.DecodeBackend` (Task 12).
 - Produces: `func BackendState(b *unstructured.Unstructured) (health.State, *metav1.Condition)` — used by the explorer for `backend.state`.
 
 - [ ] **Step 1: Write the failing table test** `TestBackendAcceptedRules` with the four rows of design §6.2: current `False` → KGWUI-002 error; current `True` → no finding, `healthy`; `observedGeneration` > 0 and lower → no finding, `unknown`; `observedGeneration` 0 → `False` gives KGWUI-002 warning with detail "The controller does not say which version of this Backend it checked" (draft), `True` gives `unknown`; absent → no finding, `unknown`. Every row: no failed required check and no "not yet processed" finding.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/health` → PASS.
-- [ ] **Step 5: Commit** `feat(health): Backend Accepted from the condition's own evidence (Q11)`.
+- [ ] **Step 2: Run** `go test ./pkg/health` → PASS.
+- [ ] **Step 3: Commit** `feat(health): Backend Accepted from the condition's own evidence (Q11)`.
 
 ### Task 18: `explore.Build`: rows, flags, states and admission
 
@@ -835,7 +843,7 @@ func TestBuildWithoutPodsOrUIDs(t *testing.T) // design §9.7: no Pods/Deploymen
 
 ```go
 func TestEachFilterAloneAndCombined(t *testing.T) // includes backend: one value, two OR-ed, a mirror target, a delegation ref target (no match)
-func TestSortsBothWaysWithTieBreak(t *testing.T) // every sort ends with (ns, name, group, kind)
+func TestSortsBothWaysWithTieBreak(t *testing.T) // every sort ends with (ns, name, group, kind); name.desc returns z before a, and its cursors page in that order
 func TestCursorsAcrossRecomputes(t *testing.T) { // Review Focus 4
 	// page 1 (limit 2) on Model A; Model B inserts a row before the anchor → next starts strictly after the anchor;
 	// Model C deletes the anchor → next starts where its tuple would sort; descending ties; prev from page 2 == page 1;
@@ -847,9 +855,8 @@ func TestNarrowestIndexIsUsed(t *testing.T) // parent → ByParent; namespace �
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/explore -run 'Filter|Sorts|Cursor|Total|Narrowest'` → FAIL.
-- [ ] **Step 3: Implement.** Candidate set from the narrowest index (parent, then backend, then namespace, else all rows), filtered, `visible` applied, sorted with `slices.SortStableFunc` unless the key is `name` (rows are already in that order), then the cursor position by `sort.Search` over the full sorted slice.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(explore): filters, sorts and keyset cursors`.
+- [ ] **Step 3: Implement.** Candidate set from the narrowest index (parent, then backend, then namespace, else all rows), filtered, `visible` applied, sorted with `slices.SortStableFunc` unless the sort is `name.asc` (rows are already in that order; `name.desc` needs the sort or a reversal), then the cursor position by `sort.Search` over the full sorted slice.
+- [ ] **Step 4: Commit** `feat(explore): filters, sorts and keyset cursors`.
 
 ### Task 20: Bounded up-chain walk
 
@@ -860,10 +867,8 @@ func TestNarrowestIndexIsUsed(t *testing.T) // parent → ByParent; namespace �
 - Produces: `type AncestorStep struct { Ref objects.Ref; Restricted bool }`; `type AncestorPath struct { Steps []AncestorStep; Cycle bool }`; `func (ix *Index) Ancestors(route objects.Ref, visible func(objects.Ref) bool) (paths []AncestorPath, truncated bool)`; `const MaxPaths, MaxDepth, MaxNodes = 5, 32, 256`.
 
 - [ ] **Step 1: Write the failing tests** `TestAncestorsChain` (child → parent → Gateway: one path, root first), `TestAncestorsDiamond` (two paths, parents sorted by namespace then name), `TestAncestorsCycleMarker` (a path meeting a route already on it ends with `Cycle: true`), `TestAncestorsLatticeTruncates` (8-layer repeated diamond: 5 paths, `truncated`, never a remaining count), `TestAncestorsNodeBound` (256 node visits stop the walk), `TestAncestorsRestrictedStep` (`visible` false → `Restricted: true`, zero `Ref`).
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** depth-first over `ParentRoutes` (reported edges only), then the route's Gateway or ListenerSet parents from `ParentLink.Target`; stop at whichever bound comes first.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(explore): bounded up-chain over reported edges`.
+- [ ] **Step 2: Implement** depth-first over `ParentRoutes` (reported edges only), then the route's Gateway or ListenerSet parents from `ParentLink.Target`; stop at whichever bound comes first.
+- [ ] **Step 3: Commit** `feat(explore): bounded up-chain over reported edges`.
 
 ### Task 21: DTOs, links and the resource endpoint superset
 
@@ -883,9 +888,8 @@ func TestNarrowestIndexIsUsed(t *testing.T) // parent → ByParent; namespace �
 
 - [ ] **Step 1: Write the failing tests** `TestEveryFindingResourceOpensItsView` (for each finding in the golden world, `link` ≠ `none` and the resource endpoint returns 200), `TestSpecNamedObjectsAreCandidates` (a backendRef'd Backend out of scope → YAML 200), `TestUnrelatedObjectIs404OnBothEndpoints`, `TestSecondStepIsNone` (D named only by candidate C: `none` and 404; once owned: `detail`).
 - [ ] **Step 2: Run** `go test ./pkg/api -run 'EveryFinding|SpecNamed|Unrelated|SecondStep'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/api` → PASS except `TestGoldenWireFormat` for `health`, `overview`, `bare-overview` (regenerated in Task 25; `TestGoldenChangesAreAdditive` must still pass after regeneration).
-- [ ] **Step 5: Commit** `feat(api): link metadata from one admission function`.
+- [ ] **Step 3: Run** `go test ./pkg/api` → PASS except `TestGoldenWireFormat` for `health`, `overview`, `bare-overview` (regenerated in Task 25; `TestGoldenChangesAreAdditive` must still pass after regeneration).
+- [ ] **Step 4: Commit** `feat(api): link metadata from one admission function`.
 
 ### Task 22: List endpoints
 
@@ -920,8 +924,7 @@ func TestListenerSetsOfOneGatewayPaged(t *testing.T) // 200 ListenerSets: four p
 
 - [ ] **Step 2: Run** `go test ./pkg/api -run 'ListParams|FilteredByParent|AttachmentSub|CollectedAtIs|ListenerSetsOfOne'` → FAIL.
 - [ ] **Step 3: Implement**; under `AllowAll` no per-row Authorizer calls.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(api): routes, gateways and listenersets lists`.
+- [ ] **Step 4: Commit** `feat(api): routes, gateways and listenersets lists`.
 
 ### Task 23: Detail endpoints and `/meta` views
 
@@ -961,10 +964,8 @@ func TestNonHTTPRouteDetailIs404(t *testing.T)
 func TestMetaViews(t *testing.T)         // Gateway, ListenerSet, XListenerSet, HTTPRoute
 ```
 
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/api` → PASS (goldens aside).
-- [ ] **Step 5: Commit** `feat(api): Gateway, ListenerSet and HTTPRoute detail endpoints`.
+- [ ] **Step 2: Run** `go test ./pkg/api` → PASS (goldens aside).
+- [ ] **Step 3: Commit** `feat(api): Gateway, ListenerSet and HTTPRoute detail endpoints`.
 
 ### Task 24: Authorizer rules for 2.2's facts
 
@@ -990,30 +991,29 @@ func TestHealthUnchangedUnderRestriction(t *testing.T) // install state, row sta
 func TestAllowAllMakesNoAuthorizerCalls(t *testing.T)  // a counting AllowAll wrapper is recognised by allowsAll → 0 calls
 ```
 
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.** Replacement detail text comes from `copy` constants finalised in Task 31.
-- [ ] **Step 4: Run** `go test ./pkg/api -race` → PASS.
-- [ ] **Step 5: Commit** `feat(api): Authorizer rules for explorer lists and details`.
+- [ ] **Step 2: Implement.** Replacement detail text comes from `copy` constants finalised in Task 31.
+- [ ] **Step 3: Run** `go test ./pkg/api -race` → PASS.
+- [ ] **Step 4: Commit** `feat(api): Authorizer rules for explorer lists and details`.
 
 ### Task 25: Goldens for 2.2, Go and TypeScript
 
 **Files:**
 - Modify: `pkg/api/golden_test.go:31-78` (cases; a delegation world: three-level chain, diamond, cycle, lattice, Backend ref, ListenerSet with an invalid listener, declared child), `pkg/api/additive_test.go` (new files are not in `golden-v1`)
 - Create: `pkg/api/testdata/golden/{routes,routes-filtered,gateways,listenersets,gateway-detail,listenerset-detail,route-detail,route-detail-candidate,bad-request,route-detail-restricted,routes-restricted,routes-by-backend,routes-by-backend-restricted}.json` — `listenerset-detail.json` holds a `NotAllowed` ListenerSet whose parent lacks `allowedListeners` and one whose parent sets it; `route-detail.json` holds a mirror filter (percent and fraction), absent vs explicit 1 and 0 weights, absent vs explicit port, and several filters of different types in one rule and one backendRef; `routes-by-backend.json` queries a Service, a Backend, a mirror target and two backends OR-ed; the restricted variant holds the same query for a denied and an absent backend, with identical bodies
-- Regenerate: `meta.json` (`views`, Backend kind), `health.json` (`link`), `overview.json`, `bare-overview.json` (`link`)
+- Regenerate: `meta.json` (`views`, Backend kind), `health.json` (`link`, the appended `backend status` check), `overview.json`, `bare-overview.json` (`link`, the appended Backends tile)
 - Modify: `web/packages/shell/src/api/types.golden.test.ts` (import and shape-check each new fixture)
 
 - [ ] **Step 1: Add the cases and run** `go test ./pkg/api -run Golden` → FAIL (files missing).
 - [ ] **Step 2: Regenerate** with `-update`; read every new file; check `TestGoldenChangesAreAdditive` passes over the regenerated Phase 1 files.
-- [ ] **Step 3: Add `TestGoldenLinksAgreeWithEndpoints`:** walk every `link` in every golden body; `detail` → the detail endpoint returns 200; `yaml` → the resource endpoint returns 200 and the detail endpoint 404 or no detail kind; `none` → both 404 (or never served).
+- [ ] **Step 3: Add `TestGoldenLinksAgreeWithEndpoints`:** walk every `link` in every golden body; `detail` → the detail endpoint returns 200; `yaml` → the resource endpoint returns 200; `none` on a denied or absent object → the resource endpoint and any detail endpoint for its kind return 404. A `none` on a never-served kind (Secret, Service) asserts only the resource endpoint's 404, and a `yaml` link asserts nothing about the detail endpoint.
 - [ ] **Step 4: Run** `go test ./pkg/api` → PASS. Commit `test(api): golden wire format for the explorer`. The TypeScript shape checks of these fixtures are in Task 26.
 
 ### Task 26: Frontend contract: types, hooks, links, slots and navigation
 
 **Files:**
 - Create: `web/packages/shell/src/api/exploreTypes.ts`, `src/api/exploreHooks.ts`, `src/api/exploreHooks.test.tsx`, `src/explore/objectPath.ts`, `src/explore/objectPath.test.ts`, `src/explore/LinkedName.tsx`, `src/explore/LinkedName.test.tsx`, `src/explore/CopyCommandButton.tsx`, `src/shell/InstallNav.tsx`
-- Modify: `src/api/types.ts` (re-export), `src/api/types.golden.test.ts` (import and shape-check every Task 25 fixture), `src/shell/extension.ts:14-22` (reserved paths doc), `:48-54` (optional slots), `src/shell/Shell.tsx:50-71` (routes, slot fallback), `src/shell/vocabulary.tsx:5-43` (`getCommand`), `src/shell/Header.tsx` (InstallNav), `src/pages/defaultPages.ts`, `src/index.ts` (exports; `SHELL_API_VERSION` stays 1)
-- Test: `src/shell/extension.test.tsx`, `src/index.test.ts`
+- Modify: `src/api/types.ts` (re-export), `src/api/types.golden.test.ts` (import and shape-check every Task 25 fixture), `src/shell/vocabulary.tsx:5-43` (`getCommand`), `src/shell/Header.tsx` (InstallNav), `src/index.ts` (exports; `SHELL_API_VERSION` stays 1)
+- Test: `src/index.test.ts`
 
 **Interfaces:**
 - Consumes: the DTOs of Tasks 21–23.
@@ -1023,7 +1023,6 @@ func TestAllowAllMakesNoAuthorizerCalls(t *testing.T)  // a counting AllowAll wr
   - `useRoutes(id, query: URLSearchParams)`, `useGateways`, `useListenerSets`, `useGatewayDetail(id, ns, name)`, `useListenerSetDetail(id, ref)`, `useRouteDetail(id, ref)` — SWR, 5 s poll, no `keepPreviousData`; an `ApiError` 400 on a cursor reports `cursorRejected: true`
   - `export function LinkedName({ refValue, installId }: { refValue: LinkedRef; installId: string })`
   - `Vocabulary.getCommand: (ref: Ref, resource: string) => string | undefined` — default `kubectl get <resource>.<group> -n <ns> <name> -o yaml` (no `.<group>` for the core group, no `-n` when cluster-scoped)
-  - `CorePages` gains optional `GatewaysPage`, `GatewayPage`, `ListenerSetsPage`, `ListenerSetPage`, `RoutesPage`, `RoutePage`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1033,8 +1032,6 @@ test("objectPath follows link only", () => {
   expect(objectPath("a.b", { ...ref, kind: "GRPCRoute", link: "yaml" })).toBe("/i/a.b/r/gateway.networking.k8s.io/GRPCRoute/shop/x");
   expect(objectPath("a.b", { ...ref, link: "none" })).toBeUndefined();
 });
-it("renders new pages with only the four Phase 1 slots", ...);       // /i/x/routes renders the upstream RoutesPage
-it("a contribution at routes cannot replace the core page", ...);
 it("getCommand returning undefined hides the copy button", ...);
 it("never shows the previous install's rows on a switch", ...);       // response.install must match the URL
 it("a 400 on a cursor drops it and loads page one", ...);
@@ -1043,8 +1040,7 @@ it("a 400 on a cursor drops it and loads page one", ...);
 
 - [ ] **Step 2: Run** `cd web && npx vitest run packages/shell/src/explore packages/shell/src/shell packages/shell/src/api` → FAIL.
 - [ ] **Step 3: Implement.** Install nav: Overview, Gateways, Routes, ListenerSets, Findings; `aria-current="page"` on the active entry; hover, active, focus-visible styles.
-- [ ] **Step 4: Run** `cd web && npm test && npm run typecheck && npm run lint` → PASS.
-- [ ] **Step 5: Commit** `feat(shell): explorer types, hooks, links, page slots and install navigation`.
+- [ ] **Step 4: Commit** `feat(shell): explorer types, hooks, links and install navigation`.
 
 ### Task 27: List pages
 
@@ -1066,10 +1062,8 @@ it("Routes filter 'Rules replaced or dropped' maps to state=not-programmed", ...
 it("rows link by their link field", ...); // a GRPCRoute row opens the YAML view; a no-parent row opens YAML
 ```
 
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** with TanStack Table (manual sorting and pagination: the server sorts).
-- [ ] **Step 4: Run** `cd web && npm test && npm run typecheck && npm run lint` → PASS.
-- [ ] **Step 5: Commit** `feat(shell): Gateways, ListenerSets and Routes lists`.
+- [ ] **Step 2: Implement** with TanStack Table (manual sorting and pagination: the server sorts).
+- [ ] **Step 3: Commit** `feat(shell): Gateways, ListenerSets and Routes lists`.
 
 ### Task 28: Gateway and ListenerSet detail pages
 
@@ -1081,10 +1075,7 @@ it("rows link by their link field", ...); // a GRPCRoute row opens the YAML view
 - Produces: `DetailTabs` (WAI-ARIA tabs, `?tab=yaml` reuses the YAML view body from `ResourcePage.tsx`), `ConditionList` (icon + text, reason, message, freshness "Describes generation N; the object is at M"), `CandidateBanner` ("Not part of this install. Shown because …").
 
 - [ ] **Step 1: Write the failing tests** `"Gateway page shows status-only listener counts"` (attachedRoutes from status; no computed column in 2.2), `"failed-route table has Not accepted, Waiting for status and Unwatched namespace sub-filters"`, `"ListenerSets are paged through the list endpoint"`, `"ListenerSet page says when the parent Gateway is missing"`, `"NotAllowed shows the parent's allowedListeners as written, or Not set with the CRD hint"`, `"an accepted ListenerSet shows no allowed-listeners block"`, `"candidate banner above the header"`, `"polling keeps scroll, focus and expanded rows"`.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** the web gates → PASS.
-- [ ] **Step 5: Commit** `feat(shell): Gateway and ListenerSet detail pages`.
+- [ ] **Step 2: Commit** `feat(shell): Gateway and ListenerSet detail pages`.
 
 ### Task 29: HTTPRoute detail page
 
@@ -1096,22 +1087,21 @@ it("rows link by their link field", ...); // a GRPCRoute row opens the YAML view
 - Produces: `UpChain` as `nav aria-label="Route parents"`; `ParentCard` per parentRef (target, section or port, every condition, other controllers' entries collapsed); `RuleList` (matches, filters with config as written, backendRefs with weight, delegation refs with mode and status state, Backend state or "Restricted").
 
 - [ ] **Step 1: Write the failing tests** `"up-chain shows a restricted step and 'More paths not shown'"`, `"hostnames or inherited text for a child"`, `"permission line: Allows any parent / Allows: shop/api"`, `"child routes are paged and fetched when expanded"`, `"other controllers' entries are collapsed"`, `"each backendRef links to Other routes using this backend (routes?backend=…)"`, `"absent weight shows 1 marked as defaulted; absent port shows nothing"`, `"mirror filters show their target and percentage; filters keep written order"`.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** the web gates → PASS.
-- [ ] **Step 5: Commit** `feat(shell): HTTPRoute detail page`.
+- [ ] **Step 2: Commit** `feat(shell): HTTPRoute detail page`.
 
-### Task 30: Finding links retarget and the Backend reverse lookup
+### Task 30: Page slots, finding links and the Backend reverse lookup
+
+Comes after Tasks 27–29, whose pages the slots fall back to.
 
 **Files:**
+- Modify: `web/packages/shell/src/shell/extension.ts:14-22` (reserved paths doc), `:48-54` (optional slots), `src/shell/Shell.tsx:50-71` (routes, slot fallback), `src/pages/defaultPages.ts`, `src/shell/extension.test.tsx`
 - Modify: `web/packages/shell/src/pages/install/FindingRow.tsx:76-79` (keep `resourcePath`), `:121` (`objectPath(installId, f.resource)`), `src/pages/install/TopFindings.tsx`, `src/pages/install/GatewayTable.tsx:192,265` (row `link`), `src/pages/ResourcePage.tsx:135-192` ("Routes that send traffic here" on an admitted Backend's YAML view)
 - Test: `src/pages/install/InstallPage.test.tsx`, `src/pages/pages.test.tsx`
 
-- [ ] **Step 1: Write the failing tests** `"finding on an HTTPRoute opens its detail page"`, `"restricted finding never links"`, `"Gateway table row opens the Gateway page"`, `"a finding with link yaml opens the YAML view"`, `"a Backend YAML view links to Routes filtered by backend=gateway.kgateway.dev/Backend/ns/name"`, `"a Service has no YAML view entry point"`.
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** the web gates → PASS.
-- [ ] **Step 5: Commit** `feat(shell): finding and Gateway links open detail pages`.
+**Interfaces:** Produces `CorePages`' optional `GatewaysPage`, `GatewayPage`, `ListenerSetsPage`, `ListenerSetPage`, `RoutesPage`, `RoutePage`.
+
+- [ ] **Step 1: Write the failing tests** `"renders new pages with only the four Phase 1 slots"` (`/i/x/routes` renders the upstream RoutesPage), `"a contribution at routes cannot replace the core page"`, `"finding on an HTTPRoute opens its detail page"`, `"restricted finding never links"`, `"Gateway table row opens the Gateway page"`, `"a finding with link yaml opens the YAML view"`, `"a Backend YAML view links to Routes filtered by backend=gateway.kgateway.dev/Backend/ns/name"`, `"a Service has no YAML view entry point"`.
+- [ ] **Step 2: Commit** `feat(shell): page slots; finding and Gateway links open detail pages`.
 
 ### Task 31: Wording pass for 2.2
 
@@ -1163,18 +1153,18 @@ func TestBudgetListRequests(t *testing.T) {
 
 **Files:**
 - Create: `docs/phases/phase-2/phase-2.2-complete.md`, `docs/phases/phase-2/reviews/2.2-codex.md`
-- Modify: `README.md` ("Upgrade notes": counts and colours change on clusters that use delegation, design §4.2 and §6.3), `docs/phase-status.md`, `docs/phases/phase-2/design.md` (only where the code deviates)
+- Modify: `README.md` ("Upgrade notes": counts and colours change on clusters that use delegation, design §4.2 and §6.3), `docs/phase-status.md`, `docs/roadmap.md`, `docs/phases/phase-2/design.md` (only where the code deviates)
 
 - [ ] **Step 1: Write the release note** in README "Upgrade notes": delegated child routes with a controller status entry now count in the HTTPRoute tile and in install health; a delegated child's failures can turn the install yellow or red; routes declaring an HTTPRoute parent without status get KGWUI-011.
-- [ ] **Step 2: Run the gates** of Task 10 Step 1 plus `make bench`; paste outputs into the record.
+- [ ] **Step 2: Run the gates** of Task 10 plus `make bench`; paste outputs into the record.
 - [ ] **Step 3: Request the cross-model review**
 
 ```bash
-codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.2-codex.md "Review sub-phase 2.2 of the kgateway UI (diff <base>..HEAD) against docs/phases/phase-2/design.md §4.2, §4.3, §6, §7, §8 and D-016/D-019. Focus: Q12 ownership and counts, KGWUI-011 pending in grace, Backend freshness, admission and links, Authorizer rules 1-3, 5, 7-10, cursors, additive goldens, SPA states and accessibility. Test and bench output: <paste>. Rank findings P1–P4 with file:line." < /dev/null
+codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.2-codex.md "Review sub-phase 2.2 of the kgateway UI (diff $BASE..HEAD) against docs/phases/phase-2/design.md §4.2, §4.3, §6, §7, §8 and D-016/D-019. Focus: Q12 ownership and counts, KGWUI-011 pending in grace, Backend freshness, admission and links, Authorizer rules 1-3, 5, 7-10, cursors, additive goldens, SPA states and accessibility. Test and bench output: <paste>. Rank findings P1–P4 with file:line." < /dev/null
 ```
 
 - [ ] **Step 4: Triage** every finding; fix accepted ones with tests; rerun the gates.
-- [ ] **Step 5: Write `phase-2.2-complete.md`** (Summary, Reviews, wording-pass choices, Waivers, Deliverables, benchmark table vs 2.1, ui-loop recording paths, release note) and update `docs/phase-status.md` (next: 2.3).
+- [ ] **Step 5: Write `phase-2.2-complete.md`** (Summary, Reviews, wording-pass choices, Waivers, Deliverables, benchmark table vs 2.1, ui-loop recording paths, release note) and update `docs/phase-status.md` (`## Sub-phase` none, next: 2.3) and `docs/roadmap.md` (2.2 shipped).
 - [ ] **Step 6: Commit** `docs: close sub-phase 2.2`.
 
 ---
@@ -1186,14 +1176,14 @@ Every 2.3 task reads `computed-rules.md` §1–§4, §8 and §9 for the behaviou
 ### Task 35: 2.3 brief and view A observations (D-021)
 
 **Files:**
-- Create: `docs/phases/phase-2/phase-2.3-brief.md`
+- Create: `docs/phases/phase-2/phase-2.3-brief.md`; Modify: `docs/phase-status.md` (sub-phase 2.3 active, base SHA)
 - Modify, only when D-021 requires it: `docs/phases/phase-2/computed-rules.md` (§2, §4, §10, §11.1), `docs/decisions.md` (D-021 Consequences)
 
 **Interfaces:** Consumes D-021 (Task 1). Produces the view A rules Tasks 36–50 implement. **No product code.**
 
 - [ ] **Step 1: Map the observations.** For D-021 items 3 and 10 (the view A items; item 3 returns in 2.4), write in the brief what each tag showed and which rules section it confirms. Expected per rules §4.4: delegated children are not in `attachedRoutes`; ListenerSet routes count only on the ListenerSet's listener status.
 - [ ] **Step 2: Gate.** If an observation contradicts rules §2 or §4, STOP and ask the user with the proposed rules text; the approved rules change only with approval. Otherwise mark §10 item 10 "confirmed by D-021".
-- [ ] **Step 3: Write the brief** (agentic-engineering-sdlc format): goal, Tasks 35–51, exit criteria from the Sub-phases table, file list, and the provenance gap: no kgateway translator output carries `NotAllowedByListeners`, `NoMatchingParent` or `NoMatchingListenerHostname` at either tag, so those fixtures cite the code and the kind e2e confirms them (Task 50).
+- [ ] **Step 3: Record the sub-phase** (Lifecycle) **and write the brief** (agentic-engineering-sdlc format): goal, Tasks 35–51, exit criteria from the Sub-phases table, file list, and the provenance gap: no kgateway translator output carries `NotAllowedByListeners`, `NoMatchingParent` or `NoMatchingListenerHostname` at either tag, so those fixtures cite the code and the kind e2e confirms them (Task 50).
 - [ ] **Step 4: Commit** `docs: 2.3 brief and view A observations (D-021)`.
 
 ### Task 36: Experimental setting and namespace labels
@@ -1237,14 +1227,13 @@ func TestNamespaceLabels(t *testing.T)     // access OK → labels by name, an u
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/install -run 'Experimental|SourceOrder|SettingBool|NamespaceLabels'` → FAIL (undefined).
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/install ./internal/boundary` → PASS; the existing scope tests pass unchanged.
-- [ ] **Step 5: Commit** `feat(install): read the experimental-features setting and namespace labels (Q16)`.
+- [ ] **Step 3: Run** `go test ./pkg/install ./internal/boundary` → PASS; the existing scope tests pass unchanged.
+- [ ] **Step 4: Commit** `feat(install): read the experimental-features setting and namespace labels (Q16)`.
 
 ### Task 37: The `pkg/computed` seam and rule-set selection
 
 **Files:**
-- Create: `pkg/computed/rules.go`, `pkg/computed/attach.go`, `pkg/computed/kgw23/rules.go`, `pkg/computed/kgw24/rules.go`, `pkg/computed/rulesets/rulesets.go`, `pkg/computed/rulesets/rulesets_test.go`
+- Create: `pkg/computed/rules.go`, `pkg/computed/attach.go`, `pkg/computed/delegation.go`, `pkg/computed/kgw23/rules.go`, `pkg/computed/kgw24/rules.go`, `pkg/computed/rulesets/rulesets.go`, `pkg/computed/rulesets/rulesets_test.go`
 - Modify: `pkg/engine/engine.go:25-55` (`Config.RulesFor`), `pkg/extension/extension.go:25-39,76-88` (`Registry.RulesFor`, `WithComputedRules`), `pkg/app/app.go` (passes `Registry.RulesFor` to the engine), `pkg/extension/extension_test.go`
 
 **Interfaces:**
@@ -1256,7 +1245,7 @@ func TestNamespaceLabels(t *testing.T)     // access OK → labels by name, an u
   - `type Coverage string`: `CoverageCount = "count-agrees"`, `CoverageStatus = "status-compatible"`, `CoverageNone = "not-verified"`
   - `attach.go` (view A, rules §4.6):
     - `type Acceptance int` (`Accepted`, `Denied`, `NoStatus`); `type Resource struct { Ref objects.Ref; Generation int64; Listeners []objects.Listener; ListenerStatus []objects.ListenerStatus; Acceptance Acceptance }` (a Gateway is `Accepted`)
-    - `type Route struct { Ref objects.Ref; Generation int64; Hostnames []string; ParentRefs []objects.ParentRef; Parents []objects.RouteParentStatus; ExperimentalOnly bool }`
+    - `type Route struct { Ref objects.Ref; Generation int64; Hostnames []string; ParentRefs []objects.ParentRef; Written []objects.WrittenRef; Parents []objects.RouteParentStatus; ExperimentalOnly bool }` — `Written` is index-aligned with `ParentRefs`; each status entry carries its own `Written` (Task 12)
     - `type AttachmentInput struct { Resources []Resource; Routes []Route; NamespaceLabels map[string]map[string]string; NamespacesOK bool; Experimental install.Setting; ControllerNames []string }`
     - `type Outcome string`: `OutcomeAccepted = "accepted"`, `OutcomeNotAllowed = "NotAllowedByListeners"`, `OutcomeNoParent = "NoMatchingParent"`, `OutcomeNoHostname = "NoMatchingListenerHostname"`
     - `type FactCode string` (`FactKind = "kind"`, `FactNamespace = "namespace"`, `FactSelectorError = "selector-error"`, `FactPort = "port"`, `FactSection = "section"`, `FactHostname = "hostname"`); `type Fact struct { Listener string; Code FactCode; Want, Got string }`
@@ -1264,7 +1253,7 @@ func TestNamespaceLabels(t *testing.T)     // access OK → labels by name, an u
     - `type RefOutcome struct { Route objects.Ref; ParentRef int; Resource objects.Ref; Outcome Outcome; Listeners []string; Facts []Fact; Unknown UnknownReason; Rule string; Deps []objects.Ref }` — `Rule` is `allowed-routes`, `section-and-port` or `hostname-intersection` (the stage that decided it)
     - `type ListenerCount struct { Resource objects.Ref; Listener string; Count int; Unknown UnknownReason; Error string; IsolationNote bool; Deps []objects.Ref }` — rule `listener-count`
     - `type AttachmentResult struct { Members []Member; Outcomes []RefOutcome; Counts []ListenerCount }`
-  - `type DelegationInput struct{}`, `type DelegationResult struct{}` — fields arrive in Tasks 53–59 (additive); both sets return the zero value and the engine does not call `Delegation` before Task 62
+  - `delegation.go`: `type DelegationInput struct{}`, `type DelegationResult struct{}` — fields arrive in Tasks 53–59 (additive); both sets return the zero value and the engine does not call `Delegation` before Task 62
   - `kgw23.New() computed.Rules` (`Version() == "kgateway-2.3"`), `kgw24.New()` (`"kgateway-2.4"`); `Attachment` returns the zero value until Task 39
   - `package rulesets`: `func Select(controllerVersion string) computed.Selection` (its own package: it imports both sets, which import `computed`)
   - `engine.Config.RulesFor func(controllerVersion string) computed.Selection` (nil → `rulesets.Select`); `extension.WithComputedRules(f func(string) computed.Selection) Option`
@@ -1334,8 +1323,7 @@ func TestIntersect(t *testing.T) {
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'AllowedKinds|NamespacesFrom|Intersect'` → FAIL.
 - [ ] **Step 3: Implement** with `metav1.LabelSelectorAsSelector` for `Selector`.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): allowed routes and hostname intersection for kgateway-2.3`.
+- [ ] **Step 4: Commit** `feat(computed): allowed routes and hostname intersection for kgateway-2.3`.
 
 ### Task 39: View A attachment and listener counts (`kgateway-2.3`)
 
@@ -1370,9 +1358,7 @@ func TestAttachDeterministic(t *testing.T)         // shuffled input order → r
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run Attach` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): view A attachment and counts for kgateway-2.3`.
+- [ ] **Step 3: Commit** `feat(computed): view A attachment and counts for kgateway-2.3`.
 
 ### Task 40: `kgateway-2.4`, the isolation note and per-version fixtures
 
@@ -1384,7 +1370,7 @@ func TestAttachDeterministic(t *testing.T)         // shuffled input order → r
 - Consumes: Tasks 37–39.
 - Produces:
   - `kgw24.Rules.Attachment` — `kgw23`'s plus `ListenerCount.IsolationNote` (rules §4.5): an `HTTP` listener whose hostname is empty or a wildcard covering the hostname of another `HTTP` listener on the same port; the count never changes
-  - `type RuleCase struct { Provenance string; RuleOnly bool; ControllerVersion string; Settings map[string]string; NamespacesOK bool; Namespaces map[string]map[string]string; Objects []*unstructured.Unstructured; Expect map[string]any }`; `func LoadRuleCase(t *testing.T, path string) RuleCase` — one YAML file per case; `provenance` names `translator/gateway/testutils/outputs/<file>@<tag>` when the expected controller signals are copied from kgateway, else `computed-rules §<n>` plus `e2e` when the kind e2e confirms it; `ruleOnly: true` keeps a case out of the API matrix (Task 45)
+  - `type RuleCase struct { Provenance string; RuleOnly bool; ControllerVersion string; Settings map[string]string; NamespacesOK bool; Namespaces map[string]map[string]string; Bounds map[string]int; Objects []*unstructured.Unstructured; Expect map[string]any }` — `Bounds` overrides `computed.Bounds` fields by name (used from Task 60); `func LoadRuleCase(t *testing.T, path string) RuleCase` — one YAML file per case; `provenance` names `translator/gateway/testutils/outputs/<file>@<tag>` when the expected controller signals are copied from kgateway, else `computed-rules §<n>` plus `e2e` when the kind e2e confirms it; `ruleOnly: true` keeps a case out of the API matrix (Task 45)
   - `func TestRuleSetGoldens(t *testing.T)` — per directory: `rulesets.Select(c.ControllerVersion).Rules.Version()` equals the directory name; outputs equal `expect`; a case without `provenance` fails. Expectations are written from the source, never generated.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1412,11 +1398,11 @@ func TestIsolationNote(t *testing.T) {
 - Produces:
   - `type CheckKind string`: `KindListenerCount = "listener-count"`, `KindRouteAccepted = "route-accepted"` (Task 61 adds `KindChildEntry = "child-entry"`, `KindParentResolvedRefs = "parent-resolvedrefs"`; Task 62 `KindDelegatedNotAttached = "delegated-not-attached"`, `KindOrphan = "orphan-not-attached"`)
   - `type Identity struct { Install, RuleSet string; Kind CheckKind; Subject string }`; `func Subject(parts ...string) string` (NUL-joined; the parts of rules §9.1)
-  - `type ReportKey struct { Group, Kind, Namespace, Name, SectionName string }`; `func KeyOf(p objects.ParentRef) ReportKey` (no port, rules §7)
-  - `type Class string`: `ClassContradicting`, `ClassStale`, `ClassMissing`, `ClassUnexpected`, `ClassCompatible`, `ClassNotObservable`, `ClassUnknown` (rules §8.3)
-  - `type CheckResult struct { ID Identity; Class Class; Verified bool; Coverage []Coverage; Fingerprint uint64; On objects.Ref; Listener string; Key ReportKey; Expected, Observed string; Deps, Contributors []objects.Ref; ParentCurrent bool; Note string; State State; Mature bool }` — `On` is the object whose status disagrees (rules §9.3 step 4); `State` and `Mature` are set by the engine (Task 42); `Contributors` and `ParentCurrent` serve `child-entry` (Task 61)
+  - `type ReportKey struct { Group, Kind, Namespace, Name, SectionName string }`; `func KeyOf(w objects.WrittenRef) ReportKey` (as written, no port; rules §7)
+  - `type Class string`: `ClassContradicting`, `ClassStale`, `ClassMissing`, `ClassUnexpected`, `ClassCompatible`, `ClassNotObservable`, `ClassInconclusive`, `ClassUnknown` (rules §8.1, §8.3)
+  - `type CheckResult struct { ID Identity; Class Class; Verified bool; Coverage []Coverage; Fingerprint uint64; On objects.Ref; Listener string; Key ReportKey; Expected, Observed string; Deps, Contributors []objects.Ref; ParentCurrent bool; Note string; State State; Mature bool; Since time.Time }` — `On` is the object whose status disagrees (rules §9.3 step 4); `State`, `Mature` and `Since` (the window start, rules §9.3 step 4) are set by the engine (Task 42); `Contributors` and `ParentCurrent` serve `child-entry` (Task 61)
   - `func (c CheckResult) Candidate() bool` — contradicting, missing, or unexpected with `Verified`
-  - `func CheckAttachment(install string, sel Selection, in AttachmentInput, r AttachmentResult) []CheckResult` — rules §8.1–§8.4 for the two kinds: refs sharing a `ReportKey` give one `route-accepted`; a stale signal (`observedGeneration` ≠ generation) is `ClassStale`; a missing top-level entry is `ClassStale` with `Observed` `"none"` (Phase 1's KGWUI-003 owns it, rules §8.3); unknown results are `ClassUnknown`; `Accepted=False` with a non-attachment reason is compatible with `accepted` and contradicts a computed rejection; `ResolvedRefs` and `kgateway.dev/Programmed` are never read; `Note` is `sel.Note`
+  - `func CheckAttachment(install string, sel Selection, in AttachmentInput, r AttachmentResult) []CheckResult` — rules §8.1–§8.4 for the two kinds: refs sharing a written `ReportKey` with the same computed outcome give one `route-accepted`; a stale signal (`observedGeneration` ≠ generation) is `ClassStale`; a missing top-level entry is `ClassStale` with `Observed` `"none"` (Phase 1's KGWUI-003 owns it, rules §8.3); unknown results are `ClassUnknown`; `Accepted=False` with a non-attachment reason is compatible with `accepted`; against a computed rejection it is inconclusive, and so is any written key shared by refs with different computed outcomes (`ClassInconclusive`: state `checked`, coverage `not-verified`, note "The controller's status cannot confirm this", never a candidate, never KGWUI-012; rules §8.1); `ResolvedRefs` and `kgateway.dev/Programmed` are never read; `Note` is `sel.Note`
   - `fingerprint.go`: `func listenerCountPrint(...) uint64`, `func routeAcceptedPrint(...) uint64` — FNV-64a over a canonical encoding of exactly the rules §9.2 inputs and evidence; a non-attachment reason hashes as `"other"`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1426,7 +1412,10 @@ func TestListenerCountAgreesAndDisagrees(t *testing.T) // §11.4 row 1: equal �
 func TestListenerCountStaleIsPending(t *testing.T)     // listener conditions' observedGeneration < generation → ClassStale, !Candidate()
 func TestRouteAcceptedContradicts(t *testing.T)        // §11.4 row 2: computed accepted vs current Accepted=False/NoMatchingParent → Contradicting, On the route
 func TestRouteAcceptedLaterStagesCompatible(t *testing.T) // §11.4 rows 4–5, top-level: 2.3 Accepted=False/RouteRuleReplaced, 2.3 Accepted=False/Conflicted, 2.4 kgateway.dev/Programmed=False, ResolvedRefs=False/BackendNotFound → Compatible [status-compatible]
-func TestRefsDifferingByPortShareOneCheck(t *testing.T) // §11.1 row 7: one route-accepted; one member rejected → expects Accepted=False with its reason
+func TestRefsDifferingByPortShareOneCheck(t *testing.T) // §11.1 row 7: one route-accepted; both members rejected → expects Accepted=False with an attachment reason
+func TestOmittedVsExplicitNamespaceTwoChecks(t *testing.T) // §11.4: refs differing only by an omitted vs explicit namespace → two keys, two checks
+func TestRejectionVsLaterStageReasonInconclusive(t *testing.T) // §11.4: computed NoMatchingParent, observed current Accepted=False/RouteRuleReplaced → ClassInconclusive, not-verified, !Candidate()
+func TestSharedKeyDifferentOutcomesInconclusive(t *testing.T)   // §11.4: one ref accepted, one rejected under one written key → ClassInconclusive
 func TestUnknownIsNeverACandidate(t *testing.T)
 func TestNoteCarriesSelection(t *testing.T)            // "Controller version unknown; using the 2.4 rules" on every result
 func TestAttachmentFingerprints(t *testing.T) {
@@ -1437,26 +1426,25 @@ func TestAttachmentFingerprints(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed -run 'ListenerCount|RouteAccepted|RefsDiffering|Unknown|NoteCarries|AttachmentFingerprints'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): view A cross-check, evidence classes and fingerprints`.
+- [ ] **Step 2: Run** `go test ./pkg/computed -run 'ListenerCount|RouteAccepted|RefsDiffering|OmittedVsExplicit|Inconclusive|Unknown|NoteCarries|AttachmentFingerprints'` → FAIL.
+- [ ] **Step 3: Commit** `feat(computed): view A cross-check, evidence classes and fingerprints`.
 
 ### Task 42: Persistence, maturation deadlines and KGWUI-012
 
 **Files:**
 - Create: `pkg/engine/views.go`, `pkg/engine/views_test.go`, `pkg/engine/persist.go`, `pkg/engine/persist_test.go`, `pkg/health/computed.go`, `pkg/health/computed_test.go`
-- Modify: `pkg/computed/rules.go` (`Views`), `pkg/engine/engine.go` (`InstallModel.Computed`, the persistence field, `Compute`: views → persistence → health → explore), `pkg/health/finding.go` (`CodeComputedDisagrees`), `pkg/health/checks.go:23-25` (register `computedCheck`, not required; `Input.Computed`), `pkg/health/messages.go` (drafts), `internal/testutil/fixtures.go` (`GatewayWithListeners`)
+- Modify: `pkg/computed/rules.go` (`Views`), `pkg/engine/engine.go` (`InstallModel.Computed`, the persistence field, `Compute`: views → persistence → health; Task 43 hands `Views` to `explore.Build`), `pkg/health/finding.go` (`CodeComputedDisagrees`; `Input.Computed` on the `Input` at `:93`), `pkg/health/checks.go:23-25` (register `computedCheck`, named `computed views`, not required, appended after `backend status`), `pkg/health/messages.go` (drafts), `internal/testutil/fixtures.go` (`GatewayWithListeners`)
 
 **Interfaces:**
-- Consumes: Tasks 36–41; `deadlines.add` (Task 6); `explore.Input.Computed` (Task 43 reads it).
+- Consumes: Tasks 36–41; `deadlines.add` (Task 6).
+- Regenerate: `pkg/api/testdata/golden/health.json` (the appended `computed views` check, design §7.6; nothing else changes)
 - Produces:
   - `type Views struct { RuleSet, Note string; Attachment AttachmentResult; Checks []CheckResult }` (Task 62 adds `Delegation`)
-  - `func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, dec objects.Decoder) computed.AttachmentInput` — owned Gateways and owned ListenerSets (acceptance from the current `Accepted`); in-scope routes of route kinds with a parentRef naming one of them; `ExperimentalOnly` from `Served.ExperimentalOnly(res.KgatewayVersion())`; labels from `install.NamespaceLabels`
+  - `func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, dec objects.Decoder) computed.AttachmentInput` — owned Gateways and owned ListenerSets (acceptance from the current `Accepted`); in-scope routes of route kinds with a parentRef naming one of them, with `Written` from `objects.WrittenParentRefs`; `ExperimentalOnly` from `Served.ExperimentalOnly(res.KgatewayVersion())`; labels from `install.NamespaceLabels`
   - `InstallModel.Computed *computed.Views`
   - `const Window = 30 * time.Second`
-  - `type persistence struct{...}` (map `computed.Identity → {print uint64; since time.Time}`, under `computeMu`); `func (p *persistence) step(now time.Time, checks []computed.CheckResult, graceEnd func(computed.CheckResult) time.Time) (next time.Time)` — one call per `Compute` over every install's checks; rules §9.3 steps 1–7: sets `State` and `Mature` in place, deletes every entry not a candidate this run, returns the earliest future maturation (zero when none), which `Compute` passes to `deadlines.add(next, false)`. A non-candidate's state: stale → `pending`; compatible, not observable → `checked`; unknown → `unknown`.
-  - `health.CodeComputedDisagrees = "KGWUI-012"`, slug `computed-view-disagrees`; `health.Input.Computed *computed.Views`; `computedCheck` (name "computed views", not required, always OK) emits one KGWUI-012 warning per check in state `disagrees`: resource `On`, `Evidence` = `Deps`, message "The UI's computed view disagrees with the controller", detail `disagreeDetail(c, ruleSet)` (drafts, Task 48), `Since` the window start
+  - `type persistence struct{...}` (map `computed.Identity → {print uint64; since time.Time}`, under `computeMu`); `func (p *persistence) step(now time.Time, checks []computed.CheckResult, graceEnd func(computed.CheckResult) time.Time) (next time.Time)` — one call per `Compute` over every install's checks; rules §9.3 steps 1–8: sets `State`, `Mature` and `Since` in place, deletes every entry not a candidate this run, returns the earliest future maturation (zero when none), which `Compute` passes to `deadlines.add(next, false)`. A non-candidate's state: stale → `pending`; compatible, not observable → `checked`; unknown → `unknown`.
+  - `health.CodeComputedDisagrees = "KGWUI-012"`, slug `computed-view-disagrees`; `health.Input.Computed *computed.Views`; `computedCheck` (name "computed views", not required, always OK) emits one KGWUI-012 warning per check in state `disagrees`: resource `On`, `Evidence` = `Deps`, message "The UI's computed view disagrees with the controller", detail `disagreeDetail(c, ruleSet)` (drafts, Task 48), `Since` = `c.Since`
   - `func GatewayWithListeners(ns, name, class string, spec []objects.Listener, status ...Listener) *unstructured.Unstructured` in testutil — listener specs as given (port, protocol, hostname, TLS mode, allowedRoutes)
 
 - [ ] **Step 1: Write the failing tests** (fake clock; worlds from testutil; rules §11.5 rows owned by 2.3)
@@ -1464,12 +1452,13 @@ func TestAttachmentFingerprints(t *testing.T) {
 ```go
 func TestDisagreementClearsBefore30s(t *testing.T)      // row 1: off by one at T, fixed at T+29s → no KGWUI-012 ever, entry gone
 func TestMaturesAtScheduledDeadline(t *testing.T) {    // row 2; design §9.3
-	// Run loop, no events after T. At T+30s−1ns Current() has no KGWUI-012.
-	// StepUntil reaches T+30s: exactly one publication, KGWUI-012 warning on the Gateway,
+	// Run loop with a 10 min safety interval, so only the deadline can explain the run; no events after T.
+	// At T+30s−1ns Current() has no KGWUI-012. awaitThenStep to T+30s: exactly one publication, KGWUI-012 warning on the Gateway,
 	// detail "Listener `http`: computed 2 routes, controller reports 1. Rule set kgateway-2.4." (draft)
 }
 func TestUnrelatedWritesDoNotReset(t *testing.T)       // row 3: at T+10s an annotation edit, an unrelated condition write, a resourceVersion-only update, a metrics arrival → matures at T+30s
-func TestNonAttachmentReasonChangeDoesNotReset(t *testing.T) // row 4, route-accepted half: computed NoMatchingParent, observed Accepted=False/RouteRuleReplaced → Conflicted at T+10s → matures at T+30s
+// row 4, route-accepted half: a non-attachment reason never opens a route-accepted window (rules §8.1), so TestAttachmentFingerprints (Task 41) pins it.
+func TestFindingSinceIsWindowStart(t *testing.T)       // §11.5: KGWUI-012's since equals the check's window start, also after a reset
 func TestListedChangeResets(t *testing.T)              // row 7: listener hostname edit at T+20s (still off) → T+50s; attachedRoutes change → reset
 func TestRuleSetSwitchResets(t *testing.T)             // row 8: controller 2.3.11 → 2.4.7 at T+20s → matures at T+50s
 func TestSubjectDeletedPrunes(t *testing.T)            // row 9: finding gone the same run, map empty
@@ -1480,15 +1469,14 @@ func TestComputedWithoutPodsOrUIDs(t *testing.T)       // design §9.7: no Pods 
 func TestAttachmentInputScope(t *testing.T)            // views_test.go: an out-of-scope route and another install's Gateway are absent; a ListenerSet with stale Accepted → NoStatus; TCPRoute ExperimentalOnly per controller version
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/engine ./pkg/health -race -run 'Disagreement|Matures|Unrelated|NonAttachment|ListedChange|RuleSetSwitch|SubjectDeleted|TurnsUnknown|KGWUI012|NoFinding|ComputedWithout|AttachmentInput'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/engine ./pkg/health ./pkg/api -race` → PASS (goldens unchanged: the golden world has no disagreement).
-- [ ] **Step 5: Commit** `feat(engine): KGWUI-012 persistence with scheduled maturation (D-020)`.
+- [ ] **Step 2: Run** `go test ./pkg/engine ./pkg/health -race -run 'Disagreement|Matures|Unrelated|SinceIsWindowStart|ListedChange|RuleSetSwitch|SubjectDeleted|TurnsUnknown|KGWUI012|NoFinding|ComputedWithout|AttachmentInput'` → FAIL.
+- [ ] **Step 3: Run** `go test ./pkg/engine ./pkg/health ./pkg/api -race` → PASS after regenerating `health.json`; `TestGoldenChangesAreAdditive` passes.
+- [ ] **Step 4: Commit** `feat(engine): KGWUI-012 persistence with scheduled maturation (D-020)`.
 
 ### Task 43: Explorer index for view A
 
 **Files:**
-- Modify: `pkg/explore/explore.go`, `pkg/explore/rows.go`, `pkg/explore/query.go`, `pkg/explore/explore_test.go`, `pkg/explore/query_test.go`
+- Modify: `pkg/explore/explore.go`, `pkg/explore/rows.go`, `pkg/explore/query.go`, `pkg/explore/explore_test.go`, `pkg/explore/query_test.go`, `pkg/engine/engine.go` (`Views` into `explore.Input`)
 
 **Interfaces:**
 - Consumes: `computed.Views` (Task 42).
@@ -1503,6 +1491,7 @@ func TestAttachmentInputScope(t *testing.T)            // views_test.go: an out-
   - `GatewayRow.Members []RowID`, `GatewayRow.Disagreements int` (checks in state `disagrees` on the Gateway); the same on `ListenerSetRow`
   - `Index.RuleSet, Index.RuleNote string`
   - `Query.Listener string` — needs `Parent` of a Gateway or ListenerSet kind, else `ErrBadQuery`; a name selects `ByListener[{parent, name}]`; `unknown` selects rows whose ref to that parent is unknown; a Gateway's listener never matches ListenerSet routes; the listener index is the narrowest (design §3.8)
+  - Computed predicates are caller-visible (design §7.4 rule 4a): `listener=<name>`, `listener=unknown` and `state=listener-unknown` match a row only when `visible` holds for every ref of the deciding fact's `DepSet`, checked before `Total`, sorting and paging. `state=disagrees` is a finding and is not filtered (rule 9).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1513,12 +1502,12 @@ func TestComputedFlags(t *testing.T)     // disagrees from the findings map; lis
 func TestDepSetsInterned(t *testing.T)   // equal refs share one index; Ref(i) round-trips
 func TestGatewayRowComputedCounts(t *testing.T) // Members distinct; Disagreements counts disagreeing checks on the Gateway
 func TestBuildDeterministicWithViews(t *testing.T)
+func TestComputedPredicatesUseVisibleDeps(t *testing.T) // a member whose Selector Namespace is hidden: not matched by listener=https, not counted in Total, matched under AllowAll
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/explore -run 'ByListener|ListenerFilter|ComputedFlags|DepSets|ComputedCounts|WithViews'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/explore ./internal/boundary` → PASS.
-- [ ] **Step 5: Commit** `feat(explore): view A members, listener index and computed flags`.
+- [ ] **Step 2: Run** `go test ./pkg/explore -run 'ByListener|ListenerFilter|ComputedFlags|DepSets|ComputedCounts|WithViews|VisibleDeps'` → FAIL.
+- [ ] **Step 3: Run** `go test ./pkg/explore ./internal/boundary` → PASS.
+- [ ] **Step 4: Commit** `feat(explore): view A members, listener index and computed flags`.
 
 ### Task 44: API: computed DTOs, the `listener` filter and Authorizer rules 4–7 for view A
 
@@ -1549,15 +1538,15 @@ func TestGatewayDetailListenerStates(t *testing.T) // checked [count-agrees]; di
 func TestListenerParam(t *testing.T)               // 400 without parent and with an HTTPRoute parent; listener=unknown 200
 func TestMemberCoverage(t *testing.T)              // one listener → [count-agrees status-compatible]; two → + not-verified
 func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) // design §9.1 (2.3): membership, count, check restricted with no value; no listener-unknown; state=listener-unknown does not match; health and row states unchanged
+func TestListenerFilterCannotProbe(t *testing.T)   // design §9.1: listener=https over a hidden Selector Namespace returns the rows and total it returns when those facts are unknown; deniedInInstall unchanged
 func TestHiddenMemberRestrictsCounts(t *testing.T) // computedRoutes and Gateway row routes omitted; AllowAll: zero Authorizer calls
 func TestKGWUI012EvidenceRestricted(t *testing.T)  // visible Gateway, hidden candidate route → detail replaced, evidenceRestricted true
 func TestNoteOnUnknownVersion(t *testing.T)        // an install without a kgateway version: every computed.note is the unknown-version note
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/api -run 'Attachment|ListenerStates|ListenerParam|MemberCoverage|HiddenNamespace|HiddenMember|KGWUI012Evidence|NoteOnUnknown'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/api -race` → PASS except goldens (Task 45).
-- [ ] **Step 5: Commit** `feat(api): view A on routes, listeners and parent cards, with dependency-based authorization`.
+- [ ] **Step 2: Run** `go test ./pkg/api -run 'Attachment|ListenerStates|ListenerParam|MemberCoverage|HiddenNamespace|CannotProbe|HiddenMember|KGWUI012Evidence|NoteOnUnknown'` → FAIL.
+- [ ] **Step 3: Run** `go test ./pkg/api -race` → PASS except goldens (Task 45).
+- [ ] **Step 4: Commit** `feat(api): view A on routes, listeners and parent cards, with dependency-based authorization`.
 
 ### Task 45: Goldens for 2.3 and the matrix through the handlers
 
@@ -1594,9 +1583,7 @@ it("stale data turns the badge unknown", ...);                 // fake timers pa
 ```
 
 - [ ] **Step 2: Run** `cd web && npx vitest run packages/shell/src/explore/ComputedBadge.test.tsx packages/shell/src/api/types.golden.test.ts` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `cd web && npm test && npm run typecheck && npm run lint` → PASS.
-- [ ] **Step 5: Commit** `feat(shell): ComputedBadge and view A types`.
+- [ ] **Step 3: Commit** `feat(shell): ComputedBadge and view A types`.
 
 ### Task 47: Pages: listener counts, `?listener=`, explanations and computed listeners
 
@@ -1624,8 +1611,7 @@ it("ListenerSet page shows computed counts per listener", ...);
 
 - [ ] **Step 2: Run** `cd web && npx vitest run packages/shell/src/pages/explore` → FAIL.
 - [ ] **Step 3: Implement.** Fixed column widths from the first render; the computed column's skeleton has the final height.
-- [ ] **Step 4: Run** the web gates → PASS.
-- [ ] **Step 5: Commit** `feat(shell): routes per listener with effective hostnames`.
+- [ ] **Step 4: Commit** `feat(shell): routes per listener with effective hostnames`.
 
 ### Task 48: Wording pass for 2.3
 
@@ -1651,7 +1637,7 @@ it("ListenerSet page shows computed counts per listener", ...);
 
 - [ ] **Step 1: Add fixtures** (design §9.5, 2.3): the `sectionName` quirk route (D-021 item 3's manifest from `test/e2e/fixtures/observe/` where it fits), a route with two parentRefs to one listener, a `Selector` listener over labelled namespaces, a ListenerSet with routes and a denied ListenerSet with a route, an HTTPS `*.example.com` listener with matching and non-matching routes.
 - [ ] **Step 2: Write `TestComputedAgreesWithController`:** on each tag, for every listener of every owned Gateway and ListenerSet, `computedRoutes == status.attachedRoutes` and coverage holds `count-agrees`; every `ParentSummary.computed` is `checked` with `status-compatible`; the quirk route is `NoMatchingParent`; the two-ref route counts twice; health holds no KGWUI-012.
-- [ ] **Step 3: Write `TestForcedDisagreementRaisesKGWUI012`:** scale the controller to 0; relabel the `Selector` namespace so the computed outcome flips; poll every second until the route's check reads `pending`; the first poll that sees KGWUI-012 on the route and on the Gateway is at least 30 s and at most 33 s after the finding's `since` (the window start); scale back to 1; KGWUI-012 is gone once the controller's status catches up. Bounded polls, no fixed sleeps.
+- [ ] **Step 3: Write `TestForcedDisagreementRaisesKGWUI012`:** the UI runs with `--poll-interval=10m` for this test, so the safety timer cannot explain a run. Scale the controller to 0; relabel the `Selector` namespace so the computed outcome flips; poll every second until the route's check reads `pending`; KGWUI-012 appears on the route and on the Gateway no earlier than its `since` + 30 s and within `since` + 90 s; scale back to 1; KGWUI-012 clears within 2 min. `t.Cleanup` restores the label and the replica count. The exact instant is proven by Task 42's fake-clock test, not here.
 - [ ] **Step 4: Extend `explorer.spec.ts`:** open `infra/edge`, select listener `https`, the URL holds `?listener=https`, rows show effective hostnames and the badge.
 - [ ] **Step 5: Run** `make e2e KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1` and `make e2e KGW_VERSION=v2.3.11 GWAPI_VERSION=v1.5.1` → PASS (or the CI matrix).
 - [ ] **Step 6: Run the `/ui-loop` skill** on the Gateway, ListenerSet and HTTPRoute pages with computed facts: light and dark, 1280 px and 720 px, pending, unknown and disagreeing states; list the recording paths in the 2.3 record.
@@ -1661,18 +1647,19 @@ it("ListenerSet page shows computed counts per listener", ...);
 
 **Files:**
 - Create: `docs/phases/phase-2/phase-2.3-complete.md`, `docs/phases/phase-2/reviews/2.3-codex.md`
-- Modify: `README.md` (Upgrade notes: KGWUI-012 and the computed listener columns), `docs/phase-status.md`, `docs/phases/phase-2/design.md` and `computed-rules.md` (only where the code deviates)
+- Modify: `README.md` (Upgrade notes: KGWUI-012 and the computed listener columns), `docs/phase-status.md`, `docs/roadmap.md`, `docs/phases/phase-2/design.md` and `computed-rules.md` (only where the code deviates)
 
-- [ ] **Step 1: Run the gates** of Task 10 Step 1 plus `make bench`; paste outputs into the record.
+- [ ] **Step 1: Run the gates** of Task 10 plus `make bench`; paste outputs into the record.
 - [ ] **Step 2: Request the cross-model review**
 
 ```bash
-codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.3-codex.md "Review sub-phase 2.3 of the kgateway UI (diff <base>..HEAD) against docs/phases/phase-2/computed-rules.md §1-4, §8, §9, §11.1, §11.4, §11.5 and design §3.4, §5.2, §7.3-7.4, §8.4. Focus: fidelity to kgateway's attachment rules incl. the allowed quirk and counting; evidence classes and coverage; fingerprints read exactly the listed fields; maturation at the exact instant; restricted facts never leak a value; fixture provenance. Test, e2e and bench output: <paste>. Rank findings P1-P4 with file:line." < /dev/null
+codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.3-codex.md "Review sub-phase 2.3 of the kgateway UI (diff $BASE..HEAD) against docs/phases/phase-2/computed-rules.md §1-4, §8, §9, §11.1, §11.4, §11.5 and design §3.4, §5.2, §7.3-7.4, §8.4. Focus: fidelity to kgateway's attachment rules incl. the allowed quirk and counting; evidence classes and coverage; fingerprints read exactly the listed fields; maturation at the exact instant; restricted facts never leak a value; fixture provenance. Test, e2e and bench output: <paste>. Rank findings P1-P4 with file:line." < /dev/null
 ```
 
 - [ ] **Step 3: Triage** every finding; fix accepted ones with tests; rerun the gates.
-- [ ] **Step 4: Write `phase-2.3-complete.md`** (Summary, Reviews, wording-pass choices, Waivers, Deliverables, benchmark table vs 2.2, ui-loop recordings, release note) and update `docs/phase-status.md` (next: 2.4).
-- [ ] **Step 5: Commit** `docs: close sub-phase 2.3`.
+- [ ] **Step 4: Write `phase-2.3-complete.md`** (Summary, Reviews, wording-pass choices, Waivers, Deliverables, benchmark table vs 2.2, ui-loop recordings, release note) and update `docs/phase-status.md` (`## Sub-phase` none, next: 2.4) and `docs/roadmap.md` (2.3 shipped).
+- [ ] **Step 5: Write the README upgrade notes:** KGWUI-012 is a new warning that never turns an install red; listener tables and parent cards show computed counts and hostnames, labelled and cross-checked.
+- [ ] **Step 6: Commit** `docs: close sub-phase 2.3`.
 
 ---
 
@@ -1683,21 +1670,20 @@ Every 2.4 task reads `computed-rules.md` §3, §5–§9 for the behaviour it imp
 ### Task 52: 2.4 brief and delegation observations (D-021)
 
 **Files:**
-- Create: `docs/phases/phase-2/phase-2.4-brief.md`
+- Create: `docs/phases/phase-2/phase-2.4-brief.md`; Modify: `docs/phase-status.md` (sub-phase 2.4 active, base SHA)
 - Modify, only when D-021 requires it: `docs/phases/phase-2/computed-rules.md` (§2, §5–§8, §10, §11.2–§11.4), `docs/decisions.md` (D-021 Consequences)
 
 **Interfaces:** Consumes D-021 items 1–9. Produces the facts later tasks pin: `kgw23`'s `ClearsDroppedStatus` (item 6; `kgw24` is `true`, rules §2), whether the §5.4 quirks carry the "not verified" note (item 7), the §7 report keys (items 2–4), the §8.2 reason rule (item 8), one entry per child (item 9), clearing for implicit children (item 1), `dropped` vs `rejected-hostnames` (item 5). **No product code.**
 
 - [ ] **Step 1: Map** each item to the rules section it confirms or changes, in the brief.
 - [ ] **Step 2: Gate.** A contradiction of rules §5–§8 → STOP and ask the user with the proposed text. Otherwise mark §10 items 1–9 "confirmed by D-021" or "changes: …" as approved.
-- [ ] **Step 3: Write the brief:** goal, Tasks 52–70, exit criteria, file list, the decided values above.
+- [ ] **Step 3: Record the sub-phase** (Lifecycle) **and write the brief:** goal, Tasks 52–70, exit criteria, file list, the decided values above.
 - [ ] **Step 4: Commit** `docs: 2.4 brief and delegation observations (D-021)`.
 
 ### Task 53: Wildcard setting, roots and delegation inputs
 
 **Files:**
-- Create: `pkg/computed/delegation.go`
-- Modify: `pkg/install/settings.go`, `pkg/install/settings_test.go`, `pkg/engine/views.go`, `pkg/engine/views_test.go`
+- Modify: `pkg/computed/delegation.go`, `pkg/install/settings.go`, `pkg/install/settings_test.go`, `pkg/engine/views.go`, `pkg/engine/views_test.go`
 
 **Interfaces:**
 - Consumes: `ReadSettings` (Task 36); `AttachmentResult` (Task 39).
@@ -1709,9 +1695,7 @@ Every 2.4 task reads `computed-rules.md` §3, §5–§9 for the behaviour it imp
 
 - [ ] **Step 1: Write the failing tests** `TestReadWildcard` (absent → all, `""` → all, `team-a`, valueFrom → unknown), `TestRootsFromViewA` (accepted root with deps; rejected-only → no root; unknown + current `Accepted=True` → status root; unknown without → `Unknown`), `TestDelegationInputScope` (out-of-scope HTTPRoutes only in `Unwatched`; `Owned` and `TopLevel` set).
 - [ ] **Step 2: Run** `go test ./pkg/install ./pkg/engine -run 'Wildcard|RootsFromViewA|DelegationInputScope'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(engine): delegation inputs, roots and the wildcard setting`.
+- [ ] **Step 3: Commit** `feat(engine): delegation inputs, roots and the wildcard setting`.
 
 ### Task 54: View C: default fit and inherit merge
 
@@ -1745,59 +1729,83 @@ func TestViewCKeepsChildIffAnyRuleKept(t *testing.T)
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Fit|Omitted|Merge|ExplicitEmpty|ViewC'` → FAIL.
 - [ ] **Step 3: Implement** (`path.Join` for the merged path; a nil child path counts as Prefix `""`).
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): view C fit and inherit merge`.
+- [ ] **Step 4: Commit** `feat(computed): view C fit and inherit merge`.
 
 ### Task 55: View B selection and permission
 
 **Files:**
 - Create: `pkg/computed/kgw23/select.go`, `pkg/computed/kgw23/select_test.go`
-- Modify: `pkg/computed/delegation.go` (`Allows`), `pkg/objects/httproute.go` (`HTTPRouteView.WrittenRefs`), `pkg/objects/views_test.go`
+- Modify: `pkg/computed/delegation.go` (`Allows`)
 
 **Interfaces:**
 - Produces:
-  - `objects.WrittenRef struct { Group, Kind, Namespace, SectionName *string; Name string; Port *int32 }`; `HTTPRouteView.WrittenRefs []WrittenRef` — `spec.parentRefs` as written, for permission (rules §5.3) and report keys (rules §7)
   - `type Allows string`: `AllowsAny = "any"`, `AllowsThis = "this"`, `AllowsOther = "other"`
-  - `kgw23`: `func newSelector(routes []computed.DelegRoute, unwatched map[objects.Ref]bool, wildcard install.Setting) *selector` (indexes by namespace and by (namespace, label value), built once); `func (s *selector) fetch(ref objects.DelegationRef) (children []objects.Ref, unresolved string, unknown computed.UnknownReason)` — rules §5.2; children sorted by (namespace, name); `unresolved` is "" or the reason ("Selects no routes", "Not watched by the controller"); with the wildcard unknown, every `label` ref is `setting-unknown` and `children` lists every route with that label value in any namespace (the over-approximation completeness needs, Task 57)
-  - `func permits(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (bool, computed.Allows)` — rules §5.3
+  - `kgw23`: `func newSelector(routes []computed.DelegRoute, unwatched map[objects.Ref]bool, wildcard install.Setting) *selector` (indexes by namespace and by (namespace, label value), built once); `func (s *selector) fetch(ref objects.DelegationRef) (children, possible []objects.Ref, unresolved string, unknown computed.UnknownReason)` — rules §5.2; children sorted by (namespace, name); `unresolved` is "" or the reason ("Selects no routes", "Not watched by the controller"); with the wildcard unknown, every `label` ref is `setting-unknown` with no `children`, and `possible` lists every route carrying that label value in any namespace: uncertain points for completeness, never a selection (rules §3.3)
+  - `func permits(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (bool, computed.Allows)` — rules §5.3, on `child.WrittenRefs` (Task 12), where an empty group or kind never matches
 
 - [ ] **Step 1: Write the failing tests** (rules §11.2 rows 1–2)
 
 ```go
-func TestWrittenRefsKeepNil(t *testing.T)     // objects: omitted group, kind and namespace stay nil; ParentRefs still defaulted
 func TestFetchModes(t *testing.T)             // name → ns/x; missing → "Selects no routes"; out of scope → "Not watched by the controller"; "*" and "" → every HTTPRoute in ns; label → only delegation.kgateway.dev/label == v
-func TestLabelWildcardNamespace(t *testing.T) // default: ref ns "all" selects the label everywhere; set "team-a": ns team-a selects everywhere, ns all only in "all"; "" → all; valueFrom → setting-unknown with every labelled route listed
+func TestLabelWildcardNamespace(t *testing.T) // default: ref ns "all" selects the label everywhere; set "team-a": ns team-a selects everywhere, ns all only in "all"; "" → all; valueFrom → setting-unknown, no children, every labelled route in `possible`
 func TestPermits(t *testing.T)                // empty list → any; explicit group+kind+name, ns nil → child's own ns → this; nil group or kind → other; sectionName and port ignored; another parent → other
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/objects ./pkg/computed/kgw23 -run 'WrittenRefs|Fetch|LabelWildcard|Permits'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): view B selection and permission`.
+- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Fetch|LabelWildcard|Permits'` → FAIL.
+- [ ] **Step 3: Commit** `feat(computed): view B selection and permission`.
 
-### Task 56: Context-aware traversal and compute bounds
+### Task 56: Row accumulator: streaming aggregation and retention
+
+Retention is streaming (computed-rules §5.7): each context is folded into its row as it is produced, and only samples within the caps are kept.
+
+**Files:**
+- Create: `pkg/computed/kgw23/accum.go`, `pkg/computed/kgw23/accum_test.go`
+- Modify: `pkg/computed/delegation.go`
+
+**Interfaces:**
+- Consumes: `FitFailure`, `EffectiveRule` (Task 54); `Allows` (Task 55); `ReportKey` (Task 41); `Bounds` (Task 53).
+- Produces (`pkg/computed/delegation.go`):
+  - `type RowOutcome string`: `attached`, `partial`, `dropped`, `forbidden`, `rejected-hostnames`, `cycle`, `unresolved`, `unknown`
+  - `type RowKey struct { Parent objects.Ref; Rule, Ref int; Child objects.Ref }` — a ref that selects nothing gives one row with a zero `Child` and outcome `unresolved` (computed-rules §5.5)
+  - `type Context struct { ParentMatch objects.Match; Path []objects.Ref; Reporter ReportKey; Outcome RowOutcome; Unknown UnknownReason; Reason *FitFailure; Rules []EffectiveRule; Deps []objects.Ref }`
+  - `type Row struct { Key RowKey; RefAsWritten objects.DelegationRef; Allows Allows; Outcome RowOutcome; Unknown UnknownReason; SomeNotComputed, Unconfirmable bool; Reason *FitFailure; Note, Quirk string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref; Reporters []ReportKey; ChildKey ReportKey; WritesEntry bool }` — `Deps` and `Reporters` cover every context, retained or not; `Note` holds the `unresolved` reason; `Quirk` names the §5.4 quirk a row reproduces, unless D-021 item 7 verified it
+  - `kgw23`: `func newAccumulator(b computed.Bounds) *accumulator`; `func (a *accumulator) add(key computed.RowKey, c computed.Context)` — always updates the row's outcome counters, `Deps` and `Reporters`; keeps `c` only while the row holds fewer than `ContextsPerRow` and the install fewer than `ContextsPerInstall`, else sets `ContextsTruncated`; `func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row` — final outcomes per computed-rules §5.5 (all known and equal → that outcome; `attached` and `dropped` → `partial`; `attached` with unknown → `attached` and `SomeNotComputed`; no `attached` with unknown or an incomplete child → `unknown`, never `dropped`; `forbidden` always known), in `RowKey` order
+
+- [ ] **Step 1: Write the failing tests**
+
+```go
+func TestAggregateOutcomes(t *testing.T)               // the rules above, incl. "Dropped on the paths computed; other paths not computed"
+func TestContextsPerRowCap(t *testing.T)               // 21 contexts → 20 kept, ContextsTruncated, outcome from all 21
+func TestInstallContextCap(t *testing.T)               // small ContextsPerInstall: later rows keep outcomes, no contexts, truncated
+func TestRetentionIsStreaming(t *testing.T)            // 10,000 adds with ContextsPerInstall 100: live retained contexts never exceed 100 at any add (test counter)
+func TestDepsAndReportersSurviveRetention(t *testing.T) // a context dropped by a cap still adds its Deps and Reporter
+func TestTwoRowsOfOneChildAreSeparate(t *testing.T)    // rows (0,0,C) and (1,0,C) both present with their own outcomes
+func TestUnresolvedRowHasZeroChild(t *testing.T)
+```
+
+- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Aggregate|ContextsPerRow|InstallContext|Streaming|Survive|TwoRows|ZeroChild'` → FAIL.
+- [ ] **Step 3: Commit** `feat(computed): streaming row accumulator with bounded retention`.
+
+### Task 57: Context-aware traversal, compute bounds and the reach graph
 
 **Files:**
 - Create: `pkg/computed/kgw23/traverse.go`, `pkg/computed/kgw23/traverse_test.go`
 - Modify: `pkg/computed/delegation.go`, `pkg/computed/kgw23/rules.go` (`Delegation`)
 
 **Interfaces:**
-- Consumes: Tasks 53–55.
-- Produces (`pkg/computed/delegation.go`):
-  - `type RowOutcome string`: `attached`, `partial`, `dropped`, `forbidden`, `rejected-hostnames`, `cycle`, `unresolved`, `unknown`
-  - `type RowKey struct { Parent objects.Ref; Rule, Ref int; Child objects.Ref }` — a ref that selects nothing gets one row with a zero `Child` and outcome `unresolved` (our call: rules §5.5 keys rows by child, but an empty selection has none)
-  - `type Context struct { ParentMatch objects.Match; Path []objects.Ref; Reporter ReportKey; Outcome RowOutcome; Unknown UnknownReason; Reason *FitFailure; Rules []EffectiveRule; Deps []objects.Ref }`
-  - `type Row struct { Key RowKey; RefAsWritten objects.DelegationRef; Allows Allows; Outcome RowOutcome; Unknown UnknownReason; SomeNotComputed, Unconfirmable bool; Reason *FitFailure; Note, Quirk string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref; ChildKey ReportKey; WritesEntry bool }` — `Note` holds the `unresolved` reason; `Quirk` names the §5.4 quirk a row reproduces, unless D-021 item 7 verified it
+- Consumes: Tasks 53–56.
+- Produces:
   - `type ParentSignal struct { Parent objects.Ref; Key ReportKey; Reasons []string; Deps []objects.Ref }` — `BackendNotFound`, `RefNotPermitted` in first-seen order
-  - `type Edge struct { Parent, Child objects.Ref }` (selected and permitted); `type Uncertain struct { Route objects.Ref; Rule, Ref int; Reason UnknownReason }` (a cut or unknown (parent, ref), or an unknown root with `Rule == -1`)
-  - `DelegationResult` gains `Rows []Row; Signals []ParentSignal; Edges []Edge; Uncertain []Uncertain; Cap string` (`""`, `"edges"`, `"contexts"` or `"matchers"`, the first cap hit) `; ClearsDroppedStatus bool`
-  - `kgw23.Rules.Delegation` — rules §5.1 roots and contexts; §5.4 `selectTree`, `childrenFor`, `flatten` as written (both quirks, path-scoped cycle check, errors never cleared, hostnames after the fit; memoising `selectTree` per parent allowed); the three compute caps of §5.7 in the fixed order (roots by (namespace, name), rules and refs by index, children by (namespace, name)), everything after a cap `unknown`/`too-large`; owned parents no root reaches get their selection and permission rows with `unknown`/`not-reached`; context deps per §5.6. Every context is kept on its row here; Task 58 aggregates and caps retention.
+  - `type Edge struct { Parent, Child objects.Ref }`; `type Uncertain struct { Route objects.Ref; Rule, Ref int; Reason UnknownReason }` (a cut or unknown (parent, ref); an unknown root with `Rule == -1`; a route an uncertain selection might reach, with `Rule == -2`)
+  - `DelegationResult` gains `Rows []Row; Signals []ParentSignal; Reach []Edge; Uncertain []Uncertain; Cap string` (`""`, `"edges"`, `"contexts"` or `"matchers"`, the first cap hit) `; ClearsDroppedStatus bool`
+  - `kgw23.Rules.Delegation` — computed-rules §5.1 roots and contexts; §5.4 `selectTree`, `childrenFor`, `flatten` as written (both quirks, path-scoped cycle check, errors never cleared, hostnames after the fit; memoising `selectTree` per parent allowed), each context handed to the accumulator as it is produced; the three compute caps of §5.7 in the fixed order (roots by (namespace, name), rules and refs by index, children by (namespace, name)), everything after a cap `unknown`/`too-large`; owned parents no root reaches get their selection and permission rows with `unknown`/`not-reached`; context deps per §5.6
+  - The reach graph (computed-rules §8.5): `Reach` holds (route → permitted selected child) for **every** in-scope HTTPRoute with delegation refs, owned or not, kept, dropped or unreached, from selection and permission alone, so edges below a dropped non-owned route and below a context or matcher cut are present; it counts against the edge cap. An uncertain selection adds no edge: its parent, and each route it might select (`possible`, Task 55), become `Uncertain`.
 
-- [ ] **Step 1: Write the failing tests** (rules §11.2)
+- [ ] **Step 1: Write the failing tests** (computed-rules §11.2)
 
 ```go
 func TestAncestorPrunedParentMatch(t *testing.T) // R /api → P {/api, /other} → C /other/item: P→C has one context, ParentMatch /api, C dropped, path-prefix
-func TestOneChildTwoMatchesOneRule(t *testing.T)  // P {/api, /v2} → C /api/x: contexts attached (/api) and dropped (/v2)
+func TestOneChildTwoMatchesOneRule(t *testing.T)  // P {/api, /v2} → C /api/x: contexts attached (/api) and dropped (/v2); row partial
 func TestOneChildTwoRules(t *testing.T)           // rule 0 drops C, rule 1 attaches: rows (0,0,C) dropped and (1,0,C) attached
 func TestHostnameChild(t *testing.T)              // fits → rejected-hostnames; every rule fails the fit → dropped
 func TestCycle(t *testing.T)                      // A→B→A: every child row of B's ref is cycle; B's signal RefNotPermitted
@@ -1808,79 +1816,54 @@ func TestThreeLevelMergedContext(t *testing.T)    // inherit child: the grandchi
 func TestUnresolvedRef(t *testing.T)              // name of a missing route: one row, zero Child, unresolved, Note "Selects no routes"; signal BackendNotFound
 func TestComputeCaps(t *testing.T)                // Bounds{Edges: 3}, {Contexts: 2}, {Matchers: 4}: Cap names the cap; later rows unknown too-large; Uncertain lists the cut (parent, ref); two runs DeepEqual
 func TestContextDeps(t *testing.T)                // root eligibility deps + every route on the path
+func TestReachGraphIgnoresFit(t *testing.T)       // edges below a dropped non-owned route, below an unreached parent and below a context cut are in Reach
+func TestUncertainSelectionAddsNoEdges(t *testing.T) // label ref under an unknown wildcard: no Reach edge from it; the parent and every possible route are Uncertain
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Ancestor|OneChild|Hostname|Cycle|Diamond|Quirks|NotReached|ThreeLevel|Unresolved|ComputeCaps|ContextDeps'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): context-aware delegation traversal with compute bounds`.
+- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Ancestor|OneChild|Hostname|Cycle|Diamond|Quirks|NotReached|ThreeLevel|Unresolved|ComputeCaps|ContextDeps|Reach|UncertainSelection'` → FAIL.
+- [ ] **Step 3: Commit** `feat(computed): context-aware delegation traversal, compute bounds and reach graph`.
 
-### Task 57: Completeness and reach closure
+### Task 58: Completeness, final outcomes and effective projection
 
 **Files:**
-- Create: `pkg/computed/complete.go`, `pkg/computed/complete_test.go`
-
-**Interfaces:**
-- Consumes: `DelegationResult.Edges`, `.Uncertain`, `.Cap` (Task 56).
-- Produces: `type Completeness struct{...}`; `func NewCompleteness(r DelegationResult) Completeness`; `func (c Completeness) Incomplete(route objects.Ref) bool` — rules §8.5: closure from every uncertain point over `Edges` only (no fit), linear in edges; `Cap == "edges"` makes every route incomplete.
-
-- [ ] **Step 1: Write the failing tests**
-
-```go
-func TestClosureFollowsSelectionNotFit(t *testing.T) // cut at P's ref: C (dropped by the fit elsewhere) and C's child G incomplete; an unrelated route complete
-func TestEdgeCapMakesEverythingIncomplete(t *testing.T)
-func TestUnknownRootIsUncertain(t *testing.T)        // its descendants incomplete
-func TestUnknownWildcardLabelRef(t *testing.T)       // §11.2: label ref with the setting unknown above C → C incomplete
-func TestClosureIsLinear(t *testing.T)               // 50,000 edges: each visited once (test counter)
-```
-
-- [ ] **Step 2: Run** `go test ./pkg/computed -run 'Closure|EdgeCap|UnknownRoot|UnknownWildcard'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): completeness by reach closure`.
-
-### Task 58: Row aggregation, retention and projection
-
-**Files:**
-- Create: `pkg/computed/kgw23/retain.go`, `pkg/computed/kgw23/retain_test.go`
+- Create: `pkg/computed/complete.go`, `pkg/computed/complete_test.go`, `pkg/computed/kgw23/project.go`, `pkg/computed/kgw23/project_test.go`
 - Modify: `pkg/computed/delegation.go`, `pkg/computed/kgw23/rules.go`, `internal/testutil/scale.go` (`DenseSelection`)
 
 **Interfaces:**
 - Consumes: Tasks 56–57.
 - Produces:
-  - `DelegationResult.Complete Completeness` — computed once by `Delegation`, after the traversal
-  - `type EffectiveEdge struct { Parent objects.Ref; Mode string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref }` (`Mode` `"default"` or `"inherit"`); `type ChildEffective struct { Edges []EffectiveEdge; Truncated bool }`; `DelegationResult.Effective map[objects.Ref]ChildEffective`
-  - `kgw23`: `func aggregate(ctxs []computed.Context, incomplete bool) (computed.RowOutcome, computed.UnknownReason, someNotComputed bool)` — rules §5.5: all known and equal → that outcome; `attached` and `dropped` → `partial`; `attached` with unknown → `attached` and `someNotComputed`; no `attached` with unknown or `incomplete` → `unknown`, never `dropped`; `forbidden` always known
-  - Retention and projection per rules §5.7: first `ContextsPerRow` contexts per row in traversal order, `ContextsPerInstall` in total (later rows keep the outcome, no contexts, `ContextsTruncated`); per child, parent edges sorted by (namespace, name), at most `EffectiveEdges`; contexts per edge the union of the retained contexts of every row with that (parent, child), in traversal order, at most `ContextsPerEdge`; an edge with none kept at the install cap has `Contexts` non-nil empty and `ContextsTruncated`
+  - `type Completeness struct{...}`; `func NewCompleteness(r DelegationResult) Completeness`; `func (c Completeness) Incomplete(route objects.Ref) bool` — computed-rules §8.5: closure from every `Uncertain` route over `Reach`, linear in edges; `Cap == "edges"` makes every route incomplete
+  - `DelegationResult.Complete Completeness` — `Delegation` runs traversal, then `NewCompleteness`, then `accumulator.rows(Complete.Incomplete)`, then projection
+  - `type EffectiveEdge struct { Parent objects.Ref; Mode string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref }` (`Mode` `"default"` or `"inherit"`); `type ChildEffective struct { Edges []EffectiveEdge; Truncated bool }`; `DelegationResult.Effective map[objects.Ref]ChildEffective` — per child, parent edges sorted by (namespace, name), at most `EffectiveEdges`; contexts per edge the union of the retained contexts of every row with that (parent, child), in traversal order, at most `ContextsPerEdge`; an edge with none kept at the install cap has `Contexts` non-nil empty and `ContextsTruncated` (computed-rules §5.7)
   - `func DenseSelection(parents, routes int) []*unstructured.Unstructured` — `parents` wildcard parents over one namespace of `routes` HTTPRoutes, each route matching under every parent (design §9.6)
 
-- [ ] **Step 1: Write the failing tests** (rules §11.2 rows on bounds and identity)
+- [ ] **Step 1: Write the failing tests** (computed-rules §11.2 bound and identity rows; §11.5 reach row)
 
 ```go
-func TestAggregateOutcomes(t *testing.T)           // the five rules above, incl. "Dropped on the paths computed; other paths not computed"
-func TestCutAfterDropBeforeAttach(t *testing.T)    // row unknown, not dropped
+func TestClosureFollowsReach(t *testing.T)           // cut at P's ref: C (dropped by the fit elsewhere) and C's child G incomplete; an unrelated route complete
+func TestDroppedNonOwnedRouteInClosure(t *testing.T) // §11.5: a dropped non-owned route between an uncertain point and a negative aggregate → incomplete
+func TestEdgeCapMakesEverythingIncomplete(t *testing.T)
+func TestUnknownRootIsUncertain(t *testing.T)        // its descendants incomplete
+func TestUnknownWildcardLabelRef(t *testing.T)       // §11.2: label ref with the setting unknown above C → C incomplete
+func TestClosureIsLinear(t *testing.T)               // 50,000 edges: each visited once (test counter)
+func TestCutAfterDropBeforeAttach(t *testing.T)      // row unknown, not dropped
 func TestCutBeforeAnyContextAttachedComputed(t *testing.T) // row attached, SomeNotComputed ("Some paths not computed")
-func TestDenseSelectionCut(t *testing.T)           // DenseSelection(100, 1000) with DefaultBounds: Cap "edges" at 50,000 rows; the rest unknown too-large; two runs DeepEqual
-func TestContextsPerRowCap(t *testing.T)           // 21 contexts → 20 kept, ContextsTruncated, outcome from all 21
-func TestInstallContextCap(t *testing.T)           // small ContextsPerInstall: later rows keep outcomes, no contexts, truncated
-func TestEffectiveProjection(t *testing.T)         // 21 contexts on one edge → 20 + flag; an edge from two rows, one truncated → flag; an edge at the install cap → Contexts [] + flag; 21 parent edges → 20 sorted, Truncated
-func TestTwoRowsOfOneChildAreSeparate(t *testing.T) // rows (0,0,C) and (1,0,C) both present with their own outcomes
-func TestEffectiveEqualsTraversal(t *testing.T)    // each edge's EffectiveRule values are the ones its row's contexts used (reflect.DeepEqual)
+func TestDenseSelectionCut(t *testing.T)             // DenseSelection(100, 1000) with DefaultBounds: Cap "edges" at 50,000 rows; the rest unknown too-large; two runs DeepEqual
+func TestEffectiveProjection(t *testing.T)           // 21 contexts on one edge → 20 + flag; an edge from two rows, one truncated → flag; an edge at the install cap → Contexts [] + flag; 21 parent edges → 20 sorted, Truncated
+func TestEffectiveEqualsTraversal(t *testing.T)      // each edge's EffectiveRule values are the ones its row's contexts used (reflect.DeepEqual)
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Aggregate|Cut|Dense|ContextsPerRow|InstallContext|EffectiveProjection|TwoRows|EffectiveEquals'` → FAIL.
-- [ ] **Step 3: Implement;** `Delegation` runs traversal, `NewCompleteness`, then aggregation and retention.
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): delegation outcomes, retention and effective projection`.
+- [ ] **Step 2: Run** `go test ./pkg/computed/... -run 'Closure|DroppedNonOwned|EdgeCap|UnknownRoot|UnknownWildcard|Cut|Dense|EffectiveProjection|EffectiveEquals'` → FAIL.
+- [ ] **Step 3: Commit** `feat(computed): completeness, final delegation outcomes and effective projection`.
 
 ### Task 59: Report keys per version and `kgateway-2.4` views B and C
 
 **Files:**
-- Create: `pkg/computed/kgw23/keys.go`, `pkg/computed/kgw23/keys_test.go`, `pkg/computed/kgw24/{fit,select,traverse,retain,keys}.go` and their tests (copies of `kgw23`; `keys.go` differs)
+- Create: `pkg/computed/kgw23/keys.go`, `pkg/computed/kgw23/keys_test.go`, `pkg/computed/kgw24/{fit,select,accum,traverse,project,keys}.go` and their tests (copies of `kgw23`; `keys.go` differs)
 - Modify: `pkg/computed/kgw24/rules.go`
 
 **Interfaces:**
-- Produces: `func childKey(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (key computed.ReportKey, writes bool)` per rule set (rules §7): `kgw23` synthesizes `{gateway.networking.k8s.io, HTTPRoute, parent.Namespace, parent.Name}` and writes only for an empty list or a spec ref with explicit group and kind, an explicit namespace equal to the parent's and no sectionName (a port is allowed); `kgw24` uses the permitting ref as written (nil as empty) and always writes. Sets `Row.ChildKey`, `Row.WritesEntry` and each child `Context.Reporter`. `DelegationResult.ClearsDroppedStatus`: `kgw24` true; `kgw23` per Task 52.
+- Produces: `func childKey(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (key computed.ReportKey, writes bool)` per rule set (rules §7): `kgw23` synthesizes `{gateway.networking.k8s.io, HTTPRoute, parent.Namespace, parent.Name}` and writes only for an empty list or a spec ref with explicit group and kind, an explicit namespace equal to the parent's and no sectionName (a port is allowed); `kgw24` uses the permitting ref as written (`HTTPRouteView.WrittenRefs`, Task 12; omitted as empty) and always writes. Sets `Row.ChildKey`, `Row.WritesEntry` and each child `Context.Reporter`. `DelegationResult.ClearsDroppedStatus`: `kgw24` true; `kgw23` per Task 52.
 
 - [ ] **Step 1: Write the failing tests** (rules §11.3, both packages)
 
@@ -1896,7 +1879,7 @@ func TestChildKeys(t *testing.T) {
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/... -run ChildKeys` → FAIL.
-- [ ] **Step 3: Implement `kgw23/keys.go`, then copy** `fit`, `select`, `traverse`, `retain` and their tests into `kgw24`, and write `kgw24/keys.go`.
+- [ ] **Step 3: Implement `kgw23/keys.go`, then copy** `fit`, `select`, `accum`, `traverse`, `project` and their tests into `kgw24`, and write `kgw24/keys.go`.
 - [ ] **Step 4: Run** `go test ./pkg/computed/...` → PASS.
 - [ ] **Step 5: Commit** `feat(computed): report keys per version; kgateway-2.4 views B and C`.
 
@@ -1907,7 +1890,7 @@ func TestChildKeys(t *testing.T) {
 - Modify: `pkg/computed/golden_test.go` (compare `rows`, `signals`, `effective`)
 
 - [ ] **Step 1: Extend `TestRuleSetGoldens`** to compare delegation outputs; run → FAIL (no fixtures).
-- [ ] **Step 2: Write the fixtures.** With kgateway provenance at both tags (expected outcomes: a child whose routes appear in the output's `Routes` is attached; the output's route status gives the child-entry and parent signals): `delegation/{basic,basic_invalid_hostname,basic_parentref_match,basic_parentref_mismatch,child_rule_matcher,cyclic1,cyclic2,discard_invalid_child_matches,inherit_parentref,invalid_child_valid_standalone,label_based,multiple_children,multiple_parents,multi_level_multiple_parents,nested_absolute_relative,relative_paths,unresolved_ref}.yaml`; in `kgateway-2.4` only `delegation/basic_parentref_match_same_namespace.yaml@v2.4.7`. Every other §11.2 and §11.3 row gets a case citing its rules section, marked `e2e` where design §9.5 runs it; the bound cases use `bounds:` overrides and `ruleOnly: true`.
+- [ ] **Step 2: Write the fixtures.** With kgateway provenance at both tags (expected outcomes: a child whose routes appear in the output's `Routes` is attached; the output's route status gives the child-entry and parent signals): `delegation/{basic,basic_invalid_hostname,basic_parentref_match,basic_parentref_mismatch,child_rule_matcher,cyclic1,cyclic2,discard_invalid_child_matches,inherit_parentref,invalid_child_valid_standalone,label_based,multiple_children,multiple_parents,multi_level_multiple_parents,nested_absolute_relative,relative_paths,unresolved_ref}.yaml`; in `kgateway-2.4` only `delegation/basic_parentref_match_same_namespace.yaml@v2.4.7`. Every other §11.2 and §11.3 row gets a case citing its rules section, marked `e2e` where design §9.5 runs it; the bound cases use `bounds:` (Task 40's field). Three of them stay in the API matrix (not `ruleOnly`): a cut after a dropping context, a row with no contexts kept at the install cap, and a context with a hidden dependency.
 - [ ] **Step 3: Run** `go test ./pkg/computed/...` → PASS. A mismatch with a kgateway output is a rules bug: STOP and report it, never edit the expectation to pass.
 - [ ] **Step 4: Commit** `test(computed): per-version delegation fixtures with provenance`.
 
@@ -1917,7 +1900,7 @@ func TestChildKeys(t *testing.T) {
 - Modify: `pkg/computed/check.go`, `pkg/computed/fingerprint.go`, `pkg/computed/check_test.go`, `pkg/computed/fingerprint_test.go`
 
 **Interfaces:**
-- Consumes: Tasks 56–59.
+- Consumes: Tasks 56–59; `DelegationResult.Complete` (Task 58).
 - Produces:
   - `KindChildEntry`, `KindParentResolvedRefs`
   - `func CheckDelegation(install string, sel Selection, in DelegationInput, r *DelegationResult, c Completeness) []CheckResult` — rules §8.1–§8.5 for both kinds: aggregation per report key over every row, context and root; a negative expectation on an incomplete subject is `ClassUnknown`, note "Not all paths computed"; a 2.3 row with `WritesEntry` false is `ClassNotObservable` (`not-verified`); a current entry nobody expects is `ClassUnexpected` with `Verified = r.ClearsDroppedStatus` for a matcher drop and false for `forbidden`; the parent's reason is compared only when complete, single, and P has no non-delegation backendRef and no `ExtensionRef` filter; `Contributors` = child, P and every route on a contributing path; `ParentCurrent` = P's entry under its reporter key is current; sets `Row.Unconfirmable` when the aggregated signal cannot confirm the row's own outcome ("Status cannot confirm this path")
@@ -1948,9 +1931,7 @@ func TestDelegationFingerprints(t *testing.T) {
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/computed -run 'ChildEntry|AncestorPruned|AttachedChild|RejectedHostnames|Parent|Truncated|ComputedAttached|StaleChild|ForbiddenEntry|NoEntry|23Child|Unconfirmable|DelegationFingerprints'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** → PASS.
-- [ ] **Step 5: Commit** `feat(computed): child-entry and parent-resolvedrefs cross-checks with completeness`.
+- [ ] **Step 3: Commit** `feat(computed): child-entry and parent-resolvedrefs cross-checks with completeness`.
 
 ### Task 62: KGWUI-011 computed and orphan triggers; delegation in the engine
 
@@ -1962,6 +1943,8 @@ func TestDelegationFingerprints(t *testing.T) {
 - Produces:
   - `KindDelegatedNotAttached` per (route, parent) and `KindOrphan` per route, from `CheckDelegation`, with `Class` `ClassTrigger = "trigger"` (our call: rules §8.3 has no class for them): `Candidate()` includes it, `persistence.step` matures it at `since + Window`, and its `State` stays `checked`, so it never makes a check pending. Predicates: design §6.2 and rules §9.3, exactly (computed trigger: in scope, no eligible entry, selected by the parent's `name` or `label` ref, every context `dropped` or `forbidden`, complete; orphan: empty `spec.parentRefs`, no eligible entry, selected only by `wildcard` refs of owned parents, every selecting row in every context `dropped` or `forbidden`, every selecting parent complete)
   - `Views.Delegation DelegationResult`; the engine calls `CheckDelegation(id, sel, in, &res, res.Complete)`
+  - `engine.Config.DelegationBounds computed.Bounds` (zero: `computed.DefaultBounds`) — set from a fixture's `bounds` by the API matrix (Task 65)
+  - both KGWUI-011 kinds take `Since` from the persistence step (rules §9.3 step 4)
   - the install's computed summary (rules §5.7): the engine logs `DelegationResult.Cap` once per distinct value, as it logs install rejections (`engine.go:157-164`); no wire field exists for it
   - engine `graceEnd(c)` = the latest `firstSeen` of `c.Contributors` + `health.Grace` for `child-entry`, zero otherwise
   - `func computedTriggerFindings(in Input) []Finding` in `delegation.go` — one KGWUI-011 warning per mature `delegated-not-attached`, merged into the status-trigger finding of the same (route, parent) by appending the computed reason; one per mature orphan, detail "No parent route in this install keeps this route, and it has no parentRefs of its own." (draft); `Evidence` = `Deps`
@@ -1975,7 +1958,7 @@ func TestMatcherDroppedEntryLeftDisagrees(t *testing.T)         // §11.4 row 12
 func TestChildResolvedRefsToggleNoReset(t *testing.T)           // §11.5 row 4
 func TestParentAcceptedChangeNoReset(t *testing.T)              // row 5
 func TestInheritAnnotationResets(t *testing.T)                  // row 6: False/BackendNotFound → no failure, observed False/RefNotPermitted; the old window does not carry over
-func TestComputedKGWUI011(t *testing.T)                         // row 12: warning at 30 s; before it no finding and every required check unchanged
+func TestComputedKGWUI011(t *testing.T)                         // row 12, safety interval 10 min: warning at exactly 30 s by the deadline; before it no finding and every required check unchanged
 func TestOrphanWarningAfter30s(t *testing.T)                    // row 13: one per route
 func TestOrphanIncompleteNoFinding(t *testing.T)                // row 14: a selecting parent cut by a bound; one in a reach closure
 func TestRouteWithParentRefsNoOrphan(t *testing.T)              // row 15
@@ -1983,13 +1966,13 @@ func TestOrphanAttachedByAnotherParent(t *testing.T)            // row 16
 func TestNewSelectingParentResetsOrphan(t *testing.T)           // row 17
 func TestOrphanCycleNoFinding(t *testing.T)                     // row 18
 func TestOrphanAlsoLabelSelected(t *testing.T)                  // row 19: only the per-parent finding for the label parent
+func TestKGWUI011SinceIsWindowStart(t *testing.T)               // §11.5: computed and orphan findings carry their window start
 func TestKGWUI011OnePerRouteParent(t *testing.T)                // status and computed triggers on one pair → one finding with the computed reason
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed ./pkg/engine ./pkg/health -race -run 'ChildEntryMatures|StaleParent|MatcherDropped|ToggleNoReset|ParentAccepted|InheritAnnotation|ComputedKGWUI011|Orphan|RouteWithParentRefs|NewSelecting|OnePerRouteParent'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/... -race` → PASS (goldens aside).
-- [ ] **Step 5: Commit** `feat(health): KGWUI-011 computed and orphan triggers; delegation checks in the engine (Q15)`.
+- [ ] **Step 2: Run** `go test ./pkg/computed ./pkg/engine ./pkg/health -race -run 'ChildEntryMatures|StaleParent|MatcherDropped|ToggleNoReset|ParentAccepted|InheritAnnotation|ComputedKGWUI011|Orphan|RouteWithParentRefs|NewSelecting|SinceIsWindowStart|OnePerRouteParent'` → FAIL.
+- [ ] **Step 3: Run** `go test ./pkg/... -race` → PASS (goldens aside).
+- [ ] **Step 4: Commit** `feat(health): KGWUI-011 computed and orphan triggers; delegation checks in the engine (Q15)`.
 
 ### Task 63: Explorer index for views B and C
 
@@ -2005,7 +1988,7 @@ func TestKGWUI011OnePerRouteParent(t *testing.T)                // status and co
   - `FlagDropped` (wire `dropped`: a row selected by an owned parent is `dropped`, `forbidden` or `rejected-hostnames`); `RouteRow.DroppedDeps DepSet`
   - `CandidateSelected CandidateReason = "selected"` with `By` the first selecting parent; a no-parent row selected by an owned parent gets a detail link
   - `Index.DelegationCap string`
-  - `type DelegationQuery struct { Rule, Ref *int; Outcomes []computed.RowOutcome; Limit int; Cursor string }`; `func (ix *Index) QueryDelegation(parent objects.Ref, q DelegationQuery, visible func(objects.Ref) bool) (Page, error)` — `Page.IDs` index `DelegRows`; cursor JSON `{"s":"delegation","d":"asc","b":before,"r":[rule,ref],"t":[ns,name,group,kind]}` (design §3.6), same 1 KiB cap; an object-list cursor is `ErrBadCursor`
+  - `type DelegationQuery struct { Rule, Ref *int; Outcomes []computed.RowOutcome; Limit int; Cursor string }`; `func (ix *Index) QueryDelegation(parent objects.Ref, q DelegationQuery, visible func(objects.Ref) bool) (Page, error)` — `Page.IDs` index `DelegRows`; cursor JSON `{"s":"delegation","d":"asc","b":before,"r":[rule,ref],"t":[ns,name,group,kind]}` (design §3.6), same 1 KiB cap; an object-list cursor is `ErrBadCursor`; an `outcome` filter and `state=dropped` match a row only when `visible` holds for every ref of its `Deps`, before `Total` and paging (design §7.4 rule 4a); a zero-`Child` row is never dropped for child visibility
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2017,12 +2000,13 @@ func TestDelegationFilters(t *testing.T)                    // rule, ref, outcom
 func TestFlagDropped(t *testing.T)
 func TestSelectedAdmission(t *testing.T)                    // selected no-parent route: "selected", By, detail; unselected no-parent: yaml
 func TestRefRows(t *testing.T)
+func TestOutcomeFilterUsesVisibleDeps(t *testing.T) // a dropped row under a hidden ancestor: not matched by outcome=dropped, not in Total; listed unfiltered as restricted
+func TestUnresolvedRowSurvivesAuthorization(t *testing.T)
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/explore -run 'Delegation|FlagDropped|SelectedAdmission|RefRows'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/explore ./internal/boundary` → PASS.
-- [ ] **Step 5: Commit** `feat(explore): delegation rows, effective edges and the selected candidate`.
+- [ ] **Step 2: Run** `go test ./pkg/explore -run 'Delegation|FlagDropped|SelectedAdmission|RefRows|OutcomeFilter|UnresolvedRow'` → FAIL.
+- [ ] **Step 3: Run** `go test ./pkg/explore ./internal/boundary` → PASS.
+- [ ] **Step 4: Commit** `feat(explore): delegation rows, effective edges and the selected candidate`.
 
 ### Task 64: API: the delegation endpoint, effective matchers, and authorization of contexts and evidence
 
@@ -2053,12 +2037,12 @@ func TestHiddenAncestorEvidence(t *testing.T) // design §9.1 (2.4): KGWUI-012 o
 func TestDelegationCountsRecounted(t *testing.T)
 func TestDroppedRouteWithGatewayParentShown(t *testing.T) // §11.5 row 15: Delegation row with its reason; no KGWUI-011
 func TestHealthUnchangedUnderDelegationRestriction(t *testing.T)
+func TestOutcomeFilterCannotProbe(t *testing.T) // design §9.1: outcome=dropped under a hidden ancestor and state=dropped give the rows and total of the unknown case
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/api -run 'Delegation|Effective|HiddenRoot|StatusRoot|HiddenAncestor|DroppedRoute'` → FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `go test ./pkg/api -race` → PASS except goldens (Task 65).
-- [ ] **Step 5: Commit** `feat(api): delegation endpoint and effective matchers with dependency-based authorization`.
+- [ ] **Step 2: Run** `go test ./pkg/api -run 'Delegation|Effective|HiddenRoot|StatusRoot|HiddenAncestor|DroppedRoute|CannotProbe'` → FAIL.
+- [ ] **Step 3: Run** `go test ./pkg/api -race` → PASS except goldens (Task 65).
+- [ ] **Step 4: Commit** `feat(api): delegation endpoint and effective matchers with dependency-based authorization`.
 
 ### Task 65: Goldens for 2.4 and the matrix through the handlers
 
@@ -2067,7 +2051,7 @@ func TestHealthUnchangedUnderDelegationRestriction(t *testing.T)
 - Regenerate: `route-detail.json` (effective in both modes, an edge with `contextsTruncated`, an edge with `contexts: []` at the install cap), `routes.json` (`dropped` flag), `route-detail-candidate.json` (`selected`)
 - Modify: `pkg/api/golden_test.go`, `pkg/api/computed_test.go` (`TestDelegationMatrixThroughAPI`)
 
-- [ ] **Step 1: Write `TestDelegationMatrixThroughAPI`** as Task 45's, over the delegation fixtures without `ruleOnly`: row outcomes, `computed.state` and coverage, child-entry and parent checks, KGWUI-011 and KGWUI-012 outcomes.
+- [ ] **Step 1: Write `TestDelegationMatrixThroughAPI`** as Task 45's, over the delegation fixtures without `ruleOnly`, including the three bound cases run with their `bounds` through `engine.Config.DelegationBounds`: row outcomes, `contextsTruncated`, `effectiveTruncated`, `contexts: []`, `computed.state` and coverage, child-entry and parent checks, KGWUI-011 and KGWUI-012 outcomes.
 - [ ] **Step 2: Add the golden cases and run** `go test ./pkg/api -run 'Golden|DelegationMatrix'` → FAIL.
 - [ ] **Step 3: Regenerate** with `-update`; read every changed file; additive and link-agreement tests pass.
 - [ ] **Step 4: Commit** `test(api): delegation goldens and the rules matrix through the handlers`.
@@ -2096,8 +2080,7 @@ it("a selected route's candidate banner names its parent", ...);
 
 - [ ] **Step 2: Run** `cd web && npx vitest run packages/shell/src/pages/explore packages/shell/src/api` → FAIL.
 - [ ] **Step 3: Implement.** Each ref is one paged list fetched when expanded (design §5.3).
-- [ ] **Step 4: Run** the web gates → PASS.
-- [ ] **Step 5: Commit** `feat(shell): Delegation tab and effective matches`.
+- [ ] **Step 4: Commit** `feat(shell): Delegation tab and effective matches`.
 
 ### Task 67: Wording pass for 2.4
 
@@ -2133,18 +2116,19 @@ it("a selected route's candidate banner names its parent", ...);
 
 **Files:**
 - Create: `docs/phases/phase-2/phase-2.4-complete.md`, `docs/phases/phase-2/reviews/2.4-codex.md`
-- Modify: `README.md` (Upgrade notes: KGWUI-011 computed and orphan triggers, the Delegation tab), `docs/phase-status.md`, `docs/phases/phase-2/design.md` and `computed-rules.md` (only where the code deviates)
+- Modify: `README.md` (Upgrade notes: KGWUI-011 computed and orphan triggers, the Delegation tab), `docs/phase-status.md`, `docs/roadmap.md`, `docs/phases/phase-2/design.md` and `computed-rules.md` (only where the code deviates)
 
-- [ ] **Step 1: Run the gates** of Task 10 Step 1 plus `make bench`; paste outputs into the record.
+- [ ] **Step 1: Run the gates** of Task 10 plus `make bench`; paste outputs into the record.
 - [ ] **Step 2: Request the cross-model review**
 
 ```bash
-codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.4-codex.md "Review sub-phase 2.4 of the kgateway UI (diff <base>..HEAD) against docs/phases/phase-2/computed-rules.md §3, §5-9, §11.2-11.5 and design §5, §6.2, §7.1-7.4. Focus: traversal fidelity incl. ancestor context, both quirks and path-scoped cycles; bounds never turn a missing path into a negative; completeness and the orphan rule; report keys per version; aggregation per report key; fingerprints; restricted contexts never reveal a hidden path; delegation cursors; fixture provenance. Test, e2e and bench output: <paste>. Rank findings P1-P4 with file:line." < /dev/null
+codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.4-codex.md "Review sub-phase 2.4 of the kgateway UI (diff $BASE..HEAD) against docs/phases/phase-2/computed-rules.md §3, §5-9, §11.2-11.5 and design §5, §6.2, §7.1-7.4. Focus: traversal fidelity incl. ancestor context, both quirks and path-scoped cycles; bounds never turn a missing path into a negative; completeness and the orphan rule; report keys per version; aggregation per report key; fingerprints; restricted contexts never reveal a hidden path; delegation cursors; fixture provenance. Test, e2e and bench output: <paste>. Rank findings P1-P4 with file:line." < /dev/null
 ```
 
 - [ ] **Step 3: Triage** every finding; fix accepted ones with tests; rerun the gates.
-- [ ] **Step 4: Write `phase-2.4-complete.md`** (Summary, Reviews, wording-pass choices, Waivers, Deliverables, benchmark table vs 2.3 with the dense-selection numbers, ui-loop recordings, release note) and update `docs/phase-status.md` (sub-phase none; next: the Phase 2 cross-model review and exit gates).
-- [ ] **Step 5: Commit** `docs: close sub-phase 2.4`.
+- [ ] **Step 4: Write `phase-2.4-complete.md`** (Summary, Reviews, wording-pass choices, Waivers, Deliverables, benchmark table vs 2.3 with the dense-selection numbers, ui-loop recordings, release note) and update `docs/phase-status.md` (`## Sub-phase` none; next: the Phase 2 cross-model review and exit gates) and `docs/roadmap.md` (2.4 shipped).
+- [ ] **Step 5: Write the README upgrade notes:** KGWUI-011 now also fires when a parent's ref drops a route on every path, and for orphans; the Delegation tab and effective matches are computed, labelled and cross-checked.
+- [ ] **Step 6: Commit** `docs: close sub-phase 2.4`.
 
 ---
 
@@ -2157,15 +2141,23 @@ Each matrix row has a rule-level test in the named task, a fixture in Task 40 or
 | §11.1 | kinds, namespaces, `NoMatchingParent` quirk, hostnames, two refs, Gateway vs ListenerSet refs, no status, experimental | 38, 39; e2e rows 50 |
 | §11.1 | Namespace access unavailable | 39, 44 |
 | §11.1 | refs differing only by port | 41 |
+| §11.4 | inconclusive cases (non-attachment reason, shared key), omitted vs explicit namespace | 41 |
 | §11.1 | 2.4 isolation note | 40 |
 | §11.2 | selection modes, wildcard setting, permission | 55 |
-| §11.2 | ancestor-pruned, two matches, two rules, hostname child, cycle, diamond, quirks, not reached, three levels | 56; checks 61; e2e rows 69 |
-| §11.2 | dense selection, context caps, effective edges, cuts, two rows of one child, effective equals traversal | 58; API 64; benchmark 68 |
-| §11.2 | label ref with an unknown wildcard | 57, 61 |
+| §11.2 | ancestor-pruned, two matches, two rules, hostname child, cycle, diamond, quirks, not reached, three levels | 57; checks 61; e2e rows 69 |
+| §11.2 | two rows of one child | 56, 63 |
+| §11.2 | context caps | 56 |
+| §11.2 | dense selection, effective edges, cuts, effective equals traversal | 58; API 64, 65; benchmark 68 |
+| §11.2 | label ref with an unknown wildcard | 55, 57, 58, 61 |
 | §11.2 | root behind a hidden Namespace, status root denied | 64 |
 | §11.2 | default fit, inherit | 54 |
 | §11.3 | all rows | 59; port-only e2e 69 |
 | §11.4 | listener count, `NoMatchingParent`, TCP conflict, top-level replaced rule | 41, 42 |
 | §11.4 | child and parent rows; effective matcher | 61, 62; 64; e2e 69 |
-| §11.5 | rows 1–4 (route-accepted), 7–10 | 42 |
+| §11.5 | rows 1–3, 4 (route-accepted, via 41's fingerprint test), 7–10 | 42 |
 | §11.5 | rows 4 (child), 5, 6, 11–19 | 62; row 15's Delegation row 64 |
+| §11.5 | finding `since` is the window start | 42, 62 |
+| §11.5 | dropped non-owned route in the reach closure | 57, 58 |
+| §11.5 | unresolved row with no child | 56, 57, 63 |
+| §11.5 | explicit `matches: []` (`no-matches`) | 54 |
+| §11.5 | unparsable boolean setting | 36 |
