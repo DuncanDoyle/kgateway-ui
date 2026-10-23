@@ -69,6 +69,16 @@ test("Gateway, failed route, its parent and back up the chain", async ({ page })
   );
   await shot(page, "failed-child");
 
+  // An implicit child (empty parentRefs) shows the same rejection on its implicit parent's card.
+  const implicitFailure = await failing(page, "shop/c-ihost", "shop/store");
+  await page.goto(`${install}/routes/gateway.networking.k8s.io/HTTPRoute/shop/c-ihost`);
+  await expect(page.getByRole("article", { name: routeCopy.implicitParentCard("shop/store") })).toContainText(
+    implicitFailure.reason,
+  );
+  await shot(page, "implicit-child");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/c-host$/);
+
   // Up the chain: the child's parent, then the parent's Gateway.
   const chain = page.getByRole("navigation", { name: routeCopy.upChain });
   await chain.getByRole("link", { name: "shop/store" }).click();

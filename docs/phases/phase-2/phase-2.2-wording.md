@@ -83,6 +83,8 @@ The final copy of the explorer pages and the 2.2 server text (design §8.8). SPA
 | S70 | Allows no parent route | parentRefs naming no route |
 | S71 | No status from this install's controllers. | Parent card without own entry |
 | S72 | Other controllers (N) | Collapsed other entries |
+| S97 | Implicit parent | Card for a status entry when parentRefs is empty (label `Implicit parent <ns/name>`) |
+| S98 | Not in parentRefs | Card for a status entry no spec parentRef names (label `Parent <ns/name>, not in parentRefs`) |
 | S73 | A backend may be missing, or a delegation ref may select no route. | Under `ResolvedRefs=False BackendNotFound` on a route with a delegation ref |
 | S74 | No parentRefs. | Route with no parentRefs |
 | S75 | No rules. | Route with no rules |

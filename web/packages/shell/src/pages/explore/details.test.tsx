@@ -124,6 +124,36 @@ it("Gateway page shows status-only listener counts", async () => {
   expect(screen.getByText("kgateway")).toBeInTheDocument();
 });
 
+/** Every health icon in the document: on a stale page all of them read unknown (design §6.3). */
+const iconStates = () =>
+  Array.from(document.querySelectorAll('[data-testid^="health-icon-"]')).map((e) =>
+    e.getAttribute("data-testid")?.replace("health-icon-", ""),
+  );
+const old = () => new Date(Date.now() - 10 * 60_000).toISOString();
+
+it("stale Gateway data turns every state on the page unknown", async () => {
+  // Only the detail is stale; the sub-lists are fresh and still follow the page.
+  serve(api({ gateway: { ...gateway(), collectedAt: old() } }));
+  mount(GW_PATH);
+  const attached = await screen.findByRole("table", { name: "Attached routes" });
+  await waitFor(() => expect(attached).toHaveAttribute("aria-busy", "false"));
+  await screen.findByText(/Data is stale/);
+  expect(within(screen.getByTestId("detail-header")).getByText("Unknown")).toBeInTheDocument();
+  expect(within(rowOf(table("Listeners"), "http")).getByText("Unknown")).toBeInTheDocument();
+  expect(iconStates().length).toBeGreaterThan(3);
+  expect(new Set(iconStates())).toEqual(new Set(["unknown"]));
+});
+
+it("stale ListenerSet data turns every state on the page unknown", async () => {
+  serve(api({ ls: { ...ls(lsInvalidGolden), collectedAt: old() } }));
+  mount(LS_PATH("partial"));
+  await screen.findByText(/Data is stale/);
+  await screen.findByRole("table", { name: "Listeners" });
+  expect(within(screen.getByTestId("detail-header")).getByText("Unknown")).toBeInTheDocument();
+  expect(iconStates().length).toBeGreaterThan(1);
+  expect(new Set(iconStates())).toEqual(new Set(["unknown"]));
+});
+
 it("a stale condition says which generation it describes", async () => {
   const g = gateway();
   g.generation = 2;
@@ -413,6 +443,30 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
           `${el.textContent || el.getAttribute("aria-label")} ${pseudo}`,
         ).toBeGreaterThan(0);
   });
+});
+
+it("below 900 px listener names keep their words: hostname moves out and long names truncate", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q.includes("max-width: 899px"),
+    media: q,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  serve(api());
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  const headers = within(listeners)
+    .getAllByRole("columnheader")
+    .map((h) => h.textContent);
+  expect(headers).not.toContain("Hostname");
+  const name = within(rowOf(listeners, "https")).getByText("https");
+  expect(name).toHaveAttribute("title", "https");
+  expect(getComputedStyle(name).whiteSpace).toBe("nowrap");
+  expect(getComputedStyle(name).textOverflow).toBe("ellipsis");
+  await userEvent.click(within(rowOf(listeners, "http")).getByRole("button", { name: /Show conditions/ }));
+  const details = screen.getByTestId("listener-http-details");
+  expect(within(details).getByText("Hostname")).toBeInTheDocument();
+  expect(details).toHaveTextContent("Any hostname");
 });
 
 it("below 900 px the listener table moves TLS and allowed routes into the expanded row", async () => {

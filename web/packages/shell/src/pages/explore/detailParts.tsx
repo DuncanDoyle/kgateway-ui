@@ -2,6 +2,8 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
+import { useNow } from "../../api/clock";
+import { isStale } from "../../api/hooks";
 import type { Candidate, LinkedRef, Page } from "../../api/types";
 import { detailCopy, listCopy } from "../../copy/explorer";
 import { CandidateBanner } from "../../explore/CandidateBanner";
@@ -9,6 +11,7 @@ import { CopyCommandButton } from "../../explore/CopyCommandButton";
 import { DetailTabs } from "../../explore/DetailTabs";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
+import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
@@ -126,6 +129,9 @@ export function DetailFrame({ installId, refValue, noun, data, error, children, 
   const [params, update] = useUrlParams();
   const tab = params.get("tab") === "yaml" ? "yaml" : "overview";
   const errorTitle = listCopy.cannotLoad(noun);
+  const now = useNow();
+  // Stale data or a failed poll turns every state on the page unknown, as on the lists (design §6.3).
+  const stale = !!data && (!!error || isStale(data.collectedAt, now));
   // A hidden object 404s as an absent one does (D-013).
   if (error?.status === 404 && !data)
     return (
@@ -155,29 +161,31 @@ export function DetailFrame({ installId, refValue, noun, data, error, children, 
     </Skeleton>
   );
   return (
-    <Frame stylesOverride={stylesOverride}>
-      {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
-      {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
-      <header data-testid="detail-header">
-        <h1>
-          <span className="kind">{refValue.kind}</span>
-          <ResourceName namespace={refValue.namespace} name={refValue.name} />
-        </h1>
-        <CopyNameButton resource={refValue} />
-        <CopyCommandButton refValue={refValue} />
-        {data ? <HealthBadge state={data.health} /> : null}
-        <span className="spacer" />
-        {data ? <DataAge collectedAt={data.collectedAt} /> : null}
-      </header>
-      <DetailTabs
-        label={detailCopy.views(refValue.kind)}
-        tabs={TABS}
-        selected={tab}
-        onSelect={(t) => update({ tab: t === "yaml" ? t : null })}
-      >
-        {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
-      </DetailTabs>
-    </Frame>
+    <StaleView.Provider value={stale}>
+      <Frame stylesOverride={stylesOverride}>
+        {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
+        {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
+        <header data-testid="detail-header">
+          <h1>
+            <span className="kind">{refValue.kind}</span>
+            <ResourceName namespace={refValue.namespace} name={refValue.name} />
+          </h1>
+          <CopyNameButton resource={refValue} />
+          <CopyCommandButton refValue={refValue} />
+          {data ? <HealthBadge state={data.health} /> : null}
+          <span className="spacer" />
+          {data ? <DataAge collectedAt={data.collectedAt} /> : null}
+        </header>
+        <DetailTabs
+          label={detailCopy.views(refValue.kind)}
+          tabs={TABS}
+          selected={tab}
+          onSelect={(t) => update({ tab: t === "yaml" ? t : null })}
+        >
+          {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
+        </DetailTabs>
+      </Frame>
+    </StaleView.Provider>
   );
 }
 

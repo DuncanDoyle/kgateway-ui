@@ -186,6 +186,11 @@ export const routeCopy = {
   allowsNone: "Allows no parent route", // S70
   parents: "Parents",
   parentCard: (name: string) => `Parent ${name}`,
+  // Status entries no spec parentRef names: an implicit parent (empty parentRefs) or a leftover entry.
+  implicitParent: "Implicit parent", // S97
+  implicitParentCard: (name: string) => `Implicit parent ${name}`,
+  notInParentRefs: "Not in parentRefs", // S98
+  notInParentRefsCard: (name: string) => `Parent ${name}, not in parentRefs`,
   section: "Section",
   port: "Port",
   noOwnStatus: "No status from this install's controllers.", // S71

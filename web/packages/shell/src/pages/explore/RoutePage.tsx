@@ -3,7 +3,7 @@ import styled from "@emotion/styled";
 import { useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { useRouteDetail } from "../../api/exploreHooks";
-import type { LinkedRef, RouteDetail } from "../../api/types";
+import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
 import { detailCopy, routeCopy } from "../../copy/explorer";
 import { useInstallId } from "../../shell/extension";
 import { DetailFrame, Facts, Section } from "./detailParts";
@@ -36,6 +36,18 @@ function permissionText(d: RouteDetail) {
   return routes.length ? routeCopy.allows(routes) : routeCopy.allowsNone;
 }
 
+const refKey = (p: ParentRef) => [p.group, p.kind, p.namespace, p.name, p.sectionName, p.port].join("/");
+
+/** Status entries' refs that no spec parentRef names, once each: a child's implicit parent (design §5.1). */
+function unlistedRefs(d: RouteDetail): ParentRef[] {
+  const out: ParentRef[] = [];
+  for (const s of d.parents) {
+    const p = s.parentRef;
+    if (!d.parentRefs.some((r) => sameParentRef(r, p)) && !out.some((r) => sameParentRef(r, p))) out.push(p);
+  }
+  return out;
+}
+
 // region Component
 interface RoutePageProps {
   stylesOverride?: SerializedStyles;
@@ -48,6 +60,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
   const ref = useMemo<LinkedRef>(() => ({ group, kind, namespace: ns, name, link: "detail" }), [group, kind, ns, name]);
   const { data, error } = useRouteDetail(id, ref);
   const hasDelegation = !!data?.rules.some((r) => r.backendRefs.some((b) => b.delegation));
+  const unlisted = useMemo(() => (data ? unlistedRefs(data) : []), [data]);
   return (
     <DetailFrame
       installId={id}
@@ -70,18 +83,29 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
           </Section>
           <Section aria-labelledby="route-parents">
             <h2 id="route-parents">
-              {routeCopy.parents} <span className="note">{data.parentRefs.length}</span>
+              {routeCopy.parents} <span className="note">{data.parentRefs.length + unlisted.length}</span>
             </h2>
-            {data.parentRefs.length ? (
+            {data.parentRefs.length || unlisted.length ? (
               <Cards>
                 {data.parentRefs.map((p) => (
                   <ParentCard
-                    key={[p.group, p.kind, p.namespace, p.name, p.sectionName, p.port].join("/")}
+                    key={refKey(p)}
                     installId={id}
                     parentRef={p}
                     entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
                     generation={data.generation}
                     hasDelegation={hasDelegation}
+                  />
+                ))}
+                {unlisted.map((p) => (
+                  <ParentCard
+                    key={`status/${refKey(p)}`}
+                    installId={id}
+                    parentRef={p}
+                    entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
+                    generation={data.generation}
+                    hasDelegation={hasDelegation}
+                    origin={data.parentRefs.length ? "unlisted" : "implicit"}
                   />
                 ))}
               </Cards>

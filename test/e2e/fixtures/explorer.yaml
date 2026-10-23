@@ -164,6 +164,8 @@ spec:
       backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-cycle, namespace: shop }]
     - matches: [{ path: { type: PathPrefix, value: /store/nons } }]
       backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-nons, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/ihost } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-ihost, namespace: shop }]
 ---
 # Name child with an explicit parentRef.
 apiVersion: gateway.networking.k8s.io/v1
@@ -218,6 +220,14 @@ metadata:
   annotations: { delegation.kgateway.dev/inherit-parent-matcher: "true" }
 spec:
   rules: [{ matches: [{ path: { type: PathPrefix, value: /x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# The same rejection on an implicit child (empty parentRefs): its page shows the implicit parent's card.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-ihost, namespace: shop, labels: { e2e: explorer } }
+spec:
+  hostnames: [ihost.example.com]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/ihost/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
 ---
 # Cycle: the first rule delegates to itself.
 apiVersion: gateway.networking.k8s.io/v1

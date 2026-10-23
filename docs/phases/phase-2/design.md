@@ -737,7 +737,7 @@ The engine takes a clock, a trigger source and a snapshot source that can pause 
 ### 9.5 kind e2e
 
 Fixtures run on kgateway 2.3.11 and 2.4.7 in the existing matrix, added per sub-phase:
-- 2.2: a Gateway with three listeners (HTTP, HTTPS with a wildcard hostname, TCP) and a `Selector` allowedRoutes; routes rejected with each of the three reasons; a ListenerSet with one invalid listener and a denied one; a delegation tree (name child, label child, wildcard parent, forbidden child, header-mismatch child); a child with hostnames; an inherit-parent-matcher child; a cycle; a static and an invalid `Backend`; a replaced rule.
+- 2.2: a Gateway with three listeners (HTTP, HTTPS with a wildcard hostname, TCP) and a `Selector` allowedRoutes; routes rejected with each of the three reasons; a ListenerSet with one invalid listener and a denied one; a delegation tree (name child, label child, wildcard parent, forbidden child, header-mismatch child); a child with hostnames; an inherit-parent-matcher child; a cycle; a static and an invalid `Backend`; a replaced rule. `NotAllowedByListeners` needs a namespace no listener admits: kgateway checks allowedRoutes across listeners before the section name, so a disallowed section alone gives `NoMatchingParent` (`v2.4.7 pkg/kgateway/query/route.go:446-540`).
 - 2.3: the `sectionName` quirk; two parentRefs to one listener.
 - 2.4: the controller-backed cases of `computed-rules.md` §11, marked **e2e**: an ancestor-pruned parent match; one child attached through one parent match and dropped through another; an attached child with a missing Service backend; a 2.3 child whose parentRef sets only a port.
 

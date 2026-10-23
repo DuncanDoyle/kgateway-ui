@@ -528,9 +528,15 @@ func TestExplorerShowsControllerStatus(t *testing.T) {
 				t.Errorf("%s: the controller reports an edge to shop/store", id)
 			}
 		}
-		for _, id := range []string{"shop/c-name", "shop/c-label", "deleg/c-wild", "shop/c-host", "shop/c-inherit", "shop/c-cycle"} {
+		for _, id := range []string{"shop/c-name", "shop/c-label", "deleg/c-wild", "shop/c-host", "shop/c-ihost", "shop/c-inherit", "shop/c-cycle"} {
 			if !reportedEdge(w.routes[id], store) {
 				t.Errorf("%s: no reported edge to shop/store", id)
+			}
+		}
+		for _, id := range []string{"shop/c-host", "shop/c-ihost"} {
+			e := ourEntry(w.routes[id], objects.ParentRef{Group: gwGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "store"})
+			if e == nil || findCond(e.Conditions, "Accepted") == nil || findCond(e.Conditions, "Accepted").Status != "False" {
+				t.Errorf("%s: want Accepted=False from shop/store, controller wrote %+v", id, e)
 			}
 		}
 		if !declared(w.routes["deleg/c-forbidden"], routeRef("shop/c-name")) {

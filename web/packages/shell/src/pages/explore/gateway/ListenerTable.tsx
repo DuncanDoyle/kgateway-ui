@@ -1,12 +1,13 @@
 import { css, type SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useContext, useState } from "react";
 import type { AllowedRoutes, LabelSelector, Listener } from "../../../api/types";
 import { columnCopy, detailCopy, listCopy, listenerCopy } from "../../../copy/explorer";
 import { ConditionList, conditionState } from "../../../explore/ConditionList";
 import { TableFrame, TableStyles } from "../../../explore/ObjectTable";
 import { HealthIcon } from "../../../health/HealthIcon";
+import { StaleView } from "../../../health/staleView";
 import { stateLabel } from "../../../health/state";
 import { ResourceName } from "../../../resource/ResourceName";
 import { useMedia } from "../../../shell/useMedia";
@@ -27,6 +28,13 @@ const tableExtra = css`
   }
   dl.spec {
     margin-bottom: 12px;
+  }
+  /* A listener name never breaks mid-word: it truncates, with the full name as a tooltip. */
+  .name {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 `;
 
@@ -58,6 +66,8 @@ function listenerState(l: Listener): { state: HealthState; failing: string[] } {
   const state = conds.map(conditionState).reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "healthy" as HealthState);
   return { state, failing: conds.filter((c) => conditionState(c) === "error").map((c) => `${c.type}: ${c.status}`) };
 }
+
+const hostname = (l: Listener): ReactNode => l.hostname ?? <Muted>{listenerCopy.anyHostname}</Muted>;
 
 const tls = (l: Listener): ReactNode =>
   l.tls ? (
@@ -101,6 +111,7 @@ interface ListenerTableProps {
  */
 export function ListenerTable({ listeners, generation, stylesOverride }: ListenerTableProps) {
   const narrow = useMedia(NARROW);
+  const stale = useContext(StaleView);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const toggle = (name: string) =>
     setOpen((prev) => {
@@ -108,7 +119,8 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
       if (!next.delete(name)) next.add(name);
       return next;
     });
-  const cols = narrow ? 7 : 9;
+  // Below 900 px hostname, TLS and allowed routes move into the expanded row, as list secondary columns do.
+  const cols = narrow ? 6 : 9;
   return (
     <TableFrame stylesOverride={css`${tableExtra}${stylesOverride}`}>
       <TableStyles aria-label={listenerCopy.table}>
@@ -118,7 +130,7 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
           <col />
           <col style={{ width: "72px" }} />
           <col style={{ width: "96px" }} />
-          <col style={{ width: narrow ? "24%" : "15%" }} />
+          {narrow ? null : <col style={{ width: "15%" }} />}
           {narrow ? null : <col style={{ width: "15%" }} />}
           {narrow ? null : <col style={{ width: "18%" }} />}
           <col style={{ width: "130px" }} />
@@ -132,7 +144,7 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
             <th scope="col">{listenerCopy.listener}</th>
             <th scope="col">{listenerCopy.port}</th>
             <th scope="col">{listenerCopy.protocol}</th>
-            <th scope="col">{listenerCopy.hostname}</th>
+            {narrow ? null : <th scope="col">{listenerCopy.hostname}</th>}
             {narrow ? null : <th scope="col">{listenerCopy.tls}</th>}
             {narrow ? null : <th scope="col">{listenerCopy.allowedRoutes}</th>}
             <th scope="col">{columnCopy.attachedRoutes}</th>
@@ -163,14 +175,18 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                   <td>
                     <State>
                       <HealthIcon state={s.state} />
-                      {l.status ? stateLabel(s.state) : listenerCopy.noStatus}
+                      {l.status ? stateLabel(stale ? "unknown" : s.state) : listenerCopy.noStatus}
                     </State>
                     {s.failing.length ? <Muted className="failing">{s.failing.join(", ")}</Muted> : null}
                   </td>
-                  <td>{l.name}</td>
+                  <td>
+                    <span className="name" title={l.name}>
+                      {l.name}
+                    </span>
+                  </td>
                   <td>{l.port ?? <Muted>{listenerCopy.notSet}</Muted>}</td>
                   <td>{l.protocol}</td>
-                  <td>{l.hostname ?? <Muted>{listenerCopy.anyHostname}</Muted>}</td>
+                  {narrow ? null : <td>{hostname(l)}</td>}
                   {narrow ? null : <td>{tls(l)}</td>}
                   {narrow ? null : <td>{allowed(l)}</td>}
                   <td>{l.status ? l.status.attachedRoutes : <Muted>{listenerCopy.notReported}</Muted>}</td>
@@ -180,6 +196,8 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                     <td colSpan={cols}>
                       {narrow ? (
                         <dl className="spec">
+                          <dt>{listenerCopy.hostname}</dt>
+                          <dd>{hostname(l)}</dd>
                           <dt>{listenerCopy.tls}</dt>
                           <dd>{tls(l)}</dd>
                           <dt>{listenerCopy.allowedRoutes}</dt>

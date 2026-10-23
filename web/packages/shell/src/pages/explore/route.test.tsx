@@ -232,6 +232,68 @@ it("other controllers' entries are collapsed", async () => {
   expect(screen.getByText("No reported path to a Gateway or ListenerSet.")).toBeInTheDocument();
 });
 
+it("an implicit child shows a card for each status entry its parentRefs do not name", async () => {
+  const child = detail(routeGolden);
+  const cond = (type: string, status: string, reason: string): Condition => ({
+    type,
+    status,
+    reason,
+    message: `${type} ${reason}`,
+    observedGeneration: child.generation,
+    lastTransitionTime: "2026-10-23T09:00:00Z",
+    stale: false,
+  });
+  const parentRef = { group: GW, kind: "HTTPRoute", namespace: "shop", name: "api" };
+  child.parentRefs = [];
+  child.parents = [
+    {
+      parentRef,
+      target: { ...parentRef, link: "detail" },
+      controllerName: "kgateway.dev/kgateway",
+      ours: true,
+      conditions: [cond("Accepted", "False", "UnsupportedValue"), cond("ResolvedRefs", "True", "ResolvedRefs")],
+    },
+  ];
+  serve(api({ mid: child }));
+  const first = mount(MID);
+  await loaded();
+  const card = screen.getByRole("article", { name: "Implicit parent shop/api" });
+  expect(within(card).getByText("Implicit parent")).toBeInTheDocument();
+  expect(within(card).getByTestId("condition-Accepted")).toHaveTextContent("Accepted: False");
+  expect(within(card).getByTestId("condition-Accepted")).toHaveTextContent("UnsupportedValue");
+  // The link follows the entry's ref.
+  expect(within(card).getByRole("link", { name: "shop/api" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/routes/${GW}/HTTPRoute/shop/api`,
+  );
+  expect(screen.queryByText("No parentRefs.")).toBeNull();
+  first.unmount();
+
+  // With parentRefs, an entry none of them names gets its own card too.
+  const left = structuredClone(child);
+  left.parentRefs = [{ group: GW, kind: "Gateway", namespace: "infra", name: "edge" }];
+  serve(api({ mid: left }));
+  mount(MID);
+  await loaded();
+  expect(screen.getByRole("article", { name: "Parent infra/edge" })).toBeInTheDocument();
+  const extra = screen.getByRole("article", { name: "Parent shop/api, not in parentRefs" });
+  expect(within(extra).getByText("Not in parentRefs")).toBeInTheDocument();
+  expect(within(extra).getByTestId("condition-Accepted")).toHaveTextContent("UnsupportedValue");
+});
+
+it("stale route data turns every state on the page unknown", async () => {
+  serve(api({ mid: { ...detail(routeGolden), collectedAt: new Date(Date.now() - 10 * 60_000).toISOString() } }));
+  mount(MID);
+  await loaded();
+  await screen.findByText(/Data is stale/);
+  expect(within(screen.getByTestId("detail-header")).getByText("Unknown")).toBeInTheDocument();
+  const states = Array.from(document.querySelectorAll('[data-testid^="health-icon-"]')).map((e) =>
+    e.getAttribute("data-testid"),
+  );
+  expect(states.length).toBeGreaterThan(2);
+  expect(new Set(states)).toEqual(new Set(["health-icon-unknown"]));
+});
+
 it("each backendRef links to Other routes using this backend (routes?backend=…)", async () => {
   serve(api());
   mount(MID);

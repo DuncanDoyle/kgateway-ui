@@ -64,6 +64,8 @@ interface ParentCardProps {
   generation: number;
   /** The route has a delegation ref, so a BackendNotFound may be about it. */
   hasDelegation: boolean;
+  /** The entries' ref is in no spec parentRef: "implicit" when parentRefs is empty, else "unlisted". */
+  origin?: "implicit" | "unlisted";
   stylesOverride?: SerializedStyles;
 }
 
@@ -74,6 +76,7 @@ export function ParentCard({
   entries,
   generation,
   hasDelegation,
+  origin,
   stylesOverride,
 }: ParentCardProps) {
   const [open, setOpen] = useState(false);
@@ -88,9 +91,18 @@ export function ParentCard({
     hasDelegation && c.type === "ResolvedRefs" && c.status === "False" && c.reason === "BackendNotFound" ? (
       <span className="hint">{routeCopy.mixedParentHint}</span>
     ) : null;
+  const label =
+    origin === "implicit"
+      ? routeCopy.implicitParentCard(name)
+      : origin === "unlisted"
+        ? routeCopy.notInParentRefsCard(name)
+        : routeCopy.parentCard(name);
   return (
-    <Card aria-label={routeCopy.parentCard(name)} stylesOverride={stylesOverride}>
+    <Card aria-label={label} stylesOverride={stylesOverride}>
       <h3>
+        {origin ? (
+          <span className="muted">{origin === "implicit" ? routeCopy.implicitParent : routeCopy.notInParentRefs}</span>
+        ) : null}
         <span className="muted">{parentRef.kind}</span>
         <LinkedName refValue={target} installId={installId} />
         {parentRef.sectionName ? (

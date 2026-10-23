@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { AlertTriangle, Check, HelpCircle, X } from "lucide-react";
 import type { HealthState } from "../theme/tokens";
+import { useShownState } from "./staleView";
 
 // region Styles
 const Chip = styled.span<{ $state: HealthState; $size: number; $stylesOverride?: SerializedStyles }>`
@@ -28,7 +29,8 @@ interface HealthIconProps {
 }
 
 /** The icon half of the health vocabulary; always paired with text by callers. */
-export function HealthIcon({ state, size = 16, stylesOverride }: HealthIconProps) {
+export function HealthIcon({ state: given, size = 16, stylesOverride }: HealthIconProps) {
+  const state = useShownState(given);
   const Glyph = glyphs[state];
   return (
     <Chip
