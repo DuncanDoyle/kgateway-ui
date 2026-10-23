@@ -145,6 +145,7 @@ it("keeps the public export surface", () => {
         "ServedKind",
         "Severity",
         "ShellExtension",
+        "SpecParentRef",
         "StatusTokens",
         "Theme",
         "Vocabulary",
