@@ -1,11 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type {
-  GatewayDetail,
-  ListenerSetRow,
-  Page as ListPage,
-  RouteDetail,
-  RouteRow,
-} from "../packages/shell/src/api/types";
+import type { Page as ListPage, RouteDetail, RouteRow } from "../packages/shell/src/api/types";
 import { gatewayCopy, listCopy, navCopy, routeCopy, routeStateCopy } from "../packages/shell/src/copy/explorer";
 
 // Walks the explorer over test/e2e/fixtures/explorer.yaml. Expected reasons come from the API,
@@ -224,12 +218,6 @@ for (const width of [1280, 720]) {
     test.use({ viewport: { width, height: 900 } });
 
     test("Gateway sub-tables do not move when their rows load", async ({ page }) => {
-      // Known gap: the ListenerSets skeleton is sized from status attachedListenerSets, the list counts every child.
-      const gw: GatewayDetail = await (await page.request.get(`${api}/gateways/infra/edge`)).json();
-      const sets: ListPage<ListenerSetRow> = await (
-        await page.request.get(`${api}/listenersets?parent=gateway.networking.k8s.io/Gateway/infra/edge`)
-      ).json();
-      test.fail((gw.attachedListenerSets ?? 1) !== sets.total, "ListenerSets skeleton count differs from the list");
       // Known gap: a wrapped long name grows its row (design §8.6 final row height vs §8.7 wrap long names).
       test.fail(width < 900, "the long route name wraps in the narrow attached-routes table");
       const release = await holdLists(page);

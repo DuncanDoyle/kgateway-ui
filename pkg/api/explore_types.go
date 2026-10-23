@@ -204,7 +204,8 @@ type Candidate struct {
 }
 
 // GatewayDetail is GET …/gateways/{ns}/{name}. Its ListenerSets are paged
-// through the ListenerSets list, never embedded.
+// through the ListenerSets list, never embedded; ListenerSets is that list's
+// total for the caller (design §7.4 rule 5).
 type GatewayDetail struct {
 	Install              string        `json:"install"`
 	Ref                  LinkedRef     `json:"ref"`
@@ -217,6 +218,7 @@ type GatewayDetail struct {
 	Addresses            []string      `json:"addresses"`
 	Listeners            []ListenerDTO `json:"listeners"`
 	AttachedListenerSets *int32        `json:"attachedListenerSets,omitempty"`
+	ListenerSets         int           `json:"listenerSets"`
 	RouteCounts          RouteCounts   `json:"routeCounts"`
 	CollectedAt          time.Time     `json:"collectedAt"`
 }

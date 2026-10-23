@@ -219,6 +219,23 @@ func listenerEdge(objs []runtime.Object) []runtime.Object {
 	return objs
 }
 
+// ListenerSets is the total the ListenerSets list returns for the Gateway,
+// recounted per caller (rule 5), so the SPA's skeleton has the loaded height.
+func TestGatewayDetailListenerSetCount(t *testing.T) {
+	const lsList = base + "/listenersets?parent=gateway.networking.k8s.io/Gateway/infra/edge"
+	_, all, _ := startWith(t, setup{}, visWorld()...)
+	_, some, _ := startWith(t, setup{authz: embedsAllowAll{}}, visWorld()...)
+	full := get[Page[ListenerSetRow]](t, all, lsList, 200).Total
+	if n := get[GatewayDetail](t, all, gwDetail, 200).ListenerSets; n != full || full == 0 {
+		t.Errorf("listenerSets %d, list total %d", n, full)
+	}
+	// hiddenSome hides infra/ls1, a child of edge.
+	vis := get[Page[ListenerSetRow]](t, some, lsList, 200).Total
+	if n := get[GatewayDetail](t, some, gwDetail, 200).ListenerSets; n != vis || n != full-1 {
+		t.Errorf("restricted listenerSets %d, list total %d, unrestricted %d", n, vis, full)
+	}
+}
+
 func TestGatewayDetailListeners(t *testing.T) {
 	_, srv, _ := startWith(t, setup{}, listenerEdge(explorerWorld())...)
 	d := get[GatewayDetail](t, srv, gwDetail, 200)
@@ -257,8 +274,8 @@ func TestGatewayDetailListeners(t *testing.T) {
 			t.Errorf("routeCounts %s %d, list total %d", tc.a, tc.n, p.Total)
 		}
 	}
-	// ListenerSets are paged through the list, never embedded.
-	if b := wire(t, srv, gwDetail); bytes.Contains(b, []byte(`"listenerSets"`)) || bytes.Contains(b, []byte(`"ls1"`)) {
+	// ListenerSets are paged through the list, never embedded: the detail carries only their count.
+	if b := wire(t, srv, gwDetail); bytes.Contains(b, []byte(`"listenerSets": [`)) || bytes.Contains(b, []byte(`"ls1"`)) {
 		t.Errorf("the detail embeds ListenerSets:\n%s", b)
 	}
 }

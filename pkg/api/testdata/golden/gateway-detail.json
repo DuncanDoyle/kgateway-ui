@@ -29,6 +29,7 @@
     "generation": 1,
     "health": "warning",
     "install": "kgw.kgateway",
+    "listenerSets": 2,
     "listeners": [
       {
         "allowedRoutes": {

@@ -167,7 +167,22 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
 		Health: st, Candidate: cand, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
 		Listeners: listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
-		RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)})
+		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)})
+}
+
+// listenerSetCount is the total of the ListenerSets list for parent gw:
+// visible ones only; a Gateway the install does not own is scanned for.
+func (d *detail) listenerSetCount(gw objects.Ref) int {
+	if id, ok := d.ix.FindGateway(gw); ok {
+		return d.v.recount(d.ix.Gateways[id].ListenerSets, func(id explore.RowID) objects.Ref { return d.ix.ListenerSets[id].Ref })
+	}
+	n := 0
+	for i := range d.ix.ListenerSets {
+		if l := &d.ix.ListenerSets[i]; l.Parent == gw && d.v.can(l.Ref) {
+			n++
+		}
+	}
+	return n
 }
 
 // servedListenerSet returns the served ListenerSet kind group/kind.

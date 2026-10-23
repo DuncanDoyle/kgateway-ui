@@ -606,8 +606,9 @@ it("sub-table skeletons have the loaded row count, so the sections below keep th
     within(table(name))
       .queryAllByRole("row")
       .filter((r) => r.closest("tbody") && r.dataset.row !== undefined).length;
-  // ListenerSets: the status count; attached: routeCounts.accepted; failed (Not accepted, 0): one blank row.
-  expect(skeletons("ListenerSets")).toBe(1);
+  // ListenerSets: the detail's visible count; attached: routeCounts.accepted; failed (Not accepted, 0): one blank row.
+  expect(skeletons("ListenerSets")).toBe(gateway().listenerSets);
+  expect(skeletons("ListenerSets")).toBe(2);
   expect(skeletons("Attached routes")).toBe(5);
   expect(skeletons("Routes not attached")).toBe(1);
   const blank = within(table("Routes not attached")).getByTestId("skeleton-row");

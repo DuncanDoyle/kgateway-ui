@@ -81,8 +81,8 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
               columns={lsCols}
               rowRef={lsRef}
               emptyTitle={gatewayCopy.noListenerSets}
-              // The status count is a hint: the list counts visible ListenerSets, the status all attached ones.
-              skeletonRows={expectedRows(data.attachedListenerSets ?? 1)}
+              // The list's own total for this caller; an older body falls back to the status count.
+              skeletonRows={expectedRows(data.listenerSets ?? data.attachedListenerSets ?? 1)}
             />
           </Section>
           <RouteSections installId={id} parent={ref} counts={data.routeCounts} />

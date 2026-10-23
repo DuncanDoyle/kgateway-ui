@@ -276,6 +276,7 @@ const gatewayDetail = shape<GatewayDetail>(
     addresses: "!",
     listeners: "!",
     attachedListenerSets: "?",
+    listenerSets: "?",
     routeCounts: "!",
     collectedAt: "!",
   },

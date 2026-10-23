@@ -153,6 +153,8 @@ export interface GatewayDetail {
   addresses: string[];
   listeners: Listener[];
   attachedListenerSets?: number;
+  /** The ListenerSets list's total for this caller; sizes the sub-table skeleton. */
+  listenerSets?: number;
   routeCounts: RouteCounts;
   collectedAt: string;
 }
