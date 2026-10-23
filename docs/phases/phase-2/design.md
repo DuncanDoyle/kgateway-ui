@@ -578,7 +578,7 @@ New fixtures in `pkg/api/testdata/golden`, added per sub-phase:
 
 The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens change only by optional fields, and a test asserts the diffs add nothing else:
 - `installs.json`, `bare-installs.json`: `confirmedAt` (2.1);
-- `meta.json`: `views` and the Backend kind (2.2);
+- `meta.json`, `bare-meta.json`: `views` and the Backend kind (2.2), appended last. Kinds added after API v1 are listed in `pkg/api`'s `addedAfterV1` set so `meta.kinds` stays append-only; every later post-v1 kind joins that set (our call, 2.2);
 - `health.json`: `link` on finding resources (2.2); `evidenceRestricted` appears only in restricted fixtures. New checks are **appended** to `checks` in registration order, after Phase 1's: `backend status` (2.2) and `computed views` (2.3), each always present and OK when nothing is wrong;
 - `overview.json`, `bare-overview.json` counts: a `Backends` tile ("in use"), present even at zero, placed after Phase 1's tiles in the fixed tile order;
 - `overview.json`, `bare-overview.json`: `link` on Gateway rows (2.2).
