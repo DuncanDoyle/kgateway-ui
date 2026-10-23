@@ -73,7 +73,6 @@ func BenchmarkFingerprint(b *testing.B) {
 				b.Fatalf("seeded %d HTTPRoutes, want at least %d", n, tier.HTTPRoutes)
 			}
 			b.ReportAllocs()
-			b.ResetTimer()
 			for b.Loop() {
 				c.Fingerprint()
 			}

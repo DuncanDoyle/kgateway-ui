@@ -192,7 +192,8 @@ func instrument(p *progress, list toolscache.ListWithContextFunc, watchFn toolsc
 }
 
 // tracked is an informer with the progress of its own List and Watch calls.
-// reg is the change handler's registration; nil without Config.Changes.
+// reg is the change handler's registration; nil without Config.Changes or
+// when registration failed.
 type tracked struct {
 	inf      toolscache.SharedIndexInformer
 	progress *progress
@@ -217,7 +218,8 @@ func (c *Cache) informer(client any, example runtime.Object, list toolscache.Lis
 	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
 	if c.changes != nil {
 		notify := func(any) { c.changes.Notify() }
-		// Adding a handler fails only on a stopped informer; this one has not started.
+		// Fails only on a stopped informer. Without a handler the kind still
+		// settles on its own sync, and the confirm tick catches its changes.
 		t.reg, _ = t.inf.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
 			AddFunc: notify, UpdateFunc: func(_, _ any) { c.changes.Notify() }, DeleteFunc: notify})
 	}
@@ -292,7 +294,7 @@ func (c *Cache) Start(ctx context.Context) {
 	go func() {
 		settled := func(context.Context) (bool, error) {
 			for _, t := range all {
-				if !t.reg.HasSynced() && access(t).Err == "" {
+				if !t.synced() && access(t).Err == "" {
 					return false, nil
 				}
 			}
@@ -302,6 +304,15 @@ func (c *Cache) Start(ctx context.Context) {
 			c.changes.Notify()
 		}
 	}()
+}
+
+// synced reports whether t's handler has received the initial list, or,
+// without a handler, whether the informer has synced.
+func (t tracked) synced() bool {
+	if t.reg == nil {
+		return t.inf.HasSynced()
+	}
+	return t.reg.HasSynced()
 }
 
 // access reports whether t is current. HasSynced records only the initial

@@ -433,7 +433,10 @@ func TestFingerprintIsOrderIndependent(t *testing.T) {
 	}
 }
 
-func TestFingerprintTracksStoreNotHandlers(t *testing.T) {
+// The fingerprint follows resourceVersion changes in the store, and a fresh
+// snapshot captures the live fingerprint. A handler-counter design would fail
+// here only when its handler lags, so this is not a guard against one.
+func TestFingerprintFollowsStoreChanges(t *testing.T) {
 	c, dyn := startCache(t, testutil.HTTPRoute("shop", "a", nil))
 	before := c.Fingerprint()
 	if !before.Equal(c.Snapshot().Source) {
@@ -538,6 +541,24 @@ func TestEventsNotifyAndSyncNotifies(t *testing.T) {
 	}
 	waitFor(t, "the delete in the store", func() bool { return inStore(c, "shop", "b") == nil })
 	testutil.Recv(t, sig.C(), "delete notify")
+}
+
+// An informer without a handler registration still settles Start's notify,
+// on its own sync, instead of panicking.
+func TestStartWithoutRegistrationNotifies(t *testing.T) {
+	sig := trigger.New()
+	dyn, kube := testutil.Clients(t)
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Changes: sig})
+	tr := c.dyn[httpRoutesGVR]
+	tr.reg = nil
+	c.dyn[httpRoutesGVR] = tr
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	testutil.Recv(t, sig.C(), "sync notify")
+	if !c.Snapshot().Synced {
+		t.Fatal("the sync notify must follow the sync")
+	}
 }
 
 func TestConfigNowStampsSnapshots(t *testing.T) {
