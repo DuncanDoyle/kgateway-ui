@@ -149,9 +149,18 @@ it("permission line: Allows any parent / Allows: shop/api", async () => {
   const open = detail(routeGolden);
   open.parentRefs = [];
   serve(api({ mid: open }));
-  mount(MID);
+  const second = mount(MID);
   await loaded();
   expect(screen.getByText("Allows any parent")).toBeInTheDocument();
+  second.unmount();
+
+  // Only non-route parentRefs: no parent route may delegate here.
+  const gwOnly = detail(routeGolden);
+  gwOnly.parentRefs = gwOnly.parentRefs.filter((p) => p.kind === "Gateway");
+  serve(api({ mid: gwOnly }));
+  mount(MID);
+  await loaded();
+  expect(screen.getByText("Allows no parent route")).toBeInTheDocument();
 });
 
 it("child routes are paged and fetched when expanded", async () => {
@@ -297,6 +306,9 @@ it("mirror filters show their target and percentage; filters keep written order"
   expect(filters[2]).toHaveTextContent("shop/mirror-frac");
   expect(filters[2]).toHaveTextContent("1/100");
   expect(filters[3]).toHaveTextContent("shop/tp");
+  // Mirror targets get no reverse-lookup link: only backendRefs do.
+  for (const f of filters)
+    expect(within(f).queryByRole("link", { name: "Other routes using this backend" })).toBeNull();
   // Config as written, as YAML.
   expect(filters[0]).toHaveTextContent("x-a");
   expect(within(backend("w1")).getAllByTestId("filter")).toHaveLength(2);
@@ -329,6 +341,11 @@ it("restricted objects show no names or data", async () => {
   expect(be1).toHaveTextContent("Restricted");
   expect(within(be1).queryByTestId("condition-Accepted")).toBeNull();
   expect(within(be1).queryByRole("link", { name: /shop\/be1/ })).toBeNull();
+  // The backend filter cannot probe (§7.4 rule 2a), so a hidden Backend keeps its lookup link.
+  const look = within(be1).getByRole("link", { name: "Other routes using this backend" });
+  expect(new URL(look.getAttribute("href") ?? "", "http://ui").searchParams.get("backend")).toBe(
+    "gateway.kgateway.dev/Backend/shop/be1",
+  );
   // A hidden child of a name ref: written name as text, state Restricted.
   expect(within(backend("child")).queryByRole("link", { name: /shop\/child/ })).toBeNull();
   expect(backend("child")).toHaveTextContent("Restricted");

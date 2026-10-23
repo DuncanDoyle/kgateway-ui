@@ -613,6 +613,10 @@ func TestRouteDetailRestricted(t *testing.T) {
 	if d.ChildCount != 1 {
 		t.Errorf("childCount %d counts the hidden child", d.ChildCount)
 	}
+	// The child-route list counts what childCount counts, hidden child excluded.
+	if kids := get[Page[RouteRow]](t, srv, base+"/routes?parent=gateway.networking.k8s.io/HTTPRoute/shop/mid", 200); kids.Total != d.ChildCount || len(kids.Items) != d.ChildCount {
+		t.Errorf("list under mid: total %d rows %d, childCount %d", kids.Total, len(kids.Items), d.ChildCount)
+	}
 	var restricted int
 	for _, p := range d.Ancestors {
 		for _, s := range p.Steps {
