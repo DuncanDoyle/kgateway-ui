@@ -215,7 +215,7 @@ func (e *Engine) compute() *Published {
 	}
 	all := install.Resolve(found, e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
-	asg := install.Assign(snap, served, all)
+	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
 	firstSeen := e.firstSeen(now)
 	// Only an object health asks about while it is in grace gets a grace deadline.

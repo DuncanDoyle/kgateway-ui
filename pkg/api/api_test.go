@@ -1966,3 +1966,160 @@ func TestZeroConfirmedAtIsOmitted(t *testing.T) {
 		t.Errorf("zero ConfirmedAt: confirmedAt %v, computedAt %v", inst[0]["confirmedAt"], inst[0]["computedAt"])
 	}
 }
+
+// checkPending reports whether h's named check is pending.
+func checkPending(h HealthResponse, name string) bool {
+	for _, c := range h.Checks {
+		if c.Name == name {
+			return c.Pending
+		}
+	}
+	return false
+}
+
+// A child naming an existing HTTPRoute is not "parent not found"; a child
+// naming a missing one is.
+func TestExistingHTTPRouteParentIsNotMissing(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	_, srv, _ := startWith(t, setup{}, isolated(
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "named", []objects.ParentRef{testutil.HTTPRouteRef("shop", "api")}),
+		testutil.HTTPRoute("shop", "lost", []objects.ParentRef{testutil.HTTPRouteRef("shop", "gone")}),
+	)...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	if hasFinding(h, health.CodeRouteUnattached, "shop/named") {
+		t.Errorf("existing HTTPRoute parent reported missing: %+v", h.Findings)
+	}
+	if !hasSev(h, health.CodeRouteUnattached, health.SeverityWarning, "shop/lost") {
+		t.Errorf("missing HTTPRoute parent not reported: %+v", h.Findings)
+	}
+}
+
+// A child edited so that its entry describes the previous generation keeps
+// its edge: it stays owned and counted, and Phase 1 freshness judges it
+// (design §4.2; pre-flight PF16, a known limitation after a child-edit drop).
+func TestStaleEligibleEntryKeepsEdge(t *testing.T) {
+	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	parent := func() *unstructured.Unstructured {
+		return testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+	}
+	child := func() *unstructured.Unstructured {
+		return testutil.HTTPRoute("shop", "child", []objects.ParentRef{api}, testutil.AcceptedBy(api, testutil.Controller))
+	}
+	cases := []struct {
+		name    string
+		s       setup
+		objs    []runtime.Object
+		state   health.State
+		sev     health.Severity // KGWUI-003 on the child; "" for none
+		pending bool
+	}{
+		{"current entry", setup{}, isolated(parent(), child()), health.StateHealthy, "", false},
+		{"edited, inside grace", setup{late: []*unstructured.Unstructured{stale(child())}}, isolated(parent()), health.StateUnknown, health.SeverityInfo, true},
+		{"edited, after grace", setup{}, isolated(parent(), stale(child())), health.StateWarning, health.SeverityWarning, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, tc.s, tc.objs...)
+			o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200)
+			if n, _ := count(o, "HTTPRoute"); n != 3 {
+				t.Fatalf("HTTPRoute count %d, want 3 (cart, api, child) before and after the edit", n)
+			}
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if h.State != tc.state {
+				t.Fatalf("state %s, want %s; findings %+v", h.State, tc.state, h.Findings)
+			}
+			if got := hasFinding(h, health.CodeRouteUnattached, "shop/child"); got != (tc.sev != "") || (got && !hasSev(h, health.CodeRouteUnattached, tc.sev, "shop/child")) {
+				t.Fatalf("KGWUI-003 on the child: want %q; findings %+v", tc.sev, h.Findings)
+			}
+			if checkPending(h, "resource status") != tc.pending {
+				t.Fatalf("resource status pending: want %v; checks %+v", tc.pending, h.Checks)
+			}
+			if hasFinding(h, "KGWUI-011", "") {
+				t.Fatalf("a stale eligible entry is not KGWUI-011: %+v", h.Findings)
+			}
+		})
+	}
+}
+
+// Q12 changes Phase 1's numbers on clusters with delegation. Each object
+// notes its Phase 1 outcome.
+func TestQ12CountsBeforeAndAfter(t *testing.T) {
+	cond := testutil.Cond
+	gw, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	api, api2, pb := testutil.HTTPRouteRef("shop", "api"), testutil.HTTPRouteRef("shop", "api2"), testutil.HTTPRouteRef("infra-b", "pb")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	rejected := func(p objects.ParentRef) testutil.RouteParent {
+		return testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
+			cond("Accepted", metav1.ConditionFalse, "UnsupportedValue"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+	}
+	// kgw2 shares the controller name and watches team=b or env=b.
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1,
+		testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}},{"matchLabels":{"env":"b"}}]`))
+	objs := isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+		testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"}), testutil.Namespace("leaving", map[string]string{"team": "a"}),
+		d2, testutil.ControllerPod(d2, "kgateway2-0", true), testutil.Gateway("infra-b", "edge", "kgateway", nil), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		// Phase 1: owned (kgw), unchanged.
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
+		testutil.HTTPRoute("shop", "api2", []objects.ParentRef{gw}, ok(gw)),
+		testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, ok(gwB)),
+		// Phase 1: owned through the Gateway; its HTTPRoute entry was ignored. Now judged on both.
+		testutil.HTTPRoute("shop", "mixed", []objects.ParentRef{gw, api}, ok(gw), rejected(api)),
+		// Phase 1: not owned. Now owned once with two reported parents.
+		testutil.HTTPRoute("shop", "two", nil, ok(api), ok(api2)),
+		// Phase 1: not owned. Now owned through api2 only; the entry for the removed api ref is ignored.
+		testutil.HTTPRoute("shop", "moved", []objects.ParentRef{api2}, rejected(api), ok(api2)),
+		// Phase 1: owned by neither. Now owned by both installs, each through its own parent.
+		testutil.HTTPRoute("shared", "both", nil, ok(api), ok(pb)),
+		// Phase 1: not owned. Now owned while its namespace is in scope.
+		testutil.HTTPRoute("leaving", "child", nil, ok(api)),
+		// Phase 1: not owned. Now owned with a stale implicit edge: KGWUI-003 warning.
+		stale(testutil.HTTPRoute("shop", "stale", nil, ok(api))),
+		// Phase 1 and now: a policy with an HTTPRoute ancestor stays owned (PF8).
+		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: api, Controller: testutil.Controller,
+			Conds: []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted")}}),
+	)
+	e, srv, update := startWith(t, setup{metrics: okMetrics("kgw.kgateway", "kgw2.kgateway2")}, objs...)
+	routes := func(id string) int {
+		n, _ := count(get[OverviewResponse](t, srv, "/api/v1/installs/"+id+"/overview", 200), "HTTPRoute")
+		return n
+	}
+	// Phase 1: kgw 4 (cart, api, api2, mixed), kgw2 1 (pb).
+	if n := routes("kgw.kgateway"); n != 9 {
+		t.Errorf("kgw HTTPRoutes %d, want 9 (cart api api2 mixed two moved both child stale)", n)
+	}
+	if n := routes("kgw2.kgateway2"); n != 2 {
+		t.Errorf("kgw2 HTTPRoutes %d, want 2 (pb both)", n)
+	}
+	if n, _ := count(get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", 200), "TrafficPolicy"); n != 1 {
+		t.Errorf("TrafficPolicy %d, want 1 as in Phase 1", n)
+	}
+	// Phase 1: healthy, no findings on these routes.
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	if h.State != health.StateError {
+		t.Errorf("roll-up %s, want error (mixed is rejected by its HTTPRoute parent)", h.State)
+	}
+	if !hasSev(h, health.CodeConditionFalse, health.SeverityError, "shop/mixed") {
+		t.Errorf("mixed not judged on its HTTPRoute parent: %+v", h.Findings)
+	}
+	if !hasSev(h, health.CodeRouteUnattached, health.SeverityWarning, "shop/stale") {
+		t.Errorf("stale implicit edge: want KGWUI-003 warning: %+v", h.Findings)
+	}
+	for _, r := range []string{"shop/two", "shop/moved", "shared/both", "leaving/child"} {
+		if hasFinding(h, health.CodeConditionFalse, r) || hasFinding(h, health.CodeRouteUnattached, r) {
+			t.Errorf("unexpected finding on %s: %+v", r, h.Findings)
+		}
+	}
+	if h2 := get[HealthResponse](t, srv, "/api/v1/installs/kgw2.kgateway2/health", 200); hasFinding(h2, health.CodeConditionFalse, "shared/both") {
+		t.Errorf("kgw2 judges only its own parent's entry: %+v", h2.Findings)
+	}
+	// The namespace leaves the scope: the child is no longer owned.
+	update(testutil.Namespace("leaving", nil))
+	deadline := time.Now().Add(5 * time.Second)
+	for e.Compute(); routes("kgw.kgateway") != 8; e.Compute() {
+		if time.Now().After(deadline) {
+			t.Fatal("leaving/child still owned after its namespace left the scope")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

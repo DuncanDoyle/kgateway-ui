@@ -29,8 +29,8 @@ func BenchmarkCompute(b *testing.B) {
 	}
 }
 
-// The Large world yields one install that owns every HTTPRoute except the
-// delegated children, which Phase 1 does not own.
+// The Large world yields one install that owns every HTTPRoute: delegated
+// children through their reported edges (Q12), each with a reported parent.
 func TestScaleComputeSanity(t *testing.T) {
 	snap := scale.Snapshot(scale.Large, 1)
 	children := map[string]bool{}
@@ -45,13 +45,17 @@ func TestScaleComputeSanity(t *testing.T) {
 	if len(m.Installs) != 1 {
 		t.Fatalf("installs %d", len(m.Installs))
 	}
-	owned := 0
+	owned, reported := 0, 0
 	for _, r := range m.Installs[0].Owned.Routes {
-		if r.Kind.Kind == "HTTPRoute" {
-			owned++
+		if r.Kind.Kind != "HTTPRoute" {
+			continue
+		}
+		owned++
+		if children[r.Obj.GetNamespace()+"/"+r.Obj.GetName()] && len(r.RouteParents) > 0 {
+			reported++
 		}
 	}
-	if want := scale.Large.HTTPRoutes - len(children); len(children) == 0 || owned != want {
-		t.Fatalf("owned HTTPRoutes %d, want %d (%d children)", owned, want, len(children))
+	if len(children) == 0 || owned != scale.Large.HTTPRoutes || reported != len(children) {
+		t.Fatalf("owned HTTPRoutes %d, want %d; children with a reported parent %d, want %d", owned, scale.Large.HTTPRoutes, reported, len(children))
 	}
 }

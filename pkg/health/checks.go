@@ -311,14 +311,14 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
 		listeners(gw, true)
 	}
-	// Routes: one status block per current parentRef of this install, matched on
-	// the full parentRef including section name and port.
+	// Routes: one status block per current parentRef of this install, and per
+	// reported HTTPRoute parent, matched on the full parentRef including section name and port.
 	for _, r := range in.Owned.Routes {
 		if in.ignored(r.Obj) {
 			continue
 		}
 		status := objects.RouteParents(r.Obj)
-		for _, p := range r.Parents {
+		for _, p := range slices.Concat(r.Parents, r.RouteParents) {
 			extra := "parent " + parentDesc(p)
 			var st *objects.RouteParentStatus
 			for i := range status {

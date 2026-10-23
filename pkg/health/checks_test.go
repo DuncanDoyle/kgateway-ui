@@ -79,7 +79,7 @@ func (w *world) report(t *testing.T) Report {
 	if w.fromPod {
 		res.Scope = install.NamespaceSelectorScope{}.Scope(in)
 	}
-	a := install.Assign(snap, served, []install.Resolved{res})
+	a := install.Assign(snap, served, []install.Resolved{res}, nil)
 	hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 		MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, Platform: w.platform}
 	if w.metrics != nil {
@@ -506,7 +506,7 @@ func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
 		in, _ := install.UpstreamDetector{}.Detect(c.d)
 		insts = append(insts, install.Resolved{Install: in, Scope: install.ParseSelectors(c.scope)})
 	}
-	a := install.Assign(snap, served, insts)
+	a := install.Assign(snap, served, insts, nil)
 	for _, res := range insts {
 		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
