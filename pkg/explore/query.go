@@ -255,10 +255,12 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 	case q.Parent != nil:
 		cands = ix.ByParent[*q.Parent]
 		if isHTTPRoute(q.Parent.Group, q.Parent.Kind) {
-			cands = union(cands, ix.ByParentRoute[*q.Parent])
-			// A declared candidate is never a child (design §4.2): only attachment=declared lists it.
-			if q.Attachment == AttachmentDeclared {
-				cands = union(cands, ix.Declared[*q.Parent])
+			// Child routes are reported edges only (design §5.3). Unwatched rows (in ByParent) and
+			// declared candidates (§4.2) are listed only under their attachment filter, which Under applies.
+			if q.Attachment == "" {
+				cands = ix.ByParentRoute[*q.Parent]
+			} else {
+				cands = union(cands, ix.ByParentRoute[*q.Parent], ix.Declared[*q.Parent])
 			}
 		}
 	case backends != nil:

@@ -195,12 +195,21 @@ func TestAttachmentSubFilters(t *testing.T) {
 		{gw + "&attachment=unwatched", []string{"blog/posts"}},
 		{api + "&attachment=declared", []string{"shop/declared"}},
 		{api + "&attachment=unwatched", []string{"blog/sub"}},
-		{api, []string{"blog/sub", "shop/child"}}, // declared only under attachment=declared
+		{api + "&attachment=accepted", []string{"shop/child"}},
+		{api + "&attachment=not-accepted", []string{}},
+		{api + "&attachment=pending", []string{}},
+		// No attachment: reported edges only; unwatched and declared rows need their filter (design §5.3, §4.2).
+		{api, []string{"shop/child"}},
 	} {
 		p := get[Page[RouteRow]](t, srv, listBase+"/routes?"+tc.q, 200)
 		if got := routeNames(p); !slices.Equal(got, tc.want) || p.Total != len(tc.want) {
 			t.Errorf("%s: rows %v total %d, want %v", tc.q, got, p.Total, tc.want)
 		}
+	}
+	// The detail's childCount counts what the child-route list returns.
+	kids := get[Page[RouteRow]](t, srv, listBase+"/routes?"+api, 200)
+	if d := get[RouteDetail](t, srv, routeDetail+"shop/api", 200); d.ChildCount != kids.Total {
+		t.Errorf("childCount %d, list total %d", d.ChildCount, kids.Total)
 	}
 	all := get[Page[RouteRow]](t, srv, listBase+"/routes?limit=200", 200)
 	rej := routeByName(t, all, "shop/rejected").Parents[0]
