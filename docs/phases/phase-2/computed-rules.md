@@ -367,7 +367,7 @@ An aggregate (§8.2) is **complete** when every context that could contribute to
 
 - **Uncertain points.** A cut by a compute bound (the (parent, ref) not flattened), a context or selection that is `unknown` (§3.3), and an owned top-level route whose root eligibility is unknown.
 - **Reach closure.** From each uncertain point, follow selection and permission only, without the matcher fit: (parent → permitted selected child), transitively. This over-approximates every route the missing work could reach. It is linear in selected edges. If the edge cap itself was hit, every aggregate in the install is incomplete.
-- An aggregate whose child (for `child-entry`), parent P (for `parent-resolvedrefs`) or route (for KGWUI-011) is in a reach closure is **incomplete**. For the orphan trigger the aggregate is the route across **every** owned parent that selects it; it is incomplete when the route, or any selecting parent, is in a reach closure.
+- An aggregate whose child (for `child-entry`), parent P (for `parent-resolvedrefs`) or route (for KGWUI-011) is in a reach closure is **incomplete**. For the orphan trigger the aggregate is the route across **every** owned parent of this install that selects it; it is incomplete when the route, or any selecting parent, is in a reach closure. Completeness, and the conclusion it supports, are **install-local**: a parent of another install may still select the route, since an empty `parentRefs` list permits any parent (`utils/delegation/delegation.go` V4:25-27, V3:25-27).
 
 | Expectation | Needs completeness | If incomplete |
 |---|---|---|
@@ -377,7 +377,7 @@ An aggregate (§8.2) is **complete** when every context that could contribute to
 | The parent's failure reason | yes | not compared |
 | No delegation failure on the parent | yes | `unknown`; no KGWUI-012 |
 | KGWUI-011 computed trigger, `name` or `label` ref (dropped or forbidden everywhere under that parent) | yes | no finding |
-| KGWUI-011 orphan trigger (empty `parentRefs`; dropped or forbidden by every selecting ref of every owned parent) | yes, for every selecting parent | no finding |
+| KGWUI-011 orphan trigger (empty `parentRefs`; selected only by `wildcard` refs; every selecting outcome `dropped` or `forbidden`) | yes, for every selecting parent of this install | no finding |
 | Listener count, parentRef outcome (view A) | no traversal; unknown inputs only (§3.3) | — |
 
 ## 9. Persistence of KGWUI-012 and the computed KGWUI-011
@@ -423,7 +423,7 @@ The engine keeps a map from identity to (fingerprint, `since`) under its compute
 6. Entries whose subject no longer exists are pruned. A UI restart loses the map, so windows restart, as grace does in Phase 1.
 7. **Deadline.** Each recompute reports the earliest future maturation instant to the scheduler (design §3.1). The predicate becomes true at exactly that instant, so a recompute then raises the finding with no further event.
 
-**Computed KGWUI-011** (design §6.2) uses the same map with kind `delegated-not-attached`, and the orphan trigger with kind `orphan-not-attached`. The orphan predicate is: the route is in scope, has an empty `spec.parentRefs` list and no eligible status entry, is selected by at least one owned parent, has no `attached`, `partial` or `rejected-hostnames` row under any of them, and its orphan aggregate is complete (§8.5). Both kinds are mature 30 s after `since`. They never make a check pending, because they wait on no controller output **(our call)**.
+**Computed KGWUI-011** (design §6.2) uses the same map with kind `delegated-not-attached`, and the orphan trigger with kind `orphan-not-attached`. The orphan predicate is, all of: the route is in scope, has an empty `spec.parentRefs` list and no eligible status entry; it is selected by at least one owned parent of this install, and **only by `wildcard` refs** (if any `name` or `label` ref selects it, the per-parent trigger applies and there is no orphan finding); **every** selecting row, in every context, has outcome `dropped` or `forbidden` (`cycle`, `unresolved`, `unknown`, `attached`, `partial` and `rejected-hostnames` all disqualify); and its orphan aggregate is complete (§8.5). The finding says no parent route of this install keeps the route; it claims nothing about other installs. Both kinds are mature 30 s after `since`. They never make a check pending, because they wait on no controller output **(our call)**.
 
 ## 10. Observations that may change these rules
 
@@ -539,3 +539,5 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | A route with a Gateway parentRef, selected by a wildcard and dropped | no finding; Delegation row shown with its reason |
 | An orphan dropped by one parent's wildcard and attached by another parent | no finding |
 | A new parent starts selecting an orphan | the orphan window resets |
+| An orphan whose only selecting wildcard ref fails with a complete `cycle` outcome | no orphan finding |
+| An orphan selected by a wildcard ref of one parent and a `label` ref of another, dropped by both | only the per-parent KGWUI-011 for the `label` parent; no orphan finding |
