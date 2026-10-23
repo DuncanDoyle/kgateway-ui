@@ -278,6 +278,14 @@ spec:
     - matches: [{ path: { type: PathPrefix, value: /be/aws } }]
       backendRefs: [{ group: gateway.kgateway.dev, kind: Backend, name: aws-be }]
 ---
+# A long name, so the layout e2e checks that a loaded row keeps its skeleton's height.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: a-route-with-a-deliberately-long-name-that-must-not-wrap-or-shift-the-table, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /long } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
 # Replaced rule: the ExtensionRef names a TrafficPolicy that does not exist.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

@@ -1,5 +1,11 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { Page as ListPage, RouteDetail, RouteRow } from "../packages/shell/src/api/types";
+import type {
+  GatewayDetail,
+  ListenerSetRow,
+  Page as ListPage,
+  RouteDetail,
+  RouteRow,
+} from "../packages/shell/src/api/types";
 import { gatewayCopy, listCopy, navCopy, routeCopy, routeStateCopy } from "../packages/shell/src/copy/explorer";
 
 // Walks the explorer over test/e2e/fixtures/explorer.yaml. Expected reasons come from the API,
@@ -143,5 +149,126 @@ for (const theme of themes) {
     expect(await underline(), "hover underlines the row link").toBe("underline");
     await link.focus();
     await shot(page, `link-${theme.mode}`);
+  });
+}
+
+// Layout (design §8.6–8.7): list responses are held so each table is measured with its skeleton, then loaded.
+type Box = { x: number; y: number; width: number; height: number };
+type Layout = { footer: Box | null; next: Box | null; rows: number[] };
+
+/** Holds every list response until release is called; detail and YAML requests pass. limit sets the page size. */
+async function holdLists(page: Page, limit?: number): Promise<() => void> {
+  let release = () => {};
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  await page.route(
+    (u) => /^\/api\/v1\/installs\/[^/]+\/(routes|gateways|listenersets)$/.test(u.pathname),
+    async (route) => {
+      await gate;
+      const u = new URL(route.request().url());
+      if (limit) u.searchParams.set("limit", String(limit));
+      await route.continue({ url: u.toString() });
+    },
+  );
+  return release;
+}
+
+/** The table's footer, the element after its section and its row heights; boxes in page coordinates. */
+function measure(table: Locator): Promise<Layout> {
+  return table.evaluate((t) => {
+    const box = (el: Element | null | undefined) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
+    };
+    const section = t.closest("section");
+    return {
+      footer: box((section ?? document).querySelector('[data-testid="list-footer"]')),
+      next: box(section?.nextElementSibling),
+      // A skeleton or data row, or the empty row that takes a skeleton row's place.
+      rows: Array.from(
+        t.querySelectorAll("tbody > tr:is([data-row], [data-empty])"),
+        (r) => r.getBoundingClientRect().height,
+      ),
+    };
+  });
+}
+
+/** Measures tables while their skeletons show, releases the lists, and checks nothing moved once loaded. */
+async function expectStableLayout(page: Page, release: () => void, names: string[]) {
+  const tables = names.map((name) => page.getByRole("table", { name, exact: true }));
+  const before: Layout[] = [];
+  for (const t of tables) {
+    await expect(t).toHaveAttribute("aria-busy", "true");
+    await expect(t.getByTestId("skeleton-row").first()).toBeVisible();
+    before.push(await measure(t));
+  }
+  release();
+  for (const [i, t] of tables.entries()) {
+    await expect(t).toHaveAttribute("aria-busy", "false");
+    await expect(t.getByTestId("skeleton-row")).toHaveCount(0);
+    const after = await measure(t);
+    const b = before[i] as Layout;
+    expect.soft(after.rows.length, `${names[i]}: rows`).toBe(b.rows.length);
+    for (const h of after.rows)
+      expect.soft(h, `${names[i]}: a loaded row keeps the skeleton row's height`).toBe(b.rows[0]);
+    expect.soft(after.footer, `${names[i]}: footer`).toEqual(b.footer);
+    expect.soft(after.next, `${names[i]}: the section after it`).toEqual(b.next);
+  }
+}
+
+const LONG = "shop/a-route-with-a-deliberately-long-name-that-must-not-wrap-or-shift-the-table";
+for (const width of [1280, 720]) {
+  test.describe(`layout at ${width} px`, () => {
+    test.use({ viewport: { width, height: 900 } });
+
+    test("Gateway sub-tables do not move when their rows load", async ({ page }) => {
+      // Known gap: the ListenerSets skeleton is sized from status attachedListenerSets, the list counts every child.
+      const gw: GatewayDetail = await (await page.request.get(`${api}/gateways/infra/edge`)).json();
+      const sets: ListPage<ListenerSetRow> = await (
+        await page.request.get(`${api}/listenersets?parent=gateway.networking.k8s.io/Gateway/infra/edge`)
+      ).json();
+      test.fail((gw.attachedListenerSets ?? 1) !== sets.total, "ListenerSets skeleton count differs from the list");
+      // Known gap: a wrapped long name grows its row (design §8.6 final row height vs §8.7 wrap long names).
+      test.fail(width < 900, "the long route name wraps in the narrow attached-routes table");
+      const release = await holdLists(page);
+      await page.goto(`${install}/gateways/infra/edge`);
+      await expect(page.getByTestId("detail-header")).toBeVisible();
+      await expectStableLayout(page, release, [
+        gatewayCopy.listenerSets,
+        gatewayCopy.attachedRoutes,
+        gatewayCopy.notAttached,
+      ]);
+      const attached = page.getByRole("table", { name: gatewayCopy.attachedRoutes, exact: true });
+      await expect(attached.getByRole("link", { name: LONG })).toBeVisible();
+      await shot(page, `layout-gateway-${width}`);
+    });
+
+    test("ListenerSet sub-tables do not move when their rows load", async ({ page }) => {
+      const release = await holdLists(page);
+      await page.goto(`${install}/listenersets/gateway.networking.k8s.io/ListenerSet/infra/extra`);
+      await expect(page.getByTestId("detail-header")).toBeVisible();
+      await expectStableLayout(page, release, [gatewayCopy.attachedRoutes, gatewayCopy.notAttached]);
+    });
+
+    test("child routes do not move when their rows load", async ({ page }) => {
+      const release = await holdLists(page);
+      await page.goto(`${install}/routes/gateway.networking.k8s.io/HTTPRoute/shop/store`);
+      await page.getByRole("button", { name: routeCopy.toggleChildren(false) }).click();
+      await expectStableLayout(page, release, [routeCopy.childRoutes]);
+    });
+
+    test("a full routes page keeps its footer in place, long name included", async ({ page }) => {
+      // Known gap: a wrapped long name grows its row (design §8.6 final row height vs §8.7 wrap long names).
+      test.fail(true, "the long route name wraps and grows its row");
+      // A page of eight fills the list's eight skeleton rows; the long name sorts first in shop.
+      const release = await holdLists(page, 8);
+      await page.goto(`${install}/routes?namespace=shop`);
+      await expectStableLayout(page, release, [listCopy.routes.title]);
+      const table = page.getByRole("table", { name: listCopy.routes.title, exact: true });
+      await expect(table.getByRole("link", { name: LONG })).toBeVisible();
+      await shot(page, `layout-routes-${width}`);
+    });
   });
 }
