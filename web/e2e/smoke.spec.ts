@@ -37,7 +37,11 @@ for (const theme of themes) {
     await page.getByRole("link", { name: /Show all/ }).click();
     await expect(page).toHaveURL(/\/i\/kgw-a\.kgateway\/findings$/);
     await expect(page.getByText("Namespace not watched by the controller")).toBeVisible();
+    // The list is virtualised and the explorer fixture adds many findings: filter to the info one, then clear.
+    const filter = page.getByRole("textbox", { name: "Filter findings" });
+    await filter.fill("KGWUI-010");
     await expect(page.getByText("Self-managed proxy: the UI cannot see its readiness")).toBeVisible();
+    await filter.fill("");
     await page
       .getByRole("link", { name: /broken/ })
       .first()

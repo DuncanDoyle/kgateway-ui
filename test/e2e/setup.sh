@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Creates a kind cluster with kgateway, the fixtures and the UI, then
 # port-forwards the UI to 127.0.0.1:18080. Usage:
-#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] test/e2e/setup.sh
+#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
+# EXPLORER=0 skips fixtures/explorer.yaml (the D-021 observations need a cluster without it).
 # The cluster's kubeconfig is written to $E2E_DIR/kubeconfig; the current
 # kubeconfig context is left alone.
 set -euo pipefail
@@ -63,6 +64,15 @@ helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --versi
   --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"a"}}]' --wait
 kubectl -n kgw-a rollout status deploy/kgateway --timeout=180s # fails fast if the rendered name changes
 kubectl apply -f test/e2e/fixtures/base.yaml
+if [[ "${EXPLORER:-1}" == 1 ]]; then
+  # Self-signed certificate for edge's https listener; the key never outlives this block.
+  d=$(mktemp -d)
+  openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=*.example.com" \
+    -keyout "$d/tls.key" -out "$d/tls.crt" >/dev/null 2>&1
+  kubectl -n infra create secret tls edge-tls --cert "$d/tls.crt" --key "$d/tls.key" >/dev/null
+  rm -rf "$d"
+  kubectl apply -f test/e2e/fixtures/explorer.yaml
+fi
 if [[ "${SECOND_INSTALL:-}" == 1 ]]; then
   helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-b --create-namespace \
     --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"b"}}]' --wait
