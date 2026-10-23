@@ -76,6 +76,7 @@ export function overview(at = Date.now()): OverviewResponse {
     gateways: [
       {
         ref: { group: gw, kind: "Gateway", namespace: "prod", name: "edge" },
+        link: "detail",
         class: "kgateway",
         state: "error",
         listeners: 2,
@@ -84,6 +85,7 @@ export function overview(at = Date.now()): OverviewResponse {
       },
       {
         ref: { group: gw, kind: "Gateway", namespace: "prod", name: "internal" },
+        link: "detail",
         class: "kgateway",
         state: "healthy",
         listeners: 1,

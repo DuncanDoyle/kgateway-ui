@@ -22,7 +22,7 @@ async function expectInstallPage(page: Page) {
 }
 
 for (const theme of themes) {
-  test(`install page, findings and YAML view (${theme.name})`, async ({ page }) => {
+  test(`install page, findings, route page and YAML (${theme.name})`, async ({ page }) => {
     await page.goto("/");
     if (second) {
       // The card shows the display name; its link carries the opaque ID.
@@ -42,6 +42,9 @@ for (const theme of themes) {
       .getByRole("link", { name: /broken/ })
       .first()
       .click();
+    // A route finding opens the route's detail page; its YAML tab shows the status as written.
+    await expect(page).toHaveURL(/\/routes\/gateway\.networking\.k8s\.io\/HTTPRoute\/[^/]+\/broken$/);
+    await page.getByRole("tab", { name: "YAML" }).click();
     await expect(page.getByTestId("yaml")).toContainText("BackendNotFound");
     // outputDir is resolved from the config, so the path does not depend on the cwd.
     await page.screenshot({

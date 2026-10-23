@@ -1,15 +1,15 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
-import { isLinkable, useInstalls, useMeta } from "../../api/hooks";
-import type { Finding, Ref } from "../../api/types";
+import { useInstalls } from "../../api/hooks";
+import type { Finding } from "../../api/types";
+import { objectPath, resourcePath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
 import { severityLabel, severityToState } from "../../health/state";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 import { InstallName } from "../../shell/InstallName";
-import { installPath } from "../../shell/paths";
 
 // region Styles
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -73,10 +73,8 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
 `;
 
 // region Helpers
-/** Path of the read-only YAML view of r. */
-export function resourcePath(installId: string, r: Ref): string {
-  return installPath(installId, `r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`);
-}
+// The YAML view path lives with objectPath; re-exported here, where the public API has always found it.
+export { resourcePath };
 
 /** The renderer registered for the longest prefix of code, if any (see ShellExtension.findingRenderers). */
 export function rendererFor(renderers: Record<string, FindingRenderer>, code: string): FindingRenderer | undefined {
@@ -94,10 +92,9 @@ interface FindingRowProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** One finding: severity, code, resource, message, detail. The resource links to its YAML view when the backend serves its kind. */
+/** One finding: severity, code, resource, message, detail. The resource opens where its server-computed link says. */
 export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
   const { findingRenderers } = useShellExtension();
-  const { data: meta } = useMeta();
   const extra = rendererFor(findingRenderers, f.code);
   const { data: installs } = useInstalls();
   // A finding without a resource is about the install; it is named, never split from its ID.
@@ -110,7 +107,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
     <ResourceName name={f.install} />
   );
   // A restricted finding (D-013) never links: its resource would 404 for this caller.
-  const linked = !!f.resource && !f.restricted && isLinkable(meta, f.resource);
+  const to = f.resource && !f.restricted ? objectPath(installId, f.resource) : undefined;
   return (
     <Row data-testid="finding-row" stylesOverride={stylesOverride}>
       <div className="sev">
@@ -118,7 +115,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
         <div className="muted code">{f.code}</div>
       </div>
       <div className="res">
-        {linked && f.resource ? <Link to={resourcePath(installId, f.resource)}>{name}</Link> : name}
+        {to ? <Link to={to}>{name}</Link> : name}
         {f.resource ? <div className="muted">{f.resource.kind}</div> : null}
       </div>
       <div className="text">

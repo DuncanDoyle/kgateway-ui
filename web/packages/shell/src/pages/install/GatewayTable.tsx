@@ -12,11 +12,11 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { type MouseEvent, memo, useDeferredValue, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Finding, GatewayRow, Ref } from "../../api/types";
+import { objectPath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
 import { useUrlParams, useUrlText } from "../../shell/urlParams";
 import type { HealthState } from "../../theme/tokens";
-import { resourcePath } from "./FindingRow";
 
 // region Styles
 /** Filter input height, shared with the loading skeleton. */
@@ -95,13 +95,13 @@ const Table = styled.table`
     border-bottom: 1px solid ${(p) => p.theme.color.border};
     font-variant-numeric: tabular-nums;
   }
-  tbody tr {
+  tbody tr[data-linked] {
     cursor: pointer;
   }
-  tbody tr:hover {
+  tbody tr[data-linked]:hover {
     background: color-mix(in srgb, ${(p) => p.theme.color.text} 5%, ${(p) => p.theme.color.surface});
   }
-  tbody tr:active {
+  tbody tr[data-linked]:active {
     background: color-mix(in srgb, ${(p) => p.theme.color.text} 8%, ${(p) => p.theme.color.surface});
   }
   tbody tr:last-of-type td {
@@ -138,6 +138,8 @@ const col = createColumnHelper<GatewayRow>();
 const rank = { error: 0, unknown: 1, warning: 2, healthy: 3 } as const;
 const noFindings: Finding[] = [];
 const gatewayKey = (r: GatewayRow) => `${r.ref.namespace ?? ""}/${r.ref.name}`;
+/** Where a row opens, from its server-computed link only; an older backend sends none, so the row is text. */
+const rowPath = (installId: string, r: GatewayRow) => objectPath(installId, { ...r.ref, link: r.link ?? "none" });
 
 /** Rows whose name, namespace or class contains q (case-insensitive). */
 function filterRows(rows: GatewayRow[], q: string): GatewayRow[] {
@@ -188,11 +190,12 @@ function columns(installId: string) {
     col.accessor(gatewayKey, {
       id: "gateway",
       header: "Gateway",
-      cell: (c) => (
-        <Link to={resourcePath(installId, c.row.original.ref)}>
-          <ResourceName namespace={c.row.original.ref.namespace} name={c.row.original.ref.name} />
-        </Link>
-      ),
+      cell: (c) => {
+        const { ref } = c.row.original;
+        const to = rowPath(installId, c.row.original);
+        const name = <ResourceName namespace={ref.namespace} name={ref.name} />;
+        return to ? <Link to={to}>{name}</Link> : name;
+      },
     }),
     col.accessor("class", { header: "Class" }),
     col.accessor("listeners", { header: "Listeners" }),
@@ -261,8 +264,9 @@ export const GatewayTable = memo(function GatewayTable({
   });
   // A click anywhere on a row opens the Gateway; the name link is the keyboard path.
   const openRow = (e: MouseEvent, r: GatewayRow) => {
-    if ((e.target as HTMLElement).closest("a, button")) return;
-    navigate(resourcePath(installId, r.ref));
+    const to = rowPath(installId, r);
+    if (!to || (e.target as HTMLElement).closest("a, button")) return;
+    navigate(to);
   };
   return (
     <>
@@ -302,7 +306,11 @@ export const GatewayTable = memo(function GatewayTable({
           </thead>
           <tbody>
             {table.getRowModel().rows.map((r) => (
-              <tr key={r.id} onClick={(e) => openRow(e, r.original)}>
+              <tr
+                key={r.id}
+                data-linked={rowPath(installId, r.original) ? "" : undefined}
+                onClick={(e) => openRow(e, r.original)}
+              >
                 {r.getVisibleCells().map((c) => (
                   <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>
                 ))}

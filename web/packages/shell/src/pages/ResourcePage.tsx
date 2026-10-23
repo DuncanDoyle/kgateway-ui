@@ -7,10 +7,11 @@ import { ResourceName } from "../resource/ResourceName";
 import { LastAppliedToggle, useYaml, YamlBlock } from "../resource/ResourceYaml";
 import { useInstallId, useVocabulary } from "../shell/extension";
 import { installPath } from "../shell/paths";
-import { BackLink } from "../states/controls";
+import { BackLink, InlineLink } from "../states/controls";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 import { DataAge } from "./DataAge";
+import { backendParam } from "./explore/route/refs";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -44,6 +45,9 @@ const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
   }
   ${(p) => p.stylesOverride}
 `;
+
+// region Helpers
+const isBackend = (r: { group: string; kind: string }) => r.group === "gateway.kgateway.dev" && r.kind === "Backend";
 
 // region Component
 interface ResourcePageProps {
@@ -89,6 +93,12 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
           <ResourceName namespace={ref.namespace} name={rname} />
         </h1>
         <CopyNameButton resource={ref} />
+        {/* The resource endpoint serves only admitted Backends (design §7.1); Services have no YAML view. */}
+        {isBackend(ref) ? (
+          <InlineLink to={`${installPath(id, "routes")}?${new URLSearchParams({ backend: backendParam(ref) })}`}>
+            Routes that send traffic here
+          </InlineLink>
+        ) : null}
         <span className="spacer" />
         {collectedAt ? <DataAge collectedAt={collectedAt} /> : null}
         {y.lastApplied ? <LastAppliedToggle shown={y.showLastApplied} onToggle={y.toggle} /> : null}

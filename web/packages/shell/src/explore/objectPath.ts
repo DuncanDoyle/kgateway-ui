@@ -1,6 +1,10 @@
-import type { LinkedRef } from "../api/types";
-import { resourcePath } from "../pages/install/FindingRow";
+import type { LinkedRef, Ref } from "../api/types";
 import { installPath } from "../shell/paths";
+
+/** Path of the read-only YAML view of r. */
+export function resourcePath(installId: string, r: Ref): string {
+  return installPath(installId, `r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`);
+}
 
 // region Helpers
 const GATEWAY_API = "gateway.networking.k8s.io";

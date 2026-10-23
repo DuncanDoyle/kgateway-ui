@@ -13,7 +13,10 @@ export interface Brand {
 
 /**
  * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:id/. The core owns "findings" and "r/..." there and "/" at the top; a contribution cannot replace them.
+ * under /i/:id/. The core owns "/" and "i/:id/..." at the top, and these under /i/:id/: "", "findings",
+ * "r/:group/:kind/:ns/:name", "gateways", "gateways/:ns/:name", "listenersets", "listenersets/:group/:kind/:ns/:name",
+ * "routes" and "routes/:group/:kind/:ns/:name". A contribution whose path could match a core URL is ignored, so it
+ * cannot replace a core page; replace one through its CorePages slot instead. "routes/stats" is fine.
  */
 export interface RouteContribution {
   path: string;
@@ -45,12 +48,21 @@ export interface ShellExtension {
   vocabulary?: Partial<Vocabulary>;
 }
 
-/** The core pages; the upstream implementations are exported as defaultPages. */
+/**
+ * The core pages; the upstream implementations are exported as defaultPages. The explorer slots (sub-phase 2.2)
+ * are optional: a slot left out renders the upstream page.
+ */
 export interface CorePages {
   ClusterLanding: ComponentType;
   InstallPage: ComponentType;
   FindingsPage: ComponentType;
   ResourcePage: ComponentType;
+  GatewaysPage?: ComponentType;
+  GatewayPage?: ComponentType;
+  ListenerSetsPage?: ComponentType;
+  ListenerSetPage?: ComponentType;
+  RoutesPage?: ComponentType;
+  RoutePage?: ComponentType;
 }
 
 export const defaultBrand: Brand = { productName: "kgateway", logo: null };

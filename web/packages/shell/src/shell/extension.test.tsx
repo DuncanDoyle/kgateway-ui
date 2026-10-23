@@ -1,6 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { SWRConfig } from "swr";
-import { controlRoomDark, defaultPages, Shell, THEME_PAINT_KEY, type Theme } from "../index";
+import {
+  type CorePages,
+  controlRoomDark,
+  defaultPages,
+  Shell,
+  type ShellExtension,
+  THEME_PAINT_KEY,
+  type Theme,
+} from "../index";
 import { overview, unhealthy } from "../test/fixtures";
 import { stubApi } from "../test/render";
 
@@ -79,4 +87,59 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
   window.history.pushState({}, "", "/i/kgw.kgateway/widgets");
   window.dispatchEvent(new PopStateEvent("popstate"));
   await waitFor(() => expect(screen.getByText("widgets page")).toBeInTheDocument());
+});
+
+// A build that predates the explorer slots: only the four Phase 1 pages.
+const phase1Pages = {
+  ClusterLanding: defaultPages.ClusterLanding,
+  InstallPage: defaultPages.InstallPage,
+  FindingsPage: defaultPages.FindingsPage,
+  ResourcePage: defaultPages.ResourcePage,
+};
+
+function mountAt(path: string, pages: CorePages, extension: ShellExtension = {}) {
+  stubApi({
+    "/api/v1/installs": [],
+    "/api/v1/meta": { version: "dev", synced: true, platform: "Kubernetes", capabilities: [], kinds: [] },
+  });
+  window.history.pushState({}, "", path);
+  render(
+    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+      <Shell pages={pages} extension={extension} />
+    </SWRConfig>,
+  );
+}
+
+it("renders new pages with only the four Phase 1 slots", async () => {
+  mountAt("/i/x/routes", phase1Pages);
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Routes", level: 1 })).toBeInTheDocument());
+});
+
+it("a downstream slot replaces the upstream page", async () => {
+  mountAt("/i/x/gateways/infra/edge", { ...phase1Pages, GatewayPage: () => <p>downstream gateway page</p> });
+  expect(await screen.findByText("downstream gateway page")).toBeInTheDocument();
+});
+
+it("a contribution at routes cannot replace the core page", async () => {
+  mountAt("/i/x/routes", phase1Pages, {
+    routes: [
+      { path: "routes", element: <p>impostor</p>, scope: "install" },
+      { path: "gateways/:ns/edge", element: <p>impostor</p>, scope: "install" },
+      { path: "routes/*", element: <p>impostor</p>, scope: "install" },
+    ],
+  });
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Routes", level: 1 })).toBeInTheDocument());
+  expect(screen.queryByText("impostor")).toBeNull();
+  window.history.pushState({}, "", "/i/x/gateways/infra/edge");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  // The Gateway page answers instead (here with its not-found state).
+  await waitFor(() => expect(screen.queryByRole("heading", { name: "Routes", level: 1 })).toBeNull());
+  expect(screen.queryByText("impostor")).toBeNull();
+});
+
+it("a contribution beside the core pages still renders", async () => {
+  mountAt("/i/x/routes/stats", phase1Pages, {
+    routes: [{ path: "routes/stats", element: <p>route stats</p>, scope: "install" }],
+  });
+  expect(await screen.findByText("route stats")).toBeInTheDocument();
 });
