@@ -78,7 +78,8 @@ const TextButton = styled.button`
     outline-offset: 2px;
   }
 `;
-const BackLink = styled(Link)`
+/** A link back to the install, under a page state. */
+export const BackLink = styled(Link)`
   display: inline-block;
   margin-top: ${(p) => p.theme.space(2)};
   padding: 4px 8px;

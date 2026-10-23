@@ -2,6 +2,9 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { type ComponentType, useMemo } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { GatewaysPage } from "../pages/explore/GatewaysPage";
+import { ListenerSetsPage } from "../pages/explore/ListenerSetsPage";
+import { RoutesPage } from "../pages/explore/RoutesPage";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
@@ -51,6 +54,9 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
   // Core pages under /i/:id/; the install nav shows an entry only when its path is listed here.
   const installRoutes: [string, ComponentType][] = [
     ["", InstallPage],
+    ["gateways", GatewaysPage],
+    ["routes", RoutesPage],
+    ["listenersets", ListenerSetsPage],
     ["findings", FindingsPage],
     ["r/:group/:kind/:rns/:rname", ResourcePage],
   ];

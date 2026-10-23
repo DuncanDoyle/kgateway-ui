@@ -58,7 +58,8 @@ const Bar = styled.div`
     background: ${(p) => p.theme.color.border};
   }
 `;
-const Chip = styled.button`
+/** A toggle filter chip; aria-pressed marks it selected. */
+export const Chip = styled.button`
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -97,7 +98,8 @@ const Chip = styled.button`
     background: color-mix(in srgb, ${(p) => p.theme.color.accentText} ${CHIP_PRESSED_ACTIVE_PCT}%, ${(p) => p.theme.color.surface});
   }
 `;
-const SearchBox = styled.label`
+/** A text filter with a search icon. */
+export const SearchBox = styled.label`
   position: relative;
   display: inline-flex;
   align-items: center;

@@ -38,6 +38,8 @@ function useList<T>(id: string, list: string, query: URLSearchParams) {
   const key = withQuery(path, query);
   const paged = useSWR<Page<T>, ApiError>(key, apiFetch, {
     ...live,
+    // A filter or page change keeps the old rows until the new ones arrive; forInstall still hides another install's.
+    keepPreviousData: true,
     refreshInterval: rejected === key ? 0 : POLL_MS,
     shouldRetryOnError: (e) => !rejects(e),
     onError: (e) => {

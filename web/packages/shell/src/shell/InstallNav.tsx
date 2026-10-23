@@ -16,6 +16,12 @@ const Nav = styled.nav`
     color: ${(p) => p.theme.color.headerText};
     text-decoration: none;
     white-space: nowrap;
+    @media (max-width: 999px) {
+      padding: 6px 7px;
+    }
+    @media (max-width: 799px) {
+      padding: 6px 4px;
+    }
   }
   a:hover { background: ${(p) => headerTint(p.theme, HEADER_HOVER_PCT)}; }
   a:active { background: ${(p) => headerTint(p.theme, HEADER_PRESS_PCT)}; }
@@ -36,6 +42,9 @@ export interface InstallNavEntry {
 /** The install nav, in order. An entry shows only once its page's route exists. */
 export const installNavEntries: InstallNavEntry[] = [
   { label: "Overview", to: "" },
+  { label: "Gateways", to: "gateways" },
+  { label: "Routes", to: "routes" },
+  { label: "ListenerSets", to: "listenersets" },
   { label: "Findings", to: "findings" },
 ];
 

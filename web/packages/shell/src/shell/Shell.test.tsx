@@ -154,10 +154,28 @@ it("the header's install nav links only to pages that exist, and navigates", asy
   mount("/i/kgw.kgateway");
   const nav = await screen.findByRole("navigation", { name: "Install" });
   const links = within(nav).getAllByRole("link");
-  expect(links.map((a) => a.getAttribute("href"))).toEqual(["/i/kgw.kgateway", "/i/kgw.kgateway/findings"]);
+  expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["Overview", "/i/kgw.kgateway"],
+    ["Gateways", "/i/kgw.kgateway/gateways"],
+    ["Routes", "/i/kgw.kgateway/routes"],
+    ["ListenerSets", "/i/kgw.kgateway/listenersets"],
+    ["Findings", "/i/kgw.kgateway/findings"],
+  ]);
   await userEvent.click(within(nav).getByRole("link", { name: "Findings" }));
   expect(await screen.findByText("findings page")).toBeInTheDocument();
   expect(within(nav).getByRole("link", { name: "Findings" })).toHaveAttribute("aria-current", "page");
+});
+
+it("serves the list pages under the install", async () => {
+  const at = new Date().toISOString();
+  stubApi({
+    "/api/v1/installs": [inst("kgw/kgateway")],
+    "/api/v1/meta": meta,
+    "/api/v1/installs/kgw.kgateway/listenersets": { install: "kgw.kgateway", items: [], total: 0, collectedAt: at },
+  });
+  mount("/i/kgw.kgateway/listenersets");
+  expect(await screen.findByRole("heading", { name: "ListenerSets" })).toBeInTheDocument();
+  expect(await screen.findByText("No ListenerSets in this install.")).toBeInTheDocument();
 });
 
 it("shows no install nav outside an install", async () => {
@@ -175,7 +193,9 @@ it("shows the install's version and controller readiness in the header", async (
   mount("/i/kgw.kgateway");
   expect(await screen.findByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
   // Replica wording needs /meta's workloads capability, so it can appear after the version.
-  const ready = await screen.findByText("Controller: 1 of 2 ready");
+  const ready = (await screen.findByText("Controller: 1 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).getByTestId("health-icon-error")).toBeInTheDocument();
 });
 
@@ -239,7 +259,9 @@ it("renders a stale install summary as unknown in the switcher and the header", 
     "/api/v1/meta": meta,
   });
   mount("/i/a.one");
-  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).getByTestId("health-icon-unknown")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
   const item = screen.getByRole("menuitem", { name: /b\/two/ });
@@ -258,7 +280,9 @@ it("confirmedAt keeps an idle install summary fresh in the switcher and the head
     "/api/v1/meta": meta,
   });
   mount("/i/a.one");
-  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).queryByTestId("health-icon-unknown")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
   const item = screen.getByRole("menuitem", { name: /b\/two/ });
@@ -384,7 +408,9 @@ it("a failing installs poll turns the header readiness and switcher items unknow
   const routes: Record<string, unknown> = { "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta };
   stubApi(routes);
   mount("/i/a.one");
-  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).getByTestId("health-icon-healthy")).toBeInTheDocument();
   routes["/api/v1/installs"] = [500, { error: "boom" }];
   // SWR refetches on reconnect of a visible page (jsdom reports hidden).

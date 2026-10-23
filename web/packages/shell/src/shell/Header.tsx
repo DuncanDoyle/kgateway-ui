@@ -79,6 +79,17 @@ const Ready = styled.span`
   gap: 6px;
   font-size: ${(p) => p.theme.font.size.sm};
   color: ${(p) => p.theme.color.headerText};
+  /* Narrow windows keep the icon; the text stays for screen readers and in the tooltip, so the nav fits. */
+  @media (max-width: 1099px) {
+    .label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
 `;
 const Spacer = styled.div`
   flex: 1;
@@ -158,17 +169,19 @@ export function Header({ installPaths }: { installPaths: readonly string[] }) {
           ) : null}
           {/* A platform that cannot observe readiness shows none; that is not a failure (D-016). */}
           {current.readiness.state !== "not-observed" ? (
-            <Ready data-testid="controller-readiness">
+            <Ready data-testid="controller-readiness" title={readinessText(current.readiness)}>
               <HealthIcon
                 state={
                   error || isStale(confirmedOrComputed(current), now) ? "unknown" : readinessState(current.readiness)
                 }
               />
-              {readinessText(current.readiness)}
+              <span className="label">{readinessText(current.readiness)}</span>
             </Ready>
           ) : null}
         </Identity>
       ) : null}
+      {/* The navs sit right of the spacer, so the identity loading in never moves them sideways. */}
+      <Spacer />
       {id ? <InstallNav installId={id} paths={installPaths} /> : null}
       {nav.length > 0 ? (
         <Nav aria-label="Extensions">
@@ -180,7 +193,6 @@ export function Header({ installPaths }: { installPaths: readonly string[] }) {
           ))}
         </Nav>
       ) : null}
-      <Spacer />
       <ThemeSwitcher />
     </Bar>
   );
