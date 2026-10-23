@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -13,14 +14,17 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 // The production selectors: Deployments by kgateway + component, Pods by
@@ -316,5 +320,230 @@ func TestSnapshotTakenAtKeepsMonotonicReading(t *testing.T) {
 	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream()})
 	if at := c.Snapshot().TakenAt; !strings.Contains(at.String(), " m=") {
 		t.Fatalf("TakenAt lost its monotonic reading: %s", at)
+	}
+}
+
+var httpRoutesGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+
+// startCacheWith starts a cache over fake clients holding objs, with its
+// notifications on sig. prepare, when set, adds reactors before the start.
+func startCacheWith(t *testing.T, sig *trigger.Signal, prepare func(*dynamicfake.FakeDynamicClient), objs ...runtime.Object) (*Cache, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	d, kube := testutil.Clients(t, objs...)
+	dyn := d.(*dynamicfake.FakeDynamicClient)
+	if prepare != nil {
+		prepare(dyn)
+	}
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Changes: sig,
+		PodSelectors: []labels.Selector{podSel}, DeploymentSelectors: []labels.Selector{deploySel}})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	c.Start(ctx)
+	return c, dyn
+}
+
+// startCache is startCacheWith with a Signal nobody drains, waited until synced.
+func startCache(t *testing.T, objs ...runtime.Object) (*Cache, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	c, dyn := startCacheWith(t, trigger.New(), nil, objs...)
+	waitSynced(t, c)
+	return c, dyn
+}
+
+// inStore reads an HTTPRoute straight from the informer store. Tests poll it
+// with waitFor: the store is what the fingerprint reads, so no handler is involved.
+func inStore(c *Cache, ns, name string) *unstructured.Unstructured {
+	o, ok, _ := c.dyn[httpRoutesGVR].inf.GetStore().GetByKey(ns + "/" + name)
+	if !ok {
+		return nil
+	}
+	return o.(*unstructured.Unstructured)
+}
+
+// updateAndWaitInStore changes an HTTPRoute's resourceVersion (the fake
+// tracker keeps the object's own) and waits until the store holds it.
+func updateAndWaitInStore(t *testing.T, dyn *dynamicfake.FakeDynamicClient, c *Cache, ns, name string) {
+	t.Helper()
+	ri := dyn.Resource(httpRoutesGVR).Namespace(ns)
+	u, err := ri.Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rv := u.GetResourceVersion() + "1"
+	u.SetResourceVersion(rv)
+	if _, err := ri.Update(context.Background(), u, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the update in the store", func() bool { o := inStore(c, ns, name); return o != nil && o.GetResourceVersion() == rv })
+}
+
+// createAndWaitInStore creates an HTTPRoute and waits until the store holds it.
+func createAndWaitInStore(t *testing.T, dyn *dynamicfake.FakeDynamicClient, c *Cache, u *unstructured.Unstructured) {
+	t.Helper()
+	if _, err := dyn.Resource(httpRoutesGVR).Namespace(u.GetNamespace()).Create(context.Background(), u, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the new object in the store", func() bool { return inStore(c, u.GetNamespace(), u.GetName()) != nil })
+}
+
+// objHash must stay FNV-64a of uid, NUL, resourceVersion, mixed by splitmix64,
+// so every fingerprint provider agrees.
+func TestObjHashIsFNVThroughSplitmix(t *testing.T) {
+	ref := func(uid, rv string) uint64 {
+		h := fnv.New64a()
+		_, _ = h.Write([]byte(uid))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(rv))
+		x := h.Sum64() + 0x9e3779b97f4a7c15
+		x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+		x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+		return x ^ (x >> 31)
+	}
+	for _, c := range [][2]string{{"", ""}, {"u1", "5"}, {"pod/kgw/kgateway-1", "123456"}, {"a", "b\x00c"}} {
+		if got, want := objHash(types.UID(c[0]), c[1]), ref(c[0], c[1]); got != want {
+			t.Errorf("objHash(%q, %q) = %x, want %x", c[0], c[1], got, want)
+		}
+	}
+	if objHash("ab", "c") == objHash("a", "bc") {
+		t.Fatal("the NUL separator must keep uid and resourceVersion apart")
+	}
+}
+
+type obj struct{ uid, rv string }
+
+func printOf(objs []obj) KindPrint {
+	var k KindPrint
+	for _, o := range objs {
+		k.add(types.UID(o.uid), o.rv)
+	}
+	return k
+}
+
+func TestFingerprintIsOrderIndependent(t *testing.T) {
+	a := printOf([]obj{{"u1", "5"}, {"u2", "7"}})
+	b := printOf([]obj{{"u2", "7"}, {"u1", "5"}})
+	if a != b {
+		t.Fatal("order changed the hash")
+	}
+	if printOf([]obj{{"u1", "6"}, {"u2", "7"}}) == a {
+		t.Fatal("rv change not detected")
+	}
+	if a.Count != 2 {
+		t.Fatalf("count %d", a.Count)
+	}
+}
+
+func TestFingerprintTracksStoreNotHandlers(t *testing.T) {
+	c, dyn := startCache(t, testutil.HTTPRoute("shop", "a", nil))
+	before := c.Fingerprint()
+	if !before.Equal(c.Snapshot().Source) {
+		t.Fatal("live and snapshot fingerprints differ on an unchanged store")
+	}
+	updateAndWaitInStore(t, dyn, c, "shop", "a")
+	after := c.Fingerprint()
+	if after.Equal(before) {
+		t.Fatal("resourceVersion change not reflected")
+	}
+	if after.Kinds[httpRoutesGVR.String()].Count != 1 {
+		t.Fatal("count")
+	}
+	if !after.Equal(c.Snapshot().Source) {
+		t.Fatal("a fresh snapshot must capture the live fingerprint")
+	}
+}
+
+// PF8: a Pod matched by two selectors is copied once, and counted once, so a
+// live fingerprint can equal the snapshot's and confirmation can succeed.
+func TestFingerprintDedupesLikeSnapshot(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-1", true))
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(),
+		PodSelectors: []labels.Selector{podSel, podSel}, DeploymentSelectors: []labels.Selector{deploySel, deploySel}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Start(ctx)
+	s := waitSynced(t, c)
+	if len(s.Pods) != 1 || len(s.Deployments) != 1 {
+		t.Fatalf("pods=%d deployments=%d", len(s.Pods), len(s.Deployments))
+	}
+	live := c.Fingerprint()
+	if live.Kinds[PodsGVR.String()].Count != 1 || live.Kinds[DeploymentsGVR.String()].Count != 1 {
+		t.Fatalf("duplicates counted: %+v", live.Kinds)
+	}
+	if !live.Equal(s.Source) {
+		t.Fatalf("live %+v != snapshot %+v", live, s.Source)
+	}
+	for _, gvr := range []schema.GroupVersionResource{NamespacesGVR, PodsGVR, DeploymentsGVR, httpRoutesGVR} {
+		if _, ok := live.Kinds[gvr.String()]; !ok {
+			t.Errorf("%s missing from Kinds", gvr)
+		}
+		if !live.Access[gvr.String()].OK {
+			t.Errorf("%s access %+v", gvr, live.Access[gvr.String()])
+		}
+	}
+}
+
+// An access transition notifies, and the fingerprint carries the failed state.
+// The Watch calls keep failing until the assertion is done (PF7).
+func TestAccessTransitionNotifies(t *testing.T) {
+	var fail atomic.Bool
+	watchers := make(chan *watch.FakeWatcher, 64)
+	failWatchAfterSync := func(dyn *dynamicfake.FakeDynamicClient) {
+		dyn.PrependWatchReactor("httproutes", func(clienttesting.Action) (bool, watch.Interface, error) {
+			if fail.Load() {
+				return true, nil, fmt.Errorf("dial tcp 10.96.0.1:443: connect: %w", syscall.ECONNREFUSED)
+			}
+			w := watch.NewFake()
+			watchers <- w
+			return true, w, nil
+		})
+	}
+	sig := trigger.New()
+	c, _ := startCacheWith(t, sig, failWatchAfterSync)
+	testutil.Recv(t, sig.C(), "sync notify")
+	w := testutil.Recv(t, watchers, "the established watch")
+	testutil.Drain(sig.C())
+
+	fail.Store(true)
+	w.Stop() // the established watch ends; the next Watch call fails
+	testutil.Recv(t, sig.C(), "notify on failure")
+	if a := c.Fingerprint().Access[httpRoutesGVR.String()]; a.OK || !strings.Contains(a.Err, "connection refused") {
+		t.Fatalf("access must be failed in the fingerprint, got %+v", a)
+	}
+
+	fail.Store(false)
+	testutil.Recv(t, sig.C(), "notify on recovery")
+	if a := c.Fingerprint().Access[httpRoutesGVR.String()]; !a.OK {
+		t.Fatalf("access must recover in the fingerprint, got %+v", a)
+	}
+}
+
+// Start notifies once after every informer has synced; then each add, update
+// and delete notifies.
+func TestEventsNotifyAndSyncNotifies(t *testing.T) {
+	sig := trigger.New()
+	c, dyn := startCacheWith(t, sig, nil)
+	testutil.Recv(t, sig.C(), "sync notify")
+	if !c.Snapshot().Synced {
+		t.Fatal("the sync notify must follow the sync")
+	}
+	testutil.Drain(sig.C())
+
+	createAndWaitInStore(t, dyn, c, testutil.HTTPRoute("shop", "b", nil))
+	testutil.Recv(t, sig.C(), "add notify")
+	updateAndWaitInStore(t, dyn, c, "shop", "b")
+	testutil.Recv(t, sig.C(), "update notify")
+	if err := dyn.Resource(httpRoutesGVR).Namespace("shop").Delete(context.Background(), "b", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the delete in the store", func() bool { return inStore(c, "shop", "b") == nil })
+	testutil.Recv(t, sig.C(), "delete notify")
+}
+
+func TestConfigNowStampsSnapshots(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Now: func() time.Time { return testutil.Now }})
+	if at := c.Snapshot().TakenAt; !at.Equal(testutil.Now) {
+		t.Fatalf("TakenAt %s, want %s", at, testutil.Now)
 	}
 }
