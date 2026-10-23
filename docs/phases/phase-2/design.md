@@ -83,14 +83,14 @@ This is the only definition of when the model is recomputed and what its timesta
 |---|---|
 | Object added, updated or deleted | event handler on every informer in `pkg/cache`: dynamic kinds, Namespaces, Pods, Deployments |
 | Access transition (D-014) | the list/watch progress hooks and initial sync; a 1 s confirm tick also compares access states as a fallback |
-| Metrics scrape result | the collector notifies the engine; the scrape cadence (`--metrics-interval`) stays separate |
+| Metrics scrape result | the collector notifies the engine only for an install's first result or a change of presence, error or content; a scrape with unchanged content does not start a recompute (2.1 ruling, our call). The scrape cadence (`--metrics-interval`) stays separate |
 | Served kinds change | the kinds monitor |
-| Time-driven deadline | the earliest of: grace expiry (design §5.2), metrics staleness (design §5.4), KGWUI-012 and computed KGWUI-011 maturation (`computed-rules.md` §9.3) |
+| Time-driven deadline | the earliest of: grace expiry for objects still in grace (design §5.2), metrics staleness (design §5.4), scope-mismatch maturation (KGWUI-007 persistence), KGWUI-012 and computed KGWUI-011 maturation (`computed-rules.md` §9.3) |
 | Safety timer | `--poll-interval`, now "maximum time between recomputes" |
 
 **Triggers give latency, not proof.** client-go updates the informer store first and calls event handlers later, from a separate listener goroutine with its own buffer (`k8s.io/client-go@v0.36.2 tools/cache/controller.go:639-644`, `shared_informer.go:961-965,1356-1360`). A counter bumped in a handler therefore lags the data, and a backlog of notifications could let an old model look current. So triggers only start recomputes. Freshness is decided by the data itself.
 
-**Source fingerprint (our call).** `Snapshot()` already walks every store (`pkg/cache/cache.go:265-305`). In the same pass it computes, per kind, the object count and an order-independent 64-bit hash over each object's (uid, `resourceVersion`), plus every access state. The engine adds the identity of the metrics result and the served-kinds list it read. This tuple is the **source fingerprint** of the snapshot, and it describes exactly the data copied.
+**Source fingerprint (our call).** `Snapshot()` already walks every store (`pkg/cache/cache.go:265-305`). In the same pass it computes, per kind, the object count and an order-independent 64-bit hash over each object's (uid, `resourceVersion`), plus every access state. The engine adds the identity of the metrics result it read (presence, error and content, not `CollectedAt`) and the served-kinds list. Metrics age is time-driven state: the compute adds a strict deadline at the instant the captured metrics would turn stale, so an idle model is refreshed at that horizon and `checks[].collectedAt` may lag a fresh scrape by up to the max age (2.1 ruling, our call). This tuple is the **source fingerprint** of the snapshot, and it describes exactly the data copied.
 - Chosen over an engine-owned mirror store with its own revision: the mirror would itself be filled by the lagging handlers, so it would confirm what the handlers had delivered, not what the informers hold.
 - Cost: one pass over the stores per confirm tick, with no decoding and no copying. It is benchmarked in 2.1 (≤ 5 ms per tick at Large, reported at Extreme) **(our call)**.
 - A hash collision could hide a change until the next trigger or the safety timer. At 64 bits per kind this is accepted.
@@ -712,7 +712,7 @@ The engine takes a clock, a trigger source and a snapshot source that can pause 
   - two requests during a swap each read one consistent `Published` (Model, Source and `ConfirmedAt` from the same value).
 - **Confirmation:** idle, `ConfirmedAt` advances each second; `computedAt` does not.
 - **Deadlines:** a grace expiry 60 s after first-seen triggers a recompute at that instant and the finding turns from info to warning. Metrics staleness with strict `age > maxAge`: a recompute at exactly `collectedAt + maxAge` does not mark it stale; the scheduler then runs at the next reading after the boundary, and that run does. A KGWUI-012 maturation deadline raises the finding with no other event (2.3).
-- **Metrics:** a result arrival triggers one recompute.
+- **Metrics:** a result with changed content triggers one recompute; an unchanged scrape triggers none. Idle, the model recomputes at the earliest of the safety timer, the metrics staleness deadline and any other deadline (measured in `bench/2.1.txt`).
 - **Timestamps, per meaning:** `computedAt` equals the run's compute time and never moves without a run; at publication `confirmedAt` equals the snapshot's `TakenAt` (≤ `computedAt`); after the first idle confirm tick `confirmedAt` equals the tick time (> `computedAt`) while `computedAt` is unchanged; while pending or running `confirmedAt` is frozen. The overview, health and resource header carry `ConfirmedAt`; `checks[].collectedAt` and `since` keep their own values.
 - Phase 1's engine tests run unchanged against the new loop.
 
