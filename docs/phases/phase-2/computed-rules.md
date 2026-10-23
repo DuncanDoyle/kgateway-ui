@@ -367,7 +367,7 @@ An aggregate (§8.2) is **complete** when every context that could contribute to
 
 - **Uncertain points.** A cut by a compute bound (the (parent, ref) not flattened), a context or selection that is `unknown` (§3.3), and an owned top-level route whose root eligibility is unknown.
 - **Reach closure.** From each uncertain point, follow selection and permission only, without the matcher fit: (parent → permitted selected child), transitively. This over-approximates every route the missing work could reach. It is linear in selected edges. If the edge cap itself was hit, every aggregate in the install is incomplete.
-- An aggregate whose child (for `child-entry`), parent P (for `parent-resolvedrefs`) or route (for KGWUI-011) is in a reach closure is **incomplete**.
+- An aggregate whose child (for `child-entry`), parent P (for `parent-resolvedrefs`) or route (for KGWUI-011) is in a reach closure is **incomplete**. For the orphan trigger the aggregate is the route across **every** owned parent that selects it; it is incomplete when the route, or any selecting parent, is in a reach closure.
 
 | Expectation | Needs completeness | If incomplete |
 |---|---|---|
@@ -376,7 +376,8 @@ An aggregate (§8.2) is **complete** when every context that could contribute to
 | Parent `ResolvedRefs=False` (some context failed) | no, for the status | the status is compared; the reason is not |
 | The parent's failure reason | yes | not compared |
 | No delegation failure on the parent | yes | `unknown`; no KGWUI-012 |
-| KGWUI-011 computed trigger (dropped or forbidden everywhere) | yes | no finding |
+| KGWUI-011 computed trigger, `name` or `label` ref (dropped or forbidden everywhere under that parent) | yes | no finding |
+| KGWUI-011 orphan trigger (empty `parentRefs`; dropped or forbidden by every selecting ref of every owned parent) | yes, for every selecting parent | no finding |
 | Listener count, parentRef outcome (view A) | no traversal; unknown inputs only (§3.3) | — |
 
 ## 9. Persistence of KGWUI-012 and the computed KGWUI-011
@@ -391,7 +392,8 @@ A check's identity is (install, rule set, check kind, subject):
 | `route-accepted` | route ref, report key |
 | `child-entry` | child ref, parent ref, report key |
 | `parent-resolvedrefs` | parent ref, reporter key |
-| `delegated-not-attached` (KGWUI-011 computed) | route ref, parent ref |
+| `delegated-not-attached` (KGWUI-011 computed, `name` or `label`) | route ref, parent ref |
+| `orphan-not-attached` (KGWUI-011 orphan) | route ref (covers every selecting parent) |
 
 A rule set change gives a new identity.
 
@@ -406,6 +408,7 @@ Each check kind has its own fingerprint: a hash over exactly the decoded inputs 
 | `child-entry` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; the aggregate's completeness | for the key: entry presence; `Accepted` status and `observedGeneration`, with the reason only when it is `UnsupportedValue`. **Not** `ResolvedRefs` or `Programmed`. |
 | `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
 | `delegated-not-attached` | as `child-entry` | none |
+| `orphan-not-attached` | the route's `parentRefs` (empty or not); the set of owned parents and refs that select it; for each, the `child-entry` inputs of its contexts; completeness of every selecting parent | none |
 
 Not in any fingerprint: `resourceVersion`, `managedFields`, labels and annotations not listed, conditions not listed for that kind, `lastTransitionTime`, metrics, Pods and Deployments. A child's backend `ResolvedRefs` toggling never restarts its `child-entry` window. An unrelated status write, annotation edit or metrics arrival never restarts any window.
 
@@ -420,7 +423,7 @@ The engine keeps a map from identity to (fingerprint, `since`) under its compute
 6. Entries whose subject no longer exists are pruned. A UI restart loses the map, so windows restart, as grace does in Phase 1.
 7. **Deadline.** Each recompute reports the earliest future maturation instant to the scheduler (design §3.1). The predicate becomes true at exactly that instant, so a recompute then raises the finding with no further event.
 
-**Computed KGWUI-011** (design §6.2) uses the same map with kind `delegated-not-attached`. It is mature 30 s after `since`. It never makes a check pending, because it waits on no controller output **(our call)**.
+**Computed KGWUI-011** (design §6.2) uses the same map with kind `delegated-not-attached`, and the orphan trigger with kind `orphan-not-attached`. The orphan predicate is: the route is in scope, has an empty `spec.parentRefs` list and no eligible status entry, is selected by at least one owned parent, has no `attached`, `partial` or `rejected-hostnames` row under any of them, and its orphan aggregate is complete (§8.5). Both kinds are mature 30 s after `since`. They never make a check pending, because they wait on no controller output **(our call)**.
 
 ## 10. Observations that may change these rules
 
@@ -531,3 +534,8 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Disagreement turns unknown (Namespace access lost) | finding cleared the same recompute |
 | Missing expected entry: `graceEnd` later than `since + 30 s`, and the reverse | matures at the later instant |
 | Computed KGWUI-011: matures at 30 s; never makes a check pending | as stated |
+| **Orphan** selected only by wildcard refs, dropped by every selecting parent, traversal complete | KGWUI-011 warning after 30 s, one per route |
+| The same orphan with one selecting parent incomplete (cut by a bound, or in a reach closure) | no finding |
+| A route with a Gateway parentRef, selected by a wildcard and dropped | no finding; Delegation row shown with its reason |
+| An orphan dropped by one parent's wildcard and attached by another parent | no finding |
+| A new parent starts selecting an orphan | the orphan window resets |

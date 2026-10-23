@@ -1,14 +1,14 @@
 # Phase 2 — Gateway & Route Explorer: Design
 
-**Status:** Revised after the fourth cross-model review (`reviews/design-r4-codex.md`: 14 findings, then 7 re-review findings N1–N7, all accepted) and the user's scope decision (2026-10-22). Earlier reviews: `reviews/design-codex.md` (13 findings and 5 re-review findings, all accepted). For approval.
-**Date:** 2026-10-21, revised 2026-10-22
+**Status:** Design questions answered by the user (2026-10-23, §15); awaiting approval. Revised after the fourth cross-model review (`reviews/design-r4-codex.md`: 14 findings, then re-review findings N1–N7 and M1–M3, all accepted) and the user's scope decision (2026-10-22). Earlier reviews: `reviews/design-codex.md` (13 findings and 5 re-review findings, all accepted).
+**Date:** 2026-10-21, revised 2026-10-22 and 2026-10-23
 **Base:** `2c25e35`
 **Roadmap:** `docs/roadmap.md`, Phase 2
 **Decisions:** D-001 … D-020 in `docs/decisions.md`
 **Rules:** `computed-rules.md` is the versioned specification of the computed views, their cross-check and KGWUI-012 persistence. This design refers to it and does not repeat it.
 **kgateway refs:** every behaviour claim cites `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`. The UI supports both tags.
 
-Choices made without the user are marked **(our call)**. Choices the user made are marked **(user, 2026-10-22)**. §15 lists what is still open.
+Choices made without the user are marked **(our call)**. Choices the user made are marked **(user, 2026-10-22)** or **(user, 2026-10-23)**. §15 lists every decided question.
 
 **One home per contract.** Scheduling and timestamps: §3.1. Authorization: §7.4. Computed views and cross-check: `computed-rules.md` §4-9. Ownership: §4.2. Every other section refers to these.
 
@@ -96,7 +96,7 @@ This is the only definition of when the model is recomputed and what its timesta
 - A hash collision could hide a change until the next trigger or the safety timer. At 64 bits per kind this is accepted.
 
 **Scheduler.** One goroutine owns the scheduler state. Its states are idle, pending (with a due time) and running.
-- **Debounce.** A trigger makes the state pending. The due time is 250 ms after the last trigger, but at most 1 s after the first trigger of the burst **(our call; §15 Q14)**. One `kubectl apply` or Helm upgrade gives one recompute; a continuous stream still recomputes about once a second.
+- **Debounce.** A trigger makes the state pending. The due time is 250 ms after the last trigger, but at most 1 s after the first trigger of the burst **(user, 2026-10-23; §15 Q14)**. One `kubectl apply` or Helm upgrade gives one recompute; a continuous stream still recomputes about once a second.
 - **Deadlines** are due at their instant, with no debounce. A deadline whose predicate is strict (metrics staleness uses `age > maxAge`, `pkg/ctrlmetrics/scrape.go:86-87`) is due at the first clock reading after the boundary; one that uses `≥` (maturation) is due at the boundary.
 - **Single flight.** At most one recompute runs. Triggers during a run keep the state pending; their due time follows the same rules; one more run follows.
 - After a run, the state is pending if a trigger arrived during it. Completing an old snapshot never clears a newer trigger.
@@ -166,7 +166,7 @@ type Rules interface {
 | `DELEGATION_WILDCARD_NAMESPACE` (no `KGW_` prefix) | `all`; empty also means `all` (`api/labels/delegation.go:12`) | view B label refs |
 | `KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES` | `true` (`v2.4.7 api/settings/settings.go:324`; `v2.3.11` `:306`) | view A: whether experimental-only kinds are candidates |
 
-- The setting is read explicitly, never assumed **(our call; §15 Q16)**. `valueFrom`, or an `envFrom` without an explicit entry, gives "unknown", and the views that depend on it say so.
+- The setting is read explicitly, never assumed **(user, 2026-10-23; §15 Q16)**. `valueFrom`, or an `envFrom` without an explicit entry, gives "unknown", and the views that depend on it say so.
 - kgateway reads the wildcard once at start (`api/labels/delegation.go:12`). The Pod spec is what runs; the template fallback describes the next rollout (D-015).
 - D-017 §4 is unchanged: the scope verifier compares stable kinds only. The experimental flag serves the computed views alone.
 - Only these entries are read. The values live in `install.Resolved.Settings`; a non-Kubernetes provider supplies them its own way.
@@ -196,7 +196,7 @@ type Rules interface {
 - A cursor is opaque base64url: the sort key, the direction and the last row's unique tuple: (sort value, namespace, name, group, kind) for object lists, and (rule, ref, namespace, name, group, kind) for delegation rows, whose only order is by rule, ref, then child. One child can have several rows, so the rule and ref indexes are part of the key. `next` starts strictly after it in the current Model; `prev` ends strictly before the first row. Both are binary searches.
 - Every sort ends with the tie-break (namespace, name, group, kind), so the same Model gives the same order.
 - A row whose sort value changes moves; a pager may see it twice or miss it, as with offsets. A vanished anchor still works: the search finds where its tuple would sort.
-- Responses carry `total` (after filters and the Authorizer). There is no "jump to page N" **(our call; §15 Q9)**. Kubernetes `limit`/`continue` expires on compaction, so it is not an option.
+- Responses carry `total` (after filters and the Authorizer). There is no "jump to page N" **(user, 2026-10-23; §15 Q9)**. Kubernetes `limit`/`continue` expires on compaction, so it is not an option.
 
 ### 3.7 Why the admin snapshot is not used
 
@@ -237,7 +237,7 @@ All views decode from unstructured objects, apply Gateway API defaults and never
 
 ### 4.2 Assignment of delegated child routes
 
-Assignment stays **status-based**. Computed views explain and cross-check; they never decide ownership, counts or install health (D-020). This ships in 2.2 **(our call; §15 Q12)**.
+Assignment stays **status-based**. Computed views explain and cross-check; they never decide ownership, counts or install health (D-020). This ships in 2.2 **(user, 2026-10-23; §15 Q12)**.
 
 Phase 1 assigns a route only through a parentRef that resolves to a Gateway or ListenerSet of the install (`pkg/install/assign.go:153-189`). A route reached only through HTTPRoute parents is not owned, counted or health-checked; a mixed route is owned through its Gateway, but its HTTPRoute-parent status is ignored (`assign.go:158-170`).
 
@@ -263,7 +263,7 @@ The empty-list fallback matches kgateway, which allows implicit attachment only 
 
 **Computed-only children** (2.4). A route view B computes as attached with no reported edge is not owned. It is a diagnostic candidate, and the missing entry is checked under `computed-rules.md` §8.3 (missing expected status).
 
-**HTTPRoutes with no parent.** An in-scope HTTPRoute with empty `spec.parentRefs` and no status from I's controller **(our call; §15 Q10)**: listed under `state=no-parent` in every install whose scope holds it; not counted; no status finding; shown by view B when selected; its row opens the YAML view (detail only when an owned parent selects it); the Authorizer applies.
+**HTTPRoutes with no parent.** An in-scope HTTPRoute with empty `spec.parentRefs` and no status from I's controller **(user, 2026-10-23; §15 Q10)**: listed under `state=no-parent` in every install whose scope holds it; not counted; no status finding; shown by view B when selected; its row opens the YAML view (detail only when an owned parent selects it); the Authorizer applies.
 
 **Stale status after a drop.** On 2.4 a matcher-dropped child's status is cleared (`v2.4.7 pkg/krtcollections/policy.go:1150-1178`). The other cases are observed on a cluster first (`computed-rules.md` §10).
 
@@ -352,16 +352,17 @@ Each row carries flags from its **current** status entries for this install's pa
 | KGWUI-003 | route-unattached | info / warning (unchanged) | also a parentRef to a missing HTTPRoute | 2.2 |
 | KGWUI-004 | namespace-not-watched | warning (unchanged) | also an unwatched route naming an owned route | 2.2 |
 | **KGWUI-011** | **delegated-route-not-attached** | info inside the grace period, warning after | **new**; two triggers | 2.2, 2.4 |
-| **KGWUI-012** | **computed-view-disagrees** | warning | **new** **(our call; §15 Q13)** | 2.3, 2.4 |
+| **KGWUI-012** | **computed-view-disagrees** | warning | **new** **(user, 2026-10-23; §15 Q13)** | 2.3, 2.4 |
 
-**KGWUI-011.** One finding per (route, parent HTTPRoute). Message draft: "Parent route does not use this route".
+**KGWUI-011.** One finding per (route, parent HTTPRoute), except the orphan trigger, which gives one per route. Message draft: "Parent route does not use this route".
 - **Status trigger** (2.2): a declared candidate (§4.2). The grace period runs from the later of the route's and the parent's current generation first-seen time **(our call)**. **Inside it the finding is info and the `resource status` required check is pending, so the install is unknown, as for any resource being processed** (Phase 1 design §5.2; restored from the earlier design). After it, the finding is a warning and the check is OK again. This holds for every ref mode: an explicit declared parent always gets the diagnostic, even when only a wildcard ref selects the route (§15 Q15). Detail draft: "No status from HTTPRoute `shop/api`", plus the computed reason when 2.4 has one.
-- **Computed trigger** (2.4): view B computes an in-scope route, with no eligible entry, as selected by an owned parent's `name` or `label` ref with outcome `dropped` or `forbidden` in every context, and the traversal for that (route, parent) is **complete** (`computed-rules.md` §8.5). An incomplete traversal gives no computed finding. It is a warning once mature (`computed-rules.md` §9.3, 30 s). **It never makes a check pending**: a computed outcome waits on no controller output, and health stays status-based (D-020) **(our call)**. Routes selected only by a `wildcard` ref get no computed finding; they show in the Delegation tab (§15 Q15).
+- **Computed trigger** (2.4): view B computes an in-scope route, with no eligible entry, as selected by an owned parent's `name` or `label` ref with outcome `dropped` or `forbidden` in every context, and the traversal for that (route, parent) is **complete** (`computed-rules.md` §8.5). An incomplete traversal gives no computed finding. It is a warning once mature (`computed-rules.md` §9.3, 30 s). **It never makes a check pending**: a computed outcome waits on no controller output, and health stays status-based (D-020) **(our call)**. 
+- **Orphan trigger** (2.4) **(user, 2026-10-23; §15 Q15)**: a route selected only by `wildcard` refs gets the computed finding only when it is an **orphan**: its `spec.parentRefs` list is empty, so it can work only as a delegated child; every selecting ref of every owned parent drops or forbids it in every context; and the traversal for every selecting parent is complete (`computed-rules.md` §8.5). It then serves traffic nowhere. One finding per route, not per parent; a warning once mature, never pending. A route with its own parentRefs that a wildcard selects and drops gets no finding and stays in the Delegation tab with its reason. Detail draft (wording-pass candidate): "No parent route uses this route. It has no parentRefs of its own, so it serves no traffic."
 - `rejected-hostnames` already has KGWUI-002 from status. An eligible but stale entry is not KGWUI-011; it follows Phase 1's freshness rules. An out-of-scope route gets KGWUI-004 only.
 
 **KGWUI-012.** Raised when a check matures under `computed-rules.md` §8.3 and §9.3. The resource is the object whose status disagrees. Message draft: "The UI's computed view disagrees with the controller". Detail draft: "Listener `https`: computed 12 routes, controller reports 11. Rule set kgateway-2.4." A warning: it can turn the install yellow, never red. Unknown, skipped, stale, not-verified and incomplete checks never raise it. A conclusion that needs absence (no entry expected, no delegation failure) needs a complete traversal (`computed-rules.md` §8.5).
 
-**Backend `Accepted`** (2.2). kgateway 2.4 stamps `observedGeneration` (`v2.4.7 pkg/reports/status.go:410-415`); 2.3 does not (`v2.3.11 extensions2/pluginutils/status.go:10-40`). The rule reads the condition's own evidence, not the version **(our call; §15 Q11)**:
+**Backend `Accepted`** (2.2). kgateway 2.4 stamps `observedGeneration` (`v2.4.7 pkg/reports/status.go:410-415`); 2.3 does not (`v2.3.11 extensions2/pluginutils/status.go:10-40`). The rule reads the condition's own evidence, not the version **(user, 2026-10-23; §15 Q11)**:
 
 | Condition | Evidence | Finding | State |
 |---|---|---|---|
@@ -642,7 +643,7 @@ A diagnostic candidate shows its banner above the header.
 
 ### 8.8 Wording pass
 
-All new copy goes through the wording pass: short sentences, plain English, active voice; per string, a sub-agent picks the least machine-sounding of five accurate options. It covers titles, empty states, filter and flag labels, attachment labels, delegation outcomes and reasons, the badge, coverage and check states, unknown reasons, KGWUI-011 and KGWUI-012 text, the Backend detail, the candidate banner, restricted placeholders, the denied-objects line and copy buttons. Drafts here are placeholders.
+All new copy goes through the wording pass: short sentences, plain English, active voice; per string, a sub-agent picks the least machine-sounding of five accurate options. It covers titles, empty states, filter and flag labels, attachment labels, delegation outcomes and reasons, the badge, coverage and check states, unknown reasons, KGWUI-011 (including the orphan detail) and KGWUI-012 text, the Backend detail, the candidate banner, restricted placeholders, the denied-objects line and copy buttons. Drafts here are placeholders.
 
 ## 9. Testing
 
@@ -669,6 +670,7 @@ Seed the fake dynamic client, run the real cache, install, computed, health, exp
 - **Admission and links (2.2):** every finding resource opens its view; spec-named objects are candidates; an unrelated object is 404 on both endpoints. For every reference in every golden, `link` agrees with the endpoints. The second step: D named only by candidate C is `none` and 404; owned, it is `detail`.
 - **Authorizer (2.2, extended in 2.3 and 2.4):** rows, nested ListenerSets, delegation rows and children hidden; `total` visible only; `deniedInInstall` unchanged under every filter; a denied Backend is `{restricted: true}` with no message; a denied ancestor has no identity; derived counts drop denied objects. 2.3: a `Selector` listener over a hidden Namespace makes membership, count and check `restricted`, and the row carries no `listener-unknown`. 2.4: a hidden ancestor makes the child's effective contexts and delegation contexts `restricted`; a KGWUI-012 on a visible child whose evidence names a hidden parent has `evidenceRestricted` and no detail. Health and row states are unchanged in every case.
 - **Computed views through the API (2.3, 2.4):** every row of `computed-rules.md` §11 that is not marked rule-only is also asserted through the handlers, with its `Computed` state, coverage and the KGWUI-012 or KGWUI-011 outcome.
+- **KGWUI-011 orphan trigger (2.4):** an orphan dropped by every selecting wildcard parent with a complete traversal gets a warning; the same with one selecting parent incomplete gets none; a route with a Gateway parentRef that a wildcard selects and drops gets none, and its Delegation row is shown; an orphan another parent attaches gets none (`computed-rules.md` §11.5).
 - **Compatibility:** every Phase 1 golden passes, except the additive changes of §7.6.
 
 ### 9.2 Per-version goldens for the computed views
@@ -721,7 +723,7 @@ Fixtures run on kgateway 2.3.11 and 2.4.7 in the existing matrix, added per sub-
 
 ### 9.6 Scale tiers and budgets
 
-The user set three tiers **(user, 2026-10-22)**. The shapes are our proposal **(our call; §15 Q6b)**:
+The user set three tiers **(user, 2026-10-22)**. The user accepted the proposed shapes **(user, 2026-10-23; §15 Q6b)**:
 
 | Shape | Typical | Large (capacity target) | Extreme (stress) |
 |---|---|---|---|
@@ -814,7 +816,7 @@ The user decided all of views A, B and C are in Phase 2, staged **(user, 2026-10
 
 ## 14. Upstream asks (draft text only, not filed)
 
-Each needs a check against kgateway `main` before filing; the user decides where they go (§15 Q5). D-020 makes each computed view a bridge: when kgateway reports the fact, the UI switches to it and keeps its computation only as a cross-check.
+Each needs a check against kgateway `main` before filing; they are filed as §15 Q5 decided **(user, 2026-10-23)**. D-020 makes each computed view a bridge: when kgateway reports the fact, the UI switches to it and keeps its computation only as a cross-check.
 
 | # | Ask | Motivation |
 |---|---|---|
@@ -826,7 +828,7 @@ Each needs a check against kgateway `main` before filing; the user decides where
 | 14.6 | Add the effective `DELEGATION_WILDCARD_NAMESPACE` and the experimental-features flag to the pending scope endpoint proposal | tools stop reading Pod env; D-017 §4 already wants the flag |
 | 14.7 | A separately bindable, read-only snapshot endpoint with route source metadata on by default | the admin server binds to localhost, shares a port with `/logging` and pprof, and needs `KGW_ENABLE_ROUTE_SOURCE_METADATA` (§3.7) |
 
-## 15. Open questions for the user
+## 15. Questions for the user
 
 ### 15.1 Decided in review
 
@@ -839,21 +841,20 @@ Each needs a check against kgateway `main` before filing; the user decides where
 | — | Recompute model | Event-driven (D-019) **(user, 2026-10-22)** |
 | — | Mirroring boundary | Overridden for views A, B and C under D-020's rules **(user, 2026-10-22)** |
 | — | Scope and staging | All of views A, B and C in Phase 2, in four sub-phases, each reviewed cross-model and shippable: 2.1 D-019 and timestamps, 2.2 explorer on status, 2.3 view A, 2.4 context-aware B and C (§13). Rules move to `computed-rules.md`. **(user, 2026-10-22)** |
+| Q1 | Policies attached to a route or Gateway? | Later (Phase 5): a list without precedence can mislead **(user, 2026-10-23)** |
+| Q4 | A graph view? | Later **(user, 2026-10-23)** |
+| Q5 | How to file the upstream asks (§14)? | §14.3 as an umbrella proposal, with 14.1 and 14.2 as its motivating cases; 14.4 and 14.7 separate; 14.6 joins the pending scope endpoint proposal **(user, 2026-10-23)** |
+| Q6b | Shapes per tier (§9.6), including parent matches and dense selection | As proposed **(user, 2026-10-23)** |
+| Q7 | Re-run the research before plan approval? | Yes: re-run the support-ticket and knowledge-base research before the plan is approved **(user, 2026-10-23)** |
+| Q9 | Keyset cursors without page numbers (§3.6)? | Yes **(user, 2026-10-23)** |
+| Q10 | No-parent HTTPRoutes (§4.2) | Listed under `no-parent` in every install whose scope holds them; not counted; no status finding; YAML view; the Authorizer applies **(user, 2026-10-23)** |
+| Q11 | Backend freshness (§6.2) | Current `False` error; current `True` healthy; stale unknown with no finding; no evidence: `False` warning, `True` unknown; absent unknown. Never green without evidence, never turns the install unknown **(user, 2026-10-23)** |
+| Q12 | Delegated children in tiles and health (§4.2) | They count, status-based. Computed views never own; a computed-only child is a candidate checked as "missing expected status"; per-ref outcomes are aggregated per report key; an eligible entry keeps the edge whether current or stale **(user, 2026-10-23)** |
+| Q13 | KGWUI-012 severity and persistence | Warning. Contradicting current status: 30 s after the check's fingerprint last changed. Missing expected child status: after both the 60 s grace period and 30 s, while the parent's status is current. Stale: never. Scheduled deadline; unrelated writes never reset (`computed-rules.md` §9) **(user, 2026-10-23)** |
+| Q14 | D-019 timing (§3.1) | 250 ms quiet, 1 s maximum, safety timer 30 s, confirm tick 1 s; event-to-publication p95 ≤ 1.2 s at Large; deadlines at their instant **(user, 2026-10-23)** |
+| Q15 | Routes selected only by a `wildcard` ref and dropped | A computed KGWUI-011 **only for an orphan**: a route with an empty `spec.parentRefs` list, dropped or forbidden by every selecting ref of every owned parent in every context, with a complete traversal for every selecting parent. It then serves traffic nowhere. A route with its own parentRefs that a wildcard selects and drops gets no finding and stays in the Delegation tab with its reason. `name` and `label` refs keep their trigger (§6.2) **(user, 2026-10-23)** |
+| Q16 | `KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES` for view A (§3.4) | Read it explicitly from the controller Pod, for the computed views only; unreadable means "unknown"; D-017 §4 unchanged **(user, 2026-10-23)** |
 
 ### 15.2 Still open
 
-| # | Question | Default this design assumes | If the other answer |
-|---|---|---|---|
-| Q1 | Policies attached to a route or Gateway (a targetRef index, no merge order): Phase 2 or later? | **Later (Phase 5).** A list without precedence can mislead. | A `policies` section and a by-target index, about one task more; the page must say "attached, not effective". |
-| Q4 | A graph view? | **Later.** | A task in 2.2 and a layout library. |
-| Q5 | Upstream asks: one issue, separate issues, or the state resource (§14.3) as umbrella? | **§14.3 as umbrella**, with 14.1 and 14.2 as motivating cases; 14.4 and 14.7 separate; 14.6 joins the scope proposal. | Separate issues triage more easily but scatter the argument. |
-| Q6b | Shapes per tier (§9.6), including the new parent-matches and dense-selection rows | **As proposed.** | The generator and budgets change; the tiers stay. |
-| Q7 | Re-run the support-ticket and knowledge-base research before plan approval? | **Yes.** | Approve on current research; new pain points become Phase 3 inputs. |
-| Q9 | Keyset cursors without page numbers (§3.6)? | **Yes.** | Offsets add "page N"; pages shift as the model changes. |
-| Q10 | No-parent HTTPRoutes (§4.2): listed under `no-parent`, not counted, no status finding, YAML view, Authorizer applies. Accept? | **Yes.** | Drop them, or add an info finding per route (noisy where intentional). |
-| Q11 | Backend freshness (§6.2): current `False` error, current `True` healthy, stale unknown with no finding, no evidence `False` warning and `True` unknown, absent unknown. Accept? | **Yes.** | `False` without evidence as an error shows red after an edit; no finding hides an invalid 2.3 Backend. |
-| Q12 | Delegated children count in tiles and health (§4.2), status-based. Computed views never own. A computed-only child is a candidate; its missing entry is checked as "missing expected status" (`computed-rules.md` §8.3, §9.3). Per-ref outcomes are aggregated per report key (§8.2), so a child attached through one match and dropped through another is not a disagreement. An eligible entry keeps the edge whether current or stale. Accept the changed numbers? | **Yes.** Children were invisible, which hid real failures. | Count computed children too: health would follow the UI's computation, which D-020 does not allow. Or keep Phase 1 counts: child failures never reach the health strip. |
-| Q13 | KGWUI-012 severity and persistence. | **Warning.** Contradicting current status: 30 s after the check's semantic fingerprint last changed. Missing expected child status: after both the 60 s grace period and 30 s, and only while the parent's own status is current. Stale status: never (KGWUI-003 covers it). Unrelated writes and metrics never reset the window; a scheduled deadline raises it with no further event (`computed-rules.md` §9). | Error: a rule bug turns installs red. Info: a real controller bug stays green. A shorter window adds noise during status lag. |
-| Q14 | D-019 timing (§3.1). | **250 ms quiet, 1 s maximum, safety timer 30 s, confirm tick 1 s.** Event-to-publication p95 ≤ 1.2 s at Large; deadlines run at their instant with no debounce. | A longer window lowers CPU under churn but delays the UI; a shorter safety timer adds idle recomputes. |
-| Q15 | Routes selected only by a `wildcard` ref and dropped: finding or not? | **No computed finding**; they show in the Delegation tab. A route that explicitly declares the parent still gets KGWUI-011's status trigger, whatever the ref mode (§6.2). | A KGWUI-011 per dropped wildcard route: noisy where a namespace mixes children and unrelated routes. |
-| Q16 | `KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES` for view A (§3.4)? | **Read it explicitly from the controller Pod**, for the computed views only; an unreadable value is "unknown". D-017 §4 is unchanged for the scope verifier. | Assume `true`: a cluster with experimental features off shows persistent KGWUI-012 on listeners with experimental route kinds. |
+None. Every question above is decided. The plan starts after the user approves this design.
