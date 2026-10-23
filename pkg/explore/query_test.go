@@ -3,8 +3,11 @@ package explore
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -504,4 +507,259 @@ func TestNarrowestIndexIsUsed(t *testing.T) {
 			t.Errorf("%s: scanned %d (%v), want %d", tc.name, n, err, tc.scanned)
 		}
 	}
+}
+
+func TestUnexpectedHealthStateRanksAsUnknown(t *testing.T) {
+	ix := hand(hr("a", ""), hr("b", "bogus"), hr("c", health.StateError), hr("d", health.StateHealthy), hr("e", health.StateUnknown))
+	for _, desc := range []bool{false, true} {
+		want := []string{"d", "a", "b", "e", "c"}
+		if desc {
+			want = []string{"c", "a", "b", "e", "d"}
+		}
+		fwd, back := walk(t, ix, Query{Sort: Sort{Key: "health", Desc: desc}, Limit: 1})
+		if got := slices.Concat(fwd...); !slices.Equal(got, want) {
+			t.Fatalf("desc=%v forward %q, want %q", desc, got, want)
+		}
+		if slices.Reverse(back); !reflect.DeepEqual(back, fwd) {
+			t.Fatalf("desc=%v backward %q, want %q", desc, back, fwd)
+		}
+	}
+}
+
+func TestEmptyPageTurnsBack(t *testing.T) {
+	model := func(keep ...string) *Index {
+		var rs []RouteRow
+		for _, n := range keep {
+			rs = append(rs, hr(n, health.StateHealthy))
+		}
+		return hand(rs...)
+	}
+	a := model("a", "b", "c", "d", "e", "f")
+	p1 := mustRoutes(t, a, Query{Limit: 2}, nil)
+	p2 := mustRoutes(t, a, Query{Limit: 2, Cursor: p1.Next}, nil) // c, d
+	for _, tc := range []struct {
+		name     string
+		ix       *Index
+		cursor   string
+		total    int
+		turnBack bool // the empty page offers prev, else next
+		want     []string
+	}{
+		{"successors deleted", model("a", "b", "c", "d"), p2.Next, 4, true, []string{"b", "c"}},
+		{"anchor and successors deleted", model("a", "b", "c"), p2.Next, 3, true, []string{"b", "c"}},
+		{"predecessors deleted", model("c", "d", "e", "f"), p2.Prev, 4, false, []string{"d", "e"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := mustRoutes(t, tc.ix, Query{Limit: 2, Cursor: tc.cursor}, nil)
+			if len(p.IDs) != 0 || p.Total != tc.total {
+				t.Fatalf("page %q total %d, want empty with total %d", names(tc.ix, p), p.Total, tc.total)
+			}
+			cur, other := p.Next, p.Prev
+			if tc.turnBack {
+				cur, other = p.Prev, p.Next
+			}
+			if cur == "" || other != "" {
+				t.Fatalf("prev %q next %q", p.Prev, p.Next)
+			}
+			if got := names(tc.ix, mustRoutes(t, tc.ix, Query{Limit: 2, Cursor: cur}, nil)); !slices.Equal(got, tc.want) {
+				t.Fatalf("turned to %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// A page empty because nothing matches offers neither.
+	if p := mustRoutes(t, model(), Query{Limit: 2, Cursor: p2.Next}, nil); p.Prev != "" || p.Next != "" {
+		t.Fatalf("empty list: prev %q next %q", p.Prev, p.Next)
+	}
+}
+
+func TestGatewayRoutesSortMatchesColumn(t *testing.T) {
+	ls := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}
+	other := testutil.GwRef("infra", "other")
+	ix := newWorld(
+		testutil.Gateway("infra", "other", "kgateway", nil),
+		testutil.Gateway("infra", "third", "kgateway", nil),
+		testutil.ListenerSet("infra", "ls", other, nil),
+		testutil.HTTPRoute("shop", "a", []objects.ParentRef{gw}, accepted(gw)),
+		testutil.HTTPRoute("shop", "bad", []objects.ParentRef{gw}, status(gw, cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners", ""), resolved)),
+		testutil.HTTPRoute("shop", "pending", []objects.ParentRef{gw}),
+		testutil.HTTPRoute("shop", "o1", []objects.ParentRef{other}, accepted(other)),
+		testutil.HTTPRoute("shop", "through", []objects.ParentRef{ls}, accepted(ls)),
+	).build(t)
+	for _, vis := range []struct {
+		name string
+		f    func(objects.Ref) bool
+	}{
+		{"all", nil},
+		{"two hidden", func(r objects.Ref) bool { return r.Name != "bad" && r.Name != "pending" }},
+	} {
+		p, err := ix.QueryGateways(Query{Sort: Sort{Key: "routes", Desc: true}}, vis.f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var counts []int
+		for _, id := range p.IDs {
+			g := ix.Gateways[id].Ref
+			n := ix.GatewayRouteCount(id, vis.f)
+			if total := mustRoutes(t, ix, Query{Parent: &g}, vis.f).Total; n != total {
+				t.Errorf("%s: %s column %d, routes?parent= total %d", vis.name, g, n, total)
+			}
+			counts = append(counts, n)
+		}
+		if !slices.IsSortedFunc(counts, func(a, b int) int { return b - a }) {
+			t.Errorf("%s: routes.desc gives counts %v", vis.name, counts)
+		}
+	}
+	// edge: a, bad, pending; other: o1 and through its ListenerSet; third: none.
+	if got := []int{ix.GatewayRouteCount(0, nil), ix.GatewayRouteCount(1, nil), ix.GatewayRouteCount(2, nil)}; !slices.Equal(got, []int{3, 2, 0}) {
+		t.Fatalf("counts %v", got)
+	}
+}
+
+func TestHTTPRouteParentAttachments(t *testing.T) {
+	api := testutil.HTTPRouteRef("shop", "api")
+	stale := testutil.HTTPRoute("shop", "kid-pending", []objects.ParentRef{api}, accepted(api))
+	stale.SetGeneration(2) // the status describes generation 1
+	ix := newWorld(
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, accepted(gw)),
+		testutil.HTTPRoute("shop", "kid-ok", []objects.ParentRef{api}, accepted(api)),
+		testutil.HTTPRoute("shop", "kid-bad", []objects.ParentRef{api}, status(api, cond("Accepted", metav1.ConditionFalse, "NotAllowedByParent", ""), resolved)),
+		stale,
+		testutil.HTTPRoute("shop", "kid-declared", []objects.ParentRef{api}),
+	).build(t)
+	parent := api.Ref()
+	for _, tc := range []struct {
+		a    Attachment
+		want []string
+	}{
+		{"", []string{"kid-bad", "kid-declared", "kid-ok", "kid-pending"}},
+		{AttachmentAccepted, []string{"kid-ok"}},
+		{AttachmentNotAccepted, []string{"kid-bad"}},
+		{AttachmentPending, []string{"kid-pending"}},
+		{AttachmentDeclared, []string{"kid-declared"}},
+	} {
+		if got := names(ix, mustRoutes(t, ix, Query{Parent: &parent, Attachment: tc.a}, nil)); !slices.Equal(got, tc.want) {
+			t.Errorf("attachment %q: got %q, want %q", tc.a, got, tc.want)
+		}
+	}
+}
+
+// TestPagingProperty checks paging against a brute-force order over random
+// rows, visibility, sorts and limits. The seeds are fixed.
+func TestPagingProperty(t *testing.T) {
+	nss, kindNames := []string{"a", "b", "c"}, []string{"GRPCRoute", "HTTPRoute", "TCPRoute"}
+	states := append(slices.Clone(healthStates), "")
+	// brute orders visible entries from scratch, independent of compareEntries.
+	brute := func(es []entry, s Sort) []RowID {
+		less := func(x, y entry) bool {
+			var c int
+			switch s.Key {
+			case "name":
+				c = strings.Compare(x.ref.Namespace+"\x00"+x.ref.Name+"\x00"+x.ref.Group+"\x00"+x.ref.Kind, y.ref.Namespace+"\x00"+y.ref.Name+"\x00"+y.ref.Group+"\x00"+y.ref.Kind)
+				if s.Desc {
+					c = -c
+				}
+				return c < 0
+			case "kind":
+				c = strings.Compare(x.ref.Group+"/"+x.ref.Kind, y.ref.Group+"/"+y.ref.Kind)
+			default:
+				c = x.v.n - y.v.n
+			}
+			if s.Desc {
+				c = -c
+			}
+			if c != 0 {
+				return c < 0
+			}
+			return compareRefs(x.ref, y.ref) < 0
+		}
+		es = slices.Clone(es)
+		sort.SliceStable(es, func(i, j int) bool { return less(es[i], es[j]) })
+		out := []RowID{}
+		for _, e := range es {
+			out = append(out, e.id)
+		}
+		return out
+	}
+	for seed := uint64(1); seed <= 200; seed++ {
+		rng := rand.New(rand.NewPCG(seed, 0))
+		var rows []RouteRow
+		seen := map[objects.Ref]bool{}
+		for range rng.IntN(30) {
+			r := RouteRow{Ref: objects.Ref{Group: objects.GatewayAPIGroup, Kind: kindNames[rng.IntN(3)], Namespace: nss[rng.IntN(3)], Name: fmt.Sprintf("r%d", rng.IntN(15))},
+				State: states[rng.IntN(len(states))]}
+			if !seen[r.Ref] {
+				seen[r.Ref] = true
+				rows = append(rows, r)
+			}
+		}
+		ix := hand(rows...)
+		hidden := map[objects.Ref]bool{}
+		for _, r := range ix.Routes {
+			hidden[r.Ref] = rng.IntN(4) == 0
+		}
+		visible := func(r objects.Ref) bool { return !hidden[r] }
+		var es []entry
+		for i, r := range ix.Routes {
+			if visible(r.Ref) {
+				es = append(es, entry{id: RowID(i), ref: r.Ref, v: sortVal{n: healthRank(r.State)}})
+			}
+		}
+		for _, key := range []string{"name", "kind", "health"} {
+			for _, desc := range []bool{false, true} {
+				s, limit := Sort{Key: key, Desc: desc}, 1+rng.IntN(5)
+				want := brute(es, s)
+				q := Query{Sort: s, Limit: limit}
+				var pages []Page
+				for p := mustRoutes(t, ix, q, visible); ; {
+					pages = append(pages, p)
+					if p.Total != len(want) {
+						t.Fatalf("seed %d %+v: total %d, want %d", seed, s, p.Total, len(want))
+					}
+					if p.Next == "" || len(pages) > len(want)+1 {
+						break
+					}
+					q.Cursor = p.Next
+					p = mustRoutes(t, ix, q, visible)
+				}
+				var got []RowID
+				for _, p := range pages {
+					got = append(got, p.IDs...)
+				}
+				if !slices.Equal(got, want) {
+					t.Fatalf("seed %d %+v limit %d: forward %v, want %v", seed, s, limit, got, want)
+				}
+				for i := len(pages) - 1; i > 0; i-- {
+					q.Cursor = pages[i].Prev
+					if p := mustRoutes(t, ix, q, visible); !slices.Equal(p.IDs, pages[i-1].IDs) {
+						t.Fatalf("seed %d %+v limit %d: prev of page %d is %v, want %v", seed, s, limit, i, p.IDs, pages[i-1].IDs)
+					}
+				}
+			}
+		}
+	}
+}
+
+// FuzzDecodeCursor: the decoder never panics, and what it accepts re-encodes
+// to a cursor that decodes to the same anchor.
+func FuzzDecodeCursor(f *testing.F) {
+	ix := hand(hr("a", health.StateError), hr("b", ""))
+	for _, key := range []string{"name", "kind", "health"} {
+		p, _ := ix.QueryRoutes(Query{Sort: Sort{Key: key}, Limit: 1}, nil)
+		f.Add(p.Next, uint8(0), false)
+	}
+	f.Add(base64.RawURLEncoding.EncodeToString([]byte(`{"s":"routes","d":"desc","b":true,"v":3,"t":["","g","x","Gateway"]}`)), uint8(3), true)
+	f.Add("!!!", uint8(0), false)
+	keys := []string{sortName, sortKind, sortHealth, sortRoutes}
+	f.Fuzz(func(t *testing.T, c string, key uint8, desc bool) {
+		// Only validated sort keys reach the decoder.
+		s := Sort{Key: keys[int(key)%len(keys)], Desc: desc}
+		cur, err := decodeCursor(c, s)
+		if err != nil {
+			return
+		}
+		again, err := decodeCursor(encodeCursor(s, cur.before, cur.anchor), s)
+		if err != nil || again != cur {
+			t.Fatalf("round trip %+v → %+v, %v", cur, again, err)
+		}
+	})
 }

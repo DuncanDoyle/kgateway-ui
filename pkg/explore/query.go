@@ -84,8 +84,17 @@ type entry struct {
 // healthStates are in ascending sort order: health.desc lists errors first.
 var healthStates = []health.State{health.StateHealthy, health.StateWarning, health.StateUnknown, health.StateError}
 
-// healthRank returns s's position in healthStates, or -1.
-func healthRank(s health.State) int { return slices.Index(healthStates, s) }
+// validHealth reports whether s is one of healthStates.
+func validHealth(s health.State) bool { return slices.Contains(healthStates, s) }
+
+// healthRank returns s's position in healthStates. A state outside them,
+// such as "", ranks as unknown, so sorting and cursors never fail.
+func healthRank(s health.State) int {
+	if i := slices.Index(healthStates, s); i >= 0 {
+		return i
+	}
+	return slices.Index(healthStates, health.StateUnknown)
+}
 
 // compareEntries orders a and b under s (design §3.6).
 func compareEntries(a, b entry, s Sort) int {
@@ -126,7 +135,7 @@ func prepare(q Query, keys ...string) (query, error) {
 		return query{}, fmt.Errorf("%w: limit %d", ErrBadQuery, q.Limit)
 	}
 	for _, h := range q.Health {
-		if healthRank(h) < 0 {
+		if !validHealth(h) {
 			return query{}, fmt.Errorf("%w: health %q", ErrBadQuery, h)
 		}
 	}
@@ -173,14 +182,20 @@ func (q *query) page(es []entry) Page {
 	for _, e := range es[start:end] {
 		p.IDs = append(p.IDs, e.id)
 	}
-	// An empty page has nothing to anchor on; the client reloads page one.
-	if end > start {
+	switch {
+	case end > start:
 		if end < n {
 			p.Next = encodeCursor(s, false, es[end-1])
 		}
 		if start > 0 {
 			p.Prev = encodeCursor(s, true, es[start])
 		}
+	// An empty page past rows that still exist turns back from the decoded
+	// anchor; it echoes only the client's own cursor.
+	case q.cur != nil && !q.cur.before && start > 0:
+		p.Prev = encodeCursor(s, true, q.cur.anchor)
+	case q.cur != nil && q.cur.before && end < n:
+		p.Next = encodeCursor(s, false, q.cur.anchor)
 	}
 	return p
 }
@@ -309,7 +324,7 @@ func routeOnly(q Query, parent bool) error {
 func lowerName(ref objects.Ref) string { return strings.ToLower(ref.Namespace + "/" + ref.Name) }
 
 // QueryGateways pages the Gateway rows, as QueryRoutes does. The routes sort
-// counts visible routes only (design §7.4 rule 5).
+// uses GatewayRouteCount, as the list row's routes column does.
 func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, error) {
 	if err := routeOnly(in, false); err != nil {
 		return Page{}, err
@@ -326,15 +341,21 @@ func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, 
 		}
 		v := sortVal{group: g.Ref.Group, kind: g.Ref.Kind, n: healthRank(g.State)}
 		if q.Sort.Key == sortRoutes {
-			v.n = ix.visibleRoutes(g.Routes, visible)
+			v.n = ix.GatewayRouteCount(RowID(i), visible) // #nosec G115 -- a row count fits in int32
 		}
 		es = append(es, entry{id: RowID(i), ref: g.Ref, v: v}) // #nosec G115 -- a row count fits in int32
 	}
 	return q.page(es), nil
 }
 
-// visibleRoutes counts the routes of ids that visible admits.
-func (ix *Index) visibleRoutes(ids []RowID, visible func(objects.Ref) bool) int {
+// GatewayRouteCount is the routes column of Gateway row id and its sort
+// value. §7.3 makes the column a 2.3 field without fixing its set; until 2.3
+// it is every route listed under the Gateway (Routes, which include
+// not-accepted, pending and unwatched rows and routes through its
+// ListenerSets) that visible admits (§7.4 rule 5), which is the Total of
+// QueryRoutes with that Gateway as Parent. nil admits every route.
+func (ix *Index) GatewayRouteCount(id RowID, visible func(objects.Ref) bool) int {
+	ids := ix.Gateways[id].Routes
 	if visible == nil {
 		return len(ids)
 	}

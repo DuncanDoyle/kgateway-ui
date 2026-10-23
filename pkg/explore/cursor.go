@@ -89,8 +89,8 @@ func decodeCursor(c string, s Sort) (cursor, error) {
 	case sortHealth:
 		var v health.State
 		ok = ok && json.Unmarshal(w.V, &v) == nil
+		ok = ok && validHealth(v)
 		e.v.n = healthRank(v)
-		ok = ok && e.v.n >= 0
 	case sortRoutes:
 		ok = ok && json.Unmarshal(w.V, &e.v.n) == nil && e.v.n >= 0
 	}
