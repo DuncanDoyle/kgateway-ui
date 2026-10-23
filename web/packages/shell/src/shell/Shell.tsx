@@ -6,6 +6,7 @@ import { GatewayPage } from "../pages/explore/GatewayPage";
 import { GatewaysPage } from "../pages/explore/GatewaysPage";
 import { ListenerSetPage } from "../pages/explore/ListenerSetPage";
 import { ListenerSetsPage } from "../pages/explore/ListenerSetsPage";
+import { RoutePage } from "../pages/explore/RoutePage";
 import { RoutesPage } from "../pages/explore/RoutesPage";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
@@ -61,6 +62,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     ["listenersets", ListenerSetsPage],
     ["gateways/:ns/:name", GatewayPage],
     ["listenersets/:group/:kind/:ns/:name", ListenerSetPage],
+    ["routes/:group/:kind/:ns/:name", RoutePage],
     ["findings", FindingsPage],
     ["r/:group/:kind/:rns/:rname", ResourcePage],
   ];

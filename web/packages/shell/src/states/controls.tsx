@@ -145,3 +145,23 @@ export const BackLink = styled(Link)`
     outline: 2px solid ${(p) => p.theme.color.focus};
   }
 `;
+/** An inline text link, e.g. "Other routes using this backend". */
+export const InlineLink = styled(Link)`
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: ${(p) => p.theme.radius.sm};
+  color: ${(p) => p.theme.color.accentText};
+  font-size: ${(p) => p.theme.font.size.sm};
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.surface});
+  }
+  &:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
+  }
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
+`;
