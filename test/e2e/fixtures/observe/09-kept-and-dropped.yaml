@@ -1,0 +1,15 @@
+# Item 9: c9 fits the parent match /api and fails /other, both in one rule.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: api, namespace: shop, labels: { observe: d021 } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /api } }, { path: { type: PathPrefix, value: /other } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c9, namespace: shop }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c9, namespace: shop, labels: { observe: d021 } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /api/nine } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]

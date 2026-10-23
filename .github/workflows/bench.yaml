@@ -1,0 +1,31 @@
+name: bench
+# Records the design §9.6 budgets on a GitHub-hosted runner: on demand, and on PRs that touch the engine paths.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ["pkg/engine/**", "pkg/cache/**", "pkg/ctrlmetrics/**", "pkg/trigger/**", "internal/testutil/scale/**", "Makefile", ".github/workflows/bench.yaml"]
+permissions: { contents: read }
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - name: make bench
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "# runner: $RUNNER_OS $RUNNER_ARCH, $(nproc) CPUs, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')"
+            echo "# commit: $GITHUB_SHA"
+            make bench
+            echo "# load after: $(uptime)"
+          } 2>&1 | tee bench.txt
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench
+          path: bench.txt
+          if-no-files-found: error

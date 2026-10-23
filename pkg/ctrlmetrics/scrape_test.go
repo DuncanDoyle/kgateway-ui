@@ -4,18 +4,22 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 type fakeScraper map[string]string // pod name → body; missing → error
@@ -195,5 +199,117 @@ func TestCollectedAtKeepsMonotonicReading(t *testing.T) {
 	d := testutil.ControllerDeployment("kgw", "kgateway", "img", 1, 1)
 	if at := NewCollector(fakeScraper{}).Collect(context.Background(), inst(testutil.ControllerPod(d, "a", false))).CollectedAt; !strings.Contains(at.String(), " m=") {
 		t.Fatalf("CollectedAt lost its monotonic reading: %s", at)
+	}
+}
+
+// stored is one result's notify decision, from WithResultHook.
+type stored struct {
+	r        Result
+	notified bool
+}
+
+// runHooked runs a collector of body every 10 s on a fake clock with max age
+// maxAge; each result's decision arrives on the returned channel.
+func runHooked(t *testing.T, body *atomic.Pointer[string], maxAge time.Duration) (*Collector, *clocktesting.FakeClock, <-chan stored) {
+	t.Helper()
+	d := testutil.ControllerDeployment("kgw", "kgateway", "kgateway:v2.4.7", 1, 1)
+	in := install.Install{Namespace: "kgw", Name: "kgateway", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
+	acks := make(chan stored, 64)
+	clk := testutil.FakeClock()
+	c := NewCollector(scraperFunc(func() string { return *body.Load() }), WithClock(clk), WithMaxAge(maxAge),
+		WithResultHook(func(_ string, r Result, notified bool) { acks <- stored{r, notified} }))
+	c.OnResult = trigger.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx, 10*time.Second, func() []install.Install { return []install.Install{in} }) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
+			t.Error(err)
+		}
+	})
+	return c, clk, acks
+}
+
+// ack receives the next decision and checks it was collected at at.
+func ack(t *testing.T, acks <-chan stored, at time.Time) stored {
+	t.Helper()
+	s := testutil.Recv(t, acks, "a result decision")
+	if !s.r.CollectedAt.Equal(at) {
+		t.Fatalf("result collected at %v, want %v", s.r.CollectedAt, at)
+	}
+	return s
+}
+
+// The first result notifies; a scrape with unchanged content does not; a
+// content change does (D-019).
+func TestCollectorNotifiesOnContentChange(t *testing.T) {
+	var body atomic.Pointer[string]
+	body.Store(new(sample))
+	c, clk, acks := runHooked(t, &body, time.Hour)
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("the first result must notify")
+	}
+	testutil.Recv(t, c.OnResult.C(), "the first notification")
+	for range 2 {
+		clk.Step(10 * time.Second)
+		if s := ack(t, acks, clk.Now()); s.notified {
+			t.Fatal("a scrape that only renews CollectedAt must not notify")
+		}
+	}
+	body.Store(new(strings.Replace(sample, "} 3\n", "} 4\n", 1)))
+	clk.Step(10 * time.Second)
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("changed content must notify")
+	}
+	testutil.Recv(t, c.OnResult.C(), "the notification for changed content")
+}
+
+// Codex 1: a result that follows a stale one notifies even with equal content.
+func TestCollectorNotifiesAfterStaleResult(t *testing.T) {
+	var body atomic.Pointer[string]
+	body.Store(new(sample))
+	_, clk, acks := runHooked(t, &body, 15*time.Second)
+	ack(t, acks, clk.Now())
+	clk.Step(10 * time.Second) // 10 s after the last: fresh
+	if s := ack(t, acks, clk.Now()); s.notified {
+		t.Fatal("a result after a fresh one with equal content must not notify")
+	}
+	clk.Step(20 * time.Second) // one delayed tick: 20 s > 15 s after the last
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("a result after a stale one must notify")
+	}
+}
+
+// scraperFunc serves the body f returns.
+type scraperFunc func() string
+
+func (f scraperFunc) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(f())), nil
+}
+
+func TestSameContentIgnoresCollectedAt(t *testing.T) {
+	m, err := Parse(strings.NewReader(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := Result{Metrics: m, CollectedAt: testutil.Now}
+	b := a
+	b.CollectedAt = a.CollectedAt.Add(time.Minute)
+	if !a.SameContent(b) {
+		t.Fatal("CollectedAt is not content")
+	}
+	b.Err = "pod a: timeout"
+	if a.SameContent(b) {
+		t.Fatal("Err is content")
+	}
+	m2, _ := Parse(strings.NewReader(strings.Replace(sample, "} 3\n", "} 4\n", 1)))
+	if a.SameContent(Result{Metrics: m2, CollectedAt: a.CollectedAt}) {
+		t.Fatal("Managed values are content")
+	}
+	// NaN equals NaN by bits, as in the engine's identity; else every scrape would notify.
+	nan := Result{Metrics: Metrics{Rejects: map[GatewayKey]float64{{"infra", "edge"}: math.NaN()}}}
+	if !nan.SameContent(nan) {
+		t.Fatal("a NaN sample must equal itself")
 	}
 }

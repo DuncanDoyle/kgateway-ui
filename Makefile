@@ -8,10 +8,11 @@ PORT ?= 18080
 UI_URL ?= http://127.0.0.1:$(PORT)
 ACTIONLINT_VERSION := v1.7.12
 
-.PHONY: help test lint actionlint build web run e2e e2e-down
+.PHONY: help test lint actionlint build web run e2e e2e-down bench
 help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
+	@echo "make bench  run the scale benchmarks and budget tests, after the Go version, machine and host load"
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
@@ -21,6 +22,11 @@ help:
 	@echo "make e2e-down  delete the e2e kind cluster"
 test:
 	go test ./...
+bench:
+	@go version
+	@echo "machine: $$(uname -sm), $$(getconf _NPROCESSORS_ONLN) CPUs"
+	@echo "load: $$(uptime)"
+	go test -tags bench -v -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache ./pkg/api
 lint:
 	go vet ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...

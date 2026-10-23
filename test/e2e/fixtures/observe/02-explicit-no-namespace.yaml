@@ -1,0 +1,16 @@
+# Item 2: an explicit child whose parentRef omits the namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: api, namespace: shop, labels: { observe: d021 } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /api } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c2, namespace: shop }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c2, namespace: shop, labels: { observe: d021 } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: api }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /api/two } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]

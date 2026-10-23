@@ -45,6 +45,7 @@ it("keeps the public export surface", () => {
         "ThemeProvider",
         "Tooltip",
         "apiFetch",
+        "confirmedOrComputed",
         "contrastRatio",
         "controlRoomDark",
         "controlRoomLight",

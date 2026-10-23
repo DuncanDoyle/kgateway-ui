@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -14,8 +16,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 // Scraper fetches the /metrics payload of one controller pod.
@@ -87,6 +91,17 @@ func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
 	return maxAge > 0 && now.Sub(r.CollectedAt) > maxAge
 }
 
+// SameContent reports whether r and o carry the same Err and Metrics.
+// CollectedAt is not content: freshness is a deadline, not a change (D-019).
+func (r Result) SameContent(o Result) bool {
+	return r.Err == o.Err && r.Metrics.ManagedPresent == o.Metrics.ManagedPresent &&
+		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits)
+}
+
+// sameBits compares samples by bit pattern, so NaN equals NaN, as the engine's
+// metrics identity hashes them.
+func sameBits(a, b float64) bool { return math.Float64bits(a) == math.Float64bits(b) }
+
 // Source returns the latest Result per install ID.
 type Source interface {
 	Get(id string) (Result, bool)
@@ -95,17 +110,46 @@ type Source interface {
 // Collector periodically scrapes every install's ready controller pods.
 type Collector struct {
 	scraper Scraper
-	now     func() time.Time
+	// clock stamps results and drives Run's ticker.
+	clock clock.WithTicker
 	// maxBody is the largest accepted body; podTimeout bounds one pod scrape.
 	maxBody    int64
 	podTimeout time.Duration
 	mu         sync.RWMutex
 	results    map[string]Result
+	// maxAge is the staleness limit of WithMaxAge; zero means none.
+	maxAge time.Duration
+	// onStored, if set, runs after each result's notify decision (tests).
+	onStored func(id string, r Result, notified bool)
+	// OnResult, if set, is notified after a stored result that is the install's
+	// first, differs in content from the previous one, or follows one that had
+	// gone stale. A result that only renews CollectedAt does not notify; the
+	// engine's staleness deadline reads it.
+	OnResult *trigger.Signal
 }
 
-// NewCollector returns a Collector using s.
-func NewCollector(s Scraper) *Collector {
-	return &Collector{scraper: s, now: time.Now, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+// CollectorOption adjusts a Collector at construction.
+type CollectorOption func(*Collector)
+
+// WithClock makes the collector stamp results and tick with clk (tests).
+func WithClock(clk clock.WithTicker) CollectorOption { return func(c *Collector) { c.clock = clk } }
+
+// WithMaxAge sets the staleness limit consumers use (3 × the metrics
+// interval), so a result after a stale one notifies.
+func WithMaxAge(d time.Duration) CollectorOption { return func(c *Collector) { c.maxAge = d } }
+
+// WithResultHook makes Run call f after each result's notify decision (tests).
+func WithResultHook(f func(id string, r Result, notified bool)) CollectorOption {
+	return func(c *Collector) { c.onStored = f }
+}
+
+// NewCollector returns a Collector using s and the real clock unless an option says otherwise.
+func NewCollector(s Scraper, opts ...CollectorOption) *Collector {
+	c := &Collector{scraper: s, clock: clock.RealClock{}, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // Collect scrapes all ready pods of in and aggregates them. It fails if any
@@ -118,14 +162,14 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		}
 		m, err := c.scrapePod(ctx, p, in.MetricsPort)
 		if err != nil {
-			return Result{CollectedAt: c.now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
+			return Result{CollectedAt: c.clock.Now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
 		}
 		per = append(per, m)
 	}
 	if len(per) == 0 {
-		return Result{CollectedAt: c.now(), Err: "no ready controller pod to scrape"}
+		return Result{CollectedAt: c.clock.Now(), Err: "no ready controller pod to scrape"}
 	}
-	return Result{Metrics: Aggregate(per), CollectedAt: c.now()}
+	return Result{Metrics: Aggregate(per), CollectedAt: c.clock.Now()}
 }
 
 // scrapePod scrapes and parses one pod under its own deadline and size cap.
@@ -169,7 +213,7 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 		return errors.New("ctrlmetrics: collection interval must be positive")
 	}
 	c.podTimeout = min(every/2, maxPodTimeout)
-	t := time.NewTicker(every)
+	t := c.clock.NewTicker(every)
 	defer t.Stop()
 	for {
 		var wg sync.WaitGroup
@@ -179,15 +223,24 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 				defer wg.Done()
 				r := c.Collect(ctx, in)
 				c.mu.Lock()
+				prev, had := c.results[in.ID()]
 				c.results[in.ID()] = r
 				c.mu.Unlock()
+				// A result after a stale one ends staleness, a change content alone would not show.
+				notify := !had || !prev.SameContent(r) || prev.Stale(r.CollectedAt, c.maxAge)
+				if notify {
+					c.OnResult.Notify()
+				}
+				if c.onStored != nil {
+					c.onStored(in.ID(), r, notify)
+				}
 			}()
 		}
 		wg.Wait()
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
+		case <-t.C():
 		}
 	}
 }

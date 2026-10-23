@@ -1,0 +1,116 @@
+# runner: Linux X64, 4 CPUs, INTEL(R) XEON(R) PLATINUM 8573C
+# commit: 8bcd882a542b7223b350d101d49d1da4a7c90e8a
+go version go1.26.0 linux/amd64
+machine: Linux x86_64, 4 CPUs
+load:  11:03:58 up 1 min,  0 user,  load average: 0.45, 0.16, 0.05
+go test -tags bench -v -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache ./pkg/api
+=== RUN   TestBudgetBurst
+    budget_test.go:226: burst 999ms; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 617ms p95 1.067s p99 1.107s max 1.118s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.11s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:261: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (2.82s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:290: confirm tick large: median 563.804µs, max 1.233251ms (budget at Large ≤ 5 ms)
+    budget_test.go:290: confirm tick extreme: median 2.142244ms, max 5.662367ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (1.05s)
+=== RUN   TestBudgetBurst
+    budget_test.go:226: burst 999ms; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 611ms p95 1.073s p99 1.113s max 1.123s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.13s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:261: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (2.87s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:290: confirm tick large: median 609.994µs, max 1.364472ms (budget at Large ≤ 5 ms)
+    budget_test.go:290: confirm tick extreme: median 2.265558ms, max 5.914022ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (1.08s)
+=== RUN   TestBudgetBurst
+    budget_test.go:226: burst 1s; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 620ms p95 1.069s p99 1.109s max 1.12s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.13s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:261: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (2.82s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:290: confirm tick large: median 603.346µs, max 2.654897ms (budget at Large ≤ 5 ms)
+    budget_test.go:290: confirm tick extreme: median 2.452395ms, max 6.435015ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (1.20s)
+=== RUN   TestBudgetBurst
+    budget_test.go:226: burst 1s; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 623ms p95 1.073s p99 1.113s max 1.123s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.09s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:261: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (2.84s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:290: confirm tick large: median 599.805µs, max 11.029161ms (budget at Large ≤ 5 ms)
+    budget_test.go:290: confirm tick extreme: median 2.333019ms, max 8.066769ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (1.13s)
+=== RUN   TestBudgetBurst
+    budget_test.go:226: burst 1s; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 634ms p95 1.083s p99 1.123s max 1.134s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.09s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:261: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (2.81s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:290: confirm tick large: median 631.635µs, max 2.428119ms (budget at Large ≤ 5 ms)
+    budget_test.go:290: confirm tick extreme: median 2.395887ms, max 6.216397ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (1.13s)
+goos: linux
+goarch: amd64
+pkg: github.com/DuncanDoyle/kgateway-ui/pkg/engine
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkCompute
+BenchmarkCompute/typical
+BenchmarkCompute/typical-4         	      58	  19905112 ns/op	 5658851 B/op	  140759 allocs/op
+BenchmarkCompute/typical-4         	      57	  19488732 ns/op	 5653793 B/op	  140758 allocs/op
+BenchmarkCompute/typical-4         	      60	  19489342 ns/op	 5652242 B/op	  140757 allocs/op
+BenchmarkCompute/typical-4         	      60	  19611152 ns/op	 5657289 B/op	  140758 allocs/op
+BenchmarkCompute/typical-4         	      61	  19594611 ns/op	 5649793 B/op	  140757 allocs/op
+BenchmarkCompute/large
+BenchmarkCompute/large-4           	      13	  91152264 ns/op	26653920 B/op	  631827 allocs/op
+BenchmarkCompute/large-4           	      12	  91342627 ns/op	26654978 B/op	  631828 allocs/op
+BenchmarkCompute/large-4           	      13	  92194213 ns/op	26674294 B/op	  631834 allocs/op
+BenchmarkCompute/large-4           	      13	  92166305 ns/op	26659744 B/op	  631830 allocs/op
+BenchmarkCompute/large-4           	      12	  91775028 ns/op	26661198 B/op	  631830 allocs/op
+BenchmarkCompute/extreme
+BenchmarkCompute/extreme-4         	       3	 338671919 ns/op	95726896 B/op	 2233764 allocs/op
+BenchmarkCompute/extreme-4         	       4	 332925384 ns/op	95707512 B/op	 2233752 allocs/op
+BenchmarkCompute/extreme-4         	       4	 332358816 ns/op	95707672 B/op	 2233754 allocs/op
+BenchmarkCompute/extreme-4         	       3	 333993163 ns/op	95713936 B/op	 2233754 allocs/op
+BenchmarkCompute/extreme-4         	       3	 338007259 ns/op	95726634 B/op	 2233763 allocs/op
+BenchmarkConfirmTick
+BenchmarkConfirmTick/large
+BenchmarkConfirmTick/large-4       	    1792	    597927 ns/op	   67160 B/op	      99 allocs/op
+BenchmarkConfirmTick/large-4       	    2134	    569223 ns/op	   67160 B/op	      99 allocs/op
+BenchmarkConfirmTick/large-4       	    1844	    582449 ns/op	   67160 B/op	      99 allocs/op
+BenchmarkConfirmTick/large-4       	    2108	    573423 ns/op	   67160 B/op	      99 allocs/op
+BenchmarkConfirmTick/large-4       	    1695	    603828 ns/op	   67160 B/op	      99 allocs/op
+BenchmarkConfirmTick/extreme
+BenchmarkConfirmTick/extreme-4     	     526	   2294837 ns/op	  232120 B/op	     105 allocs/op
+BenchmarkConfirmTick/extreme-4     	     463	   2383654 ns/op	  232120 B/op	     105 allocs/op
+BenchmarkConfirmTick/extreme-4     	     520	   2355881 ns/op	  232120 B/op	     105 allocs/op
+BenchmarkConfirmTick/extreme-4     	     510	   2351452 ns/op	  232120 B/op	     105 allocs/op
+BenchmarkConfirmTick/extreme-4     	     452	   2616194 ns/op	  232120 B/op	     105 allocs/op
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	76.991s
+goos: linux
+goarch: amd64
+pkg: github.com/DuncanDoyle/kgateway-ui/pkg/cache
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkFingerprint
+BenchmarkFingerprint/large
+BenchmarkFingerprint/large-4         	    2217	    551917 ns/op	   58328 B/op	      80 allocs/op
+BenchmarkFingerprint/large-4         	    2271	    544294 ns/op	   58328 B/op	      80 allocs/op
+BenchmarkFingerprint/large-4         	    2288	    543989 ns/op	   58328 B/op	      80 allocs/op
+BenchmarkFingerprint/large-4         	    2312	    538822 ns/op	   58328 B/op	      80 allocs/op
+BenchmarkFingerprint/large-4         	    2217	    558182 ns/op	   58328 B/op	      80 allocs/op
+BenchmarkFingerprint/extreme
+BenchmarkFingerprint/extreme-4       	     588	   2124738 ns/op	  169432 B/op	      80 allocs/op
+BenchmarkFingerprint/extreme-4       	     548	   2226119 ns/op	  169432 B/op	      80 allocs/op
+BenchmarkFingerprint/extreme-4       	     550	   2233282 ns/op	  169432 B/op	      80 allocs/op
+BenchmarkFingerprint/extreme-4       	     566	   2121640 ns/op	  169432 B/op	      80 allocs/op
+BenchmarkFingerprint/extreme-4       	     549	   2219902 ns/op	  169432 B/op	      80 allocs/op
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/cache	14.579s
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	0.010s
+# load after:  11:06:35 up 4 min,  0 user,  load average: 2.36, 1.93, 0.82

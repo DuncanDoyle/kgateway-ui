@@ -133,7 +133,7 @@ func TestFirstSeenIsPrunedForVanishedObjects(t *testing.T) {
 	}
 	snap.Objects[gvr(t, "HTTPRoute")] = routes
 	if !hasFinding(e.Compute().Installs[0].Health, health.CodeRouteUnattached, "shop/r", "") ||
-		e.Current().Installs[0].Health.State != health.StateUnknown {
+		e.Current().Model.Installs[0].Health.State != health.StateUnknown {
 		t.Fatal("a reappearing object must be inside a fresh grace period")
 	}
 }
@@ -224,7 +224,9 @@ func TestComputeAt5000RoutesUnderOneSecond(t *testing.T) {
 
 // Run hands every model it computes to OnCompute, the first one immediately.
 func TestRunCallsOnComputeWithEachModel(t *testing.T) {
-	cfg := config(snapshot(t), metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+	c := testutil.FakeClock() // Run's clock and Compute's must agree
+	cfg := config(snapshot(t), metricsAt(testutil.Now), c.Now)
+	cfg.Clock = c
 	models := make(chan *Model, 8)
 	cfg.OnCompute = func(m *Model) {
 		select {
@@ -238,7 +240,7 @@ func TestRunCallsOnComputeWithEachModel(t *testing.T) {
 	go e.Run(ctx, time.Hour)
 	select {
 	case m := <-models:
-		if m != e.Current() || len(m.Installs) != 1 {
+		if m != e.Current().Model || len(m.Installs) != 1 {
 			t.Fatalf("OnCompute must receive the current model: %+v", m)
 		}
 	case <-time.After(5 * time.Second):

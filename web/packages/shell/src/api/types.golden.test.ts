@@ -83,7 +83,10 @@ const headerKeys = {
   scope: "?",
 } as const;
 const header = shape<InstallHeader>(headerKeys, { readiness, scope });
-const summary = shape<InstallSummary>({ ...headerKeys, health: "!", computedAt: "!" }, { readiness, scope });
+const summary = shape<InstallSummary>(
+  { ...headerKeys, health: "!", computedAt: "!", confirmedAt: "?" },
+  { readiness, scope },
+);
 const access = shape<Access>({ ok: "!", error: "?" });
 const count = shape<Count>(
   { group: "!", kind: "!", category: "!", displayName: "!", count: "!", access: "!" },
@@ -147,9 +150,10 @@ describe("types.ts matches the golden v1 wire format", () => {
   });
 
   // Guards against a vacuous pass: the fixtures carry the optional fields the SPA branches on.
-  it("covers restricted findings and omitted install fields", () => {
+  it("covers restricted findings, omitted install fields and confirmedAt", () => {
     expect(health.body.findings.some((f) => "restricted" in f && f.restricted)).toBe(true);
     const bare = bareInstalls.body[0];
     expect(bare && !("scope" in bare) && !("namespace" in bare) && !("ready" in bare.readiness)).toBe(true);
+    expect(installs.body.every((s) => "confirmedAt" in s)).toBe(true);
   });
 });

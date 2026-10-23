@@ -41,7 +41,7 @@ Flags:
 - `--kubeconfig`: path to a kubeconfig; empty uses in-cluster config, else the default loading rules.
 - `--install`: pin the UI to one install (install ID or `namespace/name`).
 - `--listen`: listen address (default `:8080` in-cluster, `127.0.0.1:8080` locally).
-- `--poll-interval`: model recompute interval (default 2s).
+- `--poll-interval`: maximum time between model recomputes, the safety timer (default 30s). The model recomputes on object, access, metrics and served-kind changes; `2s` restores the earlier fixed cadence as a floor.
 - `--metrics-interval`: controller metrics scrape interval (default 10s).
 
 `make test`, `make lint` and `make e2e` run the Go tests, the linters and the kind end-to-end suite. `make help` lists all targets.
@@ -105,7 +105,7 @@ func main() {
 // options are the backend settings. Both intervals must be positive; these
 // are the stock binary's defaults.
 func options(ui fs.FS) app.Options {
-	return app.Options{UI: ui, PollInterval: 2 * time.Second, MetricsInterval: 10 * time.Second}
+	return app.Options{UI: ui, PollInterval: 30 * time.Second, MetricsInterval: 10 * time.Second}
 }
 
 // extensions are what this build adds to the stock UI.

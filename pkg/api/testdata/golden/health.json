@@ -2,7 +2,7 @@
   "body": {
     "checks": [
       {
-        "collectedAt": "<snapshot time>",
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "cluster access",
         "ok": true,
         "required": true
@@ -26,7 +26,7 @@
         "required": true
       },
       {
-        "collectedAt": "<snapshot time>",
+        "collectedAt": "2026-10-17T12:00:00Z",
         "error": "1 resource is being processed by the controller",
         "name": "resource status",
         "ok": false,
@@ -34,7 +34,7 @@
         "required": true
       },
       {
-        "collectedAt": "<snapshot time>",
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "gateway proxies",
         "ok": true,
         "required": true

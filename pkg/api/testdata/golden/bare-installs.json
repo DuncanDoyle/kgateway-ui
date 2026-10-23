@@ -2,6 +2,7 @@
   "body": [
     {
       "computedAt": "2026-10-17T12:00:00Z",
+      "confirmedAt": "2026-10-17T12:00:00Z",
       "controllerNames": [
         "kgateway.dev/kgateway"
       ],

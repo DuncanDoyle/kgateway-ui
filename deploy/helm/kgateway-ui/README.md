@@ -44,6 +44,10 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `podSecurityContext` | `runAsNonRoot`, `RuntimeDefault` seccomp | Pod security context. |
 | `securityContext` | no privilege escalation, read-only root FS, all capabilities dropped | Container security context. |
 
+## Recompute
+
+The UI recomputes its model when a watched object, an access state, a metrics scrape or the served kinds change, debounced to at most about one recompute per second. The binary's `--poll-interval` (default 30s, not set by the chart) is only the safety timer: the longest time between recomputes. Setting it to `2s` restores the earlier fixed 2 s cadence as a floor.
+
 ## RBAC
 
 The ClusterRole grants only `get`, `list` and `watch`:

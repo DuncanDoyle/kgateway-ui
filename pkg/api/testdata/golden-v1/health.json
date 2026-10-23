@@ -1,0 +1,140 @@
+{
+  "body": {
+    "checks": [
+      {
+        "collectedAt": "<snapshot time>",
+        "name": "cluster access",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "served kinds",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "controller scope",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "controller pods",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "<snapshot time>",
+        "error": "1 resource is being processed by the controller",
+        "name": "resource status",
+        "ok": false,
+        "pending": true,
+        "required": true
+      },
+      {
+        "collectedAt": "<snapshot time>",
+        "name": "gateway proxies",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "xDS rejects",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "watched namespaces",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "gateway ownership",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "scope matches controller",
+        "ok": true,
+        "required": false
+      }
+    ],
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "counts": {
+      "error": 2,
+      "info": 1,
+      "warning": 1
+    },
+    "findings": [
+      {
+        "code": "KGWUI-002",
+        "install": "kgw.kgateway",
+        "message": "",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "broken",
+          "namespace": "shop"
+        },
+        "restricted": true,
+        "severity": "error",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-002",
+        "detail": "ResolvedRefs=False, reason RefNotPermitted (parent Gateway infra/edge)",
+        "install": "kgw.kgateway",
+        "message": "Reference not permitted (missing ReferenceGrant)",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "denied",
+          "namespace": "shop"
+        },
+        "severity": "error",
+        "since": "2026-10-17T11:00:00Z",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-004",
+        "detail": "targets Gateway infra/edge",
+        "install": "kgw.kgateway",
+        "message": "Namespace not watched by the controller",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "posts",
+          "namespace": "blog"
+        },
+        "severity": "warning",
+        "slug": "namespace-not-watched"
+      },
+      {
+        "code": "KGWUI-003",
+        "detail": "no status from the controller for parent Gateway infra/edge",
+        "install": "kgw.kgateway",
+        "message": "Being processed by the controller",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "young",
+          "namespace": "shop"
+        },
+        "severity": "info",
+        "slug": "route-unattached"
+      }
+    ],
+    "install": "kgw.kgateway",
+    "state": "error"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

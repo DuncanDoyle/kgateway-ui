@@ -81,12 +81,15 @@ func TestStaleMetricsAreUnavailable(t *testing.T) {
 func TestMismatchPersistenceIsStrict(t *testing.T) {
 	v := NewManagedCountVerifier(20 * time.Second)
 	off := map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "Gateway"}: 1, {Namespace: "shop", Resource: "HTTPRoute"}: 3, {Namespace: "shop", Resource: "TrafficPolicy"}: 1}
-	v.Verify(input(t, testutil.Now, off, true))
-	if r := v.Verify(input(t, testutil.Now.Add(20*time.Second), off, true)); len(r.Mismatches) != 0 {
+	matures := testutil.Now.Add(20 * time.Second)
+	if r := v.Verify(input(t, testutil.Now, off, true)); !r.Matures.Equal(matures) {
+		t.Fatalf("a pending mismatch must name its maturation instant %v: %+v", matures, r)
+	}
+	if r := v.Verify(input(t, testutil.Now.Add(20*time.Second), off, true)); len(r.Mismatches) != 0 || !r.Matures.Equal(matures) {
 		t.Fatalf("a mismatch lasting exactly persist must not be reported: %+v", r)
 	}
-	if r := v.Verify(input(t, testutil.Now.Add(21*time.Second), off, true)); len(r.Mismatches) != 1 {
-		t.Fatalf("a mismatch lasting longer than persist must be reported: %+v", r)
+	if r := v.Verify(input(t, testutil.Now.Add(21*time.Second), off, true)); len(r.Mismatches) != 1 || !r.Matures.IsZero() {
+		t.Fatalf("a mismatch lasting longer than persist must be reported, with nothing left pending: %+v", r)
 	}
 }
 

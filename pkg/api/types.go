@@ -22,8 +22,12 @@ type InstallSummary struct {
 	Readiness       overview.Readiness     `json:"readiness"`
 	Scope           *overview.ScopeSummary `json:"scope,omitempty"`
 	Health          HealthSummary          `json:"health"`
-	// ComputedAt is when the model behind Health was computed; clients apply the stale rule to it.
+	// ComputedAt is when the model behind Health was computed. Clients fall back
+	// to it when ConfirmedAt is absent.
 	ComputedAt time.Time `json:"computedAt"`
+	// ConfirmedAt is when the model was last confirmed to match the cluster
+	// (D-019); clients apply the stale rule to it.
+	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
 }
 
 // HealthSummary is the state and per-severity counts.

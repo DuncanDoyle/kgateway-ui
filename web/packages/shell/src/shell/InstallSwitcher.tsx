@@ -2,6 +2,7 @@ import { useTheme } from "@emotion/react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useNow } from "../api/clock";
+import { confirmedOrComputed } from "../api/freshness";
 import { isStale } from "../api/hooks";
 import type { InstallSummary } from "../api/types";
 import { HealthIcon } from "../health/HealthIcon";
@@ -48,7 +49,7 @@ export function InstallSwitcher({ installs, currentId, unconfirmed = false }: In
       {menu.open ? (
         <Menu role="menu" aria-label="Installs" $align="start" ref={menu.menuRef} onKeyDown={menu.onMenuKeyDown}>
           {installs.map((i) => {
-            const state = unconfirmed || isStale(i.computedAt, now) ? "unknown" : i.health.state;
+            const state = unconfirmed || isStale(confirmedOrComputed(i), now) ? "unknown" : i.health.state;
             return (
               <button
                 key={i.id}

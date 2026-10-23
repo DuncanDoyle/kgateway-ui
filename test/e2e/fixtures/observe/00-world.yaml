@@ -1,0 +1,37 @@
+# Shared world for the D-021 observations (rules §10). Apply after base.yaml; run.sh creates
+# the self-signed Secret infra/edge-tls first. Item manifests carry the label observe=d021.
+apiVersion: v1
+kind: Namespace
+metadata: { name: orders, labels: { team: a } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: wild, labels: { team: a } }
+---
+# Lets children in orders and wild use shop/httpbin.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: { name: observe-httpbin, namespace: shop }
+spec:
+  from:
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: orders }
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: wild }
+  to: [{ group: "", kind: Service, name: httpbin }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: edge, namespace: infra }
+spec:
+  gatewayClassName: kgateway
+  allowedListeners: { namespaces: { from: Same } }
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+      allowedRoutes: { namespaces: { from: All } }
+    - name: https
+      port: 8443
+      protocol: HTTPS
+      hostname: "*.example.com"
+      tls: { mode: Terminate, certificateRefs: [{ name: edge-tls }] }
+      allowedRoutes: { namespaces: { from: All } }

@@ -229,6 +229,24 @@ it("renders a stale install summary as unknown in the switcher and the header", 
   expect(within(item).queryByTestId("health-icon-healthy")).toBeNull();
 });
 
+it("confirmedAt keeps an idle install summary fresh in the switcher and the header", async () => {
+  const old = new Date(Date.now() - 60_000).toISOString();
+  const confirmedAt = new Date().toISOString();
+  stubApi({
+    "/api/v1/installs": [
+      { ...inst("a/one", { state: "ready", ready: 2, desired: 2 }, old), confirmedAt },
+      { ...inst("b/two", { state: "ready", ready: 2, desired: 2 }, old), confirmedAt },
+    ],
+    "/api/v1/meta": meta,
+  });
+  mount("/i/a.one");
+  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  expect(within(ready).queryByTestId("health-icon-unknown")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
+  const item = screen.getByRole("menuitem", { name: /b\/two/ });
+  expect(within(item).getByTestId("health-icon-healthy")).toBeInTheDocument();
+});
+
 it("applies stylesOverride to the shell root", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
   window.history.pushState({}, "", "/i/kgw.kgateway");

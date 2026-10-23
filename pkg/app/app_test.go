@@ -20,10 +20,15 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -257,6 +262,91 @@ func TestFirstMetricsCollectionFollowsDiscovery(t *testing.T) {
 		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, sc)
 	eventually(t, "the controller was never scraped after discovery", func() bool { return sc.calls.Load() > 0 })
 	eventually(t, "no metrics result for the install", func() bool { _, ok := a.collector.Get("kgw.kgateway"); return ok })
+}
+
+// slowPods holds the Pod list until release closes, so the Deployment is
+// cached before its Pods, as an unsettled informer start can leave it.
+type slowPods struct {
+	*kubefake.Clientset
+	release chan struct{}
+}
+
+func (k slowPods) CoreV1() typedcorev1.CoreV1Interface {
+	return slowCoreV1{k.Clientset.CoreV1(), k.release}
+}
+
+type slowCoreV1 struct {
+	typedcorev1.CoreV1Interface
+	release chan struct{}
+}
+
+func (c slowCoreV1) Pods(ns string) typedcorev1.PodInterface {
+	return slowPodList{c.CoreV1Interface.Pods(ns), c.release}
+}
+
+type slowPodList struct {
+	typedcorev1.PodInterface
+	release chan struct{}
+}
+
+func (p slowPodList) List(ctx context.Context, o metav1.ListOptions) (*corev1.PodList, error) {
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return p.PodInterface.List(ctx, o)
+}
+
+// A model from a cache that has not settled must not start the collector: its
+// install may still lack its Pods, and the collector would then record "no
+// ready controller pod" and wait a full interval (here an hour) to retry.
+func TestMetricsCollectionWaitsForASettledDiscovery(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+	release := make(chan struct{})
+	early := make(chan bool, 1) // whether discovery was signalled on the unsettled model
+	var a *App
+	onLoop := func(ev engine.LoopEvent) {
+		if ev.Kind != engine.EvPublished || len(ev.Published.Model.Installs) == 0 || ev.Published.Model.Snapshot.Synced {
+			return
+		}
+		select {
+		case <-release: // already released
+			return
+		default:
+		}
+		select {
+		case <-a.discovered:
+			early <- true
+		default:
+			early <- false
+		}
+		close(release)
+	}
+	sc := &stubScraper{}
+	var err error
+	a, err = Build(Clients{Dynamic: dyn, Kube: slowPods{kube, release}, Discovery: kube.Discovery(), Scraper: sc},
+		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, OnLoop: onLoop}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	select {
+	case e := <-early:
+		if e {
+			t.Fatal("discovery was signalled on a model whose cache had not settled")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no model with the install was published before the Pods were listed")
+	}
+	var r ctrlmetrics.Result
+	eventually(t, "no metrics result for the install", func() bool { var ok bool; r, ok = a.collector.Get("kgw.kgateway"); return ok })
+	if r.Err != "" || sc.calls.Load() == 0 {
+		t.Fatalf("the first collection must scrape the install's pod: err=%q calls=%d", r.Err, sc.calls.Load())
+	}
 }
 
 // The scope verifier must wait 2 × and metrics expire after 3 × the metrics
@@ -583,4 +673,86 @@ func TestDownstreamProxyModeResolverSeam(t *testing.T) {
 		}
 		return slices.ContainsFunc(h.Findings, func(f health.Finding) bool { return f.Code == health.CodeSelfManagedProxy })
 	})
+}
+
+// An object change recomputes through the cache's trigger: neither the safety
+// timer nor a confirm tick can explain the run, both being an hour away.
+func TestAppRecomputesOnObjectChange(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), testutil.Namespace("shop", nil), d,
+		testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true))
+	events := make(chan engine.LoopEvent, 1024)
+	var overflow atomic.Bool
+	sc := &stubScraper{}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: sc},
+		Options{PollInterval: time.Hour, MetricsInterval: time.Hour, ConfirmEvery: time.Hour, UI: ui, OnLoop: func(e engine.LoopEvent) {
+			select {
+			case events <- e:
+			default:
+				overflow.Store(true)
+			}
+		}}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+
+	// Start-up, the sync notify and the first metrics result each recompute;
+	// wait for them, then for a quiet loop.
+	eventually(t, "never synced and scraped", func() bool {
+		p := a.Engine.Current()
+		_, scraped := a.collector.Get("kgw.kgateway")
+		return a.cache.Settled() && p != nil && p.Model.Snapshot.Synced && scraped
+	})
+	for quiet := false; !quiet; {
+		select {
+		case <-events:
+		case <-time.After(time.Second): // longer than the 250 ms debounce plus a compute
+			quiet = true
+		}
+	}
+
+	gvr := testutil.ServedUpstream()[0].GVR()
+	for _, s := range testutil.ServedUpstream() {
+		if s.Kind == "HTTPRoute" {
+			gvr = s.GVR()
+		}
+	}
+	if _, err := dyn.Resource(gvr).Namespace("shop").Create(ctx, testutil.HTTPRoute("shop", "added", nil), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var since []engine.LoopEventKind
+	for {
+		e := testutil.Recv(t, events, "a run whose snapshot holds the new route")
+		if e.Kind == engine.EvConfirmed || e.Kind == engine.EvConfirmRefused {
+			t.Fatalf("no confirm tick may run within the hour: %+v", e)
+		}
+		if e.Kind != engine.EvPublished {
+			since = append(since, e.Kind)
+			continue
+		}
+		if !holdsRoute(e.Published.Model.Snapshot, gvr, "shop", "added") {
+			since = nil
+			continue
+		}
+		// One trigger per event; a second trigger repeats the Triggered, Armed pair.
+		want := []engine.LoopEventKind{engine.EvTriggered, engine.EvArmed}
+		for len(since) > 3 && slices.Equal(since[:2], want) {
+			since = since[2:]
+		}
+		if !slices.Equal(since, append(want, engine.EvRunStarted)) {
+			t.Fatalf("events before the publication: %v, want Triggered, Armed, RunStarted", since)
+		}
+		break
+	}
+	if overflow.Load() {
+		t.Fatal("loop event buffer overflowed")
+	}
+}
+
+// holdsRoute reports whether snap holds ns/name under gvr.
+func holdsRoute(snap *cache.Snapshot, gvr schema.GroupVersionResource, ns, name string) bool {
+	return slices.ContainsFunc(snap.Objects[gvr], func(u *unstructured.Unstructured) bool { return u.GetNamespace() == ns && u.GetName() == name })
 }

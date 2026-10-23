@@ -1,15 +1,16 @@
-// Package engine periodically computes the UI's model from the cache, the
-// controller metrics and the registered checks.
+// Package engine computes the UI's model from the cache, the controller
+// metrics and the registered checks, when triggers or deadlines call for it (D-019).
 package engine
 
 import (
-	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -20,6 +21,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 // Config wires the engine.
@@ -48,10 +50,21 @@ type Config struct {
 	// MetricsMaxAge is the age beyond which a metrics result is stale
 	// (3 × the metrics interval). Zero disables staleness: never use it in production.
 	MetricsMaxAge time.Duration
-	// Now is the clock; nil means time.Now.
+	// Now stamps computations; nil means Clock.Now. It must agree with Clock,
+	// or Run sees deadlines due that Compute does not.
 	Now func() time.Time
-	// OnCompute, if set, receives each model Run computes, on Run's goroutine.
+	// OnCompute, if set, receives each model Run publishes, on Run's goroutine.
+	// Confirmations do not call it.
 	OnCompute func(*Model)
+	// Triggers starts recomputes; nil means only deadlines, the safety timer
+	// and the confirm tick do.
+	Triggers *trigger.Signal
+	// Clock drives Run's timers; nil means clock.RealClock{}.
+	Clock clock.WithTicker
+	// ConfirmEvery is the confirm tick interval; zero means ConfirmEvery.
+	ConfirmEvery time.Duration
+	// OnLoop, if set, is called on Run's goroutine after each loop transition (tests).
+	OnLoop func(LoopEvent)
 }
 
 // InstallModel is everything the API serves about one install.
@@ -71,17 +84,33 @@ type Model struct {
 	ComputedAt time.Time
 	// Rejected are this computation's install rejections (invalid IDs); /readyz reports them.
 	Rejected []string
+	// Seq orders computations; it strictly increases.
+	Seq uint64
+	// Next is the earliest deadline not yet due at ComputedAt: a grace expiry,
+	// metrics staleness or a scope mismatch maturing.
+	Next Deadline
+	// MetricsRead are the metrics results this computation used, one per install, in install order.
+	MetricsRead []MetricsRead
+}
+
+// MetricsRead is one metrics result as Compute read it.
+type MetricsRead struct {
+	ID      string
+	Result  ctrlmetrics.Result
+	Present bool
 }
 
 // Engine computes Models.
 type Engine struct {
 	cfg Config
-	mu  sync.RWMutex
-	cur *Model
-	// computeMu serialises Compute; seen is only touched under it.
+	cur atomic.Pointer[Published]
+	// computeMu serialises Compute; seq, seen and rejected are only touched under it.
 	computeMu sync.Mutex
+	seq       uint64
 	seen      map[generation]time.Time
-	rejected  map[string]bool // install errors already logged; only touched under computeMu
+	rejected  map[string]bool // install errors already logged
+	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
+	beforeConfirmSwap func()
 }
 
 // generation identifies one spec version of one object.
@@ -92,8 +121,14 @@ type generation struct {
 
 // New returns an Engine.
 func New(cfg Config) *Engine {
+	if cfg.Clock == nil {
+		cfg.Clock = clock.RealClock{}
+	}
 	if cfg.Now == nil {
-		cfg.Now = time.Now
+		cfg.Now = cfg.Clock.Now
+	}
+	if cfg.ConfirmEvery <= 0 {
+		cfg.ConfirmEvery = ConfirmEvery
 	}
 	if cfg.Platform.IsZero() {
 		cfg.Platform = platform.Kubernetes()
@@ -140,15 +175,24 @@ func (e *Engine) firstSeen(now time.Time) func(u *unstructured.Unstructured) tim
 	}
 }
 
-// Compute builds a new Model and makes it current.
+// Compute builds a new Model and publishes it. Once Run has started, only
+// Run's loop computes and publishes.
 func (e *Engine) Compute() *Model {
+	p := e.compute()
+	e.publish(p)
+	return p.Model
+}
+
+// compute builds a new Model and returns it with its source, unpublished.
+func (e *Engine) compute() *Published {
 	e.computeMu.Lock()
 	defer e.computeMu.Unlock()
 	snap := e.cfg.Snapshots.Snapshot()
 	now := e.cfg.Now()
 	e.observe(snap, now)
+	e.seq++
 	served := e.cfg.Served
-	m := &Model{Snapshot: snap, Served: served, Pinned: e.cfg.Pinned, ComputedAt: now}
+	m := &Model{Snapshot: snap, Served: served, Pinned: e.cfg.Pinned, ComputedAt: now, Seq: e.seq}
 	var kc kinds.Change
 	if e.cfg.KindsChange != nil {
 		kc = e.cfg.KindsChange()
@@ -165,58 +209,66 @@ func (e *Engine) Compute() *Model {
 	all := install.Resolve(found, e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all)
-	seen := e.firstSeen(now)
+	next := deadlines{now: now}
+	firstSeen := e.firstSeen(now)
+	// Only an object health asks about while it is in grace gets a grace deadline.
+	seen := func(u *unstructured.Unstructured) time.Time {
+		t := firstSeen(u)
+		if now.Sub(t) < health.Grace {
+			next.add(t.Add(health.Grace), false) // in grace while now-firstSeen < Grace
+		}
+		return t
+	}
 	for _, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
+		// Read once: the verifier, health and the source fingerprint share this evidence.
 		met, has := e.cfg.Metrics.Get(res.ID())
+		m.MetricsRead = append(m.MetricsRead, MetricsRead{ID: res.ID(), Result: met, Present: has})
+		if has && e.cfg.MetricsMaxAge > 0 {
+			next.add(met.CollectedAt.Add(e.cfg.MetricsMaxAge), true) // stale when age > max
+		}
 		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
 			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
+		if !ver.Matures.IsZero() {
+			next.add(ver.Matures, true) // reported once now − since > persist
+		}
 		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
 	}
-	e.mu.Lock()
-	e.cur = m
-	e.mu.Unlock()
-	return m
+	m.Next = next.next
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}
+	return p
 }
 
-// Current returns the latest Model, or nil before the first Compute.
-func (e *Engine) Current() *Model {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.cur
+// deadlines collects the earliest deadline not yet due at now.
+type deadlines struct {
+	now  time.Time
+	next Deadline
 }
+
+// add considers a deadline at at; strict marks an "after at" predicate.
+func (d *deadlines) add(at time.Time, strict bool) {
+	if c := (Deadline{At: at, Strict: strict}); !c.Due(d.now) {
+		d.next = Earliest(d.next, c)
+	}
+}
+
+// Current returns the latest publication, or nil before the first.
+func (e *Engine) Current() *Published { return e.cur.Load() }
 
 // Installs returns the installs of the current model; the metrics collector scrapes these.
 func (e *Engine) Installs() []install.Install {
-	m := e.Current()
-	if m == nil {
+	p := e.Current()
+	if p == nil {
 		return nil
 	}
-	out := make([]install.Install, 0, len(m.Installs))
-	for _, i := range m.Installs {
+	out := make([]install.Install, 0, len(p.Model.Installs))
+	for _, i := range p.Model.Installs {
 		out = append(out, i.Resolved.Install)
 	}
 	return out
-}
-
-// Run computes immediately and then every interval until ctx is done,
-// passing each model to Config.OnCompute.
-func (e *Engine) Run(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
-		if m := e.Compute(); e.cfg.OnCompute != nil {
-			e.cfg.OnCompute(m)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
 }

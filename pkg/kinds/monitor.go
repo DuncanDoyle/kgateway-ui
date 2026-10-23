@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 // Change is how the kinds the cluster serves now differ from the watched kinds.
@@ -70,6 +72,9 @@ type Monitor struct {
 	watched []Served
 	mu      sync.RWMutex
 	cur     Change
+	// OnChange, if set, is notified when a Refresh yields a Change that
+	// differs from the previous one.
+	OnChange *trigger.Signal
 }
 
 // NewMonitor returns a Monitor of descs against watched, the kinds the cache watches.
@@ -85,8 +90,12 @@ func (m *Monitor) Refresh() error {
 	}
 	c := Diff(m.watched, now)
 	m.mu.Lock()
+	changed := c.String() != m.cur.String()
 	m.cur = c
 	m.mu.Unlock()
+	if changed {
+		m.OnChange.Notify()
+	}
 	return nil
 }
 

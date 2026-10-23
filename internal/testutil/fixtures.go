@@ -2,6 +2,7 @@
 package testutil
 
 import (
+	"fmt"
 	"maps"
 	"time"
 
@@ -282,3 +283,27 @@ func SetGatewayParameters(gw *unstructured.Unstructured, group, kind, name strin
 	gw.Object["spec"].(map[string]any)["infrastructure"] = map[string]any{
 		"parametersRef": map[string]any{"group": group, "kind": kind, "name": name}}
 }
+
+// ScaleTeamLabel is the label of every fourth scale namespace; each scale
+// Gateway has one Selector listener that selects it.
+var ScaleTeamLabel = map[string]string{"team": "web"}
+
+// ScaleLabelled reports whether scale namespace i carries ScaleTeamLabel.
+func ScaleLabelled(i int) bool { return i%4 == 0 }
+
+// ScaleNamespaces builds the n namespaces ns-000 … of a scale world, every
+// fourth one labelled with ScaleTeamLabel.
+func ScaleNamespaces(n int) []*corev1.Namespace {
+	out := make([]*corev1.Namespace, 0, n)
+	for i := range n {
+		var lbls map[string]string
+		if ScaleLabelled(i) {
+			lbls = maps.Clone(ScaleTeamLabel)
+		}
+		out = append(out, Namespace(ScaleNamespace(i), lbls))
+	}
+	return out
+}
+
+// ScaleNamespace is the name of scale namespace i.
+func ScaleNamespace(i int) string { return fmt.Sprintf("ns-%03d", i) }

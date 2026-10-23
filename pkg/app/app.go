@@ -28,6 +28,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 // Options are the runtime settings.
@@ -36,7 +37,8 @@ type Options struct {
 	Listen string
 	// Pinned restricts the UI to one install: its ID, or namespace/name (D-016).
 	Pinned string
-	// PollInterval is the model recompute interval.
+	// PollInterval is the maximum time between model recomputes: the safety
+	// timer. Object, access, metrics and served-kind changes recompute sooner (D-019).
 	PollInterval time.Duration
 	// MetricsInterval is the controller metrics scrape interval.
 	MetricsInterval time.Duration
@@ -44,6 +46,11 @@ type Options struct {
 	KindsInterval time.Duration
 	// UI is the single-page application served at /.
 	UI fs.FS
+	// ConfirmEvery is the engine's confirm tick interval; zero means
+	// engine.ConfirmEvery. Tests only.
+	ConfirmEvery time.Duration
+	// OnLoop receives the engine's loop transitions. Tests only.
+	OnLoop func(engine.LoopEvent)
 }
 
 // Clients are the Kubernetes clients the app uses.
@@ -66,7 +73,7 @@ type App struct {
 	collector *ctrlmetrics.Collector
 	kinds     *kinds.Monitor
 	opts      Options
-	// discovered is closed after the first model with an install.
+	// discovered is closed after the first model with an install over a settled cache.
 	discovered chan struct{}
 }
 
@@ -87,13 +94,16 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.KindsInterval <= 0 {
 		o.KindsInterval = 60 * time.Second
 	}
+	// One coalescing signal: object, access, metrics and served-kind changes all start a recompute (D-019).
+	changes := trigger.New()
 	mon := kinds.NewMonitor(c.Discovery, reg.Kinds, served)
+	mon.OnChange = changes
 	var podSel, depSel []labels.Selector
 	for _, d := range reg.Detectors {
 		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
 	}
-	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel})
+	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel, Changes: changes})
 	scraper := c.Scraper
 	switch {
 	case scraper != nil:
@@ -102,7 +112,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	default:
 		scraper = ctrlmetrics.PodProxyScraper{Kube: c.Kube}
 	}
-	col := ctrlmetrics.NewCollector(scraper)
+	// Metrics older than three scrape intervals are unavailable, not reused.
+	maxAge := 3 * o.MetricsInterval
+	col := ctrlmetrics.NewCollector(scraper, ctrlmetrics.WithMaxAge(maxAge))
+	col.OnResult = changes
 	verifier := reg.Verifier
 	if verifier == nil {
 		// A mismatch must outlast two scrapes before it is reported (design §4.4).
@@ -110,11 +123,13 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	discovered := make(chan struct{})
 	var once sync.Once
-	// Metrics older than three scrape intervals are unavailable, not reused.
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: 3 * o.MetricsInterval, ProxyMode: reg.ProxyMode,
+		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
+		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop,
 		OnCompute: func(m *engine.Model) {
-			if len(m.Installs) > 0 {
+			// An unsettled cache can hold a Deployment without its Pods; scraping
+			// that install fails and is not retried for a full metrics interval.
+			if m.Snapshot.Synced && len(m.Installs) > 0 {
 				once.Do(func() { close(discovered) })
 			}
 		}}
@@ -124,8 +139,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 }
 
 // Start runs the cache, the model loop, the served-kinds monitor and the
-// metrics collector until ctx is done. The collector starts as soon as the first install is discovered,
-// so the first metrics do not wait for a collector tick.
+// metrics collector until ctx is done. PollInterval is the loop's safety timer. The collector starts as soon as the first install is discovered
+// over a settled cache, so the first metrics do not wait for a collector tick.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
 	go a.Engine.Run(ctx, a.opts.PollInterval)

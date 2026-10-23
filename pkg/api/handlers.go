@@ -22,9 +22,9 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/version"
 )
 
-// ModelSource provides the current model and the platform it is computed for.
+// ModelSource provides the current publication and the platform it is computed for.
 type ModelSource interface {
-	Current() *engine.Model
+	Current() *engine.Published
 	Platform() platform.Info
 }
 
@@ -66,21 +66,30 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
 }
 
-// model returns the current model, or writes 503 if none is ready.
-func (h *handler) model(w http.ResponseWriter) *engine.Model {
-	m := h.src.Current()
-	if !synced(m) {
+// current returns the published model, or nil before the first publication.
+func (h *handler) current() *engine.Model {
+	if p := h.src.Current(); p != nil {
+		return p.Model
+	}
+	return nil
+}
+
+// load returns the current publication, or writes 503 if its model is not
+// ready. A request calls it once and serves everything from that one value.
+func (h *handler) load(w http.ResponseWriter) *engine.Published {
+	p := h.src.Current()
+	if p == nil || !synced(p.Model) {
 		writeErr(w, http.StatusServiceUnavailable, "connecting to cluster: cache not synced")
 		return nil
 	}
-	return m
+	return p
 }
 
 // synced reports whether m exists and was computed over a synced cache.
 func synced(m *engine.Model) bool { return m != nil && m.Snapshot != nil && m.Snapshot.Synced }
 
 func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
-	m := h.src.Current()
+	m := h.current()
 	if !synced(m) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -94,7 +103,7 @@ func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
-	m, plat := h.src.Current(), h.src.Platform()
+	m, plat := h.current(), h.src.Platform()
 	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{}}
 	if m != nil {
 		resp.Pinned, resp.Synced = m.Pinned, synced(m)
@@ -159,9 +168,16 @@ func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.In
 }
 
 func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
-	m := h.model(w)
-	if m == nil {
+	p := h.load(w)
+	if p == nil {
 		return
+	}
+	m := p.Model
+	// A zero confirmation time is omitted, so clients fall back to computedAt.
+	var confirmed *time.Time
+	if !p.ConfirmedAt.IsZero() {
+		at := wireTime(p.ConfirmedAt)
+		confirmed = &at
 	}
 	out := []InstallSummary{}
 	for k := range m.Installs {
@@ -169,20 +185,21 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
-			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt)})
+			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
 	}
 	writeJSON(w, out)
 }
 
-func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Model, *engine.InstallModel) {
-	m := h.model(w)
-	if m == nil {
+// find loads the publication and the install named by the request, or writes 503 or 404.
+func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Published, *engine.InstallModel) {
+	p := h.load(w)
+	if p == nil {
 		return nil, nil
 	}
 	id := r.PathValue("id")
-	for i := range m.Installs {
-		if m.Installs[i].Resolved.ID() == id {
-			return m, &m.Installs[i]
+	for i := range p.Model.Installs {
+		if p.Model.Installs[i].Resolved.ID() == id {
+			return p, &p.Model.Installs[i]
 		}
 	}
 	writeErr(w, http.StatusNotFound, "install "+id+" not found")
@@ -190,8 +207,8 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Model, *
 }
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
-	if m, i := h.find(w, r); i != nil {
-		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, m, i, h.visibleHealth(r, i)), CollectedAt: wireTime(m.ComputedAt)})
+	if p, i := h.find(w, r); i != nil {
+		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, p.Model, i, h.visibleHealth(r, i)), CollectedAt: wireTime(p.ConfirmedAt)})
 	}
 }
 
@@ -199,10 +216,11 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 // monotonic reading, which grace and staleness durations rely on.
 func wireTime(t time.Time) time.Time { return t.UTC() }
 
-// wireHealth is rep with every time in wire form. It copies the slices, since
-// rep may share them with the model.
-func wireHealth(rep health.Report) health.Report {
-	rep.CollectedAt = wireTime(rep.CollectedAt)
+// wireHealth is rep with every time in wire form and collectedAt set to the
+// confirmation time (design §3.1). It copies the slices, since rep may share
+// them with the model; the stored report is unchanged.
+func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
+	rep.CollectedAt = wireTime(confirmedAt)
 	rep.Findings = slices.Clone(rep.Findings)
 	for i, f := range rep.Findings {
 		if f.Since != nil {
@@ -218,8 +236,8 @@ func wireHealth(rep health.Report) health.Report {
 }
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
-	if _, i := h.find(w, r); i != nil {
-		writeJSON(w, wireHealth(h.visibleHealth(r, i)))
+	if p, i := h.find(w, r); i != nil {
+		writeJSON(w, wireHealth(h.visibleHealth(r, i), p.ConfirmedAt))
 	}
 }
 
@@ -228,7 +246,7 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 // finding of the install. Only metadata.managedFields is stripped (D-013). Secrets are never watched, so
 // they are never reachable. "-" stands for the empty group or namespace.
 func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
-	m, i := h.find(w, r)
+	p, i := h.find(w, r)
 	if i == nil {
 		return
 	}
@@ -240,9 +258,9 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 	}
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
 	if h.authz.Authorize(r, want) {
-		if obj := lookup(m, i, want); obj != nil {
+		if obj := lookup(p.Model, i, want); obj != nil {
 			// The body is the raw object, so the collection time travels in a header (D-017 §6).
-			w.Header().Set("Collected-At", wireTime(m.ComputedAt).Format(time.RFC3339Nano))
+			w.Header().Set("Collected-At", wireTime(p.ConfirmedAt).Format(time.RFC3339Nano))
 			writeJSON(w, obj)
 			return
 		}
