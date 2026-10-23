@@ -11,6 +11,7 @@ export const SHELL_API_VERSION = 1;
 
 export { ApiError, apiFetch } from "./api/client";
 export { useNow } from "./api/clock";
+export { confirmedOrComputed } from "./api/freshness";
 export {
   isLinkable,
   isStale,

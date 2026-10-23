@@ -2,6 +2,7 @@ import { css, useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link, NavLink, useMatch } from "react-router-dom";
 import { useNow } from "../api/clock";
+import { confirmedOrComputed } from "../api/freshness";
 import { isStale, useInstalls } from "../api/hooks";
 import type { Readiness } from "../api/types";
 import { versionText } from "../format";
@@ -158,7 +159,9 @@ export function Header() {
           {current.readiness.state !== "not-observed" ? (
             <Ready data-testid="controller-readiness">
               <HealthIcon
-                state={error || isStale(current.computedAt, now) ? "unknown" : readinessState(current.readiness)}
+                state={
+                  error || isStale(confirmedOrComputed(current), now) ? "unknown" : readinessState(current.readiness)
+                }
               />
               {readinessText(current.readiness)}
             </Ready>

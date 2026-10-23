@@ -231,10 +231,14 @@ export function restricted(at = Date.now()): HealthReport {
 }
 
 /** The install summary that matches overview(). */
-export function installSummary(at = Date.now()): InstallSummary {
+export function installSummary(
+  at = Date.now(),
+  times: { confirmedAt?: string; computedAt?: string } = {},
+): InstallSummary {
   return {
     ...overview(at).header,
     health: { state: "error", counts: { error: 1, warning: 6 } },
-    computedAt: new Date(at).toISOString(),
+    computedAt: times.computedAt ?? new Date(at).toISOString(),
+    ...(times.confirmedAt ? { confirmedAt: times.confirmedAt } : {}),
   };
 }

@@ -111,6 +111,18 @@ it("cluster landing never shows an old healthy summary as healthy", async () => 
   expect(within(card).queryByTestId("health-icon-healthy")).toBeNull();
 });
 
+it("cluster landing keeps an idle install fresh when confirmedAt is recent", async () => {
+  const now = Date.now();
+  const old = new Date(now - 60_000).toISOString();
+  stubApi({
+    "/api/v1/installs": [{ ...inst("a/one", "error", { error: 1 }, old), confirmedAt: new Date(now).toISOString() }],
+  });
+  renderWithTheme(<ClusterLanding />);
+  const card = await screen.findByRole("link", { name: /a\/one/ });
+  expect(card).toHaveTextContent(/error/i);
+  expect(card).not.toHaveTextContent("Data is stale");
+});
+
 // Identical successful polls do not re-render through SWR, so only the shared clock turns an ageing summary stale.
 it("a fresh summary turns unknown as it ages while identical responses keep arriving", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });

@@ -2,6 +2,7 @@ import { css, type SerializedStyles, useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
 import { useNow } from "../api/clock";
+import { confirmedOrComputed } from "../api/freshness";
 import { isStale, useInstalls } from "../api/hooks";
 import type { InstallSummary } from "../api/types";
 import { countsText, versionText } from "../format";
@@ -128,7 +129,7 @@ export function ClusterLanding({ stylesOverride }: ClusterLandingProps = {}) {
       {data.map((i) => {
         // An old summary is not evidence: unknown, never its last state.
         // A failing poll leaves the summary unconfirmed: unknown as well.
-        const stale = !!error || isStale(i.computedAt, now);
+        const stale = !!error || isStale(confirmedOrComputed(i), now);
         const state: HealthState = stale ? "unknown" : i.health.state;
         return (
           <Card key={i.id} to={installPath(i.id)} $state={state} data-testid="install-card">
