@@ -325,7 +325,7 @@ it("gateway filter matches name, namespace and class and lives in the URL", asyn
   mount(healthy(), "/i/kgw.kgateway?q=internal", ov);
   const table = await screen.findByRole("table", { name: "Gateways" });
   expect(within(table).getAllByRole("row")).toHaveLength(2); // header + internal
-  const filter = screen.getByRole("textbox", { name: "Filter gateways" });
+  const filter = screen.getByRole("textbox", { name: "Filter Gateways" });
   expect(filter).toHaveValue("internal");
   await userEvent.clear(filter);
   await userEvent.type(filter, "prod");
@@ -716,7 +716,7 @@ async function switchTo(id: string) {
   await userEvent.click(item);
 }
 
-const filterBox = () => screen.getByRole("textbox", { name: "Filter gateways" });
+const filterBox = () => screen.getByRole("textbox", { name: "Filter Gateways" });
 
 it("switching installs does not carry the gateway filter over", async () => {
   const a = overview();

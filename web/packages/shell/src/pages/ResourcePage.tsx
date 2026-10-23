@@ -2,7 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useParams } from "react-router-dom";
 import { useResource } from "../api/hooks";
-import { detailCopy } from "../copy/explorer";
+import { detailCopy, listCopy } from "../copy/explorer";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
 import { LastAppliedToggle, useYaml, YamlBlock } from "../resource/ResourceYaml";
@@ -68,12 +68,12 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
     return (
       <PageState
         kind="empty"
-        title="Not in this install's scope"
+        title={listCopy.notInScope}
         message={
           <>
             {kind} <ResourceName namespace={ref.namespace} name={rname} />
             <br />
-            <BackLink to={installPath(id)}>Back to install</BackLink>
+            <BackLink to={installPath(id)}>{listCopy.backToInstall}</BackLink>
           </>
         }
       />

@@ -271,7 +271,7 @@ export const GatewayTable = memo(function GatewayTable({
   return (
     <>
       <Filter
-        aria-label="Filter gateways"
+        aria-label="Filter Gateways"
         autoComplete="off"
         placeholder="Filter by name, namespace or class"
         value={text}
