@@ -228,31 +228,9 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// missing or Unknown, a present condition has reason Pending, or a present
 	// condition may describe an older generation (including observedGeneration 0).
 	current := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) bool {
-		for _, t := range required {
-			if objects.FindCondition(cs, t) == nil {
-				pendingFor(u, parent, fmt.Sprintf("no %s condition%s", t, within(extra)))
-				return false
-			}
-		}
-		for _, t := range append(slices.Clone(required), optional...) {
-			cond := objects.FindCondition(cs, t)
-			if cond == nil {
-				continue
-			}
-			if cond.Reason == "Pending" {
-				pendingFor(u, parent, fmt.Sprintf("%s is Pending%s", t, within(extra)))
-				return false
-			}
-			if objects.IsStale(u, *cond) {
-				pendingFor(u, parent, "status describes an older generation"+within(extra))
-				return false
-			}
-		}
-		for _, t := range required {
-			if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
-				pendingFor(u, parent, fmt.Sprintf("%s is Unknown%s", t, within(extra)))
-				return false
-			}
+		if why := pendingReason(u, cs, required, optional); why != "" {
+			pendingFor(u, parent, why+within(extra))
+			return false
 		}
 		return true
 	}
@@ -398,6 +376,41 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			Error: fmt.Sprintf("%d %s being processed by the controller", n, noun)}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// pendingReason returns why a status block of u is not current, or "" when
+// it is: a required condition is missing or Unknown, or a present condition
+// has reason Pending or may describe an older generation (D-006).
+func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string) string {
+	for _, t := range required {
+		if objects.FindCondition(cs, t) == nil {
+			return fmt.Sprintf("no %s condition", t)
+		}
+	}
+	for _, t := range append(slices.Clone(required), optional...) {
+		cond := objects.FindCondition(cs, t)
+		if cond == nil {
+			continue
+		}
+		if cond.Reason == "Pending" {
+			return t + " is Pending"
+		}
+		if objects.IsStale(u, *cond) {
+			return "status describes an older generation"
+		}
+	}
+	for _, t := range required {
+		if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
+			return t + " is Unknown"
+		}
+	}
+	return ""
+}
+
+// RoutePending returns why one status.parents entry of route u is not
+// current under the rules the resource status check applies, or "" when it is.
+func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	return pendingReason(u, cs, routeRequired, routeOptional)
 }
 
 // experimentalKind returns u's served kind when kgateway watches it, at its
