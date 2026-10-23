@@ -234,6 +234,8 @@ All views decode from unstructured objects, apply Gateway API defaults and never
 | `BackendView` | `Type`, `Conditions` |
 | `RouteHostnames` (GRPCRoute, TLSRoute) | `Hostnames`, for view A |
 
+**Written and resolved refs (our call).** From 2.2 on, every spec parentRef and every status parentRef keeps two forms: as written (omitted fields as empty strings) and resolved (defaults applied). Report keys and the persistence identity use the written form (`computed-rules.md` §7); object lookup and ownership use the resolved form.
+
 `TLS.Options` is not decoded; it stays in the YAML tab **(our call)**. `CertificateRefs` are refs only, never resolved (§11).
 
 ### 4.2 Assignment of delegated child routes
@@ -472,7 +474,7 @@ RouteRow        { ref: LinkedRef, hostnames: string[], parents: ParentSummary[],
 GatewayRow2     { ref: LinkedRef, class, health, listeners, attachedRoutes /*status sum*/, routes?, notAccepted,
                   listenerSets, disagreements?, addresses: string[] }   // routes, disagreements: 2.3
 ListenerSetRow  { ref: LinkedRef, parent: LinkedRef, health, listeners, acceptedReason?, routes?, disagreements? }
-DelegationRow   { rule, ref: number, refAsWritten: { mode, namespace, name?, label? }, child: LinkedRef,
+DelegationRow   { rule, ref: number, refAsWritten: { mode, namespace, name?, label? }, child?: LinkedRef,   // absent on an unresolved row
                   allows: "any"|"this"|"other",
                   outcome: "attached"|"partial"|"dropped"|"forbidden"|"rejected-hostnames"|"cycle"|"unresolved"|"unknown",
                   reason?, contexts: DelegationContext[], contextsTruncated?: true, computed: Computed,
@@ -532,6 +534,7 @@ This is the only definition of what a caller may see. Every new handler goes thr
 2a. **The `backend` filter cannot probe.** It matches backendRefs as written in the specs of routes the caller may view, which are already part of those objects (rule 8). It never looks up the backend: the response is the same whether the backend exists, is absent or is denied, and carries nothing about the backend's state. `total` counts visible routes only, and `deniedInInstall` stays unfiltered (rule 2) **(our call)**.
 3. **Dereferenced objects.** Data that comes from another object is sent only if the caller may view that object: a Backend's state and condition (`{restricted: true}`), a `name` ref's state (`restricted`), a delegation row's child (the row is dropped), `via` (`viaRestricted`), an ancestor step (`{restricted: true}`, no identity).
 4. **Computed facts are dependency-based.** Every computed result carries its dependency set: the objects whose data decided it (`computed-rules.md` §4.6, §5.6). For a listener membership that includes the route's Namespace when the listener uses `Selector`. For a delegation context or an effective matcher it includes every route on the path, because the parent's match and inherited headers come from them, plus the facts that made the root a root: the Gateways, ListenerSets and Namespaces behind its view A outcome, or for a status root the entry's target (`computed-rules.md` §5.1). A fact is sent only if the caller may view **every** dependency. Otherwise its `Computed.state` is `restricted`, and its value, reason and note are omitted: no hostnames, no outcome, no match, no partial value. Quoted strings are never redacted piecemeal.
+4a. **Computed predicates in filters.** `listener=`, `outcome=` and the computed `state=` flags are evaluated per row with the caller's visible dependencies, **before** `total` and paging. A row whose predicate depends on a hidden object does not match, so neither row presence nor `total` reveals a hidden Namespace's labels or an ancestor's match **(our call)**.
 5. **Derived counts** (`routes`, `notAccepted`, `listenerSets`, `routeCounts`, `children`, `childCount`, `declaredCount`, `computedRoutes`, `selected`, `attached`) count only visible objects and are recounted per request. A computed count whose dependencies are not all visible, for example a listener with a hidden member or a hidden Namespace behind a `Selector`, is `restricted` and its cross-check is not shown.
 6. **Computed flags** (`listener-unknown`, `dropped`) follow rule 4 per caller.
 7. **Finding evidence.** Phase 1 redacts a finding only by its resource (`pkg/api/handlers.go:121-124`). Phase 2 findings carry their evidence's dependency set. When the caller may view the resource but not every dependency, the finding is listed with its code, severity and resource, its detail is replaced by "Details depend on objects you cannot view", and `evidenceRestricted: true` is set (additive). This covers KGWUI-011 and KGWUI-012 details that quote a parent's match, a hidden route or a Namespace's labels.
@@ -576,7 +579,8 @@ New fixtures in `pkg/api/testdata/golden`, added per sub-phase:
 The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens change only by optional fields, and a test asserts the diffs add nothing else:
 - `installs.json`, `bare-installs.json`: `confirmedAt` (2.1);
 - `meta.json`: `views` and the Backend kind (2.2);
-- `health.json`: `link` on finding resources (2.2); `evidenceRestricted` appears only in restricted fixtures;
+- `health.json`: `link` on finding resources (2.2); `evidenceRestricted` appears only in restricted fixtures. New checks are **appended** to `checks` in registration order, after Phase 1's: `backend status` (2.2) and `computed views` (2.3), each always present and OK when nothing is wrong;
+- `overview.json`, `bare-overview.json` counts: a `Backends` tile ("in use"), present even at zero, placed after Phase 1's tiles in the fixed tile order;
 - `overview.json`, `bare-overview.json`: `link` on Gateway rows (2.2).
 
 **Go shapes (our call).** `HealthResponse` stops being an alias of `health.Report` (`pkg/api/types.go:42`) and becomes a struct that embeds the report and shadows `Findings` with a type that adds `link`. `OverviewResponse` shadows the embedded `overview.Overview.Gateways` (`pkg/overview/overview.go:86`) with rows that add `link`. `encoding/json` serialises the shallower field, so both changes are additive on the wire; the stored report and overview stay unchanged.
@@ -681,6 +685,7 @@ Seed the fake dynamic client, run the real cache, install, computed, health, exp
 - **ListenerSet (2.2):** `Accepted=True/ListenersNotValid`; `Accepted=False` with no listener entries; an XListenerSet hint; a missing parent Gateway; 200 ListenerSets paged on the Gateway page.
 - **Admission and links (2.2):** every finding resource opens its view; spec-named objects are candidates; an unrelated object is 404 on both endpoints. For every reference in every golden, `link` agrees with the endpoints. The second step: D named only by candidate C is `none` and 404; owned, it is `detail`.
 - **Authorizer (2.2, extended in 2.3 and 2.4):** rows, nested ListenerSets, delegation rows and children hidden; `total` visible only; `deniedInInstall` unchanged under every filter; a denied Backend is `{restricted: true}` with no message; a denied ancestor has no identity; derived counts drop denied objects. 2.3: a `Selector` listener over a hidden Namespace makes membership, count and check `restricted`, and the row carries no `listener-unknown`. 2.4: a hidden ancestor makes the child's effective contexts and delegation contexts `restricted`; a KGWUI-012 on a visible child whose evidence names a hidden parent has `evidenceRestricted` and no detail. Health and row states are unchanged in every case.
+- **Computed predicates and probes (2.3, 2.4):** `listener=https` over a hidden `Selector` Namespace, `outcome=dropped` under a hidden ancestor, and a computed `state=` flag each return the same rows and `total` as if the hidden facts were unknown.
 - **Computed views through the API (2.3, 2.4):** every row of `computed-rules.md` §11 that is not marked rule-only is also asserted through the handlers, with its `Computed` state, coverage and the KGWUI-012 or KGWUI-011 outcome.
 - **KGWUI-011 orphan trigger (2.4):** an orphan dropped by every selecting wildcard parent with a complete traversal gets a warning; the same with one selecting parent incomplete gets none; a route with a Gateway parentRef that a wildcard selects and drops gets none, and its Delegation row is shown; an orphan another parent attaches gets none; a complete `cycle` outcome gets none; a route also selected by a `label` ref gets only the per-parent finding (`computed-rules.md` §11.5).
 - **Reverse lookup (2.2):** `backend=` for a Service, a Backend and a mirror target; repeated values OR-ed; a delegation ref never matches; a malformed value is 400; a denied backend and an absent one give identical responses; hidden routes are not counted.
@@ -783,7 +788,7 @@ Every tier also has 5 % each of GRPC, TCP and TLS routes, labelled namespaces be
 |---|---|
 | `pkg/explore`, `pkg/computed` | read objects only through `pkg/objects` and unstructured; no `corev1`, `appsv1` or client-go; covered by `internal/boundary/imports_test.go` |
 | Namespace labels | a `map[string]map[string]string` built in `pkg/install` (allowlisted) |
-| Controller settings | read from the Pod spec in `pkg/install`; `install.Resolved.Settings`; another provider supplies the keys or none ("unknown") |
+| Controller settings | read from the Pod spec in `pkg/install/settings.go`, a new entry on the boundary allowlist; `install.Resolved.Settings`; another provider supplies the keys or none ("unknown") |
 | D-019 triggers and fingerprint | an abstract trigger source and a snapshot fingerprint; a file-mode provider feeds it from its own change stream (design §14.6) |
 | Assignment | stays in `pkg/install/assign.go` |
 | Decode cache | keyed by `uid` and `resourceVersion`, synthesised in file mode (design §14.8); missing keys bypass it |
