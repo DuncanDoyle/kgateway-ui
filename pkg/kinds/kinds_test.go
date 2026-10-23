@@ -118,8 +118,13 @@ func TestExperimentalOnly(t *testing.T) {
 func TestUpstreamHasBackend(t *testing.T) {
 	want := Descriptor{Group: "gateway.kgateway.dev", Kind: "Backend", Resource: "backends", Versions: []string{"v1alpha1"},
 		Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"}
-	up := Upstream()
-	if got := up[len(up)-1]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("last upstream kind %+v, want %+v", got, want)
+	for _, d := range Upstream() {
+		if d.Group == want.Group && d.Kind == want.Kind {
+			if !reflect.DeepEqual(d, want) {
+				t.Fatalf("upstream Backend %+v, want %+v", d, want)
+			}
+			return
+		}
 	}
+	t.Fatalf("upstream kinds have no %s/%s", want.Group, want.Kind)
 }
