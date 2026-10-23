@@ -135,19 +135,19 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, resp)
 }
 
-// visibleHealth returns the install's report as the caller of r may see it
+// visibleHealth returns the install's report as the caller of v may see it
 // (D-013). A finding on a denied resource keeps its code, severity and ref but
 // is restricted: message, detail and since are emptied. State and counts still
 // cover every finding, so partial visibility never makes an install look
 // healthier, and the findings keep the order health returned.
-func (h *handler) visibleHealth(r *http.Request, i *engine.InstallModel) health.Report {
-	if allowsAll(h.authz) {
+func visibleHealth(v *view, i *engine.InstallModel) health.Report {
+	if v.all {
 		return i.Health
 	}
 	rep := i.Health
 	rep.Findings = make([]health.Finding, 0, len(i.Health.Findings))
 	for _, f := range i.Health.Findings {
-		if f.Resource != nil && !h.authz.Authorize(r, *f.Resource) {
+		if f.Resource != nil && !v.can(*f.Resource) {
 			f.Message, f.Detail, f.Since, f.Restricted = "", "", nil, true
 		}
 		rep.Findings = append(rep.Findings, f)
@@ -155,13 +155,13 @@ func (h *handler) visibleHealth(r *http.Request, i *engine.InstallModel) health.
 	return rep
 }
 
-// visibleOverview rebuilds the overview over the owned objects the caller of r
+// visibleOverview rebuilds the overview over the owned objects the caller of v
 // may see: denied objects leave the count tiles and the gateway rows.
-func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.InstallModel, rep health.Report) overview.Overview {
-	if allowsAll(h.authz) {
+func (h *handler) visibleOverview(v *view, m *engine.Model, i *engine.InstallModel, rep health.Report) overview.Overview {
+	if v.all {
 		return i.Overview
 	}
-	can := func(u *unstructured.Unstructured) bool { return h.authz.Authorize(r, objects.RefOf(u)) }
+	can := func(u *unstructured.Unstructured) bool { return v.can(objects.RefOf(u)) }
 	keep := func(us []*unstructured.Unstructured) []*unstructured.Unstructured {
 		out := []*unstructured.Unstructured{}
 		for _, u := range us {
@@ -198,10 +198,10 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		at := wireTime(p.ConfirmedAt)
 		confirmed = &at
 	}
-	out := []InstallSummary{}
+	out, v := []InstallSummary{}, h.view(r)
 	for k := range m.Installs {
 		i := &m.Installs[k]
-		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
+		hd, rep := i.Overview.Header, visibleHealth(v, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
 			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
@@ -227,8 +227,9 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Publishe
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		ov := h.visibleOverview(r, p.Model, i, h.visibleHealth(r, i))
-		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), h.linker(r, p.Model, i)
+		v := h.view(r)
+		ov := h.visibleOverview(v, p.Model, i, visibleHealth(v, i))
+		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), linkerFor(v, p.Model, i)
 		for _, g := range ov.Gateways {
 			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref)})
 		}
@@ -261,26 +262,34 @@ func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		writeJSON(w, h.healthResponse(r, p.Model, i, p.ConfirmedAt))
+		writeJSON(w, healthResponse(h.view(r), p.Model, i, p.ConfirmedAt))
 	}
 }
 
 // healthResponse is the caller's report in wire form: each finding's resource
-// carries its link, and a visible finding whose detail quotes an object the
-// caller may not view has that detail replaced (design §7.4 rule 7).
-func (h *handler) healthResponse(r *http.Request, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
-	rep := wireHealth(h.visibleHealth(r, i), confirmedAt)
+// carries its link. A visible finding whose evidence the caller may not view
+// all of has its detail replaced, and a since it has is replaced by the
+// resource's own (design §7.4 rule 7). State, counts and severities stay.
+func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
+	rep := wireHealth(visibleHealth(v, i), confirmedAt)
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
 	out.Report.Findings = nil // shadowed by out.Findings
-	l := h.linker(r, m, i)
+	l := linkerFor(v, m, i)
 	for _, f := range rep.Findings {
 		d := FindingDTO{Finding: f}
 		if f.Resource != nil {
 			lr := l.linked(*f.Resource)
 			d.Resource = &lr
 		}
-		if !f.Restricted && !h.allVisible(r, f.Evidence) {
+		if !f.Restricted && !v.allOf(f.Evidence) {
 			d.Detail, d.EvidenceRestricted = restrictedEvidence, true
+			if f.Since != nil {
+				d.Since = nil
+				if f.ResourceSince != nil {
+					at := wireTime(*f.ResourceSince)
+					d.Since = &at
+				}
+			}
 		}
 		out.Findings = append(out.Findings, d)
 	}
@@ -303,7 +312,7 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		return s
 	}
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
-	if h.linker(r, p.Model, i).link(want) != LinkNone {
+	if linkerFor(h.view(r), p.Model, i).link(want) != LinkNone {
 		if obj := object(p.Model, want); obj != nil {
 			// The body is the raw object, so the collection time travels in a header (D-017 §6).
 			w.Header().Set("Collected-At", wireTime(p.ConfirmedAt).Format(time.RFC3339Nano))

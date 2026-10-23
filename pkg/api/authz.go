@@ -27,11 +27,14 @@ type AuthorizerFunc func(r *http.Request, ref objects.Ref) bool
 // Authorize implements Authorizer.
 func (f AuthorizerFunc) Authorize(r *http.Request, ref objects.Ref) bool { return f(r, ref) }
 
-// allowsAll reports whether a is AllowAll, whose callers get the precomputed model unchanged.
+// allower is an Authorizer that admits every ref, so the API never calls
+// it and serves the precomputed model (design §7.4 rule 10).
+type allower interface{ allowsAll() bool }
+
+func (AllowAll) allowsAll() bool { return true }
+
+// allowsAll reports whether a admits every ref.
 func allowsAll(a Authorizer) bool {
-	switch a.(type) {
-	case AllowAll, *AllowAll:
-		return true
-	}
-	return false
+	al, ok := a.(allower)
+	return ok && al.allowsAll()
 }

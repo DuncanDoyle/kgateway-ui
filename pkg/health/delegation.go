@@ -37,9 +37,10 @@ func declaredFinding(in Input, d install.DeclaredCandidate) Finding {
 	if in.Now.Sub(graceStart(in, us...)) < Grace {
 		sev = SeverityInfo
 	}
+	own := in.firstSeen(d.Route.Obj)
 	return Finding{Code: CodeDelegatedNotAttached, Slug: "delegated-route-not-attached", Severity: sev, Install: in.Install.ID(),
 		Resource: ref(d.Route.Obj), Message: DelegatedNotAttachedMessage, Detail: fmt.Sprintf(DelegatedNotAttachedDetail, parent.String()),
-		Evidence: []objects.Ref{parent}, parent: d.Parent}
+		Evidence: []objects.Ref{parent}, ResourceSince: &own, parent: d.Parent}
 }
 
 // delegationOnly reports whether u is an HTTPRoute whose every backendRef

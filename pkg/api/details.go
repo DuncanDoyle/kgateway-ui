@@ -27,13 +27,13 @@ const (
 
 // detail is one detail request after its install was found.
 type detail struct {
-	h       *handler
-	r       *http.Request
-	p       *engine.Published
-	i       *engine.InstallModel
-	ix      *explore.Index
-	l       linker
-	visible func(objects.Ref) bool // nil under AllowAll (design §7.4 rule 10)
+	h  *handler
+	r  *http.Request
+	p  *engine.Published
+	i  *engine.InstallModel
+	ix *explore.Index
+	v  *view
+	l  linker
 }
 
 // startDetail finds the install, or writes 503 or 404.
@@ -46,15 +46,9 @@ func (h *handler) startDetail(w http.ResponseWriter, r *http.Request) *detail {
 	if ix == nil {
 		ix = &explore.Index{}
 	}
-	d := &detail{h: h, r: r, p: p, i: i, ix: ix, l: h.linker(r, p.Model, i)}
-	if !allowsAll(h.authz) {
-		d.visible = func(ref objects.Ref) bool { return h.authz.Authorize(r, ref) }
-	}
-	return d
+	v := h.view(r)
+	return &detail{h: h, r: r, p: p, i: i, ix: ix, v: v, l: linkerFor(v, p.Model, i)}
 }
-
-// can reports whether the caller may view ref.
-func (d *detail) can(ref objects.Ref) bool { return d.visible == nil || d.visible(ref) }
 
 // open returns the object ref names and its candidate block when the
 // caller may open its detail page (design §7.1), or writes 404 and returns
@@ -76,7 +70,7 @@ func (d *detail) open(w http.ResponseWriter, ref objects.Ref) (*unstructured.Uns
 	if a.Reason == explore.ReasonReferenced {
 		// The first visible referrer; link() admitted ref only because one exists.
 		for _, by := range a.Referrers {
-			if d.can(by) {
+			if d.v.can(by) {
 				lr := d.l.linked(by)
 				c.By = &lr
 				break
@@ -86,15 +80,9 @@ func (d *detail) open(w http.ResponseWriter, ref objects.Ref) (*unstructured.Uns
 	return u, c
 }
 
-// count is the number of rows among ids the caller may view (rule 5).
+// count is the number of route rows among ids the caller may view (rule 5).
 func (d *detail) count(ids []explore.RowID) int {
-	n := 0
-	for _, id := range ids {
-		if d.can(d.ix.Routes[id].Ref) {
-			n++
-		}
-	}
-	return n
+	return d.v.recount(ids, func(id explore.RowID) objects.Ref { return d.ix.Routes[id].Ref })
 }
 
 // routeCounts counts the visible routes under parent per attachment, as
@@ -103,7 +91,7 @@ func (d *detail) count(ids []explore.RowID) int {
 func (d *detail) routeCounts(parent objects.Ref) RouteCounts {
 	var c RouteCounts
 	for _, id := range d.ix.ByParent[parent] {
-		if !d.can(d.ix.Routes[id].Ref) {
+		if !d.v.can(d.ix.Routes[id].Ref) {
 			continue
 		}
 		for _, x := range []struct {
@@ -111,7 +99,7 @@ func (d *detail) routeCounts(parent objects.Ref) RouteCounts {
 			n *int
 		}{{explore.AttachmentAccepted, &c.Accepted}, {explore.AttachmentNotAccepted, &c.NotAccepted},
 			{explore.AttachmentPending, &c.Pending}, {explore.AttachmentUnwatched, &c.Unwatched}} {
-			if d.ix.Under(id, parent, x.a, d.visible) {
+			if d.ix.Under(id, parent, x.a, d.v.visible()) {
 				*x.n++
 			}
 		}
@@ -388,7 +376,7 @@ func (d *detail) backendRef(route objects.Ref, b objects.BackendRef) BackendRefD
 // denied one are both restricted.
 func (d *detail) delegationState(parent, child objects.Ref) string {
 	switch {
-	case !d.can(child):
+	case !d.v.can(child):
 		return DelegationRestricted
 	case slices.Contains(d.ix.ParentRoutes[child], parent):
 		return DelegationReported
@@ -403,7 +391,7 @@ func (d *detail) delegationState(parent, child objects.Ref) string {
 // the caller may not view it, omitted when it does not open (absent or not
 // admitted; admission never follows chains).
 func (d *detail) backendState(ref objects.Ref, link Link) *BackendStateDTO {
-	if !d.can(ref) {
+	if !d.v.can(ref) {
 		return &BackendStateDTO{Restricted: true}
 	}
 	if link == LinkNone {
@@ -421,11 +409,7 @@ func (d *detail) backendState(ref objects.Ref, link Link) *BackendStateDTO {
 
 // ancestors is the up-chain of route; hidden steps carry no identity.
 func (d *detail) ancestors(route objects.Ref) ([]AncestorPathDTO, bool) {
-	vis := d.visible
-	if vis == nil {
-		vis = func(objects.Ref) bool { return true }
-	}
-	paths, truncated := d.ix.Ancestors(route, vis)
+	paths, truncated := d.ix.Ancestors(route, d.v.can)
 	out := make([]AncestorPathDTO, 0, len(paths))
 	for _, p := range paths {
 		dto := AncestorPathDTO{Steps: make([]AncestorStepDTO, 0, len(p.Steps)), Cycle: p.Cycle}

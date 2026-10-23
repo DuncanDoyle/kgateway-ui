@@ -45,7 +45,7 @@ func (l engineLinks) link(t *testing.T, ref objects.Ref) Link {
 	t.Helper()
 	m, i := l.install(t)
 	h := &handler{src: l.e, authz: l.authz}
-	return h.linker(httptest.NewRequest(http.MethodGet, "/", nil), m, i).link(ref)
+	return linkerFor(h.view(httptest.NewRequest(http.MethodGet, "/", nil)), m, i).link(ref)
 }
 
 // resourcePath is the resource endpoint path of ref.

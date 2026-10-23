@@ -74,6 +74,10 @@ type Finding struct {
 	// Evidence are the objects, other than Resource, whose data Detail quotes
 	// (KGWUI-011: the parent route). Never serialised.
 	Evidence []objects.Ref `json:"-"`
+	// ResourceSince is when the engine first saw Resource's current
+	// generation. It replaces Since for a caller who may not view all of
+	// Evidence, so Since tells that caller nothing about it. Never serialised.
+	ResourceSince *time.Time `json:"-"`
 	// parent is the route parentRef a KGWUI-003 finding is about; it orders findings.
 	parent objects.ParentRef
 }

@@ -100,6 +100,10 @@ func TestKGWUI011AfterGraceIsWarningAndCheckOK(t *testing.T) {
 			if fs[0].Message != "Parent route does not use this route" || fs[0].Detail != "No status from HTTPRoute shop/api" {
 				t.Fatalf("wording: %q / %q", fs[0].Message, fs[0].Detail)
 			}
+			// ResourceSince is the route's own clock, whatever the parent's.
+			if own := fs[0].ResourceSince; own == nil || !own.Equal(testutil.Now.Add(-tc.ages["shop/c"])) {
+				t.Fatalf("resourceSince %v, want the route's first-seen time", own)
+			}
 			if ck := statusCheck(r); ck.Pending != tc.pending || ck.OK == tc.pending {
 				t.Fatalf("resource status: %+v", ck)
 			}

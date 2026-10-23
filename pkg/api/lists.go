@@ -12,14 +12,14 @@ import (
 
 // list is one list request after its install was found and its query parsed.
 type list struct {
-	h       *handler
-	r       *http.Request
-	p       *engine.Published
-	i       *engine.InstallModel
-	ix      *explore.Index
-	q       explore.Query
-	l       linker
-	visible func(objects.Ref) bool // nil under AllowAll (design §7.4 rule 10)
+	h  *handler
+	r  *http.Request
+	p  *engine.Published
+	i  *engine.InstallModel
+	ix *explore.Index
+	q  explore.Query
+	v  *view
+	l  linker
 }
 
 // startList finds the install and parses the query, or writes 503, 404 or 400.
@@ -37,44 +37,13 @@ func (h *handler) startList(w http.ResponseWriter, r *http.Request, kind listKin
 	if ix == nil {
 		ix = &explore.Index{}
 	}
-	ls := &list{h: h, r: r, p: p, i: i, ix: ix, q: q, l: h.linker(r, p.Model, i)}
-	if !allowsAll(h.authz) {
-		ls.visible = func(ref objects.Ref) bool { return h.authz.Authorize(r, ref) }
-	}
-	return ls
+	v := h.view(r)
+	return &list{h: h, r: r, p: p, i: i, ix: ix, q: q, v: v, l: linkerFor(v, p.Model, i)}
 }
 
-// can reports whether the caller may view ref.
-func (ls *list) can(ref objects.Ref) bool { return ls.visible == nil || ls.visible(ref) }
-
-// count is the number of ids whose ref the caller may view (design §7.4 rule 5).
-func (ls *list) count(ids []explore.RowID, ref func(explore.RowID) objects.Ref) int {
-	if ls.visible == nil {
-		return len(ids)
-	}
-	n := 0
-	for _, id := range ids {
-		if ls.visible(ref(id)) {
-			n++
-		}
-	}
-	return n
-}
-
-// denied is deniedInInstall: the caller's hidden rows among all n rows of
-// the list, whatever the filters (design §7.4 rule 2).
-func (ls *list) denied(n int, ref func(explore.RowID) objects.Ref) int {
-	if ls.visible == nil {
-		return 0
-	}
-	d := 0
-	for i := range n {
-		if !ls.visible(ref(explore.RowID(i))) { // #nosec G115 -- a row count fits in int32
-			d++
-		}
-	}
-	return d
-}
+func (ls *list) routeRef(id explore.RowID) objects.Ref { return ls.ix.Routes[id].Ref }
+func (ls *list) gwRef(id explore.RowID) objects.Ref    { return ls.ix.Gateways[id].Ref }
+func (ls *list) lsRef(id explore.RowID) objects.Ref    { return ls.ix.ListenerSets[id].Ref }
 
 // fail writes 400 for a query the index rejects; anything else is a bug.
 func fail(w http.ResponseWriter, err error) {
@@ -96,17 +65,16 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 	if ls == nil {
 		return
 	}
-	pg, err := ls.ix.QueryRoutes(ls.q, ls.visible)
+	pg, err := ls.ix.QueryRoutes(ls.q, ls.v.visible())
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	routeRef := func(id explore.RowID) objects.Ref { return ls.ix.Routes[id].Ref }
 	items := make([]RouteRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
 		items = append(items, ls.routeRow(id))
 	}
-	writeJSON(w, page(ls, pg, items, ls.denied(len(ls.ix.Routes), routeRef)))
+	writeJSON(w, page(ls, pg, items, ls.v.deniedInInstall(len(ls.ix.Routes), ls.routeRef)))
 }
 
 // routeRow is route row id on the wire.
@@ -124,9 +92,8 @@ func (ls *list) routeRow(id explore.RowID) RouteRow {
 	for _, p := range r.ParentRoutes {
 		out.ParentRoutes = append(out.ParentRoutes, ls.l.linked(p))
 	}
-	if ls.visible != nil {
-		kids := ls.ix.ByParentRoute[r.Ref]
-		out.Children = ls.count(kids, func(id explore.RowID) objects.Ref { return ls.ix.Routes[id].Ref })
+	if !ls.v.all {
+		out.Children = ls.v.recount(ls.ix.ByParentRoute[r.Ref], ls.routeRef)
 	}
 	if len(ls.q.Backends) > 0 {
 		out.Mirror = ls.mirrorOnly(id)
@@ -140,7 +107,7 @@ func (ls *list) routeRow(id explore.RowID) RouteRow {
 func (ls *list) parentSummary(p explore.ParentLink) ParentSummary {
 	s := ParentSummary{Ref: ls.l.linked(p.Target), SectionName: p.Ref.SectionName, Port: p.Ref.Port, Attachment: p.Attachment}
 	if p.Via != nil {
-		if ls.can(p.Target) && ls.can(*p.Via) {
+		if ls.v.can(p.Target) && ls.v.can(*p.Via) {
 			v := ls.l.linked(*p.Via)
 			s.Via = &v
 		} else {
@@ -179,36 +146,34 @@ func (h *handler) gateways(w http.ResponseWriter, r *http.Request) {
 	if ls == nil {
 		return
 	}
-	pg, err := ls.ix.QueryGateways(ls.q, ls.visible)
+	pg, err := ls.ix.QueryGateways(ls.q, ls.v.visible())
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	lsRef := func(id explore.RowID) objects.Ref { return ls.ix.ListenerSets[id].Ref }
 	items := make([]GatewayListRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
 		g := &ls.ix.Gateways[id]
 		row := GatewayListRow{Ref: ls.l.linked(g.Ref), Health: g.State, AttachedRoutes: g.AttachedRoutes,
-			NotAccepted: ls.notAccepted(g), ListenerSets: ls.count(g.ListenerSets, lsRef), Addresses: []string{}}
+			NotAccepted: ls.notAccepted(g), ListenerSets: ls.v.recount(g.ListenerSets, ls.lsRef), Addresses: []string{}}
 		if v := g.View; v != nil {
 			row.Class, row.Listeners = v.Class, len(v.Listeners)
 			row.Addresses = append(row.Addresses, v.StatusAddresses...)
 		}
 		items = append(items, row)
 	}
-	gwRef := func(id explore.RowID) objects.Ref { return ls.ix.Gateways[id].Ref }
-	writeJSON(w, page(ls, pg, items, ls.denied(len(ls.ix.Gateways), gwRef)))
+	writeJSON(w, page(ls, pg, items, ls.v.deniedInInstall(len(ls.ix.Gateways), ls.gwRef)))
 }
 
 // notAccepted counts g's not-accepted routes the caller may view, through
 // visible ListenerSets only (rule 3, rule 5).
 func (ls *list) notAccepted(g *explore.GatewayRow) int {
-	if ls.visible == nil {
+	if ls.v.all {
 		return len(g.NotAccepted)
 	}
 	n := 0
 	for _, id := range g.NotAccepted {
-		if ls.visible(ls.ix.Routes[id].Ref) && ls.ix.Under(id, g.Ref, explore.AttachmentNotAccepted, ls.visible) {
+		if ls.v.can(ls.ix.Routes[id].Ref) && ls.ix.Under(id, g.Ref, explore.AttachmentNotAccepted, ls.v.can) {
 			n++
 		}
 	}
@@ -220,7 +185,7 @@ func (h *handler) listenerSets(w http.ResponseWriter, r *http.Request) {
 	if ls == nil {
 		return
 	}
-	pg, err := ls.ix.QueryListenerSets(ls.q, ls.visible)
+	pg, err := ls.ix.QueryListenerSets(ls.q, ls.v.visible())
 	if err != nil {
 		fail(w, err)
 		return
@@ -234,6 +199,5 @@ func (h *handler) listenerSets(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, row)
 	}
-	lsRef := func(id explore.RowID) objects.Ref { return ls.ix.ListenerSets[id].Ref }
-	writeJSON(w, page(ls, pg, items, ls.denied(len(ls.ix.ListenerSets), lsRef)))
+	writeJSON(w, page(ls, pg, items, ls.v.deniedInInstall(len(ls.ix.ListenerSets), ls.lsRef)))
 }

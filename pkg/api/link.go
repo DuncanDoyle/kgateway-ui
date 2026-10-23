@@ -1,33 +1,28 @@
 package api
 
 import (
-	"net/http"
-	"slices"
-
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 // linker labels references for one request against one model (design
-// §7.1). Build one per request with h.linker, so the detail kinds are
+// §7.1). Build one per request with linkerFor, so the detail kinds are
 // computed once, not per reference.
 type linker struct {
-	h      *handler
-	r      *http.Request
+	v      *view
 	m      *engine.Model
 	i      *engine.InstallModel
 	detail map[objects.GroupKind]bool
-	all    bool // AllowAll: no Authorizer calls (design §7.4 rule 10)
 }
 
-// linker returns the linker for the caller of r and install i of m.
-func (h *handler) linker(r *http.Request, m *engine.Model, i *engine.InstallModel) linker {
+// linkerFor returns the linker for the caller of v and install i of m.
+func linkerFor(v *view, m *engine.Model, i *engine.InstallModel) linker {
 	detail := map[objects.GroupKind]bool{}
 	for _, gk := range explore.DetailKinds(m.Served) {
 		detail[gk] = true
 	}
-	return linker{h: h, r: r, m: m, i: i, detail: detail, all: allowsAll(h.authz)}
+	return linker{v: v, m: m, i: i, detail: detail}
 }
 
 // link is admit(install, caller, ref) of design §7.1, the one place that
@@ -36,15 +31,14 @@ func (h *handler) linker(r *http.Request, m *engine.Model, i *engine.InstallMode
 // and its kind has a detail view; else yaml. A referenced candidate needs a
 // referrer the caller may view. Admission never follows chains.
 func (l linker) link(ref objects.Ref) Link {
-	h, r := l.h, l.r
-	if l.i.Index == nil || !l.all && !h.authz.Authorize(r, ref) {
+	if l.i.Index == nil || !l.v.can(ref) {
 		return LinkNone
 	}
 	a, ok := l.i.Index.Admission(ref)
 	if !ok {
 		return LinkNone
 	}
-	candidate := a.Owned || a.Reason == explore.ReasonFinding || (a.Reason == explore.ReasonReferenced && h.anyVisible(r, a.Referrers))
+	candidate := a.Owned || a.Reason == explore.ReasonFinding || (a.Reason == explore.ReasonReferenced && l.v.anyOf(a.Referrers))
 	if !candidate && !a.NoParent {
 		return LinkNone
 	}
@@ -60,20 +54,4 @@ func (l linker) link(ref objects.Ref) Link {
 // linked is ref with its link.
 func (l linker) linked(ref objects.Ref) LinkedRef {
 	return LinkedRef{Ref: ref, Link: l.link(ref)}
-}
-
-// anyVisible reports whether the caller of r may view at least one of refs.
-func (h *handler) anyVisible(r *http.Request, refs []objects.Ref) bool {
-	if allowsAll(h.authz) {
-		return len(refs) > 0
-	}
-	return slices.ContainsFunc(refs, func(ref objects.Ref) bool { return h.authz.Authorize(r, ref) })
-}
-
-// allVisible reports whether the caller of r may view every one of refs.
-func (h *handler) allVisible(r *http.Request, refs []objects.Ref) bool {
-	if allowsAll(h.authz) {
-		return true
-	}
-	return !slices.ContainsFunc(refs, func(ref objects.Ref) bool { return !h.authz.Authorize(r, ref) })
 }
