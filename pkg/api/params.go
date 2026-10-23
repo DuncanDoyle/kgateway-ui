@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,12 +43,16 @@ func badParam(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", explore.ErrBadQuery, fmt.Sprintf(format, args...))
 }
 
-// parseQuery parses r's query for list (design §7.2). It rejects unknown
-// parameters, repeated single-valued ones and malformed values; explore
-// validates the rest (sort keys, health values, attachments, cursors).
+// parseQuery parses r's query for list (design §7.2). It rejects queries that
+// do not decode, unknown parameters, repeated single-valued ones and malformed
+// values; explore validates the rest (sort keys, health values, attachments, cursors).
 func parseQuery(r *http.Request, list listKind) (explore.Query, error) {
-	vals := r.URL.Query()
 	var q explore.Query
+	// r.URL.Query drops pairs that fail to decode, which would drop a filter.
+	vals, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return q, badParam("malformed query: %v", err)
+	}
 	for _, name := range slices.Sorted(maps.Keys(vals)) {
 		vs := vals[name]
 		if !slices.Contains(commonParams, name) && !slices.Contains(listParams[list], name) {

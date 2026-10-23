@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -140,6 +141,19 @@ func TestListParamsAndErrors(t *testing.T) {
 	}
 	if b := wire(t, srv, listBase+"/routes?limit=0"); !bytes.Contains(b, []byte(`"error": "bad query: limit`)) {
 		t.Fatalf("a 400 carries the error shape:\n%s", b)
+	}
+}
+
+// TestMalformedQueryIsRejected: a query that does not decode is a 400, never
+// a silently dropped filter and an unfiltered 200 (design §7.2).
+func TestMalformedQueryIsRejected(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, world()...)
+	for _, q := range []string{"state=%ZZ", "%ZZ=accepted", "state=accepted&state=%ZZ", "q=a%"} {
+		for _, l := range []string{"routes", "gateways", "listenersets"} {
+			if e := getErr(t, srv, listBase+"/"+l+"?"+q, 400); !strings.HasPrefix(e.Error, "bad query: ") {
+				t.Errorf("%s?%s: error %q, want the bad query cause", l, q, e.Error)
+			}
+		}
 	}
 }
 
