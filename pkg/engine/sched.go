@@ -68,8 +68,8 @@ func Earliest(ds ...Deadline) Deadline {
 // and is due after finish.
 type sched struct {
 	running bool
-	// first and last are the first and latest triggers of the pending burst;
-	// first is zero when nothing is pending.
+	// pending marks a burst; first and last are its first and latest triggers.
+	pending     bool
 	first, last time.Time
 	deadline    Deadline
 	safety      time.Time
@@ -77,21 +77,25 @@ type sched struct {
 
 // trigger records an event at now. It starts a burst if none is pending.
 func (s *sched) trigger(now time.Time) {
-	if s.first.IsZero() {
-		s.first = now
+	if !s.pending {
+		s.pending, s.first = true, now
 	}
 	s.last = now
 }
 
 // setDeadline replaces the previous deadline; the zero Deadline clears it.
+// A run consumes only a due deadline, so the driver sets the next one after
+// every run.
 func (s *sched) setDeadline(d Deadline) { s.deadline = d }
 
 // setSafety sets the instant by which a run must start; zero clears it.
+// A run consumes only a due safety instant, so the driver must call setSafety
+// after every run for "recompute at least this often" to hold.
 func (s *sched) setSafety(at time.Time) { s.safety = at }
 
 // pendingDue is min(last+Quiet, first+MaxDelay); ok is false when nothing is pending.
 func (s *sched) pendingDue() (time.Time, bool) {
-	if s.first.IsZero() {
+	if !s.pending {
 		return time.Time{}, false
 	}
 	due := s.last.Add(Quiet)
@@ -103,9 +107,12 @@ func (s *sched) pendingDue() (time.Time, bool) {
 
 // wake returns the next instant at which start may return true: the earliest
 // of the pending due time, the deadline (a strict one 1 ns after At) and the
-// safety instant. ok is false when none is set. While running, start still
-// refuses until finish.
+// safety instant. ok is false when none is set, and while running, since
+// nothing can start before finish; the driver asks again after finish.
 func (s *sched) wake() (time.Time, bool) {
+	if s.running {
+		return time.Time{}, false
+	}
 	var at time.Time
 	consider := func(t time.Time) {
 		if !t.IsZero() && (at.IsZero() || t.Before(at)) {
@@ -127,6 +134,10 @@ func (s *sched) wake() (time.Time, bool) {
 // reached), the deadline is due, or the safety instant has passed. On true it
 // moves to running and consumes the pending burst and whichever of the
 // deadline and safety instant were due; a not-yet-due one is kept.
+//
+// Contract: start consumes the whole pending burst, due or not, so the caller
+// must take the snapshot after start returns true; the store already holds
+// every consumed trigger's change (client-go updates it before handlers run).
 func (s *sched) start(now time.Time) bool {
 	if s.running {
 		return false
@@ -139,7 +150,7 @@ func (s *sched) start(now time.Time) bool {
 		return false
 	}
 	s.running = true
-	s.first, s.last = time.Time{}, time.Time{}
+	s.pending, s.first, s.last = false, time.Time{}, time.Time{}
 	if deadlineDue {
 		s.deadline = Deadline{}
 	}
@@ -155,4 +166,4 @@ func (s *sched) finish() { s.running = false }
 
 // idle reports whether nothing is running and no trigger is pending.
 // Deadlines and the safety instant do not count.
-func (s *sched) idle() bool { return !s.running && s.first.IsZero() }
+func (s *sched) idle() bool { return !s.running && !s.pending }

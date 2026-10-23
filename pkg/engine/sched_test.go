@@ -126,10 +126,6 @@ func TestEarliest(t *testing.T) {
 			if !got.At.Equal(tc.want.At) || got.Strict != tc.want.Strict {
 				t.Fatalf("Earliest = %+v, want %+v", got, tc.want)
 			}
-			// A deadline at now must stay due at now after Earliest.
-			if !tc.want.IsZero() && got.Due(at) != tc.want.Due(at) {
-				t.Fatal("Earliest changed whether the result is due at now")
-			}
 		})
 	}
 }
@@ -202,6 +198,12 @@ func TestStartTransitions(t *testing.T) {
 		{"future deadline survives a trigger run", func(t *testing.T) []op {
 			return []op{trig(0), dl(time.Minute, false), run(t, Quiet), fin()}
 		}, time.Minute, true, false},
+		{"deadline-started run consumes a not-yet-due burst", func(t *testing.T) []op {
+			return []op{trig(0), dl(10*ms, false), run(t, 10*ms), fin()}
+		}, time.Hour, false, true},
+		{"in-run trigger past MaxDelay starts right after finish", func(t *testing.T) []op {
+			return []op{trig(0), run(t, Quiet), trig(Quiet + ms), trig(Quiet + 200*ms), fin()}
+		}, Quiet + 2*time.Second, true, false},
 		{"setDeadline replaces the previous one", func(*testing.T) []op {
 			return []op{dl(time.Second, false), dl(time.Minute, false)}
 		}, time.Second, false, true},
@@ -253,5 +255,46 @@ func TestWake(t *testing.T) {
 				t.Fatalf("wake = %v, want Now+%v", at.Sub(testutil.Now), tc.want)
 			}
 		})
+	}
+}
+
+func TestEarliestKeepsDeadlineDueAtNow(t *testing.T) {
+	at := testutil.Now
+	for _, in := range [][]Deadline{
+		{{At: at, Strict: true}, {At: at}},
+		{{At: at}, {At: at, Strict: true}},
+	} {
+		if !Earliest(in...).Due(at) {
+			t.Fatalf("Earliest(%+v) is not due at its instant", in)
+		}
+	}
+}
+
+func TestTriggerAtZeroTimeIsKept(t *testing.T) {
+	var s sched
+	s.trigger(time.Time{})
+	if s.idle() {
+		t.Fatal("a trigger at the zero time was dropped")
+	}
+	if !s.start(time.Time{}.Add(Quiet)) {
+		t.Fatal("zero-time trigger not due after Quiet")
+	}
+}
+
+func TestWakeWhileRunning(t *testing.T) {
+	var s sched
+	s.trigger(testutil.Now)
+	s.start(testutil.Now.Add(Quiet))
+	s.trigger(testutil.Now.Add(Quiet + time.Millisecond))
+	s.setDeadline(Deadline{At: testutil.Now})
+	s.setSafety(testutil.Now)
+	if _, ok := s.wake(); ok {
+		t.Fatal("wake must report nothing while running")
+	}
+	s.finish()
+	s.setDeadline(Deadline{})
+	s.setSafety(time.Time{})
+	if at, ok := s.wake(); !ok || !at.Equal(testutil.Now.Add(2*Quiet+time.Millisecond)) {
+		t.Fatalf("after finish wake = %v %v, want the in-run trigger's due time", at, ok)
 	}
 }
