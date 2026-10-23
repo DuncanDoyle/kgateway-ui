@@ -150,6 +150,7 @@
         ],
         "attachedRoutes": 0,
         "class": "kgateway",
+        "link": "detail",
         "listeners": 1,
         "ref": {
           "group": "gateway.networking.k8s.io",

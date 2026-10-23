@@ -17,17 +17,27 @@ export interface Ref {
   namespace?: string;
   name: string;
 }
-/** restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013). */
+/** How a reference may be opened; rendered as given, never derived from a kind (design §7.1). */
+export type Link = "detail" | "yaml" | "none";
+/** A reference with its server-computed link; link is optional until the explorer types land. */
+export interface LinkedRef extends Ref {
+  link?: Link;
+}
+/**
+ * restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013).
+ * evidenceRestricted: the detail was replaced because it quotes an object the caller may not view.
+ */
 export interface Finding {
   code: string;
   slug: string;
   severity: Severity;
   install: string;
-  resource?: Ref;
+  resource?: LinkedRef;
   message: string;
   detail?: string;
   since?: string;
   restricted?: boolean;
+  evidenceRestricted?: boolean;
 }
 /** detail: context for an OK check (e.g. scope source); pending: not OK only because of the grace period. */
 export interface CheckResult {
@@ -115,6 +125,7 @@ export interface GatewayRow {
   listeners: number;
   attachedRoutes: number;
   addresses: string[];
+  link?: Link;
 }
 export interface OverviewResponse {
   header: InstallHeader;

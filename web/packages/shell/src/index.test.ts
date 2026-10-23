@@ -88,6 +88,8 @@ it("keeps the public export surface", () => {
         "InstallSummary",
         "LabelSelector",
         "LabelSelectorRequirement",
+        "Link",
+        "LinkedRef",
         "MetaResponse",
         "NavEntry",
         "OverviewResponse",

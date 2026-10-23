@@ -219,7 +219,12 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Publishe
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, p.Model, i, h.visibleHealth(r, i)), CollectedAt: wireTime(p.ConfirmedAt)})
+		ov := h.visibleOverview(r, p.Model, i, h.visibleHealth(r, i))
+		rows := make([]OverviewGatewayRow, 0, len(ov.Gateways))
+		for _, g := range ov.Gateways {
+			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: h.link(r, p.Model, i, g.Ref)})
+		}
+		writeJSON(w, OverviewResponse{Overview: ov, Gateways: rows, CollectedAt: wireTime(p.ConfirmedAt)})
 	}
 }
 
@@ -248,13 +253,34 @@ func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		writeJSON(w, wireHealth(h.visibleHealth(r, i), p.ConfirmedAt))
+		writeJSON(w, h.healthResponse(r, p.Model, i, p.ConfirmedAt))
 	}
 }
 
-// resource serves one object of a served kind, or a Deployment, when the
-// caller may view it and it is owned by the install or referenced by a current
-// finding of the install. Only metadata.managedFields is stripped (D-013). Secrets are never watched, so
+// healthResponse is the caller's report in wire form: each finding's resource
+// carries its link, and a visible finding whose detail quotes an object the
+// caller may not view has that detail replaced (design §7.4 rule 7).
+func (h *handler) healthResponse(r *http.Request, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
+	rep := wireHealth(h.visibleHealth(r, i), confirmedAt)
+	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
+	out.Report.Findings = nil // shadowed by out.Findings
+	for _, f := range rep.Findings {
+		d := FindingDTO{Finding: f}
+		if f.Resource != nil {
+			lr := h.linked(r, m, i, *f.Resource)
+			d.Resource = &lr
+		}
+		if !f.Restricted && !h.allVisible(r, f.Evidence) {
+			d.Detail, d.EvidenceRestricted = restrictedEvidence, true
+		}
+		out.Findings = append(out.Findings, d)
+	}
+	return out
+}
+
+// resource serves one object the install admits (design §7.1) when the
+// caller may view it and it exists: its link is not none. Only
+// metadata.managedFields is stripped (D-013). Secrets are never watched, so
 // they are never reachable. "-" stands for the empty group or namespace.
 func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 	p, i := h.find(w, r)
@@ -268,53 +294,53 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		return s
 	}
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
-	if h.authz.Authorize(r, want) {
-		if obj := lookup(p.Model, i, want); obj != nil {
+	if h.link(r, p.Model, i, want) != LinkNone {
+		if obj := object(p.Model, want); obj != nil {
 			// The body is the raw object, so the collection time travels in a header (D-017 §6).
 			w.Header().Set("Collected-At", wireTime(p.ConfirmedAt).Format(time.RFC3339Nano))
 			writeJSON(w, obj)
 			return
 		}
 	}
-	// Denied and absent objects get the same answer.
+	// Denied, absent and unadmitted objects get the same answer.
 	writeErr(w, http.StatusNotFound, "resource not found in this install's scope")
 }
 
-// lookup returns want as a JSON object, or nil if the install may not serve it.
-func lookup(m *engine.Model, i *engine.InstallModel, want objects.Ref) map[string]any {
-	o := i.Owned
-	owned := append(append(append([]*unstructured.Unstructured{}, o.GatewayClasses...), o.Gateways...), o.ListenerSets...)
-	for _, x := range slices.Concat(o.Routes, o.Policies) {
-		owned = append(owned, x.Obj)
-	}
-	for _, u := range owned {
-		if objects.RefOf(u) == want {
-			return clean(u.Object)
-		}
-	}
-	referenced := slices.ContainsFunc(i.Health.Findings, func(f health.Finding) bool { return f.Resource != nil && *f.Resource == want })
-	if !referenced {
-		return nil
-	}
-	if want.Group == deploymentKind.Group && want.Kind == deploymentKind.Kind {
-		for _, d := range m.Snapshot.Deployments {
-			if d.Namespace == want.Namespace && d.Name == want.Name {
-				return deploymentObject(d)
-			}
-		}
-		return nil
-	}
-	for _, k := range m.Served {
-		if k.Group != want.Group || k.Kind != want.Kind {
-			continue
-		}
-		for _, u := range m.Snapshot.Objects[k.GVR()] {
-			if objects.RefOf(u) == want {
-				return clean(u.Object)
-			}
-		}
+// object returns the stored object ref names as a JSON object, or nil.
+func object(m *engine.Model, ref objects.Ref) map[string]any {
+	switch u, d := stored(m, ref); {
+	case u != nil:
+		return clean(u.Object)
+	case d != nil:
+		return deploymentObject(d)
 	}
 	return nil
+}
+
+// stored returns the object ref names in the snapshot: an object of a served
+// kind, or a Deployment. Both are nil when it is absent or never served.
+func stored(m *engine.Model, ref objects.Ref) (*unstructured.Unstructured, *appsv1.Deployment) {
+	if ref.Group == deploymentKind.Group && ref.Kind == deploymentKind.Kind {
+		for _, d := range m.Snapshot.Deployments {
+			if d.Namespace == ref.Namespace && d.Name == ref.Name {
+				return nil, d
+			}
+		}
+		return nil, nil
+	}
+	for _, k := range m.Served {
+		if k.Group != ref.Group || k.Kind != ref.Kind {
+			continue
+		}
+		// The cache sorts each kind by "namespace/name".
+		objs, key := m.Snapshot.Objects[k.GVR()], ref.Namespace+"/"+ref.Name
+		if j, ok := slices.BinarySearchFunc(objs, key, func(u *unstructured.Unstructured, key string) int {
+			return strings.Compare(u.GetNamespace()+"/"+u.GetName(), key)
+		}); ok {
+			return objs[j], nil
+		}
+	}
+	return nil, nil
 }
 
 // clean returns a copy of obj without metadata.managedFields.

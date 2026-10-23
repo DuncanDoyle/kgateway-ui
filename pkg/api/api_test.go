@@ -818,10 +818,10 @@ func TestAuthorizerRestrictsDeniedObjects(t *testing.T) {
 	restricted := 0
 	for i, f := range part.Findings {
 		w := full.Findings[i]
-		if f.Code != w.Code || f.Severity != w.Severity || (f.Resource == nil) != (w.Resource == nil) || (f.Resource != nil && *f.Resource != *w.Resource) {
+		if f.Code != w.Code || f.Severity != w.Severity || (f.Resource == nil) != (w.Resource == nil) || (f.Resource != nil && f.Resource.Ref != w.Resource.Ref) {
 			t.Fatalf("finding %d: order, code, severity or resource changed: %+v vs %+v", i, f, w)
 		}
-		if f.Resource != nil && denied(*f.Resource) {
+		if f.Resource != nil && denied(f.Resource.Ref) {
 			restricted++
 			if !f.Restricted || f.Message != "" || f.Detail != "" || f.Since != nil {
 				t.Errorf("finding on a denied resource must be restricted without evidence: %+v", f)
@@ -1238,7 +1238,7 @@ func TestWorkloadsAtZeroReplicasAtTheAPI(t *testing.T) {
 				t.Fatalf("missing %s/%s on %s; findings: %+v", tc.want.code, tc.want.sev, tc.want.res, h.Findings)
 			}
 			if tc.want != nil {
-				i := slices.IndexFunc(h.Findings, func(f health.Finding) bool {
+				i := slices.IndexFunc(h.Findings, func(f FindingDTO) bool {
 					return f.Code == tc.want.code && f.Resource != nil && f.Resource.String() == tc.want.res
 				})
 				if i < 0 || h.Findings[i].Message != tc.msg {
@@ -1334,7 +1334,7 @@ func TestListenerSetStatusAtTheAPI(t *testing.T) {
 					t.Fatalf("unexpected %s/%s on %s; findings: %+v", f.code, f.sev, f.res, h.Findings)
 				}
 			}
-			if tc.detail != "" && !slices.ContainsFunc(h.Findings, func(f health.Finding) bool {
+			if tc.detail != "" && !slices.ContainsFunc(h.Findings, func(f FindingDTO) bool {
 				return f.Resource != nil && f.Resource.String() == ls1 && strings.Contains(f.Detail, tc.detail)
 			}) {
 				t.Fatalf("no finding on %s with detail %q; findings: %+v", ls1, tc.detail, h.Findings)
@@ -1737,7 +1737,7 @@ func TestExperimentalOnlyDependsOnControllerVersionAtTheAPI(t *testing.T) {
 			e, srv, _ := startWith(t, setup{metrics: gauge, immediate: true}, objs...)
 			e.Compute() // a mismatch must persist across two computations
 			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
-			var pending *health.Finding
+			var pending *FindingDTO
 			mismatch := false
 			for i, f := range h.Findings {
 				if f.Code == health.CodeRouteUnattached && f.Resource != nil && f.Resource.String() == "shop/tcp" {
@@ -2150,8 +2150,8 @@ func TestEveryEligibleEntryIsJudged(t *testing.T) {
 }
 
 // findingsOn returns h's findings on resource res.
-func findingsOn(h HealthResponse, res string) []health.Finding {
-	var out []health.Finding
+func findingsOn(h HealthResponse, res string) []FindingDTO {
+	var out []FindingDTO
 	for _, f := range h.Findings {
 		if f.Resource != nil && f.Resource.String() == res {
 			out = append(out, f)

@@ -17,6 +17,7 @@ import type {
   InstallHeader,
   InstallSummary,
   LabelSelector,
+  LinkedRef,
   MetaResponse,
   OverviewResponse,
   Readiness,
@@ -38,6 +39,7 @@ const shape = <T>(keys: Spec<T>, nested: Partial<Record<keyof T, Shape>> = {}): 
 });
 
 const ref = shape<Ref>({ group: "!", kind: "!", namespace: "?", name: "!" });
+const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "?" });
 const finding = shape<Finding>(
   {
     code: "!",
@@ -49,8 +51,9 @@ const finding = shape<Finding>(
     detail: "?",
     since: "?",
     restricted: "?",
+    evidenceRestricted: "?",
   },
-  { resource: ref },
+  { resource: linkedRef },
 );
 const check = shape<CheckResult>({
   name: "!",
@@ -93,7 +96,7 @@ const count = shape<Count>(
   { access },
 );
 const row = shape<GatewayRow>(
-  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!" },
+  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?" },
   { ref },
 );
 const overviewShape = shape<OverviewResponse>(

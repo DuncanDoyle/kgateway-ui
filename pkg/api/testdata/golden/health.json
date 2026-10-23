@@ -84,6 +84,7 @@
         "resource": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
+          "link": "none",
           "name": "broken",
           "namespace": "shop"
         },
@@ -99,6 +100,7 @@
         "resource": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
+          "link": "detail",
           "name": "denied",
           "namespace": "shop"
         },
@@ -114,6 +116,7 @@
         "resource": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
+          "link": "detail",
           "name": "posts",
           "namespace": "blog"
         },
@@ -128,6 +131,7 @@
         "resource": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
+          "link": "detail",
           "name": "young",
           "namespace": "shop"
         },

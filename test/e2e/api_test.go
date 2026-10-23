@@ -68,7 +68,7 @@ func status(t *testing.T, path string) int {
 
 // has reports a finding with code on res; a non-empty msg must match too.
 func has(h api.HealthResponse, code, res string, msg ...string) bool {
-	return slices.ContainsFunc(h.Findings, func(f health.Finding) bool {
+	return slices.ContainsFunc(h.Findings, func(f api.FindingDTO) bool {
 		return f.Code == code && f.Resource != nil && f.Resource.String() == res && (len(msg) == 0 || f.Message == msg[0])
 	})
 }

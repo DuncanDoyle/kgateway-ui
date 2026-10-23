@@ -218,9 +218,9 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 		h = api.HealthResponse{}
 		return getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h) == http.StatusOK && len(h.Findings) > 0 && h.State == health.StateError
 	})
-	var restricted *health.Finding
+	var restricted *api.FindingDTO
 	for i := range h.Findings {
-		if f := h.Findings[i]; f.Resource != nil && *f.Resource == denied {
+		if f := h.Findings[i]; f.Resource != nil && f.Resource.Ref == denied {
 			restricted = &h.Findings[i]
 		}
 	}
@@ -557,8 +557,8 @@ func (h *hidingDiscovery) ServerResourcesForGroupVersion(gv string) (*metav1.API
 }
 
 // kindsFinding returns the served-kinds finding and check of h, if any.
-func kindsFinding(h api.HealthResponse) (*health.Finding, *health.CheckResult) {
-	var f *health.Finding
+func kindsFinding(h api.HealthResponse) (*api.FindingDTO, *health.CheckResult) {
+	var f *api.FindingDTO
 	var c *health.CheckResult
 	for i := range h.Findings {
 		if h.Findings[i].Code == health.CodeSignalUnavailable && h.Findings[i].Message == "Served kinds changed; restart the UI to watch them" {
@@ -671,7 +671,7 @@ func TestDownstreamProxyModeResolverSeam(t *testing.T) {
 		if getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h) != http.StatusOK {
 			return false
 		}
-		return slices.ContainsFunc(h.Findings, func(f health.Finding) bool { return f.Code == health.CodeSelfManagedProxy })
+		return slices.ContainsFunc(h.Findings, func(f api.FindingDTO) bool { return f.Code == health.CodeSelfManagedProxy })
 	})
 }
 

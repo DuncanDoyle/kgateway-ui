@@ -6,6 +6,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 )
 
@@ -36,14 +37,13 @@ type HealthSummary struct {
 	Counts map[health.Severity]int `json:"counts"`
 }
 
-// OverviewResponse is GET …/overview.
+// OverviewResponse is GET …/overview. Gateways shadows the overview's rows,
+// so adding their link is additive on the wire.
 type OverviewResponse struct {
 	overview.Overview
-	CollectedAt time.Time `json:"collectedAt"`
+	Gateways    []OverviewGatewayRow `json:"gateways"`
+	CollectedAt time.Time            `json:"collectedAt"`
 }
-
-// HealthResponse is GET …/health. It carries the install ID.
-type HealthResponse = health.Report
 
 // MetaResponse is GET /api/v1/meta.
 type MetaResponse struct {
@@ -58,6 +58,8 @@ type MetaResponse struct {
 	// Kinds are the kinds the resource endpoint can serve: the served kinds,
 	// plus apps/Deployment under the workloads capability. The frontend links only these.
 	Kinds []kinds.Served `json:"kinds"`
+	// Views are the group/kinds with a detail view; informational only.
+	Views []objects.GroupKind `json:"views,omitempty"`
 }
 
 // deploymentKind is listed in /api/v1/meta because finding links reach
