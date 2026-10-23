@@ -401,3 +401,45 @@ Shadowed-match detection stays the controller's job: an upstream ask, consumed l
 - The kind e2e asserts that computed and controller counts agree on 2.3 and 2.4.
 - New finding KGWUI-012. KGWUI-011 gains a computed trigger.
 - Upstream asks: resolved route → listener relationships, delegation resolution per child, a controller-written state CRD outside Gateway API, shadowed-match conditions, and hostname resolution (Phase 2 design §14).
+
+## D-021 — Delegation and attachment status, observed on a cluster (2026-10-23, phase 2)
+**Status:** accepted 2026-10-23 (observation, sub-phase 2.1 Task 1)
+**Context:**
+- `computed-rules.md` §10 lists ten behaviours the rule sets assume but code reading cannot settle (design §9.5).
+- Run on kind with kgateway v2.4.7 / Gateway API v1.6.1 and v2.3.11 / v1.5.1, experimental CRDs, plus the legacy XListenerSet CRD from v1.4.1 (the last release that ships it). Fixtures and runner: `test/e2e/fixtures/observe/`.
+- World: Gateway `infra/edge` with listeners `http` 8080 and `https` 8443 (`*.example.com`); parent HTTPRoute `shop/api` attached to it. Each item was recorded after the Gateway and `shop/api` reported their current generation and two records 5 s apart matched. Items 1 and 6 were recorded again 30 s later; nothing changed.
+- "Entry" means a `status.parents` item with `controllerName: kgateway.dev/kgateway`. "Synthesized ref" is `{group: gateway.networking.k8s.io, kind: HTTPRoute, name: api, namespace: shop}`.
+
+**Decision:** the rule sets use these facts. Both tags agree except where noted.
+
+| # | Applied | v2.4.7 | v2.3.11 |
+|---|---|---|---|
+| 1 | implicit child `c1`, then the parent switches its ref to `c1b` | `c1` entry under the synthesized ref, then `parents: []` | same |
+| 2 | explicit child, parentRef `{group, kind: HTTPRoute, name: api}` (no namespace) | entry under the ref as written, no namespace | `parents: []` (no entry) |
+| 3 | explicit children: `sectionName: http`; `port: 8080` | both entries as written, with `sectionName` or `port` | `sectionName`: `parents: []`; `port`: entry with `port: 8080` |
+| 4 | implicit children by name, `*` in `orders`, label in `shop`, label in namespace `all` | an `Accepted=True` entry under the synthesized ref for each | same |
+| 5 | hostname children: `c5d` fails the fit, `c5k` fits | `c5d` no status; `c5k` `Accepted=False/UnsupportedValue`; parent `ResolvedRefs=False/BackendNotFound` | same |
+| 6 | child `c6` attached, then the parent match becomes `/store` | entry, then `parents: []` | same |
+| 7 | quirk 1: refs `c7a`, `c7b` in one rule | proxy has two `/q1/a` routes (from `c7a`) and one `/q1/b` | same |
+| 7 | quirk 2: `c7c` under `/q1` and `/q2`; `c7d` (`/q1/d`) only under `/q2` | `c7d` `Accepted=True`; proxy has `/q1/d`; parent `ResolvedRefs=False/BackendNotFound` | same |
+| 8 | mid-level `c8p`: self-delegation (cycle) and a missing Service, in two rule orders | cycle rule first → `BackendNotFound`; Service rule first → `RefNotPermitted` | same |
+| 8 | top-level: working Service rule plus an unresolved delegation ref | `ResolvedRefs=False/BackendNotFound` | same |
+| 9 | one rule, matches `/api` and `/other`, child `c9` `/api/nine` | one entry, `Accepted=True`; parent `ResolvedRefs=False/BackendNotFound`; one proxy route | same |
+| 10 | delegated child `c10`; route `lsr` on ListenerSet `infra/ls` (`extra` 8090); route `xlsr` on XListenerSet `infra/xls` (`legacy` 8091) | Gateway `http=3 https=3`: `good`, `broken` and `api`, not `c10` (2 each without `api`); `extra=1`; `legacy=1`; both sets `Accepted=True` | same |
+
+Verbatim excerpts (`kubectl get httproute -o json | jq '.status.parents'`):
+- Item 2, v2.4.7: `"parentRef":{"group":"gateway.networking.k8s.io","kind":"HTTPRoute","name":"api"}` with `Accepted=True`. v2.3.11: `"parents":[]`.
+- Item 3, v2.3.11: `c3p` `"parentRef":{"group":"gateway.networking.k8s.io","kind":"HTTPRoute","name":"api","namespace":"shop","port":8080}`, `Accepted=True`; `c3s` `"parents":[]`.
+- Items 1 and 6, both tags: `{"n":"shop/c1","parents":[]}`, `{"n":"shop/c6","parents":[]}`.
+- Item 8, both tags: `c8p` `ResolvedRefs=False/BackendNotFound@1` (cycle rule first); `ResolvedRefs=False/RefNotPermitted@1` (Service rule first).
+
+**Alternatives:** n/a (observation).
+
+**Consequences:**
+- Report keys (§7) are confirmed as written on both tags, including the 2.3 port case. No rule-set change.
+- Clearing is verified on both sets for deselection and matcher drop. §2 and the §8.3 "unexpected status" row now mark it verified, so a current leftover entry can raise KGWUI-012 on 2.3 too (sub-phase 2.4). Design §4.2's "other cases are observed first" is answered by items 1 and 6. Reported-edge eligibility (§4.2) is unchanged.
+- The two quirks of §5.4 are verified on both tags; the flag is removed. With quirk 2 a child can attach under a rule that never names it.
+- A delegation context with no kept child sets the parent's `ResolvedRefs=False/BackendNotFound` (items 5, 7, 9), as §5.4's `valid == 0` says. 2.4 goldens for those fixtures expect it.
+- When delegation and backend failures meet on one key, the last rule in spec order wins. §8.2 already compares the reason only without non-delegation backendRefs; unchanged.
+- `attachedRoutes` never counts delegated children. A ListenerSet or XListenerSet route counts only on that set's listener, not on the Gateway's. View A (2.3) uses this.
+- Phase 1's base fixtures attach `good` and `broken`; `blog/posts` is outside install A's scope and was not counted.

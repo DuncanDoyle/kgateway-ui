@@ -1,0 +1,15 @@
+# Item 6, step b: the parent match becomes /store, so c6 (/api/six) is dropped by the fit.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: api, namespace: shop, labels: { observe: d021 } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /store } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c6, namespace: shop }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c6, namespace: shop, labels: { observe: d021 } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /api/six } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]

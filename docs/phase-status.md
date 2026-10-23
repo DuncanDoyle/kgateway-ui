@@ -25,7 +25,11 @@ Status: design and plan approved 2026-10-23; implementing sub-phase 2.1; Phase 1
 - [ ] phase-2-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 2.1 Event-driven recompute
+Status: active
+Base: 4f2fc3098d1869b79e524a6afeaa5e83ca3cb696
+Brief: docs/phases/phase-2/phase-2.1-brief.md
+Branch: duncandoyle/eventRecompute
 
 ## Carry-over (deferred to later phases)
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md

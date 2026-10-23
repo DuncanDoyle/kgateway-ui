@@ -25,7 +25,7 @@
 | Success conditions filled in by default | `Accepted`, `ResolvedRefs` | adds `kgateway.dev/Programmed` (`pkg/reports/status.go` V4:752-780; `api/conditions/conditions.go` absent at V3) |
 | Rule replaced or dropped | `Accepted=False`, `RouteRuleReplaced`/`RouteRuleDropped` (`translator/irtranslator/route.go` V3:291-313) | `kgateway.dev/Programmed=False`, same reasons (V4:325-350) |
 | TCP or TLS route conflict | `Accepted=False/Conflicted` (`translator/listener/gateway_listener_translator.go` V3:645-656, called at :463) | `kgateway.dev/Programmed=False/Conflicted` (V4:648-660, called at :466) |
-| Old status of a matcher-dropped child | not yet observed (§10, item 6) | cleared to `parents: []` (`pkg/krtcollections/policy.go` V4:1150-1178) |
+| Old status of a dropped or deselected child | cleared to `parents: []`, observed (D-021, items 1 and 6) | cleared to `parents: []` (`pkg/krtcollections/policy.go` V4:1150-1178), observed (D-021, items 1 and 6) |
 | Plain-HTTP listener isolation (programming only, §4.5) | none | `translator/listener/gateway_listener_translator.go` V4:689-747 |
 
 **Selection.** The rule set follows the controller minor, as `kinds.ExperimentalOnly` does (`pkg/kinds/upstream.go:55-94`).
@@ -217,7 +217,7 @@ flatten(P, i, ref, ctx):                               # V4 translator/httproute
 - `parentSignal` maps an error as `ProcessBackendError` does: a cycle gives `ResolvedRefs=False/RefNotPermitted`; an unresolved reference gives `ResolvedRefs=False/BackendNotFound` (`query/utils.go` V4:38-51, V3:37-50). Under STANDARD or STRICT validation the parent rule becomes a 500 response (`translator/irtranslator/route.go` V4:315-372).
 - Child hostnames are checked **after** the fit. A hostname-bearing child whose rules all fail the fit is `dropped`, not `rejected-hostnames`.
 - Memoising `selectTree` per parent and filtering the path afterwards is allowed. The results must equal the definition above.
-- **The two quirks are reproduced as written and flagged as unverified on a cluster** (§10, item 7).
+- **The two quirks are reproduced as written.** Both were observed on 2.3.11 and 2.4.7 (D-021, item 7).
 
 ### 5.5 Outcomes and rows
 
@@ -363,7 +363,7 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Stale status | the signal exists and is stale | `pending`, "Waiting for the controller" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
 | Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route is Phase 1's KGWUI-003, and the check stays `pending`. |
-| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (2.4 matcher drop); otherwise `not-verified`, "The controller may keep old status" | where verified, when mature |
+| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (matcher drop and deselection, both sets, D-021); otherwise `not-verified`, "The controller may keep old status" | where verified, when mature |
 | Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
 | Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
 
@@ -450,16 +450,16 @@ The engine keeps a map from identity to (fingerprint, `since`) under its compute
 ## 10. Observations that may change these rules
 
 The first task of sub-phase 2.1 records, on 2.3.11 and 2.4.7, whether status is produced, and under which parentRef (design §9.5):
-1. an implicit child (empty `parentRefs`) after the parent stops selecting it: is the old entry removed?
-2. an explicit child whose parentRef omits the namespace (§7);
-3. an explicit child whose parentRef sets `sectionName`, and one that sets only `port` (§7);
-4. an implicit child selected by name, wildcard and label;
-5. a hostname-bearing child whose rules all fail the fit (§5.4);
-6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4?
-7. the two quirks of §5.4: a second delegation ref in one rule, and the same ref in two rules;
-8. a parent with both a Service backendRef and a delegation ref: which `ResolvedRefs` reason wins (§8.2)?
-9. a child kept under one parent match and dropped under another: one entry (§8.2)?
-10. listener `attachedRoutes` for delegated children (expected: not counted) and for ListenerSet routes.
+1. an implicit child (empty `parentRefs`) after the parent stops selecting it: is the old entry removed? **Answered (D-021): yes, on both.**
+2. an explicit child whose parentRef omits the namespace (§7); **answered (D-021): no entry on 2.3, entry as written on 2.4.**
+3. an explicit child whose parentRef sets `sectionName`, and one that sets only `port` (§7); **answered (D-021): as §7 states, on both.**
+4. an implicit child selected by name, wildcard and label; **answered (D-021): synthesized entry for each, on both.**
+5. a hostname-bearing child whose rules all fail the fit (§5.4); **answered (D-021): no entry, on both.**
+6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4? **Answered (D-021): yes.**
+7. the two quirks of §5.4: a second delegation ref in one rule, and the same ref in two rules; **answered (D-021): both reproduce, on both.**
+8. a parent with both a Service backendRef and a delegation ref: which `ResolvedRefs` reason wins (§8.2)? **Answered (D-021): the last rule in spec order.**
+9. a child kept under one parent match and dropped under another: one entry (§8.2)? **Answered (D-021): one entry, `Accepted=True`.**
+10. listener `attachedRoutes` for delegated children (expected: not counted) and for ListenerSet routes. **Answered (D-021): children not counted; a ListenerSet route counts only on its ListenerSet listener.**
 
 Each result becomes a decision entry. A rule set, and the `verified` mark of §8.3, change before the sub-phase that depends on them.
 

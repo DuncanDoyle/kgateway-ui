@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates a kind cluster with kgateway, the fixtures and the UI, then
 # port-forwards the UI to 127.0.0.1:18080. Usage:
-#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] test/e2e/setup.sh
+#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
 # The cluster's kubeconfig is written to $E2E_DIR/kubeconfig; the current
 # kubeconfig context is left alone.
@@ -51,7 +51,12 @@ fi
 mkdir -p "$E2E_DIR"
 down # idempotent: start from a fresh cluster
 kind create cluster --name "$CLUSTER" --kubeconfig "$KUBECONFIG" --wait 120s
-kubectl apply --server-side -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GWAPI_VERSION}/standard-install.yaml"
+# The experimental channel adds TCPRoute, TLSRoute and ListenerSet for the computed-view e2e.
+kubectl apply --server-side -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GWAPI_VERSION}/experimental-install.yaml"
+if [[ "${OBSERVE_XLISTENERSET:-}" == 1 ]]; then
+  # Legacy XListenerSet for the D-021 observations only; v1.4.1 is the last release that ships it.
+  kubectl apply --server-side -f "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.4.1/config/crd/experimental/gateway.networking.x-k8s.io_xlistenersets.yaml"
+fi
 helm install kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds --version "$KGW_VERSION" -n kgw-a --create-namespace
 # Release "kgateway" in each namespace: the controller Deployment is <ns>/kgateway (kgateway.fullname).
 helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-a \

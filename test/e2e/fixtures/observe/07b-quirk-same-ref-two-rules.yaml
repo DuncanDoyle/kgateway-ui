@@ -1,0 +1,25 @@
+# Item 7, quirk 2: the same ref (c7c) in two rules. c7d fits only /q1 but is referenced only under /q2.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: api, namespace: shop, labels: { observe: d021 } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /q1 } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7c, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /q2 } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7d, namespace: shop }, { group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7c, namespace: shop }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c7c, namespace: shop, labels: { observe: d021 } }
+spec:
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /q1/c } }, { path: { type: PathPrefix, value: /q2/c } }]
+      backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c7d, namespace: shop, labels: { observe: d021 } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /q1/d } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
