@@ -258,7 +258,7 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 		v, st = objects.DecodeHTTPRoute(u), explore.RowState(ref, d.i.Health)
 	}
 	out := RouteDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: append([]objects.ParentRef{}, v.ParentRefs...),
+		Candidate: cand, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok {
@@ -270,6 +270,15 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Ancestors, out.AncestorsTruncated = d.ancestors(ref)
 	writeJSON(w, out)
+}
+
+// specParents is a route's spec parentRefs, each linked like a status target.
+func (d *detail) specParents(ps []objects.ParentRef) []SpecParentRef {
+	out := make([]SpecParentRef, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, SpecParentRef{ParentRef: p, Target: d.l.linked(p.Ref())})
+	}
+	return out
 }
 
 // parents is route u's status.parents, this install's controllers' entries

@@ -25,7 +25,14 @@
         "group": "gateway.networking.k8s.io",
         "kind": "Gateway",
         "name": "foreign",
-        "namespace": "infra"
+        "namespace": "infra",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "none",
+          "name": "foreign",
+          "namespace": "infra"
+        }
       }
     ],
     "parents": [

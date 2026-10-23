@@ -1,7 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useId, useState } from "react";
-import type { Condition, ParentRef, ParentStatus } from "../../../api/types";
+import type { Condition, ParentStatus, SpecParentRef } from "../../../api/types";
 import { routeCopy } from "../../../copy/explorer";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
@@ -58,7 +58,7 @@ const Toggle = styled(TextButton)`
 // region Component
 interface ParentCardProps {
   installId: string;
-  parentRef: ParentRef;
+  parentRef: SpecParentRef;
   /** status.parents entries for this parentRef, ours and other controllers'. */
   entries: ParentStatus[];
   generation: number;
@@ -83,8 +83,8 @@ export function ParentCard({
   const listId = useId();
   const ours = entries.filter((e) => e.ours);
   const others = entries.filter((e) => !e.ours);
-  // The target's link comes from the status entry; without one, the spec ref is text.
-  const target = entries[0]?.target ?? asText(parentRef);
+  // The server links the target on the status entry and the spec ref; an older body without either is text.
+  const target = entries[0]?.target ?? parentRef.target ?? asText(parentRef);
   const name = `${parentRef.namespace}/${parentRef.name}`;
   // Interim wording (Task 31): with a delegation ref, BackendNotFound may not mean a missing Service.
   const extra = (c: Condition) =>

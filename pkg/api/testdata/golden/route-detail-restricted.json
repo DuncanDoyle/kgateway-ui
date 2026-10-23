@@ -122,43 +122,92 @@
         "group": "gateway.networking.k8s.io",
         "kind": "Gateway",
         "name": "edge",
-        "namespace": "infra"
+        "namespace": "infra",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
       },
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
         "name": "loop",
-        "namespace": "shop"
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "loop",
+          "namespace": "shop"
+        }
       },
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
         "name": "top1",
-        "namespace": "shop"
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top1",
+          "namespace": "shop"
+        }
       },
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
         "name": "top2",
-        "namespace": "shop"
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top2",
+          "namespace": "shop"
+        }
       },
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
         "name": "top3",
-        "namespace": "shop"
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top3",
+          "namespace": "shop"
+        }
       },
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
         "name": "top4",
-        "namespace": "shop"
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top4",
+          "namespace": "shop"
+        }
       },
       {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
         "name": "top5",
-        "namespace": "shop"
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top5",
+          "namespace": "shop"
+        }
       }
     ],
     "parents": [

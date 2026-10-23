@@ -234,7 +234,7 @@ func TestSpecRefsStay(t *testing.T) {
 	hideGW := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "Gateway" && !hiddenSome(ref) })
 	_, srv, _ := startWith(t, setup{authz: hideGW}, visWorld()...)
 	d := get[RouteDetail](t, srv, routeDetail+"shop/uses-be", 200)
-	if len(d.ParentRefs) != 1 || d.ParentRefs[0] != edgeRef {
+	if len(d.ParentRefs) != 1 || d.ParentRefs[0].ParentRef != edgeRef || d.ParentRefs[0].Target.Link != LinkNone {
 		t.Errorf("parentRefs %+v", d.ParentRefs)
 	}
 	if len(d.Parents) != 1 || d.Parents[0].Target.Link != LinkNone || len(d.Parents[0].Conditions) == 0 {

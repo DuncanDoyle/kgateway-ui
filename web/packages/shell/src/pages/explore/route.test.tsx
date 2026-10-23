@@ -232,6 +232,24 @@ it("other controllers' entries are collapsed", async () => {
   expect(screen.getByText("No reported path to a Gateway or ListenerSet.")).toBeInTheDocument();
 });
 
+it("a parent without a status entry links from its spec target; a hidden one is text", async () => {
+  // A declared candidate: spec parentRefs, no status entries. top1–4 are hidden in this golden.
+  const declared = detail(restrictedGolden);
+  declared.parents = [];
+  serve(api({ mid: declared }));
+  mount(MID);
+  await loaded();
+  const edge = screen.getByRole("article", { name: "Parent infra/edge" });
+  expect(within(edge).getByRole("link", { name: "infra/edge" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/gateways/infra/edge`,
+  );
+  expect(within(edge).getByText("No status from this install's controllers.")).toBeInTheDocument();
+  const hidden = screen.getByRole("article", { name: "Parent shop/top1" });
+  expect(within(hidden).queryByRole("link")).toBeNull();
+  expect(hidden).toHaveTextContent(/^HTTPRouteshop\/top1No status from this install's controllers\.$/);
+});
+
 it("an implicit child shows a card for each status entry its parentRefs do not name", async () => {
   const child = detail(routeGolden);
   const cond = (type: string, status: string, reason: string): Condition => ({

@@ -23,6 +23,10 @@ export interface ParentRef {
   sectionName?: string;
   port?: number;
 }
+/** A spec parentRef with its target's link, so a parent without status still links (design §7.1). */
+export interface SpecParentRef extends ParentRef {
+  target?: LinkedRef;
+}
 
 /** One page of a list. deniedInInstall counts the install's rows of the listed kinds the caller may not view. */
 export interface Page<T> {
@@ -255,7 +259,7 @@ export interface RouteDetail {
   ruleSet?: string;
   hostnames: string[];
   annotations: { inheritParentMatcher?: boolean };
-  parentRefs: ParentRef[];
+  parentRefs: SpecParentRef[];
   parents: ParentStatus[];
   rules: Rule[];
   ancestors: AncestorPath[];

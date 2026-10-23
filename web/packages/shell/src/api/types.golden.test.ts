@@ -70,6 +70,7 @@ import type {
   Rule,
   ScopeSummary,
   ServedKind,
+  SpecParentRef,
 } from "./types";
 
 // Checks the backend's golden wire format (pkg/api golden_test.go) against these types.
@@ -239,6 +240,10 @@ const parentRef = shape<ParentRef>({
   sectionName: "?",
   port: "?",
 });
+const specParentRef = shape<SpecParentRef>(
+  { group: "!", kind: "!", namespace: "!", name: "!", sectionName: "?", port: "?", target: "?" },
+  { target: linkedRef },
+);
 const parentStatus = shape<ParentStatus>(
   { parentRef: "!", target: "!", controllerName: "!", ours: "!", conditions: "!" },
   { parentRef, target: linkedRef, conditions: condition },
@@ -359,7 +364,7 @@ const routeDetail = shape<RouteDetail>(
     ref: linkedRef,
     candidate,
     annotations: shape<RouteDetail["annotations"]>({ inheritParentMatcher: "?" }),
-    parentRefs: parentRef,
+    parentRefs: specParentRef,
     parents: parentStatus,
     rules: rule,
     ancestors: ancestor,
@@ -439,6 +444,7 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(routesByBackendGolden.body.items.some((r) => "mirror" in r)).toBe(true);
     expect(routeDetailRestrictedGolden.body.ancestors.some((a) => a.steps.some((s) => "restricted" in s))).toBe(true);
     expect(routeDetailCandidateGolden.body.candidate.by).toBeDefined();
+    expect(routeDetailGolden.body.parentRefs.every((p) => "target" in p)).toBe(true);
     expect(listenersetDetailAllowedGolden.body.parentAllowedListeners.set).toBe(true);
   });
 });

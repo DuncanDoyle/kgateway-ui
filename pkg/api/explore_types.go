@@ -133,6 +133,13 @@ type Condition struct {
 	Stale              bool      `json:"stale"`
 }
 
+// SpecParentRef is a spec parentRef with its target's link, so a parent
+// without a status entry still links through admission (design §7.1).
+type SpecParentRef struct {
+	objects.ParentRef
+	Target LinkedRef `json:"target"`
+}
+
 // ParentStatus is one status.parents entry of a route. Ours marks an entry
 // written by one of the install's controllers.
 type ParentStatus struct {
@@ -254,22 +261,22 @@ type RouteAnnotations struct {
 // RouteDetail is GET …/routes/{group}/{kind}/{ns}/{name}, HTTPRoute only.
 // ChildCount and DeclaredCount count visible routes only.
 type RouteDetail struct {
-	Install            string              `json:"install"`
-	Ref                LinkedRef           `json:"ref"`
-	Generation         int64               `json:"generation"`
-	Health             health.State        `json:"health"`
-	Candidate          *Candidate          `json:"candidate,omitempty"`
-	RuleSet            string              `json:"ruleSet,omitempty"`
-	Hostnames          []string            `json:"hostnames"`
-	Annotations        RouteAnnotations    `json:"annotations"`
-	ParentRefs         []objects.ParentRef `json:"parentRefs"`
-	Parents            []ParentStatus      `json:"parents"`
-	Rules              []RuleDTO           `json:"rules"`
-	Ancestors          []AncestorPathDTO   `json:"ancestors"`
-	AncestorsTruncated bool                `json:"ancestorsTruncated"`
-	ChildCount         int                 `json:"childCount"`
-	DeclaredCount      int                 `json:"declaredCount"`
-	CollectedAt        time.Time           `json:"collectedAt"`
+	Install            string            `json:"install"`
+	Ref                LinkedRef         `json:"ref"`
+	Generation         int64             `json:"generation"`
+	Health             health.State      `json:"health"`
+	Candidate          *Candidate        `json:"candidate,omitempty"`
+	RuleSet            string            `json:"ruleSet,omitempty"`
+	Hostnames          []string          `json:"hostnames"`
+	Annotations        RouteAnnotations  `json:"annotations"`
+	ParentRefs         []SpecParentRef   `json:"parentRefs"`
+	Parents            []ParentStatus    `json:"parents"`
+	Rules              []RuleDTO         `json:"rules"`
+	Ancestors          []AncestorPathDTO `json:"ancestors"`
+	AncestorsTruncated bool              `json:"ancestorsTruncated"`
+	ChildCount         int               `json:"childCount"`
+	DeclaredCount      int               `json:"declaredCount"`
+	CollectedAt        time.Time         `json:"collectedAt"`
 }
 
 // PathMatchDTO is a path match after defaults.

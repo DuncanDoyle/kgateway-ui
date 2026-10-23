@@ -167,7 +167,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 151
+	const want = 166
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}

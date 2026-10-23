@@ -105,7 +105,7 @@ func TestRouteDetailDelegation(t *testing.T) {
 	if d.Install != "kgw.kgateway" || d.Ref.Ref != midRef.Ref() || d.Ref.Link != LinkDetail || d.Candidate != nil || d.Generation != 1 || d.RuleSet != "" {
 		t.Fatalf("header %+v", d)
 	}
-	if !slices.Equal(d.Hostnames, []string{"mid.example.com"}) || len(d.ParentRefs) != 7 || d.ParentRefs[0] != edgeRef || d.Annotations.InheritParentMatcher != nil {
+	if !slices.Equal(d.Hostnames, []string{"mid.example.com"}) || len(d.ParentRefs) != 7 || d.ParentRefs[0].ParentRef != edgeRef || d.Annotations.InheritParentMatcher != nil {
 		t.Fatalf("hostnames %v parentRefs %v annotations %+v", d.Hostnames, d.ParentRefs, d.Annotations)
 	}
 	if d.ChildCount != 2 || d.DeclaredCount != 1 {
@@ -513,6 +513,30 @@ func TestCandidateDetail(t *testing.T) {
 		t.Errorf("by under a restricting Authorizer: %+v", c)
 	}
 	getErr(t, some, base+"/gateways/infra/foreign", 404)
+}
+
+// Spec parentRefs link through admission like status targets (design §7.1): a
+// declared candidate without status reaches its visible owned parent, and a
+// hidden parent links none.
+func TestSpecParentRefsAreLinked(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, delegationWorld()...)
+	d := get[RouteDetail](t, srv, routeDetail+"shop/declared", 200)
+	if len(d.Parents) != 0 || len(d.ParentRefs) != 1 || d.ParentRefs[0].ParentRef != midRef || d.ParentRefs[0].Target != (LinkedRef{Ref: midRef.Ref(), Link: LinkDetail}) {
+		t.Fatalf("declared candidate parentRefs %+v, parents %+v", d.ParentRefs, d.Parents)
+	}
+
+	hideMid := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != route("shop", "mid") })
+	_, some, _ := startWith(t, setup{authz: hideMid}, delegationWorld()...)
+	h := get[RouteDetail](t, some, routeDetail+"shop/declared", 200)
+	if len(h.ParentRefs) != 1 || h.ParentRefs[0].Target != (LinkedRef{Ref: midRef.Ref(), Link: LinkNone}) {
+		t.Errorf("hidden parent %+v", h.ParentRefs)
+	}
+	// Every spec parent of an owned route links: the edge Gateway, then routes.
+	for _, p := range get[RouteDetail](t, srv, routeDetail+"shop/mid", 200).ParentRefs {
+		if p.Target.Ref != p.Ref() || p.Target.Link != LinkDetail {
+			t.Errorf("mid parentRef %+v", p)
+		}
+	}
 }
 
 func TestNonHTTPRouteDetailIs404(t *testing.T) {
