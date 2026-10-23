@@ -8,8 +8,8 @@ Status: design approved 2026-10-23; implementation plan in progress; Phase 1 com
 
 ### Queue
 - [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
-- [ ] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 ← CURRENT
-- [ ] Q3 Cross-model review of design + plan, triage, user approval
+- [x] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 (Tasks 1–70)
+- [ ] Q3 Cross-model review of design + plan, triage, user approval — reviews done (design-codex.md, design-r4-codex.md, plan-codex.md); waiting for user approval of the plan ← CURRENT
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -36,7 +36,7 @@ none
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
-- 2026-10-23 (resume here): design approved. Writing the plan (sub-phases 2.1–2.4), then Codex review and user approval. Before plan approval: re-run the Zendesk/knowledge-base research (needs VPN; design Q7).
+- 2026-10-23 (resume here): plan written and Codex-reviewed (last round: one gap, fixed in bbc1ecf). Waiting for the user to approve the plan and decide on a chart `extraArgs` value (would simplify Task 50's e2e). The Q7 support-ticket research ran 2026-10-23.
 - 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions".
