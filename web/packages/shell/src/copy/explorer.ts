@@ -205,7 +205,7 @@ export const routeCopy = {
   backendRefs: "Backend refs", // S76
   noBackendRefs: "No backend refs.", // S77
   backendRefFilters: "Filters on this backend ref", // S78
-  emptyMatches: "S110 PLACEHOLDER: explicit empty match list", // PICK S110
+  emptyMatches: "Empty match list", // S110
   header: "Header",
   query: "Query",
   method: "Method",

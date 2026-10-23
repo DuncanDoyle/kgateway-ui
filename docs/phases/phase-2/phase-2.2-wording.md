@@ -89,7 +89,7 @@ The final copy of the explorer pages and the 2.2 server text (design §8.8). SPA
 | S76 | Backend refs | Rule sub-heading |
 | S77 | No backend refs. | Rule with no backendRefs |
 | S78 | Filters on this backend ref | backendRef filters |
-| S79 | Default match | Empty matches |
+| S79 | ~~Default match~~ | Removed (2.2 review): omitted matches arrive with the default filled in, so the label had no case |
 | S80 | Mirror to `<ns/name>` | Mirror filter |
 | S81 | Weight N (default) | Defaulted weight |
 | S82 | Restricted | Hidden Backend or delegated route |
@@ -125,3 +125,4 @@ The final copy of the explorer pages and the 2.2 server text (design §8.8). SPA
 | S107 | no detail view for this kind | Detail 404 API error |
 | S108 | Implicit parent | Card for a status entry when parentRefs is empty (label `Implicit parent <ns/name>`) |
 | S109 | Not in parentRefs | Card for a status entry no spec parentRef names (label `Parent <ns/name>, not in parentRefs`) |
+| S110 | Empty match list | Rule with an explicit `matches: []` (computed-rules §3.2) |
