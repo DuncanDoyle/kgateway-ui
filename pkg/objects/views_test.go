@@ -62,6 +62,7 @@ func TestDecodeDelegationModes(t *testing.T) {
 		{"star is wildcard", `{` + gw + `,"kind":"HTTPRoute","name":"*","namespace":"team"}`, &DelegationRef{Mode: DelegationWildcard, Namespace: "team"}},
 		{"empty name is wildcard", `{` + gw + `,"kind":"HTTPRoute","name":""}`, &DelegationRef{Mode: DelegationWildcard, Namespace: "shop"}},
 		{"label", `{"group":"delegation.kgateway.dev","kind":"label","name":"a-team","namespace":"team"}`, &DelegationRef{Mode: DelegationLabel, Namespace: "team", Label: "a-team"}},
+		{"explicit empty namespace stays empty (strOr)", `{` + gw + `,"kind":"HTTPRoute","name":"child","namespace":""}`, &DelegationRef{Mode: DelegationName, Name: "child"}},
 		{"namespace defaults to the parent's", `{` + gw + `,"kind":"HTTPRoute","name":"child"}`, &DelegationRef{Mode: DelegationName, Namespace: "shop", Name: "child"}},
 		{"omitted group is a backend", `{"kind":"HTTPRoute","name":"child"}`, nil},
 		{"omitted kind is a Service", `{` + gw + `,"name":"child"}`, nil},
@@ -349,5 +350,50 @@ func TestHTTPRouteRef(t *testing.T) {
 	r := testutil.Rule(map[string]any{"path": map[string]any{"value": "/x"}})
 	if v := DecodeHTTPRoute(testutil.WithRules(route(`{}`), r, testutil.Rule())); len(v.Rules[0].Matches) != 1 || v.Rules[1].Matches != nil {
 		t.Fatalf("%+v", v.Rules)
+	}
+}
+
+// A delegate's filters are policies on its children; its mirror sends no traffic.
+func TestBackendTargetsSkipsDelegationMirrors(t *testing.T) {
+	v := DecodeHTTPRoute(route(`{"rules":[{"backendRefs":[{"group":"gateway.networking.k8s.io","kind":"HTTPRoute","name":"c",
+		"filters":[{"type":"RequestMirror","requestMirror":{"backendRef":{"name":"m"}}}]}]}]}`))
+	if got := BackendTargets(v); len(got) != 0 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// Hand-built objects may hold Go ints; copying them must not panic or alias.
+func TestHandBuiltGoIntsDoNotPanic(t *testing.T) {
+	mirror := map[string]any{"backendRef": map[string]any{"name": "m", "port": 80}}
+	u := route(`{}`)
+	u.Object["spec"] = map[string]any{"rules": []any{map[string]any{"filters": []any{
+		map[string]any{"type": "RequestMirror", "requestMirror": mirror}}}}}
+	f := DecodeHTTPRoute(u).Rules[0].Filters[0]
+	if f.Type != "RequestMirror" || f.Config["requestMirror"] == nil {
+		t.Fatalf("%+v", f)
+	}
+	f.Config["requestMirror"].(map[string]any)["x"] = 1
+	if _, aliased := mirror["x"]; aliased {
+		t.Fatal("Config aliases the object")
+	}
+	g := obj("Gateway", `{}`, "")
+	g.Object["spec"] = map[string]any{"allowedListeners": map[string]any{"limit": 3}}
+	if v := DecodeGateway(g); v.AllowedListeners["limit"] != 3 {
+		t.Fatalf("%+v", v.AllowedListeners)
+	}
+}
+
+func TestMalformedSupportedKindsKeepsConditions(t *testing.T) {
+	g := DecodeGateway(obj("Gateway", `{}`, `{"conditions":[{"type":"Accepted","status":"True"}],
+		"listeners":[{"name":"http","supportedKinds":"x"}]}`))
+	if len(g.Conditions) != 1 {
+		t.Fatalf("conditions %+v", g.Conditions)
+	}
+}
+
+func TestMatchWithoutPathDefaultsPathPrefix(t *testing.T) {
+	m := DecodeHTTPRoute(route(`{"rules":[{"matches":[{"method":"GET"}]}]}`)).Rules[0].Matches[0]
+	if m.Path == nil || *m.Path != (PathMatch{Type: "PathPrefix", Value: "/"}) {
+		t.Fatalf("%+v", m.Path)
 	}
 }

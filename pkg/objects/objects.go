@@ -139,13 +139,20 @@ type routeView struct {
 }
 
 // view decodes the subset of fields used by this package. Unknown fields are
-// ignored; a malformed spec or status yields an empty part rather than an
-// error, because the UI must keep rendering the rest of the cluster. They
-// decode separately, so a malformed spec keeps the status.
+// ignored; a malformed field yields its zero value rather than an error,
+// because the UI must keep rendering the rest of the cluster. Each field
+// decodes on its own, so a malformed one never wipes another.
 func view(u *unstructured.Unstructured) routeView {
 	var v routeView
-	decodeInto(u.Object["spec"], &v.Spec)
-	decodeInto(u.Object["status"], &v.Status)
+	spec, _ := u.Object["spec"].(map[string]any)
+	decodeKey(spec, "parentRefs", &v.Spec.ParentRefs)
+	decodeKey(spec, "listeners", &v.Spec.Listeners)
+	st, _ := u.Object["status"].(map[string]any)
+	decodeKey(st, "parents", &v.Status.Parents)
+	decodeKey(st, "ancestors", &v.Status.Ancestors)
+	decodeKey(st, "conditions", &v.Status.Conditions)
+	decodeKey(st, "listeners", &v.Status.Listeners)
+	decodeKey(st, "addresses", &v.Status.Addresses)
 	return v
 }
 

@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // InheritParentMatcherAnnotation makes a delegated child inherit its parent's matcher.
@@ -194,6 +193,8 @@ func decodeMatch(item any) Match {
 		return Match{}
 	}
 	m := Match{Headers: keyMatches(r.Headers), QueryParams: keyMatches(r.QueryParams), Method: r.Method}
+	// The CRD defaults an omitted path to PathPrefix "/".
+	m.Path = &PathMatch{Type: "PathPrefix", Value: "/"}
 	if r.Path != nil {
 		m.Path = &PathMatch{Type: orDefault(r.Path.Type, "PathPrefix"), Value: orDefault(r.Path.Value, "/")}
 	}
@@ -231,7 +232,7 @@ func decodeFilters(v any, ns string) []Filter {
 			out = append(out, Filter{})
 			continue
 		}
-		f := Filter{Type: r.Type, Config: runtime.DeepCopyJSON(item.(map[string]any))}
+		f := Filter{Type: r.Type, Config: copyValue(item).(map[string]any)}
 		if e := r.ExtensionRef; e != nil {
 			f.ExtensionRef = &Ref{Group: e.Group, Kind: e.Kind, Namespace: ns, Name: e.Name}
 		}
@@ -269,12 +270,13 @@ func decodeBackendRef(item any, ns string) BackendRef {
 }
 
 // delegation classifies r as kgateway does (computed-rules §3.2): group and
-// kind must both be written; anything else is an ordinary backend.
+// kind must both be written; anything else is an ordinary backend. The
+// namespace follows kgateway's strOr: a written namespace wins, even "".
 func delegation(r rawObjRef, ns string) *DelegationRef {
 	if r.Group == nil || r.Kind == nil {
 		return nil
 	}
-	if r.Namespace != nil && *r.Namespace != "" {
+	if r.Namespace != nil {
 		ns = *r.Namespace
 	}
 	switch {
@@ -290,7 +292,8 @@ func delegation(r rawObjRef, ns string) *DelegationRef {
 }
 
 // BackendTargets returns every non-delegation backendRef and every
-// RequestMirror target of v, in the order written.
+// RequestMirror target of v, in the order written. A delegation ref's
+// filters become policies on its children and send no traffic, so they are skipped.
 func BackendTargets(v *HTTPRouteView) []BackendTarget {
 	var out []BackendTarget
 	mirrors := func(fs []Filter) {
@@ -305,8 +308,8 @@ func BackendTargets(v *HTTPRouteView) []BackendTarget {
 		for _, b := range r.BackendRefs {
 			if b.Delegation == nil {
 				out = append(out, BackendTarget{Ref: b.Ref})
+				mirrors(b.Filters)
 			}
-			mirrors(b.Filters)
 		}
 	}
 	return out

@@ -52,6 +52,40 @@ func decodeInto[T any](m any, dst *T) bool {
 	return true
 }
 
+type wrapped[T any] struct {
+	V T `json:"v"`
+}
+
+// decodeKey decodes m[key] into dst; a missing or malformed value leaves the zero value.
+func decodeKey[T any](m map[string]any, key string, dst *T) {
+	var w wrapped[T]
+	if v, ok := m[key]; ok && decodeInto(map[string]any{"v": v}, &w) {
+		*dst = w.V
+	}
+}
+
+// copyValue deep-copies the maps and lists of an unstructured value. Unlike
+// runtime.DeepCopyJSONValue it accepts any scalar, such as a Go int in a
+// hand-built object, so it never panics.
+func copyValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, x := range t {
+			out[k] = copyValue(x)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = copyValue(x)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 // field returns the value at path in u, or nil.
 func field(u *unstructured.Unstructured, path ...string) any {
 	v, _, _ := unstructured.NestedFieldNoCopy(u.Object, path...)
@@ -116,7 +150,8 @@ type rawObjRef struct {
 	Port      *int32  `json:"port"`
 }
 
-// ref applies the defaults: core group, kind defKind, namespace ns.
+// ref applies the defaults: core group, kind defKind, namespace ns. Global
+// kinds (Istio Hostname) also get ns; kgateway leaves their namespace empty.
 func (r rawObjRef) ref(defKind, ns string) Ref {
 	out := Ref{Group: deref(r.Group), Kind: orDefault(r.Kind, defKind), Namespace: ns, Name: r.Name}
 	if r.Namespace != nil && *r.Namespace != "" {

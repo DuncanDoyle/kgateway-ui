@@ -3,7 +3,6 @@ package objects
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // Listener is a spec listener of a Gateway or ListenerSet with defaults applied.
@@ -134,7 +133,7 @@ func DecodeGateway(u *unstructured.Unstructured) *GatewayView {
 		v.AttachedListenerSets = &n32
 	}
 	if m, ok := field(u, "spec", "allowedListeners").(map[string]any); ok {
-		v.AllowedListeners = runtime.DeepCopyJSON(m)
+		v.AllowedListeners = copyValue(m).(map[string]any)
 	}
 	return v
 }
