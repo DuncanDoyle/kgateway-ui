@@ -79,10 +79,14 @@ export interface InstallHeader {
   /** Absent where the platform has no namespace scope. */
   scope?: ScopeSummary;
 }
-/** computedAt: when the backend computed this health; stale summaries render as unknown. */
+/**
+ * computedAt: when the backend computed this health. confirmedAt: when the backend last
+ * confirmed it matches the cluster; absent from older backends. Stale summaries render as unknown.
+ */
 export interface InstallSummary extends InstallHeader {
   health: { state: HealthState; counts: Partial<Record<Severity, number>> };
   computedAt: string;
+  confirmedAt?: string;
 }
 export interface Access {
   ok: boolean;

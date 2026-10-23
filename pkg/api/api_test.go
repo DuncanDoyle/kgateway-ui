@@ -140,20 +140,22 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		podSel = append(podSel, d.ControllerPodSelector())
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
 	}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel})
+	clk := &clock{}
+	clk.set(testutil.Now.Add(-health.Grace - time.Second))
+	now := func() time.Time {
+		if s.zone != nil {
+			return clk.now().In(s.zone)
+		}
+		return clk.now()
+	}
+	// The cache stamps snapshots on the same clock, so snapshot times are pinned too.
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, Now: now})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
-	clk := &clock{}
-	clk.set(testutil.Now.Add(-health.Grace - time.Second))
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: func() time.Time {
-			if s.zone != nil {
-				return clk.now().In(s.zone)
-			}
-			return clk.now()
-		}, Platform: s.platform, Logger: s.logger})
+		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -1854,5 +1856,102 @@ func TestWireTimesAreUTCAtTheAPI(t *testing.T) {
 	_ = resp.Body.Close()
 	if h := resp.Header.Get("Collected-At"); !strings.HasSuffix(h, "Z") {
 		t.Errorf("Collected-At: want UTC, got %q", h)
+	}
+}
+
+// confirmedAt serves the engine's publication as confirmed at a later time,
+// as an idle confirm tick would.
+type confirmedAt struct {
+	*engine.Engine
+	at time.Time
+}
+
+func (c confirmedAt) Current() *engine.Published {
+	p := *c.Engine.Current()
+	p.ConfirmedAt = c.at
+	return &p
+}
+
+// Each timestamp keeps its own meaning (design §3.1): computedAt is the model's,
+// confirmedAt, collectedAt and Collected-At are the confirmation time, and a
+// check's collectedAt and a finding's since keep theirs. All are UTC on the wire.
+func TestTimestampsPerMeaningAtTheAPI(t *testing.T) {
+	ams, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := testutil.GwRef("infra", "edge")
+	denied := testutil.HTTPRoute("shop", "denied", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")}})
+	h := newHarness(t, setup{zone: ams}, world(denied)...)
+	t0, confirmed := testutil.Now.UTC().Format(time.RFC3339Nano), testutil.Now.Add(5*time.Second)
+	want := confirmed.UTC().Format(time.RFC3339Nano)
+	srv := httptest.NewServer(NewHandler(confirmedAt{h.e, confirmed.In(ams)}, fstest.MapFS{}, nil))
+	t.Cleanup(srv.Close)
+
+	inst := get[[]map[string]any](t, srv, "/api/v1/installs", http.StatusOK)
+	if len(inst) != 1 || inst[0]["computedAt"] != t0 || inst[0]["confirmedAt"] != want {
+		t.Errorf("installs: computedAt %v (want %s), confirmedAt %v (want %s)", inst[0]["computedAt"], t0, inst[0]["confirmedAt"], want)
+	}
+	if ov := get[map[string]any](t, srv, "/api/v1/installs/kgw.kgateway/overview", http.StatusOK); ov["collectedAt"] != want {
+		t.Errorf("overview collectedAt %v, want %s", ov["collectedAt"], want)
+	}
+	rep := get[map[string]any](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+	if rep["collectedAt"] != want {
+		t.Errorf("health collectedAt %v, want %s", rep["collectedAt"], want)
+	}
+	for _, c := range rep["checks"].([]any) {
+		if c := c.(map[string]any); c["collectedAt"] != t0 {
+			t.Errorf("check %v collectedAt %v, want its own %s", c["name"], c["collectedAt"], t0)
+		}
+	}
+	var since []string
+	for _, f := range rep["findings"].([]any) {
+		if s, ok := f.(map[string]any)["since"]; ok {
+			since = append(since, s.(string))
+		}
+	}
+	if !slices.Contains(since, "2026-10-17T11:00:00Z") || slices.Contains(since, want) {
+		t.Errorf("findings since %v: want their own times", since)
+	}
+	resp, err := http.Get(srv.URL + "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/denied")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got := resp.Header.Get("Collected-At"); got != want {
+		t.Errorf("Collected-At %q, want %s", got, want)
+	}
+}
+
+// countingSource counts Current calls.
+type countingSource struct {
+	ModelSource
+	n atomic.Int32
+}
+
+func (c *countingSource) Current() *engine.Published {
+	c.n.Add(1)
+	return c.ModelSource.Current()
+}
+
+// A request loads the publication once, so its model and confirmation time come from one value.
+func TestRequestReadsOnePublished(t *testing.T) {
+	e, _, _ := start(t, nil, "", nil, world()...)
+	src := &countingSource{ModelSource: e}
+	srv := httptest.NewServer(NewHandler(src, fstest.MapFS{}, nil))
+	t.Cleanup(srv.Close)
+	for _, p := range []string{"/readyz", "/api/v1/meta", "/api/v1/installs", "/api/v1/installs/kgw.kgateway/overview",
+		"/api/v1/installs/kgw.kgateway/health", "/api/v1/installs/kgw.kgateway/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart",
+		"/api/v1/installs/nope/health"} {
+		src.n.Store(0)
+		resp, err := http.Get(srv.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if n := src.n.Load(); n != 1 {
+			t.Errorf("GET %s read Current %d times, want 1", p, n)
+		}
 	}
 }

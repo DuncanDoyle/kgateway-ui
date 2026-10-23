@@ -1,0 +1,68 @@
+{
+  "body": {
+    "apiVersion": "gateway.networking.k8s.io/v1",
+    "kind": "HTTPRoute",
+    "metadata": {
+      "creationTimestamp": "2026-10-17T11:00:00Z",
+      "generation": 1,
+      "name": "cart",
+      "namespace": "shop",
+      "uid": "HTTPRoute/shop/cart"
+    },
+    "spec": {
+      "parentRefs": [
+        {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      ]
+    },
+    "status": {
+      "parents": [
+        {
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-10-17T11:00:00Z",
+              "message": "",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-10-17T11:00:00Z",
+              "message": "",
+              "observedGeneration": 1,
+              "reason": "ResolvedRefs",
+              "status": "True",
+              "type": "ResolvedRefs"
+            },
+            {
+              "lastTransitionTime": "2026-10-17T11:00:00Z",
+              "message": "",
+              "observedGeneration": 1,
+              "reason": "Programmed",
+              "status": "True",
+              "type": "kgateway.dev/Programmed"
+            }
+          ],
+          "controllerName": "kgateway.dev/kgateway",
+          "parentRef": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "name": "edge",
+            "namespace": "infra"
+          }
+        }
+      ]
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Collected-At": "2026-10-17T12:00:00Z",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}
