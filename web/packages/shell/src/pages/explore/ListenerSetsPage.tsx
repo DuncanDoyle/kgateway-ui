@@ -65,6 +65,7 @@ export function ListenerSetsPage({ stylesOverride }: ListenerSetsPageProps = {})
         rowRef={rowRef}
         page={page}
         loading={!l.data}
+        busy={l.busy}
         emptyTitle={l.filtered ? "No ListenerSets match these filters." : "No ListenerSets in this install."}
         onClearFilters={l.filtered ? l.clearFilters : undefined}
         sort={l.sort}

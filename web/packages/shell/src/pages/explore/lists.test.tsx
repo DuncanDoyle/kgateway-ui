@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { useEffect } from "react";
+import { Route, Routes, useLocation, useNavigationType } from "react-router-dom";
 import gatewaysGolden from "../../../../../../pkg/api/testdata/golden/gateways.json";
 import listenersetsGolden from "../../../../../../pkg/api/testdata/golden/listenersets.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
@@ -35,8 +36,14 @@ function serve(fn: (u: URL) => Reply | undefined) {
 const calls = () => vi.mocked(fetch).mock.calls.map((c) => new URL(String(c[0]), "http://ui"));
 const listCalls = (list: string) => calls().filter((u) => u.pathname === `/api/v1/installs/${ID}/${list}`);
 
+// Every navigation's type; none is a PUSH when the page only replaces, so history keeps its length.
+const navTypes: string[] = [];
 function Where() {
   const loc = useLocation();
+  const type = useNavigationType();
+  useEffect(() => {
+    navTypes.push(`${type} ${loc.key}`);
+  }, [loc.key, type]);
   return <output data-testid="location">{loc.pathname + loc.search}</output>;
 }
 const location = () => screen.getByTestId("location").textContent ?? "";
@@ -128,9 +135,13 @@ it("a rejected cursor is dropped from the URL and page one shows", async () => {
     if (!u.pathname.endsWith("/routes")) return undefined;
     return u.searchParams.has("cursor") ? [400, { error: "bad cursor" }] : routes();
   });
+  navTypes.length = 0;
   mountWithLocation(`/i/${ID}/routes?sort=name.desc&cursor=stale`);
   await screen.findByText("rejected");
   await waitFor(() => expect(search().has("cursor")).toBe(false));
+  // Dropped by replace: history length is unchanged.
+  expect(navTypes.some((t) => t.startsWith("REPLACE"))).toBe(true);
+  expect(navTypes.some((t) => t.startsWith("PUSH"))).toBe(false);
   expect(search().get("sort")).toBe("name.desc");
   expect(screen.queryByTestId("page-notice")).toBeNull();
 });
@@ -154,6 +165,65 @@ it("a filter change keeps the rows on screen until the new page arrives", async 
   expect(screen.queryAllByTestId("skeleton-row")).toHaveLength(0);
   expect(screen.getByText("rejected")).toBeInTheDocument();
   await act(async () => release?.());
+});
+
+it("while a new query loads, the old rows are marked busy and dimmed", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url.includes("health=")) await gate;
+      return new Response(JSON.stringify(routes()), { status: 200 });
+    }),
+  );
+  mount(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const table = screen.getByRole("table");
+  expect(table).toHaveAttribute("aria-busy", "false");
+  await userEvent.click(screen.getByRole("button", { name: /Error/ }));
+  await waitFor(() => expect(table).toHaveAttribute("aria-busy", "true"));
+  const body = table.querySelector("tbody") as HTMLElement;
+  expect(getComputedStyle(body).opacity).toBe("0.55");
+  await act(async () => release?.());
+  await waitFor(() => expect(table).toHaveAttribute("aria-busy", "false"));
+  expect(getComputedStyle(body).opacity).not.toBe("0.55");
+});
+
+it("an error on a new query never shows the previous query's rows", async () => {
+  serve((u) =>
+    u.pathname.endsWith("/routes") ? (u.searchParams.has("health") ? [500, { error: "boom" }] : routes()) : undefined,
+  );
+  mount(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  await userEvent.click(screen.getByRole("button", { name: /Error/ }));
+  expect(await screen.findByRole("heading", { name: "Cannot load routes" })).toBeInTheDocument();
+  expect(screen.queryByText("rejected")).toBeNull();
+  expect(screen.queryByText("11 routes")).toBeNull();
+  expect(screen.queryByTestId("data-age")).toBeNull();
+});
+
+it("the pager is disabled after load when the page has no cursors", async () => {
+  serve((u) => (u.pathname.endsWith("/gateways") ? fresh(gatewaysGolden.body as GatewayList) : undefined));
+  mount(`/i/${ID}/gateways`);
+  await screen.findByText("edge");
+  expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+});
+
+it("row hover underlines only the row's own name, not other links", async () => {
+  serve((u) => (u.pathname.endsWith("/listenersets") ? fresh(listenersetsGolden.body as ListenerSetList) : undefined));
+  mount(`/i/${ID}/listenersets`);
+  await screen.findByText("partial");
+  const css = [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("");
+  const underlines = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(
+    ([, sel = "", body = ""]) => sel.includes("tr:hover") && body.includes("underline"),
+  );
+  expect(underlines.length).toBeGreaterThan(0);
+  for (const [, sel = ""] of underlines) expect(sel).toContain('td[data-col="name"]');
+  expect(rowOf("partial").querySelector('td[data-col="parent"] a')).not.toBeNull();
 });
 
 it("text search reaches the API as q", async () => {
@@ -272,7 +342,7 @@ describe("shows each list state", () => {
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
   });
 
-  it("error after data keeps the rows under a PageNotice", async () => {
+  it("a failed poll of the same query keeps the rows under a PageNotice", async () => {
     let fail = false;
     serve((u) => (u.pathname.endsWith("/routes") ? (fail ? [500, { error: "boom" }] : routes()) : undefined));
     vi.useFakeTimers({ shouldAdvanceTime: true });

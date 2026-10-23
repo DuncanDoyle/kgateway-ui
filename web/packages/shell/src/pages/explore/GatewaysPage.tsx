@@ -75,6 +75,7 @@ export function GatewaysPage({ stylesOverride }: GatewaysPageProps = {}) {
         rowRef={rowRef}
         page={page}
         loading={!l.data}
+        busy={l.busy}
         emptyTitle={l.filtered ? "No Gateways match these filters." : "No Gateways in this install."}
         onClearFilters={l.filtered ? l.clearFilters : undefined}
         sort={l.sort}

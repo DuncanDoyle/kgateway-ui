@@ -1024,6 +1024,7 @@ func TestAllowAllMakesNoAuthorizerCalls(t *testing.T)  // a counting AllowAll wr
   - TS types mirroring each Go DTO (`Link`, `LinkedRef`, `Page<T>`, `RouteRow`, `GatewayListRow`, `ListenerSetRow`, `ParentSummary`, `GatewayDetail`, `ListenerSetDetail`, `RouteDetail`, …)
   - `export function objectPath(installId: string, r: LinkedRef): string | undefined` — `detail` → `/i/:id/gateways/:ns/:name`, `/i/:id/listenersets/:group/:kind/:ns/:name` or `/i/:id/routes/:group/:kind/:ns/:name` by the ref's kind; `yaml` → `resourcePath`; `none` → `undefined`
   - `useRoutes(id, query: URLSearchParams)`, `useGateways`, `useListenerSets`, `useGatewayDetail(id, ns, name)`, `useListenerSetDetail(id, ref)`, `useRouteDetail(id, ref)` — SWR, 5 s poll, no `keepPreviousData`; an `ApiError` 400 on a cursor reports `cursorRejected: true`
+    - Lists keep previous data while a new query loads, marked busy; an error on the new query never shows the old rows (Task 27 ruling).
   - `export function LinkedName({ refValue, installId }: { refValue: LinkedRef; installId: string })`
   - `Vocabulary.getCommand: (ref: Ref, resource: string) => string | undefined` — default `kubectl get <resource>.<group> -n <ns> <name> -o yaml` (no `.<group>` for the core group, no `-n` when cluster-scoped)
 

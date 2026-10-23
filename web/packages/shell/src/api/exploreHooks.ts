@@ -1,5 +1,5 @@
 import { useState } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import type { ApiError } from "./client";
 import { apiFetch } from "./client";
 import { installApi, live, POLL_MS } from "./hooks";
@@ -27,9 +27,10 @@ const forInstall = <T extends { install: string }>(data: T | undefined, id: stri
 
 /**
  * One list page, polled. A 400 on a request with a cursor sets cursorRejected and loads page one instead (design §8.6);
- * the page should then drop the cursor from its URL.
+ * the page should then drop the cursor from its URL. isLaggy marks rows of the previous query while a new one loads.
  */
 function useList<T>(id: string, list: string, query: URLSearchParams) {
+  const { cache } = useSWRConfig();
   const path = `${installApi(id)}/${list}`;
   const hasCursor = query.has("cursor");
   const rejects = (e: ApiError | undefined) => hasCursor && e?.status === 400;
@@ -51,7 +52,12 @@ function useList<T>(id: string, list: string, query: URLSearchParams) {
   pageOne.delete("cursor");
   const first = useSWR<Page<T>, ApiError>(cursorRejected ? withQuery(path, pageOne) : null, apiFetch, live);
   const r = cursorRejected ? first : paged;
-  return { data: forInstall(r.data, id), error: r.error, mutate: r.mutate, cursorRejected };
+  const rKey = cursorRejected ? withQuery(path, pageOne) : key;
+  // With keepPreviousData the rows may belong to the previous query. They show only while the new one loads
+  // (laggy, marked busy); once the new query fails they are dropped, so its error never sits over another's rows.
+  const own = cache.get(rKey)?.data !== undefined;
+  const data = own || !r.error ? forInstall(r.data, id) : undefined;
+  return { data, error: r.error, mutate: r.mutate, cursorRejected, isLaggy: !own && data !== undefined };
 }
 
 function useDetail<T extends { install: string }>(id: string, path: string) {

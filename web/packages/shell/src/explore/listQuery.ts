@@ -61,7 +61,7 @@ export interface SortState {
 type ListHook<T> = (
   id: string,
   query: URLSearchParams,
-) => { data?: Page<T>; error?: ApiError; cursorRejected: boolean };
+) => { data?: Page<T>; error?: ApiError; cursorRejected: boolean; isLaggy: boolean };
 
 /** URL state and data of one list page: filters, sort and cursor live in the query string (design §8.1). */
 export function useListPage<T>(list: ListName, useList: ListHook<T>) {
@@ -71,7 +71,7 @@ export function useListPage<T>(list: ListName, useList: ListHook<T>) {
   const q = useDebounced(text, Q_DEBOUNCE_MS);
   // The debounced value starts at the URL's q, so a reload does not wait.
   const query = useMemo(() => apiQuery(list, params, q), [list, params, q]);
-  const { data, error, cursorRejected } = useList(id, query);
+  const { data, error, cursorRejected, isLaggy } = useList(id, query);
   // A rejected cursor is dropped (replace) and page one shows (design §8.6).
   useEffect(() => {
     if (cursorRejected) update({ cursor: null });
@@ -97,6 +97,8 @@ export function useListPage<T>(list: ListName, useList: ListHook<T>) {
     filtered,
     clearFilters,
     data,
+    /** The rows are the previous query's while this one loads. */
+    busy: isLaggy,
     // Under a rejected cursor this is page one's error.
     error,
   };

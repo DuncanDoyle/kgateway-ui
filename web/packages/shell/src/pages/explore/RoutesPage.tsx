@@ -169,6 +169,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
         rowRef={rowRef}
         page={page}
         loading={!l.data}
+        busy={l.busy}
         emptyTitle={l.filtered ? "No routes match these filters." : "No routes in this install."}
         onClearFilters={l.filtered ? l.clearFilters : undefined}
         sort={l.sort}

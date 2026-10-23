@@ -178,6 +178,33 @@ it("serves the list pages under the install", async () => {
   expect(await screen.findByText("No ListenerSets in this install.")).toBeInTheDocument();
 });
 
+it("below 1100 px the readiness text shows in a tooltip on keyboard focus", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q.includes("max-width: 1099px"),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw.kgateway");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
+  expect(ready).toHaveAttribute("tabindex", "0");
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  for (let i = 0; i < 20 && document.activeElement !== ready; i++) await userEvent.tab();
+  expect(screen.getByRole("tooltip")).toHaveTextContent("Controller: 2 of 2 ready");
+  expect(ready).toHaveAttribute("aria-describedby", screen.getByRole("tooltip").id);
+});
+
+it("at full width the readiness text is on screen and takes no tab stop", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw.kgateway");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
+  expect(ready).not.toHaveAttribute("tabindex");
+});
+
 it("shows no install nav outside an install", async () => {
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
   mount("/");

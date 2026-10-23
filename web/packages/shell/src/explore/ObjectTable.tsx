@@ -10,18 +10,11 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight } from "lucide-react";
-import {
-  type KeyboardEvent,
-  type MouseEvent,
-  type ReactNode,
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { LinkedRef, Page } from "../api/types";
+import { useMedia } from "../shell/useMedia";
+import { QuietButton } from "../states/controls";
 import { Shimmer } from "../states/Shimmer";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { SortState } from "./listQuery";
@@ -93,6 +86,12 @@ const Table = styled.table`
   tbody tr[data-row] {
     height: ${ROW_H}px;
   }
+  tbody {
+    transition: opacity 120ms ease-out;
+  }
+  tbody[data-busy] {
+    opacity: 0.55;
+  }
   tbody tr[data-link] {
     cursor: pointer;
   }
@@ -109,7 +108,8 @@ const Table = styled.table`
   tbody tr:last-of-type td {
     border-bottom: 0;
   }
-  tr:hover a [data-part="name"] {
+  /* A row click opens the row's own object, so hover underlines only its name, not other links in the row. */
+  tr:hover td[data-col="name"] a [data-part="name"] {
     text-decoration: underline;
   }
   .expand {
@@ -174,28 +174,6 @@ const Footer = styled.div`
     white-space: nowrap;
   }
 `;
-/** A quiet text button; shared by the toolbar's and the empty state's Clear filters. */
-export const TextButton = styled.button`
-  height: 28px;
-  padding: 0 8px;
-  cursor: pointer;
-  font: inherit;
-  font-size: ${(p) => p.theme.font.size.sm};
-  color: ${(p) => p.theme.color.accentText};
-  background: transparent;
-  border: 0;
-  border-radius: ${(p) => p.theme.radius.sm};
-  &:hover {
-    text-decoration: underline;
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.surface});
-  }
-  &:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
-  }
-  &:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-  }
-`;
 
 // region Helpers
 /** One column; secondary columns move into the expandable row below 900 px. */
@@ -208,22 +186,6 @@ export interface ObjectColumn<T> {
   /** The server sort key (design §7.2); absent means the column does not sort. */
   sortKey?: string;
   secondary?: boolean;
-}
-
-const mediaQuery = (q: string) => (typeof window.matchMedia === "function" ? window.matchMedia(q) : undefined);
-
-/** True while the viewport matches NARROW; read synchronously, so the first render already has the right columns. */
-function useNarrow(): boolean {
-  const subscribe = useCallback((cb: () => void) => {
-    const m = mediaQuery(NARROW);
-    m?.addEventListener?.("change", cb);
-    return () => m?.removeEventListener?.("change", cb);
-  }, []);
-  return useSyncExternalStore(
-    subscribe,
-    () => mediaQuery(NARROW)?.matches ?? false,
-    () => false,
-  );
 }
 
 const refKey = (r: LinkedRef) => [r.group, r.kind, r.namespace ?? "", r.name].join("/");
@@ -244,6 +206,8 @@ interface ObjectTableProps<T> {
   rowRef: (row: T) => LinkedRef;
   page?: Page<T>;
   loading: boolean;
+  /** The rows shown belong to the previous query while a new one loads: busy and dimmed, never moved. */
+  busy?: boolean;
   emptyTitle: string;
   /** Set when filters apply; the empty state then offers Clear filters. */
   onClearFilters?: () => void;
@@ -265,6 +229,7 @@ export function ObjectTable<T>({
   rowRef,
   page,
   loading,
+  busy = false,
   emptyTitle,
   onClearFilters,
   sort,
@@ -273,7 +238,7 @@ export function ObjectTable<T>({
   stylesOverride,
 }: ObjectTableProps<T>) {
   const navigate = useNavigate();
-  const narrow = useNarrow();
+  const narrow = useMedia(NARROW);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [active, setActive] = useState(0);
   const rowEls = useRef<(HTMLTableRowElement | null)[]>([]);
@@ -357,7 +322,7 @@ export function ObjectTable<T>({
   const focusable = Math.min(active, Math.max(0, rows.length - 1));
   return (
     <Frame stylesOverride={stylesOverride}>
-      <Table aria-label={label} aria-busy={loading}>
+      <Table aria-label={label} aria-busy={loading || busy}>
         <colgroup>
           {shown.map((c) => (
             <col key={c.id} style={{ width: widths[c.id] }} />
@@ -388,7 +353,7 @@ export function ObjectTable<T>({
             })}
           </tr>
         </thead>
-        <tbody>
+        <tbody data-busy={busy || undefined}>
           {!page && loading
             ? Array.from({ length: SKELETON_ROWS }, (_, i) => `s${i}`).map((k) => (
                 <tr key={k} data-row="" data-testid="skeleton-row">
@@ -404,9 +369,9 @@ export function ObjectTable<T>({
                 <Empty>
                   {emptyTitle}
                   {onClearFilters ? (
-                    <TextButton type="button" onClick={onClearFilters}>
+                    <QuietButton type="button" onClick={onClearFilters}>
                       Clear filters
-                    </TextButton>
+                    </QuietButton>
                   ) : null}
                 </Empty>
               </td>
@@ -429,7 +394,9 @@ export function ObjectTable<T>({
                 onKeyDown={(e) => onRowKey(e, i, r.original)}
               >
                 {r.getVisibleCells().map((c) => (
-                  <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>
+                  <td key={c.id} data-col={c.column.id}>
+                    {flexRender(c.column.columnDef.cell, c.getContext())}
+                  </td>
                 ))}
               </tr>,
               collapse && expanded.has(k) ? (

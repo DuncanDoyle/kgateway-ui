@@ -2,7 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Check, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { Chip } from "../pages/FindingsPage";
+import { Chip } from "../states/controls";
 
 // region Styles
 const Group = styled.div<{ stylesOverride?: SerializedStyles }>`

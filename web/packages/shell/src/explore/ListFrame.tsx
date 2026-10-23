@@ -4,13 +4,12 @@ import { Search } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ApiError } from "../api/client";
 import { DataAge } from "../pages/DataAge";
-import { SearchBox } from "../pages/FindingsPage";
-import { BackLink } from "../pages/ResourcePage";
 import { useVocabulary } from "../shell/extension";
 import { installPath } from "../shell/paths";
+import { BackLink, QuietButton, SearchBox } from "../states/controls";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
-import { count, TextButton } from "./ObjectTable";
+import { count } from "./ObjectTable";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -117,9 +116,9 @@ export function ListFrame({
         </SearchBox>
         {filters}
         {onClearFilters ? (
-          <TextButton type="button" onClick={onClearFilters}>
+          <QuietButton type="button" onClick={onClearFilters}>
             Clear filters
-          </TextButton>
+          </QuietButton>
         ) : null}
       </Bar>
       {children}

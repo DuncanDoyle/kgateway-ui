@@ -2,12 +2,13 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { dump } from "js-yaml";
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useResource } from "../api/hooks";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
 import { useInstallId, useVocabulary } from "../shell/extension";
 import { installPath } from "../shell/paths";
+import { BackLink, TextButton } from "../states/controls";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 import { DataAge } from "./DataAge";
@@ -55,48 +56,6 @@ const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
     border-radius: ${(p) => p.theme.radius.md};
   }
   ${(p) => p.stylesOverride}
-`;
-const TextButton = styled.button`
-  height: 28px;
-  padding: 0 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: ${(p) => p.theme.font.size.sm};
-  color: ${(p) => p.theme.color.text};
-  background: ${(p) => p.theme.color.surface};
-  border: 1px solid ${(p) => p.theme.color.borderStrong};
-  border-radius: ${(p) => p.theme.radius.sm};
-  &:hover {
-    border-color: ${(p) => p.theme.color.text};
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.surface});
-  }
-  &:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
-  }
-  &:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-    outline-offset: 2px;
-  }
-`;
-/** A link back to the install, under a page state. */
-export const BackLink = styled(Link)`
-  display: inline-block;
-  margin-top: ${(p) => p.theme.space(2)};
-  padding: 4px 8px;
-  border-radius: ${(p) => p.theme.radius.sm};
-  color: ${(p) => p.theme.color.accentText};
-  font-weight: ${(p) => p.theme.font.weight.semibold};
-  text-decoration: none;
-  &:hover {
-    text-decoration: underline;
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.bg});
-  }
-  &:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 12%, ${(p) => p.theme.color.bg});
-  }
-  &:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-  }
 `;
 
 // region Helpers
