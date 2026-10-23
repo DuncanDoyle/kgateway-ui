@@ -4,17 +4,22 @@
 Phase: 2 — Gateway & Route Explorer
 Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
 Docs: docs/phases/phase-2/
-Status: design approved 2026-10-23; implementation plan in progress; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Status: design and plan approved 2026-10-23; implementing sub-phase 2.1; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
 - [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
 - [x] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 (Tasks 1–70)
-- [ ] Q3 Cross-model review of design + plan, triage, user approval — reviews done (design-codex.md, design-r4-codex.md, plan-codex.md); waiting for user approval of the plan ← CURRENT
+- [x] Q3 Cross-model review of design + plan, triage, user approval — reviews/design-codex.md, design-r4-codex.md, plan-codex.md; plan approved by user 2026-10-23 (with chart `extraArgs`, Task 50)
+- [ ] Q4 Sub-phase 2.1 — event-driven recompute (plan Tasks 1–10) ← CURRENT
+- [ ] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34)
+- [ ] Q6 Sub-phase 2.3 — view A (Tasks 35–51)
+- [ ] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70)
+- [ ] Q8 Phase cross-model review + triage
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
-- [ ] design+plan cross-model review + triage: docs/phases/phase-2/reviews/design-codex.md
+- [x] design+plan cross-model review + triage: docs/phases/phase-2/reviews/design-codex.md, design-r4-codex.md, plan-codex.md
 - [ ] phase cross-model review + triage: docs/phases/phase-2/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-2-complete.md written, roadmap updated, tracked items closed
@@ -36,7 +41,7 @@ none
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
-- 2026-10-23 (resume here): plan written and Codex-reviewed (last round: one gap, fixed in bbc1ecf). Waiting for the user to approve the plan and decide on a chart `extraArgs` value (would simplify Task 50's e2e). The Q7 support-ticket research ran 2026-10-23.
+- 2026-10-23: user approved the plan and a chart `extraArgs` value (Task 50 Step 0).
 - 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions".
