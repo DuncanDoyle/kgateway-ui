@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import type { Readiness } from "../api/types";
-import { stubApi } from "../test/render";
+import { stubApi, testSWR } from "../test/render";
 import { useThemeSwitch } from "../theme/ThemeProvider";
 import { THEME_PAINT_KEY } from "../theme/themeStorage";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
@@ -42,7 +42,7 @@ const inst = (
 function mount(path: string, ext = {}) {
   window.history.pushState({}, "", path);
   return render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell extension={ext} pages={pages} />
     </SWRConfig>,
   );
@@ -320,7 +320,7 @@ it("applies stylesOverride to the shell root", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
   window.history.pushState({}, "", "/i/kgw.kgateway");
   render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell
         pages={pages}
         stylesOverride={css`

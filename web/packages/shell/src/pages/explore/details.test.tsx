@@ -175,19 +175,19 @@ it("a failed poll turns states unknown, keeps the notice's error icon, and fresh
   await act(async () => {
     await vi.advanceTimersByTimeAsync(5100);
   });
+  expect(polls).toBe(2);
   const notice = await screen.findByText(/Cannot load Gateway/);
   const box = notice.closest('[role="alert"], [role="status"]') ?? (notice.parentElement as HTMLElement);
   expect(within(box as HTMLElement).getByTestId("health-icon-error")).toBeInTheDocument();
   expect(within(header).getByText("Unknown")).toBeInTheDocument();
   expect(accepted().getByTestId("health-icon-unknown")).toBeInTheDocument();
 
-  // The next good poll clears the error; SWR may retry on its own schedule first, so step until it lands.
-  for (let i = 0; i < 6 && screen.queryByText(/Cannot load Gateway/); i++) {
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5100);
-    });
-  }
-  expect(screen.queryByText(/Cannot load Gateway/)).toBeNull();
+  // The test SWR config retries an error once per poll interval, so one interval brings the good response.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5100);
+  });
+  expect(polls).toBe(3);
+  await waitFor(() => expect(screen.queryByText(/Cannot load Gateway/)).toBeNull());
   expect(within(header).getByText("Warning")).toBeInTheDocument();
   expect(accepted().getByTestId("health-icon-healthy")).toBeInTheDocument();
 });

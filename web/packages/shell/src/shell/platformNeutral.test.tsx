@@ -3,7 +3,7 @@ import { SWRConfig } from "swr";
 import type { InstallHeader, MetaResponse } from "../api/types";
 import { defaultPages } from "../pages/defaultPages";
 import { healthy, installSummary, meta, overview, unhealthy, unknown } from "../test/fixtures";
-import { stubApi } from "../test/render";
+import { stubApi, testSWR } from "../test/render";
 import { installPath } from "./paths";
 import { Shell } from "./Shell";
 
@@ -15,7 +15,7 @@ afterEach(() => {
 function mount(path: string) {
   window.history.pushState({}, "", path);
   return render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell pages={defaultPages} />
     </SWRConfig>,
   );

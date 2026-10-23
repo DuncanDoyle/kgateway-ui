@@ -1,14 +1,27 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { SWRConfig } from "swr";
+import { SWRConfig, type SWRConfiguration } from "swr";
+import { POLL_MS } from "../api/hooks";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemes } from "../theme/themes";
+
+/**
+ * SWR for tests: a fresh cache, no deduping, and a deterministic error retry. SWR skips interval polls while a key
+ * holds an error, so its retry is what recovers; here it runs once per poll interval, without jitter or backoff.
+ */
+export const testSWR = (): SWRConfiguration => ({
+  provider: () => new Map(),
+  dedupingInterval: 0,
+  onErrorRetry: (_e, _key, _config, revalidate, { retryCount }) => {
+    setTimeout(() => revalidate({ retryCount }), POLL_MS);
+  },
+});
 
 /** Renders ui with the default themes (or themeId), a fresh SWR cache and a router at `path`. */
 export function renderWithTheme(ui: ReactElement, opts: { path?: string; themeId?: string } = {}) {
   return render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <ThemeProvider themes={defaultThemes} defaultThemeId={opts.themeId}>
         <MemoryRouter initialEntries={[opts.path ?? "/"]}>{ui}</MemoryRouter>
       </ThemeProvider>

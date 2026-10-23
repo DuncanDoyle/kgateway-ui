@@ -10,7 +10,7 @@ import {
   type Theme,
 } from "../index";
 import { overview, unhealthy } from "../test/fixtures";
-import { stubApi } from "../test/render";
+import { stubApi, testSWR } from "../test/render";
 import { reservedPathOf } from "./Shell";
 
 // A downstream with its own brand, theme, page, nav entry and finding renderer, registered through the public shell API only.
@@ -62,7 +62,7 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
   });
   window.history.pushState({}, "", "/i/kgw.kgateway");
   render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell
         pages={defaultPages}
         extension={{
@@ -105,7 +105,7 @@ function mountAt(path: string, pages: CorePages, extension: ShellExtension = {})
   });
   window.history.pushState({}, "", path);
   render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell pages={pages} extension={extension} />
     </SWRConfig>,
   );
