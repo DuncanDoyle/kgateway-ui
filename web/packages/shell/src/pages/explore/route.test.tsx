@@ -25,15 +25,17 @@ const detail = (g: { body: unknown }): RouteDetail =>
 const row = (name: string): RouteRow =>
   structuredClone((routesGolden.body as RouteList).items.find((r) => r.ref.name === name) as RouteRow);
 
-/** Two children of mid: one reported, one declared, as the list sends them under parent=mid. */
+/** Two reported children of mid, one per page, as the list sends them under parent=mid. */
 function childPage(cursor: string | null): RouteList {
-  const asChild = (r: RouteRow, attachment: "accepted" | "declared"): RouteRow => ({
+  const asChild = (r: RouteRow): RouteRow => ({
     ...r,
-    parents: [{ ref: { group: GW, kind: "HTTPRoute", namespace: "shop", name: "mid", link: "detail" }, attachment }],
+    parents: [
+      { ref: { group: GW, kind: "HTTPRoute", namespace: "shop", name: "mid", link: "detail" }, attachment: "accepted" },
+    ],
   });
   return cursor
-    ? { install: ID, items: [asChild(row("declared"), "declared")], total: 3, prev: "p1", collectedAt: now() }
-    : { install: ID, items: [asChild(row("child"), "accepted")], total: 3, next: "c2", collectedAt: now() };
+    ? { install: ID, items: [asChild(row("cart"))], total: 2, prev: "p1", collectedAt: now() }
+    : { install: ID, items: [asChild(row("child"))], total: 2, next: "c2", collectedAt: now() };
 }
 
 type Reply = unknown | [number, unknown];
@@ -175,8 +177,8 @@ it("child routes are paged and fetched when expanded", async () => {
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   const t = await screen.findByRole("table", { name: "Child routes" });
-  // childCount 2 + declaredCount 1: the skeleton has the loaded height.
-  expect(within(t).getAllByTestId("skeleton-row")).toHaveLength(3);
+  // childCount 2; declared candidates are never children, so declaredCount does not count.
+  expect(within(t).getAllByTestId("skeleton-row")).toHaveLength(2);
   expect(getComputedStyle(within(t).getAllByTestId("skeleton-row")[0] as HTMLElement).height).toBe(`${ROW_H}px`);
   await waitFor(() => expect(routeCalls()).toHaveLength(1));
   const q = routeCalls()[0] as URL;
@@ -184,17 +186,16 @@ it("child routes are paged and fetched when expanded", async () => {
   expect(q.searchParams.has("attachment")).toBe(false);
   await act(async () => release?.());
   expect(await within(t).findByLabelText("shop/child")).toBeInTheDocument();
-  expect(within(t).getByText("Accepted")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Next page" }));
-  expect(await within(t).findByLabelText("shop/declared")).toBeInTheDocument();
-  expect(within(t).getByText("Parent route has no status")).toBeInTheDocument();
+  expect(await within(t).findByLabelText("shop/cart")).toBeInTheDocument();
   expect(routeCalls().at(-1)?.searchParams.get("cursor")).toBe("c2");
 });
 
 it("a route with no children says so and fetches nothing", async () => {
   const none = detail(routeGolden);
+  // A declared candidate alone is not a child.
   none.childCount = 0;
-  none.declaredCount = 0;
+  none.declaredCount = 1;
   serve(api({ mid: none }));
   mount(MID);
   await loaded();

@@ -6,8 +6,7 @@ import type { ObjectColumn } from "../../../explore/ObjectTable";
 import { HealthBadge } from "../../../health/HealthBadge";
 import { TextButton } from "../../../states/controls";
 import { expectedRows, refParam, Section, SubList } from "../detailParts";
-import { attachmentLabel, Muted, NameCell } from "../listParts";
-import { sameRef } from "./refs";
+import { Muted, NameCell } from "../listParts";
 
 // region Styles
 const Toggle = styled(TextButton)`
@@ -18,19 +17,10 @@ const Toggle = styled(TextButton)`
 const NOUN = ["route", "routes"] as const;
 const rowRef = (r: RouteRow) => r.ref;
 
-function columns(installId: string, parent: LinkedRef): ObjectColumn<RouteRow>[] {
+function columns(installId: string): ObjectColumn<RouteRow>[] {
   return [
     { id: "health", header: "Status", width: "120px", cell: (r) => <HealthBadge state={r.health} /> },
     { id: "name", header: "Route", cell: (r) => <NameCell r={r.ref} installId={installId} /> },
-    {
-      id: "attachment",
-      header: "Attachment",
-      width: "200px",
-      cell: (r) => {
-        const p = r.parents.find((x) => sameRef(x.ref, parent));
-        return p ? attachmentLabel[p.attachment] : <Muted>Reported by the controller</Muted>;
-      },
-    },
     {
       id: "hostnames",
       header: "Hostnames",
@@ -45,7 +35,7 @@ function columns(installId: string, parent: LinkedRef): ObjectColumn<RouteRow>[]
 interface ChildRoutesProps {
   installId: string;
   route: LinkedRef;
-  /** Visible reported children plus declared candidates: the rows parent=<route> lists. */
+  /** Visible reported children: the rows parent=<route> lists (declared candidates are never children). */
   expected: number;
 }
 
@@ -54,7 +44,7 @@ export function ChildRoutes({ installId, route, expected }: ChildRoutesProps) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
   const query = useMemo(() => ({ parent: refParam(route) }), [route]);
-  const cols = useMemo(() => columns(installId, route), [installId, route]);
+  const cols = useMemo(() => columns(installId), [installId]);
   return (
     <Section aria-labelledby="child-routes">
       <h2 id="child-routes">

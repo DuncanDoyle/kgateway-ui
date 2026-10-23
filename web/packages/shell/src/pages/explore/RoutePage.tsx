@@ -94,7 +94,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
             </h2>
             <RuleList installId={id} rules={data.rules} />
           </Section>
-          <ChildRoutes installId={id} route={data.ref} expected={data.childCount + data.declaredCount} />
+          <ChildRoutes installId={id} route={data.ref} expected={data.childCount} />
         </>
       ) : null}
     </DetailFrame>
