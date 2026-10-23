@@ -573,7 +573,7 @@ func TestMetricsIdentityCoversContent(t *testing.T) {
 			Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "httproutes"}: 3, {Namespace: "infra", Resource: "gateways"}: 1}, ManagedPresent: true}}
 	}
 	enc := func(r ctrlmetrics.Result, present bool) uint64 {
-		return encodeMetrics([]MetricsRead{{ID: "kgw.kgateway", Result: r, Present: present}})
+		return encodeMetrics([]MetricsRead{{ID: "kgw.kgateway", Result: r, Present: present}}, at, 0)
 	}
 	if enc(res(0), true) == enc(res(1), true) {
 		t.Fatal("same CollectedAt, different Rejects must encode differently")
@@ -617,8 +617,8 @@ func TestMetricsFingerprintIsEvidenceRead(t *testing.T) {
 	if gets.Load() != 1 {
 		t.Fatalf("Compute must read metrics once per install, read %d times", gets.Load())
 	}
-	if !hasFinding(p.Model.Installs[0].Health, health.CodeXDSRejected, "", "") || p.Source.Metrics != encodeMetrics(p.Model.MetricsRead) ||
-		p.Source.Metrics != encodeMetrics([]MetricsRead{{ID: p.Model.MetricsRead[0].ID, Result: a, Present: true}}) {
+	if !hasFinding(p.Model.Installs[0].Health, health.CodeXDSRejected, "", "") || p.Source.Metrics != encodeMetrics(p.Model.MetricsRead, p.Model.ComputedAt, 0) ||
+		p.Source.Metrics != encodeMetrics([]MetricsRead{{ID: p.Model.MetricsRead[0].ID, Result: a, Present: true}}, p.Model.ComputedAt, 0) {
 		t.Fatal("health and the source must both use A")
 	}
 	h.c.Step(ConfirmEvery)
@@ -753,22 +753,32 @@ func (b bodyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser,
 
 const managedBody = "# TYPE kgateway_resources_managed gauge\nkgateway_resources_managed{namespace=\"shop\",parent=\"edge\",resource=\"HTTPRoute\"} 3\n"
 
-// newScraping returns a collector of body on its own fake clock, which starts
-// at testutil.Now like the engine's.
-func newScraping(body string) (*ctrlmetrics.Collector, bodyScraper, *clocktesting.FakeClock) {
-	sc, cc := newBodyScraper(body), testutil.FakeClock()
-	return ctrlmetrics.NewCollector(sc, ctrlmetrics.WithClock(cc)), sc, cc
+// scraping is a real collector on its own fake clock, which starts at
+// testutil.Now like the engine's, acknowledging each result's notify decision.
+type scraping struct {
+	col  *ctrlmetrics.Collector
+	sc   bodyScraper
+	cc   *clocktesting.FakeClock
+	acks chan ctrlmetrics.Result
 }
 
-// scrapeEvery runs col every interval until the returned stop (or the test
-// end) and waits for the first result.
-func scrapeEvery(t *testing.T, col *ctrlmetrics.Collector, cc *clocktesting.FakeClock, every time.Duration, installs func() []install.Install, id string) (stop func()) {
+// newScraping returns a collector of body with staleness limit maxAge (zero: none).
+func newScraping(body string, maxAge time.Duration) *scraping {
+	s := &scraping{sc: newBodyScraper(body), cc: testutil.FakeClock(), acks: make(chan ctrlmetrics.Result, 1024)}
+	s.col = ctrlmetrics.NewCollector(s.sc, ctrlmetrics.WithClock(s.cc), ctrlmetrics.WithMaxAge(maxAge),
+		ctrlmetrics.WithResultHook(func(_ string, r ctrlmetrics.Result, _ bool) { s.acks <- r }))
+	return s
+}
+
+// start runs the collector every interval until the returned stop (or the
+// test end) and waits for the first result's decision.
+func (s *scraping) start(t *testing.T, every time.Duration, installs func() []install.Install) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)
-		_ = col.Run(ctx, every, installs)
+		_ = s.col.Run(ctx, every, installs)
 	}()
 	var once sync.Once
 	stop = func() {
@@ -778,34 +788,29 @@ func scrapeEvery(t *testing.T, col *ctrlmetrics.Collector, cc *clocktesting.Fake
 		})
 	}
 	t.Cleanup(stop)
-	waitCollected(t, col, id, cc.Now())
+	s.wait(t, s.cc.Now())
 	return stop
 }
 
-// waitCollected waits until id's stored result was collected at at.
-func waitCollected(t *testing.T, col *ctrlmetrics.Collector, id string, at time.Time) {
+// wait receives the next result's notify decision and checks it was collected at at.
+func (s *scraping) wait(t *testing.T, at time.Time) {
 	t.Helper()
-	for deadline := time.Now().Add(testutil.RecvTimeout); ; time.Sleep(time.Millisecond) {
-		if r, ok := col.Get(id); ok && r.CollectedAt.Equal(at) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no metrics result collected at %v", at)
-		}
+	if r := testutil.Recv(t, s.acks, "a metrics result decision"); !r.CollectedAt.Equal(at) {
+		t.Fatalf("metrics result collected at %v, want %v", r.CollectedAt, at)
 	}
 }
 
 // idleCounts tallies driveIdle's window by the cause of each run.
-type idleCounts struct{ runs, onDeadline, onSafety, onBoth, confirms, scrapes, stale int }
+type idleCounts struct{ runs, onDeadline, onSafety, onBoth, confirms, refused, scrapes, stale int }
 
-// idleDrive is one driveIdle window. A nil col means the collector has stopped.
+// idleDrive is one window of an idle cluster.
 type idleDrive struct {
 	ev            <-chan LoopEvent
-	eng, colClk   *clocktesting.FakeClock
-	col           *ctrlmetrics.Collector
-	id            string
+	eng           *clocktesting.FakeClock
+	s             *scraping // nil: the collector has stopped
 	safety, every time.Duration
-	// allowStale accepts publications with stale metrics (a stopped collector).
+	// allowStale accepts publications with stale metrics, and the refused
+	// confirmation at the instant metrics turn stale (a stopped collector).
 	allowStale bool
 }
 
@@ -819,10 +824,10 @@ func (d idleDrive) run(t *testing.T, prev LoopEvent, steps int) (idleCounts, Loo
 	t.Helper()
 	var n idleCounts
 	for range steps {
-		if d.col != nil {
-			d.colClk.Step(time.Second)
-			if d.colClk.Now().Sub(testutil.Now)%d.every == 0 {
-				waitCollected(t, d.col, d.id, d.colClk.Now())
+		if d.s != nil {
+			d.s.cc.Step(time.Second)
+			if d.s.cc.Now().Sub(testutil.Now)%d.every == 0 {
+				d.s.wait(t, d.s.cc.Now())
 				n.scrapes++
 			}
 		}
@@ -833,8 +838,13 @@ func (d idleDrive) run(t *testing.T, prev LoopEvent, steps int) (idleCounts, Loo
 			switch e.Kind {
 			case EvConfirmed:
 				n.confirms++
-			case EvConfirmRefused, EvTriggered:
-				t.Errorf("idle: unexpected %v at +%v", e.Kind, e.At.Sub(testutil.Now))
+			case EvConfirmRefused:
+				n.refused++
+				if !d.allowStale {
+					t.Errorf("idle: refused confirmation at +%v", e.At.Sub(testutil.Now))
+				}
+			case EvTriggered:
+				t.Errorf("idle: unexpected trigger at +%v", e.At.Sub(testutil.Now))
 			case EvRunStarted:
 				inFlight = true
 			case EvPublished:
@@ -870,14 +880,14 @@ func (d idleDrive) run(t *testing.T, prev LoopEvent, steps int) (idleCounts, Loo
 	return n, prev
 }
 
-// startScraping starts col on h's installs and waits for the run its first
+// startScraping starts s on h's installs and waits for the run its first
 // result triggers; it returns the collector's stop and that publication.
-func startScraping(t *testing.T, h *harness, col *ctrlmetrics.Collector, cc *clocktesting.FakeClock, every time.Duration) (func(), LoopEvent) {
+func startScraping(t *testing.T, h *harness, s *scraping, every time.Duration) (func(), LoopEvent) {
 	t.Helper()
-	stop := scrapeEvery(t, col, cc, every, h.e.Installs, "kgw.kgateway")
+	stop := s.start(t, every, h.e.Installs)
 	h.await(EvTriggered)
 	h.await(EvArmed)
-	cc.Step(time.Second) // keeps the two clocks equal
+	s.cc.Step(time.Second) // keeps the two clocks equal
 	h.c.Step(time.Second)
 	p := h.await(EvPublished)
 	h.await(EvArmed)
@@ -891,11 +901,11 @@ func startScraping(t *testing.T, h *harness, col *ctrlmetrics.Collector, cc *clo
 // safety timer within reach recomputes only at the strict staleness deadline,
 // and never shows metrics stale.
 func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
-	col, _, cc := newScraping(managedBody)
-	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 30*time.Second; col.OnResult = c.Triggers })
+	s := newScraping(managedBody, 30*time.Second)
+	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, 30*time.Second; s.col.OnResult = c.Triggers })
 	h.start(time.Hour)
-	_, p := startScraping(t, h, col, cc, 10*time.Second)
-	d := idleDrive{ev: h.ev, eng: h.c, colClk: cc, col: col, id: "kgw.kgateway", safety: time.Hour, every: 10 * time.Second}
+	_, p := startScraping(t, h, s, 10*time.Second)
+	d := idleDrive{ev: h.ev, eng: h.c, s: s, safety: time.Hour, every: 10 * time.Second}
 	n, _ := d.run(t, p, 600)
 	if n.runs != 20 || n.onDeadline != 20 || n.confirms != 600 || n.scrapes != 60 {
 		t.Fatalf("10 min idle: %+v; want 20 runs, all at the deadline, 600 confirmations, 60 scrapes", n)
@@ -905,17 +915,17 @@ func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
 // Minor 2: once the collector stops, the first run after the last scrape's
 // strict max-age boundary shows metrics stale.
 func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
-	col, _, cc := newScraping(managedBody)
-	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 30*time.Second; col.OnResult = c.Triggers })
+	s := newScraping(managedBody, 30*time.Second)
+	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, 30*time.Second; s.col.OnResult = c.Triggers })
 	h.start(time.Hour)
-	stop, p := startScraping(t, h, col, cc, 10*time.Second)
-	d := idleDrive{ev: h.ev, eng: h.c, colClk: cc, col: col, id: "kgw.kgateway", safety: time.Hour, every: 10 * time.Second}
+	stop, p := startScraping(t, h, s, 10*time.Second)
+	d := idleDrive{ev: h.ev, eng: h.c, s: s, safety: time.Hour, every: 10 * time.Second}
 	n, p := d.run(t, p, 20) // scrapes at +10 s and +20 s, no run
 	stop()
-	d.col, d.allowStale = nil, true
+	d.s, d.allowStale = nil, true
 	m, p2 := d.run(t, p, 31) // to +52 s: runs at +31 s (reads +20 s) and +51 s
-	if n.runs != 0 || m.runs != 2 || m.onDeadline != 2 || m.stale != 1 {
-		t.Fatalf("scraping %+v, stopped %+v; want no run, then two deadline runs, the second stale", n, m)
+	if n.runs != 0 || m.runs != 2 || m.onDeadline != 2 || m.stale != 1 || m.refused != 1 {
+		t.Fatalf("scraping %+v, stopped %+v; want no run, then two deadline runs, the second stale, its tick refused", n, m)
 	}
 	if want := testutil.Now.Add(20*time.Second + 30*time.Second + time.Second); !p2.At.Equal(want) || !stale(p2.Published) {
 		t.Fatalf("stale run at +%v, want +%v: the first step after last scrape + max age", p2.At.Sub(testutil.Now), want.Sub(testutil.Now))
@@ -924,22 +934,21 @@ func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
 
 // (b): a scrape with changed content triggers one recompute; unchanged ones do not.
 func TestMetricsContentChangeTriggersRecompute(t *testing.T) {
-	col, sc, cc := newScraping(managedBody)
-	h := newHarness(t, func(c *Config) { c.Metrics = col; col.OnResult = c.Triggers })
+	s := newScraping(managedBody, 0)
+	h := newHarness(t, func(c *Config) { c.Metrics = s.col; s.col.OnResult = c.Triggers })
 	h.start(time.Hour)
-	startScraping(t, h, col, cc, 10*time.Second)
+	startScraping(t, h, s, 10*time.Second)
 	h.runs = 0
-	// Two unchanged scrapes: seeing the second stored means the first has decided.
-	for range 2 {
-		cc.Step(10 * time.Second)
-		waitCollected(t, col, "kgw.kgateway", cc.Now())
+	for range 2 { // each decision acknowledged before the engine steps
+		s.cc.Step(10 * time.Second)
+		s.wait(t, s.cc.Now())
 	}
 	h.c.Step(10 * time.Second)
 	h.await(EvConfirmed) // idle: no trigger pending
 	h.await(EvArmed)
 	changed := strings.Replace(managedBody, "} 3", "} 4", 1)
-	sc.body.Store(&changed)
-	cc.Step(10 * time.Second)
+	s.sc.body.Store(&changed)
+	s.cc.Step(10 * time.Second)
 	h.await(EvTriggered)
 	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
 	p := h.await(EvPublished).Published
@@ -994,5 +1003,84 @@ func TestScopeMismatchMaturesAtItsDeadline(t *testing.T) {
 	e := h.await(EvPublished)
 	if !e.At.Equal(testutil.Now.Add(persist+time.Nanosecond)) || !hasFinding(e.Published.Model.Installs[0].Health, health.CodeScopeMismatch, "", "") {
 		t.Fatalf("maturation run at +%v; want KGWUI-007 at +%v", e.At.Sub(testutil.Now), persist+time.Nanosecond)
+	}
+}
+
+// Codex 1: a stale model whose metrics recover with equal content is not
+// confirmed: freshness at the comparing instant is part of the identity.
+func TestStaleToFreshRefusesConfirmation(t *testing.T) {
+	var cur atomic.Pointer[ctrlmetrics.Result]
+	r := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
+	cur.Store(&r)
+	h := newHarness(t, func(c *Config) {
+		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return *cur.Load(), true })
+		c.MetricsMaxAge = 30 * time.Second
+	})
+	h.start(time.Hour)
+	for range 30 {
+		h.tickIdle() // fresh through +30 s: age > max age is strict
+	}
+	h.c.Step(time.Second)
+	if p := h.await(EvPublished).Published; !stale(p) {
+		t.Fatal("the +31 s run must report stale metrics")
+	}
+	h.await(EvArmed)
+	renewed := r
+	renewed.CollectedAt = h.c.Now()
+	cur.Store(&renewed) // equal content, fresh again, no trigger
+	h.c.Step(time.Second)
+	h.await(EvConfirmRefused)
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	if p := h.await(EvPublished).Published; stale(p) {
+		t.Fatal("the recompute after the refusal must report fresh metrics")
+	}
+	h.await(EvArmed)
+	h.tickIdle()
+	if h.runs != 2 {
+		t.Fatalf("runs = %d, want 2 (the deadline run and the recovery)", h.runs)
+	}
+}
+
+// Codex 1 end to end: on-time scrapes cause only deadline runs; a delayed
+// collector makes the deadline run report stale; when collection resumes with
+// equal content, the loop refuses to confirm the stale model and recomputes
+// it fresh; on-time scrapes then cause only deadline runs again.
+func TestDelayedCollectorRecoversFresh(t *testing.T) {
+	const maxAge, every = 30 * time.Second, 10 * time.Second
+	s := newScraping(managedBody, maxAge)
+	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge; s.col.OnResult = c.Triggers })
+	h.start(time.Hour)
+	_, p := startScraping(t, h, s, every)
+	d := idleDrive{ev: h.ev, eng: h.c, s: s, safety: time.Hour, every: every}
+	on, p := d.run(t, p, 60) // to +61 s
+	if on.runs != 2 || on.onDeadline != 2 || on.stale != 0 || on.scrapes != 6 {
+		t.Fatalf("on time: %+v; want 2 deadline runs, never stale, 6 scrapes", on)
+	}
+
+	// The collector's clock stops: its last result is from +60 s.
+	held := idleDrive{ev: h.ev, eng: h.c, safety: time.Hour, every: every, allowStale: true}
+	late, p := held.run(t, p, 30) // to +91 s
+	if late.runs != 1 || late.stale != 1 || !stale(p.Published) || !p.At.Equal(testutil.Now.Add(91*time.Second)) {
+		t.Fatalf("delayed: %+v, last run +%v; want one stale run at +91 s", late, p.At.Sub(testutil.Now))
+	}
+
+	// Collection resumes at +91 s with equal content.
+	s.cc.Step(h.c.Now().Sub(s.cc.Now()))
+	s.wait(t, h.c.Now())
+	h.await(EvTriggered) // the collector notifies: the previous result was stale
+	s.cc.Step(time.Second)
+	h.c.Step(time.Second)
+	if e := h.await(EvConfirmRefused); !stale(e.Published) {
+		t.Fatal("the refused tick must concern the stale model")
+	}
+	p = h.await(EvPublished)
+	if stale(p.Published) {
+		t.Fatal("the recompute after recovery must report fresh metrics")
+	}
+	h.await(EvArmed)
+
+	again, _ := d.run(t, p, 60) // to +152 s
+	if again.runs != 2 || again.onDeadline != 2 || again.stale != 0 || again.refused != 0 || again.scrapes != 6 {
+		t.Fatalf("on time again: %+v; want 2 deadline runs, never stale, 6 scrapes", again)
 	}
 }

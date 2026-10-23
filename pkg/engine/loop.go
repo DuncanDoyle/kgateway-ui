@@ -68,11 +68,13 @@ type LoopEvent struct {
 }
 
 // encodeMetrics is the identity of the metrics results reads: FNV-64a over,
-// per read in order, the ID and Present and, for a present result, Err,
-// ManagedPresent and every Rejects and Managed entry in key order. CollectedAt
-// is left out, as in ctrlmetrics.Result.SameContent: a renewed scrape is not a
-// change; the strict staleness deadline in Model.Next makes the next run read it.
-func encodeMetrics(reads []MetricsRead) uint64 {
+// per read in order, the ID and Present and, for a present result, whether it
+// is fresh at now under maxAge (strict age > maxAge), Err, ManagedPresent and
+// every Rejects and Managed entry in key order. CollectedAt itself is left
+// out, as in ctrlmetrics.Result.SameContent: a renewed scrape is not a change,
+// and the strict staleness deadline in Model.Next makes the next run read it.
+// Freshness is in, so a stale model is never confirmed once metrics recover.
+func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uint64 {
 	h := fnv.New64a()
 	var b [8]byte
 	u64 := func(v uint64) {
@@ -97,6 +99,7 @@ func encodeMetrics(reads []MetricsRead) uint64 {
 			continue
 		}
 		res := r.Result
+		flag(!res.Stale(now, maxAge))
 		str(res.Err)
 		flag(res.Metrics.ManagedPresent)
 		rejects := sortedKeys(res.Metrics.Rejects, func(a, b ctrlmetrics.GatewayKey) int {
@@ -155,8 +158,8 @@ func (e *Engine) confirm(prev *Published, now time.Time) bool {
 }
 
 // liveSource is the Source the stores, the metrics and the kinds monitor
-// would give a computation now, for the installs p read metrics for.
-func (e *Engine) liveSource(p *Published) Source {
+// would give a computation at now, for the installs p read metrics for.
+func (e *Engine) liveSource(p *Published, now time.Time) Source {
 	var src Source
 	if f, ok := e.cfg.Snapshots.(cache.Fingerprinter); ok {
 		src.Cache = f.Fingerprint()
@@ -168,7 +171,7 @@ func (e *Engine) liveSource(p *Published) Source {
 		res, has := e.cfg.Metrics.Get(r.ID)
 		reads[i] = MetricsRead{ID: r.ID, Result: res, Present: has}
 	}
-	src.Metrics = encodeMetrics(reads)
+	src.Metrics = encodeMetrics(reads, now, e.cfg.MetricsMaxAge)
 	if e.cfg.KindsChange != nil {
 		src.Kinds = e.cfg.KindsChange().String()
 	}
@@ -282,7 +285,7 @@ func (e *Engine) confirmTick(s *sched) {
 		e.emit(EvConfirmRefused, now, p)
 		return
 	}
-	if !e.liveSource(p).Equal(p.Source) {
+	if !e.liveSource(p, now).Equal(p.Source) {
 		s.trigger(now)
 		e.emit(EvConfirmRefused, now, p)
 		return

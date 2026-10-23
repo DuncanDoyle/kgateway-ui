@@ -240,7 +240,7 @@ func (e *Engine) compute() *Published {
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
 	}
 	m.Next = next.next
-	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}
 	return p
 }
 

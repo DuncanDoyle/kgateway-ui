@@ -243,20 +243,20 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	const safety, every, maxAge = 30 * time.Second, 10 * time.Second, 45 * time.Second
 	clk := testutil.FakeClock()
 	w := newWorld(t, scale.Large, clk.Now)
-	col, _, cc := newScraping(managedBody)
-	col.OnResult = w.sig
-	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, maxAge })
+	s := newScraping(managedBody, maxAge)
+	s.col.OnResult = w.sig
+	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge })
 	runLoop(t, e, safety)
 	awaitKind(t, ev, EvPublished) // the start-up publication, before any scrape
 	awaitKind(t, ev, EvArmed)
-	scrapeEvery(t, col, cc, every, e.Installs, "kgw.kgateway")
+	s.start(t, every, e.Installs)
 	awaitKind(t, ev, EvTriggered) // the first result; this run is not counted either
 	awaitKind(t, ev, EvArmed)
-	cc.Step(time.Second)
+	s.cc.Step(time.Second)
 	clk.Step(time.Second)
 	prev := awaitKind(t, ev, EvPublished)
 	awaitKind(t, ev, EvArmed)
-	d := idleDrive{ev: ev, eng: clk, colClk: cc, col: col, id: "kgw.kgateway", safety: safety, every: every}
+	d := idleDrive{ev: ev, eng: clk, s: s, safety: safety, every: every}
 	n, _ := d.run(t, prev, 600)
 	t.Logf("idle 10 min: %d recomputes (%d safety timer, %d staleness deadline, %d both), %d confirmations, %d scrapes",
 		n.runs, n.onSafety, n.onDeadline, n.onBoth, n.confirms, n.scrapes)
@@ -269,7 +269,7 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 // fingerprint, metrics identity and kinds, compared and swapped in.
 func tick(tb testing.TB, e *Engine) {
 	p := e.Current()
-	if !e.liveSource(p).Equal(p.Source) || !e.confirm(p, p.ConfirmedAt) {
+	if !e.liveSource(p, time.Now()).Equal(p.Source) || !e.confirm(p, p.ConfirmedAt) {
 		tb.Fatal("the idle tick did not confirm")
 	}
 }

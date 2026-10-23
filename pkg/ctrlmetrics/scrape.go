@@ -117,9 +117,14 @@ type Collector struct {
 	podTimeout time.Duration
 	mu         sync.RWMutex
 	results    map[string]Result
-	// OnResult, if set, is notified after a stored result whose content differs
-	// from the previous one for its install, or is its first. A result that
-	// only renews CollectedAt does not notify; the engine's staleness deadline reads it.
+	// maxAge is the staleness limit of WithMaxAge; zero means none.
+	maxAge time.Duration
+	// onStored, if set, runs after each result's notify decision (tests).
+	onStored func(id string, r Result, notified bool)
+	// OnResult, if set, is notified after a stored result that is the install's
+	// first, differs in content from the previous one, or follows one that had
+	// gone stale. A result that only renews CollectedAt does not notify; the
+	// engine's staleness deadline reads it.
 	OnResult *trigger.Signal
 }
 
@@ -128,6 +133,15 @@ type CollectorOption func(*Collector)
 
 // WithClock makes the collector stamp results and tick with clk (tests).
 func WithClock(clk clock.WithTicker) CollectorOption { return func(c *Collector) { c.clock = clk } }
+
+// WithMaxAge sets the staleness limit consumers use (3 × the metrics
+// interval), so a result after a stale one notifies.
+func WithMaxAge(d time.Duration) CollectorOption { return func(c *Collector) { c.maxAge = d } }
+
+// WithResultHook makes Run call f after each result's notify decision (tests).
+func WithResultHook(f func(id string, r Result, notified bool)) CollectorOption {
+	return func(c *Collector) { c.onStored = f }
+}
 
 // NewCollector returns a Collector using s and the real clock unless an option says otherwise.
 func NewCollector(s Scraper, opts ...CollectorOption) *Collector {
@@ -212,8 +226,13 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 				prev, had := c.results[in.ID()]
 				c.results[in.ID()] = r
 				c.mu.Unlock()
-				if !had || !prev.SameContent(r) {
+				// A result after a stale one ends staleness, a change content alone would not show.
+				notify := !had || !prev.SameContent(r) || prev.Stale(r.CollectedAt, c.maxAge)
+				if notify {
 					c.OnResult.Notify()
+				}
+				if c.onStored != nil {
+					c.onStored(in.ID(), r, notify)
 				}
 			}()
 		}

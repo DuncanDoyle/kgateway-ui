@@ -15,6 +15,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -201,39 +202,82 @@ func TestCollectedAtKeepsMonotonicReading(t *testing.T) {
 	}
 }
 
-// The first result notifies; a scrape with unchanged content does not; a
-// content change does (D-019).
-func TestCollectorNotifiesOnContentChange(t *testing.T) {
+// stored is one result's notify decision, from WithResultHook.
+type stored struct {
+	r        Result
+	notified bool
+}
+
+// runHooked runs a collector of body every 10 s on a fake clock with max age
+// maxAge; each result's decision arrives on the returned channel.
+func runHooked(t *testing.T, body *atomic.Pointer[string], maxAge time.Duration) (*Collector, *clocktesting.FakeClock, <-chan stored) {
+	t.Helper()
 	d := testutil.ControllerDeployment("kgw", "kgateway", "kgateway:v2.4.7", 1, 1)
 	in := install.Install{Namespace: "kgw", Name: "kgateway", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
-	var body atomic.Pointer[string]
-	body.Store(new(sample))
+	acks := make(chan stored, 64)
 	clk := testutil.FakeClock()
-	c := NewCollector(scraperFunc(func() string { return *body.Load() }), WithClock(clk))
+	c := NewCollector(scraperFunc(func() string { return *body.Load() }), WithClock(clk), WithMaxAge(maxAge),
+		WithResultHook(func(_ string, r Result, notified bool) { acks <- stored{r, notified} }))
 	c.OnResult = trigger.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- c.Run(ctx, 10*time.Second, func() []install.Install { return []install.Install{in} }) }()
-	testutil.Recv(t, c.OnResult.C(), "a notification for the first result")
-	if _, ok := c.Get(in.ID()); !ok {
-		t.Fatal("the result must be stored before the notification")
+	t.Cleanup(func() {
+		cancel()
+		if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
+			t.Error(err)
+		}
+	})
+	return c, clk, acks
+}
+
+// ack receives the next decision and checks it was collected at at.
+func ack(t *testing.T, acks <-chan stored, at time.Time) stored {
+	t.Helper()
+	s := testutil.Recv(t, acks, "a result decision")
+	if !s.r.CollectedAt.Equal(at) {
+		t.Fatalf("result collected at %v, want %v", s.r.CollectedAt, at)
 	}
-	// Two unchanged scrapes; seeing the second stored means the first has decided.
+	return s
+}
+
+// The first result notifies; a scrape with unchanged content does not; a
+// content change does (D-019).
+func TestCollectorNotifiesOnContentChange(t *testing.T) {
+	var body atomic.Pointer[string]
+	body.Store(new(sample))
+	c, clk, acks := runHooked(t, &body, time.Hour)
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("the first result must notify")
+	}
+	testutil.Recv(t, c.OnResult.C(), "the first notification")
 	for range 2 {
 		clk.Step(10 * time.Second)
-		waitCollected(t, c, in.ID(), clk.Now())
-	}
-	select {
-	case <-c.OnResult.C():
-		t.Fatal("a scrape that only renews CollectedAt must not notify")
-	default:
+		if s := ack(t, acks, clk.Now()); s.notified {
+			t.Fatal("a scrape that only renews CollectedAt must not notify")
+		}
 	}
 	body.Store(new(strings.Replace(sample, "} 3\n", "} 4\n", 1)))
 	clk.Step(10 * time.Second)
-	testutil.Recv(t, c.OnResult.C(), "a notification for changed content")
-	cancel()
-	if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
-		t.Fatal(err)
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("changed content must notify")
+	}
+	testutil.Recv(t, c.OnResult.C(), "the notification for changed content")
+}
+
+// Codex 1: a result that follows a stale one notifies even with equal content.
+func TestCollectorNotifiesAfterStaleResult(t *testing.T) {
+	var body atomic.Pointer[string]
+	body.Store(new(sample))
+	_, clk, acks := runHooked(t, &body, 15*time.Second)
+	ack(t, acks, clk.Now())
+	clk.Step(10 * time.Second) // 10 s after the last: fresh
+	if s := ack(t, acks, clk.Now()); s.notified {
+		t.Fatal("a result after a fresh one with equal content must not notify")
+	}
+	clk.Step(20 * time.Second) // one delayed tick: 20 s > 15 s after the last
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("a result after a stale one must notify")
 	}
 }
 
@@ -242,19 +286,6 @@ type scraperFunc func() string
 
 func (f scraperFunc) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader(f())), nil
-}
-
-// waitCollected waits until id's stored result was collected at at.
-func waitCollected(t *testing.T, c *Collector, id string, at time.Time) {
-	t.Helper()
-	for deadline := time.Now().Add(testutil.RecvTimeout); ; time.Sleep(time.Millisecond) {
-		if r, ok := c.Get(id); ok && r.CollectedAt.Equal(at) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no result collected at %v", at)
-		}
-	}
 }
 
 func TestSameContentIgnoresCollectedAt(t *testing.T) {

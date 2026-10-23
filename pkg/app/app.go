@@ -112,7 +112,9 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	default:
 		scraper = ctrlmetrics.PodProxyScraper{Kube: c.Kube}
 	}
-	col := ctrlmetrics.NewCollector(scraper)
+	// Metrics older than three scrape intervals are unavailable, not reused.
+	maxAge := 3 * o.MetricsInterval
+	col := ctrlmetrics.NewCollector(scraper, ctrlmetrics.WithMaxAge(maxAge))
 	col.OnResult = changes
 	verifier := reg.Verifier
 	if verifier == nil {
@@ -121,9 +123,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	discovered := make(chan struct{})
 	var once sync.Once
-	// Metrics older than three scrape intervals are unavailable, not reused.
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: 3 * o.MetricsInterval, ProxyMode: reg.ProxyMode,
+		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
 		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop,
 		OnCompute: func(m *engine.Model) {
 			if len(m.Installs) > 0 {
