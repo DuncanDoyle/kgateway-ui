@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -199,21 +200,79 @@ func TestCollectedAtKeepsMonotonicReading(t *testing.T) {
 	}
 }
 
-// Each stored result notifies OnResult once per tick.
-func TestCollectorNotifiesOnEachResult(t *testing.T) {
+// The first result notifies; a scrape with unchanged content does not; a
+// content change does (D-019).
+func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	d := testutil.ControllerDeployment("kgw", "kgateway", "kgateway:v2.4.7", 1, 1)
 	in := install.Install{Namespace: "kgw", Name: "kgateway", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
-	c := NewCollector(fakeScraper{"a": sample})
-	c.OnResult = trigger.New()
+	var body atomic.Pointer[string]
+	body.Store(new(sample))
+	c := NewCollector(scraperFunc(func() string { return *body.Load() }))
+	clk := testutil.FakeClock()
+	c.Clock, c.OnResult = clk, trigger.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- c.Run(ctx, time.Hour, func() []install.Install { return []install.Install{in} }) }()
+	go func() { done <- c.Run(ctx, 10*time.Second, func() []install.Install { return []install.Install{in} }) }()
 	testutil.Recv(t, c.OnResult.C(), "a notification for the first result")
 	if _, ok := c.Get(in.ID()); !ok {
 		t.Fatal("the result must be stored before the notification")
 	}
+	// Two unchanged scrapes; seeing the second stored means the first has decided.
+	for range 2 {
+		clk.Step(10 * time.Second)
+		waitCollected(t, c, in.ID(), clk.Now())
+	}
+	select {
+	case <-c.OnResult.C():
+		t.Fatal("a scrape that only renews CollectedAt must not notify")
+	default:
+	}
+	body.Store(new(strings.Replace(sample, "} 3\n", "} 4\n", 1)))
+	clk.Step(10 * time.Second)
+	testutil.Recv(t, c.OnResult.C(), "a notification for changed content")
 	cancel()
 	if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// scraperFunc serves the body f returns.
+type scraperFunc func() string
+
+func (f scraperFunc) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(f())), nil
+}
+
+// waitCollected waits until id's stored result was collected at at.
+func waitCollected(t *testing.T, c *Collector, id string, at time.Time) {
+	t.Helper()
+	for deadline := time.Now().Add(testutil.RecvTimeout); ; time.Sleep(time.Millisecond) {
+		if r, ok := c.Get(id); ok && r.CollectedAt.Equal(at) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no result collected at %v", at)
+		}
+	}
+}
+
+func TestSameContentIgnoresCollectedAt(t *testing.T) {
+	m, err := Parse(strings.NewReader(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := Result{Metrics: m, CollectedAt: testutil.Now}
+	b := a
+	b.CollectedAt = a.CollectedAt.Add(time.Minute)
+	if !a.SameContent(b) {
+		t.Fatal("CollectedAt is not content")
+	}
+	b.Err = "pod a: timeout"
+	if a.SameContent(b) {
+		t.Fatal("Err is content")
+	}
+	m2, _ := Parse(strings.NewReader(strings.Replace(sample, "} 3\n", "} 4\n", 1)))
+	if a.SameContent(Result{Metrics: m2, CollectedAt: a.CollectedAt}) {
+		t.Fatal("Managed values are content")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -88,6 +90,13 @@ func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
 	return maxAge > 0 && now.Sub(r.CollectedAt) > maxAge
 }
 
+// SameContent reports whether r and o carry the same Err and Metrics.
+// CollectedAt is not content: freshness is a deadline, not a change (D-019).
+func (r Result) SameContent(o Result) bool {
+	return r.Err == o.Err && r.Metrics.ManagedPresent == o.Metrics.ManagedPresent &&
+		maps.Equal(r.Metrics.Rejects, o.Metrics.Rejects) && maps.Equal(r.Metrics.Managed, o.Metrics.Managed)
+}
+
 // Source returns the latest Result per install ID.
 type Source interface {
 	Get(id string) (Result, bool)
@@ -96,19 +105,22 @@ type Source interface {
 // Collector periodically scrapes every install's ready controller pods.
 type Collector struct {
 	scraper Scraper
-	now     func() time.Time
+	// Clock stamps results and drives Run's ticker; NewCollector sets the real clock.
+	Clock clock.WithTicker
 	// maxBody is the largest accepted body; podTimeout bounds one pod scrape.
 	maxBody    int64
 	podTimeout time.Duration
 	mu         sync.RWMutex
 	results    map[string]Result
-	// OnResult, if set, is notified after each stored result.
+	// OnResult, if set, is notified after a stored result whose content differs
+	// from the previous one for its install, or is its first. A result that
+	// only renews CollectedAt does not notify; the engine's staleness deadline reads it.
 	OnResult *trigger.Signal
 }
 
 // NewCollector returns a Collector using s.
 func NewCollector(s Scraper) *Collector {
-	return &Collector{scraper: s, now: time.Now, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
+	return &Collector{scraper: s, Clock: clock.RealClock{}, maxBody: maxBodyBytes, podTimeout: maxPodTimeout, results: map[string]Result{}}
 }
 
 // Collect scrapes all ready pods of in and aggregates them. It fails if any
@@ -121,14 +133,14 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		}
 		m, err := c.scrapePod(ctx, p, in.MetricsPort)
 		if err != nil {
-			return Result{CollectedAt: c.now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
+			return Result{CollectedAt: c.Clock.Now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
 		}
 		per = append(per, m)
 	}
 	if len(per) == 0 {
-		return Result{CollectedAt: c.now(), Err: "no ready controller pod to scrape"}
+		return Result{CollectedAt: c.Clock.Now(), Err: "no ready controller pod to scrape"}
 	}
-	return Result{Metrics: Aggregate(per), CollectedAt: c.now()}
+	return Result{Metrics: Aggregate(per), CollectedAt: c.Clock.Now()}
 }
 
 // scrapePod scrapes and parses one pod under its own deadline and size cap.
@@ -172,7 +184,7 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 		return errors.New("ctrlmetrics: collection interval must be positive")
 	}
 	c.podTimeout = min(every/2, maxPodTimeout)
-	t := time.NewTicker(every)
+	t := c.Clock.NewTicker(every)
 	defer t.Stop()
 	for {
 		var wg sync.WaitGroup
@@ -182,16 +194,19 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 				defer wg.Done()
 				r := c.Collect(ctx, in)
 				c.mu.Lock()
+				prev, had := c.results[in.ID()]
 				c.results[in.ID()] = r
 				c.mu.Unlock()
-				c.OnResult.Notify()
+				if !had || !prev.SameContent(r) {
+					c.OnResult.Notify()
+				}
 			}()
 		}
 		wg.Wait()
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
+		case <-t.C():
 		}
 	}
 }

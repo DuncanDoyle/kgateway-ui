@@ -22,6 +22,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -99,15 +100,19 @@ func pad3(i int) string {
 	return s
 }
 
-// engine returns an engine over w's cache with static fresh metrics, driven
-// by clk (nil: the real clock), reporting loop events on a buffered channel.
-func (w *world) engine(tb testing.TB, clk *clocktesting.FakeClock) (*Engine, chan LoopEvent) {
+// engine returns an engine over w's cache with static metrics that never go
+// stale, driven by clk (nil: the real clock), reporting loop events on a
+// buffered channel; mut, if set, adjusts the config.
+func (w *world) engine(tb testing.TB, clk *clocktesting.FakeClock, mut ...func(*Config)) (*Engine, chan LoopEvent) {
 	ev := make(chan LoopEvent, 1<<16)
 	cfg := config(nil, metricsAt(testutil.Now), nil)
 	// Static metrics never go stale here, as a scraped cluster's do not.
 	cfg.Snapshots, cfg.Triggers, cfg.MetricsMaxAge = w.c, w.sig, 0
 	if clk != nil {
 		cfg.Clock = clk
+	}
+	for _, m := range mut {
+		m(&cfg)
 	}
 	cfg.OnLoop = func(e LoopEvent) {
 		select {
@@ -229,58 +234,33 @@ func TestBudgetBurst(t *testing.T) {
 	}
 }
 
-// TestBudgetIdleTenMinutes: on a fake clock, 600 one-second steps with no
-// change publish only at the 30 s safety instants and Model.Next deadlines,
+// TestBudgetIdleTenMinutes: on fake clocks, 600 one-second steps with no
+// object change and a real collector scraping unchanged metrics every 10 s
+// (production defaults: safety 30 s, metrics max age 3 × 10 s) recompute only
+// at the safety instants and Model.Next deadlines, never show metrics stale,
 // and confirm every second.
 func TestBudgetIdleTenMinutes(t *testing.T) {
+	const safety, every = 30 * time.Second, 10 * time.Second
 	clk := testutil.FakeClock()
 	w := newWorld(t, scale.Large, clk.Now)
-	e, ev := w.engine(t, clk)
-	const safety = 30 * time.Second
+	col := ctrlmetrics.NewCollector(newBodyScraper(managedBody))
+	col.OnResult = w.sig
+	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 3*every })
 	runLoop(t, e, safety)
-	prev := awaitKind(t, ev, EvPublished) // the start-up publication, not counted
+	awaitKind(t, ev, EvPublished) // the start-up publication, before any scrape
 	awaitKind(t, ev, EvArmed)
-	t.Logf("start-up Model.Next: %+v", prev.Published.Model.Next)
-	var runs, onSafety, onDeadline, confirms, unexpected int
-	for range 600 {
-		clk.Step(time.Second)
-		// A step ends at EvArmed with no run in flight; PF14: the tick goes first.
-		for inFlight := false; ; {
-			e := testutil.Recv(t, ev, "loop event")
-			switch e.Kind {
-			case EvConfirmed:
-				confirms++
-			case EvConfirmRefused, EvTriggered:
-				unexpected++
-				t.Errorf("idle: unexpected %v at %v", e.Kind, e.At)
-			case EvRunStarted:
-				inFlight = true
-			case EvPublished:
-				inFlight = false
-				runs++
-				switch next := prev.Published.Model.Next; {
-				case e.At.Equal(prev.At.Add(safety)):
-					onSafety++
-				case !next.IsZero() && next.Due(e.At) && !next.Due(e.At.Add(-time.Second)):
-					onDeadline++ // the first one-second step at which it is due
-				default:
-					t.Errorf("run at +%v is neither 30 s after the last (+%v) nor at its deadline %+v",
-						e.At.Sub(testutil.Now), prev.At.Sub(testutil.Now), next)
-				}
-				prev = e
-			}
-			if e.Kind == EvArmed && !inFlight {
-				break
-			}
-		}
-	}
-	t.Logf("idle 10 min: %d recomputes (%d safety, %d deadline), %d confirmations, %d refused or triggered", runs, onSafety, onDeadline, confirms, unexpected)
-	// Without an off-safety deadline the safety timer alone runs, 20 times.
-	if onDeadline == 0 && runs != 20 {
-		t.Errorf("recomputes = %d, want 20", runs)
-	}
-	if confirms != 600 {
-		t.Errorf("confirmations = %d, want 600", confirms)
+	cc := scrapeEvery(t, col, every, e.Installs, "kgw.kgateway")
+	awaitKind(t, ev, EvTriggered) // the first result; this run is not counted either
+	awaitKind(t, ev, EvArmed)
+	cc.Step(time.Second)
+	clk.Step(time.Second)
+	prev := awaitKind(t, ev, EvPublished)
+	awaitKind(t, ev, EvArmed)
+	n := driveIdle(t, ev, clk, cc, col, "kgw.kgateway", prev, safety, every, 600)
+	t.Logf("idle 10 min: %d recomputes (%d at the metrics staleness deadline, %d on the safety timer alone), %d confirmations, %d scrapes",
+		n.runs, n.onDeadline, n.onSafety, n.confirms, n.scrapes)
+	if n.runs != 20 || n.onDeadline != 20 || n.confirms != 600 || n.scrapes != 60 {
+		t.Errorf("idle 10 min: %+v; want 20 recomputes, all at the deadline, 600 confirmations, 60 scrapes", n)
 	}
 }
 

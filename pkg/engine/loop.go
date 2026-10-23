@@ -68,8 +68,10 @@ type LoopEvent struct {
 }
 
 // encodeMetrics is the identity of the metrics results reads: FNV-64a over,
-// per read in order, the ID and Present and, for a present result,
-// CollectedAt, Err, ManagedPresent and every Rejects and Managed entry in key order.
+// per read in order, the ID and Present and, for a present result, Err,
+// ManagedPresent and every Rejects and Managed entry in key order. CollectedAt
+// is left out, as in ctrlmetrics.Result.SameContent: a renewed scrape is not a
+// change; the strict staleness deadline in Model.Next makes the next run read it.
 func encodeMetrics(reads []MetricsRead) uint64 {
 	h := fnv.New64a()
 	var b [8]byte
@@ -95,7 +97,6 @@ func encodeMetrics(reads []MetricsRead) uint64 {
 			continue
 		}
 		res := r.Result
-		u64(uint64(res.CollectedAt.UnixNano()))
 		str(res.Err)
 		flag(res.Metrics.ManagedPresent)
 		rejects := sortedKeys(res.Metrics.Rejects, func(a, b ctrlmetrics.GatewayKey) int {

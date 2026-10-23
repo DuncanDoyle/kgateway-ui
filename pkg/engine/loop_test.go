@@ -16,6 +16,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
@@ -583,6 +584,11 @@ func TestMetricsIdentityCoversContent(t *testing.T) {
 	if enc(a, true) != enc(b, true) {
 		t.Fatal("equal results must encode equally")
 	}
+	later := res(1)
+	later.CollectedAt = at.Add(10 * time.Second)
+	if enc(later, true) != enc(res(1), true) {
+		t.Fatal("CollectedAt is not part of the identity")
+	}
 	errRes := res(0)
 	errRes.Err = "no ready controller pod to scrape"
 	if enc(errRes, true) == enc(res(0), true) {
@@ -724,4 +730,188 @@ func TestNoPublicationAfterRunReturns(t *testing.T) {
 	if cur != p1 {
 		t.Fatal("a compute finishing after Run returned must not be published")
 	}
+}
+
+// bodyScraper serves a fixed metrics body.
+type bodyScraper struct{ body *atomic.Pointer[string] }
+
+func newBodyScraper(body string) bodyScraper {
+	b := bodyScraper{body: &atomic.Pointer[string]{}}
+	b.body.Store(&body)
+	return b
+}
+
+func (b bodyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(*b.body.Load())), nil
+}
+
+const managedBody = "# TYPE kgateway_resources_managed gauge\nkgateway_resources_managed{namespace=\"shop\",parent=\"edge\",resource=\"HTTPRoute\"} 3\n"
+
+// scrapeEvery runs col every interval on its own fake clock, which starts at the
+// engine clock's time, and returns that clock after the first result is stored.
+func scrapeEvery(t *testing.T, col *ctrlmetrics.Collector, every time.Duration, installs func() []install.Install, id string) *clocktesting.FakeClock {
+	t.Helper()
+	clk := testutil.FakeClock()
+	col.Clock = clk
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		_ = col.Run(ctx, every, installs)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		testutil.Recv(t, stopped, "the collector to stop")
+	})
+	waitCollected(t, col, id, clk.Now())
+	return clk
+}
+
+// waitCollected waits until id's stored result was collected at at.
+func waitCollected(t *testing.T, col *ctrlmetrics.Collector, id string, at time.Time) {
+	t.Helper()
+	for deadline := time.Now().Add(testutil.RecvTimeout); ; time.Sleep(time.Millisecond) {
+		if r, ok := col.Get(id); ok && r.CollectedAt.Equal(at) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no metrics result collected at %v", at)
+		}
+	}
+}
+
+// idleCounts tallies driveIdle's window.
+type idleCounts struct{ runs, onDeadline, onSafety, confirms, scrapes int }
+
+// driveIdle steps the collector clock, then the engine clock, one second at a
+// time for steps seconds; a scrape due at a second is stored before the engine
+// sees it. prev is the last publication. It fails on a trigger, a refused
+// confirmation, a run neither the safety timer nor Model.Next explains, and a
+// published model with stale metrics.
+func driveIdle(t *testing.T, ev <-chan LoopEvent, eng, col *clocktesting.FakeClock, c *ctrlmetrics.Collector, id string,
+	prev LoopEvent, safety, every time.Duration, steps int) idleCounts {
+	t.Helper()
+	var n idleCounts
+	first := testutil.Now // scrapeEvery's clock starts there
+	for range steps {
+		col.Step(time.Second)
+		if col.Now().Sub(first)%every == 0 {
+			waitCollected(t, c, id, col.Now())
+			n.scrapes++
+		}
+		eng.Step(time.Second)
+		// A step ends at EvArmed with no run in flight; PF14: the tick goes first.
+		for inFlight := false; ; {
+			e := testutil.Recv(t, ev, "loop event")
+			switch e.Kind {
+			case EvConfirmed:
+				n.confirms++
+			case EvConfirmRefused, EvTriggered:
+				t.Errorf("idle: unexpected %v at +%v", e.Kind, e.At.Sub(testutil.Now))
+			case EvRunStarted:
+				inFlight = true
+			case EvPublished:
+				inFlight = false
+				n.runs++
+				switch next := prev.Published.Model.Next; {
+				case !next.IsZero() && next.Due(e.At):
+					n.onDeadline++
+				case e.At.Equal(prev.At.Add(safety)):
+					n.onSafety++
+				default:
+					t.Errorf("run at +%v: neither 30 s after the last (+%v) nor at its deadline %+v",
+						e.At.Sub(testutil.Now), prev.At.Sub(testutil.Now), next)
+				}
+				if stale(e.Published) {
+					t.Errorf("run at +%v shows metrics stale while scrapes arrive", e.At.Sub(testutil.Now))
+				}
+				prev = e
+			}
+			if e.Kind == EvArmed && !inFlight {
+				break
+			}
+		}
+	}
+	return n
+}
+
+// startScraping starts the collector on h's installs and waits for the run its
+// first result triggers; it returns the collector clock and that publication.
+func startScraping(t *testing.T, h *harness, col *ctrlmetrics.Collector, every time.Duration) (*clocktesting.FakeClock, LoopEvent) {
+	t.Helper()
+	cc := scrapeEvery(t, col, every, h.e.Installs, "kgw.kgateway")
+	h.await(EvTriggered)
+	h.await(EvArmed)
+	cc.Step(time.Second) // keeps the two clocks equal
+	h.c.Step(time.Second)
+	p := h.await(EvPublished)
+	h.await(EvArmed)
+	if !p.Published.Model.MetricsRead[0].Present {
+		t.Fatal("the first result must be read")
+	}
+	return cc, p
+}
+
+// (a), (c): an idle cluster scraped every 10 s with unchanged content
+// recomputes only at the strict staleness deadline (the safety instant falls on
+// the same one-second step) and never shows metrics stale.
+func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
+	col := ctrlmetrics.NewCollector(newBodyScraper(managedBody))
+	h := newHarness(t, func(c *Config) { c.Metrics, c.MetricsMaxAge = col, 30*time.Second; col.OnResult = c.Triggers })
+	h.start(30 * time.Second)
+	cc, p := startScraping(t, h, col, 10*time.Second)
+	n := driveIdle(t, h.ev, h.c, cc, col, "kgw.kgateway", p, 30*time.Second, 10*time.Second, 600)
+	if n.runs != 20 || n.onDeadline != 20 || n.confirms != 600 || n.scrapes != 60 {
+		t.Fatalf("10 min idle: %+v; want 20 runs, all at the deadline, 600 confirmations, 60 scrapes", n)
+	}
+}
+
+// (b): a scrape with changed content triggers one recompute; unchanged ones do not.
+func TestMetricsContentChangeTriggersRecompute(t *testing.T) {
+	sc := newBodyScraper(managedBody)
+	col := ctrlmetrics.NewCollector(sc)
+	h := newHarness(t, func(c *Config) { c.Metrics = col; col.OnResult = c.Triggers })
+	h.start(time.Hour)
+	cc, _ := startScraping(t, h, col, 10*time.Second)
+	h.runs = 0
+	// Two unchanged scrapes: seeing the second stored means the first has decided.
+	for range 2 {
+		cc.Step(10 * time.Second)
+		waitCollected(t, col, "kgw.kgateway", cc.Now())
+	}
+	h.c.Step(10 * time.Second)
+	h.await(EvConfirmed) // idle: no trigger pending
+	h.await(EvArmed)
+	changed := strings.Replace(managedBody, "} 3", "} 4", 1)
+	sc.body.Store(&changed)
+	cc.Step(10 * time.Second)
+	h.await(EvTriggered)
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	p := h.await(EvPublished).Published
+	if got := p.Model.MetricsRead[0].Result.Metrics.Managed[ctrlmetrics.ManagedKey{Namespace: "shop", Resource: "HTTPRoute"}]; got != 4 {
+		t.Fatalf("the run must read the changed content, managed = %v", got)
+	}
+	if h.runs != 1 {
+		t.Fatalf("runs = %d, want 1", h.runs)
+	}
+}
+
+// (d): a renewed CollectedAt still confirms; changed content is refused.
+func TestConfirmIgnoresCollectedAtOnly(t *testing.T) {
+	var cur atomic.Pointer[ctrlmetrics.Result]
+	r := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
+	cur.Store(&r)
+	h := newHarness(t, func(c *Config) {
+		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return *cur.Load(), true })
+	})
+	h.start(time.Hour)
+	renewed := r
+	renewed.CollectedAt = r.CollectedAt.Add(10 * time.Second)
+	cur.Store(&renewed)
+	h.tickIdle()
+	changed := renewed
+	changed.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
+	cur.Store(&changed)
+	h.c.Step(ConfirmEvery)
+	h.await(EvConfirmRefused)
 }
