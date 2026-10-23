@@ -131,6 +131,16 @@
         "displayName": "BackendConfigPolicies",
         "group": "gateway.kgateway.dev",
         "kind": "BackendConfigPolicy"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "backend",
+        "count": 0,
+        "displayName": "Backends",
+        "group": "gateway.kgateway.dev",
+        "kind": "Backend"
       }
     ],
     "gateways": [

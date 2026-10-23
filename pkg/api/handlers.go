@@ -107,11 +107,22 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{}}
 	if m != nil {
 		resp.Pinned, resp.Synced = m.Pinned, synced(m)
-		resp.Kinds = append(resp.Kinds, m.Served...)
+		for _, k := range m.Served {
+			if !isAddedAfterV1(k) {
+				resp.Kinds = append(resp.Kinds, k)
+			}
+		}
 	}
 	// Deployments are linkable only where the platform runs workloads.
 	if plat.Has(platform.Workloads) {
 		resp.Kinds = append(resp.Kinds, deploymentKind)
+	}
+	if m != nil {
+		for _, k := range m.Served {
+			if isAddedAfterV1(k) {
+				resp.Kinds = append(resp.Kinds, k)
+			}
+		}
 	}
 	writeJSON(w, resp)
 }

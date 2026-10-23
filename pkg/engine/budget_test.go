@@ -23,7 +23,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
@@ -43,7 +42,7 @@ type world struct {
 // waits until it has settled.
 func newWorld(tb testing.TB, tier scale.Tier, now func() time.Time) *world {
 	tb.Helper()
-	served := append(testutil.ServedUpstream(), kinds.Served{Descriptor: scale.BackendKind, Version: scale.BackendKind.Versions[0]})
+	served := testutil.ServedUpstream()
 	listKinds := map[schema.GroupVersionResource]string{}
 	byKind := map[schema.GroupKind]schema.GroupVersionResource{}
 	for _, s := range served {

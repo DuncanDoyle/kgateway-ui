@@ -188,6 +188,18 @@
         "versions": [
           "v1"
         ]
+      },
+      {
+        "category": "backend",
+        "displayName": "Backends",
+        "group": "gateway.kgateway.dev",
+        "kind": "Backend",
+        "namespaced": true,
+        "resource": "backends",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
       }
     ],
     "platform": "Kubernetes",

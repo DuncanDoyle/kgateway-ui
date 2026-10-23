@@ -143,6 +143,21 @@ func TestClusterRoleGrantsEveryReadKind(t *testing.T) {
 	}
 }
 
+// TestClusterRoleCoversBackends: the explorer reads kgateway Backends.
+func TestClusterRoleCoversBackends(t *testing.T) {
+	cr := clusterRole(t)
+	i := slices.IndexFunc(kinds.Upstream(), func(d kinds.Descriptor) bool { return d.Category == kinds.CategoryBackend })
+	if i < 0 {
+		t.Fatal("kind registry has no Backend")
+	}
+	d := kinds.Upstream()[i]
+	for _, v := range []string{"get", "list", "watch"} {
+		if !grants(cr.Rules, d.Group, d.Resource, v) {
+			t.Errorf("ClusterRole does not grant %s on %s.%s", v, d.Resource, d.Group)
+		}
+	}
+}
+
 // TestClusterRoleOmitsUnreadKinds guards D-017 §5: nothing reads ReferenceGrants
 // or CRDs, and discovery needs neither.
 func TestClusterRoleOmitsUnreadKinds(t *testing.T) {

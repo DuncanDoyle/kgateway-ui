@@ -30,6 +30,8 @@ func Upstream() []Descriptor {
 		{Group: kgwGroup, Kind: "HTTPListenerPolicy", Resource: "httplistenerpolicies", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryPolicy, DisplayName: "HTTPListenerPolicies"},
 		{Group: kgwGroup, Kind: "BackendConfigPolicy", Resource: "backendconfigpolicies", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryPolicy, DisplayName: "BackendConfigPolicies"},
 		{Group: kgwGroup, Kind: "GatewayParameters", Resource: "gatewayparameters", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryParameters, DisplayName: "GatewayParameters"},
+		// Added after API v1: kept last so v1 kind lists only gain it at the end.
+		{Group: kgwGroup, Kind: "Backend", Resource: "backends", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"},
 	}
 }
 

@@ -114,3 +114,24 @@ func TestUnavailableRestartsPersistence(t *testing.T) {
 		t.Fatalf("persistence must restart after an unavailable period: %+v", r)
 	}
 }
+
+// The gauge counts no Backends: a Backend in scope, and a Backend series from
+// the controller, leave the comparison unchanged.
+func TestVerifierIgnoresBackend(t *testing.T) {
+	be := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "gateway.kgateway.dev/v1alpha1", "kind": "Backend",
+		"metadata": map[string]any{"namespace": "shop", "name": "api"}}}
+	managed := map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "Backend"}: 5}
+	for k, n := range matching {
+		managed[k] = n
+	}
+	gw := testutil.GwRef("shop", "edge")
+	in := inputWith(t, testutil.Now, managed, true, testutil.Gateway("shop", "edge", "any-class", nil),
+		testutil.HTTPRoute("shop", "two-parents", []objects.ParentRef{gw, testutil.GwRef("shop", "other")}),
+		testutil.TrafficPolicy("shop", "tp"), be)
+	v := NewManagedCountVerifier(20 * time.Second)
+	v.Verify(in)
+	in.Now = testutil.Now.Add(25 * time.Second)
+	if r := v.Verify(in); !r.Available || len(r.Mismatches) != 0 {
+		t.Fatalf("a Backend must not enter the comparison: %+v", r)
+	}
+}

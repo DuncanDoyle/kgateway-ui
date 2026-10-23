@@ -65,6 +65,12 @@ type MetaResponse struct {
 var deploymentKind = kinds.Served{Descriptor: kinds.Descriptor{Group: "apps", Kind: "Deployment", Resource: "deployments",
 	Versions: []string{"v1"}, Namespaced: true, Category: kinds.CategoryWorkload, DisplayName: "Deployments"}, Version: "v1"}
 
+// addedAfterV1 lists the served kinds registered after API v1. Meta lists them
+// after Deployment, so v1's kind list only gains elements at its end (D-016 H11).
+var addedAfterV1 = map[string]bool{kinds.KgatewayGroup + "/Backend": true}
+
+func isAddedAfterV1(k kinds.Served) bool { return addedAfterV1[k.Group+"/"+k.Kind] }
+
 // ErrorResponse is the body of every non-2xx API response.
 type ErrorResponse struct {
 	Error string `json:"error"`

@@ -52,11 +52,6 @@ var (
 // Tiers lists Typical, Large and Extreme.
 var Tiers = []Tier{Typical, Large, Extreme}
 
-// BackendKind describes kgateway's Backend, which Phase 1 does not serve. Seed
-// a fake cache with testutil.ClientsWith(t, []kinds.Descriptor{BackendKind}, …).
-var BackendKind = kinds.Descriptor{Group: kinds.KgatewayGroup, Kind: "Backend", Resource: "backends", Versions: []string{"v1alpha1"},
-	Namespaced: true, Category: kinds.CategoryParameters, DisplayName: "Backends"}
-
 // Class is the GatewayClass of every scale Gateway.
 const Class = "kgateway"
 
@@ -449,12 +444,11 @@ func nsIndex(ns string) int {
 
 // Snapshot is a synced snapshot of tier t's world with every kind
 // readable, one kgateway v2.4.7 controller in namespace kgw with a ready Pod,
-// and a ready proxy per Gateway. Backends sit under BackendKind's GVR.
+// and a ready proxy per Gateway.
 func Snapshot(t Tier, seed int64) *cache.Snapshot {
 	byKind := map[schema.GroupKind]schema.GroupVersionResource{}
 	access := map[schema.GroupVersionResource]cache.Access{}
-	served := append(testutil.ServedUpstream(), kinds.Served{Descriptor: BackendKind, Version: BackendKind.Versions[0]})
-	for _, s := range served {
+	for _, s := range testutil.ServedUpstream() {
 		byKind[schema.GroupKind{Group: s.Group, Kind: s.Kind}] = s.GVR()
 		access[s.GVR()] = cache.Access{OK: true}
 	}
