@@ -185,7 +185,8 @@ func (e *Engine) emit(k LoopEventKind, at time.Time, p *Published) {
 // whenever triggers, deadlines or the safety timer call for it, and runs the
 // confirm tick every Config.ConfirmEvery until ctx is done. safety is the
 // longest time between recomputes; zero or less disables it. Each recompute
-// runs in its own goroutine, so triggers keep arriving during it.
+// runs in its own goroutine, so triggers keep arriving during it; the loop
+// publishes its result, and a result that arrives after ctx is done is dropped.
 func (e *Engine) Run(ctx context.Context, safety time.Duration) {
 	clk := e.cfg.Clock
 	// Created before any run timer, so a fake clock step that fires both
@@ -253,6 +254,8 @@ func (e *Engine) Run(ctx context.Context, safety time.Duration) {
 			default:
 			}
 		case p := <-done:
+			// Published here, so nothing is published after Run returns.
+			e.publish(p)
 			now := clk.Now()
 			s.finish()
 			// A run consumes only due deadlines and safety instants; set both again.

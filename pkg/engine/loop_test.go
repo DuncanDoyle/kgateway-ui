@@ -49,6 +49,13 @@ func (f *fakeSource) Fingerprint() cache.Fingerprint {
 	return f.print
 }
 
+// setBase replaces the stored objects and fingerprint together.
+func (f *fakeSource) setBase(b *cache.Snapshot, p cache.Fingerprint) {
+	f.mu.Lock()
+	f.base, f.print = b, p
+	f.mu.Unlock()
+}
+
 func (f *fakeSource) setPrint(p cache.Fingerprint) {
 	f.mu.Lock()
 	f.print = p
@@ -97,6 +104,8 @@ type harness struct {
 	sig    *trigger.Signal
 	ev     chan LoopEvent
 	cancel context.CancelFunc
+	// stopped is closed when Run returns.
+	stopped chan struct{}
 	// runs counts EvPublished after the start-up publication; confirms counts EvConfirmed.
 	runs, confirms int
 }
@@ -109,7 +118,13 @@ func newHarness(t *testing.T, mut func(*Config)) *harness {
 	h := &harness{t: t, c: c, src: src, sig: trigger.New(), ev: make(chan LoopEvent, 4096)}
 	cfg := config(nil, metricsAt(testutil.Now), c.Now)
 	cfg.Snapshots, cfg.MetricsMaxAge, cfg.Triggers, cfg.Clock = src, 0, h.sig, c
-	cfg.OnLoop = func(e LoopEvent) { h.ev <- e }
+	cfg.OnLoop = func(e LoopEvent) {
+		select {
+		case h.ev <- e:
+		default: // Fatal is for the test goroutine; the next await then times out
+			t.Errorf("loop event buffer full (%d): a test steps without awaiting events", cap(h.ev))
+		}
+	}
 	if mut != nil {
 		mut(&cfg)
 	}
@@ -123,7 +138,11 @@ func (h *harness) start(safety time.Duration) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	h.t.Cleanup(cancel)
-	go h.e.Run(ctx, safety)
+	h.stopped = make(chan struct{})
+	go func() {
+		defer close(h.stopped)
+		h.e.Run(ctx, safety)
+	}()
 	h.await(EvPublished)
 	h.await(EvArmed)
 	h.runs = 0
@@ -631,5 +650,74 @@ func TestInstallsReadsCurrent(t *testing.T) {
 	e.Compute()
 	if ids := e.Installs(); len(ids) != 1 || ids[0].ID() != "kgw.kgateway" {
 		t.Fatalf("Installs = %+v", ids)
+	}
+}
+
+// Minor 1: grace deadlines only for objects health reads while in grace.
+func TestAllGreenSchedulesNoGraceRecompute(t *testing.T) {
+	route := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{testutil.GwRef("infra", "edge")}, testutil.AcceptedBy(testutil.GwRef("infra", "edge"), testutil.Controller))
+	h := newHarness(t, nil)
+	h.src.base = snapshot(t, route)
+	h.start(time.Hour)
+	p := h.e.Current()
+	if p.Model.Installs[0].Health.State != health.StateHealthy || !p.Model.Next.IsZero() {
+		t.Fatalf("all green: state %s, Next %+v; want healthy and no deadline", p.Model.Installs[0].Health.State, p.Model.Next)
+	}
+	for range 61 {
+		h.tickIdle()
+	}
+	if h.runs != 0 {
+		t.Fatalf("runs = %d, want 0 past the grace period", h.runs)
+	}
+}
+
+// An object added later matures exactly at its own grace instant.
+func TestPendingObjectMaturesAtItsGraceInstant(t *testing.T) {
+	h := newHarness(t, nil)
+	h.start(time.Hour)
+	h.c.Step(10 * time.Second)
+	h.await(EvConfirmed)
+	h.await(EvArmed)
+	added := h.c.Now()
+	h.src.setBase(snapshot(t, testutil.HTTPRoute("shop", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")})), fprint(2, accessOK))
+	h.notify()
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	p := h.await(EvPublished).Published
+	seen := added.Add(Quiet)
+	if severity(p) != health.SeverityInfo || p.Model.Next != (Deadline{At: seen.Add(health.Grace)}) {
+		t.Fatalf("pending route: severity %q, Next %+v; want info and %v", severity(p), p.Model.Next, seen.Add(health.Grace))
+	}
+	h.await(EvArmed)
+	h.c.Step(seen.Add(health.Grace - time.Nanosecond).Sub(h.c.Now()))
+	h.await(EvConfirmed)
+	h.await(EvArmed)
+	h.c.Step(time.Nanosecond)
+	e := h.await(EvPublished)
+	if !e.At.Equal(seen.Add(health.Grace)) || severity(e.Published) != health.SeverityWarning {
+		t.Fatalf("maturation run at %v severity %q; want %v warning", e.At, severity(e.Published), seen.Add(health.Grace))
+	}
+	if h.runs != 2 {
+		t.Fatalf("runs = %d, want 2", h.runs)
+	}
+}
+
+// Minor 2: a run in flight when ctx is cancelled is never published.
+func TestNoPublicationAfterRunReturns(t *testing.T) {
+	h := newHarness(t, nil)
+	h.start(time.Hour)
+	p1 := h.e.Current()
+	taken, release := h.src.blockOnce()
+	h.notify()
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	h.await(EvRunStarted)
+	testutil.Recv(t, taken, "snapshot")
+	h.cancel()
+	testutil.Recv(t, h.stopped, "Run to return")
+	close(release)
+	h.e.computeMu.Lock() // waits for the in-flight compute to finish
+	cur := h.e.Current()
+	h.e.computeMu.Unlock()
+	if cur != p1 {
+		t.Fatal("a compute finishing after Run returned must not be published")
 	}
 }

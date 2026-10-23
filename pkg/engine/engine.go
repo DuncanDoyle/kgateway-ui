@@ -175,11 +175,14 @@ func (e *Engine) firstSeen(now time.Time) func(u *unstructured.Unstructured) tim
 }
 
 // Compute builds a new Model and publishes it. Once Run has started, only
-// Run's loop calls it.
-func (e *Engine) Compute() *Model { return e.compute().Model }
+// Run's loop computes and publishes.
+func (e *Engine) Compute() *Model {
+	p := e.compute()
+	e.publish(p)
+	return p.Model
+}
 
-// compute builds a new Model, publishes it with its source and returns the
-// published value.
+// compute builds a new Model and returns it with its source, unpublished.
 func (e *Engine) compute() *Published {
 	e.computeMu.Lock()
 	defer e.computeMu.Unlock()
@@ -205,10 +208,15 @@ func (e *Engine) compute() *Published {
 	all := install.Resolve(found, e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all)
-	seen := e.firstSeen(now)
 	next := deadlines{now: now}
-	for _, t := range e.seen {
-		next.add(t.Add(health.Grace), false) // in grace while now-firstSeen < Grace
+	firstSeen := e.firstSeen(now)
+	// Only an object health asks about while it is in grace gets a grace deadline.
+	seen := func(u *unstructured.Unstructured) time.Time {
+		t := firstSeen(u)
+		if now.Sub(t) < health.Grace {
+			next.add(t.Add(health.Grace), false) // in grace while now-firstSeen < Grace
+		}
+		return t
 	}
 	for _, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
@@ -229,7 +237,6 @@ func (e *Engine) compute() *Published {
 	}
 	m.Next = next.next
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}
-	e.publish(p)
 	return p
 }
 
