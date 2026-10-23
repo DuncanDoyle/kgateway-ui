@@ -220,9 +220,9 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Publishe
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
 		ov := h.visibleOverview(r, p.Model, i, h.visibleHealth(r, i))
-		rows := make([]OverviewGatewayRow, 0, len(ov.Gateways))
+		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), h.linker(r, p.Model, i)
 		for _, g := range ov.Gateways {
-			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: h.link(r, p.Model, i, g.Ref)})
+			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref)})
 		}
 		writeJSON(w, OverviewResponse{Overview: ov, Gateways: rows, CollectedAt: wireTime(p.ConfirmedAt)})
 	}
@@ -264,10 +264,11 @@ func (h *handler) healthResponse(r *http.Request, m *engine.Model, i *engine.Ins
 	rep := wireHealth(h.visibleHealth(r, i), confirmedAt)
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
 	out.Report.Findings = nil // shadowed by out.Findings
+	l := h.linker(r, m, i)
 	for _, f := range rep.Findings {
 		d := FindingDTO{Finding: f}
 		if f.Resource != nil {
-			lr := h.linked(r, m, i, *f.Resource)
+			lr := l.linked(*f.Resource)
 			d.Resource = &lr
 		}
 		if !f.Restricted && !h.allVisible(r, f.Evidence) {
@@ -294,7 +295,7 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		return s
 	}
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
-	if h.link(r, p.Model, i, want) != LinkNone {
+	if h.linker(r, p.Model, i).link(want) != LinkNone {
 		if obj := object(p.Model, want); obj != nil {
 			// The body is the raw object, so the collection time travels in a header (D-017 §6).
 			w.Header().Set("Collected-At", wireTime(p.ConfirmedAt).Format(time.RFC3339Nano))

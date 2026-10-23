@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -77,6 +78,32 @@ func TestSnapshotContainsWatchedObjectsOnly(t *testing.T) {
 		if !s.Access[gvr].OK {
 			t.Errorf("%s must be reported in Access: %+v", gvr.Resource, s.Access[gvr])
 		}
+	}
+}
+
+// Each kind's objects are sorted by "namespace/name": readers binary-search
+// them. Names are chosen so that ordering by namespace then name, or by name,
+// differs from the key order.
+func TestSnapshotObjectsAreSortedByKey(t *testing.T) {
+	var objs []runtime.Object
+	for _, ns := range []string{"b", "a-x", "a", "c"} {
+		objs = append(objs, testutil.Namespace(ns, nil))
+		for i := range 8 {
+			objs = append(objs, testutil.HTTPRoute(ns, fmt.Sprintf("r%d", 7-i), nil))
+		}
+	}
+	c, _ := startCache(t, objs...)
+	hr := schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+	got := c.Snapshot().Objects[hr]
+	if len(got) != 32 {
+		t.Fatalf("%d routes, want 32", len(got))
+	}
+	if !slices.IsSortedFunc(got, func(a, b *unstructured.Unstructured) int { return strings.Compare(key(a), key(b)) }) {
+		keys := make([]string, 0, len(got))
+		for _, u := range got {
+			keys = append(keys, key(u))
+		}
+		t.Fatalf("not sorted by namespace/name: %v", keys)
 	}
 }
 

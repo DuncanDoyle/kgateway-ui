@@ -48,6 +48,8 @@ var (
 
 // Snapshot is an immutable view of the cache at TakenAt. Callers must not mutate it.
 type Snapshot struct {
+	// Objects lists each kind sorted by "namespace/name", so readers may
+	// binary-search it (pkg/api does).
 	Objects map[schema.GroupVersionResource][]*unstructured.Unstructured
 	// Access holds every served kind plus NamespacesGVR, PodsGVR and DeploymentsGVR.
 	Access      map[schema.GroupVersionResource]Access

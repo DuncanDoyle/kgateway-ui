@@ -15,29 +15,37 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 const base = "/api/v1/installs/kgw.kgateway"
 
-// linker computes links as the handler of a running engine does.
-type linker struct {
+// engineLinks computes links as the handler of a running engine does.
+type engineLinks struct {
 	e     *engine.Engine
 	authz Authorizer
 }
 
-func (l linker) link(t *testing.T, ref objects.Ref) Link {
+// install returns the current model and its kgw.kgateway install.
+func (l engineLinks) install(t *testing.T) (*engine.Model, *engine.InstallModel) {
 	t.Helper()
 	m := l.e.Current().Model
 	for k := range m.Installs {
 		if i := &m.Installs[k]; i.Resolved.ID() == "kgw.kgateway" {
-			h := &handler{src: l.e, authz: l.authz}
-			return h.link(httptest.NewRequest(http.MethodGet, "/", nil), m, i, ref)
+			return m, i
 		}
 	}
 	t.Fatal("install kgw.kgateway not found")
-	return ""
+	return nil, nil
+}
+
+func (l engineLinks) link(t *testing.T, ref objects.Ref) Link {
+	t.Helper()
+	m, i := l.install(t)
+	h := &handler{src: l.e, authz: l.authz}
+	return h.linker(httptest.NewRequest(http.MethodGet, "/", nil), m, i).link(ref)
 }
 
 // resourcePath is the resource endpoint path of ref.
@@ -126,7 +134,7 @@ func TestSpecNamedObjectsAreCandidates(t *testing.T) {
 		testutil.Backend("blog", "far", nil),
 		testutil.HTTPRoute("shop", "free", nil),
 	)...)
-	l := linker{e: e, authz: AllowAll{}}
+	l := engineLinks{e: e, authz: AllowAll{}}
 	for _, tc := range []struct {
 		ref  objects.Ref
 		want Link
@@ -149,7 +157,7 @@ func TestUnrelatedObjectIs404OnBothEndpoints(t *testing.T) {
 	foreign := testutil.GwRef("infra", "foreign")
 	objs := isolated(testutil.HTTPRoute("shop", "other", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other")))
 	e, srv, _ := startWith(t, setup{}, objs...)
-	l := linker{e: e, authz: AllowAll{}}
+	l := engineLinks{e: e, authz: AllowAll{}}
 	for _, ref := range []objects.Ref{
 		route("shop", "other"),
 		{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "foreign"},
@@ -189,7 +197,7 @@ func TestSecondStepIsNone(t *testing.T) {
 				}
 			}
 			e, srv, _ := startWith(t, setup{}, objs...)
-			l := linker{e: e, authz: AllowAll{}}
+			l := engineLinks{e: e, authz: AllowAll{}}
 			if got := l.link(t, route("shop", "c")); got != LinkDetail {
 				t.Fatalf("candidate C: link %s, want detail", got)
 			}
@@ -219,7 +227,7 @@ func TestHiddenReferrerIsNotAdmitted(t *testing.T) {
 		return ref != route("shop", "api") && ref != backendRef("blog", "denied")
 	})
 	e, srv, _ := startWith(t, setup{authz: authz}, objs...)
-	l := linker{e: e, authz: authz}
+	l := engineLinks{e: e, authz: authz}
 	for _, tc := range []struct {
 		ref  objects.Ref
 		want Link
@@ -234,11 +242,22 @@ func TestHiddenReferrerIsNotAdmitted(t *testing.T) {
 		}
 	}
 	get[map[string]any](t, srv, resourcePath(backendRef("blog", "both")), 200)
-	ds, db := raw(t, srv, resourcePath(backendRef("blog", "denied")))
-	as, ab := raw(t, srv, resourcePath(backendRef("blog", "absent")))
-	fs, fb := raw(t, srv, resourcePath(backendRef("blog", "far")))
-	if ds != 404 || as != ds || fs != ds || !bytes.Equal(db, ab) || !bytes.Equal(fb, ab) {
-		t.Fatalf("denied %d %s, absent %d %s, hidden referrer %d %s: want identical 404s", ds, db, as, ab, fs, fb)
+	// The full wire form (status, client-read headers, body) is identical.
+	denied := wire(t, srv, resourcePath(backendRef("blog", "denied")))
+	absent := wire(t, srv, resourcePath(backendRef("blog", "absent")))
+	hidden := wire(t, srv, resourcePath(backendRef("blog", "far")))
+	if !bytes.Equal(denied, absent) || !bytes.Equal(hidden, absent) {
+		t.Fatalf("want identical 404s:\ndenied %s\nabsent %s\nhidden referrer %s", denied, absent, hidden)
+	}
+	var w struct {
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.Unmarshal(absent, &w); err != nil {
+		t.Fatal(err)
+	}
+	if w.Status != 404 || w.Headers["Content-Type"] != "application/json" || w.Headers["Collected-At"] != "" {
+		t.Fatalf("a 404 is JSON without Collected-At: %s", absent)
 	}
 }
 
@@ -274,5 +293,64 @@ func TestFindingEvidenceOnHiddenParentIsRestricted(t *testing.T) {
 	}
 	if strings.Contains(string(b), "api") {
 		t.Fatalf("the finding names the hidden parent: %s", b)
+	}
+}
+
+// For every object in the snapshot, and refs to absent and never-served
+// objects, under a restricting Authorizer: link is not none exactly when the
+// resource endpoint returns 200, and detail only on a kind with a detail view.
+func TestLinkAgreesWithResourceEndpoint(t *testing.T) {
+	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	foreign := testutil.GwRef("infra", "foreign")
+	objs := world(
+		withBackendRefs(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), toBackend("blog", "far"), toBackend("shop", "denied")),
+		withBackendRefs(testutil.HTTPRoute("shop", "cart2", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), toBackend("blog", "both"), toBackend("blog", "gone")),
+		testutil.WithRules(testutil.HTTPRoute("shop", "c", []objects.ParentRef{api}), map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "d")}}),
+		testutil.HTTPRoute("blog", "d", []objects.ParentRef{foreign}),
+		testutil.HTTPRoute("shop", "free", nil),
+		testutil.HTTPRoute("shop", "lost", []objects.ParentRef{testutil.GwRef("infra", "missing")}),
+		testutil.HTTPRoute("shop", "other", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other")),
+		testutil.ListenerSet("infra", "ls", gw, nil),
+		testutil.Backend("blog", "far", nil), testutil.Backend("blog", "both", nil), testutil.Backend("shop", "denied", nil), testutil.Backend("shop", "idle", nil),
+	)
+	authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
+		return ref != route("shop", "api") && ref != backendRef("shop", "denied") && ref != route("blog", "posts")
+	})
+	e, srv, _ := startWith(t, setup{authz: authz}, objs...)
+	l := engineLinks{e: e, authz: authz}
+	m, i := l.install(t)
+	detail := map[objects.GroupKind]bool{}
+	for _, gk := range explore.DetailKinds(m.Served) {
+		detail[gk] = true
+	}
+	// blog/gone is named by a visible owned route but does not exist.
+	refs := []objects.Ref{backendRef("blog", "gone"), backendRef("blog", "absent"), route("shop", "absent"), {Kind: "Service", Namespace: "shop", Name: "svc"}}
+	for _, us := range m.Snapshot.Objects {
+		for _, u := range us {
+			refs = append(refs, objects.RefOf(u))
+		}
+	}
+	for _, d := range m.Snapshot.Deployments {
+		refs = append(refs, objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name})
+	}
+	seen := map[Link]int{}
+	for _, ref := range refs {
+		got := l.link(t, ref)
+		seen[got]++
+		status, _ := raw(t, srv, resourcePath(ref))
+		if (got != LinkNone) != (status == 200) {
+			t.Errorf("%s %s: link %s, resource endpoint %d", ref.Kind, ref, got, status)
+		}
+		gk := objects.GroupKind{Group: ref.Group, Kind: ref.Kind}
+		if got == LinkDetail && !detail[gk] {
+			t.Errorf("%s %s: detail on a kind without a detail view", ref.Kind, ref)
+		}
+		// A detail kind opens as YAML only as a no-parent row.
+		if a, _ := i.Index.Admission(ref); got == LinkYAML && detail[gk] && !a.NoParent {
+			t.Errorf("%s %s: yaml on a detail kind that is not a no-parent row", ref.Kind, ref)
+		}
+	}
+	if seen[LinkNone] == 0 || seen[LinkYAML] == 0 || seen[LinkDetail] == 0 {
+		t.Fatalf("the fixture must produce every link: %v", seen)
 	}
 }
