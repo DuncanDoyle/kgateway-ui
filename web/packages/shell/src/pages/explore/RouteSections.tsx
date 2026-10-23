@@ -1,38 +1,26 @@
 import styled from "@emotion/styled";
 import { useMemo, useState } from "react";
 import { useRoutes } from "../../api/exploreHooks";
-import type { Attachment, LinkedRef, RouteCounts, RouteRow } from "../../api/types";
+import type { Attachment, LinkedRef, ParentSummary, RouteCounts, RouteRow } from "../../api/types";
 import { columnCopy, gatewayCopy } from "../../copy/explorer";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { Chip } from "../../states/controls";
 import { expectedRows, refParam, Section, SubList } from "./detailParts";
-import { attachmentLabel, Muted, NameCell } from "./listParts";
+import { attachmentLabel, Muted, NameCell, OneLine } from "./listParts";
 
 // region Styles
-const Why = styled.ul`
-  margin: 0;
-  padding: 0;
-  list-style: none;
+const Why = styled.span`
   font-size: ${(p) => p.theme.font.size.sm};
-  li + li {
-    margin-top: 4px;
-  }
-  .label {
-    white-space: nowrap;
-  }
-  /* A whole code moves to the next line rather than breaking mid-word. */
   .reason {
-    display: inline-block;
     margin-left: 6px;
     font-family: ${(p) => p.theme.font.mono};
     font-size: ${(p) => p.theme.font.size.code};
     color: ${(p) => p.theme.color.textMuted};
   }
   .message {
-    display: block;
+    margin-left: 6px;
     color: ${(p) => p.theme.color.textMuted};
-    overflow-wrap: anywhere;
   }
 `;
 
@@ -65,32 +53,44 @@ function baseColumns(installId: string): ObjectColumn<RouteRow>[] {
       header: columnCopy.hostnames,
       width: "22%",
       secondary: true,
-      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>{columnCopy.inherited}</Muted>),
+      cell: (r) =>
+        r.hostnames.length ? <OneLine text={r.hostnames.join(", ")} /> : <Muted>{columnCopy.inherited}</Muted>,
     },
   ];
 }
 
-/** Why the route did not attach to parent: the deciding condition's reason as written, and its message. */
+/** Why the route did not attach to parent: the deciding condition's reason as written, and its message, on one line. */
 function whyColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
   return {
     id: "why",
     header: columnCopy.why,
     width: "34%",
-    cell: (r) => (
-      <Why>
-        {r.parents
-          .filter((p) => same(p.ref, parent) || same(p.via, parent))
-          .map((p) => (
-            <li key={[p.ref.kind, p.ref.namespace, p.ref.name, p.sectionName, p.port].join("/")}>
-              <span className="label">{attachmentLabel[p.attachment]}</span>
-              {p.sectionName ? <Muted> · {p.sectionName}</Muted> : null}
-              {/* A reason without a condition type is ours, not the controller's: never shown as a code. */}
-              {p.conditionType && p.reason ? <span className="reason">{p.reason}</span> : null}
-              {p.conditionType && p.message ? <span className="message">{p.message}</span> : null}
-            </li>
-          ))}
-      </Why>
-    ),
+    cell: (r) => {
+      const ps = r.parents.filter((p) => same(p.ref, parent) || same(p.via, parent));
+      // A reason without a condition type is ours, not the controller's: never shown as a code.
+      const parts = (p: ParentSummary) =>
+        [
+          attachmentLabel[p.attachment],
+          p.sectionName ? `· ${p.sectionName}` : "",
+          p.conditionType ? (p.reason ?? "") : "",
+          p.conditionType ? (p.message ?? "") : "",
+        ].filter(Boolean);
+      return (
+        <OneLine text={ps.map((p) => parts(p).join(" ")).join("; ")} placement="end">
+          <Why>
+            {ps.map((p, i) => (
+              <span key={[p.ref.kind, p.ref.namespace, p.ref.name, p.sectionName, p.port].join("/")}>
+                {i ? "; " : null}
+                {attachmentLabel[p.attachment]}
+                {p.sectionName ? <Muted> · {p.sectionName}</Muted> : null}
+                {p.conditionType && p.reason ? <span className="reason">{p.reason}</span> : null}
+                {p.conditionType && p.message ? <span className="message">{p.message}</span> : null}
+              </span>
+            ))}
+          </Why>
+        </OneLine>
+      );
+    },
   };
 }
 const rowRef = (r: RouteRow) => r.ref;

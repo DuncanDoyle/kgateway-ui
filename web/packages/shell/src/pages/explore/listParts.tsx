@@ -1,5 +1,6 @@
 import { css } from "@emotion/react";
 import styled from "@emotion/styled";
+import type { ReactNode } from "react";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
 import type { Attachment, LinkedRef, Page } from "../../api/types";
@@ -19,11 +20,24 @@ export const wrapName = css`
   white-space: normal;
   overflow-wrap: anywhere;
 `;
-/** The Tooltip wrapper around a truncated name: it fills the cell so the name can shrink. */
+/** The Tooltip wrapper around a truncated cell: it fills the cell so the content can shrink. */
 export const nameTip = css`
   display: flex;
   max-width: 100%;
   min-width: 0;
+`;
+/** A cell's content on one line, cut with an ellipsis; focusable so its Tooltip is keyboard-reachable. */
+const Line = styled.span`
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border-radius: ${(p) => p.theme.radius.sm};
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
 `;
 export const Muted = styled.span`
   color: ${(p) => p.theme.color.textMuted};
@@ -63,14 +77,26 @@ export function useShownPage<T extends { health: HealthState }>(
   return { ...page, items: page.items.map((r) => ({ ...r, health: "unknown" as const })) };
 }
 
-/** A table's name cell: one truncated line, the full name in a keyboard-reachable tooltip (design §8.7). */
+/** Table cells hold one line: content is cut with an ellipsis and the full text is in a Tooltip (design §8.7). */
+export function OneLine({ text, children, placement }: { text: string; children?: ReactNode; placement?: "end" }) {
+  return (
+    <Tooltip label={text} wrap placement={placement} stylesOverride={nameTip}>
+      <Line tabIndex={0}>{children ?? text}</Line>
+    </Tooltip>
+  );
+}
+
+/** A name cell: OneLine, with the name's own link as the focusable element. */
 export function NameCell({ r, installId }: { r: LinkedRef; installId: string }) {
   return (
-    <Tooltip label={r.namespace ? `${r.namespace}/${r.name}` : r.name} stylesOverride={nameTip}>
+    <Tooltip label={refText(r)} stylesOverride={nameTip}>
       <LinkedName refValue={r} installId={installId} truncate />
     </Tooltip>
   );
 }
+
+/** namespace/name, or name for a cluster-scoped object. */
+export const refText = (r: { namespace?: string; name: string }) => (r.namespace ? `${r.namespace}/${r.name}` : r.name);
 
 // region Component
 interface FiltersProps {

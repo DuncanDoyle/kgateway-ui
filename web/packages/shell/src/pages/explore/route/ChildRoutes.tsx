@@ -7,7 +7,7 @@ import type { ObjectColumn } from "../../../explore/ObjectTable";
 import { HealthBadge } from "../../../health/HealthBadge";
 import { TextButton } from "../../../states/controls";
 import { expectedRows, refParam, Section, SubList } from "../detailParts";
-import { Muted, NameCell } from "../listParts";
+import { Muted, NameCell, OneLine } from "../listParts";
 
 // region Styles
 const Toggle = styled(TextButton)`
@@ -27,7 +27,8 @@ function columns(installId: string): ObjectColumn<RouteRow>[] {
       header: columnCopy.hostnames,
       width: "24%",
       secondary: true,
-      cell: (r) => (r.hostnames.length ? r.hostnames.join(", ") : <Muted>{columnCopy.inherited}</Muted>),
+      cell: (r) =>
+        r.hostnames.length ? <OneLine text={r.hostnames.join(", ")} /> : <Muted>{columnCopy.inherited}</Muted>,
     },
   ];
 }

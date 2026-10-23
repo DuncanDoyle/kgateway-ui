@@ -7,7 +7,7 @@ import { ListFrame } from "../../explore/ListFrame";
 import { useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
-import { ListFilters, Muted, NameCell, useShownPage } from "./listParts";
+import { ListFilters, Muted, NameCell, OneLine, useShownPage } from "./listParts";
 
 // region Helpers
 const NOUN = ["Gateway", "Gateways"] as const;
@@ -28,7 +28,7 @@ function columns(installId: string): ObjectColumn<GatewayListRow>[] {
       sortKey: "name",
       cell: (r) => <NameCell r={r.ref} installId={installId} />,
     },
-    { id: "class", header: columnCopy.class, width: "14%", secondary: true, cell: (r) => r.class },
+    { id: "class", header: columnCopy.class, width: "14%", secondary: true, cell: (r) => <OneLine text={r.class} /> },
     { id: "listeners", header: columnCopy.listeners, width: "100px", cell: (r) => r.listeners },
     { id: "attachedRoutes", header: columnCopy.attachedRoutes, width: "140px", cell: (r) => r.attachedRoutes },
     { id: "notAccepted", header: columnCopy.notAccepted, width: "120px", secondary: true, cell: (r) => r.notAccepted },
@@ -44,7 +44,7 @@ function columns(installId: string): ObjectColumn<GatewayListRow>[] {
       header: columnCopy.addresses,
       width: "18%",
       secondary: true,
-      cell: (r) => (r.addresses.length ? r.addresses.join(", ") : <Muted>{columnCopy.none}</Muted>),
+      cell: (r) => (r.addresses.length ? <OneLine text={r.addresses.join(", ")} /> : <Muted>{columnCopy.none}</Muted>),
     },
   ];
 }

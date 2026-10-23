@@ -151,7 +151,10 @@ type Box = { x: number; y: number; width: number; height: number };
 type Layout = { footer: Box | null; next: Box | null; rows: number[] };
 
 /** Holds every list response until release is called; detail and YAML requests pass. limit sets the page size. */
-async function holdLists(page: Page, limit?: number): Promise<() => void> {
+async function holdLists(
+  page: Page,
+  opts: { limit?: number; mutate?: (u: URL, body: ListPage<RouteRow>) => void } = {},
+): Promise<() => void> {
   let release = () => {};
   const gate = new Promise<void>((r) => {
     release = r;
@@ -161,12 +164,22 @@ async function holdLists(page: Page, limit?: number): Promise<() => void> {
     async (route) => {
       await gate;
       const u = new URL(route.request().url());
-      if (limit) u.searchParams.set("limit", String(limit));
-      await route.continue({ url: u.toString() });
+      if (opts.limit) u.searchParams.set("limit", String(opts.limit));
+      const res = await route.fetch({ url: u.toString() });
+      const body = await res.json();
+      opts.mutate?.(u, body);
+      await route.fulfill({ response: res, json: body });
     },
   );
   return release;
 }
+
+/** A failed route's message longer than any font fits on one line of the Why column. */
+const LONG_MESSAGE = `${"The controller wrote a long message for this route that no column can hold on one line. ".repeat(4)}`;
+const longMessage = (u: URL, body: ListPage<RouteRow>) => {
+  if (u.searchParams.get("attachment") !== "not-accepted") return;
+  for (const r of body.items) for (const p of r.parents) if (p.conditionType) p.message = LONG_MESSAGE;
+};
 
 /** The table's footer, the element after its section and its row heights; boxes in page coordinates. */
 function measure(table: Locator): Promise<Layout> {
@@ -301,7 +314,7 @@ for (const width of [1280, 720]) {
     });
 
     test("Gateway sub-tables do not move when their rows load", async ({ page }) => {
-      const release = await holdLists(page);
+      const release = await holdLists(page, { mutate: longMessage });
       await page.goto(`${install}/gateways/infra/edge`);
       await expect(page.getByTestId("detail-header")).toBeVisible();
       await expectStableLayout(page, release, [
@@ -309,6 +322,10 @@ for (const width of [1280, 720]) {
         gatewayCopy.attachedRoutes,
         gatewayCopy.notAttached,
       ]);
+      // The injected long message is on screen, so the one-line rule was exercised.
+      await expect(page.getByRole("table", { name: gatewayCopy.notAttached, exact: true })).toContainText(
+        "no column can hold",
+      );
       const attached = page.getByRole("table", { name: gatewayCopy.attachedRoutes, exact: true });
       await expect(attached.getByRole("link", { name: LONG })).toBeVisible();
       await shot(page, `layout-gateway-${width}`);
@@ -330,7 +347,7 @@ for (const width of [1280, 720]) {
 
     test("a full routes page keeps its footer in place, long name included", async ({ page }) => {
       // A page of eight fills the list's eight skeleton rows; the long name sorts first in shop.
-      const release = await holdLists(page, 8);
+      const release = await holdLists(page, { limit: 8 });
       await page.goto(`${install}/routes?namespace=shop`);
       await expectStableLayout(page, release, [listCopy.routes.title]);
       const table = page.getByRole("table", { name: listCopy.routes.title, exact: true });

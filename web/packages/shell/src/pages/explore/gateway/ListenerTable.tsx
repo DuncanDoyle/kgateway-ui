@@ -10,11 +10,10 @@ import { HealthIcon } from "../../../health/HealthIcon";
 import { StaleView } from "../../../health/staleView";
 import { stateLabel } from "../../../health/state";
 import { ResourceName } from "../../../resource/ResourceName";
-import { Tooltip } from "../../../shell/Tooltip";
 import { useMedia } from "../../../shell/useMedia";
 import { VisuallyHidden } from "../../../states/VisuallyHidden";
 import type { HealthState } from "../../../theme/tokens";
-import { Muted, nameTip, wrapName } from "../listParts";
+import { Muted, OneLine, refText, wrapName } from "../listParts";
 
 // region Styles
 const State = styled.span`
@@ -24,19 +23,10 @@ const State = styled.span`
 `;
 const tableExtra = css`
   .failing {
-    display: block;
     font-size: 0.85em;
   }
   dl.spec {
     margin-bottom: 12px;
-  }
-  /* A listener name never breaks mid-word: it truncates, with the full name as a tooltip. */
-  .name {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
   }
 `;
 
@@ -99,6 +89,30 @@ const allowed = (l: Listener): ReactNode => (
   </>
 );
 
+/** A cell's text, for its Tooltip and one-line form. */
+const tlsText = (l: Listener) =>
+  l.tls ? [l.tls.mode, ...l.tls.certificateRefs.map((c) => refText(c))].join(" · ") : columnCopy.none;
+const allowedText = (l: Listener) =>
+  `${namespacesText(l.allowedRoutes)} · ${
+    l.allowedRoutes.kinds.length ? l.allowedRoutes.kinds.map((k) => k.kind).join(", ") : listenerCopy.defaultKinds
+  }`;
+
+/** The listener's state, and its failing conditions unless stale (then they stay on expand), on one line. */
+function StateCell({ l, stale }: { l: Listener; stale: boolean }) {
+  const s = listenerState(l);
+  const label = l.status ? stateLabel(stale ? "unknown" : s.state) : listenerCopy.noStatus;
+  const failing = s.failing.length && !stale ? s.failing.join(", ") : "";
+  return (
+    <OneLine text={failing ? `${label} · ${failing}` : label}>
+      <State>
+        <HealthIcon state={s.state} />
+        {label}
+      </State>
+      {failing ? <Muted className="failing"> · {failing}</Muted> : null}
+    </OneLine>
+  );
+}
+
 // region Component
 interface ListenerTableProps {
   listeners: Listener[];
@@ -154,7 +168,6 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
         </thead>
         <tbody>
           {listeners.map((l) => {
-            const s = listenerState(l);
             const isOpen = open.has(l.name);
             return (
               <Fragment key={l.name}>
@@ -175,26 +188,24 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                     </button>
                   </td>
                   <td>
-                    <State>
-                      <HealthIcon state={s.state} />
-                      {l.status ? stateLabel(stale ? "unknown" : s.state) : listenerCopy.noStatus}
-                    </State>
-                    {/* Stale: the state only, as list rows show it; the conditions stay on expand. */}
-                    {s.failing.length && !stale ? <Muted className="failing">{s.failing.join(", ")}</Muted> : null}
+                    <StateCell l={l} stale={stale} />
                   </td>
                   <td>
-                    {/* Truncated names: the full name is in an app tooltip, reachable by keyboard when narrow. */}
-                    <Tooltip label={l.name} stylesOverride={nameTip}>
-                      <span className="name" tabIndex={narrow ? 0 : undefined}>
-                        {l.name}
-                      </span>
-                    </Tooltip>
+                    <OneLine text={l.name} />
                   </td>
                   <td>{l.port ?? <Muted>{listenerCopy.notSet}</Muted>}</td>
                   <td>{l.protocol}</td>
-                  {narrow ? null : <td>{hostname(l)}</td>}
-                  {narrow ? null : <td>{tls(l)}</td>}
-                  {narrow ? null : <td>{allowed(l)}</td>}
+                  {narrow ? null : <td>{l.hostname ? <OneLine text={l.hostname} /> : hostname(l)}</td>}
+                  {narrow ? null : (
+                    <td>
+                      <OneLine text={tlsText(l)} />
+                    </td>
+                  )}
+                  {narrow ? null : (
+                    <td>
+                      <OneLine text={allowedText(l)} />
+                    </td>
+                  )}
                   <td>{l.status ? l.status.attachedRoutes : <Muted>{listenerCopy.notReported}</Muted>}</td>
                 </tr>
                 {isOpen ? (

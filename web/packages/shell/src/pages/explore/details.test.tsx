@@ -111,10 +111,10 @@ it("Gateway page shows status-only listener counts", async () => {
   expect(within(fresh).getByText("No status")).toBeInTheDocument();
   expect(within(fresh).getByText("Not reported")).toBeInTheDocument();
   expect(within(rowOf(listeners, "http")).getByText("Any hostname")).toBeInTheDocument();
-  expect(within(rowOf(listeners, "http")).getByText("Namespaces with team=a")).toBeInTheDocument();
+  expect(within(rowOf(listeners, "http")).getByText(/^Namespaces with team=a · /)).toBeInTheDocument();
   // Certificates are names as text: Secrets never link.
   const https = rowOf(listeners, "https");
-  expect(within(https).getByText("Terminate")).toBeInTheDocument();
+  expect(within(https).getByText(/^Terminate · /)).toBeInTheDocument();
   expect(within(https).queryByRole("link")).toBeNull();
   expect(https).toHaveTextContent("infra/edge-cert");
   // Gateway conditions: icon and text, the reason as written.
@@ -156,7 +156,7 @@ it("stale ListenerSet data turns every state on the page unknown", async () => {
   // Like a list row, a stale listener row shows only its state; the conditions stay on expand.
   const extra = rowOf(table("Listeners"), "extra");
   expect(within(extra).getByText("Unknown")).toBeInTheDocument();
-  expect(within(extra).queryByText("Programmed: False")).toBeNull();
+  expect(within(extra).queryByText(/Programmed: False/)).toBeNull();
 });
 
 it("a failed poll turns states unknown, keeps the notice's error icon, and fresh data restores them", async () => {
@@ -281,6 +281,13 @@ it("failed-route table has Not accepted, Waiting for status and Namespace not wa
   // The deciding condition's reason as written, for this Gateway's parent entry.
   const failed = table("Routes not attached");
   expect(within(rowOf(failed, "rejected")).getByText("NotAllowedByListeners")).toBeInTheDocument();
+  // The Why cell is one line; its full text is in the Tooltip, on keyboard focus.
+  const why = within(rowOf(failed, "rejected")).getByText("NotAllowedByListeners").closest("[tabindex]") as HTMLElement;
+  expect([getComputedStyle(why).whiteSpace, getComputedStyle(why).textOverflow]).toEqual(["nowrap", "ellipsis"]);
+  for (let i = 0; i < 80 && document.activeElement !== why; i++) await userEvent.tab();
+  expect(why).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent("NotAllowedByListeners no listener allows this kind");
+  why.blur();
   // A pending reason is ours, not the controller's: it is never shown as a code.
   expect(within(failed).queryByText("no status from the controller")).toBeNull();
   await userEvent.click(within(group).getByRole("button", { name: /Waiting for status/ }));
@@ -371,7 +378,7 @@ it("an accepted ListenerSet shows no allowed-listeners block", async () => {
   expect(screen.queryByTestId("allowed-listeners")).toBeNull();
   // The accepted set's invalid listener shows its condition on expand, reason as written.
   const row = rowOf(listeners, "extra");
-  expect(within(row).getByText("Programmed: False")).toBeInTheDocument();
+  expect(within(row).getByText(/Programmed: False/)).toBeInTheDocument();
   await userEvent.click(within(row).getByRole("button", { name: "Show conditions for listener extra" }));
   const details = screen.getByTestId("listener-extra-details");
   expect(within(details).getByTestId("condition-Programmed")).toHaveTextContent("PortUnavailable");
