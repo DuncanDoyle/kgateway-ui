@@ -1,0 +1,28 @@
+# Phase 1 compute baseline (sub-phase 2.1, Task 2): warm Compute per iteration over scale.Snapshot(tier, 1)
+# engine code: 97665d7 (Phase 1 engine; only the benchmark files are new)
+# go version go1.27.3 darwin/arm64
+# cpu: Apple M5 Max, machine: Darwin arm64, 18 CPUs, 64 GiB
+# load before: 11:02  up 2 days,  2:11, 15 users, load averages: 3.80 4.20 4.00
+# command: go test -run '^$' -bench BenchmarkCompute -benchmem -count 5 ./pkg/engine
+goos: darwin
+goarch: arm64
+pkg: github.com/DuncanDoyle/kgateway-ui/pkg/engine
+cpu: Apple M5 Max
+BenchmarkCompute/typical-18         	     147	   8070315 ns/op	 4601488 B/op	  133625 allocs/op
+BenchmarkCompute/typical-18         	     146	   8121951 ns/op	 4600506 B/op	  133624 allocs/op
+BenchmarkCompute/typical-18         	     148	   8126350 ns/op	 4598098 B/op	  133624 allocs/op
+BenchmarkCompute/typical-18         	     148	   8107936 ns/op	 4601185 B/op	  133625 allocs/op
+BenchmarkCompute/typical-18         	     146	   8126490 ns/op	 4598196 B/op	  133624 allocs/op
+BenchmarkCompute/large-18           	      32	  36563634 ns/op	21717475 B/op	  599096 allocs/op
+BenchmarkCompute/large-18           	      32	  36586566 ns/op	21720494 B/op	  599099 allocs/op
+BenchmarkCompute/large-18           	      32	  36714940 ns/op	21710915 B/op	  599096 allocs/op
+BenchmarkCompute/large-18           	      32	  36336424 ns/op	21719336 B/op	  599098 allocs/op
+BenchmarkCompute/large-18           	      32	  36930103 ns/op	21718985 B/op	  599098 allocs/op
+BenchmarkCompute/extreme-18         	       8	 131208958 ns/op	77204995 B/op	 2111658 allocs/op
+BenchmarkCompute/extreme-18         	       8	 130679021 ns/op	77209263 B/op	 2111657 allocs/op
+BenchmarkCompute/extreme-18         	       8	 132426745 ns/op	77189881 B/op	 2111653 allocs/op
+BenchmarkCompute/extreme-18         	       8	 131837917 ns/op	77206866 B/op	 2111658 allocs/op
+BenchmarkCompute/extreme-18         	       8	 132979391 ns/op	77193184 B/op	 2111653 allocs/op
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	18.596s
+# load after: 11:02  up 2 days,  2:11, 15 users, load averages: 4.13 4.25 4.03
