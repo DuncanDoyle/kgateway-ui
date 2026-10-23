@@ -255,7 +255,7 @@ The empty-list fallback matches kgateway, which allows implicit attachment only 
 
 **Declared candidate.** A current `spec.parentRefs` entry of C resolves to an HTTPRoute P owned by I, C's namespace is in I's scope, and C has **no eligible status entry** for P, current or stale. C is a diagnostic candidate only: never a child, never in Child routes or the up-chain, never makes a `name` ref "reported", not counted unless owned another way. It gets KGWUI-011 (§6.2).
 
-**Out-of-scope routes are never candidates.** A route outside I's scope whose parentRef names a route of I gets KGWUI-004 only (`assign.go:181-186`). It never gets KGWUI-011, never enters a computed view, and never makes the resource-status check pending.
+**Out-of-scope routes are never candidates.** A route outside I's scope whose parentRef names a route of I, or whose empty parentRefs list carries a status entry from I's controllers naming a route of I (an implicit child, eligibility condition 3), gets KGWUI-004 only (`assign.go:181-186`); one finding per (install, route) (our call, 2.2). It never gets KGWUI-011, never enters a computed view, and never makes the resource-status check pending.
 
 **Ownership rules.**
 - A breadth-first pass starts at Gateway-attached HTTPRoutes and follows **reported edges only**, over a reverse index built once per recompute. A visited set stops cycles. Cost is linear in routes plus edges.
