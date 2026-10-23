@@ -360,3 +360,14 @@ No new P1, P3 or P4 findings.
 ## Re-review 3 (scoped, Codex, diff 226e974..c62211a)
 
 M1, M2 and M3 resolved; no new findings at P1–P4.
+
+## Re-review 4 (scoped, Codex, diff e334c7a..9ffb5ef: user answers and the Q15 orphan rule)
+
+1. P2 — owned-parent completeness cannot prove "serves traffic nowhere"; another install's parent can select an empty-parentRefs route (`utils/delegation/delegation.go:25-27` at both tags).
+2. P2 — the §9.3 orphan predicate was broader than the approved trigger (admitted complete `cycle`/`unresolved` outcomes and name/label selection).
+Codex confirmed an empty-parentRefs route never attaches unless a parent selects it (`query/query.go:187-196` at both tags).
+
+| # | Finding | Source | Decision | Note |
+|---|---|---|---|---|
+| O1 | Orphan conclusion not install-local | reviewer | accept | Fixed in 1f85d9d: install-local completeness and conclusion; reworded detail draft. |
+| O2 | Orphan predicate broader than approved | reviewer | accept | Fixed in 1f85d9d: wildcard-only selection and every outcome dropped or forbidden; two tests added. |
