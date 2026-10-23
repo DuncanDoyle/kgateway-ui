@@ -280,8 +280,8 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 			len(q.Kinds) > 0 && !slices.Contains(q.Kinds, gk) ||
 			backends != nil && !backends[id] ||
 			q.States != 0 && r.Flags&q.States == 0 ||
-			q.Attachment != "" && !hasAttachment(r, *q.Parent, q.Attachment) ||
-			visible != nil && !visible(r.Ref) {
+			visible != nil && !visible(r.Ref) ||
+			q.Parent != nil && (q.Attachment != "" || visible != nil) && !ix.Under(id, *q.Parent, q.Attachment, visible) {
 			continue
 		}
 		es = append(es, entry{id: id, ref: r.Ref, v: sortVal{group: r.Ref.Group, kind: r.Ref.Kind, n: healthRank(r.State)}})
@@ -304,12 +304,22 @@ func checkAttachment(parent *objects.Ref, a Attachment) error {
 	return nil
 }
 
-// hasAttachment reports whether r links parent, directly or through a
-// ListenerSet, with attachment a.
-func hasAttachment(r *RouteRow, parent objects.Ref, a Attachment) bool {
-	return slices.ContainsFunc(r.Parents, func(l ParentLink) bool {
-		return l.Attachment == a && (l.Target == parent || l.Via != nil && *l.Via == parent)
-	})
+// Under reports whether route row id is listed under parent with
+// attachment a, or any attachment when a is "". A link through a
+// ListenerSet counts only when visible admits the ListenerSet, whose spec
+// names the Gateway (design §7.4 rule 3); nil admits every one.
+func (ix *Index) Under(id RowID, parent objects.Ref, a Attachment, visible func(objects.Ref) bool) bool {
+	r := &ix.Routes[id]
+	for _, l := range r.Parents {
+		if a != "" && l.Attachment != a {
+			continue
+		}
+		if l.Target == parent || l.Via != nil && *l.Via == parent && (visible == nil || visible(l.Target)) {
+			return true
+		}
+	}
+	// A reported edge lists a child under its HTTPRoute parent.
+	return a == "" && slices.Contains(r.ParentRoutes, parent)
 }
 
 // routeOnly rejects the route filters on another list.
@@ -352,16 +362,17 @@ func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, 
 // value. §7.3 makes the column a 2.3 field without fixing its set; until 2.3
 // it is every route listed under the Gateway (Routes, which include
 // not-accepted, pending and unwatched rows and routes through its
-// ListenerSets) that visible admits (§7.4 rule 5), which is the Total of
+// ListenerSets) that visible admits (§7.4 rule 5), through visible
+// ListenerSets only (Under), which is the Total of
 // QueryRoutes with that Gateway as Parent. nil admits every route.
 func (ix *Index) GatewayRouteCount(id RowID, visible func(objects.Ref) bool) int {
-	ids := ix.Gateways[id].Routes
+	g := &ix.Gateways[id]
 	if visible == nil {
-		return len(ids)
+		return len(g.Routes)
 	}
 	n := 0
-	for _, id := range ids {
-		if visible(ix.Routes[id].Ref) {
+	for _, rid := range g.Routes {
+		if visible(ix.Routes[rid].Ref) && ix.Under(rid, g.Ref, "", visible) {
 			n++
 		}
 	}

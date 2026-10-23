@@ -215,7 +215,11 @@ func TestGatewaysSortByVisibleRoutes(t *testing.T) {
 	gref := func(name string) objects.Ref {
 		return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: name}
 	}
-	ix := hand(hr("a", ""), hr("b", ""), hr("c", ""))
+	under := func(r RouteRow, gw string) RouteRow {
+		r.Parents = []ParentLink{{Target: gref(gw), Attachment: AttachmentAccepted}}
+		return r
+	}
+	ix := hand(under(hr("a", ""), "g1"), under(hr("b", ""), "g1"), under(hr("c", ""), "g2"))
 	ix.Gateways = []GatewayRow{{Ref: gref("g1"), Routes: []RowID{0, 1}}, {Ref: gref("g2"), Routes: []RowID{2}}, {Ref: gref("g3")}}
 	hideAB := func(r objects.Ref) bool { return r.Kind == "Gateway" || r.Name == "c" }
 	for _, tc := range []struct {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -115,13 +116,13 @@ func TestListParamsAndErrors(t *testing.T) {
 		"cursor=garbage", "cursor=" + one.Next + "&sort=health", "listener=https", "unknown=1", "q=a&q=b",
 		"parent=gateway.networking.k8s.io/Gateway/infra", "kind=HTTPRoute", "sort=routes",
 	} {
-		get[ErrorResponse](t, srv, listBase+"/routes?"+q, 400)
+		getErr(t, srv, listBase+"/routes?"+q, 400)
 	}
 	for _, q := range []string{"kind=gateway.networking.k8s.io/HTTPRoute", "state=pending", "parent=gateway.networking.k8s.io/Gateway/infra/edge", "backend=core/Service/shop/x"} {
-		get[ErrorResponse](t, srv, listBase+"/gateways?"+q, 400)
+		getErr(t, srv, listBase+"/gateways?"+q, 400)
 	}
-	get[ErrorResponse](t, srv, listBase+"/listenersets?parent=gateway.networking.k8s.io/HTTPRoute/shop/cart", 400)
-	get[ErrorResponse](t, srv, listBase+"/listenersets?state=pending", 400)
+	getErr(t, srv, listBase+"/listenersets?parent=gateway.networking.k8s.io/HTTPRoute/shop/cart", 400)
+	getErr(t, srv, listBase+"/listenersets?state=pending", 400)
 	// Valid values of every parameter.
 	for _, path := range []string{
 		"/routes?sort=health.desc&health=healthy&health=error&namespace=shop&namespace=blog&q=R0&kind=gateway.networking.k8s.io/HTTPRoute&state=accepted&state=pending&limit=200",
@@ -130,16 +131,36 @@ func TestListParamsAndErrors(t *testing.T) {
 		get[map[string]any](t, srv, listBase+path, 200)
 	}
 	for _, l := range []string{"routes", "gateways", "listenersets"} {
-		get[ErrorResponse](t, srv, "/api/v1/installs/nope/"+l, 404)
+		getErr(t, srv, "/api/v1/installs/nope/"+l, 404)
 	}
 	unsynced := httptest.NewServer(NewHandler(staticModel{&engine.Model{Snapshot: &cache.Snapshot{}}}, fstest.MapFS{}, nil))
 	t.Cleanup(unsynced.Close)
 	for _, l := range []string{"routes", "gateways", "listenersets"} {
-		get[ErrorResponse](t, unsynced, listBase+"/"+l, 503)
+		getErr(t, unsynced, listBase+"/"+l, 503)
 	}
 	if b := wire(t, srv, listBase+"/routes?limit=0"); !bytes.Contains(b, []byte(`"error": "bad query: limit`)) {
 		t.Fatalf("a 400 carries the error shape:\n%s", b)
 	}
+}
+
+// getErr GETs path, wants status and the ErrorResponse shape: a JSON
+// object whose only key is a non-empty "error".
+func getErr(t *testing.T, srv *httptest.Server, path string, status int) ErrorResponse {
+	t.Helper()
+	b := wire(t, srv, path)
+	var w struct {
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+		Body    map[string]any    `json:"body"`
+	}
+	if err := json.Unmarshal(b, &w); err != nil {
+		t.Fatal(err)
+	}
+	msg, ok := w.Body["error"].(string)
+	if w.Status != status || len(w.Body) != 1 || !ok || msg == "" || w.Headers["Content-Type"] != "application/json" {
+		t.Fatalf("GET %s: want %d with the error shape, got\n%s", path, status, b)
+	}
+	return ErrorResponse{Error: msg}
 }
 
 func TestRoutesFilteredByParentIncludeListenerSetRoutes(t *testing.T) {
@@ -229,7 +250,7 @@ func TestBackendFilter(t *testing.T) {
 		}
 	}
 	for _, q := range []string{"core/Service/shop", "core/Service/shop/", "/Service/shop/cart-svc", "core/Service/shop/a/b", ""} {
-		get[ErrorResponse](t, srv, listBase+"/routes?backend="+q, 400)
+		getErr(t, srv, listBase+"/routes?backend="+q, 400)
 	}
 	// mirror is wire-only under a backend filter.
 	if r := routeByName(t, get[Page[RouteRow]](t, srv, listBase+"/routes", 200), "shop/mirror-only"); r.Mirror {
@@ -362,5 +383,45 @@ func TestBackendFilterDeniedEqualsAbsent(t *testing.T) {
 	const path = listBase + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"
 	if a, b := wire(t, denied, path), wire(t, absent, path); !bytes.Equal(a, b) {
 		t.Fatalf("denied and absent backends differ:\n%s\n%s", a, b)
+	}
+}
+
+// A hidden ListenerSet hides what its spec says: no via, and a route through
+// it is not under its Gateway, in rows, totals or counts (rule 3).
+func TestHiddenListenerSetHidesVia(t *testing.T) {
+	cond := testutil.Cond
+	// shop/ls-rejected is not accepted by edge only through ls1.
+	lsRejected := testutil.HTTPRoute("shop", "ls-rejected", []objects.ParentRef{ls1Ref}, testutil.RouteParent{Ref: ls1Ref, Controller: testutil.Controller,
+		Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+	hideLS := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "ListenerSet" })
+	_, srv, _ := startWith(t, setup{authz: hideLS}, explorerWorld(lsRejected)...)
+	_, all, _ := startWith(t, setup{}, explorerWorld(lsRejected)...)
+	const edge = "parent=gateway.networking.k8s.io/Gateway/infra/edge"
+
+	rows := get[Page[RouteRow]](t, srv, listBase+"/routes?limit=200", 200)
+	if p := routeByName(t, rows, "shop/via-ls").Parents[0]; p.Via != nil || !p.ViaRestricted || p.Ref.Link != LinkNone {
+		t.Errorf("via-ls parent %+v", p)
+	}
+	for _, q := range []string{edge, edge + "&attachment=accepted", edge + "&attachment=not-accepted"} {
+		p, full := get[Page[RouteRow]](t, srv, listBase+"/routes?"+q, 200), get[Page[RouteRow]](t, all, listBase+"/routes?"+q, 200)
+		names, fullNames := routeNames(p), routeNames(full)
+		fullNames = slices.DeleteFunc(fullNames, func(n string) bool { return n == "shop/via-ls" || n == "shop/ls-rejected" })
+		if !slices.Equal(names, fullNames) || p.Total != len(names) {
+			t.Errorf("%s: rows %v total %d, want %v", q, names, p.Total, fullNames)
+		}
+	}
+	// The route's own parentRef still lists it under the ListenerSet (rule 8).
+	if p := get[Page[RouteRow]](t, srv, listBase+"/routes?parent=gateway.networking.k8s.io/ListenerSet/infra/ls1", 200); p.Total != 2 {
+		t.Errorf("under ls1: %v", routeNames(p))
+	}
+	g, ga := get[Page[GatewayListRow]](t, srv, listBase+"/gateways", 200).Items[0], get[Page[GatewayListRow]](t, all, listBase+"/gateways", 200).Items[0]
+	if g.NotAccepted != 1 || ga.NotAccepted != 2 || g.ListenerSets != 0 {
+		t.Errorf("notAccepted %d (all %d), listenerSets %d", g.NotAccepted, ga.NotAccepted, g.ListenerSets)
+	}
+	// Hiding only the Gateway restricts via too.
+	hideGW := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "Gateway" })
+	_, gwHidden, _ := startWith(t, setup{authz: hideGW}, explorerWorld()...)
+	if p := routeByName(t, get[Page[RouteRow]](t, gwHidden, listBase+"/routes?limit=200", 200), "shop/via-ls").Parents[0]; p.Via != nil || !p.ViaRestricted || p.Ref.Link != LinkDetail {
+		t.Errorf("via-ls parent with a hidden Gateway %+v", p)
 	}
 }

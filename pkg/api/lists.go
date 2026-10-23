@@ -135,11 +135,12 @@ func (ls *list) routeRow(id explore.RowID) RouteRow {
 }
 
 // parentSummary is one parent link on the wire. Via comes from the
-// ListenerSet, not the route, so a hidden Gateway is restricted (rule 3).
+// ListenerSet's spec, so it is sent only when the caller may view both the
+// ListenerSet and its Gateway (rule 3).
 func (ls *list) parentSummary(p explore.ParentLink) ParentSummary {
 	s := ParentSummary{Ref: ls.l.linked(p.Target), SectionName: p.Ref.SectionName, Port: p.Ref.Port, Attachment: p.Attachment}
 	if p.Via != nil {
-		if ls.can(*p.Via) {
+		if ls.can(p.Target) && ls.can(*p.Via) {
 			v := ls.l.linked(*p.Via)
 			s.Via = &v
 		} else {
@@ -183,13 +184,12 @@ func (h *handler) gateways(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	routeRef := func(id explore.RowID) objects.Ref { return ls.ix.Routes[id].Ref }
 	lsRef := func(id explore.RowID) objects.Ref { return ls.ix.ListenerSets[id].Ref }
 	items := make([]GatewayListRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
 		g := &ls.ix.Gateways[id]
 		row := GatewayListRow{Ref: ls.l.linked(g.Ref), Health: g.State, AttachedRoutes: g.AttachedRoutes,
-			NotAccepted: ls.count(g.NotAccepted, routeRef), ListenerSets: ls.count(g.ListenerSets, lsRef), Addresses: []string{}}
+			NotAccepted: ls.notAccepted(g), ListenerSets: ls.count(g.ListenerSets, lsRef), Addresses: []string{}}
 		if v := g.View; v != nil {
 			row.Class, row.Listeners = v.Class, len(v.Listeners)
 			row.Addresses = append(row.Addresses, v.StatusAddresses...)
@@ -198,6 +198,21 @@ func (h *handler) gateways(w http.ResponseWriter, r *http.Request) {
 	}
 	gwRef := func(id explore.RowID) objects.Ref { return ls.ix.Gateways[id].Ref }
 	writeJSON(w, page(ls, pg, items, ls.denied(len(ls.ix.Gateways), gwRef)))
+}
+
+// notAccepted counts g's not-accepted routes the caller may view, through
+// visible ListenerSets only (rule 3, rule 5).
+func (ls *list) notAccepted(g *explore.GatewayRow) int {
+	if ls.visible == nil {
+		return len(g.NotAccepted)
+	}
+	n := 0
+	for _, id := range g.NotAccepted {
+		if ls.visible(ls.ix.Routes[id].Ref) && ls.ix.Under(id, g.Ref, explore.AttachmentNotAccepted, ls.visible) {
+			n++
+		}
+	}
+	return n
 }
 
 func (h *handler) listenerSets(w http.ResponseWriter, r *http.Request) {
