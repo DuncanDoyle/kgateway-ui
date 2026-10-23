@@ -33,6 +33,14 @@ type UnattachedRoute struct {
 	Parent objects.ParentRef
 }
 
+// DeclaredCandidate is an in-scope route whose current spec parentRef names
+// an HTTPRoute of the install with no eligible status entry, current or stale
+// (design §4.2). It is a diagnostic candidate, never a child.
+type DeclaredCandidate struct {
+	Route  OwnedObject
+	Parent objects.ParentRef
+}
+
 // Owned is everything assigned to one install.
 type Owned struct {
 	GatewayClasses []*unstructured.Unstructured
@@ -41,6 +49,17 @@ type Owned struct {
 	Routes         []OwnedObject
 	Policies       []OwnedObject
 	Unattached     []UnattachedRoute
+	// Declared holds one candidate per (route, parent HTTPRoute).
+	Declared []DeclaredCandidate
+	// NoParent are in-scope HTTPRoutes with empty spec.parentRefs and no
+	// status entry from the install's controllers. Not counted.
+	NoParent []OwnedObject
+	// Backends are the in-scope Backends that a backendRef of an owned route
+	// names by full identity ("in use", design §4.3).
+	Backends []*unstructured.Unstructured
+	// ReferencedBackends are the Backend refs of owned routes, in scope or
+	// not and whether they exist or not, once each.
+	ReferencedBackends []objects.Ref
 
 	// routeIdx maps a route ref to its index in Routes. It may be nil (copies)
 	// or miss routes appended later, so Route falls back to a scan.
@@ -66,11 +85,12 @@ type AmbiguousGateway struct {
 	Installs []string
 }
 
-// UnwatchedRoute is a route that targets a Gateway of Install from a namespace
+// UnwatchedRoute is a route that targets a parent of Install from a namespace
 // that Install does not watch (KGWUI-004).
 type UnwatchedRoute struct {
 	Install string
 	Route   objects.Ref
+	// Gateway is the owned parent named: a Gateway, ListenerSet or HTTPRoute.
 	Gateway objects.Ref
 }
 
@@ -183,10 +203,13 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 			exists[objects.RefOf(u)] = true
 		}
 	}
-	// parentRefs decodes HTTPRoutes through dec.
+	// HTTPRoutes are decoded once through dec, for parentRefs and every later pass.
+	hrs := decodeHTTPRoutes(snap, served, dec)
 	parentRefs := func(r OwnedObject) []objects.ParentRef {
 		if hasHR && r.Kind.Group == hr.Group && r.Kind.Kind == hr.Kind {
-			return dec.HTTPRoute(r.Obj).ParentRefs
+			if i, ok := hrs.byRef[objects.RefOf(r.Obj)]; ok {
+				return hrs.views[i].ParentRefs
+			}
 		}
 		return objects.RouteParentRefs(r.Obj)
 	}
@@ -194,7 +217,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 	// Routes: the route's own namespace decides scope.
 	for _, r := range list(kinds.CategoryRoute) {
 		parents := map[int][]objects.ParentRef{} // install index → parentRefs resolving to its Gateways
-		gateway := map[int]objects.Ref{}         // install index → first Gateway reached
+		named := map[int]objects.Ref{}           // install index → first Gateway or ListenerSet named
 		var order []int
 		for _, p := range parentRefs(r) {
 			pref := p.Ref()
@@ -205,7 +228,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 			if i, ok := gwOwner[gref]; ok {
 				if _, seen := parents[i]; !seen {
 					order = append(order, i)
-					gateway[i] = gref
+					named[i] = pref
 				}
 				parents[i] = append(parents[i], p)
 				continue
@@ -224,13 +247,15 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 				o := a.PerInstall[insts[i].ID()]
 				o.Routes = append(o.Routes, OwnedObject{Kind: r.Kind, Obj: r.Obj, Parents: parents[i]})
 			} else {
-				a.Unwatched = append(a.Unwatched, UnwatchedRoute{Install: insts[i].ID(), Route: objects.RefOf(r.Obj), Gateway: gateway[i]})
+				a.Unwatched = append(a.Unwatched, UnwatchedRoute{Install: insts[i].ID(), Route: objects.RefOf(r.Obj), Gateway: named[i]})
 			}
 		}
 	}
 
-	// Delegated children; candidates that need the owned routes come after this.
-	delegate(snap, served, insts, &a, inScope, dec)
+	// Delegated children, then what needs every owned route (PF10).
+	delegate(hrs, insts, &a, inScope)
+	candidates(hrs, insts, &a, inScope)
+	assignBackends(snap, served, insts, &a, inScope, hrs)
 
 	// ownerOf maps every assigned Gateway and ListenerSet to its install index.
 	ownerOf := map[objects.Ref]int{}

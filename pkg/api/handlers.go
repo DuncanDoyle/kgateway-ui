@@ -174,7 +174,7 @@ func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.In
 	}
 	o := i.Owned
 	owned := &install.Owned{GatewayClasses: keep(o.GatewayClasses), Gateways: keep(o.Gateways), ListenerSets: keep(o.ListenerSets),
-		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached}
+		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached, Backends: keep(o.Backends)}
 	return overview.Build(i.Resolved, owned, m.Snapshot, m.Served, rep, h.src.Platform())
 }
 

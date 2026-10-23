@@ -616,7 +616,7 @@ func (c unwatchedCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		r := u.Route
 		fs = append(fs, Finding{Code: CodeNamespaceNotWatched, Slug: "namespace-not-watched", Severity: SeverityWarning, Install: u.Install,
-			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets Gateway " + u.Gateway.String()})
+			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets " + u.Gateway.Kind + " " + u.Gateway.String()})
 	}
 	return fs, ok(c.Name(), false, in.Now)
 }
