@@ -14,14 +14,28 @@ const Name = styled.span<{ stylesOverride?: SerializedStyles }>`
 interface ResourceNameProps {
   namespace?: string;
   name: string;
+  /** For a focusable name, e.g. one inside a Tooltip. */
+  tabIndex?: number;
+  "aria-describedby"?: string;
   stylesOverride?: SerializedStyles;
 }
 
 /** The signature element: mono resource name with the namespace dimmed (D-011). */
-export function ResourceName({ namespace, name, stylesOverride }: ResourceNameProps) {
+export function ResourceName({
+  namespace,
+  name,
+  tabIndex,
+  "aria-describedby": describedBy,
+  stylesOverride,
+}: ResourceNameProps) {
   return (
     // The label keeps the accessible name "namespace/name" whole, whatever the inner markup.
-    <Name aria-label={namespace ? `${namespace}/${name}` : name} stylesOverride={stylesOverride}>
+    <Name
+      aria-label={namespace ? `${namespace}/${name}` : name}
+      tabIndex={tabIndex}
+      aria-describedby={describedBy}
+      stylesOverride={stylesOverride}
+    >
       {namespace ? <span data-part="namespace">{namespace}/</span> : null}
       <span data-part="name">{name}</span>
     </Name>

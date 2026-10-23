@@ -83,7 +83,7 @@ const Table = styled.table`
     border-bottom: 1px solid ${(p) => p.theme.color.border};
     font-variant-numeric: tabular-nums;
   }
-  /* Table rows grow to fit, so this is a minimum: a long wrapped name only adds height. */
+  /* A minimum, as table rows grow to fit; name cells truncate to one line, so data rows keep it. */
   tbody tr[data-row],
   tbody tr[data-empty] {
     height: ${ROW_H}px;

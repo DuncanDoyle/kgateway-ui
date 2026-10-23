@@ -14,7 +14,7 @@ import { Tooltip } from "../../../shell/Tooltip";
 import { useMedia } from "../../../shell/useMedia";
 import { VisuallyHidden } from "../../../states/VisuallyHidden";
 import type { HealthState } from "../../../theme/tokens";
-import { Muted, wrapName } from "../listParts";
+import { Muted, nameTip, wrapName } from "../listParts";
 
 // region Styles
 const State = styled.span`
@@ -38,12 +38,6 @@ const tableExtra = css`
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-`;
-
-const nameTip = css`
-  display: flex;
-  max-width: 100%;
-  min-width: 0;
 `;
 
 // region Helpers

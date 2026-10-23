@@ -9,6 +9,7 @@ import { listValues } from "../../explore/listQuery";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
 import { HealthIcon } from "../../health/HealthIcon";
 import { stateLabel } from "../../health/state";
+import { Tooltip } from "../../shell/Tooltip";
 import type { ParamChanges } from "../../shell/urlParams";
 import type { HealthState } from "../../theme/tokens";
 
@@ -17,6 +18,12 @@ import type { HealthState } from "../../theme/tokens";
 export const wrapName = css`
   white-space: normal;
   overflow-wrap: anywhere;
+`;
+/** The Tooltip wrapper around a truncated name: it fills the cell so the name can shrink. */
+export const nameTip = css`
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
 `;
 export const Muted = styled.span`
   color: ${(p) => p.theme.color.textMuted};
@@ -56,8 +63,13 @@ export function useShownPage<T extends { health: HealthState }>(
   return { ...page, items: page.items.map((r) => ({ ...r, health: "unknown" as const })) };
 }
 
+/** A table's name cell: one truncated line, the full name in a keyboard-reachable tooltip (design §8.7). */
 export function NameCell({ r, installId }: { r: LinkedRef; installId: string }) {
-  return <LinkedName refValue={r} installId={installId} stylesOverride={wrapName} />;
+  return (
+    <Tooltip label={r.namespace ? `${r.namespace}/${r.name}` : r.name} stylesOverride={nameTip}>
+      <LinkedName refValue={r} installId={installId} truncate />
+    </Tooltip>
+  );
 }
 
 // region Component

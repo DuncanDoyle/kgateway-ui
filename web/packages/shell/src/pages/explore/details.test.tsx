@@ -221,6 +221,25 @@ it("a sub-table keeps its rows and shows the notice when a poll fails, until a g
   expect(within(t).getByText("partial")).toBeInTheDocument();
 });
 
+it("a sub-table name is one truncated line with the full name in a keyboard tooltip", async () => {
+  const long = "a-listenerset-with-a-deliberately-long-name-that-must-not-wrap-or-shift-the-table";
+  const base = api();
+  serve((u) => {
+    if (u.pathname !== `${API}/listenersets`) return base(u);
+    const l = lsList();
+    return { ...l, items: l.items.map((r, i) => (i ? r : { ...r, ref: { ...r.ref, name: long } })) };
+  });
+  mount(GW_PATH);
+  const t = await screen.findByRole("table", { name: "ListenerSets" });
+  const name = await within(t).findByLabelText(new RegExp(`/${long}$`));
+  const style = getComputedStyle(name);
+  expect([style.whiteSpace, style.overflow, style.textOverflow]).toEqual(["nowrap", "hidden", "ellipsis"]);
+  const link = name.closest("a") as HTMLElement;
+  for (let i = 0; i < 80 && document.activeElement !== link; i++) await userEvent.tab();
+  expect(link).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent(name.getAttribute("aria-label") ?? "");
+});
+
 it("on a stale page the YAML tab's error keeps its error icon", async () => {
   const base = api({ gateway: { ...gateway(), collectedAt: old() } });
   serve((u) => (u.pathname.startsWith(`${API}/resources/`) ? [500, { error: "boom" }] : base(u)));

@@ -246,6 +246,24 @@ it("row hover underlines only the row's own name, not other links", async () => 
   expect(rowOf("partial").querySelector('td[data-col="parent"] a')).not.toBeNull();
 });
 
+it("a long route name is one truncated line with the full name in a keyboard tooltip", async () => {
+  const long = "a-route-with-a-deliberately-long-name-that-must-not-wrap-or-shift-the-table";
+  const body = routes();
+  const first = body.items[0] as RouteRow;
+  body.items = [{ ...first, ref: { ...first.ref, name: long } }];
+  const full = `${first.ref.namespace}/${long}`;
+  serve((u) => (u.pathname.endsWith("/routes") ? body : undefined));
+  mount(`/i/${ID}/routes`);
+  const name = await screen.findByLabelText(full);
+  const style = getComputedStyle(name);
+  expect([style.whiteSpace, style.overflow, style.textOverflow]).toEqual(["nowrap", "hidden", "ellipsis"]);
+  const link = name.closest("a") as HTMLElement;
+  for (let i = 0; i < 50 && document.activeElement !== link; i++) await userEvent.tab();
+  expect(link).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent(full);
+  expect(link).toHaveAttribute("aria-describedby", screen.getByRole("tooltip").id);
+});
+
 it("text search reaches the API as q", async () => {
   serve((u) => (u.pathname.endsWith("/gateways") ? fresh(gatewaysGolden.body as GatewayList) : undefined));
   mountWithLocation(`/i/${ID}/gateways`);

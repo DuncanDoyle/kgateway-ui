@@ -218,8 +218,6 @@ for (const width of [1280, 720]) {
     test.use({ viewport: { width, height: 900 } });
 
     test("Gateway sub-tables do not move when their rows load", async ({ page }) => {
-      // Known gap: a wrapped long name grows its row (design §8.6 final row height vs §8.7 wrap long names).
-      test.fail(width < 900, "the long route name wraps in the narrow attached-routes table");
       const release = await holdLists(page);
       await page.goto(`${install}/gateways/infra/edge`);
       await expect(page.getByTestId("detail-header")).toBeVisible();
@@ -248,8 +246,6 @@ for (const width of [1280, 720]) {
     });
 
     test("a full routes page keeps its footer in place, long name included", async ({ page }) => {
-      // Known gap: a wrapped long name grows its row (design §8.6 final row height vs §8.7 wrap long names).
-      test.fail(true, "the long route name wraps and grows its row");
       // A page of eight fills the list's eight skeleton rows; the long name sorts first in shop.
       const release = await holdLists(page, 8);
       await page.goto(`${install}/routes?namespace=shop`);

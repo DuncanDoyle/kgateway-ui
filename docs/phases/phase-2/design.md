@@ -658,7 +658,7 @@ A diagnostic candidate shows its banner above the header.
 
 ### 8.7 Interaction, layout and accessibility
 
-- Every interactive element has hover, active and focus-visible styles in both themes. Tables keep fixed column widths from the first render, wrap long names, are keyboard-navigable and carry `aria-sort`.
+- Every interactive element has hover, active and focus-visible styles in both themes. Tables keep fixed column widths from the first render, truncate long names to one line with the full name in a tooltip (our call, 2.2: §8.6's fixed row height wins), are keyboard-navigable and carry `aria-sort`.
 - Tabs follow the WAI-ARIA tabs pattern; expanders carry `aria-expanded`; the up-chain is a `nav` with `aria-label="Route parents"`. The `ComputedBadge` tooltip is reachable by keyboard and in the accessible name.
 - State is always icon + colour + text; contrast is checked in both themes by the existing token test.
 - Below 900 px sections stack and tables move secondary columns into an expandable row; no horizontal page scroll at 720 px.
