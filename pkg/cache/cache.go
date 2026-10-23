@@ -211,6 +211,16 @@ type Cache struct {
 	deploys []tracked
 	// settled is set once every informer has settled, after the settle notify.
 	settled atomic.Bool
+	// handlerHook, if set, runs in each event handler before it notifies (tests).
+	handlerHook atomic.Pointer[func()]
+}
+
+// handled is every event handler: the test hook, then the notification.
+func (c *Cache) handled() {
+	if h := c.handlerHook.Load(); h != nil {
+		(*h)()
+	}
+	c.changes.Notify()
 }
 
 // informer builds an informer over an instrumented ListerWatcher. client tells
@@ -220,11 +230,11 @@ func (c *Cache) informer(client any, example runtime.Object, list toolscache.Lis
 	lw := toolscache.ToListWatcherWithWatchListSemantics(instrument(p, list, watchFn), client)
 	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
 	if c.changes != nil {
-		notify := func(any) { c.changes.Notify() }
+		notify := func(any) { c.handled() }
 		// Fails only on a stopped informer. Without a handler the kind still
 		// settles on its own sync, and the confirm tick catches its changes.
 		t.reg, _ = t.inf.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
-			AddFunc: notify, UpdateFunc: func(_, _ any) { c.changes.Notify() }, DeleteFunc: notify})
+			AddFunc: notify, UpdateFunc: func(_, _ any) { c.handled() }, DeleteFunc: notify})
 	}
 	return t
 }
