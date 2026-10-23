@@ -4,13 +4,13 @@
 Phase: 2 — Gateway & Route Explorer
 Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
 Docs: docs/phases/phase-2/
-Status: design and plan approved 2026-10-23; sub-phase 2.1 complete (PR #7, awaiting merge); 2.2 next; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #7 (35f105d); implementing 2.2; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
 - [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
 - [x] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 (Tasks 1–70)
 - [x] Q3 Cross-model review of design + plan, triage, user approval — reviews/design-codex.md, design-r4-codex.md, plan-codex.md; plan approved by user 2026-10-23 (with chart `extraArgs`, Task 50)
-- [x] Q4 Sub-phase 2.1 — event-driven recompute (plan Tasks 1–10) — phases/phase-2/phase-2.1-complete.md; PR #7
+- [x] Q4 Sub-phase 2.1 — event-driven recompute (plan Tasks 1–10) — phases/phase-2/phase-2.1-complete.md; merged in #7 (35f105d)
 - [ ] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) ← CURRENT
 - [ ] Q6 Sub-phase 2.3 — view A (Tasks 35–51)
 - [ ] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70)
