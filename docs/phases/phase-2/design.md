@@ -525,6 +525,11 @@ BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
 - `effective` and `DelegationRow.contexts` project what the model retained, with the limits and truncation flags of `computed-rules.md` §5.7. A detail request never re-runs the traversal. An `EffectiveDTO` covers one parent edge, so it merges the contexts of every delegation row with that parent and child; its `contextsTruncated` is set when any of them was cut, and an edge with no kept contexts is sent as `contexts: []` with the flag, never as complete.
 - The Gateway page pages its ListenerSets through `GET …/listenersets?parent=…`, so no detail body is unbounded.
 - `ParentSummary` picks the deciding condition: the first current `False` among `Accepted`, `ResolvedRefs`, `kgateway.dev/Programmed`, else the pending reason.
+- `ListenerSetDetail.parentFound` is false when the caller may not view the parent Gateway, exactly as when it is absent (D-013) (our call, 2.2).
+- A rule with omitted `matches` is shown with the CRD default, one `PathPrefix /` match (our call, 2.2).
+- A Backend's `state` is omitted when the Backend is not admitted for this install, as on a candidate route's page (our call, 2.2).
+- A delegation ref's `restricted` state is decided by the Authorizer on the referenced route alone (our call, 2.2).
+- On a candidate parent's page, every child reads `not-reported`, because reported edges exist only for owned parents (our call, 2.2).
 
 ### 7.4 Authorizer
 
