@@ -6,7 +6,6 @@ package objects
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -52,6 +51,22 @@ func (p ParentRef) Ref() Ref {
 	return Ref{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name}
 }
 
+// GroupKind is an API group and kind.
+type GroupKind struct {
+	Group string `json:"group"`
+	Kind  string `json:"kind"`
+}
+
+// WrittenRef is a parentRef as written: omitted fields are empty strings and
+// no defaults are applied. It is comparable, so it serves as a report key and
+// a persistence identity (design §4.1, computed-rules §7).
+type WrittenRef struct {
+	Group, Kind, Namespace, Name, SectionName string
+	// Port is the written port; PortSet reports whether one was written.
+	Port    int32
+	PortSet bool
+}
+
 type rawRef struct {
 	Group       *string `json:"group"`
 	Kind        *string `json:"kind"`
@@ -59,6 +74,15 @@ type rawRef struct {
 	Name        string  `json:"name"`
 	SectionName *string `json:"sectionName"`
 	Port        *int32  `json:"port"`
+}
+
+// written returns r as written.
+func (r rawRef) written() WrittenRef {
+	w := WrittenRef{Group: deref(r.Group), Kind: deref(r.Kind), Namespace: deref(r.Namespace), Name: r.Name, SectionName: deref(r.SectionName)}
+	if r.Port != nil {
+		w.Port, w.PortSet = *r.Port, true
+	}
+	return w
 }
 
 // resolve applies the Gateway API defaults: group gateway.networking.k8s.io,
@@ -105,6 +129,7 @@ type routeView struct {
 		Listeners  []struct {
 			Name           string             `json:"name"`
 			AttachedRoutes int32              `json:"attachedRoutes"`
+			SupportedKinds []rawGroupKind     `json:"supportedKinds"`
 			Conditions     []metav1.Condition `json:"conditions"`
 		} `json:"listeners"`
 		Addresses []struct {
@@ -114,37 +139,60 @@ type routeView struct {
 }
 
 // view decodes the subset of fields used by this package. Unknown fields are
-// ignored; a malformed object yields an empty view rather than an error,
-// because the UI must keep rendering the rest of the cluster.
+// ignored; a malformed spec or status yields an empty part rather than an
+// error, because the UI must keep rendering the rest of the cluster. They
+// decode separately, so a malformed spec keeps the status.
 func view(u *unstructured.Unstructured) routeView {
 	var v routeView
-	_ = runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &v)
+	decodeInto(u.Object["spec"], &v.Spec)
+	decodeInto(u.Object["status"], &v.Status)
 	return v
 }
 
 // RouteParentRefs returns spec.parentRefs with defaults applied.
 func RouteParentRefs(u *unstructured.Unstructured) []ParentRef {
-	v := view(u)
+	return parentRefs(view(u), u.GetNamespace())
+}
+
+func parentRefs(v routeView, ns string) []ParentRef {
 	out := make([]ParentRef, 0, len(v.Spec.ParentRefs))
 	for _, r := range v.Spec.ParentRefs {
-		out = append(out, r.resolve(u.GetNamespace()))
+		out = append(out, r.resolve(ns))
+	}
+	return out
+}
+
+// WrittenParentRefs returns spec.parentRefs of any route kind as written,
+// index-aligned with RouteParentRefs.
+func WrittenParentRefs(u *unstructured.Unstructured) []WrittenRef { return writtenRefs(view(u)) }
+
+func writtenRefs(v routeView) []WrittenRef {
+	out := make([]WrittenRef, 0, len(v.Spec.ParentRefs))
+	for _, r := range v.Spec.ParentRefs {
+		out = append(out, r.written())
 	}
 	return out
 }
 
 // RouteParentStatus is one entry of a route's status.parents.
 type RouteParentStatus struct {
-	ParentRef      ParentRef
+	ParentRef ParentRef
+	// Written is the status parentRef as written, for report keys.
+	Written        WrittenRef `json:"-"`
 	ControllerName string
 	Conditions     []metav1.Condition
 }
 
 // RouteParents returns status.parents with defaults applied to each parentRef.
 func RouteParents(u *unstructured.Unstructured) []RouteParentStatus {
-	v := view(u)
+	return routeParents(view(u), u.GetNamespace())
+}
+
+func routeParents(v routeView, ns string) []RouteParentStatus {
 	out := make([]RouteParentStatus, 0, len(v.Status.Parents))
 	for _, p := range v.Status.Parents {
-		out = append(out, RouteParentStatus{ParentRef: p.ParentRef.resolve(u.GetNamespace()), ControllerName: p.ControllerName, Conditions: p.Conditions})
+		out = append(out, RouteParentStatus{ParentRef: p.ParentRef.resolve(ns), Written: p.ParentRef.written(),
+			ControllerName: p.ControllerName, Conditions: p.Conditions})
 	}
 	return out
 }
@@ -173,15 +221,17 @@ func Conditions(u *unstructured.Unstructured) []metav1.Condition { return view(u
 type ListenerStatus struct {
 	Name           string
 	AttachedRoutes int32
+	SupportedKinds []GroupKind
 	Conditions     []metav1.Condition
 }
 
 // GatewayListeners returns status.listeners.
-func GatewayListeners(u *unstructured.Unstructured) []ListenerStatus {
-	v := view(u)
+func GatewayListeners(u *unstructured.Unstructured) []ListenerStatus { return listenerStatus(view(u)) }
+
+func listenerStatus(v routeView) []ListenerStatus {
 	out := make([]ListenerStatus, 0, len(v.Status.Listeners))
 	for _, l := range v.Status.Listeners {
-		out = append(out, ListenerStatus{Name: l.Name, AttachedRoutes: l.AttachedRoutes, Conditions: l.Conditions})
+		out = append(out, ListenerStatus{Name: l.Name, AttachedRoutes: l.AttachedRoutes, SupportedKinds: groupKinds(l.SupportedKinds), Conditions: l.Conditions})
 	}
 	return out
 }
@@ -220,7 +270,7 @@ func ControllerName(gatewayClass *unstructured.Unstructured) string {
 func ListenerSetParent(u *unstructured.Unstructured) ParentRef {
 	m, _, _ := unstructured.NestedMap(u.Object, "spec", "parentRef")
 	var r rawRef
-	_ = runtime.DefaultUnstructuredConverter.FromUnstructured(m, &r)
+	decodeInto(m, &r)
 	return r.resolve(u.GetNamespace())
 }
 
