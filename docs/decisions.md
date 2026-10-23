@@ -321,7 +321,7 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - Installs with experimental features off show a steady, explained warning for those objects until the upstream scope endpoint reports enabled kinds (D-017 §4).
 
 ## D-019 — Event-driven model recompute (2026-10-22, phase 2)
-**Status:** proposed 2026-10-22, from the user's design review; approved with the Phase 2 design
+**Status:** accepted 2026-10-23 (proposed 2026-10-22 from the user's design review; approved with the Phase 2 design)
 **Context:**
 - Phase 1 recomputes the whole model on a fixed ticker, `--poll-interval`, default 2 s (`pkg/engine/engine.go:209-222`, `cmd/kgateway-ui/main.go:23`). Most recomputes see an unchanged cache.
 - Phase 2 adds computed views and indexes per recompute (D-020, Phase 2 design §3). A fixed 2 s cost at the Large tier is waste on an idle cluster and still adds up to 2 s of latency on a busy one.
@@ -362,7 +362,7 @@ Install assignment keeps design §4.3 (controllerName ∩ namespace scope; ambig
 - The README and chart notes describe the new meaning of `--poll-interval`.
 
 ## D-020 — Computed views, labelled and cross-checked (2026-10-22, phase 2)
-**Status:** proposed 2026-10-22, from the user's design review; approved with the Phase 2 design
+**Status:** accepted 2026-10-23 (proposed 2026-10-22 from the user's design review; approved with the Phase 2 design)
 **Context:**
 - D-005, D-016 §7 and the memory rule keep the UI from re-implementing controller logic, except as a pluggable, verified interim with an upstream ask.
 - Three questions at the core of Gateway API observability have no answer in kgateway's status:

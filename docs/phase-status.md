@@ -4,11 +4,11 @@
 Phase: 2 — Gateway & Route Explorer
 Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
 Docs: docs/phases/phase-2/
-Status: design drafted and cross-model reviewed, waiting for the user's answers to design §15 and approval; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Status: design approved 2026-10-23; implementation plan in progress; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
-- [ ] Q1 Phase 2 design (`design.md`) — drafted from research, revised after the user's review (D-019, D-020) into design.md + computed-rules.md; Codex rounds in reviews/design-codex.md and design-r4-codex.md, last round clean; open questions in design §15.2 ← CURRENT
-- [ ] Q2 Phase 2 implementation plan (`implementation-plan.md`)
+- [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
+- [ ] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 ← CURRENT
 - [ ] Q3 Cross-model review of design + plan, triage, user approval
 
 ### Exit gates
@@ -36,7 +36,7 @@ none
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
-- 2026-10-22 (resume here): design converged (last Codex round clean). User to answer design §15.2 and approve design.md + computed-rules.md + D-019/D-020. Then the plan (writing-plans) per the 2.1–2.4 split, its Codex review, approval. Zendesk/knowledge-base research still not run (VPN).
+- 2026-10-23 (resume here): design approved. Writing the plan (sub-phases 2.1–2.4), then Codex review and user approval. Before plan approval: re-run the Zendesk/knowledge-base research (needs VPN; design Q7).
 - 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions".
