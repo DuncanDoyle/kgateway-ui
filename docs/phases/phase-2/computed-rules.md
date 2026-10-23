@@ -363,7 +363,7 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Stale status | the signal exists and is stale | `pending`, "Waiting for the controller" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
 | Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route is Phase 1's KGWUI-003, and the check stays `pending`. |
-| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (both sets: a drop or deselection caused by a parent edit, D-021); otherwise, including a drop caused by a child edit, `not-verified`, "The controller may keep old status" | where verified, when mature |
+| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (both sets: a drop or deselection caused by a parent edit, D-021); otherwise, including a drop caused by a child edit, `not-verified`, "The controller may keep old status". Cause: a child edit when the child's current generation was first seen after the parent's current generation, or when either time is unknown; otherwise a parent edit (our call) | where verified, when mature |
 | Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
 | Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
 
@@ -541,6 +541,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Stale child entry contradicting | `pending`; never KGWUI-012 |
 | Matcher-dropped child (parent edit) with a current entry left, both sets | `disagrees` after 30 s |
 | Matcher-dropped child (child edit) with a current entry left | `not-verified`; no KGWUI-012 |
+| Drop with an unknown first-seen time for child or parent, current entry left | treated as a child edit: `not-verified`; no KGWUI-012 |
 | Forbidden child with a current entry left | `not-verified` |
 | Effective matcher | always `not-verified` |
 
