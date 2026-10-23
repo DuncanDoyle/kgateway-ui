@@ -63,11 +63,34 @@ it("after an outage of many polls the next retry is still one interval away, and
   expect(await screen.findByText("n=2")).toBeInTheDocument();
 });
 
-it("does not retry a 4xx: it is an answer, not an outage", async () => {
+it("re-checks a 404 every interval and shows the object once it appears", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  stubApi({ "/api/v1/installs": [404, { error: "not found" }] });
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      calls++;
+      return calls <= 3
+        ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
+        : new Response(JSON.stringify([{ id: "a.one" }]), { status: 200 });
+    }),
+  );
   renderWithTheme(<Probe />);
   await screen.findByText("error 404");
+  for (let n = 2; n <= 4; n++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+    });
+    expect(calls).toBe(n);
+  }
+  expect(await screen.findByText("n=1")).toBeInTheDocument();
+});
+
+it("does not retry a 400: a bad request stays bad for that URL", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  stubApi({ "/api/v1/installs": [400, { error: "bad query" }] });
+  renderWithTheme(<Probe />);
+  await screen.findByText("error 400");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3 * POLL_MS);
   });

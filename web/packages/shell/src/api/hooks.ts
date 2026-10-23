@@ -8,11 +8,11 @@ export const POLL_MS = 5000;
 
 /**
  * Error retry for every request. SWR skips interval polls while a key holds an error, so this is what keeps the
- * 5 s rhythm through an outage: one retry per interval, no backoff, no jitter, no cap. A 4xx is an answer, not an
- * outage, so it is never retried (a rejected cursor stays rejected).
+ * 5 s rhythm through an outage: one retry per interval, no backoff, no jitter, no cap. A 404 retries too, so a page
+ * notices the object appear. Only a 400 stops: a bad request stays bad for that URL (a rejected cursor stays rejected).
  */
 export const retryEveryPoll: NonNullable<SWRConfiguration["onErrorRetry"]> = (err, _key, _config, revalidate, opts) => {
-  if (err instanceof ApiError && err.status >= 400 && err.status < 500) return;
+  if (err instanceof ApiError && err.status === 400) return;
   setTimeout(() => revalidate(opts), POLL_MS);
 };
 
