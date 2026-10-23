@@ -20,10 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -583,4 +585,86 @@ func TestDownstreamProxyModeResolverSeam(t *testing.T) {
 		}
 		return slices.ContainsFunc(h.Findings, func(f health.Finding) bool { return f.Code == health.CodeSelfManagedProxy })
 	})
+}
+
+// An object change recomputes through the cache's trigger: neither the safety
+// timer nor a confirm tick can explain the run, both being an hour away.
+func TestAppRecomputesOnObjectChange(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), testutil.Namespace("shop", nil), d,
+		testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true))
+	events := make(chan engine.LoopEvent, 1024)
+	var overflow atomic.Bool
+	sc := &stubScraper{}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: sc},
+		Options{PollInterval: time.Hour, MetricsInterval: time.Hour, ConfirmEvery: time.Hour, UI: ui, OnLoop: func(e engine.LoopEvent) {
+			select {
+			case events <- e:
+			default:
+				overflow.Store(true)
+			}
+		}}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+
+	// Start-up, the sync notify and the first metrics result each recompute;
+	// wait for them, then for a quiet loop.
+	eventually(t, "never synced and scraped", func() bool {
+		p := a.Engine.Current()
+		_, scraped := a.collector.Get("kgw.kgateway")
+		return a.cache.Settled() && p != nil && p.Model.Snapshot.Synced && scraped
+	})
+	for quiet := false; !quiet; {
+		select {
+		case <-events:
+		case <-time.After(time.Second): // longer than the 250 ms debounce plus a compute
+			quiet = true
+		}
+	}
+
+	gvr := testutil.ServedUpstream()[0].GVR()
+	for _, s := range testutil.ServedUpstream() {
+		if s.Kind == "HTTPRoute" {
+			gvr = s.GVR()
+		}
+	}
+	if _, err := dyn.Resource(gvr).Namespace("shop").Create(ctx, testutil.HTTPRoute("shop", "added", nil), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var since []engine.LoopEventKind
+	for {
+		e := testutil.Recv(t, events, "a run whose snapshot holds the new route")
+		if e.Kind == engine.EvConfirmed || e.Kind == engine.EvConfirmRefused {
+			t.Fatalf("no confirm tick may run within the hour: %+v", e)
+		}
+		if e.Kind != engine.EvPublished {
+			since = append(since, e.Kind)
+			continue
+		}
+		if !holdsRoute(e.Published.Model.Snapshot, gvr, "shop", "added") {
+			since = nil
+			continue
+		}
+		// One trigger per event; a second trigger repeats the Triggered, Armed pair.
+		want := []engine.LoopEventKind{engine.EvTriggered, engine.EvArmed}
+		for len(since) > 3 && slices.Equal(since[:2], want) {
+			since = since[2:]
+		}
+		if !slices.Equal(since, append(want, engine.EvRunStarted)) {
+			t.Fatalf("events before the publication: %v, want Triggered, Armed, RunStarted", since)
+		}
+		break
+	}
+	if overflow.Load() {
+		t.Fatal("loop event buffer overflowed")
+	}
+}
+
+// holdsRoute reports whether snap holds ns/name under gvr.
+func holdsRoute(snap *cache.Snapshot, gvr schema.GroupVersionResource, ns, name string) bool {
+	return slices.ContainsFunc(snap.Objects[gvr], func(u *unstructured.Unstructured) bool { return u.GetNamespace() == ns && u.GetName() == name })
 }

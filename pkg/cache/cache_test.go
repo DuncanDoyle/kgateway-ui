@@ -568,3 +568,24 @@ func TestConfigNowStampsSnapshots(t *testing.T) {
 		t.Fatalf("TakenAt %s, want %s", at, testutil.Now)
 	}
 }
+
+// Settled turns true after every informer has settled, with or without Changes.
+func TestSettledFollowsSync(t *testing.T) {
+	for _, sig := range []*trigger.Signal{trigger.New(), nil} {
+		dyn, kube := testutil.Clients(t)
+		c := New(Config{Dynamic: dyn, Kube: kube, Served: testutil.ServedUpstream(), Changes: sig})
+		if c.Settled() {
+			t.Fatal("settled before Start")
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		c.Start(ctx)
+		waitFor(t, "Settled", c.Settled)
+		if !c.Snapshot().Synced {
+			t.Fatal("Settled must follow the sync")
+		}
+		if sig != nil {
+			testutil.Recv(t, sig.C(), "the settle notify, sent before Settled")
+		}
+		cancel()
+	}
+}

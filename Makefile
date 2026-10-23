@@ -26,7 +26,7 @@ bench:
 	@go version
 	@echo "machine: $$(uname -sm), $$(getconf _NPROCESSORS_ONLN) CPUs"
 	@echo "load: $$(uptime)"
-	go test -tags bench -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache ./pkg/api
+	go test -tags bench -v -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache ./pkg/api
 lint:
 	go vet ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...

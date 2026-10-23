@@ -137,8 +137,12 @@ func (h *harness) start(safety time.Duration) {
 	h.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
-	h.t.Cleanup(cancel)
 	h.stopped = make(chan struct{})
+	// Waiting for Run keeps a late OnLoop t.Errorf from firing after the test returns.
+	h.t.Cleanup(func() {
+		cancel()
+		testutil.Recv(h.t, h.stopped, "Run to return")
+	})
 	go func() {
 		defer close(h.stopped)
 		h.e.Run(ctx, safety)

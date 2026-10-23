@@ -6,6 +6,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -208,6 +209,8 @@ type Cache struct {
 	ns      tracked
 	pods    []tracked
 	deploys []tracked
+	// settled is set once every informer has settled, after the settle notify.
+	settled atomic.Bool
 }
 
 // informer builds an informer over an instrumented ListerWatcher. client tells
@@ -288,9 +291,6 @@ func (c *Cache) Start(ctx context.Context) {
 	for _, t := range all {
 		go t.inf.RunWithContext(ctx)
 	}
-	if c.changes == nil {
-		return
-	}
 	go func() {
 		settled := func(context.Context) (bool, error) {
 			for _, t := range all {
@@ -301,10 +301,16 @@ func (c *Cache) Start(ctx context.Context) {
 			return true, nil
 		}
 		if wait.PollUntilContextCancel(ctx, syncPoll, true, settled) == nil {
-			c.changes.Notify()
+			c.changes.Notify() // a nil Signal ignores it
+			c.settled.Store(true)
 		}
 	}()
 }
+
+// Settled reports whether every informer has settled since Start and, with
+// Config.Changes, the settle notification was sent. Later notifications come
+// from events, failures and recoveries only.
+func (c *Cache) Settled() bool { return c.settled.Load() }
 
 // synced reports whether t's handler has received the initial list, or,
 // without a handler, whether the informer has synced.

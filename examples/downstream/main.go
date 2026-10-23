@@ -42,7 +42,7 @@ func main() {
 // options are the backend settings. Both intervals must be positive; these
 // are the stock binary's defaults.
 func options(ui fs.FS) app.Options {
-	return app.Options{UI: ui, PollInterval: 2 * time.Second, MetricsInterval: 10 * time.Second}
+	return app.Options{UI: ui, PollInterval: 30 * time.Second, MetricsInterval: 10 * time.Second}
 }
 
 // extensions are what this build adds to the stock UI.
