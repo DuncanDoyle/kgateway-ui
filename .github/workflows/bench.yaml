@@ -1,0 +1,29 @@
+name: bench
+# Manual only: records the design §9.6 budgets on a GitHub-hosted runner.
+on:
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - name: make bench
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "# runner: $RUNNER_OS $RUNNER_ARCH, $(nproc) CPUs, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ //')"
+            echo "# commit: $GITHUB_SHA"
+            make bench
+            echo "# load after: $(uptime)"
+          } 2>&1 | tee bench.txt
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench
+          path: bench.txt
+          if-no-files-found: error
