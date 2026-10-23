@@ -1,6 +1,6 @@
 # Phase 2 — Gateway & Route Explorer: Design
 
-**Status:** Design questions answered by the user (2026-10-23, §15); awaiting approval. Revised after the fourth cross-model review (`reviews/design-r4-codex.md`: 14 findings, then re-review findings N1–N7 and M1–M3, all accepted) and the user's scope decision (2026-10-22). Earlier reviews: `reviews/design-codex.md` (13 findings and 5 re-review findings, all accepted).
+**Status:** Approved by the user 2026-10-23, with the addendum of 2026-10-23 (support-ticket research and planning fixes). Cross-model reviews: `reviews/design-r4-codex.md` (14 findings, then re-review findings N1–N7 and M1–M3, all accepted) and `reviews/design-codex.md` (13 findings and 5 re-review findings, all accepted). The research behind §1 covers support tickets (anonymised), knowledge-base articles and field threads.
 **Date:** 2026-10-21, revised 2026-10-22 and 2026-10-23
 **Base:** `2c25e35`
 **Roadmap:** `docs/roadmap.md`, Phase 2
@@ -14,7 +14,7 @@ Choices made without the user are marked **(our call)**. Choices the user made a
 
 ## 1. Goal and scope
 
-Operators debug Gateway API routing by reading `status.parents[].conditions` in YAML, by admin snapshots and by Envoy config dumps. Support and field threads show four questions come up most:
+Operators debug Gateway API routing by reading `status.parents[].conditions` in YAML, by admin snapshots and by Envoy config dumps. Support tickets (anonymised), knowledge-base articles and field threads show four questions come up most:
 - Which routes are on this Gateway, and on which listener?
 - Why is this route not attached?
 - Which child routes did delegation pick up, and which did it drop?
@@ -175,12 +175,13 @@ type Rules interface {
 
 | Index | Key | Value | Serves | From |
 |---|---|---|---|---|
-| Route rows | — | `[]RouteRow`, sorted by (namespace, name, group, kind) | Routes list | 2.2 |
+| Route rows | — | `[]RouteRow`, sorted by (namespace, name, group, kind). Includes every route the install lists: owned routes, attached or not; unwatched routes that target the install (KGWUI-004, `attachment=unwatched`); declared candidates (`attachment=declared`); and no-parent rows | Routes list | 2.2 |
 | By parent | Gateway or ListenerSet ref | row indexes, parentRef and status attachment | Gateway and ListenerSet pages | 2.2 |
 | By parent route | HTTPRoute ref | children with a reported edge (§4.2) | Child routes | 2.2 |
 | Declared candidates | HTTPRoute ref | rows that name it with no reported edge | KGWUI-011 | 2.2 |
 | Parent routes | route ref | parents of its reported edges | up-chain (§5.3) | 2.2 |
-| By namespace, by backend | namespace, Backend ref | row indexes | filters, Backend links | 2.2 |
+| By namespace | namespace | row indexes | namespace filter | 2.2 |
+| ByBackend | backend identity (group, kind, namespace, name) after defaults, for Services and Backends alike, from rule backendRefs and `RequestMirror` filters | row indexes, with "mirror" marked | `backend` filter, Backend links | 2.2 |
 | Condition state | — | a bit set per row (§6.1) | state filter | 2.2 |
 | Findings by object | object ref | worst error and warning finding | row state, health filter | 2.2 |
 | Gateway, ListenerSet, no-parent rows | — | rows; ListenerSets also by parent Gateway | lists | 2.2 |
@@ -229,7 +230,7 @@ All views decode from unstructured objects, apply Gateway API defaults and never
 | `Match` | `Path{Type, Value}`, `Headers`, `QueryParams` (type defaults to `Exact`), `Method` |
 | `Filter` | `Type`, `ExtensionRef *Ref`, `Config map[string]any` as written |
 | `BackendRef` | `Group`, `Kind` (default `Service`), `Namespace` (default the route's), `Name`, `Port`, `Weight` (default 1), `Filters`, `Delegation *DelegationRef` |
-| `DelegationRef` | `Mode` (`name`, `wildcard`, `label`), `Namespace` (default the parent's), `Name` or `Label` (`v2.4.7 translator/backendref/types.go:14-28`) |
+| `DelegationRef` | `Mode` (`name`, `wildcard`, `label`), `Namespace` (default the parent's), `Name` or `Label`. Classification as kgateway does it, identical at both tags: `computed-rules.md` §3.2 |
 | `BackendView` | `Type`, `Conditions` |
 | `RouteHostnames` (GRPCRoute, TLSRoute) | `Hostnames`, for view A |
 
@@ -350,7 +351,7 @@ Each row carries flags from its **current** status entries for this install's pa
 |---|---|---|---|---|
 | KGWUI-002 | condition-false | error (unchanged) | also covers reported-edge entries and Backend `Accepted` | 2.2 |
 | KGWUI-003 | route-unattached | info / warning (unchanged) | also a parentRef to a missing HTTPRoute | 2.2 |
-| KGWUI-004 | namespace-not-watched | warning (unchanged) | also an unwatched route naming an owned route | 2.2 |
+| KGWUI-004 | namespace-not-watched | warning (unchanged) | also an unwatched route naming an owned route. The detail names the parent's kind when it is not a Gateway ("targets HTTPRoute shop/api", "targets ListenerSet …"); the Gateway text stays "targets Gateway …" (`pkg/health/checks.go:619`), so Phase 1 goldens do not change **(our call)** | 2.2 |
 | **KGWUI-011** | **delegated-route-not-attached** | info inside the grace period, warning after | **new**; two triggers | 2.2, 2.4 |
 | **KGWUI-012** | **computed-view-disagrees** | warning | **new** **(user, 2026-10-23; §15 Q13)** | 2.3, 2.4 |
 
@@ -358,6 +359,7 @@ Each row carries flags from its **current** status entries for this install's pa
 - **Status trigger** (2.2): a declared candidate (§4.2). The grace period runs from the later of the route's and the parent's current generation first-seen time **(our call)**. **Inside it the finding is info and the `resource status` required check is pending, so the install is unknown, as for any resource being processed** (Phase 1 design §5.2; restored from the earlier design). After it, the finding is a warning and the check is OK again. This holds for every ref mode: an explicit declared parent always gets the diagnostic, even when only a wildcard ref selects the route (§15 Q15). Detail draft: "No status from HTTPRoute `shop/api`", plus the computed reason when 2.4 has one.
 - **Computed trigger** (2.4): view B computes an in-scope route, with no eligible entry, as selected by an owned parent's `name` or `label` ref with outcome `dropped` or `forbidden` in every context, and the traversal for that (route, parent) is **complete** (`computed-rules.md` §8.5). An incomplete traversal gives no computed finding. It is a warning once mature (`computed-rules.md` §9.3, 30 s). **It never makes a check pending**: a computed outcome waits on no controller output, and health stays status-based (D-020) **(our call)**. 
 - **Orphan trigger** (2.4) **(user, 2026-10-23; §15 Q15)**: a route gets the computed finding only when it is an **orphan in this install**. All of these must hold: its `spec.parentRefs` list is empty, so it can work only as a delegated child; it is selected **only by `wildcard` refs** of this install's owned parents (any `name` or `label` ref that selects it gives the per-parent trigger above instead, and no orphan finding); **every** selecting outcome, in every context, is `dropped` or `forbidden` (a `cycle` or `unresolved` outcome does not qualify); and the traversal for every selecting parent is complete (`computed-rules.md` §8.5). The conclusion is install-local: a parent of another install may still select and serve the route, because an empty list permits any parent (`utils/delegation/delegation.go:25-27`, both tags). One finding per route, not per parent; a warning once mature, never pending. A route with its own parentRefs that a wildcard selects and drops gets no finding and stays in the Delegation tab with its reason. Detail draft (wording-pass candidate): "No parent route in this install keeps this route, and it has no parentRefs of its own."
+- **Two clocks.** KGWUI-011's status-trigger grace runs 60 s from the later of the route's and the parent's current-generation first-seen time. KGWUI-012's `graceEnd` for a missing child entry (`computed-rules.md` §9.3) runs 60 s from the latest first-seen time of the child, the parent and every route on a contributing path, and is combined with the 30 s persistence window. They are different clocks and can end at different times **(our call)**.
 - `rejected-hostnames` already has KGWUI-002 from status. An eligible but stale entry is not KGWUI-011; it follows Phase 1's freshness rules. An out-of-scope route gets KGWUI-004 only.
 
 **KGWUI-012.** Raised when a check matures under `computed-rules.md` §8.3 and §9.3. The resource is the object whose status disagrees. Message draft: "The UI's computed view disagrees with the controller". Detail draft: "Listener `https`: computed 12 routes, controller reports 11. Rule set kgateway-2.4." A warning: it can turn the install yellow, never red. Unknown, skipped, stale, not-verified and incomplete checks never raise it. A conclusion that needs absence (no entry expected, no delegation failure) needs a complete traversal (`computed-rules.md` §8.5).
@@ -377,7 +379,7 @@ No-evidence states are never green (D-016 §6) and add no failed required check,
 
 ### 6.3 Row state
 
-Every row and detail header shows a **state** (`error`, `unknown`, `warning`, `healthy`), never a severity, with Phase 1's Gateway row rules applied to the row's own object (`pkg/overview/overview.go:166-187`) **(our call)**: any error finding → `error`; else any required check not OK → `unknown`; else any warning finding → `warning`; else `healthy`. A Backend without current evidence is `unknown`. Info findings never set a state. Stale data turns every state `unknown` on the client.
+Every row and detail header shows a **state** (`error`, `unknown`, `warning`, `healthy`), never a severity, with Phase 1's Gateway row rules applied to the row's own object (`pkg/overview/overview.go:166-187`) **(our call)**: any error finding → `error`; else any required check not OK → `unknown`; else any warning finding → `warning`; else `healthy`. A Backend without current evidence is `unknown`. Info findings never set a row's state by their own severity. A KGWUI-011 info inside its grace period, though, makes the install-wide `resource status` required check pending (§6.2), and Phase 1's rule is install-wide: while any required check is not OK, **every** row of the install is `unknown`. Stale data turns every state `unknown` on the client.
 
 **Propagation.** A child's failures count in install health and on the child's row. A Gateway, ListenerSet or parent route badge counts only findings on that object; a KGWUI-012 on a Gateway makes it `warning` **(our call)**. Clusters that use delegation may change colour after upgrade; the release notes say so.
 
@@ -433,6 +435,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `state` | routes | a §6.1 flag; repeatable (OR) |
 | `health` | all | `error`, `unknown`, `warning`, `healthy`; repeatable |
 | `q` | all | case-insensitive substring of namespace/name; routes also hostnames |
+| `backend` (2.2) | routes | `group/Kind/namespace/name` of a backend, `core` for the empty group (`core/Service/shop/cart`); repeatable (OR). Matches routes whose rules' `backendRefs`, or whose `RequestMirror` filters, name it by full identity after defaults. Delegation refs never match. **(user, 2026-10-23)** |
 | `sort` | all | `name` (default), `kind`, `health`, Gateways also `routes`; suffix `.asc` or `.desc` |
 | `limit`, `cursor` | all | 1–200, default 50; an opaque `next` or `prev` value |
 | `rule`, `ref`, `outcome` (2.4) | delegation | rule index, ref index, a row outcome; no `sort` (fixed order, §3.6) |
@@ -485,7 +488,9 @@ GatewayDetail   { install, ref, generation, class, health, candidate?, ruleSet?,
                   listeners: ListenerDTO[], attachedListenerSets?,
                   routeCounts: { accepted, notAccepted, pending, unwatched }, collectedAt }
 ListenerSetDetail { install, ref, generation, health, candidate?, ruleSet?, parent: LinkedRef, parentFound,
-                  conditions, listeners: ListenerDTO[], experimentalHint?, routeCounts, collectedAt }
+                  conditions, listeners: ListenerDTO[], experimentalHint?, routeCounts,
+                  parentAllowedListeners?: { set: boolean, value?: object, crdHint: boolean },   // 2.2; value as written
+                  collectedAt }
 RouteDetail     { install, ref, generation, health, candidate?, ruleSet?, hostnames,
                   annotations: { inheritParentMatcher? }, parentRefs: ParentRef[], parents: ParentStatus[],
                   attachments?: { parentRef: ParentRef, index, target: LinkedRef, result: Attachment }[],  // 2.3
@@ -524,6 +529,7 @@ This is the only definition of what a caller may see. Every new handler goes thr
 
 1. **Objects.** A denied detail object returns 404, as an absent one does. List rows are filtered per ref before paging; `total` counts only visible rows.
 2. **No filtered hidden counts.** Lists report at most `deniedInInstall`: the unfiltered number of objects of the listed kinds in the install that the caller may not view. It is independent of every filter, so a hostname probe changes nothing, and it is shown once per list page.
+2a. **The `backend` filter cannot probe.** It matches backendRefs as written in the specs of routes the caller may view, which are already part of those objects (rule 8). It never looks up the backend: the response is the same whether the backend exists, is absent or is denied, and carries nothing about the backend's state. `total` counts visible routes only, and `deniedInInstall` stays unfiltered (rule 2) **(our call)**.
 3. **Dereferenced objects.** Data that comes from another object is sent only if the caller may view that object: a Backend's state and condition (`{restricted: true}`), a `name` ref's state (`restricted`), a delegation row's child (the row is dropped), `via` (`viaRestricted`), an ancestor step (`{restricted: true}`, no identity).
 4. **Computed facts are dependency-based.** Every computed result carries its dependency set: the objects whose data decided it (`computed-rules.md` §4.6, §5.6). For a listener membership that includes the route's Namespace when the listener uses `Selector`. For a delegation context or an effective matcher it includes every route on the path, because the parent's match and inherited headers come from them, plus the facts that made the root a root: the Gateways, ListenerSets and Namespaces behind its view A outcome, or for a status root the entry's target (`computed-rules.md` §5.1). A fact is sent only if the caller may view **every** dependency. Otherwise its `Computed.state` is `restricted`, and its value, reason and note are omitted: no hostnames, no outcome, no match, no partial value. Quoted strings are never redacted piecemeal.
 5. **Derived counts** (`routes`, `notAccepted`, `listenerSets`, `routeCounts`, `children`, `childCount`, `declaredCount`, `computedRoutes`, `selected`, `attached`) count only visible objects and are recounted per request. A computed count whose dependencies are not all visible, for example a listener with a hidden member or a hidden Namespace behind a `Selector`, is `restricted` and its cross-check is not shown.
@@ -563,7 +569,7 @@ kgateway writes no message on attachment failures (`translator/gateway/gateway_t
 ### 7.6 Goldens
 
 New fixtures in `pkg/api/testdata/golden`, added per sub-phase:
-- 2.2: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json`, `route-detail.json` (delegation refs, reported children, a cycle in the up-chain, a truncated up-chain, a Backend ref), `route-detail-candidate.json`, `bad-request.json`, and a restricted variant (Backend, ancestor step, `via`, `deniedInInstall`).
+- 2.2: `routes.json`, `routes-filtered.json`, `gateways.json`, `listenersets.json`, `gateway-detail.json`, `listenerset-detail.json` (with a `NotAllowed` ListenerSet whose parent has no `allowedListeners`, and one whose parent sets it), `route-detail.json` (delegation refs, reported children, a cycle in the up-chain, a truncated up-chain, a Backend ref), `route-detail-candidate.json`, `bad-request.json`, and a restricted variant (Backend, ancestor step, `via`, `deniedInInstall`).
 - 2.3: `routes-by-listener.json`; `gateway-detail.json` gains one listener per check state; a restricted variant with a `Selector` listener over a hidden Namespace.
 - 2.4: `route-delegation.json` (every outcome, `partial`, contexts), `route-detail.json` gains effective matchers in both modes, an edge with `contextsTruncated` and an edge with `contexts: []` at the install cap; a restricted variant with a hidden ancestor and `evidenceRestricted`.
 
@@ -572,6 +578,10 @@ The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) i
 - `meta.json`: `views` and the Backend kind (2.2);
 - `health.json`: `link` on finding resources (2.2); `evidenceRestricted` appears only in restricted fixtures;
 - `overview.json`, `bare-overview.json`: `link` on Gateway rows (2.2).
+
+**Go shapes (our call).** `HealthResponse` stops being an alias of `health.Report` (`pkg/api/types.go:42`) and becomes a struct that embeds the report and shadows `Findings` with a type that adds `link`. `OverviewResponse` shadows the embedded `overview.Overview.Gateways` (`pkg/overview/overview.go:86`) with rows that add `link`. `encoding/json` serialises the shallower field, so both changes are additive on the wire; the stored report and overview stay unchanged.
+
+**Reverse lookup goldens (2.2).** `routes-by-backend.json` (a Service, a Backend, a mirror target, two backends OR-ed) and a restricted variant: the same query for a denied backend and for an absent one return identical bodies.
 
 ## 8. Frontend
 
@@ -600,7 +610,7 @@ The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) i
 
 ### 8.3 Finding links retarget
 
-`FindingRow` (`FindingRow.tsx:34,42`) and the top findings use `objectPath` on the finding's `link`; the Gateway table uses the row's `link`. A restricted finding never links.
+`FindingRow` (`pages/install/FindingRow.tsx:121`) and the top findings use `objectPath` on the finding's `link`; the Gateway table's name cell and row click (`pages/install/GatewayTable.tsx:192,265`) use the row's `link`. A restricted finding never links.
 
 ### 8.4 Computed facts on screen
 
@@ -617,7 +627,9 @@ A diagnostic candidate shows its banner above the header.
 
 **HTTPRoute detail.** Up-chain breadcrumb ("A parent you cannot view" for a restricted step; "More paths not shown" when truncated); hostnames, or "Inherits the listener's hostnames", or for a child "Inherits the parent route's hostnames"; one card per parentRef with target, section or port, every condition and, from 2.3, the computed listeners each with its own effective hostnames; other controllers' entries collapsed; permission ("Allows any parent" or "Allows: …"); rules (matches, filters with config as written, backendRefs with weight; a delegation ref shows its mode and, from 2.4, its selected and attached counts; a Backend shows its state or "Restricted"); from 2.4, effective matches per parent path and the Delegation tab; child routes (reported, paged).
 
-**ListenerSet detail.** Parent Gateway link (or "Parent Gateway not found"), conditions, the listener table, attached routes.
+**ListenerSet detail.** Parent Gateway link (or "Parent Gateway not found"), conditions, the listener table, attached routes. **Allowed listeners (2.2, user, 2026-10-23).** When the ListenerSet is not accepted with reason `NotAllowed`, the page shows the parent Gateway's `spec.allowedListeners` as written next to that condition (or "Not set: the Gateway allows no ListenerSets"). When the field is absent, a hint adds: "If you set `allowedListeners` and it is missing here, the Gateway CRD in this cluster may not have the field. The API server drops fields its CRD does not define. Install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD." **Detection (our call):** the UI does not read CRDs (D-017 §5 dropped that RBAC), so it shows the hint whenever the field is absent on the parent Gateway. It cannot tell an unset field from one the CRD lacks: both read as absent. Served versions do not settle it either, because the standard and experimental channels serve the same Gateway version. The hint is therefore worded as a possibility, never a diagnosis.
+
+**Reverse lookup (2.2, user, 2026-10-23).** "Routes that send traffic here" opens the Routes list with `backend=…`. It appears on the YAML view of an admitted Backend, and on every backendRef of a route page ("Other routes using this backend"). Services are not watched, so they have no YAML view (§11); for a Service the entry point is the route's backendRef **(our call)**. Mirror targets are listed with a "Mirror" label.
 
 ### 8.6 States
 
@@ -643,7 +655,7 @@ A diagnostic candidate shows its banner above the header.
 
 ### 8.8 Wording pass
 
-All new copy goes through the wording pass: short sentences, plain English, active voice; per string, a sub-agent picks the least machine-sounding of five accurate options. It covers titles, empty states, filter and flag labels, attachment labels, delegation outcomes and reasons, the badge, coverage and check states, unknown reasons, KGWUI-011 (including the orphan detail) and KGWUI-012 text, the Backend detail, the candidate banner, restricted placeholders, the denied-objects line and copy buttons. Drafts here are placeholders.
+All new copy goes through the wording pass: short sentences, plain English, active voice; per string, a sub-agent picks the least machine-sounding of five accurate options. It covers titles, empty states, filter and flag labels, attachment labels, delegation outcomes and reasons, the badge, coverage and check states, unknown reasons, KGWUI-011 (including the orphan detail) and KGWUI-012 text, the Backend detail (a current `Accepted=True` reads "Configuration accepted", never "working") **(user, 2026-10-23)**, the allowed-listeners hint, the candidate banner, restricted placeholders, the denied-objects line and copy buttons. Drafts here are placeholders.
 
 ## 9. Testing
 
@@ -665,12 +677,16 @@ Seed the fake dynamic client, run the real cache, install, computed, health, exp
 - **Phase 1 → Phase 2 behaviour change, Q12 (2.2).** Counts, findings and roll-up together, before and after: a mixed-role route owned once and judged on both; a child of two parents counted once; two installs sharing a controller name; a removed parentRef; a namespace leaving the scope; a stale implicit edge.
 - **Isolation (2.2):** a child reported by another install's controller is not owned here; a child reported by parents in two installs appears in both.
 - **Backend (2.2):** each row of the §6.2 table; none adds "not yet processed" or turns the install unknown.
-- **Row state (2.2):** a warning plus a pending required check is `unknown`; info only is `healthy`; a Gateway with failing routes keeps its own state; a Gateway with KGWUI-012 is `warning` (2.3).
+- **Row state (2.2):** a warning plus a pending required check is `unknown`; an object with only info findings is `healthy` when every required check is OK; a KGWUI-011 info inside grace makes the required check pending, so every row of the install, including unrelated Gateways, is `unknown` until grace ends; a Gateway with failing routes keeps its own state; a Gateway with KGWUI-012 is `warning` (2.3).
 - **ListenerSet (2.2):** `Accepted=True/ListenersNotValid`; `Accepted=False` with no listener entries; an XListenerSet hint; a missing parent Gateway; 200 ListenerSets paged on the Gateway page.
 - **Admission and links (2.2):** every finding resource opens its view; spec-named objects are candidates; an unrelated object is 404 on both endpoints. For every reference in every golden, `link` agrees with the endpoints. The second step: D named only by candidate C is `none` and 404; owned, it is `detail`.
 - **Authorizer (2.2, extended in 2.3 and 2.4):** rows, nested ListenerSets, delegation rows and children hidden; `total` visible only; `deniedInInstall` unchanged under every filter; a denied Backend is `{restricted: true}` with no message; a denied ancestor has no identity; derived counts drop denied objects. 2.3: a `Selector` listener over a hidden Namespace makes membership, count and check `restricted`, and the row carries no `listener-unknown`. 2.4: a hidden ancestor makes the child's effective contexts and delegation contexts `restricted`; a KGWUI-012 on a visible child whose evidence names a hidden parent has `evidenceRestricted` and no detail. Health and row states are unchanged in every case.
 - **Computed views through the API (2.3, 2.4):** every row of `computed-rules.md` §11 that is not marked rule-only is also asserted through the handlers, with its `Computed` state, coverage and the KGWUI-012 or KGWUI-011 outcome.
 - **KGWUI-011 orphan trigger (2.4):** an orphan dropped by every selecting wildcard parent with a complete traversal gets a warning; the same with one selecting parent incomplete gets none; a route with a Gateway parentRef that a wildcard selects and drops gets none, and its Delegation row is shown; an orphan another parent attaches gets none; a complete `cycle` outcome gets none; a route also selected by a `label` ref gets only the per-parent finding (`computed-rules.md` §11.5).
+- **Reverse lookup (2.2):** `backend=` for a Service, a Backend and a mirror target; repeated values OR-ed; a delegation ref never matches; a malformed value is 400; a denied backend and an absent one give identical responses; hidden routes are not counted.
+- **ListenerSet allowed listeners (2.2):** a `NotAllowed` ListenerSet whose parent Gateway sets `allowedListeners` shows it with no hint; one whose parent lacks the field shows the hint; an accepted ListenerSet shows neither.
+- **KGWUI-004 detail (2.2):** a route naming an owned HTTPRoute or ListenerSet from an unwatched namespace says "targets HTTPRoute …" or "targets ListenerSet …"; the Gateway case is byte-identical to Phase 1.
+- **Values easy to get wrong in detail views (2.2) (user, 2026-10-23).** Fixtures and goldens cover: a `RequestMirror` filter with its backendRef (and a percentage or fraction where set); weights, including an absent weight (shown as the default 1, marked as defaulted) next to an explicit 1 and an explicit 0; ports, including an absent port next to an explicit one (a missing port is never shown as 0); and filter order, preserved exactly as written across several filters of different types in one rule and in one backendRef.
 - **Compatibility:** every Phase 1 golden passes, except the additive changes of §7.6.
 
 ### 9.2 Per-version goldens for the computed views
@@ -827,6 +843,7 @@ Each needs a check against kgateway `main` before filing; they are filed as §15
 | 14.5 | Clear kgateway-owned parent entries from routes translation no longer reports, in every case (only if §9.5 confirms the gap) | 2.4 clears a matcher-dropped child (`pkg/krtcollections/policy.go:1150-1178`); other cases may keep stale entries (`pkg/reports/status.go:452-472`) |
 | 14.6 | Add the effective `DELEGATION_WILDCARD_NAMESPACE` and the experimental-features flag to the pending scope endpoint proposal | tools stop reading Pod env; D-017 §4 already wants the flag |
 | 14.7 | A separately bindable, read-only snapshot endpoint with route source metadata on by default | the admin server binds to localhost, shares a port with `/logging` and pprof, and needs `KGW_ENABLE_ROUTE_SOURCE_METADATA` (§3.7) |
+| 14.8 | A status signal when the data plane rejects a route's config **(user, 2026-10-23)** | Envoy can reject (NACK) a configuration update that includes a route, while the route stays `Accepted=True` and later edits stop taking effect. Nothing in route or Gateway status says so. Ask: a condition per route (or per Gateway, naming the routes) when the proxy rejected the last config that contained it, with the rejection message, cleared when a later version is accepted. Open question: per route or per Gateway at scale. |
 
 ## 15. Questions for the user
 
@@ -840,6 +857,8 @@ Each needs a check against kgateway `main` before filing; they are filed as §15
 | Q8 | Routes per listener? | A product requirement: view A, cross-checked against `attachedRoutes` **(user, 2026-10-22)** |
 | — | Recompute model | Event-driven (D-019) **(user, 2026-10-22)** |
 | — | Mirroring boundary | Overridden for views A, B and C under D-020's rules **(user, 2026-10-22)** |
+| — | GRPCRoute detail page | No: GRPCRoute stays a list row plus the YAML view in Phase 2 **(user, 2026-10-23)** |
+| — | Research addendum | From the support-ticket research: the ListenerSet page shows the parent's `allowedListeners` with a CRD hint; Backend `Accepted=True` reads "Configuration accepted"; a reverse lookup from a backend to its routes; an upstream ask for data-plane rejection (§14.8); goldens for values easy to get wrong **(user, 2026-10-23)** |
 | — | Scope and staging | All of views A, B and C in Phase 2, in four sub-phases, each reviewed cross-model and shippable: 2.1 D-019 and timestamps, 2.2 explorer on status, 2.3 view A, 2.4 context-aware B and C (§13). Rules move to `computed-rules.md`. **(user, 2026-10-22)** |
 | Q1 | Policies attached to a route or Gateway? | Later (Phase 5): a list without precedence can mislead **(user, 2026-10-23)** |
 | Q4 | A graph view? | Later **(user, 2026-10-23)** |

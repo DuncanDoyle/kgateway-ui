@@ -1,6 +1,6 @@
 # Phase 2 — Computed rules specification (D-020)
 
-**Status:** draft with the Phase 2 design, for approval
+**Status:** Approved by the user 2026-10-23
 **Date:** 2026-10-22
 **Rule sets:** `kgateway-2.3` (tag `v2.3.11`, `c2af2887`) and `kgateway-2.4` (tag `v2.4.7`, `b4a2bf74`)
 **Design:** `design.md`. This document is the only definition of the computed views (D-020 views A, B and C), their cross-check against the controller and the persistence rules of KGWUI-012. The design refers to it and does not repeat it. Scheduling is defined once in design §3.1, and authorization once in design §7.4.
@@ -46,7 +46,10 @@
 ### 3.2 Defaults applied when decoding
 
 - parentRef: group and kind default to Gateway; namespace to the route's own (`pkg/krtcollections/policy.go` V4:1247-1274).
-- Delegation backendRef: namespace defaults to the parent route's (`pkg/krtcollections/policy.go` V4:1575-1590). Group and kind must be explicit; an omitted kind means Service (`translator/backendref/types.go` V4:14-28).
+- Delegation backendRef: namespace defaults to the parent route's (`pkg/krtcollections/policy.go` V4:1575-1590). Classification follows `translator/backendref/types.go` V4:12-28, V3:12-28 (the file is the same at both tags):
+  - **HTTPRoute ref** (`IsHTTPRoute`): `group` is exactly `gateway.networking.k8s.io` **and** `kind` is exactly `HTTPRoute`, both set. A nil group or kind never matches, and an omitted kind means Service. Within this group, `name` `""` or `"*"` is the **wildcard** mode and any other name is the **name** mode (`query/route.go` V4:339, V3:299).
+  - **Label selector** (`IsHTTPRouteDelegationLabelSelector`): `group` and `kind` both set, and `group + "/" + kind` equals `delegation.kgateway.dev/label` (`api/labels/delegation.go:7`), so group `delegation.kgateway.dev` and kind `label`. The `name` is the label value.
+  - Anything else is an ordinary backend.
 - Header and query matches default to type `Exact`, so equality compares like with like, as kgateway's `DeepEqual` does on typed structs.
 - A rule with omitted `matches` has the CRD default `PathPrefix /`. An explicit `matches: []` stays empty.
 - `inherit-parent-matcher` is true for `true`, `yes` or `enabled`, case-insensitive, read from the child (`api/annotations/delegation.go:7`; `utils/delegation/delegation.go` V4:59-71, V3:48-60; `pkg/krtcollections/policy.go` V4:1429).
