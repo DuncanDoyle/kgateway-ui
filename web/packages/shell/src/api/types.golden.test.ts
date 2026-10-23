@@ -113,9 +113,10 @@ const kind = shape<ServedKind>({
   displayName: "!",
   version: "!",
 });
+const groupKind = shape<NonNullable<MetaResponse["views"]>[number]>({ group: "!", kind: "!" });
 const metaShape = shape<MetaResponse>(
-  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!" },
-  { kinds: kind },
+  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!", views: "?" },
+  { kinds: kind, views: groupKind },
 );
 const errorShape = shape<ErrorResponse>({ error: "!" });
 
@@ -158,5 +159,6 @@ describe("types.ts matches the golden v1 wire format", () => {
     const bare = bareInstalls.body[0];
     expect(bare && !("scope" in bare) && !("namespace" in bare) && !("ready" in bare.readiness)).toBe(true);
     expect(installs.body.every((s) => "confirmedAt" in s)).toBe(true);
+    expect(meta.body.views?.length).toBeGreaterThan(0);
   });
 });

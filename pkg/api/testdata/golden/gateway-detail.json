@@ -1,0 +1,133 @@
+{
+  "body": {
+    "addresses": [
+      "10.0.0.1"
+    ],
+    "attachedListenerSets": 1,
+    "class": "kgateway",
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "Accepted",
+        "stale": false,
+        "status": "True",
+        "type": "Accepted"
+      },
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "Programmed",
+        "stale": false,
+        "status": "True",
+        "type": "Programmed"
+      }
+    ],
+    "generation": 1,
+    "health": "warning",
+    "install": "kgw.kgateway",
+    "listeners": [
+      {
+        "allowedRoutes": {
+          "kinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute"
+            }
+          ],
+          "namespaces": {
+            "from": "Selector",
+            "selector": {
+              "matchLabels": {
+                "team": "a"
+              }
+            }
+          }
+        },
+        "name": "http",
+        "port": 8080,
+        "protocol": "HTTP",
+        "status": {
+          "attachedRoutes": 3,
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-10-17T11:00:00Z",
+              "message": "",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "stale": false,
+              "status": "True",
+              "type": "Accepted"
+            }
+          ],
+          "supportedKinds": [
+            {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute"
+            }
+          ]
+        }
+      },
+      {
+        "allowedRoutes": {
+          "kinds": [],
+          "namespaces": {
+            "from": "Same"
+          }
+        },
+        "hostname": "*.example.com",
+        "name": "https",
+        "port": 443,
+        "protocol": "HTTPS",
+        "status": {
+          "attachedRoutes": 0,
+          "conditions": [],
+          "supportedKinds": []
+        },
+        "tls": {
+          "certificateRefs": [
+            {
+              "group": "",
+              "kind": "Secret",
+              "link": "none",
+              "name": "edge-cert",
+              "namespace": "infra"
+            }
+          ],
+          "mode": "Terminate"
+        }
+      },
+      {
+        "allowedRoutes": {
+          "kinds": [],
+          "namespaces": {
+            "from": "Same"
+          }
+        },
+        "name": "new",
+        "protocol": "HTTP"
+      }
+    ],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "Gateway",
+      "link": "detail",
+      "name": "edge",
+      "namespace": "infra"
+    },
+    "routeCounts": {
+      "accepted": 5,
+      "notAccepted": 1,
+      "pending": 1,
+      "unwatched": 1
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

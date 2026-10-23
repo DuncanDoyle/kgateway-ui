@@ -151,6 +151,8 @@ export interface MetaResponse {
   platform: string;
   capabilities: string[];
   kinds: ServedKind[];
+  /** The group/kinds with a detail view; informational, links come from LinkedRef.link. */
+  views?: { group: string; kind: string }[];
 }
 export interface ErrorResponse {
   error: string;

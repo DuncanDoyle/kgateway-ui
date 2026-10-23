@@ -204,7 +204,25 @@
     ],
     "platform": "Kubernetes",
     "synced": true,
-    "version": "<build version>"
+    "version": "<build version>",
+    "views": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "ListenerSet"
+      },
+      {
+        "group": "gateway.networking.x-k8s.io",
+        "kind": "XListenerSet"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute"
+      }
+    ]
   },
   "headers": {
     "Cache-Control": "no-store",

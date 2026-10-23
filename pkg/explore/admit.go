@@ -131,3 +131,15 @@ func (b *builder) admit(ix *Index) map[objects.Ref]Admission {
 	}
 	return m
 }
+
+// FindGateway returns the row of Gateway ref.
+func (ix *Index) FindGateway(ref objects.Ref) (RowID, bool) {
+	i, ok := slices.BinarySearchFunc(ix.Gateways, ref, func(g GatewayRow, ref objects.Ref) int { return compareRefs(g.Ref, ref) })
+	return RowID(i), ok // #nosec G115 -- a row count fits in int32
+}
+
+// FindListenerSet returns the row of ListenerSet ref.
+func (ix *Index) FindListenerSet(ref objects.Ref) (RowID, bool) {
+	i, ok := slices.BinarySearchFunc(ix.ListenerSets, ref, func(l ListenerSetRow, ref objects.Ref) int { return compareRefs(l.Ref, ref) })
+	return RowID(i), ok // #nosec G115 -- a row count fits in int32
+}

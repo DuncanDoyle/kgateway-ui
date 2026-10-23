@@ -1,0 +1,71 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "NotAllowed",
+        "stale": false,
+        "status": "False",
+        "type": "Accepted"
+      },
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "NotAllowed",
+        "stale": false,
+        "status": "False",
+        "type": "Programmed"
+      }
+    ],
+    "generation": 1,
+    "health": "error",
+    "install": "kgw.kgateway",
+    "listeners": [
+      {
+        "allowedRoutes": {
+          "kinds": [],
+          "namespaces": {
+            "from": "Same"
+          }
+        },
+        "name": "extra",
+        "port": 8081,
+        "protocol": "HTTP"
+      }
+    ],
+    "parent": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "Gateway",
+      "link": "detail",
+      "name": "edge",
+      "namespace": "infra"
+    },
+    "parentAllowedListeners": {
+      "crdHint": true,
+      "set": false
+    },
+    "parentFound": true,
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "ListenerSet",
+      "link": "detail",
+      "name": "na",
+      "namespace": "infra"
+    },
+    "routeCounts": {
+      "accepted": 0,
+      "notAccepted": 0,
+      "pending": 0,
+      "unwatched": 0
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

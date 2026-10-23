@@ -90,6 +90,38 @@ func TestGoldenExplorerLists(t *testing.T) {
 	}
 }
 
+// TestGoldenExplorerDetails pins the 2.2 detail bodies (design §7.6).
+func TestGoldenExplorerDetails(t *testing.T) {
+	notAllowed := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowed"), testutil.Cond("Programmed", metav1.ConditionFalse, "NotAllowed")}
+	na := func() *unstructured.Unstructured {
+		return lsWith("na", "ListenerSet", edgeRef, notAllowed, testutil.Listener{Name: "extra"})
+	}
+	_, gws, _ := startWith(t, setup{}, listenerEdge(explorerWorld())...)
+	_, unset, _ := startWith(t, setup{}, world(na())...)
+	_, allowed, _ := startWith(t, setup{}, edgeAllowing(map[string]any{"namespaces": map[string]any{"from": "Same"}}, world(na()))...)
+	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
+	_, restricted, _ := startWith(t, setup{authz: hideMidDeps()}, delegationWorld()...)
+	foreign := testutil.GwRef("infra", "foreign")
+	far := testutil.HTTPRoute("blog", "far", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other"), testutil.AcceptedBy(foreign, testutil.Controller))
+	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
+	_, cand, _ := startWith(t, setup{}, world(far, mid)...)
+	for _, tc := range []struct {
+		golden string
+		srv    *httptest.Server
+		path   string
+	}{
+		{"gateway-detail", gws, gwDetail},
+		{"listenerset-detail", unset, lsDetail + "infra/na"},
+		{"listenerset-detail-allowed", allowed, lsDetail + "infra/na"},
+		{"route-detail", deleg, routeDetail + "shop/mid"},
+		{"route-detail-restricted", restricted, routeDetail + "shop/mid"},
+		{"route-detail-candidate", cand, routeDetail + "blog/far"},
+	} {
+		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
+	}
+}
+
 // checkGolden compares got with testdata/golden/<name>.json, or rewrites it under -update.
 func checkGolden(t *testing.T, name, path string, got []byte) {
 	t.Helper()

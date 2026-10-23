@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -46,6 +47,9 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes", h.routes)
 	mux.HandleFunc("GET /api/v1/installs/{id}/gateways", h.gateways)
 	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets", h.listenerSets)
+	mux.HandleFunc("GET /api/v1/installs/{id}/gateways/{ns}/{name}", h.gatewayDetail)
+	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets/{group}/{kind}/{ns}/{name}", h.listenerSetDetail)
+	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}", h.routeDetail)
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	mux.Handle("/", spa(ui))
@@ -126,6 +130,7 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 				resp.Kinds = append(resp.Kinds, k)
 			}
 		}
+		resp.Views = explore.DetailKinds(m.Served)
 	}
 	writeJSON(w, resp)
 }
@@ -307,7 +312,7 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Denied, absent and unadmitted objects get the same answer.
-	writeErr(w, http.StatusNotFound, "resource not found in this install's scope")
+	writeErr(w, http.StatusNotFound, notFoundInScope)
 }
 
 // object returns the stored object ref names as a JSON object, or nil.
