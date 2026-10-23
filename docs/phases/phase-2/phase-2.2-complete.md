@@ -25,7 +25,7 @@ none
 - `test/e2e/fixtures/explorer.yaml`, `TestExplorerShowsControllerStatus`, `web/e2e/explorer.spec.ts` (walk, filters, themes and layout geometry).
 - Budget tests and benchmarks for 2.2 (`make bench`, `make bench-stream`); the bench workflow covers the explorer paths.
 - README upgrade notes; wording record `phase-2.2-wording.md`; evidence record `phase-2.2-evidence.md`.
-- Gates on `0855652`: `go vet` (plain, `bench` and `e2e` tags), `go test ./... -race` over 20 packages, golangci-lint 0 issues; Vitest 443/443, typecheck, Biome and build; no forbidden terms in the tree. kind e2e passed locally on v2.4.7 (Go 2/2, Playwright 17/17) and on v2.3.11 (earlier in the sub-phase), and in PR #8's CI matrix.
+- Gates on `ff37edf`: `go vet` (plain, `bench` and `e2e` tags), `go test ./... -race` over 20 packages, golangci-lint 0 issues; Vitest 443/443, typecheck, Biome and build; no forbidden terms in the tree. kind e2e passed locally on v2.4.7 and v2.3.11 (Go 2/2, Playwright 17/17 each), and in PR #8's CI matrix.
 
 ### Benchmarks (Large tier, CI runner, `bench/2.1-ci.txt` and `bench/2.2-ci.txt`)
 
@@ -56,7 +56,7 @@ Recorded in the plan workspace ledger; the ones that changed behaviour or the de
 - Detail links follow the server's detail kinds; downstream ListenerSet kinds link to the ListenerSet page.
 - Lists keep the previous query's rows while a new one loads, marked busy; an error on the new query never shows the old rows (plan Task 26 note).
 - Stale view covers states, not notices (design §6.3).
-- Table names truncate to one line with the full name in a tooltip (design §8.7).
+- Long text in table cells truncates to one line with the full text in a tooltip (design §8.7). The kind layout check found the wrapping only on CI's wider fonts, so its fixture now forces long text.
 - The Gateway detail carries its visible ListenerSet count (design §7.4 rule 5).
 - A hidden parent Gateway reads "Not available" (design §8.5).
 
