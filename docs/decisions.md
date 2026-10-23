@@ -420,26 +420,40 @@ Shadowed-match detection stays the controller's job: an upstream ask, consumed l
 | 4 | implicit children by name, `*` in `orders`, label in `shop`, label in namespace `all` | an `Accepted=True` entry under the synthesized ref for each | same |
 | 5 | hostname children: `c5d` fails the fit, `c5k` fits | `c5d` no status; `c5k` `Accepted=False/UnsupportedValue`; parent `ResolvedRefs=False/BackendNotFound` | same |
 | 6 | child `c6` attached, then the parent match becomes `/store` | entry, then `parents: []` | same |
-| 7 | quirk 1: refs `c7a`, `c7b` in one rule | proxy has two `/q1/a` routes (from `c7a`) and one `/q1/b` | same |
+| 7 | quirk 1: refs `c7a`, `c7b` in one rule | proxy has two `/q1/a` routes (both from `c7a`) and one `/q1/b` | same |
 | 7 | quirk 2: `c7c` under `/q1` and `/q2`; `c7d` (`/q1/d`) only under `/q2` | `c7d` `Accepted=True`; proxy has `/q1/d`; parent `ResolvedRefs=False/BackendNotFound` | same |
-| 8 | mid-level `c8p`: self-delegation (cycle) and a missing Service, in two rule orders | cycle rule first → `BackendNotFound`; Service rule first → `RefNotPermitted` | same |
+| 8 | mid-level `c8p`: self-delegation (cycle) and a missing Service, observed with two rule orderings | cycle rule first → `BackendNotFound`; Service rule first → `RefNotPermitted` | same |
 | 8 | top-level: working Service rule plus an unresolved delegation ref | `ResolvedRefs=False/BackendNotFound` | same |
 | 9 | one rule, matches `/api` and `/other`, child `c9` `/api/nine` | one entry, `Accepted=True`; parent `ResolvedRefs=False/BackendNotFound`; one proxy route | same |
-| 10 | delegated child `c10`; route `lsr` on ListenerSet `infra/ls` (`extra` 8090); route `xlsr` on XListenerSet `infra/xls` (`legacy` 8091) | Gateway `http=3 https=3`: `good`, `broken` and `api`, not `c10` (2 each without `api`); `extra=1`; `legacy=1`; both sets `Accepted=True` | same |
+| 10 | delegated child `c10`; route `lsr` on ListenerSet `infra/ls` (`extra` 8090); route `xlsr` on XListenerSet `infra/xls` (`legacy` 8091) | Gateway `http=3 https=3`: `good`, `broken` and `api`, not `c10` (baseline before any item: 2 each); `extra=1`; `legacy=1`; both sets `Accepted=True` | same |
 
 Verbatim excerpts (`kubectl get httproute -o json | jq '.status.parents'`):
 - Item 2, v2.4.7: `"parentRef":{"group":"gateway.networking.k8s.io","kind":"HTTPRoute","name":"api"}` with `Accepted=True`. v2.3.11: `"parents":[]`.
 - Item 3, v2.3.11: `c3p` `"parentRef":{"group":"gateway.networking.k8s.io","kind":"HTTPRoute","name":"api","namespace":"shop","port":8080}`, `Accepted=True`; `c3s` `"parents":[]`.
 - Items 1 and 6, both tags: `{"n":"shop/c1","parents":[]}`, `{"n":"shop/c6","parents":[]}`.
 - Item 8, both tags: `c8p` `ResolvedRefs=False/BackendNotFound@1` (cycle rule first); `ResolvedRefs=False/RefNotPermitted@1` (Service rule first).
+- Item 10, both tags: baseline `{"listeners":[{"name":"http","attachedRoutes":2},{"name":"https","attachedRoutes":2}]}`; after item 10 `{"name":"http","attachedRoutes":3},{"name":"https","attachedRoutes":3}`; `infra/ls` `{"type":"Accepted","status":"True","reason":"Accepted","observedGeneration":1}`, `{"name":"extra","attachedRoutes":1}`; `infra/xls` `{"type":"Accepted","status":"True","reason":"Accepted","observedGeneration":1}`, `{"name":"legacy","attachedRoutes":1}`.
+
+Verbatim proxy routes for item 7, listener 8080, identical on both tags (`run.sh xds`; the `https` listener repeats them):
+```
+quirk 1 (prefix /q1):
+{"name":"listener~8080~*-route-1-httproute-c7a-shop-0-0-matcher-0","match":{"path_separated_prefix":"/q1/a"}}
+{"name":"listener~8080~*-route-2-httproute-c7a-shop-0-0-matcher-0","match":{"path_separated_prefix":"/q1/a"}}
+{"name":"listener~8080~*-route-3-httproute-c7b-shop-0-0-matcher-0","match":{"path_separated_prefix":"/q1/b"}}
+quirk 2 (prefix /q):
+{"name":"listener~8080~*-route-1-httproute-c7c-shop-0-0-matcher-0","match":{"path_separated_prefix":"/q1/c"}}
+{"name":"listener~8080~*-route-2-httproute-c7c-shop-0-0-matcher-0","match":{"path_separated_prefix":"/q2/c"}}
+{"name":"listener~8080~*-route-3-httproute-c7d-shop-0-0-matcher-0","match":{"path_separated_prefix":"/q1/d"}}
+{"name":"listener~8080~*-route-5-httproute-api-shop-1-0-matcher-0","match":{"path_separated_prefix":"/q2"}}
+```
 
 **Alternatives:** n/a (observation).
 
 **Consequences:**
 - Report keys (§7) are confirmed as written on both tags, including the 2.3 port case. No rule-set change.
-- Clearing is verified on both sets for deselection and matcher drop. §2 and the §8.3 "unexpected status" row now mark it verified, so a current leftover entry can raise KGWUI-012 on 2.3 too (sub-phase 2.4). Design §4.2's "other cases are observed first" is answered by items 1 and 6. Reported-edge eligibility (§4.2) is unchanged.
+- Clearing is verified on both sets only when a parent edit causes the drop: deselection (item 1) and matcher drop (item 6). §2 and the §8.3 "unexpected status" row mark that case verified, so a current leftover entry there can raise KGWUI-012 on 2.3 too (sub-phase 2.4). A drop caused by a child edit was not observed, and 2.3's clearing path was not traced in code. A leftover entry after a child-edit drop stays inconclusive (`not-verified`, no `disagrees`, no KGWUI-012) until observed. Reported-edge eligibility (§4.2) is unchanged.
 - The two quirks of §5.4 are verified on both tags; the flag is removed. With quirk 2 a child can attach under a rule that never names it.
 - A delegation context with no kept child sets the parent's `ResolvedRefs=False/BackendNotFound` (items 5, 7, 9), as §5.4's `valid == 0` says. 2.4 goldens for those fixtures expect it.
-- When delegation and backend failures meet on one key, the last rule in spec order wins. §8.2 already compares the reason only without non-delegation backendRefs; unchanged.
+- When delegation and backend failures meet on one key, the last rule in spec order wins (observed with two rule orderings). §8.2 already compares the reason only without non-delegation backendRefs; unchanged.
 - `attachedRoutes` never counts delegated children. A ListenerSet or XListenerSet route counts only on that set's listener, not on the Gateway's. View A (2.3) uses this.
 - Phase 1's base fixtures attach `good` and `broken`; `blog/posts` is outside install A's scope and was not counted.

@@ -57,10 +57,10 @@ case "${1:-}" in
 prepare)
   if ! kubectl -n infra get secret edge-tls >/dev/null 2>&1; then
     d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT # the key never outlives the script, even on failure
     openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj "/CN=*.example.com" \
       -keyout "$d/tls.key" -out "$d/tls.crt" >/dev/null 2>&1
     kubectl -n infra create secret tls edge-tls --cert "$d/tls.crt" --key "$d/tls.key" >/dev/null
-    rm -rf "$d"
   fi
   kubectl apply -f 00-world.yaml
   kubectl -n infra wait --for=condition=Programmed gateway/edge --timeout=180s
