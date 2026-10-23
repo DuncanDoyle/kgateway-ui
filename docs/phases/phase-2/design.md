@@ -374,6 +374,7 @@ Each row carries flags from its **current** status entries for this install's pa
 | `observedGeneration` > 0 and lower | stale | none | unknown |
 | `observedGeneration` 0 (2.3) | none | `False` → KGWUI-002 **warning**, "The controller does not say which version of this Backend it checked" | unknown |
 | absent | none | none (optional condition) | unknown |
+| `Unknown` status, any evidence | n/a | none | unknown (our call, 2.2) |
 
 No-evidence states are never green (D-016 §6) and add no failed required check, so a 2.3 install with Backends does not stay unknown forever (D-018). The pending helper (`pkg/health/checks.go:228-255`) is not used for Backends.
 
