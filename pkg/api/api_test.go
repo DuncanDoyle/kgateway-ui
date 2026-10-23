@@ -874,7 +874,12 @@ func TestNotSyncedIsServiceUnavailable(t *testing.T) {
 
 type staticModel struct{ m *engine.Model }
 
-func (s staticModel) Current() *engine.Model { return s.m }
+func (s staticModel) Current() *engine.Published {
+	if s.m == nil {
+		return nil
+	}
+	return &engine.Published{Model: s.m}
+}
 
 func (staticModel) Platform() platform.Info { return platform.Kubernetes() }
 

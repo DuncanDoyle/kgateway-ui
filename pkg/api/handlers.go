@@ -22,9 +22,9 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/version"
 )
 
-// ModelSource provides the current model and the platform it is computed for.
+// ModelSource provides the current publication and the platform it is computed for.
 type ModelSource interface {
-	Current() *engine.Model
+	Current() *engine.Published
 	Platform() platform.Info
 }
 
@@ -66,9 +66,17 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
 }
 
+// current returns the published model, or nil before the first publication.
+func (h *handler) current() *engine.Model {
+	if p := h.src.Current(); p != nil {
+		return p.Model
+	}
+	return nil
+}
+
 // model returns the current model, or writes 503 if none is ready.
 func (h *handler) model(w http.ResponseWriter) *engine.Model {
-	m := h.src.Current()
+	m := h.current()
 	if !synced(m) {
 		writeErr(w, http.StatusServiceUnavailable, "connecting to cluster: cache not synced")
 		return nil
@@ -80,7 +88,7 @@ func (h *handler) model(w http.ResponseWriter) *engine.Model {
 func synced(m *engine.Model) bool { return m != nil && m.Snapshot != nil && m.Snapshot.Synced }
 
 func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
-	m := h.src.Current()
+	m := h.current()
 	if !synced(m) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -94,7 +102,7 @@ func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
-	m, plat := h.src.Current(), h.src.Platform()
+	m, plat := h.current(), h.src.Platform()
 	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{}}
 	if m != nil {
 		resp.Pinned, resp.Synced = m.Pinned, synced(m)
