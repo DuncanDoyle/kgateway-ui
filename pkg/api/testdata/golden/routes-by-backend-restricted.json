@@ -1,0 +1,43 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "deniedInInstall": 2,
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "uses-be",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "total": 1
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

@@ -59,23 +59,53 @@ func TestGoldenWireFormat(t *testing.T) {
 		{"bare-installs", bare, "/api/v1/installs"},
 		{"bare-overview", bare, "/api/v1/installs/acme~edge_1/overview"},
 	} {
-		t.Run(tc.golden, func(t *testing.T) {
-			got := wire(t, tc.srv, tc.path)
-			file := filepath.Join("testdata", "golden", tc.golden+".json")
-			if *update {
-				if err := os.WriteFile(file, got, 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-			want, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatalf("%v (run with -update to create it)", err)
-			}
-			if !bytes.Equal(got, want) {
-				t.Errorf("GET %s differs from %s (run with -update if the change is intended):\n--- got\n%s", tc.path, file, got)
-			}
-		})
+		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
+	}
+}
+
+// TestGoldenExplorerLists pins the 2.2 list bodies (design §7.6). The
+// restricted variant is the same backend query for a denied Backend and an
+// absent one, so it also pins that they are identical.
+func TestGoldenExplorerLists(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, explorerWorld()...)
+	_, denied, _ := startWith(t, setup{authz: restrictedAuthz()}, explorerWorld(append(probeRoutes(), testutil.Backend("shop", "be-x", nil))...)...)
+	_, absent, _ := startWith(t, setup{authz: restrictedAuthz()}, explorerWorld(probeRoutes()...)...)
+	const base, edge = "/api/v1/installs/kgw.kgateway", "gateway.networking.k8s.io/Gateway/infra/edge"
+	for _, tc := range []struct {
+		golden string
+		srv    *httptest.Server
+		path   string
+	}{
+		{"routes", srv, base + "/routes"},
+		{"routes-filtered", srv, base + "/routes?parent=" + edge + "&state=accepted&sort=name.desc&limit=2"},
+		{"gateways", srv, base + "/gateways"},
+		{"listenersets", srv, base + "/listenersets"},
+		{"bad-request", srv, base + "/routes?limit=0"},
+		{"routes-by-backend", srv, base + "/routes?backend=core/Service/shop/cart-svc&backend=gateway.kgateway.dev/Backend/shop/be1&backend=core/Service/shop/mirror-svc"},
+		{"routes-restricted", denied, base + "/routes"},
+		{"routes-by-backend-restricted", denied, base + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"},
+		{"routes-by-backend-restricted", absent, base + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"},
+	} {
+		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
+	}
+}
+
+// checkGolden compares got with testdata/golden/<name>.json, or rewrites it under -update.
+func checkGolden(t *testing.T, name, path string, got []byte) {
+	t.Helper()
+	file := filepath.Join("testdata", "golden", name+".json")
+	if *update {
+		if err := os.WriteFile(file, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("%v (run with -update to create it)", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("GET %s differs from %s (run with -update if the change is intended):\n--- got\n%s", path, file, got)
 	}
 }
 

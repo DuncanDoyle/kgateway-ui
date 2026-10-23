@@ -1,0 +1,80 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [
+          "ls.example.com"
+        ],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "ListenerSet",
+              "link": "detail",
+              "name": "ls1",
+              "namespace": "infra"
+            },
+            "via": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "via-ls",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "mirror-only",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "next": "eyJzIjoibmFtZSIsImQiOiJkZXNjIiwiYiI6ZmFsc2UsInQiOlsic2hvcCIsIm1pcnJvci1vbmx5IiwiZ2F0ZXdheS5uZXR3b3JraW5nLms4cy5pbyIsIkhUVFBSb3V0ZSJdfQ",
+    "total": 5
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

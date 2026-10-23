@@ -1,0 +1,326 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "deniedInInstall": 2,
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "children": 0,
+        "flags": [],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "unwatched",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "posts",
+          "namespace": "blog"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "unwatched",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "api",
+              "namespace": "shop"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "sub",
+          "namespace": "blog"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "api",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "backends",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "cart",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "declared"
+        ],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "declared",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "api",
+              "namespace": "shop"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "declared",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "mirror-only",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "pending"
+        ],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "pending",
+            "reason": "no status from the controller",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "pending",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "not-accepted"
+        ],
+        "health": "error",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "not-accepted",
+            "conditionType": "Accepted",
+            "message": "no listener allows this kind",
+            "reason": "NotAllowedByListeners",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "rejected",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "none",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "uses-be",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [
+          "ls.example.com"
+        ],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "ListenerSet",
+              "link": "detail",
+              "name": "ls1",
+              "namespace": "infra"
+            },
+            "viaRestricted": true
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "via-ls",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "total": 11
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

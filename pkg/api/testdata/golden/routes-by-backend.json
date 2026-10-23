@@ -1,0 +1,71 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "backends",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "mirror": true,
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "mirror-only",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "total": 2
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

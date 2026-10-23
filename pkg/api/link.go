@@ -18,6 +18,7 @@ type linker struct {
 	m      *engine.Model
 	i      *engine.InstallModel
 	detail map[objects.GroupKind]bool
+	all    bool // AllowAll: no Authorizer calls (design §7.4 rule 10)
 }
 
 // linker returns the linker for the caller of r and install i of m.
@@ -26,7 +27,7 @@ func (h *handler) linker(r *http.Request, m *engine.Model, i *engine.InstallMode
 	for _, gk := range explore.DetailKinds(m.Served) {
 		detail[gk] = true
 	}
-	return linker{h: h, r: r, m: m, i: i, detail: detail}
+	return linker{h: h, r: r, m: m, i: i, detail: detail, all: allowsAll(h.authz)}
 }
 
 // link is admit(install, caller, ref) of design §7.1, the one place that
@@ -36,7 +37,7 @@ func (h *handler) linker(r *http.Request, m *engine.Model, i *engine.InstallMode
 // referrer the caller may view. Admission never follows chains.
 func (l linker) link(ref objects.Ref) Link {
 	h, r := l.h, l.r
-	if l.i.Index == nil || !h.authz.Authorize(r, ref) {
+	if l.i.Index == nil || !l.all && !h.authz.Authorize(r, ref) {
 		return LinkNone
 	}
 	a, ok := l.i.Index.Admission(ref)
