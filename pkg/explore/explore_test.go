@@ -272,6 +272,21 @@ func TestAttachmentFromCurrentStatusOnly(t *testing.T) {
 	}
 }
 
+// Assign records one target per unwatched route; the row is under every
+// parent of the install it names: a Gateway and that Gateway's ListenerSet.
+func TestUnwatchedRouteNamingGatewayAndListenerSet(t *testing.T) {
+	ls := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}
+	ix := newWorld(testutil.ListenerSet("infra", "ls", gw, nil), testutil.HTTPRoute("out", "far", []objects.ParentRef{gw, ls})).build(t)
+	id, r := row(t, ix, "out", "far")
+	if len(r.Parents) != 2 || r.Parents[0].Attachment != AttachmentUnwatched || r.Parents[1].Attachment != AttachmentUnwatched ||
+		r.Parents[1].Target != ls.Ref() || r.Parents[1].Via == nil || *r.Parents[1].Via != gwObj {
+		t.Fatalf("parents %+v", r.Parents)
+	}
+	if !slices.Equal(ix.ByParent[gwObj], []RowID{id}) || !slices.Equal(ix.ByParent[ls.Ref()], []RowID{id}) {
+		t.Fatalf("ByParent gateway %v, listenerset %v", ix.ByParent[gwObj], ix.ByParent[ls.Ref()])
+	}
+}
+
 func TestFlags(t *testing.T) {
 	api := testutil.HTTPRouteRef("shop", "api")
 	other := testutil.GwRef("infra", "other")
@@ -428,21 +443,29 @@ func TestByBackendIndex(t *testing.T) {
 	grpc := testutil.WithRules(testutil.HTTPRoute("shop", "g1", []objects.ParentRef{gw}, accepted(gw)), rule([]any{svc("grpc-svc")}))
 	grpc.SetAPIVersion("gateway.networking.k8s.io/v1")
 	grpc.SetKind("GRPCRoute")
+	tcp := testutil.WithRules(testutil.HTTPRoute("shop", "t1", []objects.ParentRef{gw}, accepted(gw)), rule([]any{svc("tcp-svc")}))
+	tcp.SetKind("TCPRoute")
+	tls := testutil.WithRules(testutil.HTTPRoute("shop", "s1", []objects.ParentRef{gw}, accepted(gw)), rule([]any{svc("tls-svc"), be}))
+	tls.SetKind("TLSRoute")
 	ix := newWorld(
 		testutil.WithRules(testutil.HTTPRoute("shop", "r1", []objects.ParentRef{gw}, accepted(gw)), rule([]any{svc("cart"), be}, mirror("mirror-svc"))),
 		testutil.WithRules(testutil.HTTPRoute("shop", "r2", []objects.ParentRef{gw}, accepted(gw)), rule([]any{svc("both")}, mirror("both"))),
 		testutil.WithRules(testutil.HTTPRoute("shop", "r3", []objects.ParentRef{gw}, accepted(gw)), rule([]any{testutil.DelegateTo("shop", "child")})),
-		grpc,
+		grpc, tcp, tls,
 	).build(t)
 	service := func(name string) objects.Ref { return objects.Ref{Kind: "Service", Namespace: "shop", Name: name} }
 	r1, r2 := ids(t, ix, "r1")[0], ids(t, ix, "r2")[0]
 	g1, _ := row(t, ix, "shop", "g1")
+	t1, _ := row(t, ix, "shop", "t1")
+	s1, _ := row(t, ix, "shop", "s1")
 	want := map[objects.Ref][]BackendUse{
 		service("cart"): {{Row: r1}},
-		{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "shop", Name: "be1"}: {{Row: r1}},
+		{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "shop", Name: "be1"}: {{Row: r1}, {Row: s1}},
 		service("mirror-svc"): {{Row: r1, Mirror: true}},
 		service("both"):       {{Row: r2}},
 		service("grpc-svc"):   {{Row: g1}},
+		service("tcp-svc"):    {{Row: t1}},
+		service("tls-svc"):    {{Row: s1}},
 	}
 	if !reflect.DeepEqual(ix.ByBackend, want) {
 		t.Fatalf("ByBackend\n got %v\nwant %v", ix.ByBackend, want)
@@ -517,7 +540,8 @@ func TestAdmissionTable(t *testing.T) {
 		rule(backendRef("out", "be"), map[string]any{"name": "svc"}))
 	ix := newWorld(
 		cart,
-		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, accepted(gw)), rule(testutil.DelegateTo("out", "child"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, accepted(gw)), rule(testutil.DelegateTo("out", "child"), backendRef("out", "be"))),
+		testutil.HTTPRoute("shop", "lost", []objects.ParentRef{testutil.GwRef("infra", "missing")}), // unattached: KGWUI-003
 		testutil.HTTPRoute("out", "child", []objects.ParentRef{testutil.GwRef("infra", "elsewhere")}),
 		testutil.WithRules(testutil.HTTPRoute("shop", "c", []objects.ParentRef{api}), rule(backendRef("out", "d"))), // candidate C
 		testutil.HTTPRoute("out", "far", []objects.ParentRef{gw}),
@@ -539,9 +563,10 @@ func TestAdmissionTable(t *testing.T) {
 		{"owned class", objects.Ref{Group: objects.GatewayAPIGroup, Kind: "GatewayClass", Name: "kgateway"}, Admission{Owned: true}, true},
 		{"declared candidate", routeRef("shop", "c"), Admission{Reason: ReasonFinding}, true},
 		{"unwatched route", routeRef("out", "far"), Admission{Reason: ReasonFinding}, true},
-		{"backendRef target", be, Admission{Reason: ReasonReferenced, By: &cartRef}, true},
-		{"parentRef target", orphanLS.Ref(), Admission{Reason: ReasonReferenced, By: &cartRef}, true},
-		{"delegation name ref target", routeRef("out", "child"), Admission{Reason: ReasonReferenced, By: &apiRef}, true},
+		{"unattached route", routeRef("shop", "lost"), Admission{Reason: ReasonFinding}, true},
+		{"backendRef target of two routes", be, Admission{Reason: ReasonReferenced, By: &apiRef, Referrers: []objects.Ref{apiRef, cartRef}}, true},
+		{"parentRef target", orphanLS.Ref(), Admission{Reason: ReasonReferenced, By: &cartRef, Referrers: []objects.Ref{cartRef}}, true},
+		{"delegation name ref target", routeRef("out", "child"), Admission{Reason: ReasonReferenced, By: &apiRef, Referrers: []objects.Ref{apiRef}}, true},
 		{"no-parent row", routeRef("shop", "free"), Admission{NoParent: true}, true},
 		{"Service is never served", objects.Ref{Kind: "Service", Namespace: "shop", Name: "svc"}, Admission{}, false},
 		{"named only by candidate C", objects.Ref{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "out", Name: "d"}, Admission{}, false},

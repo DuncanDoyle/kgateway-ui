@@ -3,6 +3,7 @@ package explore
 import (
 	"cmp"
 	"slices"
+	"sort"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,35 +23,37 @@ const (
 // programmedType is kgateway's route programming condition (2.4).
 const programmedType = "kgateway.dev/Programmed"
 
-// draft is a route row being built, with what it needs until it is sorted.
-type draft struct {
-	row RouteRow
+// aux is what Build needs about a row until the index is filled. It is
+// index-aligned with builder.rows and sorted with it.
+type aux struct {
 	// status are the row's status.parents; specRefs its spec.parentRefs.
 	status   []objects.RouteParentStatus
 	specRefs []objects.ParentRef
 	// edges are the HTTPRoutes of the row's reported edges.
 	edges []objects.Ref
-	// targets are the row's backend targets, set by index.
+	// targets are the row's backend targets; nil for an HTTPRoute until index.
 	targets []objects.BackendTarget
 }
 
 // builder holds Build's per-call state.
 type builder struct {
-	in      Input
-	dec     objects.Decoder
-	drafts  []*draft
-	at      map[objects.Ref]*draft
+	in  Input
+	dec objects.Decoder
+	// rows become Index.Routes in place; aux is index-aligned with them.
+	rows    []RouteRow
+	aux     []aux
+	at      map[objects.Ref]int
 	lsGW    map[objects.Ref]*objects.Ref // owned ListenerSet → its Gateway, shared by every link
-	parents map[objects.GroupKind]bool   // served Gateway and ListenerSet kinds
-	unknown bool                         // a required check is not OK
+	ownedGW map[objects.Ref]bool
+	parents map[objects.GroupKind]bool // served Gateway and ListenerSet kinds
+	unknown bool                       // a required check is not OK
 	worst   map[objects.Ref]Worst
-	byRef   map[objects.Ref]*unstructured.Unstructured // snapshot routes, built on first use
 }
 
 // Build builds the index of one install. It is pure: the same input gives
 // the same rows in the same order, whatever the snapshot's order.
 func Build(in Input) *Index {
-	b := &builder{in: in, dec: in.Views, lsGW: map[objects.Ref]*objects.Ref{}, parents: map[objects.GroupKind]bool{}}
+	b := &builder{in: in, dec: in.Views, lsGW: map[objects.Ref]*objects.Ref{}, ownedGW: map[objects.Ref]bool{}, parents: map[objects.GroupKind]bool{}}
 	if b.dec == nil {
 		b.dec = objects.Direct{}
 	}
@@ -62,16 +65,20 @@ func Build(in Input) *Index {
 	b.findings()
 	ix := &Index{}
 	if o := in.Owned; o != nil {
+		for _, g := range o.Gateways {
+			b.ownedGW[objects.RefOf(g)] = true
+		}
 		lsViews := make([]*objects.ListenerSetView, len(o.ListenerSets))
 		for i, ls := range o.ListenerSets {
 			lsViews[i] = b.dec.ListenerSet(ls)
 			g := lsViews[i].Parent.Ref()
 			b.lsGW[objects.RefOf(ls)] = &g
 		}
-		n := len(o.Routes) + len(o.Unattached) + len(o.Declared) + len(o.NoParent)
-		b.at, b.drafts = make(map[objects.Ref]*draft, n), make([]*draft, 0, n)
+		n := len(o.Routes) + len(o.Unattached) + len(o.Declared) + len(o.NoParent) + len(in.Assignment.Unwatched)
+		b.at, b.rows, b.aux = make(map[objects.Ref]int, n), make([]RouteRow, 0, n), make([]aux, 0, n)
 		b.routes()
-		ix.Routes = b.sorted()
+		b.sort()
+		ix.Routes = b.rows
 		b.index(ix)
 		b.gateways(ix, lsViews)
 	}
@@ -96,85 +103,125 @@ func (b *builder) findings() {
 
 func (b *builder) state(ref objects.Ref) health.State { return b.worst[ref].state(b.unknown) }
 
-// draftFor returns the draft of u, creating it on first use.
-func (b *builder) draftFor(k kinds.Served, u *unstructured.Unstructured, owned bool) *draft {
+// rowFor returns the index of u's row, creating it on first use. Rows are
+// addressed by index because the slice may still grow.
+func (b *builder) rowFor(k kinds.Served, u *unstructured.Unstructured, owned bool) int {
 	ref := objects.RefOf(u)
-	d, ok := b.at[ref]
+	i, ok := b.at[ref]
 	if !ok {
-		d = &draft{row: RouteRow{Ref: ref, Kind: k, Obj: u}}
+		i = len(b.rows)
+		r, a := RouteRow{Ref: ref, Kind: k, Obj: u}, aux{}
 		if isHTTPRoute(k.Group, k.Kind) {
 			v := b.dec.HTTPRoute(u)
-			d.row.View, d.row.Hostnames, d.status, d.specRefs = v, v.Hostnames, v.Parents, v.ParentRefs
+			r.View, r.Hostnames, a.status, a.specRefs = v, v.Hostnames, v.Parents, v.ParentRefs
 		} else {
-			d.row.Hostnames = b.dec.RouteHostnames(u).Hostnames
-			d.status, d.specRefs = objects.RouteParents(u), objects.RouteParentRefs(u)
+			v := b.dec.Route(u)
+			r.Hostnames, a.status, a.specRefs, a.targets = v.Hostnames, v.Parents, v.ParentRefs, v.Targets
 		}
-		b.at[ref] = d
-		b.drafts = append(b.drafts, d)
+		b.at[ref] = i
+		b.rows, b.aux = append(b.rows, r), append(b.aux, a)
 	}
-	d.row.Owned = d.row.Owned || owned
-	return d
+	b.rows[i].Owned = b.rows[i].Owned || owned
+	return i
 }
 
-// link adds l to d unless d already has a link for the same parentRef.
-func (d *draft) link(l ParentLink) {
-	if slices.ContainsFunc(d.row.Parents, func(x ParentLink) bool { return x.Ref == l.Ref && x.Target == l.Target }) {
+// link adds l to row i unless it already has a link for the same parentRef.
+func (b *builder) link(i int, l ParentLink) {
+	r := &b.rows[i]
+	if slices.ContainsFunc(r.Parents, func(x ParentLink) bool { return x.Ref == l.Ref && x.Target == l.Target }) {
 		return
 	}
-	d.row.Parents = append(d.row.Parents, l)
+	r.Parents = append(r.Parents, l)
 }
 
 // routes collects every row of design §3.5.
 func (b *builder) routes() {
 	o := b.in.Owned
+	// One backing array for the owned routes' links; each row gets a capped window.
+	n := 0
 	for _, r := range o.Routes {
-		d := b.draftFor(r.Kind, r.Obj, true)
-		d.row.Parents = slices.Grow(d.row.Parents, len(r.Parents)+len(r.RouteParents))
+		n += len(r.Parents) + len(r.RouteParents)
+	}
+	arena := make([]ParentLink, n)
+	for _, r := range o.Routes {
+		i := b.rowFor(r.Kind, r.Obj, true)
+		if k := len(r.Parents) + len(r.RouteParents); b.rows[i].Parents == nil && k > 0 {
+			b.rows[i].Parents, arena = arena[:0:k], arena[k:]
+		}
 		for _, p := range r.Parents {
-			d.link(b.fromStatus(d, p))
+			b.link(i, b.fromStatus(i, p))
 		}
 		for _, p := range r.RouteParents {
-			d.link(b.fromStatus(d, p))
-			if !slices.Contains(d.edges, p.Ref()) {
-				d.edges = append(d.edges, p.Ref())
+			b.link(i, b.fromStatus(i, p))
+			if a := &b.aux[i]; !slices.Contains(a.edges, p.Ref()) {
+				a.edges = append(a.edges, p.Ref())
 			}
 		}
 	}
 	for _, u := range o.Unattached {
-		d := b.draftFor(u.Route.Kind, u.Route.Obj, false)
-		d.link(ParentLink{Target: u.Parent.Ref(), Ref: u.Parent, Attachment: AttachmentPending, Pending: pendingParentMissing})
-		d.row.Flags |= FlagPending
+		i := b.rowFor(u.Route.Kind, u.Route.Obj, false)
+		b.link(i, ParentLink{Target: u.Parent.Ref(), Ref: u.Parent, Attachment: AttachmentPending, Pending: pendingParentMissing})
+		b.rows[i].Flags |= FlagPending
 	}
 	for _, c := range o.Declared {
-		d := b.draftFor(c.Route.Kind, c.Route.Obj, false)
-		d.link(ParentLink{Target: c.Parent.Ref(), Ref: c.Parent, Attachment: AttachmentDeclared})
-		d.row.Flags |= FlagDeclared
+		i := b.rowFor(c.Route.Kind, c.Route.Obj, false)
+		b.link(i, ParentLink{Target: c.Parent.Ref(), Ref: c.Parent, Attachment: AttachmentDeclared})
+		b.rows[i].Flags |= FlagDeclared
 	}
+	b.unwatchedRows()
+	for _, r := range o.NoParent {
+		i := b.rowFor(r.Kind, r.Obj, false)
+		b.rows[i].Flags |= FlagNoParent
+	}
+}
+
+// unwatchedRows adds this install's unwatched routes (KGWUI-004). Assign
+// records one target per route; the row links every spec parentRef that
+// names a parent of this install, so a route naming a Gateway and its
+// ListenerSet is under both. An implicit child links the recorded target.
+func (b *builder) unwatchedRows() {
 	id := b.in.Install.ID()
+	want := map[objects.Ref]objects.Ref{} // route → recorded target
 	for _, u := range b.in.Assignment.Unwatched {
-		if u.Install != id {
-			continue
+		if u.Install == id {
+			want[u.Route] = u.Gateway
 		}
-		k, obj, ok := b.lookup(u.Route)
-		if !ok {
-			continue
-		}
-		d := b.draftFor(k, obj, false)
-		named := false
-		for _, p := range d.specRefs {
-			if p.Ref() == u.Gateway {
-				d.link(b.unwatched(p))
-				named = true
+	}
+	if len(want) == 0 || b.in.Snapshot == nil {
+		return
+	}
+	// One pass over the snapshot's routes, in snapshot order; rows are sorted later.
+	for _, k := range kinds.ByCategory(b.in.Served, kinds.CategoryRoute) {
+		for _, u := range b.in.Snapshot.Objects[k.GVR()] {
+			target, ok := want[objects.RefOf(u)]
+			if !ok {
+				continue
+			}
+			i := b.rowFor(k, u, false)
+			named := false
+			for _, p := range b.aux[i].specRefs {
+				if p.Ref() == target || b.ourParent(p.Ref()) {
+					b.link(i, b.unwatched(p))
+					named = true
+				}
+			}
+			if !named {
+				b.link(i, b.unwatched(objects.ParentRef{Group: target.Group, Kind: target.Kind, Namespace: target.Namespace, Name: target.Name}))
 			}
 		}
-		if !named { // an implicit child: no spec ref names the parent
-			g := u.Gateway
-			d.link(b.unwatched(objects.ParentRef{Group: g.Group, Kind: g.Kind, Namespace: g.Namespace, Name: g.Name}))
-		}
 	}
-	for _, r := range o.NoParent {
-		b.draftFor(r.Kind, r.Obj, false).row.Flags |= FlagNoParent
+}
+
+// ourParent reports whether ref is a Gateway, ListenerSet or HTTPRoute the install owns.
+func (b *builder) ourParent(ref objects.Ref) bool {
+	if b.ownedGW[ref] || b.lsGW[ref] != nil {
+		return true
 	}
+	if isHTTPRoute(ref.Group, ref.Kind) {
+		_, ok := b.in.Owned.Route(ref)
+		return ok
+	}
+	return false
 }
 
 func (b *builder) unwatched(p objects.ParentRef) ParentLink {
@@ -186,51 +233,27 @@ func (b *builder) via(target objects.Ref) *objects.Ref {
 	return b.lsGW[target]
 }
 
-// lookup finds a route of a served kind in the snapshot by ref.
-func (b *builder) lookup(ref objects.Ref) (kinds.Served, *unstructured.Unstructured, bool) {
-	var k kinds.Served
-	found := false
-	for _, s := range kinds.ByCategory(b.in.Served, kinds.CategoryRoute) {
-		if s.Group == ref.Group && s.Kind == ref.Kind {
-			k, found = s, true
-			break
-		}
-	}
-	if !found || b.in.Snapshot == nil {
-		return k, nil, false
-	}
-	if b.byRef == nil {
-		b.byRef = map[objects.Ref]*unstructured.Unstructured{}
-		for _, s := range kinds.ByCategory(b.in.Served, kinds.CategoryRoute) {
-			for _, u := range b.in.Snapshot.Objects[s.GVR()] {
-				b.byRef[objects.RefOf(u)] = u
-			}
-		}
-	}
-	u, ok := b.byRef[ref]
-	return k, u, ok
-}
-
-// fromStatus decides the attachment of d to parent p from the status entry
+// fromStatus decides the attachment of row i to parent p from the status entry
 // of the install's controllers, current entries only (Phase 1 freshness),
 // and adds the row's flags (design §6.1).
-func (b *builder) fromStatus(d *draft, p objects.ParentRef) ParentLink {
+func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
+	r, status := &b.rows[i], b.aux[i].status
 	l := ParentLink{Target: p.Ref(), Ref: p, Via: b.via(p.Ref())}
 	var st *objects.RouteParentStatus
-	for i := range d.status {
-		if d.status[i].ParentRef == p && slices.Contains(b.in.Install.ControllerNames, d.status[i].ControllerName) {
-			st = &d.status[i]
+	for j := range status {
+		if status[j].ParentRef == p && slices.Contains(b.in.Install.ControllerNames, status[j].ControllerName) {
+			st = &status[j]
 			break
 		}
 	}
 	if st == nil {
 		l.Attachment, l.Pending = AttachmentPending, pendingNoStatus
-		d.row.Flags |= FlagPending
+		r.Flags |= FlagPending
 		return l
 	}
-	if why := health.RoutePending(d.row.Obj, st.Conditions); why != "" {
+	if why := health.RoutePending(r.Obj, st.Conditions); why != "" {
 		l.Attachment, l.Pending = AttachmentPending, why
-		d.row.Flags |= FlagPending
+		r.Flags |= FlagPending
 		return l
 	}
 	// Current: Accepted and ResolvedRefs are present and neither is Unknown.
@@ -238,19 +261,19 @@ func (b *builder) fromStatus(d *draft, p objects.ParentRef) ParentLink {
 	acc := objects.FindCondition(cs, "Accepted")
 	if acc.Status == metav1.ConditionTrue {
 		l.Attachment = AttachmentAccepted
-		d.row.Flags |= FlagAccepted
+		r.Flags |= FlagAccepted
 	} else {
 		l.Attachment = AttachmentNotAccepted
-		d.row.Flags |= FlagNotAccepted
+		r.Flags |= FlagNotAccepted
 		if acc.Reason == "RouteRuleReplaced" || acc.Reason == "RouteRuleDropped" {
-			d.row.Flags |= FlagNotProgrammed // 2.3 reports these through Accepted
+			r.Flags |= FlagNotProgrammed // 2.3 reports these through Accepted
 		}
 	}
 	if c := objects.FindCondition(cs, "ResolvedRefs"); c.Status == metav1.ConditionFalse {
-		d.row.Flags |= FlagRefsUnresolved
+		r.Flags |= FlagRefsUnresolved
 	}
 	if c := objects.FindCondition(cs, programmedType); c != nil && c.Status == metav1.ConditionFalse {
-		d.row.Flags |= FlagNotProgrammed
+		r.Flags |= FlagNotProgrammed
 	}
 	for _, t := range []string{"Accepted", "ResolvedRefs", programmedType} {
 		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
@@ -270,29 +293,40 @@ func compareParentRefs(a, b objects.ParentRef) int {
 	return cmp.Or(compareRefs(a.Ref(), b.Ref()), cmp.Compare(a.SectionName, b.SectionName), cmp.Compare(a.Port, b.Port))
 }
 
-// sorted returns the rows in (namespace, name, group, kind) order. Parents
-// follow spec order, then parentRef order; reported parent routes are sorted.
-func (b *builder) sorted() []RouteRow {
-	slices.SortFunc(b.drafts, func(x, y *draft) int { return compareRefs(x.row.Ref, y.row.Ref) })
-	rows := make([]RouteRow, len(b.drafts))
-	for i, d := range b.drafts {
-		r := &d.row
+// sort puts the rows in (namespace, name, group, kind) order in place, with
+// their aux. Parents follow spec order, then parentRef order; reported
+// parent routes are sorted.
+func (b *builder) sort() {
+	sort.Sort(byRef{b.rows, b.aux})
+	for i := range b.rows {
+		r, a := &b.rows[i], &b.aux[i]
 		specIdx := func(p objects.ParentRef) int {
-			if j := slices.Index(d.specRefs, p); j >= 0 {
+			if j := slices.Index(a.specRefs, p); j >= 0 {
 				return j
 			}
-			return len(d.specRefs)
+			return len(a.specRefs)
 		}
 		slices.SortStableFunc(r.Parents, func(x, y ParentLink) int {
 			return cmp.Or(cmp.Compare(specIdx(x.Ref), specIdx(y.Ref)), compareParentRefs(x.Ref, y.Ref), compareRefs(x.Target, y.Target))
 		})
-		slices.SortFunc(d.edges, compareRefs)
-		r.ParentRoutes = d.edges
+		slices.SortFunc(a.edges, compareRefs)
+		r.ParentRoutes = a.edges
 		r.State = b.state(r.Ref)
 		r.search = search(r.Ref, r.Hostnames)
-		rows[i] = *r
 	}
-	return rows
+}
+
+// byRef sorts rows and their aux together.
+type byRef struct {
+	rows []RouteRow
+	aux  []aux
+}
+
+func (s byRef) Len() int           { return len(s.rows) }
+func (s byRef) Less(i, j int) bool { return compareRefs(s.rows[i].Ref, s.rows[j].Ref) < 0 }
+func (s byRef) Swap(i, j int) {
+	s.rows[i], s.rows[j] = s.rows[j], s.rows[i]
+	s.aux[i], s.aux[j] = s.aux[j], s.aux[i]
 }
 
 // search is the lower-cased "namespace/name" and hostnames, one per line.
@@ -313,7 +347,7 @@ func appendOnce[K comparable](m map[K][]RowID, k K, id RowID) {
 	}
 }
 
-// index fills the route indexes from the sorted rows; b.drafts is in row order.
+// index fills the route indexes from the sorted rows; b.aux is in row order.
 func (b *builder) index(ix *Index) {
 	ix.ByParent, ix.ByParentRoute, ix.Declared = map[objects.Ref][]RowID{}, map[objects.Ref][]RowID{}, map[objects.Ref][]RowID{}
 	ix.ByBackend, ix.ByNamespace, ix.ParentRoutes = map[objects.Ref][]BackendUse{}, map[string][]RowID{}, map[objects.Ref][]objects.Ref{}
@@ -347,8 +381,11 @@ func (b *builder) index(ix *Index) {
 		}
 		// One use per backend; Mirror only when every mention is a mirror.
 		uses, targets = uses[:0], targets[:0]
-		b.drafts[i].targets = b.targets(r)
-		for _, t := range b.drafts[i].targets {
+		a := &b.aux[i]
+		if r.View != nil {
+			a.targets = objects.BackendTargets(r.View)
+		}
+		for _, t := range a.targets {
 			if j := slices.Index(targets, t.Ref); j >= 0 {
 				uses[j].Mirror = uses[j].Mirror && t.Mirror
 				continue
@@ -363,14 +400,6 @@ func (b *builder) index(ix *Index) {
 	for i := range ix.Routes {
 		ix.Routes[i].Children = len(ix.ByParentRoute[ix.Routes[i].Ref])
 	}
-}
-
-// targets returns r's backendRefs and mirror targets; delegation refs are excluded.
-func (b *builder) targets(r *RouteRow) []objects.BackendTarget {
-	if r.View != nil {
-		return objects.BackendTargets(r.View)
-	}
-	return objects.RouteBackendTargets(r.Obj)
 }
 
 // gateways fills the Gateway and ListenerSet rows; lsViews is index-aligned
