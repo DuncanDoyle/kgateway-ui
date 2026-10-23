@@ -31,6 +31,9 @@ func TestDecodeCacheReusesUnchangedObjects(t *testing.T) {
 	if first != second {
 		t.Fatal("same uid and resourceVersion decoded twice")
 	}
+	if r1, r2 := c.Route(gw("a", "u1", "1")), c.Route(gw("a", "u1", "1")); r1 != r2 {
+		t.Fatal("route view decoded twice")
+	}
 }
 
 func TestDecodeCacheMissesOnNewResourceVersion(t *testing.T) {
@@ -60,7 +63,8 @@ func TestDecodeCachePrunedWithObserve(t *testing.T) {
 	e.decode.Gateway(keep)
 	e.decode.Gateway(drop)
 	e.decode.HTTPRoute(drop)
-	if n := e.decode.size(); n != 3 {
+	e.decode.Route(drop)
+	if n := e.decode.size(); n != 4 {
 		t.Fatalf("seeded %d entries", n)
 	}
 	// Snapshot holds only keep, at a newer resourceVersion: both are stale.

@@ -240,7 +240,7 @@ func (e *Engine) compute() *Published {
 			next.add(met.CollectedAt.Add(e.cfg.MetricsMaxAge), true) // stale when age > max
 		}
 		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
-			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
+			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now, Views: e.decode})
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}

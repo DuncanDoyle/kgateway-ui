@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -26,6 +27,8 @@ type Input struct {
 	// MetricsMaxAge is the age beyond which Metrics is stale; zero means no limit.
 	MetricsMaxAge time.Duration
 	Now           time.Time
+	// Views decodes routes to count their parentRefs; nil decodes directly.
+	Views objects.Decoder
 }
 
 // Mismatch is a (namespace, resource) whose counts have disagreed since Since.
@@ -197,24 +200,29 @@ func uiCounts(in Input) (out map[ctrlmetrics.ManagedKey]float64, skip map[ctrlme
 	for _, n := range in.Snapshot.Namespaces {
 		nsByName[n.Name] = n
 	}
+	dec := in.Views
+	if dec == nil {
+		dec = objects.Direct{}
+	}
 	out, skip = map[ctrlmetrics.ManagedKey]float64{}, map[ctrlmetrics.ManagedKey]bool{}
 	for _, k := range in.Served {
 		label := resourceLabel(k)
 		if label == "" {
 			continue
 		}
+		exp := k.ExperimentalOnly(in.Install.KgatewayVersion())
 		for _, o := range in.Snapshot.Objects[k.GVR()] {
 			if !in.Install.Scope.Contains(o.GetNamespace(), nsByName[o.GetNamespace()]) {
 				continue
 			}
 			key := ctrlmetrics.ManagedKey{Namespace: o.GetNamespace(), Resource: label}
-			if k.ExperimentalOnly(in.Install.KgatewayVersion()) {
+			if exp {
 				skip[key] = true // ListenerSet shares this label, so it is skipped here too
 				continue
 			}
 			w := 1.0
 			if k.Category == kinds.CategoryRoute {
-				w = float64(len(objects.RouteParentRefs(o)))
+				w = float64(len(routeParentRefs(dec, k, o)))
 			}
 			if w > 0 {
 				out[key] += w
@@ -225,4 +233,12 @@ func uiCounts(in Input) (out map[ctrlmetrics.ManagedKey]float64, skip map[ctrlme
 		delete(out, key)
 	}
 	return out, skip
+}
+
+// routeParentRefs returns o's resolved spec.parentRefs through dec.
+func routeParentRefs(dec objects.Decoder, k kinds.Served, o *unstructured.Unstructured) []objects.ParentRef {
+	if k.Group == objects.GatewayAPIGroup && k.Kind == "HTTPRoute" {
+		return dec.HTTPRoute(o).ParentRefs
+	}
+	return dec.Route(o).ParentRefs
 }

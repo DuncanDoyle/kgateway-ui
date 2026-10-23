@@ -12,6 +12,7 @@ type Decoder interface {
 	HTTPRoute(u *unstructured.Unstructured) *HTTPRouteView
 	Backend(u *unstructured.Unstructured) *BackendView
 	RouteHostnames(u *unstructured.Unstructured) *RouteHostnames
+	Route(u *unstructured.Unstructured) *RouteView
 }
 
 // Direct is a Decoder that decodes on every call.
@@ -35,6 +36,9 @@ func (Direct) Backend(u *unstructured.Unstructured) *BackendView { return Decode
 func (Direct) RouteHostnames(u *unstructured.Unstructured) *RouteHostnames {
 	return DecodeRouteHostnames(u)
 }
+
+// Route decodes u with DecodeRoute.
+func (Direct) Route(u *unstructured.Unstructured) *RouteView { return DecodeRoute(u) }
 
 // decodeInto decodes m into dst and reports whether m is a well-formed
 // object. On failure dst is the zero value, never a partial one.

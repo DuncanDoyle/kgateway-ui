@@ -211,7 +211,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 				return hrs.views[i].ParentRefs
 			}
 		}
-		return objects.RouteParentRefs(r.Obj)
+		return dec.Route(r.Obj).ParentRefs
 	}
 
 	// Routes: the route's own namespace decides scope.
@@ -255,7 +255,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 	// Delegated children, then what needs every owned route (PF10).
 	delegate(hrs, insts, &a, inScope)
 	candidates(hrs, insts, &a, inScope)
-	assignBackends(snap, served, insts, &a, inScope, hrs)
+	assignBackends(snap, served, insts, &a, inScope, hrs, dec)
 
 	// ownerOf maps every assigned Gateway and ListenerSet to its install index.
 	ownerOf := map[objects.Ref]int{}

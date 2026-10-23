@@ -229,8 +229,9 @@ func candidates(h *httpRoutes, insts []Resolved, a *Assignment, inScope func(Res
 
 // assignBackends gives each install the in-scope Backends that a backendRef
 // or mirror of an owned route of any kind names by full identity, and
-// records every such ref (design §4.3). h is nil when HTTPRoute is not served.
-func assignBackends(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, a *Assignment, inScope func(Resolved, string) bool, h *httpRoutes) {
+// records every such ref (design §4.3). h is nil when HTTPRoute is not served;
+// other route kinds decode through dec.
+func assignBackends(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, a *Assignment, inScope func(Resolved, string) bool, h *httpRoutes, dec objects.Decoder) {
 	bks := kinds.ByCategory(served, kinds.CategoryBackend)
 	if len(bks) == 0 {
 		return
@@ -246,7 +247,7 @@ func assignBackends(snap *cache.Snapshot, served []kinds.Served, insts []Resolve
 			if i, ok := h.index(r); ok {
 				ts = objects.BackendTargets(h.views[i])
 			} else {
-				ts = objects.RouteBackendTargets(r.Obj)
+				ts = dec.Route(r.Obj).Targets
 			}
 			for _, t := range ts {
 				if isBackend(t.Ref) && !refs[t.Ref] {

@@ -17,6 +17,7 @@ type decodeCache struct {
 	httpRoutes    viewCache[objects.HTTPRouteView]
 	backends      viewCache[objects.BackendView]
 	routeHostname viewCache[objects.RouteHostnames]
+	routes        viewCache[objects.RouteView]
 }
 
 var _ objects.Decoder = (*decodeCache)(nil)
@@ -28,6 +29,7 @@ func newDecodeCache() *decodeCache {
 		httpRoutes:    viewCache[objects.HTTPRouteView]{},
 		backends:      viewCache[objects.BackendView]{},
 		routeHostname: viewCache[objects.RouteHostnames]{},
+		routes:        viewCache[objects.RouteView]{},
 	}
 }
 
@@ -56,6 +58,11 @@ func (d *decodeCache) RouteHostnames(u *unstructured.Unstructured) *objects.Rout
 	return d.routeHostname.get(u, objects.DecodeRouteHostnames)
 }
 
+// Route returns the cached RouteView for u, decoding it on a miss.
+func (d *decodeCache) Route(u *unstructured.Unstructured) *objects.RouteView {
+	return d.routes.get(u, objects.DecodeRoute)
+}
+
 // prune drops every entry whose uid is absent from live or whose
 // resourceVersion differs from the live one.
 func (d *decodeCache) prune(live map[types.UID]string) {
@@ -64,11 +71,12 @@ func (d *decodeCache) prune(live map[types.UID]string) {
 	d.httpRoutes.prune(live)
 	d.backends.prune(live)
 	d.routeHostname.prune(live)
+	d.routes.prune(live)
 }
 
 // size reports the number of cached views (tests).
 func (d *decodeCache) size() int {
-	return len(d.gateways) + len(d.listenerSets) + len(d.httpRoutes) + len(d.backends) + len(d.routeHostname)
+	return len(d.gateways) + len(d.listenerSets) + len(d.httpRoutes) + len(d.backends) + len(d.routeHostname) + len(d.routes)
 }
 
 type cachedView[T any] struct {

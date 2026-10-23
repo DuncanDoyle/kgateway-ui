@@ -317,6 +317,7 @@ func TestMalformedFieldsGiveZeroValues(t *testing.T) {
 		_ = DecodeBackend(u)
 		_ = DecodeListenerSet(u)
 		_ = DecodeRouteHostnames(u)
+		_ = DecodeRoute(u)
 		_ = DecodeHTTPRoute(u)
 		_ = DecodeGateway(u)
 	}
@@ -340,6 +341,22 @@ func TestDirectDecodesEveryCall(t *testing.T) {
 	}
 	if h1, h2 := d.RouteHostnames(u), d.RouteHostnames(u); h1 == nil || h1 == h2 {
 		t.Fatal("RouteHostnames")
+	}
+	if r1, r2 := d.Route(u), d.Route(u); r1 == nil || r1 == r2 {
+		t.Fatal("Route")
+	}
+}
+
+// DecodeRoute gives what the per-field accessors give, from one decode.
+func TestDecodeRouteMatchesAccessors(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	u := testutil.WithRules(testutil.WithHostnames(testutil.HTTPRoute("shop", "g", []ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), "a.example.com"),
+		map[string]any{"backendRefs": []any{map[string]any{"name": "svc", "port": int64(80)}}})
+	u.SetKind("GRPCRoute")
+	v := DecodeRoute(u)
+	if !reflect.DeepEqual(v.ParentRefs, RouteParentRefs(u)) || !reflect.DeepEqual(v.Parents, RouteParents(u)) ||
+		!reflect.DeepEqual(v.Targets, RouteBackendTargets(u)) || !reflect.DeepEqual(v.Hostnames, []string{"a.example.com"}) || len(v.Targets) != 1 {
+		t.Fatalf("%+v", v)
 	}
 }
 
