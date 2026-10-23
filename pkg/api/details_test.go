@@ -360,6 +360,47 @@ func TestParentAllowedListeners(t *testing.T) {
 	}
 }
 
+// A NotAllowed ListenerSet whose parent is hidden or unadmitted reads the
+// parent as not found and sends nothing of the Gateway's spec (D-013).
+func TestListenerSetParentHiddenOrUnadmitted(t *testing.T) {
+	cond := testutil.Cond
+	notAllowed := []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowed"), cond("Programmed", metav1.ConditionFalse, "NotAllowed")}
+	secret := map[string]any{"namespaces": map[string]any{"from": "Selector", "selector": map[string]any{"matchLabels": map[string]any{"zone": "secret-zone"}}}}
+	foreign := testutil.GwRef("infra", "foreign")
+	// infra/away names the foreign Gateway; shop/both makes it a referenced candidate.
+	awayRef := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "away"}
+	both := testutil.HTTPRoute("shop", "both", []objects.ParentRef{edgeRef, awayRef}, testutil.AcceptedBy(edgeRef, testutil.Controller))
+	objs := world(lsWith("na", "ListenerSet", edgeRef, notAllowed, testutil.Listener{Name: "extra"}),
+		lsWith("away", "ListenerSet", foreign, notAllowed, testutil.Listener{Name: "extra"}), both)
+	for _, o := range objs {
+		if u, ok := o.(*unstructured.Unstructured); ok && u.GetKind() == "Gateway" {
+			u.Object["spec"].(map[string]any)["allowedListeners"] = secret
+		}
+	}
+	hideEdge := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != edgeRef.Ref() })
+	_, srv, _ := startWith(t, setup{authz: hideEdge}, objs...)
+	for _, path := range []string{lsDetail + "infra/na", lsDetail + "infra/away"} {
+		d := get[ListenerSetDetail](t, srv, path, 200)
+		if d.ParentFound || d.Parent.Link != LinkNone || d.ParentAllowedListeners != nil {
+			t.Errorf("%s: parentFound %v, parent %+v, allowedListeners %+v", path, d.ParentFound, d.Parent, d.ParentAllowedListeners)
+		}
+		if b := wire(t, srv, path); bytes.Contains(b, []byte("secret-zone")) || bytes.Contains(b, []byte("parentAllowedListeners")) {
+			t.Errorf("%s: the body carries the parent's spec:\n%s", path, b)
+		}
+	}
+	if c := get[ListenerSetDetail](t, srv, lsDetail+"infra/away", 200).Candidate; c == nil || c.Reason != "referenced" {
+		t.Errorf("away is a referenced candidate: %+v", c)
+	}
+	// Under AllowAll the owned ListenerSet's parent opens; the candidate's still does not.
+	_, all, _ := startWith(t, setup{}, objs...)
+	if d := get[ListenerSetDetail](t, all, lsDetail+"infra/na", 200); !d.ParentFound || d.ParentAllowedListeners == nil || !d.ParentAllowedListeners.Set {
+		t.Errorf("visible parent: %+v", d)
+	}
+	if d := get[ListenerSetDetail](t, all, lsDetail+"infra/away", 200); d.ParentFound || d.ParentAllowedListeners != nil {
+		t.Errorf("unadmitted parent: %+v", d)
+	}
+}
+
 func TestRouteDetailValuesEasyToGetWrong(t *testing.T) {
 	_, srv, _ := startWith(t, setup{}, delegationWorld()...)
 	d := get[RouteDetail](t, srv, routeDetail+"shop/mid", 200)
@@ -415,15 +456,24 @@ func TestRouteDetailValuesEasyToGetWrong(t *testing.T) {
 	}
 }
 
+// farWorld is blog/far, out of scope, with the other controller's entry
+// written first; it sends to the Backend blog/be-far and delegates to
+// blog/kid, which reports far as its parent.
+func farWorld() []runtime.Object {
+	foreign, farRef := testutil.GwRef("infra", "foreign"), testutil.HTTPRouteRef("blog", "far")
+	far := testutil.WithRules(testutil.HTTPRoute("blog", "far", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other"), testutil.AcceptedBy(foreign, testutil.Controller)),
+		map[string]any{"backendRefs": []any{toBackend("blog", "be-far"), testutil.DelegateTo("blog", "kid")}})
+	return []runtime.Object{far, testutil.Backend("blog", "be-far", nil), testutil.HTTPRoute("blog", "kid", []objects.ParentRef{farRef}, testutil.AcceptedBy(farRef, testutil.Controller))}
+}
+
 func TestCandidateDetail(t *testing.T) {
 	foreign := testutil.GwRef("infra", "foreign")
-	// blog/far is out of scope and named by shop/mid's delegation ref; its other controller's entry is written first.
-	far := testutil.HTTPRoute("blog", "far", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other"), testutil.AcceptedBy(foreign, testutil.Controller))
+	// blog/far is named by shop/mid's delegation ref.
 	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef, foreign}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
 	mid2 := testutil.WithRules(testutil.HTTPRoute("shop", "mid2", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
-	objs := world(far, mid, mid2, testutil.HTTPRoute("shop", "declared", []objects.ParentRef{testutil.HTTPRouteRef("shop", "mid")}))
+	objs := world(append(farWorld(), mid, mid2, testutil.HTTPRoute("shop", "declared", []objects.ParentRef{testutil.HTTPRouteRef("shop", "mid")}))...)
 	_, srv, _ := startWith(t, setup{}, objs...)
 
 	d := get[RouteDetail](t, srv, routeDetail+"blog/far", 200)
@@ -435,6 +485,12 @@ func TestCandidateDetail(t *testing.T) {
 	}
 	if len(d.Ancestors) != 0 || d.ChildCount != 0 {
 		t.Errorf("a candidate has no reported edges: %+v", d)
+	}
+	// Admission does not follow chains: far's Backend does not open, so it has
+	// no state, and its child reads not-reported (edges are for owned parents).
+	if refs := d.Rules[0].BackendRefs; len(refs) != 2 || refs[0].Ref.Ref != backendRef("blog", "be-far") || refs[0].Ref.Link != LinkNone || refs[0].Backend != nil ||
+		refs[1].Delegation == nil || refs[1].Delegation.State != "not-reported" || refs[1].Ref.Link != LinkNone {
+		t.Errorf("candidate rules %+v", d.Rules)
 	}
 	// A KGWUI-011 declared route is a finding candidate, without by.
 	if c := get[RouteDetail](t, srv, routeDetail+"shop/declared", 200).Candidate; c == nil || c.Reason != "finding" || c.By != nil {

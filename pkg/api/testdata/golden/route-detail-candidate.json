@@ -129,7 +129,52 @@
       "name": "far",
       "namespace": "blog"
     },
-    "rules": []
+    "rules": [
+      {
+        "backendRefs": [
+          {
+            "filters": [],
+            "ref": {
+              "group": "gateway.kgateway.dev",
+              "kind": "Backend",
+              "link": "none",
+              "name": "be-far",
+              "namespace": "blog"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "delegation": {
+              "mode": "name",
+              "name": "kid",
+              "namespace": "blog",
+              "state": "not-reported"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "kid",
+              "namespace": "blog"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          }
+        ],
+        "filters": [],
+        "index": 0,
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ]
+      }
+    ]
   },
   "headers": {
     "Cache-Control": "no-store",

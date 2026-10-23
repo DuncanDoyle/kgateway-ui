@@ -101,11 +101,9 @@ func TestGoldenExplorerDetails(t *testing.T) {
 	_, allowed, _ := startWith(t, setup{}, edgeAllowing(map[string]any{"namespaces": map[string]any{"from": "Same"}}, world(na()))...)
 	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
 	_, restricted, _ := startWith(t, setup{authz: hideMidDeps()}, delegationWorld()...)
-	foreign := testutil.GwRef("infra", "foreign")
-	far := testutil.HTTPRoute("blog", "far", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other"), testutil.AcceptedBy(foreign, testutil.Controller))
 	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
-	_, cand, _ := startWith(t, setup{}, world(far, mid)...)
+	_, cand, _ := startWith(t, setup{}, world(append(farWorld(), mid)...)...)
 	for _, tc := range []struct {
 		golden string
 		srv    *httptest.Server

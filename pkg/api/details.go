@@ -232,9 +232,10 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && k.ExperimentalOnly(d.i.Resolved.KgatewayVersion()) {
 		out.ExperimentalHint = experimentalHint(k)
 	}
-	// A parent the caller may not view reads as not found, as an absent one does (D-013).
+	// The parent is read only when it opens: a hidden, absent or unadmitted
+	// parent reads as not found, and admission never follows chains (D-013).
 	var pu *unstructured.Unstructured
-	if d.can(parent) {
+	if out.Parent.Link != LinkNone {
 		pu, _ = stored(d.p.Model, parent)
 	}
 	out.ParentFound = pu != nil

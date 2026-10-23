@@ -224,8 +224,10 @@ type AllowedListenersDTO struct {
 }
 
 // ListenerSetDetail is GET …/listenersets/{group}/{kind}/{ns}/{name}.
-// ParentAllowedListeners is sent only while the ListenerSet's current
-// Accepted condition is False with reason NotAllowed and its parent is found.
+// ParentFound is false when the parent does not open for the caller
+// (absent, hidden or unadmitted). ParentAllowedListeners is sent only while
+// the ListenerSet's current Accepted condition is False with reason
+// NotAllowed and its parent is found.
 type ListenerSetDetail struct {
 	Install                string               `json:"install"`
 	Ref                    LinkedRef            `json:"ref"`
@@ -292,7 +294,9 @@ type MatchDTO struct {
 }
 
 // RuleDTO is one spec rule. Omitted matches carry the CRD default, one
-// PathPrefix "/" match; an explicit empty list stays empty.
+// PathPrefix "/" match. An explicit empty list stays [] as written; kgateway
+// treats it as match-all (or, for an inheriting child, the parent's match),
+// so clients must not render it as "matches nothing".
 type RuleDTO struct {
 	Index       int             `json:"index"`
 	Name        string          `json:"name,omitempty"`
