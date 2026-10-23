@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 func TestDiffReportsAddedAndRemovedVersions(t *testing.T) {
@@ -45,5 +47,36 @@ func TestMonitorKeepsLastChangeOnError(t *testing.T) {
 	}
 	if err := m.Refresh(); err == nil || m.Change().Empty() {
 		t.Fatalf("a failed refresh must return its error and keep the change: %v %+v", err, m.Change())
+	}
+}
+
+// pending reports whether sig has a notification waiting, consuming it.
+func pending(sig *trigger.Signal) bool {
+	select {
+	case <-sig.C():
+		return true
+	default:
+		return false
+	}
+}
+
+// Refresh notifies only when the Change differs from the previous one.
+func TestMonitorNotifiesOnlyOnChange(t *testing.T) {
+	hr := Descriptor{Group: "gateway.networking.k8s.io", Kind: "HTTPRoute", Resource: "httproutes", Versions: []string{"v1"}}
+	tls := Descriptor{Group: "gateway.networking.k8s.io", Kind: "TLSRoute", Resource: "tlsroutes", Versions: []string{"v1"}}
+	watched := []Served{{Descriptor: hr, Version: "v1"}, {Descriptor: tls, Version: "v1"}}
+	dc := discovery(list("gateway.networking.k8s.io/v1", "httproutes"))
+	m := NewMonitor(dc, []Descriptor{hr, tls}, watched)
+	m.OnChange = trigger.New()
+
+	if err := m.Refresh(); err != nil || !pending(m.OnChange) {
+		t.Fatalf("a first change must notify: %v", err)
+	}
+	if err := m.Refresh(); err != nil || pending(m.OnChange) {
+		t.Fatalf("an unchanged answer must not notify: %v", err)
+	}
+	dc.Resources = []*metav1.APIResourceList{list("gateway.networking.k8s.io/v1")}
+	if err := m.Refresh(); err != nil || !pending(m.OnChange) {
+		t.Fatalf("a further removed kind must notify: %v", err)
 	}
 }

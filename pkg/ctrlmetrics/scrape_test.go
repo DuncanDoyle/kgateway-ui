@@ -16,6 +16,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 type fakeScraper map[string]string // pod name → body; missing → error
@@ -195,5 +196,24 @@ func TestCollectedAtKeepsMonotonicReading(t *testing.T) {
 	d := testutil.ControllerDeployment("kgw", "kgateway", "img", 1, 1)
 	if at := NewCollector(fakeScraper{}).Collect(context.Background(), inst(testutil.ControllerPod(d, "a", false))).CollectedAt; !strings.Contains(at.String(), " m=") {
 		t.Fatalf("CollectedAt lost its monotonic reading: %s", at)
+	}
+}
+
+// Each stored result notifies OnResult once per tick.
+func TestCollectorNotifiesOnEachResult(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "kgateway:v2.4.7", 1, 1)
+	in := install.Install{Namespace: "kgw", Name: "kgateway", Pods: testutil.PodList(testutil.ControllerPod(d, "a", true)), MetricsPort: 9092}
+	c := NewCollector(fakeScraper{"a": sample})
+	c.OnResult = trigger.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx, time.Hour, func() []install.Install { return []install.Install{in} }) }()
+	testutil.Recv(t, c.OnResult.C(), "a notification for the first result")
+	if _, ok := c.Get(in.ID()); !ok {
+		t.Fatal("the result must be stored before the notification")
+	}
+	cancel()
+	if err := testutil.Recv(t, done, "Run to return after cancel"); err != nil {
+		t.Fatal(err)
 	}
 }

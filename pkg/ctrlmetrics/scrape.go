@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 // Scraper fetches the /metrics payload of one controller pod.
@@ -101,6 +102,8 @@ type Collector struct {
 	podTimeout time.Duration
 	mu         sync.RWMutex
 	results    map[string]Result
+	// OnResult, if set, is notified after each stored result.
+	OnResult *trigger.Signal
 }
 
 // NewCollector returns a Collector using s.
@@ -181,6 +184,7 @@ func (c *Collector) Run(ctx context.Context, every time.Duration, installs func(
 				c.mu.Lock()
 				c.results[in.ID()] = r
 				c.mu.Unlock()
+				c.OnResult.Notify()
 			}()
 		}
 		wg.Wait()
