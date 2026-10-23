@@ -42,17 +42,15 @@ type Owned struct {
 	Policies       []OwnedObject
 	Unattached     []UnattachedRoute
 
-	// routeIdx maps a route ref to its index in Routes; nil on copies.
+	// routeIdx maps a route ref to its index in Routes. It may be nil (copies)
+	// or miss routes appended later, so Route falls back to a scan.
 	routeIdx map[objects.Ref]int
 }
 
 // Route returns the owned route ref, if any.
 func (o *Owned) Route(ref objects.Ref) (*OwnedObject, bool) {
-	if o.routeIdx != nil {
-		if i, ok := o.routeIdx[ref]; ok && i < len(o.Routes) && objects.RefOf(o.Routes[i].Obj) == ref {
-			return &o.Routes[i], true
-		}
-		return nil, false
+	if i, ok := o.routeIdx[ref]; ok && i < len(o.Routes) && objects.RefOf(o.Routes[i].Obj) == ref {
+		return &o.Routes[i], true
 	}
 	for i := range o.Routes {
 		if objects.RefOf(o.Routes[i].Obj) == ref {

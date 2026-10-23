@@ -43,9 +43,17 @@ func TestReportedEdgeNeedsEligibility(t *testing.T) {
 	if edge(testutil.HTTPRoute("shop", "c", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller), testutil.AcceptedBy(p, testutil.Controller))) {
 		t.Fatal("a non-empty list without p keeps no implicit edge")
 	}
-	entry, ok := ReportedEdge(objects.DecodeHTTPRoute(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(p, testutil.Controller))), p.Ref(), ctl)
-	if !ok || entry.ParentRef != p {
-		t.Fatalf("entry: %+v", entry)
+	es, ok := ReportedEdge(objects.DecodeHTTPRoute(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(p, testutil.Controller))), p.Ref(), ctl)
+	if !ok || len(es) != 1 || es[0].ParentRef != p {
+		t.Fatalf("entries: %+v", es)
+	}
+	// Two refs to one parent: every eligible entry counts.
+	s1, s2 := p, p
+	s1.SectionName, s2.Port = "a", 8080
+	es, _ = ReportedEdge(objects.DecodeHTTPRoute(testutil.HTTPRoute("shop", "c", []objects.ParentRef{s1, s2},
+		testutil.AcceptedBy(s1, testutil.Controller), testutil.AcceptedBy(s2, testutil.Controller))), p.Ref(), ctl)
+	if len(es) != 2 || es[0].ParentRef != s1 || es[1].ParentRef != s2 {
+		t.Fatalf("two refs to one parent: %+v", es)
 	}
 }
 
@@ -196,5 +204,23 @@ func TestHTTPRouteParentKindKeepsPolicyOwnership(t *testing.T) {
 	}
 	if len(o.Unattached) != 1 || o.Unattached[0].Route.Obj.GetName() != "lost" || o.Unattached[0].Parent != testutil.HTTPRouteRef("shop", "gone") {
 		t.Fatalf("a missing HTTPRoute parent is unattached: %+v", o.Unattached)
+	}
+}
+
+// Route finds routes appended after Assign built its index.
+func TestOwnedRouteAfterAppend(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "api"), testutil.Controller)))
+	late := testutil.HTTPRoute("shop", "late", nil)
+	o.Routes = append(o.Routes, OwnedObject{Obj: late})
+	for _, n := range []string{"api", "c", "late"} {
+		if r, ok := o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: n}); !ok || r.Obj.GetName() != n {
+			t.Fatalf("Route(shop/%s) not found", n)
+		}
+	}
+	if _, ok := o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "none"}); ok {
+		t.Fatal("unknown route found")
 	}
 }

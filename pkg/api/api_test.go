@@ -2123,3 +2123,27 @@ func TestQ12CountsBeforeAndAfter(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// A child naming one parent twice (by section and by port) has each entry
+// judged: a stale one is pending while the current one is clean.
+func TestEveryEligibleEntryIsJudged(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	s1, s2 := testutil.HTTPRouteRef("shop", "api"), testutil.HTTPRouteRef("shop", "api")
+	s1.SectionName, s2.Port = "a", 8080
+	fresh := testutil.AcceptedBy(s1, testutil.Controller)
+	for i := range fresh.Conds {
+		fresh.Conds[i].ObservedGeneration = 2
+	}
+	child := stale(testutil.HTTPRoute("shop", "child", []objects.ParentRef{s1, s2}, fresh, testutil.AcceptedBy(s2, testutil.Controller)))
+	_, srv, _ := startWith(t, setup{}, isolated(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), child)...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	var details []string
+	for _, f := range h.Findings {
+		if f.Code == health.CodeRouteUnattached && f.Resource != nil && f.Resource.String() == "shop/child" {
+			details = append(details, f.Detail)
+		}
+	}
+	if len(details) != 1 || !strings.Contains(details[0], "port 8080") {
+		t.Fatalf("want one KGWUI-003 for the stale port-8080 entry, got %q; findings %+v", details, h.Findings)
+	}
+}

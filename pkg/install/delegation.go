@@ -8,22 +8,27 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// ReportedEdge returns child's status entry that gives it a reported edge to
-// the HTTPRoute parent (design §4.2 conditions 2 and 3): the entry is from one
+// ReportedEdge returns child's status entries that give it a reported edge
+// to the HTTPRoute parent (design §4.2 conditions 2 and 3): each is from one
 // of controllers, its parentRef resolves to parent, and it is eligible: a
 // current spec parentRef equals it after defaults, or the spec list is empty.
+// A child naming parent twice (by section or port) has one entry per ref.
 // Freshness does not matter. Scope and ownership are the caller's to check.
-func ReportedEdge(child *objects.HTTPRouteView, parent objects.Ref, controllers []string) (*objects.RouteParentStatus, bool) {
+func ReportedEdge(child *objects.HTTPRouteView, parent objects.Ref, controllers []string) ([]*objects.RouteParentStatus, bool) {
+	var out []*objects.RouteParentStatus
 	for i := range child.Parents {
 		e := &child.Parents[i]
 		if e.ParentRef.Ref() != parent || !slices.Contains(controllers, e.ControllerName) {
 			continue
 		}
-		if len(child.ParentRefs) == 0 || slices.Contains(child.ParentRefs, e.ParentRef) {
-			return e, true
+		if len(child.ParentRefs) != 0 && !slices.Contains(child.ParentRefs, e.ParentRef) {
+			continue
+		}
+		if !slices.ContainsFunc(out, func(x *objects.RouteParentStatus) bool { return x.ParentRef == e.ParentRef }) {
+			out = append(out, e)
 		}
 	}
-	return nil, false
+	return out, len(out) > 0
 }
 
 // httpRouteKind returns the served HTTPRoute kind.
@@ -85,7 +90,7 @@ func delegate(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, a *
 				if !inScope(in, c.GetNamespace()) {
 					continue
 				}
-				e, ok := ReportedEdge(views[ci], pref, in.ControllerNames)
+				es, ok := ReportedEdge(views[ci], pref, in.ControllerNames)
 				if !ok {
 					continue
 				}
@@ -96,7 +101,9 @@ func delegate(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, a *
 					o.routeIdx[cref] = j
 					o.Routes = append(o.Routes, OwnedObject{Kind: k, Obj: c})
 				}
-				o.Routes[j].RouteParents = append(o.Routes[j].RouteParents, e.ParentRef)
+				for _, e := range es {
+					o.Routes[j].RouteParents = append(o.Routes[j].RouteParents, e.ParentRef)
+				}
 				if !visited[ci] {
 					visited[ci] = true
 					queue = append(queue, ci)
