@@ -73,7 +73,7 @@ type App struct {
 	collector *ctrlmetrics.Collector
 	kinds     *kinds.Monitor
 	opts      Options
-	// discovered is closed after the first model with an install.
+	// discovered is closed after the first model with an install over a settled cache.
 	discovered chan struct{}
 }
 
@@ -127,7 +127,9 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
 		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop,
 		OnCompute: func(m *engine.Model) {
-			if len(m.Installs) > 0 {
+			// An unsettled cache can hold a Deployment without its Pods; scraping
+			// that install fails and is not retried for a full metrics interval.
+			if m.Snapshot.Synced && len(m.Installs) > 0 {
 				once.Do(func() { close(discovered) })
 			}
 		}}
@@ -137,8 +139,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 }
 
 // Start runs the cache, the model loop, the served-kinds monitor and the
-// metrics collector until ctx is done. PollInterval is the loop's safety timer. The collector starts as soon as the first install is discovered,
-// so the first metrics do not wait for a collector tick.
+// metrics collector until ctx is done. PollInterval is the loop's safety timer. The collector starts as soon as the first install is discovered
+// over a settled cache, so the first metrics do not wait for a collector tick.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
 	go a.Engine.Run(ctx, a.opts.PollInterval)

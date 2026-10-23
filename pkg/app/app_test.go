@@ -21,10 +21,13 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -259,6 +262,91 @@ func TestFirstMetricsCollectionFollowsDiscovery(t *testing.T) {
 		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, sc)
 	eventually(t, "the controller was never scraped after discovery", func() bool { return sc.calls.Load() > 0 })
 	eventually(t, "no metrics result for the install", func() bool { _, ok := a.collector.Get("kgw.kgateway"); return ok })
+}
+
+// slowPods holds the Pod list until release closes, so the Deployment is
+// cached before its Pods, as an unsettled informer start can leave it.
+type slowPods struct {
+	*kubefake.Clientset
+	release chan struct{}
+}
+
+func (k slowPods) CoreV1() typedcorev1.CoreV1Interface {
+	return slowCoreV1{k.Clientset.CoreV1(), k.release}
+}
+
+type slowCoreV1 struct {
+	typedcorev1.CoreV1Interface
+	release chan struct{}
+}
+
+func (c slowCoreV1) Pods(ns string) typedcorev1.PodInterface {
+	return slowPodList{c.CoreV1Interface.Pods(ns), c.release}
+}
+
+type slowPodList struct {
+	typedcorev1.PodInterface
+	release chan struct{}
+}
+
+func (p slowPodList) List(ctx context.Context, o metav1.ListOptions) (*corev1.PodList, error) {
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return p.PodInterface.List(ctx, o)
+}
+
+// A model from a cache that has not settled must not start the collector: its
+// install may still lack its Pods, and the collector would then record "no
+// ready controller pod" and wait a full interval (here an hour) to retry.
+func TestMetricsCollectionWaitsForASettledDiscovery(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+	release := make(chan struct{})
+	early := make(chan bool, 1) // whether discovery was signalled on the unsettled model
+	var a *App
+	onLoop := func(ev engine.LoopEvent) {
+		if ev.Kind != engine.EvPublished || len(ev.Published.Model.Installs) == 0 || ev.Published.Model.Snapshot.Synced {
+			return
+		}
+		select {
+		case <-release: // already released
+			return
+		default:
+		}
+		select {
+		case <-a.discovered:
+			early <- true
+		default:
+			early <- false
+		}
+		close(release)
+	}
+	sc := &stubScraper{}
+	var err error
+	a, err = Build(Clients{Dynamic: dyn, Kube: slowPods{kube, release}, Discovery: kube.Discovery(), Scraper: sc},
+		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, OnLoop: onLoop}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	select {
+	case e := <-early:
+		if e {
+			t.Fatal("discovery was signalled on a model whose cache had not settled")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no model with the install was published before the Pods were listed")
+	}
+	var r ctrlmetrics.Result
+	eventually(t, "no metrics result for the install", func() bool { var ok bool; r, ok = a.collector.Get("kgw.kgateway"); return ok })
+	if r.Err != "" || sc.calls.Load() == 0 {
+		t.Fatalf("the first collection must scrape the install's pod: err=%q calls=%d", r.Err, sc.calls.Load())
+	}
 }
 
 // The scope verifier must wait 2 × and metrics expire after 3 × the metrics
