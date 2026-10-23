@@ -108,8 +108,6 @@ const Config = styled(YamlBlock)`
 `;
 
 // region Helpers
-/** An explicit empty list is match-all; it shows the CRD default, never "matches nothing" (design §7.3). */
-const DEFAULT_MATCH: Match = { path: { type: "PathPrefix", value: "/" } };
 
 function MatchLine({ m }: { m: Match }) {
   return (
@@ -301,7 +299,6 @@ export function RuleList({ installId, rules, stylesOverride }: RuleListProps) {
     <Rules stylesOverride={stylesOverride}>
       {rules.map((r) => {
         const title = `${routeCopy.rule(r.index + 1)}${r.name ? ` ${r.name}` : ""}`;
-        const matches = r.matches.length ? r.matches : [DEFAULT_MATCH];
         return (
           <RuleBox key={r.index} aria-label={title}>
             <h3>
@@ -310,15 +307,21 @@ export function RuleList({ installId, rules, stylesOverride }: RuleListProps) {
             </h3>
             <div>
               <h4>{routeCopy.matches}</h4>
-              <ul>
-                {matches.map((m, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: positional
-                  <li key={i} className="line" data-testid="match">
-                    <MatchLine m={m} />
-                    {r.matches.length ? null : <span className="muted">{routeCopy.defaultMatch}</span>}
-                  </li>
-                ))}
-              </ul>
+              {/* Omitted matches arrive with the CRD default; only an explicit [] is empty (computed-rules §3.2). */}
+              {r.matches.length ? (
+                <ul>
+                  {r.matches.map((m, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: positional
+                    <li key={i} className="line" data-testid="match">
+                      <MatchLine m={m} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="muted" data-testid="match-empty">
+                  {routeCopy.emptyMatches}
+                </span>
+              )}
             </div>
             {r.filters.length ? (
               <div>

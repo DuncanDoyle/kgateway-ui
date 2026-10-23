@@ -404,6 +404,18 @@ func TestListenerSetParentHiddenOrUnadmitted(t *testing.T) {
 	}
 }
 
+// Explicit matches: [] stays empty on the wire; only omitted matches get the
+// CRD default (computed-rules §3.2), so the SPA can tell them apart.
+func TestExplicitEmptyMatchesStayEmpty(t *testing.T) {
+	r := testutil.WithRules(testutil.HTTPRoute("shop", "empty", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		map[string]any{"matches": []any{}}, map[string]any{})
+	_, srv, _ := startWith(t, setup{}, world(r)...)
+	d := get[RouteDetail](t, srv, routeDetail+"shop/empty", 200)
+	if len(d.Rules) != 2 || d.Rules[0].Matches == nil || len(d.Rules[0].Matches) != 0 || len(d.Rules[1].Matches) != 1 {
+		t.Fatalf("explicit vs omitted matches: %+v", d.Rules)
+	}
+}
+
 func TestRouteDetailValuesEasyToGetWrong(t *testing.T) {
 	_, srv, _ := startWith(t, setup{}, delegationWorld()...)
 	d := get[RouteDetail](t, srv, routeDetail+"shop/mid", 200)

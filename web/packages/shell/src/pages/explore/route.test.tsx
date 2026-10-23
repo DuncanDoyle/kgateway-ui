@@ -6,6 +6,7 @@ import candidateGolden from "../../../../../../pkg/api/testdata/golden/route-det
 import restrictedGolden from "../../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
 import type { Condition, RouteDetail, RouteList, RouteRow } from "../../api/types";
+import { routeCopy } from "../../copy/explorer";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
@@ -398,22 +399,25 @@ it("mirror filters show their target and percentage; filters keep written order"
   expect(within(backend("w1")).getAllByTestId("filter")).toHaveLength(2);
 });
 
-it("matches render as written, and an empty list as the default match", async () => {
+it("matches render as written; an explicit empty list is not the default match", async () => {
   const d = detail(routeGolden);
   (d.rules[0] as RouteDetail["rules"][number]).matches = [];
   serve(api({ mid: d }));
   mount(MID);
   await loaded();
-  // An explicit empty list is match-all: shown as the CRD default, never as "matches nothing".
-  expect(within(rule(1)).getByTestId("match")).toHaveTextContent("PathPrefix /");
-  expect(within(rule(1)).getByText("Default match")).toBeInTheDocument();
-  expect(rule(1)).not.toHaveTextContent(/nothing/i);
+  // Explicit matches: [] reaches the SPA empty and keeps its own line (computed-rules §3.2, §6).
+  expect(within(rule(1)).queryByTestId("match")).toBeNull();
+  expect(within(rule(1)).getByTestId("match-empty")).toHaveTextContent(routeCopy.emptyMatches);
+  expect(rule(1)).not.toHaveTextContent("PathPrefix /");
+  // Omitted matches arrive with the CRD default filled in, shown as written.
+  expect(within(rule(2)).getByTestId("match")).toHaveTextContent("PathPrefix /");
+  expect(within(rule(2)).queryByTestId("match-empty")).toBeNull();
   const m = within(rule(3)).getByTestId("match");
   expect(m).toHaveTextContent("PathPrefix /");
   expect(m).toHaveTextContent("Header x-env Exact prod");
   expect(m).toHaveTextContent("Query q RegularExpression .*");
   expect(m).toHaveTextContent("Method GET");
-  expect(within(rule(3)).queryByText("Default match")).toBeNull();
+  expect(within(rule(3)).queryByTestId("match-empty")).toBeNull();
 });
 
 it("restricted objects show no names or data", async () => {
