@@ -11,6 +11,7 @@ import {
   type CorePages,
   defaultBrand,
   type ResolvedShellExtension,
+  type RouteContribution,
   type ShellExtension,
   ShellExtensionContext,
 } from "./extension";
@@ -27,23 +28,15 @@ const Root = styled.div<{ stylesOverride?: SerializedStyles }>`
 // region Helpers
 const noExtension: ShellExtension = {};
 
-const segments = (path: string) => path.split("/").filter(Boolean);
-const sameSegment = (a: string, b: string) => a === b || a.startsWith(":") || b.startsWith(":");
+// The explorer's install-scoped paths (design §8.2); the CorePages slots replace their pages.
+const RESERVED = ["gateways", "listenersets", "routes"];
 
-/** Whether some URL matches both patterns; a trailing "*" matches any rest, including none. */
-export function pathsOverlap(a: string, b: string): boolean {
-  const [x, y] = [segments(a), segments(b)];
-  const splat = (p: string[], q: string[]) => {
-    const prefix = p.slice(0, -1);
-    return q.length >= prefix.length && prefix.every((s, i) => q[i] === "*" || sameSegment(s, q[i] ?? ""));
-  };
-  if (x.at(-1) === "*") return splat(x, y);
-  if (y.at(-1) === "*") return splat(y, x);
-  return x.length === y.length && x.every((s, i) => sameSegment(s, y[i] ?? ""));
+/** The reserved path an install-scoped contribution sits at or below, if any; every other path competes by router rank as in Phase 1. */
+export function reservedPathOf(r: RouteContribution): string | undefined {
+  if (r.scope !== "install") return undefined;
+  const first = r.path.split("/").find(Boolean);
+  return RESERVED.find((p) => p === first);
 }
-
-// The core owns "/" and everything under /i/:id/ at the top.
-const coreTopPaths = ["", "i/:id/*"];
 
 // region Component
 interface ShellProps {
@@ -66,6 +59,19 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },
     };
   }, [extension]);
+  // A contribution at or below a reserved path is ignored, with one warning, so it cannot shadow an explorer page.
+  const contributed = useMemo(
+    () =>
+      ext.routes.filter((r) => {
+        const reserved = reservedPathOf(r);
+        if (reserved)
+          console.warn(
+            `kgateway-ui: ignoring contributed route "${r.path}": "${reserved}" is reserved; use its CorePages slot.`,
+          );
+        return !reserved;
+      }),
+    [ext.routes],
+  );
   const { ClusterLanding, InstallPage, FindingsPage, ResourcePage } = pages;
   // A slot a build leaves out renders the upstream page, so a Phase 1 build still gets the explorer.
   const GatewaysPage = pages.GatewaysPage ?? defaultPages.GatewaysPage;
@@ -86,10 +92,6 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     ["findings", FindingsPage],
     ["r/:group/:kind/:rns/:rname", ResourcePage],
   ];
-  // A contribution that could match a core URL is ignored: it would replace or shadow a core page.
-  const contributed = ext.routes.filter((r) =>
-    (r.scope === "install" ? installRoutes.map(([p]) => p) : coreTopPaths).every((core) => !pathsOverlap(r.path, core)),
-  );
   return (
     <ShellExtensionContext.Provider value={ext}>
       {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}

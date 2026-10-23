@@ -13,10 +13,9 @@ export interface Brand {
 
 /**
  * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:id/. The core owns "/" and "i/:id/..." at the top, and these under /i/:id/: "", "findings",
- * "r/:group/:kind/:ns/:name", "gateways", "gateways/:ns/:name", "listenersets", "listenersets/:group/:kind/:ns/:name",
- * "routes" and "routes/:group/:kind/:ns/:name". A contribution whose path could match a core URL is ignored, so it
- * cannot replace a core page; replace one through its CorePages slot instead. "routes/stats" is fine.
+ * under /i/:id/. The core owns "/" at the top and "", "findings" and "r/..." under /i/:id/, and wins on its own URLs.
+ * "gateways", "listenersets" and "routes" are reserved under /i/:id/: a contribution at or below them is ignored with
+ * a console warning; replace those pages through their CorePages slots instead.
  */
 export interface RouteContribution {
   path: string;

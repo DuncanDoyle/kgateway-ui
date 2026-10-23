@@ -11,6 +11,7 @@ import {
 } from "../index";
 import { overview, unhealthy } from "../test/fixtures";
 import { stubApi } from "../test/render";
+import { reservedPathOf } from "./Shell";
 
 // A downstream with its own brand, theme, page, nav entry and finding renderer, registered through the public shell API only.
 const acmeTheme: Theme = {
@@ -132,14 +133,46 @@ it("a contribution at routes cannot replace the core page", async () => {
   expect(screen.queryByText("impostor")).toBeNull();
   window.history.pushState({}, "", "/i/x/gateways/infra/edge");
   window.dispatchEvent(new PopStateEvent("popstate"));
-  // The Gateway page answers instead (here with its not-found state).
-  await waitFor(() => expect(screen.queryByRole("heading", { name: "Routes", level: 1 })).toBeNull());
+  // The Gateway page answers instead, here with its not-found state.
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Not in this install's scope" })).toBeInTheDocument());
   expect(screen.queryByText("impostor")).toBeNull();
 });
 
-it("a contribution beside the core pages still renders", async () => {
-  mountAt("/i/x/routes/stats", phase1Pages, {
-    routes: [{ path: "routes/stats", element: <p>route stats</p>, scope: "install" }],
+it("a contribution outside the reserved paths still renders", async () => {
+  mountAt("/i/x/widgets", phase1Pages, {
+    routes: [{ path: "widgets", element: <p>widgets page</p>, scope: "install" }],
   });
-  expect(await screen.findByText("route stats")).toBeInTheDocument();
+  expect(await screen.findByText("widgets page")).toBeInTheDocument();
+});
+
+it.each([
+  ["install", "routes", "routes"],
+  ["install", "/gateways/", "gateways"],
+  ["install", "routes/*", "routes"],
+  ["install", "gateways/:ns/:name", "gateways"],
+  ["install", "listenersets/stats", "listenersets"],
+  ["install", ":tab", undefined],
+  ["install", "*", undefined],
+  ["install", "x/routes", undefined],
+  ["install", "routesx", undefined],
+  ["top", "routes", undefined],
+  ["top", "i/:id/x", undefined],
+] as const)("reservedPathOf(%s %s) is %s", (scope, path, want) => {
+  expect(reservedPathOf({ scope, path, element: null })).toBe(want);
+});
+
+it("a dropped contribution warns once, naming its path and the reserved path", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  mountAt("/i/x/routes", phase1Pages, {
+    routes: [
+      { path: "routes/stats", element: <p>impostor</p>, scope: "install" },
+      { path: "widgets", element: <p>widgets</p>, scope: "install" },
+    ],
+  });
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Routes", level: 1 })).toBeInTheDocument());
+  const ours = warn.mock.calls.filter((c) => String(c[0]).includes("routes/stats"));
+  expect(ours).toHaveLength(1);
+  expect(String(ours[0]?.[0])).toContain('"routes"');
+  expect(warn.mock.calls.some((c) => String(c[0]).includes("widgets"))).toBe(false);
+  warn.mockRestore();
 });

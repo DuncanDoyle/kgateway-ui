@@ -508,18 +508,21 @@ it("a Backend outside the install's scope offers no reverse lookup", async () =>
 });
 
 it("a Service has no YAML view entry point", async () => {
-  // Services are not watched, so the backend never serves one; even a served object of another kind gets no lookup.
+  // Services are not watched, so the backend never serves one; even if it did, the view offers no lookup.
   stubApi({
     "/api/v1/installs/kgw.kgateway/resources/-/Service/shop/cart": {
       kind: "Service",
       metadata: { name: "cart", namespace: "shop" },
     },
-    [cartPath]: { kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } },
   });
   resource("/i/kgw.kgateway/r/-/Service/shop/cart");
   await screen.findByTestId("yaml");
   expect(screen.queryByRole("link", { name: lookupName })).toBeNull();
+});
+
+it("a YAML view of another kind offers no reverse lookup", async () => {
+  stubApi({ [cartPath]: { kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } } });
   resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
-  await waitFor(() => expect(screen.getAllByTestId("yaml")).toHaveLength(2));
+  await screen.findByTestId("yaml");
   expect(screen.queryByRole("link", { name: lookupName })).toBeNull();
 });

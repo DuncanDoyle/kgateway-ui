@@ -16,7 +16,7 @@ export function isStale(collectedAt: string, now: number): boolean {
   return Number.isNaN(age) || age > 2 * POLL_MS;
 }
 
-/** True when /api/v1/meta lists r's kind, so its YAML view can resolve. */
+/** True when /api/v1/meta lists r's kind. The shell no longer links by kind: links come from LinkedRef.link. */
 export function isLinkable(meta: MetaResponse | undefined, r: Ref): boolean {
   return !!meta?.kinds.some((k) => k.group === r.group && k.kind === r.kind);
 }
