@@ -136,50 +136,77 @@ func partialLS() *unstructured.Unstructured {
 // TestGoldenLinksAgreeWithEndpoints serves every link in every golden body from
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
-	detailPath := map[string]func(objects.Ref) string{
-		"Gateway": func(r objects.Ref) string { return "/gateways/" + r.Namespace + "/" + r.Name },
-		"HTTPRoute": func(r objects.Ref) string {
-			return "/routes/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
-		},
-		"ListenerSet": func(r objects.Ref) string {
-			return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
-		},
-		"XListenerSet": func(r objects.Ref) string {
-			return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
-		},
-	}
 	var walked int
 	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
-		if !ok {
+		if !ok { // meta and installs: no install segment, and no links
 			continue
 		}
 		installBase := "/api/v1/installs/" + install
 		for _, l := range goldenLinks(readGolden(t, "golden", tc.golden).(map[string]any)["body"]) {
 			walked++
 			res := strings.Replace(resourcePath(l.ref), base, installBase, 1)
-			dp, hasDetail := detailPath[l.ref.Kind]
+			dp, hasDetail := detailPath(l.ref)
 			switch l.link {
 			case LinkDetail:
 				if !hasDetail {
 					t.Errorf("%s: detail link on %v, a kind without a detail view", tc.golden, l.ref)
 					continue
 				}
-				wantStatus(t, tc, installBase+dp(l.ref), 200)
+				wantStatus(t, tc, installBase+dp, 200)
 			case LinkYAML:
 				wantStatus(t, tc, res, 200)
 			case LinkNone:
 				wantStatus(t, tc, res, 404)
 				if hasDetail {
-					wantStatus(t, tc, installBase+dp(l.ref), 404)
+					wantStatus(t, tc, installBase+dp, 404)
 				}
 			default:
 				t.Errorf("%s: link %q on %v", tc.golden, l.link, l.ref)
 			}
 		}
 	}
-	if walked < 100 {
-		t.Errorf("walked %d links; the goldens carry more", walked)
+	// Every link in every golden; update it when a golden gains or loses one.
+	const want = 151
+	if walked != want {
+		t.Errorf("walked %d links, want %d", walked, want)
+	}
+}
+
+// detailPath is ref's detail endpoint below the install, if its kind has one.
+func detailPath(r objects.Ref) (string, bool) {
+	switch r.Kind {
+	case "Gateway":
+		return "/gateways/" + r.Namespace + "/" + r.Name, true
+	case "HTTPRoute":
+		return "/routes/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name, true
+	case "ListenerSet", "XListenerSet":
+		return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name, true
+	}
+	return "", false
+}
+
+// TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
+func TestGoldenFilesHaveCases(t *testing.T) {
+	cased := map[string]bool{}
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t)) {
+		cased[tc.golden+".json"] = true
+	}
+	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk := map[string]bool{}
+	for _, f := range files {
+		onDisk[f.Name()] = true
+		if !cased[f.Name()] {
+			t.Errorf("testdata/golden/%s has no case", f.Name())
+		}
+	}
+	for name := range cased {
+		if !onDisk[name] {
+			t.Errorf("case %s has no file under testdata/golden", name)
+		}
 	}
 }
 
