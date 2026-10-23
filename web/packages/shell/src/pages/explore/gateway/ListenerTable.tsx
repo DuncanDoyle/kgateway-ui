@@ -10,6 +10,7 @@ import { HealthIcon } from "../../../health/HealthIcon";
 import { StaleView } from "../../../health/staleView";
 import { stateLabel } from "../../../health/state";
 import { ResourceName } from "../../../resource/ResourceName";
+import { Tooltip } from "../../../shell/Tooltip";
 import { useMedia } from "../../../shell/useMedia";
 import { VisuallyHidden } from "../../../states/VisuallyHidden";
 import type { HealthState } from "../../../theme/tokens";
@@ -32,10 +33,17 @@ const tableExtra = css`
   /* A listener name never breaks mid-word: it truncates, with the full name as a tooltip. */
   .name {
     display: block;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+`;
+
+const nameTip = css`
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
 `;
 
 // region Helpers
@@ -177,12 +185,16 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                       <HealthIcon state={s.state} />
                       {l.status ? stateLabel(stale ? "unknown" : s.state) : listenerCopy.noStatus}
                     </State>
-                    {s.failing.length ? <Muted className="failing">{s.failing.join(", ")}</Muted> : null}
+                    {/* Stale: the state only, as list rows show it; the conditions stay on expand. */}
+                    {s.failing.length && !stale ? <Muted className="failing">{s.failing.join(", ")}</Muted> : null}
                   </td>
                   <td>
-                    <span className="name" title={l.name}>
-                      {l.name}
-                    </span>
+                    {/* Truncated names: the full name is in an app tooltip, reachable by keyboard when narrow. */}
+                    <Tooltip label={l.name} stylesOverride={nameTip}>
+                      <span className="name" tabIndex={narrow ? 0 : undefined}>
+                        {l.name}
+                      </span>
+                    </Tooltip>
                   </td>
                   <td>{l.port ?? <Muted>{listenerCopy.notSet}</Muted>}</td>
                   <td>{l.protocol}</td>

@@ -42,7 +42,7 @@ export function PageNotice({ error, title, stylesOverride }: PageNoticeProps) {
       data-testid="page-notice"
       stylesOverride={stylesOverride}
     >
-      <HealthIcon state={connecting ? "unknown" : "error"} />
+      <HealthIcon state={connecting ? "unknown" : "error"} notice />
       {connecting ? `${waiting}: ${error.message}` : `${title}: ${error.message}`}
     </Box>
   );

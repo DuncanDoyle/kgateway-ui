@@ -152,6 +152,54 @@ it("stale ListenerSet data turns every state on the page unknown", async () => {
   expect(within(screen.getByTestId("detail-header")).getByText("Unknown")).toBeInTheDocument();
   expect(iconStates().length).toBeGreaterThan(1);
   expect(new Set(iconStates())).toEqual(new Set(["unknown"]));
+  // Like a list row, a stale listener row shows only its state; the conditions stay on expand.
+  const extra = rowOf(table("Listeners"), "extra");
+  expect(within(extra).getByText("Unknown")).toBeInTheDocument();
+  expect(within(extra).queryByText("Programmed: False")).toBeNull();
+});
+
+it("a failed poll turns states unknown, keeps the notice's error icon, and fresh data restores them", async () => {
+  let polls = 0;
+  const base = api();
+  serve((u) => {
+    if (u.pathname !== `${API}/gateways/infra/edge`) return base(u);
+    return polls++ === 1 ? [500, { error: "boom" }] : gateway();
+  });
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mount(GW_PATH);
+  const header = await screen.findByTestId("detail-header");
+  await within(header).findByText("Warning");
+  const accepted = () => within(screen.getByTestId("condition-Accepted"));
+  expect(accepted().getByTestId("health-icon-healthy")).toBeInTheDocument();
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5100);
+  });
+  const notice = await screen.findByText(/Cannot load Gateway/);
+  const box = notice.closest('[role="alert"], [role="status"]') ?? (notice.parentElement as HTMLElement);
+  expect(within(box as HTMLElement).getByTestId("health-icon-error")).toBeInTheDocument();
+  expect(within(header).getByText("Unknown")).toBeInTheDocument();
+  expect(accepted().getByTestId("health-icon-unknown")).toBeInTheDocument();
+
+  // The next good poll clears the error; SWR may retry on its own schedule first, so step until it lands.
+  for (let i = 0; i < 6 && screen.queryByText(/Cannot load Gateway/); i++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5100);
+    });
+  }
+  expect(screen.queryByText(/Cannot load Gateway/)).toBeNull();
+  expect(within(header).getByText("Warning")).toBeInTheDocument();
+  expect(accepted().getByTestId("health-icon-healthy")).toBeInTheDocument();
+});
+
+it("on a stale page the YAML tab's error keeps its error icon", async () => {
+  const base = api({ gateway: { ...gateway(), collectedAt: old() } });
+  serve((u) => (u.pathname.startsWith(`${API}/resources/`) ? [500, { error: "boom" }] : base(u)));
+  mount(`${GW_PATH}?tab=yaml`);
+  await screen.findByText(/Data is stale/);
+  const title = await screen.findByText("Cannot load resource");
+  expect(title).toBeInTheDocument();
+  expect(screen.getByTestId("health-icon-error")).toBeInTheDocument();
 });
 
 it("a stale condition says which generation it describes", async () => {
@@ -460,9 +508,13 @@ it("below 900 px listener names keep their words: hostname moves out and long na
     .map((h) => h.textContent);
   expect(headers).not.toContain("Hostname");
   const name = within(rowOf(listeners, "https")).getByText("https");
-  expect(name).toHaveAttribute("title", "https");
   expect(getComputedStyle(name).whiteSpace).toBe("nowrap");
   expect(getComputedStyle(name).textOverflow).toBe("ellipsis");
+  // The full name is reachable by keyboard: focus shows the app tooltip.
+  expect(name).toHaveAttribute("tabindex", "0");
+  fireEvent.keyDown(document, { key: "Tab" });
+  act(() => name.focus());
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("https");
   await userEvent.click(within(rowOf(listeners, "http")).getByRole("button", { name: /Show conditions/ }));
   const details = screen.getByTestId("listener-http-details");
   expect(within(details).getByText("Hostname")).toBeInTheDocument();

@@ -1,12 +1,15 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { dump } from "js-yaml";
+import { useContext } from "react";
 import type { BackendRef, Condition, DelegationRef, Filter, Match, Rule } from "../../../api/types";
 import { routeCopy } from "../../../copy/explorer";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
 import { HealthBadge } from "../../../health/HealthBadge";
 import { HealthIcon } from "../../../health/HealthIcon";
+import { StaleView } from "../../../health/staleView";
+import { stateLabel } from "../../../health/state";
 import { YamlBlock } from "../../../resource/ResourceYaml";
 import { installPath } from "../../../shell/paths";
 import { InlineLink } from "../../../states/controls";
@@ -195,7 +198,10 @@ const delegationState: Record<NonNullable<DelegationRef["state"]>, { label: stri
 
 function Delegation({ b, installId }: { b: BackendRef & { delegation: DelegationRef }; installId: string }) {
   const d = b.delegation;
-  const s = d.state ? delegationState[d.state] : undefined;
+  const stale = useContext(StaleView);
+  const known = d.state ? delegationState[d.state] : undefined;
+  // A stale page shows every state unknown, words included (design §6.3).
+  const s = known && stale ? { label: stateLabel("unknown"), state: "unknown" as const } : known;
   return (
     <span className="line">
       <span className="muted">{routeCopy.delegatesTo}</span>

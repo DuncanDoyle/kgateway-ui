@@ -25,12 +25,15 @@ const glyphs = { healthy: Check, warning: AlertTriangle, error: X, unknown: Help
 interface HealthIconProps {
   state: HealthState;
   size?: number;
+  /** A notice's icon, not an object's state: it ignores the stale view (design §6.3 covers states only). */
+  notice?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
 /** The icon half of the health vocabulary; always paired with text by callers. */
-export function HealthIcon({ state: given, size = 16, stylesOverride }: HealthIconProps) {
-  const state = useShownState(given);
+export function HealthIcon({ state: given, size = 16, notice, stylesOverride }: HealthIconProps) {
+  const shown = useShownState(given);
+  const state = notice ? given : shown;
   const Glyph = glyphs[state];
   return (
     <Chip

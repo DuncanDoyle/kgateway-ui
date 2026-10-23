@@ -28,7 +28,7 @@ export function DataAge({ collectedAt, stylesOverride }: DataAgeProps) {
   const stale = isStale(collectedAt, now);
   return (
     <Age data-testid="data-age" stylesOverride={stylesOverride}>
-      {stale ? <HealthIcon state="unknown" /> : null}
+      {stale ? <HealthIcon state="unknown" notice /> : null}
       {stale ? `Data is stale. Last checked ${ago(collectedAt, now)}` : `Last checked ${ago(collectedAt, now)}`}
     </Age>
   );

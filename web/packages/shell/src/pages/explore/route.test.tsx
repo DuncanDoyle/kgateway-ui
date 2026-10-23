@@ -292,6 +292,9 @@ it("stale route data turns every state on the page unknown", async () => {
   );
   expect(states.length).toBeGreaterThan(2);
   expect(new Set(states)).toEqual(new Set(["health-icon-unknown"]));
+  // Delegation states follow the stale view: unknown text with the unknown icon.
+  expect(backend("child")).toHaveTextContent("Unknown");
+  expect(backend("child")).not.toHaveTextContent("Reported by the controller");
 });
 
 it("each backendRef links to Other routes using this backend (routes?backend=…)", async () => {

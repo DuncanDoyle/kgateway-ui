@@ -557,6 +557,9 @@ func TestExplorerShowsControllerStatus(t *testing.T) {
 				for _, l := range g.Status.Listeners {
 					sum += l.AttachedRoutes
 				}
+				if _, ok := rows[id]; !ok {
+					return fmt.Errorf("Gateway %s: no row", id)
+				}
 				if rows[id].AttachedRoutes != sum {
 					return fmt.Errorf("Gateway row %s: attachedRoutes %d, status sum %d", id, rows[id].AttachedRoutes, sum)
 				}
@@ -609,7 +612,9 @@ func TestExplorerShowsControllerStatus(t *testing.T) {
 				}
 				parent := w.gateways[s.Spec.ParentRef.resolve(s.Metadata.Namespace).Ref().String()]
 				al := d.ParentAllowedListeners
-				if al == nil || al.Set != (parent.Spec.AllowedListeners != nil) || !reflect.DeepEqual(al.Value, parent.Spec.AllowedListeners) {
+				// The UI reads no CRDs, so the hint shows whenever the field is absent (design §8.5).
+				if al == nil || al.Set != (parent.Spec.AllowedListeners != nil) || al.CRDHint != (parent.Spec.AllowedListeners == nil) ||
+					!reflect.DeepEqual(al.Value, parent.Spec.AllowedListeners) {
 					return fmt.Errorf("ListenerSet %s: parentAllowedListeners %+v, parent spec %v", id, al, parent.Spec.AllowedListeners)
 				}
 			}
@@ -644,6 +649,9 @@ func TestExplorerShowsControllerStatus(t *testing.T) {
 						continue
 					}
 					e := ourEntry(r, objects.ParentRef{Group: s.Ref.Group, Kind: s.Ref.Kind, Namespace: s.Ref.Namespace, Name: s.Ref.Name, SectionName: s.SectionName, Port: s.Port})
+					if e == nil {
+						return fmt.Errorf("route row %s parent %s: %s, but the controller wrote no entry", id, s.Ref.Name, s.Attachment)
+					}
 					var want kcond
 					for _, typ := range []string{"Accepted", "ResolvedRefs", programmed} {
 						if c := findCond(e.Conditions, typ); c != nil && c.Status == "False" {
