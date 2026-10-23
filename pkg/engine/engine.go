@@ -109,6 +109,8 @@ type Engine struct {
 	seq       uint64
 	seen      map[generation]time.Time
 	rejected  map[string]bool // install errors already logged
+	// decode caches typed views by (uid, resourceVersion); only touched under computeMu.
+	decode *decodeCache
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -136,7 +138,7 @@ func New(cfg Config) *Engine {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache()}
 }
 
 // Platform returns the platform the engine computes models for.
@@ -148,10 +150,14 @@ func (e *Engine) Platform() platform.Info { return e.cfg.Platform }
 // objects present at the first computation get grace from UI start.
 func (e *Engine) observe(snap *cache.Snapshot, now time.Time) {
 	current := map[generation]bool{}
+	live := map[types.UID]string{}
 	for _, objs := range snap.Objects {
 		for _, u := range objs {
 			k := generation{u.GetUID(), u.GetGeneration()}
 			current[k] = true
+			if uid := u.GetUID(); uid != "" {
+				live[uid] = u.GetResourceVersion()
+			}
 			if _, ok := e.seen[k]; !ok {
 				e.seen[k] = now
 			}
@@ -162,6 +168,7 @@ func (e *Engine) observe(snap *cache.Snapshot, now time.Time) {
 			delete(e.seen, k)
 		}
 	}
+	e.decode.prune(live)
 }
 
 // firstSeen returns when the engine first saw u's current generation; an
