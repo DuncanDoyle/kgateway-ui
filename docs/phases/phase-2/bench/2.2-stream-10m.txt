@@ -2,13 +2,13 @@
 # run: make bench-stream
 go version go1.27.3 darwin/arm64
 machine: Darwin arm64, 18 CPUs, Apple M5 Max
-commit base: a615b63b2938cb84abf9a393f67e15f36524345b
-load: 20:21  up 2 days, 11:30, 14 users, load averages: 2.27 3.07 3.14
+code: be523f10ef8f84b3630ec229f7946a3f044db416 + fix round 1 working tree
+load: 20:53  up 2 days, 12:02, 14 users, load averages: 3.55 3.35 3.31
 go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 15m ./pkg/api
 === RUN   TestBudgetSustainedStream
-    budget_test.go:297: stream 10m0.002s: 6000 updates, 567 recomputes (0.94/s, budget ≤ 1/s), 567 publications; process CPU 43.069s = 7.2 % of one core (budget ≤ 15 %); recompute wall 28.962s = 4.8 %; GC share 25.3 % of used CPU (1.9 % of one core)
-    budget_test.go:299: polls: 2400, p50 684µs p95 1.2ms max 5.78ms
---- PASS: TestBudgetSustainedStream (600.14s)
+    budget_test.go:332: stream 10m0.003s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 43.017s = 7.2 % of one core (budget ≤ 15 %); recompute wall 29s = 4.8 %; GC share 25.1 % of used CPU (1.8 % of one core)
+    budget_test.go:334: polls: 2401, p50 754µs p95 1.2ms max 10.63ms
+--- PASS: TestBudgetSustainedStream (600.13s)
 PASS
-ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	600.595s
-load after: 20:31  up 2 days, 11:40, 14 users, load averages: 1.80 2.00 2.49
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	600.435s
+load after: 21:03  up 2 days, 12:12, 14 users, load averages: 1.91 2.76 3.03

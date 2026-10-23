@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,23 @@ func latencies(tb testing.TB, h http.Handler, path string, n, c int) []time.Dura
 	return out
 }
 
+// listRows is the item count and total of one list response from h.
+func listRows(tb testing.TB, h http.Handler, path string) (items, total int) {
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	var page struct {
+		Items []json.RawMessage `json:"items"`
+		Total int               `json:"total"`
+	}
+	if w.Code != http.StatusOK {
+		tb.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		tb.Fatal(err)
+	}
+	return len(page.Items), page.Total
+}
+
 // widest is the viewable key of m with the most rows.
 func widest(m map[objects.Ref][]explore.RowID, keep func(objects.Ref) bool) objects.Ref {
 	var best objects.Ref
@@ -98,10 +116,21 @@ func TestBudgetListRequests(t *testing.T) {
 			}
 			gw, ls := widest(ix.ByParent, kindIs("Gateway")), widest(ix.ByParent, kindIs("ListenerSet"))
 			parent := widest(ix.ByParentRoute, can)
+			// The namespace with the most viewable not-accepted rows, so namespace+state returns rows.
 			var ns string
+			best := 0
 			for n, ids := range ix.ByNamespace {
-				if can(objects.Ref{Namespace: n}) && (len(ids) > len(ix.ByNamespace[ns]) || len(ids) == len(ix.ByNamespace[ns]) && n < ns) {
-					ns = n
+				if !can(objects.Ref{Namespace: n}) {
+					continue
+				}
+				c := 0
+				for _, id := range ids {
+					if ix.Routes[id].Flags&explore.FlagNotAccepted != 0 {
+						c++
+					}
+				}
+				if c > best || c == best && c > 0 && n < ns {
+					ns, best = n, c
 				}
 			}
 			deepest, depth := deepestChild(ix, can)
@@ -122,6 +151,11 @@ func TestBudgetListRequests(t *testing.T) {
 				{"delegation-widest-parent", base + "/routes?parent=" + refParam(parent)},
 			}
 			for _, mx := range mixes {
+				items, total := listRows(t, h, mx.path)
+				t.Logf("%-25s %d rows on the page, total %d", mx.name, items, total)
+				if items == 0 {
+					t.Fatalf("%s: GET %s returned no rows; it would measure nothing", mx.name, mx.path)
+				}
 				seq := latencies(t, h, mx.path, requestsPerMix, 1)
 				conc := latencies(t, h, mx.path, requestsPerMix, 20)
 				t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 %v p95 %v p99 %v (budget p95 < 100 ms)",
@@ -289,6 +323,9 @@ func TestBudgetSustainedStream(t *testing.T) {
 	stopCollect()
 	<-counted
 
+	if len(polls) == 0 {
+		t.Fatal("no poll completed")
+	}
 	slices.Sort(polls)
 	rate := float64(runs) / wall.Seconds()
 	share := cpu.Seconds() / wall.Seconds()
