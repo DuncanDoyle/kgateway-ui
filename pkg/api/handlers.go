@@ -172,14 +172,20 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		return
 	}
-	m, confirmed := p.Model, wireTime(p.ConfirmedAt)
+	m := p.Model
+	// A zero confirmation time is omitted, so clients fall back to computedAt.
+	var confirmed *time.Time
+	if !p.ConfirmedAt.IsZero() {
+		at := wireTime(p.ConfirmedAt)
+		confirmed = &at
+	}
 	out := []InstallSummary{}
 	for k := range m.Installs {
 		i := &m.Installs[k]
 		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
-			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: &confirmed})
+			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
 	}
 	writeJSON(w, out)
 }

@@ -1955,3 +1955,14 @@ func TestRequestReadsOnePublished(t *testing.T) {
 		}
 	}
 }
+
+// A publication without a confirmation time omits confirmedAt, so clients fall back to computedAt.
+func TestZeroConfirmedAtIsOmitted(t *testing.T) {
+	e, _, _ := start(t, nil, "", nil, world()...)
+	srv := httptest.NewServer(NewHandler(confirmedAt{e, time.Time{}}, fstest.MapFS{}, nil))
+	t.Cleanup(srv.Close)
+	inst := get[[]map[string]any](t, srv, "/api/v1/installs", http.StatusOK)
+	if _, ok := inst[0]["confirmedAt"]; ok || inst[0]["computedAt"] == nil {
+		t.Errorf("zero ConfirmedAt: confirmedAt %v, computedAt %v", inst[0]["confirmedAt"], inst[0]["computedAt"])
+	}
+}
