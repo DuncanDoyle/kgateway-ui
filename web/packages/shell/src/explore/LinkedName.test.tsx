@@ -33,7 +33,7 @@ describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => 
   it("has hover, active and focus-visible styles", () => {
     renderWithTheme(<LinkedName refValue={ref} installId="kgw.kgateway" />, { themeId: t.id });
     const a = screen.getByRole("link");
-    expect(pseudoRules(a, ":hover").join()).toContain("text-decoration:underline");
+    expect(pseudoRules(a, ':hover [data-part="name"]').join()).toContain("text-decoration:underline");
     expect(pseudoRules(a, ":active").join()).toContain(t.color.accentText);
     expect(pseudoRules(a, ":focus-visible").join()).toContain(t.color.focus);
   });

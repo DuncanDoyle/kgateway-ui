@@ -21,10 +21,23 @@ test("detail links open the page of the ref's kind", () => {
   expect(objectPath("a.b", { ...ref, kind: "ListenerSet", namespace: "infra", name: "ls1" })).toBe(
     "/i/a.b/listenersets/gateway.networking.k8s.io/ListenerSet/infra/ls1",
   );
-  // A downstream ListenerSet kind has its own group and kind; the server marks it detail.
-  expect(objectPath("a.b", { group: "acme.io", kind: "EdgeSet", namespace: "n", name: "e", link: "detail" })).toBe(
-    "/i/a.b/listenersets/acme.io/EdgeSet/n/e",
-  );
+  expect(
+    objectPath("a.b", {
+      group: "gateway.networking.x-k8s.io",
+      kind: "XListenerSet",
+      namespace: "n",
+      name: "e",
+      link: "detail",
+    }),
+  ).toBe("/i/a.b/listenersets/gateway.networking.x-k8s.io/XListenerSet/n/e");
+});
+
+test("a detail link on a kind outside the detail set opens nothing", () => {
+  expect(objectPath("a.b", { ...ref, kind: "GRPCRoute" })).toBeUndefined();
+  expect(objectPath("a.b", { ...ref, group: "acme.io", kind: "HTTPRoute" })).toBeUndefined();
+  expect(
+    objectPath("a.b", { group: "acme.io", kind: "EdgeSet", namespace: "n", name: "e", link: "detail" }),
+  ).toBeUndefined();
 });
 
 test("the install ID and names are encoded, never split", () => {

@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithTheme, stubApi } from "../test/render";
 import {
   useGatewayDetail,
@@ -8,9 +8,11 @@ import {
   useRouteDetail,
   useRoutes,
 } from "./exploreHooks";
+import { POLL_MS } from "./hooks";
 import type { RouteList, RouteRow } from "./types";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -88,6 +90,25 @@ it("a 400 on a cursor drops it and loads page one", async () => {
   });
   renderWithTheme(<RoutesProbe id="a.one" query="sort=name&cursor=stale" />);
   expect(await screen.findByText("rows first cursor rejected")).toBeInTheDocument();
+});
+
+it("a rejected cursor stops polling while page one keeps polling", async () => {
+  vi.useFakeTimers();
+  const stale = "/api/v1/installs/a.one/routes?sort=name&cursor=stale";
+  const pageOne = "/api/v1/installs/a.one/routes?sort=name";
+  stubApi({ [stale]: [400, { error: "bad query: cursor" }], [pageOne]: list("a.one", "first") });
+  renderWithTheme(<RoutesProbe id="a.one" query="sort=name&cursor=stale" />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  expect(screen.getByText("rows first cursor rejected")).toBeInTheDocument();
+  const count = (u: string) => fetched().filter((f) => f === u).length;
+  const [before, firstBefore] = [count(stale), count(pageOne)];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4 * POLL_MS);
+  });
+  expect(count(stale)).toBe(before);
+  expect(count(pageOne)).toBeGreaterThan(firstBefore);
 });
 
 it("a 400 without a cursor is an error, not a rejected cursor", async () => {

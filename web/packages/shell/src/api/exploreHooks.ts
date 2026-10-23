@@ -1,7 +1,8 @@
+import { useState } from "react";
 import useSWR from "swr";
 import type { ApiError } from "./client";
 import { apiFetch } from "./client";
-import { installApi, live } from "./hooks";
+import { installApi, live, POLL_MS } from "./hooks";
 import type {
   GatewayDetail,
   GatewayListRow,
@@ -30,8 +31,20 @@ const forInstall = <T extends { install: string }>(data: T | undefined, id: stri
  */
 function useList<T>(id: string, list: string, query: URLSearchParams) {
   const path = `${installApi(id)}/${list}`;
-  const paged = useSWR<Page<T>, ApiError>(withQuery(path, query), apiFetch, live);
-  const cursorRejected = query.has("cursor") && paged.error?.status === 400;
+  const hasCursor = query.has("cursor");
+  const rejects = (e: ApiError | undefined) => hasCursor && e?.status === 400;
+  // A rejected cursor is final: its key neither polls nor retries, so it never loops on a 400.
+  const [rejected, setRejected] = useState<string>();
+  const key = withQuery(path, query);
+  const paged = useSWR<Page<T>, ApiError>(key, apiFetch, {
+    ...live,
+    refreshInterval: rejected === key ? 0 : POLL_MS,
+    shouldRetryOnError: (e) => !rejects(e),
+    onError: (e) => {
+      if (rejects(e)) setRejected(key);
+    },
+  });
+  const cursorRejected = rejects(paged.error);
   const pageOne = new URLSearchParams(query);
   pageOne.delete("cursor");
   const first = useSWR<Page<T>, ApiError>(cursorRejected ? withQuery(path, pageOne) : null, apiFetch, live);
