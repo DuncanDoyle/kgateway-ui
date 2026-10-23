@@ -195,7 +195,7 @@ func TestAttachmentSubFilters(t *testing.T) {
 		{gw + "&attachment=unwatched", []string{"blog/posts"}},
 		{api + "&attachment=declared", []string{"shop/declared"}},
 		{api + "&attachment=unwatched", []string{"blog/sub"}},
-		{api, []string{"blog/sub", "shop/child", "shop/declared"}},
+		{api, []string{"blog/sub", "shop/child"}}, // declared only under attachment=declared
 	} {
 		p := get[Page[RouteRow]](t, srv, listBase+"/routes?"+tc.q, 200)
 		if got := routeNames(p); !slices.Equal(got, tc.want) || p.Total != len(tc.want) {

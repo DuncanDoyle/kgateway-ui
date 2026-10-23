@@ -255,7 +255,11 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 	case q.Parent != nil:
 		cands = ix.ByParent[*q.Parent]
 		if isHTTPRoute(q.Parent.Group, q.Parent.Kind) {
-			cands = union(cands, ix.ByParentRoute[*q.Parent], ix.Declared[*q.Parent])
+			cands = union(cands, ix.ByParentRoute[*q.Parent])
+			// A declared candidate is never a child (design §4.2): only attachment=declared lists it.
+			if q.Attachment == AttachmentDeclared {
+				cands = union(cands, ix.Declared[*q.Parent])
+			}
 		}
 	case backends != nil:
 		cands = make([]RowID, 0, len(backends))

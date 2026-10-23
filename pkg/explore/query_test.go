@@ -124,7 +124,8 @@ func TestEachFilterAloneAndCombined(t *testing.T) {
 		{"two namespaces", Query{Namespaces: []string{"infra", "shop"}}, []string{"i1", "api", "declared", "g1", "pending", "r1", "r2"}},
 		{"kind", Query{Kinds: []objects.GroupKind{gk("GRPCRoute")}}, []string{"g1"}},
 		{"parent gateway", Query{Parent: &gwObj}, []string{"i1", "api", "g1", "pending", "r1", "r2"}},
-		{"parent httproute", Query{Parent: &apiRef}, []string{"declared"}},
+		// A declared candidate is never a child: only attachment=declared lists it (design §4.2).
+		{"parent httproute", Query{Parent: &apiRef}, []string{}},
 		{"attachment", Query{Parent: &gwObj, Attachment: AttachmentNotAccepted}, []string{"r2"}},
 		{"declared", Query{Parent: &apiRef, Attachment: AttachmentDeclared}, []string{"declared"}},
 		{"state", Query{States: FlagPending | FlagDeclared}, []string{"declared", "pending"}},
@@ -637,7 +638,7 @@ func TestHTTPRouteParentAttachments(t *testing.T) {
 		a    Attachment
 		want []string
 	}{
-		{"", []string{"kid-bad", "kid-declared", "kid-ok", "kid-pending"}},
+		{"", []string{"kid-bad", "kid-ok", "kid-pending"}}, // reported children only
 		{AttachmentAccepted, []string{"kid-ok"}},
 		{AttachmentNotAccepted, []string{"kid-bad"}},
 		{AttachmentPending, []string{"kid-pending"}},
@@ -645,6 +646,11 @@ func TestHTTPRouteParentAttachments(t *testing.T) {
 	} {
 		if got := names(ix, mustRoutes(t, ix, Query{Parent: &parent, Attachment: tc.a}, nil)); !slices.Equal(got, tc.want) {
 			t.Errorf("attachment %q: got %q, want %q", tc.a, got, tc.want)
+		}
+		// A non-nil visible takes the Under path; the rows are the same.
+		all := func(objects.Ref) bool { return true }
+		if got := names(ix, mustRoutes(t, ix, Query{Parent: &parent, Attachment: tc.a}, all)); !slices.Equal(got, tc.want) {
+			t.Errorf("attachment %q with visible: got %q, want %q", tc.a, got, tc.want)
 		}
 	}
 }
