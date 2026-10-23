@@ -443,7 +443,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `limit`, `cursor` | all | 1–200, default 50; an opaque `next` or `prev` value |
 | `rule`, `ref`, `outcome` (2.4) | delegation | rule index, ref index, a row outcome; no `sort` (fixed order, §3.6) |
 
-**Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
+**Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, unknown parameter name, a single-valued parameter given twice (our call, 2.2: a filter an older backend silently ignored would return unfiltered data the SPA shows as filtered, so a newer SPA sends a new filter only when `/meta` advertises it), `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
 
 ### 7.3 DTOs
 
@@ -471,7 +471,7 @@ Page<T>         { install, items: T[], total, next?, prev?, deniedInInstall?, co
 
 // Lists
 RouteRow        { ref: LinkedRef, hostnames: string[], parents: ParentSummary[], parentRoutes: LinkedRef[],
-                  children: number, flags: string[], health: State }
+                  children: number, flags: string[], health: State, mirror?: true /*only under backend=, when every matched use is a mirror*/ }
 GatewayRow2     { ref: LinkedRef, class, health, listeners, attachedRoutes /*status sum*/, routes?, notAccepted,
                   listenerSets, disagreements?, addresses: string[] }   // routes, disagreements: 2.3
 ListenerSetRow  { ref: LinkedRef, parent: LinkedRef, health, listeners, acceptedReason?, routes?, disagreements? }
@@ -556,7 +556,7 @@ GET /api/v1/installs/kgw.kgateway/routes?parent=gateway.networking.k8s.io/Gatewa
      "hostnames": ["shop.example.com"],
      "parents": [{"ref": {"group": "gateway.networking.k8s.io", "kind": "Gateway", "namespace": "infra", "name": "edge", "link": "detail"},
                   "sectionName": "https", "attachment": "not-accepted", "conditionType": "Accepted",
-                  "reason": "NoMatchingListenerHostname", "message": "",
+                  "reason": "NoMatchingListenerHostname",
                   "computed": {"outcome": "NoMatchingListenerHostname", "listeners": [],
                                "explanation": "listener https has *.example.org; route has shop.example.com",
                                "computed": {"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection",
