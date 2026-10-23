@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,7 +33,23 @@ var update = flag.Bool("update", false, "rewrite the golden files under testdata
 // and UIDs of internal/testutil, and the cache stamps snapshots on that clock,
 // so only the build version is normalised. A change to an existing golden must
 // be additive (TestGoldenChangesAreAdditive).
-func TestGoldenWireFormat(t *testing.T) {
+func TestGoldenWireFormat(t *testing.T) { runGolden(t, wireCases(t)) }
+
+// goldenCase is one golden body and the server and path that produce it.
+type goldenCase struct {
+	golden string
+	srv    *httptest.Server
+	path   string
+}
+
+func runGolden(t *testing.T, cases []goldenCase) {
+	for _, tc := range cases {
+		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
+	}
+}
+
+// wireCases are the Phase 1 goldens.
+func wireCases(t *testing.T) []goldenCase {
 	gw := testutil.GwRef("infra", "edge")
 	// broken: error (KGWUI-002), restricted below; denied: error, unrestricted; blog/posts: warning
 	// (KGWUI-004); young, created inside the grace period: info (KGWUI-003).
@@ -44,11 +63,7 @@ func TestGoldenWireFormat(t *testing.T) {
 	// D-016 H2/H3: no namespace, name, scope or replica counts.
 	_, bare, _ := startWith(t, setup{detectors: []install.Detector{idDetector{id: "acme~edge_1"}}, metrics: okMetrics("acme~edge_1"), platform: platform.Info{Name: "Test"}}, world()...)
 
-	for _, tc := range []struct {
-		golden string
-		srv    *httptest.Server
-		path   string
-	}{
+	return []goldenCase{
 		{"meta", kube, "/api/v1/meta"},
 		{"installs", kube, "/api/v1/installs"},
 		{"overview", kube, "/api/v1/installs/kgw.kgateway/overview"},
@@ -58,24 +73,20 @@ func TestGoldenWireFormat(t *testing.T) {
 		{"bare-meta", bare, "/api/v1/meta"},
 		{"bare-installs", bare, "/api/v1/installs"},
 		{"bare-overview", bare, "/api/v1/installs/acme~edge_1/overview"},
-	} {
-		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
 	}
 }
 
 // TestGoldenExplorerLists pins the 2.2 list bodies (design §7.6). The
 // restricted variant is the same backend query for a denied Backend and an
 // absent one, so it also pins that they are identical.
-func TestGoldenExplorerLists(t *testing.T) {
-	_, srv, _ := startWith(t, setup{}, explorerWorld()...)
+func TestGoldenExplorerLists(t *testing.T) { runGolden(t, listCases(t)) }
+
+func listCases(t *testing.T) []goldenCase {
+	_, srv, _ := startWith(t, setup{}, explorerWorld(partialLS())...)
 	_, denied, _ := startWith(t, setup{authz: restrictedAuthz()}, explorerWorld(append(probeRoutes(), testutil.Backend("shop", "be-x", nil))...)...)
 	_, absent, _ := startWith(t, setup{authz: restrictedAuthz()}, explorerWorld(probeRoutes()...)...)
 	const base, edge = "/api/v1/installs/kgw.kgateway", "gateway.networking.k8s.io/Gateway/infra/edge"
-	for _, tc := range []struct {
-		golden string
-		srv    *httptest.Server
-		path   string
-	}{
+	return []goldenCase{
 		{"routes", srv, base + "/routes"},
 		{"routes-filtered", srv, base + "/routes?parent=" + edge + "&state=accepted&sort=name.desc&limit=2"},
 		{"gateways", srv, base + "/gateways"},
@@ -85,18 +96,18 @@ func TestGoldenExplorerLists(t *testing.T) {
 		{"routes-restricted", denied, base + "/routes"},
 		{"routes-by-backend-restricted", denied, base + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"},
 		{"routes-by-backend-restricted", absent, base + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"},
-	} {
-		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
 	}
 }
 
 // TestGoldenExplorerDetails pins the 2.2 detail bodies (design §7.6).
-func TestGoldenExplorerDetails(t *testing.T) {
+func TestGoldenExplorerDetails(t *testing.T) { runGolden(t, detailCases(t)) }
+
+func detailCases(t *testing.T) []goldenCase {
 	notAllowed := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowed"), testutil.Cond("Programmed", metav1.ConditionFalse, "NotAllowed")}
 	na := func() *unstructured.Unstructured {
 		return lsWith("na", "ListenerSet", edgeRef, notAllowed, testutil.Listener{Name: "extra"})
 	}
-	_, gws, _ := startWith(t, setup{}, listenerEdge(explorerWorld())...)
+	_, gws, _ := startWith(t, setup{}, listenerEdge(explorerWorld(partialLS()))...)
 	_, unset, _ := startWith(t, setup{}, world(na())...)
 	_, allowed, _ := startWith(t, setup{}, edgeAllowing(map[string]any{"namespaces": map[string]any{"from": "Same"}}, world(na()))...)
 	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
@@ -104,19 +115,114 @@ func TestGoldenExplorerDetails(t *testing.T) {
 	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
 	_, cand, _ := startWith(t, setup{}, world(append(farWorld(), mid)...)...)
-	for _, tc := range []struct {
-		golden string
-		srv    *httptest.Server
-		path   string
-	}{
+	return []goldenCase{
 		{"gateway-detail", gws, gwDetail},
 		{"listenerset-detail", unset, lsDetail + "infra/na"},
 		{"listenerset-detail-allowed", allowed, lsDetail + "infra/na"},
+		{"listenerset-detail-invalid", gws, lsDetail + "infra/partial"},
 		{"route-detail", deleg, routeDetail + "shop/mid"},
 		{"route-detail-restricted", restricted, routeDetail + "shop/mid"},
 		{"route-detail-candidate", cand, routeDetail + "blog/far"},
-	} {
-		t.Run(tc.golden, func(t *testing.T) { checkGolden(t, tc.golden, tc.path, wire(t, tc.srv, tc.path)) })
+	}
+}
+
+// partialLS is an accepted ListenerSet whose one listener is not programmed.
+func partialLS() *unstructured.Unstructured {
+	cond := testutil.Cond
+	return lsWith("partial", "ListenerSet", edgeRef, []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "ListenersNotValid"), cond("Programmed", metav1.ConditionTrue, "Programmed")},
+		testutil.Listener{Name: "extra", Conds: []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionFalse, "PortUnavailable")}})
+}
+
+// TestGoldenLinksAgreeWithEndpoints serves every link in every golden body from
+// the server that produced it (design §7.1): detail and yaml open, none is a 404.
+func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
+	detailPath := map[string]func(objects.Ref) string{
+		"Gateway": func(r objects.Ref) string { return "/gateways/" + r.Namespace + "/" + r.Name },
+		"HTTPRoute": func(r objects.Ref) string {
+			return "/routes/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
+		},
+		"ListenerSet": func(r objects.Ref) string {
+			return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
+		},
+		"XListenerSet": func(r objects.Ref) string {
+			return "/listenersets/" + r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name
+		},
+	}
+	var walked int
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t)) {
+		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
+		if !ok {
+			continue
+		}
+		installBase := "/api/v1/installs/" + install
+		for _, l := range goldenLinks(readGolden(t, "golden", tc.golden).(map[string]any)["body"]) {
+			walked++
+			res := strings.Replace(resourcePath(l.ref), base, installBase, 1)
+			dp, hasDetail := detailPath[l.ref.Kind]
+			switch l.link {
+			case LinkDetail:
+				if !hasDetail {
+					t.Errorf("%s: detail link on %v, a kind without a detail view", tc.golden, l.ref)
+					continue
+				}
+				wantStatus(t, tc, installBase+dp(l.ref), 200)
+			case LinkYAML:
+				wantStatus(t, tc, res, 200)
+			case LinkNone:
+				wantStatus(t, tc, res, 404)
+				if hasDetail {
+					wantStatus(t, tc, installBase+dp(l.ref), 404)
+				}
+			default:
+				t.Errorf("%s: link %q on %v", tc.golden, l.link, l.ref)
+			}
+		}
+	}
+	if walked < 100 {
+		t.Errorf("walked %d links; the goldens carry more", walked)
+	}
+}
+
+// goldenLink is one link in a golden body and the ref it labels.
+type goldenLink struct {
+	ref  objects.Ref
+	link Link
+}
+
+// goldenLinks finds every link in v: on a flattened LinkedRef, or beside a "ref" object.
+func goldenLinks(v any) []goldenLink {
+	var out []goldenLink
+	switch x := v.(type) {
+	case map[string]any:
+		if l, ok := x["link"].(string); ok {
+			r := x
+			if _, flat := x["kind"]; !flat {
+				r, _ = x["ref"].(map[string]any)
+			}
+			str := func(k string) string { s, _ := r[k].(string); return s }
+			out = append(out, goldenLink{objects.Ref{Group: str("group"), Kind: str("kind"), Namespace: str("namespace"), Name: str("name")}, Link(l)})
+		}
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			out = append(out, goldenLinks(x[k])...)
+		}
+	case []any:
+		for _, e := range x {
+			out = append(out, goldenLinks(e)...)
+		}
+	}
+	return out
+}
+
+// wantStatus fails t unless GET path on tc's server answers status.
+func wantStatus(t *testing.T, tc goldenCase, path string, status int) {
+	t.Helper()
+	resp, err := http.Get(tc.srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != status {
+		t.Errorf("%s: GET %s = %d, want %d", tc.golden, path, resp.StatusCode, status)
 	}
 }
 

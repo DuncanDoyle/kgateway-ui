@@ -1,0 +1,91 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "ListenersNotValid",
+        "stale": false,
+        "status": "True",
+        "type": "Accepted"
+      },
+      {
+        "lastTransitionTime": "2026-10-17T11:00:00Z",
+        "message": "",
+        "observedGeneration": 1,
+        "reason": "Programmed",
+        "stale": false,
+        "status": "True",
+        "type": "Programmed"
+      }
+    ],
+    "generation": 1,
+    "health": "error",
+    "install": "kgw.kgateway",
+    "listeners": [
+      {
+        "allowedRoutes": {
+          "kinds": [],
+          "namespaces": {
+            "from": "Same"
+          }
+        },
+        "name": "extra",
+        "port": 8081,
+        "protocol": "HTTP",
+        "status": {
+          "attachedRoutes": 0,
+          "conditions": [
+            {
+              "lastTransitionTime": "2026-10-17T11:00:00Z",
+              "message": "",
+              "observedGeneration": 1,
+              "reason": "Accepted",
+              "stale": false,
+              "status": "True",
+              "type": "Accepted"
+            },
+            {
+              "lastTransitionTime": "2026-10-17T11:00:00Z",
+              "message": "",
+              "observedGeneration": 1,
+              "reason": "PortUnavailable",
+              "stale": false,
+              "status": "False",
+              "type": "Programmed"
+            }
+          ],
+          "supportedKinds": []
+        }
+      }
+    ],
+    "parent": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "Gateway",
+      "link": "detail",
+      "name": "edge",
+      "namespace": "infra"
+    },
+    "parentFound": true,
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "ListenerSet",
+      "link": "detail",
+      "name": "partial",
+      "namespace": "infra"
+    },
+    "routeCounts": {
+      "accepted": 0,
+      "notAccepted": 0,
+      "pending": 0,
+      "unwatched": 0
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

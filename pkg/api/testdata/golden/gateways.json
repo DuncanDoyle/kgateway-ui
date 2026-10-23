@@ -10,7 +10,7 @@
         "attachedRoutes": 0,
         "class": "kgateway",
         "health": "healthy",
-        "listenerSets": 1,
+        "listenerSets": 2,
         "listeners": 1,
         "notAccepted": 1,
         "ref": {

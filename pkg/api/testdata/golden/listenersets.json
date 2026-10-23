@@ -20,9 +20,27 @@
           "name": "ls1",
           "namespace": "infra"
         }
+      },
+      {
+        "health": "error",
+        "listeners": 1,
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "ListenerSet",
+          "link": "detail",
+          "name": "partial",
+          "namespace": "infra"
+        }
       }
     ],
-    "total": 1
+    "total": 2
   },
   "headers": {
     "Cache-Control": "no-store",

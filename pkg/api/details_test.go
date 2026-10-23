@@ -33,8 +33,8 @@ func matchPath(p string) map[string]any {
 
 // midRules are shop/mid's rules: delegation refs of every mode, then the
 // values easy to get wrong (filter order, mirror percent and fraction,
-// absent and explicit weights, absent port, a Backend), then explicit
-// matches.
+// absent and explicit weights, absent port, filters of two types on one
+// backendRef, a Backend), then explicit matches.
 func midRules() []map[string]any {
 	deleg := testutil.Rule(matchPath("/api"))
 	deleg["name"] = "deleg"
@@ -49,7 +49,10 @@ func midRules() []map[string]any {
 	}
 	values["backendRefs"] = []any{
 		svcRef("cart-svc"),
-		map[string]any{"name": "w1", "port": int64(8080), "weight": int64(1)},
+		map[string]any{"name": "w1", "port": int64(8080), "weight": int64(1), "filters": []any{
+			map[string]any{"type": "ResponseHeaderModifier", "responseHeaderModifier": map[string]any{"remove": []any{"x-b"}}},
+			mirrorFilter("mirror-svc"),
+		}},
 		map[string]any{"name": "w0", "weight": int64(0)},
 		beRef("be1"),
 	}
@@ -436,6 +439,9 @@ func TestRouteDetailValuesEasyToGetWrong(t *testing.T) {
 	}
 	if b[1].Weight != 1 || b[1].WeightDefaulted || b[1].Port != 8080 {
 		t.Errorf("explicit weight 1 %+v", b[1])
+	}
+	if f := b[1].Filters; len(f) != 2 || f[0].Type != "ResponseHeaderModifier" || f[1].Mirror == nil || f[1].Mirror.BackendRef.Name != "mirror-svc" {
+		t.Errorf("backendRef filters %+v", f)
 	}
 	if b[2].Weight != 0 || b[2].WeightDefaulted || b[2].Port != 0 {
 		t.Errorf("explicit weight 0, absent port %+v", b[2])

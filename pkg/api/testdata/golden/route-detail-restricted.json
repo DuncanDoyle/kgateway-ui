@@ -611,7 +611,41 @@
             "weightDefaulted": true
           },
           {
-            "filters": [],
+            "filters": [
+              {
+                "config": {
+                  "responseHeaderModifier": {
+                    "remove": [
+                      "x-b"
+                    ]
+                  },
+                  "type": "ResponseHeaderModifier"
+                },
+                "type": "ResponseHeaderModifier"
+              },
+              {
+                "config": {
+                  "requestMirror": {
+                    "backendRef": {
+                      "name": "mirror-svc",
+                      "port": 80
+                    }
+                  },
+                  "type": "RequestMirror"
+                },
+                "mirror": {
+                  "backendRef": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "mirror-svc",
+                    "namespace": "shop"
+                  },
+                  "port": 80
+                },
+                "type": "RequestMirror"
+              }
+            ],
             "port": 8080,
             "ref": {
               "group": "",
