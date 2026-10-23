@@ -4,15 +4,15 @@
 Phase: 2 — Gateway & Route Explorer
 Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
 Docs: docs/phases/phase-2/
-Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #7 (35f105d); implementing 2.2; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #7 (35f105d); sub-phase 2.2 complete (PR #8, merge pending); 2.3 next; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
 - [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
 - [x] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 (Tasks 1–70)
 - [x] Q3 Cross-model review of design + plan, triage, user approval — reviews/design-codex.md, design-r4-codex.md, plan-codex.md; plan approved by user 2026-10-23 (with chart `extraArgs`, Task 50)
 - [x] Q4 Sub-phase 2.1 — event-driven recompute (plan Tasks 1–10) — phases/phase-2/phase-2.1-complete.md; merged in #7 (35f105d)
-- [ ] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) ← CURRENT
-- [ ] Q6 Sub-phase 2.3 — view A (Tasks 35–51)
+- [x] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) — phases/phase-2/phase-2.2-complete.md; review reviews/2.2-codex.md; PR #8
+- [ ] Q6 Sub-phase 2.3 — view A (Tasks 35–51) ← NEXT
 - [ ] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70)
 - [ ] Q8 Phase cross-model review + triage
 
@@ -25,11 +25,7 @@ Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #
 - [ ] phase-2-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 2.2 Explorer on observed status
-Status: active
-Base: 77fc4dce94f54ed3662c0943ff93e78166243f38
-Brief: docs/phases/phase-2/phase-2.2-brief.md
-Branch: duncandoyle/explorer
+none (2.2 closed 2026-10-23; next: 2.3, after PR #8 merges)
 
 ## Carry-over (deferred to later phases)
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
@@ -39,11 +35,11 @@ Branch: duncandoyle/explorer
 - (P4) Extension seam: finding-code prefix registry (Phase 1 uses a documented convention) — for the seam milestone after Phase 2 — src: phases/phase-1/phase-1.1-complete.md
 - (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
 - (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md
-- (P3) Register `Backend` with its `Accepted` condition and an assignment rule — Phase 2 design (D-016, design §14.5)
 - (P4) Refactors of design §14.4, triggered by the standalone PoC; neutral `Install` and `Detector` before the seam milestone
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
+- 2026-10-23: sub-phase 2.2 closed. Gates green on 0855652; Codex review triaged and fixed (reviews/2.2-codex.md). No waivers.
 - 2026-10-23: user approved the plan and a chart `extraArgs` value (Task 50 Step 0).
 - 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
