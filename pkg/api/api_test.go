@@ -1811,7 +1811,7 @@ func TestScopeEnvFromIsUnknownUnlessExplicitAtTheAPI(t *testing.T) {
 }
 
 // Every time on the wire is UTC, though internal clocks keep their zone and
-// monotonic reading. Run also under TZ=Europe/Amsterdam for the snapshot time.
+// monotonic reading. The harness stamps snapshots in the engine's zone too.
 func TestWireTimesAreUTCAtTheAPI(t *testing.T) {
 	cest := time.FixedZone("CEST", 2*3600)
 	metrics := okMetrics("kgw.kgateway")
@@ -1829,7 +1829,7 @@ func TestWireTimesAreUTCAtTheAPI(t *testing.T) {
 		switch v := v.(type) {
 		case map[string]any:
 			for k, c := range v {
-				if s, ok := c.(string); ok && (k == "computedAt" || k == "collectedAt" || k == "since") {
+				if s, ok := c.(string); ok && (k == "computedAt" || k == "confirmedAt" || k == "collectedAt" || k == "since") {
 					n++
 					if at, err := time.Parse(time.RFC3339Nano, s); err != nil || s != at.UTC().Format(time.RFC3339Nano) {
 						t.Errorf("%s.%s: want a UTC RFC 3339 time, got %q", path, k, s)
