@@ -14,6 +14,8 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -273,5 +275,19 @@ func TestComputeStoresIndexFromDecodeCache(t *testing.T) {
 	}
 	if a, b := view(e.Compute()), view(e.Compute()); a != b {
 		t.Fatal("the index decoded an unchanged route again")
+	}
+}
+
+// Each install gets the rule set for its kgateway version; RulesFor replaces the default (D-020).
+func TestComputeSelectsRulesPerInstall(t *testing.T) {
+	now := func() time.Time { return testutil.Now }
+	cfg := config(snapshot(t), metricsAt(testutil.Now), now)
+	if s := New(cfg).Compute().Installs[0].Rules; s.Rules.Version() != "kgateway-2.4" || s.Note != "" {
+		t.Fatalf("2.4.7 controller: got %s %q", s.Rules.Version(), s.Note)
+	}
+	var got string
+	cfg.RulesFor = func(v string) computed.Selection { got = v; return rulesets.Select("2.3.0") }
+	if s := New(cfg).Compute().Installs[0].Rules; got != "2.4.7" || s.Rules.Version() != "kgateway-2.3" {
+		t.Fatalf("RulesFor must get the kgateway version and decide: got %q, %s", got, s.Rules.Version())
 	}
 }

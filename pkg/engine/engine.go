@@ -13,6 +13,8 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -46,6 +48,8 @@ type Config struct {
 	Platform platform.Info
 	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
 	ProxyMode proxymode.Resolver
+	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
+	RulesFor func(controllerVersion string) computed.Selection
 	// Logger receives install rejections; nil means slog.Default().
 	Logger *slog.Logger
 	// MetricsMaxAge is the age beyond which a metrics result is stale
@@ -76,6 +80,8 @@ type InstallModel struct {
 	Health   health.Report
 	// Index is the explorer's immutable index; handlers never decode objects.
 	Index *explore.Index
+	// Rules is the computed rule set selected for this install's controller (D-020).
+	Rules computed.Selection
 }
 
 // Model is one consistent computation over a snapshot.
@@ -140,6 +146,9 @@ func New(cfg Config) *Engine {
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.RulesFor == nil {
+		cfg.RulesFor = rulesets.Select
 	}
 	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache()}
 }
@@ -249,7 +258,8 @@ func (e *Engine) compute() *Published {
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode})
-		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
+		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
+			Rules: e.cfg.RulesFor(res.KgatewayVersion())})
 	}
 	m.Next = next.next
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}

@@ -125,6 +125,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	var once sync.Once
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
+		RulesFor: reg.RulesFor,
 		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop,
 		OnCompute: func(m *engine.Model) {
 			// An unsettled cache can hold a Deployment without its Pods; scraping
