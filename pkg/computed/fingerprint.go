@@ -140,6 +140,7 @@ func listenerCountPrint(p *printer, r *Resource, l *objects.Listener, routes, ns
 	p.start()
 	p.listener(l)
 	p.flag(r.Ref.Kind == "ListenerSet")
+	// Defensive: a denied or status-less ListenerSet has no check or an unknown one (rules §9.2).
 	p.num(int64(r.Acceptance))
 	p.u64(routes)
 	if l.AllowedRoutes.Namespaces.From == "Selector" {
@@ -182,8 +183,8 @@ func routeAcceptedPrint(p *printer, rt *Route, res objects.Ref, listeners uint64
 	return p.sum()
 }
 
-// minObserved is the oldest observedGeneration of cs, -1 when there is none:
-// it alone decides whether the listener's status is current.
+// minObserved is the oldest observedGeneration of cs, -1 when there is none;
+// a newer condition never resets the window.
 func minObserved(cs []metav1.Condition) int64 {
 	if len(cs) == 0 {
 		return -1

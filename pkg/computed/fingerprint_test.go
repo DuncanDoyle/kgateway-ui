@@ -1,6 +1,7 @@
 package computed_test
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"slices"
 	"testing"
@@ -77,7 +78,6 @@ func TestAttachmentFingerprints(t *testing.T) {
 		{"listener hostname", func(in *computed.AttachmentInput) { res(in, 0).Listeners[0].Hostname = "*.example.org" }, []string{"edge/a", "r1/", "r2/b"}},
 		{"listener allowedRoutes", func(in *computed.AttachmentInput) { res(in, 0).Listeners[0].AllowedRoutes.Namespaces.From = "Same" },
 			[]string{"edge/a", "r1/", "r2/b"}},
-		{"ListenerSet acceptance", func(in *computed.AttachmentInput) { res(in, 1).Acceptance = computed.NoStatus }, []string{"ls/c"}},
 		{"route kind", func(in *computed.AttachmentInput) { in.Routes[0].Ref.Kind = "GRPCRoute" }, []string{"edge/a", "edge/b", "r1/"}},
 		{"route namespace", func(in *computed.AttachmentInput) {
 			in.Routes[1].Ref.Namespace = "shop"
@@ -129,6 +129,56 @@ func TestAttachmentFingerprints(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ListenerSet acceptance is not a print input that matters: losing it makes
+// the count unknown, which clears the window (rules §9.3 step 6).
+func TestListenerSetAcceptanceClearsCount(t *testing.T) {
+	in := fpWorld()
+	res(&in, 1).Acceptance = computed.NoStatus
+	if c := countCheck(t, check(v24, in), in.Resources[1], "c"); c.Class != computed.ClassUnknown || c.Candidate() {
+		t.Errorf("status-less ListenerSet: %+v", c)
+	}
+}
+
+// TLS mode decides a TLS listener's default kinds (rules §4.2), so it is hashed.
+func TestTLSModeFingerprint(t *testing.T) {
+	print := func(mode string) (count, route uint64) {
+		l := cLis("t", "TLS", 443)
+		l.TLS = &objects.ListenerTLS{Mode: mode}
+		g := cGW("infra", "edge", l)
+		lisStatus(&g, "t", 0, gen)
+		rt := cRoute("infra", "r", wref("edge", ""))
+		rt.Ref.Kind = "TLSRoute"
+		status(&rt, rt.Written[0], "", gen)
+		cs := check(v24, input([]computed.Resource{g}, rt))
+		return countCheck(t, cs, g, "t").Fingerprint, oneRouteCheck(t, cs, rt).Fingerprint
+	}
+	c1, r1 := print("Terminate")
+	c2, r2 := print("Passthrough")
+	if c1 == c2 || r1 == r2 {
+		t.Errorf("TLS mode must change the prints: count %v, route %v", c1 != c2, r1 != r2)
+	}
+}
+
+// Currency needs every condition current; the print keeps the oldest, so a
+// condition added at the current generation does not reset the window.
+func TestListenerObservedGenerationIsOldest(t *testing.T) {
+	print := func(gens ...int64) uint64 {
+		in := fpWorld()
+		st := &res(&in, 0).ListenerStatus[0]
+		st.Conditions = nil
+		for i, g := range gens {
+			st.Conditions = append(st.Conditions, metav1.Condition{Type: fmt.Sprint("T", i), Status: "True", ObservedGeneration: g})
+		}
+		return prints(t, in)["edge/a"]
+	}
+	if print(gen-1) != print(gen-1, gen) {
+		t.Error("a newer condition reset the print")
+	}
+	if print(gen-1) == print(gen) {
+		t.Error("observedGeneration must be hashed")
 	}
 }
 
