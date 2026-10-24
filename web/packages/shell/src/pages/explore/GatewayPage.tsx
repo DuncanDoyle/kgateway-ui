@@ -61,12 +61,11 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
     [location.search, navigate],
   );
   // An older server rejects listener= (strict params), so it gets no selector and the URL value is ignored.
-  const pick: ListenerPick | "waiting" | undefined =
-    supported && data
-      ? { listeners: data.listeners, selected, onSelect }
-      : supported === undefined && selected
-        ? "waiting"
-        : undefined;
+  // While /meta loads the selector keeps its place (ready false), so the route sections never move.
+  const pick: ListenerPick | undefined =
+    supported !== false && data
+      ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
+      : undefined;
   return (
     <DetailFrame installId={id} refValue={ref} noun="Gateway" data={data} error={error} stylesOverride={stylesOverride}>
       {data ? (

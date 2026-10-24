@@ -3,8 +3,8 @@ import { useMemo, useState } from "react";
 import { useRoutes } from "../../api/exploreHooks";
 import type { Attachment, LinkedRef, Listener, ParentSummary, RouteCounts, RouteRow } from "../../api/types";
 import { columnCopy, gatewayCopy, listenerCopy, viewACopy } from "../../copy/explorer";
-import { ComputedBadge } from "../../explore/ComputedBadge";
-import type { ObjectColumn } from "../../explore/ObjectTable";
+import { ComputedBadge, ComputedChip, computedTooltip } from "../../explore/ComputedBadge";
+import { FOOTER_H, type ObjectColumn, ROW_H } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { installPath } from "../../shell/paths";
 import { Chip, InlineLink } from "../../states/controls";
@@ -55,7 +55,11 @@ const NotKnown = styled.div`
   font-size: ${(p) => p.theme.font.size.sm};
 `;
 
+/** Height of a table header row (ObjectTable th). */
+const HEAD_H = 36;
+
 const Bar = styled.div`
+  min-height: 32px;
   display: flex;
   flex-wrap: wrap;
   gap: ${(p) => p.theme.space(1)};
@@ -148,16 +152,19 @@ function whyColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
   };
 }
 
-/** Each row's effective hostnames on the selected listener, computed per (parentRef, listener). */
-function hostnamesColumn(parent: LinkedRef, listener: string): ObjectColumn<RouteRow> {
+/** Each row's effective hostnames on the parent's own listener, computed per (parentRef, listener). */
+function hostnamesColumn(parent: LinkedRef, listener: string, ruleSet: string): ObjectColumn<RouteRow> {
+  const tip = computedTooltip({ by: "ui", rules: ruleSet, rule: "hostname-intersection", state: "checked" });
   return {
     id: "effective",
     header: viewACopy.effectiveHostnames,
+    headerExtra: <ComputedChip label={tip} />,
     width: "34%",
     cell: (r) => {
+      // A ListenerSet under this Gateway may have a listener of the same name: only the parent's own count here.
       const ls = under(r, parent)
         .flatMap((p) => p.computed?.listeners ?? [])
-        .filter((l) => l.listener === listener);
+        .filter((l) => l.listener === listener && same(l.resource, parent));
       const first = ls[0];
       if (!first) return null;
       const hosts = [...new Set(ls.flatMap((l) => l.effectiveHostnames ?? []))];
@@ -167,7 +174,7 @@ function hostnamesColumn(parent: LinkedRef, listener: string): ObjectColumn<Rout
       return (
         <WithBadge>
           {text ? <OneLine text={text} /> : null}
-          <ComputedBadge computed={first.computed} compact />
+          <ComputedBadge computed={first.computed} compact chip={false} />
         </WithBadge>
       );
     },
@@ -181,8 +188,11 @@ function notPlacedColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
     header: viewACopy.whyNotPlaced,
     width: "40%",
     cell: (r) => {
-      const c = under(r, parent).find((p) => p.computed)?.computed?.computed;
-      return c ? <ComputedBadge computed={c} compact /> : null;
+      // The ref the UI could not place; another ref of the row (e.g. through a ListenerSet) may have a result.
+      const ps = under(r, parent);
+      const c = (ps.find((p) => p.computed?.computed.state === "unknown") ?? ps.find((p) => p.computed))?.computed
+        ?.computed;
+      return c ? <ComputedBadge computed={c} compact="long" /> : null;
     },
   };
 }
@@ -195,22 +205,27 @@ export interface ListenerPick {
   /** A listener name, UNPLACED, or undefined for every attached route. */
   selected?: string;
   onSelect: (name?: string) => void;
+  /** False while /meta loads: the bar's place is kept, so nothing moves when the chips arrive. */
+  ready: boolean;
+  /** The detail's rule set, for the computed columns' header chips. */
+  ruleSet: string;
 }
 
 interface RouteSectionsProps {
   installId: string;
   parent: LinkedRef;
   counts: RouteCounts;
-  /** "waiting" while /meta loads with a listener in the URL, so no unfiltered list flashes first. */
-  pick?: ListenerPick | "waiting";
+  pick?: ListenerPick;
 }
 
 /** Attached routes, optionally per listener, and routes that failed to attach with Not accepted, Waiting and Unwatched sub-filters. */
 export function RouteSections({ installId, parent, counts, pick }: RouteSectionsProps) {
   const [failed, setFailed] = useState<Failed>("not-accepted");
   const p = refParam(parent);
-  const sel = typeof pick === "object" ? pick.selected : undefined;
-  const listener = typeof pick === "object" ? pick.listeners.find((l) => l.name === sel) : undefined;
+  const sel = pick?.selected;
+  const listener = pick?.listeners.find((l) => l.name === sel);
+  // Only a server that accepts listener= gets it; an unknown name has nothing to ask for.
+  const absent = !!pick?.ready && !!sel && sel !== UNPLACED && !listener;
   // A listener selects view A's members; without one the section lists status-accepted routes.
   const attachedQuery = useMemo(
     (): Record<string, string> => (sel ? { parent: p, listener: sel } : { parent: p, attachment: "accepted" }),
@@ -221,8 +236,12 @@ export function RouteSections({ installId, parent, counts, pick }: RouteSections
   const failedCols = useMemo(() => [...base, whyColumn(parent)], [base, parent]);
   const attachedCols = useMemo(
     () =>
-      !sel ? base : sel === UNPLACED ? [...base, notPlacedColumn(parent)] : [...base, hostnamesColumn(parent, sel)],
-    [base, parent, sel],
+      !sel
+        ? base
+        : sel === UNPLACED
+          ? [...base, notPlacedColumn(parent)]
+          : [...base, hostnamesColumn(parent, sel, pick?.ruleSet ?? "")],
+    [base, parent, sel, pick?.ruleSet],
   );
   const title = !sel
     ? gatewayCopy.attachedRoutes
@@ -236,8 +255,8 @@ export function RouteSections({ installId, parent, counts, pick }: RouteSections
         <h2 id="attached-routes">
           {title} {sel ? null : <span className="note">{counts.accepted}</span>}
         </h2>
-        {typeof pick === "object" ? (
-          <Bar role="group" aria-label={viewACopy.listenerGroup}>
+        {pick?.ready ? (
+          <Bar role="group" aria-label={viewACopy.listenerGroup} data-testid="listener-bar">
             <Chip type="button" aria-pressed={!sel} onClick={() => pick.onSelect(undefined)}>
               {viewACopy.allListeners}
             </Chip>
@@ -250,13 +269,23 @@ export function RouteSections({ installId, parent, counts, pick }: RouteSections
               {viewACopy.notPlaced}
             </Chip>
           </Bar>
+        ) : pick ? (
+          // /meta is loading: keep the bar's place.
+          <Bar aria-hidden="true" data-testid="listener-bar" />
         ) : null}
-        {pick === "waiting" ? (
-          <Shimmer h={expectedRows(counts.accepted || 1) * 44 + 80} />
-        ) : listener?.computed && hidden(listener) ? (
+        {pick && !pick.ready && sel ? (
+          // A selected listener waits for /meta, at the height its table will have.
+          <Shimmer h={expectedRows(sel === UNPLACED ? 1 : (known ?? 1)) * ROW_H + HEAD_H + FOOTER_H + 2} />
+        ) : absent || (listener?.computed && hidden(listener)) ? (
           <NotKnown data-testid="listener-routes-unknown">
-            <ComputedBadge computed={listener.computed} />
-            <span>{viewACopy.cannotList}</span>
+            {absent ? (
+              <span>{viewACopy.noSuchListener(parent.kind, sel)}</span>
+            ) : listener?.computed ? (
+              <>
+                <ComputedBadge computed={listener.computed} />
+                <span>{viewACopy.cannotList}</span>
+              </>
+            ) : null}
             <InlineLink to={`${installPath(installId, "routes")}?${new URLSearchParams({ parent: p })}`}>
               {viewACopy.allRoutesOf(parent.kind)}
             </InlineLink>

@@ -262,9 +262,18 @@ export const computedCopy = {
   } as Record<string, string>,
   unknownOther: (reason: string) => `Unknown: ${reason}`, // S132
   stale: "Unknown: the data is stale", // S133
+  // Short states for one-line cells; the sentences above stay in tooltips and expanded rows.
+  short: {
+    agrees: "Agrees", // S159
+    disagrees: "Disagrees", // S160
+    pending: "Waiting", // S161
+    unknown: "Unknown", // S162
+    restricted: "Hidden", // S163
+    notVerified: "Not checked", // S164
+  },
 };
 
-// region View A on pages (2.3). Drafts S134–S163, for the wording pass (Task 48).
+// region View A on pages (2.3). Drafts S134–S158 and S165–S166 (S159–S164 are computedCopy.short), for the wording pass (Task 48).
 export const viewACopy = {
   computedRoutes: "Computed routes", // S134
   isolationNote: "Envoy may serve fewer hostnames on this listener", // S135
@@ -290,7 +299,9 @@ export const viewACopy = {
   routesColumn: "Routes", // S153
   routesTooltip: "Computed by the UI: distinct routes on this object's own listeners", // S154
   noCount: "No count", // S155
-  disagreements: (n: number) => `${n} disagrees`, // S156
+  disagreements: (n: number) => `Disagreements: ${n}`, // S156
+  noSuchListener: (kind: string, name: string) => `This ${kind} has no listener named ${name}.`, // S165
+  hostnamesNotChecked: "The controller does not check effective hostnames.", // S166
   stateFlags: {
     disagrees: "UI disagrees with the controller", // S157
     "listener-unknown": "Listener unknown", // S158

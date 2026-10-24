@@ -1,6 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import { useMemo } from "react";
 import { useListenerSets } from "../../api/exploreHooks";
+import { useListFilter } from "../../api/hooks";
 import type { ListenerSetRow } from "../../api/types";
 import { columnCopy, listCopy, viewACopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
@@ -12,8 +13,9 @@ import { ListFilters, NameCell, RoutesCell, routesHeaderExtra, useShownPage } fr
 // region Helpers
 const NOUN = ["ListenerSet", "ListenerSets"] as const;
 
-function columns(installId: string): ObjectColumn<ListenerSetRow>[] {
-  return [
+/** viewA is false on a server before 2.3, which sends no routes: the Routes column is left out. */
+function columns(installId: string, viewA: boolean): ObjectColumn<ListenerSetRow>[] {
+  const cols: ObjectColumn<ListenerSetRow>[] = [
     {
       id: "health",
       header: columnCopy.status,
@@ -35,10 +37,11 @@ function columns(installId: string): ObjectColumn<ListenerSetRow>[] {
       id: "routes",
       header: viewACopy.routesColumn,
       headerExtra: routesHeaderExtra,
-      width: "150px",
+      width: "184px",
       cell: (r) => <RoutesCell routes={r.routes} disagreements={r.disagreements} />,
     },
   ];
+  return viewA ? cols : cols.filter((c) => c.id !== "routes");
 }
 const rowRef = (r: ListenerSetRow) => r.ref;
 
@@ -51,7 +54,9 @@ interface ListenerSetsPageProps {
 export function ListenerSetsPage({ stylesOverride }: ListenerSetsPageProps = {}) {
   const l = useListPage("listenersets", useListenerSets);
   const page = useShownPage(l.data, !!l.error);
-  const cols = useMemo(() => columns(l.id), [l.id]);
+  // Shown until /meta says otherwise, so a 2.3 server never sees the column appear late.
+  const viewA = useListFilter("routes", "listener") !== false;
+  const cols = useMemo(() => columns(l.id, viewA), [l.id, viewA]);
   return (
     <ListFrame
       title={listCopy.listenerSets.title}

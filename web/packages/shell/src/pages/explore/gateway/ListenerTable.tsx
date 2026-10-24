@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, Info } from "lucide-react";
 import { Fragment, type ReactNode, useContext, useState } from "react";
 import type { AllowedRoutes, LabelSelector, Listener } from "../../../api/types";
 import { columnCopy, detailCopy, listCopy, listenerCopy, viewACopy } from "../../../copy/explorer";
-import { ComputedBadge } from "../../../explore/ComputedBadge";
+import { ComputedBadge, ComputedChip, computedTooltip } from "../../../explore/ComputedBadge";
 import { ConditionList, conditionState } from "../../../explore/ConditionList";
 import { TableFrame, TableStyles } from "../../../explore/ObjectTable";
 import { HealthIcon } from "../../../health/HealthIcon";
@@ -169,7 +169,8 @@ function ComputedCell({ l }: { l: Listener }) {
           </NoteIcon>
         </Tooltip>
       ) : null}
-      <ComputedBadge computed={l.computed} compact />
+      {/* The column header carries the Computed chip; the cell keeps a short state with the full text in its tooltip. */}
+      <ComputedBadge computed={l.computed} compact chip={false} />
     </Counted>
   );
 }
@@ -198,7 +199,7 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
     });
   // Below 900 px hostname, TLS and allowed routes move into the expanded row, as list secondary columns do.
   // A server before 2.3 sends no computed facts, so the column is left out.
-  const computed = listeners.some((l) => l.computed);
+  const computed = listeners.find((l) => l.computed)?.computed;
   const cols = (narrow ? 6 : 9) + (computed ? 1 : 0);
   return (
     <TableFrame stylesOverride={css`${tableExtra}${stylesOverride}`}>
@@ -209,11 +210,11 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
           <col />
           <col style={{ width: "64px" }} />
           <col style={{ width: "88px" }} />
-          {narrow ? null : <col style={{ width: computed ? "10%" : "15%" }} />}
-          {narrow ? null : <col style={{ width: computed ? "10%" : "15%" }} />}
-          {narrow ? null : <col style={{ width: computed ? "12%" : "18%" }} />}
+          {narrow ? null : <col style={{ width: computed ? "12%" : "15%" }} />}
+          {narrow ? null : <col style={{ width: computed ? "12%" : "15%" }} />}
+          {narrow ? null : <col style={{ width: computed ? "13%" : "18%" }} />}
           <col style={{ width: computed ? "116px" : "130px" }} />
-          {computed ? <col style={{ width: narrow ? "172px" : "25%" }} /> : null}
+          {computed ? <col style={{ width: narrow ? "172px" : "18%" }} /> : null}
         </colgroup>
         <thead>
           <tr>
@@ -228,7 +229,14 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
             {narrow ? null : <th scope="col">{listenerCopy.tls}</th>}
             {narrow ? null : <th scope="col">{listenerCopy.allowedRoutes}</th>}
             <th scope="col">{columnCopy.attachedRoutes}</th>
-            {computed ? <th scope="col">{viewACopy.computedRoutes}</th> : null}
+            {computed ? (
+              <th scope="col" className="has-extra">
+                {viewACopy.routesColumn}
+                <span className="extra">
+                  <ComputedChip label={computedTooltip(computed)} />
+                </span>
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>

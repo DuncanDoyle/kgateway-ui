@@ -168,3 +168,47 @@ describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => 
     expect(pseudoRules(chip, ":focus-visible").join()).toContain(t.color.focus);
   });
 });
+
+describe("compact", () => {
+  it("renders one short state; the full sentence is in the chip's tooltip", async () => {
+    renderWithTheme(<ComputedBadge computed={{ ...base, state: "disagrees" }} compact />);
+    expect(within(badge()).getByText("Disagrees")).toBeInTheDocument();
+    expect(within(badge()).queryByText(computedCopy.disagrees)).toBeNull();
+    await userEvent.tab();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(computedCopy.disagrees);
+  });
+
+  it("a checked badge with several labels shows one Agrees; none compared shows Not checked", () => {
+    const { unmount } = renderWithTheme(
+      <ComputedBadge computed={{ ...base, coverage: ["count-agrees", "status-compatible", "not-verified"] }} compact />,
+    );
+    expect(badge()).toHaveTextContent(/^ComputedAgrees$/);
+    expect(icons()).toEqual(["health-icon-healthy"]);
+    unmount();
+    renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["not-verified"] }} compact />);
+    expect(badge()).toHaveTextContent(/^ComputedNot checked$/);
+  });
+
+  it("each state has its short label", () => {
+    const cases: [Computed, string][] = [
+      [{ ...base, state: "pending" }, "Waiting"],
+      [{ ...base, state: "unknown", reason: "too-large" }, "Unknown"],
+      [{ ...base, state: "restricted" }, "Hidden"],
+    ];
+    for (const [c, label] of cases) {
+      const { unmount } = renderWithTheme(<ComputedBadge computed={c} compact />);
+      expect(badge()).toHaveTextContent(new RegExp(`^Computed${label}$`));
+      unmount();
+    }
+  });
+
+  it("without a chip the state carries the tooltip and is keyboard-reachable", async () => {
+    renderWithTheme(<ComputedBadge computed={{ ...base, state: "pending" }} compact chip={false} extra="More." />);
+    expect(within(badge()).queryByText("Computed")).toBeNull();
+    await userEvent.tab();
+    const tipEl = screen.getByRole("tooltip");
+    expect(tipEl).toHaveTextContent(tip);
+    expect(tipEl).toHaveTextContent("Waiting for the controller");
+    expect(tipEl).toHaveTextContent("More.");
+  });
+});

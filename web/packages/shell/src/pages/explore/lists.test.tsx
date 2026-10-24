@@ -584,7 +584,7 @@ it("Gateways list has a sortable routes column with view A's count", async () =>
   expect(within(screen.getByRole("columnheader", { name: /Attached routes/ })).queryByText("Computed")).toBeNull();
   const edge = within(rowOf("edge")).getByTestId("routes-cell");
   expect(edge).toHaveTextContent("6");
-  expect(edge).toHaveTextContent("1 disagrees");
+  expect(edge).toHaveTextContent("Disagreements: 1");
   expect(within(edge).getByTestId("health-icon-warning")).toBeInTheDocument();
   // No count: no number shown as if known.
   expect(within(rowOf("hidden")).getByTestId("routes-cell")).toHaveTextContent("No count");
@@ -600,4 +600,29 @@ it("ListenerSets list shows view A's routes count", async () => {
   await screen.findByText("partial");
   expect(within(rowOf("ls1")).getByTestId("routes-cell")).toHaveTextContent("1");
   expect(within(rowOf("partial")).getByTestId("routes-cell")).toHaveTextContent("0");
+});
+
+it("a server before 2.3 gets no Routes column, not No count in every row", async () => {
+  serve((u) =>
+    u.pathname === "/api/v1/meta"
+      ? { ...meta, filters: undefined }
+      : u.pathname.endsWith("/gateways")
+        ? fresh(gatewaysGolden.body as GatewayList)
+        : u.pathname.endsWith("/listenersets")
+          ? fresh(listenersetsGolden.body as ListenerSetList)
+          : undefined,
+  );
+  const { unmount } = renderWithTheme(
+    <Routes>
+      <Route path="/i/:id/gateways" element={<GatewaysPage />} />
+    </Routes>,
+    { path: `/i/${ID}/gateways` },
+  );
+  await screen.findByText("edge");
+  await waitFor(() => expect(screen.queryByRole("columnheader", { name: /^Routes\s*Computed$/ })).toBeNull());
+  expect(screen.getByRole("columnheader", { name: "Attached routes" })).toBeInTheDocument();
+  unmount();
+  mount(`/i/${ID}/listenersets`);
+  await screen.findByText("partial");
+  await waitFor(() => expect(screen.queryAllByTestId("routes-cell")).toHaveLength(0));
 });

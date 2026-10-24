@@ -9,7 +9,7 @@ import type {
   SpecParentRef,
 } from "../../../api/types";
 import { listenerCopy, routeCopy, viewACopy } from "../../../copy/explorer";
-import { ComputedBadge, NotVerified } from "../../../explore/ComputedBadge";
+import { ComputedBadge, ComputedChip, computedTooltip } from "../../../explore/ComputedBadge";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
 import { objectPath } from "../../../explore/objectPath";
@@ -73,9 +73,8 @@ const Computed = styled.div`
     padding: 0;
     list-style: none;
   }
-  li {
-    display: grid;
-    gap: 2px;
+  ul {
+    margin-top: 2px;
   }
   .line {
     display: flex;
@@ -90,37 +89,31 @@ const Toggle = styled(TextButton)`
 `;
 
 // region Helpers
-/** One listener the parentRef attaches to: a Gateway listener opens the Gateway page with it selected (design §8.1). */
+/** One listener the parentRef attaches to, on one line: name, effective hostnames, a short state (design §8.4). */
 function ListenerItem({ installId, l }: { installId: string; l: ListenerAttachment }) {
+  // A Gateway listener opens the Gateway page with it selected (design §8.1).
   const to = l.resource.kind === "Gateway" ? objectPath(installId, l.resource) : undefined;
   // Hostnames are sent only when checked or disagrees; there an absent or empty list means any hostname.
   const known = l.computed.state === "checked" || l.computed.state === "disagrees";
   const hosts = l.effectiveHostnames?.length ? l.effectiveHostnames.join(", ") : listenerCopy.anyHostname;
   return (
-    <li data-testid={`computed-listener-${l.listener}`}>
-      <span className="line">
-        {to ? (
-          <InlineLink to={`${to}?listener=${encodeURIComponent(l.listener)}`}>{l.listener}</InlineLink>
-        ) : (
-          l.listener
-        )}
-        <ComputedBadge computed={l.computed} />
-      </span>
-      {known ? (
-        <span className="line">
-          <span>
-            <span className="label">{viewACopy.effectiveHostnames}:</span> {hosts}
-          </span>
-          {/* Which hostnames, unlike the count, no status reports (rules §8.4). */}
-          <NotVerified testId="hostnames-not-verified" />
-        </span>
-      ) : null}
+    <li data-testid={`computed-listener-${l.listener}`} className="line">
+      {to ? <InlineLink to={`${to}?listener=${encodeURIComponent(l.listener)}`}>{l.listener}</InlineLink> : l.listener}
+      {known ? <span>{hosts}</span> : null}
+      {/* The block's chip marks it computed; coverage and the unchecked hostnames are in the state's tooltip. */}
+      <ComputedBadge
+        computed={l.computed}
+        compact
+        chip={false}
+        extra={known ? viewACopy.hostnamesNotChecked : undefined}
+      />
     </li>
   );
 }
 
 /** View A's result for the parentRef: outcome and explanation, then the listeners it attaches to. */
 function ComputedResult({ installId, a }: { installId: string; a: ComputedAttachment }) {
+  const first = a.listeners[0];
   return (
     <Computed>
       <div className="line" data-testid="computed-outcome">
@@ -129,15 +122,18 @@ function ComputedResult({ installId, a }: { installId: string; a: ComputedAttach
         <ComputedBadge computed={a.computed} />
         {a.explanation ? <span>{a.explanation}</span> : null}
       </div>
-      {a.listeners.length ? (
-        <>
-          <span className="label">{viewACopy.computedListeners}</span>
+      {first ? (
+        <div data-testid="computed-listeners">
+          <span className="line">
+            <span className="label">{viewACopy.computedListeners}</span>
+            <ComputedChip label={computedTooltip(first.computed)} />
+          </span>
           <ul>
             {a.listeners.map((l) => (
               <ListenerItem key={`${l.resource.kind}/${l.resource.name}/${l.listener}`} installId={installId} l={l} />
             ))}
           </ul>
-        </>
+        </div>
       ) : null}
     </Computed>
   );

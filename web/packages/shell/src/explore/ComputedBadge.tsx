@@ -165,41 +165,81 @@ export function ComputedChip({ label }: ComputedChipProps) {
   );
 }
 
+/** One short state for a compact badge (design §8.4): the worst of the items, so a table cell fits it. */
+function shortItem(c: Computed, items: Shown[], stale: boolean): Shown {
+  const first = items[0] as Shown;
+  const short = computedCopy.short;
+  if (stale || c.state === "unknown") return { ...first, key: "unknown", text: short.unknown };
+  if (c.state === "pending") return { ...first, text: short.pending };
+  if (c.state === "restricted") return { ...first, text: short.restricted };
+  if (c.state === "disagrees") return { ...first, text: short.disagrees };
+  // checked: Agrees when any compared label passed, else nothing was checked.
+  const agrees = items.find((i) => i.state === "healthy");
+  return agrees ? { ...agrees, key: "agrees", text: short.agrees } : { ...first, text: short.notVerified };
+}
+
+const Focusable = styled.span`
+  display: inline-flex;
+  min-width: 0;
+  cursor: help;
+  border-radius: ${(p) => p.theme.radius.sm};
+  &:hover {
+    background: ${(p) => p.theme.color.status.unknown.stripBg};
+  }
+  &:active {
+    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
+  }
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
+`;
+
 interface ComputedBadgeProps {
   computed: Computed;
-  /** One line for a table cell: the state text is cut with an ellipsis and the chip's tooltip carries it in full. */
-  compact?: boolean;
+  /**
+   * One line for a table cell: one short state ("Agrees", "Disagrees", …); the tooltip carries the rule, the full
+   * states and the note. "long" keeps the full state text, cut with an ellipsis (e.g. an unknown reason column).
+   */
+  compact?: boolean | "long";
+  /** false when the column header already carries the Computed chip; the state then holds the tooltip. */
+  chip?: boolean;
+  /** More tooltip text in compact form, e.g. that hostnames are not checked. */
+  extra?: string;
   stylesOverride?: SerializedStyles;
 }
 
 /** Marks a fact the UI computed: an outlined "Computed" chip whose tooltip names the rule, then its check state and note. */
-export function ComputedBadge({ computed, compact, stylesOverride }: ComputedBadgeProps) {
+export function ComputedBadge({ computed, compact, chip = true, extra, stylesOverride }: ComputedBadgeProps) {
   const stale = useContext(StaleView);
-  const items = stateItems(computed, stale);
+  const all = stateItems(computed, stale);
   // Restricted carries no note on the wire; never show one even if sent (design §7.4).
   const note = computed.state === "restricted" ? undefined : computed.note;
   const tip = computedTooltip(computed);
-  const full = compact ? [tip, ...items.map((s) => s.text), ...(note ? [note] : [])].join(". ") : tip;
+  const full = compact
+    ? [tip, ...all.map((s) => s.text), ...(note ? [note] : []), ...(extra ? [extra] : [])].join(". ")
+    : tip;
+  const items = compact === true ? [shortItem(computed, all, stale)] : all;
+  const rendered = items.map((s) => (
+    <Item key={s.key} $state={s.state} data-item="" data-testid={`computed-state-${s.key}`}>
+      {s.icon}
+      <span data-text="">{s.text}</span>
+    </Item>
+  ));
   return (
-    <Wrap data-testid="computed-badge" $compact={compact} $stylesOverride={stylesOverride}>
-      <ComputedChip label={full} />
-      {items.map((s) => (
-        <Item key={s.key} $state={s.state} data-item="" data-testid={`computed-state-${s.key}`}>
-          {s.icon}
-          <span data-text="">{s.text}</span>
-        </Item>
-      ))}
+    <Wrap data-testid="computed-badge" $compact={!!compact} $stylesOverride={stylesOverride}>
+      {chip ? <ComputedChip label={full} /> : null}
+      {chip ? (
+        rendered
+      ) : (
+        <Tooltip label={full} placement="start" wrap>
+          {/* Without a chip the state is the focusable trigger, so keyboard users still reach the tooltip. */}
+          <Focusable tabIndex={0} data-item="">
+            {rendered}
+          </Focusable>
+        </Tooltip>
+      )}
       {note && !compact ? <Note>{note}</Note> : null}
     </Wrap>
-  );
-}
-
-/** "Not checked by the controller" with the neutral icon, for a computed value no check covers (e.g. hostnames). */
-export function NotVerified({ testId }: { testId?: string }) {
-  return (
-    <Item data-testid={testId}>
-      <NeutralIcon glyph={Minus} kind="neutral" />
-      <span data-text="">{computedCopy.coverage["not-verified"]}</span>
-    </Item>
   );
 }

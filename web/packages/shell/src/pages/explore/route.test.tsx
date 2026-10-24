@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
@@ -546,12 +547,19 @@ it("a stale Backend condition shows the unknown icon, not Configuration accepted
 });
 
 // region View A (2.3)
-it("parent card lists computed listeners, each with its own effective hostnames marked Not checked by the controller", async () => {
+it("parent card lists computed listeners, one line each, with effective hostnames not checked by the controller", async () => {
   const d = detail(routeGolden);
   const a = d.attachments?.[0];
   if (!a) throw new Error("golden has no attachment");
   const first = a.result.listeners[0];
   if (!first) throw new Error("golden has no listener");
+  // Server-shaped: a parentRef that matches two listeners adds not-verified to each member (explain.go memberCoverage).
+  const coverage: ("count-agrees" | "status-compatible" | "not-verified")[] = [
+    "count-agrees",
+    "status-compatible",
+    "not-verified",
+  ];
+  first.computed = { ...first.computed, coverage };
   a.result.listeners.push({
     ...structuredClone(first),
     listener: "https",
@@ -561,15 +569,27 @@ it("parent card lists computed listeners, each with its own effective hostnames 
   mount(MID);
   await loaded();
   const card = screen.getByRole("article", { name: "Parent infra/edge" });
+  // One Computed chip marks the listeners block; each listener line has no chip of its own.
+  const block = within(card).getByTestId("computed-listeners");
+  expect(within(block).getAllByText("Computed")).toHaveLength(1);
   const http = within(card).getByTestId("computed-listener-http");
   const https = within(card).getByTestId("computed-listener-https");
   expect(http).toHaveTextContent("mid.example.com");
   expect(http).not.toHaveTextContent("www.example.com");
   expect(https).toHaveTextContent("mid.example.com, www.example.com");
   for (const l of [http, https]) {
-    expect(within(l).getByTestId("computed-badge")).toBeInTheDocument();
-    expect(within(l).getByTestId("hostnames-not-verified")).toHaveTextContent("Not checked by the controller");
+    // One short state per line; the coverage detail lives in the tooltip.
+    expect(within(l).getByText("Agrees")).toBeInTheDocument();
+    expect(l).not.toHaveTextContent("Count agrees with the controller");
   }
+  // "Not checked by the controller" never shows twice: not on the card at all, and once in a listener's tooltip.
+  expect(within(card).queryAllByText("Not checked by the controller")).toHaveLength(0);
+  const state = within(http).getByText("Agrees").closest("[tabindex]") as HTMLElement;
+  for (let i = 0; i < 120 && document.activeElement !== state; i++) await userEvent.tab();
+  expect(state).toHaveFocus();
+  const tipText = screen.getByRole("tooltip").textContent ?? "";
+  expect(tipText.split("Not checked by the controller")).toHaveLength(2);
+  expect(tipText).toContain("The controller does not check effective hostnames.");
   // The listener links to the Gateway page with that listener selected.
   expect(within(http).getByRole("link", { name: "http" })).toHaveAttribute(
     "href",
@@ -593,7 +613,7 @@ it("a parent card's unknown or restricted listener shows no hostnames", async ()
   const card = screen.getByRole("article", { name: "Parent infra/edge" });
   const outcome = within(card).getByTestId("computed-outcome");
   expect(outcome).toHaveTextContent("Hidden: depends on objects you cannot view");
-  expect(within(card).queryByTestId("hostnames-not-verified")).toBeNull();
+  expect(within(card).queryByTestId("computed-listeners")).toBeNull();
 });
 
 it("a failed parentRef shows its computed explanation", async () => {
