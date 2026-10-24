@@ -51,7 +51,7 @@ A minimal UI that is deployable and operational and already provides value. It c
 It also delivers the build foundation: the Go binary with the embedded SPA, a container image, a Helm chart, CI, and the extension registry seam. It also delivers the design foundation: the chosen component library, design tokens and themes (including the downstream override), and the health states.
 
 ### Phase 2 — Gateway & Route Explorer
-**Status:** In progress — sub-phases 2.1 (event-driven recompute) and 2.2 (explorer on observed status) complete; 2.3 next
+**Status:** In progress — sub-phases 2.1 (event-driven recompute) and 2.2 (explorer on observed status) complete; 2.3 (view A) in progress
 **Docs:** `docs/phases/phase-2/`
 
 - Drill into a Gateway: its listeners, ports, hostnames, TLS mode, addresses and attached routes.

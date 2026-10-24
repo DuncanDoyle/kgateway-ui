@@ -443,7 +443,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `limit`, `cursor` | all | 1–200, default 50; an opaque `next` or `prev` value |
 | `rule`, `ref`, `outcome` (2.4) | delegation | rule index, ref index, a row outcome; no `sort` (fixed order, §3.6) |
 
-**Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, unknown parameter name, a single-valued parameter given twice (our call, 2.2: a filter an older backend silently ignored would return unfiltered data the SPA shows as filtered, so a newer SPA sends a new filter only when `/meta` advertises it), `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
+**Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, unknown parameter name, a single-valued parameter given twice (our call, 2.2: a filter an older backend silently ignored would return unfiltered data the SPA shows as filtered, so a newer SPA sends a new filter only when `/meta` advertises it; `/meta` lists such filters in an additive `filters` object, list name → filter names, e.g. `{"routes": ["listener"]}`, our call, 2.3), `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
 
 ### 7.3 DTOs
 
@@ -607,7 +607,7 @@ The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) i
 - Detail pages have **Overview** and **YAML** tabs (`?tab=yaml`); the YAML tab reuses the YAML view's body (`web/packages/shell/src/pages/ResourcePage.tsx:135-192`).
 - The header gains install-scoped nav: Overview, Gateways, Routes, ListenerSets, Findings.
 - Filters, sort and cursor live in the query string, as in the Gateway table (`pages/install/GatewayTable.tsx:221-260`).
-- On detail pages only `?tab` is in the URL; sub-table filters and cursors are page-local, so a reload returns to page one and the default sub-filter **(our call, 2.2)**.
+- On detail pages only `?tab` and the Gateway page's `?listener=` are in the URL; sub-table filters and cursors are page-local, so a reload returns to page one and the default sub-filter **(our call, 2.2)**. `?listener=` selects a listener rather than filtering a sub-table **(our call, 2.3)**.
 - Every link comes from the reference's `link` (§7.1).
 
 ### 8.2 Extension contract
