@@ -35,7 +35,9 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -83,6 +85,17 @@ type setup struct {
 	logger *slog.Logger
 	// zone, when set, is the zone the engine clock reports its times in.
 	zone *time.Location
+	// views runs the computed views. Off, since world() routes shop through a
+	// Same-only listener, which view A disputes once the window matures.
+	views bool
+}
+
+// rulesFor is the engine's rule selection: the default, or none.
+func rulesFor(views bool) func(string) computed.Selection {
+	if views {
+		return nil
+	}
+	return computedtest.NoViews
 }
 
 // harness is a running cache, engine and handler over fake clients, with the
@@ -156,7 +169,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger})
+		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: rulesFor(s.views)})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -2319,5 +2332,30 @@ func TestKGWUI011OnKgateway23ForUnreportedRefForms(t *testing.T) {
 	}
 	if h.State != health.StateWarning || checkPending(h, "resource status") {
 		t.Fatalf("state %s; findings %+v", h.State, h.Findings)
+	}
+}
+
+// KGWUI-012 through the handlers (2.3): world() routes shop/cart through a
+// Same-only listener with Accepted=True, and the harness computes 61 s apart,
+// so the window has held: /health reports a warning on the route.
+func TestComputedDisagreementAtTheAPI(t *testing.T) {
+	_, srv, _ := startWith(t, setup{views: true}, world()...)
+	rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+	var got []FindingDTO
+	for _, f := range rep.Findings {
+		if f.Code == health.CodeComputedDisagrees {
+			got = append(got, f)
+		}
+	}
+	want := "Parent `edge`: computed NotAllowedByListeners, controller reports True. Rule set kgateway-2.4."
+	if len(got) != 1 || got[0].Resource == nil || got[0].Resource.String() != "shop/cart" || got[0].Severity != health.SeverityWarning ||
+		got[0].Detail != want || got[0].Since == nil || !got[0].Since.Equal(testutil.Now.Add(-health.Grace-time.Second)) {
+		t.Fatalf("KGWUI-012 findings %+v", got)
+	}
+	if rep.State == health.StateError {
+		t.Fatalf("state %s: KGWUI-012 is never an error", rep.State)
+	}
+	if c := rep.Checks[len(rep.Checks)-1]; c.Name != "computed views" || !c.OK || c.Required {
+		t.Fatalf("last check %+v", c)
 	}
 }

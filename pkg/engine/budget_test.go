@@ -21,6 +21,7 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -191,7 +192,8 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	w := newWorld(t, scale.Large, clk.Now)
 	s := newScraping(managedBody, maxAge)
 	s.col.OnResult = w.sig
-	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge })
+	// The scale world's statuses are not drawn from view A, so its windows would mature once.
+	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge, c.RulesFor = s.col, maxAge, computedtest.NoViews })
 	runLoop(t, e, safety)
 	awaitKind(t, ev, EvPublished) // the start-up publication, before any scrape
 	awaitKind(t, ev, EvArmed)

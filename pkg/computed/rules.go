@@ -54,3 +54,12 @@ const (
 	CoverageStatus Coverage = "status-compatible"
 	CoverageNone   Coverage = "not-verified"
 )
+
+// Views are one install's computed views and their cross-checks (D-020).
+// The engine sets each check's State, Mature and Since.
+type Views struct {
+	// RuleSet is the rule set's Version; Note is its selection label.
+	RuleSet, Note string
+	Attachment    AttachmentResult
+	Checks        []CheckResult
+}

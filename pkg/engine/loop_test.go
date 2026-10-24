@@ -13,6 +13,7 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -672,6 +673,7 @@ func TestAllGreenSchedulesNoGraceRecompute(t *testing.T) {
 		Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 1, {Namespace: "shop", Resource: "HTTPRoute"}: 1}}}
 	h := newHarness(t, func(c *Config) {
 		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return agree, true })
+		c.RulesFor = computedtest.NoViews // the default listener admits Same only, so view A would dispute shop/cart
 	})
 	h.src.base = snapshot(t, route)
 	h.start(time.Hour)
@@ -1098,7 +1100,7 @@ func TestDeclaredCandidateMaturesAtItsGraceInstant(t *testing.T) {
 		}
 		return ""
 	}
-	h := newHarness(t, nil)
+	h := newHarness(t, func(c *Config) { c.RulesFor = computedtest.NoViews }) // as in TestAllGreenSchedulesNoGraceRecompute
 	h.src.base = snapshot(t, parent)
 	h.start(time.Hour)
 	// The parent's own grace is long over before the child appears.

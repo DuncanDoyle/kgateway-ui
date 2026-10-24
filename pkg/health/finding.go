@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -51,6 +52,7 @@ const (
 	CodeAmbiguousOwnership   = "KGWUI-009"
 	CodeSelfManagedProxy     = "KGWUI-010"
 	CodeDelegatedNotAttached = "KGWUI-011"
+	CodeComputedDisagrees    = "KGWUI-012"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -121,6 +123,8 @@ type Input struct {
 	Platform platform.Info
 	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
 	ProxyMode proxymode.Resolver
+	// Computed are the install's computed views with their check states; nil means none.
+	Computed *computed.Views
 }
 
 // firstSeen returns when the grace period for u's current generation started.

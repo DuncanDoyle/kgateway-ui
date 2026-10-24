@@ -68,6 +68,12 @@
         "name": "backend status",
         "ok": true,
         "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "computed views",
+        "ok": true,
+        "required": false
       }
     ],
     "collectedAt": "2026-10-17T12:00:00Z",

@@ -34,15 +34,17 @@ func DecodeRouteHostnames(u *unstructured.Unstructured) *RouteHostnames {
 type RouteView struct {
 	Hostnames  []string
 	ParentRefs []ParentRef
-	Parents    []RouteParentStatus
-	Targets    []BackendTarget
+	// WrittenRefs are ParentRefs as written, index-aligned.
+	WrittenRefs []WrittenRef
+	Parents     []RouteParentStatus
+	Targets     []BackendTarget
 }
 
 // DecodeRoute decodes the shared fields of any route kind in one pass. It never fails.
 func DecodeRoute(u *unstructured.Unstructured) *RouteView {
 	rv, ns := view(u), u.GetNamespace()
 	return &RouteView{Hostnames: stringList(field(u, "spec", "hostnames")), ParentRefs: parentRefs(rv, ns),
-		Parents: routeParents(rv, ns), Targets: RouteBackendTargets(u)}
+		WrittenRefs: writtenRefs(rv), Parents: routeParents(rv, ns), Targets: RouteBackendTargets(u)}
 }
 
 // RouteBackendTargets returns the spec.rules[].backendRefs and RequestMirror

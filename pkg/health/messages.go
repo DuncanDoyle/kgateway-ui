@@ -61,3 +61,15 @@ const (
 	// DelegationNoChildDetail starts that finding's detail; the raw condition follows.
 	DelegationNoChildDetail = "A delegating rule selects no child route the controller accepted"
 )
+
+// Wording for KGWUI-012 (design §6.2). Drafts until the wording pass (Task 48).
+const (
+	// ComputedDisagreesMessage is KGWUI-012's message.
+	ComputedDisagreesMessage = "The UI's computed view disagrees with the controller"
+	// countDisagrees is a listener-count detail: listener, computed, controller.
+	countDisagrees = "Listener `%s`: computed %s, controller reports %s."
+	// parentDisagrees is a route-accepted detail: parent, computed, controller.
+	parentDisagrees = "Parent %s: computed %s, controller reports %s."
+	// ruleSetDetail ends every detail with the rule set.
+	ruleSetDetail = " Rule set %s."
+)

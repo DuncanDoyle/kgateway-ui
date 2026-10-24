@@ -92,6 +92,78 @@ func Gateway(ns, name, class string, cs []metav1.Condition, listeners ...Listene
 	return u
 }
 
+// GatewayWithListeners builds an Accepted, Programmed Gateway whose spec
+// listeners are spec, as given, and whose status listeners are status.
+func GatewayWithListeners(ns, name, class string, spec []objects.Listener, status ...Listener) *unstructured.Unstructured {
+	u := Gateway(ns, name, class, nil, Listener{Name: "placeholder"})
+	specLs := make([]any, 0, len(spec))
+	for _, l := range spec {
+		specLs = append(specLs, listenerSpec(l))
+	}
+	ls := make([]any, 0, len(status))
+	for _, l := range status {
+		ls = append(ls, map[string]any{"name": l.Name, "attachedRoutes": int64(l.Attached), "conditions": conds(l.Conds), "supportedKinds": []any{}})
+	}
+	u.Object["spec"].(map[string]any)["listeners"] = specLs
+	u.Object["status"].(map[string]any)["listeners"] = ls
+	return u
+}
+
+// listenerSpec writes l as a spec listener; zero fields are omitted.
+func listenerSpec(l objects.Listener) map[string]any {
+	m := map[string]any{"name": l.Name, "protocol": l.Protocol}
+	if l.Port != 0 {
+		m["port"] = int64(l.Port)
+	}
+	if l.Hostname != "" {
+		m["hostname"] = l.Hostname
+	}
+	if l.TLS != nil {
+		m["tls"] = map[string]any{"mode": l.TLS.Mode}
+	}
+	ar := map[string]any{}
+	nsm := map[string]any{}
+	if from := l.AllowedRoutes.Namespaces.From; from != "" {
+		nsm["from"] = from
+	}
+	if sel := l.AllowedRoutes.Namespaces.Selector; sel != nil {
+		s := map[string]any{}
+		if len(sel.MatchLabels) > 0 {
+			ml := map[string]any{}
+			for k, v := range sel.MatchLabels {
+				ml[k] = v
+			}
+			s["matchLabels"] = ml
+		}
+		if len(sel.MatchExpressions) > 0 {
+			es := make([]any, 0, len(sel.MatchExpressions))
+			for _, e := range sel.MatchExpressions {
+				vs := make([]any, 0, len(e.Values))
+				for _, v := range e.Values {
+					vs = append(vs, v)
+				}
+				es = append(es, map[string]any{"key": e.Key, "operator": string(e.Operator), "values": vs})
+			}
+			s["matchExpressions"] = es
+		}
+		nsm["selector"] = s
+	}
+	if len(nsm) > 0 {
+		ar["namespaces"] = nsm
+	}
+	if l.AllowedRoutes.Kinds != nil {
+		ks := make([]any, 0, len(l.AllowedRoutes.Kinds))
+		for _, k := range l.AllowedRoutes.Kinds {
+			ks = append(ks, map[string]any{"group": k.Group, "kind": k.Kind})
+		}
+		ar["kinds"] = ks
+	}
+	if len(ar) > 0 {
+		m["allowedRoutes"] = ar
+	}
+	return m
+}
+
 // AddSpecListener adds a listener to gw's spec without a status block, as when
 // the controller has not processed it yet.
 func AddSpecListener(gw *unstructured.Unstructured, name string) {
