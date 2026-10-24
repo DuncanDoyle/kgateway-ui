@@ -433,7 +433,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `namespace` | all | exact; repeatable (OR) |
 | `kind` | routes | `group/Kind`; repeatable |
 | `parent` | routes, listenersets | `group/Kind/namespace/name`; routes: a Gateway (including routes through its ListenerSets), ListenerSet or HTTPRoute; listenersets: a Gateway |
-| `listener` (2.3) | routes | needs a Gateway or ListenerSet `parent`; view A's computed members, or `unknown` |
+| `listener` (2.3) | routes | needs a Gateway or ListenerSet `parent`; a listener name selects view A's computed members, and a listener whose count is unknown has no members; `_unknown`, which no listener name can be, selects rows whose ref to that parent is unknown |
 | `attachment` | routes | with `parent`: `accepted`, `not-accepted`, `pending`, `unwatched`, and for an HTTPRoute parent `declared` |
 | `state` | routes | a §6.1 flag; repeatable (OR) |
 | `health` | all | `error`, `unknown`, `warning`, `healthy`; repeatable |
@@ -518,6 +518,7 @@ BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
 // InstallSummary gains optional confirmedAt (§3.1)
 ```
 
+- `routes` on a Gateway or ListenerSet row is the number of distinct routes that view A places on that object's own listeners; a Gateway's count leaves out routes on its ListenerSets, which have their own row **(our call, 2.3)**.
 - `attachments` has one entry per parentRef to a Gateway or ListenerSet. Each listener of each parentRef has its own `effectiveHostnames`, so the parent cards render without a second request.
 - `ParentSummary.computed` carries the same `Attachment` for list rows. Failed-route tables render reason, message and explanation without a detail request.
 - `GatewayRow2` is new. Phase 1's overview `GatewayRow` (`pkg/overview/overview.go:73-80`) gains only an optional `link`. The final Go name is the plan's choice.

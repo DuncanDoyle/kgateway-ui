@@ -1490,19 +1490,19 @@ func TestAttachmentInputScope(t *testing.T)            // views_test.go: an out-
   - `type DepSet []int32`; `Index.Refs []objects.Ref` (interned per install, design §7.4 rule 10); `func (ix *Index) Ref(i int32) objects.Ref`
   - `type ListenerKey struct { Resource objects.Ref; Listener string }`
   - `type Member struct { Row RowID; ParentRef int; Hostnames []string; Deps DepSet }`; `Index.ByListener map[ListenerKey][]Member`
-  - `type ListenerFacts struct { Count int; Known bool; Unknown computed.UnknownReason; Error string; IsolationNote bool; Check computed.CheckResult; Deps DepSet }`; `Index.Listeners map[ListenerKey]ListenerFacts`
-  - `type ListenerHit struct { Listener string; Hostnames []string; Deps DepSet }`; `type RefFacts struct { ParentRef int; Target objects.Ref; Outcome computed.Outcome; Unknown computed.UnknownReason; Rule string; Listeners []ListenerHit; Facts []computed.Fact; Check computed.CheckResult; Deps DepSet }`; `RouteRow.Computed []RefFacts`; `RouteRow.UnknownDeps DepSet` (dependencies of `listener-unknown`)
+  - `type ListenerFacts struct { Count int; Known bool; Unknown computed.UnknownReason; Error string; IsolationNote bool; Check *computed.CheckResult; Deps DepSet }`; `Index.Listeners map[ListenerKey]ListenerFacts`
+  - `type ListenerHit struct { Listener string; Hostnames []string; Deps DepSet }`; `type RefFacts struct { Out *computed.RefOutcome; Listeners []ListenerHit; Check *computed.CheckResult; Deps DepSet }` (`Out` and `Check` are shared with the views, Task 43 fix round 1); `RouteRow.Computed []RefFacts`; `RouteRow.UnknownDeps DepSet` (dependencies of `listener-unknown`)
   - `FlagDisagrees` (wire `disagrees`: the row's object has KGWUI-012), `FlagListenerUnknown` (wire `listener-unknown`: a status-accepted parentRef whose outcome is unknown or has no listener)
   - `GatewayRow.Members []RowID`, `GatewayRow.Disagreements int` (checks in state `disagrees` on the Gateway); the same on `ListenerSetRow`
   - `Index.RuleSet, Index.RuleNote string`
-  - `Query.Listener string` — needs `Parent` of a Gateway or ListenerSet kind, else `ErrBadQuery`; a name selects `ByListener[{parent, name}]`; `unknown` selects rows whose ref to that parent is unknown; a Gateway's listener never matches ListenerSet routes; the listener index is the narrowest (design §3.8)
-  - Computed predicates are caller-visible (design §7.4 rule 4a): `listener=<name>`, `listener=unknown` and `state=listener-unknown` match a row only when `visible` holds for every ref of the deciding fact's `DepSet`, checked before `Total`, sorting and paging. `state=disagrees` is a finding and is not filtered (rule 9).
+  - `Query.Listener string` — needs `Parent` of a Gateway or ListenerSet kind, else `ErrBadQuery`; a name selects `ByListener[{parent, name}]`; `_unknown` (never a listener name) selects rows whose ref to that parent is unknown; a Gateway's listener never matches ListenerSet routes; the listener index is the narrowest (design §3.8)
+  - Computed predicates are caller-visible (design §7.4 rule 4a): `listener=<name>`, `listener=_unknown` and `state=listener-unknown` match a row only when `visible` holds for every ref of the deciding fact's `DepSet`, checked before `Total`, sorting and paging. `state=disagrees` is a finding and is not filtered (rule 9).
 
 - [ ] **Step 1: Write the failing tests**
 
 ```go
 func TestByListenerMembers(t *testing.T) // hostnames per listener; a route with two refs on one listener: one row on the page, two Members
-func TestListenerFilter(t *testing.T)    // listener=https → members; listener=unknown → unknown rows; no parent or an HTTPRoute parent → ErrBadQuery; a name absent on the parent → empty page
+func TestListenerFilter(t *testing.T)    // listener=https → members; listener=_unknown → unknown rows; no parent or an HTTPRoute parent → ErrBadQuery; a name absent on the parent → empty page
 func TestComputedFlags(t *testing.T)     // disagrees from the findings map; listener-unknown only on a status-accepted ref with an unknown outcome
 func TestDepSetsInterned(t *testing.T)   // equal refs share one index; Ref(i) round-trips
 func TestGatewayRowComputedCounts(t *testing.T) // Members distinct; Disagreements counts disagreeing checks on the Gateway
@@ -1540,7 +1540,7 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) // a member whose Select
 func TestRouteListCarriesAttachment(t *testing.T)  // design §7.5 body: outcome, listeners [], explanation, rule hostname-intersection, rules kgateway-2.4, state checked, coverage [status-compatible]
 func TestRouteDetailAttachments(t *testing.T)      // per listener effectiveHostnames; HTTPRoute parentRefs have no entry
 func TestGatewayDetailListenerStates(t *testing.T) // checked [count-agrees]; disagrees with computedRoutes and status attachedRoutes both sent; pending; unknown (reason, no computedRoutes); isolationNote
-func TestListenerParam(t *testing.T)               // 400 without parent and with an HTTPRoute parent; listener=unknown 200
+func TestListenerParam(t *testing.T)               // 400 without parent and with an HTTPRoute parent; listener=_unknown 200
 func TestMemberCoverage(t *testing.T)              // one listener → [count-agrees status-compatible]; two → + not-verified
 func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) // design §9.1 (2.3): membership, count, check restricted with no value; no listener-unknown; state=listener-unknown does not match; health and row states unchanged
 func TestListenerFilterCannotProbe(t *testing.T)   // design §9.1: listener=https over a hidden Selector Namespace returns the rows and total it returns when those facts are unknown; deniedInInstall unchanged
@@ -1604,7 +1604,8 @@ it("stale data turns the badge unknown", ...);                 // fake timers pa
 it("listener table shows the status count and the computed count with its check", ...);   // "Count agrees with the controller"
 it("a disagreeing listener shows both numbers and the warning icon with text", ...);
 it("selecting a listener sets ?listener= and filters attached routes to its members", ...); // effective hostnames per row; survives reload; back clears it
-it("listener=unknown lists the routes the UI could not place", ...);
+it("listener=_unknown lists the routes the UI could not place", ...);
+it("an unknown-count listener shows the unknown state and its reason, never an empty table", ...);
 it("failed-route rows show the computed explanation", ...);
 it("a shared plain-HTTP port shows the isolation note", ...);
 it("parent card lists computed listeners, each with its own effective hostnames marked Not checked by the controller", ...);
