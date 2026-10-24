@@ -15,6 +15,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -330,8 +331,8 @@ func TestFlags(t *testing.T) {
 	if _, r := row(t, ix, "shop", "accepted"); r.Parents[0].Cond != nil {
 		t.Errorf("accepted has deciding condition %+v", r.Parents[0].Cond)
 	}
-	all := Flag(1<<7 - 1)
-	if want := []string{"accepted", "not-accepted", "refs-unresolved", "not-programmed", "pending", "declared", "no-parent"}; !slices.Equal(all.Names(), want) {
+	all := Flag(1<<9 - 1)
+	if want := []string{"accepted", "not-accepted", "refs-unresolved", "not-programmed", "pending", "declared", "no-parent", "disagrees", "listener-unknown"}; !slices.Equal(all.Names(), want) {
 		t.Fatalf("names %q", all.Names())
 	}
 	for _, n := range all.Names() {
@@ -339,8 +340,8 @@ func TestFlags(t *testing.T) {
 			t.Errorf("ParseFlag(%q) = %v, %v", n, f, ok)
 		}
 	}
-	if _, ok := ParseFlag("disagrees"); ok {
-		t.Error("ParseFlag accepted a 2.3 flag")
+	if _, ok := ParseFlag("dropped"); ok {
+		t.Error("ParseFlag accepted a 2.4 flag")
 	}
 }
 
@@ -685,5 +686,271 @@ func TestDetailKinds(t *testing.T) {
 		{Group: "gateway.networking.x-k8s.io", Kind: "XListenerSet"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}}
 	if got := DetailKinds(testutil.ServedUpstream()); !slices.Equal(got, want) {
 		t.Fatalf("DetailKinds %v", got)
+	}
+}
+
+// View A fixtures: Gateway infra/edge with listeners http and https, a
+// ListenerSet infra/ls with listener extra, and routes in shop:
+//   - a: one ref to edge, a member of http;
+//   - b: two refs (https by section, and edge), both members of https;
+//   - c: one ref to ls, a member of extra;
+//   - u: one ref to edge, outcome unknown;
+//   - r: one ref to edge, rejected by status and computed NotAllowedByListeners.
+var (
+	lsRef  = objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}
+	lsObj  = lsRef.Ref()
+	gwTLS  = objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge", SectionName: "https"}
+	shopNS = objects.Ref{Kind: "Namespace", Name: "shop"}
+)
+
+// viewWorld is the world of the view A fixtures.
+func viewWorld() *world {
+	ok := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
+	w := newWorld(
+		testutil.ListenerSet("infra", "ls", gw, nil),
+		testutil.HTTPRoute("shop", "a", []objects.ParentRef{gw}, accepted(gw)),
+		testutil.HTTPRoute("shop", "b", []objects.ParentRef{gwTLS, gw}, accepted(gwTLS), accepted(gw)),
+		testutil.HTTPRoute("shop", "c", []objects.ParentRef{lsRef}, accepted(lsRef)),
+		testutil.HTTPRoute("shop", "u", []objects.ParentRef{gw}, accepted(gw)),
+		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, status(gw, cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners", ""), resolved)),
+	)
+	w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", nil, testutil.Listener{Name: "http", Conds: ok}, testutil.Listener{Name: "https", Conds: ok})
+	return w
+}
+
+// views are view A over viewWorld. Every slice is fresh, so a test may change one.
+func views() *computed.Views {
+	a, b, c, u, r := routeRef("shop", "a"), routeRef("shop", "b"), routeRef("shop", "c"), routeRef("shop", "u"), routeRef("shop", "r")
+	bDeps := []objects.Ref{b, gwObj, shopNS} // https uses Selector
+	return &computed.Views{RuleSet: "kgateway-2.4", Note: "a note", Attachment: computed.AttachmentResult{
+		Members: []computed.Member{
+			{Resource: gwObj, Listener: "http", Route: a, ParentRef: 0, Hostnames: []string{"a.example.com"}, Deps: []objects.Ref{a, gwObj}},
+			{Resource: gwObj, Listener: "https", Route: b, ParentRef: 0, Hostnames: []string{"b.example.com"}, Deps: bDeps},
+			{Resource: gwObj, Listener: "https", Route: b, ParentRef: 1, Hostnames: []string{"b.example.com"}, Deps: bDeps},
+			{Resource: lsObj, Listener: "extra", Route: c, ParentRef: 0, Hostnames: []string{"c.example.com"}, Deps: []objects.Ref{c, lsObj}},
+		},
+		Outcomes: []computed.RefOutcome{
+			{Route: a, ParentRef: 0, Resource: gwObj, Outcome: computed.OutcomeAccepted, Listeners: []string{"http"}, Rule: "hostname-intersection", Deps: []objects.Ref{a, gwObj}},
+			{Route: b, ParentRef: 0, Resource: gwObj, Outcome: computed.OutcomeAccepted, Listeners: []string{"https"}, Rule: "hostname-intersection", Deps: bDeps},
+			{Route: b, ParentRef: 1, Resource: gwObj, Outcome: computed.OutcomeAccepted, Listeners: []string{"https"}, Rule: "hostname-intersection", Deps: bDeps},
+			{Route: c, ParentRef: 0, Resource: lsObj, Outcome: computed.OutcomeAccepted, Listeners: []string{"extra"}, Rule: "hostname-intersection", Deps: []objects.Ref{c, lsObj}},
+			{Route: r, ParentRef: 0, Resource: gwObj, Outcome: computed.OutcomeNotAllowed, Rule: "allowed-routes",
+				Facts: []computed.Fact{{Listener: "https", Code: computed.FactNamespace, Want: "team=web", Got: "team=retail"}}, Deps: []objects.Ref{r, gwObj, shopNS}},
+			{Route: u, ParentRef: 0, Resource: gwObj, Unknown: computed.UnknownNamespaceLabels, Deps: []objects.Ref{u, gwObj, shopNS}},
+		},
+		Counts: []computed.ListenerCount{
+			{Resource: gwObj, Listener: "http", Count: 1, Deps: []objects.Ref{gwObj, a, r, u}},
+			{Resource: gwObj, Listener: "https", Count: 2, Deps: []objects.Ref{gwObj, a, b, r, u, shopNS}},
+			{Resource: lsObj, Listener: "extra", Count: 1, Deps: []objects.Ref{lsObj, c}},
+		},
+	}}
+}
+
+// buildViews builds viewWorld with v.
+func buildViews(t *testing.T, v *computed.Views) *Index {
+	t.Helper()
+	in := viewWorld().input(t)
+	in.Computed = v
+	return Build(in)
+}
+
+// refsOf maps d back to refs.
+func refsOf(ix *Index, d DepSet) []objects.Ref {
+	out := []objects.Ref{}
+	for _, i := range d {
+		out = append(out, ix.Ref(i))
+	}
+	return out
+}
+
+func TestByListenerMembers(t *testing.T) {
+	ix := buildViews(t, views())
+	a, _ := row(t, ix, "shop", "a")
+	b, br := row(t, ix, "shop", "b")
+	https := ix.ByListener[ListenerKey{Resource: gwObj, Listener: "https"}]
+	if len(https) != 2 || https[0].Row != b || https[0].ParentRef != 0 || https[1].Row != b || https[1].ParentRef != 1 ||
+		!slices.Equal(https[0].Hostnames, []string{"b.example.com"}) {
+		t.Fatalf("https members %+v", https)
+	}
+	if !slices.Equal(refsOf(ix, https[0].Deps), []objects.Ref{routeRef("shop", "b"), gwObj, shopNS}) {
+		t.Errorf("member deps %v", refsOf(ix, https[0].Deps))
+	}
+	if http := ix.ByListener[ListenerKey{Resource: gwObj, Listener: "http"}]; len(http) != 1 || http[0].Row != a || http[0].Hostnames[0] != "a.example.com" {
+		t.Errorf("http members %+v", http)
+	}
+	if extra := ix.ByListener[ListenerKey{Resource: lsObj, Listener: "extra"}]; len(extra) != 1 {
+		t.Errorf("extra members %+v", extra)
+	}
+	// One row per route on the page, however many members.
+	p := mustRoutes(t, ix, Query{Parent: &gwObj, Listener: "https"}, nil)
+	if !slices.Equal(p.IDs, []RowID{b}) || p.Total != 1 {
+		t.Errorf("listener=https: %v total %d", p.IDs, p.Total)
+	}
+	// Per-ref facts carry each listener's hostnames.
+	if len(br.Computed) != 2 {
+		t.Fatalf("b facts %+v", br.Computed)
+	}
+	for i, f := range br.Computed {
+		if f.ParentRef != i || f.Target != gwObj || f.Outcome != computed.OutcomeAccepted || len(f.Listeners) != 1 ||
+			f.Listeners[0].Listener != "https" || f.Listeners[0].Hostnames[0] != "b.example.com" || len(f.Listeners[0].Deps) != 3 {
+			t.Errorf("b ref %d: %+v", i, f)
+		}
+	}
+	if ix.RuleSet != "kgateway-2.4" || ix.RuleNote != "a note" {
+		t.Errorf("rule set %q note %q", ix.RuleSet, ix.RuleNote)
+	}
+	lf := ix.Listeners[ListenerKey{Resource: gwObj, Listener: "https"}]
+	if !lf.Known || lf.Count != 2 || len(lf.Deps) != 6 {
+		t.Errorf("https facts %+v", lf)
+	}
+	_, rr := row(t, ix, "shop", "r")
+	if f := rr.Computed; len(f) != 1 || f[0].Outcome != computed.OutcomeNotAllowed || f[0].Rule != "allowed-routes" || len(f[0].Facts) != 1 || len(f[0].Listeners) != 0 {
+		t.Errorf("r facts %+v", f)
+	}
+}
+
+// A listener whose count is unknown presents no members, even when the rules
+// listed some (setting-unknown); the ref keeps its listener.
+func TestByListenerHidesMembersUnderUnknownCount(t *testing.T) {
+	v := views()
+	v.Attachment.Counts[0].Unknown = computed.UnknownSetting
+	ix := buildViews(t, v)
+	key := ListenerKey{Resource: gwObj, Listener: "http"}
+	if m := ix.ByListener[key]; len(m) != 0 {
+		t.Errorf("members under an unknown count: %+v", m)
+	}
+	if f := ix.Listeners[key]; f.Known || f.Unknown != computed.UnknownSetting {
+		t.Errorf("facts %+v", f)
+	}
+	if _, r := row(t, ix, "shop", "a"); len(r.Computed) != 1 || r.Computed[0].Listeners[0].Hostnames[0] != "a.example.com" {
+		t.Errorf("a facts %+v", r.Computed)
+	}
+	if g := ix.Gateways[0]; slices.Contains(g.Members, ids(t, ix, "a")[0]) {
+		t.Errorf("members %v", g.Members)
+	}
+}
+
+func TestComputedFlags(t *testing.T) {
+	in := viewWorld().input(t)
+	in.Computed = views()
+	a := routeRef("shop", "a")
+	in.Health.Findings = append(in.Health.Findings, health.Finding{Code: health.CodeComputedDisagrees, Severity: health.SeverityWarning, Resource: &a})
+	ix := Build(in)
+	for name, want := range map[string]Flag{"a": FlagAccepted | FlagDisagrees, "b": FlagAccepted, "c": FlagAccepted, "u": FlagAccepted | FlagListenerUnknown, "r": FlagNotAccepted} {
+		if _, r := row(t, ix, "shop", name); r.Flags != want {
+			t.Errorf("%s: flags %v, want %v", name, r.Flags.Names(), want.Names())
+		}
+	}
+	if _, r := row(t, ix, "shop", "u"); !slices.Equal(refsOf(ix, r.UnknownDeps), []objects.Ref{routeRef("shop", "u"), gwObj, shopNS}) {
+		t.Errorf("unknown deps %v", refsOf(ix, r.UnknownDeps))
+	}
+	for _, n := range []string{"disagrees", "listener-unknown"} {
+		if f, ok := ParseFlag(n); !ok || f.Names()[0] != n {
+			t.Errorf("ParseFlag(%q) = %v %v", n, f, ok)
+		}
+	}
+	p := mustRoutes(t, ix, Query{States: FlagListenerUnknown}, nil)
+	if !slices.Equal(p.IDs, ids(t, ix, "u")) {
+		t.Errorf("state=listener-unknown: %v", names(ix, p))
+	}
+
+	// Without views no computed flag is set.
+	in.Computed = nil
+	if _, r := row(t, Build(in), "shop", "u"); r.Flags&FlagListenerUnknown != 0 || r.Computed != nil {
+		t.Errorf("no views: flags %v facts %+v", r.Flags.Names(), r.Computed)
+	}
+
+	// scope-unknown: every status-accepted ref is listener-unknown; a rejected one is not.
+	sv := &computed.Views{RuleSet: "kgateway-2.4"}
+	for _, o := range views().Attachment.Outcomes {
+		sv.Attachment.Outcomes = append(sv.Attachment.Outcomes, computed.RefOutcome{Route: o.Route, ParentRef: o.ParentRef, Resource: o.Resource,
+			Unknown: computed.UnknownScope, Deps: o.Deps})
+	}
+	in.Computed = sv
+	ix = Build(in)
+	for _, name := range []string{"a", "b", "c", "u"} {
+		if _, r := row(t, ix, "shop", name); r.Flags&FlagListenerUnknown == 0 {
+			t.Errorf("scope-unknown: %s flags %v", name, r.Flags.Names())
+		}
+	}
+	if _, r := row(t, ix, "shop", "r"); r.Flags&FlagListenerUnknown != 0 {
+		t.Errorf("scope-unknown: rejected r flagged")
+	}
+}
+
+func TestDepSetsInterned(t *testing.T) {
+	v := views()
+	before := slices.Clone(v.Attachment.Members[1].Deps)
+	ix := buildViews(t, v)
+	seen := map[objects.Ref]int32{}
+	for i, r := range ix.Refs {
+		if j, dup := seen[r]; dup {
+			t.Errorf("ref %v interned at %d and %d", r, j, i)
+		}
+		seen[r] = int32(i)
+		if ix.Ref(int32(i)) != r {
+			t.Errorf("Ref(%d) = %v, want %v", i, ix.Ref(int32(i)), r)
+		}
+	}
+	b := ix.ByListener[ListenerKey{Resource: gwObj, Listener: "https"}]
+	if !slices.Equal(b[0].Deps, b[1].Deps) || seen[gwObj] != b[0].Deps[1] {
+		t.Errorf("equal refs differ: %v %v", b[0].Deps, b[1].Deps)
+	}
+	if !slices.Equal(v.Attachment.Members[1].Deps, before) {
+		t.Errorf("source deps changed: %v", v.Attachment.Members[1].Deps)
+	}
+	if !ix.Visible(b[0].Deps, nil) || ix.Visible(b[0].Deps, func(r objects.Ref) bool { return r.Kind != "Namespace" }) {
+		t.Error("Visible")
+	}
+}
+
+func TestGatewayRowComputedCounts(t *testing.T) {
+	v := views()
+	disagree := func(kind computed.CheckKind, on objects.Ref, listener string, st computed.State) computed.CheckResult {
+		return computed.CheckResult{ID: computed.Identity{Kind: kind}, On: on, Listener: listener, State: st}
+	}
+	v.Checks = []computed.CheckResult{
+		disagree(computed.KindListenerCount, gwObj, "http", computed.StateDisagrees),
+		disagree(computed.KindListenerCount, gwObj, "https", computed.StateChecked),
+		disagree(computed.KindListenerCount, lsObj, "extra", computed.StateDisagrees),
+		disagree(computed.KindRouteAccepted, routeRef("shop", "a"), "", computed.StateDisagrees),
+	}
+	v.Checks[3].Key = computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
+	ix := buildViews(t, v)
+	g := ix.Gateways[0]
+	if !slices.Equal(g.Members, ids(t, ix, "a", "b")) || g.Disagreements != 1 {
+		t.Errorf("gateway members %v disagreements %d", g.Members, g.Disagreements)
+	}
+	if l := ix.ListenerSets[0]; !slices.Equal(l.Members, ids(t, ix, "c")) || l.Disagreements != 1 {
+		t.Errorf("listenerset members %v disagreements %d", l.Members, l.Disagreements)
+	}
+	if n, ok := ix.GatewayMemberCount(0, nil); n != 2 || !ok {
+		t.Errorf("member count %d %v", n, ok)
+	}
+	if _, ok := ix.GatewayMemberCount(0, func(r objects.Ref) bool { return r.Kind != "Namespace" }); ok {
+		t.Error("a hidden dependency leaves a count")
+	}
+	if f := ix.Listeners[ListenerKey{Resource: gwObj, Listener: "http"}]; f.Check == nil || f.Check.State != computed.StateDisagrees {
+		t.Errorf("listener check %+v", f.Check)
+	}
+	if _, r := row(t, ix, "shop", "a"); r.Computed[0].Check == nil || r.Computed[0].Check.State != computed.StateDisagrees {
+		t.Errorf("ref check %+v", r.Computed[0].Check)
+	}
+}
+
+func TestBuildDeterministicWithViews(t *testing.T) {
+	w := viewWorld()
+	in := w.input(t)
+	in.Computed = views()
+	a := Build(in)
+	for w.seed = 1; w.seed < 5; w.seed++ {
+		in := w.input(t)
+		in.Computed = views()
+		if b := Build(in); !reflect.DeepEqual(a, b) {
+			t.Fatalf("seed %d: Builds with views differ", w.seed)
+		}
+	}
+	if len(a.Refs) == 0 || len(a.ByListener) != 3 {
+		t.Fatalf("refs %d listeners %d", len(a.Refs), len(a.ByListener))
 	}
 }

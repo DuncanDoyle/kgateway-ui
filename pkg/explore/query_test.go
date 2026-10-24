@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -209,34 +210,6 @@ func TestSortsBothWaysWithTieBreak(t *testing.T) {
 				t.Fatalf("backward pages %q, want %q", back, want)
 			}
 		})
-	}
-}
-
-func TestGatewaysSortByVisibleRoutes(t *testing.T) {
-	gref := func(name string) objects.Ref {
-		return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: name}
-	}
-	under := func(r RouteRow, gw string) RouteRow {
-		r.Parents = []ParentLink{{Target: gref(gw), Attachment: AttachmentAccepted}}
-		return r
-	}
-	ix := hand(under(hr("a", ""), "g1"), under(hr("b", ""), "g1"), under(hr("c", ""), "g2"))
-	ix.Gateways = []GatewayRow{{Ref: gref("g1"), Routes: []RowID{0, 1}}, {Ref: gref("g2"), Routes: []RowID{2}}, {Ref: gref("g3")}}
-	hideAB := func(r objects.Ref) bool { return r.Kind == "Gateway" || r.Name == "c" }
-	for _, tc := range []struct {
-		name    string
-		visible func(objects.Ref) bool
-		desc    bool
-		want    []RowID
-	}{
-		{"all visible", nil, true, []RowID{0, 1, 2}},
-		{"hidden routes do not count", hideAB, true, []RowID{1, 0, 2}},
-		{"ascending", hideAB, false, []RowID{0, 2, 1}},
-	} {
-		p, err := ix.QueryGateways(Query{Sort: Sort{Key: "routes", Desc: tc.desc}}, tc.visible)
-		if err != nil || !slices.Equal(p.IDs, tc.want) {
-			t.Errorf("%s: got %v %v, want %v", tc.name, p.IDs, err, tc.want)
-		}
 	}
 }
 
@@ -579,49 +552,6 @@ func TestEmptyPageTurnsBack(t *testing.T) {
 	}
 }
 
-func TestGatewayRoutesSortMatchesColumn(t *testing.T) {
-	ls := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}
-	other := testutil.GwRef("infra", "other")
-	ix := newWorld(
-		testutil.Gateway("infra", "other", "kgateway", nil),
-		testutil.Gateway("infra", "third", "kgateway", nil),
-		testutil.ListenerSet("infra", "ls", other, nil),
-		testutil.HTTPRoute("shop", "a", []objects.ParentRef{gw}, accepted(gw)),
-		testutil.HTTPRoute("shop", "bad", []objects.ParentRef{gw}, status(gw, cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners", ""), resolved)),
-		testutil.HTTPRoute("shop", "pending", []objects.ParentRef{gw}),
-		testutil.HTTPRoute("shop", "o1", []objects.ParentRef{other}, accepted(other)),
-		testutil.HTTPRoute("shop", "through", []objects.ParentRef{ls}, accepted(ls)),
-	).build(t)
-	for _, vis := range []struct {
-		name string
-		f    func(objects.Ref) bool
-	}{
-		{"all", nil},
-		{"two hidden", func(r objects.Ref) bool { return r.Name != "bad" && r.Name != "pending" }},
-	} {
-		p, err := ix.QueryGateways(Query{Sort: Sort{Key: "routes", Desc: true}}, vis.f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var counts []int
-		for _, id := range p.IDs {
-			g := ix.Gateways[id].Ref
-			n := ix.GatewayRouteCount(id, vis.f)
-			if total := mustRoutes(t, ix, Query{Parent: &g}, vis.f).Total; n != total {
-				t.Errorf("%s: %s column %d, routes?parent= total %d", vis.name, g, n, total)
-			}
-			counts = append(counts, n)
-		}
-		if !slices.IsSortedFunc(counts, func(a, b int) int { return b - a }) {
-			t.Errorf("%s: routes.desc gives counts %v", vis.name, counts)
-		}
-	}
-	// edge: a, bad, pending; other: o1 and through its ListenerSet; third: none.
-	if got := []int{ix.GatewayRouteCount(0, nil), ix.GatewayRouteCount(1, nil), ix.GatewayRouteCount(2, nil)}; !slices.Equal(got, []int{3, 2, 0}) {
-		t.Fatalf("counts %v", got)
-	}
-}
-
 func TestHTTPRouteParentAttachments(t *testing.T) {
 	api := testutil.HTTPRouteRef("shop", "api")
 	stale := testutil.HTTPRoute("shop", "kid-pending", []objects.ParentRef{api}, accepted(api))
@@ -774,4 +704,125 @@ func FuzzDecodeCursor(f *testing.F) {
 			t.Fatalf("round trip %+v → %+v, %v", cur, again, err)
 		}
 	})
+}
+
+func TestListenerFilter(t *testing.T) {
+	ix := buildViews(t, views())
+	route := routeRef("shop", "a")
+	for _, tc := range []struct {
+		name   string
+		parent *objects.Ref
+		l      string
+		want   []string
+	}{
+		{"https members", &gwObj, "https", []string{"b"}},
+		{"http members", &gwObj, "http", []string{"a"}},
+		{"unknown refs", &gwObj, "unknown", []string{"u"}},
+		{"listenerset members", &lsObj, "extra", []string{"c"}},
+		{"nothing unknown on the listenerset", &lsObj, "unknown", []string{}},
+		{"a Gateway listener never matches ListenerSet routes", &gwObj, "extra", []string{}},
+		{"absent listener", &gwObj, "nope", []string{}},
+	} {
+		p := mustRoutes(t, ix, Query{Parent: tc.parent, Listener: tc.l}, nil)
+		if got := names(ix, p); !slices.Equal(got, tc.want) || p.Total != len(tc.want) {
+			t.Errorf("%s: %v total %d, want %v", tc.name, got, p.Total, tc.want)
+		}
+	}
+	for _, q := range []Query{{Listener: "https"}, {Parent: &route, Listener: "https"}} {
+		if _, err := ix.QueryRoutes(q, nil); !errors.Is(err, ErrBadQuery) {
+			t.Errorf("%+v: err %v, want ErrBadQuery", q, err)
+		}
+	}
+	// The listener index is the narrowest.
+	if _, n, err := ix.queryRoutes(Query{Parent: &gwObj, Listener: "https", Namespaces: []string{"shop"}}, nil); err != nil || n != 1 {
+		t.Errorf("scanned %d (%v), want 1", n, err)
+	}
+}
+
+// Design §7.4 rule 4a: computed predicates need every dependency visible;
+// the disagrees flag is a finding and is not filtered (rule 9).
+func TestComputedPredicatesUseVisibleDeps(t *testing.T) {
+	in := viewWorld().input(t)
+	in.Computed = views()
+	b := routeRef("shop", "b")
+	in.Health.Findings = append(in.Health.Findings, health.Finding{Code: health.CodeComputedDisagrees, Severity: health.SeverityWarning, Resource: &b})
+	ix := Build(in)
+	noNS := func(r objects.Ref) bool { return r.Kind != "Namespace" }
+	for _, tc := range []struct {
+		name string
+		q    Query
+		want []string
+	}{
+		{"listener", Query{Parent: &gwObj, Listener: "https"}, []string{"b"}},
+		{"listener=unknown", Query{Parent: &gwObj, Listener: "unknown"}, []string{"u"}},
+		{"state=listener-unknown", Query{States: FlagListenerUnknown}, []string{"u"}},
+	} {
+		if p := mustRoutes(t, ix, tc.q, nil); !slices.Equal(names(ix, p), tc.want) {
+			t.Errorf("%s AllowAll: %v, want %v", tc.name, names(ix, p), tc.want)
+		}
+		if p := mustRoutes(t, ix, tc.q, noNS); len(p.IDs) != 0 || p.Total != 0 {
+			t.Errorf("%s with a hidden Namespace: %v total %d", tc.name, names(ix, p), p.Total)
+		}
+	}
+	if p := mustRoutes(t, ix, Query{States: FlagDisagrees}, noNS); !slices.Equal(names(ix, p), []string{"b"}) {
+		t.Errorf("state=disagrees is filtered: %v", names(ix, p))
+	}
+	if p := mustRoutes(t, ix, Query{Parent: &gwObj, Listener: "http"}, noNS); !slices.Equal(names(ix, p), []string{"a"}) {
+		t.Errorf("a member with visible deps: %v", names(ix, p))
+	}
+}
+
+// sort=routes uses the computed member count; a row without one (unknown,
+// or restricted for the caller) sorts after rows with one, both ways.
+func TestGatewaysSortByMemberCount(t *testing.T) {
+	w := viewWorld()
+	w.objs = append(w.objs, testutil.Gateway("infra", "other", "kgateway", nil), testutil.Gateway("infra", "third", "kgateway", nil))
+	in := w.input(t)
+	v := views()
+	other, third := testutil.GwRef("infra", "other").Ref(), testutil.GwRef("infra", "third").Ref()
+	v.Attachment.Counts = append(v.Attachment.Counts,
+		computed.ListenerCount{Resource: other, Listener: "http", Deps: []objects.Ref{other}},
+		computed.ListenerCount{Resource: third, Listener: "http", Unknown: computed.UnknownNamespaceLabels, Deps: []objects.Ref{third}})
+	in.Computed = v
+	ix := Build(in)
+	gname := func(p Page) []string {
+		out := []string{}
+		for _, id := range p.IDs {
+			out = append(out, ix.Gateways[id].Ref.Name)
+		}
+		return out
+	}
+	noNS := func(r objects.Ref) bool { return r.Kind != "Namespace" }
+	for _, tc := range []struct {
+		name    string
+		visible func(objects.Ref) bool
+		desc    bool
+		want    []string
+	}{
+		{"desc", nil, true, []string{"edge", "other", "third"}},
+		{"asc", nil, false, []string{"other", "edge", "third"}},
+		{"restricted desc", noNS, true, []string{"other", "edge", "third"}},
+		{"restricted asc", noNS, false, []string{"other", "edge", "third"}},
+	} {
+		q := Query{Sort: Sort{Key: "routes", Desc: tc.desc}}
+		p, err := ix.QueryGateways(q, tc.visible)
+		if err != nil || !slices.Equal(gname(p), tc.want) {
+			t.Errorf("%s: %v %v, want %v", tc.name, gname(p), err, tc.want)
+		}
+		// Paging one row at a time with cursors gives the same order.
+		var paged []string
+		for q.Limit = 1; ; {
+			p, err := ix.QueryGateways(q, tc.visible)
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			paged = append(paged, gname(p)...)
+			if q.Cursor = p.Next; q.Cursor == "" {
+				break
+			}
+		}
+		if !slices.Equal(paged, tc.want) {
+			t.Errorf("%s paged: %v", tc.name, paged)
+		}
+	}
 }

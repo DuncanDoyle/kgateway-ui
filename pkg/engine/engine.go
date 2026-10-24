@@ -278,7 +278,8 @@ func (e *Engine) compute() *Published {
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
 			Computed: views[i]}, e.cfg.Checks)
 		// The index decodes through the cache, so it runs here under computeMu.
-		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode})
+		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
+			Computed: views[i]})
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
 			Rules: r.sel, Computed: views[i]})
 	}
