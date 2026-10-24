@@ -130,7 +130,9 @@ Two things narrow what Envoy serves without changing status or counts:
 - 2.4's plain-HTTP listener isolation drops a hostname from a less specific listener on the same port (`translator/listener/gateway_listener_translator.go` V4:689-747; V3 has none);
 - listeners that fail validation are dropped later (`TranslateListeners`, V4:62). Their routes still count and keep `Accepted=True`.
 
-View A shows status semantics. On 2.4, a listener that shares its port with a more specific listener carries the note "Envoy may serve fewer hostnames on this listener" **(our call)**.
+View A shows status semantics. On 2.4, a plain-HTTP listener carries the note "Envoy may serve fewer hostnames on this listener" when another plain-HTTP listener on the same port of the same Gateway (its own listeners and those of its allowed ListenerSets, `appendHttpListener` V4:135-173) has a hostname inside this listener's and ranks above it in kgateway's precedence: empty < wildcard < exact, a wildcard with more labels first, equal hostnames never (`translator/listener/gateway_listener_translator.go` V4:700-747). So an empty-hostname listener is noted when any other has a hostname, and a `*.x` listener when another is an exact name ending in `.x` or a longer wildcard under `.x`. The count never changes **(our call)**.
+- Only listeners kgateway merges take part, so a listener whose current status is `Accepted=False` neither gives nor gets the note: kgateway drops rejected and conflicted listeners before merging (V4:62-63; `translator/listener/validation.go` V4:166, 518-546).
+- A ListenerSet without a current `Accepted` (§3.3), or whose parent Gateway is not known, neither gives nor gets the note: its listeners' counts are unknown **(our call)**.
 
 ### 4.6 Output
 

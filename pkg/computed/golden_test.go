@@ -105,6 +105,7 @@ func checkProvenance(t *testing.T, p, tag string) {
 	}
 }
 
+// decodeExpect decodes a case's expect block strictly; listeners and parentRefs are required.
 func decodeExpect(t *testing.T, m map[string]any) viewAExpect {
 	t.Helper()
 	b, err := json.Marshal(m)
@@ -123,6 +124,7 @@ func decodeExpect(t *testing.T, m map[string]any) viewAExpect {
 	return e
 }
 
+// show renders parentRef outcomes as JSON, so pointer fields print as values.
 func show(m map[string]refExpect) string {
 	b, _ := json.Marshal(m)
 	return string(b)

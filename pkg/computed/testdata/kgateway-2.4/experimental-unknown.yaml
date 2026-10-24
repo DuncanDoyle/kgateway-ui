@@ -38,3 +38,7 @@ expect:
     "TCPRoute infra/c #0": {unknown: setting-unknown}
     "TCPRoute infra/c1 #0": {outcome: accepted, listeners: [tcp]}
     "HTTPRoute infra/h #0": {outcome: accepted, listeners: [http]}
+  # c1 stays a member of tcp although tcp's count is unknown; the API must hide it.
+  members:
+    "TCPRoute infra/c1 #0 -> Gateway infra/gw tcp": []
+    "HTTPRoute infra/h #0 -> Gateway infra/gw http": []
