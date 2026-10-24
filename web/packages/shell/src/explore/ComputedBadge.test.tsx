@@ -7,7 +7,7 @@ import { computedCopy } from "../copy/explorer";
 import { StaleView } from "../health/staleView";
 import { pseudoRules, renderWithTheme } from "../test/render";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
-import { ComputedBadge, computedTooltip } from "./ComputedBadge";
+import { ComputedBadge, computedTooltip, joinSentences } from "./ComputedBadge";
 
 const base: Computed = { by: "ui", rules: "kgateway-2.4", rule: "hostname-intersection", state: "checked" };
 const tip = "Computed by the UI from kgateway 2.4's attachment rules: hostname intersection";
@@ -26,12 +26,12 @@ it("renders each coverage with its own text", () => {
   unmount();
 
   const r2 = renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["status-compatible"] }} />);
-  expect(within(badge()).getByText("Status agrees")).toBeInTheDocument();
+  expect(within(badge()).getByText("Consistent with the status")).toBeInTheDocument();
   expect(icons()).toEqual(["health-icon-healthy"]);
   r2.unmount();
 
   renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["not-verified"] }} />);
-  expect(within(badge()).getByText("Not checked by the controller")).toBeInTheDocument();
+  expect(within(badge()).getByText("The controller does not report this")).toBeInTheDocument();
   // not-verified uses a neutral icon, never the healthy one.
   expect(icons()).toEqual(["computed-icon-neutral"]);
 });
@@ -39,26 +39,26 @@ it("renders each coverage with its own text", () => {
 it("renders several coverage labels side by side, each with its own icon", () => {
   renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["count-agrees", "not-verified"] }} />);
   expect(within(badge()).getByText("Count agrees with the controller")).toBeInTheDocument();
-  expect(within(badge()).getByText("Not checked by the controller")).toBeInTheDocument();
+  expect(within(badge()).getByText("The controller does not report this")).toBeInTheDocument();
   expect(icons()).toEqual(["health-icon-healthy", "computed-icon-neutral"]);
 });
 
 it("a checked fact without coverage reads as not checked, never healthy", () => {
   renderWithTheme(<ComputedBadge computed={base} />);
-  expect(within(badge()).getByText("Not checked by the controller")).toBeInTheDocument();
+  expect(within(badge()).getByText("The controller does not report this")).toBeInTheDocument();
   expect(icons()).not.toContain("health-icon-healthy");
 });
 
 it("renders pending, unknown and disagrees with icon and text", () => {
   const p = renderWithTheme(<ComputedBadge computed={{ ...base, state: "pending" }} />);
-  expect(within(badge()).getByText("Waiting for the controller")).toBeInTheDocument();
+  expect(within(badge()).getByText("Waiting for the controller's status")).toBeInTheDocument();
   expect(icons()).toEqual(["computed-icon-pending"]);
   p.unmount();
 
   const u = renderWithTheme(
     <ComputedBadge computed={{ ...base, state: "unknown", reason: "listenerset-no-status" }} />,
   );
-  expect(within(badge()).getByText("Unknown: the ListenerSet has no status yet")).toBeInTheDocument();
+  expect(within(badge()).getByText("Unknown: the ListenerSet has no current status")).toBeInTheDocument();
   expect(icons()).toEqual(["health-icon-unknown"]);
   u.unmount();
 
@@ -70,7 +70,7 @@ it("renders pending, unknown and disagrees with icon and text", () => {
   renderWithTheme(<ComputedBadge computed={{ ...base, state: "disagrees", coverage: ["count-agrees"] }} />);
   expect(
     within(badge()).getByText(
-      "The UI's computation disagrees with the controller. The controller's status is what counts.",
+      "The UI's computation disagrees with the controller. The controller's status is what counts",
     ),
   ).toBeInTheDocument();
   expect(icons()).toEqual(["health-icon-warning"]);
@@ -83,7 +83,7 @@ it("restricted renders the placeholder and no value", () => {
   );
   expect(within(badge()).getByText("Hidden: depends on objects you cannot view")).toBeInTheDocument();
   expect(badge()).not.toHaveTextContent("secret note");
-  expect(badge()).not.toHaveTextContent("Unknown: a controller setting cannot be read");
+  expect(badge()).not.toHaveTextContent("Unknown: the UI cannot read a controller setting");
   expect(icons()).toEqual(["computed-icon-restricted"]);
 });
 
@@ -104,7 +104,7 @@ it("tooltip is reachable by keyboard and describes the chip", async () => {
 
 it("names the listener-count rule and falls back to the raw ids for unknown rules", () => {
   expect(computedTooltip({ ...base, rule: "listener-count" })).toBe(
-    "Computed by the UI from kgateway 2.4's attachment rules: listener route count",
+    "Computed by the UI from kgateway 2.4's attachment rules: routes per listener",
   );
   expect(computedTooltip({ ...base, rules: "other", rule: "x-rule" })).toBe(
     "Computed by the UI from other's rules: x-rule",
@@ -208,7 +208,19 @@ describe("compact", () => {
     await userEvent.tab();
     const tipEl = screen.getByRole("tooltip");
     expect(tipEl).toHaveTextContent(tip);
-    expect(tipEl).toHaveTextContent("Waiting for the controller");
+    expect(tipEl).toHaveTextContent("Waiting for the controller's status");
     expect(tipEl).toHaveTextContent("More.");
+  });
+
+  it("joins tooltip parts as sentences without a double period", async () => {
+    const c: Computed = { ...base, state: "disagrees", note: "The controller's status cannot confirm this" };
+    renderWithTheme(<ComputedBadge computed={c} compact extra="The controller does not report effective hostnames." />);
+    await userEvent.tab();
+    const text = screen.getByRole("tooltip").textContent ?? "";
+    expect(text).not.toContain("..");
+    expect(text).toContain(
+      "The controller's status is what counts. The controller's status cannot confirm this. The controller does not report effective hostnames.",
+    );
+    expect(joinSentences(["A.", "B", "C.."])).toBe("A. B. C.");
   });
 });

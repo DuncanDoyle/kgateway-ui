@@ -62,7 +62,7 @@ const (
 	DelegationNoChildDetail = "A delegating rule selects no child route the controller accepted"
 )
 
-// Wording for KGWUI-012 (design §6.2). Drafts until the wording pass (Task 48).
+// Wording for KGWUI-012 (design §6.2), from the wording pass (Task 48).
 const (
 	// ComputedDisagreesMessage is KGWUI-012's message.
 	ComputedDisagreesMessage = "The UI's computed view disagrees with the controller"

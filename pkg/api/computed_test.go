@@ -115,7 +115,7 @@ func TestRouteListCarriesAttachment(t *testing.T) {
 	row := items[0].(map[string]any)
 	got := row["parents"].([]any)[0].(map[string]any)["computed"]
 	want := decode(t, `{"outcome": "NoMatchingListenerHostname", "listeners": [],
-		"explanation": "listener https has *.example.org; route has shop.example.com",
+		"explanation": "listener https has *.example.org, route has shop.example.com",
 		"computed": {"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection", "state": "checked", "coverage": ["status-compatible"]}}`)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parents[0].computed:\n%v\nwant\n%v", got, want)
@@ -903,5 +903,48 @@ func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.Ru
 	slices.Sort(wantOn)
 	if !slices.Equal(on, wantOn) {
 		t.Errorf("KGWUI-012 on %v, want %v", on, wantOn)
+	}
+}
+
+// TestExplainClauses pins each fact's clause: no inner ";", since explain
+// joins clauses with "; ", and the kind clause names the route's kind first.
+func TestExplainClauses(t *testing.T) {
+	cases := []struct {
+		f    computed.Fact
+		want string
+	}{
+		{computed.Fact{Listener: "https", Code: computed.FactHostname, Want: "*.example.org", Got: "shop.example.com"},
+			"listener https has *.example.org, route has shop.example.com"},
+		{computed.Fact{Listener: "https", Code: computed.FactNamespace, Want: "infra", Got: "shop"},
+			"listener https allows routes from namespace infra, route is in shop"},
+		{computed.Fact{Listener: "https", Code: computed.FactNamespace, Want: "team=web", Got: "team=retail"},
+			"listener https allows namespaces with team=web, route's namespace has team=retail"},
+		{computed.Fact{Listener: "https", Code: computed.FactNamespace, Want: "team=web"},
+			"listener https allows namespaces with team=web, route's namespace has no labels"},
+		{computed.Fact{Listener: "https", Code: computed.FactKind, Want: "GRPCRoute, TCPRoute", Got: "HTTPRoute"},
+			"listener https does not allow HTTPRoute (allows GRPCRoute, TCPRoute)"},
+		{computed.Fact{Listener: "https", Code: computed.FactSelectorError, Got: "bad"},
+			"listener https has an invalid namespace selector: bad"},
+		{computed.Fact{Listener: "https", Code: computed.FactPort, Want: "8443", Got: "443"},
+			"parentRef wants port 8443, listener https is on 443"},
+		{computed.Fact{Listener: "https", Code: computed.FactSection, Want: "api", Got: "https"},
+			"parentRef names section api, not listener https"},
+		{computed.Fact{Listener: "https", Code: "other"}, "listener https: other"},
+	}
+	for _, c := range cases {
+		if got := explainFact(c.f); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.f.Code, got, c.want)
+		}
+		if strings.Contains(c.want, ";") {
+			t.Errorf("%s: clause holds a ';': %q", c.f.Code, c.want)
+		}
+	}
+	// Two facts of one stage stay two clauses.
+	two := []computed.Fact{
+		{Listener: "a", Code: computed.FactSection, Want: "api", Got: "a"},
+		{Listener: "b", Code: computed.FactSection, Want: "api", Got: "b"},
+	}
+	if got, want := explain(two), "parentRef names section api, not listener a; parentRef names section api, not listener b"; got != want {
+		t.Errorf("explain: got %q, want %q", got, want)
 	}
 }

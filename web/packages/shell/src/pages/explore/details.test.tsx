@@ -762,6 +762,11 @@ it("unknown and restricted listeners show no number", async () => {
   expect(cell("tcp")).not.toHaveTextContent(/\d/);
   expect(cell("http")).toHaveTextContent("Hidden");
   expect(cell("http")).not.toHaveTextContent(/\d/);
+  // The expanded row never reads an unknown count as "None".
+  await userEvent.click(within(rowOf(listeners, "tcp")).getByRole("button", { name: /Show conditions/ }));
+  const details = screen.getByTestId("listener-tcp-details");
+  expect(details).toHaveTextContent("Computed routes: No count");
+  expect(details).not.toHaveTextContent("None");
 });
 
 it("controller values carry no badge", async () => {
@@ -803,7 +808,7 @@ it("selecting a listener sets ?listener= and filters attached routes to its memb
   await screen.findByRole("table", { name: "Attached routes" });
   await pick("drift");
   await waitFor(() => expect(location()).toBe(`${GW_PATH}?listener=drift`));
-  const t = await screen.findByRole("table", { name: "Routes on listener drift" });
+  const t = await screen.findByRole("table", { name: "Computed routes on listener drift" });
   await within(t).findByText("api");
   // The request names the parent and the listener, and nothing else (strict params, §7.2).
   const q = listCalls("routes").at(-1) as URL;
@@ -829,7 +834,7 @@ it("selecting a listener sets ?listener= and filters attached routes to its memb
 it("?listener= survives reload", async () => {
   serve(viewA());
   mount(`${GW_PATH}?listener=drift`);
-  const t = await screen.findByRole("table", { name: "Routes on listener drift" });
+  const t = await screen.findByRole("table", { name: "Computed routes on listener drift" });
   await within(t).findByText("api");
   // The unfiltered attached-routes query is never sent for a selected listener.
   for (const u of listCalls("routes").filter((x) => x.searchParams.get("attachment") === "accepted"))
@@ -841,11 +846,11 @@ it("listener=_unknown lists the routes the UI could not place", async () => {
   serve(viewA());
   mount(GW_PATH);
   await screen.findByRole("table", { name: "Attached routes" });
-  await pick("Not placed");
+  await pick("Unknown listener");
   await waitFor(() => expect(location()).toBe(`${GW_PATH}?listener=_unknown`));
-  const t = await screen.findByRole("table", { name: "Routes the UI could not place" });
+  const t = await screen.findByRole("table", { name: "Routes with an unknown listener" });
   await within(t).findByText("stream");
-  expect(within(rowOf(t, "stream")).getByText("Unknown: a controller setting cannot be read")).toBeInTheDocument();
+  expect(within(rowOf(t, "stream")).getByText("Unknown: the UI cannot read a controller setting")).toBeInTheDocument();
   expect(listCalls("routes").at(-1)?.searchParams.get("listener")).toBe("_unknown");
 });
 
@@ -853,8 +858,8 @@ it("an unknown-count listener shows the unknown state and its reason, never an e
   serve(viewA());
   mount(`${GW_PATH}?listener=tcp`);
   const box = await screen.findByTestId("listener-routes-unknown");
-  expect(box).toHaveTextContent("Unknown: a controller setting cannot be read");
-  expect(screen.queryByRole("table", { name: "Routes on listener tcp" })).toBeNull();
+  expect(box).toHaveTextContent("Unknown: the UI cannot read a controller setting");
+  expect(screen.queryByRole("table", { name: "Computed routes on listener tcp" })).toBeNull();
   expect(within(box).getByRole("link", { name: /All routes of this Gateway/ })).toHaveAttribute(
     "href",
     `/i/${ID}/routes?parent=${encodeURIComponent(EDGE)}`,
@@ -868,7 +873,7 @@ it("a restricted listener shows its state, not an empty table", async () => {
   mount(`${GW_PATH}?listener=http`);
   const box = await screen.findByTestId("listener-routes-unknown");
   expect(box).toHaveTextContent("Hidden: depends on objects you cannot view");
-  expect(screen.queryByRole("table", { name: "Routes on listener http" })).toBeNull();
+  expect(screen.queryByRole("table", { name: "Computed routes on listener http" })).toBeNull();
 });
 
 it("an older server without the listener filter gets no selector and no listener param", async () => {
@@ -882,7 +887,7 @@ it("an older server without the listener filter gets no selector and no listener
 });
 
 it("failed-route rows show the computed explanation", async () => {
-  const explanation = "listener https has *.example.org; route has shop.example.com";
+  const explanation = "listener https has *.example.org, route has shop.example.com";
   const base = api();
   serve((u) => {
     const b = base(u);
@@ -1023,7 +1028,7 @@ it("effective hostnames come from the parent's own listener, not a ListenerSet l
   const base = viewA();
   serve((u) => (u.pathname === `${API}/routes` && u.searchParams.get("listener") === "http" ? sharedName() : base(u)));
   mount(`${GW_PATH}?listener=http`);
-  const t = await screen.findByRole("table", { name: "Routes on listener http" });
+  const t = await screen.findByRole("table", { name: "Computed routes on listener http" });
   const r = rowOf(
     t,
     await within(t)
@@ -1056,9 +1061,9 @@ it("Why not placed takes the parent's unknown entry, not the first entry with a 
     return b;
   });
   mount(`${GW_PATH}?listener=_unknown`);
-  const t = await screen.findByRole("table", { name: "Routes the UI could not place" });
+  const t = await screen.findByRole("table", { name: "Routes with an unknown listener" });
   await within(t).findByText("stream");
-  expect(rowOf(t, "stream")).toHaveTextContent("Unknown: a controller setting cannot be read");
+  expect(rowOf(t, "stream")).toHaveTextContent("Unknown: the UI cannot read a controller setting");
 });
 
 it("a ?listener= name the Gateway does not have says so and sends no request", async () => {

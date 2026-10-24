@@ -61,7 +61,7 @@ func ownedObject(o *install.Owned, ref objects.Ref) *unstructured.Unstructured {
 }
 
 // disagreeDetail says what was computed and what the controller reports, and
-// under which rule set (draft, Task 48).
+// under which rule set (wording pass, Task 48).
 func disagreeDetail(c computed.CheckResult, ruleSet string) string {
 	var d string
 	switch c.ID.Kind {

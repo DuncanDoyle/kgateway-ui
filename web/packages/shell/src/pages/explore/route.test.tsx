@@ -582,14 +582,14 @@ it("parent card lists computed listeners, one line each, with effective hostname
     expect(within(l).getByText("Agrees")).toBeInTheDocument();
     expect(l).not.toHaveTextContent("Count agrees with the controller");
   }
-  // "Not checked by the controller" never shows twice: not on the card at all, and once in a listener's tooltip.
-  expect(within(card).queryAllByText("Not checked by the controller")).toHaveLength(0);
+  // "The controller does not report this" never shows twice: not on the card at all, and once in a listener's tooltip.
+  expect(within(card).queryAllByText("The controller does not report this")).toHaveLength(0);
   const state = within(http).getByText("Agrees").closest("[tabindex]") as HTMLElement;
   for (let i = 0; i < 120 && document.activeElement !== state; i++) await userEvent.tab();
   expect(state).toHaveFocus();
   const tipText = screen.getByRole("tooltip").textContent ?? "";
-  expect(tipText.split("Not checked by the controller")).toHaveLength(2);
-  expect(tipText).toContain("The controller does not check effective hostnames.");
+  expect(tipText.split("The controller does not report this")).toHaveLength(2);
+  expect(tipText).toContain("The controller does not report effective hostnames.");
   // The listener links to the Gateway page with that listener selected.
   expect(within(http).getByRole("link", { name: "http" })).toHaveAttribute(
     "href",
@@ -623,7 +623,7 @@ it("a failed parentRef shows its computed explanation", async () => {
   a.result = {
     outcome: "NoMatchingListenerHostname",
     listeners: [],
-    explanation: "listener https has *.example.org; route has shop.example.com",
+    explanation: "listener https has *.example.org, route has shop.example.com",
     computed: {
       by: "ui",
       rules: "kgateway-2.4",
@@ -636,6 +636,6 @@ it("a failed parentRef shows its computed explanation", async () => {
   mount(MID);
   await loaded();
   const outcome = within(screen.getByRole("article", { name: "Parent infra/edge" })).getByTestId("computed-outcome");
-  expect(outcome).toHaveTextContent("listener https has *.example.org; route has shop.example.com");
-  expect(within(outcome).getByTestId("computed-badge")).toHaveTextContent("Status agrees");
+  expect(outcome).toHaveTextContent("listener https has *.example.org, route has shop.example.com");
+  expect(within(outcome).getByTestId("computed-badge")).toHaveTextContent("Consistent with the status");
 });

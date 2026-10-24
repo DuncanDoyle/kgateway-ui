@@ -302,7 +302,7 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                       {l.computed ? (
                         <div className="computed-details">
                           <span>
-                            {viewACopy.computedRoutes}: {knownCount(l) ?? <Muted>{columnCopy.none}</Muted>}
+                            {viewACopy.computedRoutes}: {knownCount(l) ?? <Muted>{viewACopy.noCount}</Muted>}
                           </span>
                           <ComputedBadge computed={l.computed} />
                           {l.isolationNote ? <Muted>{viewACopy.isolationNote}</Muted> : null}

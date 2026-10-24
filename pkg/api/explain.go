@@ -10,16 +10,17 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// Explanation drafts (design §7.5), one per fact code; the wording pass is Task 48.
+// Explanation clauses (design §7.5), one per fact code, from the wording pass
+// (Task 48). Clauses hold no ";": explain joins them with "; ".
 const (
-	explainHostname      = "listener %s has %s; route has %s"
-	explainSameNamespace = "listener %s allows routes from namespace %s; route is in %s"
-	explainSelector      = "listener %s allows namespaces with %s; route's namespace has %s"
-	explainNoLabels      = "listener %s allows namespaces with %s; route's namespace has no labels"
-	explainKind          = "listener %s allows %s; route is %s"
+	explainHostname      = "listener %s has %s, route has %s"
+	explainSameNamespace = "listener %s allows routes from namespace %s, route is in %s"
+	explainSelector      = "listener %s allows namespaces with %s, route's namespace has %s"
+	explainNoLabels      = "listener %s allows namespaces with %s, route's namespace has no labels"
+	explainKind          = "listener %s does not allow %s (allows %s)"
 	explainSelectorError = "listener %s has an invalid namespace selector: %s"
-	explainPort          = "parentRef port %s; listener %s is on port %s"
-	explainSection       = "parentRef section %s; listener is %s"
+	explainPort          = "parentRef wants port %s, listener %s is on %s"
+	explainSection       = "parentRef names section %s, not listener %s"
 	explainOther         = "listener %s: %s"
 )
 
@@ -66,7 +67,7 @@ func explainFact(f computed.Fact) string {
 		}
 		return fmt.Sprintf(explainSameNamespace, f.Listener, f.Want, f.Got)
 	case computed.FactKind:
-		return fmt.Sprintf(explainKind, f.Listener, f.Want, f.Got)
+		return fmt.Sprintf(explainKind, f.Listener, f.Got, f.Want)
 	case computed.FactSelectorError:
 		return fmt.Sprintf(explainSelectorError, f.Listener, f.Got)
 	case computed.FactPort:

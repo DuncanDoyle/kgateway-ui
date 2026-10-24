@@ -231,7 +231,7 @@ export const routeCopy = {
   noChildRoutes: "No reported child routes.", // S93
 };
 
-// region Computed facts (2.3). Drafts S111–S133, for the wording pass (Task 48).
+// region Computed facts (2.3). S111–S133; final wording from Task 48 (phase-2.3-wording.md).
 export const computedCopy = {
   chip: "Computed", // S111
   tooltip: (ruleSet: string, family: string, rule: string) => `Computed by the UI from ${ruleSet}'s ${family}: ${rule}`, // S112
@@ -241,26 +241,26 @@ export const computedCopy = {
     "allowed-routes": "allowed routes", // S115
     "section-and-port": "section name and port", // S116
     "hostname-intersection": "hostname intersection", // S117
-    "listener-count": "listener route count", // S118
+    "listener-count": "routes per listener", // S118
   } as Record<string, string>,
   coverage: {
     "count-agrees": "Count agrees with the controller", // S119
-    "status-compatible": "Status agrees", // S120
-    "not-verified": "Not checked by the controller", // S121
+    "status-compatible": "Consistent with the status", // S120
+    "not-verified": "The controller does not report this", // S121
   },
-  pending: "Waiting for the controller", // S122
+  pending: "Waiting for the controller's status", // S122
   restricted: "Hidden: depends on objects you cannot view", // S123
-  disagrees: "The UI's computation disagrees with the controller. The controller's status is what counts.", // S124
+  disagrees: "The UI's computation disagrees with the controller. The controller's status is what counts", // S124
   unknownReasons: {
     "scope-unknown": "Unknown: the install's scope is not known", // S125
-    "namespace-labels-unavailable": "Unknown: namespace labels cannot be read", // S126
-    "listenerset-no-status": "Unknown: the ListenerSet has no status yet", // S127
-    "setting-unknown": "Unknown: a controller setting cannot be read", // S128
+    "namespace-labels-unavailable": "Unknown: the UI cannot read namespace labels", // S126
+    "listenerset-no-status": "Unknown: the ListenerSet has no current status", // S127
+    "setting-unknown": "Unknown: the UI cannot read a controller setting", // S128
     "not-reached": "Unknown: no root route reaches this route", // S129
     "context-unknown": "Unknown: a route above this one is unknown", // S130
     "too-large": "Unknown: too large to compute", // S131
   } as Record<string, string>,
-  unknownOther: (reason: string) => `Unknown: ${reason}`, // S132
+  unknownOther: (reason: string) => `Unknown (${reason})`, // S132
   stale: "Unknown: the data is stale", // S133
   // Short states for one-line cells; the sentences above stay in tooltips and expanded rows.
   short: {
@@ -273,37 +273,37 @@ export const computedCopy = {
   },
 };
 
-// region View A on pages (2.3). Drafts S134–S158 and S165–S166 (S159–S164 are computedCopy.short), for the wording pass (Task 48).
+// region View A on pages (2.3). S134–S158, S165–S166 and S187 (S159–S164 are computedCopy.short); final wording from Task 48.
 export const viewACopy = {
   computedRoutes: "Computed routes", // S134
   isolationNote: "Envoy may serve fewer hostnames on this listener", // S135
   listenerGroup: "Routes by listener", // S136
   allListeners: "All listeners", // S137
-  notPlaced: "Not placed", // S138
-  routesOnListener: (name: string) => `Routes on listener ${name}`, // S139
-  notPlacedTitle: "Routes the UI could not place", // S140
+  notPlaced: "Unknown listener", // S138
+  routesOnListener: (name: string) => `Computed routes on listener ${name}`, // S139
+  notPlacedTitle: "Routes with an unknown listener", // S140
   noRoutesOnListener: "No routes on this listener.", // S141
-  noRoutesNotPlaced: "The UI placed every route.", // S142
+  noRoutesNotPlaced: "No route has an unknown listener.", // S142
   cannotList: "The UI cannot list this listener's routes.", // S143
   allRoutesOf: (kind: string) => `All routes of this ${kind}`, // S144
   effectiveHostnames: "Effective hostnames", // S145
-  whyNotPlaced: "Why not placed", // S146
+  whyNotPlaced: "Why unknown", // S146
   computedListeners: "Listeners", // S147
   computedOutcome: "Computed outcome", // S148
   outcomes: {
     accepted: "Accepted", // S149
-    NotAllowedByListeners: "Not allowed by the listeners", // S150
+    NotAllowedByListeners: "No listener allows this route", // S150
     NoMatchingParent: "No listener matches the section or port", // S151
     NoMatchingListenerHostname: "No listener hostname matches", // S152
   } as Record<string, string>,
   routesColumn: "Routes", // S153
-  routesTooltip: "Computed by the UI: distinct routes on this object's own listeners", // S154
-  noCount: "No count", // S155
+  routesTooltip: "Computed by the UI: routes on this object's own listeners, each counted once", // S154
+  noCount: "No count", // S155; S187 in the listener expand
   disagreements: (n: number) => `Disagreements: ${n}`, // S156
   noSuchListener: (kind: string, name: string) => `This ${kind} has no listener named ${name}.`, // S165
-  hostnamesNotChecked: "The controller does not check effective hostnames.", // S166
+  hostnamesNotChecked: "The controller does not report effective hostnames.", // S166
   stateFlags: {
     disagrees: "UI disagrees with the controller", // S157
-    "listener-unknown": "Listener unknown", // S158
+    "listener-unknown": "Unknown listener", // S158
   },
 };

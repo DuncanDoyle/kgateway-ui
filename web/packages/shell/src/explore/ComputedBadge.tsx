@@ -91,6 +91,11 @@ export function computedTooltip(c: Computed): string {
   return computedCopy.tooltip(ruleSetLabel(c.rules), family, computedCopy.ruleNames[c.rule] ?? c.rule);
 }
 
+/** Parts as sentences ending in one period: a part's own trailing period is dropped, so the join never shows "..". */
+export function joinSentences(parts: string[]): string {
+  return `${parts.map((p) => p.replace(/\.+$/, "")).join(". ")}.`;
+}
+
 function NeutralIcon({ glyph: Glyph, kind }: { glyph: LucideIcon; kind: string }) {
   return (
     <Neutral data-testid={`computed-icon-${kind}`} aria-hidden="true">
@@ -217,7 +222,7 @@ export function ComputedBadge({ computed, compact, chip = true, extra, stylesOve
   const note = computed.state === "restricted" ? undefined : computed.note;
   const tip = computedTooltip(computed);
   const full = compact
-    ? [tip, ...all.map((s) => s.text), ...(note ? [note] : []), ...(extra ? [extra] : [])].join(". ")
+    ? joinSentences([tip, ...all.map((s) => s.text), ...(note ? [note] : []), ...(extra ? [extra] : [])])
     : tip;
   const items = compact === true ? [shortItem(computed, all, stale)] : all;
   const rendered = items.map((s) => (

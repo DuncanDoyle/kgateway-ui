@@ -542,7 +542,7 @@ it("Routes state filter offers disagrees and listener-unknown", async () => {
   const group = screen.getByRole("group", { name: "Route state" });
   await userEvent.click(await within(group).findByRole("button", { name: "UI disagrees with the controller" }));
   await waitFor(() => expect(search().get("state")).toBe("disagrees"));
-  await userEvent.click(within(group).getByRole("button", { name: "Listener unknown" }));
+  await userEvent.click(within(group).getByRole("button", { name: "Unknown listener" }));
   await waitFor(() =>
     expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["disagrees", "listener-unknown"]),
   );
@@ -559,7 +559,7 @@ it("an older server is not offered the 2.3 state values", async () => {
   mount(`/i/${ID}/routes`);
   await screen.findByText("rejected");
   const group = screen.getByRole("group", { name: "Route state" });
-  expect(within(group).queryByRole("button", { name: "Listener unknown" })).toBeNull();
+  expect(within(group).queryByRole("button", { name: "Unknown listener" })).toBeNull();
 });
 
 it("Gateways list has a sortable routes column with view A's count", async () => {
