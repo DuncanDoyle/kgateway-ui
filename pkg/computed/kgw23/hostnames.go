@@ -11,6 +11,10 @@ func intersect(listener string, route []string) (ok bool, eff []string) {
 		}
 		return true, []string{listener}
 	}
+	// No listener hostname: the route's hostnames as written, duplicates kept.
+	if listener == "" {
+		return true, append([]string(nil), route...)
+	}
 	seen := map[string]bool{}
 	for _, r := range route {
 		h, m := intersectOne(listener, r)
@@ -24,13 +28,10 @@ func intersect(listener string, route []string) (ok bool, eff []string) {
 
 // intersectOne intersects one listener hostname with one route hostname.
 func intersectOne(l, r string) (string, bool) {
-	if l == "" {
-		return r, true
-	}
 	if l == r {
 		return l, true
 	}
-	lw, rw := strings.HasPrefix(l, "*"), strings.HasPrefix(r, "*")
+	lw, rw := strings.HasPrefix(l, "*."), strings.HasPrefix(r, "*.")
 	switch {
 	case lw && rw:
 		// The longer suffix is the more specific wildcard.

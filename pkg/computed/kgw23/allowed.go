@@ -11,7 +11,7 @@ import (
 // allowedKinds returns the route kinds a listener accepts: the protocol
 // defaults, narrowed by allowedRoutes.kinds (rules §4.2).
 func allowedKinds(l objects.Listener) []objects.GroupKind {
-	gk := func(kinds ...string) []objects.GroupKind {
+	gwKinds := func(kinds ...string) []objects.GroupKind {
 		out := make([]objects.GroupKind, 0, len(kinds))
 		for _, k := range kinds {
 			out = append(out, objects.GroupKind{Group: objects.GatewayAPIGroup, Kind: k})
@@ -21,34 +21,31 @@ func allowedKinds(l objects.Listener) []objects.GroupKind {
 	var defaults []objects.GroupKind
 	switch l.Protocol {
 	case "HTTP", "HTTPS":
-		defaults = gk("HTTPRoute", "GRPCRoute")
+		defaults = gwKinds("HTTPRoute", "GRPCRoute")
 	case "TLS":
 		// A TLS listener without a tls block is not Terminate.
 		if l.TLS != nil && l.TLS.Mode == "Terminate" {
-			defaults = gk("TLSRoute", "TCPRoute")
+			defaults = gwKinds("TLSRoute", "TCPRoute")
 		} else {
-			defaults = gk("TLSRoute")
+			defaults = gwKinds("TLSRoute")
 		}
 	case "TCP":
-		defaults = gk("TCPRoute")
+		defaults = gwKinds("TCPRoute")
 	case "UDP":
 		return nil
 	default:
-		defaults = gk("HTTPRoute")
+		defaults = gwKinds("HTTPRoute")
 	}
-	if len(l.AllowedRoutes.Kinds) == 0 {
+	// An explicit empty list allows no kinds; only nil keeps the defaults.
+	if l.AllowedRoutes.Kinds == nil {
 		return defaults
 	}
+	// Requested order and duplicates are kept; an empty group stays empty.
 	var out []objects.GroupKind
-	for _, d := range defaults {
-		for _, k := range l.AllowedRoutes.Kinds {
-			// A nil group means the Gateway API group.
-			g := k.Group
-			if g == "" {
-				g = objects.GatewayAPIGroup
-			}
-			if g == d.Group && k.Kind == d.Kind {
-				out = append(out, d)
+	for _, k := range l.AllowedRoutes.Kinds {
+		for _, d := range defaults {
+			if k == d {
+				out = append(out, k)
 				break
 			}
 		}
@@ -73,8 +70,6 @@ type nsVerdict struct {
 // ListenerSet that owns the listener (rules §4.2).
 func namespaces(l objects.Listener, resourceNS, routeNS string, nsLabels map[string]map[string]string, labelsOK bool) nsVerdict {
 	switch l.AllowedRoutes.Namespaces.From {
-	case "", "Same":
-		return nsVerdict{OK: routeNS == resourceNS}
 	case "All":
 		return nsVerdict{OK: true}
 	case "Selector":
@@ -83,18 +78,25 @@ func namespaces(l objects.Listener, resourceNS, routeNS string, nsLabels map[str
 			v.SelectorError = true
 			return v
 		}
-		if !labelsOK {
-			v.Unknown = computed.UnknownNamespaceLabels
-			return v
-		}
+		// Parse first: an invalid selector is known even without labels.
 		sel, err := metav1.LabelSelectorAsSelector(l.AllowedRoutes.Namespaces.Selector)
 		if err != nil {
 			v.SelectorError = true
 			return v
 		}
-		// A missing Namespace has no labels, so only an empty selector matches it.
-		v.OK = sel.Matches(labels.Set(nsLabels[routeNS]))
+		if !labelsOK {
+			v.Unknown = computed.UnknownNamespaceLabels
+			return v
+		}
+		// A missing Namespace is admitted only by an empty selector.
+		ls, found := nsLabels[routeNS]
+		if !found {
+			v.OK = sel.Empty()
+			return v
+		}
+		v.OK = sel.Matches(labels.Set(ls))
 		return v
 	}
-	return nsVerdict{}
+	// Same, and any unknown From, as the controller does.
+	return nsVerdict{OK: routeNS == resourceNS}
 }

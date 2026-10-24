@@ -43,11 +43,14 @@ func TestAllowedKindsIntersection(t *testing.T) {
 		kinds []objects.GroupKind
 		want  []objects.GroupKind
 	}{
-		{"nil group", "HTTPS", []objects.GroupKind{{Kind: "GRPCRoute"}}, []objects.GroupKind{gk("GRPCRoute")}},
+		// The decoder defaults a nil group, so a real nil group arrives with the Gateway API group.
+		{"defaulted group", "HTTPS", []objects.GroupKind{gk("GRPCRoute")}, []objects.GroupKind{gk("GRPCRoute")}},
+		{"explicit empty group", "HTTPS", []objects.GroupKind{{Group: "", Kind: "HTTPRoute"}}, nil},
+		{"explicit empty list", "HTTPS", []objects.GroupKind{}, nil},
 		{"explicit group", "HTTPS", []objects.GroupKind{gk("HTTPRoute")}, []objects.GroupKind{gk("HTTPRoute")}},
 		{"foreign group", "HTTPS", []objects.GroupKind{{Group: "example.com", Kind: "HTTPRoute"}}, nil},
-		{"kind not in defaults", "HTTP", []objects.GroupKind{{Kind: "TCPRoute"}}, nil},
-		{"order follows defaults", "HTTPS", []objects.GroupKind{{Kind: "GRPCRoute"}, {Kind: "HTTPRoute"}}, []objects.GroupKind{gk("HTTPRoute"), gk("GRPCRoute")}},
+		{"kind not in defaults", "HTTP", []objects.GroupKind{gk("TCPRoute")}, nil},
+		{"requested order and duplicates kept", "HTTPS", []objects.GroupKind{gk("GRPCRoute"), gk("HTTPRoute"), gk("GRPCRoute")}, []objects.GroupKind{gk("GRPCRoute"), gk("HTTPRoute"), gk("GRPCRoute")}},
 	} {
 		l := https
 		l.Protocol = c.proto
@@ -66,6 +69,8 @@ func TestNamespacesFrom(t *testing.T) {
 	web := &metav1.LabelSelector{MatchLabels: map[string]string{"team": "web"}}
 	labels := map[string]map[string]string{"shop": {"team": "web"}, "other": {"team": "retail"}}
 	bad := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "k", Operator: "Bogus"}}}
+	dne := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "team", Operator: metav1.LabelSelectorOpDoesNotExist}}}
+	notIn := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "team", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"web"}}}}
 	for _, c := range []struct {
 		name        string
 		l           objects.Listener
@@ -88,7 +93,12 @@ func TestNamespacesFrom(t *testing.T) {
 		{"invalid selector", sel("Selector", bad), "gw", "shop", labels, true, nsVerdict{SelectorError: true, UsesSelector: true}},
 		{"labels unavailable", sel("Selector", web), "gw", "shop", nil, false, nsVerdict{UsesSelector: true, Unknown: computed.UnknownNamespaceLabels}},
 		{"labels unavailable not needed", sel("All", nil), "gw", "shop", nil, false, nsVerdict{OK: true}},
-		{"unknown from", sel("Bogus", nil), "gw", "gw", nil, true, nsVerdict{}},
+		{"unknown from acts as same", sel("Bogus", nil), "gw", "gw", nil, true, nsVerdict{OK: true}},
+		{"unknown from other ns", sel("Bogus", nil), "gw", "shop", nil, true, nsVerdict{}},
+		{"invalid selector, labels unavailable", sel("Selector", bad), "gw", "shop", nil, false, nsVerdict{SelectorError: true, UsesSelector: true}},
+		{"DoesNotExist, missing ns", sel("Selector", dne), "gw", "gone", labels, true, nsVerdict{UsesSelector: true}},
+		{"NotIn, missing ns", sel("Selector", notIn), "gw", "gone", labels, true, nsVerdict{UsesSelector: true}},
+		{"DoesNotExist, label-less ns", sel("Selector", dne), "gw", "bare", map[string]map[string]string{"bare": {}}, true, nsVerdict{OK: true, UsesSelector: true}},
 	} {
 		if got := namespaces(c.l, c.resNS, c.rtNS, c.labels, c.labelsOK); got != c.want {
 			t.Errorf("%s: got %+v, want %+v", c.name, got, c.want)

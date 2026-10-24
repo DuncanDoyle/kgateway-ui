@@ -27,7 +27,9 @@ func TestIntersect(t *testing.T) {
 		{"*.example.com", []string{"*.example.com"}, []string{"*.example.com"}, true},
 		{"*.example.com", []string{"*.other.com"}, nil, false},
 		{"a.other.com", []string{"*.example.com"}, nil, false},
-		{"", []string{"x.com", "x.com"}, []string{"x.com"}, true},
+		{"", []string{"x.com", "x.com"}, []string{"x.com", "x.com"}, true}, // no listener hostname: kept as written
+		{"*.example.com", []string{"a.example.com", "*.example.com"}, []string{"a.example.com", "*.example.com"}, true},
+		{"*x.com", []string{"ax.com"}, nil, false}, // wildcard needs the "*." prefix
 		{"a.example.com", []string{"b.example.com", "a.example.com"}, []string{"a.example.com"}, true},
 	} {
 		ok, eff := intersect(c.l, c.r)
