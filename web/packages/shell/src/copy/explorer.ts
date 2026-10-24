@@ -263,3 +263,36 @@ export const computedCopy = {
   unknownOther: (reason: string) => `Unknown: ${reason}`, // S132
   stale: "Unknown: the data is stale", // S133
 };
+
+// region View A on pages (2.3). Drafts S134–S163, for the wording pass (Task 48).
+export const viewACopy = {
+  computedRoutes: "Computed routes", // S134
+  isolationNote: "Envoy may serve fewer hostnames on this listener", // S135
+  listenerGroup: "Routes by listener", // S136
+  allListeners: "All listeners", // S137
+  notPlaced: "Not placed", // S138
+  routesOnListener: (name: string) => `Routes on listener ${name}`, // S139
+  notPlacedTitle: "Routes the UI could not place", // S140
+  noRoutesOnListener: "No routes on this listener.", // S141
+  noRoutesNotPlaced: "The UI placed every route.", // S142
+  cannotList: "The UI cannot list this listener's routes.", // S143
+  allRoutesOf: (kind: string) => `All routes of this ${kind}`, // S144
+  effectiveHostnames: "Effective hostnames", // S145
+  whyNotPlaced: "Why not placed", // S146
+  computedListeners: "Listeners", // S147
+  computedOutcome: "Computed outcome", // S148
+  outcomes: {
+    accepted: "Accepted", // S149
+    NotAllowedByListeners: "Not allowed by the listeners", // S150
+    NoMatchingParent: "No listener matches the section or port", // S151
+    NoMatchingListenerHostname: "No listener hostname matches", // S152
+  } as Record<string, string>,
+  routesColumn: "Routes", // S153
+  routesTooltip: "Computed by the UI: distinct routes on this object's own listeners", // S154
+  noCount: "No count", // S155
+  disagreements: (n: number) => `${n} disagrees`, // S156
+  stateFlags: {
+    disagrees: "UI disagrees with the controller", // S157
+    "listener-unknown": "Listener unknown", // S158
+  },
+};

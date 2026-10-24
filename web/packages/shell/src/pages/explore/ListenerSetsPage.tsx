@@ -2,12 +2,12 @@ import type { SerializedStyles } from "@emotion/react";
 import { useMemo } from "react";
 import { useListenerSets } from "../../api/exploreHooks";
 import type { ListenerSetRow } from "../../api/types";
-import { columnCopy, listCopy } from "../../copy/explorer";
+import { columnCopy, listCopy, viewACopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
-import { ListFilters, NameCell, useShownPage } from "./listParts";
+import { ListFilters, NameCell, RoutesCell, routesHeaderExtra, useShownPage } from "./listParts";
 
 // region Helpers
 const NOUN = ["ListenerSet", "ListenerSets"] as const;
@@ -30,6 +30,14 @@ function columns(installId: string): ObjectColumn<ListenerSetRow>[] {
     { id: "kind", header: columnCopy.kind, width: "140px", sortKey: "kind", secondary: true, cell: (r) => r.ref.kind },
     { id: "parent", header: columnCopy.parentGateway, cell: (r) => <NameCell r={r.parent} installId={installId} /> },
     { id: "listeners", header: columnCopy.listeners, width: "100px", cell: (r) => r.listeners },
+    {
+      // The server sorts ListenerSets by name, kind and health only (design §7.2).
+      id: "routes",
+      header: viewACopy.routesColumn,
+      headerExtra: routesHeaderExtra,
+      width: "150px",
+      cell: (r) => <RoutesCell routes={r.routes} disagreements={r.disagreements} />,
+    },
   ];
 }
 const rowRef = (r: ListenerSetRow) => r.ref;

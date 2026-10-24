@@ -1,11 +1,19 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useId, useState } from "react";
-import type { Condition, ParentStatus, SpecParentRef } from "../../../api/types";
-import { routeCopy } from "../../../copy/explorer";
+import type {
+  ComputedAttachment,
+  Condition,
+  ListenerAttachment,
+  ParentStatus,
+  SpecParentRef,
+} from "../../../api/types";
+import { listenerCopy, routeCopy, viewACopy } from "../../../copy/explorer";
+import { ComputedBadge, NotVerified } from "../../../explore/ComputedBadge";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
-import { TextButton } from "../../../states/controls";
+import { objectPath } from "../../../explore/objectPath";
+import { InlineLink, TextButton } from "../../../states/controls";
 import { asText } from "./refs";
 
 // region Styles
@@ -51,9 +59,89 @@ const Card = styled.article<{ stylesOverride?: SerializedStyles }>`
   }
   ${(p) => p.stylesOverride}
 `;
+const Computed = styled.div`
+  display: grid;
+  gap: ${(p) => p.theme.space(1)};
+  font-size: ${(p) => p.theme.font.size.sm};
+  .label {
+    color: ${(p) => p.theme.color.textMuted};
+  }
+  ul {
+    display: grid;
+    gap: ${(p) => p.theme.space(2)};
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  li {
+    display: grid;
+    gap: 2px;
+  }
+  .line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px ${(p) => p.theme.space(2)};
+    overflow-wrap: anywhere;
+  }
+`;
 const Toggle = styled(TextButton)`
   justify-self: start;
 `;
+
+// region Helpers
+/** One listener the parentRef attaches to: a Gateway listener opens the Gateway page with it selected (design §8.1). */
+function ListenerItem({ installId, l }: { installId: string; l: ListenerAttachment }) {
+  const to = l.resource.kind === "Gateway" ? objectPath(installId, l.resource) : undefined;
+  // Hostnames are sent only when checked or disagrees; there an absent or empty list means any hostname.
+  const known = l.computed.state === "checked" || l.computed.state === "disagrees";
+  const hosts = l.effectiveHostnames?.length ? l.effectiveHostnames.join(", ") : listenerCopy.anyHostname;
+  return (
+    <li data-testid={`computed-listener-${l.listener}`}>
+      <span className="line">
+        {to ? (
+          <InlineLink to={`${to}?listener=${encodeURIComponent(l.listener)}`}>{l.listener}</InlineLink>
+        ) : (
+          l.listener
+        )}
+        <ComputedBadge computed={l.computed} />
+      </span>
+      {known ? (
+        <span className="line">
+          <span>
+            <span className="label">{viewACopy.effectiveHostnames}:</span> {hosts}
+          </span>
+          {/* Which hostnames, unlike the count, no status reports (rules §8.4). */}
+          <NotVerified testId="hostnames-not-verified" />
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
+/** View A's result for the parentRef: outcome and explanation, then the listeners it attaches to. */
+function ComputedResult({ installId, a }: { installId: string; a: ComputedAttachment }) {
+  return (
+    <Computed>
+      <div className="line" data-testid="computed-outcome">
+        <span className="label">{viewACopy.computedOutcome}:</span>
+        {a.outcome ? <span>{viewACopy.outcomes[a.outcome] ?? a.outcome}</span> : null}
+        <ComputedBadge computed={a.computed} />
+        {a.explanation ? <span>{a.explanation}</span> : null}
+      </div>
+      {a.listeners.length ? (
+        <>
+          <span className="label">{viewACopy.computedListeners}</span>
+          <ul>
+            {a.listeners.map((l) => (
+              <ListenerItem key={`${l.resource.kind}/${l.resource.name}/${l.listener}`} installId={installId} l={l} />
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </Computed>
+  );
+}
 
 // region Component
 interface ParentCardProps {
@@ -66,6 +154,8 @@ interface ParentCardProps {
   hasDelegation: boolean;
   /** The entries' ref is in no spec parentRef: "implicit" when parentRefs is empty, else "unlisted". */
   origin?: "implicit" | "unlisted";
+  /** View A's result for this parentRef (2.3); only Gateway and ListenerSet parentRefs have one. */
+  attachment?: ComputedAttachment;
   stylesOverride?: SerializedStyles;
 }
 
@@ -77,6 +167,7 @@ export function ParentCard({
   generation,
   hasDelegation,
   origin,
+  attachment,
   stylesOverride,
 }: ParentCardProps) {
   const [open, setOpen] = useState(false);
@@ -123,6 +214,7 @@ export function ParentCard({
       ) : (
         <span className="hint">{routeCopy.noOwnStatus}</span>
       )}
+      {attachment ? <ComputedResult installId={installId} a={attachment} /> : null}
       {others.length ? (
         <>
           <Toggle

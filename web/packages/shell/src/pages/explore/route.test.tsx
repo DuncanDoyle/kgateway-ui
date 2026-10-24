@@ -117,7 +117,8 @@ it("hostnames or inherited text for a child", async () => {
   serve(api());
   const first = mount(MID);
   await loaded();
-  expect(screen.getByText("mid.example.com")).toBeInTheDocument();
+  // The route's own hostnames; the parent card's effective hostnames repeat it.
+  expect(screen.getAllByText("mid.example.com").length).toBeGreaterThan(0);
   first.unmount();
 
   const child = detail(routeGolden);
@@ -542,4 +543,79 @@ it("a stale Backend condition shows the unknown icon, not Configuration accepted
   expect(c).toHaveTextContent("Accepted: True");
   expect(c).toHaveTextContent("Describes an older generation of the Backend.");
   expect(within(c).queryByTestId("health-icon-healthy")).toBeNull();
+});
+
+// region View A (2.3)
+it("parent card lists computed listeners, each with its own effective hostnames marked Not checked by the controller", async () => {
+  const d = detail(routeGolden);
+  const a = d.attachments?.[0];
+  if (!a) throw new Error("golden has no attachment");
+  const first = a.result.listeners[0];
+  if (!first) throw new Error("golden has no listener");
+  a.result.listeners.push({
+    ...structuredClone(first),
+    listener: "https",
+    effectiveHostnames: ["mid.example.com", "www.example.com"],
+  });
+  serve(api({ mid: d }));
+  mount(MID);
+  await loaded();
+  const card = screen.getByRole("article", { name: "Parent infra/edge" });
+  const http = within(card).getByTestId("computed-listener-http");
+  const https = within(card).getByTestId("computed-listener-https");
+  expect(http).toHaveTextContent("mid.example.com");
+  expect(http).not.toHaveTextContent("www.example.com");
+  expect(https).toHaveTextContent("mid.example.com, www.example.com");
+  for (const l of [http, https]) {
+    expect(within(l).getByTestId("computed-badge")).toBeInTheDocument();
+    expect(within(l).getByTestId("hostnames-not-verified")).toHaveTextContent("Not checked by the controller");
+  }
+  // The listener links to the Gateway page with that listener selected.
+  expect(within(http).getByRole("link", { name: "http" })).toHaveAttribute(
+    "href",
+    `/i/${ID}/gateways/infra/edge?listener=http`,
+  );
+  // The parentRef's computed outcome, with its own badge.
+  expect(within(card).getByTestId("computed-outcome")).toHaveTextContent("Accepted");
+});
+
+it("a parent card's unknown or restricted listener shows no hostnames", async () => {
+  const d = detail(routeGolden);
+  const a = d.attachments?.[0];
+  if (!a) throw new Error("golden has no attachment");
+  a.result = {
+    listeners: [],
+    computed: { by: "ui", rules: "kgateway-2.4", rule: "hostname-intersection", state: "restricted" },
+  };
+  serve(api({ mid: d }));
+  mount(MID);
+  await loaded();
+  const card = screen.getByRole("article", { name: "Parent infra/edge" });
+  const outcome = within(card).getByTestId("computed-outcome");
+  expect(outcome).toHaveTextContent("Hidden: depends on objects you cannot view");
+  expect(within(card).queryByTestId("hostnames-not-verified")).toBeNull();
+});
+
+it("a failed parentRef shows its computed explanation", async () => {
+  const d = detail(routeGolden);
+  const a = d.attachments?.[0];
+  if (!a) throw new Error("golden has no attachment");
+  a.result = {
+    outcome: "NoMatchingListenerHostname",
+    listeners: [],
+    explanation: "listener https has *.example.org; route has shop.example.com",
+    computed: {
+      by: "ui",
+      rules: "kgateway-2.4",
+      rule: "hostname-intersection",
+      state: "checked",
+      coverage: ["status-compatible"],
+    },
+  };
+  serve(api({ mid: d }));
+  mount(MID);
+  await loaded();
+  const outcome = within(screen.getByRole("article", { name: "Parent infra/edge" })).getByTestId("computed-outcome");
+  expect(outcome).toHaveTextContent("listener https has *.example.org; route has shop.example.com");
+  expect(within(outcome).getByTestId("computed-badge")).toHaveTextContent("Status agrees");
 });

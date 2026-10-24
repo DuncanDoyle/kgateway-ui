@@ -11,12 +11,19 @@ import { Tooltip } from "../shell/Tooltip";
 import type { HealthState } from "../theme/tokens";
 
 // region Styles
-const Wrap = styled.span<{ $stylesOverride?: SerializedStyles }>`
+const Wrap = styled.span<{ $stylesOverride?: SerializedStyles; $compact?: boolean }>`
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: ${(p) => p.theme.space(1)} ${(p) => p.theme.space(2)};
   font-size: ${(p) => p.theme.font.size.sm};
+  ${(p) =>
+    p.$compact
+      ? `flex-wrap: nowrap; max-width: 100%; min-width: 0;
+         & > * { flex: none; }
+         & > [data-item] { flex: 0 1 auto; min-width: 0; }
+         [data-text] { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }`
+      : ""}
   ${(p) => p.$stylesOverride}
 `;
 const Chip = styled.span`
@@ -46,6 +53,7 @@ const Chip = styled.span`
 `;
 const Item = styled.span<{ $state?: HealthState }>`
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: ${(p) => p.theme.space(1.5)};
   font-weight: ${(p) => p.theme.font.weight.semibold};
@@ -139,33 +147,59 @@ function stateItems(c: Computed, stale: boolean): Shown[] {
 }
 
 // region Component
+interface ComputedChipProps {
+  /** The tooltip: which rule computed the fact, and in compact form its state too. */
+  label: string;
+}
+
+/** The outlined "Computed" chip alone, e.g. in a column header whose cells are computed. */
+export function ComputedChip({ label }: ComputedChipProps) {
+  return (
+    <Tooltip label={label} placement="start" wrap>
+      {/* Focusable so keyboard users can read the tooltip. */}
+      <Chip tabIndex={0}>
+        <Calculator size={12} strokeWidth={2.5} aria-hidden="true" />
+        {computedCopy.chip}
+      </Chip>
+    </Tooltip>
+  );
+}
+
 interface ComputedBadgeProps {
   computed: Computed;
+  /** One line for a table cell: the state text is cut with an ellipsis and the chip's tooltip carries it in full. */
+  compact?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
 /** Marks a fact the UI computed: an outlined "Computed" chip whose tooltip names the rule, then its check state and note. */
-export function ComputedBadge({ computed, stylesOverride }: ComputedBadgeProps) {
+export function ComputedBadge({ computed, compact, stylesOverride }: ComputedBadgeProps) {
   const stale = useContext(StaleView);
-  const tip = computedTooltip(computed);
+  const items = stateItems(computed, stale);
   // Restricted carries no note on the wire; never show one even if sent (design §7.4).
   const note = computed.state === "restricted" ? undefined : computed.note;
+  const tip = computedTooltip(computed);
+  const full = compact ? [tip, ...items.map((s) => s.text), ...(note ? [note] : [])].join(". ") : tip;
   return (
-    <Wrap data-testid="computed-badge" $stylesOverride={stylesOverride}>
-      <Tooltip label={tip} placement="start" wrap>
-        {/* Focusable so keyboard users can read the tooltip. */}
-        <Chip tabIndex={0}>
-          <Calculator size={12} strokeWidth={2.5} aria-hidden="true" />
-          {computedCopy.chip}
-        </Chip>
-      </Tooltip>
-      {stateItems(computed, stale).map((s) => (
-        <Item key={s.key} $state={s.state} data-testid={`computed-state-${s.key}`}>
+    <Wrap data-testid="computed-badge" $compact={compact} $stylesOverride={stylesOverride}>
+      <ComputedChip label={full} />
+      {items.map((s) => (
+        <Item key={s.key} $state={s.state} data-item="" data-testid={`computed-state-${s.key}`}>
           {s.icon}
-          {s.text}
+          <span data-text="">{s.text}</span>
         </Item>
       ))}
-      {note ? <Note>{note}</Note> : null}
+      {note && !compact ? <Note>{note}</Note> : null}
     </Wrap>
+  );
+}
+
+/** "Not checked by the controller" with the neutral icon, for a computed value no check covers (e.g. hostnames). */
+export function NotVerified({ testId }: { testId?: string }) {
+  return (
+    <Item data-testid={testId}>
+      <NeutralIcon glyph={Minus} kind="neutral" />
+      <span data-text="">{computedCopy.coverage["not-verified"]}</span>
+    </Item>
   );
 }

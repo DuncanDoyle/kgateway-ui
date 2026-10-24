@@ -1,15 +1,17 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
+import gatewayRestrictedGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail-restricted.json";
 import lsGolden from "../../../../../../pkg/api/testdata/golden/listenerset-detail.json";
 import lsAllowedGolden from "../../../../../../pkg/api/testdata/golden/listenerset-detail-allowed.json";
 import lsInvalidGolden from "../../../../../../pkg/api/testdata/golden/listenerset-detail-invalid.json";
 import listenersetsGolden from "../../../../../../pkg/api/testdata/golden/listenersets.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
+import routesByListenerGolden from "../../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import { POLL_MS } from "../../api/hooks";
-import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList } from "../../api/types";
+import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList, RouteRow } from "../../api/types";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
@@ -65,7 +67,13 @@ function api(over: { gateway?: GatewayDetail; ls?: ListenerSetDetail } = {}) {
 
 function Where() {
   const loc = useLocation();
-  return <output data-testid="location">{loc.pathname + loc.search}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{loc.pathname + loc.search}</output>
+      <button type="button" data-testid="back" onClick={() => navigate(-1)} />
+    </>
+  );
 }
 const location = () => screen.getByTestId("location").textContent ?? "";
 
@@ -94,18 +102,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("Gateway page shows status-only listener counts", async () => {
+it("Gateway page shows the status count and the computed count side by side", async () => {
   serve(api());
   mount(GW_PATH);
   const listeners = await screen.findByRole("table", { name: "Listeners" });
-  // attachedRoutes as the controller wrote them; no computed column in 2.2.
   const headers = within(listeners)
     .getAllByRole("columnheader")
     .map((h) => h.textContent);
-  expect(headers).toContain("Attached routes");
-  expect(headers.join(" ")).not.toMatch(/omputed/);
-  expect(within(rowOf(listeners, "http")).getByText("6")).toBeInTheDocument();
-  expect(within(rowOf(listeners, "https")).getByText("0")).toBeInTheDocument();
+  expect(headers).toEqual(expect.arrayContaining(["Attached routes", "Computed routes"]));
+  expect(within(rowOf(listeners, "https")).getAllByText("0")).toHaveLength(2);
   // A listener the controller has not written status for says so, with no number.
   const fresh = rowOf(listeners, "new");
   expect(within(fresh).getByText("No status")).toBeInTheDocument();
@@ -284,7 +289,7 @@ it("failed-route table has Not accepted, Waiting for status and Namespace not wa
   // The Why cell is one line; its full text is in the Tooltip, on keyboard focus.
   const why = within(rowOf(failed, "rejected")).getByText("UnsupportedValue").closest("[tabindex]") as HTMLElement;
   expect([getComputedStyle(why).whiteSpace, getComputedStyle(why).textOverflow]).toEqual(["nowrap", "ellipsis"]);
-  for (let i = 0; i < 80 && document.activeElement !== why; i++) await userEvent.tab();
+  for (let i = 0; i < 160 && document.activeElement !== why; i++) await userEvent.tab();
   expect(why).toHaveFocus();
   expect(screen.getByRole("tooltip")).toHaveTextContent("UnsupportedValue unsupported filter type");
   why.blur();
@@ -660,4 +665,269 @@ it("the hidden-routes line shows once for the route sections, and single pages h
   expect(screen.getAllByText("You cannot view 2 routes in this install.")).toHaveLength(1);
   expect(table("Routes not attached").parentElement).toHaveTextContent("You cannot view 2 routes");
   expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+});
+
+// region View A (2.3)
+const EDGE = `${GW}/Gateway/infra/edge`;
+const edgeRef = { group: GW, kind: "Gateway", namespace: "infra", name: "edge", link: "detail" as const };
+const byListener = (): RouteList =>
+  structuredClone({ ...(routesByListenerGolden.body as RouteList), collectedAt: now() });
+/** byListener's rows with effective hostnames on listener name of edge. */
+function members(name: string, hosts: Record<string, string[]>): RouteList {
+  const b = byListener();
+  for (const r of b.items)
+    for (const p of r.parents)
+      for (const l of p.computed?.listeners ?? []) {
+        l.listener = name;
+        if (hosts[r.ref.name]) l.effectiveHostnames = hosts[r.ref.name];
+      }
+  return b;
+}
+const unplaced = (): RouteList => {
+  const r = structuredClone(byListener().items[0] as RouteRow);
+  r.ref = { ...r.ref, name: "stream", kind: "TCPRoute" };
+  r.flags = ["accepted", "listener-unknown"];
+  r.parents = [
+    {
+      ref: edgeRef,
+      attachment: "accepted",
+      computed: {
+        listeners: [],
+        computed: {
+          by: "ui",
+          rules: "kgateway-2.4",
+          rule: "allowed-routes",
+          state: "unknown",
+          reason: "setting-unknown",
+        },
+      },
+    },
+  ];
+  return { install: ID, items: [r], total: 1, collectedAt: now() };
+};
+/** The default API, with routes?listener= answered from the view A goldens. */
+function viewA(over: { gateway?: GatewayDetail } = {}) {
+  const base = api(over);
+  return (u: URL): Reply | undefined => {
+    const l = u.searchParams.get("listener");
+    if (u.pathname === `${API}/routes` && l === "_unknown") return unplaced();
+    if (u.pathname === `${API}/routes` && l)
+      return members(l, { api: ["api.example.com"], cart: ["cart.example.com"] });
+    return base(u);
+  };
+}
+const listenerGroup = () => screen.getByRole("group", { name: "Routes by listener" });
+const pick = (name: string | RegExp) => userEvent.click(within(listenerGroup()).getByRole("button", { name }));
+
+it("listener table shows the status count and the computed count with its check", async () => {
+  serve(api());
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  const http = rowOf(listeners, "http");
+  // Status count and computed count: both 6, the computed one with its badge and check.
+  expect(within(http).getAllByText("6")).toHaveLength(2);
+  const badge = within(http).getByTestId("computed-badge");
+  expect(badge).toHaveTextContent("Computed");
+  expect(within(badge).getByText("Count agrees with the controller")).toBeInTheDocument();
+  expect(within(badge).getByTestId("health-icon-healthy")).toBeInTheDocument();
+  // Pending: the number with its waiting state.
+  expect(within(rowOf(listeners, "https")).getByText("Waiting for the controller")).toBeInTheDocument();
+});
+
+it("a disagreeing listener shows both numbers and the warning icon with text", async () => {
+  serve(api());
+  mount(GW_PATH);
+  const drift = rowOf(await screen.findByRole("table", { name: "Listeners" }), "drift");
+  expect(within(drift).getByText("7")).toBeInTheDocument();
+  expect(within(drift).getByText("6")).toBeInTheDocument();
+  const badge = within(drift).getByTestId("computed-badge");
+  expect(within(badge).getByTestId("health-icon-warning")).toBeInTheDocument();
+  expect(badge).toHaveTextContent(/disagrees with the controller/);
+});
+
+it("unknown and restricted listeners show no number", async () => {
+  serve(api({ gateway: { ...(gatewayRestrictedGolden.body as GatewayDetail), collectedAt: now() } }));
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  const cell = (name: string) => within(rowOf(listeners, name)).getByTestId("computed-cell");
+  // tcp: unknown with its reason; http (a Selector over a hidden Namespace): restricted. Neither has a number.
+  expect(cell("tcp")).toHaveTextContent("Unknown: a controller setting cannot be read");
+  expect(cell("tcp")).not.toHaveTextContent(/\d/);
+  expect(cell("http")).toHaveTextContent("Hidden: depends on objects you cannot view");
+  expect(cell("http")).not.toHaveTextContent(/\d/);
+});
+
+it("controller values carry no badge", async () => {
+  serve(api());
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  for (const name of ["http", "https", "new", "drift", "tcp"]) {
+    const row = rowOf(listeners, name);
+    // One badge per row, in the computed cell; status, name, port and the attached count have none.
+    expect(within(row).getAllByTestId("computed-badge")).toHaveLength(1);
+    expect(within(within(row).getByTestId("computed-cell")).getByTestId("computed-badge")).toBeInTheDocument();
+  }
+  expect(within(screen.getByTestId("detail-header")).queryByTestId("computed-badge")).toBeNull();
+  expect(screen.getByRole("region", { name: "Conditions" }).querySelector("[data-testid=computed-badge]")).toBeNull();
+  // The failed-route table's reason and message are the controller's: no badge without an explanation.
+  const failed = await screen.findByRole("table", { name: "Routes not attached" });
+  await within(failed).findByText("rejected");
+  expect(within(rowOf(failed, "rejected")).queryByTestId("computed-badge")).toBeNull();
+});
+
+it("a shared plain-HTTP port shows the isolation note", async () => {
+  const g = gateway();
+  g.listeners = g.listeners.map((l) => (l.name === "http" ? { ...l, isolationNote: true } : l));
+  serve(api({ gateway: g }));
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  const note = within(rowOf(listeners, "http")).getByLabelText("Envoy may serve fewer hostnames on this listener");
+  expect(note).toHaveAttribute("tabindex", "0");
+  expect(within(rowOf(listeners, "drift")).queryByLabelText(/fewer hostnames/)).toBeNull();
+  await userEvent.click(within(rowOf(listeners, "http")).getByRole("button", { name: /Show conditions/ }));
+  expect(screen.getByTestId("listener-http-details")).toHaveTextContent(
+    "Envoy may serve fewer hostnames on this listener",
+  );
+});
+
+it("selecting a listener sets ?listener= and filters attached routes to its members", async () => {
+  serve(viewA());
+  mount(GW_PATH);
+  await screen.findByRole("table", { name: "Attached routes" });
+  await pick("drift");
+  await waitFor(() => expect(location()).toBe(`${GW_PATH}?listener=drift`));
+  const t = await screen.findByRole("table", { name: "Routes on listener drift" });
+  await within(t).findByText("api");
+  // The request names the parent and the listener, and nothing else (strict params, §7.2).
+  const q = listCalls("routes").at(-1) as URL;
+  expect([...q.searchParams.entries()]).toEqual([
+    ["parent", EDGE],
+    ["listener", "drift"],
+  ]);
+  // Effective hostnames per row, each computed.
+  expect(within(rowOf(t, "api")).getByText("api.example.com")).toBeInTheDocument();
+  expect(within(rowOf(t, "cart")).getByText("cart.example.com")).toBeInTheDocument();
+  expect(within(rowOf(t, "api")).getByTestId("computed-badge")).toBeInTheDocument();
+  expect(within(listenerGroup()).getByRole("button", { name: "drift" })).toHaveAttribute("aria-pressed", "true");
+  // Back clears it.
+  await userEvent.click(screen.getByTestId("back"));
+  await waitFor(() => expect(location()).toBe(GW_PATH));
+  expect(await screen.findByRole("table", { name: "Attached routes" })).toBeInTheDocument();
+  expect(within(listenerGroup()).getByRole("button", { name: "All listeners" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+it("?listener= survives reload", async () => {
+  serve(viewA());
+  mount(`${GW_PATH}?listener=drift`);
+  const t = await screen.findByRole("table", { name: "Routes on listener drift" });
+  await within(t).findByText("api");
+  // The unfiltered attached-routes query is never sent for a selected listener.
+  for (const u of listCalls("routes").filter((x) => x.searchParams.get("attachment") === "accepted"))
+    expect(u.searchParams.get("listener")).not.toBeNull();
+  expect(listCalls("routes").some((u) => u.searchParams.get("listener") === "drift")).toBe(true);
+});
+
+it("listener=_unknown lists the routes the UI could not place", async () => {
+  serve(viewA());
+  mount(GW_PATH);
+  await screen.findByRole("table", { name: "Attached routes" });
+  await pick("Not placed");
+  await waitFor(() => expect(location()).toBe(`${GW_PATH}?listener=_unknown`));
+  const t = await screen.findByRole("table", { name: "Routes the UI could not place" });
+  await within(t).findByText("stream");
+  expect(within(rowOf(t, "stream")).getByText("Unknown: a controller setting cannot be read")).toBeInTheDocument();
+  expect(listCalls("routes").at(-1)?.searchParams.get("listener")).toBe("_unknown");
+});
+
+it("an unknown-count listener shows the unknown state and its reason, never an empty table", async () => {
+  serve(viewA());
+  mount(`${GW_PATH}?listener=tcp`);
+  const box = await screen.findByTestId("listener-routes-unknown");
+  expect(box).toHaveTextContent("Unknown: a controller setting cannot be read");
+  expect(screen.queryByRole("table", { name: "Routes on listener tcp" })).toBeNull();
+  expect(within(box).getByRole("link", { name: /All routes of this Gateway/ })).toHaveAttribute(
+    "href",
+    `/i/${ID}/routes?parent=${encodeURIComponent(EDGE)}`,
+  );
+  // No member query for a listener whose count is unknown.
+  expect(listCalls("routes").some((u) => u.searchParams.get("listener") === "tcp")).toBe(false);
+});
+
+it("a restricted listener shows its state, not an empty table", async () => {
+  serve(viewA({ gateway: { ...(gatewayRestrictedGolden.body as GatewayDetail), collectedAt: now() } }));
+  mount(`${GW_PATH}?listener=http`);
+  const box = await screen.findByTestId("listener-routes-unknown");
+  expect(box).toHaveTextContent("Hidden: depends on objects you cannot view");
+  expect(screen.queryByRole("table", { name: "Routes on listener http" })).toBeNull();
+});
+
+it("an older server without the listener filter gets no selector and no listener param", async () => {
+  const base = viewA();
+  serve((u) => (u.pathname === "/api/v1/meta" ? { ...metaGolden.body, filters: undefined } : base(u)));
+  mount(`${GW_PATH}?listener=drift`);
+  const t = await screen.findByRole("table", { name: "Attached routes" });
+  await within(t).findByText("cart");
+  expect(screen.queryByRole("group", { name: "Routes by listener" })).toBeNull();
+  for (const u of listCalls("routes")) expect(u.searchParams.has("listener")).toBe(false);
+});
+
+it("failed-route rows show the computed explanation", async () => {
+  const explanation = "listener https has *.example.org; route has shop.example.com";
+  const base = api();
+  serve((u) => {
+    const b = base(u);
+    if (u.pathname !== `${API}/routes`) return b;
+    const list = structuredClone(b as RouteList);
+    for (const r of list.items)
+      if (r.ref.name === "rejected")
+        for (const p of r.parents)
+          if (p.computed) p.computed = { ...p.computed, outcome: "NoMatchingListenerHostname", explanation };
+    return list;
+  });
+  mount(GW_PATH);
+  const failed = await screen.findByRole("table", { name: "Routes not attached" });
+  await within(failed).findByText("rejected");
+  const row = rowOf(failed, "rejected");
+  expect(within(row).getByText(explanation)).toBeInTheDocument();
+  expect(within(row).getByTestId("computed-badge")).toBeInTheDocument();
+});
+
+it("ListenerSet page shows computed counts per listener", async () => {
+  const l = ls(lsInvalidGolden);
+  l.listeners = l.listeners.map((x, i) => ({
+    ...x,
+    computedRoutes: i + 2,
+    computed: { by: "ui", rules: "kgateway-2.4", rule: "listener-count", state: "checked", coverage: ["count-agrees"] },
+  }));
+  serve(api({ ls: l }));
+  mount(LS_PATH("partial"));
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  const first = l.listeners[0]?.name ?? "";
+  const cell = within(rowOf(listeners, first)).getByTestId("computed-cell");
+  expect(cell).toHaveTextContent("2");
+  expect(within(cell).getByText("Count agrees with the controller")).toBeInTheDocument();
+  // The listener selector is the Gateway page's (design §8.1).
+  expect(screen.queryByRole("group", { name: "Routes by listener" })).toBeNull();
+});
+
+describe.each([controlRoomLight, controlRoomDark])("view A interactive styles in $id", (theme) => {
+  it("listener chips and the isolation note have hover, active and focus-visible styles", async () => {
+    const g = gateway();
+    g.listeners = g.listeners.map((l) => (l.name === "http" ? { ...l, isolationNote: true } : l));
+    serve(viewA({ gateway: g }));
+    mount(`${GW_PATH}?listener=tcp`, theme.id);
+    const box = await screen.findByTestId("listener-routes-unknown");
+    const els = [
+      within(listenerGroup()).getByRole("button", { name: "http" }),
+      within(box).getByRole("link", { name: /All routes/ }),
+    ];
+    for (const el of els)
+      for (const pseudo of [":hover", ":active", ":focus-visible"])
+        expect(pseudoRules(el, pseudo).join("").length, `${el.textContent} ${pseudo}`).toBeGreaterThan(0);
+    const note = screen.getByLabelText("Envoy may serve fewer hostnames on this listener");
+    expect(pseudoRules(note, ":focus-visible").join("").length).toBeGreaterThan(0);
+  });
 });
