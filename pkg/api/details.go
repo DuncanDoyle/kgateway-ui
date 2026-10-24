@@ -31,6 +31,7 @@ type detail struct {
 	ix *explore.Index
 	v  *view
 	l  linker
+	f  facts
 }
 
 // startDetail finds the install, or writes 503 or 404.
@@ -44,7 +45,8 @@ func (h *handler) startDetail(w http.ResponseWriter, r *http.Request) *detail {
 		ix = &explore.Index{}
 	}
 	v := h.view(r)
-	return &detail{h: h, r: r, p: p, i: i, ix: ix, v: v, l: linkerFor(v, p.Model, i)}
+	l := linkerFor(v, p.Model, i)
+	return &detail{h: h, r: r, p: p, i: i, ix: ix, v: v, l: l, f: facts{ix: ix, v: v, l: l}}
 }
 
 // open returns the object ref names and its candidate block when the
@@ -125,8 +127,9 @@ func groupKinds(gks []objects.GroupKind) []objects.GroupKind {
 	return gks
 }
 
-// listeners joins spec listeners with their status blocks by name.
-func listeners(u *unstructured.Unstructured, ls []objects.Listener, st []objects.ListenerStatus) []ListenerDTO {
+// listeners joins resource u's spec listeners with their status blocks by
+// name and adds view A's counts.
+func (d *detail) listeners(u *unstructured.Unstructured, ls []objects.Listener, st []objects.ListenerStatus) []ListenerDTO {
 	out := make([]ListenerDTO, 0, len(ls))
 	for _, l := range ls {
 		dto := ListenerDTO{Name: l.Name, Port: l.Port, Protocol: l.Protocol, Hostname: l.Hostname, AllowedRoutes: AllowedRoutesDTO{
@@ -142,6 +145,7 @@ func listeners(u *unstructured.Unstructured, ls []objects.Listener, st []objects
 			s := st[j]
 			dto.Status = &ListenerStatusDTO{AttachedRoutes: s.AttachedRoutes, SupportedKinds: groupKinds(s.SupportedKinds), Conditions: conditions(u, s.Conditions)}
 		}
+		d.f.listener(objects.RefOf(u), &dto)
 		out = append(out, dto)
 	}
 	return out
@@ -165,8 +169,8 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 		v, st = objects.DecodeGateway(u), explore.RowState(ref, d.i.Health)
 	}
 	writeJSON(w, GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
-		Health: st, Candidate: cand, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
-		Listeners: listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
+		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
+		Listeners: d.listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
 		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)})
 }
 
@@ -225,7 +229,7 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	parent := v.Parent.Ref()
 	out := ListenerSetDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: listeners(u, v.Listeners, v.ListenerStatus),
+		Candidate: cand, RuleSet: d.ix.RuleSet, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
 		RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && k.ExperimentalOnly(d.i.Resolved.KgatewayVersion()) {
 		out.ExperimentalHint = experimentalHint(k)
@@ -267,24 +271,46 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	var v *objects.HTTPRouteView
 	var st health.State
-	if id, ok := d.ix.Row(ref); ok && d.ix.Routes[id].View != nil {
+	id, row := d.ix.Row(ref)
+	if row && d.ix.Routes[id].View != nil {
 		v, st = d.ix.Routes[id].View, d.ix.Routes[id].State
 	} else {
 		v, st = objects.DecodeHTTPRoute(u), explore.RowState(ref, d.i.Health)
 	}
 	out := RouteDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
+		Candidate: cand, RuleSet: d.ix.RuleSet, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok {
 		b := v.InheritParentMatcher
 		out.Annotations.InheritParentMatcher = &b
 	}
+	if row {
+		out.Attachments = d.attachments(id, v.ParentRefs)
+	}
 	for _, rule := range v.Rules {
 		out.Rules = append(out.Rules, d.rule(ref, rule))
 	}
 	out.Ancestors, out.AncestorsTruncated = d.ancestors(ref)
 	writeJSON(w, out)
+}
+
+// attachments is view A for each Gateway or ListenerSet parentRef of route
+// row id, in parentRef order; nil when none was computed.
+func (d *detail) attachments(id explore.RowID, refs []objects.ParentRef) []RouteAttachment {
+	fs := d.ix.Routes[id].Computed
+	if len(fs) == 0 {
+		return nil
+	}
+	out := make([]RouteAttachment, 0, len(fs))
+	for i := range fs {
+		f := &fs[i]
+		if f.Out.ParentRef >= len(refs) {
+			continue
+		}
+		out = append(out, RouteAttachment{ParentRef: refs[f.Out.ParentRef], Index: f.Out.ParentRef, Target: d.l.linked(f.Out.Resource), Result: d.f.attachment(f)})
+	}
+	return out
 }
 
 // specParents is a route's spec parentRefs, each linked like a status target.

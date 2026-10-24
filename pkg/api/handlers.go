@@ -132,6 +132,7 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 		}
 		resp.Views = explore.DetailKinds(m.Served)
 	}
+	resp.Filters = addedFilters
 	writeJSON(w, resp)
 }
 

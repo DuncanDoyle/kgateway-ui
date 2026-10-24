@@ -17,6 +17,8 @@ type view struct {
 	r    *http.Request
 	all  bool
 	seen map[objects.Ref]bool
+	// deps memoises allowDeps per index of the request's dependency table: 1 visible, -1 hidden.
+	deps []int8
 }
 
 // view returns the view of the caller of r.
@@ -48,6 +50,31 @@ func (v *view) visible() func(objects.Ref) bool {
 		return nil
 	}
 	return v.can
+}
+
+// allowDeps reports whether the caller may view every dependency in d
+// (design §7.4 rule 4). Answers are memoised per ref index; under AllowAll it
+// is true without calls (rule 10). A view serves one index.
+func (v *view) allowDeps(ix *explore.Index, d explore.DepSet) bool {
+	if v.all {
+		return true
+	}
+	if v.deps == nil {
+		v.deps = make([]int8, len(ix.Refs))
+	}
+	for _, i := range d {
+		switch v.deps[i] {
+		case -1:
+			return false
+		case 0:
+			if !v.can(ix.Ref(i)) {
+				v.deps[i] = -1
+				return false
+			}
+			v.deps[i] = 1
+		}
+	}
+	return true
 }
 
 // anyOf reports whether the caller may view at least one of refs.

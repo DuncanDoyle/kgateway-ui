@@ -114,6 +114,8 @@ type ParentLink struct {
 	Cond *metav1.Condition
 	// Pending is why the status entry is not current, for a pending link.
 	Pending string
+	// Spec is the index of Ref in the row's spec parentRefs, or -1.
+	Spec int
 }
 
 // RouteRow is one route the install lists (design §3.5): an owned route,
@@ -275,6 +277,14 @@ type RefFacts struct {
 	// Check is the route-accepted cross-check of the ref's report key, shared with the views; nil when none.
 	Check *computed.CheckResult
 	Deps  DepSet
+}
+
+// Facts returns view A's facts for parent link l of row id, or nil.
+func (ix *Index) Facts(id RowID, l ParentLink) *RefFacts {
+	if l.Spec < 0 {
+		return nil
+	}
+	return ix.Routes[id].facts(l.Spec, l.Target)
 }
 
 // Ref returns the ref at index i of the dependency table.

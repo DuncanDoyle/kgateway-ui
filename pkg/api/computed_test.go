@@ -1,0 +1,510 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"reflect"
+	"slices"
+	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+const (
+	edgeParent  = "parent=gateway.networking.k8s.io/Gateway/infra/edge"
+	underEdge   = listBase + "/routes?" + edgeParent
+	unknownNote = "Controller version unknown; using the 2.4 rules"
+)
+
+// lst is a plain HTTP listener admitting routes from every namespace.
+func lst(name string, port int32, hostname string) objects.Listener {
+	return objects.Listener{Name: name, Port: port, Protocol: "HTTP", Hostname: hostname,
+		AllowedRoutes: objects.AllowedRoutes{Namespaces: objects.RouteNamespaces{From: "All"}}}
+}
+
+// up is a current, accepted listener status entry reporting attached routes.
+func up(name string, attached int32) testutil.Listener {
+	return testutil.Listener{Name: name, Attached: attached, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}}
+}
+
+// edgeWith is infra/edge with the given spec listeners and status entries.
+func edgeWith(spec []objects.Listener, status ...testutil.Listener) *unstructured.Unstructured {
+	return testutil.GatewayWithListeners("infra", "edge", "kgateway", spec, status...)
+}
+
+// viewAWorld is world with gw as infra/edge, without shop/cart, plus extra.
+func viewAWorld(gw *unstructured.Unstructured, extra ...runtime.Object) []runtime.Object {
+	var out []runtime.Object
+	for _, o := range world() {
+		if u, ok := o.(*unstructured.Unstructured); ok && u.GetNamespace() != "blog" {
+			switch {
+			case u.GetKind() == "Gateway" && u.GetName() == "edge":
+				o = gw
+			case u.GetKind() == "HTTPRoute" && u.GetName() == "cart":
+				continue
+			}
+		}
+		out = append(out, o)
+	}
+	return append(out, extra...)
+}
+
+// sectionRef is a parentRef to infra/edge's listener name.
+func sectionRef(name string) objects.ParentRef {
+	r := edgeRef
+	r.SectionName = name
+	return r
+}
+
+// rejectedBy is a current Accepted=False status entry with reason.
+func rejectedBy(p objects.ParentRef, reason string) testutil.RouteParent {
+	return testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionFalse, reason), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
+}
+
+// hostWorld: edge has http (no hostname) and https (*.example.org); shop/multi
+// names edge, edge's https and the HTTPRoute shop/api, and attaches to both listeners.
+func hostWorld() []runtime.Object {
+	gw := edgeWith([]objects.Listener{lst("http", 8080, ""), lst("https", 443, "*.example.org")}, up("http", 1), up("https", 2))
+	multi := testutil.WithHostnames(testutil.HTTPRoute("shop", "multi", []objects.ParentRef{edgeRef, sectionRef("https"), apiRef},
+		testutil.AcceptedBy(edgeRef, testutil.Controller), testutil.AcceptedBy(sectionRef("https"), testutil.Controller)),
+		"shop.example.org", "shop.example.com")
+	return viewAWorld(gw, multi, testutil.HTTPRoute("shop", "api", nil))
+}
+
+// Design §7.5: a rejected route's row carries view A's outcome and explanation.
+func TestRouteListCarriesAttachment(t *testing.T) {
+	gw := edgeWith([]objects.Listener{lst("http", 8080, ""), lst("https", 443, "*.example.org")}, up("http", 0), up("https", 0))
+	cart := testutil.WithHostnames(testutil.HTTPRoute("shop", "cart", []objects.ParentRef{sectionRef("https")},
+		rejectedBy(sectionRef("https"), "NoMatchingListenerHostname")), "shop.example.com")
+	_, srv, _ := startWith(t, setup{}, viewAWorld(gw, cart)...)
+	p := get[map[string]any](t, srv, underEdge+"&attachment=not-accepted&limit=2", 200)
+	items := p["items"].([]any)
+	if len(items) != 1 || p["total"] != 1.0 {
+		t.Fatalf("items %v", items)
+	}
+	row := items[0].(map[string]any)
+	got := row["parents"].([]any)[0].(map[string]any)["computed"]
+	want := decode(t, `{"outcome": "NoMatchingListenerHostname", "listeners": [],
+		"explanation": "listener https has *.example.org; route has shop.example.com",
+		"computed": {"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection", "state": "checked", "coverage": ["status-compatible"]}}`)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parents[0].computed:\n%v\nwant\n%v", got, want)
+	}
+	if !reflect.DeepEqual(row["flags"], []any{"not-accepted"}) {
+		t.Errorf("flags %v", row["flags"])
+	}
+}
+
+func TestRouteDetailAttachments(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, hostWorld()...)
+	d := get[RouteDetail](t, srv, routeDetail+"shop/multi", 200)
+	if d.RuleSet != "kgateway-2.4" || len(d.Attachments) != 2 {
+		t.Fatalf("ruleSet %q, attachments %+v", d.RuleSet, d.Attachments)
+	}
+	notVerified := []string{"count-agrees", "status-compatible", "not-verified"}
+	for i, want := range []struct {
+		ref       objects.ParentRef
+		listeners []string
+		hosts     [][]string
+		coverage  []string
+	}{
+		{edgeRef, []string{"http", "https"}, [][]string{{"shop.example.org", "shop.example.com"}, {"shop.example.org"}}, notVerified},
+		{sectionRef("https"), []string{"https"}, [][]string{{"shop.example.org"}}, []string{"count-agrees", "status-compatible"}},
+	} {
+		a := d.Attachments[i]
+		if a.Index != i || a.ParentRef != want.ref || a.Target.Ref != edgeRef.Ref() || a.Target.Link != LinkDetail ||
+			a.Result.Outcome != "accepted" || a.Result.Explanation != "" || len(a.Result.Listeners) != len(want.listeners) {
+			t.Fatalf("attachment %d: %+v", i, a)
+		}
+		if c := a.Result.Computed; c.By != "ui" || c.Rules != "kgateway-2.4" || c.Rule != "hostname-intersection" || c.State != "checked" ||
+			!slices.Equal(c.Coverage, []string{"status-compatible"}) || c.Reason != "" || c.Note != "" {
+			t.Errorf("attachment %d computed %+v", i, c)
+		}
+		for j, l := range a.Result.Listeners {
+			if l.Listener != want.listeners[j] || l.Resource.Ref != edgeRef.Ref() || !slices.Equal(l.EffectiveHostnames, want.hosts[j]) ||
+				l.Computed.State != "checked" || !slices.Equal(l.Computed.Coverage, want.coverage) {
+				t.Errorf("attachment %d listener %d: %+v", i, j, l)
+			}
+		}
+	}
+	// The list row carries the same result per status parent.
+	row := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/multi")
+	if len(row.Parents) != 2 || row.Parents[1].Computed == nil || !reflect.DeepEqual(*row.Parents[1].Computed, d.Attachments[1].Result) {
+		t.Errorf("row parents %+v", row.Parents)
+	}
+}
+
+// stateWorld has one listener per check state: ok agrees, bad disagrees,
+// stale reports for an old generation; wide gets the 2.4 isolation note from narrow.
+func stateWorld() []runtime.Object {
+	stale := up("stale", 0)
+	for i := range stale.Conds {
+		stale.Conds[i].ObservedGeneration = 0
+	}
+	gw := edgeWith([]objects.Listener{lst("ok", 8080, ""), lst("bad", 8081, ""), lst("stale", 8082, ""), lst("wide", 8083, ""), lst("narrow", 8083, "x.example.com")},
+		up("ok", 1), up("bad", 1), stale, up("wide", 0), up("narrow", 0))
+	return viewAWorld(gw, testutil.HTTPRoute("shop", "cart", []objects.ParentRef{sectionRef("ok")}, testutil.AcceptedBy(sectionRef("ok"), testutil.Controller)))
+}
+
+// unknownScope is objs with the controller's scope read from a ConfigMap, so it is unknown.
+func unknownScope(objs []runtime.Object) []runtime.Object {
+	env := corev1.EnvVar{Name: install.DiscoveryNamespaceSelectorsEnv, ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1, env)
+	out := slices.Clone(objs)
+	for i, o := range out {
+		switch v := o.(type) {
+		case *appsv1.Deployment:
+			if v.Name == "kgateway" {
+				out[i] = d
+			}
+		case *corev1.Pod:
+			if v.Name == "kgateway-0" {
+				out[i] = testutil.ControllerPod(d, "kgateway-0", true)
+			}
+		}
+	}
+	return out
+}
+
+func TestGatewayDetailListenerStates(t *testing.T) {
+	_, srv, _ := startWith(t, setup{disputes: true}, stateWorld()...)
+	d := get[GatewayDetail](t, srv, gwDetail, 200)
+	if d.RuleSet != "kgateway-2.4" || len(d.Listeners) != 5 {
+		t.Fatalf("ruleSet %q, listeners %d", d.RuleSet, len(d.Listeners))
+	}
+	ls := map[string]ListenerDTO{}
+	for _, l := range d.Listeners {
+		ls[l.Name] = l
+		if l.Computed == nil || l.Computed.By != "ui" || l.Computed.Rules != "kgateway-2.4" || l.Computed.Rule != "listener-count" {
+			t.Errorf("%s: computed %+v", l.Name, l.Computed)
+		}
+	}
+	for _, want := range []struct {
+		name     string
+		routes   int
+		state    string
+		coverage []string
+		note     bool
+	}{
+		{"ok", 1, "checked", []string{"count-agrees"}, false},
+		{"bad", 0, "disagrees", nil, false},
+		{"stale", 0, "pending", nil, false},
+		{"wide", 0, "checked", []string{"count-agrees"}, true},
+		{"narrow", 0, "checked", []string{"count-agrees"}, false},
+	} {
+		l := ls[want.name]
+		if l.ComputedRoutes == nil || *l.ComputedRoutes != want.routes || l.Computed.State != want.state ||
+			!slices.Equal(l.Computed.Coverage, want.coverage) || l.IsolationNote != want.note || l.Computed.Reason != "" {
+			t.Errorf("%s: routes %v, computed %+v, isolationNote %v", want.name, l.ComputedRoutes, l.Computed, l.IsolationNote)
+		}
+	}
+	// A disagreement sends both numbers.
+	if bad := ls["bad"]; bad.Status == nil || bad.Status.AttachedRoutes != 1 {
+		t.Errorf("bad status %+v", bad.Status)
+	}
+	g := get[Page[GatewayListRow]](t, srv, listBase+"/gateways?q=edge", 200).Items[0]
+	if g.Routes == nil || *g.Routes != 1 || g.Disagreements != 1 {
+		t.Errorf("gateway row routes %v, disagreements %d", g.Routes, g.Disagreements)
+	}
+
+	t.Run("unknown", func(t *testing.T) {
+		_, srv, _ := startWith(t, setup{disputes: true}, unknownScope(stateWorld())...)
+		for _, l := range get[GatewayDetail](t, srv, gwDetail, 200).Listeners {
+			if c := l.Computed; c == nil || c.State != "unknown" || c.Reason != string(computed.UnknownScope) || l.ComputedRoutes != nil || l.IsolationNote || c.Coverage != nil {
+				t.Errorf("%s: routes %v, computed %+v", l.Name, l.ComputedRoutes, c)
+			}
+		}
+		row := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/cart")
+		if a := row.Parents[0].Computed; a == nil || a.Outcome != "" || len(a.Listeners) != 0 || a.Computed.State != "unknown" || a.Computed.Reason != "scope-unknown" {
+			t.Errorf("unknown ref %+v", a)
+		}
+		if g := get[Page[GatewayListRow]](t, srv, listBase+"/gateways?q=edge", 200).Items[0]; g.Routes != nil {
+			t.Errorf("unknown counts give no routes: %v", *g.Routes)
+		}
+	})
+}
+
+func TestListenerParam(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, hostWorld()...)
+	for _, q := range []string{
+		"/routes?listener=http", "/routes?listener=http&parent=gateway.networking.k8s.io/HTTPRoute/shop/api",
+		"/routes?listener=&" + edgeParent, "/routes?listener=http&listener=https&" + edgeParent, "/gateways?listener=http",
+	} {
+		getErr(t, srv, listBase+q, 400)
+	}
+	if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=_unknown", 200); p.Total != 0 {
+		t.Errorf("_unknown: %v", routeNames(p))
+	}
+	for _, l := range []string{"http", "https"} {
+		if p := get[Page[RouteRow]](t, srv, underEdge+"&listener="+l, 200); p.Total != 1 || !slices.Equal(routeNames(p), []string{"shop/multi"}) {
+			t.Errorf("listener=%s: %v", l, routeNames(p))
+		}
+	}
+	if m := get[MetaResponse](t, srv, "/api/v1/meta", 200); !reflect.DeepEqual(m.Filters, map[string][]string{"routes": {"listener"}}) {
+		t.Errorf("meta filters %v", m.Filters)
+	}
+}
+
+func TestMemberCoverage(t *testing.T) {
+	count := computed.CheckResult{Coverage: []computed.Coverage{computed.CoverageCount}}
+	status := computed.CheckResult{Coverage: []computed.Coverage{computed.CoverageStatus}}
+	for _, tc := range []struct {
+		listener, ref computed.CheckResult
+		matched       int
+		want          []computed.Coverage
+	}{
+		{count, status, 1, []computed.Coverage{"count-agrees", "status-compatible"}},
+		{count, status, 2, []computed.Coverage{"count-agrees", "status-compatible", "not-verified"}},
+		{computed.CheckResult{}, status, 1, []computed.Coverage{"status-compatible"}},
+		{computed.CheckResult{}, computed.CheckResult{}, 1, []computed.Coverage{"not-verified"}},
+	} {
+		if got := memberCoverage(tc.listener, tc.ref, tc.matched); !slices.Equal(got, tc.want) {
+			t.Errorf("memberCoverage(%v, %v, %d) = %v, want %v", tc.listener.Coverage, tc.ref.Coverage, tc.matched, got, tc.want)
+		}
+	}
+}
+
+// selectorWorld: edge's only listener sel selects namespaces with zone=in.
+// shop has it, so shop/cart is a member; infra does not, so infra/odd, which
+// the controller accepted, has no listener and disagrees. sel reports 2 for 1.
+func selectorWorld() []runtime.Object {
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	objs := viewAWorld(edgeWith([]objects.Listener{sel}, up("sel", 2)),
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		testutil.HTTPRoute("infra", "odd", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": "in"})
+		}
+	}
+	return objs
+}
+
+// hideNamespaces denies every Namespace object and nothing else.
+var hideNamespaces = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "Namespace" })
+
+func flagged(r RouteRow, f string) bool { return slices.Contains(r.Flags, f) }
+
+// Design §9.1 (2.3): a Selector over a hidden Namespace restricts membership,
+// count and check; listener-unknown follows the caller (rule 6); health,
+// row states and disagreements do not (rule 9).
+func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
+	_, all, _ := startWith(t, setup{disputes: true}, selectorWorld()...)
+	_, some, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, selectorWorld()...)
+	full, hid := get[Page[RouteRow]](t, all, underEdge, 200), get[Page[RouteRow]](t, some, underEdge, 200)
+	for _, name := range []string{"shop/cart", "infra/odd"} {
+		a, h := routeByName(t, full, name), routeByName(t, hid, name)
+		if c := a.Parents[0].Computed; c == nil || c.Computed.State == "restricted" {
+			t.Errorf("%s unrestricted: %+v", name, c)
+		}
+		c := h.Parents[0].Computed
+		if c == nil || c.Outcome != "" || len(c.Listeners) != 0 || c.Explanation != "" ||
+			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", Rule: a.Parents[0].Computed.Computed.Rule, State: "restricted"}) {
+			t.Errorf("%s restricted: %+v", name, c)
+		}
+		if a.Health != h.Health {
+			t.Errorf("%s health %s, restricted %s", name, a.Health, h.Health)
+		}
+	}
+	if !flagged(routeByName(t, full, "infra/odd"), "listener-unknown") || flagged(routeByName(t, hid, "infra/odd"), "listener-unknown") {
+		t.Errorf("listener-unknown per caller: %v / %v", routeByName(t, full, "infra/odd").Flags, routeByName(t, hid, "infra/odd").Flags)
+	}
+	const unknownState = listBase + "/routes?state=listener-unknown"
+	if a, h := get[Page[RouteRow]](t, all, unknownState, 200), get[Page[RouteRow]](t, some, unknownState, 200); a.Total != 1 || h.Total != 0 {
+		t.Errorf("state=listener-unknown: %v / %v", routeNames(a), routeNames(h))
+	}
+	ad, hd := get[GatewayDetail](t, all, gwDetail, 200), get[GatewayDetail](t, some, gwDetail, 200)
+	if l := ad.Listeners[0]; l.ComputedRoutes == nil || *l.ComputedRoutes != 1 || l.Computed.State != "disagrees" {
+		t.Errorf("sel unrestricted: %v %+v", l.ComputedRoutes, l.Computed)
+	}
+	if l := hd.Listeners[0]; l.ComputedRoutes != nil || l.Computed == nil ||
+		!reflect.DeepEqual(*l.Computed, Computed{By: "ui", Rules: "kgateway-2.4", Rule: "listener-count", State: "restricted"}) || l.Status.AttachedRoutes != 2 {
+		t.Errorf("sel restricted: %v %+v", l.ComputedRoutes, l.Computed)
+	}
+	if ad.Health != hd.Health {
+		t.Errorf("gateway health %s, restricted %s", ad.Health, hd.Health)
+	}
+	if a, h := get[HealthResponse](t, all, base+"/health", 200), get[HealthResponse](t, some, base+"/health", 200); a.State != h.State || !reflect.DeepEqual(a.Counts, h.Counts) {
+		t.Errorf("install health %s %v, restricted %s %v", a.State, a.Counts, h.State, h.Counts)
+	}
+	// Disagreements count every check, as health does; routes is restricted.
+	ag, hg := get[Page[GatewayListRow]](t, all, listBase+"/gateways?q=edge", 200).Items[0], get[Page[GatewayListRow]](t, some, listBase+"/gateways?q=edge", 200).Items[0]
+	if ag.Routes == nil || *ag.Routes != 1 || hg.Routes != nil || ag.Disagreements != 1 || hg.Disagreements != 1 || ag.Health != hg.Health {
+		t.Errorf("gateway rows %+v / %+v", ag, hg)
+	}
+}
+
+// Design §9.1: listener= over a hidden Selector Namespace answers as when
+// those facts are unknown; deniedInInstall takes no filter.
+func TestListenerFilterCannotProbe(t *testing.T) {
+	_, all, _ := startWith(t, setup{disputes: true}, selectorWorld()...)
+	_, some, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, selectorWorld()...)
+	_, unknown, _ := startWith(t, setup{disputes: true}, unknownScope(selectorWorld())...)
+	const q = underEdge + "&listener=sel"
+	if p := get[Page[RouteRow]](t, all, q, 200); !slices.Equal(routeNames(p), []string{"shop/cart"}) || p.Total != 1 {
+		t.Fatalf("unrestricted: %v total %d", routeNames(p), p.Total)
+	}
+	h, u := get[Page[RouteRow]](t, some, q, 200), get[Page[RouteRow]](t, unknown, q, 200)
+	if len(h.Items) != len(u.Items) || h.Total != u.Total || h.Total != 0 || h.Next != "" {
+		t.Errorf("restricted %v total %d; unknown %v total %d", routeNames(h), h.Total, routeNames(u), u.Total)
+	}
+	for _, p := range []string{listBase + "/routes", underEdge, q} {
+		if d := get[Page[RouteRow]](t, some, p, 200).DeniedInInstall; d != h.DeniedInInstall {
+			t.Errorf("%s: deniedInInstall %d, with listener %d", p, d, h.DeniedInInstall)
+		}
+	}
+}
+
+// memberWorld: edge's http has shop/cart; ListenerSet ls1's extra has shop/via-ls.
+func memberWorld() []runtime.Object {
+	ls := admitAll(testutil.ListenerSet("infra", "ls1", edgeRef, nil, up("extra", 1)))
+	return viewAWorld(edgeWith([]objects.Listener{lst("http", 8080, "")}, up("http", 1)), ls,
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		testutil.HTTPRoute("shop", "via-ls", []objects.ParentRef{ls1Ref}, testutil.AcceptedBy(ls1Ref, testutil.Controller)))
+}
+
+// Rule 5: a hidden member restricts its listener's count and the row's routes;
+// a Gateway counts its own listeners only. Rule 10: AllowAll asks nothing.
+func TestHiddenMemberRestrictsCounts(t *testing.T) {
+	routes := func(srv string, p Page[GatewayListRow], ls Page[ListenerSetRow]) (gw, set *int) {
+		t.Helper()
+		if len(p.Items) != 1 || len(ls.Items) != 1 {
+			t.Fatalf("%s: rows %d / %d", srv, len(p.Items), len(ls.Items))
+		}
+		return p.Items[0].Routes, ls.Items[0].Routes
+	}
+	n := func(p *int) int {
+		if p == nil {
+			return -1
+		}
+		return *p
+	}
+	for _, tc := range []struct {
+		name   string
+		hidden string
+		gw, ls int
+	}{{"all visible", "", 1, 1}, {"gateway member hidden", "cart", -1, 1}, {"listenerset member hidden", "via-ls", 1, -1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != tc.hidden })
+			_, srv, _ := startWith(t, setup{authz: authz}, memberWorld()...)
+			gw, set := routes(tc.name, get[Page[GatewayListRow]](t, srv, listBase+"/gateways?q=edge", 200), get[Page[ListenerSetRow]](t, srv, listBase+"/listenersets", 200))
+			if n(gw) != tc.gw || n(set) != tc.ls {
+				t.Errorf("routes: gateway %d, listenerset %d", n(gw), n(set))
+			}
+			l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]
+			if n(l.ComputedRoutes) != tc.gw || (tc.gw < 0) != (l.Computed.State == "restricted") {
+				t.Errorf("gateway listener %v %+v", l.ComputedRoutes, l.Computed)
+			}
+			x := get[ListenerSetDetail](t, srv, lsDetail+"infra/ls1", 200)
+			if l := x.Listeners[0]; n(l.ComputedRoutes) != tc.ls || (tc.ls < 0) != (l.Computed.State == "restricted") || x.RuleSet != "kgateway-2.4" {
+				t.Errorf("listenerset listener %v %+v", l.ComputedRoutes, l.Computed)
+			}
+		})
+	}
+	t.Run("AllowAll", func(t *testing.T) {
+		a := &countingAuthz{all: true}
+		_, srv, _ := startWith(t, setup{authz: a}, memberWorld()...)
+		_, ref, _ := startWith(t, setup{}, memberWorld()...)
+		for _, p := range []string{underEdge, underEdge + "&listener=http", listBase + "/routes?state=listener-unknown", listBase + "/gateways",
+			listBase + "/listenersets", gwDetail, lsDetail + "infra/ls1", routeDetail + "shop/cart", routeDetail + "shop/via-ls"} {
+			if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
+				t.Errorf("GET %s differs from AllowAll", p)
+			}
+			if n := len(a.take()); n != 0 {
+				t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
+			}
+		}
+	})
+}
+
+// Rule 7: KGWUI-012 on a visible object whose evidence names a hidden one
+// is listed with its detail replaced.
+func TestKGWUI012EvidenceRestricted(t *testing.T) {
+	kgwui012 := func(t *testing.T, srv string, h HealthResponse, on string) FindingDTO {
+		t.Helper()
+		for _, f := range findingsOn(h, on) {
+			if f.Code == health.CodeComputedDisagrees {
+				return f
+			}
+		}
+		t.Fatalf("%s: no KGWUI-012 on %s", srv, on)
+		return FindingDTO{}
+	}
+	for _, tc := range []struct {
+		name  string
+		objs  []runtime.Object
+		authz Authorizer
+		on    string
+	}{
+		// edge's http reports 2; the hidden candidate shop/cart is its only member.
+		{"hidden candidate route", viewAWorld(edgeWith([]objects.Listener{lst("http", 8080, "")}, up("http", 2)),
+			testutil.HTTPRoute("shop", "cart", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller))),
+			AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "cart" }), "infra/edge"},
+		{"hidden selector namespace", selectorWorld(), hideNamespaces, "infra/odd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, all, _ := startWith(t, setup{disputes: true}, tc.objs...)
+			_, some, _ := startWith(t, setup{disputes: true, authz: tc.authz}, tc.objs...)
+			if f := kgwui012(t, "all", get[HealthResponse](t, all, base+"/health", 200), tc.on); f.EvidenceRestricted || f.Detail == restrictedEvidence {
+				t.Errorf("unrestricted: %+v", f)
+			}
+			f := kgwui012(t, "some", get[HealthResponse](t, some, base+"/health", 200), tc.on)
+			if !f.EvidenceRestricted || f.Detail != restrictedEvidence || f.Restricted || f.Message == "" || f.Resource == nil || f.Resource.Link != LinkDetail {
+				t.Errorf("restricted: %+v", f)
+			}
+		})
+	}
+}
+
+// Every computed label carries the selection note of an unknown controller version.
+func TestNoteOnUnknownVersion(t *testing.T) {
+	_, srv, _ := startWith(t, setup{}, withControllerVersion("unknown", hostWorld())...)
+	var cs []Computed
+	add := func(a *Attachment) {
+		if a != nil {
+			cs = append(cs, a.Computed)
+			for _, l := range a.Listeners {
+				cs = append(cs, l.Computed)
+			}
+		}
+	}
+	for _, r := range get[Page[RouteRow]](t, srv, underEdge, 200).Items {
+		for _, p := range r.Parents {
+			add(p.Computed)
+		}
+	}
+	for _, a := range get[RouteDetail](t, srv, routeDetail+"shop/multi", 200).Attachments {
+		add(&a.Result)
+	}
+	for _, l := range get[GatewayDetail](t, srv, gwDetail, 200).Listeners {
+		if l.Computed != nil {
+			cs = append(cs, *l.Computed)
+		}
+	}
+	if len(cs) < 8 {
+		t.Fatalf("only %d computed labels", len(cs))
+	}
+	for _, c := range cs {
+		if c.Note != unknownNote || c.Rules != "kgateway-2.4" {
+			t.Errorf("computed %+v", c)
+		}
+	}
+	b, err := json.Marshal(cs[0])
+	if err != nil || !bytes.Contains(b, []byte(`"note":"`+unknownNote+`"`)) {
+		t.Errorf("wire %s", b)
+	}
+}

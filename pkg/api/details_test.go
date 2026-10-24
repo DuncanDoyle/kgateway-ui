@@ -102,7 +102,7 @@ func stepNames(p AncestorPathDTO) string {
 func TestRouteDetailDelegation(t *testing.T) {
 	_, srv, _ := startWith(t, setup{}, delegationWorld()...)
 	d := get[RouteDetail](t, srv, routeDetail+"shop/mid", 200)
-	if d.Install != "kgw.kgateway" || d.Ref.Ref != midRef.Ref() || d.Ref.Link != LinkDetail || d.Candidate != nil || d.Generation != 1 || d.RuleSet != "" {
+	if d.Install != "kgw.kgateway" || d.Ref.Ref != midRef.Ref() || d.Ref.Link != LinkDetail || d.Candidate != nil || d.Generation != 1 || d.RuleSet != "kgateway-2.4" {
 		t.Fatalf("header %+v", d)
 	}
 	if !slices.Equal(d.Hostnames, []string{"mid.example.com"}) || len(d.ParentRefs) != 7 || d.ParentRefs[0].ParentRef != edgeRef || d.Annotations.InheritParentMatcher != nil {
