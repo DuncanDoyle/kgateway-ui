@@ -7,7 +7,7 @@ import { computedCopy } from "../copy/explorer";
 import { StaleView } from "../health/staleView";
 import { pseudoRules, renderWithTheme } from "../test/render";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
-import { ComputedBadge } from "./ComputedBadge";
+import { ComputedBadge, computedTooltip } from "./ComputedBadge";
 
 const base: Computed = { by: "ui", rules: "kgateway-2.4", rule: "hostname-intersection", state: "checked" };
 const tip = "Computed by the UI from kgateway 2.4's attachment rules: hostname intersection";
@@ -87,28 +87,28 @@ it("restricted renders the placeholder and no value", () => {
   expect(icons()).toEqual(["computed-icon-restricted"]);
 });
 
-it("tooltip is reachable by keyboard and part of the accessible name", async () => {
+it("tooltip is reachable by keyboard and describes the chip", async () => {
   const user = userEvent.setup();
   renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["not-verified"] }} />);
-  const chip = screen.getByRole("button", { name: `Computed. ${tip}` });
+  const chip = within(badge()).getByText("Computed");
   expect(screen.queryByRole("tooltip")).toBeNull();
   await user.tab();
   expect(chip).toHaveFocus();
-  expect(screen.getByRole("tooltip")).toHaveTextContent(tip);
+  const tooltip = screen.getByRole("tooltip");
+  expect(tooltip).toHaveTextContent(tip);
+  expect(chip).toHaveAttribute("aria-describedby", tooltip.id);
+  expect(chip).toHaveAccessibleDescription(tip);
+  // Focusable text, not a control: nothing to press.
+  expect(screen.queryByRole("button")).toBeNull();
 });
 
 it("names the listener-count rule and falls back to the raw ids for unknown rules", () => {
-  const a = renderWithTheme(<ComputedBadge computed={{ ...base, rule: "listener-count" }} />);
-  expect(
-    screen.getByRole("button", {
-      name: "Computed. Computed by the UI from kgateway 2.4's attachment rules: listener route count",
-    }),
-  ).toBeInTheDocument();
-  a.unmount();
-  renderWithTheme(<ComputedBadge computed={{ ...base, rules: "other", rule: "x-rule" }} />);
-  expect(
-    screen.getByRole("button", { name: "Computed. Computed by the UI from other's rules: x-rule" }),
-  ).toBeInTheDocument();
+  expect(computedTooltip({ ...base, rule: "listener-count" })).toBe(
+    "Computed by the UI from kgateway 2.4's attachment rules: listener route count",
+  );
+  expect(computedTooltip({ ...base, rules: "other", rule: "x-rule" })).toBe(
+    "Computed by the UI from other's rules: x-rule",
+  );
 });
 
 it("shows the selection note", () => {
@@ -162,7 +162,7 @@ it("stale restricted and disagreeing facts turn unknown too", () => {
 describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => {
   it("the chip has hover, active and focus-visible styles", () => {
     renderWithTheme(<ComputedBadge computed={base} />, { themeId: t.id });
-    const chip = screen.getByRole("button");
+    const chip = within(badge()).getByText("Computed");
     expect(pseudoRules(chip, ":hover").join()).toContain(`border-color:${t.color.text}`);
     expect(pseudoRules(chip, ":active").join()).toContain(t.color.accentText);
     expect(pseudoRules(chip, ":focus-visible").join()).toContain(t.color.focus);

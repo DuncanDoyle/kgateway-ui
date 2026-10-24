@@ -19,7 +19,7 @@ const Wrap = styled.span<{ $stylesOverride?: SerializedStyles }>`
   font-size: ${(p) => p.theme.font.size.sm};
   ${(p) => p.$stylesOverride}
 `;
-const Chip = styled.button`
+const Chip = styled.span`
   display: inline-flex;
   align-items: center;
   gap: ${(p) => p.theme.space(1)};
@@ -27,9 +27,7 @@ const Chip = styled.button`
   height: 20px;
   border: 1px solid ${(p) => p.theme.color.borderStrong};
   border-radius: ${(p) => p.theme.radius.sm};
-  background: transparent;
   color: ${(p) => p.theme.color.text};
-  font: inherit;
   font-size: ${(p) => p.theme.font.size.xs};
   font-weight: ${(p) => p.theme.font.weight.semibold};
   cursor: help;
@@ -146,7 +144,7 @@ interface ComputedBadgeProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** Marks a fact the UI computed: an outlined "Computed" chip naming its rule, then its check state and note. */
+/** Marks a fact the UI computed: an outlined "Computed" chip whose tooltip names the rule, then its check state and note. */
 export function ComputedBadge({ computed, stylesOverride }: ComputedBadgeProps) {
   const stale = useContext(StaleView);
   const tip = computedTooltip(computed);
@@ -155,7 +153,8 @@ export function ComputedBadge({ computed, stylesOverride }: ComputedBadgeProps) 
   return (
     <Wrap data-testid="computed-badge" $stylesOverride={stylesOverride}>
       <Tooltip label={tip} placement="start" wrap>
-        <Chip type="button" aria-label={`${computedCopy.chip}. ${tip}`}>
+        {/* Focusable so keyboard users can read the tooltip. */}
+        <Chip tabIndex={0}>
           <Calculator size={12} strokeWidth={2.5} aria-hidden="true" />
           {computedCopy.chip}
         </Chip>
