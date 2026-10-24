@@ -117,7 +117,8 @@ type ListenerCount struct {
 	Deps          []objects.Ref
 }
 
-// AttachmentResult is view A for one install.
+// AttachmentResult is view A for one install. Its Deps slices are read-only and
+// may be shared between entries: never sort or append to them in place.
 type AttachmentResult struct {
 	Members  []Member
 	Outcomes []RefOutcome
