@@ -60,14 +60,14 @@ func beRef(name string) map[string]any {
 func explorerWorld(extra ...runtime.Object) []runtime.Object {
 	cond := testutil.Cond
 	rejected := testutil.RouteParent{Ref: edgeRef, Controller: testutil.Controller, Conds: []metav1.Condition{
-		{Type: "Accepted", Status: metav1.ConditionFalse, Reason: "NotAllowedByListeners", Message: "no listener allows this kind", ObservedGeneration: 1, LastTransitionTime: metav1.NewTime(testutil.Now.Add(-time.Hour))},
+		{Type: "Accepted", Status: metav1.ConditionFalse, Reason: "UnsupportedValue", Message: "unsupported filter type", ObservedGeneration: 1, LastTransitionTime: metav1.NewTime(testutil.Now.Add(-time.Hour))},
 		cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
 	objs := []runtime.Object{
 		admitAll(testutil.ListenerSet("infra", "ls1", edgeRef, nil, testutil.Listener{Name: "extra", Attached: 1, Conds: []metav1.Condition{
 			cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionTrue, "Programmed")}})),
 		testutil.WithHostnames(testutil.HTTPRoute("shop", "via-ls", []objects.ParentRef{ls1Ref}, testutil.AcceptedBy(ls1Ref, testutil.Controller)), "ls.example.com"),
-		// A TCPRoute: no HTTP listener of edge admits its kind.
-		asKind("TCPRoute", testutil.HTTPRoute("shop", "rejected", []objects.ParentRef{edgeRef}, rejected)),
+		// Rejected by a later stage: view A computes accepted, which that reason does not dispute (rules §8.1).
+		testutil.HTTPRoute("shop", "rejected", []objects.ParentRef{edgeRef}, rejected),
 		testutil.HTTPRoute("shop", "pending", []objects.ParentRef{edgeRef}),
 		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 			backendRule([]any{testutil.DelegateTo("shop", "child")})),
@@ -246,8 +246,18 @@ func TestAttachmentSubFilters(t *testing.T) {
 	}
 	all := get[Page[RouteRow]](t, srv, listBase+"/routes?limit=200", 200)
 	rej := routeByName(t, all, "shop/rejected").Parents[0]
-	if rej.Attachment != "not-accepted" || rej.ConditionType != "Accepted" || rej.Reason != "NotAllowedByListeners" || rej.Message != "no listener allows this kind" {
+	if rej.Attachment != "not-accepted" || rej.ConditionType != "Accepted" || rej.Reason != "UnsupportedValue" || rej.Message != "unsupported filter type" {
 		t.Errorf("rejected parent %+v", rej)
+	}
+	// The row links to its detail page, which shows our controller's rejection.
+	if l := routeByName(t, all, "shop/rejected").Ref.Link; l != LinkDetail {
+		t.Errorf("rejected link %s", l)
+	}
+	d := get[RouteDetail](t, srv, routeDetail+"shop/rejected", 200)
+	if len(d.Parents) != 1 || !d.Parents[0].Ours || !slices.ContainsFunc(d.Parents[0].Conditions, func(c Condition) bool {
+		return c.Type == "Accepted" && c.Status == "False" && c.Reason == "UnsupportedValue"
+	}) {
+		t.Errorf("rejected detail parents %+v", d.Parents)
 	}
 	if pen := routeByName(t, all, "shop/pending").Parents[0]; pen.Attachment != "pending" || pen.Reason == "" || pen.ConditionType != "" {
 		t.Errorf("pending parent %+v", pen)

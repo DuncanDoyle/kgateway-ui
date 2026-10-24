@@ -104,7 +104,7 @@ it("Gateway page shows status-only listener counts", async () => {
     .map((h) => h.textContent);
   expect(headers).toContain("Attached routes");
   expect(headers.join(" ")).not.toMatch(/omputed/);
-  expect(within(rowOf(listeners, "http")).getByText("5")).toBeInTheDocument();
+  expect(within(rowOf(listeners, "http")).getByText("6")).toBeInTheDocument();
   expect(within(rowOf(listeners, "https")).getByText("0")).toBeInTheDocument();
   // A listener the controller has not written status for says so, with no number.
   const fresh = rowOf(listeners, "new");
@@ -280,13 +280,13 @@ it("failed-route table has Not accepted, Waiting for status and Namespace not wa
   expect(chips[0]).toHaveAttribute("aria-pressed", "true");
   // The deciding condition's reason as written, for this Gateway's parent entry.
   const failed = table("Routes not attached");
-  expect(within(rowOf(failed, "rejected")).getByText("NotAllowedByListeners")).toBeInTheDocument();
+  expect(within(rowOf(failed, "rejected")).getByText("UnsupportedValue")).toBeInTheDocument();
   // The Why cell is one line; its full text is in the Tooltip, on keyboard focus.
-  const why = within(rowOf(failed, "rejected")).getByText("NotAllowedByListeners").closest("[tabindex]") as HTMLElement;
+  const why = within(rowOf(failed, "rejected")).getByText("UnsupportedValue").closest("[tabindex]") as HTMLElement;
   expect([getComputedStyle(why).whiteSpace, getComputedStyle(why).textOverflow]).toEqual(["nowrap", "ellipsis"]);
   for (let i = 0; i < 80 && document.activeElement !== why; i++) await userEvent.tab();
   expect(why).toHaveFocus();
-  expect(screen.getByRole("tooltip")).toHaveTextContent("NotAllowedByListeners no listener allows this kind");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("UnsupportedValue unsupported filter type");
   why.blur();
   // A pending reason is ours, not the controller's: it is never shown as a code.
   expect(within(failed).queryByText("no status from the controller")).toBeNull();

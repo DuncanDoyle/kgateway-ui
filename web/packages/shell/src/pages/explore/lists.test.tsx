@@ -446,7 +446,7 @@ it("parent cells say how each parent took the route, in words", async () => {
   await screen.findByText("rejected");
   expect(within(rowOf("rejected")).getByText("Not accepted")).toBeInTheDocument();
   // The raw condition reason is never shown as a code.
-  expect(within(rowOf("rejected")).queryByText("NotAllowedByListeners")).toBeNull();
+  expect(within(rowOf("rejected")).queryByText("UnsupportedValue")).toBeNull();
   expect(within(rowOf("via-ls")).getByText(/on Gateway/)).toHaveTextContent("on Gateway infra/edge");
 });
 

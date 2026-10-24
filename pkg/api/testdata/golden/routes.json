@@ -272,8 +272,8 @@
           {
             "attachment": "not-accepted",
             "conditionType": "Accepted",
-            "message": "no listener allows this kind",
-            "reason": "NotAllowedByListeners",
+            "message": "unsupported filter type",
+            "reason": "UnsupportedValue",
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "Gateway",
@@ -285,8 +285,8 @@
         ],
         "ref": {
           "group": "gateway.networking.k8s.io",
-          "kind": "TCPRoute",
-          "link": "yaml",
+          "kind": "HTTPRoute",
+          "link": "detail",
           "name": "rejected",
           "namespace": "shop"
         }

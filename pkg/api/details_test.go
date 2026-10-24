@@ -251,7 +251,7 @@ func TestGatewayDetailListeners(t *testing.T) {
 		h.AllowedRoutes.Namespaces.Selector.MatchLabels["team"] != "a" || !slices.Equal(h.AllowedRoutes.Kinds, []objects.GroupKind{{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}}) {
 		t.Errorf("http %+v", h)
 	}
-	if h.Status == nil || h.Status.AttachedRoutes != 5 || len(h.Status.SupportedKinds) != 1 || len(h.Status.Conditions) != 1 || h.Status.Conditions[0].Stale {
+	if h.Status == nil || h.Status.AttachedRoutes != 6 || len(h.Status.SupportedKinds) != 1 || len(h.Status.Conditions) != 1 || h.Status.Conditions[0].Stale {
 		t.Errorf("http status %+v", h.Status)
 	}
 	if s.Hostname != "*.example.com" || s.TLS == nil || s.TLS.Mode != "Terminate" || len(s.TLS.CertificateRefs) != 1 ||
