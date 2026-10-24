@@ -2,16 +2,18 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { cloneElement, type ReactElement, useId, useRef, useState } from "react";
 
+type Placement = "start" | "center" | "end";
+
 // region Styles
 const Wrap = styled.span<{ stylesOverride?: SerializedStyles }>`
   position: relative;
   display: inline-flex;
   ${(p) => p.stylesOverride}
 `;
-const Tip = styled.span<{ $placement: "center" | "end"; $wrap?: boolean }>`
+const Tip = styled.span<{ $placement: Placement; $wrap?: boolean }>`
   position: absolute;
   top: calc(100% + 6px);
-  ${(p) => (p.$placement === "end" ? "right: 0;" : "left: 50%; transform: translateX(-50%);")}
+  ${(p) => ({ start: "left: 0;", end: "right: 0;", center: "left: 50%; transform: translateX(-50%);" })[p.$placement]}
   z-index: 20;
   padding: 4px 8px;
   border-radius: ${(p) => p.theme.radius.sm};
@@ -51,8 +53,8 @@ interface TooltipProps {
   label: string;
   /** A single focusable element; it gets aria-describedby while the tip shows. */
   children: ReactElement<{ "aria-describedby"?: string }>;
-  /** "end" aligns the tip's right edge with the trigger, for triggers at the window edge. */
-  placement?: "center" | "end";
+  /** "start" and "end" align the tip's left or right edge with the trigger, for triggers near a window edge. */
+  placement?: Placement;
   /** Long labels wrap inside a bounded width instead of one line. */
   wrap?: boolean;
   stylesOverride?: SerializedStyles;

@@ -487,4 +487,35 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(routeDetailGolden.body.parentRefs.every((p) => "target" in p)).toBe(true);
     expect(listenersetDetailAllowedGolden.body.parentAllowedListeners.set).toBe(true);
   });
+
+  // View A: every computed label the fixtures carry uses a state and coverage ComputedBadge renders.
+  it("covers view A labels: known states and coverage, restricted with no reason or note", () => {
+    const labels: Computed[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") {
+        for (const [k, x] of Object.entries(v)) {
+          if (k === "computed" && x && typeof x === "object" && "by" in x) labels.push(x as Computed);
+          walk(x);
+        }
+      }
+    };
+    walk([
+      routesByListenerGolden.body,
+      gatewayDetailRestrictedGolden.body,
+      gatewayDetailGolden.body,
+      routeDetailGolden.body,
+    ]);
+    const states: Computed["state"][] = ["checked", "disagrees", "pending", "unknown", "restricted"];
+    const coverage: NonNullable<Computed["coverage"]>[number][] = ["count-agrees", "status-compatible", "not-verified"];
+    expect(new Set(labels.map((c) => c.state))).toEqual(new Set(states));
+    expect(labels.some((c) => c.state === "unknown" && c.reason)).toBe(true);
+    for (const c of labels) {
+      expect(c.by).toBe("ui");
+      expect(states).toContain(c.state);
+      for (const v of c.coverage ?? []) expect(coverage).toContain(v);
+      if (c.state === "restricted") expect([c.reason, c.note]).toEqual([undefined, undefined]);
+    }
+    expect(meta.body.filters?.routes).toContain("listener");
+  });
 });

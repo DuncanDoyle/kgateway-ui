@@ -230,3 +230,36 @@ export const routeCopy = {
   toggleChildren: (open: boolean) => (open ? "Hide child routes" : "Show child routes"), // S92
   noChildRoutes: "No reported child routes.", // S93
 };
+
+// region Computed facts (2.3). Drafts S111–S133, for the wording pass (Task 48).
+export const computedCopy = {
+  chip: "Computed", // S111
+  tooltip: (ruleSet: string, family: string, rule: string) => `Computed by the UI from ${ruleSet}'s ${family}: ${rule}`, // S112
+  attachmentRules: "attachment rules", // S113
+  otherRules: "rules", // S114
+  ruleNames: {
+    "allowed-routes": "allowed routes", // S115
+    "section-and-port": "section name and port", // S116
+    "hostname-intersection": "hostname intersection", // S117
+    "listener-count": "listener route count", // S118
+  } as Record<string, string>,
+  coverage: {
+    "count-agrees": "Count agrees with the controller", // S119
+    "status-compatible": "Status agrees", // S120
+    "not-verified": "Not checked by the controller", // S121
+  },
+  pending: "Waiting for the controller", // S122
+  restricted: "Hidden: depends on objects you cannot view", // S123
+  disagrees: "The UI's computation disagrees with the controller. The controller's status is what counts.", // S124
+  unknownReasons: {
+    "scope-unknown": "Unknown: the install's scope is not known", // S125
+    "namespace-labels-unavailable": "Unknown: namespace labels cannot be read", // S126
+    "listenerset-no-status": "Unknown: the ListenerSet has no status yet", // S127
+    "setting-unknown": "Unknown: a controller setting cannot be read", // S128
+    "not-reached": "Unknown: no root route reaches this route", // S129
+    "context-unknown": "Unknown: a route above this one is unknown", // S130
+    "too-large": "Unknown: too large to compute", // S131
+  } as Record<string, string>,
+  unknownOther: (reason: string) => `Unknown: ${reason}`, // S132
+  stale: "Unknown: the data is stale", // S133
+};
