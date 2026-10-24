@@ -136,7 +136,7 @@ Two things narrow what Envoy serves without changing status or counts:
 View A shows status semantics. On 2.4, a plain-HTTP listener carries the note "Envoy may serve fewer hostnames on this listener" when another plain-HTTP listener on the same port of the same Gateway (its own listeners and those of its allowed ListenerSets, `appendHttpListener` V4:135-173) has a hostname inside this listener's and ranks above it in kgateway's precedence: empty < wildcard < exact, a wildcard with more labels first, equal hostnames never (`translator/listener/gateway_listener_translator.go` V4:700-747). So an empty-hostname listener is noted when any other has a hostname, and a `*.x` listener when another is an exact name ending in `.x` or a longer wildcard under `.x`. The count never changes **(our call)**.
 - Only listeners kgateway merges take part, so a listener whose current status is `Accepted=False` neither gives nor gets the note: kgateway drops rejected and conflicted listeners before merging (V4:62-63; `translator/listener/validation.go` V4:166, 518-546).
 - A ListenerSet without a current `Accepted` (§3.3), or whose parent Gateway is not known, neither gives nor gets the note: its listeners' counts are unknown **(our call)**.
-- A listener whose count is unknown, for any reason of §3.3, gets no note; under `scope-unknown` no listener does **(user, 2026-10-24)**.
+- A listener whose count is unknown, for any reason of §3.3, gets no note; under `scope-unknown` no listener does **(our call, 2.3; follows the user decision on scope-unknown, 2026-10-24)**.
 
 ### 4.6 Output
 
