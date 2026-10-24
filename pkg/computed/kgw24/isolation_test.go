@@ -89,3 +89,31 @@ func named(l objects.Listener, h string) objects.Listener {
 	l.Hostname = h
 	return l
 }
+
+// A listener whose count is unknown gets no note (any reason): under unknown
+// scope no listener is noted; with unavailable labels only the Selector
+// listener loses its note, and it still narrows the others.
+func TestIsolationNoteSkipsUnknownCounts(t *testing.T) {
+	sel := withFrom(lis("a", "HTTP", 8080), "Selector", map[string]string{"team": "web"})
+	g := gw("infra", "edge", sel, lis("b", "HTTP", 8080), named(lis("c", "HTTP", 8080), "c.example.com"))
+	rt := route("HTTPRoute", "infra", "r", pref(g, ""))
+	notes := func(in computed.AttachmentInput) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range New().Attachment(in).Counts {
+			out[c.Listener] = c.IsolationNote
+		}
+		return out
+	}
+	in := computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}}
+	if got := notes(in); !reflect.DeepEqual(got, map[string]bool{"a": false, "b": true, "c": false}) {
+		t.Fatalf("labels unavailable: %v", got)
+	}
+	in.NamespacesOK, in.NamespaceLabels = true, map[string]map[string]string{"infra": {"team": "web"}}
+	if got := notes(in); !reflect.DeepEqual(got, map[string]bool{"a": true, "b": true, "c": false}) {
+		t.Fatalf("labels known: %v", got)
+	}
+	in.ScopeUnknown = true
+	if got := notes(in); !reflect.DeepEqual(got, map[string]bool{"a": false, "b": false, "c": false}) {
+		t.Fatalf("scope unknown: %v", got)
+	}
+}

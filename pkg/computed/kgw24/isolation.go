@@ -61,7 +61,8 @@ func isolationNotes(in computed.AttachmentInput, res *computed.AttachmentResult)
 	})
 	for i := range res.Counts {
 		c := &res.Counts[i]
-		c.IsolationNote = noted[listenerKey{c.Resource, c.Listener}]
+		// An unknown count gets no note, whatever the reason.
+		c.IsolationNote = c.Unknown == "" && noted[listenerKey{c.Resource, c.Listener}]
 	}
 }
 
