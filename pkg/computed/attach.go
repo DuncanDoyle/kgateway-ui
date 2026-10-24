@@ -109,7 +109,9 @@ type ListenerCount struct {
 	Listener string
 	Count    int
 	Unknown  UnknownReason
-	Error    string
+	// Error is the listener's selector error. It is computed only: kgateway
+	// never reports it, and the §8 cross-check never compares it.
+	Error string
 	// IsolationNote marks a count that plain-HTTP listener isolation may not program (rules §4.5).
 	IsolationNote bool
 	Deps          []objects.Ref

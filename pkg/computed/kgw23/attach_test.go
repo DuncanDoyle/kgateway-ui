@@ -494,3 +494,111 @@ func BenchmarkAttachLarge(b *testing.B) {
 		New().Attachment(in)
 	}
 }
+
+func TestAttachUnknownCountsNarrowed(t *testing.T) {
+	// Labels unavailable: a ref naming another section cannot count on the Selector listener.
+	g := gw("shop", "edge",
+		withFrom(lis("sel", "HTTP", 80), "Selector", map[string]string{"team": "web"}),
+		lis("same", "HTTP", 81),
+	)
+	rt := route("HTTPRoute", "shop", "a", pref(g, "same"))
+	res := New().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}})
+	if c := count(t, res, g, "sel"); c.Unknown != "" || c.Count != 0 {
+		t.Errorf("sel count: %+v", c)
+	}
+	if c := count(t, res, g, "same"); c.Unknown != "" || c.Count != 1 {
+		t.Errorf("same count: %+v", c)
+	}
+
+	// Setting unknown: a TCPRoute whose port misses the TCP listener leaves its count known.
+	tg := gw("infra", "tcp", lis("tcp", "TCP", 9000))
+	ref := pref(tg, "")
+	ref.Port = 9001
+	tcp := route("TCPRoute", "infra", "t", ref)
+	tcp.ExperimentalOnly = true
+	res = run(computed.AttachmentInput{Resources: []computed.Resource{tg}, Routes: []computed.Route{tcp}, Experimental: expSetting("", false)})
+	if c := count(t, res, tg, "tcp"); c.Unknown != "" || c.Count != 0 {
+		t.Errorf("tcp count: %+v", c)
+	}
+	if o := outcome(t, res, tcp, 0); o.Unknown != computed.UnknownSetting {
+		t.Errorf("tcp outcome: %+v", o)
+	}
+}
+
+func TestAttachInvalidSelector(t *testing.T) {
+	l := lis("bad", "HTTP", 80)
+	l.AllowedRoutes.Namespaces.From = "Selector"
+	l.AllowedRoutes.Namespaces.Selector = &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "team", Operator: "Bogus"}}}
+	g := gw("infra", "edge", l)
+	rt := route("HTTPRoute", "infra", "r", pref(g, ""))
+	res := run(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}, NamespaceLabels: map[string]map[string]string{}})
+	c := count(t, res, g, "bad")
+	if c.Error == "" || c.Error == "selector must be set" || c.Count != 0 || c.Unknown != "" {
+		t.Errorf("count %+v", c)
+	}
+	o := outcome(t, res, rt, 0)
+	if o.Outcome != computed.OutcomeNotAllowed || !reflect.DeepEqual(o.Facts, []computed.Fact{fact("bad", computed.FactSelectorError, "", c.Error)}) {
+		t.Errorf("outcome %+v", o)
+	}
+}
+
+func TestAttachSettingUnknownBeforeLabels(t *testing.T) {
+	g := gw("infra", "edge", withFrom(lis("tcp", "TCP", 9000), "Selector", map[string]string{"team": "web"}))
+	tcp := route("TCPRoute", "infra", "t", pref(g, ""))
+	tcp.ExperimentalOnly = true
+	res := New().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{tcp}, Experimental: expSetting("", false)})
+	if o := outcome(t, res, tcp, 0); o.Unknown != computed.UnknownSetting {
+		t.Errorf("outcome %+v", o)
+	}
+}
+
+func TestAttachNoSelectorNoNamespaceDep(t *testing.T) {
+	g := gw("infra", "edge", withFrom(lis("all", "HTTP", 80), "All", nil))
+	rt := route("HTTPRoute", "shop", "r", pref(g, ""))
+	res := run(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}, NamespaceLabels: map[string]map[string]string{"shop": {}}})
+	want := []objects.Ref{g.Ref, rt.Ref}
+	if o := outcome(t, res, rt, 0); !sameRefs(o.Deps, want) {
+		t.Errorf("outcome deps %v", o.Deps)
+	}
+	if c := count(t, res, g, "all"); !sameRefs(c.Deps, want) {
+		t.Errorf("count deps %v", c.Deps)
+	}
+}
+
+// Results share Deps slices internally, but never across calls or with the input.
+func TestAttachResultsIndependent(t *testing.T) {
+	g := gw("infra", "edge", lis("a", "HTTP", 80), withFrom(lis("b", "HTTP", 81), "Selector", map[string]string{"team": "web"}))
+	rt := withHosts(route("HTTPRoute", "infra", "r", pref(g, ""), pref(g, "c")), "x.example.com")
+	in := computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt},
+		NamespaceLabels: map[string]map[string]string{"infra": {"team": "web"}}}
+	want := run(in)
+	got := run(in)
+	junk := objects.Ref{Name: "junk"}
+	for i := range got.Members {
+		for j := range got.Members[i].Deps {
+			got.Members[i].Deps[j] = junk
+		}
+		for j := range got.Members[i].Hostnames {
+			got.Members[i].Hostnames[j] = "junk"
+		}
+	}
+	for i := range got.Outcomes {
+		for j := range got.Outcomes[i].Deps {
+			got.Outcomes[i].Deps[j] = junk
+		}
+		for j := range got.Outcomes[i].Facts {
+			got.Outcomes[i].Facts[j].Want = "junk"
+		}
+		for j := range got.Outcomes[i].Listeners {
+			got.Outcomes[i].Listeners[j] = "junk"
+		}
+	}
+	for i := range got.Counts {
+		for j := range got.Counts[i].Deps {
+			got.Counts[i].Deps[j] = junk
+		}
+	}
+	if again := run(in); !reflect.DeepEqual(again, want) {
+		t.Errorf("mutating one result changed the next")
+	}
+}

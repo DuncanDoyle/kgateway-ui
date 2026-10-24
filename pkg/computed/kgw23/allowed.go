@@ -1,6 +1,8 @@
 package kgw23
 
 import (
+	"errors"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -69,18 +71,37 @@ type nsVerdict struct {
 // allowedRoutes.namespaces. resourceNS is the namespace of the Gateway or
 // ListenerSet that owns the listener (rules §4.2).
 func namespaces(l objects.Listener, resourceNS, routeNS string, nsLabels map[string]map[string]string, labelsOK bool) nsVerdict {
+	sel, err := parseSelector(l)
+	return namespacesParsed(l, sel, err, resourceNS, routeNS, nsLabels, labelsOK)
+}
+
+// parseSelector parses a Selector listener's selector once; a nil selector
+// gives the controller's error. Other listeners return nil, nil.
+func parseSelector(l objects.Listener) (labels.Selector, error) {
+	ns := l.AllowedRoutes.Namespaces
+	if ns.From != "Selector" {
+		return nil, nil
+	}
+	if ns.Selector == nil {
+		return nil, errSelectorUnset
+	}
+	return metav1.LabelSelectorAsSelector(ns.Selector)
+}
+
+// errSelectorUnset is the controller's error for From Selector without a selector.
+var errSelectorUnset = errors.New("selector must be set")
+
+// namespacesParsed is namespaces with the selector already parsed by parseSelector.
+func namespacesParsed(l objects.Listener, sel labels.Selector, selErr error, resourceNS, routeNS string,
+	nsLabels map[string]map[string]string, labelsOK bool,
+) nsVerdict {
 	switch l.AllowedRoutes.Namespaces.From {
 	case "All":
 		return nsVerdict{OK: true}
 	case "Selector":
 		v := nsVerdict{UsesSelector: true}
-		if l.AllowedRoutes.Namespaces.Selector == nil {
-			v.SelectorError = true
-			return v
-		}
-		// Parse first: an invalid selector is known even without labels.
-		sel, err := metav1.LabelSelectorAsSelector(l.AllowedRoutes.Namespaces.Selector)
-		if err != nil {
+		// An invalid selector is known even without labels.
+		if selErr != nil {
 			v.SelectorError = true
 			return v
 		}

@@ -1338,6 +1338,7 @@ func TestIntersect(t *testing.T) {
 **Interfaces:**
 - Consumes: Task 37 types; Task 38 helpers.
 - Produces: `func (Rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult` — rules §4.1 per Gateway and per `Accepted` ListenerSet (the `allowed` quirk exactly as written), §4.4 counts, §4.6 dependencies, one `Fact` per listener that failed for a non-accepted outcome. Sorted: Members by (resource, listener, route, parentRef); Outcomes by (route, parentRef); Counts by resource, then listener order as written. Namespace deps are `objects.Ref{Kind: "Namespace", Name: ns}`.
+- Members follow the listener order as written, as Counts do, not listener name.
 - Unknown rules (rules §3.3; the precise reach is our call): a `Denied` ListenerSet gives no members, outcomes or counts; a `NoStatus` ListenerSet makes its counts and the refs naming it `listenerset-no-status`. An experimental-only route with the setting false is not a candidate; with the setting unknown its outcomes are `setting-unknown`, and so is every count of a listener it names whose allowed kinds include its kind. A listener whose namespace verdict is unknown has an unknown count and no members; a ref is unknown when any kind-matching listener of its resource has an unknown verdict.
 
 - [ ] **Step 1: Write the failing tests** (rules §11.1, rule level; test-local builders `gw(ns, name string, ls ...objects.Listener) computed.Resource`, `route(kind, ns, name string, refs ...objects.ParentRef) computed.Route`)
