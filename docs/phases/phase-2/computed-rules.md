@@ -104,8 +104,8 @@ viewA(resource, route):                               # processRoute: V4 query/r
 
 ### 4.2 Allowed routes
 
-- **Kinds.** Protocol defaults: HTTP and HTTPS → HTTPRoute, GRPCRoute; TLS with mode Terminate → TLSRoute, TCPRoute; any other TLS mode → TLSRoute; TCP → TCPRoute; UDP → none; any other protocol → HTTPRoute (`query/route.go` V4:198-221). A set `allowedRoutes.kinds` is intersected with those defaults; a nil group means `gateway.networking.k8s.io` (V4:163-175). An explicit empty `kinds` list allows no kinds; an entry with an empty group is ignored (`query/route.go` V4:135-147, V3:135-147 at v2.3.11).
-- **Namespaces.** The default `Same` means the namespace of the resource; for a ListenerSet listener that is the ListenerSet's. `All` allows every namespace. `Selector` is evaluated against the Namespace object's labels. A missing Namespace is admitted only by an empty selector, via `sel.Empty()` (`pkg/krtcollections/namespaceselector.go` V4:20-28). An unknown `From` acts as `Same` (`query/route.go` V4:152-165).
+- **Kinds.** Protocol defaults: HTTP and HTTPS → HTTPRoute, GRPCRoute; TLS with mode Terminate → TLSRoute, TCPRoute; any other TLS mode → TLSRoute; TCP → TCPRoute; UDP → none; any other protocol → HTTPRoute (`query/route.go` V4:198-221). A set `allowedRoutes.kinds` is intersected with those defaults; a nil group means `gateway.networking.k8s.io` (V4:163-175). An explicit empty `kinds` list allows no kinds; an entry with an empty group is ignored, and the requested order and duplicates are kept (`query/route.go` V4:163-174, V3:136-147; `filterSupportedRouteKinds` V4:223-231, V3:196-204).
+- **Namespaces.** The default `Same` means the namespace of the resource; for a ListenerSet listener that is the ListenerSet's. `All` allows every namespace. `Selector` is evaluated against the Namespace object's labels. A missing Namespace is admitted only by an empty selector, via `sel.Empty()` (`pkg/krtcollections/namespaceselector.go` V4:20-28). An unknown `From` acts as `Same` (`query/route.go` V4:178-192, V3:151-165).
 - **Experimental kinds.** A route of an experimental-only kind (D-018) is a candidate only when the experimental setting is true.
 
 ### 4.3 Hostname intersection
@@ -113,8 +113,8 @@ viewA(resource, route):                               # processRoute: V4 query/r
 From `query/query.go` V4:231-296 (both). Matching is a case-sensitive string suffix match.
 - A route with no hostnames attaches. Its effective hostname is the listener's, or none.
 - A listener with no hostname gives the route's hostnames as written (`query/query.go` V4:248-250); duplicates are removed only when intersecting.
-- Otherwise, per pair: two exact names must be equal (result: the listener's); a `*.x` listener matches an exact route name ending in `.x` at any depth (result: the route's); an exact listener matches a `*.x` route when it ends in `.x` (result: the listener's); two wildcards give the more specific.
-- Duplicates are removed. Attachment fails only when the result is empty.
+- Otherwise, per pair: two exact names must be equal (result: the listener's); a `*.x` listener matches an exact route name ending in `.x` at any depth (result: the route's); an exact listener matches a `*.x` route when it ends in `.x` (result: the listener's); two wildcards give the more specific. Duplicates are removed.
+- Attachment fails only when the result is empty.
 - The result is the **effective hostnames per (parentRef, listener)**. Each listener has its own list (`query/route.go` V4:457-521, V3:417-481).
 
 ### 4.4 Listener count
