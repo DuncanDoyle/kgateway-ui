@@ -707,7 +707,12 @@ func FuzzDecodeCursor(f *testing.F) {
 }
 
 func TestListenerFilter(t *testing.T) {
-	ix := buildViews(t, views())
+	// A listener may be named "unknown": the reserved value cannot collide with it.
+	v := views()
+	a := routeRef("shop", "a")
+	v.Attachment.Counts = append(v.Attachment.Counts, computed.ListenerCount{Resource: gwObj, Listener: "unknown", Count: 1, Deps: []objects.Ref{gwObj, a}})
+	v.Attachment.Members = append(v.Attachment.Members, computed.Member{Resource: gwObj, Listener: "unknown", Route: a, Deps: []objects.Ref{a, gwObj}})
+	ix := buildViews(t, v)
 	route := routeRef("shop", "a")
 	for _, tc := range []struct {
 		name   string
@@ -717,9 +722,10 @@ func TestListenerFilter(t *testing.T) {
 	}{
 		{"https members", &gwObj, "https", []string{"b"}},
 		{"http members", &gwObj, "http", []string{"a"}},
-		{"unknown refs", &gwObj, "unknown", []string{"u"}},
+		{"unknown refs", &gwObj, ListenerUnknown, []string{"u"}},
+		{"a listener named unknown", &gwObj, "unknown", []string{"a"}},
 		{"listenerset members", &lsObj, "extra", []string{"c"}},
-		{"nothing unknown on the listenerset", &lsObj, "unknown", []string{}},
+		{"nothing unknown on the listenerset", &lsObj, "_unknown", []string{}},
 		{"a Gateway listener never matches ListenerSet routes", &gwObj, "extra", []string{}},
 		{"absent listener", &gwObj, "nope", []string{}},
 	} {
@@ -744,6 +750,9 @@ func TestListenerFilter(t *testing.T) {
 func TestComputedPredicatesUseVisibleDeps(t *testing.T) {
 	in := viewWorld().input(t)
 	in.Computed = views()
+	// a is also on https, without a Namespace dependency.
+	a := routeRef("shop", "a")
+	in.Computed.Attachment.Members = append(in.Computed.Attachment.Members, computed.Member{Resource: gwObj, Listener: "https", Route: a, Deps: []objects.Ref{a, gwObj}})
 	b := routeRef("shop", "b")
 	in.Health.Findings = append(in.Health.Findings, health.Finding{Code: health.CodeComputedDisagrees, Severity: health.SeverityWarning, Resource: &b})
 	ix := Build(in)
@@ -753,8 +762,7 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) {
 		q    Query
 		want []string
 	}{
-		{"listener", Query{Parent: &gwObj, Listener: "https"}, []string{"b"}},
-		{"listener=unknown", Query{Parent: &gwObj, Listener: "unknown"}, []string{"u"}},
+		{"listener=_unknown", Query{Parent: &gwObj, Listener: ListenerUnknown}, []string{"u"}},
 		{"state=listener-unknown", Query{States: FlagListenerUnknown}, []string{"u"}},
 	} {
 		if p := mustRoutes(t, ix, tc.q, nil); !slices.Equal(names(ix, p), tc.want) {
@@ -769,6 +777,13 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) {
 	}
 	if p := mustRoutes(t, ix, Query{Parent: &gwObj, Listener: "http"}, noNS); !slices.Equal(names(ix, p), []string{"a"}) {
 		t.Errorf("a member with visible deps: %v", names(ix, p))
+	}
+	// One visible and one hidden member on https: only the visible one matches and counts.
+	if p := mustRoutes(t, ix, Query{Parent: &gwObj, Listener: "https"}, nil); !slices.Equal(names(ix, p), []string{"a", "b"}) || p.Total != 2 {
+		t.Errorf("https AllowAll: %v total %d", names(ix, p), p.Total)
+	}
+	if p := mustRoutes(t, ix, Query{Parent: &gwObj, Listener: "https"}, noNS); !slices.Equal(names(ix, p), []string{"a"}) || p.Total != 1 {
+		t.Errorf("https with a hidden Namespace: %v total %d", names(ix, p), p.Total)
 	}
 }
 

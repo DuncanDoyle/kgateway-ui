@@ -791,7 +791,7 @@ func TestByListenerMembers(t *testing.T) {
 		t.Fatalf("b facts %+v", br.Computed)
 	}
 	for i, f := range br.Computed {
-		if f.ParentRef != i || f.Target != gwObj || f.Outcome != computed.OutcomeAccepted || len(f.Listeners) != 1 ||
+		if f.Out.ParentRef != i || f.Out.Resource != gwObj || f.Out.Outcome != computed.OutcomeAccepted || len(f.Listeners) != 1 ||
 			f.Listeners[0].Listener != "https" || f.Listeners[0].Hostnames[0] != "b.example.com" || len(f.Listeners[0].Deps) != 3 {
 			t.Errorf("b ref %d: %+v", i, f)
 		}
@@ -804,7 +804,7 @@ func TestByListenerMembers(t *testing.T) {
 		t.Errorf("https facts %+v", lf)
 	}
 	_, rr := row(t, ix, "shop", "r")
-	if f := rr.Computed; len(f) != 1 || f[0].Outcome != computed.OutcomeNotAllowed || f[0].Rule != "allowed-routes" || len(f[0].Facts) != 1 || len(f[0].Listeners) != 0 {
+	if f := rr.Computed; len(f) != 1 || f[0].Out.Outcome != computed.OutcomeNotAllowed || f[0].Out.Rule != "allowed-routes" || len(f[0].Out.Facts) != 1 || len(f[0].Listeners) != 0 {
 		t.Errorf("r facts %+v", f)
 	}
 }

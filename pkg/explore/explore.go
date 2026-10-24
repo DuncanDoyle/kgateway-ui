@@ -46,7 +46,7 @@ const (
 	FlagPending
 	FlagDeclared
 	FlagNoParent
-	// FlagDisagrees: the row's object has KGWUI-012 (sub-phase 2.3).
+	// FlagDisagrees: the row's object has KGWUI-012.
 	FlagDisagrees
 	// FlagListenerUnknown: a status-accepted parentRef whose outcome is unknown or has no listener.
 	FlagListenerUnknown
@@ -217,6 +217,7 @@ type Index struct {
 	// Findings holds the worst error and warning finding per object.
 	Findings map[objects.Ref]Worst
 	// Refs is the install's dependency table; a DepSet indexes it (design §7.4 rule 10).
+	// Refs[i] for i < len(Routes) is route row i's ref.
 	Refs []objects.Ref
 	// ByListener lists view A's members per listener whose count is known, by row and parentRef.
 	ByListener map[ListenerKey][]Member
@@ -265,15 +266,12 @@ type ListenerHit struct {
 	Deps      DepSet
 }
 
-// RefFacts is view A's outcome of one parentRef (spec index) of a route row.
+// RefFacts is view A's outcome of one parentRef of a route row. Out is the
+// source outcome, shared with the views: its ParentRef is the spec index and
+// its Resource the target. Listeners and Deps replace Out's.
 type RefFacts struct {
-	ParentRef int
-	Target    objects.Ref
-	Outcome   computed.Outcome
-	Unknown   computed.UnknownReason
-	Rule      string
+	Out       *computed.RefOutcome
 	Listeners []ListenerHit
-	Facts     []computed.Fact
 	// Check is the route-accepted cross-check of the ref's report key, shared with the views; nil when none.
 	Check *computed.CheckResult
 	Deps  DepSet

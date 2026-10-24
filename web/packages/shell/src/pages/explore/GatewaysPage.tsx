@@ -12,7 +12,7 @@ import { ListFilters, Muted, NameCell, OneLine, useShownPage } from "./listParts
 // region Helpers
 const NOUN = ["Gateway", "Gateways"] as const;
 
-// The server's "routes" sort counts visible routes, not the status sum shown here, so that column does not sort.
+// The server's "routes" sort uses view A's member count, not the status sum shown here, so that column does not sort.
 function columns(installId: string): ObjectColumn<GatewayListRow>[] {
   return [
     {

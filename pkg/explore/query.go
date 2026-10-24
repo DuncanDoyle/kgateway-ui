@@ -41,7 +41,8 @@ type Sort struct {
 }
 
 // ListenerUnknown is the listener filter value that selects unknown refs.
-const ListenerUnknown = "unknown"
+// No listener name can contain "_", so it never shadows a listener.
+const ListenerUnknown = "_unknown"
 
 // Query is one list request after parsing (design §7.2). Zero fields do not
 // filter. Kinds, Parent, Attachment, Listener, Backends and States apply to
@@ -338,7 +339,7 @@ func (ix *Index) listenerRows(k ListenerKey, visible func(objects.Ref) bool) []R
 // outcome is unknown, with dependencies visible admits.
 func (ix *Index) unknownRef(id RowID, parent objects.Ref, visible func(objects.Ref) bool) bool {
 	for _, f := range ix.Routes[id].Computed {
-		if f.Target == parent && f.Unknown != "" && ix.Visible(f.Deps, visible) {
+		if f.Out.Resource == parent && f.Out.Unknown != "" && ix.Visible(f.Deps, visible) {
 			return true
 		}
 	}

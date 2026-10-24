@@ -465,12 +465,16 @@ func (b *builder) gateways(ix *Index, lsViews []*objects.ListenerSetView) {
 	}
 }
 
-// interner maps refs to Index.Refs indexes. Source dep slices are shared
-// between results, so each one is converted once and its DepSet reused.
+// interner maps refs to Index.Refs indexes. A route row's index is its RowID;
+// other refs are added on first use. Source dep slices are shared between
+// results, so each one is converted once and its DepSet reused.
 type interner struct {
-	at   map[objects.Ref]int32
-	refs []objects.Ref
-	seen map[depKey]DepSet
+	ix *Index
+	// routes are the served route kinds.
+	routes map[objects.GroupKind]bool
+	at     map[objects.Ref]int32
+	refs   []objects.Ref
+	seen   map[depKey]DepSet
 	// buf is the current arena chunk for new DepSets.
 	buf []int32
 }
@@ -504,6 +508,11 @@ func (n *interner) deps(src []objects.Ref) DepSet {
 
 // ref returns r's index, adding it on first use.
 func (n *interner) ref(r objects.Ref) int32 {
+	if n.routes[objects.GroupKind{Group: r.Group, Kind: r.Kind}] {
+		if id, ok := n.ix.Row(r); ok {
+			return int32(id)
+		}
+	}
 	i, ok := n.at[r]
 	if !ok {
 		i = int32(len(n.refs)) // #nosec G115 -- a ref count fits in int32
@@ -535,9 +544,15 @@ func (b *builder) views(ix *Index) {
 	}
 	ix.RuleSet, ix.RuleNote = v.RuleSet, v.Note
 	a := &v.Attachment
-	// Deps name routes, resources and Namespaces: size for the rows and listeners.
-	refs := len(ix.Routes) + len(a.Counts)
-	n := &interner{at: make(map[objects.Ref]int32, refs), refs: make([]objects.Ref, 0, refs), seen: make(map[depKey]DepSet, len(a.Counts)+len(a.Outcomes))}
+	// Route rows take the first indexes; the map holds resources and Namespaces.
+	n := &interner{ix: ix, routes: map[objects.GroupKind]bool{}, at: map[objects.Ref]int32{}, seen: map[depKey]DepSet{},
+		refs: make([]objects.Ref, len(ix.Routes), len(ix.Routes)+len(a.Counts))}
+	for i := range ix.Routes {
+		n.refs[i] = ix.Routes[i].Ref
+	}
+	for _, k := range kinds.ByCategory(b.in.Served, kinds.CategoryRoute) {
+		n.routes[objects.GroupKind{Group: k.Group, Kind: k.Kind}] = true
+	}
 	ix.Listeners = make(map[ListenerKey]ListenerFacts, len(a.Counts))
 	for i := range a.Counts {
 		c := &a.Counts[i]
@@ -618,7 +633,7 @@ func (b *builder) refFacts(ix *Index, n *interner) {
 		if rows[i] < 0 {
 			continue
 		}
-		f := RefFacts{ParentRef: o.ParentRef, Target: o.Resource, Outcome: o.Outcome, Unknown: o.Unknown, Rule: o.Rule, Facts: o.Facts, Deps: n.deps(o.Deps)}
+		f := RefFacts{Out: o, Deps: n.deps(o.Deps)}
 		if k := len(o.Listeners); k > 0 {
 			f.Listeners, hitArena = hitArena[:k:k], hitArena[k:]
 			for j, l := range o.Listeners {
@@ -629,14 +644,14 @@ func (b *builder) refFacts(ix *Index, n *interner) {
 		r.Computed = append(r.Computed, f)
 	}
 	for i := range ix.Routes {
-		slices.SortStableFunc(ix.Routes[i].Computed, func(x, y RefFacts) int { return cmp.Compare(x.ParentRef, y.ParentRef) })
+		slices.SortStableFunc(ix.Routes[i].Computed, func(x, y RefFacts) int { return cmp.Compare(x.Out.ParentRef, y.Out.ParentRef) })
 	}
 }
 
 // facts returns the facts of parentRef p to target, or nil.
 func (r *RouteRow) facts(p int, target objects.Ref) *RefFacts {
 	for i := range r.Computed {
-		if f := &r.Computed[i]; f.ParentRef == p && f.Target == target {
+		if f := &r.Computed[i]; f.Out.ParentRef == p && f.Out.Resource == target {
 			return f
 		}
 	}
@@ -668,7 +683,7 @@ func (b *builder) checks(ix *Index, cs []computed.CheckResult) {
 			r, written := &ix.Routes[id], b.aux[id].written
 			// One check covers every parentRef with its report key (rules §8.2).
 			for j := range r.Computed {
-				if p := r.Computed[j].ParentRef; p < len(written) && computed.KeyOf(written[p]) == c.Key {
+				if p := r.Computed[j].Out.ParentRef; p < len(written) && computed.KeyOf(written[p]) == c.Key {
 					r.Computed[j].Check = c
 				}
 			}
@@ -691,7 +706,7 @@ func (b *builder) listenerUnknown(ix *Index, i int, n *interner) {
 		switch {
 		case f == nil:
 			r.UnknownDeps = union32(r.UnknownDeps, DepSet{n.ref(r.Ref), n.ref(l.Target)})
-		case f.Unknown != "" || len(f.Listeners) == 0:
+		case f.Out.Unknown != "" || len(f.Listeners) == 0:
 			r.UnknownDeps = union32(r.UnknownDeps, f.Deps)
 		default:
 			continue
