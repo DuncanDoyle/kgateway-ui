@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
@@ -97,5 +99,20 @@ func TestDisagreeDetailRouteAccepted(t *testing.T) {
 	want := "Parent `edge` (section `http`): computed accepted, controller reports False/NoMatchingParent. Rule set kgateway-2.4. Rules not yet verified for 2.5."
 	if len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
 		t.Fatalf("got %+v\nwant detail %q", rep.Findings, want)
+	}
+}
+
+// ResourceSince is the disagreeing object's own first-seen time, which a
+// caller who cannot view every dep sees instead of the window start (design §7.4 rule 7).
+func TestKGWUI012ResourceSince(t *testing.T) {
+	gw := testutil.Gateway("infra", "edge", "kgateway", nil)
+	seen := testutil.Now.Add(-5 * time.Minute)
+	in := health.Input{Install: install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway"}},
+		Owned: &install.Owned{Gateways: []*unstructured.Unstructured{gw}}, Snapshot: &cache.Snapshot{Synced: true}, Now: testutil.Now,
+		FirstSeen: func(*unstructured.Unstructured) time.Time { return seen },
+		Computed:  &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{countCheck(computed.StateDisagrees, computed.ClassContradicting)}}}
+	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:])
+	if len(rep.Findings) != 1 || rep.Findings[0].ResourceSince == nil || !rep.Findings[0].ResourceSince.Equal(seen) || !rep.Findings[0].Since.Equal(testutil.Now) {
+		t.Fatalf("findings %+v", rep.Findings)
 	}
 }

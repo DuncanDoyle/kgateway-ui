@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -302,30 +303,40 @@ func TestSubjectDeletedPrunes(t *testing.T) {
 	}
 }
 
-// Row 10 (Task 39 review): losing Namespace access records no Namespace dep,
-// yet the source fingerprint changes, so the confirm tick starts a run that
-// turns the check unknown and clears KGWUI-012, with no event delivered.
+// Row 10 (Task 39 review): losing Namespace access records no Namespace dep.
+// In production the cache notifies on the access change (pkg/cache onChange);
+// the confirm tick is the fallback when that notification lags. Either way the
+// run turns the check unknown and clears KGWUI-012 in the same recompute.
 func TestTurnsUnknownClearsSameRun(t *testing.T) {
-	w := defaultWorld()
-	w.selector = true
-	h := newHarness(t, nil)
-	h.src.setBase(w.snapshot(t), w.print())
-	h.start(10 * time.Minute)
-	h.c.Step(Window)
-	matured(t, h.await(EvPublished).Published.Model, testutil.Now)
-	h.await(EvArmed)
-	w.nsDenied = true
-	h.src.setBase(w.snapshot(t), w.print()) // no notify: only the fingerprint moved
-	h.c.Step(ConfirmEvery)
-	h.await(EvConfirmRefused)
-	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
-	m := h.await(EvPublished).Published.Model
-	none(t, m, "after Namespace access was lost")
-	if c := countCheck(t, m); c.State != computed.StateUnknown || c.Mature {
-		t.Fatalf("check after access loss: %+v", c)
-	}
-	if len(h.e.persist.m) != 0 {
-		t.Fatalf("entries left: %v", h.e.persist.m)
+	for _, notify := range []bool{true, false} {
+		name := map[bool]string{true: "notified", false: "fingerprint only"}[notify]
+		t.Run(name, func(t *testing.T) {
+			w := defaultWorld()
+			w.selector = true
+			h := newHarness(t, nil)
+			h.src.setBase(w.snapshot(t), w.print())
+			h.start(10 * time.Minute)
+			h.c.Step(Window)
+			matured(t, h.await(EvPublished).Published.Model, testutil.Now)
+			h.await(EvArmed)
+			w.nsDenied = true
+			h.src.setBase(w.snapshot(t), w.print())
+			if notify {
+				h.notify()
+			} else {
+				h.c.Step(ConfirmEvery)
+				h.await(EvConfirmRefused)
+			}
+			awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+			m := h.await(EvPublished).Published.Model
+			none(t, m, "after Namespace access was lost")
+			if c := countCheck(t, m); c.State != computed.StateUnknown || c.Mature {
+				t.Fatalf("check after access loss: %+v", c)
+			}
+			if len(h.e.persist.m) != 0 {
+				t.Fatalf("entries left: %v", h.e.persist.m)
+			}
+		})
 	}
 }
 
@@ -382,5 +393,31 @@ func TestPersistenceStep(t *testing.T) {
 	}
 	if len(p.m) != 3 {
 		t.Fatalf("entries %v, want the three candidates", p.m)
+	}
+}
+
+// persist over several installs equals step over their concatenation: states,
+// window starts, the map and the next maturation.
+func TestPersistEqualsStep(t *testing.T) {
+	id := func(inst, s string) computed.Identity {
+		return computed.Identity{Install: inst, RuleSet: "r", Kind: computed.KindListenerCount, Subject: s}
+	}
+	a := []computed.CheckResult{{ID: id("a", "c"), Class: computed.ClassContradicting, Fingerprint: 1}, {ID: id("a", "k"), Class: computed.ClassCompatible}}
+	b := []computed.CheckResult{{ID: id("b", "c"), Class: computed.ClassContradicting, Fingerprint: 2}, {ID: id("b", "s"), Class: computed.ClassStale},
+		{ID: id("b", "u"), Class: computed.ClassUnknown}}
+	t0 := testutil.Now
+	ps, pp := newPersistence(), newPersistence()
+	for _, d := range []time.Duration{0, 10 * time.Second, Window} {
+		now := t0.Add(d)
+		if d == 10*time.Second {
+			b[0].Fingerprint = 3 // b's window restarts
+		}
+		all := append(append([]computed.CheckResult{}, a...), b...)
+		views := []*computed.Views{{Checks: append([]computed.CheckResult{}, a...)}, {Checks: append([]computed.CheckResult{}, b...)}}
+		ns, np := ps.step(now, all, nil), pp.persist(now, views)
+		got := append(append([]computed.CheckResult{}, views[0].Checks...), views[1].Checks...)
+		if !ns.Equal(np) || !reflect.DeepEqual(all, got) || !reflect.DeepEqual(ps.m, pp.m) {
+			t.Fatalf("at +%v: next %v vs %v\nstep    %+v\npersist %+v", d, ns, np, all, got)
+		}
 	}
 }

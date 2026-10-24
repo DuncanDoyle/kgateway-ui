@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"strconv"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 // computedCheck raises KGWUI-012 for each cross-check the engine matured into
@@ -24,12 +28,36 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 				continue
 			}
 			on, since := ch.On, ch.Since
-			fs = append(fs, Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
+			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet),
-				Since: &since, Evidence: ch.Deps})
+				Since: &since, Evidence: ch.Deps}
+			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
+			if u := ownedObject(in.Owned, on); u != nil {
+				own := in.firstSeen(u)
+				f.ResourceSince = &own
+			}
+			fs = append(fs, f)
 		}
 	}
 	return fs, ok(c.Name(), false, in.Now)
+}
+
+// ownedObject returns the owned Gateway, ListenerSet or route ref, or nil.
+func ownedObject(o *install.Owned, ref objects.Ref) *unstructured.Unstructured {
+	if o == nil {
+		return nil
+	}
+	for _, us := range [][]*unstructured.Unstructured{o.Gateways, o.ListenerSets} {
+		for _, u := range us {
+			if objects.RefOf(u) == ref {
+				return u
+			}
+		}
+	}
+	if r, ok := o.Route(ref); ok {
+		return r.Obj
+	}
+	return nil
 }
 
 // disagreeDetail says what was computed and what the controller reports, and
