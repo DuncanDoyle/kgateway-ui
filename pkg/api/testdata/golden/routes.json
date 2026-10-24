@@ -285,8 +285,8 @@
         ],
         "ref": {
           "group": "gateway.networking.k8s.io",
-          "kind": "HTTPRoute",
-          "link": "detail",
+          "kind": "TCPRoute",
+          "link": "yaml",
           "name": "rejected",
           "namespace": "shop"
         }

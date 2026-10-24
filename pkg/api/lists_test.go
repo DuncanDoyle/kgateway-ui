@@ -13,7 +13,9 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -61,9 +63,11 @@ func explorerWorld(extra ...runtime.Object) []runtime.Object {
 		{Type: "Accepted", Status: metav1.ConditionFalse, Reason: "NotAllowedByListeners", Message: "no listener allows this kind", ObservedGeneration: 1, LastTransitionTime: metav1.NewTime(testutil.Now.Add(-time.Hour))},
 		cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}
 	objs := []runtime.Object{
-		testutil.ListenerSet("infra", "ls1", edgeRef, nil),
+		admitAll(testutil.ListenerSet("infra", "ls1", edgeRef, nil, testutil.Listener{Name: "extra", Attached: 1, Conds: []metav1.Condition{
+			cond("Accepted", metav1.ConditionTrue, "Accepted"), cond("Programmed", metav1.ConditionTrue, "Programmed")}})),
 		testutil.WithHostnames(testutil.HTTPRoute("shop", "via-ls", []objects.ParentRef{ls1Ref}, testutil.AcceptedBy(ls1Ref, testutil.Controller)), "ls.example.com"),
-		testutil.HTTPRoute("shop", "rejected", []objects.ParentRef{edgeRef}, rejected),
+		// A TCPRoute: no HTTP listener of edge admits its kind.
+		asKind("TCPRoute", testutil.HTTPRoute("shop", "rejected", []objects.ParentRef{edgeRef}, rejected)),
 		testutil.HTTPRoute("shop", "pending", []objects.ParentRef{edgeRef}),
 		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 			backendRule([]any{testutil.DelegateTo("shop", "child")})),
@@ -77,6 +81,21 @@ func explorerWorld(extra ...runtime.Object) []runtime.Object {
 		testutil.Backend("shop", "be1", nil),
 	}
 	return world(append(objs, extra...)...)
+}
+
+// asKind turns route u into another Gateway API route kind.
+func asKind(kind string, u *unstructured.Unstructured) *unstructured.Unstructured {
+	u.SetKind(kind)
+	u.SetUID(types.UID(kind + "/" + u.GetNamespace() + "/" + u.GetName()))
+	return u
+}
+
+// admitAll makes every spec listener of u admit routes from all namespaces.
+func admitAll(u *unstructured.Unstructured) *unstructured.Unstructured {
+	for _, l := range u.Object["spec"].(map[string]any)["listeners"].([]any) {
+		l.(map[string]any)["allowedRoutes"] = map[string]any{"namespaces": map[string]any{"from": "All"}}
+	}
+	return u
 }
 
 func routeNames(p Page[RouteRow]) []string {
@@ -414,8 +433,9 @@ func TestBackendFilterDeniedEqualsAbsent(t *testing.T) {
 func TestHiddenListenerSetHidesVia(t *testing.T) {
 	cond := testutil.Cond
 	// shop/ls-rejected is not accepted by edge only through ls1.
-	lsRejected := testutil.HTTPRoute("shop", "ls-rejected", []objects.ParentRef{ls1Ref}, testutil.RouteParent{Ref: ls1Ref, Controller: testutil.Controller,
-		Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+	// A TCPRoute, which ls1's HTTP listener does not admit.
+	lsRejected := asKind("TCPRoute", testutil.HTTPRoute("shop", "ls-rejected", []objects.ParentRef{ls1Ref}, testutil.RouteParent{Ref: ls1Ref, Controller: testutil.Controller,
+		Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}))
 	hideLS := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "ListenerSet" })
 	_, srv, _ := startWith(t, setup{authz: hideLS}, explorerWorld(lsRejected)...)
 	_, all, _ := startWith(t, setup{}, explorerWorld(lsRejected)...)

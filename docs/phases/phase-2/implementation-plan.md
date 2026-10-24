@@ -1438,7 +1438,7 @@ func TestAttachmentFingerprints(t *testing.T) {
 
 **Files:**
 - Create: `pkg/engine/views.go`, `pkg/engine/views_test.go`, `pkg/engine/persist.go`, `pkg/engine/persist_test.go`, `pkg/health/computed.go`, `pkg/health/computed_test.go`
-- Modify: `pkg/computed/rules.go` (`Views`), `pkg/engine/engine.go` (`InstallModel.Computed`, the persistence field, `Compute`: views → persistence → health; Task 43 hands `Views` to `explore.Build`), `pkg/health/finding.go` (`CodeComputedDisagrees`; `Input.Computed` on the `Input` at `:93`), `pkg/health/checks.go:23-25` (register `computedCheck`, named `computed views`, not required, appended after `backend status`), `pkg/health/messages.go` (drafts), `internal/testutil/fixtures.go` (`GatewayWithListeners`)
+- Modify: `pkg/computed/rules.go` (`Views`), `pkg/engine/engine.go` (`InstallModel.Computed`, the persistence field, `Compute`: views → persistence → health; Task 43 hands `Views` to `explore.Build`), `pkg/health/finding.go` (`CodeComputedDisagrees`; `Input.Computed` on the `Input` at `:93`), `pkg/health/checks.go:23-25` (register `computedCheck`, named `computed views`, not required, appended after `backend status`), `pkg/health/messages.go` (drafts), `internal/testutil/fixtures.go` (`GatewayWithListeners`; the default Gateway listener admits all namespaces), `pkg/objects/backend.go` (`RouteView.WrittenRefs`, so report keys reuse the cached decode), `internal/testutil/computedtest` (`NoViews`, for the frozen v1 wire worlds and the idle budget until Task 49)
 
 **Interfaces:**
 - Consumes: Tasks 36–41; `deadlines.add` (Task 6).

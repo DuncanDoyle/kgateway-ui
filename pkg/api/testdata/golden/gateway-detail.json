@@ -52,7 +52,7 @@
         "port": 8080,
         "protocol": "HTTP",
         "status": {
-          "attachedRoutes": 3,
+          "attachedRoutes": 5,
           "conditions": [
             {
               "lastTransitionTime": "2026-10-17T11:00:00Z",

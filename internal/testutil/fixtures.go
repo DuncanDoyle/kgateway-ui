@@ -73,6 +73,7 @@ type Listener struct {
 }
 
 // Gateway builds a Gateway. With no conditions given it is Accepted and Programmed.
+// Its listeners admit routes from every namespace.
 func Gateway(ns, name, class string, cs []metav1.Condition, listeners ...Listener) *unstructured.Unstructured {
 	u := obj("gateway.networking.k8s.io/v1", "Gateway", ns, name)
 	if cs == nil {
@@ -85,7 +86,8 @@ func Gateway(ns, name, class string, cs []metav1.Condition, listeners ...Listene
 	specLs := []any{}
 	for _, l := range listeners {
 		ls = append(ls, map[string]any{"name": l.Name, "attachedRoutes": int64(l.Attached), "conditions": conds(l.Conds), "supportedKinds": []any{}})
-		specLs = append(specLs, map[string]any{"name": l.Name, "port": int64(8080), "protocol": "HTTP"})
+		specLs = append(specLs, map[string]any{"name": l.Name, "port": int64(8080), "protocol": "HTTP",
+			"allowedRoutes": map[string]any{"namespaces": map[string]any{"from": "All"}}})
 	}
 	u.Object["spec"] = map[string]any{"gatewayClassName": class, "listeners": specLs}
 	u.Object["status"] = map[string]any{"conditions": conds(cs), "listeners": ls, "addresses": []any{map[string]any{"type": "IPAddress", "value": "10.0.0.1"}}}

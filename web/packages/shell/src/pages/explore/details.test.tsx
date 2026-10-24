@@ -104,7 +104,7 @@ it("Gateway page shows status-only listener counts", async () => {
     .map((h) => h.textContent);
   expect(headers).toContain("Attached routes");
   expect(headers.join(" ")).not.toMatch(/omputed/);
-  expect(within(rowOf(listeners, "http")).getByText("3")).toBeInTheDocument();
+  expect(within(rowOf(listeners, "http")).getByText("5")).toBeInTheDocument();
   expect(within(rowOf(listeners, "https")).getByText("0")).toBeInTheDocument();
   // A listener the controller has not written status for says so, with no number.
   const fresh = rowOf(listeners, "new");

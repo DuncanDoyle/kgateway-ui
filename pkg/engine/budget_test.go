@@ -192,7 +192,7 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	w := newWorld(t, scale.Large, clk.Now)
 	s := newScraping(managedBody, maxAge)
 	s.col.OnResult = w.sig
-	// The scale world's statuses are not drawn from view A, so its windows would mature once.
+	// The scale world's statuses disagree with view A until Task 49 derives them, so its windows would mature once.
 	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge, c.RulesFor = s.col, maxAge, computedtest.NoViews })
 	runLoop(t, e, safety)
 	awaitKind(t, ev, EvPublished) // the start-up publication, before any scrape

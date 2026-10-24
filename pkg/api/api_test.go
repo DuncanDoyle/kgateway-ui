@@ -35,7 +35,6 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -85,17 +84,27 @@ type setup struct {
 	logger *slog.Logger
 	// zone, when set, is the zone the engine clock reports its times in.
 	zone *time.Location
-	// views runs the computed views. Off, since world() routes shop through a
-	// Same-only listener, which view A disputes once the window matures.
-	views bool
+	// rulesFor replaces the engine's rule selection; nil runs the real rule sets.
+	rulesFor func(string) computed.Selection
+	// disputes marks a world that disagrees with view A on purpose; every other
+	// world must agree, so fixture drift fails here (consistentWithViews).
+	disputes bool
 }
 
-// rulesFor is the engine's rule selection: the default, or none.
-func rulesFor(views bool) func(string) computed.Selection {
-	if views {
-		return nil
+// consistentWithViews fails t when m has a matured disagreement: every
+// seeded object was first seen 61 s earlier, so only late objects may be pending.
+func consistentWithViews(t *testing.T, m *engine.Model) {
+	t.Helper()
+	for _, im := range m.Installs {
+		if im.Computed == nil {
+			continue
+		}
+		for _, c := range im.Computed.Checks {
+			if c.State == computed.StateDisagrees {
+				t.Fatalf("the test world disagrees with view A: %s %s on %s (expected %s, observed %s)", c.ID.Kind, c.Class, c.On, c.Expected, c.Observed)
+			}
+		}
 	}
-	return computedtest.NoViews
 }
 
 // harness is a running cache, engine and handler over fake clients, with the
@@ -169,7 +178,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: rulesFor(s.views)})
+		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -181,7 +190,9 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	for _, u := range s.late {
 		createAndWait(ctx, t, fd, c, s.served, u)
 	}
-	e.Compute()
+	if m := e.Compute(); !s.disputes {
+		consistentWithViews(t, m)
+	}
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
 	t.Cleanup(srv.Close)
 	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube}
@@ -254,6 +265,28 @@ func get[T any](t *testing.T, srv *httptest.Server, path string, wantStatus int)
 // world: install kgw.kgateway scoped to team=a; infra and shop are watched, blog is not.
 func world(extra ...runtime.Object) []runtime.Object { return worldWith(1, 1, extra...) }
 
+// frozenWorld is world as golden-v1 pinned it: edge reports no attached routes.
+func frozenWorld(extra ...runtime.Object) []runtime.Object { return withEdge(world(extra...), 0) }
+
+// withEdge replaces infra/edge in objs with edge(attached), so its count agrees with view A.
+func withEdge(objs []runtime.Object, attached int32) []runtime.Object {
+	for i, o := range objs {
+		if u, ok := o.(*unstructured.Unstructured); ok && u.GetKind() == "Gateway" && u.GetNamespace() == "infra" && u.GetName() == "edge" {
+			objs[i] = edge(attached)
+		}
+	}
+	return objs
+}
+
+// edge is the Gateway infra/edge whose listener http reports attached routes.
+func edge(attached int32) *unstructured.Unstructured { return edgeIn("infra", attached) }
+
+// edgeIn is the Gateway ns/edge whose listener http reports attached routes.
+func edgeIn(ns string, attached int32) *unstructured.Unstructured {
+	return testutil.Gateway(ns, "edge", "kgateway", nil, testutil.Listener{Name: "http", Attached: attached,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}})
+}
+
 // worldWith is world with the number of ready controller and proxy replicas (of 1).
 func worldWith(ctrlReady, proxyReady int32, extra ...runtime.Object) []runtime.Object {
 	return replicaWorld(1, ctrlReady, 1, proxyReady, extra...)
@@ -270,13 +303,54 @@ func replicaWorld(ctrlDesired, ctrlReady, proxyDesired, proxyReady int32, extra 
 		objs = append(objs, testutil.ControllerPod(d, "kgateway-0", ctrlReady > 0))
 	}
 	// blog/posts stays last: isolated() drops it.
-	return append(append(objs,
+	return settleEdge(append(append(objs,
 		testutil.ProxyDeployment("infra", "edge", proxyDesired, proxyReady),
 		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/other", true),
-		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra", "foreign", "other", nil),
+		edge(1), testutil.Gateway("infra", "foreign", "other", nil),
 		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
 		testutil.HTTPRoute("blog", "posts", []objects.ParentRef{gw}),
-	), extra...)
+	), extra...))
+}
+
+// settleEdge sets edge's http attachedRoutes to the parentRefs the world puts
+// on it: plain refs to infra/edge from routes in namespaces labelled team=a (watched).
+// It is bookkeeping, so a route a test adds is reported as the controller would;
+// consistentWithViews still checks every world against view A.
+func settleEdge(objs []runtime.Object) []runtime.Object {
+	var gw *unstructured.Unstructured
+	n := 0
+	watched := map[string]bool{}
+	for _, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok {
+			watched[ns.Name] = ns.Labels["team"] == "a"
+		}
+	}
+	for _, o := range objs {
+		u, ok := o.(*unstructured.Unstructured)
+		if !ok {
+			continue
+		}
+		if u.GetKind() == "Gateway" && u.GetNamespace() == "infra" && u.GetName() == "edge" {
+			gw = u
+		}
+		if (u.GetKind() != "HTTPRoute" && u.GetKind() != "GRPCRoute") || !watched[u.GetNamespace()] {
+			continue
+		}
+		for _, p := range objects.RouteParentRefs(u) {
+			if p.Ref() == edgeRef.Ref() && p.SectionName == "" && p.Port == 0 {
+				n++
+			}
+		}
+	}
+	if gw == nil {
+		return objs
+	}
+	for _, l := range gw.Object["status"].(map[string]any)["listeners"].([]any) {
+		if m := l.(map[string]any); m["name"] == "http" {
+			m["attachedRoutes"] = int64(n)
+		}
+	}
+	return objs
 }
 
 // stale bumps u's generation past its fixture conditions (observed generation 1).
@@ -579,7 +653,7 @@ func TestEveryFindingCodeAtTheAPI(t *testing.T) {
 // isolated is world without the unwatched blog/posts route, so its baseline is healthy.
 func isolated(extra ...runtime.Object) []runtime.Object {
 	objs := world()
-	return append(objs[:len(objs)-1:len(objs)-1], extra...)
+	return settleEdge(append(objs[:len(objs)-1:len(objs)-1], extra...))
 }
 
 // hasSev is hasFinding with a severity; an empty sev matches any.
@@ -615,10 +689,10 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 	// Foreign install: kgw2 watches team=b and owns infra-b/edge; shop/both is attached to both installs' Gateways.
 	gwB := testutil.GwRef("infra-b", "edge")
 	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}}]`))
-	twoInstalls := isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}), d2,
+	twoInstalls := withEdge(isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}), d2,
 		testutil.ControllerPod(d2, "kgateway2-0", true), testutil.Gateway("infra-b", "edge", "kgateway", nil), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
 		testutil.HTTPRoute("shop", "both", []objects.ParentRef{gw, gwB}, testutil.AcceptedBy(gw, testutil.Controller),
-			testutil.RouteParent{Ref: gwB, Controller: testutil.Controller, Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}}))
+			testutil.RouteParent{Ref: gwB, Controller: testutil.Controller, Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})), 2)
 
 	cases := []struct {
 		name   string
@@ -649,10 +723,11 @@ func TestStatusRulesAtTheAPI(t *testing.T) {
 			health.StateWarning, &expect{health.CodeRouteUnattached, health.SeverityWarning, "shop/btls-new"}, nil, map[string]int{"BackendTLSPolicy": 1}},
 		{"being processed (first seen inside the grace period)", setup{late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})}}, isolated(),
 			health.StateUnknown, &expect{health.CodeRouteUnattached, health.SeverityInfo, "shop/young"}, []expect{{health.CodeRouteUnattached, health.SeverityWarning, "shop/young"}}, map[string]int{"HTTPRoute": 2}},
-		{"status for a removed parent", setup{}, isolated(testutil.HTTPRoute("shop", "moved", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller),
-			testutil.RouteParent{Ref: testutil.GwRef("infra", "old"), Controller: testutil.Controller, Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NoMatchingParent"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})),
+		{"status for a removed parent", setup{}, withEdge(isolated(testutil.HTTPRoute("shop", "moved", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller),
+			testutil.RouteParent{Ref: testutil.GwRef("infra", "old"), Controller: testutil.Controller, Conds: []metav1.Condition{cond("Accepted", metav1.ConditionFalse, "NoMatchingParent"), cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})), 2),
 			health.StateHealthy, nil, []expect{{health.CodeConditionFalse, "", "shop/moved"}, {health.CodeRouteUnattached, "", "shop/moved"}}, map[string]int{"HTTPRoute": 2}},
-		{"status only for another port", setup{}, isolated(testutil.HTTPRoute("shop", "ported", []objects.ParentRef{gw443}, testutil.AcceptedBy(gw, testutil.Controller))),
+		// Report keys drop the port (rules §7), so view A judges the port-less entry as this ref's and disputes it.
+		{"status only for another port", setup{disputes: true}, isolated(testutil.HTTPRoute("shop", "ported", []objects.ParentRef{gw443}, testutil.AcceptedBy(gw, testutil.Controller))),
 			health.StateWarning, &expect{health.CodeRouteUnattached, health.SeverityWarning, "shop/ported"}, []expect{{health.CodeConditionFalse, "", "shop/ported"}}, map[string]int{"HTTPRoute": 2}},
 		{"foreign-group parentRef", setup{}, isolated(testutil.HTTPRoute("shop", "foreign", []objects.ParentRef{{Group: "example.com", Kind: "Gateway", Namespace: "infra", Name: "edge"}})),
 			health.StateHealthy, nil, []expect{{health.CodeRouteUnattached, "", "shop/foreign"}, {health.CodeConditionFalse, "", "shop/foreign"}}, map[string]int{"HTTPRoute": 1}},
@@ -1121,7 +1196,7 @@ func proxyWorld(p proxySetup, extra ...runtime.Object) []runtime.Object {
 		}
 		out = append(out, o)
 	}
-	return append(out, extra...)
+	return settleEdge(append(out, extra...))
 }
 
 const selfManagedMsg = "Self-managed proxy: the UI cannot see its readiness"
@@ -1600,7 +1675,8 @@ func TestDuplicateScopeEnvIsLastWinsAtTheAPI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), envWorld(tc.withPod, tc.env...)...)
+			// Unknown scope admits every namespace, so view A counts blog/posts, which the controller does not see.
+			_, srv, _ := startWith(t, setup{disputes: tc.mode == install.ScopeUnknown}, envWorld(tc.withPod, tc.env...)...)
 			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
 			if len(insts) != 1 || insts[0].Scope == nil {
 				t.Fatalf("installs: %+v", insts)
@@ -1807,7 +1883,8 @@ func TestScopeEnvFromIsUnknownUnlessExplicitAtTheAPI(t *testing.T) {
 					}
 				}
 			}
-			_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway"), objs...)
+			// Unknown scope admits every namespace, so view A counts blog/posts, which the controller does not see.
+			_, srv, _ := startWith(t, setup{disputes: tc.mode == install.ScopeUnknown}, objs...)
 			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
 			if len(insts) != 1 || insts[0].Scope == nil {
 				t.Fatalf("installs: %+v", insts)
@@ -2028,9 +2105,9 @@ func TestStaleEligibleEntryKeepsEdge(t *testing.T) {
 		sev     health.Severity // KGWUI-003 on the child; "" for none
 		pending bool
 	}{
-		{"current entry", setup{}, isolated(parent(), child()), health.StateHealthy, "", false},
-		{"edited, inside grace", setup{late: []*unstructured.Unstructured{stale(child())}}, isolated(parent()), health.StateUnknown, health.SeverityInfo, true},
-		{"edited, after grace", setup{}, isolated(parent(), stale(child())), health.StateWarning, health.SeverityWarning, false},
+		{"current entry", setup{}, withEdge(isolated(parent(), child()), 2), health.StateHealthy, "", false},
+		{"edited, inside grace", setup{late: []*unstructured.Unstructured{stale(child())}}, withEdge(isolated(parent()), 2), health.StateUnknown, health.SeverityInfo, true},
+		{"edited, after grace", setup{}, withEdge(isolated(parent(), stale(child())), 2), health.StateWarning, health.SeverityWarning, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2072,7 +2149,7 @@ func TestQ12CountsBeforeAndAfter(t *testing.T) {
 		testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}},{"matchLabels":{"env":"b"}}]`))
 	objs := isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
 		testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"}), testutil.Namespace("leaving", map[string]string{"team": "a"}),
-		d2, testutil.ControllerPod(d2, "kgateway2-0", true), testutil.Gateway("infra-b", "edge", "kgateway", nil), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
 		// Phase 1: owned (kgw), unchanged.
 		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
 		testutil.HTTPRoute("shop", "api2", []objects.ParentRef{gw}, ok(gw)),
@@ -2279,7 +2356,11 @@ func backendOnly(kind, version, name, backend string) *unstructured.Unstructured
 	gw := testutil.GwRef("infra", "edge")
 	r := testutil.Rule()
 	r["backendRefs"] = []any{map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "name": backend}}
-	u := testutil.WithRules(testutil.HTTPRoute("shop", name, []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), r)
+	st := testutil.AcceptedBy(gw, testutil.Controller)
+	if kind == "TCPRoute" { // edge's HTTP listener does not admit it
+		st.Conds[0] = testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners")
+	}
+	u := testutil.WithRules(testutil.HTTPRoute("shop", name, []objects.ParentRef{gw}, st), r)
 	u.SetAPIVersion("gateway.networking.k8s.io/" + version)
 	u.SetKind(kind)
 	return u
@@ -2335,27 +2416,42 @@ func TestKGWUI011OnKgateway23ForUnreportedRefForms(t *testing.T) {
 	}
 }
 
-// KGWUI-012 through the handlers (2.3): world() routes shop/cart through a
-// Same-only listener with Accepted=True, and the harness computes 61 s apart,
-// so the window has held: /health reports a warning on the route.
+// KGWUI-012 through the handlers (2.3): shop/drift attaches to edge, which still
+// reports one route; the harness computes 61 s apart, so the window has held.
+// A caller who cannot view shop/drift gets no detail and the Gateway's own since.
 func TestComputedDisagreementAtTheAPI(t *testing.T) {
-	_, srv, _ := startWith(t, setup{views: true}, world()...)
-	rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
-	var got []FindingDTO
-	for _, f := range rep.Findings {
-		if f.Code == health.CodeComputedDisagrees {
-			got = append(got, f)
-		}
-	}
-	want := "Parent `edge`: computed NotAllowedByListeners, controller reports True. Rule set kgateway-2.4."
-	if len(got) != 1 || got[0].Resource == nil || got[0].Resource.String() != "shop/cart" || got[0].Severity != health.SeverityWarning ||
-		got[0].Detail != want || got[0].Since == nil || !got[0].Since.Equal(testutil.Now.Add(-health.Grace-time.Second)) {
-		t.Fatalf("KGWUI-012 findings %+v", got)
-	}
-	if rep.State == health.StateError {
-		t.Fatalf("state %s: KGWUI-012 is never an error", rep.State)
-	}
-	if c := rep.Checks[len(rep.Checks)-1]; c.Name != "computed views" || !c.OK || c.Required {
-		t.Fatalf("last check %+v", c)
+	gw := testutil.GwRef("infra", "edge")
+	drift := testutil.HTTPRoute("shop", "drift", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "drift" })
+	for _, tc := range []struct {
+		name       string
+		authz      Authorizer
+		detail     string
+		restricted bool
+	}{
+		{"all visible", nil, "Listener `http`: computed 2 routes, controller reports 1. Rule set kgateway-2.4.", false},
+		{"dep hidden", hide, restrictedEvidence, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{authz: tc.authz, disputes: true}, withEdge(world(drift), 1)...)
+			rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+			var got []FindingDTO
+			for _, f := range rep.Findings {
+				if f.Code == health.CodeComputedDisagrees {
+					got = append(got, f)
+				}
+			}
+			since := testutil.Now.Add(-health.Grace - time.Second) // window start and edge's first-seen alike
+			if len(got) != 1 || got[0].Resource == nil || got[0].Resource.String() != "infra/edge" || got[0].Severity != health.SeverityWarning ||
+				got[0].Detail != tc.detail || got[0].EvidenceRestricted != tc.restricted || got[0].Since == nil || !got[0].Since.Equal(since) {
+				t.Fatalf("KGWUI-012 findings %+v", got)
+			}
+			if rep.State == health.StateError {
+				t.Fatalf("state %s: KGWUI-012 is never an error", rep.State)
+			}
+			if c := rep.Checks[len(rep.Checks)-1]; c.Name != "computed views" || !c.OK || c.Required {
+				t.Fatalf("last check %+v", c)
+			}
+		})
 	}
 }

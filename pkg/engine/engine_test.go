@@ -9,6 +9,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -50,8 +51,16 @@ func gvr(t *testing.T, kind string) schema.GroupVersionResource {
 // with its proxy, the kgateway class and objs.
 func snapshot(t *testing.T, objs ...*unstructured.Unstructured) *cache.Snapshot {
 	t.Helper()
+	return snapshotEdge(t, 0, objs...)
+}
+
+// snapshotEdge is snapshot with edge's listener http reporting attached routes.
+func snapshotEdge(t *testing.T, attached int32, objs ...*unstructured.Unstructured) *cache.Snapshot {
+	t.Helper()
 	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
-	all := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil)}, objs...)
+	edge := testutil.Gateway("infra", "edge", "kgateway", nil, testutil.Listener{Name: "http", Attached: attached, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}})
+	all := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true), edge}, objs...)
 	access := map[schema.GroupVersionResource]cache.Access{}
 	for _, k := range testutil.ServedUpstream() {
 		access[k.GVR()] = cache.Access{OK: true}
