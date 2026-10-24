@@ -33,6 +33,70 @@ it("surfaces API errors with their status", async () => {
   await waitFor(() => expect(screen.getByText("error 503")).toBeInTheDocument());
 });
 
+it("after an outage of many polls the next retry is still one interval away, and fresh data shows", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      calls++;
+      // Six failures (one poll, five retries), then the API is back.
+      return calls <= 6
+        ? new Response(JSON.stringify({ error: "down" }), { status: 503 })
+        : new Response(JSON.stringify([{ id: "a.one" }, { id: "b.two" }]), { status: 200 });
+    }),
+  );
+  renderWithTheme(<Probe />);
+  await screen.findByText("error 503");
+  expect(calls).toBe(1);
+  for (let n = 2; n <= 7; n++) {
+    // No backoff and no jitter: nothing before one interval, exactly one request at it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS - 100);
+    });
+    expect(calls).toBe(n - 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(calls).toBe(n);
+  }
+  expect(await screen.findByText("n=2")).toBeInTheDocument();
+});
+
+it("re-checks a 404 every interval and shows the object once it appears", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      calls++;
+      return calls <= 3
+        ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
+        : new Response(JSON.stringify([{ id: "a.one" }]), { status: 200 });
+    }),
+  );
+  renderWithTheme(<Probe />);
+  await screen.findByText("error 404");
+  for (let n = 2; n <= 4; n++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+    });
+    expect(calls).toBe(n);
+  }
+  expect(await screen.findByText("n=1")).toBeInTheDocument();
+});
+
+it("does not retry a 400: a bad request stays bad for that URL", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  stubApi({ "/api/v1/installs": [400, { error: "bad query" }] });
+  renderWithTheme(<Probe />);
+  await screen.findByText("error 400");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(3 * POLL_MS);
+  });
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+});
+
 it("drops the previous install's data when the install changes", async () => {
   let release: (() => void) | undefined;
   const gate = new Promise<void>((r) => {

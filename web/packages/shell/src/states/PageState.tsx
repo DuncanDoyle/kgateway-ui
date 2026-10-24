@@ -77,8 +77,8 @@ export function PageState({ kind, title, message, copyText, stylesOverride }: Pa
   return (
     <Center role={kind === "error" ? "alert" : "status"} stylesOverride={stylesOverride}>
       {kind === "loading" || kind === "connecting" ? <Spinner aria-hidden="true" /> : null}
-      {kind === "error" ? <HealthIcon state="error" size={28} /> : null}
-      {kind === "empty" ? <HealthIcon state="unknown" size={28} /> : null}
+      {kind === "error" ? <HealthIcon state="error" size={28} notice /> : null}
+      {kind === "empty" ? <HealthIcon state="unknown" size={28} notice /> : null}
       <h2>{title}</h2>
       {message ? <p>{message}</p> : null}
       {copyText ? (

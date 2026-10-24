@@ -3,7 +3,7 @@ import { SWRConfig } from "swr";
 import type { InstallHeader, MetaResponse } from "../api/types";
 import { defaultPages } from "../pages/defaultPages";
 import { healthy, installSummary, meta, overview, unhealthy, unknown } from "../test/fixtures";
-import { stubApi } from "../test/render";
+import { stubApi, testSWR } from "../test/render";
 import { installPath } from "./paths";
 import { Shell } from "./Shell";
 
@@ -15,7 +15,7 @@ afterEach(() => {
 function mount(path: string) {
   window.history.pushState({}, "", path);
   return render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell pages={defaultPages} />
     </SWRConfig>,
   );
@@ -185,6 +185,8 @@ it("H3: without the workloads capability there is no replica wording and no Depl
           kind: "Deployment",
           namespace: "kgw",
           name: "kgateway",
+          // Without workloads the backend serves no Deployment, so it sends no link.
+          link: "none" as const,
         },
       },
       {
@@ -198,6 +200,7 @@ it("H3: without the workloads capability there is no replica wording and no Depl
           kind: "Gateway",
           namespace: "prod",
           name: "edge",
+          link: "detail" as const,
         },
       },
     ],
@@ -213,7 +216,7 @@ it("H3: without the workloads capability there is no replica wording and no Depl
     "/api/v1/installs/kgw.kgateway/health": h,
   });
   mount("/i/kgw.kgateway");
-  // The Gateway row links only once /meta has loaded, so what follows is checked against loaded capabilities.
+  // The Gateway finding links by its server-computed link; the Deployment's is none.
   const rows = await screen.findAllByTestId("finding-row");
   const gateway = rows.find((r) => r.textContent?.includes("Gateway not programmed")) as HTMLElement;
   await within(gateway).findByRole("link");

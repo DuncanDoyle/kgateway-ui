@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -43,6 +44,12 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
 	mux.HandleFunc("GET /api/v1/installs", h.installs)
 	mux.HandleFunc("GET /api/v1/installs/{id}/overview", h.overview)
 	mux.HandleFunc("GET /api/v1/installs/{id}/health", h.health)
+	mux.HandleFunc("GET /api/v1/installs/{id}/routes", h.routes)
+	mux.HandleFunc("GET /api/v1/installs/{id}/gateways", h.gateways)
+	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets", h.listenerSets)
+	mux.HandleFunc("GET /api/v1/installs/{id}/gateways/{ns}/{name}", h.gatewayDetail)
+	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets/{group}/{kind}/{ns}/{name}", h.listenerSetDetail)
+	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}", h.routeDetail)
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	mux.Handle("/", spa(ui))
@@ -107,28 +114,40 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{}}
 	if m != nil {
 		resp.Pinned, resp.Synced = m.Pinned, synced(m)
-		resp.Kinds = append(resp.Kinds, m.Served...)
+		for _, k := range m.Served {
+			if !isAddedAfterV1(k) {
+				resp.Kinds = append(resp.Kinds, k)
+			}
+		}
 	}
 	// Deployments are linkable only where the platform runs workloads.
 	if plat.Has(platform.Workloads) {
 		resp.Kinds = append(resp.Kinds, deploymentKind)
 	}
+	if m != nil {
+		for _, k := range m.Served {
+			if isAddedAfterV1(k) {
+				resp.Kinds = append(resp.Kinds, k)
+			}
+		}
+		resp.Views = explore.DetailKinds(m.Served)
+	}
 	writeJSON(w, resp)
 }
 
-// visibleHealth returns the install's report as the caller of r may see it
+// visibleHealth returns the install's report as the caller of v may see it
 // (D-013). A finding on a denied resource keeps its code, severity and ref but
 // is restricted: message, detail and since are emptied. State and counts still
 // cover every finding, so partial visibility never makes an install look
 // healthier, and the findings keep the order health returned.
-func (h *handler) visibleHealth(r *http.Request, i *engine.InstallModel) health.Report {
-	if allowsAll(h.authz) {
+func visibleHealth(v *view, i *engine.InstallModel) health.Report {
+	if v.all {
 		return i.Health
 	}
 	rep := i.Health
 	rep.Findings = make([]health.Finding, 0, len(i.Health.Findings))
 	for _, f := range i.Health.Findings {
-		if f.Resource != nil && !h.authz.Authorize(r, *f.Resource) {
+		if f.Resource != nil && !v.can(*f.Resource) {
 			f.Message, f.Detail, f.Since, f.Restricted = "", "", nil, true
 		}
 		rep.Findings = append(rep.Findings, f)
@@ -136,13 +155,13 @@ func (h *handler) visibleHealth(r *http.Request, i *engine.InstallModel) health.
 	return rep
 }
 
-// visibleOverview rebuilds the overview over the owned objects the caller of r
+// visibleOverview rebuilds the overview over the owned objects the caller of v
 // may see: denied objects leave the count tiles and the gateway rows.
-func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.InstallModel, rep health.Report) overview.Overview {
-	if allowsAll(h.authz) {
+func (h *handler) visibleOverview(v *view, m *engine.Model, i *engine.InstallModel, rep health.Report) overview.Overview {
+	if v.all {
 		return i.Overview
 	}
-	can := func(u *unstructured.Unstructured) bool { return h.authz.Authorize(r, objects.RefOf(u)) }
+	can := func(u *unstructured.Unstructured) bool { return v.can(objects.RefOf(u)) }
 	keep := func(us []*unstructured.Unstructured) []*unstructured.Unstructured {
 		out := []*unstructured.Unstructured{}
 		for _, u := range us {
@@ -163,7 +182,7 @@ func (h *handler) visibleOverview(r *http.Request, m *engine.Model, i *engine.In
 	}
 	o := i.Owned
 	owned := &install.Owned{GatewayClasses: keep(o.GatewayClasses), Gateways: keep(o.Gateways), ListenerSets: keep(o.ListenerSets),
-		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached}
+		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached, Backends: keep(o.Backends)}
 	return overview.Build(i.Resolved, owned, m.Snapshot, m.Served, rep, h.src.Platform())
 }
 
@@ -179,10 +198,10 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		at := wireTime(p.ConfirmedAt)
 		confirmed = &at
 	}
-	out := []InstallSummary{}
+	out, v := []InstallSummary{}, h.view(r)
 	for k := range m.Installs {
 		i := &m.Installs[k]
-		hd, rep := i.Overview.Header, h.visibleHealth(r, i)
+		hd, rep := i.Overview.Header, visibleHealth(v, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
 			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
@@ -208,7 +227,13 @@ func (h *handler) find(w http.ResponseWriter, r *http.Request) (*engine.Publishe
 
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		writeJSON(w, OverviewResponse{Overview: h.visibleOverview(r, p.Model, i, h.visibleHealth(r, i)), CollectedAt: wireTime(p.ConfirmedAt)})
+		v := h.view(r)
+		ov := h.visibleOverview(v, p.Model, i, visibleHealth(v, i))
+		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), linkerFor(v, p.Model, i)
+		for _, g := range ov.Gateways {
+			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref)})
+		}
+		writeJSON(w, OverviewResponse{Overview: ov, Gateways: rows, CollectedAt: wireTime(p.ConfirmedAt)})
 	}
 }
 
@@ -237,13 +262,43 @@ func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
 
 func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
-		writeJSON(w, wireHealth(h.visibleHealth(r, i), p.ConfirmedAt))
+		writeJSON(w, healthResponse(h.view(r), p.Model, i, p.ConfirmedAt))
 	}
 }
 
-// resource serves one object of a served kind, or a Deployment, when the
-// caller may view it and it is owned by the install or referenced by a current
-// finding of the install. Only metadata.managedFields is stripped (D-013). Secrets are never watched, so
+// healthResponse is the caller's report in wire form: each finding's resource
+// carries its link. A visible finding whose evidence the caller may not view
+// all of has its detail replaced, and a since it has is replaced by the
+// resource's own (design §7.4 rule 7). State, counts and severities stay.
+func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
+	rep := wireHealth(visibleHealth(v, i), confirmedAt)
+	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
+	out.Report.Findings = nil // shadowed by out.Findings
+	l := linkerFor(v, m, i)
+	for _, f := range rep.Findings {
+		d := FindingDTO{Finding: f}
+		if f.Resource != nil {
+			lr := l.linked(*f.Resource)
+			d.Resource = &lr
+		}
+		if !f.Restricted && !v.allOf(f.Evidence) {
+			d.Detail, d.EvidenceRestricted = restrictedEvidence, true
+			if f.Since != nil {
+				d.Since = nil
+				if f.ResourceSince != nil {
+					at := wireTime(*f.ResourceSince)
+					d.Since = &at
+				}
+			}
+		}
+		out.Findings = append(out.Findings, d)
+	}
+	return out
+}
+
+// resource serves one object the install admits (design §7.1) when the
+// caller may view it and it exists: its link is not none. Only
+// metadata.managedFields is stripped (D-013). Secrets are never watched, so
 // they are never reachable. "-" stands for the empty group or namespace.
 func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 	p, i := h.find(w, r)
@@ -257,53 +312,53 @@ func (h *handler) resource(w http.ResponseWriter, r *http.Request) {
 		return s
 	}
 	want := objects.Ref{Group: dash(r.PathValue("group")), Kind: r.PathValue("kind"), Namespace: dash(r.PathValue("rns")), Name: r.PathValue("rname")}
-	if h.authz.Authorize(r, want) {
-		if obj := lookup(p.Model, i, want); obj != nil {
+	if linkerFor(h.view(r), p.Model, i).link(want) != LinkNone {
+		if obj := object(p.Model, want); obj != nil {
 			// The body is the raw object, so the collection time travels in a header (D-017 §6).
 			w.Header().Set("Collected-At", wireTime(p.ConfirmedAt).Format(time.RFC3339Nano))
 			writeJSON(w, obj)
 			return
 		}
 	}
-	// Denied and absent objects get the same answer.
-	writeErr(w, http.StatusNotFound, "resource not found in this install's scope")
+	// Denied, absent and unadmitted objects get the same answer.
+	writeErr(w, http.StatusNotFound, notFoundInScope)
 }
 
-// lookup returns want as a JSON object, or nil if the install may not serve it.
-func lookup(m *engine.Model, i *engine.InstallModel, want objects.Ref) map[string]any {
-	o := i.Owned
-	owned := append(append(append([]*unstructured.Unstructured{}, o.GatewayClasses...), o.Gateways...), o.ListenerSets...)
-	for _, x := range slices.Concat(o.Routes, o.Policies) {
-		owned = append(owned, x.Obj)
-	}
-	for _, u := range owned {
-		if objects.RefOf(u) == want {
-			return clean(u.Object)
-		}
-	}
-	referenced := slices.ContainsFunc(i.Health.Findings, func(f health.Finding) bool { return f.Resource != nil && *f.Resource == want })
-	if !referenced {
-		return nil
-	}
-	if want.Group == deploymentKind.Group && want.Kind == deploymentKind.Kind {
-		for _, d := range m.Snapshot.Deployments {
-			if d.Namespace == want.Namespace && d.Name == want.Name {
-				return deploymentObject(d)
-			}
-		}
-		return nil
-	}
-	for _, k := range m.Served {
-		if k.Group != want.Group || k.Kind != want.Kind {
-			continue
-		}
-		for _, u := range m.Snapshot.Objects[k.GVR()] {
-			if objects.RefOf(u) == want {
-				return clean(u.Object)
-			}
-		}
+// object returns the stored object ref names as a JSON object, or nil.
+func object(m *engine.Model, ref objects.Ref) map[string]any {
+	switch u, d := stored(m, ref); {
+	case u != nil:
+		return clean(u.Object)
+	case d != nil:
+		return deploymentObject(d)
 	}
 	return nil
+}
+
+// stored returns the object ref names in the snapshot: an object of a served
+// kind, or a Deployment. Both are nil when it is absent or never served.
+func stored(m *engine.Model, ref objects.Ref) (*unstructured.Unstructured, *appsv1.Deployment) {
+	if ref.Group == deploymentKind.Group && ref.Kind == deploymentKind.Kind {
+		for _, d := range m.Snapshot.Deployments {
+			if d.Namespace == ref.Namespace && d.Name == ref.Name {
+				return nil, d
+			}
+		}
+		return nil, nil
+	}
+	for _, k := range m.Served {
+		if k.Group != ref.Group || k.Kind != ref.Kind {
+			continue
+		}
+		// The cache sorts each kind by "namespace/name".
+		objs, key := m.Snapshot.Objects[k.GVR()], ref.Namespace+"/"+ref.Name
+		if j, ok := slices.BinarySearchFunc(objs, key, func(u *unstructured.Unstructured, key string) int {
+			return strings.Compare(u.GetNamespace()+"/"+u.GetName(), key)
+		}); ok {
+			return objs[j], nil
+		}
+	}
+	return nil, nil
 }
 
 // clean returns a copy of obj without metadata.managedFields.

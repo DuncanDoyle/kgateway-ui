@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { AlertTriangle, Check, HelpCircle, X } from "lucide-react";
 import type { HealthState } from "../theme/tokens";
+import { useShownState } from "./staleView";
 
 // region Styles
 const Chip = styled.span<{ $state: HealthState; $size: number; $stylesOverride?: SerializedStyles }>`
@@ -24,11 +25,15 @@ const glyphs = { healthy: Check, warning: AlertTriangle, error: X, unknown: Help
 interface HealthIconProps {
   state: HealthState;
   size?: number;
+  /** A notice's icon, not an object's state: it ignores the stale view (design §6.3 covers states only). */
+  notice?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
 /** The icon half of the health vocabulary; always paired with text by callers. */
-export function HealthIcon({ state, size = 16, stylesOverride }: HealthIconProps) {
+export function HealthIcon({ state: given, size = 16, notice, stylesOverride }: HealthIconProps) {
+  const shown = useShownState(given);
+  const state = notice ? given : shown;
   const Glyph = glyphs[state];
   return (
     <Chip

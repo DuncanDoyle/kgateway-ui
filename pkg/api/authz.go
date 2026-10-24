@@ -27,11 +27,17 @@ type AuthorizerFunc func(r *http.Request, ref objects.Ref) bool
 // Authorize implements Authorizer.
 func (f AuthorizerFunc) Authorize(r *http.Request, ref objects.Ref) bool { return f(r, ref) }
 
-// allowsAll reports whether a is AllowAll, whose callers get the precomputed model unchanged.
+// allowsAllHook lets tests mark a counting Authorizer as admitting every
+// ref; it is nil in production.
+var allowsAllHook func(Authorizer) bool
+
+// allowsAll reports whether a is AllowAll, which the API never calls and
+// answers from the precomputed model (design §7.4 rule 10). The check is on
+// the exact type: a type embedding AllowAll may override Authorize.
 func allowsAll(a Authorizer) bool {
 	switch a.(type) {
 	case AllowAll, *AllowAll:
 		return true
 	}
-	return false
+	return allowsAllHook != nil && allowsAllHook(a)
 }

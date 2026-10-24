@@ -16,7 +16,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
@@ -25,7 +24,7 @@ import (
 // testutil.ClientsWith does, which takes a *testing.T.
 func scaleCache(b *testing.B, tier scale.Tier) *cache.Cache {
 	b.Helper()
-	served := append(testutil.ServedUpstream(), kinds.Served{Descriptor: scale.BackendKind, Version: scale.BackendKind.Versions[0]})
+	served := testutil.ServedUpstream()
 	listKinds := map[schema.GroupVersionResource]string{}
 	byKind := map[schema.GroupKind]schema.GroupVersionResource{}
 	for _, s := range served {

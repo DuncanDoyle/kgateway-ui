@@ -1,0 +1,14 @@
+# Sustained-stream budget at Large, full 10-minute run (sub-phase 2.2, Task 32). make bench runs the 60 s -short version.
+# run: make bench-stream
+go version go1.27.3 darwin/arm64
+machine: Darwin arm64, 18 CPUs, Apple M5 Max
+code: be523f10ef8f84b3630ec229f7946a3f044db416 + fix round 1 working tree
+load: 20:53  up 2 days, 12:02, 14 users, load averages: 3.55 3.35 3.31
+go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 15m ./pkg/api
+=== RUN   TestBudgetSustainedStream
+    budget_test.go:332: stream 10m0.003s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 43.017s = 7.2 % of one core (budget ≤ 15 %); recompute wall 29s = 4.8 %; GC share 25.1 % of used CPU (1.8 % of one core)
+    budget_test.go:334: polls: 2401, p50 754µs p95 1.2ms max 10.63ms
+--- PASS: TestBudgetSustainedStream (600.13s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	600.435s
+load after: 21:03  up 2 days, 12:12, 14 users, load averages: 1.91 2.76 3.03

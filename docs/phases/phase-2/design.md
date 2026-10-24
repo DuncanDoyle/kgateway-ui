@@ -255,7 +255,7 @@ The empty-list fallback matches kgateway, which allows implicit attachment only 
 
 **Declared candidate.** A current `spec.parentRefs` entry of C resolves to an HTTPRoute P owned by I, C's namespace is in I's scope, and C has **no eligible status entry** for P, current or stale. C is a diagnostic candidate only: never a child, never in Child routes or the up-chain, never makes a `name` ref "reported", not counted unless owned another way. It gets KGWUI-011 (§6.2).
 
-**Out-of-scope routes are never candidates.** A route outside I's scope whose parentRef names a route of I gets KGWUI-004 only (`assign.go:181-186`). It never gets KGWUI-011, never enters a computed view, and never makes the resource-status check pending.
+**Out-of-scope routes are never candidates.** A route outside I's scope whose parentRef names a route of I, or whose empty parentRefs list carries a status entry from I's controllers naming a route of I (an implicit child, eligibility condition 3), gets KGWUI-004 only (`assign.go:181-186`); one finding per (install, route) (our call, 2.2). It never gets KGWUI-011, never enters a computed view, and never makes the resource-status check pending.
 
 **Ownership rules.**
 - A breadth-first pass starts at Gateway-attached HTTPRoutes and follows **reported edges only**, over a reverse index built once per recompute. A visited set stops cycles. Cost is linear in routes plus edges.
@@ -374,6 +374,7 @@ Each row carries flags from its **current** status entries for this install's pa
 | `observedGeneration` > 0 and lower | stale | none | unknown |
 | `observedGeneration` 0 (2.3) | none | `False` → KGWUI-002 **warning**, "The controller does not say which version of this Backend it checked" | unknown |
 | absent | none | none (optional condition) | unknown |
+| `Unknown` status, any evidence | n/a | none | unknown (our call, 2.2) |
 
 No-evidence states are never green (D-016 §6) and add no failed required check, so a 2.3 install with Backends does not stay unknown forever (D-018). The pending helper (`pkg/health/checks.go:228-255`) is not used for Backends.
 
@@ -442,7 +443,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `limit`, `cursor` | all | 1–200, default 50; an opaque `next` or `prev` value |
 | `rule`, `ref`, `outcome` (2.4) | delegation | rule index, ref index, a row outcome; no `sort` (fixed order, §3.6) |
 
-**Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
+**Errors** use Phase 1's `ErrorResponse` (`pkg/api/types.go:64-67`). 400: unknown value, unknown parameter name, a single-valued parameter given twice (our call, 2.2: a filter an older backend silently ignored would return unfiltered data the SPA shows as filtered, so a newer SPA sends a new filter only when `/meta` advertises it), `limit` out of range, `listener` without a suitable `parent`, a malformed cursor or one from another sort (the SPA drops it and reloads page one). 404: unknown install, or an absent, unadmitted or denied object. 503: cache not synced (`handlers.go:69-77`).
 
 ### 7.3 DTOs
 
@@ -470,7 +471,7 @@ Page<T>         { install, items: T[], total, next?, prev?, deniedInInstall?, co
 
 // Lists
 RouteRow        { ref: LinkedRef, hostnames: string[], parents: ParentSummary[], parentRoutes: LinkedRef[],
-                  children: number, flags: string[], health: State }
+                  children: number, flags: string[], health: State, mirror?: true /*only under backend=, when every matched use is a mirror*/ }
 GatewayRow2     { ref: LinkedRef, class, health, listeners, attachedRoutes /*status sum*/, routes?, notAccepted,
                   listenerSets, disagreements?, addresses: string[] }   // routes, disagreements: 2.3
 ListenerSetRow  { ref: LinkedRef, parent: LinkedRef, health, listeners, acceptedReason?, routes?, disagreements? }
@@ -524,6 +525,11 @@ BackendRefDTO   { ref: LinkedRef, port?, weight, filters: FilterDTO[],
 - `effective` and `DelegationRow.contexts` project what the model retained, with the limits and truncation flags of `computed-rules.md` §5.7. A detail request never re-runs the traversal. An `EffectiveDTO` covers one parent edge, so it merges the contexts of every delegation row with that parent and child; its `contextsTruncated` is set when any of them was cut, and an edge with no kept contexts is sent as `contexts: []` with the flag, never as complete.
 - The Gateway page pages its ListenerSets through `GET …/listenersets?parent=…`, so no detail body is unbounded.
 - `ParentSummary` picks the deciding condition: the first current `False` among `Accepted`, `ResolvedRefs`, `kgateway.dev/Programmed`, else the pending reason.
+- `ListenerSetDetail.parentFound` is false when the caller may not view, or the install does not admit, the parent Gateway, and the body then carries nothing of that Gateway (D-013). The ListenerSet's own status may still imply that a parent exists; that is data of a visible object (§7.4 rules 8–9). The SPA words this as "not available", not "not found" (our call, 2.2).
+- A rule with omitted `matches` is shown with the CRD default, one `PathPrefix /` match (our call, 2.2).
+- A Backend's `state` is omitted when the Backend is not admitted for this install, as on a candidate route's page (our call, 2.2).
+- A delegation ref's `restricted` state is decided by the Authorizer on the referenced route alone (our call, 2.2).
+- On a candidate parent's page, every child reads `not-reported`, because reported edges exist only for owned parents (our call, 2.2).
 
 ### 7.4 Authorizer
 
@@ -539,7 +545,7 @@ This is the only definition of what a caller may see. Every new handler goes thr
 6. **Computed flags** (`listener-unknown`, `dropped`) follow rule 4 per caller.
 7. **Finding evidence.** Phase 1 redacts a finding only by its resource (`pkg/api/handlers.go:121-124`). Phase 2 findings carry their evidence's dependency set. When the caller may view the resource but not every dependency, the finding is listed with its code, severity and resource, its detail is replaced by "Details depend on objects you cannot view", and `evidenceRestricted: true` is set (additive). This covers KGWUI-011 and KGWUI-012 details that quote a parent's match, a hidden route or a Namespace's labels.
 8. **Spec refs stay.** References written in an authorized object's own spec or status are part of it and are sent as written, as the YAML view does. Status-written numbers (`attachedRoutes`, `attachedListenerSets`) are sent as written.
-9. **Health is not filtered.** Install health, row states and the `disagrees` flag cover all findings (design §7.1, D-013). Only evidence is restricted (rule 7).
+9. **Health is not filtered.** Install health, row states and the `disagrees` flag cover all findings (design §7.1, D-013). Only evidence is restricted (rule 7). Accepted consequence (our call, 2.2): a KGWUI-011 on a visible child stays info while its hidden parent's current generation is inside grace, which hints that the parent changed within the last minute; when a finding's evidence is restricted, its `since` becomes the child's own current-generation first-seen time, so `since` reveals nothing of the hidden parent.
 10. `AllowAll` skips per-row and dependency calls and uses precomputed values (`authz.go:30-37`). Dependency sets are stored as indexes into a per-install ref table, so the check is a bounded loop.
 
 ### 7.5 Example (2.3)
@@ -555,7 +561,7 @@ GET /api/v1/installs/kgw.kgateway/routes?parent=gateway.networking.k8s.io/Gatewa
      "hostnames": ["shop.example.com"],
      "parents": [{"ref": {"group": "gateway.networking.k8s.io", "kind": "Gateway", "namespace": "infra", "name": "edge", "link": "detail"},
                   "sectionName": "https", "attachment": "not-accepted", "conditionType": "Accepted",
-                  "reason": "NoMatchingListenerHostname", "message": "",
+                  "reason": "NoMatchingListenerHostname",
                   "computed": {"outcome": "NoMatchingListenerHostname", "listeners": [],
                                "explanation": "listener https has *.example.org; route has shop.example.com",
                                "computed": {"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection",
@@ -578,7 +584,7 @@ New fixtures in `pkg/api/testdata/golden`, added per sub-phase:
 
 The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) imports each one. Existing goldens change only by optional fields, and a test asserts the diffs add nothing else:
 - `installs.json`, `bare-installs.json`: `confirmedAt` (2.1);
-- `meta.json`: `views` and the Backend kind (2.2);
+- `meta.json`, `bare-meta.json`: `views` and the Backend kind (2.2), appended last. Kinds added after API v1 are listed in `pkg/api`'s `addedAfterV1` set so `meta.kinds` stays append-only; every later post-v1 kind joins that set (our call, 2.2);
 - `health.json`: `link` on finding resources (2.2); `evidenceRestricted` appears only in restricted fixtures. New checks are **appended** to `checks` in registration order, after Phase 1's: `backend status` (2.2) and `computed views` (2.3), each always present and OK when nothing is wrong;
 - `overview.json`, `bare-overview.json` counts: a `Backends` tile ("in use"), present even at zero, placed after Phase 1's tiles in the fixed tile order;
 - `overview.json`, `bare-overview.json`: `link` on Gateway rows (2.2).
@@ -601,6 +607,7 @@ The TypeScript golden test (`web/packages/shell/src/api/types.golden.test.ts`) i
 - Detail pages have **Overview** and **YAML** tabs (`?tab=yaml`); the YAML tab reuses the YAML view's body (`web/packages/shell/src/pages/ResourcePage.tsx:135-192`).
 - The header gains install-scoped nav: Overview, Gateways, Routes, ListenerSets, Findings.
 - Filters, sort and cursor live in the query string, as in the Gateway table (`pages/install/GatewayTable.tsx:221-260`).
+- On detail pages only `?tab` is in the URL; sub-table filters and cursors are page-local, so a reload returns to page one and the default sub-filter **(our call, 2.2)**.
 - Every link comes from the reference's `link` (§7.1).
 
 ### 8.2 Extension contract
@@ -631,7 +638,7 @@ A diagnostic candidate shows its banner above the header.
 
 **HTTPRoute detail.** Up-chain breadcrumb ("A parent you cannot view" for a restricted step; "More paths not shown" when truncated); hostnames, or "Inherits the listener's hostnames", or for a child "Inherits the parent route's hostnames"; one card per parentRef with target, section or port, every condition and, from 2.3, the computed listeners each with its own effective hostnames; other controllers' entries collapsed; permission ("Allows any parent" or "Allows: …"); rules (matches, filters with config as written, backendRefs with weight; a delegation ref shows its mode and, from 2.4, its selected and attached counts; a Backend shows its state or "Restricted"); from 2.4, effective matches per parent path and the Delegation tab; child routes (reported, paged).
 
-**ListenerSet detail.** Parent Gateway link (or "Parent Gateway not found"), conditions, the listener table, attached routes. **Allowed listeners (2.2, user, 2026-10-23).** When the ListenerSet is not accepted with reason `NotAllowed`, the page shows the parent Gateway's `spec.allowedListeners` as written next to that condition (or "Not set: the Gateway allows no ListenerSets"). When the field is absent, a hint adds: "If you set `allowedListeners` and it is missing here, the Gateway CRD in this cluster may not have the field. The API server drops fields its CRD does not define. Install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD." **Detection (our call):** the UI does not read CRDs (D-017 §5 dropped that RBAC), so it shows the hint whenever the field is absent on the parent Gateway. It cannot tell an unset field from one the CRD lacks: both read as absent. Served versions do not settle it either, because the standard and experimental channels serve the same Gateway version. The hint is therefore worded as a possibility, never a diagnosis.
+**ListenerSet detail.** Parent Gateway link (or "Not available" when `parentFound` is false; §7.3), conditions, the listener table, attached routes. **Allowed listeners (2.2, user, 2026-10-23).** When the ListenerSet is not accepted with reason `NotAllowed`, the page shows the parent Gateway's `spec.allowedListeners` as written next to that condition (or "Not set: the Gateway allows no ListenerSets"). When the field is absent, a hint adds: "If you set `allowedListeners` and it is missing here, the Gateway CRD in this cluster may not have the field. The API server drops fields its CRD does not define. Install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD." **Detection (our call):** the UI does not read CRDs (D-017 §5 dropped that RBAC), so it shows the hint whenever the field is absent on the parent Gateway. It cannot tell an unset field from one the CRD lacks: both read as absent. Served versions do not settle it either, because the standard and experimental channels serve the same Gateway version. The hint is therefore worded as a possibility, never a diagnosis.
 
 **Reverse lookup (2.2, user, 2026-10-23).** "Routes that send traffic here" opens the Routes list with `backend=…`. It appears on the YAML view of an admitted Backend, and on every backendRef of a route page ("Other routes using this backend"). Services are not watched, so they have no YAML view (§11); for a Service the entry point is the route's backendRef **(our call)**. Mirror targets are listed with a "Mirror" label.
 
@@ -639,7 +646,7 @@ A diagnostic candidate shows its banner above the header.
 
 | State | Behaviour |
 |---|---|
-| Loading | skeleton rows at the final row height; fixed-height header and tabs |
+| Loading | skeleton rows at the final row height, sub-tables sized from the detail's counts; fixed-height header and tabs. The candidate banner is the one allowed load-time shift: it appears only once the body says the object is a candidate **(our call, 2.2)** |
 | Empty | per table, with a Clear filters action where filters apply |
 | Error after data | keep the data, show `PageNotice` (`ResourcePage.tsx:174` pattern) |
 | 404 | "Not in this install's scope", with a link back |
@@ -651,7 +658,7 @@ A diagnostic candidate shows its banner above the header.
 
 ### 8.7 Interaction, layout and accessibility
 
-- Every interactive element has hover, active and focus-visible styles in both themes. Tables keep fixed column widths from the first render, wrap long names, are keyboard-navigable and carry `aria-sort`.
+- Every interactive element has hover, active and focus-visible styles in both themes. Tables keep fixed column widths from the first render, truncate long text in table cells to one line with the full text in a tooltip (our call, 2.2: §8.6's fixed row height wins), are keyboard-navigable and carry `aria-sort`.
 - Tabs follow the WAI-ARIA tabs pattern; expanders carry `aria-expanded`; the up-chain is a `nav` with `aria-label="Route parents"`. The `ComputedBadge` tooltip is reachable by keyboard and in the accessible name.
 - State is always icon + colour + text; contrast is checked in both themes by the existing token test.
 - Below 900 px sections stack and tables move secondary columns into an expandable row; no horizontal page scroll at 720 px.
@@ -730,7 +737,7 @@ The engine takes a clock, a trigger source and a snapshot source that can pause 
 ### 9.5 kind e2e
 
 Fixtures run on kgateway 2.3.11 and 2.4.7 in the existing matrix, added per sub-phase:
-- 2.2: a Gateway with three listeners (HTTP, HTTPS with a wildcard hostname, TCP) and a `Selector` allowedRoutes; routes rejected with each of the three reasons; a ListenerSet with one invalid listener and a denied one; a delegation tree (name child, label child, wildcard parent, forbidden child, header-mismatch child); a child with hostnames; an inherit-parent-matcher child; a cycle; a static and an invalid `Backend`; a replaced rule.
+- 2.2: a Gateway with three listeners (HTTP, HTTPS with a wildcard hostname, TCP) and a `Selector` allowedRoutes; routes rejected with each of the three reasons; a ListenerSet with one invalid listener and a denied one; a delegation tree (name child, label child, wildcard parent, forbidden child, header-mismatch child); a child with hostnames; an inherit-parent-matcher child; a cycle; a static and an invalid `Backend`; a replaced rule. `NotAllowedByListeners` needs a namespace no listener admits: kgateway checks allowedRoutes across listeners before the section name, so a disallowed section alone gives `NoMatchingParent` (`v2.4.7 pkg/kgateway/query/route.go:446-540`).
 - 2.3: the `sectionName` quirk; two parentRefs to one listener.
 - 2.4: the controller-backed cases of `computed-rules.md` §11, marked **e2e**: an ancestor-pruned parent match; one child attached through one parent match and dropped through another; an attached child with a missing Service backend; a 2.3 child whose parentRef sets only a port.
 

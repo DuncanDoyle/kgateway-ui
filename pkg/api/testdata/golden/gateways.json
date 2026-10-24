@@ -1,0 +1,32 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "addresses": [
+          "10.0.0.1"
+        ],
+        "attachedRoutes": 0,
+        "class": "kgateway",
+        "health": "healthy",
+        "listenerSets": 2,
+        "listeners": 1,
+        "notAccepted": 1,
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "total": 1
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

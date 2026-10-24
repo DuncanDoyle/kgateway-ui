@@ -1,0 +1,935 @@
+{
+  "body": {
+    "ancestors": [
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": true,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "loop",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "top1",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "top2",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "top3",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      }
+    ],
+    "ancestorsTruncated": true,
+    "annotations": {},
+    "childCount": 2,
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "declaredCount": 1,
+    "generation": 1,
+    "health": "healthy",
+    "hostnames": [
+      "mid.example.com"
+    ],
+    "install": "kgw.kgateway",
+    "parentRefs": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "name": "edge",
+        "namespace": "infra",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "name": "loop",
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "loop",
+          "namespace": "shop"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "name": "top1",
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top1",
+          "namespace": "shop"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "name": "top2",
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top2",
+          "namespace": "shop"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "name": "top3",
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top3",
+          "namespace": "shop"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "name": "top4",
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top4",
+          "namespace": "shop"
+        }
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "name": "top5",
+        "namespace": "shop",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top5",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "parents": [
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "loop",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "loop",
+          "namespace": "shop"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "top1",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top1",
+          "namespace": "shop"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "top2",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top2",
+          "namespace": "shop"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "top3",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top3",
+          "namespace": "shop"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "top4",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top4",
+          "namespace": "shop"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "top5",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top5",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "HTTPRoute",
+      "link": "detail",
+      "name": "mid",
+      "namespace": "shop"
+    },
+    "rules": [
+      {
+        "backendRefs": [
+          {
+            "delegation": {
+              "mode": "name",
+              "name": "child",
+              "namespace": "shop",
+              "state": "reported"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "child",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "delegation": {
+              "mode": "name",
+              "name": "declared",
+              "namespace": "shop",
+              "state": "not-reported"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "declared",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "delegation": {
+              "mode": "name",
+              "name": "ghost",
+              "namespace": "shop",
+              "state": "not-found"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "ghost",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "delegation": {
+              "mode": "wildcard",
+              "namespace": "shop"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "*",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "delegation": {
+              "label": "team",
+              "mode": "label",
+              "namespace": "shop"
+            },
+            "filters": [],
+            "ref": {
+              "group": "delegation.kgateway.dev",
+              "kind": "label",
+              "link": "none",
+              "name": "team",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          }
+        ],
+        "filters": [],
+        "index": 0,
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/api"
+            }
+          }
+        ],
+        "name": "deleg"
+      },
+      {
+        "backendRefs": [
+          {
+            "filters": [],
+            "port": 80,
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "cart-svc",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "filters": [
+              {
+                "config": {
+                  "responseHeaderModifier": {
+                    "remove": [
+                      "x-b"
+                    ]
+                  },
+                  "type": "ResponseHeaderModifier"
+                },
+                "type": "ResponseHeaderModifier"
+              },
+              {
+                "config": {
+                  "requestMirror": {
+                    "backendRef": {
+                      "name": "mirror-svc",
+                      "port": 80
+                    }
+                  },
+                  "type": "RequestMirror"
+                },
+                "mirror": {
+                  "backendRef": {
+                    "group": "",
+                    "kind": "Service",
+                    "link": "none",
+                    "name": "mirror-svc",
+                    "namespace": "shop"
+                  },
+                  "port": 80
+                },
+                "type": "RequestMirror"
+              }
+            ],
+            "port": 8080,
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "w1",
+              "namespace": "shop"
+            },
+            "weight": 1
+          },
+          {
+            "filters": [],
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "w0",
+              "namespace": "shop"
+            },
+            "weight": 0
+          },
+          {
+            "backend": {
+              "accepted": {
+                "lastTransitionTime": "2026-10-17T11:00:00Z",
+                "message": "",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "stale": false,
+                "status": "True",
+                "type": "Accepted"
+              },
+              "state": "healthy"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.kgateway.dev",
+              "kind": "Backend",
+              "link": "yaml",
+              "name": "be1",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          }
+        ],
+        "filters": [
+          {
+            "config": {
+              "requestHeaderModifier": {
+                "add": [
+                  {
+                    "name": "x-a",
+                    "value": "1"
+                  }
+                ]
+              },
+              "type": "RequestHeaderModifier"
+            },
+            "type": "RequestHeaderModifier"
+          },
+          {
+            "config": {
+              "requestMirror": {
+                "backendRef": {
+                  "name": "mirror-svc",
+                  "port": 80
+                },
+                "percent": 10
+              },
+              "type": "RequestMirror"
+            },
+            "mirror": {
+              "backendRef": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "mirror-svc",
+                "namespace": "shop"
+              },
+              "percent": 10,
+              "port": 80
+            },
+            "type": "RequestMirror"
+          },
+          {
+            "config": {
+              "requestMirror": {
+                "backendRef": {
+                  "name": "mirror-frac"
+                },
+                "fraction": {
+                  "numerator": 1
+                }
+              },
+              "type": "RequestMirror"
+            },
+            "mirror": {
+              "backendRef": {
+                "group": "",
+                "kind": "Service",
+                "link": "none",
+                "name": "mirror-frac",
+                "namespace": "shop"
+              },
+              "fraction": {
+                "denominator": 100,
+                "numerator": 1
+              }
+            },
+            "type": "RequestMirror"
+          },
+          {
+            "config": {
+              "extensionRef": {
+                "group": "gateway.kgateway.dev",
+                "kind": "TrafficPolicy",
+                "name": "tp"
+              },
+              "type": "ExtensionRef"
+            },
+            "extensionRef": {
+              "group": "gateway.kgateway.dev",
+              "kind": "TrafficPolicy",
+              "link": "none",
+              "name": "tp",
+              "namespace": "shop"
+            },
+            "type": "ExtensionRef"
+          }
+        ],
+        "index": 1,
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ]
+      },
+      {
+        "backendRefs": [
+          {
+            "filters": [],
+            "port": 80,
+            "ref": {
+              "group": "",
+              "kind": "Service",
+              "link": "none",
+              "name": "cart-svc",
+              "namespace": "shop"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          }
+        ],
+        "filters": [],
+        "index": 2,
+        "matches": [
+          {
+            "headers": [
+              {
+                "name": "x-env",
+                "type": "Exact",
+                "value": "prod"
+              }
+            ],
+            "method": "GET",
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            },
+            "queryParams": [
+              {
+                "name": "q",
+                "type": "RegularExpression",
+                "value": ".*"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

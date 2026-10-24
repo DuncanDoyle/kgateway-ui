@@ -8,7 +8,7 @@ const Wrap = styled.span<{ stylesOverride?: SerializedStyles }>`
   display: inline-flex;
   ${(p) => p.stylesOverride}
 `;
-const Tip = styled.span<{ $placement: "center" | "end" }>`
+const Tip = styled.span<{ $placement: "center" | "end"; $wrap?: boolean }>`
   position: absolute;
   top: calc(100% + 6px);
   ${(p) => (p.$placement === "end" ? "right: 0;" : "left: 50%; transform: translateX(-50%);")}
@@ -23,6 +23,7 @@ const Tip = styled.span<{ $placement: "center" | "end" }>`
   font-weight: ${(p) => p.theme.font.weight.regular};
   white-space: nowrap;
   pointer-events: none;
+  ${(p) => (p.$wrap ? "white-space: normal; width: max-content; max-width: min(32rem, 80vw); overflow-wrap: anywhere;" : "")}
 `;
 
 // region Helpers
@@ -52,11 +53,13 @@ interface TooltipProps {
   children: ReactElement<{ "aria-describedby"?: string }>;
   /** "end" aligns the tip's right edge with the trigger, for triggers at the window edge. */
   placement?: "center" | "end";
+  /** Long labels wrap inside a bounded width instead of one line. */
+  wrap?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
 /** App tooltip shown on hover and keyboard focus, hidden on press. Native title tooltips are not used. */
-export function Tooltip({ label, children, placement = "center", stylesOverride }: TooltipProps) {
+export function Tooltip({ label, children, placement = "center", wrap, stylesOverride }: TooltipProps) {
   const [open, setOpen] = useState(false);
   // A press hides the tip until the pointer leaves.
   const pressed = useRef(false);
@@ -78,7 +81,7 @@ export function Tooltip({ label, children, placement = "center", stylesOverride 
     >
       {cloneElement(children, { "aria-describedby": open ? id : undefined })}
       {open ? (
-        <Tip role="tooltip" id={id} $placement={placement}>
+        <Tip role="tooltip" id={id} $placement={placement} $wrap={wrap}>
           {label}
         </Tip>
       ) : null}

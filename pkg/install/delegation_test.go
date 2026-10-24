@@ -1,0 +1,422 @@
+package install
+
+import (
+	"cmp"
+	"slices"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+func TestReportedEdgeNeedsEligibility(t *testing.T) {
+	p := testutil.HTTPRouteRef("shop", "api")
+	ctl := []string{testutil.Controller}
+	edge := func(u *unstructured.Unstructured) bool {
+		_, ok := ReportedEdge(objects.DecodeHTTPRoute(u), p.Ref(), ctl)
+		return ok
+	}
+	if !edge(testutil.HTTPRoute("shop", "c", []objects.ParentRef{p}, testutil.AcceptedBy(p, testutil.Controller))) {
+		t.Fatal("matching spec + status is an edge")
+	}
+	if edge(testutil.HTTPRoute("shop", "c", []objects.ParentRef{testutil.HTTPRouteRef("shop", "other")}, testutil.AcceptedBy(p, testutil.Controller))) {
+		t.Fatal("a removed ref keeps no edge")
+	}
+	if !edge(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(p, testutil.Controller))) {
+		t.Fatal("empty list falls back to status")
+	}
+	if edge(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(p, "example.com/other"))) {
+		t.Fatal("another controller's entry is no edge")
+	}
+	if edge(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "other"), testutil.Controller))) {
+		t.Fatal("an entry for another parent is no edge to p")
+	}
+	// Equal after defaults: a ref written without its namespace (2.4 writes the entry as the spec ref).
+	short := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "api"}
+	if !edge(testutil.HTTPRoute("shop", "c", []objects.ParentRef{short}, testutil.AcceptedBy(short, testutil.Controller))) {
+		t.Fatal("refs equal after defaults make an edge")
+	}
+	gw := testutil.GwRef("infra", "edge")
+	if edge(testutil.HTTPRoute("shop", "c", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller), testutil.AcceptedBy(p, testutil.Controller))) {
+		t.Fatal("a non-empty list without p keeps no implicit edge")
+	}
+	es, ok := ReportedEdge(objects.DecodeHTTPRoute(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(p, testutil.Controller))), p.Ref(), ctl)
+	if !ok || len(es) != 1 || es[0].ParentRef != p {
+		t.Fatalf("entries: %+v", es)
+	}
+	// Two refs to one parent: every eligible entry counts.
+	s1, s2 := p, p
+	s1.SectionName, s2.Port = "a", 8080
+	es, _ = ReportedEdge(objects.DecodeHTTPRoute(testutil.HTTPRoute("shop", "c", []objects.ParentRef{s1, s2},
+		testutil.AcceptedBy(s1, testutil.Controller), testutil.AcceptedBy(s2, testutil.Controller))), p.Ref(), ctl)
+	if len(es) != 2 || es[0].ParentRef != s1 || es[1].ParentRef != s2 {
+		t.Fatalf("two refs to one parent: %+v", es)
+	}
+}
+
+// delegationWorld: install kgw/kgateway watches team=a (infra, shop); blog is unwatched.
+func delegationWorld(t *testing.T, routes ...*unstructured.Unstructured) *Owned {
+	t.Helper()
+	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}),
+		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil)}
+	objs := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.GatewayClass("other", "example.com/other", true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra", "foreign", "other", nil)}, routes...)
+	return Assign(snapshot(t, nss, objs...), testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}, objects.Direct{}).PerInstall["kgw.kgateway"]
+}
+
+// routeParents returns the RouteParents of owned route shop/name, failing when it is not owned.
+func routeParents(t *testing.T, o *Owned, name string) []objects.ParentRef {
+	t.Helper()
+	r, ok := o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: name})
+	if !ok {
+		t.Fatalf("shop/%s not owned; routes %v", name, names(o.Routes))
+	}
+	return r.RouteParents
+}
+
+func TestDelegationShapesOwnership(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	ref := func(n string) objects.ParentRef { return testutil.HTTPRouteRef("shop", n) }
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "a", []objects.ParentRef{gw}, ok(gw)),
+		// Chain a → b → c; b implicit, c explicit.
+		testutil.HTTPRoute("shop", "b", nil, ok(ref("a"))),
+		testutil.HTTPRoute("shop", "c", []objects.ParentRef{ref("b")}, ok(ref("b"))),
+		// Diamond: d is a child of a and of b.
+		testutil.HTTPRoute("shop", "d", nil, ok(ref("a")), ok(ref("b"))),
+		// Cycle a → x ⇄ y.
+		testutil.HTTPRoute("shop", "x", []objects.ParentRef{ref("a"), ref("y")}, ok(ref("a")), ok(ref("y"))),
+		testutil.HTTPRoute("shop", "y", []objects.ParentRef{ref("x")}, ok(ref("x"))),
+		// Mixed: attached to the Gateway and a child of a.
+		testutil.HTTPRoute("shop", "m", []objects.ParentRef{gw, ref("a")}, ok(gw), ok(ref("a"))),
+		// Reported only by a parent no install owns.
+		testutil.HTTPRoute("shop", "f", []objects.ParentRef{testutil.GwRef("infra", "foreign")}, testutil.AcceptedBy(testutil.GwRef("infra", "foreign"), "example.com/other")),
+		testutil.HTTPRoute("shop", "orphan", nil, ok(ref("f"))),
+		// A reported child outside the scope.
+		testutil.HTTPRoute("blog", "out", nil, ok(ref("a"))),
+	)
+	if got := names(o.Routes); len(got) != 7 {
+		t.Fatalf("owned routes %v, want a b c d x y m once each", got)
+	}
+	for name, want := range map[string][]objects.ParentRef{"a": nil, "b": {ref("a")}, "c": {ref("b")}, "d": {ref("a"), ref("b")},
+		"x": {ref("a"), ref("y")}, "y": {ref("x")}, "m": {ref("a")}} {
+		got := routeParents(t, o, name)
+		slices.SortFunc(got, func(p, q objects.ParentRef) int { return cmp.Compare(p.Name, q.Name) })
+		if !slices.Equal(got, want) {
+			t.Errorf("%s RouteParents %v, want %v", name, got, want)
+		}
+	}
+	if r, _ := o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "m"}); !slices.Equal(r.Parents, []objects.ParentRef{gw}) {
+		t.Errorf("mixed route keeps its Gateway parents: %v", r.Parents)
+	}
+}
+
+func TestImplicitEdgeRules(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	api := testutil.HTTPRouteRef("shop", "api")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
+		testutil.HTTPRoute("shop", "implicit", nil, ok(api)),
+		// Gained a Gateway parentRef; the old implicit entry is no longer eligible.
+		testutil.HTTPRoute("shop", "gained", []objects.ParentRef{gw}, ok(gw), ok(api)),
+	)
+	if got := routeParents(t, o, "implicit"); !slices.Equal(got, []objects.ParentRef{api}) {
+		t.Fatalf("implicit: %v", got)
+	}
+	if got := routeParents(t, o, "gained"); len(got) != 0 {
+		t.Fatalf("gained a Gateway parentRef: the implicit edge is gone, got %v", got)
+	}
+}
+
+// On 2.3 a child ref that omits the namespace or sets sectionName gets no
+// status entry (computed-rules §7), so it is not a reported child.
+func TestRefWithoutEntryIsNotAChild(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	short := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "api"}
+	sect := testutil.HTTPRouteRef("shop", "api")
+	sect.SectionName = "rule-1"
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "no-ns", []objects.ParentRef{short}),
+		testutil.HTTPRoute("shop", "section", []objects.ParentRef{sect}),
+	)
+	if got := names(o.Routes); !slices.Equal(got, []string{"shop/api"}) {
+		t.Fatalf("owned %v: a ref without a status entry is not owned through that ref", got)
+	}
+	if len(o.Unattached) != 0 {
+		t.Fatalf("an existing HTTPRoute parent is not missing: %+v", o.Unattached)
+	}
+}
+
+func TestChildReportedByAnotherInstall(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+		testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"})}
+	gwA, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	pa, pb := testutil.HTTPRouteRef("infra", "pa"), testutil.HTTPRouteRef("infra-b", "pb")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.HTTPRoute("infra", "pa", []objects.ParentRef{gwA}, ok(gwA)),
+		testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, ok(gwB)),
+		testutil.HTTPRoute("shared", "only-a", nil, ok(pa)),
+		testutil.HTTPRoute("shared", "both", nil, ok(pa), ok(pb)),
+	)
+	// Both installs share the controller name; b watches team=b or env=b.
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA),
+		resolved("kgw-b/b", `[{"matchLabels":{"team":"b"}},{"matchLabels":{"env":"b"}}]`)}, objects.Direct{})
+	oa, ob := a.PerInstall["kgw-a.a"], a.PerInstall["kgw-b.b"]
+	if got := names(oa.Routes); !slices.Equal(got, []string{"infra/pa", "shared/only-a", "shared/both"}) {
+		t.Fatalf("install a: %v", got)
+	}
+	if got := names(ob.Routes); !slices.Equal(got, []string{"infra-b/pb", "shared/both"}) {
+		t.Fatalf("install b: %v (only-a is reported by a's parent only)", got)
+	}
+	for _, c := range []struct {
+		o    *Owned
+		want objects.ParentRef
+	}{{oa, pa}, {ob, pb}} {
+		r, _ := c.o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shared", Name: "both"})
+		if !slices.Equal(r.RouteParents, []objects.ParentRef{c.want}) {
+			t.Errorf("each install counts only edges whose parent it owns: %v, want %v", r.RouteParents, c.want)
+		}
+	}
+}
+
+// HTTPRoute is a route-parent kind for the missing-parent check only: policy
+// ownership (claimable) is unchanged (pre-flight PF8).
+func TestHTTPRouteParentKindKeepsPolicyOwnership(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	api := testutil.HTTPRouteRef("shop", "api")
+	anc := testutil.PolicyAncestor{Ref: api, Controller: testutil.Controller, Conds: nil}
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.TrafficPolicy("shop", "on-route", anc),
+		testutil.HTTPRoute("shop", "lost", []objects.ParentRef{testutil.HTTPRouteRef("shop", "gone")}),
+	)
+	if got := names(o.Policies); !slices.Equal(got, []string{"shop/on-route"}) {
+		t.Fatalf("policies %v: a policy with an HTTPRoute ancestor stays owned", got)
+	}
+	if len(o.Unattached) != 1 || o.Unattached[0].Route.Obj.GetName() != "lost" || o.Unattached[0].Parent != testutil.HTTPRouteRef("shop", "gone") {
+		t.Fatalf("a missing HTTPRoute parent is unattached: %+v", o.Unattached)
+	}
+}
+
+// Route finds routes appended after Assign built its index.
+func TestOwnedRouteAfterAppend(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "api"), testutil.Controller)))
+	late := testutil.HTTPRoute("shop", "late", nil)
+	o.Routes = append(o.Routes, OwnedObject{Obj: late})
+	for _, n := range []string{"api", "c", "late"} {
+		if r, ok := o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: n}); !ok || r.Obj.GetName() != n {
+			t.Fatalf("Route(shop/%s) not found", n)
+		}
+	}
+	if _, ok := o.Route(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "none"}); ok {
+		t.Fatal("unknown route found")
+	}
+}
+
+// declared returns the (route, parent) pairs of o.Declared as "ns/route→ns/parent".
+func declared(o *Owned) []string {
+	var out []string
+	for _, d := range o.Declared {
+		out = append(out, objects.RefOf(d.Route.Obj).String()+"→"+d.Parent.Ref().String())
+	}
+	return out
+}
+
+// A declared candidate names an owned HTTPRoute without an eligible entry. It
+// is never a child; candidates three levels deep are found too (PF10).
+func TestDeclaredCandidateIsNotAChild(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	ref := func(n string) objects.ParentRef { return testutil.HTTPRouteRef("shop", n) }
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	short := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: "a"}
+	sect := ref("a")
+	sect.SectionName = "rule-1"
+	stale := testutil.HTTPRoute("shop", "stale", []objects.ParentRef{ref("a")}, ok(ref("a")))
+	stale.SetGeneration(2)
+	o := delegationWorld(t,
+		testutil.HTTPRoute("shop", "a", []objects.ParentRef{gw}, ok(gw)),
+		testutil.HTTPRoute("shop", "b", nil, ok(ref("a"))),
+		testutil.HTTPRoute("shop", "c", []objects.ParentRef{ref("b")}, ok(ref("b"))),
+		// Names the grandchild c, which is owned only after the ownership pass.
+		testutil.HTTPRoute("shop", "deep", []objects.ParentRef{ref("c")}),
+		testutil.HTTPRoute("shop", "named", []objects.ParentRef{ref("a")}),
+		// Named twice without an entry: one candidate per parent.
+		testutil.HTTPRoute("shop", "twice", []objects.ParentRef{ref("a"), sect}),
+		// 2.3 writes no entry for these ref shapes (PF15).
+		testutil.HTTPRoute("shop", "no-ns", []objects.ParentRef{short}),
+		testutil.HTTPRoute("shop", "section", []objects.ParentRef{sect}),
+		// Owned through the Gateway, declared for a.
+		testutil.HTTPRoute("shop", "mixed", []objects.ParentRef{gw, ref("a")}, ok(gw)),
+		// Another controller's entry is not eligible.
+		testutil.HTTPRoute("shop", "foreign", []objects.ParentRef{ref("a")}, testutil.AcceptedBy(ref("a"), "example.com/other")),
+		// Not candidates: a stale eligible entry, a parent no install owns, an out-of-scope route.
+		stale,
+		testutil.HTTPRoute("shop", "loose", nil),
+		testutil.HTTPRoute("shop", "to-loose", []objects.ParentRef{ref("loose")}),
+		testutil.HTTPRoute("blog", "out", []objects.ParentRef{ref("a")}),
+	)
+	want := []string{"shop/deep→shop/c", "shop/named→shop/a", "shop/twice→shop/a", "shop/no-ns→shop/a", "shop/section→shop/a",
+		"shop/mixed→shop/a", "shop/foreign→shop/a"}
+	if got := declared(o); !slices.Equal(got, want) {
+		t.Fatalf("declared %v, want %v", got, want)
+	}
+	if got := names(o.Routes); !slices.Equal(got, []string{"shop/a", "shop/mixed", "shop/b", "shop/stale", "shop/c"}) {
+		t.Fatalf("owned %v: candidates are not children", got)
+	}
+	if got := routeParents(t, o, "mixed"); len(got) != 0 {
+		t.Fatalf("a declared parent is no RouteParent: %v", got)
+	}
+	if d := o.Declared[1]; d.Parent != ref("a") || d.Route.Kind.Kind != "HTTPRoute" {
+		t.Fatalf("candidate: %+v", d)
+	}
+}
+
+// NoParent lists in-scope HTTPRoutes with no parentRefs and no status from
+// the install's controllers, in every install whose scope holds them.
+func TestNoParentRowsInEveryInstallScope(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+		testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"}), testutil.Namespace("blog", nil)}
+	gwA := testutil.GwRef("infra", "edge")
+	pa, gone := testutil.HTTPRouteRef("infra", "pa"), testutil.HTTPRouteRef("shared", "gone")
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.HTTPRoute("infra", "pa", []objects.ParentRef{gwA}, testutil.AcceptedBy(gwA, testutil.Controller)),
+		testutil.HTTPRoute("shared", "lonely", nil),
+		testutil.HTTPRoute("shared", "foreign", nil, testutil.AcceptedBy(pa, "example.com/other")),
+		// Not rows: a reported child, an entry from the install's controller, an out-of-scope route.
+		testutil.HTTPRoute("shared", "child", nil, testutil.AcceptedBy(pa, testutil.Controller)),
+		testutil.HTTPRoute("shared", "seen", nil, testutil.AcceptedBy(gone, testutil.Controller)),
+		testutil.HTTPRoute("blog", "lonely", nil),
+	)
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA),
+		resolved("kgw-b/b", `[{"matchLabels":{"team":"b"}},{"matchLabels":{"env":"b"}}]`)}, objects.Direct{})
+	for id, o := range a.PerInstall {
+		if got := names(o.NoParent); !slices.Equal(got, []string{"shared/lonely", "shared/foreign"}) {
+			t.Errorf("%s NoParent %v", id, got)
+		}
+		for _, r := range o.Routes {
+			if n := r.Obj.GetName(); n == "lonely" || n == "foreign" {
+				t.Errorf("%s: a no-parent route is not owned: %v", id, names(o.Routes))
+			}
+		}
+	}
+}
+
+// backendRefs sets one rule on u that sends to each ref and returns u.
+func backendRefs(u *unstructured.Unstructured, refs ...map[string]any) *unstructured.Unstructured {
+	bs := make([]any, 0, len(refs))
+	for _, r := range refs {
+		bs = append(bs, r)
+	}
+	r := testutil.Rule()
+	r["backendRefs"] = bs
+	return testutil.WithRules(u, r)
+}
+
+// asKind turns a route fixture into kind (GRPCRoute, TCPRoute, TLSRoute) at its first upstream version.
+func asKind(u *unstructured.Unstructured, kind string) *unstructured.Unstructured {
+	for _, k := range testutil.ServedUpstream() {
+		if k.Kind == kind {
+			u.SetAPIVersion(k.Group + "/" + k.Version)
+		}
+	}
+	u.SetKind(kind)
+	return u
+}
+
+func backendRef(ns, name string) map[string]any {
+	return map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "namespace": ns, "name": name}
+}
+
+// A Backend belongs to an install when it is in scope and an owned route names
+// it by full identity (design §4.3).
+func TestBackendAssignment(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	svc := map[string]any{"name": "svc-named"} // a Service, not the Backend of that name
+	mirror := testutil.Rule()
+	mirror["filters"] = []any{map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": backendRef("shop", "mirrored")}}}
+	child := backendRefs(testutil.HTTPRoute("shop", "child", nil, ok(testutil.HTTPRouteRef("shop", "api"))), backendRef("shop", "deep"))
+	o := delegationWorld(t,
+		backendRefs(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
+			backendRef("shop", "used"), backendRef("blog", "outside"), svc, backendRef("shop", "used"), backendRef("shop", "missing")),
+		testutil.WithRules(testutil.HTTPRoute("shop", "mirrors", []objects.ParentRef{gw}, ok(gw)), mirror),
+		child,
+		// Not owned: its Backend belongs to no install.
+		backendRefs(testutil.HTTPRoute("shop", "loose", nil), backendRef("shop", "by-loose")),
+		testutil.Backend("shop", "used", nil), testutil.Backend("blog", "outside", nil), testutil.Backend("shop", "svc-named", nil),
+		testutil.Backend("shop", "idle", nil), testutil.Backend("shop", "by-loose", nil), testutil.Backend("shop", "mirrored", nil),
+		testutil.Backend("shop", "deep", nil),
+		// Other route kinds: a GRPCRoute (backendRef and mirror) and a TCPRoute.
+		asKind(backendRefs(testutil.HTTPRoute("shop", "grpc", []objects.ParentRef{gw}, ok(gw)), backendRef("shop", "by-grpc"),
+			map[string]any{"name": "grpc-svc", "filters": []any{map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": backendRef("shop", "grpc-mirror")}}}}), "GRPCRoute"),
+		asKind(backendRefs(testutil.HTTPRoute("shop", "tcp", []objects.ParentRef{gw}, ok(gw)), map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend", "name": "by-tcp"}), "TCPRoute"),
+		testutil.Backend("shop", "by-grpc", nil), testutil.Backend("shop", "grpc-mirror", nil), testutil.Backend("shop", "by-tcp", nil),
+	)
+	var got []string
+	for _, b := range o.Backends {
+		got = append(got, objects.RefOf(b).String())
+	}
+	slices.Sort(got)
+	if want := []string{"shop/by-grpc", "shop/by-tcp", "shop/deep", "shop/grpc-mirror", "shop/mirrored", "shop/used"}; !slices.Equal(got, want) {
+		t.Fatalf("Backends %v, want %v", got, want)
+	}
+	var refs []string
+	for _, r := range o.ReferencedBackends {
+		if r.Group != "gateway.kgateway.dev" || r.Kind != "Backend" {
+			t.Fatalf("referenced %+v is not a Backend", r)
+		}
+		refs = append(refs, r.String())
+	}
+	slices.Sort(refs)
+	if want := []string{"blog/outside", "shop/by-grpc", "shop/by-tcp", "shop/deep", "shop/grpc-mirror", "shop/mirrored", "shop/missing", "shop/used"}; !slices.Equal(refs, want) {
+		t.Fatalf("ReferencedBackends %v, want %v (each once)", refs, want)
+	}
+}
+
+// With two installs, each install's candidates and Unwatched use only its own
+// owned routes, even though most refs miss its index.
+func TestCandidatesPerInstall(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+		testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("shop-b", map[string]string{"team": "b"})}
+	gwA, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	pa, pb := testutil.HTTPRouteRef("shop", "pa"), testutil.HTTPRouteRef("shop-b", "pb")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "pa", []objects.ParentRef{gwA}, ok(gwA)),
+		testutil.HTTPRoute("shop-b", "pb", []objects.ParentRef{gwB}, ok(gwB)),
+		testutil.HTTPRoute("shop", "ca", nil, ok(pa)),
+		testutil.HTTPRoute("shop", "decl-a", []objects.ParentRef{pa}),
+		testutil.HTTPRoute("shop-b", "decl-b", []objects.ParentRef{pb}),
+		// Out of a's scope, naming a's child: unwatched for a only.
+		testutil.HTTPRoute("shop-b", "to-ca", []objects.ParentRef{testutil.HTTPRouteRef("shop", "ca")}),
+	)
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"team":"b"}}]`)}, objects.Direct{})
+	if got := declared(a.PerInstall["kgw-a.a"]); !slices.Equal(got, []string{"shop/decl-a→shop/pa"}) {
+		t.Errorf("a declared %v", got)
+	}
+	if got := declared(a.PerInstall["kgw-b.b"]); !slices.Equal(got, []string{"shop-b/decl-b→shop-b/pb"}) {
+		t.Errorf("b declared %v", got)
+	}
+	var unw []string
+	for _, u := range a.Unwatched {
+		unw = append(unw, u.Install+" "+u.Route.String()+"→"+u.Gateway.String())
+	}
+	// Phase 1: each route outside the other install's scope names no Gateway of it.
+	if want := []string{"kgw-a.a shop-b/to-ca→shop/ca"}; !slices.Equal(unw, want) {
+		t.Errorf("unwatched %v, want %v", unw, want)
+	}
+}

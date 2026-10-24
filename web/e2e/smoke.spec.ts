@@ -22,7 +22,7 @@ async function expectInstallPage(page: Page) {
 }
 
 for (const theme of themes) {
-  test(`install page, findings and YAML view (${theme.name})`, async ({ page }) => {
+  test(`install page, findings, route page and YAML (${theme.name})`, async ({ page }) => {
     await page.goto("/");
     if (second) {
       // The card shows the display name; its link carries the opaque ID.
@@ -36,12 +36,20 @@ for (const theme of themes) {
     await expectInstallPage(page);
     await page.getByRole("link", { name: /Show all/ }).click();
     await expect(page).toHaveURL(/\/i\/kgw-a\.kgateway\/findings$/);
+    // The list is virtualised and the explorer fixture adds many findings: filter to each one checked here.
+    const filter = page.getByRole("textbox", { name: "Filter findings" });
+    await filter.fill("KGWUI-004");
     await expect(page.getByText("Namespace not watched by the controller")).toBeVisible();
+    await filter.fill("KGWUI-010");
     await expect(page.getByText("Self-managed proxy: the UI cannot see its readiness")).toBeVisible();
+    await filter.fill("shop/broken");
     await page
       .getByRole("link", { name: /broken/ })
       .first()
       .click();
+    // A route finding opens the route's detail page; its YAML tab shows the status as written.
+    await expect(page).toHaveURL(/\/routes\/gateway\.networking\.k8s\.io\/HTTPRoute\/[^/]+\/broken$/);
+    await page.getByRole("tab", { name: "YAML" }).click();
     await expect(page.getByTestId("yaml")).toContainText("BackendNotFound");
     // outputDir is resolved from the config, so the path does not depend on the cwd.
     await page.screenshot({

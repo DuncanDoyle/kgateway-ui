@@ -1,28 +1,76 @@
+import badRequestGolden from "../../../../../pkg/api/testdata/golden/bad-request.json";
 import bareInstalls from "../../../../../pkg/api/testdata/golden/bare-installs.json";
 import bareMeta from "../../../../../pkg/api/testdata/golden/bare-meta.json";
 import bareOverview from "../../../../../pkg/api/testdata/golden/bare-overview.json";
+import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
+import gatewaysGolden from "../../../../../pkg/api/testdata/golden/gateways.json";
 import health from "../../../../../pkg/api/testdata/golden/health.json";
 import installs from "../../../../../pkg/api/testdata/golden/installs.json";
+import listenersetDetailGolden from "../../../../../pkg/api/testdata/golden/listenerset-detail.json";
+import listenersetDetailAllowedGolden from "../../../../../pkg/api/testdata/golden/listenerset-detail-allowed.json";
+import listenersetDetailInvalidGolden from "../../../../../pkg/api/testdata/golden/listenerset-detail-invalid.json";
+import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listenersets.json";
 import meta from "../../../../../pkg/api/testdata/golden/meta.json";
 import notFound from "../../../../../pkg/api/testdata/golden/not-found.json";
 import overview from "../../../../../pkg/api/testdata/golden/overview.json";
+import routeDetailGolden from "../../../../../pkg/api/testdata/golden/route-detail.json";
+import routeDetailCandidateGolden from "../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
+import routeDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
+import routesGolden from "../../../../../pkg/api/testdata/golden/routes.json";
+import routesByBackendGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend.json";
+import routesByBackendRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend-restricted.json";
+import routesFilteredGolden from "../../../../../pkg/api/testdata/golden/routes-filtered.json";
+import routesRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-restricted.json";
 import type {
   Access,
+  AllowedListeners,
+  AllowedRoutes,
+  AncestorPath,
+  AncestorStep,
+  BackendRef,
+  BackendState,
+  Candidate,
   CheckResult,
+  Condition,
   Count,
+  DelegationRef,
   ErrorResponse,
+  Filter,
   Finding,
+  Fraction,
+  GatewayDetail,
+  GatewayListRow,
   GatewayRow,
+  GroupKind,
   HealthReport,
   InstallHeader,
   InstallSummary,
+  KeyMatch,
   LabelSelector,
+  LinkedRef,
+  Listener,
+  ListenerSetDetail,
+  ListenerSetRow,
+  ListenerStatus,
+  ListenerTLS,
+  Match,
   MetaResponse,
+  Mirror,
   OverviewResponse,
+  Page,
+  ParentRef,
+  ParentStatus,
+  ParentSummary,
+  PathMatch,
   Readiness,
   Ref,
+  RouteCounts,
+  RouteDetail,
+  RouteRow,
+  Rule,
   ScopeSummary,
   ServedKind,
+  SpecParentRef,
 } from "./types";
 
 // Checks the backend's golden wire format (pkg/api golden_test.go) against these types.
@@ -38,6 +86,7 @@ const shape = <T>(keys: Spec<T>, nested: Partial<Record<keyof T, Shape>> = {}): 
 });
 
 const ref = shape<Ref>({ group: "!", kind: "!", namespace: "?", name: "!" });
+const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "!" });
 const finding = shape<Finding>(
   {
     code: "!",
@@ -49,8 +98,9 @@ const finding = shape<Finding>(
     detail: "?",
     since: "?",
     restricted: "?",
+    evidenceRestricted: "?",
   },
-  { resource: ref },
+  { resource: linkedRef },
 );
 const check = shape<CheckResult>({
   name: "!",
@@ -93,7 +143,7 @@ const count = shape<Count>(
   { access },
 );
 const row = shape<GatewayRow>(
-  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!" },
+  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?" },
   { ref },
 );
 const overviewShape = shape<OverviewResponse>(
@@ -110,11 +160,217 @@ const kind = shape<ServedKind>({
   displayName: "!",
   version: "!",
 });
+const groupKind = shape<NonNullable<MetaResponse["views"]>[number]>({ group: "!", kind: "!" });
 const metaShape = shape<MetaResponse>(
-  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!" },
-  { kinds: kind },
+  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!", views: "?" },
+  { kinds: kind, views: groupKind },
 );
 const errorShape = shape<ErrorResponse>({ error: "!" });
+
+// Explorer DTOs (sub-phase 2.2).
+const pageKeys = {
+  install: "!",
+  items: "!",
+  total: "!",
+  next: "?",
+  prev: "?",
+  deniedInInstall: "?",
+  collectedAt: "!",
+} as const satisfies Spec<Page<unknown>>;
+const page = (items: Shape) => shape<Page<unknown>>(pageKeys, { items });
+const parentSummary = shape<ParentSummary>(
+  {
+    ref: "!",
+    sectionName: "?",
+    port: "?",
+    via: "?",
+    viaRestricted: "?",
+    attachment: "!",
+    conditionType: "?",
+    reason: "?",
+    message: "?",
+  },
+  { ref: linkedRef, via: linkedRef },
+);
+const routeRow = shape<RouteRow>(
+  {
+    ref: "!",
+    hostnames: "!",
+    parents: "!",
+    parentRoutes: "!",
+    children: "!",
+    flags: "!",
+    health: "!",
+    mirror: "?",
+  },
+  { ref: linkedRef, parents: parentSummary, parentRoutes: linkedRef },
+);
+const gatewayListRow = shape<GatewayListRow>(
+  {
+    ref: "!",
+    class: "!",
+    health: "!",
+    listeners: "!",
+    attachedRoutes: "!",
+    notAccepted: "!",
+    listenerSets: "!",
+    addresses: "!",
+  },
+  { ref: linkedRef },
+);
+const listenerSetRow = shape<ListenerSetRow>(
+  { ref: "!", parent: "!", health: "!", listeners: "!", acceptedReason: "?" },
+  { ref: linkedRef, parent: linkedRef },
+);
+const condition = shape<Condition>({
+  type: "!",
+  status: "!",
+  reason: "!",
+  message: "!",
+  observedGeneration: "!",
+  lastTransitionTime: "!",
+  stale: "!",
+});
+const gk = shape<GroupKind>({ group: "!", kind: "!" });
+const parentRef = shape<ParentRef>({
+  group: "!",
+  kind: "!",
+  namespace: "!",
+  name: "!",
+  sectionName: "?",
+  port: "?",
+});
+const specParentRef = shape<SpecParentRef>(
+  { group: "!", kind: "!", namespace: "!", name: "!", sectionName: "?", port: "?", target: "?" },
+  { target: linkedRef },
+);
+const parentStatus = shape<ParentStatus>(
+  { parentRef: "!", target: "!", controllerName: "!", ours: "!", conditions: "!" },
+  { parentRef, target: linkedRef, conditions: condition },
+);
+const tls = shape<ListenerTLS>({ mode: "!", certificateRefs: "!" }, { certificateRefs: linkedRef });
+const allowedRoutes = shape<AllowedRoutes>(
+  { namespaces: "!", kinds: "!" },
+  { namespaces: shape<AllowedRoutes["namespaces"]>({ from: "!", selector: "?" }, { selector }), kinds: gk },
+);
+const listenerStatus = shape<ListenerStatus>(
+  { attachedRoutes: "!", supportedKinds: "!", conditions: "!" },
+  { supportedKinds: gk, conditions: condition },
+);
+const listener = shape<Listener>(
+  { name: "!", port: "?", protocol: "!", hostname: "?", tls: "?", allowedRoutes: "!", status: "?" },
+  { tls, allowedRoutes, status: listenerStatus },
+);
+const routeCounts = shape<RouteCounts>({ accepted: "!", notAccepted: "!", pending: "!", unwatched: "!" });
+const candidate = shape<Candidate>({ reason: "!", by: "?" }, { by: linkedRef });
+const gatewayDetail = shape<GatewayDetail>(
+  {
+    install: "!",
+    ref: "!",
+    generation: "!",
+    class: "!",
+    health: "!",
+    candidate: "?",
+    ruleSet: "?",
+    conditions: "!",
+    addresses: "!",
+    listeners: "!",
+    attachedListenerSets: "?",
+    listenerSets: "?",
+    routeCounts: "!",
+    collectedAt: "!",
+  },
+  { ref: linkedRef, candidate, conditions: condition, listeners: listener, routeCounts },
+);
+// value is the Gateway's field as written, so its keys are not checked.
+const allowedListeners = shape<AllowedListeners>({ set: "!", value: "?", crdHint: "!" });
+const listenerSetDetail = shape<ListenerSetDetail>(
+  {
+    install: "!",
+    ref: "!",
+    generation: "!",
+    health: "!",
+    candidate: "?",
+    ruleSet: "?",
+    parent: "!",
+    parentFound: "!",
+    conditions: "!",
+    listeners: "!",
+    experimentalHint: "?",
+    routeCounts: "!",
+    parentAllowedListeners: "?",
+    collectedAt: "!",
+  },
+  {
+    ref: linkedRef,
+    candidate,
+    parent: linkedRef,
+    conditions: condition,
+    listeners: listener,
+    routeCounts,
+    parentAllowedListeners: allowedListeners,
+  },
+);
+const keyMatch = shape<KeyMatch>({ type: "!", name: "!", value: "!" });
+const match = shape<Match>(
+  { path: "?", headers: "?", queryParams: "?", method: "?" },
+  { path: shape<PathMatch>({ type: "!", value: "!" }), headers: keyMatch, queryParams: keyMatch },
+);
+const mirror = shape<Mirror>(
+  { backendRef: "!", port: "?", percent: "?", fraction: "?" },
+  { backendRef: linkedRef, fraction: shape<Fraction>({ numerator: "!", denominator: "!" }) },
+);
+// config is the filter as written, so its keys are not checked.
+const filter = shape<Filter>(
+  { type: "!", extensionRef: "?", mirror: "?", config: "?" },
+  { extensionRef: linkedRef, mirror },
+);
+const backendRef = shape<BackendRef>(
+  { ref: "!", port: "?", weight: "!", weightDefaulted: "?", filters: "!", delegation: "?", backend: "?" },
+  {
+    ref: linkedRef,
+    filters: filter,
+    delegation: shape<DelegationRef>({ mode: "!", namespace: "!", name: "?", label: "?", state: "?" }),
+    backend: shape<BackendState>({ state: "?", accepted: "?", restricted: "?" }, { accepted: condition }),
+  },
+);
+const rule = shape<Rule>(
+  { index: "!", name: "?", matches: "!", filters: "!", backendRefs: "!" },
+  { matches: match, filters: filter, backendRefs: backendRef },
+);
+const ancestor = shape<AncestorPath>(
+  { steps: "!", cycle: "!" },
+  { steps: shape<AncestorStep>({ ref: "?", restricted: "?" }, { ref: linkedRef }) },
+);
+const routeDetail = shape<RouteDetail>(
+  {
+    install: "!",
+    ref: "!",
+    generation: "!",
+    health: "!",
+    candidate: "?",
+    ruleSet: "?",
+    hostnames: "!",
+    annotations: "!",
+    parentRefs: "!",
+    parents: "!",
+    rules: "!",
+    ancestors: "!",
+    ancestorsTruncated: "!",
+    childCount: "!",
+    declaredCount: "!",
+    collectedAt: "!",
+  },
+  {
+    ref: linkedRef,
+    candidate,
+    annotations: shape<RouteDetail["annotations"]>({ inheritParentMatcher: "?" }),
+    parentRefs: specParentRef,
+    parents: parentStatus,
+    rules: rule,
+    ancestors: ancestor,
+  },
+);
 
 /** problems lists keys the types do not declare and required keys the wire omits, recursing into nested shapes. */
 function problems(s: Shape, v: unknown, path: string): string[] {
@@ -145,6 +401,21 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["bare-overview", bareOverview, overviewShape],
     ["health", health, healthReport],
     ["not-found", notFound, errorShape],
+    ["routes", routesGolden, page(routeRow)],
+    ["routes-filtered", routesFilteredGolden, page(routeRow)],
+    ["routes-restricted", routesRestrictedGolden, page(routeRow)],
+    ["routes-by-backend", routesByBackendGolden, page(routeRow)],
+    ["routes-by-backend-restricted", routesByBackendRestrictedGolden, page(routeRow)],
+    ["gateways", gatewaysGolden, page(gatewayListRow)],
+    ["listenersets", listenersetsGolden, page(listenerSetRow)],
+    ["bad-request", badRequestGolden, errorShape],
+    ["gateway-detail", gatewayDetailGolden, gatewayDetail],
+    ["listenerset-detail", listenersetDetailGolden, listenerSetDetail],
+    ["listenerset-detail-allowed", listenersetDetailAllowedGolden, listenerSetDetail],
+    ["listenerset-detail-invalid", listenersetDetailInvalidGolden, listenerSetDetail],
+    ["route-detail", routeDetailGolden, routeDetail],
+    ["route-detail-restricted", routeDetailRestrictedGolden, routeDetail],
+    ["route-detail-candidate", routeDetailCandidateGolden, routeDetail],
   ] as const)("%s", (_, golden, s) => {
     expect(problems(s, golden.body, "body")).toEqual([]);
   });
@@ -155,5 +426,26 @@ describe("types.ts matches the golden v1 wire format", () => {
     const bare = bareInstalls.body[0];
     expect(bare && !("scope" in bare) && !("namespace" in bare) && !("ready" in bare.readiness)).toBe(true);
     expect(installs.body.every((s) => "confirmedAt" in s)).toBe(true);
+    expect(meta.body.views?.length).toBeGreaterThan(0);
+  });
+
+  // The explorer fixtures carry each link value and the optional fields the pages branch on.
+  it("covers every link, restricted placeholders, candidates and paging", () => {
+    const all = JSON.stringify([
+      routesGolden,
+      routesRestrictedGolden,
+      gatewayDetailGolden,
+      routeDetailGolden,
+      routeDetailRestrictedGolden,
+    ]);
+    for (const l of ["detail", "yaml", "none"]) expect(all).toContain(`"link":"${l}"`);
+    expect(routesRestrictedGolden.body.deniedInInstall).toBeGreaterThan(0);
+    expect(routesRestrictedGolden.body.items.some((r) => r.parents.some((p) => "viaRestricted" in p))).toBe(true);
+    expect(routesFilteredGolden.body.next).toBeTruthy();
+    expect(routesByBackendGolden.body.items.some((r) => "mirror" in r)).toBe(true);
+    expect(routeDetailRestrictedGolden.body.ancestors.some((a) => a.steps.some((s) => "restricted" in s))).toBe(true);
+    expect(routeDetailCandidateGolden.body.candidate.by).toBeDefined();
+    expect(routeDetailGolden.body.parentRefs.every((p) => "target" in p)).toBe(true);
+    expect(listenersetDetailAllowedGolden.body.parentAllowedListeners.set).toBe(true);
   });
 });

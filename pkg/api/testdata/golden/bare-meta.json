@@ -173,11 +173,41 @@
         "versions": [
           "v1alpha1"
         ]
+      },
+      {
+        "category": "backend",
+        "displayName": "Backends",
+        "group": "gateway.kgateway.dev",
+        "kind": "Backend",
+        "namespaced": true,
+        "resource": "backends",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
       }
     ],
     "platform": "Test",
     "synced": true,
-    "version": "<build version>"
+    "version": "<build version>",
+    "views": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "ListenerSet"
+      },
+      {
+        "group": "gateway.networking.x-k8s.io",
+        "kind": "XListenerSet"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute"
+      }
+    ]
   },
   "headers": {
     "Cache-Control": "no-store",

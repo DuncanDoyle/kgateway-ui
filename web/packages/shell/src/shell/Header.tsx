@@ -1,5 +1,6 @@
 import { css, useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
+import type { ReactElement } from "react";
 import { Link, NavLink, useMatch } from "react-router-dom";
 import { useNow } from "../api/clock";
 import { confirmedOrComputed } from "../api/freshness";
@@ -13,9 +14,12 @@ import { HEADER_H } from "./constants";
 import { useShellExtension } from "./extension";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerResourceName, headerTint } from "./headerTint";
 import { InstallName } from "./InstallName";
+import { InstallNav } from "./InstallNav";
 import { InstallSwitcher } from "./InstallSwitcher";
 import { installPath } from "./paths";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { Tooltip } from "./Tooltip";
+import { useMedia } from "./useMedia";
 
 // region Styles
 const Bar = styled.header`
@@ -78,6 +82,22 @@ const Ready = styled.span`
   gap: 6px;
   font-size: ${(p) => p.theme.font.size.sm};
   color: ${(p) => p.theme.color.headerText};
+  border-radius: ${(p) => p.theme.radius.sm};
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
+  /* Narrow windows keep the icon; the text stays for screen readers and in the tooltip, so the nav fits. */
+  @media (max-width: 1099px) {
+    .label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
 `;
 const Spacer = styled.div`
   flex: 1;
@@ -101,6 +121,9 @@ const Nav = styled.nav`
 `;
 
 // region Helpers
+/** Below this width the readiness text moves into a tooltip, so five nav entries fit (the .label rule matches it). */
+const COMPACT = "(max-width: 1099px)";
+
 /** Matches KGWUI-005: not ready is an error; readiness the platform cannot tell is unknown. */
 function readinessState(r: Readiness): HealthState {
   if (r.state === "ready") return "healthy";
@@ -114,9 +137,22 @@ function readinessText(r: Readiness): string {
   return r.state === "not-ready" ? "Controller: not ready" : "Controller: unknown";
 }
 
+/** Below COMPACT the readiness text shows in a tooltip on hover and keyboard focus; wider, it is on screen. */
+function ReadyTip({
+  label,
+  compact,
+  children,
+}: {
+  label: string;
+  compact: boolean;
+  children: ReactElement<{ "aria-describedby"?: string }>;
+}) {
+  return compact ? <Tooltip label={label}>{children}</Tooltip> : children;
+}
+
 // region Component
-/** Header: brand, install identity, version, edition and controller readiness, extension navigation, theme switcher. */
-export function Header() {
+/** Header: brand, install identity, version, edition and controller readiness, install and extension navigation, theme switcher. */
+export function Header({ installPaths }: { installPaths: readonly string[] }) {
   const { brand, navEntries } = useShellExtension();
   const match = useMatch("/i/:id/*");
   const { data, error } = useInstalls();
@@ -125,6 +161,7 @@ export function Header() {
   const id = match?.params.id ?? "";
   const current = data?.find((i) => i.id === id);
   const theme = useTheme();
+  const compact = useMedia(COMPACT);
   const nav = navEntries.filter((n) => n.scope === "top" || id);
   return (
     <Bar>
@@ -157,17 +194,22 @@ export function Header() {
           ) : null}
           {/* A platform that cannot observe readiness shows none; that is not a failure (D-016). */}
           {current.readiness.state !== "not-observed" ? (
-            <Ready data-testid="controller-readiness">
-              <HealthIcon
-                state={
-                  error || isStale(confirmedOrComputed(current), now) ? "unknown" : readinessState(current.readiness)
-                }
-              />
-              {readinessText(current.readiness)}
-            </Ready>
+            <ReadyTip label={readinessText(current.readiness)} compact={compact}>
+              <Ready data-testid="controller-readiness" tabIndex={compact ? 0 : undefined}>
+                <HealthIcon
+                  state={
+                    error || isStale(confirmedOrComputed(current), now) ? "unknown" : readinessState(current.readiness)
+                  }
+                />
+                <span className="label">{readinessText(current.readiness)}</span>
+              </Ready>
+            </ReadyTip>
           ) : null}
         </Identity>
       ) : null}
+      {/* The navs sit right of the spacer, so the identity loading in never moves them sideways. */}
+      <Spacer />
+      {id ? <InstallNav installId={id} paths={installPaths} /> : null}
       {nav.length > 0 ? (
         <Nav aria-label="Extensions">
           {nav.map((n) => (
@@ -178,7 +220,6 @@ export function Header() {
           ))}
         </Nav>
       ) : null}
-      <Spacer />
       <ThemeSwitcher />
     </Bar>
   );

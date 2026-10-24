@@ -1,16 +1,18 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { dump } from "js-yaml";
-import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useResource } from "../api/hooks";
+import { detailCopy, listCopy } from "../copy/explorer";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
+import { LastAppliedToggle, useYaml, YamlBlock } from "../resource/ResourceYaml";
 import { useInstallId, useVocabulary } from "../shell/extension";
 import { installPath } from "../shell/paths";
+import { BackLink, InlineLink } from "../states/controls";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
 import { DataAge } from "./DataAge";
+import { backendParam } from "./explore/route/refs";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -42,89 +44,11 @@ const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
   .spacer {
     flex: 1;
   }
-  pre {
-    margin: 0;
-    padding: ${(p) => p.theme.space(4)};
-    overflow: auto;
-    font-family: ${(p) => p.theme.font.mono};
-    font-size: ${(p) => p.theme.font.size.code};
-    line-height: 1.55;
-    color: ${(p) => p.theme.color.text};
-    background: ${(p) => p.theme.color.surface};
-    border: 1px solid ${(p) => p.theme.color.border};
-    border-radius: ${(p) => p.theme.radius.md};
-  }
   ${(p) => p.stylesOverride}
-`;
-const TextButton = styled.button`
-  height: 28px;
-  padding: 0 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: ${(p) => p.theme.font.size.sm};
-  color: ${(p) => p.theme.color.text};
-  background: ${(p) => p.theme.color.surface};
-  border: 1px solid ${(p) => p.theme.color.borderStrong};
-  border-radius: ${(p) => p.theme.radius.sm};
-  &:hover {
-    border-color: ${(p) => p.theme.color.text};
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.surface});
-  }
-  &:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 14%, ${(p) => p.theme.color.surface});
-  }
-  &:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-    outline-offset: 2px;
-  }
-`;
-const BackLink = styled(Link)`
-  display: inline-block;
-  margin-top: ${(p) => p.theme.space(2)};
-  padding: 4px 8px;
-  border-radius: ${(p) => p.theme.radius.sm};
-  color: ${(p) => p.theme.color.accentText};
-  font-weight: ${(p) => p.theme.font.weight.semibold};
-  text-decoration: none;
-  &:hover {
-    text-decoration: underline;
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 6%, ${(p) => p.theme.color.bg});
-  }
-  &:active {
-    background: color-mix(in srgb, ${(p) => p.theme.color.text} 12%, ${(p) => p.theme.color.bg});
-  }
-  &:focus-visible {
-    outline: 2px solid ${(p) => p.theme.color.focus};
-  }
 `;
 
 // region Helpers
-const LAST_APPLIED = "kubectl.kubernetes.io/last-applied-configuration";
-
-type Obj = Record<string, unknown>;
-
-function isObj(v: unknown): v is Obj {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-/** Status first, then the rest in served order: the health-relevant part leads (design §2 flow 2). */
-function statusFirst(o: Obj): Obj {
-  const { status, ...rest } = o;
-  return status === undefined ? rest : { status, ...rest };
-}
-
-/** o without the kubectl last-applied annotation, which repeats the spec as one long JSON line. */
-function withoutLastApplied(o: Obj): Obj {
-  const meta = o.metadata;
-  if (!isObj(meta) || !isObj(meta.annotations) || !(LAST_APPLIED in meta.annotations)) return o;
-  const { [LAST_APPLIED]: _, ...annotations } = meta.annotations;
-  const { annotations: __, ...restMeta } = meta;
-  return { ...o, metadata: Object.keys(annotations).length ? { ...restMeta, annotations } : restMeta };
-}
-
-function hasLastApplied(o: Obj): boolean {
-  return isObj(o.metadata) && isObj(o.metadata.annotations) && LAST_APPLIED in o.metadata.annotations;
-}
+const isBackend = (r: { group: string; kind: string }) => r.group === "gateway.kgateway.dev" && r.kind === "Backend";
 
 // region Component
 interface ResourcePageProps {
@@ -138,25 +62,18 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
   const { group = "-", kind = "", rns = "-", rname = "" } = useParams();
   const ref = { group: group === "-" ? "" : group, kind, namespace: rns === "-" ? undefined : rns, name: rname };
   const { data, error, collectedAt } = useResource(id, ref);
-  const [showLastApplied, setShowLastApplied] = useState(false);
-  const yaml = useMemo(
-    () =>
-      data
-        ? dump(statusFirst(showLastApplied ? data : withoutLastApplied(data)), { noRefs: true, lineWidth: 140 })
-        : "",
-    [data, showLastApplied],
-  );
+  const y = useYaml(data);
   // The backend answers 404 alike for objects outside the install and objects the caller may not view (D-013).
   if (error?.status === 404)
     return (
       <PageState
         kind="empty"
-        title="Not in this install's scope"
+        title={listCopy.notInScope}
         message={
           <>
             {kind} <ResourceName namespace={ref.namespace} name={rname} />
             <br />
-            <BackLink to={installPath(id)}>Back to install</BackLink>
+            <BackLink to={installPath(id)}>{listCopy.backToInstall}</BackLink>
           </>
         }
       />
@@ -168,7 +85,6 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
       return <PageState kind="error" title="Cannot load resource" message={error.message} copyText={error.message} />;
     return <PageState kind="loading" title="Loading resource…" />;
   }
-  const lastApplied = hasLastApplied(data);
   return (
     <Page stylesOverride={stylesOverride}>
       {error ? <PageNotice error={error} title="Cannot load resource" /> : null}
@@ -178,15 +94,17 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
           <ResourceName namespace={ref.namespace} name={rname} />
         </h1>
         <CopyNameButton resource={ref} />
+        {/* The resource endpoint serves only admitted Backends (design §7.1); Services have no YAML view. */}
+        {isBackend(ref) ? (
+          <InlineLink to={`${installPath(id, "routes")}?${new URLSearchParams({ backend: backendParam(ref) })}`}>
+            {detailCopy.backendLookup}
+          </InlineLink>
+        ) : null}
         <span className="spacer" />
         {collectedAt ? <DataAge collectedAt={collectedAt} /> : null}
-        {lastApplied ? (
-          <TextButton type="button" aria-expanded={showLastApplied} onClick={() => setShowLastApplied((s) => !s)}>
-            {showLastApplied ? "Hide last-applied config" : "Show last-applied config"}
-          </TextButton>
-        ) : null}
+        {y.lastApplied ? <LastAppliedToggle shown={y.showLastApplied} onToggle={y.toggle} /> : null}
       </header>
-      <pre data-testid="yaml">{yaml}</pre>
+      <YamlBlock data-testid="yaml">{y.yaml}</YamlBlock>
     </Page>
   );
 }

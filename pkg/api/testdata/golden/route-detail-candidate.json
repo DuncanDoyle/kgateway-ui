@@ -1,0 +1,191 @@
+{
+  "body": {
+    "ancestors": [],
+    "ancestorsTruncated": false,
+    "annotations": {},
+    "candidate": {
+      "by": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "detail",
+        "name": "mid",
+        "namespace": "shop"
+      },
+      "reason": "referenced"
+    },
+    "childCount": 0,
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "declaredCount": 0,
+    "generation": 1,
+    "health": "healthy",
+    "hostnames": [],
+    "install": "kgw.kgateway",
+    "parentRefs": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "name": "foreign",
+        "namespace": "infra",
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "none",
+          "name": "foreign",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "parents": [
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "foreign",
+          "namespace": "infra"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "none",
+          "name": "foreign",
+          "namespace": "infra"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "example.com/other",
+        "ours": false,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "foreign",
+          "namespace": "infra"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "none",
+          "name": "foreign",
+          "namespace": "infra"
+        }
+      }
+    ],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "HTTPRoute",
+      "link": "detail",
+      "name": "far",
+      "namespace": "blog"
+    },
+    "rules": [
+      {
+        "backendRefs": [
+          {
+            "filters": [],
+            "ref": {
+              "group": "gateway.kgateway.dev",
+              "kind": "Backend",
+              "link": "none",
+              "name": "be-far",
+              "namespace": "blog"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          },
+          {
+            "delegation": {
+              "mode": "name",
+              "name": "kid",
+              "namespace": "blog",
+              "state": "not-reported"
+            },
+            "filters": [],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "kid",
+              "namespace": "blog"
+            },
+            "weight": 1,
+            "weightDefaulted": true
+          }
+        ],
+        "filters": [],
+        "index": 0,
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

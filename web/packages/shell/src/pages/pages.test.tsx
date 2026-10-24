@@ -6,7 +6,7 @@ import type { Finding, HealthReport, InstallSummary, ScopeSummary } from "../api
 import { defaultBrand, ShellExtensionContext } from "../shell/extension";
 import { kubernetesVocabulary } from "../shell/vocabulary";
 import { meta, overview, restricted, unhealthy } from "../test/fixtures";
-import { renderWithTheme, stubApi } from "../test/render";
+import { pseudoRules, renderWithTheme, stubApi } from "../test/render";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemes } from "../theme/themes";
 import { ClusterLanding } from "./ClusterLanding";
@@ -282,7 +282,13 @@ it("findings page virtualises a long list", async () => {
     severity: "warning" as const,
     install: "kgw.kgateway",
     message: "Backend not found",
-    resource: { group: "gateway.networking.k8s.io", kind: "HTTPRoute", namespace: "shop", name: `route-${i}` },
+    resource: {
+      group: "gateway.networking.k8s.io",
+      kind: "HTTPRoute",
+      namespace: "shop",
+      name: `route-${i}`,
+      link: "yaml",
+    },
   }));
   findings("/i/kgw.kgateway/findings", h);
   const rows = await screen.findAllByTestId("finding-row");
@@ -472,4 +478,51 @@ it("resource page shows other errors as errors", async () => {
   stubApi({ [cartPath]: [500, { error: "boom" }] });
   resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
   expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load resource");
+});
+
+const lookupName = "Routes that send traffic here";
+
+it("a Backend YAML view links to Routes filtered by backend=gateway.kgateway.dev/Backend/ns/name", async () => {
+  stubApi({
+    "/api/v1/installs/kgw.kgateway/resources/gateway.kgateway.dev/Backend/shop/be1": {
+      apiVersion: "gateway.kgateway.dev/v1alpha1",
+      kind: "Backend",
+      metadata: { name: "be1", namespace: "shop" },
+      spec: { type: "Static" },
+    },
+  });
+  resource("/i/kgw.kgateway/r/gateway.kgateway.dev/Backend/shop/be1");
+  const link = await screen.findByRole("link", { name: lookupName });
+  const url = new URL(link.getAttribute("href") ?? "", "http://ui");
+  expect(url.pathname).toBe("/i/kgw.kgateway/routes");
+  expect(url.searchParams.getAll("backend")).toEqual(["gateway.kgateway.dev/Backend/shop/be1"]);
+  // PF26: the link has hover, active and focus-visible styles.
+  for (const pseudo of [":hover", ":active", ":focus-visible"]) expect(pseudoRules(link, pseudo).join("")).not.toBe("");
+});
+
+it("a Backend outside the install's scope offers no reverse lookup", async () => {
+  stubApi({});
+  resource("/i/kgw.kgateway/r/gateway.kgateway.dev/Backend/shop/gone");
+  expect(await screen.findByText("Not in this install's scope")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: lookupName })).toBeNull();
+});
+
+it("a Service has no YAML view entry point", async () => {
+  // Services are not watched, so the backend never serves one; even if it did, the view offers no lookup.
+  stubApi({
+    "/api/v1/installs/kgw.kgateway/resources/-/Service/shop/cart": {
+      kind: "Service",
+      metadata: { name: "cart", namespace: "shop" },
+    },
+  });
+  resource("/i/kgw.kgateway/r/-/Service/shop/cart");
+  await screen.findByTestId("yaml");
+  expect(screen.queryByRole("link", { name: lookupName })).toBeNull();
+});
+
+it("a YAML view of another kind offers no reverse lookup", async () => {
+  stubApi({ [cartPath]: { kind: "HTTPRoute", metadata: { name: "cart", namespace: "shop" } } });
+  resource("/i/kgw.kgateway/r/gateway.networking.k8s.io/HTTPRoute/shop/cart");
+  await screen.findByTestId("yaml");
+  expect(screen.queryByRole("link", { name: lookupName })).toBeNull();
 });

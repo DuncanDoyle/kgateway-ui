@@ -1,5 +1,9 @@
 // Package kinds describes the Kubernetes resource kinds the UI understands and
 // resolves which of them the cluster actually serves.
+//
+// A downstream ListenerSet kind registers with CategoryListenerSet and must
+// have the upstream shape the explorer reads: spec.parentRef (the Gateway),
+// spec.listeners[] and status.listeners[].
 package kinds
 
 import (
@@ -26,6 +30,10 @@ const (
 	// CategoryParameters marks kinds read only to resolve other objects
 	// (GatewayParameters). They are watched but never counted or attributed.
 	CategoryParameters Category = "parameters"
+	// CategoryBackend marks kgateway Backends: route targets the explorer
+	// shows. They are neither attributed to Gateways nor counted by the
+	// controller's managed-resource gauge.
+	CategoryBackend Category = "backend"
 )
 
 // Descriptor describes a kind the UI can watch. Versions are in preference order.

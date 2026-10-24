@@ -11,6 +11,14 @@ export const SHELL_API_VERSION = 1;
 
 export { ApiError, apiFetch } from "./api/client";
 export { useNow } from "./api/clock";
+export {
+  useGatewayDetail,
+  useGateways,
+  useListenerSetDetail,
+  useListenerSets,
+  useRouteDetail,
+  useRoutes,
+} from "./api/exploreHooks";
 export { confirmedOrComputed } from "./api/freshness";
 export {
   isLinkable,
@@ -24,6 +32,9 @@ export {
   useResource,
 } from "./api/hooks";
 export * from "./api/types";
+export { CopyCommandButton } from "./explore/CopyCommandButton";
+export { LinkedName } from "./explore/LinkedName";
+export { objectPath } from "./explore/objectPath";
 export { HealthBadge } from "./health/HealthBadge";
 export { HealthIcon } from "./health/HealthIcon";
 export { severityToState, stateLabel } from "./health/state";

@@ -1,6 +1,7 @@
 package kinds
 
 import (
+	"reflect"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,7 +54,7 @@ func TestUpstreamDescriptorsAreComplete(t *testing.T) {
 		"XListenerSet": CategoryListenerSet, "HTTPRoute": CategoryRoute, "GRPCRoute": CategoryRoute,
 		"TCPRoute": CategoryRoute, "TLSRoute": CategoryRoute, "BackendTLSPolicy": CategoryPolicy,
 		"TrafficPolicy": CategoryPolicy, "ListenerPolicy": CategoryPolicy, "HTTPListenerPolicy": CategoryPolicy,
-		"BackendConfigPolicy": CategoryPolicy,
+		"BackendConfigPolicy": CategoryPolicy, "Backend": CategoryBackend,
 	}
 	got := map[string]Category{}
 	for _, d := range Upstream() {
@@ -111,4 +112,19 @@ func TestExperimentalOnly(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Backend is registered last, so existing kind lists only gain it at the end.
+func TestUpstreamHasBackend(t *testing.T) {
+	want := Descriptor{Group: "gateway.kgateway.dev", Kind: "Backend", Resource: "backends", Versions: []string{"v1alpha1"},
+		Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"}
+	for _, d := range Upstream() {
+		if d.Group == want.Group && d.Kind == want.Kind {
+			if !reflect.DeepEqual(d, want) {
+				t.Fatalf("upstream Backend %+v, want %+v", d, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("upstream kinds have no %s/%s", want.Group, want.Kind)
 }

@@ -1,25 +1,40 @@
 import type { HealthState } from "../theme/tokens";
+import type { Link, LinkedRef } from "./exploreTypes";
+
+export * from "./exploreTypes";
 
 /** Mirrors pkg/api, pkg/overview, pkg/health JSON as built (sub-phase 1.1). */
 export type Severity = "error" | "warning" | "info";
-export type Category = "gatewayclass" | "gateway" | "listenerset" | "route" | "policy" | "workload" | "parameters";
+export type Category =
+  | "gatewayclass"
+  | "gateway"
+  | "listenerset"
+  | "route"
+  | "policy"
+  | "workload"
+  | "parameters"
+  | "backend";
 export interface Ref {
   group: string;
   kind: string;
   namespace?: string;
   name: string;
 }
-/** restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013). */
+/**
+ * restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013).
+ * evidenceRestricted: the detail was replaced because it quotes an object the caller may not view.
+ */
 export interface Finding {
   code: string;
   slug: string;
   severity: Severity;
   install: string;
-  resource?: Ref;
+  resource?: LinkedRef;
   message: string;
   detail?: string;
   since?: string;
   restricted?: boolean;
+  evidenceRestricted?: boolean;
 }
 /** detail: context for an OK check (e.g. scope source); pending: not OK only because of the grace period. */
 export interface CheckResult {
@@ -107,6 +122,7 @@ export interface GatewayRow {
   listeners: number;
   attachedRoutes: number;
   addresses: string[];
+  link?: Link;
 }
 export interface OverviewResponse {
   header: InstallHeader;
@@ -132,6 +148,8 @@ export interface MetaResponse {
   platform: string;
   capabilities: string[];
   kinds: ServedKind[];
+  /** The group/kinds with a detail view; informational, links come from LinkedRef.link. */
+  views?: { group: string; kind: string }[];
 }
 export interface ErrorResponse {
   error: string;

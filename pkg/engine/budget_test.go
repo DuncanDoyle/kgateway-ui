@@ -3,27 +3,27 @@
 package engine
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
-	kubefake "k8s.io/client-go/kubernetes/fake"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
@@ -32,71 +32,17 @@ import (
 // world is a settled cache over tier's world with its change signal drained.
 type world struct {
 	c      *cache.Cache
-	dyn    *dynamicfake.FakeDynamicClient
+	update func(context.Context, *unstructured.Unstructured) error
 	sig    *trigger.Signal
 	routes []*unstructured.Unstructured // the seeded HTTPRoutes
 	gvr    schema.GroupVersionResource  // HTTPRoutes
 }
 
-// newWorld seeds fake clients with tier's world, one kgateway controller and a
-// proxy per Gateway (as scale.Snapshot), starts a cache stamped by now and
-// waits until it has settled.
+// newWorld is scale.Live under the names these tests use.
 func newWorld(tb testing.TB, tier scale.Tier, now func() time.Time) *world {
 	tb.Helper()
-	served := append(testutil.ServedUpstream(), kinds.Served{Descriptor: scale.BackendKind, Version: scale.BackendKind.Versions[0]})
-	listKinds := map[schema.GroupVersionResource]string{}
-	byKind := map[schema.GroupKind]schema.GroupVersionResource{}
-	for _, s := range served {
-		listKinds[s.GVR()] = s.Kind + "List"
-		byKind[schema.GroupKind{Group: s.Group, Kind: s.Kind}] = s.GVR()
-	}
-	w := &world{dyn: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds), sig: trigger.New()}
-	w.gvr = byKind[schema.GroupKind{Group: "gateway.networking.k8s.io", Kind: "HTTPRoute"}]
-	for i, o := range scale.World(tier, 1) {
-		gvr, ok := byKind[o.GroupVersionKind().GroupKind()]
-		if !ok {
-			tb.Fatalf("unserved kind %s", o.GetKind())
-		}
-		o.SetResourceVersion("1")
-		o.SetUID(types.UID(strconv.Itoa(i)))
-		if err := w.dyn.Tracker().Create(gvr, o, o.GetNamespace()); err != nil {
-			tb.Fatal(err)
-		}
-		if gvr == w.gvr {
-			w.routes = append(w.routes, o)
-		}
-	}
-	typed := []runtime.Object{testutil.Namespace("kgw", nil)}
-	for _, ns := range testutil.ScaleNamespaces(tier.Namespaces) {
-		typed = append(typed, ns)
-	}
-	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
-	typed = append(typed, d, testutil.ControllerPod(d, "kgateway-0", true))
-	for i := range tier.Gateways {
-		typed = append(typed, testutil.ProxyDeployment(testutil.ScaleNamespace(i%tier.Namespaces), "gw-"+pad3(i), 1, 1))
-	}
-	det := install.UpstreamDetector{}
-	w.c = cache.New(cache.Config{Dynamic: w.dyn, Kube: kubefake.NewSimpleClientset(typed...), Served: served, Now: now, Changes: w.sig,
-		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
-	ctx, cancel := context.WithCancel(context.Background())
-	tb.Cleanup(cancel)
-	w.c.Start(ctx)
-	for deadline := time.Now().Add(time.Minute); !w.c.Settled(); time.Sleep(10 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			tb.Fatal("cache did not settle")
-		}
-	}
-	testutil.Drain(w.sig.C()) // the settle notify precedes Settled
-	return w
-}
-
-// pad3 matches scale's Gateway names, gw-000 ….
-func pad3(i int) string {
-	s := strconv.Itoa(i)
-	for len(s) < 3 {
-		s = "0" + s
-	}
-	return s
+	l := scale.Live(tb, tier, now)
+	return &world{c: l.Cache, update: l.Update, sig: l.Signal, routes: l.Routes, gvr: l.RouteGVR}
 }
 
 // engine returns an engine over w's cache with static metrics that never go
@@ -180,7 +126,7 @@ func TestBudgetBurst(t *testing.T) {
 		u.SetResourceVersion(rv(i))
 		u.SetAnnotations(map[string]string{"burst": strconv.Itoa(i)})
 		sent[i] = time.Now()
-		if _, err := w.dyn.Resource(w.gvr).Namespace(u.GetNamespace()).Update(ctx, u, metav1.UpdateOptions{}); err != nil {
+		if err := w.update(ctx, u); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -308,4 +254,169 @@ func BenchmarkConfirmTick(b *testing.B) {
 			}
 		})
 	}
+}
+
+// The 2.2 budgets of design §9.6 at Large: the explorer's index and decode cache.
+
+// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 100 ms,
+// every warm Compute allocates ≤ 32 MiB, and the median of 5 cold ones ≤ 1 s.
+func TestBudgetWarmRecompute(t *testing.T) {
+	const mib = 1 << 20
+	snap := scale.Snapshot(scale.Large, 1)
+	newEngine := func() *Engine {
+		return New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+	}
+	cold := make([]time.Duration, 5)
+	for i := range cold {
+		e := newEngine()
+		t0 := time.Now()
+		e.Compute()
+		cold[i] = time.Since(t0)
+	}
+	e := newEngine()
+	e.Compute()
+	warm := make([]time.Duration, 20)
+	alloc := make([]uint64, len(warm))
+	var ms runtime.MemStats
+	for i := range warm {
+		runtime.ReadMemStats(&ms)
+		a0 := ms.TotalAlloc
+		t0 := time.Now()
+		e.Compute()
+		warm[i] = time.Since(t0)
+		runtime.ReadMemStats(&ms)
+		alloc[i] = ms.TotalAlloc - a0
+	}
+	slices.Sort(cold)
+	slices.Sort(warm)
+	slices.Sort(alloc)
+	t.Logf("large: cold median %v max %v (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 100 ms); warm alloc median %.1f MiB max %.1f MiB (budget ≤ 32 MiB)",
+		cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond),
+		warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
+		float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib)
+	if cold[len(cold)/2] > time.Second {
+		t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
+	}
+	if warm[len(warm)/2] > 100*time.Millisecond {
+		t.Errorf("warm recompute median %v, budget ≤ 100 ms", warm[len(warm)/2])
+	}
+	if alloc[len(alloc)-1] > 32*mib {
+		t.Errorf("warm recompute allocation %d B, budget ≤ 32 MiB", alloc[len(alloc)-1])
+	}
+}
+
+// heapBaseline is the median "retained" HeapInuse of the 2.1 engine at Large
+// (docs/phases/phase-2/bench/2.2-baseline-heap.txt).
+const heapBaseline = 25411584
+
+// heapChildEnv makes TestBudgetHeap measure in this process and print one line.
+const heapChildEnv = "KGWUI_HEAP_CHILD"
+
+// heapRun is one child's measurement: HeapInuse at the baseline's three
+// points, and the HeapAlloc freed by dropping each part in order.
+type heapRun struct {
+	Start, Snapshot, Retained uint64
+	Parts                     []heapPart
+}
+
+type heapPart struct {
+	Name  string
+	Freed int64
+}
+
+// TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
+// and five runs, the median retained heap at Large ≤ 32 MiB above it. Each
+// part is then dropped in turn; its freed HeapAlloc is reported per kind.
+func TestBudgetHeap(t *testing.T) {
+	if os.Getenv(heapChildEnv) != "" {
+		heapChild(t)
+		return
+	}
+	const mib = 1 << 20
+	var runs []heapRun
+	for range 5 {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestBudgetHeap$", "-test.count=1")
+		cmd.Env = append(os.Environ(), heapChildEnv+"=1")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("heap child: %v\n%s", err, out)
+		}
+		var r heapRun
+		for line := range strings.Lines(string(out)) {
+			if j, ok := strings.CutPrefix(line, "heap: "); ok {
+				if err := json.Unmarshal([]byte(j), &r); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if r.Retained == 0 {
+			t.Fatalf("heap child printed no result:\n%s", out)
+		}
+		runs = append(runs, r)
+	}
+	t.Logf("run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)")
+	for i, r := range runs {
+		t.Logf("%d    %d    %d      %d      %d", i+1, r.Start, r.Snapshot, r.Retained, int64(r.Retained)-int64(r.Snapshot))
+	}
+	slices.SortFunc(runs, func(a, b heapRun) int { return cmp.Compare(a.Retained, b.Retained) })
+	med := runs[len(runs)/2]
+	over := int64(med.Retained) - heapBaseline
+	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 32 MiB)", med.Retained, float64(med.Retained)/mib, float64(over)/mib, heapBaseline)
+	for _, p := range med.Parts {
+		t.Logf("  %-28s %7.2f MiB", p.Name, float64(p.Freed)/mib)
+	}
+	if over > 32*mib {
+		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 32 MiB", float64(over)/mib)
+	}
+}
+
+// heapChild measures one heapRun at Large and prints it.
+func heapChild(t *testing.T) {
+	stats := func() runtime.MemStats {
+		runtime.GC()
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		return m
+	}
+	var r heapRun
+	r.Start = stats().HeapInuse
+	snap := scale.Snapshot(scale.Large, 1)
+	st := stats()
+	r.Snapshot = st.HeapInuse
+	snapAlloc := st.HeapAlloc
+	e := New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+	e.Compute()
+	m := e.Compute()
+	before := stats()
+	r.Retained = before.HeapInuse
+	if len(m.Installs) != 1 {
+		t.Fatalf("installs %d", len(m.Installs))
+	}
+	ix := m.Installs[0].Index
+	// Views shared by rows and the decode cache count where they are dropped last.
+	prev := before.HeapAlloc
+	drop := func(name string, f func()) {
+		f()
+		now := stats().HeapAlloc
+		r.Parts = append(r.Parts, heapPart{name, int64(prev) - int64(now)})
+		prev = now
+	}
+	drop("index: route rows", func() { ix.Routes = nil })
+	drop("index: Gateway rows", func() { ix.Gateways = nil })
+	drop("index: ListenerSet rows", func() { ix.ListenerSets = nil })
+	drop("index: lookups", func() { m.Installs[0].Index = nil })
+	drop("decode: HTTPRoute views", func() { e.decode.httpRoutes = viewCache[objects.HTTPRouteView]{} })
+	drop("decode: route views", func() { e.decode.routes = viewCache[objects.RouteView]{} })
+	drop("decode: route hostnames", func() { e.decode.routeHostname = viewCache[objects.RouteHostnames]{} })
+	drop("decode: Gateway views", func() { e.decode.gateways = viewCache[objects.GatewayView]{} })
+	drop("decode: ListenerSet views", func() { e.decode.listenerSets = viewCache[objects.ListenerSetView]{} })
+	drop("decode: Backend views", func() { e.decode.backends = viewCache[objects.BackendView]{} })
+	// What the engine and model still hold above the snapshot: health, overview, first-seen.
+	r.Parts = append(r.Parts, heapPart{"rest of engine and model", int64(prev) - int64(snapAlloc)})
+	runtime.KeepAlive(e)
+	runtime.KeepAlive(m)
+	runtime.KeepAlive(snap)
+	j, _ := json.Marshal(r)
+	fmt.Println("heap: " + string(j))
 }

@@ -307,3 +307,76 @@ func ScaleNamespaces(n int) []*corev1.Namespace {
 
 // ScaleNamespace is the name of scale namespace i.
 func ScaleNamespace(i int) string { return fmt.Sprintf("ns-%03d", i) }
+
+// HTTPRouteRef is a parentRef to an HTTPRoute.
+func HTTPRouteRef(ns, name string) objects.ParentRef {
+	return objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: ns, Name: name}
+}
+
+// Rule builds an HTTPRoute rule with the given matches; with none, matches is omitted.
+func Rule(matches ...map[string]any) map[string]any {
+	r := map[string]any{}
+	if len(matches) > 0 {
+		ms := make([]any, 0, len(matches))
+		for _, m := range matches {
+			ms = append(ms, m)
+		}
+		r["matches"] = ms
+	}
+	return r
+}
+
+// DelegateTo is a backendRef that delegates to the HTTPRoute ns/name.
+func DelegateTo(ns, name string) map[string]any {
+	return map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute", "namespace": ns, "name": name}
+}
+
+// DelegateWildcard is a backendRef that delegates to every HTTPRoute in ns.
+func DelegateWildcard(ns string) map[string]any { return DelegateTo(ns, "*") }
+
+// DelegateLabel is a backendRef that delegates to the HTTPRoutes in ns
+// labelled with the delegation label value label.
+func DelegateLabel(ns, label string) map[string]any {
+	return map[string]any{"group": "delegation.kgateway.dev", "kind": "label", "namespace": ns, "name": label}
+}
+
+// WithRules sets u's spec.rules and returns u.
+func WithRules(u *unstructured.Unstructured, rules ...map[string]any) *unstructured.Unstructured {
+	rs := make([]any, 0, len(rules))
+	for _, r := range rules {
+		rs = append(rs, r)
+	}
+	spec(u)["rules"] = rs
+	return u
+}
+
+// WithHostnames sets u's spec.hostnames and returns u.
+func WithHostnames(u *unstructured.Unstructured, h ...string) *unstructured.Unstructured {
+	hs := make([]any, 0, len(h))
+	for _, s := range h {
+		hs = append(hs, s)
+	}
+	spec(u)["hostnames"] = hs
+	return u
+}
+
+func spec(u *unstructured.Unstructured) map[string]any {
+	s, ok := u.Object["spec"].(map[string]any)
+	if !ok {
+		s = map[string]any{}
+		u.Object["spec"] = s
+	}
+	return s
+}
+
+// Backend builds a kgateway Backend of type Static. With no conditions given
+// it is Accepted.
+func Backend(ns, name string, cs []metav1.Condition) *unstructured.Unstructured {
+	u := obj("gateway.kgateway.dev/v1alpha1", "Backend", ns, name)
+	if cs == nil {
+		cs = []metav1.Condition{Cond("Accepted", metav1.ConditionTrue, "Accepted")}
+	}
+	u.Object["spec"] = map[string]any{"type": "Static", "static": map[string]any{"hosts": []any{map[string]any{"host": "example.com", "port": int64(80)}}}}
+	u.Object["status"] = map[string]any{"conditions": conds(cs)}
+	return u
+}

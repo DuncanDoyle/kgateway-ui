@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import type { HealthState } from "../theme/tokens";
 import { HealthIcon } from "./HealthIcon";
+import { useShownState } from "./staleView";
 import { stateLabel } from "./state";
 
 // region Styles
@@ -24,7 +25,8 @@ interface HealthBadgeProps {
 }
 
 /** Icon + colour + text for a health state. */
-export function HealthBadge({ state, label, stylesOverride }: HealthBadgeProps) {
+export function HealthBadge({ state: given, label, stylesOverride }: HealthBadgeProps) {
+  const state = useShownState(given);
   return (
     <Badge state={state} stylesOverride={stylesOverride}>
       <HealthIcon state={state} />

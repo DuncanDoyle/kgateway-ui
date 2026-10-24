@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the D-021 observations (computed-rules.md §10) on a cluster made by test/e2e/setup.sh.
+# Runs the D-021 observations (computed-rules.md §10) on a cluster made by EXPLORER=0 test/e2e/setup.sh.
 #   run.sh prepare          # TLS Secret for listener https, then 00-world.yaml
 #   run.sh apply FILE...    # apply, wait until current and settled, print the record as JSON
 #   run.sh settle           # wait as apply does, then print the record

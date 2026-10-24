@@ -76,6 +76,7 @@ export function overview(at = Date.now()): OverviewResponse {
     gateways: [
       {
         ref: { group: gw, kind: "Gateway", namespace: "prod", name: "edge" },
+        link: "detail",
         class: "kgateway",
         state: "error",
         listeners: 2,
@@ -84,6 +85,7 @@ export function overview(at = Date.now()): OverviewResponse {
       },
       {
         ref: { group: gw, kind: "Gateway", namespace: "prod", name: "internal" },
+        link: "detail",
         class: "kgateway",
         state: "healthy",
         listeners: 1,
@@ -101,7 +103,7 @@ const f = (code: string, severity: "error" | "warning" | "info", ns: string, nam
   severity,
   install: "kgw.kgateway",
   message,
-  resource: { group: gw, kind: "HTTPRoute", namespace: ns, name },
+  resource: { group: gw, kind: "HTTPRoute", namespace: ns, name, link: "yaml" as const },
 });
 
 export function unhealthy(at = Date.now()): HealthReport {
@@ -113,7 +115,7 @@ export function unhealthy(at = Date.now()): HealthReport {
       {
         ...f("KGWUI-001", "error", "prod", "edge", "Configuration rejected by Envoy"),
         detail: "2 active rejects",
-        resource: { group: gw, kind: "Gateway", namespace: "prod", name: "edge" },
+        resource: { group: gw, kind: "Gateway", namespace: "prod", name: "edge", link: "yaml" },
       },
       ...Array.from({ length: 6 }, (_, i) => f("KGWUI-002", "warning", "shop", `route-${i}`, "Backend not found")),
     ],
@@ -173,7 +175,7 @@ export function processing(at = Date.now()): HealthReport {
       severity: "info" as const,
       install: "kgw.kgateway",
       message: "Being processed by the controller",
-      resource: { group: gw, kind: "HTTPRoute", namespace: "shop", name },
+      resource: { group: gw, kind: "HTTPRoute", namespace: "shop", name, link: "yaml" },
     })),
     checks: [
       {
@@ -223,7 +225,7 @@ export function restricted(at = Date.now()): HealthReport {
         install: "kgw.kgateway",
         message: "",
         restricted: true,
-        resource: { group: gw, kind: "HTTPRoute", namespace: "payments", name: "checkout" },
+        resource: { group: gw, kind: "HTTPRoute", namespace: "payments", name: "checkout", link: "none" },
       },
     ],
     counts: { error: 1 },

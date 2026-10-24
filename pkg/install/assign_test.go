@@ -59,7 +59,7 @@ func TestAssignGatewaysRoutesAndPolicies(t *testing.T) {
 		testutil.TrafficPolicy("shop", "tp"),
 		testutil.TrafficPolicy("blog", "tp-out"),
 	)
-	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)})
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}, nil)
 	o := a.PerInstall["kgw.kgateway"]
 	if len(o.Gateways) != 1 || o.Gateways[0].GetName() != "edge" {
 		t.Fatalf("gateways: %d", len(o.Gateways))
@@ -90,7 +90,7 @@ func TestAssignRouteViaListenerSet(t *testing.T) {
 		testutil.Gateway("infra", "edge", "kgateway", nil), ls,
 		testutil.HTTPRoute("shop", "r", []objects.ParentRef{{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "shop", Name: "ls"}}),
 	)
-	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}).PerInstall["kgw.kgateway"]
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}, nil).PerInstall["kgw.kgateway"]
 	if len(o.ListenerSets) != 1 || len(o.Routes) != 1 {
 		t.Fatalf("listenersets=%d routes=%d", len(o.ListenerSets), len(o.Routes))
 	}
@@ -101,7 +101,7 @@ func TestAssignAmbiguousGateway(t *testing.T) {
 	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("shared", "gw", "kgateway", nil))
 	a := Assign(snap, testutil.ServedUpstream(), []Resolved{
 		resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"env":"x"}}]`),
-	})
+	}, nil)
 	if len(a.Ambiguous) != 1 || len(a.Ambiguous[0].Installs) != 2 {
 		t.Fatalf("want 1 ambiguous gateway claimed by 2 installs, got %+v", a.Ambiguous)
 	}
@@ -114,7 +114,7 @@ func TestDisjointInstallsSplitCleanly(t *testing.T) {
 	nss := []*corev1.Namespace{testutil.Namespace("app-a", map[string]string{"team": "a"}), testutil.Namespace("app-b", map[string]string{"team": "b"})}
 	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
 		testutil.Gateway("app-a", "gw", "kgateway", nil), testutil.Gateway("app-b", "gw", "kgateway", nil))
-	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"team":"b"}}]`)})
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"team":"b"}}]`)}, nil)
 	if len(a.PerInstall["kgw-a.a"].Gateways) != 1 || len(a.PerInstall["kgw-b.b"].Gateways) != 1 || len(a.Ambiguous) != 0 {
 		t.Fatalf("unexpected split: a=%d b=%d ambiguous=%d", len(a.PerInstall["kgw-a.a"].Gateways), len(a.PerInstall["kgw-b.b"].Gateways), len(a.Ambiguous))
 	}
@@ -125,7 +125,7 @@ func TestStaleStatusOutOfScopeIsIgnored(t *testing.T) {
 	nss := []*corev1.Namespace{testutil.Namespace("infra", map[string]string{"team": "a"}), testutil.Namespace("old", nil)}
 	stale := testutil.HTTPRoute("old", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")}, testutil.AcceptedBy(testutil.GwRef("infra", "edge"), testutil.Controller))
 	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil), stale)
-	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)})
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}, nil)
 	if len(a.PerInstall["kgw.kgateway"].Routes) != 0 {
 		t.Fatal("out-of-scope route with stale kgateway status must not be assigned")
 	}
@@ -146,7 +146,7 @@ func TestForeignGroupReferencesDoNotResolve(t *testing.T) {
 		testutil.Gateway("infra", "edge", "kgateway", nil), ls,
 		testutil.HTTPRoute("shop", "foreign", []objects.ParentRef{foreignGw}),
 	)
-	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}).PerInstall["kgw.kgateway"]
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}, nil).PerInstall["kgw.kgateway"]
 	if len(o.Routes) != 0 || len(o.ListenerSets) != 0 || len(o.Unattached) != 0 {
 		t.Fatalf("foreign-group references must not resolve: routes=%v listenersets=%d unattached=%d", names(o.Routes), len(o.ListenerSets), len(o.Unattached))
 	}
@@ -164,7 +164,7 @@ func TestRouteParentsAreScopedToTheInstall(t *testing.T) {
 	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true),
 		testutil.Gateway("infra-a", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
 		testutil.HTTPRoute("shop", "both", []objects.ParentRef{ga, gb}))
-	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"env":"x"}}]`)})
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), resolved("kgw-b/b", `[{"matchLabels":{"env":"x"}}]`)}, nil)
 	for id, want := range map[string]objects.ParentRef{"kgw-a.a": ga, "kgw-b.b": gb} {
 		rs := a.PerInstall[id].Routes
 		if len(rs) != 1 || len(rs[0].Parents) != 1 || rs[0].Parents[0] != want {
@@ -183,7 +183,7 @@ func TestRouteToMissingGatewayIsUnattached(t *testing.T) {
 		testutil.HTTPRoute("shop", "orphan", []objects.ParentRef{gone}),
 		testutil.HTTPRoute("shop", "half", []objects.ParentRef{testutil.GwRef("infra", "edge"), gone}),
 		testutil.HTTPRoute("blog", "elsewhere", []objects.ParentRef{gone}))
-	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}).PerInstall["kgw.kgateway"]
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}, nil).PerInstall["kgw.kgateway"]
 	if got := names(o.Routes); len(got) != 1 || got[0] != "shop/half" {
 		t.Fatalf("only shop/half is owned (through infra/edge): %v", got)
 	}
@@ -209,7 +209,7 @@ func TestGenericPolicyWithoutStatusIsOwned(t *testing.T) {
 		testutil.BackendTLSPolicy("shop", "new"),
 		testutil.BackendTLSPolicy("shop", "istio", other),
 		testutil.BackendTLSPolicy("shop", "ours", mine))
-	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}).PerInstall["kgw.kgateway"]
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", "[]")}, nil).PerInstall["kgw.kgateway"]
 	if got := names(o.Policies); len(got) != 2 || got[0] != "shop/new" || got[1] != "shop/ours" {
 		t.Fatalf("policies: %v", got)
 	}
@@ -233,7 +233,7 @@ func TestUnknownScopeDoesNotMakeGatewaysAmbiguous(t *testing.T) {
 		return out
 	}
 
-	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), unknown})
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", teamA), unknown}, nil)
 	if len(a.Ambiguous) != 0 {
 		t.Fatalf("known scope wins over unknown, want no ambiguity: %+v", a.Ambiguous)
 	}
@@ -245,7 +245,7 @@ func TestUnknownScopeDoesNotMakeGatewaysAmbiguous(t *testing.T) {
 		t.Fatalf("b: %v", got)
 	}
 
-	both := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{`), unknown})
+	both := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{`), unknown}, nil)
 	if len(both.Ambiguous) != 2 {
 		t.Fatalf("two unknown scopes: want both gateways ambiguous, got %+v", both.Ambiguous)
 	}
@@ -263,7 +263,7 @@ func TestPolicyBelongsToTheInstallOwningItsAncestor(t *testing.T) {
 		testutil.Gateway("infra-a", "edge", "kgateway", nil), testutil.Gateway("infra-b", "edge", "kgateway", nil),
 		testutil.TrafficPolicy("shop", "tp", anc), testutil.BackendTLSPolicy("shop", "btls", anc),
 		testutil.TrafficPolicy("shop", "new"), testutil.TrafficPolicy("shop", "summary", summary))
-	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{"matchLabels":{"a":"yes"}}]`), resolved("kgw-b/b", `[{"matchLabels":{"b":"yes"}}]`)})
+	a := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw-a/a", `[{"matchLabels":{"a":"yes"}}]`), resolved("kgw-b/b", `[{"matchLabels":{"b":"yes"}}]`)}, nil)
 	if got := names(a.PerInstall["kgw-a.a"].Policies); len(got) != 4 {
 		t.Fatalf("a: %v", got)
 	}

@@ -3,7 +3,14 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { POLL_MS } from "../../api/hooks";
-import type { HealthReport, InstallSummary, OverviewResponse, ScopeSummary } from "../../api/types";
+import type {
+  Finding,
+  GatewayRow,
+  HealthReport,
+  InstallSummary,
+  OverviewResponse,
+  ScopeSummary,
+} from "../../api/types";
 import { InstallSwitcher } from "../../shell/InstallSwitcher";
 import {
   healthy,
@@ -27,7 +34,12 @@ afterEach(() => {
 
 function Where() {
   const loc = useLocation();
-  return <output data-testid="location">{loc.search}</output>;
+  return (
+    <>
+      <output data-testid="location">{loc.search}</output>
+      <output data-testid="pathname">{loc.pathname}</output>
+    </>
+  );
 }
 
 function mount(health: HealthReport, path = "/i/kgw.kgateway", ov: OverviewResponse = overview()) {
@@ -313,7 +325,7 @@ it("gateway filter matches name, namespace and class and lives in the URL", asyn
   mount(healthy(), "/i/kgw.kgateway?q=internal", ov);
   const table = await screen.findByRole("table", { name: "Gateways" });
   expect(within(table).getAllByRole("row")).toHaveLength(2); // header + internal
-  const filter = screen.getByRole("textbox", { name: "Filter gateways" });
+  const filter = screen.getByRole("textbox", { name: "Filter Gateways" });
   expect(filter).toHaveValue("internal");
   await userEvent.clear(filter);
   await userEvent.type(filter, "prod");
@@ -338,35 +350,110 @@ it("gateway sort lives in the URL", async () => {
   expect(gatewayRows()[0]).toHaveTextContent("edge");
 });
 
-it("gateway names link to their YAML view", async () => {
+it("Gateway table row opens the Gateway page", async () => {
   mount(healthy());
   await screen.findByRole("table", { name: "Gateways" });
-  expect(within(gatewayRows()[0] as HTMLElement).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
+  const row = gatewayRows()[0] as HTMLElement;
+  expect(within(row).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
+    "href",
+    "/i/kgw.kgateway/gateways/prod/edge",
+  );
+  // A click anywhere on the row opens the same page.
+  await userEvent.click(within(row).getByText("34.12.8.1"));
+  expect(screen.getByTestId("pathname")).toHaveTextContent("/i/kgw.kgateway/gateways/prod/edge");
+});
+
+it("a Gateway row follows its link: yaml opens the YAML view, none is plain text", async () => {
+  const ov = overview();
+  const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
+  mount(healthy(), "/i/kgw.kgateway", {
+    ...ov,
+    gateways: [
+      { ...edge, link: "yaml" },
+      { ...internal, link: "none" },
+    ],
+  });
+  await screen.findByRole("table", { name: "Gateways" });
+  const [yaml, none] = gatewayRows() as [HTMLElement, HTMLElement];
+  expect(within(yaml).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
     "href",
     "/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge",
   );
+  expect(within(none).queryByRole("link")).toBeNull();
+  expect(none).not.toHaveAttribute("data-linked");
+  // Only a linked row looks clickable: pointer and hover/active backgrounds sit on [data-linked].
+  expect(yaml).toHaveAttribute("data-linked");
+  const css = [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("");
+  expect(css).toMatch(/tbody tr\[data-linked\]:hover/);
+  expect(css).toMatch(/tbody tr\[data-linked\]:active/);
+  expect(css).not.toMatch(/tbody tr:hover/);
+  // A row without a link goes nowhere on click.
+  await userEvent.click(within(none).getAllByRole("cell")[2] as HTMLElement);
+  expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway");
 });
 
-it("links only finding resources whose kind /api/v1/meta lists", async () => {
-  stubApi({
-    "/api/v1/installs/kgw.kgateway/overview": overview(),
-    "/api/v1/installs/kgw.kgateway/health": unhealthy(),
-    "/api/v1/meta": { ...meta, kinds: meta.kinds.filter((k) => k.kind !== "HTTPRoute") },
-  });
-  renderWithTheme(
-    <Routes>
-      <Route path="/i/:id" element={<InstallPage />} />
-    </Routes>,
-    { path: "/i/kgw.kgateway" },
+const gw = "gateway.networking.k8s.io";
+const oneFinding = (resource: Finding["resource"], extra: Partial<Finding> = {}): HealthReport => ({
+  ...unhealthy(),
+  findings: [
+    {
+      code: "KGWUI-002",
+      slug: "condition-false",
+      severity: "error",
+      install: "kgw.kgateway",
+      message: "Backend not found",
+      resource,
+      ...extra,
+    },
+  ],
+  counts: { error: 1 },
+});
+
+it("finding on an HTTPRoute opens its detail page", async () => {
+  mount(oneFinding({ group: gw, kind: "HTTPRoute", namespace: "shop", name: "cart", link: "detail" }));
+  const row = await screen.findByTestId("finding-row");
+  expect(within(row).getByRole("link", { name: "shop/cart" })).toHaveAttribute(
+    "href",
+    "/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/cart",
   );
-  const rows = await screen.findAllByTestId("finding-row");
-  await waitFor(() =>
-    expect(within(rows[0] as HTMLElement).getByRole("link")).toHaveAttribute(
-      "href",
-      "/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge",
+});
+
+it("a finding on a Gateway opens the Gateway page", async () => {
+  mount(oneFinding({ group: gw, kind: "Gateway", namespace: "prod", name: "edge", link: "detail" }));
+  const row = await screen.findByTestId("finding-row");
+  expect(within(row).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
+    "href",
+    "/i/kgw.kgateway/gateways/prod/edge",
+  );
+});
+
+it("a finding with link yaml opens the YAML view", async () => {
+  mount(oneFinding({ group: "gateway.kgateway.dev", kind: "Backend", namespace: "shop", name: "be1", link: "yaml" }));
+  const row = await screen.findByTestId("finding-row");
+  expect(within(row).getByRole("link", { name: "shop/be1" })).toHaveAttribute(
+    "href",
+    "/i/kgw.kgateway/r/gateway.kgateway.dev/Backend/shop/be1",
+  );
+});
+
+it("a finding with link none is plain text", async () => {
+  mount(oneFinding({ group: gw, kind: "HTTPRoute", namespace: "shop", name: "cart", link: "none" }));
+  const row = await screen.findByTestId("finding-row");
+  expect(row).toHaveTextContent("shop/cart");
+  expect(within(row).queryByRole("link")).toBeNull();
+});
+
+it("restricted finding never links", async () => {
+  // Even a detail link the server sent is ignored for a restricted finding.
+  mount(
+    oneFinding(
+      { group: gw, kind: "HTTPRoute", namespace: "payments", name: "checkout", link: "detail" },
+      { restricted: true, message: "" },
     ),
   );
-  expect(within(rows[1] as HTMLElement).queryByRole("link")).toBeNull(); // HTTPRoute is not listed
+  const row = await screen.findByTestId("finding-row");
+  expect(row).toHaveTextContent("payments/checkout");
+  expect(within(row).queryByRole("link")).toBeNull();
 });
 
 it("a restricted finding shows its resource, severity and code, a short note and no link", async () => {
@@ -526,7 +613,7 @@ it("gateway rows take the worst of their row state and their current health find
       severity: "warning",
       install: "kgw.kgateway",
       message: "Listener conflicted",
-      resource: { group: gw, kind: "Gateway", namespace: "prod", name: "internal" },
+      resource: { group: gw, kind: "Gateway", namespace: "prod", name: "internal", link: "yaml" },
     },
     // A finding on another kind with the same name does not count for the Gateway.
     {
@@ -535,7 +622,7 @@ it("gateway rows take the worst of their row state and their current health find
       severity: "error",
       install: "kgw.kgateway",
       message: "Backend not found",
-      resource: { group: gw, kind: "HTTPRoute", namespace: "prod", name: "internal" },
+      resource: { group: gw, kind: "HTTPRoute", namespace: "prod", name: "internal", link: "yaml" },
     },
   ];
   mount(h);
@@ -629,7 +716,7 @@ async function switchTo(id: string) {
   await userEvent.click(item);
 }
 
-const filterBox = () => screen.getByRole("textbox", { name: "Filter gateways" });
+const filterBox = () => screen.getByRole("textbox", { name: "Filter Gateways" });
 
 it("switching installs does not carry the gateway filter over", async () => {
   const a = overview();

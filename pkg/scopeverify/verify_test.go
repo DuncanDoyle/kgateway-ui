@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -113,4 +114,72 @@ func TestUnavailableRestartsPersistence(t *testing.T) {
 	if r := v.Verify(input(t, testutil.Now.Add(25*time.Second), off, true)); len(r.Mismatches) != 0 {
 		t.Fatalf("persistence must restart after an unavailable period: %+v", r)
 	}
+}
+
+// The gauge counts no Backends: a Backend in scope, and a Backend series from
+// the controller, leave the comparison unchanged.
+func TestVerifierIgnoresBackend(t *testing.T) {
+	be := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "gateway.kgateway.dev/v1alpha1", "kind": "Backend",
+		"metadata": map[string]any{"namespace": "shop", "name": "api"}}}
+	managed := map[ctrlmetrics.ManagedKey]float64{{Namespace: "shop", Resource: "Backend"}: 5}
+	for k, n := range matching {
+		managed[k] = n
+	}
+	gw := testutil.GwRef("shop", "edge")
+	in := inputWith(t, testutil.Now, managed, true, testutil.Gateway("shop", "edge", "any-class", nil),
+		testutil.HTTPRoute("shop", "two-parents", []objects.ParentRef{gw, testutil.GwRef("shop", "other")}),
+		testutil.TrafficPolicy("shop", "tp"), be)
+	v := NewManagedCountVerifier(20 * time.Second)
+	v.Verify(in)
+	in.Now = testutil.Now.Add(25 * time.Second)
+	if r := v.Verify(in); !r.Available || len(r.Mismatches) != 0 {
+		t.Fatalf("a Backend must not enter the comparison: %+v", r)
+	}
+}
+
+// countingDecoder records which routes went through it.
+type countingDecoder struct {
+	objects.Direct
+	http, other int
+}
+
+func (c *countingDecoder) HTTPRoute(u *unstructured.Unstructured) *objects.HTTPRouteView {
+	c.http++
+	return c.Direct.HTTPRoute(u)
+}
+
+func (c *countingDecoder) Route(u *unstructured.Unstructured) *objects.RouteView {
+	c.other++
+	return c.Direct.Route(u)
+}
+
+// Route parentRefs are counted through Input.Views, so the engine's cache
+// decodes each route once per change, with the same counts.
+func TestRoutesAreCountedThroughViews(t *testing.T) {
+	in := input(t, testutil.Now, matching, true)
+	grpc := testutil.HTTPRoute("shop", "g", []objects.ParentRef{testutil.GwRef("shop", "edge")})
+	grpc.SetKind("GRPCRoute")
+	in = inputWith(t, testutil.Now, matching, true, append([]*unstructured.Unstructured{grpc}, flatten(in.Snapshot.Objects)...)...)
+	dec := &countingDecoder{}
+	in.Views = dec
+	want := map[ctrlmetrics.ManagedKey]float64{}
+	for k, v := range matching {
+		want[k] = v
+	}
+	want[ctrlmetrics.ManagedKey{Namespace: "shop", Resource: "GRPCRoute"}] = 1
+	in.Metrics.Metrics.Managed = want
+	if r := NewManagedCountVerifier(20 * time.Second).Verify(in); !r.Available || len(r.Mismatches) != 0 {
+		t.Fatalf("%+v", r)
+	}
+	if dec.http != 2 || dec.other != 1 {
+		t.Fatalf("decoded %d HTTPRoutes and %d other routes through Views, want 2 and 1", dec.http, dec.other)
+	}
+}
+
+func flatten(m map[schema.GroupVersionResource][]*unstructured.Unstructured) []*unstructured.Unstructured {
+	var out []*unstructured.Unstructured
+	for _, l := range m {
+		out = append(out, l...)
+	}
+	return out
 }

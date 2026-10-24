@@ -1,0 +1,21 @@
+# Retained-heap baseline for the 2.2 heap budget (sub-phase 2.2, Task 11, ruling PF32)
+# engine code: 77fc4dce94f54ed3662c0943ff93e78166243f38 (2.1 merged; no explorer index, no decode cache)
+# go version go1.27.3 darwin/arm64
+# cpu: Apple M5 Max, machine: Darwin arm64, 18 CPUs, 64 GiB
+# load: 13:59  up 2 days,  5:08, 16 users, load averages: 5.40 4.62 4.33
+# method: a throwaway in-package test, one process per run (go test -count 1 ./pkg/engine), five runs:
+#   start    = HeapInuse after runtime.GC() twice, before anything is built
+#   snapshot = the same after scale.Snapshot(scale.Large, 1)
+#   retained = the same after New(config(snap, …)), one cold and one warm Compute,
+#              with the engine, its published model and the snapshot kept alive
+# The 2.2 budget compares Task 32's TestBudgetHeap, measured the same way, against "retained".
+
+run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+1    3317760    22274048      25526272      3252224
+2    3309568    22118400      25411584      3293184
+3    3080192    22077440      25370624      3293184
+4    3358720    22298624      25567232      3268608
+5    3309568    21815296      25092096      3276800
+
+median retained: 25411584 B (24.2 MiB); engine+model over snapshot: ~3.27 MB (3.1 MiB)
+budget (design §9.6): heap of index, computed views and decode cache <= 32 MiB above "retained"

@@ -99,7 +99,7 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 		byKind[schema.GroupKind{Group: r.Group, Kind: r.Kind}]++
 	}
 	if owned != nil {
-		for _, us := range [][]*unstructured.Unstructured{owned.GatewayClasses, owned.Gateways, owned.ListenerSets} {
+		for _, us := range [][]*unstructured.Unstructured{owned.GatewayClasses, owned.Gateways, owned.ListenerSets, owned.Backends} {
 			for _, u := range us {
 				add(u)
 			}

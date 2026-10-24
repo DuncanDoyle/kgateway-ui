@@ -1,0 +1,9 @@
+{
+  "body": {
+    "error": "bad query: limit \"0\": want 1–200"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "status": 400
+}

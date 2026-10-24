@@ -1,6 +1,7 @@
 package install
 
 import (
+	"maps"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
@@ -19,12 +20,23 @@ type OwnedObject struct {
 	// or ListenerSet of this install. Only their status entries
 	// are evaluated. Empty for policies.
 	Parents []objects.ParentRef
+	// RouteParents are the status parentRefs (after defaults) of the route's
+	// reported edges to HTTPRoutes of this install (design §4.2).
+	RouteParents []objects.ParentRef
 }
 
 // UnattachedRoute is a route in an install's scope whose parentRef names a
 // Gateway or ListenerSet that does not exist. It is a diagnostic candidate
 // for KGWUI-003 and is not counted as owned.
 type UnattachedRoute struct {
+	Route  OwnedObject
+	Parent objects.ParentRef
+}
+
+// DeclaredCandidate is an in-scope route whose current spec parentRef names
+// an HTTPRoute of the install with no eligible status entry, current or stale
+// (design §4.2). It is a diagnostic candidate, never a child.
+type DeclaredCandidate struct {
 	Route  OwnedObject
 	Parent objects.ParentRef
 }
@@ -37,6 +49,34 @@ type Owned struct {
 	Routes         []OwnedObject
 	Policies       []OwnedObject
 	Unattached     []UnattachedRoute
+	// Declared holds one candidate per (route, parent HTTPRoute).
+	Declared []DeclaredCandidate
+	// NoParent are in-scope HTTPRoutes with empty spec.parentRefs and no
+	// status entry from the install's controllers. Not counted.
+	NoParent []OwnedObject
+	// Backends are the in-scope Backends that a backendRef of an owned route
+	// names by full identity ("in use", design §4.3).
+	Backends []*unstructured.Unstructured
+	// ReferencedBackends are the Backend refs of owned routes, in scope or
+	// not and whether they exist or not, once each.
+	ReferencedBackends []objects.Ref
+
+	// routeIdx maps a route ref to its index in Routes. It may be nil (copies)
+	// or miss routes appended later, so Route falls back to a scan.
+	routeIdx map[objects.Ref]int
+}
+
+// Route returns the owned route ref, if any.
+func (o *Owned) Route(ref objects.Ref) (*OwnedObject, bool) {
+	if i, ok := o.routeIdx[ref]; ok && i < len(o.Routes) && objects.RefOf(o.Routes[i].Obj) == ref {
+		return &o.Routes[i], true
+	}
+	for i := range o.Routes {
+		if objects.RefOf(o.Routes[i].Obj) == ref {
+			return &o.Routes[i], true
+		}
+	}
+	return nil, false
 }
 
 // AmbiguousGateway is a Gateway claimed by more than one install (KGWUI-009).
@@ -45,11 +85,12 @@ type AmbiguousGateway struct {
 	Installs []string
 }
 
-// UnwatchedRoute is a route that targets a Gateway of Install from a namespace
+// UnwatchedRoute is a route that targets a parent of Install from a namespace
 // that Install does not watch (KGWUI-004).
 type UnwatchedRoute struct {
 	Install string
 	Route   objects.Ref
+	// Gateway is the owned parent named: a Gateway, ListenerSet or HTTPRoute.
 	Gateway objects.Ref
 }
 
@@ -61,8 +102,12 @@ type Assignment struct {
 }
 
 // Assign assigns the snapshot's resources to insts. References are resolved
-// by full group/kind/namespace/name identity.
-func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assignment {
+// by full group/kind/namespace/name identity. HTTPRoutes are decoded through
+// dec; nil decodes directly.
+func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec objects.Decoder) Assignment {
+	if dec == nil {
+		dec = objects.Direct{}
+	}
 	a := Assignment{PerInstall: map[string]*Owned{}}
 	for _, in := range insts {
 		a.PerInstall[in.ID()] = &Owned{}
@@ -96,7 +141,7 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 
 	// Gateways: class controllerName ∩ namespace scope.
 	gwOwner := map[objects.Ref]int{}
-	exists := map[objects.Ref]bool{} // every Gateway and ListenerSet in the snapshot
+	exists := map[objects.Ref]bool{} // every Gateway, ListenerSet and HTTPRoute in the snapshot
 	for _, gw := range list(kinds.CategoryGateway) {
 		gref := objects.RefOf(gw.Obj)
 		exists[gref] = true
@@ -143,19 +188,38 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 		o.ListenerSets = append(o.ListenerSets, ls.Obj)
 	}
 
-	// parentKinds are the served group/kinds a route parentRef can name; only
-	// for these can the UI tell that the target does not exist.
+	// parentKinds are the served Gateway and ListenerSet group/kinds; they also
+	// decide policy ownership (claimable).
 	parentKinds := map[[2]string]bool{}
 	for _, k := range append(kinds.ByCategory(served, kinds.CategoryGateway), kinds.ByCategory(served, kinds.CategoryListenerSet)...) {
 		parentKinds[[2]string{k.Group, k.Kind}] = true
+	}
+	// routeParentKinds adds HTTPRoute for the missing-parent check only.
+	routeParentKinds := maps.Clone(parentKinds)
+	hr, hasHR := httpRouteKind(served)
+	if hasHR {
+		routeParentKinds[[2]string{hr.Group, hr.Kind}] = true
+		for _, u := range snap.Objects[hr.GVR()] {
+			exists[objects.RefOf(u)] = true
+		}
+	}
+	// HTTPRoutes are decoded once through dec, for parentRefs and every later pass.
+	hrs := decodeHTTPRoutes(snap, served, dec)
+	parentRefs := func(r OwnedObject) []objects.ParentRef {
+		if hasHR && r.Kind.Group == hr.Group && r.Kind.Kind == hr.Kind {
+			if i, ok := hrs.byRef[objects.RefOf(r.Obj)]; ok {
+				return hrs.views[i].ParentRefs
+			}
+		}
+		return dec.Route(r.Obj).ParentRefs
 	}
 
 	// Routes: the route's own namespace decides scope.
 	for _, r := range list(kinds.CategoryRoute) {
 		parents := map[int][]objects.ParentRef{} // install index → parentRefs resolving to its Gateways
-		gateway := map[int]objects.Ref{}         // install index → first Gateway reached
+		named := map[int]objects.Ref{}           // install index → first Gateway or ListenerSet named
 		var order []int
-		for _, p := range objects.RouteParentRefs(r.Obj) {
+		for _, p := range parentRefs(r) {
 			pref := p.Ref()
 			gref := pref
 			if g, ok := lsGateway[pref]; ok {
@@ -164,12 +228,12 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 			if i, ok := gwOwner[gref]; ok {
 				if _, seen := parents[i]; !seen {
 					order = append(order, i)
-					gateway[i] = gref
+					named[i] = pref
 				}
 				parents[i] = append(parents[i], p)
 				continue
 			}
-			if parentKinds[[2]string{pref.Group, pref.Kind}] && !exists[pref] {
+			if routeParentKinds[[2]string{pref.Group, pref.Kind}] && !exists[pref] {
 				for _, in := range insts {
 					if inScope(in, r.Obj.GetNamespace()) {
 						o := a.PerInstall[in.ID()]
@@ -183,10 +247,15 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved) Assig
 				o := a.PerInstall[insts[i].ID()]
 				o.Routes = append(o.Routes, OwnedObject{Kind: r.Kind, Obj: r.Obj, Parents: parents[i]})
 			} else {
-				a.Unwatched = append(a.Unwatched, UnwatchedRoute{Install: insts[i].ID(), Route: objects.RefOf(r.Obj), Gateway: gateway[i]})
+				a.Unwatched = append(a.Unwatched, UnwatchedRoute{Install: insts[i].ID(), Route: objects.RefOf(r.Obj), Gateway: named[i]})
 			}
 		}
 	}
+
+	// Delegated children, then what needs every owned route (PF10).
+	delegate(hrs, insts, &a, inScope)
+	candidates(hrs, insts, &a, inScope)
+	assignBackends(snap, served, insts, &a, inScope, hrs, dec)
 
 	// ownerOf maps every assigned Gateway and ListenerSet to its install index.
 	ownerOf := map[objects.Ref]int{}

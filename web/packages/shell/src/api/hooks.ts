@@ -1,13 +1,23 @@
 import { useMemo } from "react";
-import useSWR from "swr";
-import { type ApiError, apiFetch, apiFetchWithHeaders } from "./client";
+import useSWR, { type SWRConfiguration } from "swr";
+import { ApiError, apiFetch, apiFetchWithHeaders } from "./client";
 import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, RawHealthReport, Ref } from "./types";
 
 /** Poll interval for live data (design §6.6). */
 export const POLL_MS = 5000;
 
+/**
+ * Error retry for every request. SWR skips interval polls while a key holds an error, so this is what keeps the
+ * 5 s rhythm through an outage: one retry per interval, no backoff, no jitter, no cap. A 404 retries too, so a page
+ * notices the object appear. Only a 400 stops: a bad request stays bad for that URL (a rejected cursor stays rejected).
+ */
+export const retryEveryPoll: NonNullable<SWRConfiguration["onErrorRetry"]> = (err, _key, _config, revalidate, opts) => {
+  if (err instanceof ApiError && err.status === 400) return;
+  setTimeout(() => revalidate(opts), POLL_MS);
+};
+
 // No keepPreviousData: on an install switch it would show the old install's data under the new URL.
-const live = { refreshInterval: POLL_MS };
+export const live = { refreshInterval: POLL_MS, onErrorRetry: retryEveryPoll };
 
 /** True when data collected at collectedAt is older than two poll intervals; pass useNow() as now. */
 export function isStale(collectedAt: string, now: number): boolean {
@@ -16,7 +26,7 @@ export function isStale(collectedAt: string, now: number): boolean {
   return Number.isNaN(age) || age > 2 * POLL_MS;
 }
 
-/** True when /api/v1/meta lists r's kind, so its YAML view can resolve. */
+/** True when /api/v1/meta lists r's kind. The shell no longer links by kind: links come from LinkedRef.link. */
 export function isLinkable(meta: MetaResponse | undefined, r: Ref): boolean {
   return !!meta?.kinds.some((k) => k.group === r.group && k.kind === r.kind);
 }
@@ -34,11 +44,11 @@ export function useInstalls() {
 
 /** GET /api/v1/meta. */
 export function useMeta() {
-  return useSWR<MetaResponse, ApiError>("/api/v1/meta", apiFetch);
+  return useSWR<MetaResponse, ApiError>("/api/v1/meta", apiFetch, { onErrorRetry: retryEveryPoll });
 }
 
 /** API base of one install; the ID is encoded, never parsed. */
-const installApi = (id: string) => `/api/v1/installs/${encodeURIComponent(id)}`;
+export const installApi = (id: string) => `/api/v1/installs/${encodeURIComponent(id)}`;
 
 /** GET /api/v1/installs/{id}/overview. */
 export function useOverview(id: string) {

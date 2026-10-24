@@ -14,6 +14,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -73,6 +74,8 @@ type InstallModel struct {
 	Owned    *install.Owned
 	Overview overview.Overview
 	Health   health.Report
+	// Index is the explorer's immutable index; handlers never decode objects.
+	Index *explore.Index
 }
 
 // Model is one consistent computation over a snapshot.
@@ -109,6 +112,8 @@ type Engine struct {
 	seq       uint64
 	seen      map[generation]time.Time
 	rejected  map[string]bool // install errors already logged
+	// decode caches typed views by (uid, resourceVersion); only touched under computeMu.
+	decode *decodeCache
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -136,7 +141,7 @@ func New(cfg Config) *Engine {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache()}
 }
 
 // Platform returns the platform the engine computes models for.
@@ -148,10 +153,14 @@ func (e *Engine) Platform() platform.Info { return e.cfg.Platform }
 // objects present at the first computation get grace from UI start.
 func (e *Engine) observe(snap *cache.Snapshot, now time.Time) {
 	current := map[generation]bool{}
+	live := map[types.UID]string{}
 	for _, objs := range snap.Objects {
 		for _, u := range objs {
 			k := generation{u.GetUID(), u.GetGeneration()}
 			current[k] = true
+			if uid := u.GetUID(); uid != "" {
+				live[uid] = u.GetResourceVersion()
+			}
 			if _, ok := e.seen[k]; !ok {
 				e.seen[k] = now
 			}
@@ -162,6 +171,7 @@ func (e *Engine) observe(snap *cache.Snapshot, now time.Time) {
 			delete(e.seen, k)
 		}
 	}
+	e.decode.prune(live)
 }
 
 // firstSeen returns when the engine first saw u's current generation; an
@@ -208,7 +218,7 @@ func (e *Engine) compute() *Published {
 	}
 	all := install.Resolve(found, e.cfg.Scope)
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
-	asg := install.Assign(snap, served, all)
+	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
 	firstSeen := e.firstSeen(now)
 	// Only an object health asks about while it is in grace gets a grace deadline.
@@ -230,14 +240,16 @@ func (e *Engine) compute() *Published {
 			next.add(met.CollectedAt.Add(e.cfg.MetricsMaxAge), true) // stale when age > max
 		}
 		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: met, HasMetrics: has,
-			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now})
+			MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now, Views: e.decode})
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
 		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)
-		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
+		// The index decodes through the cache, so it runs here under computeMu.
+		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode})
+		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
 	}
 	m.Next = next.next
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}

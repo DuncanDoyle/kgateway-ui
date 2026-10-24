@@ -21,7 +21,7 @@ import (
 
 // Upstream returns the Phase 1 checks (design §5.2).
 func Upstream() []Check {
-	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}}
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
@@ -172,7 +172,7 @@ var (
 	policyOptional   = []string{"Attached"}
 )
 
-// conditionsCheck: KGWUI-002 and KGWUI-003. Freshness is decided before
+// conditionsCheck: KGWUI-002, KGWUI-003 and KGWUI-011's status trigger. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
 // condition with reason Pending, or any stale condition makes the resource
 // "not yet processed"; only current conditions are reported or count as
@@ -188,8 +188,10 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
 	id := in.Install.ID()
 	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string) {
-		fs = append(fs, Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
-			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)})
+		f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
+			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)}
+		delegationCondition(&f, u, cond)
+		fs = append(fs, f)
 	}
 	// One KGWUI-003 per (resource, parentRef); parent is the zero value for
 	// everything but route parents.
@@ -226,31 +228,9 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// missing or Unknown, a present condition has reason Pending, or a present
 	// condition may describe an older generation (including observedGeneration 0).
 	current := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) bool {
-		for _, t := range required {
-			if objects.FindCondition(cs, t) == nil {
-				pendingFor(u, parent, fmt.Sprintf("no %s condition%s", t, within(extra)))
-				return false
-			}
-		}
-		for _, t := range append(slices.Clone(required), optional...) {
-			cond := objects.FindCondition(cs, t)
-			if cond == nil {
-				continue
-			}
-			if cond.Reason == "Pending" {
-				pendingFor(u, parent, fmt.Sprintf("%s is Pending%s", t, within(extra)))
-				return false
-			}
-			if objects.IsStale(u, *cond) {
-				pendingFor(u, parent, "status describes an older generation"+within(extra))
-				return false
-			}
-		}
-		for _, t := range required {
-			if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
-				pendingFor(u, parent, fmt.Sprintf("%s is Unknown%s", t, within(extra)))
-				return false
-			}
+		if why := pendingReason(u, cs, required, optional); why != "" {
+			pendingFor(u, parent, why+within(extra))
+			return false
 		}
 		return true
 	}
@@ -311,14 +291,14 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
 		listeners(gw, true)
 	}
-	// Routes: one status block per current parentRef of this install, matched on
-	// the full parentRef including section name and port.
+	// Routes: one status block per current parentRef of this install, and per
+	// reported HTTPRoute parent, matched on the full parentRef including section name and port.
 	for _, r := range in.Owned.Routes {
 		if in.ignored(r.Obj) {
 			continue
 		}
 		status := objects.RouteParents(r.Obj)
-		for _, p := range r.Parents {
+		for _, p := range slices.Concat(r.Parents, r.RouteParents) {
 			extra := "parent " + parentDesc(p)
 			var st *objects.RouteParentStatus
 			for i := range status {
@@ -342,6 +322,15 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
 			"parent "+parentDesc(u.Parent)+" does not exist")
+	}
+	// Declared candidates: KGWUI-011's status trigger. Inside its grace the
+	// route is being processed, so this check is pending (design §6.2).
+	for _, d := range in.Owned.Declared {
+		f := declaredFinding(in, d)
+		if f.Severity == SeverityInfo {
+			inGrace[*f.Resource] = true
+		}
+		fs = append(fs, f)
 	}
 	// Policies: ancestors written by this install's controller, for a Gateway
 	// or ListenerSet it owns or for any other kind. Assign drops policies
@@ -389,6 +378,41 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
 
+// pendingReason returns why a status block of u is not current, or "" when
+// it is: a required condition is missing or Unknown, or a present condition
+// has reason Pending or may describe an older generation (D-006).
+func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string) string {
+	for _, t := range required {
+		if objects.FindCondition(cs, t) == nil {
+			return fmt.Sprintf("no %s condition", t)
+		}
+	}
+	for _, t := range append(slices.Clone(required), optional...) {
+		cond := objects.FindCondition(cs, t)
+		if cond == nil {
+			continue
+		}
+		if cond.Reason == "Pending" {
+			return t + " is Pending"
+		}
+		if objects.IsStale(u, *cond) {
+			return "status describes an older generation"
+		}
+	}
+	for _, t := range required {
+		if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
+			return t + " is Unknown"
+		}
+	}
+	return ""
+}
+
+// RoutePending returns why one status.parents entry of route u is not
+// current under the rules the resource status check applies, or "" when it is.
+func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	return pendingReason(u, cs, routeRequired, routeOptional)
+}
+
 // experimentalKind returns u's served kind when kgateway watches it, at its
 // served version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
 func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bool) {
@@ -404,6 +428,10 @@ func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bo
 // ExperimentalHint is appended to the detail of a "not processed" finding on
 // an experimental-only kind (D-018 §2); %s is the kind and served version.
 const ExperimentalHint = "; the controller watches %s only when its experimental Gateway API features are on, and they may be off here"
+
+// ExperimentalSentence is the same hint as a page sentence, for an experimental-only
+// object with no status (design §6.2); %s is the kind and served version.
+const ExperimentalSentence = "The controller watches %s only with its experimental Gateway API features on. They may be off here."
 
 // experimentalHint returns ExperimentalHint for u's kind, or "" for a stable kind.
 func (in Input) experimentalHint(u *unstructured.Unstructured) string {
@@ -616,7 +644,7 @@ func (c unwatchedCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		r := u.Route
 		fs = append(fs, Finding{Code: CodeNamespaceNotWatched, Slug: "namespace-not-watched", Severity: SeverityWarning, Install: u.Install,
-			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets Gateway " + u.Gateway.String()})
+			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets " + u.Gateway.Kind + " " + u.Gateway.String()})
 	}
 	return fs, ok(c.Name(), false, in.Now)
 }

@@ -6,7 +6,7 @@ import { useVocabulary } from "../shell/extension";
 import { Tooltip } from "../shell/Tooltip";
 
 // region Styles
-const IconButton = styled.button<{ stylesOverride?: SerializedStyles }>`
+export const IconButton = styled.button<{ stylesOverride?: SerializedStyles }>`
   width: 28px;
   height: 28px;
   display: inline-flex;

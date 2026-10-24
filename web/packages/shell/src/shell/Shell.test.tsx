@@ -3,7 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import type { Readiness } from "../api/types";
-import { stubApi } from "../test/render";
+import { stubApi, testSWR } from "../test/render";
 import { useThemeSwitch } from "../theme/ThemeProvider";
 import { THEME_PAINT_KEY } from "../theme/themeStorage";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
@@ -42,7 +42,7 @@ const inst = (
 function mount(path: string, ext = {}) {
   window.history.pushState({}, "", path);
   return render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell extension={ext} pages={pages} />
     </SWRConfig>,
   );
@@ -149,6 +149,69 @@ it("renders extension brand and routes", async () => {
   expect(screen.getByRole("link", { name: "WAF" })).toHaveAttribute("href", "/i/kgw.kgateway/waf");
 });
 
+it("the header's install nav links only to pages that exist, and navigates", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw.kgateway");
+  const nav = await screen.findByRole("navigation", { name: "Install" });
+  const links = within(nav).getAllByRole("link");
+  expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+    ["Overview", "/i/kgw.kgateway"],
+    ["Gateways", "/i/kgw.kgateway/gateways"],
+    ["Routes", "/i/kgw.kgateway/routes"],
+    ["ListenerSets", "/i/kgw.kgateway/listenersets"],
+    ["Findings", "/i/kgw.kgateway/findings"],
+  ]);
+  await userEvent.click(within(nav).getByRole("link", { name: "Findings" }));
+  expect(await screen.findByText("findings page")).toBeInTheDocument();
+  expect(within(nav).getByRole("link", { name: "Findings" })).toHaveAttribute("aria-current", "page");
+});
+
+it("serves the list pages under the install", async () => {
+  const at = new Date().toISOString();
+  stubApi({
+    "/api/v1/installs": [inst("kgw/kgateway")],
+    "/api/v1/meta": meta,
+    "/api/v1/installs/kgw.kgateway/listenersets": { install: "kgw.kgateway", items: [], total: 0, collectedAt: at },
+  });
+  mount("/i/kgw.kgateway/listenersets");
+  expect(await screen.findByRole("heading", { name: "ListenerSets" })).toBeInTheDocument();
+  expect(await screen.findByText("No ListenerSets in this install.")).toBeInTheDocument();
+});
+
+it("below 1100 px the readiness text shows in a tooltip on keyboard focus", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q.includes("max-width: 1099px"),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw.kgateway");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
+  expect(ready).toHaveAttribute("tabindex", "0");
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  for (let i = 0; i < 20 && document.activeElement !== ready; i++) await userEvent.tab();
+  expect(screen.getByRole("tooltip")).toHaveTextContent("Controller: 2 of 2 ready");
+  expect(ready).toHaveAttribute("aria-describedby", screen.getByRole("tooltip").id);
+});
+
+it("at full width the readiness text is on screen and takes no tab stop", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  mount("/i/kgw.kgateway");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
+  expect(ready).not.toHaveAttribute("tabindex");
+});
+
+it("shows no install nav outside an install", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/");
+  await screen.findByText("cluster landing");
+  expect(screen.queryByRole("navigation", { name: "Install" })).toBeNull();
+});
+
 it("shows the install's version and controller readiness in the header", async () => {
   stubApi({
     "/api/v1/installs": [inst("kgw/kgateway", { state: "not-ready", ready: 1, desired: 2 })],
@@ -157,7 +220,9 @@ it("shows the install's version and controller readiness in the header", async (
   mount("/i/kgw.kgateway");
   expect(await screen.findByTestId("version")).toHaveTextContent(/^v2\.4\.7$/);
   // Replica wording needs /meta's workloads capability, so it can appear after the version.
-  const ready = await screen.findByText("Controller: 1 of 2 ready");
+  const ready = (await screen.findByText("Controller: 1 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).getByTestId("health-icon-error")).toBeInTheDocument();
 });
 
@@ -221,7 +286,9 @@ it("renders a stale install summary as unknown in the switcher and the header", 
     "/api/v1/meta": meta,
   });
   mount("/i/a.one");
-  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).getByTestId("health-icon-unknown")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
   const item = screen.getByRole("menuitem", { name: /b\/two/ });
@@ -240,7 +307,9 @@ it("confirmedAt keeps an idle install summary fresh in the switcher and the head
     "/api/v1/meta": meta,
   });
   mount("/i/a.one");
-  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).queryByTestId("health-icon-unknown")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
   const item = screen.getByRole("menuitem", { name: /b\/two/ });
@@ -251,7 +320,7 @@ it("applies stylesOverride to the shell root", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
   window.history.pushState({}, "", "/i/kgw.kgateway");
   render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={testSWR()}>
       <Shell
         pages={pages}
         stylesOverride={css`
@@ -366,7 +435,9 @@ it("a failing installs poll turns the header readiness and switcher items unknow
   const routes: Record<string, unknown> = { "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta };
   stubApi(routes);
   mount("/i/a.one");
-  const ready = await screen.findByText("Controller: 2 of 2 ready");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
   expect(within(ready).getByTestId("health-icon-healthy")).toBeInTheDocument();
   routes["/api/v1/installs"] = [500, { error: "boom" }];
   // SWR refetches on reconnect of a visible page (jsdom reports hidden).

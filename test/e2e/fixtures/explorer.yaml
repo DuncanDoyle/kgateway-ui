@@ -1,0 +1,309 @@
+# Explorer scenario (design §9.5, 2.2), applied after base.yaml; setup.sh creates the Secret infra/edge-tls first.
+# Every object carries e2e=explorer. TestExplorerShowsControllerStatus reads the controller's status from the
+# cluster and compares it with the API, so the comments say what each object is for, not what it reports.
+apiVersion: v1
+kind: Namespace
+metadata: { name: store, labels: { team: a, edge-https: allowed, e2e: explorer } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: deleg, labels: { team: a, e2e: explorer } }
+---
+# In scope, but edge's http listener excludes it.
+apiVersion: v1
+kind: Namespace
+metadata: { name: closed, labels: { team: a, edge-http: deny, e2e: explorer } }
+---
+# Replaces base.yaml's edge: HTTP and HTTPS (wildcard hostname) with Selectors, TCP; ListenerSets from infra only.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: edge, namespace: infra, labels: { e2e: explorer } }
+spec:
+  gatewayClassName: kgateway
+  allowedListeners: { namespaces: { from: Same } }
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+      allowedRoutes:
+        namespaces: { from: Selector, selector: { matchExpressions: [{ key: edge-http, operator: DoesNotExist }] } }
+    - name: https
+      port: 8443
+      protocol: HTTPS
+      hostname: "*.example.com"
+      tls: { mode: Terminate, certificateRefs: [{ name: edge-tls }] }
+      allowedRoutes: { namespaces: { from: Selector, selector: { matchLabels: { edge-https: allowed } } } }
+    - name: tcp
+      port: 9000
+      protocol: TCP
+      allowedRoutes: { namespaces: { from: Same }, kinds: [{ kind: TCPRoute }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: shadow, namespace: shop, labels: { e2e: explorer } }
+spec: { selector: { app: httpbin }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: { name: explorer-httpbin, namespace: shop, labels: { e2e: explorer } }
+spec:
+  from: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: deleg }]
+  to: [{ group: "", kind: Service, name: httpbin }]
+---
+# The three attachment failures.
+# NotAllowedByListeners: no listener admits the namespace closed (kgateway checks every listener before the
+# section name, so a route on the https section from an unlabelled namespace gets NoMatchingParent instead).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: not-allowed, namespace: closed, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ backendRefs: [{ name: web, port: 8000 }] }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web, namespace: closed, labels: { e2e: explorer } }
+spec: { ports: [{ port: 8000 }] }
+---
+# NoMatchingParent: no listener has this section name.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: no-section, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: nosuch }]
+  rules: [{ backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# NoMatchingListenerHostname: .org does not fit *.example.com.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: wrong-host, namespace: store, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: https }]
+  hostnames: [store.example.org]
+  rules: [{ backendRefs: [{ name: web, port: 8000 }] }]
+---
+# Accepted on the Selector listener.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: secure, namespace: store, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: https }]
+  hostnames: [store.example.com]
+  rules: [{ backendRefs: [{ name: web, port: 8000 }] }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web, namespace: store, labels: { e2e: explorer } }
+spec: { ports: [{ port: 8000 }] }
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata: { name: tcp, namespace: infra, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, sectionName: tcp }]
+  rules: [{ backendRefs: [{ name: tcp, port: 9000 }] }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: tcp, namespace: infra, labels: { e2e: explorer } }
+spec: { ports: [{ port: 9000 }] }
+---
+# ListenerSets: one valid, one invalid (unsupported protocol) and one conflicting listener on edge;
+# one denied by edge's allowedListeners (namespace); one on self, which sets no allowedListeners.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: { name: extra, namespace: infra, labels: { e2e: explorer } }
+spec:
+  parentRef: { name: edge }
+  listeners:
+    - { name: extra, port: 8090, protocol: HTTP, allowedRoutes: { namespaces: { from: All } } }
+    - { name: odd, port: 8091, protocol: example.com/odd }
+    - { name: clash, port: 8080, protocol: HTTP }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: { name: denied, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRef: { name: edge, namespace: infra }
+  listeners: [{ name: other, port: 8092, protocol: HTTP }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: { name: closed, namespace: infra, labels: { e2e: explorer } }
+spec:
+  parentRef: { name: self }
+  listeners: [{ name: closed, port: 8093, protocol: HTTP }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: on-set, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: ListenerSet, name: extra, namespace: infra, sectionName: extra }]
+  rules: [{ backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Delegation tree under shop/store.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: store, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /store/name } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-name, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/label } }]
+      backendRefs: [{ group: delegation.kgateway.dev, kind: label, name: team-x, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/wild } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: deleg }]
+    - matches: [{ path: { type: PathPrefix, value: /store/hdr }, headers: [{ name: x-env, value: prod }] }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-hdr, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/host } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-host, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/inherit } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-inherit, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/cycle } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-cycle, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/nons } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-nons, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/ihost } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-ihost, namespace: shop }]
+---
+# Name child with an explicit parentRef.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-name, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: store, namespace: shop }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/name/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-label, namespace: shop, labels: { e2e: explorer, delegation.kgateway.dev/label: team-x } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/label/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-wild, namespace: deleg, labels: { e2e: explorer } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/wild/x } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
+---
+# Forbidden: the wildcard selects it, but its parentRefs allow only shop/c-name, which never delegates to it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-forbidden, namespace: deleg, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-name, namespace: shop }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/wild/f } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
+---
+# Header mismatch: the parent match requires x-env: prod and the child does not.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-hdr, namespace: shop, labels: { e2e: explorer } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/hdr/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Hostnames on a child: the controller rejects it. Its parentRef is explicit, so its page has a parent card.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-host, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: store, namespace: shop }]
+  hostnames: [host.example.com]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/host/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: c-inherit
+  namespace: shop
+  labels: { e2e: explorer }
+  annotations: { delegation.kgateway.dev/inherit-parent-matcher: "true" }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# The same rejection on an implicit child (empty parentRefs): its page shows the implicit parent's card.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-ihost, namespace: shop, labels: { e2e: explorer } }
+spec:
+  hostnames: [ihost.example.com]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/ihost/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Cycle: the first rule delegates to itself.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-cycle, namespace: shop, labels: { e2e: explorer } }
+spec:
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /store/cycle/a } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: c-cycle, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /store/cycle/svc } }]
+      backendRefs: [{ name: httpbin, port: 8000 }]
+---
+# A parentRef without a namespace: 2.4 writes an entry, 2.3 none (D-021 item 2).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: c-nons, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: store }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /store/nons/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Backends: a static one and one whose credentials Secret does not exist.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: Backend
+metadata: { name: static-be, namespace: shop, labels: { e2e: explorer } }
+spec:
+  type: Static
+  static: { hosts: [{ host: httpbin.shop.svc.cluster.local, port: 8000 }] }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: Backend
+metadata: { name: aws-be, namespace: shop, labels: { e2e: explorer } }
+spec:
+  type: AWS
+  aws:
+    accountId: "000000000000"
+    region: us-east-1
+    lambda: { functionName: nosuch }
+    auth: { type: Secret, secretRef: { name: no-such-credentials } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: backends, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /be/static } }]
+      backendRefs: [{ group: gateway.kgateway.dev, kind: Backend, name: static-be }]
+    - matches: [{ path: { type: PathPrefix, value: /be/aws } }]
+      backendRefs: [{ group: gateway.kgateway.dev, kind: Backend, name: aws-be }]
+---
+# A long name, so the layout e2e checks that a loaded row keeps its skeleton's height.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: a-route-with-a-deliberately-long-name-that-must-not-wrap-or-shift-the-table, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /long } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Replaced rule: the ExtensionRef names a TrafficPolicy that does not exist.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: replaced, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /replaced } }]
+      filters: [{ type: ExtensionRef, extensionRef: { group: gateway.kgateway.dev, kind: TrafficPolicy, name: no-such-policy } }]
+      backendRefs: [{ name: httpbin, port: 8000 }]
+---
+# Mirrors to shop/shadow, which no route uses as a backend.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: mirror, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /mirror } }]
+      filters: [{ type: RequestMirror, requestMirror: { backendRef: { name: shadow, port: 8000 } } }]
+      backendRefs: [{ name: httpbin, port: 8000 }]

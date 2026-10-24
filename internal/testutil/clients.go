@@ -51,8 +51,14 @@ func ClientsWith(t *testing.T, extra []kinds.Descriptor, objs ...runtime.Object)
 	return clients(t, served, objs)
 }
 
+// ScaleClients is Clients under testing.TB, for scale benchmarks and budgets.
+func ScaleClients(tb testing.TB, objs ...runtime.Object) (*dynamicfake.FakeDynamicClient, *kubefake.Clientset) {
+	tb.Helper()
+	return clients(tb, ServedUpstream(), objs)
+}
+
 // clients builds the fakes for served: discovery, list kinds and tracker GVRs.
-func clients(t *testing.T, served []kinds.Served, objs []runtime.Object) (*dynamicfake.FakeDynamicClient, *kubefake.Clientset) {
+func clients(t testing.TB, served []kinds.Served, objs []runtime.Object) (*dynamicfake.FakeDynamicClient, *kubefake.Clientset) {
 	t.Helper()
 	listKinds := map[schema.GroupVersionResource]string{}
 	byKind := map[schema.GroupKind]schema.GroupVersionResource{}
