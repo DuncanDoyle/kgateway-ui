@@ -89,10 +89,13 @@ func TestRouteListCarriesAttachment(t *testing.T) {
 	gw := edgeWith([]objects.Listener{lst("http", 8080, ""), lst("https", 443, "*.example.org")}, up("http", 0), up("https", 0))
 	cart := testutil.WithHostnames(testutil.HTTPRoute("shop", "cart", []objects.ParentRef{sectionRef("https")},
 		rejectedBy(sectionRef("https"), "NoMatchingListenerHostname")), "shop.example.com")
-	_, srv, _ := startWith(t, setup{}, viewAWorld(gw, cart)...)
+	// A later stage's reason may have overwritten the attachment reason: inconclusive (rules §8.1).
+	other := testutil.WithHostnames(testutil.HTTPRoute("shop", "other", []objects.ParentRef{sectionRef("https")},
+		rejectedBy(sectionRef("https"), "UnsupportedValue")), "shop.example.com")
+	_, srv, _ := startWith(t, setup{}, viewAWorld(gw, cart, other)...)
 	p := get[map[string]any](t, srv, underEdge+"&attachment=not-accepted&limit=2", 200)
 	items := p["items"].([]any)
-	if len(items) != 1 || p["total"] != 1.0 {
+	if len(items) != 2 || p["total"] != 2.0 {
 		t.Fatalf("items %v", items)
 	}
 	row := items[0].(map[string]any)
@@ -105,6 +108,11 @@ func TestRouteListCarriesAttachment(t *testing.T) {
 	}
 	if !reflect.DeepEqual(row["flags"], []any{"not-accepted"}) {
 		t.Errorf("flags %v", row["flags"])
+	}
+	inconclusive := items[1].(map[string]any)["parents"].([]any)[0].(map[string]any)["computed"].(map[string]any)["computed"]
+	if want := decode(t, `{"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection", "state": "checked",
+		"coverage": ["not-verified"], "note": "The controller's status cannot confirm this"}`); !reflect.DeepEqual(inconclusive, want) {
+		t.Errorf("inconclusive computed:\n%v\nwant\n%v", inconclusive, want)
 	}
 }
 
@@ -156,7 +164,8 @@ func stateWorld() []runtime.Object {
 	}
 	gw := edgeWith([]objects.Listener{lst("ok", 8080, ""), lst("bad", 8081, ""), lst("stale", 8082, ""), lst("wide", 8083, ""), lst("narrow", 8083, "x.example.com")},
 		up("ok", 1), up("bad", 1), stale, up("wide", 0), up("narrow", 0))
-	return viewAWorld(gw, testutil.HTTPRoute("shop", "cart", []objects.ParentRef{sectionRef("ok")}, testutil.AcceptedBy(sectionRef("ok"), testutil.Controller)))
+	return viewAWorld(gw, testutil.HTTPRoute("shop", "cart", []objects.ParentRef{sectionRef("ok")}, testutil.AcceptedBy(sectionRef("ok"), testutil.Controller)),
+		testutil.WithHostnames(testutil.HTTPRoute("shop", "waiting", []objects.ParentRef{sectionRef("stale")}, testutil.AcceptedBy(sectionRef("stale"), testutil.Controller)), "a.example.com"))
 }
 
 // unknownScope is objs with the controller's scope read from a ConfigMap, so it is unknown.
@@ -201,7 +210,7 @@ func TestGatewayDetailListenerStates(t *testing.T) {
 	}{
 		{"ok", 1, "checked", []string{"count-agrees"}, false},
 		{"bad", 0, "disagrees", nil, false},
-		{"stale", 0, "pending", nil, false},
+		{"stale", 1, "pending", nil, false},
 		{"wide", 0, "checked", []string{"count-agrees"}, true},
 		{"narrow", 0, "checked", []string{"count-agrees"}, false},
 	} {
@@ -216,8 +225,13 @@ func TestGatewayDetailListenerStates(t *testing.T) {
 		t.Errorf("bad status %+v", bad.Status)
 	}
 	g := get[Page[GatewayListRow]](t, srv, listBase+"/gateways?q=edge", 200).Items[0]
-	if g.Routes == nil || *g.Routes != 1 || g.Disagreements != 1 {
+	if g.Routes == nil || *g.Routes != 2 || g.Disagreements != 1 {
 		t.Errorf("gateway row routes %v, disagreements %d", g.Routes, g.Disagreements)
+	}
+	// A pending membership sends no hostnames.
+	w := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/waiting").Parents[0].Computed
+	if w == nil || len(w.Listeners) != 1 || w.Listeners[0].Computed.State != "pending" || w.Listeners[0].EffectiveHostnames != nil {
+		t.Errorf("pending membership %+v", w)
 	}
 
 	t.Run("unknown", func(t *testing.T) {
@@ -297,6 +311,7 @@ func selectorWorld() []runtime.Object {
 // hideNamespaces denies every Namespace object and nothing else.
 var hideNamespaces = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "Namespace" })
 
+// flagged reports whether row r carries flag f.
 func flagged(r RouteRow, f string) bool { return slices.Contains(r.Flags, f) }
 
 // Design §9.1 (2.3): a Selector over a hidden Namespace restricts membership,
@@ -506,5 +521,55 @@ func TestNoteOnUnknownVersion(t *testing.T) {
 	b, err := json.Marshal(cs[0])
 	if err != nil || !bytes.Contains(b, []byte(`"note":"`+unknownNote+`"`)) {
 		t.Errorf("wire %s", b)
+	}
+}
+
+// A listener whose count is unknown presents no members: on a TLS listener a
+// pre-v1 TCPRoute under an unknown experimental setting makes the count
+// setting-unknown, so the accepted TLSRoute's membership is unknown too.
+func TestUnknownCountHasNoMembers(t *testing.T) {
+	served := slices.Clone(testutil.ServedUpstream())
+	for i := range served {
+		switch served[i].Kind {
+		case "TCPRoute":
+			served[i].Version = "v1alpha2"
+		case "TLSRoute":
+			served[i].Version = "v1"
+		}
+	}
+	tls := lst("tls", 443, "")
+	tls.Protocol, tls.TLS = "TLS", &objects.ListenerTLS{Mode: "Terminate"}
+	tlsRoute := tcpRoute("v1", "shop", "tls", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller))
+	tlsRoute.SetKind("TLSRoute")
+	objs := viewAWorld(edgeWith([]objects.Listener{tls}, up("tls", 2)), tlsRoute,
+		tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)))
+	exp := corev1.EnvVar{Name: install.ExperimentalEnv, ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`), exp)
+	for i, o := range objs {
+		switch v := o.(type) {
+		case *appsv1.Deployment:
+			if v.Name == "kgateway" {
+				objs[i] = d
+			}
+		case *corev1.Pod:
+			if v.Name == "kgateway-0" {
+				objs[i] = testutil.ControllerPod(d, "kgateway-0", true)
+			}
+		}
+	}
+	_, srv, _ := startWith(t, setup{served: served, disputes: true}, objs...)
+	if l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]; l.ComputedRoutes != nil || l.Computed == nil || l.Computed.Reason != string(computed.UnknownSetting) {
+		t.Fatalf("tls count %v %+v", l.ComputedRoutes, l.Computed)
+	}
+	a := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/tls").Parents[0].Computed
+	if a == nil || a.Outcome != "accepted" || len(a.Listeners) != 1 {
+		t.Fatalf("tls ref %+v", a)
+	}
+	if m := a.Listeners[0]; m.Listener != "tls" || m.EffectiveHostnames != nil || m.Computed.Coverage != nil ||
+		m.Computed.State != "unknown" || m.Computed.Reason != string(computed.UnknownSetting) {
+		t.Errorf("membership under an unknown count: %+v", m)
+	}
+	if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200); p.Total != 0 {
+		t.Errorf("listener=tls lists %v", routeNames(p))
 	}
 }

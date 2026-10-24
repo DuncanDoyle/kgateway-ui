@@ -20,6 +20,7 @@ const (
 	explainSelectorError = "listener %s has an invalid namespace selector: %s"
 	explainPort          = "parentRef port %s; listener %s is on port %s"
 	explainSection       = "parentRef section %s; listener is %s"
+	explainOther         = "listener %s: %s"
 )
 
 // explain is the explanation of a rejected parentRef from its listener facts.
@@ -73,7 +74,7 @@ func explainFact(f computed.Fact) string {
 	case computed.FactSection:
 		return fmt.Sprintf(explainSection, f.Want, f.Got)
 	}
-	return fmt.Sprintf("listener %s: %s", f.Listener, f.Code)
+	return fmt.Sprintf(explainOther, f.Listener, f.Code)
 }
 
 // ruleListenerCount is the rule of a listener's computed count.
@@ -103,7 +104,8 @@ func (f facts) unknown(rule string, why computed.UnknownReason) Computed {
 	return c
 }
 
-// checked is a computed fact labelled by its cross-check. A fact no check
+// checked is a computed fact labelled by its cross-check, with the check's
+// own note, which includes the rule set's (rules §8.1). A fact no check
 // covers is checked and not verified (rules §8.3, not observable).
 func (f facts) checked(rule string, c *computed.CheckResult) Computed {
 	if c == nil {
@@ -112,7 +114,7 @@ func (f facts) checked(rule string, c *computed.CheckResult) Computed {
 		return out
 	}
 	out := f.label(rule, checkState(c))
-	out.Coverage = coverage(c.Coverage)
+	out.Coverage, out.Note = coverage(c.Coverage), c.Note
 	return out
 }
 
@@ -127,6 +129,7 @@ func checkState(c *computed.CheckResult) computed.State {
 	return c.State
 }
 
+// coverage is cs on the wire; nil when empty, so it is omitted.
 func coverage(cs []computed.Coverage) []string {
 	if len(cs) == 0 {
 		return nil
@@ -189,21 +192,23 @@ func (f facts) attachment(rf *explore.RefFacts) Attachment {
 
 // membership is one listener of an accepted parentRef. A listener whose count
 // is unknown presents no members, so the membership is unknown too. The
-// count's check counts only when its dependencies are visible (rule 5).
+// count's check counts only when its dependencies are visible (rule 5). The
+// note is the ref check's.
 func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.ListenerHit) ListenerAttachment {
 	rule := rf.Out.Rule
 	out := ListenerAttachment{Resource: res, Listener: h.Listener}
+	// Every listener of a computed resource has a count; without one only the ref's check applies.
 	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: rf.Out.Resource, Listener: h.Listener}]
 	switch {
 	case !f.v.allowDeps(f.ix, h.Deps):
 		out.Computed = f.restricted(rule)
 		return out
-	case !ok || !lf.Known:
+	case ok && !lf.Known:
 		out.Computed = f.unknown(rule, lf.Unknown)
 		return out
 	}
 	lc := lf.Check
-	if !f.v.allowDeps(f.ix, lf.Deps) {
+	if !ok || !f.v.allowDeps(f.ix, lf.Deps) {
 		lc = nil
 	}
 	var lv, rv computed.CheckResult
@@ -216,6 +221,9 @@ func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.Listen
 	st := memberState(lc, rf.Check)
 	out.Computed = f.label(rule, st)
 	out.Computed.Coverage = coverage(memberCoverage(lv, rv, len(rf.Listeners)))
+	if rf.Check != nil {
+		out.Computed.Note = rf.Check.Note
+	}
 	if st == computed.StateChecked || st == computed.StateDisagrees {
 		out.EffectiveHostnames = h.Hostnames
 	}
