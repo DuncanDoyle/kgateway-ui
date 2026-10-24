@@ -154,7 +154,7 @@ type Rules interface {
 }
 ```
 
-- In a new package `pkg/computed`, following the `proxymode.Resolver` pattern (`pkg/engine/engine.go:44-45`). `engine.Config` takes `RulesFor(controllerVersion) Rules`; downstreams register theirs through `extension.WithComputedRules` **(our call)**.
+- In a new package `pkg/computed`, following the `proxymode.Resolver` pattern (`pkg/engine/engine.go:44-45`). `engine.Config` takes `RulesFor(controllerVersion) Selection` (rules and their note); downstreams register theirs through `extension.WithComputedRules` **(our call)**.
 - Upstream ships `kgateway-2.3` and `kgateway-2.4`. Version selection and their differences: `computed-rules.md` §2.
 - Inputs are neutral: decoded views, a namespace → labels map, a settings map (§10).
 - Every result carries its dependencies (for §7.4) and its check state and coverage (`computed-rules.md` §8.4).

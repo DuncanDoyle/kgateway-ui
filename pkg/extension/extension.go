@@ -78,7 +78,8 @@ func WithAuthorizer(a api.Authorizer) Option { return func(r *Registry) { r.Auth
 func WithProxyModeResolver(p proxymode.Resolver) Option { return func(r *Registry) { r.ProxyMode = p } }
 
 // WithComputedRules replaces rulesets.Select. A downstream distribution maps
-// its controller to a rule set; it receives "" as the version (D-018 §3).
+// its controller to a rule set; a build that is not the kgateway edition
+// receives "" as the version (D-018 §3).
 func WithComputedRules(f func(controllerVersion string) computed.Selection) Option {
 	return func(r *Registry) { r.RulesFor = f }
 }
