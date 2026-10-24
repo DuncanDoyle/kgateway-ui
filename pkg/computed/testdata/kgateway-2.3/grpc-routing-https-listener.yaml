@@ -1,0 +1,52 @@
+# Input: translator/gateway/testutils/inputs/grpc-routing/https-listener.yaml@v2.3.11, with
+# namespace default written out and the Service and Secret left out. Status is copied from the output.
+provenance: translator/gateway/testutils/outputs/grpc-routing/https-listener.yaml@v2.3.11
+controllerVersion: v2.3.11
+namespaces:
+  default: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: example-gateway, namespace: default}
+  spec:
+    gatewayClassName: example-gateway-class
+    listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+        - {name: https, kind: Secret}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: https
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: GRPCRoute
+  metadata: {name: example-grpc-route, namespace: default}
+  spec:
+    parentRefs:
+    - {name: example-gateway}
+    rules:
+    - matches:
+      - method: {service: example.grpc.Service, method: ExampleMethod}
+      backendRefs:
+      - {name: example-grpc-svc, port: 9000}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {group: "", kind: "", name: example-gateway}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+      - {type: ResolvedRefs, status: "True", reason: ResolvedRefs, observedGeneration: 1}
+expect:
+  listeners:
+    Gateway default/example-gateway https: {count: 1}
+  parentRefs:
+    "GRPCRoute default/example-grpc-route #0": {outcome: accepted}

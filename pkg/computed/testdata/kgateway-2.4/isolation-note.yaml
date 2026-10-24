@@ -1,0 +1,57 @@
+# Plain-HTTP listeners sharing port 8080 on one Gateway and its ListenerSet. On 2.4 a less
+# specific one may lose hostnames to a more specific one: a (empty) to all, c (*.example.com)
+# to b, e (*.com, on the ListenerSet) to b and c. b is exact and d is HTTPS: no note.
+# Counts are unchanged.
+provenance: computed-rules §4.5, §11.1
+controllerVersion: v2.4.7
+namespaces:
+  infra: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    allowedListeners: {namespaces: {from: Same}}
+    listeners:
+    - {name: a, protocol: HTTP, port: 8080}
+    - {name: b, protocol: HTTP, port: 8080, hostname: api.example.com}
+    - {name: c, protocol: HTTP, port: 8080, hostname: "*.example.com"}
+    - {name: d, protocol: HTTPS, port: 8443, tls: {mode: Terminate}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls, namespace: infra}
+  spec:
+    parentRef: {name: gw}
+    listeners:
+    - {name: e, protocol: HTTP, port: 8080, hostname: "*.com"}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    hostnames: [api.example.com]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-ls, namespace: infra}
+  spec:
+    parentRefs: [{name: ls, kind: ListenerSet}]
+expect:
+  listeners:
+    Gateway infra/gw a: {count: 1, isolationNote: true}
+    Gateway infra/gw b: {count: 1}
+    Gateway infra/gw c: {count: 1, isolationNote: true}
+    Gateway infra/gw d: {count: 1}
+    ListenerSet infra/ls e: {count: 1, isolationNote: true}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted, listeners: [a, b, c, d]}
+    "HTTPRoute infra/r-ls #0": {outcome: accepted, listeners: [e]}
+  members:
+    "HTTPRoute infra/r #0 -> Gateway infra/gw a": [api.example.com]
+    "HTTPRoute infra/r #0 -> Gateway infra/gw b": [api.example.com]
+    "HTTPRoute infra/r #0 -> Gateway infra/gw c": [api.example.com]
+    "HTTPRoute infra/r #0 -> Gateway infra/gw d": [api.example.com]
+    "HTTPRoute infra/r-ls #0 -> ListenerSet infra/ls e": ["*.com"]

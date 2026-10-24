@@ -11,9 +11,11 @@ func New() computed.Rules { return rules{} }
 // Version implements computed.Rules.
 func (rules) Version() string { return "kgateway-2.4" }
 
-// Attachment implements computed.Rules.
-func (rules) Attachment(computed.AttachmentInput) computed.AttachmentResult {
-	return computed.AttachmentResult{}
+// Attachment implements computed.Rules: 2.3's view A plus the isolation note.
+func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
+	res := attach(in)
+	isolationNotes(in, &res)
+	return res
 }
 
 // Delegation implements computed.Rules.

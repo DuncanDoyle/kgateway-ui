@@ -1,0 +1,82 @@
+# Same on a Gateway and on a ListenerSet listener, All, Selector matching and not matching,
+# a missing Namespace (ghost) under a non-empty and an empty selector, and a nil selector.
+provenance: computed-rules §4.2, §11.1
+controllerVersion: v2.3.11
+namespaces:
+  infra: {}
+  apps: {team: web}
+  shop: {team: retail}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    allowedListeners: {namespaces: {from: All}}
+    listeners:
+    - {name: same, protocol: HTTP, port: 80}
+    - {name: all, protocol: HTTP, port: 81, allowedRoutes: {namespaces: {from: All}}}
+    - {name: sel, protocol: HTTP, port: 82, allowedRoutes: {namespaces: {from: Selector, selector: {matchLabels: {team: web}}}}}
+    - {name: empty-sel, protocol: HTTP, port: 83, allowedRoutes: {namespaces: {from: Selector, selector: {}}}}
+    - {name: nil-sel, protocol: HTTP, port: 84, allowedRoutes: {namespaces: {from: Selector}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls, namespace: apps}
+  spec:
+    parentRef: {name: gw, namespace: infra}
+    listeners:
+    - {name: ls-same, protocol: HTTP, port: 90}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-infra, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-apps, namespace: apps}
+  spec:
+    parentRefs:
+    - {name: gw, namespace: infra}
+    - {name: ls, kind: ListenerSet}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-shop, namespace: shop}
+  spec:
+    parentRefs:
+    - {name: gw, namespace: infra}
+    - {name: ls, kind: ListenerSet, namespace: apps}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-ghost, namespace: ghost}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+expect:
+  listeners:
+    Gateway infra/gw same: {count: 1}
+    Gateway infra/gw all: {count: 4}
+    Gateway infra/gw sel: {count: 1}
+    Gateway infra/gw empty-sel: {count: 4}
+    Gateway infra/gw nil-sel: {count: 0, error: selector must be set}
+    ListenerSet apps/ls ls-same: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r-infra #0": {outcome: accepted, listeners: [same, all, empty-sel]}
+    "HTTPRoute apps/r-apps #0": {outcome: accepted, listeners: [all, sel, empty-sel]}
+    "HTTPRoute apps/r-apps #1": {outcome: accepted, listeners: [ls-same]}
+    "HTTPRoute shop/r-shop #0": {outcome: accepted, listeners: [all, empty-sel]}
+    "HTTPRoute shop/r-shop #1": {outcome: NotAllowedByListeners}
+    "HTTPRoute ghost/r-ghost #0": {outcome: accepted, listeners: [all, empty-sel]}
+  members:
+    "HTTPRoute infra/r-infra #0 -> Gateway infra/gw same": []
+    "HTTPRoute infra/r-infra #0 -> Gateway infra/gw all": []
+    "HTTPRoute infra/r-infra #0 -> Gateway infra/gw empty-sel": []
+    "HTTPRoute apps/r-apps #0 -> Gateway infra/gw all": []
+    "HTTPRoute apps/r-apps #0 -> Gateway infra/gw sel": []
+    "HTTPRoute apps/r-apps #0 -> Gateway infra/gw empty-sel": []
+    "HTTPRoute apps/r-apps #1 -> ListenerSet apps/ls ls-same": []
+    "HTTPRoute shop/r-shop #0 -> Gateway infra/gw all": []
+    "HTTPRoute shop/r-shop #0 -> Gateway infra/gw empty-sel": []
+    "HTTPRoute ghost/r-ghost #0 -> Gateway infra/gw all": []
+    "HTTPRoute ghost/r-ghost #0 -> Gateway infra/gw empty-sel": []

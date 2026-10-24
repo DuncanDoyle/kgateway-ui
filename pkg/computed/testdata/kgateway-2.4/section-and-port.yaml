@@ -1,0 +1,50 @@
+# port, sectionName, and the NoMatchingParent quirk: r-quirk names b, which does not admit apps,
+# but a and c do, so allowed is set before the section check fails everywhere.
+provenance: computed-rules §4.1, §11.1; e2e
+controllerVersion: v2.4.7
+namespaces:
+  infra: {}
+  apps: {team: web}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: a, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+    - {name: b, protocol: HTTP, port: 81, allowedRoutes: {namespaces: {from: Selector, selector: {matchLabels: {team: ops}}}}}
+    - {name: c, protocol: HTTP, port: 82, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-port, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra, port: 82}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-section, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra, sectionName: a}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-quirk, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra, sectionName: b}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-no-port, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra, port: 90}]
+expect:
+  listeners:
+    Gateway infra/gw a: {count: 1}
+    Gateway infra/gw b: {count: 0}
+    Gateway infra/gw c: {count: 1}
+  parentRefs:
+    "HTTPRoute apps/r-port #0": {outcome: accepted, listeners: [c]}
+    "HTTPRoute apps/r-section #0": {outcome: accepted, listeners: [a]}
+    "HTTPRoute apps/r-quirk #0": {outcome: NoMatchingParent}
+    "HTTPRoute apps/r-no-port #0": {outcome: NoMatchingParent}
+  members:
+    "HTTPRoute apps/r-port #0 -> Gateway infra/gw c": []
+    "HTTPRoute apps/r-section #0 -> Gateway infra/gw a": []

@@ -1,0 +1,28 @@
+# Two parentRefs that differ only by port share one route-accepted check (rules §7); view A
+# computes each: both name a port no listener has, so both are NoMatchingParent.
+provenance: computed-rules §4.1, §7, §11.1
+controllerVersion: v2.4.7
+namespaces:
+  infra: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, port: 90}
+    - {name: gw, port: 91}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 0}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: NoMatchingParent}
+    "HTTPRoute infra/r #1": {outcome: NoMatchingParent}
+  members: {}

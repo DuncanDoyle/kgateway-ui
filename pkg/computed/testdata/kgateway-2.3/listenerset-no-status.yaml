@@ -1,0 +1,51 @@
+# A ListenerSet without a current Accepted: one has no status, one an Accepted older than its
+# generation. Their listeners and the refs naming them are unknown.
+provenance: computed-rules §3.3, §11.1
+controllerVersion: v2.3.11
+namespaces:
+  infra: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    allowedListeners: {namespaces: {from: Same}}
+    listeners:
+    - {name: http, protocol: HTTP, port: 80}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls, namespace: infra}
+  spec:
+    parentRef: {name: gw}
+    listeners:
+    - {name: extra, protocol: HTTP, port: 90}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls-stale, namespace: infra, generation: 2}
+  spec:
+    parentRef: {name: gw}
+    listeners:
+    - {name: more, protocol: HTTP, port: 91}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: ls, kind: ListenerSet}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-stale, namespace: infra}
+  spec:
+    parentRefs: [{name: ls-stale, kind: ListenerSet}]
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 0}
+    ListenerSet infra/ls extra: {count: 0, unknown: listenerset-no-status}
+    ListenerSet infra/ls-stale more: {count: 0, unknown: listenerset-no-status}
+  parentRefs:
+    "HTTPRoute infra/r #0": {unknown: listenerset-no-status}
+    "HTTPRoute infra/r-stale #0": {unknown: listenerset-no-status}
+  members: {}

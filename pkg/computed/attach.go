@@ -17,7 +17,9 @@ const (
 
 // Resource is a Gateway or ListenerSet whose listeners routes attach to.
 type Resource struct {
-	Ref            objects.Ref
+	Ref objects.Ref
+	// Parent is a ListenerSet's Gateway; zero for a Gateway.
+	Parent         objects.Ref
 	Generation     int64
 	Listeners      []objects.Listener
 	ListenerStatus []objects.ListenerStatus
