@@ -1,6 +1,11 @@
 {
   "body": {
     "capabilities": [],
+    "filters": {
+      "routes": [
+        "listener"
+      ]
+    },
     "kinds": [
       {
         "category": "gatewayclass",

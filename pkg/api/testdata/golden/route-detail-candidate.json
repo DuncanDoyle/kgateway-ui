@@ -136,6 +136,7 @@
       "name": "far",
       "namespace": "blog"
     },
+    "ruleSet": "kgateway-2.4",
     "rules": [
       {
         "backendRefs": [

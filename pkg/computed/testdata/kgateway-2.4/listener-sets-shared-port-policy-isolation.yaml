@@ -77,7 +77,7 @@ objects:
   status:
     parents:
     - controllerName: kgateway.dev/kgateway
-      parentRef: {kind: ListenerSet, name: wildcard-listenerset}
+      parentRef: {group: gateway.networking.k8s.io, kind: ListenerSet, name: wildcard-listenerset}
       conditions:
       - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
       - {type: ResolvedRefs, status: "True", reason: ResolvedRefs, observedGeneration: 1}
@@ -96,7 +96,7 @@ objects:
   status:
     parents:
     - controllerName: kgateway.dev/kgateway
-      parentRef: {kind: ListenerSet, name: specific-listenerset}
+      parentRef: {group: gateway.networking.k8s.io, kind: ListenerSet, name: specific-listenerset}
       conditions:
       - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
       - {type: ResolvedRefs, status: "True", reason: ResolvedRefs, observedGeneration: 1}
@@ -108,3 +108,9 @@ expect:
   parentRefs:
     "HTTPRoute default/wildcard-route #0": {outcome: accepted}
     "HTTPRoute default/specific-route #0": {outcome: accepted}
+  checks:
+    ListenerSet default/wildcard-listenerset http-9090: {state: checked, coverage: [count-agrees]}
+    ListenerSet default/specific-listenerset http-9090: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute default/wildcard-route #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute default/specific-route #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

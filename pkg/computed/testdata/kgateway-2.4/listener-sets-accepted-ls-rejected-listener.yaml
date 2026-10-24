@@ -80,3 +80,9 @@ expect:
     ListenerSet default/foo-listenerset udp-9091: {count: 0}
   parentRefs:
     "HTTPRoute default/foo-route #0": {outcome: accepted}
+  checks:
+    Gateway default/example-gateway http-8080: {state: checked, coverage: [count-agrees]}
+    ListenerSet default/foo-listenerset http-9090: {state: checked, coverage: [count-agrees]}
+    ListenerSet default/foo-listenerset udp-9091: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute default/foo-route #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

@@ -1,4 +1,5 @@
 # Two parentRefs of one route that both match one listener count twice (rules §4.4).
+# Status is hand-written to agree with view A (rules §8.3).
 provenance: computed-rules §4.4, §11.1; e2e
 controllerVersion: v2.3.11
 namespaces:
@@ -11,6 +12,12 @@ objects:
     gatewayClassName: kgateway
     listeners:
     - {name: http, protocol: HTTP, port: 80}
+  status:
+    listeners:
+    - name: http
+      attachedRoutes: 2
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r, namespace: infra}
@@ -18,6 +25,16 @@ objects:
     parentRefs:
     - {name: gw}
     - {name: gw, sectionName: http}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: http}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 expect:
   listeners:
     Gateway infra/gw http: {count: 2}
@@ -27,3 +44,8 @@ expect:
   members:
     "HTTPRoute infra/r #0 -> Gateway infra/gw http": []
     "HTTPRoute infra/r #1 -> Gateway infra/gw http": []
+  checks:
+    Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/r #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/r #1": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

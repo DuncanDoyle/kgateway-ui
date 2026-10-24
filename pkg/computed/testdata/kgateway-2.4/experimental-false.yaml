@@ -1,6 +1,8 @@
 # Experimental setting false: on 2.4 TCPRoute v1 is watched regardless, so only c1 is a
 # candidate; v1alpha2 stays experimental-only.
 provenance: computed-rules §4.2, §11.1
+# The API serves TCPRoute at one version, so c and c1 cannot differ there.
+ruleOnly: true
 controllerVersion: v2.4.7
 settings:
   KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES: "false"

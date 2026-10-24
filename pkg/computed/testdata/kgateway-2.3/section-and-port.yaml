@@ -1,5 +1,6 @@
 # port, sectionName, and the NoMatchingParent quirk: r-quirk names b, which does not admit apps,
 # but a and c do, so allowed is set before the section check fails everywhere.
+# Status is hand-written to agree with view A (rules §8.3).
 provenance: computed-rules §4.1, §11.1; e2e
 controllerVersion: v2.3.11
 namespaces:
@@ -15,26 +16,64 @@ objects:
     - {name: a, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
     - {name: b, protocol: HTTP, port: 81, allowedRoutes: {namespaces: {from: Selector, selector: {matchLabels: {team: ops}}}}}
     - {name: c, protocol: HTTP, port: 82, allowedRoutes: {namespaces: {from: All}}}
+  status:
+    listeners:
+    - name: a
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: b
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: c
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-port, namespace: apps}
   spec:
     parentRefs: [{name: gw, namespace: infra, port: 82}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-section, namespace: apps}
   spec:
     parentRefs: [{name: gw, namespace: infra, sectionName: a}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra, sectionName: a}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-quirk, namespace: apps}
   spec:
     parentRefs: [{name: gw, namespace: infra, sectionName: b}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra, sectionName: b}
+      conditions:
+      - {type: Accepted, status: "False", reason: NoMatchingParent, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-no-port, namespace: apps}
   spec:
     parentRefs: [{name: gw, namespace: infra, port: 90}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "False", reason: NoMatchingParent, observedGeneration: 1}
 expect:
   listeners:
     Gateway infra/gw a: {count: 1}
@@ -48,3 +87,12 @@ expect:
   members:
     "HTTPRoute apps/r-port #0 -> Gateway infra/gw c": []
     "HTTPRoute apps/r-section #0 -> Gateway infra/gw a": []
+  checks:
+    Gateway infra/gw a: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw b: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw c: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute apps/r-port #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-section #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-quirk #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-no-port #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

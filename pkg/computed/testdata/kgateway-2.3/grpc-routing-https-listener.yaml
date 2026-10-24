@@ -50,3 +50,7 @@ expect:
     Gateway default/example-gateway https: {count: 1}
   parentRefs:
     "GRPCRoute default/example-grpc-route #0": {outcome: accepted}
+  checks:
+    Gateway default/example-gateway https: {state: checked, coverage: [count-agrees]}
+    "GRPCRoute default/example-grpc-route #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

@@ -150,6 +150,8 @@ export interface MetaResponse {
   kinds: ServedKind[];
   /** The group/kinds with a detail view; informational, links come from LinkedRef.link. */
   views?: { group: string; kind: string }[];
+  /** Filters added after v1, per list (2.3: routes has listener). */
+  filters?: Record<string, string[]>;
 }
 export interface ErrorResponse {
   error: string;

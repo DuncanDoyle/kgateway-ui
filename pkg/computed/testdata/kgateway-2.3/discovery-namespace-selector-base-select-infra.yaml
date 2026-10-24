@@ -3,6 +3,8 @@
 # no parentRefs, so it is never a candidate and never counts. Status is copied from the output.
 provenance: translator/gateway/testutils/outputs/discovery-namespace-selector/base_select_infra.yaml@v2.3.11
 controllerVersion: v2.3.11
+settings:
+  KGW_DISCOVERY_NAMESPACE_SELECTORS: '[{"matchLabels":{"kubernetes.io/metadata.name":"infra"}}]'
 namespaces:
   infra: {kubernetes.io/metadata.name: infra}
   a: {kubernetes.io/metadata.name: a, app: a}
@@ -65,3 +67,7 @@ expect:
     Gateway infra/example-gateway http: {count: 1}
   parentRefs:
     "HTTPRoute infra/example-route #0": {outcome: accepted}
+  checks:
+    Gateway infra/example-gateway http: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/example-route #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

@@ -1,5 +1,6 @@
 # Every hostname case of rules §4.3. Refs without sectionName match several listeners and
 # get separate effective hostnames per listener. Listeners use distinct ports.
+# Status is hand-written to agree with view A (rules §8.3).
 provenance: computed-rules §4.3, §11.1
 controllerVersion: v2.3.11
 namespaces:
@@ -16,12 +17,36 @@ objects:
     - {name: exact, protocol: HTTP, port: 81, hostname: foo.example.com, allowedRoutes: {namespaces: {from: All}}}
     - {name: wild, protocol: HTTP, port: 82, hostname: "*.example.com", allowedRoutes: {namespaces: {from: All}}}
     - {name: deep-wild, protocol: HTTP, port: 83, hostname: "*.a.example.com", allowedRoutes: {namespaces: {from: All}}}
+  status:
+    listeners:
+    - name: none
+      attachedRoutes: 5
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: exact
+      attachedRoutes: 4
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: wild
+      attachedRoutes: 5
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: deep-wild
+      attachedRoutes: 2
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 # No route hostnames: the listener's hostname, or none.
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-nohost, namespace: apps}
   spec:
     parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 # Duplicates are kept as written on a listener without hostname, removed when intersecting.
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
@@ -29,6 +54,12 @@ objects:
   spec:
     parentRefs: [{name: gw, namespace: infra}]
     hostnames: [foo.example.com, foo.example.com]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 # Two exact names must be equal; a *.x listener takes an exact name in .x.
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
@@ -36,6 +67,12 @@ objects:
   spec:
     parentRefs: [{name: gw, namespace: infra}]
     hostnames: [foo.example.com, bar.example.com]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 # A *.x listener matches an exact name at any depth.
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
@@ -43,6 +80,12 @@ objects:
   spec:
     parentRefs: [{name: gw, namespace: infra}]
     hostnames: [x.y.example.com]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 # A wildcard route: an exact listener in .x gives the listener's; two wildcards give the more specific.
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
@@ -50,12 +93,24 @@ objects:
   spec:
     parentRefs: [{name: gw, namespace: infra}]
     hostnames: ["*.example.com"]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-miss, namespace: apps}
   spec:
     parentRefs: [{name: gw, namespace: infra, sectionName: exact}]
     hostnames: [other.org]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra, sectionName: exact}
+      conditions:
+      - {type: Accepted, status: "False", reason: NoMatchingListenerHostname, observedGeneration: 1}
 expect:
   listeners:
     Gateway infra/gw none: {count: 5}
@@ -86,3 +141,15 @@ expect:
     "HTTPRoute apps/r-wild #0 -> Gateway infra/gw exact": [foo.example.com]
     "HTTPRoute apps/r-wild #0 -> Gateway infra/gw wild": ["*.example.com"]
     "HTTPRoute apps/r-wild #0 -> Gateway infra/gw deep-wild": ["*.a.example.com"]
+  checks:
+    Gateway infra/gw none: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw exact: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw wild: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw deep-wild: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute apps/r-nohost #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-dup #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-exact #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-deep #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-wild #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-miss #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

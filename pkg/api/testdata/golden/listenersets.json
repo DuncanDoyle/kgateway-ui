@@ -19,7 +19,8 @@
           "link": "detail",
           "name": "ls1",
           "namespace": "infra"
-        }
+        },
+        "routes": 1
       },
       {
         "health": "error",
@@ -37,7 +38,8 @@
           "link": "detail",
           "name": "partial",
           "namespace": "infra"
-        }
+        },
+        "routes": 0
       }
     ],
     "total": 2

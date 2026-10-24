@@ -1,5 +1,6 @@
 # Same on a Gateway and on a ListenerSet listener, All, Selector matching and not matching,
 # a missing Namespace (ghost) under a non-empty and an empty selector, and a nil selector.
+# Status is hand-written to agree with view A (rules §8.3).
 provenance: computed-rules §4.2, §11.1
 controllerVersion: v2.4.7
 namespaces:
@@ -19,6 +20,28 @@ objects:
     - {name: sel, protocol: HTTP, port: 82, allowedRoutes: {namespaces: {from: Selector, selector: {matchLabels: {team: web}}}}}
     - {name: empty-sel, protocol: HTTP, port: 83, allowedRoutes: {namespaces: {from: Selector, selector: {}}}}
     - {name: nil-sel, protocol: HTTP, port: 84, allowedRoutes: {namespaces: {from: Selector}}}
+  status:
+    listeners:
+    - name: same
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: all
+      attachedRoutes: 4
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: sel
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: empty-sel
+      attachedRoutes: 4
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: nil-sel
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: ListenerSet
   metadata: {name: ls, namespace: apps}
@@ -29,11 +52,22 @@ objects:
   status:
     conditions:
     - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    listeners:
+    - name: ls-same
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-infra, namespace: infra}
   spec:
     parentRefs: [{name: gw}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-apps, namespace: apps}
@@ -41,6 +75,16 @@ objects:
     parentRefs:
     - {name: gw, namespace: infra}
     - {name: ls, kind: ListenerSet}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: ls, kind: ListenerSet}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-shop, namespace: shop}
@@ -48,11 +92,27 @@ objects:
     parentRefs:
     - {name: gw, namespace: infra}
     - {name: ls, kind: ListenerSet, namespace: apps}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: ls, kind: ListenerSet, namespace: apps}
+      conditions:
+      - {type: Accepted, status: "False", reason: NotAllowedByListeners, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-ghost, namespace: ghost}
   spec:
     parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 expect:
   listeners:
     Gateway infra/gw same: {count: 1}
@@ -80,3 +140,17 @@ expect:
     "HTTPRoute shop/r-shop #0 -> Gateway infra/gw empty-sel": []
     "HTTPRoute ghost/r-ghost #0 -> Gateway infra/gw all": []
     "HTTPRoute ghost/r-ghost #0 -> Gateway infra/gw empty-sel": []
+  checks:
+    Gateway infra/gw same: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw all: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw sel: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw empty-sel: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw nil-sel: {state: checked, coverage: [count-agrees]}
+    ListenerSet apps/ls ls-same: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/r-infra #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-apps #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/r-apps #1": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute shop/r-shop #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute shop/r-shop #1": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute ghost/r-ghost #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

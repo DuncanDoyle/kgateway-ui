@@ -66,6 +66,40 @@
         "parents": [
           {
             "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "Gateway",
@@ -94,6 +128,40 @@
         "parents": [
           {
             "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "Gateway",
@@ -122,6 +190,40 @@
         "parents": [
           {
             "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "Gateway",
@@ -214,6 +316,40 @@
         "parents": [
           {
             "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "Gateway",
@@ -242,6 +378,36 @@
         "parents": [
           {
             "attachment": "pending",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "pending"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "pending"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "reason": "no status from the controller",
             "ref": {
               "group": "gateway.networking.k8s.io",
@@ -271,6 +437,40 @@
         "parents": [
           {
             "attachment": "not-accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "conditionType": "Accepted",
             "message": "unsupported filter type",
             "reason": "UnsupportedValue",
@@ -304,6 +504,43 @@
         "parents": [
           {
             "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "effectiveHostnames": [
+                    "ls.example.com"
+                  ],
+                  "listener": "extra",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "ListenerSet",
+                    "link": "detail",
+                    "name": "ls1",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "ListenerSet",

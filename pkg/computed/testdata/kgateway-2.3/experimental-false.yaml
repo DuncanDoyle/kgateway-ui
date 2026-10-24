@@ -1,5 +1,7 @@
 # Experimental setting false: on 2.3 every TCPRoute is experimental-only, so neither
 # TCPRoute is a candidate.
+# Status is hand-written to agree with view A (rules §8.3).
+# 2.3 watches no TCPRoute with the setting false, so c and c1 have no status.
 provenance: computed-rules §4.2, §11.1
 controllerVersion: v2.3.11
 settings:
@@ -15,6 +17,16 @@ objects:
     listeners:
     - {name: tcp, protocol: TCP, port: 9000}
     - {name: http, protocol: HTTP, port: 80}
+  status:
+    listeners:
+    - name: tcp
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: http
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1alpha2
   kind: TCPRoute
   metadata: {name: c, namespace: infra}
@@ -30,9 +42,20 @@ objects:
   metadata: {name: h, namespace: infra}
   spec:
     parentRefs: [{name: gw}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 expect:
   listeners:
     Gateway infra/gw tcp: {count: 0}
     Gateway infra/gw http: {count: 1}
   parentRefs:
     "HTTPRoute infra/h #0": {outcome: accepted, listeners: [http]}
+  checks:
+    Gateway infra/gw tcp: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/h #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

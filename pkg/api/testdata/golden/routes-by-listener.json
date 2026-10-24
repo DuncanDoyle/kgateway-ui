@@ -1,0 +1,511 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "children": 1,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                },
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "disagrees"
+                  },
+                  "listener": "drift",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "api",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                },
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "disagrees"
+                  },
+                  "listener": "drift",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "backends",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                },
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "disagrees"
+                  },
+                  "listener": "drift",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "cart",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                },
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "disagrees"
+                  },
+                  "listener": "drift",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "mirror-only",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "pending"
+        ],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "pending",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "pending"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "pending"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                },
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "disagrees"
+                  },
+                  "listener": "drift",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
+            "reason": "no status from the controller",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "pending",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "not-accepted"
+        ],
+        "health": "error",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "not-accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "listeners": [
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "count-agrees",
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "checked"
+                  },
+                  "listener": "http",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                },
+                {
+                  "computed": {
+                    "by": "ui",
+                    "coverage": [
+                      "status-compatible",
+                      "not-verified"
+                    ],
+                    "rule": "hostname-intersection",
+                    "rules": "kgateway-2.4",
+                    "state": "disagrees"
+                  },
+                  "listener": "drift",
+                  "resource": {
+                    "group": "gateway.networking.k8s.io",
+                    "kind": "Gateway",
+                    "link": "detail",
+                    "name": "edge",
+                    "namespace": "infra"
+                  }
+                }
+              ],
+              "outcome": "accepted"
+            },
+            "conditionType": "Accepted",
+            "message": "unsupported filter type",
+            "reason": "UnsupportedValue",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "rejected",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "total": 6
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

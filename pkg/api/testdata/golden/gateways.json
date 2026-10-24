@@ -19,7 +19,8 @@
           "link": "detail",
           "name": "edge",
           "namespace": "infra"
-        }
+        },
+        "routes": 6
       }
     ],
     "total": 1

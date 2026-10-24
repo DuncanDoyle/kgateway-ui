@@ -155,6 +155,61 @@
     ],
     "ancestorsTruncated": true,
     "annotations": {},
+    "attachments": [
+      {
+        "index": 0,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "result": {
+          "computed": {
+            "by": "ui",
+            "coverage": [
+              "status-compatible"
+            ],
+            "rule": "hostname-intersection",
+            "rules": "kgateway-2.4",
+            "state": "checked"
+          },
+          "listeners": [
+            {
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "count-agrees",
+                  "status-compatible"
+                ],
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
+              "effectiveHostnames": [
+                "mid.example.com"
+              ],
+              "listener": "http",
+              "resource": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "Gateway",
+                "link": "detail",
+                "name": "edge",
+                "namespace": "infra"
+              }
+            }
+          ],
+          "outcome": "accepted"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        }
+      }
+    ],
     "childCount": 2,
     "collectedAt": "2026-10-17T12:00:00Z",
     "declaredCount": 1,
@@ -588,6 +643,7 @@
       "name": "mid",
       "namespace": "shop"
     },
+    "ruleSet": "kgateway-2.4",
     "rules": [
       {
         "backendRefs": [

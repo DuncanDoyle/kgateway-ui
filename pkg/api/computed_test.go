@@ -3,21 +3,35 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -571,5 +585,323 @@ func TestUnknownCountHasNoMembers(t *testing.T) {
 	}
 	if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200); p.Total != 0 {
 		t.Errorf("listener=tls lists %v", routeNames(p))
+	}
+}
+
+// matrixListener is a listener count of a rules fixture; matrixRef a parentRef outcome.
+type matrixListener struct {
+	Count         int    `json:"count"`
+	Unknown       string `json:"unknown"`
+	Error         string `json:"error"`
+	IsolationNote bool   `json:"isolationNote"`
+}
+
+type matrixRef struct {
+	Outcome   string    `json:"outcome"`
+	Unknown   string    `json:"unknown"`
+	Listeners *[]string `json:"listeners"`
+}
+
+// matrixCheck is the Computed label the case expects on a listener or parentRef key.
+type matrixCheck struct {
+	State    string   `json:"state"`
+	Coverage []string `json:"coverage"`
+	Note     string   `json:"note"`
+}
+
+// matrixExpect is a rules fixture's expect block (pkg/computed's keys, plus
+// checks and kgwui012, the objects each KGWUI-012 is on).
+type matrixExpect struct {
+	Listeners  map[string]matrixListener `json:"listeners"`
+	ParentRefs map[string]matrixRef      `json:"parentRefs"`
+	Members    *map[string][]string      `json:"members"`
+	Checks     map[string]matrixCheck    `json:"checks"`
+	KGWUI012   *[]string                 `json:"kgwui012"`
+}
+
+// decodeMatrix decodes expect strictly; every listener and parentRef key needs a check.
+func decodeMatrix(t *testing.T, m map[string]any) matrixExpect {
+	t.Helper()
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var e matrixExpect
+	if err := dec.Decode(&e); err != nil {
+		t.Fatalf("expect: %v", err)
+	}
+	if e.KGWUI012 == nil {
+		t.Fatal("expect needs kgwui012, even when empty")
+	}
+	keys := slices.Concat(slices.Collect(maps.Keys(e.Listeners)), slices.Collect(maps.Keys(e.ParentRefs)))
+	if len(keys) != len(e.Checks) {
+		t.Fatalf("expect has %d checks for %d listeners and parentRefs", len(e.Checks), len(keys))
+	}
+	for _, k := range keys {
+		if _, ok := e.Checks[k]; !ok {
+			t.Fatalf("expect has no check for %s", k)
+		}
+	}
+	return e
+}
+
+// ruleCaseWorld seeds a fixture as a cluster: a controller at the case's
+// version and settings, one GatewayClass per class named, the case's
+// Namespaces (forbidden when the case has no Namespace access) and objects.
+// Each kind is served at the version of its first object.
+func ruleCaseWorld(t *testing.T, c testutil.RuleCase) (setup, []runtime.Object, []*unstructured.Unstructured) {
+	t.Helper()
+	var env []corev1.EnvVar
+	for _, k := range slices.Sorted(maps.Keys(c.Settings)) {
+		if v := c.Settings[k]; v == testutil.SettingValueFrom {
+			env = append(env, corev1.EnvVar{Name: k, ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}})
+		} else {
+			env = append(env, testutil.Env(k, v))
+		}
+	}
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:"+c.ControllerVersion, 1, 1, env...)
+	d.Labels["app.kubernetes.io/version"] = strings.TrimPrefix(c.ControllerVersion, "v")
+	objs := []runtime.Object{d, testutil.ControllerPod(d, "kgateway-0", true)}
+	s := setup{served: testutil.ServedUpstream()}
+	if c.NamespacesOK {
+		objs = append(objs, testutil.Namespace("kgw", nil))
+		for _, ns := range slices.Sorted(maps.Keys(c.Namespaces)) {
+			objs = append(objs, testutil.Namespace(ns, c.Namespaces[ns]))
+		}
+	} else {
+		s.prepare = func(_ *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
+			kube.PrependReactor("list", "namespaces", func(clienttesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, "", nil)
+			})
+		}
+	}
+	pinned := map[objects.GroupKind]bool{}
+	classes := map[string]bool{}
+	var us []*unstructured.Unstructured
+	for _, o := range c.Objects {
+		u := o.DeepCopy()
+		gv, _ := schema.ParseGroupVersion(u.GetAPIVersion())
+		gk := objects.GroupKind{Group: gv.Group, Kind: u.GetKind()}
+		i := slices.IndexFunc(s.served, func(k kinds.Served) bool { return k.Group == gk.Group && k.Kind == gk.Kind })
+		switch {
+		case i < 0:
+			t.Fatalf("kind %v is not served", gk)
+		case !pinned[gk]:
+			if !slices.Contains(s.served[i].Versions, gv.Version) {
+				t.Fatalf("%v has no version %s", gk, gv.Version)
+			}
+			s.served[i].Version, pinned[gk] = gv.Version, true
+		}
+		u.SetAPIVersion(schema.GroupVersion{Group: gv.Group, Version: s.served[i].Version}.String())
+		u.SetUID(types.UID(u.GetKind() + "/" + u.GetNamespace() + "/" + u.GetName()))
+		u.SetCreationTimestamp(testutil.Old)
+		if u.GetKind() == "Gateway" {
+			cls, _, _ := unstructured.NestedString(u.Object, "spec", "gatewayClassName")
+			classes[cls] = true
+		}
+		us = append(us, u)
+	}
+	for _, cls := range slices.Sorted(maps.Keys(classes)) {
+		objs = append(objs, testutil.GatewayClass(cls, testutil.Controller, true))
+	}
+	return s, objs, us
+}
+
+// ruleCaseFiles are the rules fixtures of every rule set.
+func ruleCaseFiles(t *testing.T) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join("..", "computed", "testdata", "*", "*.yaml"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no rules fixtures (%v)", err)
+	}
+	return files
+}
+
+// Design §9.1 "Computed views through the API": every rules fixture not
+// marked ruleOnly is seeded as a cluster and read back through the handlers.
+// Seeded objects are first seen 61 s before the responses (newHarness), past
+// the 30 s window; a case with a KGWUI-012 also runs with its objects first
+// seen at testutil.Now, stepping the engine clock to the window's end.
+func TestViewAMatrixThroughAPI(t *testing.T) {
+	ran := 0
+	for _, f := range ruleCaseFiles(t) {
+		c := testutil.LoadRuleCase(t, f)
+		if c.RuleOnly {
+			continue
+		}
+		ran++
+		rules := filepath.Base(filepath.Dir(f))
+		t.Run(rules+"/"+filepath.Base(f), func(t *testing.T) {
+			t.Parallel()
+			want := decodeMatrix(t, c.Expect)
+			s, objs, us := ruleCaseWorld(t, c)
+			// A case expecting KGWUI-012 disagrees with the controller on purpose.
+			s.disputes = len(*want.KGWUI012) > 0
+			h := newHarness(t, s, append(objs, asObjects(us)...)...)
+			checkMatrix(t, h.srv, rules, c, want, false)
+			if !s.disputes {
+				return
+			}
+			s.late = us
+			h = newHarness(t, s, objs...)
+			checkMatrix(t, h.srv, rules, c, want, true)
+			h.clk.set(testutil.Now.Add(engine.Window - time.Nanosecond))
+			h.e.Compute()
+			checkMatrix(t, h.srv, rules, c, want, true)
+			h.clk.set(testutil.Now.Add(engine.Window))
+			h.e.Compute()
+			checkMatrix(t, h.srv, rules, c, want, false)
+		})
+	}
+	// Every fixture of rules §11.1 and §11.4 (view A) that is not rule-only.
+	if want := 41; ran != want {
+		t.Errorf("ran %d cases, want %d", ran, want)
+	}
+}
+
+func asObjects(us []*unstructured.Unstructured) []runtime.Object {
+	out := make([]runtime.Object, len(us))
+	for i, u := range us {
+		out[i] = u
+	}
+	return out
+}
+
+// checkMatrix asserts every listener, parentRef and KGWUI-012 of the case
+// through the handlers. inWindow: the window is still open, so a check
+// expected to disagree is pending and no KGWUI-012 is raised yet.
+func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.RuleCase, want matrixExpect, inWindow bool) {
+	t.Helper()
+	label := func(key string, got Computed, reason string) {
+		t.Helper()
+		w := want.Checks[key]
+		if inWindow && w.State == "disagrees" {
+			w = matrixCheck{State: "pending"}
+		}
+		if got.By != ComputedBy || got.Rules != rules || got.State != w.State || !slices.Equal(got.Coverage, w.Coverage) ||
+			(w.Note != "" && got.Note != w.Note) || got.Reason != reason {
+			t.Errorf("%s: computed %+v, want %+v reason %q", key, got, w, reason)
+		}
+	}
+	seen := map[string]bool{}
+	for _, u := range c.Objects {
+		ref := objects.RefOf(u)
+		var ls []ListenerDTO
+		switch ref.Kind {
+		case "Gateway":
+			ls = get[GatewayDetail](t, srv, base+"/gateways/"+ref.Namespace+"/"+ref.Name, 200).Listeners
+		case "ListenerSet":
+			ls = get[ListenerSetDetail](t, srv, lsDetail+ref.Namespace+"/"+ref.Name, 200).Listeners
+		}
+		for _, l := range ls {
+			key := ref.Kind + " " + ref.Namespace + "/" + ref.Name + " " + l.Name
+			w, ok := want.Listeners[key]
+			switch {
+			case !ok && l.Computed != nil:
+				t.Errorf("%s: computed %+v, want none", key, l.Computed)
+			case !ok:
+			case l.Computed == nil:
+				t.Errorf("%s: no computed count", key)
+			case w.Unknown != "":
+				seen[key] = true
+				label(key, *l.Computed, w.Unknown)
+				if l.ComputedRoutes != nil || l.IsolationNote {
+					t.Errorf("%s: unknown count sends routes %v, isolationNote %v", key, l.ComputedRoutes, l.IsolationNote)
+				}
+			default:
+				seen[key] = true
+				label(key, *l.Computed, "")
+				if l.ComputedRoutes == nil || *l.ComputedRoutes != w.Count || l.IsolationNote != w.IsolationNote {
+					t.Errorf("%s: routes %v, isolationNote %v, want %+v", key, l.ComputedRoutes, l.IsolationNote, w)
+				}
+			}
+		}
+	}
+
+	attachment := func(key string, a Attachment) {
+		t.Helper()
+		w, ok := want.ParentRefs[key]
+		if !ok {
+			t.Errorf("%s: computed %+v, want none", key, a)
+			return
+		}
+		seen[key] = true
+		if w.Unknown != "" {
+			label(key, a.Computed, w.Unknown)
+			if a.Outcome != "" || len(a.Listeners) != 0 {
+				t.Errorf("%s: unknown sends outcome %q, listeners %+v", key, a.Outcome, a.Listeners)
+			}
+			return
+		}
+		label(key, a.Computed, "")
+		names := []string{}
+		for _, l := range a.Listeners {
+			names = append(names, l.Listener)
+			m := key + " -> " + l.Resource.Kind + " " + l.Resource.Namespace + "/" + l.Resource.Name + " " + l.Listener
+			hosts, written := []string(nil), want.Members != nil
+			if written {
+				hosts = (*want.Members)[m]
+			}
+			if st := l.Computed.State; written && (st == "checked" || st == "disagrees") && !slices.Equal(l.EffectiveHostnames, hosts) &&
+				(len(hosts) > 0 || len(l.EffectiveHostnames) > 0) {
+				t.Errorf("%s: hostnames %v, want %v", m, l.EffectiveHostnames, hosts)
+			}
+		}
+		if a.Outcome != w.Outcome || (w.Listeners != nil && !slices.Equal(names, *w.Listeners)) {
+			t.Errorf("%s: outcome %q on %v, want %+v", key, a.Outcome, names, w)
+		}
+	}
+	routes := get[Page[RouteRow]](t, srv, base+"/routes?limit=200", 200)
+	for _, u := range c.Objects {
+		ref := objects.RefOf(u)
+		i := slices.IndexFunc(routes.Items, func(r RouteRow) bool { return r.Ref.Ref == ref })
+		if i < 0 {
+			continue
+		}
+		spec := objects.RouteParentRefs(u)
+		refKey := func(j int) string { return fmt.Sprintf("%s %s/%s #%d", ref.Kind, ref.Namespace, ref.Name, j) }
+		for _, p := range routes.Items[i].Parents {
+			j := slices.IndexFunc(spec, func(s objects.ParentRef) bool {
+				return s.Ref() == p.Ref.Ref && s.SectionName == p.SectionName && s.Port == p.Port
+			})
+			switch {
+			case p.Computed != nil && j >= 0:
+				attachment(refKey(j), *p.Computed)
+			case p.Computed != nil:
+				t.Errorf("%v: computed on parent %+v, not a spec parentRef", ref, p)
+			case j >= 0:
+				if _, ok := want.ParentRefs[refKey(j)]; ok {
+					t.Errorf("%s: no computed outcome", refKey(j))
+				}
+			}
+		}
+		if ref.Kind == "HTTPRoute" {
+			for _, a := range get[RouteDetail](t, srv, routeDetail+ref.Namespace+"/"+ref.Name, 200).Attachments {
+				attachment(refKey(a.Index), a.Result)
+			}
+		}
+	}
+	for _, k := range slices.Concat(slices.Collect(maps.Keys(want.Listeners)), slices.Collect(maps.Keys(want.ParentRefs))) {
+		if !seen[k] {
+			t.Errorf("%s: not served", k)
+		}
+	}
+
+	var on []string
+	for _, f := range get[HealthResponse](t, srv, base+"/health", 200).Findings {
+		if f.Code == health.CodeComputedDisagrees {
+			on = append(on, f.Resource.Kind+" "+f.Resource.Namespace+"/"+f.Resource.Name)
+		}
+	}
+	wantOn := slices.Clone(*want.KGWUI012)
+	if inWindow {
+		wantOn = nil
+	}
+	slices.Sort(on)
+	slices.Sort(wantOn)
+	if !slices.Equal(on, wantOn) {
+		t.Errorf("KGWUI-012 on %v, want %v", on, wantOn)
 	}
 }

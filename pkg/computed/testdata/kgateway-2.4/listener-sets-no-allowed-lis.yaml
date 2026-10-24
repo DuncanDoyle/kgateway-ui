@@ -54,3 +54,6 @@ expect:
     Gateway default/example-gateway http-8080: {count: 0}
   # A denied ListenerSet is never evaluated: no counts and no outcome for its route.
   parentRefs: {}
+  checks:
+    Gateway default/example-gateway http-8080: {state: checked, coverage: [count-agrees]}
+  kgwui012: []

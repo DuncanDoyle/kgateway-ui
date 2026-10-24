@@ -61,7 +61,8 @@
       "notAccepted": 0,
       "pending": 0,
       "unwatched": 0
-    }
+    },
+    "ruleSet": "kgateway-2.4"
   },
   "headers": {
     "Cache-Control": "no-store",

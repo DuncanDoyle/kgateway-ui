@@ -1,0 +1,147 @@
+# View A against current controller status (rules §8.1-§8.3, §11.4). ok agrees. bad reports
+# one route more than view A counts. The controller rejects wrongly's only ref, which view A
+# accepts, so other's count and that ref disagree. shared's refs differ only by port: one report
+# key, two outcomes, so inconclusive. two-keys' refs differ by an omitted versus explicit
+# namespace: two keys, two checks.
+# 2.3 reports a replaced rule on Accepted: compatible with replaced's acceptance, and
+# inconclusive against replaced-missing's computed NoMatchingParent.
+provenance: computed-rules §8.1, §8.2, §8.3, §11.4
+controllerVersion: v2.3.11
+namespaces:
+  infra: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: ok, protocol: HTTP, port: 80}
+    - {name: bad, protocol: HTTP, port: 81}
+    - {name: other, protocol: HTTP, port: 82}
+  status:
+    listeners:
+    - name: ok
+      attachedRoutes: 4
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: bad
+      attachedRoutes: 2
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: other
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: on-bad, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, sectionName: bad}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: bad}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: wrongly, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, sectionName: other}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: other}
+      conditions:
+      - {type: Accepted, status: "False", reason: NoMatchingParent, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: shared, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, sectionName: ok, port: 80}
+    - {name: gw, sectionName: ok, port: 81}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: ok}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: two-keys, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, sectionName: ok}
+    - {name: gw, namespace: infra, sectionName: ok}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: ok}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra, sectionName: ok}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: replaced, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, sectionName: ok}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: ok}
+      conditions:
+      - {type: Accepted, status: "False", reason: RouteRuleReplaced, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: replaced-missing, namespace: infra}
+  spec:
+    parentRefs:
+    - {name: gw, sectionName: missing}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, sectionName: missing}
+      conditions:
+      - {type: Accepted, status: "False", reason: RouteRuleReplaced, observedGeneration: 1}
+expect:
+  listeners:
+    Gateway infra/gw ok: {count: 4}
+    Gateway infra/gw bad: {count: 1}
+    Gateway infra/gw other: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/on-bad #0": {outcome: accepted, listeners: [bad]}
+    "HTTPRoute infra/wrongly #0": {outcome: accepted, listeners: [other]}
+    "HTTPRoute infra/shared #0": {outcome: accepted, listeners: [ok]}
+    "HTTPRoute infra/shared #1": {outcome: NoMatchingParent}
+    "HTTPRoute infra/two-keys #0": {outcome: accepted, listeners: [ok]}
+    "HTTPRoute infra/two-keys #1": {outcome: accepted, listeners: [ok]}
+    "HTTPRoute infra/replaced #0": {outcome: accepted, listeners: [ok]}
+    "HTTPRoute infra/replaced-missing #0": {outcome: NoMatchingParent}
+  members:
+    "HTTPRoute infra/on-bad #0 -> Gateway infra/gw bad": []
+    "HTTPRoute infra/wrongly #0 -> Gateway infra/gw other": []
+    "HTTPRoute infra/shared #0 -> Gateway infra/gw ok": []
+    "HTTPRoute infra/two-keys #0 -> Gateway infra/gw ok": []
+    "HTTPRoute infra/two-keys #1 -> Gateway infra/gw ok": []
+    "HTTPRoute infra/replaced #0 -> Gateway infra/gw ok": []
+  checks:
+    Gateway infra/gw ok: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw bad: {state: disagrees}
+    Gateway infra/gw other: {state: disagrees}
+    "HTTPRoute infra/on-bad #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/wrongly #0": {state: disagrees}
+    "HTTPRoute infra/shared #0": {state: checked, coverage: [not-verified], note: "The controller's status cannot confirm this"}
+    "HTTPRoute infra/shared #1": {state: checked, coverage: [not-verified], note: "The controller's status cannot confirm this"}
+    "HTTPRoute infra/two-keys #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/two-keys #1": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/replaced #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/replaced-missing #0": {state: checked, coverage: [not-verified], note: "The controller's status cannot confirm this"}
+  kgwui012: [Gateway infra/gw, Gateway infra/gw, HTTPRoute infra/wrongly]

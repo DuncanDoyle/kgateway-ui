@@ -15,6 +15,15 @@
         "parents": [
           {
             "attachment": "accepted",
+            "computed": {
+              "computed": {
+                "by": "ui",
+                "rule": "hostname-intersection",
+                "rules": "kgateway-2.4",
+                "state": "restricted"
+              },
+              "listeners": []
+            },
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "Gateway",

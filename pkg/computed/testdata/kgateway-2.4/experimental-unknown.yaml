@@ -1,6 +1,8 @@
 # Experimental setting unknown (valueFrom): every experimental-only route, and the listener
 # it could count on, is unknown. On 2.4 TCPRoute v1 is not experimental-only, so c1 is known.
 provenance: computed-rules §3.3, §4.2, §11.1
+# The API serves TCPRoute at one version, so c and c1 cannot differ there.
+ruleOnly: true
 controllerVersion: v2.4.7
 settings:
   KGW_ENABLE_EXPERIMENTAL_GATEWAY_API_FEATURES: <valueFrom>

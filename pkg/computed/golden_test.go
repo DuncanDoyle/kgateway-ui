@@ -46,6 +46,9 @@ type viewAExpect struct {
 	ParentRefs map[string]refExpect      `json:"parentRefs"`
 	// Members is compared only when written.
 	Members *map[string][]string `json:"members"`
+	// Checks and KGWUI012 are the cross-check's; pkg/api's matrix reads them.
+	Checks   json.RawMessage `json:"checks"`
+	KGWUI012 json.RawMessage `json:"kgwui012"`
 }
 
 func TestRuleSetGoldens(t *testing.T) {

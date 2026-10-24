@@ -41,3 +41,7 @@ expect:
     Gateway default/http http-httpbin: {count: 0}
     Gateway default/http http-bookinfo: {count: 0}
   parentRefs: {}
+  checks:
+    Gateway default/http http-httpbin: {state: checked, coverage: [count-agrees]}
+    Gateway default/http http-bookinfo: {state: checked, coverage: [count-agrees]}
+  kgwui012: []

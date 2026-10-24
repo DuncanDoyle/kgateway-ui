@@ -1,7 +1,7 @@
 import type { HealthState } from "../theme/tokens";
 import type { LabelSelector, Ref } from "./types";
 
-/** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phase 2.2, design §7.3). */
+/** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
 
 /** How a reference may be opened; rendered as given, never derived from a kind (design §7.1). */
 export type Link = "detail" | "yaml" | "none";
@@ -41,6 +41,38 @@ export interface Page<T> {
 
 export type Attachment = "accepted" | "not-accepted" | "pending" | "unwatched" | "declared";
 
+/** A computed fact's label (design §7.3, sub-phase 2.3). restricted carries no reason and no note. */
+export interface Computed {
+  by: "ui";
+  rules: string;
+  rule: string;
+  state: "checked" | "disagrees" | "pending" | "unknown" | "restricted";
+  coverage?: ("count-agrees" | "status-compatible" | "not-verified")[];
+  reason?: string;
+  note?: string;
+}
+/** One listener a parentRef attaches to; hostnames only when checked or disagrees. */
+export interface ListenerAttachment {
+  resource: LinkedRef;
+  listener: string;
+  effectiveHostnames?: string[];
+  computed: Computed;
+}
+/** View A's outcome of one parentRef; outcome is absent when unknown or restricted. */
+export interface ComputedAttachment {
+  outcome?: "accepted" | "NotAllowedByListeners" | "NoMatchingParent" | "NoMatchingListenerHostname";
+  listeners: ListenerAttachment[];
+  explanation?: string;
+  computed: Computed;
+}
+/** View A for one Gateway or ListenerSet parentRef of a route, by its spec index. */
+export interface RouteAttachment {
+  parentRef: ParentRef;
+  index: number;
+  target: LinkedRef;
+  result: ComputedAttachment;
+}
+
 /** One parent of a route row. via is a ListenerSet parent's Gateway; viaRestricted replaces it when hidden. */
 export interface ParentSummary {
   ref: LinkedRef;
@@ -52,6 +84,7 @@ export interface ParentSummary {
   conditionType?: string;
   reason?: string;
   message?: string;
+  computed?: ComputedAttachment;
 }
 /** One row of the routes list; mirror is set only under a backend filter. */
 export interface RouteRow {
@@ -74,6 +107,8 @@ export interface GatewayListRow {
   notAccepted: number;
   listenerSets: number;
   addresses: string[];
+  routes?: number;
+  disagreements?: number;
 }
 /** One row of the ListenerSets list. */
 export interface ListenerSetRow {
@@ -82,6 +117,8 @@ export interface ListenerSetRow {
   health: HealthState;
   listeners: number;
   acceptedReason?: string;
+  routes?: number;
+  disagreements?: number;
 }
 export type RouteList = Page<RouteRow>;
 export type GatewayList = Page<GatewayListRow>;
@@ -128,6 +165,9 @@ export interface Listener {
   tls?: ListenerTLS;
   allowedRoutes: AllowedRoutes;
   status?: ListenerStatus;
+  computedRoutes?: number;
+  computed?: Computed;
+  isolationNote?: boolean;
 }
 /** Visible routes under a parent, per attachment. */
 export interface RouteCounts {
@@ -263,6 +303,7 @@ export interface RouteDetail {
   annotations: { inheritParentMatcher?: boolean };
   parentRefs: SpecParentRef[];
   parents: ParentStatus[];
+  attachments?: RouteAttachment[];
   rules: Rule[];
   ancestors: AncestorPath[];
   ancestorsTruncated: boolean;

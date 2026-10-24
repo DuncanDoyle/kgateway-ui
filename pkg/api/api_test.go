@@ -139,6 +139,7 @@ type harness struct {
 	srv   *httptest.Server
 	dyn   *dynamicfake.FakeDynamicClient
 	kube  *kubefake.Clientset
+	clk   *clock
 }
 
 // clock is the engine clock of a harness.
@@ -218,7 +219,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	}
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
 	t.Cleanup(srv.Close)
-	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube}
+	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, clk: clk}
 }
 
 // createAndWait creates u through the fake dynamic client and waits until the cache holds it.

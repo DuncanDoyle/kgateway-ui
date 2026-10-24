@@ -2,6 +2,7 @@
 # specific one may lose hostnames to a more specific one: a (empty) to all, c (*.example.com)
 # to b, e (*.com, on the ListenerSet) to b and c. b is exact and d is HTTPS: no note.
 # Counts are unchanged.
+# Status is hand-written to agree with view A (rules §8.3).
 provenance: computed-rules §4.5, §11.1
 controllerVersion: v2.4.7
 namespaces:
@@ -18,6 +19,24 @@ objects:
     - {name: b, protocol: HTTP, port: 8080, hostname: api.example.com}
     - {name: c, protocol: HTTP, port: 8080, hostname: "*.example.com"}
     - {name: d, protocol: HTTPS, port: 8443, tls: {mode: Terminate}}
+  status:
+    listeners:
+    - name: a
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: b
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: c
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: d
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: ListenerSet
   metadata: {name: ls, namespace: infra}
@@ -28,17 +47,34 @@ objects:
   status:
     conditions:
     - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    listeners:
+    - name: e
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r, namespace: infra}
   spec:
     parentRefs: [{name: gw}]
     hostnames: [api.example.com]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - apiVersion: gateway.networking.k8s.io/v1
   kind: HTTPRoute
   metadata: {name: r-ls, namespace: infra}
   spec:
     parentRefs: [{name: ls, kind: ListenerSet}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: ls, kind: ListenerSet}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 expect:
   listeners:
     Gateway infra/gw a: {count: 1, isolationNote: true}
@@ -55,3 +91,12 @@ expect:
     "HTTPRoute infra/r #0 -> Gateway infra/gw c": [api.example.com]
     "HTTPRoute infra/r #0 -> Gateway infra/gw d": [api.example.com]
     "HTTPRoute infra/r-ls #0 -> ListenerSet infra/ls e": ["*.com"]
+  checks:
+    Gateway infra/gw a: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw b: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw c: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw d: {state: checked, coverage: [count-agrees]}
+    ListenerSet infra/ls e: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/r #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/r-ls #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []
