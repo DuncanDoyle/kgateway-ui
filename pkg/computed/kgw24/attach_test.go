@@ -602,3 +602,33 @@ func TestAttachResultsIndependent(t *testing.T) {
 		t.Errorf("mutating one result changed the next")
 	}
 }
+
+// Unknown scope (user, 2026-10-24) makes every count and outcome unknown,
+// ahead of a statusless ListenerSet, unavailable labels and an unknown setting.
+func TestAttachScopeUnknown(t *testing.T) {
+	g := gw("infra", "edge", lis("http", "HTTP", 80), withFrom(lis("sel", "HTTP", 81), "Selector", map[string]string{"team": "web"}), lis("tcp", "TCP", 9000))
+	ls := lset("infra", "ls", computed.NoStatus, lis("a", "HTTP", 82))
+	web := route("HTTPRoute", "infra", "web", pref(g, ""), pref(ls, ""))
+	tcp := route("TCPRoute", "infra", "t", pref(g, "tcp"))
+	tcp.ExperimentalOnly = true
+	in := computed.AttachmentInput{Resources: []computed.Resource{g, ls}, Routes: []computed.Route{web, tcp}, Experimental: expSetting("", false), ScopeUnknown: true}
+	res := New().Attachment(in)
+	if len(res.Members) != 0 || len(res.Outcomes) != 3 || len(res.Counts) != 4 {
+		t.Fatalf("members %d outcomes %d counts %d", len(res.Members), len(res.Outcomes), len(res.Counts))
+	}
+	for _, o := range res.Outcomes {
+		if o.Unknown != computed.UnknownScope || o.Outcome != "" || o.Listeners != nil || o.Facts != nil {
+			t.Errorf("outcome %+v", o)
+		}
+	}
+	for _, c := range res.Counts {
+		if c.Unknown != computed.UnknownScope || c.Count != 0 {
+			t.Errorf("count %+v", c)
+		}
+	}
+	for _, c := range computed.CheckAttachment("i", computed.Selection{Rules: New()}, in, res) {
+		if c.Class != computed.ClassUnknown || c.Candidate() {
+			t.Errorf("check %+v", c)
+		}
+	}
+}

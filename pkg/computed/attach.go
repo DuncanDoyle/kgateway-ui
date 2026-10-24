@@ -47,6 +47,8 @@ type AttachmentInput struct {
 	NamespacesOK    bool
 	Experimental    install.Setting
 	ControllerNames []string
+	// ScopeUnknown makes every count and outcome unknown: the candidates are a guess (rules §3.3).
+	ScopeUnknown bool
 }
 
 // Outcome is a parentRef's attachment outcome; rejections use the controller's reasons.

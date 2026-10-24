@@ -91,6 +91,29 @@ type setup struct {
 	disputes bool
 }
 
+// scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
+// result unknown and raises no KGWUI-012; known scope computes the views.
+func scopeViews(t *testing.T, e *engine.Engine, srv *httptest.Server, unknown bool) {
+	t.Helper()
+	v := e.Current().Model.Installs[0].Computed
+	if v == nil || len(v.Checks) == 0 {
+		t.Fatal("no computed checks")
+	}
+	for _, c := range v.Checks {
+		if (c.State == computed.StateUnknown) != unknown {
+			t.Fatalf("scope unknown %v: check %+v", unknown, c)
+		}
+	}
+	for _, c := range v.Attachment.Counts {
+		if (c.Unknown == computed.UnknownScope) != unknown {
+			t.Fatalf("scope unknown %v: count %+v", unknown, c)
+		}
+	}
+	if hasFinding(get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200), health.CodeComputedDisagrees, "") {
+		t.Fatal("KGWUI-012 raised")
+	}
+}
+
 // consistentWithViews fails t when m has a matured disagreement: every
 // seeded object was first seen 61 s earlier, so only late objects may be pending.
 func consistentWithViews(t *testing.T, m *engine.Model) {
@@ -1675,8 +1698,8 @@ func TestDuplicateScopeEnvIsLastWinsAtTheAPI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Unknown scope admits every namespace, so view A counts blog/posts, which the controller does not see.
-			_, srv, _ := startWith(t, setup{disputes: tc.mode == install.ScopeUnknown}, envWorld(tc.withPod, tc.env...)...)
+			e, srv, _ := startWith(t, setup{}, envWorld(tc.withPod, tc.env...)...)
+			scopeViews(t, e, srv, tc.mode == install.ScopeUnknown)
 			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
 			if len(insts) != 1 || insts[0].Scope == nil {
 				t.Fatalf("installs: %+v", insts)
@@ -1883,8 +1906,8 @@ func TestScopeEnvFromIsUnknownUnlessExplicitAtTheAPI(t *testing.T) {
 					}
 				}
 			}
-			// Unknown scope admits every namespace, so view A counts blog/posts, which the controller does not see.
-			_, srv, _ := startWith(t, setup{disputes: tc.mode == install.ScopeUnknown}, objs...)
+			e, srv, _ := startWith(t, setup{}, objs...)
+			scopeViews(t, e, srv, tc.mode == install.ScopeUnknown)
 			insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
 			if len(insts) != 1 || insts[0].Scope == nil {
 				t.Fatalf("installs: %+v", insts)

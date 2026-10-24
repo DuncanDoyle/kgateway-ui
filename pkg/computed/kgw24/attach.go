@@ -127,7 +127,7 @@ func attach(in computed.AttachmentInput) computed.AttachmentResult {
 		states[k] = newListenerStates(r)
 		nCands += len(cands[k])
 		nListeners += len(r.Listeners)
-		if r.Acceptance != computed.NoStatus {
+		if blanketUnknown(in, r) == "" {
 			nMembers += memberBound(in, r, states[k], cands[k])
 		}
 	}
@@ -171,6 +171,18 @@ func memberBound(in computed.AttachmentInput, r *computed.Resource, ls []listene
 	return n
 }
 
+// blanketUnknown is why every listener and ref of r is unknown, or "".
+// Unknown scope ranks first: it affects every candidate (rules §3.3).
+func blanketUnknown(in computed.AttachmentInput, r *computed.Resource) computed.UnknownReason {
+	switch {
+	case in.ScopeUnknown:
+		return computed.UnknownScope
+	case r.Acceptance == computed.NoStatus:
+		return computed.UnknownListenerSetStatus
+	}
+	return ""
+}
+
 // evalResource runs processRoute for every candidate of one resource and
 // appends its members, outcomes and counts (rules §4.1, §4.4).
 func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.AttachmentInput,
@@ -185,18 +197,18 @@ func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.Att
 	countDeps = sortRefs(countDeps)
 	countDeps = countDeps[:len(countDeps):len(countDeps)]
 
-	if r.Acceptance == computed.NoStatus {
+	if why := blanketUnknown(in, r); why != "" {
 		// Its listeners are unknown, and so is every ref naming it (rules §3.3).
 		for _, c := range cands {
 			res.Outcomes = append(res.Outcomes, computed.RefOutcome{
 				Route: in.Routes[c.route].Ref, ParentRef: c.ref, Resource: r.Ref,
-				Unknown: computed.UnknownListenerSetStatus, Rule: ruleAllowed,
+				Unknown: why, Rule: ruleAllowed,
 				Deps: sortRefs([]objects.Ref{in.Routes[c.route].Ref, r.Ref}),
 			})
 		}
 		for _, l := range r.Listeners {
 			res.Counts = append(res.Counts, computed.ListenerCount{
-				Resource: r.Ref, Listener: l.Name, Unknown: computed.UnknownListenerSetStatus, Deps: countDeps,
+				Resource: r.Ref, Listener: l.Name, Unknown: why, Deps: countDeps,
 			})
 		}
 		return

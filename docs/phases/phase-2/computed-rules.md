@@ -60,12 +60,15 @@
 
 | Reason | When | What is unknown |
 |---|---|---|
+| `scope-unknown` | the install's discovery scope is unknown, so its candidate routes are a guess **(user, 2026-10-24)** | every listener count and parentRef outcome of view A; no members |
 | `namespace-labels-unavailable` | Namespace access is not OK and a listener uses `From: Selector` | that listener's count, its members and their parentRef outcomes |
 | `listenerset-no-status` | a ListenerSet has no current `Accepted` | that ListenerSet's listeners |
 | `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs whose namespace could be the wildcard |
 | `not-reached` | an owned parent route is not reached from any root (§5.1) | its contexts, so its delegation outcomes; selection and permission stay known |
 | `context-unknown` | an ancestor on the path is unknown or was cut by a bound | everything below that point |
 | `too-large` | a compute bound of §5.7 stopped the computation | everything not yet computed, in the deterministic order of §5.7 |
+
+**Precedence.** `scope-unknown` wins over every other reason, since it affects every candidate **(user, 2026-10-24)**; then `listenerset-no-status`, which covers a whole ListenerSet; then, per ref, `setting-unknown` before `namespace-labels-unavailable`.
 
 **Uncertainty is never evidence (our call).** An unknown setting, a boolean setting that does not parse, and the over-approximation used for label selection under an unknown wildcard setting all stay uncertainty. They never select a route, never make a route a candidate, and never count as negative evidence. They feed only the uncertain points of §8.5.
 

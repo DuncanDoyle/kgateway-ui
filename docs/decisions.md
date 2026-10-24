@@ -400,6 +400,7 @@ Shadowed-match detection stays the controller's job: an upstream ask, consumed l
 - A new kgateway minor needs a rule-set review before it is supported.
 - The kind e2e asserts that computed and controller counts agree on 2.3 and 2.4.
 - New finding KGWUI-012. KGWUI-011 gains a computed trigger.
+- When an install's discovery scope is unknown, view A is unknown (`scope-unknown`), so no KGWUI-012 comes from guessed candidates (user, 2026-10-24).
 - Upstream asks: resolved route → listener relationships, delegation resolution per child, a controller-written state CRD outside Gateway API, shadowed-match conditions, and hostname resolution (Phase 2 design §14).
 
 ## D-021 — Delegation and attachment status, observed on a cluster (2026-10-23, phase 2)

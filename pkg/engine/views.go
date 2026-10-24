@@ -28,7 +28,7 @@ func computeViews(sel computed.Selection, res install.Resolved, owned *install.O
 func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, dec objects.Decoder) computed.AttachmentInput {
 	labels, ok := install.NamespaceLabels(snap)
 	in := computed.AttachmentInput{NamespaceLabels: labels, NamespacesOK: ok, Experimental: res.Settings.Experimental,
-		ControllerNames: res.ControllerNames}
+		ControllerNames: res.ControllerNames, ScopeUnknown: res.Scope.Mode == install.ScopeUnknown}
 	if owned == nil {
 		return in
 	}

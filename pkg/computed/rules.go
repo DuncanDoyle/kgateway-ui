@@ -31,6 +31,8 @@ const (
 	UnknownNotReached        UnknownReason = "not-reached"
 	UnknownContext           UnknownReason = "context-unknown"
 	UnknownTooLarge          UnknownReason = "too-large"
+	// UnknownScope: the install's discovery scope is unknown (user, 2026-10-24).
+	UnknownScope UnknownReason = "scope-unknown"
 )
 
 // State is a cross-check's state on the wire (rules §8.4).
