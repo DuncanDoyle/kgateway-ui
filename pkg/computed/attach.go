@@ -119,6 +119,8 @@ type ListenerCount struct {
 	// IsolationNote marks a count that plain-HTTP listener isolation may not program (rules §4.5).
 	IsolationNote bool
 	Deps          []objects.Ref
+	// NoteDeps are the note's own dependencies: the Gateway and every ListenerSet naming it (rules §4.6).
+	NoteDeps []objects.Ref
 }
 
 // AttachmentResult is view A for one install. Its Deps slices are read-only and

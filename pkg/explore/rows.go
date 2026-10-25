@@ -558,7 +558,7 @@ func (b *builder) views(ix *Index) {
 	for i := range a.Counts {
 		c := &a.Counts[i]
 		ix.Listeners[ListenerKey{c.Resource, c.Listener}] = ListenerFacts{Count: c.Count, Known: c.Unknown == "", Unknown: c.Unknown,
-			Error: c.Error, IsolationNote: c.IsolationNote, Deps: n.deps(c.Deps)}
+			Error: c.Error, IsolationNote: c.IsolationNote, Deps: n.deps(c.Deps), NoteDeps: n.deps(c.NoteDeps)}
 	}
 	b.refFacts(ix, n)
 	ix.ByListener = make(map[ListenerKey][]Member, len(a.Counts))

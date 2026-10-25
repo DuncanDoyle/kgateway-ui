@@ -24,6 +24,7 @@ type portHosts struct {
 // isolationNotes notes each plain-HTTP listener that a more specific one on the same Gateway port
 // may narrow (rules §4.5; kgateway V4 gateway_listener_translator.go:689-747). Counts are unchanged.
 func isolationNotes(in computed.AttachmentInput, res *computed.AttachmentResult) {
+	noteDeps(in, res)
 	ports := map[portKey]*portHosts{}
 	eachMerged(in, func(k portKey, _ *computed.Resource, l *objects.Listener) {
 		if l.Hostname == "" {
@@ -63,6 +64,33 @@ func isolationNotes(in computed.AttachmentInput, res *computed.AttachmentResult)
 		c := &res.Counts[i]
 		// An unknown count gets no note, whatever the reason.
 		c.IsolationNote = c.Unknown == "" && noted[listenerKey{c.Resource, c.Listener}]
+	}
+}
+
+// noteDeps gives each known count of a Gateway's listeners, or of a ListenerSet's with a known
+// parent, the Gateway and every ListenerSet naming it: any of them can move the note.
+func noteDeps(in computed.AttachmentInput, res *computed.AttachmentResult) {
+	family := map[objects.Ref][]objects.Ref{}
+	gateway := make(map[objects.Ref]objects.Ref, len(in.Resources))
+	for i := range in.Resources {
+		r := &in.Resources[i]
+		g := r.Ref
+		if r.Ref.Kind != "Gateway" {
+			g = r.Parent
+		}
+		if g != (objects.Ref{}) {
+			gateway[r.Ref] = g
+			family[g] = append(family[g], g, r.Ref)
+		}
+	}
+	// One sorted slice per Gateway, shared by its counts.
+	for g, refs := range family {
+		family[g] = sortRefs(refs)
+	}
+	for i := range res.Counts {
+		if c := &res.Counts[i]; c.Unknown == "" {
+			c.NoteDeps = family[gateway[c.Resource]]
+		}
 	}
 }
 

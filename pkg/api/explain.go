@@ -232,7 +232,8 @@ func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.Listen
 }
 
 // listener adds view A's count of listener dto of resource: omitted when
-// unknown or restricted (rule 5), with no isolation note then.
+// unknown or restricted (rule 5), with no isolation note then. The note also
+// needs its own dependencies visible (rule 4).
 func (f facts) listener(resource objects.Ref, dto *ListenerDTO) {
 	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: resource, Listener: dto.Name}]
 	if !ok {
@@ -246,7 +247,8 @@ func (f facts) listener(resource objects.Ref, dto *ListenerDTO) {
 		c = f.unknown(ruleListenerCount, lf.Unknown)
 	default:
 		n := lf.Count
-		dto.ComputedRoutes, dto.IsolationNote = &n, lf.IsolationNote
+		dto.ComputedRoutes = &n
+		dto.IsolationNote = lf.IsolationNote && f.v.allowDeps(f.ix, lf.NoteDeps)
 		c = f.checked(ruleListenerCount, lf.Check)
 	}
 	dto.Computed = &c

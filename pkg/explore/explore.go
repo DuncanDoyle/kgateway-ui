@@ -259,6 +259,8 @@ type ListenerFacts struct {
 	// Check is the listener-count cross-check, shared with the views; nil when none.
 	Check *computed.CheckResult
 	Deps  DepSet
+	// NoteDeps are IsolationNote's dependencies, apart from Deps.
+	NoteDeps DepSet
 }
 
 // ListenerHit is one listener an accepted parentRef attaches to.

@@ -948,3 +948,41 @@ func TestExplainClauses(t *testing.T) {
 		t.Errorf("explain: got %q, want %q", got, want)
 	}
 }
+
+// isolationWorld: edge's wide (*.example.com) and ls1's extra (host) share
+// port 8081, so wide's 2.4 isolation note follows ls1's hostname.
+func isolationWorld(host string) []runtime.Object {
+	ls := admitAll(testutil.ListenerSet("infra", "ls1", edgeRef, nil, up("extra", 0)))
+	ls.Object["spec"].(map[string]any)["listeners"].([]any)[0].(map[string]any)["hostname"] = host
+	return viewAWorld(edgeWith([]objects.Listener{lst("wide", 8081, "*.example.com")}, up("wide", 0)), ls)
+}
+
+// Rule 4: the isolation note reads its sibling ListenerSets, so a hidden one
+// cannot move a visible listener's note. Rule 10: AllowAll asks nothing.
+func TestIsolationNoteNeedsItsListenerSets(t *testing.T) {
+	note := func(t *testing.T, s setup, host string) bool {
+		t.Helper()
+		_, srv, _ := startWith(t, s, isolationWorld(host)...)
+		l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]
+		if l.Name != "wide" || l.ComputedRoutes == nil || l.Computed == nil || l.Computed.State != "checked" {
+			t.Fatalf("wide %v %+v", l.ComputedRoutes, l.Computed)
+		}
+		return l.IsolationNote
+	}
+	if in, out := note(t, setup{}, "a.example.com"), note(t, setup{}, "a.example.org"); !in || out {
+		t.Fatalf("visible ListenerSet: note %v inside, %v outside", in, out)
+	}
+	hide := setup{authz: AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "ls1" })}
+	if in, out := note(t, hide, "a.example.com"), note(t, hide, "a.example.org"); in != out {
+		t.Errorf("hidden ListenerSet moves the note: %v inside, %v outside", in, out)
+	}
+	a := &countingAuthz{all: true}
+	_, srv, _ := startWith(t, setup{authz: a}, isolationWorld("a.example.com")...)
+	_, ref, _ := startWith(t, setup{}, isolationWorld("a.example.com")...)
+	if got, want := wire(t, srv, gwDetail), wire(t, ref, gwDetail); !bytes.Equal(got, want) {
+		t.Errorf("AllowAll differs:\n%s\n%s", got, want)
+	}
+	if n := len(a.take()); n != 0 {
+		t.Errorf("AllowAll asked about %d refs", n)
+	}
+}
