@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
@@ -122,11 +123,20 @@ func TestRealCluster(t *testing.T) {
 		}
 	}
 
-	// Gateways edge and self; posts in the unlabelled blog namespace must not count. An
-	// in-scope HTTPRoute is owned, so counted, once the settled controller wrote it an entry (design §4.2).
+	// Gateways edge and self; posts in the unlabelled blog namespace must not count. An in-scope
+	// HTTPRoute is owned, so counted, when a parentRef names one of the install's Gateways or
+	// ListenerSets (denied ones included), or once the settled controller wrote it an entry (design §4.2).
 	routes := 0
-	for _, r := range settledWorld(t).routes {
-		if slices.ContainsFunc(r.Status.Parents, func(e kentry) bool { return e.ControllerName == ours }) {
+	w := settledWorld(t)
+	for _, r := range w.routes {
+		parent := slices.ContainsFunc(r.Spec.ParentRefs, func(p kref) bool {
+			id := p.resolve(r.Metadata.Namespace).Ref().String()
+			k := deref(p.Kind, "Gateway")
+			_, gw := w.gateways[id]
+			_, set := w.sets[id]
+			return k == "Gateway" && gw || k == "ListenerSet" && set
+		})
+		if parent || slices.ContainsFunc(r.Status.Parents, func(e kentry) bool { return e.ControllerName == ours }) {
 			routes++
 		}
 	}
@@ -202,11 +212,23 @@ const (
 )
 
 // scoped are install A's namespaces (team=a); blog is outside its scope.
-var scoped = []string{"infra", "shop", "store", "deleg", "closed"}
+var scoped = []string{"infra", "shop", "store", "deleg", "closed", "flip"}
 
 // kubectl decodes `kubectl get … -o json` from the harness cluster into v. It
 // always passes the harness kubeconfig, so the user's current context is never used.
 func kubectl(t *testing.T, v any, args ...string) {
+	t.Helper()
+	out, err := kubectlRun(t, args...)
+	if err != nil {
+		t.Fatalf("kubectl %v: %v", args, err)
+	}
+	if err := json.Unmarshal(out, v); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// kubectlRun runs kubectl against the harness cluster and returns its stdout.
+func kubectlRun(t *testing.T, args ...string) ([]byte, error) {
 	t.Helper()
 	dir := os.Getenv("E2E_DIR")
 	if dir == "" {
@@ -217,13 +239,7 @@ func kubectl(t *testing.T, v any, args ...string) {
 	if _, err := os.Stat(kc); err != nil {
 		t.Fatalf("harness kubeconfig: %v", err)
 	}
-	out, err := exec.Command("kubectl", append([]string{"--kubeconfig", kc}, args...)...).Output()
-	if err != nil {
-		t.Fatalf("kubectl %v: %v", args, err)
-	}
-	if err := json.Unmarshal(out, v); err != nil {
-		t.Fatal(err)
-	}
+	return exec.Command("kubectl", append([]string{"--kubeconfig", kc}, args...)...).Output()
 }
 
 // kcond is a condition as the controller wrote it; lastTransitionTime is left out.
@@ -826,4 +842,334 @@ func sameListeners(ls []api.ListenerDTO, o kobj) error {
 		}
 	}
 	return nil
+}
+
+// region View A (2.3)
+
+// accepted reports whether the controller accepted ListenerSet s.
+func accepted(s kobj) bool {
+	c := findCond(s.Status.Conditions, "Accepted")
+	return c != nil && c.Status == "True"
+}
+
+// sameCounts checks every listener with a status block: view A's count equals
+// attachedRoutes and the check holds count-agrees (rules §8.1).
+func sameCounts(ls []api.ListenerDTO, o kobj) error {
+	for _, k := range o.Status.Listeners {
+		i := slices.IndexFunc(ls, func(l api.ListenerDTO) bool { return l.Name == k.Name })
+		if i < 0 {
+			return fmt.Errorf("listener %s: not served", k.Name)
+		}
+		l := ls[i]
+		if l.Computed == nil || l.ComputedRoutes == nil {
+			return fmt.Errorf("listener %s: no computed count (computed %+v)", k.Name, l.Computed)
+		}
+		if *l.ComputedRoutes != int(k.AttachedRoutes) {
+			return fmt.Errorf("listener %s: computed %d, controller attachedRoutes %d", k.Name, *l.ComputedRoutes, k.AttachedRoutes)
+		}
+		if l.Computed.By != api.ComputedBy || l.Computed.State != string(computed.StateChecked) ||
+			!slices.Contains(l.Computed.Coverage, string(computed.CoverageCount)) {
+			return fmt.Errorf("listener %s: computed %+v, want checked with %s", k.Name, *l.Computed, computed.CoverageCount)
+		}
+	}
+	return nil
+}
+
+// TestComputedAgreesWithController checks view A against the controller on a
+// settled cluster (design §9.5, 2.3): every listener count equals attachedRoutes,
+// every parentRef outcome is status-compatible, and nothing raises KGWUI-012.
+func TestComputedAgreesWithController(t *testing.T) {
+	w := settledWorld(t)
+	t.Logf("kgateway %s", kgwMinor(t))
+
+	t.Run("fixture", func(t *testing.T) {
+		// The cases the comparisons exist for; if a controller stops producing one, they prove less.
+		q := w.routes["shop/quirk"]
+		e := ourEntry(q, q.Spec.ParentRefs[0].resolve("shop"))
+		if e == nil || findCond(e.Conditions, "Accepted") == nil || findCond(e.Conditions, "Accepted").Reason != "NoMatchingParent" {
+			t.Errorf("shop/quirk: want Accepted reason NoMatchingParent, controller wrote %+v", e)
+		}
+		// Its two refs resolve alike, so ourEntry cannot tell their entries apart; count them instead.
+		two, rt := 0, w.routes["infra/two-refs"]
+		for _, e := range rt.Status.Parents {
+			if c := findCond(e.Conditions, "Accepted"); e.ControllerName == ours && c != nil && c.Status == "True" {
+				two++
+			}
+		}
+		if two != 2 {
+			t.Errorf("infra/two-refs: want two Accepted=True entries, controller wrote %+v", rt.Status.Parents)
+		}
+		if accepted(w.sets["shop/denied"]) || !accepted(w.sets["infra/extra"]) {
+			t.Errorf("ListenerSets: want shop/denied denied and infra/extra accepted")
+		}
+		if _, ok := w.routes["flip/flip"]; !ok {
+			t.Errorf("flip/flip: not read")
+		}
+	})
+
+	t.Run("counts", func(t *testing.T) {
+		eventually(t, func() error {
+			for id, g := range w.gateways {
+				var d api.GatewayDetail
+				get(t, install+"/gateways/"+id, &d)
+				if err := sameCounts(d.Listeners, g); err != nil {
+					return fmt.Errorf("Gateway %s: %w", id, err)
+				}
+			}
+			for id, s := range w.sets {
+				var d api.ListenerSetDetail
+				get(t, install+"/listenersets/gateway.networking.k8s.io/ListenerSet/"+id, &d)
+				if accepted(s) {
+					if err := sameCounts(d.Listeners, s); err != nil {
+						return fmt.Errorf("ListenerSet %s: %w", id, err)
+					}
+					continue
+				}
+				// View A never evaluates a denied ListenerSet (rules §3.1).
+				for _, l := range d.Listeners {
+					if l.ComputedRoutes != nil {
+						return fmt.Errorf("denied ListenerSet %s listener %s: computed count %d", id, l.Name, *l.ComputedRoutes)
+					}
+				}
+			}
+			return nil
+		})
+	})
+
+	t.Run("outcomes", func(t *testing.T) {
+		eventually(t, func() error {
+			checked := 0
+			for _, r := range routeList(t, "") {
+				id := r.Ref.String()
+				if !slices.Contains(scoped, r.Ref.Namespace) {
+					continue // an unwatched route is never evaluated
+				}
+				for _, p := range r.Parents {
+					evaluated := p.Ref.Kind == "Gateway" || p.Ref.Kind == "ListenerSet" && accepted(w.sets[p.Ref.String()])
+					if p.Computed == nil {
+						if evaluated {
+							return fmt.Errorf("route %s parent %s: no computed outcome", id, p.Ref.String())
+						}
+						continue
+					}
+					c := p.Computed.Computed
+					if !evaluated || c.By != api.ComputedBy || c.State != string(computed.StateChecked) ||
+						!slices.Equal(c.Coverage, []string{string(computed.CoverageStatus)}) {
+						return fmt.Errorf("route %s parent %s: computed %+v, want checked with %s", id, p.Ref.String(), c, computed.CoverageStatus)
+					}
+					checked++
+				}
+			}
+			if checked == 0 {
+				return fmt.Errorf("no computed parent outcome")
+			}
+
+			var d api.RouteDetail
+			get(t, install+"/routes/gateway.networking.k8s.io/HTTPRoute/shop/quirk", &d)
+			if len(d.Attachments) != 1 || d.Attachments[0].Result.Outcome != string(computed.OutcomeNoParent) {
+				return fmt.Errorf("shop/quirk: attachments %+v, want %s", d.Attachments, computed.OutcomeNoParent)
+			}
+			// Both refs of two-refs land on edge's http listener, so the route counts twice there.
+			get(t, install+"/routes/gateway.networking.k8s.io/HTTPRoute/infra/two-refs", &d)
+			on := 0
+			for _, a := range d.Attachments {
+				for _, l := range a.Result.Listeners {
+					if l.Resource.String() == "infra/edge" && l.Listener == "http" {
+						on++
+					}
+				}
+			}
+			if on != 2 {
+				return fmt.Errorf("infra/two-refs: %d memberships on infra/edge http, want 2: %+v", on, d.Attachments)
+			}
+			rows := rowIDs(routeList(t, "parent="+refParam(objects.Ref{Group: gwGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"})+"&listener=http"))
+			if !slices.Contains(rows, "infra/two-refs") {
+				return fmt.Errorf("listener=http of infra/edge: %v lacks infra/two-refs", rows)
+			}
+			return nil
+		})
+	})
+
+	t.Run("health", func(t *testing.T) {
+		var h api.HealthResponse
+		get(t, install+"/health", &h)
+		for _, f := range h.Findings {
+			if f.Code == health.CodeComputedDisagrees {
+				t.Errorf("KGWUI-012 on %v: %s", f.Resource, f.Detail)
+			}
+		}
+		if !slices.ContainsFunc(h.Checks, func(c health.CheckResult) bool { return c.Name == "computed views" && c.OK }) {
+			t.Errorf("no OK computed views check: %+v", h.Checks)
+		}
+	})
+}
+
+// uiArgs is the UI container's args as installed by setup.sh.
+func uiArgs(t *testing.T) []string {
+	var d struct {
+		Spec struct {
+			Template struct {
+				Spec struct{ Containers []struct{ Args []string } }
+			}
+		}
+	}
+	kubectl(t, &d, "-n", "kgateway-ui", "get", "deploy/ui-kgateway-ui", "-o", "json")
+	return d.Spec.Template.Spec.Containers[0].Args
+}
+
+// controllerPods is the number of install A's controller pods, terminating ones included.
+func controllerPods(t *testing.T) int {
+	var d struct {
+		Spec struct {
+			Selector struct{ MatchLabels map[string]string }
+		}
+	}
+	kubectl(t, &d, "-n", "kgw-a", "get", "deploy/kgateway", "-o", "json")
+	sel := make([]string, 0, len(d.Spec.Selector.MatchLabels))
+	for k, v := range d.Spec.Selector.MatchLabels {
+		sel = append(sel, k+"="+v)
+	}
+	var pods struct{ Items []any }
+	kubectl(t, &pods, "-n", "kgw-a", "get", "pods", "-l", strings.Join(sel, ","), "-o", "json")
+	return len(pods.Items)
+}
+
+// must runs kubectl and fails the test on error.
+func must(t *testing.T, args ...string) {
+	t.Helper()
+	if out, err := kubectlRun(t, args...); err != nil {
+		t.Fatalf("kubectl %v: %v: %s", args, err, out)
+	}
+}
+
+// routeCheck is view A's check state of route id's only parentRef.
+func routeCheck(t *testing.T, id string) string {
+	var d api.RouteDetail
+	get(t, install+"/routes/gateway.networking.k8s.io/HTTPRoute/"+id, &d)
+	if len(d.Attachments) != 1 {
+		t.Fatalf("%s: attachments %+v", id, d.Attachments)
+	}
+	return d.Attachments[0].Result.Computed.State
+}
+
+// disagreement is the KGWUI-012 finding on the object kind/id in h, or nil.
+func disagreement(h api.HealthResponse, kind, id string) *api.FindingDTO {
+	for i, f := range h.Findings {
+		if f.Code == health.CodeComputedDisagrees && f.Resource != nil && f.Resource.Kind == kind && f.Resource.String() == id {
+			return &h.Findings[i]
+		}
+	}
+	return nil
+}
+
+// TestForcedDisagreementRaisesKGWUI012 skews the cluster while the controller is
+// stopped (design §9.5, 2.3): a Namespace relabel flips flip/flip's computed
+// outcome and edge's https count, the status stays as written, and KGWUI-012
+// matures at the scheduled deadline and clears once the controller catches up.
+// The exact instant is Task 42's fake-clock test; this checks the window.
+func TestForcedDisagreementRaisesKGWUI012(t *testing.T) {
+	const pollInterval = "--poll-interval=10m"
+	if !slices.Contains(uiArgs(t), pollInterval) {
+		t.Skip("needs the UI installed with " + pollInterval + " (UI_EXTRA_ARGS=" + pollInterval +
+			"), so only the scheduled deadline, never the safety timer, can mature the check")
+	}
+	settledWorld(t)
+	const route = "flip/flip"
+	eventually(t, func() error {
+		if s := routeCheck(t, route); s != string(computed.StateChecked) {
+			return fmt.Errorf("%s: check %s before the skew, want checked", route, s)
+		}
+		return nil
+	})
+
+	t.Cleanup(func() {
+		for _, args := range [][]string{
+			{"label", "namespace", "flip", "edge-https=allowed", "--overwrite"},
+			{"-n", "kgw-a", "scale", "deploy/kgateway", "--replicas=1"},
+			{"-n", "kgw-a", "rollout", "status", "deploy/kgateway", "--timeout=180s"},
+		} {
+			if out, err := kubectlRun(t, args...); err != nil {
+				t.Errorf("cleanup: kubectl %v: %v: %s", args, err, out)
+			}
+		}
+		// Later tests and Playwright expect the agreeing world back.
+		settledWorld(t)
+		eventually(t, func() error {
+			if s := routeCheck(t, route); s != string(computed.StateChecked) {
+				return fmt.Errorf("cleanup: %s check %s, want checked", route, s)
+			}
+			return nil
+		})
+	})
+
+	must(t, "-n", "kgw-a", "scale", "deploy/kgateway", "--replicas=0")
+	eventually(t, func() error {
+		if n := controllerPods(t); n != 0 {
+			return fmt.Errorf("%d controller pods left", n)
+		}
+		return nil
+	})
+	must(t, "label", "namespace", "flip", "edge-https-")
+
+	// The check waits out its persistence window as pending.
+	deadline := time.Now().Add(time.Minute)
+	for routeCheck(t, route) != string(computed.StatePending) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: check never pending after the relabel", route)
+		}
+		time.Sleep(time.Second)
+	}
+
+	// Each finding is checked on the first health response that carries it.
+	// collectedAt is the UI's clock, as is since, so no clock skew enters.
+	type subject struct{ kind, id string }
+	subjects := []subject{{"HTTPRoute", route}, {"Gateway", "infra/edge"}}
+	seen := map[subject]bool{}
+	deadline = time.Now().Add(2 * time.Minute)
+	for len(seen) < len(subjects) {
+		var h api.HealthResponse
+		get(t, install+"/health", &h)
+		for _, s := range subjects {
+			f := disagreement(h, s.kind, s.id)
+			if f == nil || seen[s] {
+				continue
+			}
+			seen[s] = true
+			if f.Since == nil || f.Severity != health.SeverityWarning {
+				t.Fatalf("KGWUI-012 on %s %s: severity %s, since %v; want a warning with since", s.kind, s.id, f.Severity, f.Since)
+			}
+			early, late := f.Since.Add(30*time.Second), f.Since.Add(90*time.Second)
+			if h.CollectedAt.Before(early) || h.CollectedAt.After(late) {
+				t.Errorf("KGWUI-012 on %s %s at %s: want within [since+30s, since+90s] = [%s, %s]",
+					s.kind, s.id, h.CollectedAt.Format(time.RFC3339Nano), early.Format(time.RFC3339Nano), late.Format(time.RFC3339Nano))
+			}
+			t.Logf("KGWUI-012 on %s %s: since %s, first seen in a model of %s", s.kind, s.id,
+				f.Since.Format(time.RFC3339Nano), h.CollectedAt.Format(time.RFC3339Nano))
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("KGWUI-012 never raised on every subject: seen %v, findings %+v", seen, h.Findings)
+		}
+		time.Sleep(time.Second)
+	}
+
+	// The controller writes the skewed world's status, which now agrees.
+	must(t, "-n", "kgw-a", "scale", "deploy/kgateway", "--replicas=1")
+	deadline = time.Now().Add(2 * time.Minute)
+	for {
+		var h api.HealthResponse
+		get(t, install+"/health", &h)
+		left := 0
+		for _, f := range h.Findings {
+			if f.Code == health.CodeComputedDisagrees {
+				left++
+			}
+		}
+		if left == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("KGWUI-012 did not clear within 2 min of scaling the controller back: %+v", h.Findings)
+		}
+		time.Sleep(time.Second)
+	}
 }

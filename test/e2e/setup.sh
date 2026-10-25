@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Creates a kind cluster with kgateway, the fixtures and the UI, then
 # port-forwards the UI to 127.0.0.1:18080. Usage:
-#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] test/e2e/setup.sh
+#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] [UI_EXTRA_ARGS=...] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
 # EXPLORER=0 skips fixtures/explorer.yaml (the D-021 observations need a cluster without it).
+# UI_EXTRA_ARGS are space-separated UI flags for the chart's extraArgs, e.g. --poll-interval=10m.
 # The cluster's kubeconfig is written to $E2E_DIR/kubeconfig; the current
 # kubeconfig context is left alone.
 set -euo pipefail
@@ -86,8 +87,14 @@ kubectl -n shop rollout status deploy/httpbin --timeout=180s
 
 docker build -t kgateway-ui:e2e --build-arg VERSION=e2e .
 kind load docker-image kgateway-ui:e2e --name "$CLUSTER"
+ui_args=()
+if [[ -n "${UI_EXTRA_ARGS:-}" ]]; then
+  read -ra extra <<<"$UI_EXTRA_ARGS"
+  ui_args=(--set "extraArgs={$(IFS=,; echo "${extra[*]}")}")
+fi
+# ${a[@]+...} keeps an empty array safe under set -u on bash 3.
 helm install ui deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
-  --set image.repository=kgateway-ui --set image.tag=e2e --set image.pullPolicy=Never --wait
+  --set image.repository=kgateway-ui --set image.tag=e2e --set image.pullPolicy=Never ${ui_args[@]+"${ui_args[@]}"} --wait
 kubectl -n kgateway-ui rollout status deploy/ui-kgateway-ui --timeout=120s
 
 nohup kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui "$PORT:80" >"$E2E_DIR/port-forward.log" 2>&1 &

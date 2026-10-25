@@ -4,6 +4,7 @@ GOLANGCI_LINT_VERSION := v2.15.0
 KGW_VERSION ?= v2.4.7
 GWAPI_VERSION ?= v1.6.1
 SECOND_INSTALL ?= 0
+UI_EXTRA_ARGS ?=
 PORT ?= 18080
 UI_URL ?= http://127.0.0.1:$(PORT)
 ACTIONLINT_VERSION := v1.7.12
@@ -20,6 +21,7 @@ help:
 	@echo "make run    run the server from source (placeholder page unless make web ran)"
 	@echo "make e2e    kind cluster with kgateway KGW_VERSION, then the API and Playwright tests (installs web deps and Chromium if needed)"
 	@echo "           CI pairs: KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1, KGW_VERSION=v2.3.11 GWAPI_VERSION=v1.5.1; PORT sets the local port"
+	@echo "           UI_EXTRA_ARGS=--poll-interval=10m also runs the forced-disagreement test"
 	@echo "make e2e-down  delete the e2e kind cluster"
 test:
 	go test ./...
@@ -48,7 +50,7 @@ build: web
 run:
 	go run ./cmd/kgateway-ui --kubeconfig $${KUBECONFIG:-$$HOME/.kube/config}
 e2e:
-	KGW_VERSION=$(KGW_VERSION) GWAPI_VERSION=$(GWAPI_VERSION) SECOND_INSTALL=$(SECOND_INSTALL) PORT=$(PORT) bash test/e2e/setup.sh
+	KGW_VERSION=$(KGW_VERSION) GWAPI_VERSION=$(GWAPI_VERSION) SECOND_INSTALL=$(SECOND_INSTALL) PORT=$(PORT) UI_EXTRA_ARGS="$(UI_EXTRA_ARGS)" bash test/e2e/setup.sh
 	SECOND_INSTALL=$(SECOND_INSTALL) UI_URL=$(UI_URL) go test -tags e2e ./test/e2e/... -v -count=1
 	cd web && { [ -d node_modules ] || npm ci; } && npx playwright install chromium
 	cd web && SECOND_INSTALL=$(SECOND_INSTALL) UI_URL=$(UI_URL) npx playwright test -c e2e/playwright.config.ts

@@ -22,7 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { kgw: v2.4.7, gwapi: v1.6.1, second: "0" }
+          # A 10 min safety timer lets TestForcedDisagreementRaisesKGWUI012 run: only its deadline can mature the check.
+          - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", ui_args: "--poll-interval=10m" }
           - { kgw: v2.3.11, gwapi: v1.5.1, second: "0" }
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "1" }
     runs-on: ubuntu-latest
@@ -30,6 +31,7 @@ jobs:
       KGW_VERSION: ${{ matrix.kgw }}
       GWAPI_VERSION: ${{ matrix.gwapi }}
       SECOND_INSTALL: ${{ matrix.second }}
+      UI_EXTRA_ARGS: ${{ matrix.ui_args }}
       E2E_DIR: ${{ github.workspace }}/.e2e
     steps:
       - uses: actions/checkout@v7
