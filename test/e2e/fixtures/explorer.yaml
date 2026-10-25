@@ -309,8 +309,8 @@ spec:
       backendRefs: [{ name: httpbin, port: 8000 }]
 ---
 # View A (design §9.5, 2.3). TestComputedAgreesWithController compares every computed count and outcome with the controller.
-# The allowed quirk (rules §4.1): http admits shop and https does not, so a ref to section https gives NoMatchingParent.
-# Its sectionName ref follows D-021 item 3's c3s manifest, on a Gateway instead of a parent route.
+# The allowed quirk (computed-rules.md §4.1): http admits shop and https does not, so a ref to section https
+# gives NoMatchingParent.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata: { name: quirk, namespace: shop, labels: { e2e: explorer } }

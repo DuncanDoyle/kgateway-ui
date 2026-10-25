@@ -4,7 +4,8 @@
 #   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] [UI_EXTRA_ARGS=...] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
 # EXPLORER=0 skips fixtures/explorer.yaml (the D-021 observations need a cluster without it).
-# UI_EXTRA_ARGS are space-separated UI flags for the chart's extraArgs, e.g. --poll-interval=10m.
+# UI_EXTRA_ARGS are space-separated UI flags for the chart's extraArgs, e.g. --poll-interval=10m;
+# a value must not contain a comma (helm's --set list syntax splits on it).
 # The cluster's kubeconfig is written to $E2E_DIR/kubeconfig; the current
 # kubeconfig context is left alone.
 set -euo pipefail

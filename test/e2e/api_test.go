@@ -854,6 +854,7 @@ func accepted(s kobj) bool {
 
 // sameCounts checks every listener with a status block: view A's count equals
 // attachedRoutes and the check holds count-agrees (rules §8.1).
+// It compares only the listeners the controller reports.
 func sameCounts(ls []api.ListenerDTO, o kobj) error {
 	for _, k := range o.Status.Listeners {
 		i := slices.IndexFunc(ls, func(l api.ListenerDTO) bool { return l.Name == k.Name })
@@ -1006,6 +1007,7 @@ func TestComputedAgreesWithController(t *testing.T) {
 
 // uiArgs is the UI container's args as installed by setup.sh.
 func uiArgs(t *testing.T) []string {
+	t.Helper()
 	var d struct {
 		Spec struct {
 			Template struct {
@@ -1019,6 +1021,7 @@ func uiArgs(t *testing.T) []string {
 
 // controllerPods is the number of install A's controller pods, terminating ones included.
 func controllerPods(t *testing.T) int {
+	t.Helper()
 	var d struct {
 		Spec struct {
 			Selector struct{ MatchLabels map[string]string }
@@ -1044,6 +1047,7 @@ func must(t *testing.T, args ...string) {
 
 // routeCheck is view A's check state of route id's only parentRef.
 func routeCheck(t *testing.T, id string) string {
+	t.Helper()
 	var d api.RouteDetail
 	get(t, install+"/routes/gateway.networking.k8s.io/HTTPRoute/"+id, &d)
 	if len(d.Attachments) != 1 {
@@ -1082,10 +1086,13 @@ func TestForcedDisagreementRaisesKGWUI012(t *testing.T) {
 		return nil
 	})
 
+	var d struct{ Spec struct{ Replicas *int32 } }
+	kubectl(t, &d, "-n", "kgw-a", "get", "deploy/kgateway", "-o", "json")
+	replicas := fmt.Sprintf("--replicas=%d", deref(d.Spec.Replicas, 1))
 	t.Cleanup(func() {
 		for _, args := range [][]string{
 			{"label", "namespace", "flip", "edge-https=allowed", "--overwrite"},
-			{"-n", "kgw-a", "scale", "deploy/kgateway", "--replicas=1"},
+			{"-n", "kgw-a", "scale", "deploy/kgateway", replicas},
 			{"-n", "kgw-a", "rollout", "status", "deploy/kgateway", "--timeout=180s"},
 		} {
 			if out, err := kubectlRun(t, args...); err != nil {
@@ -1153,7 +1160,7 @@ func TestForcedDisagreementRaisesKGWUI012(t *testing.T) {
 	}
 
 	// The controller writes the skewed world's status, which now agrees.
-	must(t, "-n", "kgw-a", "scale", "deploy/kgateway", "--replicas=1")
+	must(t, "-n", "kgw-a", "scale", "deploy/kgateway", replicas)
 	deadline = time.Now().Add(2 * time.Minute)
 	for {
 		var h api.HealthResponse
