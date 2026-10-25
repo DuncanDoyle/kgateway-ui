@@ -468,7 +468,7 @@ quirk 2 (prefix /q):
 
 **Decision:**
 1. Allocation per warm recompute is reported, not gated.
-2. The gates are engine CPU in the sustained stream (≤ 15 % of one core), retained heap (≤ 32 MiB above the baseline) and staying well inside the pod memory limit, each in the consistent world and in the worst case.
+2. The gates are engine CPU in the sustained stream (≤ 15 % of one core), retained heap (≤ 32 MiB above the baseline) and staying well inside the pod memory limit, each in the consistent world and in the worst case. "Well inside" is memory obtained from the OS during the sustained stream ≤ 256 MiB, half the limit **(our call)**.
 
 **Consequences:**
 - Task 49 runs the sustained stream in both worlds and applies the cheap allocation cuts anyway (pre-sized finding slices, `Finding.parent` out of `Finding`).

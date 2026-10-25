@@ -33,7 +33,7 @@ bench:
 	go test -tags bench -v -short -run 'Budget' -count 1 -timeout 20m ./pkg/api
 	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/api
 bench-stream:
-	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 15m ./pkg/api
+	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 30m ./pkg/api
 lint:
 	go vet ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...

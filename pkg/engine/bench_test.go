@@ -1,22 +1,34 @@
 package engine
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 )
 
-// scaleEngine is an upstream engine over tier's scale snapshot with fresh metrics.
+// scaleEngine is an upstream engine over tier's scale snapshot with fresh
+// metrics. Under Contradict it has computed once and its clock is past the
+// window, so every check matures.
 func scaleEngine(tier scale.Tier) *Engine {
-	return New(config(scale.Snapshot(tier, 1), metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+	now := testutil.Now
+	cfg := config(scale.Snapshot(tier, 1), metricsAt(testutil.Now), func() time.Time { return now })
+	cfg.MetricsMaxAge = 0
+	e := New(cfg)
+	if tier.Contradict {
+		e.Compute()
+		now = now.Add(Window + time.Second)
+	}
+	return e
 }
 
 // BenchmarkCompute measures one warm Compute per iteration: the engine has
 // already seen the snapshot once, as after the first run in production.
 func BenchmarkCompute(b *testing.B) {
-	for _, tier := range scale.Tiers {
+	for _, tier := range append(slices.Clone(scale.Tiers), scale.Large.Contradicting()) {
 		b.Run(tier.Name, func(b *testing.B) {
 			e := scaleEngine(tier)
 			e.Compute()
@@ -57,5 +69,32 @@ func TestScaleComputeSanity(t *testing.T) {
 	}
 	if len(children) == 0 || owned != scale.Large.HTTPRoutes || reported != len(children) {
 		t.Fatalf("owned HTTPRoutes %d, want %d; children with a reported parent %d, want %d", owned, scale.Large.HTTPRoutes, reported, len(children))
+	}
+}
+
+// Every tier's statuses agree with view A, so the budgets measure realistic
+// data; under Contradicting every check contradicts.
+func TestScaleViewsConsistent(t *testing.T) {
+	tiers := append(slices.Clone(scale.Tiers), scale.Large.Contradicting())
+	for _, tier := range tiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			m := New(config(scale.Snapshot(tier, 1), metricsAt(testutil.Now), func() time.Time { return testutil.Now })).Compute()
+			want := computed.ClassCompatible
+			if tier.Contradict {
+				want = computed.ClassContradicting
+			}
+			checks := m.Installs[0].Computed.Checks
+			bad := 0
+			for _, c := range checks {
+				if c.Class != want {
+					if bad++; bad <= 5 {
+						t.Errorf("%s %s: %s, expected %s observed %s", c.ID.Kind, c.On, c.Class, c.Expected, c.Observed)
+					}
+				}
+			}
+			if bad > 0 || len(checks) == 0 {
+				t.Fatalf("%d of %d checks not %s", bad, len(checks), want)
+			}
+		})
 	}
 }

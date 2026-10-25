@@ -8,9 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"runtime"
 	"runtime/metrics"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -133,18 +137,31 @@ func TestBudgetListRequests(t *testing.T) {
 					ns, best = n, c
 				}
 			}
+			// The viewable Gateway listener with the most members, for the listener mix.
+			var lk explore.ListenerKey
+			for k, ms := range ix.ByListener {
+				if k.Resource.Kind != "Gateway" || !can(k.Resource) {
+					continue
+				}
+				if n := len(ix.ByListener[lk]); len(ms) > n || len(ms) == n && k.Resource.String()+k.Listener < lk.Resource.String()+lk.Listener {
+					lk = k
+				}
+			}
+			if lk.Listener == "" {
+				t.Fatal("the Large tier has no listener members")
+			}
 			deepest, depth := deepestChild(ix, can)
 			if depth == 0 || len(ix.ByParentRoute[parent]) == 0 {
 				t.Fatal("the Large tier has no delegation")
 			}
-			t.Logf("parents: Gateway %s (%d rows), ListenerSet %s (%d rows), HTTPRoute %s (%d children); namespace %s (%d rows); deepest child %s at depth %d",
-				gw, len(ix.ByParent[gw]), ls, len(ix.ByParent[ls]), parent, len(ix.ByParentRoute[parent]), ns, len(ix.ByNamespace[ns]), deepest, depth)
+			t.Logf("parents: Gateway %s (%d rows), ListenerSet %s (%d rows), listener %s/%s (%d members), HTTPRoute %s (%d children); namespace %s (%d rows); deepest child %s at depth %d",
+				gw, len(ix.ByParent[gw]), ls, len(ix.ByParent[ls]), lk.Resource, lk.Listener, len(ix.ByListener[lk]), parent, len(ix.ByParentRoute[parent]), ns, len(ix.ByNamespace[ns]), deepest, depth)
 			base := "/api/v1/installs/" + m.Installs[0].Resolved.ID()
-			// No listener index exists before 2.3; a ListenerSet parent stands in for the listener mix.
 			mixes := []struct{ name, path string }{
 				{"none", base + "/routes"},
 				{"parent-gateway", base + "/routes?parent=" + refParam(gw)},
 				{"parent-listenerset", base + "/routes?parent=" + refParam(ls)},
+				{"parent+listener", base + "/routes?parent=" + refParam(lk.Resource) + "&listener=" + lk.Listener},
 				{"namespace+state", base + "/routes?namespace=" + ns + "&state=not-accepted"},
 				{"q", base + "/routes?q=r-01"},
 				{"sort=health", base + "/routes?sort=health.desc"},
@@ -180,6 +197,40 @@ func TestBudgetListRequests(t *testing.T) {
 	}
 }
 
+// TestBudgetHealth reports /health's response size and latency, 1,000
+// sequential requests and 1,000 from 20 goroutines (a worst-case response
+// is about 2 MiB), for the consistent
+// world and the worst case (every check matured), under AllowAll and a
+// restricting Authorizer. §9.6 sets no /health budget, so nothing is asserted.
+func TestBudgetHealth(t *testing.T) {
+	for _, tier := range []scale.Tier{scale.Large, scale.Large.Contradicting()} {
+		for _, a := range []struct {
+			name  string
+			authz Authorizer
+		}{{"allow-all", nil}, {"restricted", restricting}} {
+			t.Run(tier.Name+"/"+a.name, func(t *testing.T) {
+				h, m := tierHandler(t, tier, a.authz)
+				f, c := matured(m)
+				path := "/api/v1/installs/" + m.Installs[0].Resolved.ID() + "/health"
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				if rec.Code != http.StatusOK {
+					t.Fatalf("GET %s: %d", path, rec.Code)
+				}
+				seq := latencies(t, h, path, 1000, 1)
+				conc := latencies(t, h, path, 1000, 20)
+				t.Logf("%s %s: %d findings (%d KGWUI-012 of %d checks), %d B (%.1f KiB); sequential p50 %v p95 %v p99 %v; 20 clients p50 %v p95 %v p99 %v",
+					tier.Name, a.name, len(m.Installs[0].Health.Findings), f, c, rec.Body.Len(), float64(rec.Body.Len())/1024,
+					rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)),
+					rd(percentile(conc, 50)), rd(percentile(conc, 95)), rd(percentile(conc, 99)))
+				if tier.Contradict && (f != c || c == 0) {
+					t.Fatalf("worst case: %d KGWUI-012 of %d checks", f, c)
+				}
+			})
+		}
+	}
+}
+
 // rd rounds d for logs.
 func rd(d time.Duration) time.Duration {
 	if d < time.Millisecond {
@@ -207,13 +258,62 @@ func gcCPU() (gc, used float64) {
 // TestBudgetSustainedStream: over a real cache and Run loop at Large, one
 // HTTPRoute update per 100 ms for 10 min (-short: 60 s) while 20 clients poll
 // /routes every 5 s gives ≤ 1 recompute per s and process CPU ≤ 15 % of one
-// core (rusage delta; it bounds the engine's share). GC share is logged.
+// core (rusage delta; it bounds the engine's share), and the memory obtained
+// from the OS stays ≤ half the chart's 512 MiB pod limit. GC share is logged.
+// Both the consistent world and the worst case run, each in a fresh process
+// so earlier tests' heap and CPU do not count; the worst case starts once
+// every check has matured.
 func TestBudgetSustainedStream(t *testing.T) {
+	tiers := []scale.Tier{scale.Large, scale.Large.Contradicting()}
+	if name := os.Getenv(streamChildEnv); name != "" {
+		sustainedStream(t, tiers[slices.IndexFunc(tiers, func(x scale.Tier) bool { return x.Name == name })])
+		return
+	}
+	for _, tier := range tiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			args := []string{"-test.run=^TestBudgetSustainedStream$", "-test.count=1", "-test.v"}
+			if testing.Short() {
+				args = append(args, "-test.short")
+			}
+			cmd := exec.Command(os.Args[0], args...)
+			cmd.Env = append(os.Environ(), streamChildEnv+"="+tier.Name)
+			out, err := cmd.CombinedOutput()
+			for line := range strings.Lines(string(out)) {
+				if strings.Contains(line, "budget_test.go") {
+					t.Log(strings.TrimSpace(line))
+				}
+			}
+			if err != nil {
+				t.Errorf("stream child: %v", err)
+			}
+		})
+	}
+}
+
+// streamChildEnv makes TestBudgetSustainedStream run one world in this process.
+const streamChildEnv = "KGWUI_STREAM_CHILD"
+
+// matured reports whether every computed check of m raised KGWUI-012.
+func matured(m *engine.Model) (findings, checks int) {
+	in := m.Installs[0]
+	for _, f := range in.Health.Findings {
+		if f.Code == health.CodeComputedDisagrees {
+			findings++
+		}
+	}
+	if in.Computed != nil {
+		checks = len(in.Computed.Checks)
+	}
+	return findings, checks
+}
+
+func sustainedStream(t *testing.T, tier scale.Tier) {
+	const mib = 1 << 20
 	dur := 10 * time.Minute
 	if testing.Short() {
 		dur = time.Minute
 	}
-	w := scale.Live(t, scale.Large, nil)
+	w := scale.Live(t, tier, nil)
 	ev := make(chan engine.LoopEvent, 1<<16)
 	e := engine.New(engine.Config{Snapshots: w.Cache, Triggers: w.Signal, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
@@ -237,6 +337,18 @@ func TestBudgetSustainedStream(t *testing.T) {
 		testutil.Recv(t, stopped, "Run to return")
 	})
 	for testutil.Recv(t, ev, "loop event").Kind != engine.EvPublished { // the start-up publication
+	}
+	if tier.Contradict {
+		// Windows mature on the real clock about 30 s after start-up.
+		for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
+			if f, c := matured(e.Current().Model); f == c && c > 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the worst case did not mature")
+			}
+		}
+		testutil.Drain(ev)
 	}
 	h := NewHandler(e, fstest.MapFS{}, nil)
 	path := "/api/v1/installs/" + e.Current().Model.Installs[0].Resolved.ID() + "/routes"
@@ -332,6 +444,17 @@ func TestBudgetSustainedStream(t *testing.T) {
 	t.Logf("stream %v: %d updates, %d recomputes (%.2f/s, budget ≤ 1/s), %d publications; process CPU %v = %.1f %% of one core (budget ≤ 15 %%); recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
 		wall.Round(time.Millisecond), updates, runs, rate, pubs, cpu.Round(time.Millisecond), 100*share, busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
 	t.Logf("polls: %d, p50 %v p95 %v max %v", len(polls), rd(percentile(polls, 50)), rd(percentile(polls, 95)), rd(polls[len(polls)-1]))
+	f, c := matured(e.Current().Model)
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)",
+		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib)
+	if tier.Contradict && f != c {
+		t.Errorf("worst case: %d KGWUI-012 of %d checks at the end", f, c)
+	}
+	if ms.Sys > 256*mib {
+		t.Errorf("memory from the OS %.1f MiB, budget ≤ 256 MiB", float64(ms.Sys)/mib)
+	}
 	if rate > 1 {
 		t.Errorf("%.2f recomputes per s, budget ≤ 1", rate)
 	}
