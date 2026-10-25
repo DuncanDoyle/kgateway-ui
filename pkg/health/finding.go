@@ -80,8 +80,9 @@ type Finding struct {
 	// generation. It replaces Since for a caller who may not view all of
 	// Evidence, so Since tells that caller nothing about it. Never serialised.
 	ResourceSince *time.Time `json:"-"`
-	// parent is the route parentRef a KGWUI-003 finding is about; it orders findings.
-	parent objects.ParentRef
+	// parent is the route parentRef a KGWUI-003 or KGWUI-011 finding is about;
+	// it orders findings. A pointer keeps the other findings small.
+	parent *objects.ParentRef
 }
 
 // CheckResult records whether a check could collect current input. A Required

@@ -22,6 +22,13 @@ func (computedCheck) Name() string { return "computed views" }
 func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 	var fs []Finding
 	if v := in.Computed; v != nil {
+		n := 0
+		for i := range v.Checks {
+			if v.Checks[i].State == computed.StateDisagrees {
+				n++
+			}
+		}
+		fs = make([]Finding, 0, n)
 		for i := range v.Checks {
 			ch := &v.Checks[i]
 			if ch.State != computed.StateDisagrees {

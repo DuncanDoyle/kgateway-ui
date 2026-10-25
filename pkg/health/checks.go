@@ -216,7 +216,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			inGrace[r] = true
 		}
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
-			Message: msg, Detail: why, parent: parent})
+			Message: msg, Detail: why, parent: &parent})
 	}
 	// pendingFor reports a block of u that is not processed; parent is set for
 	// route parents. An experimental-only kind gets a hint (D-018 §2).
