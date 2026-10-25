@@ -832,18 +832,32 @@ func asObjects(us []*unstructured.Unstructured) []runtime.Object {
 // expected to disagree is pending and no KGWUI-012 is raised yet.
 func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.RuleCase, want matrixExpect, inWindow bool) {
 	t.Helper()
-	label := func(key string, got Computed, reason string) {
-		t.Helper()
+	check := func(key string) matrixCheck {
 		w := want.Checks[key]
 		if inWindow && w.State == "disagrees" {
 			w = matrixCheck{State: "pending"}
 		}
+		return w
+	}
+	// The list merges the checks of written refs that resolve alike (design §7.3).
+	merged := func(keys []string) matrixCheck {
+		w := check(keys[0])
+		m := Computed{State: w.State, Coverage: w.Coverage, Note: w.Note}
+		for _, k := range keys[1:] {
+			w := check(k)
+			m = mergeComputed(m, Computed{State: w.State, Coverage: w.Coverage, Note: w.Note})
+		}
+		return matrixCheck{State: m.State, Coverage: m.Coverage, Note: m.Note}
+	}
+	label := func(key string, got Computed, reason string, w matrixCheck) {
+		t.Helper()
 		if got.By != ComputedBy || got.Rules != rules || got.State != w.State || !slices.Equal(got.Coverage, w.Coverage) ||
 			(w.Note != "" && got.Note != w.Note) || got.Reason != reason {
 			t.Errorf("%s: computed %+v, want %+v reason %q", key, got, w, reason)
 		}
 	}
-	seen := map[string]bool{}
+	// List and detail are asserted separately: each must serve every key it covers.
+	seen, listSeen, detailSeen := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, u := range c.Objects {
 		ref := objects.RefOf(u)
 		var ls []ListenerDTO
@@ -864,13 +878,13 @@ func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.Ru
 				t.Errorf("%s: no computed count", key)
 			case w.Unknown != "":
 				seen[key] = true
-				label(key, *l.Computed, w.Unknown)
+				label(key, *l.Computed, w.Unknown, check(key))
 				if l.ComputedRoutes != nil || l.IsolationNote {
 					t.Errorf("%s: unknown count sends routes %v, isolationNote %v", key, l.ComputedRoutes, l.IsolationNote)
 				}
 			default:
 				seen[key] = true
-				label(key, *l.Computed, "")
+				label(key, *l.Computed, "", check(key))
 				if l.ComputedRoutes == nil || *l.ComputedRoutes != w.Count || l.IsolationNote != w.IsolationNote {
 					t.Errorf("%s: routes %v, isolationNote %v, want %+v", key, l.ComputedRoutes, l.IsolationNote, w)
 				}
@@ -878,22 +892,26 @@ func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.Ru
 		}
 	}
 
-	attachment := func(key string, a Attachment) {
+	// attachment asserts a for keys, the written refs it covers; the first names it.
+	attachment := func(served map[string]bool, keys []string, a Attachment) {
 		t.Helper()
+		key := keys[0]
 		w, ok := want.ParentRefs[key]
 		if !ok {
 			t.Errorf("%s: computed %+v, want none", key, a)
 			return
 		}
-		seen[key] = true
+		for _, k := range keys {
+			served[k] = true
+		}
 		if w.Unknown != "" {
-			label(key, a.Computed, w.Unknown)
+			label(key, a.Computed, w.Unknown, merged(keys))
 			if a.Outcome != "" || len(a.Listeners) != 0 {
 				t.Errorf("%s: unknown sends outcome %q, listeners %+v", key, a.Outcome, a.Listeners)
 			}
 			return
 		}
-		label(key, a.Computed, "")
+		label(key, a.Computed, "", merged(keys))
 		names := []string{}
 		for _, l := range a.Listeners {
 			names = append(names, l.Listener)
@@ -926,7 +944,13 @@ func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.Ru
 			})
 			switch {
 			case p.Computed != nil && j >= 0:
-				attachment(refKey(j), *p.Computed)
+				keys := []string{refKey(j)}
+				for k := j + 1; k < len(spec); k++ {
+					if spec[k] == spec[j] {
+						keys = append(keys, refKey(k))
+					}
+				}
+				attachment(listSeen, keys, *p.Computed)
 			case p.Computed != nil:
 				t.Errorf("%v: computed on parent %+v, not a spec parentRef", ref, p)
 			case j >= 0:
@@ -937,13 +961,21 @@ func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.Ru
 		}
 		if ref.Kind == "HTTPRoute" {
 			for _, a := range get[RouteDetail](t, srv, routeDetail+ref.Namespace+"/"+ref.Name, 200).Attachments {
-				attachment(refKey(a.Index), a.Result)
+				attachment(detailSeen, []string{refKey(a.Index)}, a.Result)
 			}
 		}
 	}
-	for _, k := range slices.Concat(slices.Collect(maps.Keys(want.Listeners)), slices.Collect(maps.Keys(want.ParentRefs))) {
+	for k := range want.Listeners {
 		if !seen[k] {
 			t.Errorf("%s: not served", k)
+		}
+	}
+	for k := range want.ParentRefs {
+		if !listSeen[k] {
+			t.Errorf("%s: not served by the list", k)
+		}
+		if strings.HasPrefix(k, "HTTPRoute ") && !detailSeen[k] {
+			t.Errorf("%s: not served by route detail", k)
 		}
 	}
 
@@ -1042,5 +1074,53 @@ func TestIsolationNoteNeedsItsListenerSets(t *testing.T) {
 	}
 	if n := len(a.take()); n != 0 {
 		t.Errorf("AllowAll asked about %d refs", n)
+	}
+}
+
+// Rules §8.2: {name: edge} and {name: edge, namespace: infra} name one
+// listener under two report keys, so two checks; the controller accepted the
+// first and rejected the second. Route detail shows each; the list's one
+// ParentSummary merges them, worst first (design §7.3).
+func TestListMergesWrittenRefChecks(t *testing.T) {
+	short := edgeRef
+	short.Namespace = ""
+	dup := testutil.HTTPRoute("infra", "dup", []objects.ParentRef{short, edgeRef},
+		testutil.AcceptedBy(short, testutil.Controller), rejectedBy(edgeRef, "NotAllowedByListeners"))
+	_, srv, _ := startWith(t, setup{disputes: true}, viewAWorld(edgeWith([]objects.Listener{lst("http", 8080, "")}, up("http", 2)), dup)...)
+	var detail []string
+	for _, a := range get[RouteDetail](t, srv, routeDetail+"infra/dup", 200).Attachments {
+		detail = append(detail, a.Result.Computed.State)
+	}
+	if !slices.Equal(detail, []string{"checked", "disagrees"}) {
+		t.Fatalf("detail states %v", detail)
+	}
+	ps := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "infra/dup").Parents
+	if len(ps) != 1 || ps[0].Computed == nil {
+		t.Fatalf("parents %+v", ps)
+	}
+	a := ps[0].Computed
+	if a.Outcome != "accepted" || a.Computed.State != "disagrees" || len(a.Listeners) != 1 || a.Listeners[0].Computed.State != "disagrees" {
+		t.Errorf("merged %+v", a)
+	}
+}
+
+// The merge order and the restricted rule (design §7.3).
+func TestMergeComputed(t *testing.T) {
+	c := func(st string, cov ...string) Computed { return Computed{State: st, Coverage: cov, Note: st} }
+	for _, tc := range []struct {
+		a, b Computed
+		want Computed
+	}{
+		{c("checked", "status-compatible"), c("checked", "not-verified"), Computed{State: "checked", Coverage: []string{"status-compatible", "not-verified"}, Note: "checked"}},
+		{c("checked", "count-agrees"), c("disagrees"), Computed{State: "disagrees", Coverage: []string{"count-agrees"}, Note: "disagrees"}},
+		{c("pending"), c("disagrees"), Computed{State: "disagrees", Note: "disagrees"}},
+		{c("unknown"), c("pending"), Computed{State: "pending", Note: "pending"}},
+		{c("checked"), c("unknown"), Computed{State: "unknown", Note: "unknown"}},
+		{c("disagrees"), Computed{State: "restricted"}, Computed{State: "restricted"}},
+		{Computed{State: "restricted"}, c("checked", "status-compatible"), Computed{State: "restricted"}},
+	} {
+		if got := mergeComputed(tc.a, tc.b); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("merge(%s, %s) = %+v, want %+v", tc.a.State, tc.b.State, got, tc.want)
+		}
 	}
 }

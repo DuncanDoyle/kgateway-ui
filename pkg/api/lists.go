@@ -124,6 +124,11 @@ func (ls *list) parentSummary(id explore.RowID, p explore.ParentLink) ParentSumm
 	}
 	if f := ls.ix.Facts(id, p); f != nil {
 		a := ls.f.attachment(f)
+		for k := range p.Dups {
+			if d := ls.ix.DupFacts(id, p, k); d != nil {
+				a = mergeAttachment(a, ls.f.attachment(d))
+			}
+		}
 		s.Computed = &a
 	}
 	return s

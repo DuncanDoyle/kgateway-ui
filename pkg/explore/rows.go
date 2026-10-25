@@ -145,7 +145,13 @@ func (b *builder) link(i int, l ParentLink) {
 	if slices.ContainsFunc(r.Parents, func(x ParentLink) bool { return x.Ref == l.Ref && x.Target == l.Target }) {
 		return
 	}
-	l.Spec = slices.Index(b.aux[i].specRefs, l.Ref)
+	specs := b.aux[i].specRefs
+	l.Spec = slices.Index(specs, l.Ref)
+	for j := l.Spec + 1; l.Spec >= 0 && j < len(specs); j++ {
+		if specs[j] == l.Ref {
+			l.Dups = append(l.Dups, j)
+		}
+	}
 	r.Parents = append(r.Parents, l)
 }
 

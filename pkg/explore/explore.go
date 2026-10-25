@@ -116,6 +116,9 @@ type ParentLink struct {
 	Pending string
 	// Spec is the index of Ref in the row's spec parentRefs, or -1.
 	Spec int
+	// Dups are the later spec indexes that resolve to Ref; one written
+	// differently has its own report key and check (rules §8.2). Usually nil.
+	Dups []int
 }
 
 // RouteRow is one route the install lists (design §3.5): an owned route,
@@ -287,6 +290,11 @@ func (ix *Index) Facts(id RowID, l ParentLink) *RefFacts {
 		return nil
 	}
 	return ix.Routes[id].facts(l.Spec, l.Target)
+}
+
+// DupFacts returns view A's facts for l's spec index l.Dups[k], or nil.
+func (ix *Index) DupFacts(id RowID, l ParentLink, k int) *RefFacts {
+	return ix.Routes[id].facts(l.Dups[k], l.Target)
 }
 
 // Ref returns the ref at index i of the dependency table.

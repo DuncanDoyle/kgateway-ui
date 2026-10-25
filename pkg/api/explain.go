@@ -256,3 +256,69 @@ func (f facts) listener(resource objects.Ref, dto *ListenerDTO) {
 	}
 	dto.Computed = &c
 }
+
+// stateRank orders check states for a merge, worst highest (design §7.3):
+// disagrees > pending > unknown > restricted > checked.
+func stateRank(st string) int {
+	switch computed.State(st) {
+	case computed.StateDisagrees:
+		return 4
+	case computed.StatePending:
+		return 3
+	case computed.StateUnknown:
+		return 2
+	case computed.StateRestricted:
+		return 1
+	}
+	return 0
+}
+
+// mergeComputed is a and b as one fact: the worst state with its reason and
+// note, a's on a tie, and the union of their coverage. A restricted side
+// makes it restricted, since the union would depend on that side.
+func mergeComputed(a, b Computed) Computed {
+	switch {
+	case a.State == string(computed.StateRestricted):
+		return a
+	case b.State == string(computed.StateRestricted):
+		return b
+	}
+	out := a
+	if stateRank(b.State) > stateRank(a.State) {
+		out = b
+	}
+	var cov []string
+	for _, c := range []computed.Coverage{computed.CoverageCount, computed.CoverageStatus, computed.CoverageNone} {
+		if slices.Contains(a.Coverage, string(c)) || slices.Contains(b.Coverage, string(c)) {
+			cov = append(cov, string(c))
+		}
+	}
+	out.Coverage = cov
+	return out
+}
+
+// mergeAttachment is the list's one Attachment for two written parentRefs
+// that resolve to the same parent (design §7.3). They share outcome,
+// listeners and deps and differ only in their checks, which merge worst first.
+func mergeAttachment(a, b Attachment) Attachment {
+	a.Computed = mergeComputed(a.Computed, b.Computed)
+	if st := computed.State(a.Computed.State); st == computed.StateRestricted || st == computed.StateUnknown {
+		return Attachment{Listeners: []ListenerAttachment{}, Computed: a.Computed}
+	}
+	for i := range a.Listeners {
+		m := &a.Listeners[i]
+		for _, o := range b.Listeners {
+			if o.Listener == m.Listener && o.Resource == m.Resource {
+				m.Computed = mergeComputed(m.Computed, o.Computed)
+				if m.EffectiveHostnames == nil {
+					m.EffectiveHostnames = o.EffectiveHostnames
+				}
+			}
+		}
+		// Hostnames go with checked or disagrees only (design §7.3).
+		if st := computed.State(m.Computed.State); st != computed.StateChecked && st != computed.StateDisagrees {
+			m.EffectiveHostnames = nil
+		}
+	}
+	return a
+}

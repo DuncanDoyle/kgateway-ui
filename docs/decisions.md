@@ -473,3 +473,17 @@ quirk 2 (prefix /q):
 **Consequences:**
 - Task 49 runs the sustained stream in both worlds and applies the cheap allocation cuts anyway (pre-sized finding slices, `Finding.parent` as a pointer), which bring the worst case from 44.2 to 35.1 MiB.
 - Replaces the user's 2026-10-23 "keep 32 MiB" for allocation; the ledger note to revisit it at each sub-phase close now applies to CPU and retained heap.
+
+## D-023 — View A on the wire: hidden counts and merged written refs (2026-10-25, phase 2)
+**Status:** accepted 2026-10-25 (user)
+**Context:**
+- The 2.3 cross-model review found that a hidden candidate route moved a visible route's membership: the count's unknown state and the `listener=` filter ignored the count's dependencies.
+- The review also found that the route list showed only the first of several written parentRefs that resolve to one parent. Each has its own report key and check (rules §8.2), so a contradicting second check was invisible in the list.
+
+**Decision:**
+1. A count's facts, its check and its unknown state, reach a membership and the `listener=` filter only when the count's dependencies are visible. Otherwise the membership carries only its parentRef's check (design §7.2, §7.4 rule 5).
+2. The list's one `ParentSummary.computed` merges those checks: worst state first (`disagrees` > `pending` > `unknown` > `restricted` > `checked`), coverage united, `restricted` if any side is. Route detail keeps each written ref separate (design §7.3, rules §8.4).
+
+**Consequences:**
+- A caller who cannot view a count's dependencies may see a membership as checked where an unrestricted caller sees it unknown. That reveals nothing hidden.
+- No wire format change: `ParentSummary` keeps its shape.

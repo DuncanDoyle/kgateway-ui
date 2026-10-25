@@ -388,6 +388,8 @@ A result may carry several labels. A route's listener membership carries the lis
 
 Check states on the wire are `checked`, `disagrees`, `pending`, `unknown` and `restricted`. `restricted` is set at serve time when the caller may not view a dependency (design §7.4).
 
+A route list row merges the checks of written parentRefs that resolve to one parent: worst state first (`disagrees` > `pending` > `unknown` > `restricted` > `checked`), coverage united, and `restricted` if any side is. Route detail shows each check (design §7.3) **(user, 2026-10-25)**.
+
 ### 8.5 Completeness
 
 An aggregate (§8.2) is **complete** when every context that could contribute to it was evaluated. Positive evidence needs no completeness; negative evidence does.
