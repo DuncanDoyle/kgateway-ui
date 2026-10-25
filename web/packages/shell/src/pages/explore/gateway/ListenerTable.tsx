@@ -267,7 +267,9 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
                     <OneLine text={l.name} />
                   </td>
                   <td>{l.port ?? <Muted>{listenerCopy.notSet}</Muted>}</td>
-                  <td>{l.protocol}</td>
+                  <td>
+                    <OneLine text={l.protocol} />
+                  </td>
                   {narrow ? null : <td>{l.hostname ? <OneLine text={l.hostname} /> : hostname(l)}</td>}
                   {narrow ? null : (
                     <td>
