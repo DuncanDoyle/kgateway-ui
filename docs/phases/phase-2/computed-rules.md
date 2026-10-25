@@ -367,7 +367,7 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Class | When | Check state | KGWUI-012 |
 |---|---|---|---|
 | Contradicting current status | the signal exists, is current, and contradicts the expectation | `pending` until mature, then `disagrees` | when mature (§9.3) |
-| Stale status | the signal exists and is stale | `pending`, "Waiting for the controller" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
+| Stale status | the signal exists and is stale | `pending`, "Waiting for the controller's status" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
 | Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route, and a missing listener entry on an owned Gateway or ListenerSet (`pkg/health/checks.go:264`), is Phase 1's KGWUI-003, and the check stays `pending`. |
 | Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (both sets: a drop or deselection caused by a parent edit, D-021); otherwise, including a drop caused by a child edit, `not-verified`, "The controller may keep old status". Cause: a child edit when the child's current generation was first seen after the parent's current generation, or when either time is unknown; otherwise a parent edit (our call) | where verified, when mature |
@@ -381,8 +381,8 @@ A cross-check that passes says what it verified. "Agrees" is never shown for a f
 | Coverage | Means | Shown as (draft) |
 |---|---|---|
 | `count-agrees` | the listener's count equals `attachedRoutes`; membership and effective hostnames are not verified | "Count agrees with the controller" |
-| `status-compatible` | the parentRef's or child's status is consistent with the outcome | "Status agrees" |
-| `not-verified` | nothing the controller writes covers this fact | "Not checked by the controller" |
+| `status-compatible` | the parentRef's or child's status is consistent with the outcome | "Consistent with the status" |
+| `not-verified` | nothing the controller writes covers this fact | "The controller does not report this" |
 
 A result may carry several labels. A route's listener membership carries the listener's `count-agrees` and the parentRef's `status-compatible`, and stays `not-verified` for which listener it is on when its parentRef matched several. An effective matcher is always `not-verified`.
 
