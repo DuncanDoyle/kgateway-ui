@@ -119,33 +119,39 @@ func TestKGWUI012ResourceSince(t *testing.T) {
 
 // Each KGWUI-012 keeps its own resource, and ResourceSince is that object's
 // first-seen for an owned Gateway, ListenerSet or route; nil when not owned.
+// Two of each resource kind make a lookup of the wrong object fail.
 func TestKGWUI012SubjectsResourceSince(t *testing.T) {
-	gw := testutil.Gateway("infra", "edge", "kgateway", nil)
-	ls := testutil.ListenerSet("infra", "extra", testutil.GwRef("infra", "edge"), nil)
-	rt := testutil.HTTPRoute("shop", "a", []objects.ParentRef{testutil.GwRef("infra", "edge")})
-	seen := map[string]time.Time{}
-	for i, u := range []*unstructured.Unstructured{gw, ls, rt} {
-		seen[u.GetKind()] = testutil.Now.Add(-time.Duration(i+1) * time.Minute)
+	objs := []*unstructured.Unstructured{
+		testutil.Gateway("infra", "edge", "kgateway", nil),
+		testutil.Gateway("infra", "edge2", "kgateway", nil),
+		testutil.ListenerSet("infra", "extra", testutil.GwRef("infra", "edge"), nil),
+		testutil.ListenerSet("infra", "extra2", testutil.GwRef("infra", "edge2"), nil),
+		testutil.HTTPRoute("shop", "a", []objects.ParentRef{testutil.GwRef("infra", "edge")}),
 	}
-	check := func(on objects.Ref) computed.CheckResult {
+	seen := map[objects.Ref]time.Time{}
+	var checks []computed.CheckResult
+	for i, u := range objs {
+		on := objects.RefOf(u)
+		seen[on] = testutil.Now.Add(-time.Duration(i+1) * time.Minute)
 		c := countCheck(computed.StateDisagrees, computed.ClassContradicting)
 		c.On, c.ID.Subject = on, on.String()
-		return c
+		checks = append(checks, c)
 	}
 	gone := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gone"}
+	c := countCheck(computed.StateDisagrees, computed.ClassContradicting)
+	c.On, c.ID.Subject = gone, gone.String()
+	checks = append(checks, c)
 	in := health.Input{Install: install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway"}},
-		Owned: &install.Owned{Gateways: []*unstructured.Unstructured{gw}, ListenerSets: []*unstructured.Unstructured{ls},
-			Routes: []install.OwnedObject{{Obj: rt}}},
+		Owned:    &install.Owned{Gateways: objs[:2], ListenerSets: objs[2:4], Routes: []install.OwnedObject{{Obj: objs[4]}}},
 		Snapshot: &cache.Snapshot{Synced: true}, Now: testutil.Now,
-		FirstSeen: func(u *unstructured.Unstructured) time.Time { return seen[u.GetKind()] },
-		Computed: &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{
-			check(objects.RefOf(gw)), check(objects.RefOf(ls)), check(objects.RefOf(rt)), check(gone)}}}
+		FirstSeen: func(u *unstructured.Unstructured) time.Time { return seen[objects.RefOf(u)] },
+		Computed:  &computed.Views{RuleSet: "kgateway-2.4", Checks: checks}}
 	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:])
-	if len(rep.Findings) != 4 {
+	if len(rep.Findings) != len(checks) {
 		t.Fatalf("findings %+v", rep.Findings)
 	}
 	for _, f := range rep.Findings {
-		want, owned := seen[f.Resource.Kind], *f.Resource != gone
+		want, owned := seen[*f.Resource]
 		switch {
 		case !owned && f.ResourceSince != nil:
 			t.Errorf("%s: ResourceSince %v, want none", f.Resource, f.ResourceSince)

@@ -63,6 +63,9 @@ func Live(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
 	dyn, kube := testutil.ScaleClients(tb, objs...)
 	w.Update = func(ctx context.Context, u *unstructured.Unstructured) error {
 		_, err := dyn.Resource(w.RouteGVR).Namespace(u.GetNamespace()).Update(ctx, u, metav1.UpdateOptions{})
+		// The fakes keep a copy of every action forever; long streams would measure that log, not the UI.
+		dyn.ClearActions()
+		kube.ClearActions()
 		return err
 	}
 	det := install.UpstreamDetector{}

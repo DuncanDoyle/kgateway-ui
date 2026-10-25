@@ -1,15 +1,17 @@
 go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 30m ./pkg/api
 === RUN   TestBudgetSustainedStream
 === RUN   TestBudgetSustainedStream/large
-    budget_test.go:283: budget_test.go:444: stream 10m0.001s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 55.55s = 9.3 % of one core (budget ≤ 15 %); recompute wall 38.489s = 6.4 %; GC share 23.8 % of used CPU (2.2 % of one core)
-    budget_test.go:283: budget_test.go:446: polls: 2400, p50 1.01ms p95 1.84ms max 4.68ms
-    budget_test.go:283: budget_test.go:450: large: 0 KGWUI-012 of 3309 checks at the end; memory from the OS 233.3 MiB, heap in use 163.8 MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)
+    budget_test.go:287: budget_test.go:458: stream 10m0.001s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 55.145s = 9.2 % of one core (budget ≤ 15 %); recompute wall 39.364s = 6.6 %; GC share 21.7 % of used CPU (2.0 % of one core)
+    budget_test.go:287: budget_test.go:460: polls: 2400, p50 930µs p95 1.76ms max 3.42ms
+    budget_test.go:287: budget_test.go:465: large: heap after GC 61.9 MiB at 1 min, 51.3 MiB at the end (-10.6 MiB)
+    budget_test.go:287: budget_test.go:470: large: 0 KGWUI-012 of 3309 checks at the end; memory from the OS 164.4 MiB, heap in use 76.7 MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)
 === RUN   TestBudgetSustainedStream/large-contradicting
-    budget_test.go:283: budget_test.go:444: stream 10m0.003s: 5980 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 565 publications; process CPU 59.313s = 9.9 % of one core (budget ≤ 15 %); recompute wall 40.831s = 6.8 %; GC share 25.2 % of used CPU (2.5 % of one core)
-    budget_test.go:283: budget_test.go:446: polls: 2401, p50 923µs p95 1.65ms max 9.4ms
-    budget_test.go:283: budget_test.go:450: large-contradicting: 3309 KGWUI-012 of 3309 checks at the end; memory from the OS 229.1 MiB, heap in use 174.6 MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)
+    budget_test.go:287: budget_test.go:458: stream 10m0.003s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 1m1.42s = 10.2 % of one core (budget ≤ 15 %); recompute wall 43.312s = 7.2 %; GC share 23.1 % of used CPU (2.4 % of one core)
+    budget_test.go:287: budget_test.go:460: polls: 2401, p50 932µs p95 1.78ms max 10.38ms
+    budget_test.go:287: budget_test.go:465: large-contradicting: heap after GC 61.8 MiB at 1 min, 52.3 MiB at the end (-9.6 MiB)
+    budget_test.go:287: budget_test.go:470: large-contradicting: 3309 KGWUI-012 of 3309 checks at the end; memory from the OS 172.7 MiB, heap in use 75.4 MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)
 --- PASS: TestBudgetSustainedStream (1230.45s)
     --- PASS: TestBudgetSustainedStream/large (600.17s)
-    --- PASS: TestBudgetSustainedStream/large-contradicting (630.29s)
+    --- PASS: TestBudgetSustainedStream/large-contradicting (630.27s)
 PASS
-ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	1230.900s
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	1230.896s

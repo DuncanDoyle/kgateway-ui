@@ -278,13 +278,14 @@ func TestBudgetSustainedStream(t *testing.T) {
 			cmd := exec.Command(os.Args[0], args...)
 			cmd.Env = append(os.Environ(), streamChildEnv+"="+tier.Name)
 			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Errorf("stream child: %v\n%s", err, out)
+				return
+			}
 			for line := range strings.Lines(string(out)) {
 				if strings.Contains(line, "budget_test.go") {
 					t.Log(strings.TrimSpace(line))
 				}
-			}
-			if err != nil {
-				t.Errorf("stream child: %v", err)
 			}
 		})
 	}
@@ -292,6 +293,14 @@ func TestBudgetSustainedStream(t *testing.T) {
 
 // streamChildEnv makes TestBudgetSustainedStream run one world in this process.
 const streamChildEnv = "KGWUI_STREAM_CHILD"
+
+// liveHeap is HeapAlloc after a full GC.
+func liveHeap() uint64 {
+	runtime.GC()
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	return ms.HeapAlloc
+}
 
 // matured reports whether every computed check of m raised KGWUI-012.
 func matured(m *engine.Model) (findings, checks int) {
@@ -416,8 +425,13 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 		})
 	}
 	updates := 0
+	// The live heap after a full GC, at the first minute mark and at the end: growth would be a leak.
+	var heap60 uint64
 	tick := time.NewTicker(100 * time.Millisecond)
 	for deadline := start.Add(dur); time.Now().Before(deadline); <-tick.C {
+		if heap60 == 0 && dur > time.Minute && time.Since(start) >= time.Minute {
+			heap60 = liveHeap()
+		}
 		u := w.Routes[updates%len(w.Routes)].DeepCopy()
 		updates++
 		u.SetResourceVersion(strconv.Itoa(1_000_000 + updates))
@@ -444,6 +458,12 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	t.Logf("stream %v: %d updates, %d recomputes (%.2f/s, budget ≤ 1/s), %d publications; process CPU %v = %.1f %% of one core (budget ≤ 15 %%); recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
 		wall.Round(time.Millisecond), updates, runs, rate, pubs, cpu.Round(time.Millisecond), 100*share, busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
 	t.Logf("polls: %d, p50 %v p95 %v max %v", len(polls), rd(percentile(polls, 50)), rd(percentile(polls, 95)), rd(polls[len(polls)-1]))
+	heapEnd := liveHeap()
+	if heap60 == 0 {
+		heap60 = heapEnd // the -short run ends at the minute mark
+	}
+	t.Logf("%s: heap after GC %.1f MiB at 1 min, %.1f MiB at the end (%+.1f MiB)",
+		tier.Name, float64(heap60)/mib, float64(heapEnd)/mib, (float64(heapEnd)-float64(heap60))/mib)
 	f, c := matured(e.Current().Model)
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)

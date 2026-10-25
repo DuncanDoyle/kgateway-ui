@@ -464,12 +464,12 @@ quirk 2 (prefix /q):
 **Context:**
 - Design §9.6 gated allocation per warm recompute at ≤ 32 MiB at the Large tier, an unexplained number of our own (all §9.6 budgets are "our call"). The user kept it on 2026-10-23 when 2.2 measured 35.7 MB on CI.
 - Allocation is short-lived garbage; it costs only through garbage collection. The stream budget (engine CPU ≤ 15 % of one core) measures that cost directly, and retained heap measures what the UI holds against the chart's pod limit (`limits.memory: 512Mi`).
-- 2.3 at Large: 29.2 MiB per recompute in a consistent world, 44.2 MiB in a worst case where every route status contradicts view A (3,309 KGWUI-012 and 2,574 Phase 1 KGWUI-002 findings); retained heap +13.6 and +16.1 MiB over the baseline.
+- 2.3 at Large: 29.2 MiB per recompute in a consistent world, 44.2 MiB in a worst case where every route status contradicts view A (3,309 KGWUI-012 and 2,574 Phase 1 KGWUI-002 findings), 35.1 MiB after the cuts below; retained heap +13.6 and +16.1 MiB over the baseline.
 
 **Decision:**
 1. Allocation per warm recompute is reported, not gated.
 2. The gates are engine CPU in the sustained stream (≤ 15 % of one core), retained heap (≤ 32 MiB above the baseline) and staying well inside the pod memory limit, each in the consistent world and in the worst case. "Well inside" is memory obtained from the OS during the sustained stream ≤ 256 MiB, half the limit **(our call)**.
 
 **Consequences:**
-- Task 49 runs the sustained stream in both worlds and applies the cheap allocation cuts anyway (pre-sized finding slices, `Finding.parent` out of `Finding`).
+- Task 49 runs the sustained stream in both worlds and applies the cheap allocation cuts anyway (pre-sized finding slices, `Finding.parent` as a pointer), which bring the worst case from 44.2 to 35.1 MiB.
 - Replaces the user's 2026-10-23 "keep 32 MiB" for allocation; the ledger note to revisit it at each sub-phase close now applies to CPU and retained heap.

@@ -327,8 +327,12 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			slices.Sort(alloc)
 			slices.Sort(step)
 			t.Logf("%s: %d checks, %d KGWUI-012 findings, %d persistence entries", tier.Name, len(views[0].Checks), len(disagreements(m)), len(e.persist.m))
-			t.Logf("%s: cold median %v max %v (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 120 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
-				tier.Name, cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond),
+			coldNote := ""
+			if tier.Contradict {
+				coldNote = ", a first compute with no matured windows"
+			}
+			t.Logf("%s: cold median %v max %v%s (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 120 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
+				tier.Name, cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond), coldNote,
 				warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
 				float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib,
 				step[len(step)/2].Round(time.Microsecond), step[len(step)-1].Round(time.Microsecond))
