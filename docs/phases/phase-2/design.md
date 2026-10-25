@@ -777,9 +777,10 @@ Every tier also has 5 % each of GRPC, TCP and TLS routes, labelled namespaces be
 | Idle 10 min | recomputes only from the safety timer and deadlines; confirm-tick CPU reported | 2.1 |
 | One warm recompute | ≤ 100 ms with the explorer (2.2), ≤ 120 ms with view A (2.3), ≤ 150 ms with views B and C (2.4) | 2.2–2.4 |
 | One cold recompute | ≤ 1 s | 2.2–2.4 |
-| Allocation per warm recompute | ≤ 32 MiB | 2.2–2.4 |
+| Allocation per warm recompute | reported, not gated (user, 2026-10-25; D-022): its cost shows as GC CPU in the sustained stream | 2.2–2.4 |
 | Heap of index, computed views and decode cache | ≤ 32 MiB above the baseline, per kind | 2.2–2.4 |
-| Sustained stream (one event per 100 ms for 10 min) with 20 polling clients | ≤ 1 recompute per s; engine CPU ≤ 15 % of one core; GC share reported | 2.2–2.4 |
+| Sustained stream (one event per 100 ms for 10 min) with 20 polling clients | ≤ 1 recompute per s; engine CPU ≤ 15 % of one core; GC share reported; from 2.3 in the consistent world and in the worst case | 2.2–2.4 |
+| Retained memory | heap stays well inside the chart's pod limit (`limits.memory`, 512Mi) in the worst case | 2.3–2.4 |
 | List request per filter mix (none, parent, listener, namespace+state, `q`, `sort=health`, delegation of the widest parent) | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 2.2–2.4 |
 | Route detail on the deepest child | p95 < 50 ms | 2.2, 2.4 |
 | Dense selection recompute | reported; the cut is deterministic | 2.4 |

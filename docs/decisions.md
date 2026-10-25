@@ -458,3 +458,18 @@ quirk 2 (prefix /q):
 - When delegation and backend failures meet on one key, the last rule in spec order wins (observed with two rule orderings). §8.2 already compares the reason only without non-delegation backendRefs; unchanged.
 - `attachedRoutes` never counts delegated children. A ListenerSet or XListenerSet route counts only on that set's listener, not on the Gateway's. View A (2.3) uses this.
 - Phase 1's base fixtures attach `good` and `broken`; `blog/posts` is outside install A's scope and was not counted.
+
+## D-022 — Memory is gated on CPU and retained heap, not allocation (2026-10-25, phase 2)
+**Status:** accepted 2026-10-25 (user)
+**Context:**
+- Design §9.6 gated allocation per warm recompute at ≤ 32 MiB at the Large tier, an unexplained number of our own (all §9.6 budgets are "our call"). The user kept it on 2026-10-23 when 2.2 measured 35.7 MB on CI.
+- Allocation is short-lived garbage; it costs only through garbage collection. The stream budget (engine CPU ≤ 15 % of one core) measures that cost directly, and retained heap measures what the UI holds against the chart's pod limit (`limits.memory: 512Mi`).
+- 2.3 at Large: 29.2 MiB per recompute in a consistent world, 44.2 MiB in a worst case where every route status contradicts view A (3,309 KGWUI-012 and 2,574 Phase 1 KGWUI-002 findings); retained heap +13.6 and +16.1 MiB over the baseline.
+
+**Decision:**
+1. Allocation per warm recompute is reported, not gated.
+2. The gates are engine CPU in the sustained stream (≤ 15 % of one core), retained heap (≤ 32 MiB above the baseline) and staying well inside the pod memory limit, each in the consistent world and in the worst case.
+
+**Consequences:**
+- Task 49 runs the sustained stream in both worlds and applies the cheap allocation cuts anyway (pre-sized finding slices, `Finding.parent` out of `Finding`).
+- Replaces the user's 2026-10-23 "keep 32 MiB" for allocation; the ledger note to revisit it at each sub-phase close now applies to CPU and retained heap.
