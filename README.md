@@ -126,7 +126,7 @@ func extensions() []extension.Option {
 }
 ```
 
-The other options are `WithDetectors`, `WithChecks`, `WithScopeProvider` and `WithScopeVerifier`. Kinds added with `WithKinds` need matching rules in the chart's ClusterRole.
+The other options are `WithDetectors`, `WithChecks`, `WithScopeProvider`, `WithScopeVerifier` and `WithComputedRules`. Kinds added with `WithKinds` need matching rules in the chart's ClusterRole.
 
 The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`:
 
@@ -149,6 +149,22 @@ createRoot(document.getElementById("root") as HTMLElement).render(<Shell extensi
 A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`.
 
 ## Upgrade notes
+
+### Computed listener attachment (sub-phase 2.3)
+
+The UI now computes which routes attach to each listener, using kgateway 2.3's or 2.4's own attachment rules, and cross-checks the result with the controller's status:
+
+- Listener tables and parent cards show a computed route count and each route's effective hostnames, labelled "Computed" and marked whether the controller agrees. The controller's status is always what counts.
+- The Gateways list's routes column and sort now use the computed count of the Gateway's own listeners; routes on its ListenerSets are not included.
+- The routes list takes `?listener=<name>` with a Gateway or ListenerSet `parent`.
+- KGWUI-012 is a new warning: the UI's computation has disagreed with the controller for over 30 seconds. It never turns an install red.
+- When the install's discovery scope is unknown, computed counts and outcomes read "Unknown" instead of guessing.
+- With per-user authorisation, a computed fact that depends on an object the viewer cannot see reads "Hidden". Its value is not shown.
+
+For downstream builds:
+
+- `extension.WithComputedRules` registers the rule set used for a controller version.
+- The chart gains `extraArgs`, extra flags appended to the UI binary's arguments.
 
 ### Gateway & Route Explorer (sub-phase 2.2)
 
