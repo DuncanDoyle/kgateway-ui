@@ -67,8 +67,9 @@ func isolationNotes(in computed.AttachmentInput, res *computed.AttachmentResult)
 	}
 }
 
-// noteDeps gives each known count of a Gateway's listeners, or of a ListenerSet's with a known
-// parent, the Gateway and every ListenerSet naming it: any of them can move the note.
+// noteDeps gives each known count of a Gateway's listeners, or of an accepted ListenerSet's with a
+// known parent, the resources eachMerged reads for that Gateway: the Gateway and its accepted
+// ListenerSets. A denied or statusless one is never read, so it is not a dependency.
 func noteDeps(in computed.AttachmentInput, res *computed.AttachmentResult) {
 	family := map[objects.Ref][]objects.Ref{}
 	gateway := make(map[objects.Ref]objects.Ref, len(in.Resources))
@@ -78,7 +79,7 @@ func noteDeps(in computed.AttachmentInput, res *computed.AttachmentResult) {
 		if r.Ref.Kind != "Gateway" {
 			g = r.Parent
 		}
-		if g != (objects.Ref{}) {
+		if g != (objects.Ref{}) && r.Acceptance == computed.Accepted {
 			gateway[r.Ref] = g
 			family[g] = append(family[g], g, r.Ref)
 		}

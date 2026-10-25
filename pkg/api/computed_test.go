@@ -538,6 +538,29 @@ func TestNoteOnUnknownVersion(t *testing.T) {
 	}
 }
 
+// Rule 4: the note depends only on the ListenerSets it reads. A hidden
+// denied or statusless ListenerSet naming edge is never read, so the note on
+// wide, which narrow on the same port always gives, stays visible.
+func TestIsolationNoteIgnoresUnreadListenerSets(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cs   []metav1.Condition
+	}{
+		{"denied", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowed")}},
+		{"no status", []metav1.Condition{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ls := admitAll(testutil.ListenerSet("infra", "ls1", edgeRef, tc.cs, up("extra", 0)))
+			gw := edgeWith([]objects.Listener{lst("wide", 8081, "*.example.com"), lst("narrow", 8081, "a.example.com")}, up("wide", 0), up("narrow", 0))
+			hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "ls1" })
+			_, srv, _ := startWith(t, setup{authz: hide}, viewAWorld(gw, ls)...)
+			if l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]; l.Name != "wide" || !l.IsolationNote {
+				t.Errorf("wide: isolationNote %v, computed %+v", l.IsolationNote, l.Computed)
+			}
+		})
+	}
+}
+
 // unknownCountWorld: edge's TLS listener tls has the accepted TLSRoute
 // shop/tls and the pre-v1 TCPRoute shop/tcp, which names edge through
 // tcpRef, under an unknown experimental setting.
