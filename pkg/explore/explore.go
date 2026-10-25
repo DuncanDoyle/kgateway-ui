@@ -221,7 +221,7 @@ type Index struct {
 	// Refs is the install's dependency table; a DepSet indexes it (design §7.4 rule 10).
 	// Refs[i] for i < len(Routes) is route row i's ref.
 	Refs []objects.Ref
-	// ByListener lists view A's members per listener whose count is known, by row and parentRef.
+	// ByListener lists view A's members per listener, by row and parentRef.
 	ByListener map[ListenerKey][]Member
 	// Listeners holds every computed listener count.
 	Listeners map[ListenerKey]ListenerFacts

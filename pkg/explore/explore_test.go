@@ -810,23 +810,30 @@ func TestByListenerMembers(t *testing.T) {
 }
 
 // A listener whose count is unknown presents no members, even when the rules
-// listed some (setting-unknown); the ref keeps its listener.
-func TestByListenerHidesMembersUnderUnknownCount(t *testing.T) {
+// listed some (setting-unknown); the ref keeps its listener. A caller who may
+// not view the count's deps cannot tell it is unknown, so sees the member.
+func TestListenerRowsUnderUnknownCount(t *testing.T) {
 	v := views()
 	v.Attachment.Counts[0].Unknown = computed.UnknownSetting
 	ix := buildViews(t, v)
 	key := ListenerKey{Resource: gwObj, Listener: "http"}
-	if m := ix.ByListener[key]; len(m) != 0 {
-		t.Errorf("members under an unknown count: %+v", m)
-	}
 	if f := ix.Listeners[key]; f.Known || f.Unknown != computed.UnknownSetting {
 		t.Errorf("facts %+v", f)
 	}
 	if _, r := row(t, ix, "shop", "a"); len(r.Computed) != 1 || r.Computed[0].Listeners[0].Hostnames[0] != "a.example.com" {
 		t.Errorf("a facts %+v", r.Computed)
 	}
-	if g := ix.Gateways[0]; slices.Contains(g.Members, ids(t, ix, "a")[0]) {
-		t.Errorf("members %v", g.Members)
+	if n, ok := ix.GatewayMemberCount(0, nil); ok {
+		t.Errorf("gateway member count %d under an unknown count", n)
+	}
+	q := Query{Parent: &gwObj, Listener: "http"}
+	if p := mustRoutes(t, ix, q, nil); len(p.IDs) != 0 {
+		t.Errorf("members under an unknown count: %v", names(ix, p))
+	}
+	a := routeRef("shop", "a")
+	onlyA := func(r objects.Ref) bool { return r == a || r == gwObj }
+	if p := mustRoutes(t, ix, q, onlyA); !slices.Equal(names(ix, p), []string{"a"}) {
+		t.Errorf("hidden count deps: %v", names(ix, p))
 	}
 }
 

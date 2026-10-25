@@ -578,11 +578,8 @@ func (b *builder) views(ix *Index) {
 				}
 			}
 		}
-		// An unknown count presents no members, even when the rules list some (setting-unknown).
+		// Members of an unknown count are kept for callers who may not see that it is unknown (listenerRows).
 		k := ListenerKey{m.Resource, m.Listener}
-		if !ix.Listeners[k].Known {
-			continue
-		}
 		ms, ok := ix.ByListener[k]
 		if !ok {
 			j := i + 1

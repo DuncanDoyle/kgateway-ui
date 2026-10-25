@@ -193,23 +193,26 @@ func (f facts) attachment(rf *explore.RefFacts) Attachment {
 
 // membership is one listener of an accepted parentRef. A listener whose count
 // is unknown presents no members, so the membership is unknown too. The
-// count's check counts only when its dependencies are visible (rule 5). The
-// note is the ref check's.
+// count's facts, its check and its unknown state, count only when its
+// dependencies are visible (rules 4, 5): otherwise only the ref's check
+// applies, so a hidden candidate cannot move the membership. The note is the
+// ref check's.
 func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.ListenerHit) ListenerAttachment {
 	rule := rf.Out.Rule
 	out := ListenerAttachment{Resource: res, Listener: h.Listener}
-	// Every listener of a computed resource has a count; without one only the ref's check applies.
-	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: rf.Out.Resource, Listener: h.Listener}]
-	switch {
-	case !f.v.allowDeps(f.ix, h.Deps):
+	if !f.v.allowDeps(f.ix, h.Deps) {
 		out.Computed = f.restricted(rule)
 		return out
-	case ok && !lf.Known:
+	}
+	// Every listener of a computed resource has a count; without one only the ref's check applies.
+	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: rf.Out.Resource, Listener: h.Listener}]
+	counted := ok && f.v.allowDeps(f.ix, lf.Deps)
+	if counted && !lf.Known {
 		out.Computed = f.unknown(rule, lf.Unknown)
 		return out
 	}
 	lc := lf.Check
-	if !ok || !f.v.allowDeps(f.ix, lf.Deps) {
+	if !counted {
 		lc = nil
 	}
 	var lv, rv computed.CheckResult

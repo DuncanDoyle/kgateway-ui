@@ -323,8 +323,12 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 }
 
 // listenerRows are the distinct rows with a member on k whose dependencies
-// visible admits (design §7.4 rule 4a).
+// visible admits (design §7.4 rule 4a). A count known to be unknown has no
+// members; one whose dependencies are hidden cannot be told unknown (rule 5).
 func (ix *Index) listenerRows(k ListenerKey, visible func(objects.Ref) bool) []RowID {
+	if f := ix.Listeners[k]; !f.Known && ix.Visible(f.Deps, visible) {
+		return nil
+	}
 	ms := ix.ByListener[k]
 	out := make([]RowID, 0, len(ms))
 	for _, m := range ms {

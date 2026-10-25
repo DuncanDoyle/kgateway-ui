@@ -538,10 +538,10 @@ func TestNoteOnUnknownVersion(t *testing.T) {
 	}
 }
 
-// A listener whose count is unknown presents no members: on a TLS listener a
-// pre-v1 TCPRoute under an unknown experimental setting makes the count
-// setting-unknown, so the accepted TLSRoute's membership is unknown too.
-func TestUnknownCountHasNoMembers(t *testing.T) {
+// unknownCountWorld: edge's TLS listener tls has the accepted TLSRoute
+// shop/tls and the pre-v1 TCPRoute shop/tcp, which names edge through
+// tcpRef, under an unknown experimental setting.
+func unknownCountWorld(tcpRef objects.ParentRef) (setup, []runtime.Object) {
 	served := slices.Clone(testutil.ServedUpstream())
 	for i := range served {
 		switch served[i].Kind {
@@ -556,7 +556,7 @@ func TestUnknownCountHasNoMembers(t *testing.T) {
 	tlsRoute := tcpRoute("v1", "shop", "tls", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller))
 	tlsRoute.SetKind("TLSRoute")
 	objs := viewAWorld(edgeWith([]objects.Listener{tls}, up("tls", 2)), tlsRoute,
-		tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)))
+		tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{tcpRef}, testutil.AcceptedBy(tcpRef, testutil.Controller)))
 	exp := corev1.EnvVar{Name: install.ExperimentalEnv, ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}
 	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`), exp)
 	for i, o := range objs {
@@ -571,7 +571,15 @@ func TestUnknownCountHasNoMembers(t *testing.T) {
 			}
 		}
 	}
-	_, srv, _ := startWith(t, setup{served: served, disputes: true}, objs...)
+	return setup{served: served, disputes: true}, objs
+}
+
+// A listener whose count is unknown presents no members: on a TLS listener a
+// pre-v1 TCPRoute under an unknown experimental setting makes the count
+// setting-unknown, so the accepted TLSRoute's membership is unknown too.
+func TestUnknownCountHasNoMembers(t *testing.T) {
+	s, objs := unknownCountWorld(edgeRef)
+	_, srv, _ := startWith(t, s, objs...)
 	if l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]; l.ComputedRoutes != nil || l.Computed == nil || l.Computed.Reason != string(computed.UnknownSetting) {
 		t.Fatalf("tls count %v %+v", l.ComputedRoutes, l.Computed)
 	}
@@ -585,6 +593,56 @@ func TestUnknownCountHasNoMembers(t *testing.T) {
 	}
 	if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200); p.Total != 0 {
 		t.Errorf("listener=tls lists %v", routeNames(p))
+	}
+}
+
+// Rules 4, 4a and 5: the unknown state comes from the count, so a hidden
+// candidate behind it cannot move a visible route's membership. shop/tcp
+// either names the tls listener's port, making the count unknown, or misses
+// it, leaving the count known; a caller who may not view shop/tcp sees one
+// answer. Route detail is HTTPRoute only; it shares the list's projection. Rule 10: AllowAll asks nothing.
+func TestHiddenCandidateCannotMoveMembership(t *testing.T) {
+	miss := edgeRef
+	miss.Port = 9999
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "tcp" })
+	type seen struct {
+		List  []byte
+		Total int
+	}
+	look := func(t *testing.T, tcpRef objects.ParentRef, authz Authorizer) seen {
+		t.Helper()
+		s, objs := unknownCountWorld(tcpRef)
+		s.authz = authz
+		_, srv, _ := startWith(t, s, objs...)
+		row := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/tls")
+		list, err := json.Marshal(row.Parents[0].Computed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seen{list, get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200).Total}
+	}
+	if u, k := look(t, edgeRef, nil), look(t, miss, nil); bytes.Equal(u.List, k.List) || u.Total == k.Total {
+		t.Fatalf("visible shop/tcp should move the membership:\n%s\n%s", u.List, k.List)
+	}
+	u, k := look(t, edgeRef, hide), look(t, miss, hide)
+	if !bytes.Equal(u.List, k.List) {
+		t.Errorf("list: hidden shop/tcp moves the membership:\n%s\n%s", u.List, k.List)
+	}
+	if u.Total != k.Total {
+		t.Errorf("listener=tls: hidden shop/tcp moves the total: %d, %d", u.Total, k.Total)
+	}
+	a := &countingAuthz{all: true}
+	s, objs := unknownCountWorld(edgeRef)
+	_, ref, _ := startWith(t, s, objs...)
+	s.authz = a
+	_, srv, _ := startWith(t, s, objs...)
+	for _, p := range []string{underEdge, underEdge + "&listener=tls", gwDetail} {
+		if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
+			t.Errorf("GET %s differs from AllowAll", p)
+		}
+		if n := len(a.take()); n != 0 {
+			t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
+		}
 	}
 }
 
