@@ -29,6 +29,10 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 		}
 		fs = make([]Finding, 0, n)
+		var owned map[objects.Ref]*unstructured.Unstructured
+		if n > 0 {
+			owned = ownedResources(in.Owned)
+		}
 		for i := range v.Checks {
 			ch := &v.Checks[i]
 			if ch.State != computed.StateDisagrees {
@@ -39,7 +43,7 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet),
 				Since: &since, Evidence: ch.Deps}
 			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
-			if u := ownedObject(in.Owned, on); u != nil {
+			if u := ownedObject(in.Owned, owned, on); u != nil {
 				own := in.firstSeen(u)
 				f.ResourceSince = &own
 			}
@@ -49,17 +53,29 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), false, in.Now)
 }
 
-// ownedObject returns the owned Gateway, ListenerSet or route ref, or nil.
-func ownedObject(o *install.Owned, ref objects.Ref) *unstructured.Unstructured {
+// ownedResources maps the owned Gateways, then ListenerSets, by ref; the first of duplicates wins.
+func ownedResources(o *install.Owned) map[objects.Ref]*unstructured.Unstructured {
 	if o == nil {
 		return nil
 	}
+	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets))
 	for _, us := range [][]*unstructured.Unstructured{o.Gateways, o.ListenerSets} {
 		for _, u := range us {
-			if objects.RefOf(u) == ref {
-				return u
+			if r := objects.RefOf(u); m[r] == nil {
+				m[r] = u
 			}
 		}
+	}
+	return m
+}
+
+// ownedObject returns the owned Gateway or ListenerSet (from resources) or route ref, or nil.
+func ownedObject(o *install.Owned, resources map[objects.Ref]*unstructured.Unstructured, ref objects.Ref) *unstructured.Unstructured {
+	if o == nil {
+		return nil
+	}
+	if u := resources[ref]; u != nil {
+		return u
 	}
 	if r, ok := o.Route(ref); ok {
 		return r.Obj

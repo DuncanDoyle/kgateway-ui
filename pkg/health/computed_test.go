@@ -116,3 +116,41 @@ func TestKGWUI012ResourceSince(t *testing.T) {
 		t.Fatalf("findings %+v", rep.Findings)
 	}
 }
+
+// Each KGWUI-012 keeps its own resource, and ResourceSince is that object's
+// first-seen for an owned Gateway, ListenerSet or route; nil when not owned.
+func TestKGWUI012SubjectsResourceSince(t *testing.T) {
+	gw := testutil.Gateway("infra", "edge", "kgateway", nil)
+	ls := testutil.ListenerSet("infra", "extra", testutil.GwRef("infra", "edge"), nil)
+	rt := testutil.HTTPRoute("shop", "a", []objects.ParentRef{testutil.GwRef("infra", "edge")})
+	seen := map[string]time.Time{}
+	for i, u := range []*unstructured.Unstructured{gw, ls, rt} {
+		seen[u.GetKind()] = testutil.Now.Add(-time.Duration(i+1) * time.Minute)
+	}
+	check := func(on objects.Ref) computed.CheckResult {
+		c := countCheck(computed.StateDisagrees, computed.ClassContradicting)
+		c.On, c.ID.Subject = on, on.String()
+		return c
+	}
+	gone := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gone"}
+	in := health.Input{Install: install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway"}},
+		Owned: &install.Owned{Gateways: []*unstructured.Unstructured{gw}, ListenerSets: []*unstructured.Unstructured{ls},
+			Routes: []install.OwnedObject{{Obj: rt}}},
+		Snapshot: &cache.Snapshot{Synced: true}, Now: testutil.Now,
+		FirstSeen: func(u *unstructured.Unstructured) time.Time { return seen[u.GetKind()] },
+		Computed: &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{
+			check(objects.RefOf(gw)), check(objects.RefOf(ls)), check(objects.RefOf(rt)), check(gone)}}}
+	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:])
+	if len(rep.Findings) != 4 {
+		t.Fatalf("findings %+v", rep.Findings)
+	}
+	for _, f := range rep.Findings {
+		want, owned := seen[f.Resource.Kind], *f.Resource != gone
+		switch {
+		case !owned && f.ResourceSince != nil:
+			t.Errorf("%s: ResourceSince %v, want none", f.Resource, f.ResourceSince)
+		case owned && (f.ResourceSince == nil || !f.ResourceSince.Equal(want)):
+			t.Errorf("%s: ResourceSince %v, want %v", f.Resource, f.ResourceSince, want)
+		}
+	}
+}
