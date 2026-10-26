@@ -306,8 +306,18 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 }
 
 // compareRefs orders by namespace, name, group and kind (design §3.6 tie-break).
+// It stops at the first field that differs: Index.Row calls it per probe.
 func compareRefs(a, b objects.Ref) int {
-	return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Group, b.Group), cmp.Compare(a.Kind, b.Kind))
+	if c := strings.Compare(a.Namespace, b.Namespace); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Name, b.Name); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Group, b.Group); c != 0 {
+		return c
+	}
+	return strings.Compare(a.Kind, b.Kind)
 }
 
 func compareParentRefs(a, b objects.ParentRef) int {
