@@ -10,9 +10,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// delegationLabel is the label a label-mode ref selects on (api/labels/delegation.go:7).
-const delegationLabel = "delegation.kgateway.dev/label"
-
 // nsLabel keys routes by namespace and delegation label value.
 type nsLabel struct{ ns, value string }
 
@@ -41,7 +38,7 @@ func newSelector(routes []computed.DelegRoute, unwatched map[objects.Ref]bool, w
 	}
 	for i, r := range routes {
 		s.byNS[r.Ref.Namespace] = append(s.byNS[r.Ref.Namespace], i)
-		if v, ok := r.View.Labels[delegationLabel]; ok {
+		if v, ok := r.View.Labels[objects.DelegationLabelKey]; ok {
 			s.byNSLabel[nsLabel{r.Ref.Namespace, v}] = append(s.byNSLabel[nsLabel{r.Ref.Namespace, v}], i)
 			s.byLabel[v] = append(s.byLabel[v], i)
 		}

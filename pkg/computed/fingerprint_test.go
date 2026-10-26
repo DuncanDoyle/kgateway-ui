@@ -286,7 +286,7 @@ type fpDelegCase struct {
 	docs    func(map[string]string)
 	status  func(t *testing.T, objs map[string]*unstructured.Unstructured)
 	in      func(*computed.DelegationInput)
-	unknown bool // add an unknown root u that selects c, so c is incomplete
+	unknown string // add an unknown root u that selects this route, so it is incomplete
 }
 
 // replace returns a docs change replacing old with new in doc name, once.
@@ -299,12 +299,17 @@ func replace(name, old, new string) func(map[string]string) {
 	}
 }
 
-// restatus replaces route name's status with one entry under ref.
+// restatus replaces route name's status with one current entry under ref.
 func restatus(name, ref string, conds ...string) func(*testing.T, map[string]*unstructured.Unstructured) {
+	return restatusAt(name, ref, gen, conds...)
+}
+
+// restatusAt is restatus with the entry observed at obsGen.
+func restatusAt(name, ref string, obsGen int64, conds ...string) func(*testing.T, map[string]*unstructured.Unstructured) {
 	return func(t *testing.T, objs map[string]*unstructured.Unstructured) {
 		unstructured.RemoveNestedField(objs[name].Object, "status")
 		if ref != "" {
-			entry(t, objs[name], ref, gen, conds...)
+			entry(t, objs[name], ref, obsGen, conds...)
 		}
 	}
 }
@@ -323,8 +328,8 @@ func delegPrints(t *testing.T, v string, fc fpDelegCase) map[string]uint64 {
 		objs[name] = hr(t, docs[name])
 		w.routes = append(w.routes, objs[name])
 	}
-	if fc.unknown {
-		u := hr(t, "metadata: {name: u, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: ["+rule([]string{"/a/x"}, to("apps", "c"))+"]")
+	if fc.unknown != "" {
+		u := hr(t, "metadata: {name: u, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: ["+rule([]string{"/a/x"}, to("apps", fc.unknown))+"]")
 		w.routes, w.unknown = append(w.routes, u), []string{"infra/u"}
 	}
 	entry(t, objs["r1"], gwEntry, gen, "Accepted=True", "ResolvedRefs=True")
@@ -380,7 +385,8 @@ func TestDelegationFingerprints(t *testing.T) {
 		{fpDelegCase{name: "child inherit", docs: replace("e", "namespace: apps}", "namespace: apps, "+inherit+"}")}, "ce e<-p", true},
 		{fpDelegCase{name: "ref", docs: replace("p", to("apps", "c"), "{group: delegation.kgateway.dev, kind: label, namespace: apps, name: cee}")}, "ce c<-p", true},
 		{fpDelegCase{name: "wildcard", in: func(in *computed.DelegationInput) { in.Wildcard.Value = "elsewhere" }}, "ce c<-p", true},
-		{fpDelegCase{name: "completeness", unknown: true}, "ce c<-p", true},
+		{fpDelegCase{name: "completeness", unknown: "c"}, "ce c<-p", true},
+		{fpDelegCase{name: "Accepted observedGeneration", status: restatusAt("c", synth("apps", "p"), gen-1, "Accepted=True", "ResolvedRefs=True")}, "ce c<-p", true},
 		{fpDelegCase{name: "entry presence", status: restatus("c", "")}, "ce c<-p", true},
 		{fpDelegCase{name: "UnsupportedValue", status: restatus("c", synth("apps", "p"), "Accepted=False/UnsupportedValue", "ResolvedRefs=True")}, "ce c<-p", true},
 		// parent-resolvedrefs (rules §9.2); r1's /b context is under p's key r1 only.
@@ -396,6 +402,17 @@ func TestDelegationFingerprints(t *testing.T) {
 		{fpDelegCase{name: "label used by a label ref", docs: replace("d", "label: team", "label: team2")}, "pr p@r1", true},
 		{fpDelegCase{name: "backendRef kinds", docs: replace("p", to("apps", "e"), to("apps", "e")+", {name: svc, port: 80}")}, "pr p@r1", true},
 		{fpDelegCase{name: "ExtensionRef filter", docs: replace("p", "{matches:", "{filters: [{type: ExtensionRef, extensionRef: {group: x.io, kind: Thing, name: t}}], matches:")}, "pr p@r1", true},
+		{fpDelegCase{name: "child hostnames", docs: replace("e", "spec:\n", "spec:\n  hostnames: [e.example.com]\n")}, "pr p@r1", true},
+		{fpDelegCase{name: "child parentRefs", docs: replace("e", "name: p}", "name: p, port: 80}")}, "pr p@r1", true},
+		{fpDelegCase{name: "ref", docs: replace("p", to("apps", "c"), "{group: delegation.kgateway.dev, kind: label, namespace: apps, name: cee}")}, "pr p@r1", true},
+		{fpDelegCase{name: "wildcard", in: func(in *computed.DelegationInput) { in.Wildcard.Value = "elsewhere" }}, "pr p@r1", true},
+		// p also permits u, so the unknown root reaches it; that ref changes nothing else of (p, r1).
+		{fpDelegCase{name: "completeness", unknown: "p", docs: replace("p", synth("infra", "r2")+"]", synth("infra", "r2")+", "+synth("infra", "u")+"]")}, "pr p@r1", true},
+		{fpDelegCase{name: "parent permits u, no unknown root", docs: replace("p", synth("infra", "r2")+"]", synth("infra", "r2")+", "+synth("infra", "u")+"]")}, "pr p@r1", false},
+		{fpDelegCase{name: "ResolvedRefs observedGeneration", status: func(t *testing.T, objs map[string]*unstructured.Unstructured) {
+			restatusAt("p", synth("infra", "r1"), gen-1, "Accepted=True", "ResolvedRefs=True")(t, objs)
+			entry(t, objs["p"], synth("infra", "r2"), gen, "Accepted=True", "ResolvedRefs=True")
+		}}, "pr p@r1", true},
 		{fpDelegCase{name: "ResolvedRefs", status: func(t *testing.T, objs map[string]*unstructured.Unstructured) {
 			restatus("p", synth("infra", "r1"), "Accepted=True", "ResolvedRefs=False/BackendNotFound")(t, objs)
 			entry(t, objs["p"], synth("infra", "r2"), gen, "Accepted=True", "ResolvedRefs=True")
@@ -413,6 +430,13 @@ func TestDelegationFingerprints(t *testing.T) {
 			if changed := got[tc.check] != base[tc.check]; changed != tc.changes {
 				t.Errorf("%s %s: %s changed %v, want %v", v, tc.name, tc.check, changed, tc.changes)
 			}
+		}
+		// An ExtensionRef filter's target is not read: only that one exists (rules §9.2).
+		withExt := func(name string) func(map[string]string) {
+			return replace("p", "{matches:", "{filters: [{type: ExtensionRef, extensionRef: {group: x.io, kind: Thing, name: "+name+"}}], matches:")
+		}
+		if delegPrints(t, v, fpDelegCase{docs: withExt("t")})["pr p@r1"] != delegPrints(t, v, fpDelegCase{docs: withExt("u")})["pr p@r1"] {
+			t.Errorf("%s: an ExtensionRef target changed the parent-resolvedrefs print", v)
 		}
 		// Reasons other than UnsupportedValue are hashed alike.
 		a := delegPrints(t, v, fpDelegCase{status: restatus("c", synth("apps", "p"), "Accepted=False/RouteRuleReplaced")})

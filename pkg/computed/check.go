@@ -483,11 +483,8 @@ func compareKey(a, b ReportKey) int {
 
 func compareRef(a, b objects.Ref) int { return a.Compare(b) }
 
-// Notes of views B and C checks (rules §8.3, §8.5).
-const (
-	noteIncomplete = "Not all paths computed"
-	noteOldStatus  = "The controller may keep old status"
-)
+// noteIncomplete is the note of a negative check on an incomplete aggregate (rules §8.5).
+const noteIncomplete = "Not all paths computed"
 
 // Child entry expectations, as CheckResult.Expected shows them (rules §8.2).
 const (
@@ -513,6 +510,8 @@ type delegChecker struct {
 	kids []uint64
 	keys []ReportKey
 	idx  []int
+	// seen are the (parent, key) pairs of one route's leftover entries.
+	seen []RouteKey
 }
 
 // CheckDelegation cross-checks views B and C against the controller's status
@@ -642,9 +641,7 @@ func (c *delegChecker) childEntry(group []int) CheckResult {
 	e := c.entry(ci, key)
 	out.Fingerprint = childEntryPrint(c.p, c.childInputs(ci), c.rowRefs(group, false), agg.digest, c.in.Wildcard, agg.incomplete, e)
 	switch {
-	case agg.forbidden:
-		return c.leftover(out, ci, e, true)
-	case !first.WritesEntry:
+	case !first.WritesEntry && !agg.forbidden:
 		// 2.3 writes no entry under this key (rules §7, §11.3).
 		out.Class, out.Coverage = ClassNotObservable, []Coverage{CoverageNone}
 		return out
@@ -653,7 +650,7 @@ func (c *delegChecker) childEntry(group []int) CheckResult {
 			out.Expected = expectNone
 			return c.unknownIncomplete(out)
 		}
-		return c.leftover(out, ci, e, false)
+		return c.leftover(out, ci, e)
 	}
 	out.Expected = expectEntry
 	if agg.rejected {
@@ -692,7 +689,7 @@ func (c *delegChecker) childResult(child, parent objects.Ref, key ReportKey, gro
 		parent.Group, parent.Kind, parent.Namespace, parent.Name,
 		key.Group, key.Kind, key.Namespace, key.Name, key.SectionName), child)
 	out.Key = key
-	out.Deps = c.unionDeps(group, nil, child, parent)
+	out.Deps = c.unionDeps(group, nil, nil, child, parent)
 	out.Contributors = routesOf(out.Deps)
 	return out
 }
@@ -732,10 +729,9 @@ func entryGeneration(e *objects.RouteParentStatus, acc *metav1.Condition) int64 
 }
 
 // leftover classifies an entry no context expects (rules §8.3): none is
-// compatible; a current one is unexpected, verified for every cause of the
-// drop or deselection, but not for a forbidden child, which the controller
-// may keep old status for.
-func (c *delegChecker) leftover(out CheckResult, ci int, e *objects.RouteParentStatus, forbidden bool) CheckResult {
+// compatible; a current one is unexpected and verified for every cause of
+// the drop or deselection, a forbidden child's included (D-021 amendment).
+func (c *delegChecker) leftover(out CheckResult, ci int, e *objects.RouteParentStatus) CheckResult {
 	out.Expected = expectNone
 	if e == nil {
 		out.Class, out.Coverage, out.Observed = ClassCompatible, []Coverage{CoverageStatus}, expectNone
@@ -745,10 +741,7 @@ func (c *delegChecker) leftover(out CheckResult, ci int, e *objects.RouteParentS
 		out.Class = ClassStale
 		return out
 	}
-	out.Class, out.Verified = ClassUnexpected, !forbidden
-	if forbidden {
-		c.withNote(&out, noteOldStatus)
-	}
+	out.Class, out.Verified = ClassUnexpected, true
 	return out
 }
 
@@ -759,6 +752,7 @@ func (c *delegChecker) leftEntries(out []CheckResult) []CheckResult {
 	rows := c.r.Rows
 	for ci := range c.in.Routes {
 		rt := &c.in.Routes[ci]
+		c.seen = c.seen[:0]
 		for i := range rt.View.Parents {
 			e := &rt.View.Parents[i]
 			parent := e.ParentRef.Ref()
@@ -769,6 +763,11 @@ func (c *delegChecker) leftEntries(out []CheckResult) []CheckResult {
 				continue // only an owned parent's entries are this install's to explain
 			}
 			key := KeyOf(e.Written)
+			// Entries differing only by port share a key, and so one check (rules §7).
+			if slices.Contains(c.seen, RouteKey{Route: parent, Key: key}) {
+				continue
+			}
+			c.seen = append(c.seen, RouteKey{Route: parent, Key: key})
 			group := c.group(rt.Ref, parent)
 			if len(group) > 0 && rows[group[0]].ChildKey == key {
 				continue // checked by childEntry
@@ -781,12 +780,12 @@ func (c *delegChecker) leftEntries(out []CheckResult) []CheckResult {
 			}
 			agg := c.aggregate(group, rt.Ref, key)
 			o.Fingerprint = childEntryPrint(c.p, c.childInputs(ci), c.rowRefs(group, false), agg.digest, c.in.Wildcard, agg.incomplete, e)
-			if agg.incomplete && !agg.forbidden {
+			if agg.incomplete {
 				o.Expected = expectNone
 				out = append(out, c.unknownIncomplete(o))
 				continue
 			}
-			out = append(out, c.leftover(o, ci, e, agg.forbidden))
+			out = append(out, c.leftover(o, ci, e))
 		}
 	}
 	return out
@@ -825,14 +824,24 @@ func (c *delegChecker) parentCurrent(parent objects.Ref, group []int) bool {
 	return seen
 }
 
-// unionDeps is the sorted union of the rows' Deps, extra and refs. It shares
-// the rows' Deps when they are one set holding the others, and is a new slice
-// otherwise; either way it is read-only.
-func (c *delegChecker) unionDeps(rows []int, extra []objects.Ref, refs ...objects.Ref) []objects.Ref {
+// unionDeps is the sorted union of the rows' Deps, extra and refs; with key,
+// the rows' deps under that reporter key only. It shares the rows' deps when
+// they are one set holding the others, and is a new slice otherwise; either
+// way it is read-only.
+func (c *delegChecker) unionDeps(rows []int, key *ReportKey, extra []objects.Ref, refs ...objects.Ref) []objects.Ref {
+	of := func(g int) []objects.Ref {
+		if row := &c.r.Rows[g]; key != nil {
+			if i, ok := slices.BinarySearchFunc(row.Reporters, *key, ReportKey.Compare); ok {
+				return row.KeyDeps[i]
+			}
+			return nil
+		}
+		return c.r.Rows[g].Deps
+	}
 	if len(rows) > 0 {
-		first := c.r.Rows[rows[0]].Deps
+		first := of(rows[0])
 		holds := func(r objects.Ref) bool { _, ok := slices.BinarySearchFunc(first, r, compareRef); return ok }
-		if !slices.ContainsFunc(rows[1:], func(g int) bool { return !slices.Equal(c.r.Rows[g].Deps, first) }) &&
+		if !slices.ContainsFunc(rows[1:], func(g int) bool { return !slices.Equal(of(g), first) }) &&
 			!slices.ContainsFunc(extra, func(r objects.Ref) bool { return !holds(r) }) &&
 			!slices.ContainsFunc(refs, func(r objects.Ref) bool { return !holds(r) }) {
 			return first
@@ -840,11 +849,11 @@ func (c *delegChecker) unionDeps(rows []int, extra []objects.Ref, refs ...object
 	}
 	n := len(extra) + len(refs)
 	for _, g := range rows {
-		n += len(c.r.Rows[g].Deps)
+		n += len(of(g))
 	}
 	out := make([]objects.Ref, 0, n)
 	for _, g := range rows {
-		out = append(out, c.r.Rows[g].Deps...)
+		out = append(out, of(g)...)
 	}
 	out = append(append(out, extra...), refs...)
 	slices.SortFunc(out, compareRef)
@@ -899,7 +908,7 @@ func (c *delegChecker) rowRefs(rows []int, keep bool) uint64 {
 		if ci := c.route(row.Key.Child); keep && ci >= 0 {
 			s.u64(c.kids[ci])
 			if row.RefAsWritten.Mode == objects.DelegationLabel {
-				l, ok := c.in.Routes[ci].View.Labels[delegationLabel]
+				l, ok := c.in.Routes[ci].View.Labels[objects.DelegationLabelKey]
 				s.flag(ok)
 				s.str(l)
 			}
@@ -964,7 +973,7 @@ func (c *delegChecker) parentResolvedRefs(parent objects.Ref, key ReportKey, lo,
 	if sig != nil {
 		sigDeps = sig.Deps
 	}
-	out.Deps = c.unionDeps(c.idx, sigDeps, parent)
+	out.Deps = c.unionDeps(c.idx, &key, sigDeps, parent)
 	out.Contributors = routesOf(out.Deps)
 	pi := c.route(parent)
 	e := c.entry(pi, key)
@@ -976,6 +985,11 @@ func (c *delegChecker) parentResolvedRefs(parent objects.Ref, key ReportKey, lo,
 	out.ParentCurrent = e != nil && current(e.Conditions, gen)
 	if c.in.ScopeUnknown {
 		out.Class, out.Unknown = ClassUnknown, UnknownScope
+		return out
+	}
+	if c.unwritten(parent, key) {
+		// 2.3 never writes the parent's entry under this key (rules §7, §11.3).
+		out.Class, out.Coverage = ClassNotObservable, []Coverage{CoverageNone}
 		return out
 	}
 	incomplete := c.r.Complete.IncompleteKey(parent, key)
@@ -1021,6 +1035,19 @@ func (c *delegChecker) parentResolvedRefs(parent objects.Ref, key ReportKey, lo,
 		out.Class, out.Coverage = ClassCompatible, []Coverage{CoverageStatus}
 	}
 	return out
+}
+
+// unwritten reports whether key is route's report key under some parent
+// whose status builder never writes it (Row.WritesEntry false).
+func (c *delegChecker) unwritten(route objects.Ref, key ReportKey) bool {
+	rows := c.r.Rows
+	i, _ := slices.BinarySearchFunc(c.byChild, route, func(g int, t objects.Ref) int { return rows[g].Key.Child.Compare(t) })
+	for ; i < len(c.byChild) && rows[c.byChild[i]].Key.Child == route; i++ {
+		if row := &rows[c.byChild[i]]; row.ChildKey == key && !row.WritesEntry && row.Outcome != OutcomeForbidden {
+			return true
+		}
+	}
+	return false
 }
 
 // signal is the parent signal of (parent, key), or nil.

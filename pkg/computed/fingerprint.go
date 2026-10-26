@@ -232,9 +232,6 @@ func minObserved(cs []metav1.Condition) int64 {
 	return m
 }
 
-// delegationLabel is the label a label delegation ref selects on (rules §5.2).
-const delegationLabel = "delegation.kgateway.dev/label"
-
 // setting writes a setting's value and whether it is known.
 func (p *printer) setting(s install.Setting) {
 	p.flag(s.Known)
@@ -309,7 +306,7 @@ func childEntryPrint(p *printer, child, refs, digest uint64, wildcard install.Se
 // parentResolvedRefsPrint is the parent-resolvedrefs fingerprint (rules
 // §9.2). digest sums the KeyDigests of the parent's rows under the key; refs
 // hashes the rows' refs and each selected child's inputs; v is the parent,
-// read for its backendRef kinds and ExtensionRef filters; e is its entry
+// read for its backendRef kinds and whether it has ExtensionRef filters; e is its entry
 // under the key, whose ResolvedRefs reason is read only when compared. Not
 // Accepted or Programmed.
 func parentResolvedRefsPrint(p *printer, v *objects.HTTPRouteView, digest, refs uint64, wildcard install.Setting,
@@ -346,21 +343,8 @@ func parentResolvedRefsPrint(p *printer, v *objects.HTTPRouteView, digest, refs 
 	return p.sum()
 }
 
-// extensionRefs writes the ExtensionRef filters of fs and their targets.
+// extensionRefs writes whether fs has an ExtensionRef filter: the
+// expectation reads only that, not the target (rules §8.2).
 func (p *printer) extensionRefs(fs []objects.Filter) {
-	n := 0
-	for _, f := range fs {
-		if extensionRef(f) {
-			n++
-		}
-	}
-	p.num(int64(n))
-	for _, f := range fs {
-		if extensionRef(f) {
-			p.flag(f.ExtensionRef != nil)
-			if f.ExtensionRef != nil {
-				p.ref(*f.ExtensionRef)
-			}
-		}
-	}
+	p.flag(slices.ContainsFunc(fs, extensionRef))
 }

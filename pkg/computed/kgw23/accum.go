@@ -94,6 +94,9 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	r.addDeps(c.Deps)
 	if i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare); !ok {
 		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
+		r.row.KeyDeps = slices.Insert(r.row.KeyDeps, i, c.Deps)
+	} else {
+		r.row.KeyDeps[i] = unionRefs(r.row.KeyDeps[i], c.Deps)
 	}
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	r.row.KeyDigests[c.Reporter] += d

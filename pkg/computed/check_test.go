@@ -878,17 +878,18 @@ func TestStaleChildEntryIsStale(t *testing.T) {
 	}
 }
 
-func TestForbiddenEntryLeftNotVerified(t *testing.T) {
+func TestForbiddenEntryLeftVerified(t *testing.T) {
 	for _, v := range both {
 		t.Run(v, func(t *testing.T) {
-			// c's parentRefs name another parent only, so r may not select it.
+			// c's parentRefs name another parent only, so r may not select it. The
+			// controller clears such an entry too (D-021 amendment, case 2).
 			r, c := basic(t, []string{"/api"}, "parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: infra, name: other}]")
 			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
 			_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
 			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
 			is(t, ce, computed.ClassUnexpected)
-			if ce.Verified || ce.Candidate() || !strings.Contains(ce.Note, "The controller may keep old status") {
-				t.Fatalf("verified %v note %q", ce.Verified, ce.Note)
+			if !ce.Verified || !ce.Candidate() || ce.Expected != "none" {
+				t.Fatalf("verified %v candidate %v expected %q", ce.Verified, ce.Candidate(), ce.Expected)
 			}
 		})
 	}
@@ -998,9 +999,9 @@ func TestNoEntryIncompleteIsUnknown(t *testing.T) {
 			// route other/d keeps an entry under r; its negative check is unknown.
 			lr := root(t, "r", "["+rule([]string{"/api"}, "{group: delegation.kgateway.dev, kind: label, name: team, namespace: apps}")+"]")
 			kid := child(t, "apps", "kid", []string{"/api/k"})
-			kid.SetLabels(map[string]string{"delegation.kgateway.dev/label": "team"})
+			kid.SetLabels(map[string]string{objects.DelegationLabelKey: "team"})
 			d := child(t, "other", "d", []string{"/zzz"})
-			d.SetLabels(map[string]string{"delegation.kgateway.dev/label": "team"})
+			d.SetLabels(map[string]string{objects.DelegationLabelKey: "team"})
 			entry(t, d, synth("infra", "r"), gen, "Accepted=True")
 			w = dworld{routes: []*unstructured.Unstructured{lr, kid, d}, roots: []string{"infra/r"},
 				mod: func(in *computed.DelegationInput) { in.Wildcard = install.Setting{} }}
@@ -1112,5 +1113,70 @@ func BenchmarkCheckDelegationLarge(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		computed.CheckDelegation("kgw/kgateway", sel, in, &res)
+	}
+}
+
+func Test23UnwrittenParentNotObservable(t *testing.T) {
+	// On 2.3 p's ref to r omits the namespace, so p never gets an entry under
+	// its key: its ResolvedRefs there cannot be observed, not stale.
+	r := root(t, "r", "["+rule([]string{"/api"}, to("infra", "p"))+"]")
+	p := hr(t, "metadata: {name: p, namespace: infra}\nspec:\n  parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r}]\n  rules: ["+
+		rule([]string{"/api/p"}, to("infra", "missing"))+"]")
+	_, cs := dworld{routes: []*unstructured.Unstructured{r, p}, roots: []string{"infra/r"}}.run(v23)
+	pc := oneParentCheck(t, cs, "infra", "p")
+	is(t, pc, computed.ClassNotObservable, computed.CoverageNone)
+	if pc.Candidate() {
+		t.Fatal("candidate")
+	}
+}
+
+func TestLeftEntriesDedupedByKey(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// Two leftover entries differ only by port: one key, so one check.
+			r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "c2"))+"]")
+			c := child(t, "apps", "c", []string{"/api/c"})
+			for _, port := range []string{"80", "81"} {
+				entry(t, c, "{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: infra, name: r, port: "+port+"}", gen, "Accepted=True")
+			}
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, c, child(t, "apps", "c2", []string{"/api/c2"})}, roots: []string{"infra/r"}}.run(v)
+			is(t, oneChildEntry(t, cs, "apps", "c", "infra", "r"), computed.ClassUnexpected)
+			seen := map[computed.Identity]bool{}
+			for _, ck := range cs {
+				if seen[ck.ID] {
+					t.Fatalf("duplicate identity %+v", ck.ID)
+				}
+				seen[ck.ID] = true
+			}
+		})
+	}
+}
+
+func TestParentDepsPerKey(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// p is reached from r1 (on gw) and r2 (on a gw2 the caller may not see):
+			// (p, r1's key) depends on nothing behind r2.
+			gw2 := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gw2"}
+			r1 := root(t, "r1", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+			r2 := root(t, "r2", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+			p := hr(t, "metadata: {name: p, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api/p"}, to("apps", "missing"))+"]")
+			w := dworld{routes: []*unstructured.Unstructured{r1, r2, p}, roots: []string{"infra/r1", "infra/r2"},
+				mod: func(in *computed.DelegationInput) { in.Roots[1].Deps = []objects.Ref{gw2, in.Roots[1].Route} }}
+			_, cs := w.run(v)
+			pcs := parentChecks(cs, "apps", "p")
+			if len(pcs) != 2 {
+				t.Fatalf("checks %+v", pcs)
+			}
+			for _, pc := range pcs {
+				other, hidden := hRef("infra", "r2"), gw2
+				if pc.Key.Name == "r2" {
+					other, hidden = hRef("infra", "r1"), gwRef
+				}
+				if slices.Contains(pc.Deps, other) || slices.Contains(pc.Deps, hidden) || !slices.Contains(pc.Deps, hRef("apps", "p")) {
+					t.Fatalf("(p, %s) deps %v", pc.Key.Name, pc.Deps)
+				}
+			}
+		})
 	}
 }

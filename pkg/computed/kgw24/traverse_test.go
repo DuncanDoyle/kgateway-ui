@@ -42,7 +42,7 @@ func (b *hr) hosts(h ...string) *hr { b.r.View.Hostnames = h; return b }
 func (b *hr) inherit() *hr { b.r.View.InheritParentMatcher = true; return b }
 
 func (b *hr) label(v string) *hr {
-	b.r.View.Labels = map[string]string{delegationLabel: v}
+	b.r.View.Labels = map[string]string{objects.DelegationLabelKey: v}
 	return b
 }
 

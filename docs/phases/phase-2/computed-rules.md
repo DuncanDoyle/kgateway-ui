@@ -377,7 +377,7 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Stale status | the signal exists and is stale | `pending`, "Waiting for the controller's status" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
 | Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route, and a missing listener entry on an owned Gateway or ListenerSet (`pkg/health/checks.go:264`), is Phase 1's KGWUI-003, and the check stays `pending`. |
-| Unexpected status | no entry is expected and a current one exists | `disagrees` after the 30 s window, for any cause of the drop or deselection: parent edit or child edit, both sets (observed 2026-10-26, D-021 amendment). Only a `forbidden` child's leftover entry is `not-verified`, "The controller may keep old status" | when mature |
+| Unexpected status | no entry is expected and a current one exists | `disagrees` after the 30 s window, for any cause of the drop or deselection: parent edit or child edit, both sets (observed 2026-10-26, D-021 amendment). A child that became `forbidden` is one such cause: its leftover entry is cleared too | when mature |
 | Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
 | Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
 
@@ -443,7 +443,7 @@ Each check kind has its own fingerprint: a hash over exactly the decoded inputs 
 | `listener-count` | the listener's spec (name, port, protocol, hostname, TLS mode, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; candidate namespaces' labels when the listener uses `Selector`; the experimental setting | `attachedRoutes`; the listener conditions' `observedGeneration` |
 | `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs (as for `listener-count`); namespace labels when `Selector` is used | for the key: `Accepted` status, reason and `observedGeneration`, but the reason only when it is an attachment reason (another reason is compatible and is hashed as "other") |
 | `child-entry` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; the aggregate's completeness | for the key: entry presence; `Accepted` status and `observedGeneration`, with the reason only when it is `UnsupportedValue`. **Not** `ResolvedRefs` or `Programmed`. |
-| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
+| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and whether P has an `ExtensionRef` filter (not its target); the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
 | `delegated-not-attached` | as `child-entry` | none |
 | `orphan-not-attached` | the route's `parentRefs` (empty or not); the set of owned parents and refs that select it; for each, the `child-entry` inputs of its contexts; completeness of every selecting parent | none |
 
@@ -561,7 +561,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Stale child entry contradicting | `pending`; never KGWUI-012 |
 | Matcher-dropped child (parent edit or child edit) with a current entry left, both sets | `disagrees` after 30 s; KGWUI-012 (observed 2026-10-26, D-021 amendment) |
 | Drop with an unknown first-seen time for child or parent, current entry left | the same: `disagrees` after 30 s; the cause is not needed |
-| Forbidden child with a current entry left | `not-verified` |
+| Forbidden child with a current entry left | `disagrees` after 30 s; KGWUI-012 (D-021 amendment, case 2) |
 | Effective matcher | always `not-verified` |
 
 ### 11.5 Persistence and deadlines (sub-phase 2.3; extended in 2.4)

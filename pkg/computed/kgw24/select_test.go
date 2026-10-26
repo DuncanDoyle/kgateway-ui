@@ -20,7 +20,7 @@ func routeRef(ns, name string) objects.Ref {
 func delegRoute(ns, name, label string) computed.DelegRoute {
 	v := &objects.HTTPRouteView{}
 	if label != "" {
-		v.Labels = map[string]string{"delegation.kgateway.dev/label": label}
+		v.Labels = map[string]string{objects.DelegationLabelKey: label}
 	}
 	return computed.DelegRoute{Ref: routeRef(ns, name), View: v}
 }

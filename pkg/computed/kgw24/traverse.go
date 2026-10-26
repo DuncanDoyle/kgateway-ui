@@ -790,8 +790,11 @@ func withDep(deps []objects.Ref, r objects.Ref) []objects.Ref {
 // unionRefs merges sorted sets; it returns a or b unchanged when one holds
 // the other's elements, and never writes either.
 func unionRefs(a, b []objects.Ref) []objects.Ref {
-	if len(a) == 0 {
+	switch {
+	case len(a) == 0:
 		return b
+	case len(b) == 0 || len(a) == len(b) && &a[0] == &b[0]:
+		return a // nothing new, or the same shared set
 	}
 	if !slices.ContainsFunc(b, func(r objects.Ref) bool { _, ok := slices.BinarySearchFunc(a, r, compareRef); return !ok }) {
 		return a

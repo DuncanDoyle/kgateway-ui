@@ -9,6 +9,10 @@ import (
 // InheritParentMatcherAnnotation makes a delegated child inherit its parent's matcher.
 const InheritParentMatcherAnnotation = "delegation.kgateway.dev/inherit-parent-matcher"
 
+// DelegationLabelKey is the label a label-mode delegation ref selects on
+// (kgateway api/labels/delegation.go:7).
+const DelegationLabelKey = "delegation.kgateway.dev/label"
+
 // delegationLabelGroup and delegationLabelKind identify a label-selector delegation ref.
 const (
 	delegationLabelGroup = "delegation.kgateway.dev"
