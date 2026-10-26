@@ -54,6 +54,31 @@ type DelegationInput struct {
 	ScopeUnknown bool
 }
 
+// Unresolved says why a delegation ref selects no routes (rules §5.2). It is a
+// code; pkg/api renders the text.
+type Unresolved string
+
+// Unresolved codes.
+const (
+	// UnresolvedMissing: no in-scope route matches the ref.
+	UnresolvedMissing Unresolved = "missing"
+	// UnresolvedUnwatched: a name ref's target exists outside the controller's scope.
+	UnresolvedUnwatched Unresolved = "unwatched"
+)
+
+// Allows is which parents a child's parentRefs permit (rules §5.3).
+type Allows string
+
+// Allows values.
+const (
+	// AllowsAny: the child has no parentRefs, so any parent may select it.
+	AllowsAny Allows = "any"
+	// AllowsThis: a parentRef names the selecting parent.
+	AllowsThis Allows = "this"
+	// AllowsOther: the parentRefs name other parents only.
+	AllowsOther Allows = "other"
+)
+
 // DelegationResult is views B and C for one install; fields arrive with those views.
 type DelegationResult struct{}
 
