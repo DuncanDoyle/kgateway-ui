@@ -2,6 +2,7 @@ package explore
 
 import (
 	"slices"
+	"sort"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -45,10 +46,12 @@ func (ix *Index) Admission(ref objects.Ref) (Admission, bool) {
 	return a, ok
 }
 
-// Row returns the row of route ref.
+// Row returns the row of route ref. It searches by index, as
+// slices.BinarySearchFunc would copy a whole RouteRow per probe.
 func (ix *Index) Row(ref objects.Ref) (RowID, bool) {
-	i, ok := slices.BinarySearchFunc(ix.Routes, ref, func(r RouteRow, ref objects.Ref) int { return compareRefs(r.Ref, ref) })
-	return RowID(i), ok // #nosec G115 -- a row count fits in int32
+	n := len(ix.Routes)
+	i := sort.Search(n, func(i int) bool { return compareRefs(ix.Routes[i].Ref, ref) >= 0 })
+	return RowID(i), i < n && compareRefs(ix.Routes[i].Ref, ref) == 0 // #nosec G115 -- a row count fits in int32
 }
 
 // admit fills the admission table of design §7.1 for what the rows do not
