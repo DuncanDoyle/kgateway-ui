@@ -293,3 +293,10 @@ func TestUnresolvedRowKeepsContextFacts(t *testing.T) {
 		t.Errorf("kept %d contexts, want 2", len(r.Contexts))
 	}
 }
+
+func TestOneContextRowStaysSmall(t *testing.T) {
+	r := one(t, computed.DefaultBounds, rowKey(0, 0, accChild), computed.RowMeta{}, never, ctx("/a", computed.OutcomeAttached))
+	if cap(r.Contexts) > 2 {
+		t.Errorf("cap(Contexts) = %d, want <= 2", cap(r.Contexts))
+	}
+}

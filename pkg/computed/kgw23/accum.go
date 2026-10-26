@@ -69,9 +69,6 @@ func (a *accumulator) add(key computed.RowKey, c computed.Context) {
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	r.row.KeyDigests[c.Reporter] += d
 	if len(r.row.Contexts) < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
-		if r.row.Contexts == nil {
-			r.row.Contexts = make([]computed.Context, 0, min(a.bounds.ContextsPerRow, a.bounds.ContextsPerInstall-a.kept))
-		}
 		r.row.Contexts = append(r.row.Contexts, c)
 		a.kept++
 	} else {
