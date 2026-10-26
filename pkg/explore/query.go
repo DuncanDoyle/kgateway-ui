@@ -363,19 +363,29 @@ func (ix *Index) unknownRef(id RowID, parent objects.Ref, visible func(objects.R
 	return false
 }
 
-// RowFlags are row id's flags for a caller: listener-unknown and dropped
-// need their dependencies visible (design §7.4 rule 6); disagrees is a
-// finding (rule 9).
+// RowFlags are row id's flags for a caller: listener-unknown needs its
+// dependencies visible, and dropped those of any one flagging row (design
+// §7.4 rule 6); disagrees is a finding (rule 9).
 func (ix *Index) RowFlags(id RowID, visible func(objects.Ref) bool) Flag {
 	r := &ix.Routes[id]
 	f := r.Flags
 	if f&FlagListenerUnknown != 0 && !ix.Visible(r.UnknownDeps, visible) {
 		f &^= FlagListenerUnknown
 	}
-	if f&FlagDropped != 0 && !ix.Visible(r.DroppedDeps, visible) {
+	if f&FlagDropped != 0 && !ix.anyVisible(r.DroppedDeps, visible) {
 		f &^= FlagDropped
 	}
 	return f
+}
+
+// anyVisible reports whether visible admits every ref of some set in ds.
+func (ix *Index) anyVisible(ds []DepSet, visible func(objects.Ref) bool) bool {
+	for _, d := range ds {
+		if ix.Visible(d, visible) {
+			return true
+		}
+	}
+	return false
 }
 
 // DelegationQuery is one delegation page request after parsing (design

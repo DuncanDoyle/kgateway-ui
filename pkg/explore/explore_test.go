@@ -1168,8 +1168,8 @@ func TestFlagDropped(t *testing.T) {
 		}
 	}
 	id1, r1 := row(t, ix, "shop", "k1")
-	if got := refsOf(ix, r1.DroppedDeps); !slices.Equal(got, []objects.Ref{gwObj, shopNS}) {
-		t.Errorf("k1 dropped deps %v", got)
+	if len(r1.DroppedDeps) != 1 || !slices.Equal(refsOf(ix, r1.DroppedDeps[0]), []objects.Ref{gwObj, shopNS}) {
+		t.Errorf("k1 dropped deps %v", r1.DroppedDeps)
 	}
 	id2, _ := row(t, ix, "shop", "k2")
 	noNS := func(r objects.Ref) bool { return r.Kind != "Namespace" }
@@ -1208,5 +1208,30 @@ func TestSelectedAdmission(t *testing.T) {
 		if !ok || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: %+v %v, want %+v", tc.name, got, ok, tc.want)
 		}
+	}
+}
+
+// The dropped flag shows when any one flagging row's deps are visible: here
+// (a, 1, 0, k1) is behind a hidden Selector Namespace, (b, 0, 0, k1) is not.
+func TestFlagDroppedAnyVisibleRow(t *testing.T) {
+	in := delegWorld().input(t)
+	v := delegViews()
+	v.Delegation.Rows[5] = drow(dB, 0, 0, k1, computed.OutcomeDropped, dB, gwObj)
+	in.Computed = v
+	ix := Build(in)
+	id, r := row(t, ix, "shop", "k1")
+	if len(r.DroppedDeps) != 2 {
+		t.Fatalf("dropped deps %v", r.DroppedDeps)
+	}
+	noNS := func(r objects.Ref) bool { return r.Kind != "Namespace" }
+	if ix.RowFlags(id, noNS)&FlagDropped == 0 {
+		t.Errorf("hidden Namespace on one row hid the flag: %v", ix.RowFlags(id, noNS).Names())
+	}
+	if p := mustRoutes(t, ix, Query{States: FlagDropped}, noNS); !slices.Equal(names(ix, p), []string{"k1", "k2"}) {
+		t.Errorf("state=dropped: %v", names(ix, p))
+	}
+	noGW := func(r objects.Ref) bool { return r.Kind != "Gateway" }
+	if ix.RowFlags(id, noGW)&FlagDropped != 0 {
+		t.Errorf("every flagging row hidden, flag shown")
 	}
 }

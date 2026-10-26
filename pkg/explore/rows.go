@@ -527,7 +527,8 @@ func (n *interner) deps(src []objects.Ref) DepSet {
 
 // offPath interns src without its HTTPRoutes. Every route in a view B or C
 // dependency set is on the result's path, and those never restrict (rules
-// §5.6, D-024).
+// §5.6, D-024). TestContextDeps in kgw23 and kgw24 pins that invariant,
+// which keeps dropping by kind sound.
 func (n *interner) offPath(src []objects.Ref) DepSet {
 	if len(src) == 0 {
 		return nil
@@ -750,7 +751,9 @@ func delegRows(ix *Index, n *interner, src []computed.Row, checks []computed.Che
 			if id, ok := ix.Row(k.Child); ok && owned {
 				c := &ix.Routes[id]
 				c.Flags |= FlagDropped
-				c.DroppedDeps = union32(c.DroppedDeps, r.Deps)
+				if !slices.ContainsFunc(c.DroppedDeps, func(d DepSet) bool { return slices.Equal(d, r.Deps) }) {
+					c.DroppedDeps = append(c.DroppedDeps, r.Deps)
+				}
 			}
 		}
 	}

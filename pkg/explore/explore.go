@@ -148,9 +148,10 @@ type RouteRow struct {
 	Computed []RefFacts
 	// UnknownDeps are the dependencies of FlagListenerUnknown.
 	UnknownDeps DepSet
-	// DroppedDeps are the dependencies of FlagDropped: the union of the
-	// flagging rows' Deps, which leave out the routes on their paths (D-024).
-	DroppedDeps DepSet
+	// DroppedDeps are the distinct Deps of the rows that set FlagDropped,
+	// which leave out the routes on their paths (D-024). The flag shows when
+	// any one of them is visible.
+	DroppedDeps []DepSet
 	// search is the lower-cased "namespace/name" and hostnames.
 	search string
 }

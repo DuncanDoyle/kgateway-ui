@@ -1055,3 +1055,27 @@ func TestUnresolvedRowSurvivesAuthorization(t *testing.T) {
 		t.Errorf("k1's hidden child: %v total %d", dpage(ix, p), p.Total)
 	}
 }
+
+// Design §7.4 rule 4b, second clause: a status root's hidden target Gateway
+// still restricts its rows, while the root route itself does not.
+func TestStatusRootTargetRestricts(t *testing.T) {
+	in := delegWorld().input(t)
+	v := delegViews()
+	// b is a status root: its deps are b and the target of its Accepted entry.
+	v.Delegation.Rows[5] = drow(dB, 0, 0, k1, computed.OutcomeDropped, dB, gwObj)
+	in.Computed = v
+	ix := Build(in)
+	dropped := DelegationQuery{Outcomes: []computed.RowOutcome{computed.OutcomeDropped}}
+	noB := func(r objects.Ref) bool { return r != dB }
+	if p := mustDeleg(t, ix, dB, dropped, noB); !slices.Equal(dpage(ix, p), []string{"0.0:k1"}) || p.Total != 1 {
+		t.Errorf("hidden root route: %v total %d", dpage(ix, p), p.Total)
+	}
+	noGW := func(r objects.Ref) bool { return r != gwObj }
+	if p := mustDeleg(t, ix, dB, dropped, noGW); len(p.IDs) != 0 || p.Total != 0 {
+		t.Errorf("hidden target Gateway: %v total %d", dpage(ix, p), p.Total)
+	}
+	p := mustDeleg(t, ix, dB, DelegationQuery{}, noGW)
+	if !slices.Equal(dpage(ix, p), []string{"0.0:k1"}) || ix.Visible(ix.DelegRows[p.IDs[0]].Deps, noGW) {
+		t.Errorf("unfiltered: %v, want the row listed as restricted", dpage(ix, p))
+	}
+}
