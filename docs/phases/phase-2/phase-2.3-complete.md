@@ -8,18 +8,18 @@ The UI computes which routes attach to each listener and cross-checks the result
 - **Rule sets:** `pkg/computed/kgw23` and `kgw24` mirror kgateway v2.3.11 and v2.4.7 attachment: allowed routes (decided before the section check, rules §4.1), section and port, hostname intersection and per-listener counting. `rulesets.Select` picks one by controller version; downstream builds register their own with `extension.WithComputedRules`. The 2.4 isolation note marks counts that plain-HTTP listener isolation may not program.
 - **Cross-check:** every computed count and parentRef outcome is checked against `attachedRoutes` and route status (rules §8). The result is agreement, disagreement, pending, unknown (`scope-unknown`, `listenerset-no-status`, `setting-unknown`, `namespace-labels-unavailable`) or restricted. Fingerprints cover the rules §9.2 inputs.
 - **KGWUI-012:** a disagreement that lasts the 30 s window becomes a warning on the route and its parent. It never turns an install red.
-- **API:** Gateway and ListenerSet details carry `computedRoutes`, effective hostnames and badges; routes take `?listener=` (with `_unknown`); `/meta` lists the filters; the Gateways routes column uses the computed own-listener count. Every computed fact goes through the Authorizer by its dependency set.
+- **API:** Gateway and ListenerSet details carry `computedRoutes`, effective hostnames and badges; routes take `?listener=` (with `_unknown`); `/meta` lists the filters; the Gateways routes column uses the computed own-listener count. Every per-route computed fact goes through the Authorizer by its dependency set; listener facts show to every caller who sees the listener.
 - **SPA:** the `Computed` badge on listener tables, parent cards and route sections, with short compact states and a tooltip that names the rule.
 - **Chart:** `extraArgs` for extra UI flags.
 
 ## Reviews
 - **Task reviews:** every task had a spec and quality review. Fix rounds were confirmed by scoped re-reviews or by the controller for small diffs.
 - **Cross-model (Codex):** `reviews/2.3-codex.md`, 4 findings plus 2 from the re-review. Accepted:
-  - **#1 and #2 (P1):** restricted-data leaks through the isolation note and unknown memberships.
+  - **#1 and #2 (P1):** restricted-data leaks through the isolation note and unknown memberships. Their fixes were later superseded (below).
   - **#3 (P1):** the list dropped a second written ref's check.
   - **#4 (P3):** no app-level extension test.
 
-  Re-review R1 was accepted in part (narrower note deps). R2 was rejected: a `restricted` state reveals only that a hidden dependency exists, which rules 5 and 8 already show; this is documented in design §7.4 rule 4.
+  Re-review R1 and R2 were accepted. Restricting a listener's count or note leaked through what moved it: a hidden route or ListenerSet entering or leaving its dependencies. Both were resolved by showing listener-level facts to every caller who sees the listener ([`4f82c36`](https://github.com/DuncanDoyle/kgateway-ui/commit/4f82c36), user, 2026-10-26). That supersedes the fixes for #1 and #2.
 
 ## Wording pass
 `phase-2.3-wording.md` holds the final copy (S111–S187), picked per string from five options by a separate subagent. Rulings:
@@ -95,10 +95,10 @@ These are recorded in the plan workspace ledger. The ones that changed behaviour
 - The wire note is the check's own note.
 - Allocation per recompute is reported, not gated. The gates are CPU, retained heap and memory from the OS (user, 2026-10-25, D-022; the 256 MiB figure is our call).
 - KGWUI-012 subjects are looked up once per run (CPU fix). The scale harness clears the fake clients' action log, which had inflated long-stream memory.
-- A count's facts reach memberships only when the count's deps are visible. The list merges written-ref checks, worst first (user, 2026-10-25, D-023).
+- Listener facts (count, check, unknown state, isolation note) show to every caller who sees the listener, hidden members included (user, 2026-10-26, D-023 amended). The list merges written-ref checks, worst first (user, 2026-10-25, D-023).
 
 ## Notes for later phases
-- 2.4 copies view B and C code from `kgw23` to `kgw24` (Task 59). Isolation `NoteDeps` and the restricted-membership rule apply to views B and C facts too.
+- 2.4 copies view B and C code from `kgw23` to `kgw24` (Task 59). Listener facts are not dependency-restricted; per-route facts of views B and C are (design §7.4 rules 4 and 5).
 - Memory from the OS was the closest gate before the harness fix. Watch it when views B and C land.
 - `bench-stream` runs two 10-minute worlds against a 30 min timeout.
 

@@ -159,7 +159,7 @@ The UI now computes which routes attach to each listener, using kgateway 2.3's o
 - The routes list takes `?listener=<name>` with a Gateway or ListenerSet `parent`.
 - KGWUI-012 is a new warning: the UI's computation has disagreed with the controller for over 30 seconds. It never turns an install red.
 - When the install's discovery scope is unknown, computed counts and outcomes read "Unknown" instead of guessing.
-- With per-user authorisation, a computed fact that depends on an object the viewer cannot see reads "Hidden". Its value is not shown.
+- With per-user authorisation, a computed fact about a route reads "Hidden" when it depends on an object the viewer cannot see. Its value is not shown. Listener counts always show. Like the controller's `attachedRoutes`, they include routes the viewer cannot see.
 
 For downstream builds:
 
