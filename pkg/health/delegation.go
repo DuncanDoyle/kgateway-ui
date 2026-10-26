@@ -163,8 +163,9 @@ func mergeTriggers(fs []Finding, declared int, cs []Finding) []Finding {
 		if rank(c.Severity) < rank(f.Severity) {
 			f.Severity = c.Severity
 		}
-		// The computed trigger puts the parent on the route's delegation paths:
-		// it is an ancestor, so the evidence keeps no route (D-024, rule 7).
+		// Merging needs the same (route, parent): the status trigger's only
+		// evidence is that parent, which the computed trigger puts on the
+		// route's delegation paths. An ancestor, so no route is kept (D-024, rule 7).
 		ev := make([]objects.Ref, 0, len(f.Evidence)+len(c.Evidence))
 		for _, r := range slices.Concat(f.Evidence, c.Evidence) {
 			if (r.Group != objects.GatewayAPIGroup || r.Kind != "HTTPRoute") && !slices.Contains(ev, r) {

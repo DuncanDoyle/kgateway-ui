@@ -1212,11 +1212,13 @@ func TestSelectedAdmission(t *testing.T) {
 }
 
 // The dropped flag shows when any one flagging row's deps are visible: here
-// (a, 1, 0, k1) is behind a hidden Selector Namespace, (b, 0, 0, k1) is not.
+// (a, 1, 0, k1) is behind a hidden Selector Namespace, (c, 0, 0, k1) is not.
+// c's root eligibility is its ListenerSet; b's would be the Namespace too,
+// since every row carries its parent's (fix round 3).
 func TestFlagDroppedAnyVisibleRow(t *testing.T) {
 	in := delegWorld().input(t)
 	v := delegViews()
-	v.Delegation.Rows[5] = drow(dB, 0, 0, k1, computed.OutcomeDropped, dB, gwObj)
+	v.Delegation.Rows[5] = drow(routeRef("shop", "c"), 0, 0, k1, computed.OutcomeDropped, routeRef("shop", "c"), lsObj)
 	in.Computed = v
 	ix := Build(in)
 	id, r := row(t, ix, "shop", "k1")
@@ -1230,8 +1232,8 @@ func TestFlagDroppedAnyVisibleRow(t *testing.T) {
 	if p := mustRoutes(t, ix, Query{States: FlagDropped}, noNS); !slices.Equal(names(ix, p), []string{"k1", "k2"}) {
 		t.Errorf("state=dropped: %v", names(ix, p))
 	}
-	noGW := func(r objects.Ref) bool { return r.Kind != "Gateway" }
-	if ix.RowFlags(id, noGW)&FlagDropped != 0 {
+	noParents := func(r objects.Ref) bool { return r.Kind != "Gateway" && r.Kind != "ListenerSet" }
+	if ix.RowFlags(id, noParents)&FlagDropped != 0 {
 		t.Errorf("every flagging row hidden, flag shown")
 	}
 }

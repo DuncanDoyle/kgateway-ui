@@ -2,6 +2,7 @@ package health
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -41,7 +42,7 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			on, since := ch.On, ch.Since
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet),
-				Since: &since, Evidence: evidence(ch)}
+				Since: &since, Evidence: evidence(ch, v.Delegation.Rows)}
 			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
 			if u := ownedObject(in.Owned, owned, on); u != nil {
 				own := in.firstSeen(u)
@@ -54,13 +55,28 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 }
 
 // evidence is what a KGWUI-012 detail depends on. A views B and C check
-// leaves out its routes: they are the subject and the ancestors on its
-// paths, whose names the detail may quote (design §7.4 rule 7, D-024).
-func evidence(c *computed.CheckResult) []objects.Ref {
-	if c.ID.Kind == computed.KindChildEntry || c.ID.Kind == computed.KindParentResolvedRefs {
+// leaves out the routes of its deps: they are the subject and the ancestors
+// on its paths, whose names the detail may quote (design §7.4 rule 7,
+// D-024). Descendants still count: a parent-resolvedrefs check is decided by
+// the children its rows under the key select, so it adds them; rows are in
+// RowKey order (fix round 3).
+func evidence(c *computed.CheckResult, rows []computed.Row) []objects.Ref {
+	switch c.ID.Kind {
+	case computed.KindChildEntry:
 		return withoutRoutes(c.Deps, c.Contributors)
+	case computed.KindParentResolvedRefs:
+	default:
+		return c.Deps
 	}
-	return c.Deps
+	ev := slices.Clone(withoutRoutes(c.Deps, c.Contributors))
+	i, _ := slices.BinarySearchFunc(rows, c.On, func(r computed.Row, p objects.Ref) int { return r.Key.Parent.Compare(p) })
+	for ; i < len(rows) && rows[i].Key.Parent == c.On; i++ {
+		r := &rows[i]
+		if ch := r.Key.Child; ch != (objects.Ref{}) && slices.Contains(r.Reporters, c.Key) && !slices.Contains(ev, ch) {
+			ev = append(ev, ch)
+		}
+	}
+	return ev
 }
 
 // ownedResources maps the owned Gateways, ListenerSets and routes by ref; the

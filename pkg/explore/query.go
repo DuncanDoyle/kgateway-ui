@@ -403,7 +403,9 @@ var rowOutcomes = []computed.RowOutcome{computed.OutcomeAttached, computed.Outco
 	computed.OutcomeRejectedHostnames, computed.OutcomeCycle, computed.OutcomeUnresolved, computed.OutcomeUnknown}
 
 // QueryDelegation pages parent's delegation rows that match q; Page.IDs
-// index DelegRows. A row whose child visible rejects is left out; a row with
+// index DelegRows, and a negative ID -1-i is the restricted row of a
+// selection-restricted ref, the ref of DelegRows[i]: it replaces the ref's
+// zero-child rows and matches no outcome (our call, 2.4). A row whose child visible rejects is left out; a row with
 // no child never is (design §7.4 rule 3). The outcome filter matches a row
 // only when visible admits every ref of its Deps, which leave out the routes
 // on its paths (rules 4a, 4b). Both apply before Total and paging; nil
@@ -435,25 +437,47 @@ func (ix *Index) QueryDelegation(parent objects.Ref, q DelegationQuery, visible 
 	if q.Rule != nil && q.Ref != nil {
 		cands = ix.RefRows[RefKey{parent, *q.Rule, *q.Ref}]
 	}
+	// A match is a DelegRows index, or -1-i for the restricted row that
+	// stands for the selection of the ref of row i.
 	match := make([]int, 0, len(cands))
+	hidden, first := false, -1
 	for _, i := range cands {
 		r := &ix.DelegRows[i]
 		k := &r.Key
-		if q.Rule != nil && k.Rule != *q.Rule || q.Ref != nil && k.Ref != *q.Ref ||
+		if q.Rule != nil && k.Rule != *q.Rule || q.Ref != nil && k.Ref != *q.Ref {
+			continue
+		}
+		if first < 0 || k.Rule != ix.DelegRows[first].Key.Rule || k.Ref != ix.DelegRows[first].Key.Ref {
+			first = i
+			hidden = ix.SelectionHidden(RefKey{parent, k.Rule, k.Ref}, visible)
+			// It matches no outcome: its outcome is restricted (rule 4a).
+			if hidden && len(q.Outcomes) == 0 {
+				match = append(match, -1-i)
+			}
+		}
+		if hidden && k.Child == (objects.Ref{}) ||
 			len(q.Outcomes) > 0 && (!slices.Contains(q.Outcomes, r.Outcome) || !ix.Visible(r.Deps, visible)) ||
 			visible != nil && k.Child != (objects.Ref{}) && !visible(k.Child) {
 			continue
 		}
 		match = append(match, i)
 	}
+	key := func(m int) *computed.RowKey {
+		if m >= 0 {
+			return &ix.DelegRows[m].Key
+		}
+		k := ix.DelegRows[-1-m].Key
+		k.Child = objects.Ref{}
+		return &k
+	}
 	// The same slicing as page, over the fixed order (design §3.6).
 	n := len(match)
 	start, end := 0, min(n, q.Limit)
 	if cur != nil && cur.before {
-		end = sort.Search(n, func(i int) bool { return cur.compare(&ix.DelegRows[match[i]].Key) >= 0 })
+		end = sort.Search(n, func(i int) bool { return cur.compare(key(match[i])) >= 0 })
 		start = max(0, end-q.Limit)
 	} else if cur != nil {
-		start = sort.Search(n, func(i int) bool { return cur.compare(&ix.DelegRows[match[i]].Key) > 0 })
+		start = sort.Search(n, func(i int) bool { return cur.compare(key(match[i])) > 0 })
 		end = min(n, start+q.Limit)
 	}
 	p := Page{IDs: make([]RowID, 0, end-start), Total: n}
@@ -463,10 +487,10 @@ func (ix *Index) QueryDelegation(parent objects.Ref, q DelegationQuery, visible 
 	switch {
 	case end > start:
 		if end < n {
-			p.Next = encodeDelegCursor(false, &ix.DelegRows[match[end-1]].Key)
+			p.Next = encodeDelegCursor(false, key(match[end-1]))
 		}
 		if start > 0 {
-			p.Prev = encodeDelegCursor(true, &ix.DelegRows[match[start]].Key)
+			p.Prev = encodeDelegCursor(true, key(match[start]))
 		}
 	case cur != nil && !cur.before && start > 0:
 		p.Prev = encodeDelegCursor(true, cur.key())

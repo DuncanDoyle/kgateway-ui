@@ -631,9 +631,16 @@
         "backendRefs": [
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "rules": "kgateway-2.4",
+                "state": "restricted"
+              },
               "mode": "name",
               "name": "child",
               "namespace": "shop",
+              "selected": 0,
               "state": "restricted"
             },
             "filters": [],
@@ -710,12 +717,8 @@
               "attached": 0,
               "computed": {
                 "by": "ui",
-                "coverage": [
-                  "status-compatible"
-                ],
-                "rule": "delegation",
                 "rules": "kgateway-2.4",
-                "state": "disagrees"
+                "state": "restricted"
               },
               "mode": "wildcard",
               "namespace": "shop",
@@ -737,12 +740,8 @@
               "attached": 0,
               "computed": {
                 "by": "ui",
-                "coverage": [
-                  "not-verified"
-                ],
-                "rule": "delegation",
                 "rules": "kgateway-2.4",
-                "state": "checked"
+                "state": "restricted"
               },
               "label": "team",
               "mode": "label",

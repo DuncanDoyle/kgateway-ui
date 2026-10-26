@@ -247,6 +247,9 @@ type Index struct {
 	RefRows map[RefKey][]int
 	// Effective is view C per child route.
 	Effective map[objects.Ref]EffectiveEntry
+	// RefScope is, per delegation ref, the routes its selection reads; a
+	// caller who cannot view them all sees the ref as selection-restricted.
+	RefScope map[RefKey]DepSet
 	// Unreached maps a child route to its rows that no context reached and
 	// whose Deps, its parent's root eligibility, are not empty, as
 	// DelegRows indexes in order. Such a row has no effective edge.
@@ -342,6 +345,12 @@ func (ix *Index) Facts(id RowID, l ParentLink) *RefFacts {
 // DupFacts returns view A's facts for l's spec index l.Dups[k], or nil.
 func (ix *Index) DupFacts(id RowID, l ParentLink, k int) *RefFacts {
 	return ix.Routes[id].facts(l.Dups[k], l.Target)
+}
+
+// SelectionHidden reports whether visible rejects a route that ref k's
+// selection reads: the ref is then selection-restricted (our call, 2.4).
+func (ix *Index) SelectionHidden(k RefKey, visible func(objects.Ref) bool) bool {
+	return visible != nil && !ix.Visible(ix.RefScope[k], visible)
 }
 
 // Ref returns the ref at index i of the dependency table.

@@ -376,7 +376,8 @@ func restrictedComputed(string) Computed {
 }
 
 // withoutHealth is GET path's canonical JSON without any "health" field or
-// "disagrees" flag, which cover every finding (design §7.4 rule 9).
+// "disagrees" flag, which cover every finding (design §7.4 rule 9), and
+// without deniedInInstall, the one hidden count a list sends (rule 2).
 func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
 	t.Helper()
 	var strip func(v any)
@@ -384,6 +385,7 @@ func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
 		switch x := v.(type) {
 		case map[string]any:
 			delete(x, "health")
+			delete(x, "deniedInInstall")
 			if fs, ok := x["flags"].([]any); ok {
 				x["flags"] = slices.DeleteFunc(fs, func(f any) bool { return f == "disagrees" })
 			}
@@ -605,15 +607,17 @@ var hideAncestor = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 
 // D-024: under a hidden ancestor route, a visible child's rows, contexts and
 // effective edges show the ancestor's name (link none) and the match it
-// delegated under, and nothing else; total counts visible children. Hidden
+// delegated under, and nothing else; total counts visible children and the
+// ref's one restricted row, since leaf's wildcard reads the hidden k2. Hidden
 // routes that are not ancestors change nothing the caller sees.
 func TestHiddenAncestorShowsInheritedMatch(t *testing.T) {
 	_, srv, _ := startWith(t, setup{disputes: true, authz: hideAncestor}, ancestorWorld("/api/s", "")...)
+	// The hidden k2 makes the wildcard selection-restricted: one restricted row first.
 	p := get[Page[DelegationRow]](t, srv, delegURL("shop", "leaf", ""), 200)
-	if !slices.Equal(rowKeys(p), []string{"0.0:kids/k1"}) || p.Total != 1 {
+	if !slices.Equal(rowKeys(p), []string{"0.0:", "0.0:kids/k1"}) || p.Total != 2 || p.Items[0].Computed.State != "restricted" {
 		t.Fatalf("leaf rows %v total %d", rowKeys(p), p.Total)
 	}
-	r := p.Items[0]
+	r := p.Items[1]
 	wantPath := []PathStepDTO{
 		{Ref: LinkedRef{Ref: route("shop", "api"), Link: LinkDetail}, Match: pathMatch("/api")},
 		{Ref: LinkedRef{Ref: route("shop", "mid"), Link: LinkNone}, Match: pathMatch("/api/m")},
@@ -628,7 +632,7 @@ func TestHiddenAncestorShowsInheritedMatch(t *testing.T) {
 		!reflect.DeepEqual(d.Effective[0].Contexts[0].ParentMatch, ptr(pathMatch("/api/m"))) {
 		t.Fatalf("leaf effective %+v", d.Effective)
 	}
-	if dl := d.Rules[0].BackendRefs[0].Delegation; dl.Selected == nil || *dl.Selected != 1 || dl.Attached == nil || *dl.Attached != 1 || dl.Computed.State != "checked" {
+	if dl := d.Rules[0].BackendRefs[0].Delegation; dl.Selected == nil || *dl.Selected != 1 || dl.Attached == nil || *dl.Attached != 1 || dl.Computed.State != "restricted" {
 		t.Errorf("leaf ref %+v", dl)
 	}
 	// Nothing else of mid: no link, no rules, no status.
@@ -711,14 +715,20 @@ func TestDelegationCountsRecounted(t *testing.T) {
 		if dl.Selected == nil || *dl.Selected != tc.selected || dl.Attached == nil || *dl.Attached != tc.attached {
 			t.Errorf("hide %q: selected %v attached %v", tc.hide, dl.Selected, dl.Attached)
 		}
-		if p := get[Page[DelegationRow]](t, srv, delegURL("shop", "w", ""), 200); p.Total != tc.selected {
+		// A hidden child adds the ref's one restricted row (our call, 2.4).
+		total := tc.selected
+		if tc.hide != "" {
+			total++
+		}
+		if p := get[Page[DelegationRow]](t, srv, delegURL("shop", "w", ""), 200); p.Total != total {
 			t.Errorf("hide %q: total %d", tc.hide, p.Total)
 		}
 	}
 }
 
-// D-013: a name ref to a hidden route carries no counts and no check, so a
-// present target and an absent one look the same.
+// D-013: a name ref to a hidden route is selection-restricted: a restricted
+// check and visible counts only, so a present target and an absent one look
+// the same.
 func TestHiddenNameRefHasNoCounts(t *testing.T) {
 	w := testutil.WithRules(testutil.HTTPRoute("shop", "w", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		delegRule([]string{"/w"}, testutil.DelegateTo("kids", "x")), delegRule([]string{"/w"}, testutil.DelegateTo("kids", "y")))
@@ -726,10 +736,150 @@ func TestHiddenNameRefHasNoCounts(t *testing.T) {
 	_, srv, _ := startWith(t, setup{disputes: true, authz: hide}, isolated(kidsNS, w, leaf("kids", "x", nil, "/w/x"))...)
 	rules := get[RouteDetail](t, srv, routeDetail+"shop/w", 200).Rules
 	for i, name := range []string{"x", "y"} {
-		want := &DelegationRefDTO{Mode: objects.DelegationName, Namespace: "kids", Name: name, State: DelegationRestricted}
+		zero, rc := 0, restrictedComputed("")
+		want := &DelegationRefDTO{Mode: objects.DelegationName, Namespace: "kids", Name: name, State: DelegationRestricted, Selected: &zero, Attached: &zero, Computed: &rc}
 		if got := rules[i].BackendRefs[0].Delegation; !reflect.DeepEqual(got, want) {
 			t.Errorf("kids/%s: %+v", name, got)
 		}
+	}
+}
+
+// flipBodies is the caller's view of parent shop/w in each world: its full
+// delegation page, two outcome filters, its detail without health, and the
+// state=dropped list, concatenated per world.
+func flipBodies(t *testing.T, authz Authorizer, worlds ...[]runtime.Object) [][]byte {
+	t.Helper()
+	var out [][]byte
+	for _, w := range worlds {
+		_, srv, _ := startWith(t, setup{disputes: true, authz: authz}, w...)
+		out = append(out, slices.Concat(wire(t, srv, delegURL("shop", "w", "")), wire(t, srv, delegURL("shop", "w", "?outcome=unresolved")),
+			wire(t, srv, delegURL("shop", "w", "?outcome=attached")), withoutHealth(t, srv, routeDetail+"shop/w"),
+			withoutHealth(t, srv, listBase+"/routes?state=dropped")))
+	}
+	return out
+}
+
+// wWorld is root shop/w on edge delegating /w through ref, plus extra.
+func wWorld(ref map[string]any, extra ...runtime.Object) []runtime.Object {
+	w := testutil.WithRules(testutil.HTTPRoute("shop", "w", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/w"}, ref))
+	return isolated(append([]runtime.Object{kidsNS, w}, extra...)...)
+}
+
+var hideKids = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
+	return ref.Kind != "HTTPRoute" || ref.Namespace != "kids" || strings.HasPrefix(ref.Name, "k")
+})
+
+// Fix round 3, P1a (our call, 2.4): a name ref whose target the caller cannot
+// view is selection-restricted: one restricted zero-child row, whether the
+// target exists or not.
+func TestHiddenNameTargetPresentOrAbsent(t *testing.T) {
+	ref := testutil.DelegateTo("kids", "x")
+	b := flipBodies(t, hideKids, wWorld(ref, leaf("kids", "x", nil, "/w/x")), wWorld(ref))
+	if !bytes.Equal(b[0], b[1]) {
+		t.Fatalf("a hidden name target's existence shows")
+	}
+	_, srv, _ := startWith(t, setup{disputes: true, authz: hideKids}, wWorld(ref)...)
+	p := get[Page[DelegationRow]](t, srv, delegURL("shop", "w", ""), 200)
+	want := DelegationRow{RefAsWritten: DelegationRefDTO{Mode: objects.DelegationName, Namespace: "kids", Name: "x"}, Contexts: []DelegationContext{},
+		Computed: restrictedComputed("")}
+	if len(p.Items) != 1 || p.Total != 1 || !reflect.DeepEqual(p.Items[0], want) {
+		t.Fatalf("rows %+v total %d", p.Items, p.Total)
+	}
+}
+
+// Fix round 3, P1b: a label ref over a namespace with a hidden route is
+// selection-restricted, whether that route carries the label or not.
+func TestHiddenRouteLabelledOrNot(t *testing.T) {
+	ref := testutil.DelegateLabel("kids", "team")
+	labelled := leaf("kids", "h", nil, "/w/h")
+	labelled.SetLabels(map[string]string{objects.DelegationLabelKey: "team"})
+	b := flipBodies(t, hideKids, wWorld(ref, labelled), wWorld(ref, leaf("kids", "h", nil, "/w/h")))
+	if !bytes.Equal(b[0], b[1]) {
+		t.Fatalf("a hidden route's label shows")
+	}
+}
+
+// Fix round 3, P1b: under a wildcard ref, a hidden route created or deleted
+// changes nothing while another hidden route stays in the namespace. With no
+// hidden route left, the ref is no longer restricted: that reveals no more
+// than deniedInInstall (design §7.4 rule 2, our call, 2.4).
+func TestHiddenRouteUnderWildcard(t *testing.T) {
+	ref := testutil.DelegateWildcard("kids")
+	keep := []runtime.Object{leaf("kids", "k1", nil, "/w/k1"), leaf("kids", "h1", nil, "/w/h1")}
+	b := flipBodies(t, hideKids, wWorld(ref, append(slices.Clone(keep), leaf("kids", "h2", nil, "/other"))...), wWorld(ref, keep...))
+	if !bytes.Equal(b[0], b[1]) {
+		t.Fatalf("a hidden route under a wildcard shows")
+	}
+	_, srv, _ := startWith(t, setup{disputes: true, authz: hideKids}, wWorld(ref, keep...)...)
+	if p := get[Page[DelegationRow]](t, srv, delegURL("shop", "w", ""), 200); !slices.Equal(rowKeys(p), []string{"0.0:", "0.0:kids/k1"}) ||
+		p.Items[0].Computed.State != "restricted" || p.Items[1].Outcome != "attached" {
+		t.Fatalf("rows %v", rowKeys(p))
+	}
+	if p := get[Page[DelegationRow]](t, srv, delegURL("shop", "w", "?outcome=unknown&outcome=unresolved"), 200); p.Total != 0 {
+		t.Fatalf("the restricted row matched an outcome filter: %v", rowKeys(p))
+	}
+}
+
+// twoRootWorld: shop/r1 (edge, visible) and shop/r2 (edge2's Selector
+// listener over shop's zone label) both delegate /x to shop/mid, which
+// delegates /x/m to shop/kid.
+func twoRootWorld(zone string) []runtime.Object {
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	edge2 := testutil.GatewayWithListeners("infra", "edge2", "kgateway", []objects.Listener{sel}, up("sel", 1))
+	r1Ref, r2Ref := testutil.HTTPRouteRef("shop", "r1"), testutil.HTTPRouteRef("shop", "r2")
+	r1 := testutil.WithRules(testutil.HTTPRoute("shop", "r1", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/x"}, testutil.DelegateTo("shop", "mid")))
+	r2 := testutil.WithRules(testutil.HTTPRoute("shop", "r2", []objects.ParentRef{edge2Ref}, testutil.AcceptedBy(edge2Ref, testutil.Controller)),
+		delegRule([]string{"/x"}, testutil.DelegateTo("shop", "mid")))
+	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", nil, testutil.AcceptedBy(r1Ref, testutil.Controller), testutil.AcceptedBy(r2Ref, testutil.Controller)),
+		delegRule([]string{"/x/m"}, testutil.DelegateTo("shop", "kid")))
+	objs := isolated(edge2, r1, r2, mid, leaf("shop", "kid", nil, "/x/m/k", testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "mid"), testutil.Controller)))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": zone})
+		}
+	}
+	return objs
+}
+
+// Fix round 3, P1c: a row reached by a visible root and by a root behind a
+// hidden Namespace restricts whatever that Namespace's labels are.
+func TestRootEligibilityOnEveryRow(t *testing.T) {
+	var bodies [][]byte
+	for _, zone := range []string{"in", "out"} {
+		_, srv, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, twoRootWorld(zone)...)
+		var b []byte
+		for _, p := range []string{delegURL("shop", "mid", ""), delegURL("shop", "mid", "?outcome=attached"), delegURL("shop", "r1", ""), delegURL("shop", "r2", "")} {
+			b = append(b, wire(t, srv, p)...)
+		}
+		for _, p := range []string{routeDetail + "shop/mid", routeDetail + "shop/kid", routeDetail + "shop/r1", routeDetail + "shop/r2", listBase + "/routes?state=dropped"} {
+			b = append(b, withoutHealth(t, srv, p)...)
+		}
+		bodies = append(bodies, b)
+		if r := get[Page[DelegationRow]](t, srv, delegURL("shop", "mid", ""), 200).Items; len(r) != 1 || r[0].Computed.State != "restricted" {
+			t.Errorf("zone %s: mid rows %+v", zone, r)
+		}
+	}
+	if !bytes.Equal(bodies[0], bodies[1]) {
+		t.Fatalf("the hidden Namespace's labels change what the caller sees")
+	}
+}
+
+// Fix round 3, P2: children decide parent-resolvedrefs, so a hidden child
+// restricts its KGWUI-012 evidence; only ancestors never do (rule 7).
+func TestParentResolvedRefsEvidenceHiddenChild(t *testing.T) {
+	hideC := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != route("shop", "c") })
+	_, srv, _ := startWith(t, setup{disputes: true, authz: hideC}, childDropWorld(false)...)
+	var got []FindingDTO
+	for _, f := range findingsOn(get[HealthResponse](t, srv, base+"/health", 200), "shop/api") {
+		if f.Code == health.CodeComputedDisagrees {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || !got[0].EvidenceRestricted || got[0].Detail != restrictedEvidence {
+		t.Fatalf("parent-resolvedrefs under a hidden child: %+v", got)
 	}
 }
 

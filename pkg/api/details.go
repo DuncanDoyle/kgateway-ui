@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"net/http"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -423,11 +422,6 @@ func (d *detail) backendRef(route objects.Ref, rule, i int, b objects.BackendRef
 			child := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: dl.Namespace, Name: dl.Name}
 			out.Ref = d.l.linked(child)
 			out.Delegation.State = d.delegationState(route, child)
-			// Like the state, a hidden target leaves no count: rows would tell
-			// a present target from an absent one (D-013).
-			if out.Delegation.State == DelegationRestricted {
-				return out
-			}
 		}
 		d.refCounts(out.Delegation, explore.RefKey{Parent: route, Rule: rule, Ref: i})
 		return out
@@ -505,6 +499,7 @@ func (d *detail) ancestors(route objects.Ref) ([]AncestorPathDTO, bool) {
 // dependencies the caller may view (design §7.4 rules 3, 4b).
 func (d *detail) delegatedMatches(parent, child objects.Ref) []MatchDTO {
 	var ms []objects.Match
+	seen := map[string]bool{}
 	for _, i := range d.ix.Delegation[parent] {
 		r := &d.ix.DelegRows[i]
 		if r.Key.Child != child {
@@ -512,7 +507,8 @@ func (d *detail) delegatedMatches(parent, child objects.Ref) []MatchDTO {
 		}
 		for j := range r.Contexts {
 			m := r.Contexts[j].ParentMatch
-			if d.v.allowDeps(d.ix, r.ContextDeps[j]) && !slices.ContainsFunc(ms, func(o objects.Match) bool { return reflect.DeepEqual(o, m) }) {
+			if key := matchKey(m); d.v.allowDeps(d.ix, r.ContextDeps[j]) && !seen[key] {
+				seen[key] = true
 				ms = append(ms, m)
 			}
 		}
@@ -523,22 +519,45 @@ func (d *detail) delegatedMatches(parent, child objects.Ref) []MatchDTO {
 	return matchList(ms)
 }
 
+// matchKey is m as a string, equal for equal matches.
+func matchKey(m objects.Match) string {
+	var b strings.Builder
+	if m.Path != nil {
+		b.WriteString(m.Path.Type + "\x00" + m.Path.Value)
+	}
+	for _, ks := range [][]objects.KeyMatch{m.Headers, m.QueryParams} {
+		b.WriteByte(1)
+		for _, k := range ks {
+			b.WriteString(k.Type + "\x00" + k.Name + "\x00" + k.Value + "\x00")
+		}
+	}
+	b.WriteString("\x01" + m.Method)
+	return b.String()
+}
+
 // refCounts adds view B's counts and merged check to the delegation ref k
 // (design §7.3, §7.4 rule 5). Rows of hidden children are left out. Selected
 // is unknown when the selection is (a partial selection or an unknown
 // scope); Attached also when a counted row is unknown or restricted. A ref
-// with no rows, such as one of a parent no root reaches, gets neither.
+// with no rows, such as one of a parent no root reaches, gets neither. A
+// selection-restricted ref's check is restricted and its zero-child rows
+// are left out; it still counts its visible children (our call, 2.4).
 func (d *detail) refCounts(dto *DelegationRefDTO, k explore.RefKey) {
 	ids := d.ix.RefRows[k]
 	if len(ids) == 0 {
 		return
 	}
+	hidden := d.ix.SelectionHidden(k, d.v.visible())
 	var c *Computed
+	if hidden {
+		rc := d.f.restricted()
+		c = &rc
+	}
 	selected, attached, selKnown, attKnown := 0, 0, true, true
 	for _, i := range ids {
 		r := &d.ix.DelegRows[i]
 		child := r.Key.Child != (objects.Ref{})
-		if child && !d.v.can(r.Key.Child) {
+		if child && !d.v.can(r.Key.Child) || hidden && !child {
 			continue
 		}
 		rc := d.f.delegation(r)
@@ -669,6 +688,10 @@ func (h *handler) routeDelegation(w http.ResponseWriter, r *http.Request) {
 	pu, pv := d.routeView(ref)
 	items := make([]DelegationRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
+		if id < 0 {
+			items = append(items, d.selectionRow(&d.ix.DelegRows[-1-id]))
+			continue
+		}
 		items = append(items, d.delegationRow(&d.ix.DelegRows[id], pu, pv))
 	}
 	writeJSON(w, Page[DelegationRow]{Install: d.i.Resolved.ID(), Items: items, Total: pg.Total, Next: pg.Next, Prev: pg.Prev,
@@ -702,6 +725,15 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 		out.Contexts, out.ContextsTruncated = append(out.Contexts, DelegationContext{Restricted: true}), false
 	}
 	return out
+}
+
+// selectionRow is the one row of a selection-restricted ref, the ref of r:
+// it stands for hidden children and for "selects nothing" alike, so it has
+// no child, outcome, reason or context (our call, 2.4).
+func (d *detail) selectionRow(r *explore.DelegRow) DelegationRow {
+	as := r.RefAsWritten
+	return DelegationRow{Rule: r.Key.Rule, Ref: r.Key.Ref, RefAsWritten: DelegationRefDTO{Mode: as.Mode, Namespace: as.Namespace, Name: as.Name, Label: as.Label},
+		Contexts: []DelegationContext{}, Computed: d.f.restricted()}
 }
 
 // delegationContext is retained context j of row r, whose dependencies the
