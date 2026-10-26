@@ -1164,3 +1164,30 @@ func TestHiddenMemberIsCounted(t *testing.T) {
 		}
 	})
 }
+
+// D-024 and design §7.4 rule 7: an orphan's evidence names no route on its
+// paths, so a hidden wildcard parent never restricts it.
+func TestOrphanUnderHiddenParentNotRestricted(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	rule := testutil.Rule(matchPath("/api"))
+	rule["backendRefs"] = []any{testutil.DelegateWildcard("shop")}
+	// api keeps no child, so it reports ResolvedRefs=False/BackendNotFound, as kgateway does (D-021 item 9).
+	st := testutil.AcceptedBy(gw, testutil.Controller)
+	st.Conds[1] = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	objs := isolated(
+		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, st), rule),
+		testutil.WithRules(testutil.HTTPRoute("shop", "o", nil), testutil.Rule(matchPath("/other"))))
+	hideAPI := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "HTTPRoute" || ref.Name != "api" })
+	for _, authz := range []Authorizer{nil, hideAPI} {
+		_, srv, _ := startWith(t, setup{authz: authz}, objs...)
+		var got []FindingDTO
+		for _, f := range findingsOn(get[HealthResponse](t, srv, base+"/health", 200), "shop/o") {
+			if f.Code == health.CodeDelegatedNotAttached {
+				got = append(got, f)
+			}
+		}
+		if len(got) != 1 || got[0].EvidenceRestricted || got[0].Detail != health.OrphanDetail {
+			t.Fatalf("hidden parent %v: %+v", authz != nil, got)
+		}
+	}
+}

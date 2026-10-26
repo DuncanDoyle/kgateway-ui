@@ -267,3 +267,43 @@ func TestMergedTriggerSeverity(t *testing.T) {
 		t.Fatalf("scope unknown: %+v", fs)
 	}
 }
+
+// A computed or orphan finding's ResourceSince is its route's first-seen
+// time, whether the route is owned, a declared candidate or has no parent;
+// nil for a route the install does not hold.
+func TestComputedTriggerResourceSince(t *testing.T) {
+	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	w := delegationWorld(
+		testutil.HTTPRoute("shop", "owned", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "declared", []objects.ParentRef{api}),
+		testutil.HTTPRoute("shop", "loose", nil))
+	ages := map[string]time.Duration{"shop/owned": time.Minute, "shop/declared": 2 * time.Minute, "shop/loose": 3 * time.Minute}
+	w.firstSeen = seenAt(ages)
+	var cs []computed.CheckResult
+	for _, n := range []string{"owned", "declared", "loose", "absent"} {
+		c := trigger(testutil.Now)
+		c.On.Name = n
+		c.ID.Kind, c.ID.Subject = computed.KindOrphan, n
+		cs = append(cs, c)
+	}
+	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: cs}
+	r := w.report(t)
+	for _, n := range []string{"owned", "declared", "loose", "absent"} {
+		var fs []Finding
+		for _, f := range findingsFor(r, CodeDelegatedNotAttached, "shop/"+n) {
+			if f.Message == ComputedNotAttachedMessage { // declared also has the status trigger
+				fs = append(fs, f)
+			}
+		}
+		if len(fs) != 1 {
+			t.Fatalf("%s: %+v", n, fs)
+		}
+		age, held := ages["shop/"+n]
+		switch got := fs[0].ResourceSince; {
+		case !held && got != nil:
+			t.Errorf("%s: ResourceSince %v, want none", n, got)
+		case held && (got == nil || !got.Equal(testutil.Now.Add(-age))):
+			t.Errorf("%s: ResourceSince %v, want %v", n, got, testutil.Now.Add(-age))
+		}
+	}
+}

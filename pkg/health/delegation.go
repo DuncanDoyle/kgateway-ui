@@ -47,7 +47,7 @@ func declaredFinding(in Input, d install.DeclaredCandidate) Finding {
 
 // computedTriggerFindings is KGWUI-011's computed and orphan triggers (design
 // §6.2): one warning per mature delegated-not-attached or orphan-not-attached
-// check, since its window start. None while the scope is unknown (D-024).
+// check, since its window start. Evidence leaves out the routes on the paths. None while the scope is unknown (D-024).
 // conditionsCheck merges a computed one into the status trigger of its
 // (route, parent).
 func computedTriggerFindings(in Input) []Finding {
@@ -56,15 +56,21 @@ func computedTriggerFindings(in Input) []Finding {
 		return nil
 	}
 	var fs []Finding
+	var routes map[objects.Ref]*unstructured.Unstructured
 	for i := range v.Checks {
 		c := &v.Checks[i]
 		if c.Class != computed.ClassTrigger || !c.Mature {
 			continue
 		}
+		if routes == nil {
+			routes = heldRoutes(in.Owned)
+		}
 		on, since := c.On, c.Since
 		f := Finding{Code: CodeDelegatedNotAttached, Slug: "delegated-route-not-attached", Severity: SeverityWarning, Install: in.Install.ID(),
-			Resource: &on, Message: ComputedNotAttachedMessage, Since: &since}
-		if u := routeObject(in.Owned, on); u != nil {
+			Resource: &on, Message: ComputedNotAttachedMessage, Since: &since,
+			// The detail quotes the routes on the paths by name only (design §7.4 rule 7, D-024).
+			Evidence: withoutRoutes(c.Deps, c.Contributors)}
+		if u := routes[on]; u != nil {
 			own := in.firstSeen(u)
 			f.ResourceSince = &own
 		}
@@ -75,11 +81,9 @@ func computedTriggerFindings(in Input) []Finding {
 				continue
 			}
 			f.Detail = computedReason(parent, c.Expected)
-			// The detail quotes the routes on the paths by name only (design §7.4 rule 7, D-024).
-			f.Evidence = withoutRoutes(c.Deps, c.Contributors)
 			f.parent = &objects.ParentRef{Group: parent.Group, Kind: parent.Kind, Namespace: parent.Namespace, Name: parent.Name}
 		case computed.KindOrphan:
-			f.Detail, f.Evidence = OrphanDetail, c.Deps
+			f.Detail = OrphanDetail
 		default:
 			continue
 		}
@@ -111,26 +115,28 @@ func withoutRoutes(deps, routes []objects.Ref) []objects.Ref {
 	return out
 }
 
-// routeObject returns in-scope route ref: owned, a declared candidate or one
-// with no parent; nil otherwise.
-func routeObject(o *install.Owned, ref objects.Ref) *unstructured.Unstructured {
+// heldRoutes maps the install's owned routes, declared candidates and routes
+// with no parent by ref, built once per run; the first of duplicates wins.
+func heldRoutes(o *install.Owned) map[objects.Ref]*unstructured.Unstructured {
 	if o == nil {
-		return nil
+		return map[objects.Ref]*unstructured.Unstructured{}
 	}
-	if r, ok := o.Route(ref); ok {
-		return r.Obj
+	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Routes)+len(o.Declared)+len(o.NoParent))
+	add := func(u *unstructured.Unstructured) {
+		if r := objects.RefOf(u); m[r] == nil {
+			m[r] = u
+		}
+	}
+	for _, r := range o.Routes {
+		add(r.Obj)
 	}
 	for _, d := range o.Declared {
-		if objects.RefOf(d.Route.Obj) == ref {
-			return d.Route.Obj
-		}
+		add(d.Route.Obj)
 	}
 	for _, r := range o.NoParent {
-		if objects.RefOf(r.Obj) == ref {
-			return r.Obj
-		}
+		add(r.Obj)
 	}
-	return nil
+	return m
 }
 
 // mergeTriggers adds the computed trigger findings cs to fs, whose status

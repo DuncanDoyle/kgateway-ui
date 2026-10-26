@@ -88,9 +88,8 @@ func TestScaleComputeSanity(t *testing.T) {
 }
 
 // Every tier's statuses agree with the computed views, so the budgets
-// measure realistic data: at Large every check is compatible; elsewhere no
-// view B check is a candidate (Extreme hits caps, and Typical has one child
-// entry under a rejected parent, which no context reaches). Under
+// measure realistic data: every check is compatible, except that a view B
+// check may be unknown when a compute cap was hit (Extreme). Under
 // Contradicting every view A and parent check contradicts and every child
 // entry is missing; a parent whose own entry was dropped is stale.
 func TestScaleViewsConsistent(t *testing.T) {
@@ -98,11 +97,12 @@ func TestScaleViewsConsistent(t *testing.T) {
 	for _, tier := range tiers {
 		t.Run(tier.Name, func(t *testing.T) {
 			m := New(config(scale.Snapshot(tier, 1), metricsAt(testutil.Now), func() time.Time { return testutil.Now })).Compute()
+			capped := m.Installs[0].Computed.Delegation.Cap != ""
 			want := func(c computed.CheckResult) bool {
 				viewA := c.ID.Kind == computed.KindListenerCount || c.ID.Kind == computed.KindRouteAccepted
 				switch {
-				case !tier.Contradict && !viewA && tier.Name != scale.Large.Name:
-					return !c.Candidate()
+				case !tier.Contradict && !viewA && capped && c.Class == computed.ClassUnknown:
+					return true
 				case !tier.Contradict:
 					return c.Class == computed.ClassCompatible
 				case c.ID.Kind == computed.KindChildEntry:

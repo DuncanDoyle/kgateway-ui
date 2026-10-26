@@ -759,7 +759,7 @@ func TestOrphanWarningAfter30s(t *testing.T) {
 	m := w.step(s, Window)
 	f := oneFinding(t, m, health.CodeDelegatedNotAttached, "apps/o", testutil.Now)
 	tr := delegCheck(t, m, computed.KindOrphan, "apps/o")
-	if f.Severity != health.SeverityWarning || f.Detail != orphanDetail || f.Message != health.ComputedNotAttachedMessage || !reflect.DeepEqual(f.Evidence, tr.Deps) {
+	if f.Severity != health.SeverityWarning || f.Detail != orphanDetail || f.Message != health.ComputedNotAttachedMessage || !reflect.DeepEqual(f.Evidence, []objects.Ref{edgeRef.Ref()}) {
 		t.Fatalf("finding %+v, deps %v", f, tr.Deps)
 	}
 }
@@ -916,5 +916,40 @@ func TestScopeUnknownNoDelegationFindings(t *testing.T) {
 	}
 	if n == 0 || len(s.e.persist.m) != 0 {
 		t.Fatalf("%d delegation checks, %d windows", n, len(s.e.persist.m))
+	}
+}
+
+// The cap is logged once per distinct value, as install rejections are:
+// clearing and hitting it again logs nothing new.
+func TestDelegationCapLoggedOncePerValue(t *testing.T) {
+	var log bytes.Buffer
+	capped := dworld{routes: append(dbase(testutil.DelegateWildcard("apps")), dleaf("apps", "o", "/other", nil))}
+	clear := dworld{routes: []*unstructured.Unstructured{droot("api", "/api", map[string]any{"name": "svc", "port": int64(80)})}}
+	s := newDStepper(t, func(c *Config) {
+		c.DelegationBounds = computed.DefaultBounds
+		c.DelegationBounds.Contexts = 1
+		c.Logger = slog.New(slog.NewTextHandler(&log, nil))
+	})
+	for i, w := range []dworld{capped, clear, capped, clear, capped} {
+		m := w.step(s, time.Duration(i)*time.Second)
+		if got, want := m.Installs[0].Computed.Delegation.Cap, map[bool]string{true: computed.CapContexts, false: ""}[i%2 == 0]; got != want {
+			t.Fatalf("step %d: cap %q, want %q", i, got, want)
+		}
+	}
+	if n := strings.Count(log.String(), "cap=contexts"); n != 1 {
+		t.Fatalf("cap logged %d times:\n%s", n, log.String())
+	}
+}
+
+// D-024 silences only the computed and orphan triggers: under an unknown
+// scope the 2.2 status trigger still fires for a declared candidate.
+func TestScopeUnknownKeepsStatusTrigger(t *testing.T) {
+	c := dleaf("shop", "c", "/other", []objects.ParentRef{testutil.HTTPRouteRef("shop", "api")})
+	w := dworld{routes: append(dbase(testutil.DelegateTo("shop", "c")), c)}
+	s := newDStepper(t, func(c *Config) { c.Scope = unknownScope{} })
+	w.step(s, 0)
+	fs := findingsOn(w.step(s, health.Grace+time.Second), health.CodeDelegatedNotAttached, "shop/c")
+	if len(fs) != 1 || fs[0].Severity != health.SeverityWarning || fs[0].Detail != "No status entry for parent HTTPRoute shop/api" || fs[0].Since != nil {
+		t.Fatalf("want the status trigger alone: %+v", fs)
 	}
 }

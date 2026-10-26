@@ -299,11 +299,12 @@ func allows(protocol, kind string) bool {
 }
 
 // delegate turns HTTPRoutes [top, top+children) into delegated children: the
-// lattice first, then trees whose roots are top-level routes in random order.
+// lattice first, then trees whose roots are accepted top-level routes in random order.
 // The first tree reaches MaxFanOut at its root and MaxDepth along its first child.
 func (w *world) delegate(top, children int) {
 	t := w.t
-	roots := w.rng.Perm(top)
+	// A route whose every parentRef fails is no root: nothing would reach its children (rules §5.1).
+	roots := slices.DeleteFunc(w.rng.Perm(top), func(i int) bool { return !slices.Contains(w.routes[i].failed, false) })
 	next := top
 	end := top + children
 	link := func(p, c int) {

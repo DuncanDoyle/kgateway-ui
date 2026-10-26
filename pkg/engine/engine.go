@@ -122,8 +122,8 @@ type Engine struct {
 	computeMu sync.Mutex
 	seq       uint64
 	seen      map[generation]time.Time
-	rejected  map[string]bool   // install errors already logged
-	caps      map[string]string // each install's last logged delegation cap
+	rejected  map[string]bool // install errors already logged
+	caps      map[string]bool // install and delegation cap pairs already logged
 	// decode caches typed views by (uid, resourceVersion); only touched under computeMu.
 	decode *decodeCache
 	// persist holds the KGWUI-012 windows; only touched under computeMu.
@@ -161,7 +161,7 @@ func New(cfg Config) *Engine {
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]string{},
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
 		decode: newDecodeCache(), persist: newPersistence()}
 }
 
@@ -294,12 +294,10 @@ func (e *Engine) compute() *Published {
 		runs = append(runs, r)
 		v := computeViews(r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
 		views = append(views, v)
-		// The cap hit is logged once per change, as rejections are (rules §5.7).
-		if c := v.Delegation.Cap; c != e.caps[res.ID()] {
-			e.caps[res.ID()] = c
-			if c != "" {
-				e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
-			}
+		// Each cap hit is logged once per distinct value, as rejections are (rules §5.7).
+		if c := v.Delegation.Cap; c != "" && !e.caps[res.ID()+"\x00"+c] {
+			e.caps[res.ID()+"\x00"+c] = true
+			e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
 		}
 	}
 	if at := e.persist.persist(now, views, e.graceEnd(snap, served, firstSeen)); !at.IsZero() {
