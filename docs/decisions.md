@@ -492,3 +492,25 @@ quirk 2 (prefix /q):
 - Decision 1 is replaced. Listener facts are shown to every caller who can see the listener: the computed count, its cross-check, its unknown state and reason, and its isolation note. The count includes members the caller cannot see, as `attachedRoutes` does. A visible route's membership takes the count's state again, so an unknown count makes it unknown for every caller, and `listener=` has no members under it. Per-route facts of hidden routes stay hidden (design §7.2, §7.4 rules 4 and 5).
 - Why: the re-review (R1, R2) showed that restricting a count leaks. Moving a hidden route or ListenerSet into or out of a listener's dependencies flipped visible facts between "Hidden" and their real state. The number of routes a Gateway serves is also a property of that Gateway.
 - Decision 2, the written-ref merge, stands.
+
+## D-024 — Views B and C: unknown scope and the inherited match (2026-10-26, phase 2)
+**Status:** accepted 2026-10-26 (user; sub-phase 2.4 pre-flight PF4, PF5)
+**Context:**
+- When an install's discovery scope is unknown, view A is unknown: its candidates are a guess (user, 2026-10-24; rules §3.3). Views B and C had no such rule. With an unknown scope every namespace counts as in scope (`pkg/install/scope.go:45-48`), so view B would select routes the controller may not watch and could raise computed KGWUI-011 and KGWUI-012 on them.
+- Design §7.4 rule 4 made a delegation context, row or effective matcher `restricted` when any route on its path was hidden. D-023's amendment showed that such restriction leaks: a fact flips between "Hidden" and its real state as a hidden object enters or leaves its dependencies. A hidden ancestor gaining or losing a path to a visible child flips that child's rows the same way.
+
+**Decision:**
+1. **Unknown scope.** An unknown discovery scope makes views B and C unknown. Every delegation row, context, effective matcher and check is `unknown` with reason `scope-unknown`. No computed or orphan KGWUI-011 and no KGWUI-012 from `child-entry` or `parent-resolvedrefs` is raised while it holds. This extends the 2026-10-24 decision.
+2. **Inherited match.** A delegation row, delegation context or effective matcher on a child the caller can see shows its inherited match: the match each ancestor rule on the path delegated under, and the ancestors' names, even when an ancestor is hidden. Nothing else of a hidden ancestor is sent: no other rules, filters, backends, status or detail link (`link: none`). So these facts never turn "Hidden" because of a hidden ancestor.
+3. The rule covers `GET …/delegation` (rows, contexts and the `outcome` filter), `RouteDetail.effective` and the computed `dropped` flag. Per-route facts of hidden routes that are not ancestors of a visible row stay hidden (design §7.4 rule 4). Row presence and `total` still count visible children only (rule 3).
+- Why (user): the child's owner needs the inherited match to manage the child; the ancestor's name is already in the child's status (design §7.4 rule 8); the delegating match is what the parent deliberately handed to the child.
+
+**Alternatives:**
+- Restrict every fact with a hidden route on its path (design §7.4 rule 4 as first written). Rejected: visible rows flip to "Hidden" as hidden ancestors come and go, and the child's owner loses what they need.
+- Compute views B and C over a guessed scope. Rejected: selection outside the controller's real scope raises false warnings.
+
+**Consequences:**
+- Rules §3.3, §5.6 and §11.2, and design §6.2, §7.3, §7.4 (rule 4b) and §9.1 change with this entry.
+- A context's path steps carry each ancestor's name and the match it delegated under. Retained contexts grow by one match per path step, inside the retention caps of rules §5.7.
+- Non-route dependencies still restrict: a root admitted through a `Selector` over a hidden Namespace, or a status root whose target is hidden, keeps its descendants' contexts, rows and effective matchers `restricted` (rules §11.2).
+- Unchanged: the route header's up-chain, where a hidden ancestor step has no identity (design §5.3, rule 3), and finding evidence, where a KGWUI-011 or KGWUI-012 that names a hidden route gets `evidenceRestricted` (rule 7).

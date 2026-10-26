@@ -60,7 +60,7 @@
 
 | Reason | When | What is unknown |
 |---|---|---|
-| `scope-unknown` | the install's discovery scope is unknown, so its candidate routes are a guess **(user, 2026-10-24)** | every listener count and parentRef outcome of view A; no members |
+| `scope-unknown` | the install's discovery scope is unknown, so its candidate routes are a guess **(user, 2026-10-24)** | every listener count and parentRef outcome of view A; no members. Every view B row, context, effective matcher and check (`child-entry`, `parent-resolvedrefs`); no computed or orphan KGWUI-011 and no KGWUI-012 from them while it holds **(user, 2026-10-26; D-024)** |
 | `namespace-labels-unavailable` | Namespace access is not OK and a listener uses `From: Selector` | that listener's count, its members and their parentRef outcomes |
 | `listenerset-no-status` | a ListenerSet has no current `Accepted` | that ListenerSet's listeners |
 | `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs whose namespace could be the wildcard |
@@ -243,7 +243,7 @@ The row aggregates its contexts **(our call)**. A bound reduces certainty; it ne
 Every result carries the set of objects whose data decided it; the design's Authorizer filters on it (design §7.4).
 - **Root eligibility.** A view A root depends on the union of the dependencies of all its parentRef outcomes (§4.6): the route, each Gateway or ListenerSet, and each Namespace a `Selector` evaluated. A status root depends on the route and the target of the `Accepted=True` entry it used.
 - **Context.** A context depends on its root's eligibility set plus every route on its path. Each child context inherits its parent context's set and adds the child.
-- **Row and effective matcher.** The union of the sets of its contexts. A context the caller may not view is projected as `{restricted: true}`; an outcome that aggregates over a hidden context is `restricted` as a whole, so the presence of a hidden path is never revealed.
+- **Row and effective matcher.** The union of the sets of its contexts. Routes on a context's path never restrict it: a caller who can see the child gets each ancestor's name and the match it delegated under, and nothing else of a hidden ancestor (design §7.4 rule 4b) **(user, 2026-10-26; D-024)**. A context whose other dependencies (the root's Gateways, ListenerSets, `Selector` Namespaces, or a status root's target) the caller may not view is projected as `{restricted: true}`; an outcome that aggregates over such a context is `restricted` as a whole.
 - **Aggregate checks** (§8.2) and the findings they raise: the union over every context in the aggregate.
 
 ### 5.7 Budget, retention and projection
@@ -505,7 +505,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Hostname-bearing child that fits; one that does not | `rejected-hostnames`; `dropped` |
 | Cycle: the ref fails, its siblings drop, parent `RefNotPermitted` | as stated |
 | Diamond A→B1→C, A→B2→C | two child entries, one per parent |
-| The two quirks of §5.4 | as written, flagged |
+| The two quirks of §5.4 | as written (verified, D-021 item 7; no note) |
 | An owned parent not reached from a root | `not-reached`; selection still shown |
 | Dense selection: 100 wildcard parents over a namespace of 1,000 routes | `too-large` after the edge cap, deterministic cut |
 | Contexts per row above 20; retained contexts above 100,000 | `contextsTruncated`; outcomes unchanged |
@@ -515,6 +515,8 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | A label ref with an unknown wildcard setting above C | C in the reach closure; negative checks `unknown` |
 | Root behind a `Selector` listener; caller denied that Namespace | every descendant context, row and effective matcher `restricted` |
 | Status root; caller denied the entry's target Gateway | descendants `restricted` |
+| Hidden ancestor route between a visible root and a visible child | the child's contexts, rows and effective matchers shown, with the ancestor's name and delegating match only (D-024) |
+| The install's discovery scope is unknown | every row and check `unknown`, `scope-unknown`; no KGWUI-011 or KGWUI-012 from views B and C (D-024) |
 | Two rows of one child under rules 0 and 1 | separate identities; both listed |
 | An effective matcher on the route page | equal to the one the traversal used in the same Model |
 | Default fit: each clause, raw prefix `/apiv2`, child path type ignored, omitted `matches` under `/api` | kept or the failing clause |

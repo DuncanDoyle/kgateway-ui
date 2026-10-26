@@ -1672,20 +1672,20 @@ codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.3-codex.md "Revi
 
 # Sub-phase 2.4 — Views B and C
 
-Every 2.4 task reads `computed-rules.md` §3, §5–§9 for the behaviour it implements. View B and C code is written in `kgw23` and copied to `kgw24` in Task 59; only the report keys differ (rules §2, §7).
+Every 2.4 task reads `computed-rules.md` §3, §5–§9 for the behaviour it implements. View B and C code is written in `kgw23` and copied to `kgw24` in Task 59; only the report keys differ (rules §2, §7). D-024 (user, 2026-10-26) and the pre-flight rulings PF1–PF26 (`.superpowers/sdd/implementation-plan/preflight-2.4.md`) are folded into the tasks below.
 
 ### Task 52: 2.4 brief and delegation observations (D-021)
 
 **Files:**
 - Create: `docs/phases/phase-2/phase-2.4-brief.md`; Modify: `docs/phase-status.md` (sub-phase 2.4 active, base SHA)
-- Modify, only when D-021 requires it: `docs/phases/phase-2/computed-rules.md` (§2, §5–§8, §10, §11.2–§11.4), `docs/decisions.md` (D-021 Consequences)
+- Modify: `docs/phases/phase-2/computed-rules.md` (§3.3, §5.6, §11.2), `docs/phases/phase-2/design.md` (§6.2, §7.3, §7.4, §9.1), `docs/decisions.md` (D-024), `.superpowers/sdd/implementation-plan/preflight-2.4.md`
 
-**Interfaces:** Consumes D-021 items 1–9. Produces the facts later tasks pin: `kgw23`'s `ClearsDroppedStatus` (item 6; `kgw24` is `true`, rules §2), whether the §5.4 quirks carry the "not verified" note (item 7), the §7 report keys (items 2–4), the §8.2 reason rule (item 8), one entry per child (item 9), clearing for implicit children (item 1), `dropped` vs `rejected-hostnames` (item 5). **No product code.**
+**Interfaces:** Consumes D-021 items 1–9. Produces the facts later tasks pin: a leftover entry's clearing is verified on both sets when a parent edit caused the drop or deselection, and not after a child edit (items 1, 6; rules §2, §8.3; PF1); the §5.4 quirks carry no note (item 7; PF10); the §7 report keys (items 2–4), the §8.2 reason rule (item 8), one entry per child (item 9), clearing for implicit children (item 1), `dropped` vs `rejected-hostnames` (item 5). **No product code.**
 
 - [ ] **Step 1: Map** each item to the rules section it confirms or changes, in the brief.
-- [ ] **Step 2: Gate.** A contradiction of rules §5–§8 → STOP and ask the user with the proposed text. Otherwise mark §10 items 1–9 "confirmed by D-021" or "changes: …" as approved.
+- [ ] **Step 2: Gate.** A contradiction of rules §5–§8 → STOP and ask the user with the proposed text. Otherwise nothing to mark: §10 already reads "Answered (D-021)". Apply the setup rulings: rules §11.2's quirk row reads "as written" (PF10); D-024 (user, 2026-10-26) amends rules §3.3, §5.6, §11.2 and design §6.2, §7.3, §7.4, §9.1.
 - [ ] **Step 3: Record the sub-phase** (Lifecycle) **and write the brief:** goal, Tasks 52–70, exit criteria, file list, the decided values above.
-- [ ] **Step 4: Commit** `docs: 2.4 brief and delegation observations (D-021)`.
+- [ ] **Step 4: Commit** `docs: start sub-phase 2.4 (brief, D-024, plan rulings)`.
 
 ### Task 53: Wildcard setting, roots and delegation inputs
 
@@ -1697,12 +1697,14 @@ Every 2.4 task reads `computed-rules.md` §3, §5–§9 for the behaviour it imp
 - Produces:
   - `const WildcardEnv = "DELEGATION_WILDCARD_NAMESPACE"`; `Settings.WildcardNamespace Setting` — absent → `"all"`; `""` → `"all"` (rules §5.2); `valueFrom` and `envFrom` as Task 36
   - `pkg/computed/delegation.go`: `type DelegRoute struct { Ref objects.Ref; Generation int64; View *objects.HTTPRouteView; Owned, TopLevel bool }`; `type Root struct { Route objects.Ref; FromStatus, Unknown bool; Deps []objects.Ref }`; `type Bounds struct { Edges, Contexts, Matchers, ContextsPerRow, ContextsPerInstall, EffectiveEdges, ContextsPerEdge int }`; `var DefaultBounds = Bounds{Edges: 50_000, Contexts: 20_000, Matchers: 200_000, ContextsPerRow: 20, ContextsPerInstall: 100_000, EffectiveEdges: 20, ContextsPerEdge: 20}` (rules §5.7)
-  - `DelegationInput` gains `Routes []DelegRoute` (every in-scope HTTPRoute, sorted by (namespace, name)), `Unwatched map[objects.Ref]bool` (HTTPRoutes outside the scope), `Roots []Root`, `Wildcard install.Setting`, `ControllerNames []string`, `Bounds Bounds`
+  - `DelegationInput` gains `Routes []DelegRoute` (every in-scope HTTPRoute, sorted by (namespace, name)), `Unwatched map[objects.Ref]bool` (HTTPRoutes outside the scope), `Roots []Root`, `Wildcard install.Setting`, `ControllerNames []string`, `Bounds Bounds`, `ScopeUnknown bool` (the install's discovery scope is unknown: views B and C are `scope-unknown`, D-024)
   - `func delegationInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, dec objects.Decoder, a computed.AttachmentResult) computed.DelegationInput` — roots per rules §5.1: an owned top-level HTTPRoute with an `accepted` outcome (deps: the union of its outcomes' deps, rules §5.6); all outcomes unknown and a current `Accepted=True` entry → `FromStatus` (deps: the route and the entry's target); all unknown without one → `Unknown`
 
-- [ ] **Step 1: Write the failing tests** `TestReadWildcard` (absent → all, `""` → all, `team-a`, valueFrom → unknown), `TestRootsFromViewA` (accepted root with deps; rejected-only → no root; unknown + current `Accepted=True` → status root; unknown without → `Unknown`), `TestDelegationInputScope` (out-of-scope HTTPRoutes only in `Unwatched`; `Owned` and `TopLevel` set).
+- [ ] **Step 1: Write the failing tests** `TestReadWildcard` (absent → all, `""` → all, `team-a`, valueFrom → unknown), `TestRootsFromViewA` (accepted root with deps; rejected-only → no root; unknown + current `Accepted=True` → status root; unknown without → `Unknown`), `TestDelegationInputScope` (out-of-scope HTTPRoutes only in `Unwatched`; `Owned` and `TopLevel` set; an unknown scope sets `ScopeUnknown`).
 - [ ] **Step 2: Run** `go test ./pkg/install ./pkg/engine -run 'Wildcard|RootsFromViewA|DelegationInputScope'` → FAIL.
-- [ ] **Step 3: Commit** `feat(engine): delegation inputs, roots and the wildcard setting`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(engine): delegation inputs, roots and the wildcard setting`.
 
 ### Task 54: View C: default fit and inherit merge
 
@@ -1727,7 +1729,7 @@ func TestFitClauses(t *testing.T) {
 }
 func TestOmittedMatchesUnderPrefix(t *testing.T) // nil matches under /api → dropped, default-slash, Parent "/api"; under / → kept
 func TestMerge(t *testing.T) {
-	// /api + Prefix / → Prefix /api; /api + Exact /x → Exact /api/x; /api + nil path → Prefix /api; parent Exact /api + child Prefix /x → Prefix /api/x (type not checked);
+	// /api + Prefix / → Prefix /api; /api + Exact /x → Exact /api/x; /api + nil path → Prefix /api (a hand-built Match: decoded matches never have a nil path, PF23); parent Exact /api + child Prefix /x → Prefix /api/x (type not checked);
 	// headers a=1,b=2 + b=3,c=4 → a=1,b=2,c=4 sorted by name; query alike; method: parent GET wins, parent none keeps child POST
 }
 func TestExplicitEmptyMatches(t *testing.T)      // inherit → [parentMatch]; default → dropped, no-matches
@@ -1736,7 +1738,8 @@ func TestViewCKeepsChildIffAnyRuleKept(t *testing.T)
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Fit|Omitted|Merge|ExplicitEmpty|ViewC'` → FAIL.
 - [ ] **Step 3: Implement** (`path.Join` for the merged path; a nil child path counts as Prefix `""`).
-- [ ] **Step 4: Commit** `feat(computed): view C fit and inherit merge`.
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(computed): view C fit and inherit merge`.
 
 ### Task 55: View B selection and permission
 
@@ -1747,19 +1750,21 @@ func TestViewCKeepsChildIffAnyRuleKept(t *testing.T)
 **Interfaces:**
 - Produces:
   - `type Allows string`: `AllowsAny = "any"`, `AllowsThis = "this"`, `AllowsOther = "other"`
-  - `kgw23`: `func newSelector(routes []computed.DelegRoute, unwatched map[objects.Ref]bool, wildcard install.Setting) *selector` (indexes by namespace and by (namespace, label value), built once); `func (s *selector) fetch(ref objects.DelegationRef) (children, possible []objects.Ref, unresolved string, unknown computed.UnknownReason)` — rules §5.2; children sorted by (namespace, name); `unresolved` is "" or the reason ("Selects no routes", "Not watched by the controller"); with the wildcard unknown, every `label` ref is `setting-unknown` with no `children`, and `possible` lists every route carrying that label value in any namespace: uncertain points for completeness, never a selection (rules §3.3)
+  - `kgw23`: `func newSelector(routes []computed.DelegRoute, unwatched map[objects.Ref]bool, wildcard install.Setting) *selector` (indexes by namespace and by (namespace, label value), built once); `func (s *selector) fetch(ref objects.DelegationRef) (children, possible []objects.Ref, unresolved computed.Unresolved, unknown computed.UnknownReason)` — rules §5.2; children sorted by (namespace, name); `unresolved` is empty or a code, `computed.UnresolvedMissing` or `computed.UnresolvedUnwatched` (type `Unresolved` in `delegation.go`); `pkg/api/explain.go` renders "Selects no routes" and "Not watched by the controller" (PF9); with the wildcard unknown, every `label` ref is `setting-unknown` with no `children`, and `possible` lists every route carrying that label value in any namespace: uncertain points for completeness, never a selection (rules §3.3)
   - `func permits(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (bool, computed.Allows)` — rules §5.3, on `child.WrittenRefs` (Task 12), where an empty group or kind never matches
 
 - [ ] **Step 1: Write the failing tests** (rules §11.2 rows 1–2)
 
 ```go
-func TestFetchModes(t *testing.T)             // name → ns/x; missing → "Selects no routes"; out of scope → "Not watched by the controller"; "*" and "" → every HTTPRoute in ns; label → only delegation.kgateway.dev/label == v
+func TestFetchModes(t *testing.T)             // name → ns/x; missing → UnresolvedMissing; out of scope → UnresolvedUnwatched; "*" and "" → every HTTPRoute in ns; label → only delegation.kgateway.dev/label == v
 func TestLabelWildcardNamespace(t *testing.T) // default: ref ns "all" selects the label everywhere; set "team-a": ns team-a selects everywhere, ns all only in "all"; "" → all; valueFrom → setting-unknown, no children, every labelled route in `possible`
 func TestPermits(t *testing.T)                // empty list → any; explicit group+kind+name, ns nil → child's own ns → this; nil group or kind → other; sectionName and port ignored; another parent → other
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Fetch|LabelWildcard|Permits'` → FAIL.
-- [ ] **Step 3: Commit** `feat(computed): view B selection and permission`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(computed): view B selection and permission`.
 
 ### Task 56: Row accumulator: streaming aggregation and retention
 
@@ -1774,9 +1779,9 @@ Retention is streaming (computed-rules §5.7): each context is folded into its r
 - Produces (`pkg/computed/delegation.go`):
   - `type RowOutcome string`: `attached`, `partial`, `dropped`, `forbidden`, `rejected-hostnames`, `cycle`, `unresolved`, `unknown`
   - `type RowKey struct { Parent objects.Ref; Rule, Ref int; Child objects.Ref }` — a ref that selects nothing gives one row with a zero `Child` and outcome `unresolved` (computed-rules §5.5)
-  - `type Context struct { ParentMatch objects.Match; Path []objects.Ref; Reporter ReportKey; Outcome RowOutcome; Unknown UnknownReason; Reason *FitFailure; Rules []EffectiveRule; Deps []objects.Ref }`
-  - `type Row struct { Key RowKey; RefAsWritten objects.DelegationRef; Allows Allows; Outcome RowOutcome; Unknown UnknownReason; SomeNotComputed, Unconfirmable bool; Reason *FitFailure; Note, Quirk string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref; Reporters []ReportKey; ChildKey ReportKey; WritesEntry bool }` — `Deps` and `Reporters` cover every context, retained or not; `Note` holds the `unresolved` reason; `Quirk` names the §5.4 quirk a row reproduces, unless D-021 item 7 verified it
-  - `type RowMeta struct { RefAsWritten objects.DelegationRef; Allows Allows; Note, Quirk string }`; `Row.ContextDigest uint64` — order-independent wrapping sum of a 64-bit hash of every contributing context's incoming match, path, reporter and outcome, retained or not; `Row.KeyDigests map[ReportKey]uint64` — the same streaming digest partitioned by each context's `Reporter`. Task 61's fingerprints read them for the per-context inputs of computed-rules §9.2
+  - `type PathStep struct { Route objects.Ref; Match objects.Match }` — a route on the path and the match it delegated under (D-024); `type Context struct { ParentMatch objects.Match; Path []PathStep; Reporter ReportKey; Outcome RowOutcome; Unknown UnknownReason; Reason *FitFailure; Rules []EffectiveRule; Deps []objects.Ref }`
+  - `type Row struct { Key RowKey; RefAsWritten objects.DelegationRef; Allows Allows; Outcome RowOutcome; Unknown UnknownReason; SomeNotComputed, Unconfirmable bool; Reason *FitFailure; Unresolved Unresolved; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref; Reporters []ReportKey; ChildKey ReportKey; WritesEntry bool }` — `Deps` and `Reporters` cover every context, retained or not; `Unresolved` holds the unresolved code; there is no quirk field, since both quirks are verified (D-021 item 7, PF10)
+  - `type RowMeta struct { RefAsWritten objects.DelegationRef; Allows Allows; Unresolved Unresolved }`; `Row.ContextDigest uint64` — order-independent wrapping sum of a 64-bit hash of every contributing context's incoming match, path, reporter and outcome, retained or not; `Row.KeyDigests map[ReportKey]uint64` — the same streaming digest partitioned by each context's `Reporter`. Task 61's fingerprints read them for the per-context inputs of computed-rules §9.2
   - `kgw23`: `func newAccumulator(b computed.Bounds) *accumulator`; `func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta)` — called once per row before any `add` (an `unresolved` zero-child row gets only `open`); `func (a *accumulator) add(key computed.RowKey, c computed.Context)` — always updates the row's outcome counters, `Deps`, `Reporters`, `ContextDigest` and `KeyDigests[c.Reporter]`; keeps `c` only while the row holds fewer than `ContextsPerRow` and the install fewer than `ContextsPerInstall`, else sets `ContextsTruncated`; `func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row` — final outcomes per computed-rules §5.5 (all known and equal → that outcome; `attached` and `dropped` → `partial`; `attached` with unknown → `attached` and `SomeNotComputed`; no `attached` with unknown or an incomplete child → `unknown`, never `dropped`; `forbidden` always known), in `RowKey` order
 
 - [ ] **Step 1: Write the failing tests**
@@ -1788,18 +1793,20 @@ func TestInstallContextCap(t *testing.T)               // small ContextsPerInsta
 func TestRetentionIsStreaming(t *testing.T)            // 10,000 adds with ContextsPerInstall 100: live retained contexts never exceed 100 at any add (test counter)
 func TestDepsAndReportersSurviveRetention(t *testing.T) // a context dropped by a cap still adds its Deps and Reporter
 func TestUnretainedContextChangesDigest(t *testing.T)  // change only the incoming match of the 21st (unretained) context, same outcome, deps and reporter → ContextDigest and that reporter's KeyDigests entry differ; other keys' entries do not
-func TestRowMetaCarried(t *testing.T)                 // RefAsWritten, Allows, Note and Quirk from open appear on the emitted Row
+func TestRowMetaCarried(t *testing.T)                 // RefAsWritten, Allows and Unresolved from open appear on the emitted Row
 func TestTwoRowsOfOneChildAreSeparate(t *testing.T)    // rows (0,0,C) and (1,0,C) both present with their own outcomes
 func TestUnresolvedRowHasZeroChild(t *testing.T)
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Aggregate|ContextsPerRow|InstallContext|Streaming|Survive|ChangesDigest|RowMeta|TwoRows|ZeroChild'` → FAIL.
-- [ ] **Step 3: Commit** `feat(computed): streaming row accumulator with bounded retention`.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(computed): streaming row accumulator with bounded retention`.
 
 ### Task 57: Context-aware traversal, compute bounds and the reach graph
 
 **Files:**
-- Create: `pkg/computed/kgw23/traverse.go`, `pkg/computed/kgw23/traverse_test.go`
+- Create: `pkg/computed/kgw23/traverse.go`, `pkg/computed/kgw23/traverse_test.go`, `pkg/computed/kgw23/keys.go`, `pkg/computed/kgw23/keys_test.go` (moved from Task 59, PF3)
 - Modify: `pkg/computed/delegation.go`, `pkg/computed/kgw23/rules.go` (`Delegation`)
 
 **Interfaces:**
@@ -1807,8 +1814,9 @@ func TestUnresolvedRowHasZeroChild(t *testing.T)
 - Produces:
   - `type ParentSignal struct { Parent objects.Ref; Key ReportKey; Reasons []string; Deps []objects.Ref }` — `BackendNotFound`, `RefNotPermitted` in first-seen order
   - `type Edge struct { Parent, Child objects.Ref }`; `type Uncertain struct { Route objects.Ref; Rule, Ref int; Reason UnknownReason }` (a cut or unknown (parent, ref); an unknown root with `Rule == -1`; a route an uncertain selection might reach, with `Rule == -2`)
-  - `DelegationResult` gains `Rows []Row; Signals []ParentSignal; Reach []Edge; Uncertain []Uncertain; Cap string` (`""`, `"edges"`, `"contexts"` or `"matchers"`, the first cap hit) `; ClearsDroppedStatus bool`
-  - `kgw23.Rules.Delegation` — computed-rules §5.1 roots and contexts; §5.4 `selectTree`, `childrenFor`, `flatten` as written (both quirks, path-scoped cycle check, errors never cleared, hostnames after the fit; memoising `selectTree` per parent allowed), each row opened with its `RowMeta` (the ref as written, `Allows` from `permits`, the unresolved reason, the quirk name) before its first context, and each context handed to the accumulator as it is produced; the three compute caps of §5.7 in the fixed order (roots by (namespace, name), rules and refs by index, children by (namespace, name)), everything after a cap `unknown`/`too-large`; owned parents no root reaches get their selection and permission rows with `unknown`/`not-reached`; context deps per §5.6
+  - `DelegationResult` gains `Rows []Row; Signals []ParentSignal; Reach []Edge; Uncertain []Uncertain; Cap string` (`""`, `"edges"`, `"contexts"` or `"matchers"`, the first cap hit). No `ClearsDroppedStatus`: clearing is verified by cause in Task 61 (PF1)
+  - `kgw23.Rules.Delegation` — computed-rules §5.1 roots and contexts; §5.4 `selectTree`, `childrenFor`, `flatten` as written (both quirks, path-scoped cycle check, errors never cleared, hostnames after the fit; memoising `selectTree` per parent allowed), each row opened with its `RowMeta` (the ref as written, `Allows` from `permits`, the unresolved code) before its first context, and each context handed to the accumulator as it is produced; each context's `Path` lists every route from the root with the match it delegated under (D-024); with `ScopeUnknown`, every row is `unknown`/`scope-unknown` and every root an uncertain point (D-024); the matcher cap is charged `len(child matches)` before each `viewC` call, and a call that would pass it is not made (PF15); the three compute caps of §5.7 in the fixed order (roots by (namespace, name), rules and refs by index, children by (namespace, name)), everything after a cap `unknown`/`too-large`; owned parents no root reaches get their selection and permission rows with `unknown`/`not-reached`; context deps per §5.6
+  - `kgw23`: `func childKey(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (key computed.ReportKey, writes bool)` per Task 59's definition (moved here, PF3): the traversal sets `Row.ChildKey`, `Row.WritesEntry` and each child `Context.Reporter` from it
   - The reach graph (computed-rules §8.5): `Reach` holds (route → permitted selected child) for **every** in-scope HTTPRoute with delegation refs, owned or not, kept, dropped or unreached, from selection and permission alone, so edges below a dropped non-owned route and below a context or matcher cut are present; it counts against the edge cap. An uncertain selection adds no edge: its parent, and each route it might select (`possible`, Task 55), become `Uncertain`.
 
 - [ ] **Step 1: Write the failing tests** (computed-rules §11.2)
@@ -1820,7 +1828,7 @@ func TestOneChildTwoRules(t *testing.T)           // rule 0 drops C, rule 1 atta
 func TestHostnameChild(t *testing.T)              // fits → rejected-hostnames; every rule fails the fit → dropped
 func TestCycle(t *testing.T)                      // A→B→A: every child row of B's ref is cycle; B's signal RefNotPermitted
 func TestDiamond(t *testing.T)                    // A→B1→C, A→B2→C: C contexts under B1 and B2 with reporters for each parent
-func TestQuirks(t *testing.T)                     // second ref of a rule carries the first ref's children; the same ref key in two rules: the later overwrites; Quirk set per Task 52
+func TestQuirks(t *testing.T)                     // second ref of a rule carries the first ref's children; the same ref key in two rules: the later overwrites; no quirk field or note (D-021 item 7, PF10)
 func TestNotReached(t *testing.T)                 // owned parent off every root path: rows with child and allows, outcome unknown, not-reached
 func TestThreeLevelMergedContext(t *testing.T)    // inherit child: the grandchild's ParentMatch is the child's merged match
 func TestUnresolvedRef(t *testing.T)              // name of a missing route: one row, zero Child, unresolved, Note "Selects no routes"; signal BackendNotFound
@@ -1828,16 +1836,21 @@ func TestComputeCaps(t *testing.T)                // Bounds{Edges: 3}, {Contexts
 func TestContextDeps(t *testing.T)                // root eligibility deps + every route on the path
 func TestReachGraphIgnoresFit(t *testing.T)       // edges below a dropped non-owned route, below an unreached parent and below a context cut are in Reach
 func TestUncertainSelectionAddsNoEdges(t *testing.T) // label ref under an unknown wildcard: no Reach edge from it; the parent and every possible route are Uncertain
+func TestPathCarriesDelegatingMatches(t *testing.T) // D-024: each Path step holds the route and the match it delegated under; the last equals ParentMatch
+func TestScopeUnknownRowsUnknown(t *testing.T)      // D-024: ScopeUnknown → every row unknown, scope-unknown; every root Uncertain
+func TestChildKeys(t *testing.T)                    // the kgw23 half of Task 59's cases (moved, PF3)
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Ancestor|OneChild|Hostname|Cycle|Diamond|Quirks|NotReached|ThreeLevel|Unresolved|ComputeCaps|ContextDeps|Reach|UncertainSelection'` → FAIL.
-- [ ] **Step 3: Commit** `feat(computed): context-aware delegation traversal, compute bounds and reach graph`.
+- [ ] **Step 2: Run** `go test ./pkg/computed/kgw23 -run 'Ancestor|OneChild|Hostname|Cycle|Diamond|Quirks|NotReached|ThreeLevel|Unresolved|ComputeCaps|ContextDeps|Reach|UncertainSelection|PathCarries|ScopeUnknown|ChildKeys'` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(computed): context-aware delegation traversal, compute bounds and reach graph`.
 
 ### Task 58: Completeness, final outcomes and effective projection
 
 **Files:**
 - Create: `pkg/computed/complete.go`, `pkg/computed/complete_test.go`, `pkg/computed/kgw23/project.go`, `pkg/computed/kgw23/project_test.go`
-- Modify: `pkg/computed/delegation.go`, `pkg/computed/kgw23/rules.go`, `internal/testutil/scale.go` (`DenseSelection`)
+- Modify: `pkg/computed/delegation.go`, `pkg/computed/kgw23/rules.go`, `internal/testutil/scale/scale.go` and `internal/testutil/scale/scale_test.go` (`DenseSelection`; a view-B-consistent world, PF2, PF16)
 
 **Interfaces:**
 - Consumes: Tasks 56–57.
@@ -1845,7 +1858,8 @@ func TestUncertainSelectionAddsNoEdges(t *testing.T) // label ref under an unkno
   - `type Completeness struct{...}`; `func NewCompleteness(r DelegationResult) Completeness`; `func (c Completeness) Incomplete(route objects.Ref) bool` — computed-rules §8.5: closure from every `Uncertain` route over `Reach`, linear in edges; `Cap == "edges"` makes every route incomplete
   - `DelegationResult.Complete Completeness` — `Delegation` runs traversal, then `NewCompleteness`, then `accumulator.rows(Complete.Incomplete)`, then projection
   - `type EffectiveEdge struct { Parent objects.Ref; Mode string; Contexts []Context; ContextsTruncated bool; Deps []objects.Ref }` (`Mode` `"default"` or `"inherit"`); `type ChildEffective struct { Edges []EffectiveEdge; Truncated bool }`; `DelegationResult.Effective map[objects.Ref]ChildEffective` — per child, parent edges sorted by (namespace, name), at most `EffectiveEdges`; contexts per edge the union of the retained contexts of every row with that (parent, child), in traversal order, at most `ContextsPerEdge`; an edge with none kept at the install cap has `Contexts` non-nil empty and `ContextsTruncated` (computed-rules §5.7)
-  - `func DenseSelection(parents, routes int) []*unstructured.Unstructured` — `parents` wildcard parents over one namespace of `routes` HTTPRoutes, each route matching under every parent (design §9.6)
+  - `scale.World` writes the status view B expects: each child carries one match per incoming match of each delegator, so every context attaches (today a child fits only its first delegator, `scale.go:512-518`, and the `-alt` matches fit no child, `scale.go:497-503`); under `Contradict`, child entries are removed and parent `ResolvedRefs` is `False/BackendNotFound` (PF2)
+  - `func scale.DenseSelection(parents, routes int) []*unstructured.Unstructured` — `parents` wildcard parents over one namespace of `routes` HTTPRoutes, each route matching under every parent (design §9.6)
 
 - [ ] **Step 1: Write the failing tests** (computed-rules §11.2 bound and identity rows; §11.5 reach row)
 
@@ -1858,24 +1872,27 @@ func TestUnknownWildcardLabelRef(t *testing.T)       // §11.2: label ref with t
 func TestClosureIsLinear(t *testing.T)               // 50,000 edges: each visited once (test counter)
 func TestCutAfterDropBeforeAttach(t *testing.T)      // row unknown, not dropped
 func TestCutBeforeAnyContextAttachedComputed(t *testing.T) // row attached, SomeNotComputed ("Some paths not computed")
-func TestDenseSelectionCut(t *testing.T)             // DenseSelection(100, 1000) with DefaultBounds: Cap "edges" at 50,000 rows; the rest unknown too-large; two runs DeepEqual
+func TestDenseSelectionCut(t *testing.T)             // in kgw23, decoded with objects.DecodeHTTPRoute (a kgw23 test cannot import pkg/engine, PF16); DenseSelection(100, 1000) with DefaultBounds: Cap "edges" at 50,000 rows; the rest unknown too-large; two runs DeepEqual
 func TestEffectiveProjection(t *testing.T)           // 21 contexts on one edge → 20 + flag; an edge from two rows, one truncated → flag; an edge at the install cap → Contexts [] + flag; 21 parent edges → 20 sorted, Truncated
 func TestEffectiveEqualsTraversal(t *testing.T)      // each edge's EffectiveRule values are the ones its row's contexts used (reflect.DeepEqual)
+func TestWorldChildrenFitEveryDelegator(t *testing.T) // internal/testutil/scale: every child match fits each delegator's incoming matches; Contradict flips entries and parent ResolvedRefs (PF2)
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed/... -run 'Closure|DroppedNonOwned|EdgeCap|UnknownRoot|UnknownWildcard|Cut|Dense|EffectiveProjection|EffectiveEquals'` → FAIL.
-- [ ] **Step 3: Commit** `feat(computed): completeness, final delegation outcomes and effective projection`.
+- [ ] **Step 2: Run** `go test ./pkg/computed/... -run 'Closure|DroppedNonOwned|EdgeCap|UnknownRoot|UnknownWildcard|Cut|Dense|EffectiveProjection|EffectiveEquals'` and `go test ./internal/testutil/scale -run WorldChildrenFit` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(computed): completeness, final delegation outcomes and effective projection`.
 
 ### Task 59: Report keys per version and `kgateway-2.4` views B and C
 
 **Files:**
-- Create: `pkg/computed/kgw23/keys.go`, `pkg/computed/kgw23/keys_test.go`, `pkg/computed/kgw24/{fit,select,accum,traverse,project,keys}.go` and their tests (copies of `kgw23`; `keys.go` differs)
+- Create: `pkg/computed/kgw24/{fit,select,accum,traverse,project,keys}.go` and their tests (copies of `kgw23`; `keys.go` differs; `kgw23/keys.go` is Task 57's, PF3)
 - Modify: `pkg/computed/kgw24/rules.go`
 
 **Interfaces:**
-- Produces: `func childKey(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (key computed.ReportKey, writes bool)` per rule set (rules §7): `kgw23` synthesizes `{gateway.networking.k8s.io, HTTPRoute, parent.Namespace, parent.Name}` and writes only for an empty list or a spec ref with explicit group and kind, an explicit namespace equal to the parent's and no sectionName (a port is allowed); `kgw24` uses the permitting ref as written (`HTTPRouteView.WrittenRefs`, Task 12; omitted as empty) and always writes. Sets `Row.ChildKey`, `Row.WritesEntry` and each child `Context.Reporter`. `DelegationResult.ClearsDroppedStatus`: `kgw24` true; `kgw23` per Task 52.
+- Produces: `func childKey(child *objects.HTTPRouteView, childNS string, parent objects.Ref) (key computed.ReportKey, writes bool)` per rule set (rules §7): `kgw23` synthesizes `{gateway.networking.k8s.io, HTTPRoute, parent.Namespace, parent.Name}` and writes only for an empty list or a spec ref with explicit group and kind, an explicit namespace equal to the parent's and no sectionName (a port is allowed); `kgw24` uses the permitting ref as written (`HTTPRouteView.WrittenRefs`, Task 12; omitted as empty) and always writes. `kgw23`'s `childKey` and its wiring land in Task 57; this task adds `kgw24`'s. There is no `ClearsDroppedStatus` (PF1).
 
-- [ ] **Step 1: Write the failing tests** (rules §11.3, both packages)
+- [ ] **Step 1: Write the failing tests** (rules §11.3; the `kgw24` half here, the `kgw23` half in Task 57)
 
 ```go
 func TestChildKeys(t *testing.T) {
@@ -1889,7 +1906,7 @@ func TestChildKeys(t *testing.T) {
 ```
 
 - [ ] **Step 2: Run** `go test ./pkg/computed/... -run ChildKeys` → FAIL.
-- [ ] **Step 3: Implement `kgw23/keys.go`, then copy** `fit`, `select`, `accum`, `traverse`, `project` and their tests into `kgw24`, and write `kgw24/keys.go`.
+- [ ] **Step 3: Copy** `fit`, `select`, `accum`, `traverse`, `project`, `keys` and their tests into `kgw24`, and change `kgw24/keys.go` to the 2.4 key.
 - [ ] **Step 4: Run** `go test ./pkg/computed/...` → PASS.
 - [ ] **Step 5: Commit** `feat(computed): report keys per version; kgateway-2.4 views B and C`.
 
@@ -1900,7 +1917,7 @@ func TestChildKeys(t *testing.T) {
 - Modify: `pkg/computed/golden_test.go` (compare `rows`, `signals`, `effective`)
 
 - [ ] **Step 1: Extend `TestRuleSetGoldens`** to compare delegation outputs; run → FAIL (no fixtures).
-- [ ] **Step 2: Write the fixtures.** With kgateway provenance at both tags (expected outcomes: a child whose routes appear in the output's `Routes` is attached; the output's route status gives the child-entry and parent signals): `delegation/{basic,basic_invalid_hostname,basic_parentref_match,basic_parentref_mismatch,child_rule_matcher,cyclic1,cyclic2,discard_invalid_child_matches,inherit_parentref,invalid_child_valid_standalone,label_based,multiple_children,multiple_parents,multi_level_multiple_parents,nested_absolute_relative,relative_paths,unresolved_ref}.yaml`; in `kgateway-2.4` only `delegation/basic_parentref_match_same_namespace.yaml@v2.4.7`. Every other §11.2 and §11.3 row gets a case citing its rules section, marked `e2e` where design §9.5 runs it; the bound cases use `bounds:` (Task 40's field). Three of them stay in the API matrix (not `ruleOnly`): a cut after a dropping context, a row with no contexts kept at the install cap, and a context with a hidden dependency.
+- [ ] **Step 2: Write the fixtures.** With kgateway provenance at both tags (expected outcomes: a child whose routes appear in the output's `Routes` is attached; the output's route status gives the child-entry and parent signals): `delegation/{basic,basic_invalid_hostname,basic_parentref_match,basic_parentref_mismatch,child_rule_matcher,cyclic1,cyclic2,discard_invalid_child_matches,inherit_parentref,invalid_child_valid_standalone,label_based,multiple_children,multiple_parents,multi_level_multiple_parents,nested_absolute_relative,relative_paths,unresolved_ref}.yaml`; in `kgateway-2.4` only `delegation/basic_parentref_match_same_namespace.yaml@v2.4.7`. Every other §11.2 and §11.3 row gets a case citing its rules section, marked `e2e` where design §9.5 runs it; the bound cases use `bounds:` (Task 40's field). A `scope-unknown` case pins D-024. Three of them stay in the API matrix (not `ruleOnly`): a cut after a dropping context, a row with no contexts kept at the install cap, and a context with a hidden dependency.
 - [ ] **Step 3: Run** `go test ./pkg/computed/...` → PASS. A mismatch with a kgateway output is a rules bug: STOP and report it, never edit the expectation to pass.
 - [ ] **Step 4: Commit** `test(computed): per-version delegation fixtures with provenance`.
 
@@ -1913,23 +1930,27 @@ func TestChildKeys(t *testing.T) {
 - Consumes: Tasks 56–59; `DelegationResult.Complete` (Task 58).
 - Produces:
   - `KindChildEntry`, `KindParentResolvedRefs`
-  - `func CheckDelegation(install string, sel Selection, in DelegationInput, r *DelegationResult, c Completeness) []CheckResult` — rules §8.1–§8.5 for both kinds: aggregation per report key over every row, context and root; a negative expectation on an incomplete subject is `ClassUnknown`, note "Not all paths computed"; a 2.3 row with `WritesEntry` false is `ClassNotObservable` (`not-verified`); a current entry nobody expects is `ClassUnexpected` with `Verified = r.ClearsDroppedStatus` for a matcher drop and false for `forbidden`; the parent's reason is compared only when complete, single, and P has no non-delegation backendRef and no `ExtensionRef` filter; `Contributors` = child, P and every route on a contributing path; `ParentCurrent` = P's entry under its reporter key is current; sets `Row.Unconfirmable` when the aggregated signal cannot confirm the row's own outcome ("Status cannot confirm this path")
+  - `func CheckDelegation(install string, sel Selection, in DelegationInput, r *DelegationResult, firstSeen func(objects.Ref) time.Time) []CheckResult` (completeness from `r.Complete`; `firstSeen` gives when a route's current generation was first seen, zero when unknown; PF1) — rules §8.1–§8.5 for both kinds: aggregation per report key over every row, context and root; a negative expectation on an incomplete subject is `ClassUnknown`, note "Not all paths computed"; a 2.3 row with `WritesEntry` false is `ClassNotObservable` (`not-verified`); a current entry nobody expects, including one under P's delegation key when P no longer selects the child (deselection, D-021 item 1), is `ClassUnexpected`: `Verified` when a parent edit caused it (the child's current generation first seen no later than P's), false after a child edit, with an unknown first-seen time, or for `forbidden`, with the note "The controller may keep old status" (rules §8.3, PF1); with `in.ScopeUnknown` every check is `ClassUnknown`, `scope-unknown` (D-024); the parent's reason is compared only when complete, single, and P has no non-delegation backendRef and no `ExtensionRef` filter; `Contributors` = child, P and every route on a contributing path; `ParentCurrent` = P's entry under its reporter key is current; sets `Row.Unconfirmable` when the aggregated signal cannot confirm the row's own outcome ("Status cannot confirm this path")
   - `childEntryPrint`, `parentResolvedRefsPrint` — exactly the rules §9.2 fields; the per-context inputs (incoming match, path) come from the contributing rows' digests, so unretained contexts count: `child-entry` reads `ContextDigest`; `parent-resolvedrefs` for (P, key) reads only `KeyDigests[key]` of P's rows
 
 - [ ] **Step 1: Write the failing tests** (rules §11.2 expectations, §11.4)
 
 ```go
 func TestChildEntryAggregation(t *testing.T)          // partial row → entry expected, status-compatible; two rules → one entry expected; diamond → two checks, one per parent key
-func TestAncestorPrunedExpectsNoEntry(t *testing.T)   // complete → no entry expected; a current entry left: 2.4 Unexpected Verified; 2.3 per Task 52
-func TestAttachedChildMissingBackend(t *testing.T)    // §11.4 row 3: ResolvedRefs=False/BackendNotFound → Compatible, status-compatible
-func TestAttachedChildReplacedRule(t *testing.T)      // §11.4 row 4: 2.4 Programmed=False, 2.3 Accepted=False/RouteRuleReplaced → Compatible
+func TestAncestorPrunedExpectsNoEntry(t *testing.T)   // complete → no entry expected; a current entry left after a parent edit: Unexpected, Verified, on both sets
+func TestAttachedChildMissingBackend(t *testing.T)    // §11.4 "attached child with a missing Service backend": ResolvedRefs=False/BackendNotFound → Compatible, status-compatible
+func TestAttachedChildReplacedRule(t *testing.T)      // §11.4 "attached child with a replaced rule": 2.4 Programmed=False, 2.3 Accepted=False/RouteRuleReplaced → Compatible
 func TestRejectedHostnamesExpectsUnsupportedValue(t *testing.T)
-func TestParentWithOneUnresolvedRef(t *testing.T)     // §11.4 row 6: expects False/BackendNotFound, reason compared
-func TestTruncatedParentAggregate(t *testing.T)       // §11.4 row 7: retained BackendNotFound, cut cycle, observed False/RefNotPermitted → Compatible, reason not compared
-func TestParentMissingServiceBackend(t *testing.T)    // §11.4 row 8: delegation fine, observed False → Compatible
-func TestComputedAttachedNoEntry(t *testing.T)        // §11.4 row 9: ClassMissing, Contributors child+P+path, ParentCurrent per P's entry
-func TestStaleChildEntryIsStale(t *testing.T)         // §11.4 row 11
-func TestForbiddenEntryLeftNotVerified(t *testing.T)  // §11.4 row 13
+func TestParentWithOneUnresolvedRef(t *testing.T)     // §11.4 "parent with two delegation refs, one unresolved": expects False/BackendNotFound, reason compared
+func TestTruncatedParentAggregate(t *testing.T)       // §11.4 "truncated parent aggregate": retained BackendNotFound, cut cycle, observed False/RefNotPermitted → Compatible, reason not compared
+func TestParentMissingServiceBackend(t *testing.T)    // §11.4 "parent with a missing Service backend": delegation fine, observed False → Compatible
+func TestComputedAttachedNoEntry(t *testing.T)        // §11.4 "computed-attached child, no entry, P current": ClassMissing, Contributors child+P+path, ParentCurrent per P's entry
+func TestStaleChildEntryIsStale(t *testing.T)         // §11.4 "stale child entry contradicting"
+func TestForbiddenEntryLeftNotVerified(t *testing.T)  // §11.4 "forbidden child with a current entry left"
+func TestLeftEntryChildEdit(t *testing.T)            // §11.4 "matcher-dropped child (child edit)": not-verified, no candidate (PF1)
+func TestLeftEntryUnknownFirstSeen(t *testing.T)     // §11.4 "drop with an unknown first-seen time": treated as a child edit (PF1)
+func TestDeselectedEntryLeft(t *testing.T)           // D-021 item 1: P stops selecting C after a parent edit; C\'s current entry → Unexpected, Verified (PF1)
+func TestScopeUnknownChecksUnknown(t *testing.T)     // D-024: every child-entry and parent-resolvedrefs check unknown, scope-unknown
 func TestNoEntryIncompleteIsUnknown(t *testing.T)     // §11.2 cut row; unknown wildcard label ref → negative checks unknown
 func Test23ChildWithoutEntryNotVerified(t *testing.T) // §11.3: namespace omitted, sectionName set
 func TestUnconfirmableRow(t *testing.T)               // a dropped row whose child key expects an entry from another context
@@ -1942,49 +1963,54 @@ func TestDelegationFingerprints(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed -run 'ChildEntry|AncestorPruned|AttachedChild|RejectedHostnames|Parent|Truncated|ComputedAttached|StaleChild|ForbiddenEntry|NoEntry|23Child|Unconfirmable|DelegationFingerprints'` → FAIL.
-- [ ] **Step 3: Commit** `feat(computed): child-entry and parent-resolvedrefs cross-checks with completeness`.
+- [ ] **Step 2: Run** `go test ./pkg/computed -run 'ChildEntry|AncestorPruned|AttachedChild|RejectedHostnames|Parent|Truncated|ComputedAttached|StaleChild|ForbiddenEntry|NoEntry|23Child|Unconfirmable|DelegationFingerprints|LeftEntry|Deselected|ScopeUnknown'` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the same command → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(computed): child-entry and parent-resolvedrefs cross-checks with completeness`.
 
 ### Task 62: KGWUI-011 computed and orphan triggers; delegation in the engine
 
 **Files:**
-- Modify: `pkg/computed/check.go`, `pkg/computed/check_test.go`, `pkg/computed/rules.go` (`Views.Delegation`), `pkg/engine/engine.go` (`Delegation` and its checks per install; the cap hit logged once per change), `pkg/engine/persist.go` (`graceEnd`), `pkg/engine/persist_test.go`, `pkg/health/delegation.go`, `pkg/health/delegation_test.go`, `pkg/health/messages.go`
+- Modify: `pkg/computed/check.go`, `pkg/computed/check_test.go`, `pkg/computed/rules.go` (`Views.Delegation`), `pkg/engine/engine.go` (`Delegation` and its checks per install; the cap hit logged once per change), `pkg/engine/persist.go` (`graceEnd`), `pkg/engine/persist_test.go`, `pkg/health/delegation.go`, `pkg/health/delegation_test.go`, `pkg/health/messages.go`; added by PF7 and PF2: `pkg/engine/views.go` (`computeViews` runs `Delegation` and `CheckDelegation`), `pkg/health/checks.go` (the merge with the status trigger, `checks.go:328-336`), `pkg/health/computed.go` and `computed_test.go` (KGWUI-012 detail for the two new kinds), `pkg/engine/bench_test.go` (`TestScaleComputeSanity`: no delegation check is a candidate in the consistent world)
 
 **Interfaces:**
 - Consumes: Tasks 42, 56–61; `declaredFinding` (Task 16).
 - Produces:
-  - `KindDelegatedNotAttached` per (route, parent) and `KindOrphan` per route, from `CheckDelegation`, with `Class` `ClassTrigger = "trigger"` (our call: rules §8.3 has no class for them): `Candidate()` includes it, `persistence.step` matures it at `since + Window`, and its `State` stays `checked`, so it never makes a check pending. Predicates: design §6.2 and rules §9.3, exactly (computed trigger: in scope, no eligible entry, selected by the parent's `name` or `label` ref, every context `dropped` or `forbidden`, complete; orphan: empty `spec.parentRefs`, no eligible entry, selected only by `wildcard` refs of owned parents, every selecting row in every context `dropped` or `forbidden`, every selecting parent complete)
-  - `Views.Delegation DelegationResult`; the engine calls `CheckDelegation(id, sel, in, &res, res.Complete)`
+  - `KindDelegatedNotAttached` per (route, parent) and `KindOrphan` per route, from `CheckDelegation`, with `Class` `ClassTrigger = "trigger"` (our call: rules §8.3 has no class for them): `Candidate()` includes it, `persistence.step` matures it at `since + Window`, and its `State` stays `checked`, so it never makes a check pending: `persistence.visit` tracks its window but leaves `State` alone (today it sets every candidate `pending`, `pkg/engine/persist.go:59-69`; PF12). Predicates: design §6.2 and rules §9.3, exactly (computed trigger: in scope, no eligible entry, selected by the parent's `name` or `label` ref, every context `dropped` or `forbidden`, complete; orphan: empty `spec.parentRefs`, no eligible entry, selected only by `wildcard` refs of owned parents, every selecting row in every context `dropped` or `forbidden`, every selecting parent complete)
+  - `Views.Delegation DelegationResult`; the engine calls `CheckDelegation(id, sel, in, &res, firstSeen)` with its first-seen lookup (PF1)
   - `engine.Config.DelegationBounds computed.Bounds` (zero: `computed.DefaultBounds`) — set from a fixture's `bounds` by the API matrix (Task 65)
   - both KGWUI-011 kinds take `Since` from the persistence step (rules §9.3 step 4)
-  - the install's computed summary (rules §5.7): the engine logs `DelegationResult.Cap` once per distinct value, as it logs install rejections (`engine.go:157-164`); no wire field exists for it
+  - the install's computed summary (rules §5.7): the engine logs `DelegationResult.Cap` once per distinct value, as it logs install rejections (`engine.go:225-230`, PF21); no wire field exists for it
   - engine `graceEnd(c)` = the latest `firstSeen` of `c.Contributors` + `health.Grace` for `child-entry`, zero otherwise
-  - `func computedTriggerFindings(in Input) []Finding` in `delegation.go` — one KGWUI-011 warning per mature `delegated-not-attached`, merged into the status-trigger finding of the same (route, parent) by appending the computed reason; one per mature orphan, detail "No parent route in this install keeps this route, and it has no parentRefs of its own." (draft); `Evidence` = `Deps`
+  - `func computedTriggerFindings(in Input) []Finding` in `delegation.go` — one KGWUI-011 warning per mature `delegated-not-attached`, merged into the status-trigger finding of the same (route, parent) by appending the computed reason, in `conditionsCheck`; the merged finding takes the higher severity, and the `resource status` pending effect follows the status trigger's own grace clock **(inferred, PF13)**; neither trigger fires under `ScopeUnknown` (D-024); one per mature orphan, detail "No parent route in this install keeps this route, and it has no parentRefs of its own." (draft); `Evidence` = `Deps`
 
-- [ ] **Step 1: Write the failing tests** (rules §11.4 rows 9–10, 12; §11.5 rows 4–6, 11–19)
+- [ ] **Step 1: Write the failing tests** (rules §11.4 "computed-attached child, no entry" with P current and with P stale, "matcher-dropped child (parent edit)"; §11.5 rows 4–6, 11–13, 18–24; rows cited by case name, PF11)
 
 ```go
-func TestChildEntryMaturesAtLaterOfGraceAndWindow(t *testing.T) // row 11 both orders; §11.4 row 9: KGWUI-012 on the child at max(since+30s, graceEnd)
-func TestChildEntryWithStaleParentStaysPending(t *testing.T)    // §11.4 row 10
-func TestMatcherDroppedEntryLeftDisagrees(t *testing.T)         // §11.4 row 12 (2.4): KGWUI-012 on the child after 30 s
+func TestChildEntryMaturesAtLaterOfGraceAndWindow(t *testing.T) // row 11 both orders; §11.4 "computed-attached child, no entry, P current": KGWUI-012 on the child at max(since+30s, graceEnd)
+func TestChildEntryWithStaleParentStaysPending(t *testing.T)    // §11.4 "the same with P stale"
+func TestMatcherDroppedEntryLeftDisagrees(t *testing.T)         // §11.4 "matcher-dropped child (parent edit)", both sets: KGWUI-012 on the child after 30 s
 func TestChildResolvedRefsToggleNoReset(t *testing.T)           // §11.5 row 4
 func TestParentAcceptedChangeNoReset(t *testing.T)              // row 5
 func TestInheritAnnotationResets(t *testing.T)                  // row 6: False/BackendNotFound → no failure, observed False/RefNotPermitted; the old window does not carry over
 func TestComputedKGWUI011(t *testing.T)                         // row 12, safety interval 10 min: warning at exactly 30 s by the deadline; before it no finding and every required check unchanged
-func TestOrphanWarningAfter30s(t *testing.T)                    // row 13: one per route
-func TestOrphanIncompleteNoFinding(t *testing.T)                // row 14: a selecting parent cut by a bound; one in a reach closure
-func TestRouteWithParentRefsNoOrphan(t *testing.T)              // row 15
-func TestOrphanAttachedByAnotherParent(t *testing.T)            // row 16
-func TestNewSelectingParentResetsOrphan(t *testing.T)           // row 17
-func TestOrphanCycleNoFinding(t *testing.T)                     // row 18
-func TestOrphanAlsoLabelSelected(t *testing.T)                  // row 19: only the per-parent finding for the label parent
+func TestOrphanWarningAfter30s(t *testing.T)                    // row 18: one per route
+func TestOrphanIncompleteNoFinding(t *testing.T)                // row 19: a selecting parent cut by a bound; one in a reach closure
+func TestRouteWithParentRefsNoOrphan(t *testing.T)              // row 20
+func TestOrphanAttachedByAnotherParent(t *testing.T)            // row 21
+func TestNewSelectingParentResetsOrphan(t *testing.T)           // row 22
+func TestOrphanCycleNoFinding(t *testing.T)                     // row 23
+func TestOrphanAlsoLabelSelected(t *testing.T)                  // row 24: only the per-parent finding for the label parent
 func TestKGWUI011SinceIsWindowStart(t *testing.T)               // §11.5: computed and orphan findings carry their window start
 func TestKGWUI011OnePerRouteParent(t *testing.T)                // status and computed triggers on one pair → one finding with the computed reason
+func TestScopeUnknownNoDelegationFindings(t *testing.T) // D-024: no computed or orphan KGWUI-011 and no KGWUI-012 from views B and C
+func TestMergedTriggerSeverity(t *testing.T)            // PF13: status info in grace + mature computed → warning; the resource status check follows the status grace
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/computed ./pkg/engine ./pkg/health -race -run 'ChildEntryMatures|StaleParent|MatcherDropped|ToggleNoReset|ParentAccepted|InheritAnnotation|ComputedKGWUI011|Orphan|RouteWithParentRefs|NewSelecting|SinceIsWindowStart|OnePerRouteParent'` → FAIL.
-- [ ] **Step 3: Run** `go test ./pkg/... -race` → PASS (goldens aside).
-- [ ] **Step 4: Commit** `feat(health): KGWUI-011 computed and orphan triggers; delegation checks in the engine (Q15)`.
+- [ ] **Step 2: Run** `go test ./pkg/computed ./pkg/engine ./pkg/health -race -run 'ChildEntryMatures|StaleParent|MatcherDropped|ToggleNoReset|ParentAccepted|InheritAnnotation|ComputedKGWUI011|Orphan|RouteWithParentRefs|NewSelecting|SinceIsWindowStart|OnePerRouteParent|ScopeUnknownNoDelegation|MergedTrigger|ScaleComputeSanity'` → FAIL.
+- [ ] **Step 3: Implement** (PF24).
+- [ ] **Step 4: Run** `go test ./pkg/... -race` → PASS (goldens aside).
+- [ ] **Step 5: Commit** `feat(health): KGWUI-011 computed and orphan triggers; delegation checks in the engine (Q15)`.
 
 ### Task 63: Explorer index for views B and C
 
@@ -1994,11 +2020,11 @@ func TestKGWUI011OnePerRouteParent(t *testing.T)                // status and co
 **Interfaces:**
 - Consumes: `Views.Delegation` (Task 62); `DepSet` (Task 43).
 - Produces:
-  - `type DelegRow struct { computed.Row; Deps DepSet; ContextDeps []DepSet }`; `Index.DelegRows []DelegRow`; `Index.Delegation map[objects.Ref][]int` (parent → rows sorted by (rule, ref, namespace, name, group, kind))
+  - `type DelegRow struct { computed.Row; Deps DepSet; ContextDeps []DepSet; Check *computed.CheckResult }` — `Deps` and `ContextDeps` leave out the routes on each context's path, which never restrict (D-024); `Check` is the row's `child-entry` check, joined by (child, parent, `Row.ChildKey`) (PF14); `Index.DelegRows []DelegRow`; `Index.Delegation map[objects.Ref][]int` (parent → rows sorted by (rule, ref, namespace, name, group, kind))
   - `type EffectiveEntry struct { computed.ChildEffective; EdgeDeps []DepSet; ContextDeps [][]DepSet }`; `Index.Effective map[objects.Ref]EffectiveEntry`
   - `type RefKey struct { Parent objects.Ref; Rule, Ref int }`; `Index.RefRows map[RefKey][]int` (for `selected` and `attached` recounts)
   - `FlagDropped` (wire `dropped`: a row selected by an owned parent is `dropped`, `forbidden` or `rejected-hostnames`); `RouteRow.DroppedDeps DepSet`
-  - `CandidateSelected CandidateReason = "selected"` with `By` the first selecting parent; a no-parent row selected by an owned parent gets a detail link
+  - `ReasonSelected CandidateReason = "selected"` (the package's `Reason…` names, `pkg/explore/admit.go:17-18`, PF20) with `By` the first selecting parent; a no-parent row selected by an owned parent gets a detail link
   - `Index.DelegationCap string`
   - `type DelegationQuery struct { Rule, Ref *int; Outcomes []computed.RowOutcome; Limit int; Cursor string }`; `func (ix *Index) QueryDelegation(parent objects.Ref, q DelegationQuery, visible func(objects.Ref) bool) (Page, error)` — `Page.IDs` index `DelegRows`; cursor JSON `{"s":"delegation","d":"asc","b":before,"r":[rule,ref],"t":[ns,name,group,kind]}` (design §3.6), same 1 KiB cap; an object-list cursor is `ErrBadCursor`; an `outcome` filter and `state=dropped` match a row only when `visible` holds for every ref of its `Deps`, before `Total` and paging (design §7.4 rule 4a); a zero-`Child` row is never dropped for child visibility
 
@@ -2012,30 +2038,33 @@ func TestDelegationFilters(t *testing.T)                    // rule, ref, outcom
 func TestFlagDropped(t *testing.T)
 func TestSelectedAdmission(t *testing.T)                    // selected no-parent route: "selected", By, detail; unselected no-parent: yaml
 func TestRefRows(t *testing.T)
-func TestOutcomeFilterUsesVisibleDeps(t *testing.T) // a dropped row under a hidden ancestor: not matched by outcome=dropped, not in Total; listed unfiltered as restricted
+func TestOutcomeFilterUsesVisibleDeps(t *testing.T) // a dropped row under a root behind a hidden Selector Namespace: not matched by outcome=dropped, not in Total; listed unfiltered as restricted. Under a hidden ancestor route it matches (D-024)
+func TestFlags(t *testing.T)                        // existing: now accepts `dropped` (explore_test.go:343-345, PF19)
+func TestRowCheckJoin(t *testing.T)                 // PF14: each row's Check is its child-entry check by ChildKey
 func TestUnresolvedRowSurvivesAuthorization(t *testing.T)
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/explore -run 'Delegation|FlagDropped|SelectedAdmission|RefRows|OutcomeFilter|UnresolvedRow'` → FAIL.
-- [ ] **Step 3: Run** `go test ./pkg/explore ./internal/boundary` → PASS.
-- [ ] **Step 4: Commit** `feat(explore): delegation rows, effective edges and the selected candidate`.
+- [ ] **Step 2: Run** `go test ./pkg/explore -run 'Delegation|FlagDropped|SelectedAdmission|RefRows|OutcomeFilter|UnresolvedRow|Flags|RowCheckJoin'` → FAIL.
+- [ ] **Step 3: Implement** (PF24).
+- [ ] **Step 4: Run** `go test ./pkg/explore ./internal/boundary` → PASS.
+- [ ] **Step 5: Commit** `feat(explore): delegation rows, effective edges and the selected candidate`.
 
 ### Task 64: API: the delegation endpoint, effective matchers, and authorization of contexts and evidence
 
 **Files:**
 - Create: `pkg/api/delegation_test.go`
-- Modify: `pkg/api/explore_types.go`, `pkg/api/details.go` (endpoint, `effective`, ref counts), `pkg/api/params.go` (`rule`, `ref`, `outcome`), `pkg/api/visible.go`, `pkg/api/link.go` (`selected`)
+- Modify: `pkg/api/explore_types.go`, `pkg/api/details.go` (endpoint, `effective`, ref counts), `pkg/api/params.go` (`rule`, `ref`, `outcome`), `pkg/api/visible.go`, `pkg/api/link.go` (`selected`), `pkg/api/handlers.go` (route registration), `pkg/api/explain.go` (outcome, fit-clause and unresolved text), `pkg/api/types.go` (`/meta` filters) (PF8)
 
 **Interfaces:**
 - Consumes: Task 63; `allowDeps` (Task 44).
 - Produces (JSON per design §7.3):
   - `type DelegationRow struct { Rule, Ref int; RefAsWritten DelegationRefDTO; Child *LinkedRef \`json:"child,omitempty"\`; Allows string; Outcome, Reason string \`json:",omitempty"\`; Contexts []DelegationContext; ContextsTruncated bool \`json:"contextsTruncated,omitempty"\`; Computed Computed; Observed DelegationObserved }` — `Child` absent only on an `unresolved` row with no selection
-  - `type DelegationContext struct { Restricted bool \`json:"restricted,omitempty"\`; ParentMatch *MatchDTO; Path []AncestorStepDTO; Outcome, Reason string }`; `type DelegationObserved struct { Entry *ParentStatus; ParentCondition *Condition }`
+  - `type DelegationContext struct { Restricted bool \`json:"restricted,omitempty"\`; ParentMatch *MatchDTO; Path []PathStepDTO; Outcome, Reason string }`; `type PathStepDTO struct { Ref LinkedRef; Match MatchDTO }`: each ancestor's name and the match it delegated under; a hidden ancestor has `link: none` and nothing else (D-024); `type DelegationObserved struct { Entry *ParentStatus; ParentCondition *Condition }`
   - `type EffectiveDTO struct { Parent LinkedRef; Mode string; ContextsTruncated bool \`json:"contextsTruncated,omitempty"\`; Contexts []EffectiveContext \`json:"contexts"\`; Computed Computed }` — `contexts: []` is sent, never omitted; coverage always `["not-verified"]`
   - `type EffectiveContext struct { Restricted bool; ParentMatch *MatchDTO; Rules []EffectiveRuleDTO }`; `type EffectiveRuleDTO struct { Index int; Kept bool; Matches []MatchDTO; Reason string }`
-  - `RouteDetail.Effective []EffectiveDTO`, `.EffectiveTruncated bool`; `BackendRefDTO.Delegation` gains `Selected, Attached *int` and `Computed *Computed`; `Candidate.Reason` `"selected"`
-  - `GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation` → `Page[DelegationRow]`; `rule` and `ref` integers, `outcome` repeatable; `sort` → 400
-  - Rules (design §7.4): a row whose child is hidden is dropped (3); a context with a hidden dependency is `{restricted: true}`, and a row or effective edge aggregating a hidden context is `restricted` with no outcome or reason (4); `selected` and `attached` count visible children only (5); `dropped` follows its deps per caller (6); KGWUI-011 and KGWUI-012 with hidden evidence get `evidenceRestricted` (7)
+  - `RouteDetail.Effective []EffectiveDTO`, `.EffectiveTruncated bool`; `BackendRefDTO.Delegation` gains `Selected, Attached *int` and `Computed *Computed` (its state merges the ref's rows worst-first, D-023 decision 2; a row's `computed` is its `child-entry` check plus the row's note; **inferred**, PF14); `Candidate.Reason` `"selected"`
+  - `GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation` → `Page[DelegationRow]`; `rule` and `ref` integers, `outcome` repeatable; `sort` → 400; `/meta` `filters` gains `"delegation": ["rule", "ref", "outcome"]` (PF8)
+  - Rules (design §7.4): a row whose child is hidden is dropped (3); routes on a context's path never restrict it: a hidden ancestor is sent by name (`link: none`) with the match it delegated under, and nothing else (4b, D-024); a context with another hidden dependency (a root's Gateway, ListenerSet or `Selector` Namespace, or a status root's target) is `{restricted: true}`, and a row or effective edge aggregating one is `restricted` with no outcome or reason (4); `selected` and `attached` count visible children only (5); `dropped` follows its deps per caller (6); KGWUI-011 and KGWUI-012 with hidden evidence get `evidenceRestricted` (7)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2047,20 +2076,23 @@ func TestHiddenRootNamespace(t *testing.T)    // §11.2: root behind a Selector 
 func TestStatusRootTargetDenied(t *testing.T) // §11.2
 func TestHiddenAncestorEvidence(t *testing.T) // design §9.1 (2.4): KGWUI-012 on a visible child naming a hidden parent → evidenceRestricted, no detail
 func TestDelegationCountsRecounted(t *testing.T)
-func TestDroppedRouteWithGatewayParentShown(t *testing.T) // §11.5 row 15: Delegation row with its reason; no KGWUI-011
+func TestDroppedRouteWithGatewayParentShown(t *testing.T) // §11.5 row 20: Delegation row with its reason; no KGWUI-011
 func TestHealthUnchangedUnderDelegationRestriction(t *testing.T)
-func TestOutcomeFilterCannotProbe(t *testing.T) // design §9.1: outcome=dropped under a hidden ancestor and state=dropped give the rows and total of the unknown case
+func TestOutcomeFilterCannotProbe(t *testing.T) // design §9.1: outcome=dropped under a root behind a hidden Selector Namespace and state=dropped give the rows and total of the unknown case
+func TestHiddenAncestorShowsInheritedMatch(t *testing.T) // D-024: rows, contexts and effective edges under a hidden ancestor route show its name (link none) and delegating match, nothing else; total counts visible children
+func TestMetaAdvertisesDelegation(t *testing.T)       // PF8: filters.delegation
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/api -run 'Delegation|Effective|HiddenRoot|StatusRoot|HiddenAncestor|DroppedRoute|CannotProbe'` → FAIL.
-- [ ] **Step 3: Run** `go test ./pkg/api -race` → PASS except goldens (Task 65).
-- [ ] **Step 4: Commit** `feat(api): delegation endpoint and effective matchers with dependency-based authorization`.
+- [ ] **Step 2: Run** `go test ./pkg/api -run 'Delegation|Effective|HiddenRoot|StatusRoot|HiddenAncestor|DroppedRoute|CannotProbe|InheritedMatch|MetaAdvertises'` → FAIL.
+- [ ] **Step 3: Implement** (PF24).
+- [ ] **Step 4: Run** `go test ./pkg/api -race` → PASS except goldens (Task 65).
+- [ ] **Step 5: Commit** `feat(api): delegation endpoint and effective matchers with dependency-based authorization`.
 
 ### Task 65: Goldens for 2.4 and the matrix through the handlers
 
 **Files:**
-- Create: `pkg/api/testdata/golden/{route-delegation,route-detail-delegation-restricted,health-evidence-restricted}.json` (the last: KGWUI-011 and KGWUI-012 with `evidenceRestricted`, design §7.6)
-- Regenerate: `route-detail.json` (effective in both modes, an edge with `contextsTruncated`, an edge with `contexts: []` at the install cap), `routes.json` (`dropped` flag), `route-detail-candidate.json` (`selected`)
+- Create: `pkg/api/testdata/golden/{route-delegation,route-detail-delegation-restricted,health-evidence-restricted}.json` (the second: a hidden ancestor shown by name and match only, and a root behind a hidden `Selector` Namespace restricted, D-024; the last: KGWUI-011 and KGWUI-012 with `evidenceRestricted`, design §7.6)
+- Regenerate: `route-detail.json` (effective in both modes, an edge with `contextsTruncated`, an edge with `contexts: []` at the install cap), `routes.json` (`dropped` flag), `route-detail-candidate.json` (`selected`), `meta.json` and `bare-meta.json` (`filters.delegation`, PF8)
 - Modify: `pkg/api/golden_test.go`, `pkg/api/computed_test.go` (`TestDelegationMatrixThroughAPI`)
 
 - [ ] **Step 1: Write `TestDelegationMatrixThroughAPI`** as Task 45's, over the delegation fixtures without `ruleOnly`, including the three bound cases run with their `bounds` through `engine.Config.DelegationBounds`: row outcomes, `contextsTruncated`, `effectiveTruncated`, `contexts: []`, `computed.state` and coverage, child-entry and parent checks, KGWUI-011 and KGWUI-012 outcomes.
@@ -2072,7 +2104,7 @@ func TestOutcomeFilterCannotProbe(t *testing.T) // design §9.1: outcome=dropped
 
 **Files:**
 - Create: `web/packages/shell/src/pages/explore/route/DelegationTab.tsx`, `src/pages/explore/route/EffectiveMatches.tsx`, `src/pages/explore/delegation.test.tsx`
-- Modify: `src/api/exploreTypes.ts`, `src/api/exploreHooks.ts` (`useDelegation(id: string, ref: LinkedRef, query: URLSearchParams)`), `src/api/types.golden.test.ts`, `src/pages/explore/RoutePage.tsx`, `src/pages/explore/route/RuleList.tsx`, `src/explore/CandidateBanner.tsx`
+- Modify: `src/api/exploreTypes.ts`, `src/api/exploreHooks.ts` (`useDelegation(id: string, ref: LinkedRef, query: URLSearchParams)`), `src/api/types.golden.test.ts`, `src/pages/explore/RoutePage.tsx`, `src/pages/explore/route/RuleList.tsx`, `src/explore/CandidateBanner.tsx`, `src/api/hooks.ts` and `src/pages/explore/RoutesPage.tsx` (the tab and the `dropped` option only when `/meta` advertises `filters.delegation`), `src/copy/explorer.ts` (drafts), `src/index.ts` (`useDelegation` export, design §8.2) (PF8)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2082,8 +2114,10 @@ it("every outcome has its icon and text", ...);    // partial "Attached under so
 it("contexts expand with aria-expanded; a restricted context shows the placeholder", ...);
 it("contextsTruncated says more paths exist", ...);
 it("a row the status cannot confirm says so", ...);
-it("outcome, rule and ref filters round-trip through the URL; a 400 cursor reloads page one", ...);
-it("effective matches per parent path in both modes, marked Not checked by the controller", ...);
+it("outcome, rule and ref filters stay page-local and only ?tab=delegation is in the URL; a 400 cursor reloads page one", ...); // design §8.1, PF26
+it("effective matches per parent path in both modes, marked with the not-verified coverage copy", ...); // assert copy constants, PF22
+it("a hidden ancestor shows its name without a link, and its delegating match", ...); // D-024
+it("the tab and the dropped filter appear only when /meta advertises filters.delegation", ...); // PF8
 it("an edge with no kept contexts never looks complete", ...);
 it("a delegation ref shows selected and attached counts with a ComputedBadge", ...);
 it("a selected route's candidate banner names its parent", ...);
@@ -2092,36 +2126,37 @@ it("a selected route's candidate banner names its parent", ...);
 
 - [ ] **Step 2: Run** `cd web && npx vitest run packages/shell/src/pages/explore packages/shell/src/api` → FAIL.
 - [ ] **Step 3: Implement.** Each ref is one paged list fetched when expanded (design §5.3).
-- [ ] **Step 4: Commit** `feat(shell): Delegation tab and effective matches`.
+- [ ] **Step 4: Run** `cd web && npm test && npm run typecheck && npm run lint` → PASS (PF24).
+- [ ] **Step 5: Commit** `feat(shell): Delegation tab and effective matches`.
 
 ### Task 67: Wording pass for 2.4
 
-**Files:** Modify `web/packages/shell/src/copy/explorer.ts`, `pkg/health/messages.go`, `pkg/api/explain.go`, the components of Task 66.
+**Files:** Modify `web/packages/shell/src/copy/explorer.ts`, `pkg/health/messages.go`, `pkg/api/explain.go`, the components of Task 66, `pkg/computed/check.go` (check notes), the goldens the copy touches; Create `docs/phases/phase-2/phase-2.4-wording.md` (PF9).
 
-- [ ] **Step 1: List every 2.4 string** with its draft: the eight outcomes and their reasons, each fit clause, the three remaining unknown reasons, "Some paths not computed", "Dropped on the paths computed; other paths not computed", "Not all paths computed", "Status cannot confirm this path", the quirk note, "Selects no routes", "Not watched by the controller", allows labels, mode labels, truncation notes, the `dropped` flag label, KGWUI-011 computed and orphan details, the "selected" banner reason.
-- [ ] **Step 2: Pick per string** as in Task 31; record the choices for the 2.4 record.
+- [ ] **Step 1: List every 2.4 string** with its draft: the eight outcomes and their reasons, each fit clause, the three remaining unknown reasons, "Some paths not computed", "Dropped on the paths computed; other paths not computed", "Not all paths computed", "Status cannot confirm this path", "Selects no routes" and "Not watched by the controller" (rendered in `explain.go` from the unresolved codes), allows labels, mode labels, truncation notes, the `dropped` flag label, KGWUI-011 computed and orphan details, the "selected" banner reason.
+- [ ] **Step 2: Pick per string** as in Task 31; record the choices in `phase-2.4-wording.md`.
 - [ ] **Step 3: Apply;** update quoting tests and goldens.
 - [ ] **Step 4: Run** `go test ./pkg/... && cd web && npm test` → PASS.
 - [ ] **Step 5: Commit** `copy: wording pass for delegation`.
 
 ### Task 68: 2.4 budgets and the dense-selection benchmark
 
-**Files:** Modify `pkg/engine/budget_test.go`, `pkg/engine/bench_test.go`, `pkg/api/budget_test.go`
+**Files:** Modify `pkg/engine/budget_test.go`, `pkg/engine/bench_test.go`, `pkg/api/budget_test.go`, `.github/workflows/bench.yaml` (the path filter gains `pkg/computed/**`, PF17); Create `docs/phases/phase-2/bench/2.4.txt`, `2.4-ci.txt`, `2.4-stream-10m.txt` (PF6)
 
-- [ ] **Step 1: Extend the budget tests:** warm `Compute` ≤ 150 ms, cold ≤ 1 s, allocation ≤ 32 MiB; heap with retained contexts ≤ 32 MiB above the 2.1 baseline, per kind; the sustained stream; list mixes gain the delegation of the widest parent (p95 < 50 ms, p99 < 100 ms, 20 clients p95 < 100 ms); route detail on the deepest child p95 < 50 ms.
+- [ ] **Step 1: Extend the budget tests:** warm `Compute` ≤ 150 ms and cold ≤ 1 s; allocation per recompute reported, not gated (D-022); heap with retained contexts ≤ 32 MiB above `bench/2.2-baseline-heap.txt`, per kind; the sustained stream with engine CPU ≤ 15 % and memory from the OS ≤ 256 MiB; each in the consistent world and the worst case (`Tier.Contradicting`, which also contradicts child entries and parent `ResolvedRefs` after Task 58); the consistent world raises no KGWUI-012 and holds no window (PF6). The list mix "delegation of the widest parent" moves from 2.2's `routes?parent=<HTTPRoute>` stand-in (`pkg/api/budget_test.go:168`) to the delegation endpoint (p95 < 50 ms, p99 < 100 ms, 20 clients p95 < 100 ms); route detail on the deepest child p95 < 50 ms.
 - [ ] **Step 2: Add `BenchmarkDenseSelection/{large,extreme}`** over `DenseSelection(20, 500)` and `DenseSelection(100, 1000)`; report time, allocation and the cap hit; two runs give the same `Cap` and the same last computed row.
-- [ ] **Step 3: Run** `make bench | tee docs/phases/phase-2/bench/2.4.txt` → PASS, or STOP and report the miss.
+- [ ] **Step 3: Run** `make bench | tee docs/phases/phase-2/bench/2.4.txt` → PASS, or STOP and report the miss. Save the CI run as `bench/2.4-ci.txt` and the 10-minute stream as `bench/2.4-stream-10m.txt`.
 - [ ] **Step 4: Commit** `test: Large-tier budgets with views B and C; dense selection`.
 
 ### Task 69: kind e2e for 2.4
 
-**Files:** Modify `test/e2e/fixtures/explorer.yaml`, `test/e2e/api_test.go`, `web/e2e/explorer.spec.ts`
+**Files:** Modify `test/e2e/fixtures/explorer.yaml`, `test/e2e/api_test.go`, `web/e2e/explorer.spec.ts`; Create `docs/phases/phase-2/phase-2.4-evidence.md` (PF25)
 
 - [ ] **Step 1: Add fixtures** (design §9.5, 2.4): the ancestor-pruned parent match; one child attached through one parent match and dropped through another; an attached child with a missing Service backend; a child whose parentRef sets only a port. Reuse D-021's manifests from `test/e2e/fixtures/observe/` where they fit.
-- [ ] **Step 2: Write `TestDelegationAgreesWithController`:** on each tag, every `child-entry` and `parent-resolvedrefs` check is `checked` under its rule set; health holds no KGWUI-012; the backend-failure child is `status-compatible`; the pruned child is `dropped` with no entry expected; the two-match child is `partial` with an entry; on 2.3 the port-only child has an entry carrying its port.
+- [ ] **Step 2: Write `TestDelegationAgreesWithController`:** on each tag, every `child-entry` and `parent-resolvedrefs` check is `checked` under its rule set; health holds no KGWUI-012; the backend-failure child is `status-compatible`; the pruned child is `dropped` with no entry expected; the two-match child is `partial` with an entry; on 2.3 the port-only child has an entry carrying its port. The 2.2 fixture's delegation tree (forbidden, header-mismatch, cycle and hostname children) gets compatible or `not-verified` checks too, and `TestComputedAgreesWithController` and `TestForcedDisagreementRaisesKGWUI012` stay green; a mismatch is a rules bug: STOP (PF18).
 - [ ] **Step 3: Extend `explorer.spec.ts`:** open the parent route's Delegation tab, expand a `partial` row, open the child, see its effective matches.
 - [ ] **Step 4: Run** both `make e2e` pairs → PASS.
-- [ ] **Step 5: Run the `/ui-loop` skill** on the Delegation tab and effective matches: both themes, 1280 px and 720 px, restricted, truncated and unknown states; list the recording paths in the 2.4 record.
+- [ ] **Step 5: Run the `/ui-loop` skill** on the Delegation tab and effective matches: both themes, 1280 px and 720 px, restricted, truncated and unknown states; list the recording paths in `phase-2.4-evidence.md`.
 - [ ] **Step 6: Commit** `test(e2e): delegation agrees with the controller on kgateway 2.3 and 2.4`.
 
 ### Task 70: Close sub-phase 2.4
@@ -2134,7 +2169,7 @@ it("a selected route's candidate banner names its parent", ...);
 - [ ] **Step 2: Request the cross-model review**
 
 ```bash
-codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.4-codex.md "Review sub-phase 2.4 of the kgateway UI (diff $BASE..HEAD) against docs/phases/phase-2/computed-rules.md §3, §5-9, §11.2-11.5 and design §5, §6.2, §7.1-7.4. Focus: traversal fidelity incl. ancestor context, both quirks and path-scoped cycles; bounds never turn a missing path into a negative; completeness and the orphan rule; report keys per version; aggregation per report key; fingerprints; restricted contexts never reveal a hidden path; delegation cursors; fixture provenance. Test, e2e and bench output: <paste>. Rank findings P1-P4 with file:line." < /dev/null
+codex exec --sandbox read-only -o docs/phases/phase-2/reviews/2.4-codex.md "Review sub-phase 2.4 of the kgateway UI (diff $BASE..HEAD) against docs/phases/phase-2/computed-rules.md §3, §5-9, §11.2-11.5 and design §5, §6.2, §7.1-7.4. Focus: traversal fidelity incl. ancestor context, both quirks and path-scoped cycles; bounds never turn a missing path into a negative; completeness and the orphan rule; report keys per version; aggregation per report key; fingerprints; restricted contexts and D-024's inherited match (a hidden ancestor sends only its name and delegating match); delegation cursors; fixture provenance. Test, e2e and bench output: <paste>. Rank findings P1-P4 with file:line." < /dev/null
 ```
 
 - [ ] **Step 3: Triage** every finding; fix accepted ones with tests; rerun the gates.
@@ -2161,13 +2196,14 @@ Each matrix row has a rule-level test in the named task, a fixture in Task 40 or
 | §11.2 | context caps | 56 |
 | §11.2 | dense selection, effective edges, cuts, effective equals traversal | 58; API 64, 65; benchmark 68 |
 | §11.2 | label ref with an unknown wildcard | 55, 57, 58, 61 |
-| §11.2 | root behind a hidden Namespace, status root denied | 64 |
+| §11.2 | root behind a hidden Namespace, status root denied, hidden ancestor route (D-024) | 64 |
+| §11.2 | unknown discovery scope (D-024) | 53, 57, 61, 62 |
 | §11.2 | default fit, inherit | 54 |
 | §11.3 | all rows | 59; port-only e2e 69 |
 | §11.4 | listener count, `NoMatchingParent`, TCP conflict, top-level replaced rule | 41, 42 |
 | §11.4 | child and parent rows; effective matcher | 61, 62; 64; e2e 69 |
 | §11.5 | rows 1–3, 4 (route-accepted, via 41's fingerprint test), 7–10 | 42 |
-| §11.5 | rows 4 (child), 5, 6, 11–19 | 62; row 15's Delegation row 64 |
+| §11.5 | rows 4 (child), 5, 6, 11–13, 18–24 | 62; row 20's Delegation row 64 |
 | §11.5 | finding `since` is the window start | 42, 62 |
 | §11.5 | dropped non-owned route in the reach closure | 57, 58 |
 | §11.5 | unresolved row with no child | 56, 57, 63 |
