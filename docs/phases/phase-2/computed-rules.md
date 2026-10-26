@@ -260,12 +260,12 @@ This is the one policy for how much is computed, kept and served **(our call)**.
 | Compute | contexts: `flatten` calls | 20,000 per install | the rest is `unknown`, `too-large` |
 | Compute | matcher evaluations: (child match, context) fit or merge steps | 200,000 per install | the rest is `unknown`, `too-large` |
 | Retain | contexts kept per row, each with its incoming match, path, outcome and effective rules | first 20 in traversal order | `contextsTruncated` on the row; the outcome still aggregates all contexts |
-| Retain | contexts kept per install | 100,000 | later rows keep their outcome with no contexts and `contextsTruncated` |
+| Retain | contexts kept per install | 30,000 **(our call, 2.4; D-022 retained heap)** | later rows keep their outcome with no contexts and `contextsTruncated` |
 | Project | rows per delegation page | the page `limit` (≤ 200) | cursor (design §3.6) |
 | Project | parent edges in a route's `effective` | 20, sorted by parent (namespace, name) | `effectiveTruncated` |
 | Project | contexts per parent edge in `effective` | the union of the retained contexts of every row with that (parent, child), in traversal order, at most 20 | the edge's `contextsTruncated`: true when any of those rows is truncated (per-row or install cap) or the union exceeds 20. At the install cap an edge can have no contexts; it is then sent with `contexts: []` and `contextsTruncated: true`, never as complete |
 
-- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). A cut is deterministic, so the same Model gives the same cut. Which cap was hit is **logged** once per change of the summary; it is not served on the API **(our call)**.
+- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). Selected edges are charged in a deterministic selection pass before the traversal: routes by (namespace, name), rules and refs by index, per selection (a ref's children at once), not per row; a ref that would pass the cap, and every ref after it, is `too-large` **(our call, 2.4)**. A cut is deterministic, so the same Model gives the same cut. Which cap was hit is **logged** once per change of the summary; it is not served on the API **(our call)**.
 - **Retention is streaming (our call).** Each `flatten` result is folded into its row's aggregate as it is produced: the outcome aggregate, the dependency set, the completeness inputs and the report-key aggregates are updated in full, and the context itself is kept only while the row's and the install's retention caps allow. Nothing is materialised first and trimmed later, so memory is bounded by the retention caps plus the aggregates. Dependency and completeness data are never dropped by retention; only context samples are.
 - An effective matcher shown on a page is exactly the one the traversal used for the outcome and the cross-check in the same Model.
 - Retained contexts are counted in the heap budget (design §9.6).
@@ -512,7 +512,7 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | The two quirks of §5.4 | as written (verified, D-021 item 7; no note) |
 | An owned parent not reached from a root | `not-reached`; selection still shown |
 | Dense selection: 100 wildcard parents over a namespace of 1,000 routes | `too-large` after the edge cap, deterministic cut |
-| Contexts per row above 20; retained contexts above 100,000 | `contextsTruncated`; outcomes unchanged |
+| Contexts per row above 20; retained contexts above 30,000 | `contextsTruncated`; outcomes unchanged |
 | One parent edge with 21 contexts; an edge from two rows, one truncated; an edge with no contexts kept at the install cap | `effective` edge has 20 contexts and `contextsTruncated`; flag set; `contexts: []` with `contextsTruncated` |
 | A cut after a context that drops C, before one that would attach it | row `unknown`, not `dropped`; `child-entry` incomplete, no KGWUI-012 on an existing entry; no computed KGWUI-011 |
 | A cut before any context reaches C, and an attached context already computed | row `attached`, "Some paths not computed"; entry expected |

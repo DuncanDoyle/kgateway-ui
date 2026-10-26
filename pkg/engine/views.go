@@ -177,12 +177,16 @@ func roots(res install.Resolved, routes []computed.DelegRoute, objs map[objects.
 			for _, o := range outs {
 				addDeps(o.Deps...)
 			}
-			out = append(out, computed.Root{Route: r.Ref, Deps: deps})
+			keys := refKeys(r.View, outs, func(o computed.RefOutcome) bool { return o.Outcome == computed.OutcomeAccepted && o.Unknown == "" }, nil)
+			out = append(out, computed.Root{Route: r.Ref, Deps: deps, Keys: keys,
+				UncertainKeys: refKeys(r.View, outs, func(o computed.RefOutcome) bool { return o.Unknown != "" }, keys)})
 		case !anyUnknown:
 		default:
 			root := computed.Root{Route: r.Ref, Unknown: true, Deps: []objects.Ref{r.Ref}}
-			if target, ok := statusTarget(res, r, objs[r.Ref], parents[r.Ref]); allUnknown && ok {
-				root = computed.Root{Route: r.Ref, FromStatus: true, Deps: []objects.Ref{r.Ref, target}}
+			if target, key, ok := statusTarget(res, r, objs[r.Ref], parents[r.Ref]); allUnknown && ok {
+				keys := []computed.ReportKey{key}
+				root = computed.Root{Route: r.Ref, FromStatus: true, Deps: []objects.Ref{r.Ref, target}, Keys: keys,
+					UncertainKeys: refKeys(r.View, outs, func(o computed.RefOutcome) bool { return true }, keys)}
 			}
 			out = append(out, root)
 		}
@@ -190,10 +194,30 @@ func roots(res install.Resolved, routes []computed.DelegRoute, objs map[objects.
 	return out
 }
 
-// statusTarget is the target of r's first current Accepted=True status entry
-// from the install's controllers that names one of parents, the route's
-// Gateway and ListenerSet parents of this install.
-func statusTarget(res install.Resolved, r computed.DelegRoute, u *unstructured.Unstructured, parents []objects.ParentRef) (objects.Ref, bool) {
+// refKeys are the report keys, as written, of the parentRefs whose outcomes
+// pass keep, in spec order, without repeats and without those in skip.
+// Rejected parentRefs and other controllers' Gateways (no outcome) get none.
+func refKeys(v *objects.HTTPRouteView, outs []computed.RefOutcome, keep func(computed.RefOutcome) bool, skip []computed.ReportKey) []computed.ReportKey {
+	var idx []int
+	for _, o := range outs {
+		if keep(o) && o.ParentRef < len(v.WrittenRefs) {
+			idx = append(idx, o.ParentRef)
+		}
+	}
+	slices.Sort(idx)
+	var out []computed.ReportKey
+	for _, i := range idx {
+		if k := computed.KeyOf(v.WrittenRefs[i]); !slices.Contains(out, k) && !slices.Contains(skip, k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// statusTarget is the target and report key of r's first current
+// Accepted=True status entry from the install's controllers that names one of
+// parents, the route's Gateway and ListenerSet parents of this install.
+func statusTarget(res install.Resolved, r computed.DelegRoute, u *unstructured.Unstructured, parents []objects.ParentRef) (objects.Ref, computed.ReportKey, bool) {
 	for _, e := range r.View.Parents {
 		if !slices.Contains(res.ControllerNames, e.ControllerName) {
 			continue
@@ -203,8 +227,8 @@ func statusTarget(res install.Resolved, r computed.DelegRoute, u *unstructured.U
 			continue
 		}
 		if slices.ContainsFunc(parents, func(p objects.ParentRef) bool { return p.Ref() == e.ParentRef.Ref() }) {
-			return e.ParentRef.Ref(), true
+			return e.ParentRef.Ref(), computed.KeyOf(e.Written), true
 		}
 	}
-	return objects.Ref{}, false
+	return objects.Ref{}, computed.ReportKey{}, false
 }

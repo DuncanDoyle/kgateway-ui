@@ -91,7 +91,7 @@ func world(bs ...*hr) computed.DelegationInput {
 	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
 	for _, r := range in.Routes {
 		if r.TopLevel {
-			in.Roots = append(in.Roots, computed.Root{Route: r.Ref, Deps: []objects.Ref{tGateway, r.Ref}})
+			in.Roots = append(in.Roots, computed.Root{Route: r.Ref, Deps: []objects.Ref{tGateway, r.Ref}, Keys: []computed.ReportKey{tGwKey}})
 		}
 	}
 	return in
@@ -356,6 +356,62 @@ func TestUnresolvedRef(t *testing.T) {
 	}
 }
 
+func TestRootReportsUnderAcceptedKeysOnly(t *testing.T) {
+	// The root has two Gateway parentRefs; view A accepted only the first (Root.Keys).
+	other := computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gw2"}
+	r := route23("rk", "r").top().rule(at("/api"), toName("rk", "missing"))
+	r.r.View.ParentRefs = append(r.r.View.ParentRefs, objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gw2"})
+	r.r.View.WrittenRefs = append(r.r.View.WrittenRefs, objects.WrittenRef{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gw2"})
+	unknownKey := computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gw3"}
+	in := world(r)
+	in.Roots[0].UncertainKeys = []computed.ReportKey{unknownKey}
+	res := delegate(in)
+	if len(res.Signals) != 1 || res.Signals[0].Key != tGwKey {
+		t.Fatalf("signals %+v, want only under %+v", res.Signals, tGwKey)
+	}
+	if got := row(t, res, r, 0, 0, nil).Reporters; !slices.Equal(got, []computed.ReportKey{tGwKey}) || slices.Contains(got, other) {
+		t.Fatalf("reporters %+v", got)
+	}
+	want := []computed.RouteKey{{Route: r.r.Ref, Key: unknownKey}}
+	if !reflect.DeepEqual(res.UncertainKeys, want) {
+		t.Fatalf("uncertain keys %+v, want %+v", res.UncertainKeys, want)
+	}
+}
+
+func TestForbiddenOnPathIsNoCycle(t *testing.T) {
+	// The forbidden check runs before the cycle check (query/route.go V3:239-249).
+	refs := []refSel{{rule: 0, ref: 0, key: refKey{name: "x"}, kids: []int32{0, 1}, allows: []computed.Allows{computed.AllowsOther, computed.AllowsAny}}}
+	got := selectTree(refs, func(c int32) bool { return c == 0 })
+	if got[0].err != errNone || !slices.Equal(got[0].kids, []int32{1}) {
+		t.Fatalf("got %+v, want kids [1] and no error", got[0])
+	}
+	// End to end: B selects its top-level ancestor A, which forbids it.
+	a := route23("fp", "a").top().rule(at("/a"), toName("fp", "b"))
+	b := route23("fp", "b").rule(at("/a"), toName("fp", "a"))
+	res := delegate(world(a, b))
+	if got := row(t, res, b, 0, 0, a).Outcome; got != computed.OutcomeForbidden {
+		t.Fatalf("B→A %s", got)
+	}
+	if s := signal(t, res, b, under(a)); !slices.Equal(s.Reasons, []string{computed.ReasonBackendNotFound}) {
+		t.Fatalf("B signal %v", s.Reasons)
+	}
+}
+
+func TestCutOpensQuirkRows(t *testing.T) {
+	// Rule 0's ref 1 carries ref 0's child (quirk 1); the context cap cuts ref 1.
+	k1 := route23("qc", "k1").rule(at("/r/1"), service("qc", "be"))
+	k2 := route23("qc", "k2").rule(at("/r/2"), service("qc", "be"))
+	r := route23("qc", "r").top().rule(at("/r"), toName("qc", "k1"), toName("qc", "k2"))
+	in := world(r, k1, k2)
+	in.Bounds.Contexts = 1
+	res := delegate(in)
+	for _, c := range []*hr{k1, k2} {
+		if got := row(t, res, r, 0, 1, c); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownTooLarge || len(got.Contexts) != 1 {
+			t.Fatalf("R ref 1 → %s: %s %s, %d contexts", c.r.Ref.Name, got.Outcome, got.Unknown, len(got.Contexts))
+		}
+	}
+}
+
 func TestComputeCaps(t *testing.T) {
 	leaf := func(ns, name, path string) *hr { return route23(ns, name).rule(at(path), service(ns, "be")) }
 	run := func(t *testing.T, b computed.Bounds, bs ...*hr) computed.DelegationResult {
@@ -551,7 +607,8 @@ func TestScopeUnknownRowsUnknown(t *testing.T) {
 }
 
 // delegationInput builds tier t's views B and C input from the scale world:
-// every HTTPRoute owned, each with a Gateway or ListenerSet parent a root.
+// every HTTPRoute owned, each with a Gateway or ListenerSet parent a root
+// reporting under all of them.
 func delegationInput(b *testing.B, t scale.Tier) computed.DelegationInput {
 	in := computed.DelegationInput{Wildcard: known(install.WildcardAll), Bounds: computed.DefaultBounds}
 	for _, u := range scale.World(t, 1) {
@@ -561,15 +618,19 @@ func delegationInput(b *testing.B, t scale.Tier) computed.DelegationInput {
 		v := objects.DecodeHTTPRoute(u)
 		r := computed.DelegRoute{Ref: objects.RefOf(u), Generation: u.GetGeneration(), View: v, Owned: true}
 		var deps []objects.Ref
-		for _, p := range v.ParentRefs {
+		var keys []computed.ReportKey
+		for i, p := range v.ParentRefs {
 			if p.Kind != "HTTPRoute" {
 				r.TopLevel = true
 				deps = append(deps, p.Ref())
+				if k := computed.KeyOf(v.WrittenRefs[i]); !slices.Contains(keys, k) {
+					keys = append(keys, k)
+				}
 			}
 		}
 		in.Routes = append(in.Routes, r)
 		if r.TopLevel {
-			in.Roots = append(in.Roots, computed.Root{Route: r.Ref, Deps: append(deps, r.Ref)})
+			in.Roots = append(in.Roots, computed.Root{Route: r.Ref, Deps: append(deps, r.Ref), Keys: keys})
 		}
 	}
 	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })

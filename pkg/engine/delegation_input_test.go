@@ -70,10 +70,11 @@ func TestRootsFromViewA(t *testing.T) {
 	for _, rt := range in.Roots {
 		got[rt.Route] = rt
 	}
+	gwKey := []computed.ReportKey{computed.KeyOf(objects.DecodeHTTPRoute(routes[0]).WrittenRefs[0])}
 	want := map[objects.Ref]computed.Root{
-		r("ok"):       {Route: r("ok"), Deps: []objects.Ref{r("ok"), gwRef, nsRef}},
-		r("status"):   {Route: r("status"), FromStatus: true, Deps: []objects.Ref{r("status"), gwRef}},
-		r("both"):     {Route: r("both"), Deps: []objects.Ref{r("both"), gwRef}},
+		r("ok"):       {Route: r("ok"), Deps: []objects.Ref{r("ok"), gwRef, nsRef}, Keys: gwKey},
+		r("status"):   {Route: r("status"), FromStatus: true, Deps: []objects.Ref{r("status"), gwRef}, Keys: gwKey},
+		r("both"):     {Route: r("both"), Deps: []objects.Ref{r("both"), gwRef}, Keys: gwKey},
 		r("viahttp"):  {Route: r("viahttp"), Unknown: true, Deps: []objects.Ref{r("viahttp")}},
 		r("mixed"):    {Route: r("mixed"), Unknown: true, Deps: []objects.Ref{r("mixed")}},
 		r("denied"):   {Route: r("denied"), Unknown: true, Deps: []objects.Ref{r("denied")}},
@@ -85,6 +86,53 @@ func TestRootsFromViewA(t *testing.T) {
 	}
 	if len(in.Roots) != len(want) {
 		t.Fatalf("roots %+v", in.Roots)
+	}
+}
+
+// A root reports under the parentRefs view A accepted, or its status entry's;
+// unknown parentRefs are UncertainKeys; rejected ones and other controllers'
+// Gateways get no key.
+func TestRootKeys(t *testing.T) {
+	gw, other := testutil.GwRef("infra", "edge"), testutil.GwRef("infra", "foreign")
+	sec := func(p objects.ParentRef, s string) objects.ParentRef { p.SectionName = s; return p }
+	routes := []*unstructured.Unstructured{
+		// accepted, rejected, another controller's Gateway (no outcome), unknown
+		testutil.HTTPRoute("shop", "keys", []objects.ParentRef{gw, sec(gw, "a"), other, sec(gw, "b")}),
+		testutil.HTTPRoute("shop", "status", []objects.ParentRef{gw, sec(gw, "s")}, testutil.AcceptedBy(gw, testutil.Controller)),
+	}
+	nss := []*corev1.Namespace{testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)}
+	objs := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.GatewayWithListeners("infra", "edge", "kgateway", nil)}, routes...)
+	snap := viewSnapshot(t, nss, objs...)
+	served := testutil.ServedUpstream()
+	res := resolved("i", "v2.4.7", install.Scope{Mode: install.ScopeAll}, nil, testutil.Controller)
+	dec := newDecodeCache()
+	owned := install.Assign(snap, served, []install.Resolved{res}, dec).PerInstall[res.ID()]
+	at := func(o computed.RefOutcome, i int) computed.RefOutcome { o.ParentRef = i; return o }
+	r := func(n string) objects.Ref { return routeRef("shop", n) }
+	a := computed.AttachmentResult{Outcomes: []computed.RefOutcome{
+		at(outcome(r("keys"), computed.OutcomeAccepted, "", r("keys"), gw.Ref()), 0),
+		at(outcome(r("keys"), computed.OutcomeNotAllowed, "", r("keys"), gw.Ref()), 1),
+		at(outcome(r("keys"), "", computed.UnknownNamespaceLabels, r("keys")), 3),
+		at(outcome(r("status"), "", computed.UnknownNamespaceLabels, r("status")), 0),
+		at(outcome(r("status"), "", computed.UnknownNamespaceLabels, r("status")), 1),
+	}}
+	in := delegationInput(res, owned, snap, served, dec, a)
+	key := func(u *unstructured.Unstructured, i int) computed.ReportKey {
+		return computed.KeyOf(objects.DecodeHTTPRoute(u).WrittenRefs[i])
+	}
+	statusKey := computed.KeyOf(objects.DecodeHTTPRoute(routes[1]).Parents[0].Written)
+	want := map[objects.Ref][2][]computed.ReportKey{
+		r("keys"):   {{key(routes[0], 0)}, {key(routes[0], 3)}},
+		r("status"): {{statusKey}, {key(routes[1], 1)}},
+	}
+	if len(in.Roots) != len(want) {
+		t.Fatalf("roots %+v", in.Roots)
+	}
+	for _, rt := range in.Roots {
+		if w := want[rt.Route]; !reflect.DeepEqual(rt.Keys, w[0]) || !reflect.DeepEqual(rt.UncertainKeys, w[1]) {
+			t.Fatalf("%v: keys %+v uncertain %+v, want %+v %+v", rt.Route, rt.Keys, rt.UncertainKeys, w[0], w[1])
+		}
 	}
 }
 

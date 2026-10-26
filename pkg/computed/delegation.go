@@ -26,6 +26,14 @@ type Root struct {
 	FromStatus, Unknown bool
 	// Deps are the root's eligibility dependencies (rules §5.6).
 	Deps []objects.Ref
+	// Keys are the report keys, as written, of the parentRefs view A accepted,
+	// or of the status entry a status root used: the keys the root's
+	// delegation failures are written under. Rejected parentRefs and those of
+	// other controllers' Gateways have none.
+	Keys []ReportKey
+	// UncertainKeys are the keys of parentRefs whose view A outcome is
+	// unknown, not in Keys: the controller may or may not write under them.
+	UncertainKeys []ReportKey
 }
 
 // Bounds are the compute and retention caps of views B and C (rules §5.7).
@@ -38,9 +46,10 @@ type Bounds struct {
 	EffectiveEdges, ContextsPerEdge int
 }
 
-// DefaultBounds are the caps of rules §5.7.
+// DefaultBounds are the caps of rules §5.7. ContextsPerInstall is 30,000
+// (our call, 2.4; D-022 retained heap).
 var DefaultBounds = Bounds{Edges: 50_000, Contexts: 20_000, Matchers: 200_000,
-	ContextsPerRow: 20, ContextsPerInstall: 100_000, EffectiveEdges: 20, ContextsPerEdge: 20}
+	ContextsPerRow: 20, ContextsPerInstall: 30_000, EffectiveEdges: 20, ContextsPerEdge: 20}
 
 // DelegationInput is everything views B and C read for one install.
 type DelegationInput struct {
@@ -94,6 +103,9 @@ type DelegationResult struct {
 	Reach []Edge
 	// Uncertain are the uncertain points of rules §8.5, sorted by (Route, Rule, Ref).
 	Uncertain []Uncertain
+	// UncertainKeys are each root's Root.UncertainKeys, sorted: a check under
+	// one of them makes no negative expectation (rules §8.5).
+	UncertainKeys []RouteKey
 	// Cap names the first compute cap hit: "", "edges", "contexts" or "matchers".
 	Cap string
 }
@@ -120,6 +132,12 @@ type ParentSignal struct {
 	Key     ReportKey
 	Reasons []string
 	Deps    []objects.Ref
+}
+
+// RouteKey is a report key of one route.
+type RouteKey struct {
+	Route objects.Ref
+	Key   ReportKey
 }
 
 // Edge is a reach graph edge: Parent selects Child and Child permits it.

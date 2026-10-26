@@ -149,12 +149,24 @@ func delegation(in computed.DelegationInput) computed.DelegationResult {
 	}
 	w.acc.tooLarge = w.cap != ""
 	res := computed.DelegationResult{Rows: w.acc.rows(func(objects.Ref) bool { return false }),
-		Signals: w.signals, Reach: w.reach(), Uncertain: w.sortedUncertain(), Cap: w.cap}
+		Signals: w.signals, Reach: w.reach(), Uncertain: w.sortedUncertain(), UncertainKeys: uncertainKeys(in.Roots), Cap: w.cap}
 	w.setChildKeys(res.Rows)
 	slices.SortFunc(res.Signals, func(a, b computed.ParentSignal) int {
 		return cmp.Or(a.Parent.Compare(b.Parent), a.Key.Compare(b.Key))
 	})
 	return res
+}
+
+// uncertainKeys lists every root's UncertainKeys, sorted by (Route, Key).
+func uncertainKeys(roots []computed.Root) []computed.RouteKey {
+	var out []computed.RouteKey
+	for _, r := range roots {
+		for _, k := range r.UncertainKeys {
+			out = append(out, computed.RouteKey{Route: r.Route, Key: k})
+		}
+	}
+	slices.SortFunc(out, func(a, b computed.RouteKey) int { return cmp.Or(a.Route.Compare(b.Route), a.Key.Compare(b.Key)) })
+	return slices.Compact(out)
 }
 
 // withDefaults gives each zero field of b its DefaultBounds value.
@@ -337,7 +349,11 @@ func (w *walker) eval(pi, ri int, path []computed.PathStep) evalSel {
 // (namespace, name), rules and refs by index (rules §5.1, §5.7;
 // translator/httproute/gateway_http_route_translator.go V3:74-79, 119, 189-210).
 func (w *walker) walkRoots() {
-	roots := slices.SortedFunc(slices.Values(w.in.Roots), func(a, b computed.Root) int { return a.Route.Compare(b.Route) })
+	byRoute := func(a, b computed.Root) int { return a.Route.Compare(b.Route) }
+	roots := w.in.Roots // the engine sorts them; copy only when it did not
+	if !slices.IsSortedFunc(roots, byRoute) {
+		roots = slices.SortedFunc(slices.Values(roots), byRoute)
+	}
 	for _, root := range roots {
 		if root.Unknown {
 			w.uncertain = append(w.uncertain, computed.Uncertain{Route: root.Route, Rule: computed.UncertainRoot, Ref: -1, Reason: computed.UnknownContext})
@@ -350,7 +366,8 @@ func (w *walker) walkRoots() {
 		rs, v := &w.sels[pi], w.routes[pi].View
 		deps := slices.Clone(root.Deps)
 		slices.SortFunc(deps, compareRef)
-		keys, ds := rootKeys(v), withDep(slices.Compact(deps), root.Route)
+		// Only keys view A accepted, or the status entry's, are written under.
+		keys, ds := root.Keys, withDep(slices.Compact(deps), root.Route)
 		for _, rule := range v.Rules {
 			lo, hi := rs.ruleRange(rule.Index)
 			if lo == hi {
@@ -379,21 +396,6 @@ func rootMatches(ms []objects.Match) []objects.Match {
 	return ms
 }
 
-// rootKeys are the report keys of a root's Gateway and ListenerSet
-// parentRefs as written, in spec order without repeats (rules §7).
-func rootKeys(v *objects.HTTPRouteView) []computed.ReportKey {
-	var out []computed.ReportKey
-	for i, p := range v.ParentRefs {
-		if (p.Group == objects.GatewayAPIGroup && p.Kind == "HTTPRoute") || i >= len(v.WrittenRefs) {
-			continue
-		}
-		if k := computed.KeyOf(v.WrittenRefs[i]); !slices.Contains(out, k) {
-			out = append(out, k)
-		}
-	}
-	return out
-}
-
 // flatten is rules §5.4 flatten for P's ref ri under f
 // (translator/httproute/delegation.go V3:28-109). The contexts cap is charged
 // per call and the matchers cap per child before viewC; past either cap,
@@ -405,7 +407,7 @@ func (w *walker) flatten(pi, ri int, f *frame) {
 		w.hit(computed.CapContexts)
 	}
 	if w.halted {
-		w.cut(pi, rs, f)
+		w.cut(pi, ri, f)
 		return
 	}
 	w.contexts++
@@ -547,8 +549,10 @@ func (w *walker) descend(pi int, ki int32, e *kidEval, f *frame) {
 }
 
 // cut records a flatten call past a cap: the (parent, ref) is uncertain and
-// each of its rows gets an unknown, too-large context.
-func (w *walker) cut(pi int, rs *refSel, f *frame) {
+// each of its rows gets an unknown, too-large context. Its rows are the ref's
+// own selection plus any children quirks 1 and 2 hand it.
+func (w *walker) cut(pi, ri int, f *frame) {
+	rs := &w.sels[pi].refs[ri]
 	w.uncertainRef(w.routes[pi].Ref, rs, computed.UnknownTooLarge)
 	if rs.unknown != "" {
 		return
@@ -559,6 +563,14 @@ func (w *walker) cut(pi int, rs *refSel, f *frame) {
 	}
 	for _, k := range rs.kids {
 		w.add(pi, rs, k, f, c)
+	}
+	if ev := w.eval(pi, ri, f.path); ev.err == errNone {
+		for _, k := range ev.kids {
+			// Own kids are sorted by index; skip those already given a context.
+			if _, own := slices.BinarySearch(rs.kids, k); !own {
+				w.add(pi, rs, k, f, c)
+			}
+		}
 	}
 }
 
