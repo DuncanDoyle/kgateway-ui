@@ -56,3 +56,42 @@ type DelegationInput struct {
 
 // DelegationResult is views B and C for one install; fields arrive with those views.
 type DelegationResult struct{}
+
+// FitClause names the clause of the default-mode fit that dropped a child
+// rule (rules §6).
+type FitClause string
+
+// Fit clauses (rules §6).
+const (
+	// ClausePathType: the parent path type is not PathPrefix.
+	ClausePathType FitClause = "path-type"
+	// ClausePathPrefix: the child path does not start with the parent's.
+	ClausePathPrefix FitClause = "path-prefix"
+	// ClauseHeader and ClauseQuery: a parent header or query param is missing from the child.
+	ClauseHeader FitClause = "header"
+	ClauseQuery  FitClause = "query"
+	// ClauseMethod: the child does not have the parent's method.
+	ClauseMethod FitClause = "method"
+	// ClauseDefaultSlash: omitted matches default to PathPrefix /, outside a parent prefix other than /.
+	ClauseDefaultSlash FitClause = "default-slash"
+	// ClauseNoMatches: an explicit empty match list in default mode (our call).
+	ClauseNoMatches FitClause = "no-matches"
+)
+
+// FitFailure is why a child rule was dropped: the clause its first match
+// failed. Match is -1 for an explicit empty list. Parent and Child are the
+// values the clause compared; Child is empty when the child has none.
+type FitFailure struct {
+	Rule, Match   int
+	Clause        FitClause
+	Parent, Child string
+}
+
+// EffectiveRule is one child rule under one parent match (view C, rules §6).
+// A kept rule has its effective matches; a dropped one has Reason.
+type EffectiveRule struct {
+	Index   int
+	Kept    bool
+	Matches []objects.Match
+	Reason  *FitFailure
+}
