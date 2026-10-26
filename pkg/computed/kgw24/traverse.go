@@ -44,6 +44,10 @@ type refSel struct {
 	// elsewhere carry the label (rules §3.3, §5.2).
 	partial  computed.UnknownReason
 	possible []int32
+	// rows caches the open row of each kid, and zero the zero-child row, so
+	// add skips the RowKey map.
+	rows []*rowAcc
+	zero *rowAcc
 }
 
 // evalSel is childrenFor's answer for one ref under one path: the
@@ -259,6 +263,7 @@ func (w *walker) selectAll() {
 					w.edges += len(children) // forbidden included
 					sel.unresolved = unresolved
 					sel.kids, sel.allows = make([]int32, len(children)), make([]computed.Allows, len(children))
+					sel.rows = make([]*rowAcc, len(children))
 					for k, c := range children {
 						i, _ := w.index(c)
 						sel.kids[k] = int32(i) //nolint:gosec // route counts fit in int32
@@ -662,8 +667,27 @@ func firstReason(rules []computed.EffectiveRule) *computed.FitFailure {
 }
 
 // open opens row (P, ref, child), or returns it when open; child -1 is the
-// zero-child row.
+// zero-child row. Rows of rs's own kids and its zero-child row are cached in rs.
 func (w *walker) open(pi int, rs *refSel, child int32) *rowAcc {
+	slot := &rs.zero
+	if child >= 0 {
+		slot = nil
+		if k, ok := slices.BinarySearch(rs.kids, child); ok {
+			slot = &rs.rows[k]
+		}
+	}
+	if slot != nil && *slot != nil {
+		return *slot
+	}
+	r := w.openKey(pi, rs, child)
+	if slot != nil {
+		*slot = r
+	}
+	return r
+}
+
+// openKey is open through the RowKey map.
+func (w *walker) openKey(pi int, rs *refSel, child int32) *rowAcc {
 	key := computed.RowKey{Parent: w.routes[pi].Ref, Rule: rs.rule, Ref: rs.ref}
 	if child >= 0 {
 		key.Child = w.routes[child].Ref
