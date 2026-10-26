@@ -28,7 +28,7 @@
 - **Rule sets (rules §1):** one per kgateway minor; `kgw24` starts as a copy of `kgw23`; a shipped set is never edited for a new minor. A fixture's expectation is written from its provenance, never generated.
 - **Supported versions:** kgateway v2.3.11 (`c2af2887`, Gateway API v1.5.1) and v2.4.7 (`b4a2bf74`, Gateway API v1.6.1).
 - **Scale tiers (design §9.6):** Typical 30 Gateways / 3 listeners / 500 HTTPRoutes / 10 ListenerSets / 20 namespaces / 50 Backends; Large 100 / 4 / 2,000 / 200 / 100 / 200; Extreme 500 / 4 / 5,000 / 2,000 / 500 / 1,000; delegated children 10 % (depth ≤ 2, 3, 4; fan-out ≤ 10, 50, 100; Extreme adds an 8-layer diamond lattice); parentRefs mean 1.2, 1.3, 1.5; parent matches per delegating rule 1, 2, 4; 5 % each GRPC, TCP and TLS routes; labelled namespaces behind some `Selector` listeners; 5 % failed parentRefs.
-- **Large-tier budgets (block the sub-phase when missed):** confirm tick ≤ 5 ms; burst of 1,000 events within 1 s ≤ 2 recomputes with event-to-publication p95 ≤ 1.2 s; warm recompute ≤ 100 ms (2.2), ≤ 120 ms (2.3), ≤ 150 ms (2.4); cold recompute ≤ 1 s; allocation per warm recompute ≤ 32 MiB; heap of index, computed views and decode cache ≤ 32 MiB above baseline; sustained stream (one event per 100 ms, 10 min, 20 polling clients) ≤ 1 recompute per s and engine CPU ≤ 15 % of one core; list request p95 < 50 ms, p99 < 100 ms, p95 < 100 ms with 20 concurrent clients; route detail on the deepest child p95 < 50 ms.
+- **Large-tier budgets (block the sub-phase when missed):** confirm tick ≤ 5 ms; burst of 1,000 events within 1 s ≤ 2 recomputes with event-to-publication p95 ≤ 1.2 s; warm recompute ≤ 100 ms (2.2), ≤ 120 ms (2.3), ≤ 150 ms (2.4); cold recompute ≤ 1 s; allocation per warm recompute reported, not gated (D-022); heap of index, computed views and decode cache ≤ 32 MiB above baseline; sustained stream (one event per 100 ms, 10 min, 20 polling clients) ≤ 1 recompute per s and engine CPU ≤ 15 % of one core; list request p95 < 50 ms, p99 < 100 ms, p95 < 100 ms with 20 concurrent clients; route detail on the deepest child p95 < 50 ms.
 - **Change-size rule (AGENTS.md §6):** approval of this plan covers each task's file list. A task that needs more files stops and asks.
 
 ## Review Focus
@@ -117,7 +117,7 @@ pkg/api/testdata/golden-v1/         frozen Phase 1 goldens for the additive-only
 pkg/extension/extension.go          WithComputedRules (2.3)
 pkg/app/app.go                      trigger wiring, safety timer (2.1)
 cmd/kgateway-ui/main.go             --poll-interval default 30s (2.1)
-internal/testutil/scale.go          ScaleWorld per tier (2.1); dense selection (2.4)
+internal/testutil/scale/scale.go    ScaleWorld per tier (2.1); dense selection (2.4)
 internal/testutil/fixtures.go       Backend, delegation, rule fixtures (2.2); Gateways with listener specs (2.3)
 internal/testutil/rulecase.go       rule-case fixture loader shared by pkg/computed and pkg/api (2.3)
 internal/boundary/imports_test.go   allowlist entry for pkg/install/settings.go (2.3)
@@ -1982,7 +1982,7 @@ func TestDelegationFingerprints(t *testing.T) {
   - both KGWUI-011 kinds take `Since` from the persistence step (rules §9.3 step 4)
   - the install's computed summary (rules §5.7): the engine logs `DelegationResult.Cap` once per distinct value, as it logs install rejections (`engine.go:225-230`, PF21); no wire field exists for it
   - engine `graceEnd(c)` = the latest `firstSeen` of `c.Contributors` + `health.Grace` for `child-entry`, zero otherwise
-  - `func computedTriggerFindings(in Input) []Finding` in `delegation.go` — one KGWUI-011 warning per mature `delegated-not-attached`, merged into the status-trigger finding of the same (route, parent) by appending the computed reason, in `conditionsCheck`; the merged finding takes the higher severity, and the `resource status` pending effect follows the status trigger's own grace clock **(inferred, PF13)**; neither trigger fires under `ScopeUnknown` (D-024); one per mature orphan, detail "No parent route in this install keeps this route, and it has no parentRefs of its own." (draft); `Evidence` = `Deps`
+  - `func computedTriggerFindings(in Input) []Finding` in `delegation.go` — one KGWUI-011 warning per mature `delegated-not-attached`, merged into the status-trigger finding of the same (route, parent) by appending the computed reason, in `conditionsCheck`; `Evidence` leaves out the routes on the contributing paths, which the detail may quote by name and delegated match (design §7.4 rule 7, **(our call, extends D-024)**); the merged finding takes the higher severity, and the `resource status` pending effect follows the status trigger's own grace clock **(inferred, PF13)**; neither trigger fires under `ScopeUnknown` (D-024); one per mature orphan, detail "No parent route in this install keeps this route, and it has no parentRefs of its own." (draft); `Evidence` = `Deps`
 
 - [ ] **Step 1: Write the failing tests** (rules §11.4 "computed-attached child, no entry" with P current and with P stale, "matcher-dropped child (parent edit)"; §11.5 rows 4–6, 11–13, 18–24; rows cited by case name, PF11)
 
@@ -2015,7 +2015,7 @@ func TestMergedTriggerSeverity(t *testing.T)            // PF13: status info in 
 ### Task 63: Explorer index for views B and C
 
 **Files:**
-- Modify: `pkg/explore/explore.go`, `pkg/explore/rows.go`, `pkg/explore/admit.go`, `pkg/explore/query.go`, `pkg/explore/cursor.go`, `pkg/explore/explore_test.go`, `pkg/explore/query_test.go`
+- Modify: `pkg/explore/explore.go`, `pkg/explore/rows.go`, `pkg/explore/admit.go`, `pkg/explore/query.go`, `pkg/explore/cursor.go`, `pkg/explore/explore_test.go`, `pkg/explore/query_test.go`; `pkg/explore/ancestors.go` and `ancestors_test.go` (a hidden ancestor route step keeps its ref for the API to send with `link: none`, **(our call, extends D-024)**)
 
 **Interfaces:**
 - Consumes: `Views.Delegation` (Task 62); `DepSet` (Task 43).
@@ -2064,7 +2064,7 @@ func TestUnresolvedRowSurvivesAuthorization(t *testing.T)
   - `type EffectiveContext struct { Restricted bool; ParentMatch *MatchDTO; Rules []EffectiveRuleDTO }`; `type EffectiveRuleDTO struct { Index int; Kept bool; Matches []MatchDTO; Reason string }`
   - `RouteDetail.Effective []EffectiveDTO`, `.EffectiveTruncated bool`; `BackendRefDTO.Delegation` gains `Selected, Attached *int` and `Computed *Computed` (its state merges the ref's rows worst-first, D-023 decision 2; a row's `computed` is its `child-entry` check plus the row's note; **inferred**, PF14); `Candidate.Reason` `"selected"`
   - `GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation` → `Page[DelegationRow]`; `rule` and `ref` integers, `outcome` repeatable; `sort` → 400; `/meta` `filters` gains `"delegation": ["rule", "ref", "outcome"]` (PF8)
-  - Rules (design §7.4): a row whose child is hidden is dropped (3); routes on a context's path never restrict it: a hidden ancestor is sent by name (`link: none`) with the match it delegated under, and nothing else (4b, D-024); a context with another hidden dependency (a root's Gateway, ListenerSet or `Selector` Namespace, or a status root's target) is `{restricted: true}`, and a row or effective edge aggregating one is `restricted` with no outcome or reason (4); `selected` and `attached` count visible children only (5); `dropped` follows its deps per caller (6); KGWUI-011 and KGWUI-012 with hidden evidence get `evidenceRestricted` (7)
+  - Rules (design §7.4): a row whose child is hidden is dropped (3); routes on a context's path never restrict it: a hidden ancestor is sent by name (`link: none`) with the match it delegated under, and nothing else (4b, D-024); a context with another hidden dependency (a root's Gateway, ListenerSet or `Selector` Namespace, or a status root's target) is `{restricted: true}`, and a row or effective edge aggregating one is `restricted` with no outcome or reason (4); `selected` and `attached` count visible children only (5); `dropped` follows its deps per caller (6); KGWUI-011 and KGWUI-012 with hidden evidence get `evidenceRestricted`, except when the only hidden dependencies are ancestor routes, whose names and delegated matches the detail may quote (7); an up-chain step for a hidden ancestor route is `{ref (link none), matches}` from the child's view B contexts, a hidden Gateway or ListenerSet step stays `{restricted: true}` (3) **(our call, extends D-024)**
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2074,7 +2074,8 @@ func TestDelegationParams(t *testing.T)       // non-integer rule/ref, unknown o
 func TestEffectiveOnRoutePage(t *testing.T)   // both modes; equals the traversal (§11.2); coverage not-verified; contexts [] with contextsTruncated at the install cap; effectiveTruncated at 21 edges
 func TestHiddenRootNamespace(t *testing.T)    // §11.2: root behind a Selector listener, Namespace denied → every descendant context, row and effective edge restricted
 func TestStatusRootTargetDenied(t *testing.T) // §11.2
-func TestHiddenAncestorEvidence(t *testing.T) // design §9.1 (2.4): KGWUI-012 on a visible child naming a hidden parent → evidenceRestricted, no detail
+func TestHiddenAncestorEvidence(t *testing.T) // design §9.1 (2.4): KGWUI-012 on a visible child whose only hidden evidence is its parent route → detail kept, quoting the parent's name and delegated match, no evidenceRestricted; with a root behind a hidden Selector Namespace → evidenceRestricted, no detail (**(our call, extends D-024)**)
+func TestUpChainHiddenAncestorRoute(t *testing.T) // a hidden ancestor route step: name, link none, delegated matches; a hidden Gateway step stays restricted (**(our call, extends D-024)**)
 func TestDelegationCountsRecounted(t *testing.T)
 func TestDroppedRouteWithGatewayParentShown(t *testing.T) // §11.5 row 20: Delegation row with its reason; no KGWUI-011
 func TestHealthUnchangedUnderDelegationRestriction(t *testing.T)
@@ -2083,7 +2084,7 @@ func TestHiddenAncestorShowsInheritedMatch(t *testing.T) // D-024: rows, context
 func TestMetaAdvertisesDelegation(t *testing.T)       // PF8: filters.delegation
 ```
 
-- [ ] **Step 2: Run** `go test ./pkg/api -run 'Delegation|Effective|HiddenRoot|StatusRoot|HiddenAncestor|DroppedRoute|CannotProbe|InheritedMatch|MetaAdvertises'` → FAIL.
+- [ ] **Step 2: Run** `go test ./pkg/api -run 'Delegation|Effective|HiddenRoot|StatusRoot|HiddenAncestor|DroppedRoute|CannotProbe|InheritedMatch|MetaAdvertises|UpChainHidden'` → FAIL.
 - [ ] **Step 3: Implement** (PF24).
 - [ ] **Step 4: Run** `go test ./pkg/api -race` → PASS except goldens (Task 65).
 - [ ] **Step 5: Commit** `feat(api): delegation endpoint and effective matchers with dependency-based authorization`.
@@ -2091,7 +2092,7 @@ func TestMetaAdvertisesDelegation(t *testing.T)       // PF8: filters.delegation
 ### Task 65: Goldens for 2.4 and the matrix through the handlers
 
 **Files:**
-- Create: `pkg/api/testdata/golden/{route-delegation,route-detail-delegation-restricted,health-evidence-restricted}.json` (the second: a hidden ancestor shown by name and match only, and a root behind a hidden `Selector` Namespace restricted, D-024; the last: KGWUI-011 and KGWUI-012 with `evidenceRestricted`, design §7.6)
+- Create: `pkg/api/testdata/golden/{route-delegation,route-detail-delegation-restricted,health-evidence-restricted}.json` (the second: a hidden ancestor shown by name and match only, in the Delegation rows, effective matchers and the up-chain, and a root behind a hidden `Selector` Namespace restricted, D-024; the last: KGWUI-011 and KGWUI-012 with `evidenceRestricted` from a hidden root Namespace, and one quoting a hidden parent route without it, design §7.6)
 - Regenerate: `route-detail.json` (effective in both modes, an edge with `contextsTruncated`, an edge with `contexts: []` at the install cap), `routes.json` (`dropped` flag), `route-detail-candidate.json` (`selected`), `meta.json` and `bare-meta.json` (`filters.delegation`, PF8)
 - Modify: `pkg/api/golden_test.go`, `pkg/api/computed_test.go` (`TestDelegationMatrixThroughAPI`)
 
@@ -2104,7 +2105,7 @@ func TestMetaAdvertisesDelegation(t *testing.T)       // PF8: filters.delegation
 
 **Files:**
 - Create: `web/packages/shell/src/pages/explore/route/DelegationTab.tsx`, `src/pages/explore/route/EffectiveMatches.tsx`, `src/pages/explore/delegation.test.tsx`
-- Modify: `src/api/exploreTypes.ts`, `src/api/exploreHooks.ts` (`useDelegation(id: string, ref: LinkedRef, query: URLSearchParams)`), `src/api/types.golden.test.ts`, `src/pages/explore/RoutePage.tsx`, `src/pages/explore/route/RuleList.tsx`, `src/explore/CandidateBanner.tsx`, `src/api/hooks.ts` and `src/pages/explore/RoutesPage.tsx` (the tab and the `dropped` option only when `/meta` advertises `filters.delegation`), `src/copy/explorer.ts` (drafts), `src/index.ts` (`useDelegation` export, design §8.2) (PF8)
+- Modify: `src/api/exploreTypes.ts`, `src/api/exploreHooks.ts` (`useDelegation(id: string, ref: LinkedRef, query: URLSearchParams)`), `src/api/types.golden.test.ts`, `src/pages/explore/RoutePage.tsx`, `src/pages/explore/route/RuleList.tsx`, `src/explore/CandidateBanner.tsx`, `src/pages/explore/route/UpChain.tsx` (a hidden ancestor route step as name and matches, no link, **(our call, extends D-024)**), `src/api/hooks.ts` and `src/pages/explore/RoutesPage.tsx` (the tab and the `dropped` option only when `/meta` advertises `filters.delegation`), `src/copy/explorer.ts` (drafts), `src/index.ts` (`useDelegation` export, design §8.2) (PF8)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2117,6 +2118,7 @@ it("a row the status cannot confirm says so", ...);
 it("outcome, rule and ref filters stay page-local and only ?tab=delegation is in the URL; a 400 cursor reloads page one", ...); // design §8.1, PF26
 it("effective matches per parent path in both modes, marked with the not-verified coverage copy", ...); // assert copy constants, PF22
 it("a hidden ancestor shows its name without a link, and its delegating match", ...); // D-024
+it("the up-chain shows a hidden ancestor route by name without a link; a hidden Gateway stays 'A parent you cannot view'", ...); // extends D-024
 it("the tab and the dropped filter appear only when /meta advertises filters.delegation", ...); // PF8
 it("an edge with no kept contexts never looks complete", ...);
 it("a delegation ref shows selected and attached counts with a ComputedBadge", ...);

@@ -512,5 +512,6 @@ quirk 2 (prefix /q):
 **Consequences:**
 - Rules §3.3, §5.6 and §11.2, and design §6.2, §7.3, §7.4 (rule 4b) and §9.1 change with this entry.
 - A context's path steps carry each ancestor's name and the match it delegated under. Retained contexts grow by one match per path step, inside the retention caps of rules §5.7.
-- Non-route dependencies still restrict: a root admitted through a `Selector` over a hidden Namespace, or a status root whose target is hidden, keeps its descendants' contexts, rows and effective matchers `restricted` (rules §11.2).
-- Unchanged: the route header's up-chain, where a hidden ancestor step has no identity (design §5.3, rule 3), and finding evidence, where a KGWUI-011 or KGWUI-012 that names a hidden route gets `evidenceRestricted` (rule 7).
+- Non-route dependencies still restrict: a root admitted through a `Selector` over a hidden Namespace, or a status root whose target is hidden, keeps its descendants' contexts, rows and effective matchers `restricted` (rules §11.2). Those facts are decided by hidden labels or hidden objects, not handed over by an ancestor **(our call; raised with the user)**.
+- The same rule holds everywhere a hidden ancestor route of a visible child appears: the route header's up-chain step (design §7.4 rule 3, ancestor routes only) and KGWUI-011 and KGWUI-012 evidence (rule 7) show its name and the matches it delegated under, with no link and nothing else. A finding whose only hidden dependencies are such ancestors is not `evidenceRestricted`. Hidden Gateways and ListenerSets on the up-chain keep `{restricted: true}` **(our call, extends D-024)**.
+- The computed `dropped` flag follows decision 2 (our call).
