@@ -50,22 +50,24 @@ none
   - design §5.2, §7.2–7.4, §8.1, §9.6;
   - D-022 (memory gates) and D-023 (restricted memberships, written-ref merge);
   - `phase-2.3-evidence.md`.
-- **Gates on `33cc71e`:**
+- **Gates on `32bba6a`** (CI on PR #9 all green, including `bench`; earlier local runs on `33cc71e`):
   - Go: `go vet` (plain, `bench`, `e2e`) clean, `go test ./... -race -count=1` passes in 24 packages, golangci-lint reports 0 issues.
   - Web: Vitest 494/494, typecheck, lint and build pass (last run on `4b5cc6b`; the later commits touch no web code).
   - kind e2e passed on v2.4.7 (Go 4/4, Playwright 18/18; KGWUI-012 at since + 30.8 s) and v2.3.11 (forced test skipped by design).
 
 ### Benchmarks (Large tier)
-2.2 numbers are from the CI runner (`bench/2.2-ci.txt`); 2.3 numbers are from a laptop (`bench/2.3.txt`, `bench/2.3-stream-10m.txt`, darwin/arm64), so compare with care. The CI record for 2.3 comes from the PR's bench job.
+CI runner numbers (4 vCPUs). 2.2 ran on an EPYC 9V45 (`bench/2.2-ci.txt`); 2.3 ran on a slower EPYC 7763 (`bench/2.3-ci.txt`), so compare with care. The 10-minute stream is a laptop record (`bench/2.3-stream-10m.txt`).
 
 | Measure | 2.2 | 2.3 consistent | 2.3 worst case | Limit |
 |---|---|---|---|---|
-| Warm recompute | ~55 ms | 42 ms | 49 ms | ≤ 120 ms |
-| Allocation per recompute | 23.1 MiB | 29.1 MiB | 35.1 MiB | reported (D-022) |
-| Retained heap over baseline | +7.2 MiB | +13.6 MiB | +15.8 MiB | ≤ 32 MiB |
-| Stream CPU, 10 min | 7.2 % (laptop) | 9.2 % | 10.2 % | ≤ 15 % |
-| Memory from the OS, 10 min | — | 164 MiB | 173 MiB | ≤ 256 MiB |
-| List p95, 20 clients, restricted `sort=health` | 73.5 ms | 5.5 ms | — | < 100 ms |
+| Warm recompute | ~55 ms | 64 ms | 87 ms | ≤ 120 ms |
+| Allocation per recompute | 23.1 MiB | 19.2 MiB | 25.8 MiB | reported (D-022) |
+| Retained heap over baseline | +7.2 MiB | +12.4 MiB | +14.2 MiB | ≤ 32 MiB |
+| Stream CPU, 60 s | 8.9 % | 12.2 % | 9.5 % | ≤ 15 % |
+| Memory from the OS, 60 s | — | 156 MiB | 161 MiB | ≤ 256 MiB |
+| List p95, 20 clients, restricted `sort=health` | 73.5 ms | 83 ms | — | < 100 ms |
+
+Before the merge, the first CI run missed warm recompute (123/142 ms) and the list p95 (109 ms). Five perf cuts reduced recompute allocation (`98b4cca`..`d40eecb`), and two pooled buffers removed most per-request list allocation (`b92fdf2`, `d832575`, `3755ec2`). The list p99 (130–150 ms on CI) is driven by 20 in-process clients sharing 4 CPUs, not by request cost; only p95 is gated.
 
 `make bench` takes 7.4 min, and `make bench-stream` takes 20.6 min.
 
@@ -107,4 +109,5 @@ These are recorded in the plan workspace ledger. The ones that changed behaviour
 - (P4) A pre-2.3 server shifts the layout once when `/meta` is slower than the detail.
 - (P4) The scale generator panics on tiers with fewer than 10 Gateways or no ListenerSets. No current tier is affected.
 - (P4) CheckResult slimming stays available if 2.4 needs allocation headroom.
+- (P3) The 20-client list p95 keeps ~17 % headroom on CI, and its p99 reflects the in-process harness. If it flakes, move the clients out of process or tie the client count to GOMAXPROCS.
 - (P4) The forced-disagreement e2e runs only in the v2.4.7 row.
