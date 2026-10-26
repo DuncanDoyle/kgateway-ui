@@ -568,6 +568,7 @@ type matrixExpect struct {
 	Checks     map[string]matrixCheck    `json:"checks"`
 	KGWUI012   *[]string                 `json:"kgwui012"`
 	// Views B and C (pkg/computed's golden); not served through the handlers yet.
+	// Task 65: assert these through the delegation endpoint and route detail.
 	Rows               json.RawMessage `json:"rows"`
 	Entries            json.RawMessage `json:"entries"`
 	Signals            json.RawMessage `json:"signals"`
