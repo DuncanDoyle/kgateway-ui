@@ -17,6 +17,9 @@ type accumulator struct {
 	// kept counts the retained contexts of the install.
 	kept   int
 	hasher *computed.ContextHasher
+	// tooLarge is set when a compute cap was hit, so a row with no context
+	// may have been reached: it is too-large, not not-reached (rules §3.3).
+	tooLarge bool
 }
 
 // rowAcc is one row's running aggregate.
@@ -36,16 +39,22 @@ func newAccumulator(b computed.Bounds) *accumulator {
 	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, hasher: computed.NewContextHasher()}
 }
 
-// open starts a row. It is called once per row before any add.
-func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta) {
-	a.byKey[key] = &rowAcc{row: computed.Row{Key: key, RefAsWritten: meta.RefAsWritten, Allows: meta.Allows,
+// open starts a row and returns it. It is called once per row before any add.
+func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta) *rowAcc {
+	r := &rowAcc{row: computed.Row{Key: key, RefAsWritten: meta.RefAsWritten, Allows: meta.Allows,
 		Unresolved: meta.Unresolved}, scope: meta.ScopeUnknown}
+	a.byKey[key] = r
+	return r
 }
 
 // add folds c into the row of key. c's slices are shared, never copied. A
 // zero-child unresolved row gets its contexts too, for their reporters and deps.
 func (a *accumulator) add(key computed.RowKey, c computed.Context) {
-	r := a.byKey[key]
+	a.addTo(a.byKey[key], c, a.hasher.Sum(&c))
+}
+
+// addTo is add for an open row r, with d the context's ContextHasher sum.
+func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64) {
 	if r.n == 0 {
 		r.row.KeyDigests = map[computed.ReportKey]uint64{}
 	}
@@ -65,10 +74,13 @@ func (a *accumulator) add(key computed.RowKey, c computed.Context) {
 	if i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare); !ok {
 		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
 	}
-	d := a.hasher.Sum(&c)
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	r.row.KeyDigests[c.Reporter] += d
-	if len(r.row.Contexts) < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
+	if n := len(r.row.Contexts); n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
+		if n == cap(r.row.Contexts) {
+			// Double, but never past the per-row cap.
+			r.row.Contexts = slices.Grow(r.row.Contexts, min(max(n, 1), a.bounds.ContextsPerRow-n))
+		}
 		r.row.Contexts = append(r.row.Contexts, c)
 		a.kept++
 	} else {
@@ -79,6 +91,9 @@ func (a *accumulator) add(key computed.RowKey, c computed.Context) {
 // addDeps merges deps into the row's sorted set. The first sorted set is
 // shared rather than copied, since contexts' Deps are read-only.
 func (r *rowAcc) addDeps(deps []objects.Ref) {
+	if len(deps) == 0 || r.sharedDeps && len(deps) == len(r.row.Deps) && &deps[0] == &r.row.Deps[0] {
+		return // nothing new: the same shared set again
+	}
 	if len(r.row.Deps) == 0 {
 		if slices.IsSortedFunc(deps, compareRef) && !hasAdjacentDup(deps) {
 			r.row.Deps, r.sharedDeps = deps, true
@@ -113,7 +128,7 @@ func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
 	out := make([]computed.Row, 0, len(keys))
 	for _, k := range keys {
 		r := a.byKey[k]
-		r.aggregate(incomplete)
+		r.aggregate(incomplete, a.tooLarge)
 		out = append(out, r.row)
 	}
 	return out
@@ -126,7 +141,7 @@ var signalled = []computed.RowOutcome{computed.OutcomeRejectedHostnames, compute
 	computed.OutcomeUnresolved, computed.OutcomeDropped}
 
 // aggregate sets the row's outcome from its meta and contexts (rules §5.5).
-func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool) {
+func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool, tooLarge bool) {
 	row := &r.row
 	switch {
 	case r.scope:
@@ -142,6 +157,9 @@ func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool) {
 	case r.n == 0:
 		// Selected, but no context reached it.
 		row.Outcome, row.Unknown = computed.OutcomeUnknown, computed.UnknownNotReached
+		if tooLarge {
+			row.Unknown = computed.UnknownTooLarge
+		}
 		return
 	}
 	missing := r.count(computed.OutcomeUnknown) > 0 || incomplete(row.Key.Child)

@@ -82,8 +82,67 @@ const (
 	AllowsOther Allows = "other"
 )
 
-// DelegationResult is views B and C for one install; fields arrive with those views.
-type DelegationResult struct{}
+// DelegationResult is views B and C for one install (rules §5, §6, §8.5).
+type DelegationResult struct {
+	// Rows are in RowKey order.
+	Rows []Row
+	// Signals are the parents' ResolvedRefs failures, by (Parent, Key).
+	Signals []ParentSignal
+	// Reach is (route → permitted selected child) for every in-scope route
+	// with delegation refs, from selection and permission alone (rules §8.5).
+	// It is sorted by (Parent, Child).
+	Reach []Edge
+	// Uncertain are the uncertain points of rules §8.5, sorted by (Route, Rule, Ref).
+	Uncertain []Uncertain
+	// Cap names the first compute cap hit: "", "edges", "contexts" or "matchers".
+	Cap string
+}
+
+// Compute caps, as DelegationResult.Cap names them (rules §5.7).
+const (
+	CapEdges    = "edges"
+	CapContexts = "contexts"
+	CapMatchers = "matchers"
+)
+
+// Parent signal reasons: ResolvedRefs=False reasons a delegation failure
+// writes on the parent (ProcessBackendError, pkg/kgateway/query/utils.go V3:37-50).
+const (
+	ReasonBackendNotFound = "BackendNotFound"
+	ReasonRefNotPermitted = "RefNotPermitted"
+)
+
+// ParentSignal is the ResolvedRefs=False a delegating parent's reporter
+// receives (rules §5.4 parentSignal). Reasons are in first-seen order; Deps
+// cover every context that recorded a failure.
+type ParentSignal struct {
+	Parent  objects.Ref
+	Key     ReportKey
+	Reasons []string
+	Deps    []objects.Ref
+}
+
+// Edge is a reach graph edge: Parent selects Child and Child permits it.
+type Edge struct {
+	Parent, Child objects.Ref
+}
+
+// Uncertain point rule indexes besides a real rule index (rules §8.5).
+const (
+	// UncertainRoot: an owned top-level route whose root eligibility is unknown.
+	UncertainRoot = -1
+	// UncertainPossible: a route an uncertain selection might select.
+	UncertainPossible = -2
+)
+
+// Uncertain is an uncertain point (rules §8.5): a (route, rule, ref) that was
+// cut by a bound or whose selection or context is unknown, or a route with
+// Rule UncertainRoot or UncertainPossible, where Ref is -1.
+type Uncertain struct {
+	Route     objects.Ref
+	Rule, Ref int
+	Reason    UnknownReason
+}
 
 // FitClause names the clause of the default-mode fit that dropped a child
 // rule (rules §6).
