@@ -1,6 +1,9 @@
 package computed
 
 import (
+	"cmp"
+	"strings"
+
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -119,4 +122,93 @@ type EffectiveRule struct {
 	Kept    bool
 	Matches []objects.Match
 	Reason  *FitFailure
+}
+
+// RowOutcome is a delegation row's outcome, per context or aggregated (rules §5.5).
+type RowOutcome string
+
+// Row outcomes. Partial is only ever an aggregate.
+const (
+	OutcomeAttached          RowOutcome = "attached"
+	OutcomePartial           RowOutcome = "partial"
+	OutcomeDropped           RowOutcome = "dropped"
+	OutcomeForbidden         RowOutcome = "forbidden"
+	OutcomeRejectedHostnames RowOutcome = "rejected-hostnames"
+	OutcomeCycle             RowOutcome = "cycle"
+	OutcomeUnresolved        RowOutcome = "unresolved"
+	OutcomeUnknown           RowOutcome = "unknown"
+)
+
+// RowKey identifies a delegation row: a parent, its rule and ref indexes and
+// the selected child. A ref that selects nothing has one row with a zero
+// Child (rules §5.5).
+type RowKey struct {
+	Parent    objects.Ref
+	Rule, Ref int
+	Child     objects.Ref
+}
+
+// Compare orders keys by parent, rule, ref and child.
+func (k RowKey) Compare(o RowKey) int {
+	return cmp.Or(k.Parent.Compare(o.Parent), cmp.Compare(k.Rule, o.Rule), cmp.Compare(k.Ref, o.Ref), k.Child.Compare(o.Child))
+}
+
+// PathStep is a route on a context's path and the match it delegated under (D-024).
+type PathStep struct {
+	Route objects.Ref
+	Match objects.Match
+}
+
+// Context is one evaluation of a row under one incoming parent match (rules
+// §5.1). Its slices are read-only once added to a row, so they may be shared.
+type Context struct {
+	ParentMatch objects.Match
+	Path        []PathStep
+	// Reporter is the report key of the parent's reporter (rules §7).
+	Reporter ReportKey
+	Outcome  RowOutcome
+	Unknown  UnknownReason
+	Reason   *FitFailure
+	Rules    []EffectiveRule
+	Deps     []objects.Ref
+}
+
+// RowMeta is what a row knows before its contexts: the ref as written, the
+// child's permission and, for a zero-child row, why the ref selected nothing.
+type RowMeta struct {
+	RefAsWritten objects.DelegationRef
+	Allows       Allows
+	Unresolved   Unresolved
+}
+
+// Row is one delegation row aggregated over its contexts (rules §5.5). Deps,
+// Reporters and the digests cover every context, retained or not (rules §5.7).
+type Row struct {
+	Key          RowKey
+	RefAsWritten objects.DelegationRef
+	Allows       Allows
+	Outcome      RowOutcome
+	Unknown      UnknownReason
+	// SomeNotComputed: attached, but some paths were not computed.
+	// Unconfirmable: status cannot confirm this row's own outcome.
+	SomeNotComputed, Unconfirmable bool
+	Reason                         *FitFailure
+	Unresolved                     Unresolved
+	Contexts                       []Context
+	ContextsTruncated              bool
+	Deps                           []objects.Ref
+	Reporters                      []ReportKey
+	ChildKey                       ReportKey
+	WritesEntry                    bool
+	// ContextDigest is an order-independent digest of every contributing
+	// context's incoming match, path, reporter and outcome; KeyDigests is the
+	// same digest per reporter. Fingerprints read them (rules §9.2).
+	ContextDigest uint64
+	KeyDigests    map[ReportKey]uint64
+}
+
+// Compare orders report keys field by field.
+func (k ReportKey) Compare(o ReportKey) int {
+	return cmp.Or(strings.Compare(k.Group, o.Group), strings.Compare(k.Kind, o.Kind),
+		strings.Compare(k.Namespace, o.Namespace), strings.Compare(k.Name, o.Name), strings.Compare(k.SectionName, o.SectionName))
 }
