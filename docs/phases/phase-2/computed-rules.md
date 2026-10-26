@@ -292,13 +292,13 @@ viewC(child, parentMatch):
 - every parent header and query param must appear in the child, equal in name, type and value;
 - a parent method must be matched by the same child method.
 
-A rule with omitted `matches` has the default `PathPrefix /`, which fails under any parent prefix but `/`. The reason reads "This rule has no matches, so it defaults to `/`, which is outside the parent's `/api`".
+A rule with omitted `matches` has the default `PathPrefix /`, which fails under any parent prefix but `/`. The reason reads "This rule has no matches, so it defaults to `/`, which is outside the parent's `/api`". That reason is `default-slash`; an omitted list that fails another clause reports that clause, e.g. `path-type` under an Exact parent, or `header` under `/` when the parent has a header.
 
 An explicit `matches: []` in default mode has no match to fit, so the rule is dropped with reason `no-matches`: "This rule has an empty match list, so nothing fits the parent's match" **(our call)**.
 
-**Inherit mode, `merge`** (`mergeParentChildRouteMatch`, `delegation_helpers.go` V4:117-142, V3:118-146). The parent path type is not checked.
+**Inherit mode, `merge`** (`mergeParentChildRouteMatch`, `delegation_helpers.go` V4:117-142, V3:118-143). The parent path type is not checked.
 - Path: `path.Join(parent, child)`, keeping the child's path type. A nil child path counts as Prefix `""`. `path.Join` cleans the result, so `/api` + `/` gives `/api`.
-- Headers and query params: the union by name, the parent winning on a conflict, sorted by name (V4:146-196, V3:147-196).
+- Headers and query params: the union by name, the parent winning on a conflict, sorted by name (V4:146-196, V3:147-197).
 - Method: the parent's, if set.
 - Nothing is dropped.
 

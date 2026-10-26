@@ -69,7 +69,7 @@ func fits(parent, child objects.Match) (bool, computed.FitClause) {
 // fit is fits with the values the failing clause compared.
 func fit(parent, child objects.Match) (ok bool, clause computed.FitClause, pv, cv string) {
 	if parent.Path == nil || parent.Path.Type != "PathPrefix" {
-		return false, computed.ClausePathType, pathType(parent), pathType(child)
+		return false, computed.ClausePathType, pathType(parent), pathValue(child)
 	}
 	// Only a missing child path fails here; its type is not checked.
 	if child.Path == nil || !strings.HasPrefix(child.Path.Value, parent.Path.Value) {
@@ -121,6 +121,7 @@ func keyString(k objects.KeyMatch) string {
 	return s
 }
 
+// pathType is used for the parent only: kgateway never checks the child's type.
 func pathType(m objects.Match) string {
 	if m.Path == nil {
 		return ""

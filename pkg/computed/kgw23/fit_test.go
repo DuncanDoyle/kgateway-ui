@@ -46,6 +46,8 @@ func TestFitClauses(t *testing.T) {
 		{"method equal", withMethod(prefix("/api"), "GET"), withMethod(prefix("/api"), "GET"), true, ""},
 		// Beyond the brief: a child method under a parent without one, and extra child headers.
 		{"child method only", prefix("/api"), withMethod(prefix("/api"), "POST"), true, ""},
+		{"trailing slash parent", prefix("/api/"), prefix("/api"), false, computed.ClausePathPrefix},
+		{"header name case", withHeaders(prefix("/api"), kv("X", "1")), withHeaders(prefix("/api"), kv("x", "1")), false, computed.ClauseHeader},
 		{"extra child header", withHeaders(prefix("/api"), kv("x", "1")), withHeaders(prefix("/api"), kv("a", "0"), kv("x", "1")), true, ""},
 	} {
 		ok, clause := fits(c.parent, c.child)
@@ -67,6 +69,21 @@ func TestOmittedMatchesUnderPrefix(t *testing.T) {
 	want = computed.EffectiveRule{Index: 0, Kept: true, Matches: []objects.Match{prefix("/")}}
 	if !kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
 		t.Errorf("under /: %+v, %v; want %+v kept", rules, kept, want)
+	}
+
+	// Under an Exact parent the clause is path-type, not default-slash.
+	rules, kept = viewC(child, pm("Exact", "/api"))
+	want = computed.EffectiveRule{Index: 0, Reason: &computed.FitFailure{Rule: 0, Match: 0, Clause: computed.ClausePathType, Parent: "Exact", Child: "/"}}
+	if kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
+		t.Errorf("under Exact /api: %+v, %v; want %+v dropped", rules, kept, want)
+	}
+
+	// Inherit mode merges the default PathPrefix / into the parent's path.
+	inherit := &objects.HTTPRouteView{InheritParentMatcher: true, Rules: []objects.Rule{{Index: 0}}}
+	rules, kept = viewC(inherit, prefix("/api"))
+	want = computed.EffectiveRule{Index: 0, Kept: true, Matches: []objects.Match{prefix("/api")}}
+	if !kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
+		t.Errorf("inherit under /api: %+v, %v; want %+v kept", rules, kept, want)
 	}
 }
 
