@@ -614,13 +614,19 @@ func (w *walker) open(pi int, rs *refSel, child int32) *rowAcc {
 	return w.acc.open(key, meta)
 }
 
-// add folds c into row (P, ref, child), once per reporter key of f.
+// add folds c into row (P, ref, child), once per reporter key of f. A
+// too-large context is counted but never retained.
 func (w *walker) add(pi int, rs *refSel, child int32, f *frame, c computed.Context) {
 	r := w.open(pi, rs, child)
 	c.ParentMatch, c.Path, c.Deps = f.match, f.path, f.deps
+	cut := c.Unknown == computed.UnknownTooLarge
 	for _, k := range f.keys {
 		c.Reporter = k
-		w.acc.addTo(r, c, w.digest(f, &c))
+		if cut {
+			w.acc.addCounted(r, c, w.digest(f, &c))
+		} else {
+			w.acc.addTo(r, c, w.digest(f, &c))
+		}
 	}
 }
 

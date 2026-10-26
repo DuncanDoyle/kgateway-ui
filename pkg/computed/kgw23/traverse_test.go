@@ -406,8 +406,33 @@ func TestCutOpensQuirkRows(t *testing.T) {
 	in.Bounds.Contexts = 1
 	res := delegate(in)
 	for _, c := range []*hr{k1, k2} {
-		if got := row(t, res, r, 0, 1, c); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownTooLarge || len(got.Contexts) != 1 {
+		if got := row(t, res, r, 0, 1, c); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownTooLarge || len(got.Contexts) != 0 || !got.ContextsTruncated {
 			t.Fatalf("R ref 1 → %s: %s %s, %d contexts", c.r.Ref.Name, got.Outcome, got.Unknown, len(got.Contexts))
+		}
+	}
+}
+
+func TestCutContextsNotRetained(t *testing.T) {
+	// Every flatten call after the first is cut: rows stay too-large with deps
+	// and reporters, but no cut context is retained.
+	k1 := route23("nr", "k1").rule(at("/r/1"), service("nr", "be"))
+	k2 := route23("nr", "k2").rule(at("/r/2"), service("nr", "be"))
+	r := route23("nr", "r").top().rule(at("/r"), toName("nr", "k1"), toName("nr", "k2")).rule(at("/r"), toName("nr", "k1"))
+	in := world(r, k1, k2)
+	in.Bounds.Contexts = 1
+	w := &walker{in: &in, b: withDefaults(in.Bounds), routes: in.Routes, sigIdx: map[sigKey]int{}}
+	w.acc = newAccumulator(w.b)
+	w.selectAll()
+	w.walkRoots()
+	if w.acc.kept != 1 {
+		t.Fatalf("retained %d contexts, want only the computed one", w.acc.kept)
+	}
+	res := delegate(in)
+	for _, k := range []computed.RowKey{{Parent: r.r.Ref, Rule: 0, Ref: 1, Child: k1.r.Ref}, {Parent: r.r.Ref, Rule: 1, Ref: 0, Child: k1.r.Ref}} {
+		got := row(t, res, r, k.Rule, k.Ref, map[objects.Ref]*hr{k1.r.Ref: k1, k2.r.Ref: k2}[k.Child])
+		if got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownTooLarge || len(got.Contexts) != 0 ||
+			!got.ContextsTruncated || len(got.Deps) == 0 || !slices.Equal(got.Reporters, []computed.ReportKey{tGwKey}) {
+			t.Fatalf("cut row %+v", got)
 		}
 	}
 }

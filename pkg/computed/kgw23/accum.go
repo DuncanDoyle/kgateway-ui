@@ -54,7 +54,14 @@ func (a *accumulator) add(key computed.RowKey, c computed.Context) {
 }
 
 // addTo is add for an open row r, with d the context's ContextHasher sum.
-func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64) {
+func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, true) }
+
+// addCounted folds c like addTo but never retains it: a context cut by a compute
+// cap carries nothing a sample would show. The row is marked truncated, so
+// its contexts never read as complete.
+func (a *accumulator) addCounted(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, false) }
+
+func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, retain bool) {
 	if r.n == 0 {
 		r.row.KeyDigests = map[computed.ReportKey]uint64{}
 	}
@@ -76,7 +83,7 @@ func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64) {
 	}
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	r.row.KeyDigests[c.Reporter] += d
-	if n := len(r.row.Contexts); n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
+	if n := len(r.row.Contexts); retain && n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
 		if n == cap(r.row.Contexts) {
 			// Double, but never past the per-row cap.
 			r.row.Contexts = slices.Grow(r.row.Contexts, min(max(n, 1), a.bounds.ContextsPerRow-n))
