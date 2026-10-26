@@ -362,7 +362,10 @@ const backendRef = shape<BackendRef>(
   {
     ref: linkedRef,
     filters: filter,
-    delegation: shape<DelegationRef>({ mode: "!", namespace: "!", name: "?", label: "?", state: "?" }),
+    delegation: shape<DelegationRef>(
+      { mode: "!", namespace: "!", name: "?", label: "?", state: "?", selected: "?", attached: "?", computed: "?" },
+      { computed },
+    ),
     backend: shape<BackendState>({ state: "?", accepted: "?", restricted: "?" }, { accepted: condition }),
   },
 );

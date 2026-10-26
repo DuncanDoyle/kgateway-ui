@@ -252,12 +252,16 @@ export interface Filter {
   mirror?: Mirror;
   config?: Record<string, unknown>;
 }
+/** A delegation ref; selected and attached count visible children of view B's rows (2.4), absent when unknown. */
 export interface DelegationRef {
   mode: "name" | "wildcard" | "label";
   namespace: string;
   name?: string;
   label?: string;
   state?: "reported" | "not-reported" | "not-found" | "restricted";
+  selected?: number;
+  attached?: number;
+  computed?: Computed;
 }
 /** A Backend's state and Accepted condition, or only restricted when the caller may not view it. */
 export interface BackendState {

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -145,4 +146,57 @@ func segments(v string, n int, param string) ([]string, error) {
 		s[0] = ""
 	}
 	return s, nil
+}
+
+// Delegation list parameters (design §7.2): no sort, the order is fixed.
+var (
+	delegationParams = []string{"rule", "ref", "outcome", "limit", "cursor"}
+	delegationSingle = []string{"rule", "ref", "limit", "cursor"}
+)
+
+// parseDelegationQuery parses r's query for GET …/delegation. It rejects
+// unknown and repeated single-valued parameters and non-integer rule, ref
+// and limit values; explore validates the rest (ranges, outcomes, cursors).
+func parseDelegationQuery(r *http.Request) (explore.DelegationQuery, error) {
+	var q explore.DelegationQuery
+	vals, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return q, badParam("malformed query: %v", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(vals)) {
+		if !slices.Contains(delegationParams, name) {
+			return q, badParam("unknown parameter %q", name)
+		}
+		if len(vals[name]) > 1 && slices.Contains(delegationSingle, name) {
+			return q, badParam("parameter %q given more than once", name)
+		}
+	}
+	index := func(name string) (*int, error) {
+		if !vals.Has(name) {
+			return nil, nil
+		}
+		n, err := strconv.Atoi(vals.Get(name))
+		if err != nil {
+			return nil, badParam("%s %q: want an integer", name, vals.Get(name))
+		}
+		return &n, nil
+	}
+	if q.Rule, err = index("rule"); err != nil {
+		return q, err
+	}
+	if q.Ref, err = index("ref"); err != nil {
+		return q, err
+	}
+	if v := vals.Get("limit"); vals.Has("limit") {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > explore.MaxLimit {
+			return q, badParam("limit %q: want 1–%d", v, explore.MaxLimit)
+		}
+		q.Limit = n
+	}
+	for _, v := range vals["outcome"] {
+		q.Outcomes = append(q.Outcomes, computed.RowOutcome(v))
+	}
+	q.Cursor = vals.Get("cursor")
+	return q, nil
 }

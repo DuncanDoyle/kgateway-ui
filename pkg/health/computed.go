@@ -41,7 +41,7 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			on, since := ch.On, ch.Since
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet),
-				Since: &since, Evidence: ch.Deps}
+				Since: &since, Evidence: evidence(ch)}
 			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
 			if u := ownedObject(in.Owned, owned, on); u != nil {
 				own := in.firstSeen(u)
@@ -51,6 +51,16 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 	}
 	return fs, ok(c.Name(), false, in.Now)
+}
+
+// evidence is what a KGWUI-012 detail depends on. A views B and C check
+// leaves out its routes: they are the subject and the ancestors on its
+// paths, whose names the detail may quote (design §7.4 rule 7, D-024).
+func evidence(c *computed.CheckResult) []objects.Ref {
+	if c.ID.Kind == computed.KindChildEntry || c.ID.Kind == computed.KindParentResolvedRefs {
+		return withoutRoutes(c.Deps, c.Contributors)
+	}
+	return c.Deps
 }
 
 // ownedResources maps the owned Gateways, ListenerSets and routes by ref; the

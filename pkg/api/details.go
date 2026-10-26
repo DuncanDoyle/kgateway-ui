@@ -3,11 +3,13 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -32,6 +34,8 @@ type detail struct {
 	v  *view
 	l  linker
 	f  facts
+	// links memoises link per ref for the many path steps of one delegation page.
+	links map[objects.Ref]Link
 }
 
 // startDetail finds the install, or writes 503 or 404.
@@ -66,7 +70,7 @@ func (d *detail) open(w http.ResponseWriter, ref objects.Ref) (*unstructured.Uns
 		return u, nil
 	}
 	c := &Candidate{Reason: a.Reason}
-	if a.Reason == explore.ReasonReferenced {
+	if a.Reason == explore.ReasonReferenced || a.Reason == explore.ReasonSelected {
 		// The first visible referrer; link() admitted ref only because one exists.
 		for _, by := range a.Referrers {
 			if d.v.can(by) {
@@ -291,6 +295,7 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 	for _, rule := range v.Rules {
 		out.Rules = append(out.Rules, d.rule(ref, rule))
 	}
+	out.Effective, out.EffectiveTruncated = d.effective(ref)
 	out.Ancestors, out.AncestorsTruncated = d.ancestors(ref)
 	writeJSON(w, out)
 }
@@ -357,21 +362,31 @@ func matchDTOs(ms []objects.Match) []MatchDTO {
 	if ms == nil {
 		ms = defaultMatches
 	}
+	return matchList(ms)
+}
+
+// matchList is ms on the wire as computed: never nil, no default.
+func matchList(ms []objects.Match) []MatchDTO {
 	out := make([]MatchDTO, 0, len(ms))
 	for _, m := range ms {
-		dto := MatchDTO{Headers: keyMatches(m.Headers), QueryParams: keyMatches(m.QueryParams), Method: m.Method}
-		if m.Path != nil {
-			dto.Path = &PathMatchDTO{Type: m.Path.Type, Value: m.Path.Value}
-		}
-		out = append(out, dto)
+		out = append(out, matchDTO(m))
 	}
 	return out
 }
 
+// matchDTO is one match on the wire.
+func matchDTO(m objects.Match) MatchDTO {
+	dto := MatchDTO{Headers: keyMatches(m.Headers), QueryParams: keyMatches(m.QueryParams), Method: m.Method}
+	if m.Path != nil {
+		dto.Path = &PathMatchDTO{Type: m.Path.Type, Value: m.Path.Value}
+	}
+	return dto
+}
+
 func (d *detail) rule(route objects.Ref, r objects.Rule) RuleDTO {
 	out := RuleDTO{Index: r.Index, Name: r.Name, Matches: matchDTOs(r.Matches), Filters: d.filters(r.Filters), BackendRefs: make([]BackendRefDTO, 0, len(r.BackendRefs))}
-	for _, b := range r.BackendRefs {
-		out.BackendRefs = append(out.BackendRefs, d.backendRef(route, b))
+	for i, b := range r.BackendRefs {
+		out.BackendRefs = append(out.BackendRefs, d.backendRef(route, r.Index, i, b))
 	}
 	return out
 }
@@ -396,9 +411,9 @@ func (d *detail) filters(fs []objects.Filter) []FilterDTO {
 	return out
 }
 
-// backendRef is b of route on the wire. A name delegation ref links its
-// child; wildcard and label refs select, so they never link.
-func (d *detail) backendRef(route objects.Ref, b objects.BackendRef) BackendRefDTO {
+// backendRef is b, ref i of rule of route, on the wire. A name delegation
+// ref links its child; wildcard and label refs select, so they never link.
+func (d *detail) backendRef(route objects.Ref, rule, i int, b objects.BackendRef) BackendRefDTO {
 	out := BackendRefDTO{Ref: LinkedRef{Ref: b.Ref, Link: LinkNone}, Port: b.Port, Weight: b.Weight, WeightDefaulted: b.WeightDefaulted, Filters: d.filters(b.Filters)}
 	if dl := b.Delegation; dl != nil {
 		out.Delegation = &DelegationRefDTO{Mode: dl.Mode, Namespace: dl.Namespace, Name: dl.Name, Label: dl.Label}
@@ -406,7 +421,13 @@ func (d *detail) backendRef(route objects.Ref, b objects.BackendRef) BackendRefD
 			child := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: dl.Namespace, Name: dl.Name}
 			out.Ref = d.l.linked(child)
 			out.Delegation.State = d.delegationState(route, child)
+			// Like the state, a hidden target leaves no count: rows would tell
+			// a present target from an absent one (D-013).
+			if out.Delegation.State == DelegationRestricted {
+				return out
+			}
 		}
+		d.refCounts(out.Delegation, explore.RefKey{Parent: route, Rule: rule, Ref: i})
 		return out
 	}
 	out.Ref = d.l.linked(b.Ref)
@@ -452,21 +473,281 @@ func (d *detail) backendState(ref objects.Ref, link Link) *BackendStateDTO {
 	return out
 }
 
-// ancestors is the up-chain of route; hidden steps carry no identity.
+// ancestors is the up-chain of route. A hidden Gateway or ListenerSet step
+// carries no identity; a hidden ancestor route its name and the matches it
+// delegated under (design §7.4 rule 3, D-024).
 func (d *detail) ancestors(route objects.Ref) ([]AncestorPathDTO, bool) {
 	paths, truncated := d.ix.Ancestors(route, d.v.can)
 	out := make([]AncestorPathDTO, 0, len(paths))
 	for _, p := range paths {
 		dto := AncestorPathDTO{Steps: make([]AncestorStepDTO, 0, len(p.Steps)), Cycle: p.Cycle}
-		for _, s := range p.Steps {
+		for k, s := range p.Steps {
 			if s.Restricted {
 				dto.Steps = append(dto.Steps, AncestorStepDTO{Restricted: true})
 				continue
 			}
 			lr := d.l.linked(s.Ref)
-			dto.Steps = append(dto.Steps, AncestorStepDTO{Ref: &lr})
+			step := AncestorStepDTO{Ref: &lr}
+			if s.Hidden && k+1 < len(p.Steps) {
+				step.Matches = d.delegatedMatches(s.Ref, p.Steps[k+1].Ref)
+			}
+			dto.Steps = append(dto.Steps, step)
 		}
 		out = append(out, dto)
 	}
 	return out, truncated
+}
+
+// delegatedMatches are the distinct matches under which the hidden route
+// parent delegated to child, from view B's retained contexts whose other
+// dependencies the caller may view (design §7.4 rules 3, 4b).
+func (d *detail) delegatedMatches(parent, child objects.Ref) []MatchDTO {
+	var ms []objects.Match
+	for _, i := range d.ix.Delegation[parent] {
+		r := &d.ix.DelegRows[i]
+		if r.Key.Child != child {
+			continue
+		}
+		for j := range r.Contexts {
+			m := r.Contexts[j].ParentMatch
+			if d.v.allowDeps(d.ix, r.ContextDeps[j]) && !slices.ContainsFunc(ms, func(o objects.Match) bool { return reflect.DeepEqual(o, m) }) {
+				ms = append(ms, m)
+			}
+		}
+	}
+	if ms == nil {
+		return nil
+	}
+	return matchList(ms)
+}
+
+// refCounts adds view B's counts and merged check to the delegation ref k
+// (design §7.3, §7.4 rule 5). Rows of hidden children are left out. Selected
+// is unknown when the selection is (a partial selection or an unknown
+// scope); Attached also when a counted row is unknown or restricted. A ref
+// with no rows, such as one of a parent no root reaches, gets neither.
+func (d *detail) refCounts(dto *DelegationRefDTO, k explore.RefKey) {
+	ids := d.ix.RefRows[k]
+	if len(ids) == 0 {
+		return
+	}
+	var c *Computed
+	selected, attached, selKnown, attKnown := 0, 0, true, true
+	for _, i := range ids {
+		r := &d.ix.DelegRows[i]
+		child := r.Key.Child != (objects.Ref{})
+		if child && !d.v.can(r.Key.Child) {
+			continue
+		}
+		rc := d.f.delegation(r)
+		if c == nil {
+			c = &rc
+		} else {
+			m := mergeComputed(*c, rc)
+			c = &m
+		}
+		if r.Outcome == computed.OutcomeUnknown && (!child || r.Unknown == computed.UnknownScope) {
+			selKnown = false
+		}
+		if !child {
+			continue
+		}
+		selected++
+		switch {
+		case rc.State == string(computed.StateRestricted) || r.Outcome == computed.OutcomeUnknown:
+			attKnown = false
+		case r.Outcome == computed.OutcomeAttached || r.Outcome == computed.OutcomePartial:
+			attached++
+		}
+	}
+	dto.Computed = c
+	if selKnown {
+		dto.Selected = &selected
+		if attKnown {
+			dto.Attached = &attached
+		}
+	}
+}
+
+// effective is view C of route per parent edge, and whether edges were cut
+// (rules §5.7, §6). A hidden parent is named with link none (D-024). A
+// restricted edge's hidden contexts are one trailing {restricted: true}, as
+// on a delegation row (design §7.4 rule 4).
+func (d *detail) effective(route objects.Ref) ([]EffectiveDTO, bool) {
+	e, ok := d.ix.Effective[route]
+	if !ok || len(e.Edges) == 0 {
+		return nil, false
+	}
+	out := make([]EffectiveDTO, 0, len(e.Edges))
+	for j := range e.Edges {
+		ed := &e.Edges[j]
+		dto := EffectiveDTO{Parent: d.l.linked(ed.Parent), Mode: ed.Mode, ContextsTruncated: ed.ContextsTruncated,
+			Contexts: make([]EffectiveContext, 0, len(ed.Contexts)), Computed: d.f.effective(ed, e.EdgeDeps[j])}
+		for x := range ed.Contexts {
+			if !d.v.allowDeps(d.ix, e.ContextDeps[j][x]) {
+				continue
+			}
+			c := &ed.Contexts[x]
+			pm := matchDTO(c.ParentMatch)
+			ec := EffectiveContext{ParentMatch: &pm, Rules: make([]EffectiveRuleDTO, 0, len(c.Rules))}
+			for _, er := range c.Rules {
+				ec.Rules = append(ec.Rules, EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: explainFit(er.Reason)})
+			}
+			dto.Contexts = append(dto.Contexts, ec)
+		}
+		if dto.Computed.State == string(computed.StateRestricted) {
+			dto.Contexts, dto.ContextsTruncated = append(dto.Contexts, EffectiveContext{Restricted: true}), false
+		}
+		out = append(out, dto)
+	}
+	return out, e.Truncated
+}
+
+// routeDelegation is GET …/routes/{group}/{kind}/{ns}/{name}/delegation:
+// the route's view B rows, filtered and paged in their fixed order (design
+// §7.1, §7.2). It opens like the route's detail page; rows of hidden
+// children are left out before the total (design §7.4 rule 3).
+func (h *handler) routeDelegation(w http.ResponseWriter, r *http.Request) {
+	d := h.startDetail(w, r)
+	if d == nil {
+		return
+	}
+	if r.PathValue("group") != objects.GatewayAPIGroup || r.PathValue("kind") != "HTTPRoute" {
+		writeErr(w, http.StatusNotFound, noDetailView)
+		return
+	}
+	q, err := parseDelegationQuery(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ref := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: r.PathValue("ns"), Name: r.PathValue("name")}
+	if u, _ := d.open(w, ref); u == nil {
+		return
+	}
+	pg, err := d.ix.QueryDelegation(ref, q, d.v.visible())
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	pu, pv := d.routeView(ref)
+	items := make([]DelegationRow, 0, len(pg.IDs))
+	for _, id := range pg.IDs {
+		items = append(items, d.delegationRow(&d.ix.DelegRows[id], pu, pv))
+	}
+	writeJSON(w, Page[DelegationRow]{Install: d.i.Resolved.ID(), Items: items, Total: pg.Total, Next: pg.Next, Prev: pg.Prev,
+		CollectedAt: wireTime(d.p.ConfirmedAt)})
+}
+
+// delegationRow is view B row r of the parent stored as pu, pv for the
+// caller. A restricted row has no outcome, reason or parent condition, and
+// its hidden contexts are one trailing {restricted: true}: their number and
+// the parent's reporter keys can depend on hidden objects (design §7.4 rule 4).
+func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructured, pv *objects.HTTPRouteView) DelegationRow {
+	as := r.RefAsWritten
+	out := DelegationRow{Rule: r.Key.Rule, Ref: r.Key.Ref, RefAsWritten: DelegationRefDTO{Mode: as.Mode, Namespace: as.Namespace, Name: as.Name, Label: as.Label},
+		Allows: string(r.Allows), Contexts: make([]DelegationContext, 0, len(r.Contexts)), ContextsTruncated: r.ContextsTruncated, Computed: d.f.delegation(r)}
+	shown := out.Computed.State != string(computed.StateRestricted)
+	if shown {
+		out.Outcome, out.Reason = string(r.Outcome), explainRow(r.Outcome, r.Reason, r.Unresolved)
+		out.Observed.ParentCondition = d.parentCondition(pu, pv, r.Reporters)
+	}
+	if child := r.Key.Child; child != (objects.Ref{}) {
+		lr := d.cachedLink(child)
+		out.Child = &lr
+		out.Observed.Entry = d.childEntry(child, r.ChildKey)
+	}
+	for j := range r.Contexts {
+		if d.v.allowDeps(d.ix, r.ContextDeps[j]) {
+			out.Contexts = append(out.Contexts, d.delegationContext(r, j))
+		}
+	}
+	if !shown {
+		out.Contexts, out.ContextsTruncated = append(out.Contexts, DelegationContext{Restricted: true}), false
+	}
+	return out
+}
+
+// delegationContext is retained context j of row r, whose dependencies the
+// caller may view: routes on its path are named with their links, which is
+// none for a hidden one, and never restrict it (design §7.4 rule 4b, D-024).
+func (d *detail) delegationContext(r *explore.DelegRow, j int) DelegationContext {
+	c := &r.Contexts[j]
+	o := c.Outcome
+	if o == "" {
+		o = computed.OutcomeUnknown // an empty outcome counts as unknown
+	}
+	pm := matchDTO(c.ParentMatch)
+	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, 0, len(c.Path)), Outcome: string(o)}
+	// An unknown context's reason is its unknown code, as Computed.Reason is.
+	if o == computed.OutcomeUnknown {
+		out.Reason = string(c.Unknown)
+	} else {
+		out.Reason = explainRow(o, c.Reason, r.Unresolved)
+	}
+	for _, s := range c.Path {
+		out.Path = append(out.Path, PathStepDTO{Ref: d.cachedLink(s.Route), Match: matchDTO(s.Match)})
+	}
+	return out
+}
+
+// cachedLink is d.l.linked memoised per request.
+func (d *detail) cachedLink(ref objects.Ref) LinkedRef {
+	if d.links == nil {
+		d.links = map[objects.Ref]Link{}
+	}
+	l, ok := d.links[ref]
+	if !ok {
+		l = d.l.link(ref)
+		d.links[ref] = l
+	}
+	return LinkedRef{Ref: ref, Link: l}
+}
+
+// routeView is route ref's object and decoded view, from its row when it has one.
+func (d *detail) routeView(ref objects.Ref) (*unstructured.Unstructured, *objects.HTTPRouteView) {
+	if id, ok := d.ix.Row(ref); ok && d.ix.Routes[id].View != nil {
+		return d.ix.Routes[id].Obj, d.ix.Routes[id].View
+	}
+	if u, _ := stored(d.p.Model, ref); u != nil {
+		return u, objects.DecodeHTTPRoute(u)
+	}
+	return nil, nil
+}
+
+// childEntry is child's status entry from the install's controllers under
+// report key, as written (rules §7); nil when there is none.
+func (d *detail) childEntry(child objects.Ref, key computed.ReportKey) *ParentStatus {
+	if key == (computed.ReportKey{}) {
+		return nil
+	}
+	u, v := d.routeView(child)
+	if v == nil {
+		return nil
+	}
+	for _, p := range v.Parents {
+		if computed.KeyOf(p.Written) == key && slices.Contains(d.i.Resolved.ControllerNames, p.ControllerName) {
+			return &ParentStatus{ParentRef: p.ParentRef, Target: d.cachedLink(p.ParentRef.Ref()), ControllerName: p.ControllerName,
+				Ours: true, Conditions: conditions(u, p.Conditions)}
+		}
+	}
+	return nil
+}
+
+// parentCondition is the parent's ResolvedRefs condition from its first
+// entry of the install's controllers under one of keys, its reporter keys.
+func (d *detail) parentCondition(u *unstructured.Unstructured, v *objects.HTTPRouteView, keys []computed.ReportKey) *Condition {
+	if v == nil {
+		return nil
+	}
+	for _, p := range v.Parents {
+		if !slices.Contains(keys, computed.KeyOf(p.Written)) || !slices.Contains(d.i.Resolved.ControllerNames, p.ControllerName) {
+			continue
+		}
+		if c := objects.FindCondition(p.Conditions, "ResolvedRefs"); c != nil {
+			cc := condition(u, *c)
+			return &cc
+		}
+	}
+	return nil
 }

@@ -649,9 +649,20 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "delegation",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
               "mode": "name",
               "name": "declared",
               "namespace": "shop",
+              "selected": 1,
               "state": "not-reported"
             },
             "filters": [],
@@ -667,9 +678,20 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "not-verified"
+                ],
+                "rule": "delegation",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
               "mode": "name",
               "name": "ghost",
               "namespace": "shop",
+              "selected": 0,
               "state": "not-found"
             },
             "filters": [],
@@ -685,8 +707,19 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "delegation",
+                "rules": "kgateway-2.4",
+                "state": "disagrees"
+              },
               "mode": "wildcard",
-              "namespace": "shop"
+              "namespace": "shop",
+              "selected": 5
             },
             "filters": [],
             "ref": {
@@ -701,9 +734,20 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "not-verified"
+                ],
+                "rule": "delegation",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
               "label": "team",
               "mode": "label",
-              "namespace": "shop"
+              "namespace": "shop",
+              "selected": 0
             },
             "filters": [],
             "ref": {

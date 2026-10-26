@@ -151,6 +151,13 @@ func TestBudgetListRequests(t *testing.T) {
 			if lk.Listener == "" {
 				t.Fatal("the Large tier has no listener members")
 			}
+			// The viewable parent with the most view B rows, for the delegation endpoint.
+			var deleg objects.Ref
+			for r, rows := range ix.Delegation {
+				if n := len(ix.Delegation[deleg]); can(r) && (len(rows) > n || len(rows) == n && r.String() < deleg.String()) {
+					deleg = r
+				}
+			}
 			deepest, depth := deepestChild(ix, can)
 			if depth == 0 || len(ix.ByParentRoute[parent]) == 0 {
 				t.Fatal("the Large tier has no delegation")
@@ -167,6 +174,7 @@ func TestBudgetListRequests(t *testing.T) {
 				{"q", base + "/routes?q=r-01"},
 				{"sort=health", base + "/routes?sort=health.desc"},
 				{"delegation-widest-parent", base + "/routes?parent=" + refParam(parent)},
+				{"delegation-rows", base + "/routes/gateway.networking.k8s.io/HTTPRoute/" + deleg.Namespace + "/" + deleg.Name + "/delegation"},
 			}
 			for _, mx := range mixes {
 				items, total := listRows(t, h, mx.path)
