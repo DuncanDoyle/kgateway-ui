@@ -192,29 +192,24 @@ func (f facts) attachment(rf *explore.RefFacts) Attachment {
 }
 
 // membership is one listener of an accepted parentRef. A listener whose count
-// is unknown presents no members, so the membership is unknown too. The
-// count's facts, its check and its unknown state, count only when its
-// dependencies are visible (rules 4, 5): otherwise only the ref's check
-// applies, so a hidden candidate cannot move the membership. The note is the
-// ref check's.
+// is unknown presents no members, so the membership is unknown too. Listener
+// facts are shown to every caller who sees the listener (rule 5), so the
+// count's check and unknown state apply whatever its candidates. The note is
+// the ref check's.
 func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.ListenerHit) ListenerAttachment {
 	rule := rf.Out.Rule
 	out := ListenerAttachment{Resource: res, Listener: h.Listener}
-	if !f.v.allowDeps(f.ix, h.Deps) {
-		out.Computed = f.restricted(rule)
-		return out
-	}
 	// Every listener of a computed resource has a count; without one only the ref's check applies.
 	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: rf.Out.Resource, Listener: h.Listener}]
-	counted := ok && f.v.allowDeps(f.ix, lf.Deps)
-	if counted && !lf.Known {
+	switch {
+	case !f.v.allowDeps(f.ix, h.Deps):
+		out.Computed = f.restricted(rule)
+		return out
+	case ok && !lf.Known:
 		out.Computed = f.unknown(rule, lf.Unknown)
 		return out
 	}
 	lc := lf.Check
-	if !counted {
-		lc = nil
-	}
 	var lv, rv computed.CheckResult
 	if lc != nil {
 		lv = *lc
@@ -234,25 +229,21 @@ func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.Listen
 	return out
 }
 
-// listener adds view A's count of listener dto of resource: omitted when
-// unknown or restricted (rule 5), with no isolation note then. The note also
-// needs its own dependencies visible (rule 4).
+// listener adds view A's count of listener dto of resource, omitted when
+// unknown, with no isolation note then. A count is a fact of its listener: it
+// includes members the caller cannot view, as attachedRoutes does (rule 5).
 func (f facts) listener(resource objects.Ref, dto *ListenerDTO) {
 	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: resource, Listener: dto.Name}]
 	if !ok {
 		return
 	}
 	var c Computed
-	switch {
-	case !f.v.allowDeps(f.ix, lf.Deps):
-		c = f.restricted(ruleListenerCount)
-	case !lf.Known:
-		c = f.unknown(ruleListenerCount, lf.Unknown)
-	default:
+	if lf.Known {
 		n := lf.Count
-		dto.ComputedRoutes = &n
-		dto.IsolationNote = lf.IsolationNote && f.v.allowDeps(f.ix, lf.NoteDeps)
+		dto.ComputedRoutes, dto.IsolationNote = &n, lf.IsolationNote
 		c = f.checked(ruleListenerCount, lf.Check)
+	} else {
+		c = f.unknown(ruleListenerCount, lf.Unknown)
 	}
 	dto.Computed = &c
 }

@@ -171,7 +171,7 @@ func (h *handler) gateways(w http.ResponseWriter, r *http.Request) {
 			row.Class, row.Listeners = v.Class, len(v.Listeners)
 			row.Addresses = append(row.Addresses, v.StatusAddresses...)
 		}
-		if n, ok := ls.ix.GatewayMemberCount(id, ls.v.visible()); ok {
+		if n, ok := ls.ix.GatewayMemberCount(id); ok {
 			row.Routes = &n
 		}
 		items = append(items, row)
@@ -212,7 +212,7 @@ func (h *handler) listenerSets(w http.ResponseWriter, r *http.Request) {
 		if s.View != nil {
 			row.Listeners = len(s.View.Listeners)
 		}
-		if n, ok := ls.ix.ListenerSetMemberCount(id, ls.v.visible()); ok {
+		if n, ok := ls.ix.ListenerSetMemberCount(id); ok {
 			row.Routes = &n
 		}
 		items = append(items, row)

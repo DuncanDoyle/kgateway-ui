@@ -323,12 +323,8 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 }
 
 // listenerRows are the distinct rows with a member on k whose dependencies
-// visible admits (design §7.4 rule 4a). A count known to be unknown has no
-// members; one whose dependencies are hidden cannot be told unknown (rule 5).
+// visible admits (design §7.4 rule 4a).
 func (ix *Index) listenerRows(k ListenerKey, visible func(objects.Ref) bool) []RowID {
-	if f := ix.Listeners[k]; !f.Known && ix.Visible(f.Deps, visible) {
-		return nil
-	}
 	ms := ix.ByListener[k]
 	out := make([]RowID, 0, len(ms))
 	for _, m := range ms {
@@ -422,7 +418,7 @@ func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, 
 		}
 		v := sortVal{group: g.Ref.Group, kind: g.Ref.Kind, n: healthRank(g.State)}
 		if q.Sort.Key == sortRoutes {
-			if n, ok := ix.GatewayMemberCount(RowID(i), visible); ok { // #nosec G115 -- a row count fits in int32
+			if n, ok := ix.GatewayMemberCount(RowID(i)); ok { // #nosec G115 -- a row count fits in int32
 				v.n = n
 			} else {
 				v.n = -1
@@ -434,34 +430,33 @@ func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, 
 }
 
 // GatewayMemberCount is the routes column of Gateway row id and its sort
-// value: its distinct member routes. ok is false when a listener's count is
-// unknown, or has a dependency visible does not admit (design §7.4 rule 5).
-func (ix *Index) GatewayMemberCount(id RowID, visible func(objects.Ref) bool) (n int, ok bool) {
+// value: its distinct member routes, hidden ones too, as a listener's count
+// (design §7.4 rule 5). ok is false when a listener's count is unknown.
+func (ix *Index) GatewayMemberCount(id RowID) (n int, ok bool) {
 	g := &ix.Gateways[id]
 	if g.View == nil {
 		return 0, false
 	}
-	return ix.memberCount(g.Ref, g.View.Listeners, g.Members, visible)
+	return ix.memberCount(g.Ref, g.View.Listeners, g.Members)
 }
 
 // ListenerSetMemberCount is GatewayMemberCount for ListenerSet row id.
-func (ix *Index) ListenerSetMemberCount(id RowID, visible func(objects.Ref) bool) (n int, ok bool) {
+func (ix *Index) ListenerSetMemberCount(id RowID) (n int, ok bool) {
 	l := &ix.ListenerSets[id]
 	if l.View == nil {
 		return 0, false
 	}
-	return ix.memberCount(l.Ref, l.View.Listeners, l.Members, visible)
+	return ix.memberCount(l.Ref, l.View.Listeners, l.Members)
 }
 
-// memberCount is len(members) when every listener's count is known and
-// visible. A count's deps cover its members', so none is then hidden.
-func (ix *Index) memberCount(ref objects.Ref, ls []objects.Listener, members []RowID, visible func(objects.Ref) bool) (int, bool) {
+// memberCount is len(members) when every listener's count is known.
+func (ix *Index) memberCount(ref objects.Ref, ls []objects.Listener, members []RowID) (int, bool) {
 	if ix.Listeners == nil {
 		return 0, false
 	}
 	for _, l := range ls {
 		f, ok := ix.Listeners[ListenerKey{ref, l.Name}]
-		if !ok || !f.Known || !ix.Visible(f.Deps, visible) {
+		if !ok || !f.Known {
 			return 0, false
 		}
 	}

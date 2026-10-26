@@ -34,8 +34,6 @@ type listenerState struct {
 	selText string
 	count   int
 	unknown computed.UnknownReason
-	// nsNames are the namespaces its Selector evaluated, with duplicates.
-	nsNames []string
 }
 
 // newListenerStates parses each listener's allowed kinds and selector once.
@@ -188,15 +186,6 @@ func blanketUnknown(in computed.AttachmentInput, r *computed.Resource) computed.
 func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.AttachmentInput,
 	r *computed.Resource, ls []listenerState, cands []candidate, expUnknown bool,
 ) {
-	countDeps := make([]objects.Ref, 0, len(cands)+1)
-	countDeps = append(countDeps, r.Ref)
-	for _, c := range cands {
-		countDeps = append(countDeps, in.Routes[c.route].Ref)
-	}
-	// Sorted once and shared by the counts without Namespace deps; full cap forces a copy on append.
-	countDeps = sortRefs(countDeps)
-	countDeps = countDeps[:len(countDeps):len(countDeps)]
-
 	if why := blanketUnknown(in, r); why != "" {
 		// Its listeners are unknown, and so is every ref naming it (rules §3.3).
 		for _, c := range cands {
@@ -208,7 +197,7 @@ func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.Att
 		}
 		for _, l := range r.Listeners {
 			res.Counts = append(res.Counts, computed.ListenerCount{
-				Resource: r.Ref, Listener: l.Name, Unknown: why, Deps: countDeps,
+				Resource: r.Ref, Listener: l.Name, Unknown: why,
 			})
 		}
 		return
@@ -220,20 +209,12 @@ func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.Att
 
 	for j, l := range r.Listeners {
 		st := &ls[j]
-		lc := computed.ListenerCount{Resource: r.Ref, Listener: l.Name, Count: st.count, Unknown: st.unknown, Deps: countDeps}
+		lc := computed.ListenerCount{Resource: r.Ref, Listener: l.Name, Count: st.count, Unknown: st.unknown}
 		if st.selErr != nil {
 			lc.Error = st.selErr.Error()
 		}
 		if lc.Unknown != "" {
 			lc.Count = 0
-		}
-		if len(st.nsNames) > 0 {
-			d := make([]objects.Ref, len(countDeps), len(countDeps)+len(st.nsNames))
-			copy(d, countDeps)
-			for _, ns := range st.nsNames {
-				d = append(d, nsRef(ns))
-			}
-			lc.Deps = sortRefs(d)
 		}
 		res.Counts = append(res.Counts, lc)
 	}
@@ -301,10 +282,6 @@ func evalRef(ms *memberBuf, in computed.AttachmentInput, r *computed.Resource, l
 		}
 		if v.UsesSelector {
 			withNS()
-			// Consecutive candidates often share a namespace; sortRefs removes the rest.
-			if ns := rt.Ref.Namespace; len(st.nsNames) == 0 || st.nsNames[len(st.nsNames)-1] != ns {
-				st.nsNames = append(st.nsNames, ns)
-			}
 		}
 		if !v.OK {
 			addFact(nsFact(l.Name, st, r.Ref.Namespace, rt.Ref.Namespace, v, in))

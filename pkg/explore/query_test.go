@@ -710,7 +710,7 @@ func TestListenerFilter(t *testing.T) {
 	// A listener may be named "unknown": the reserved value cannot collide with it.
 	v := views()
 	a := routeRef("shop", "a")
-	v.Attachment.Counts = append(v.Attachment.Counts, computed.ListenerCount{Resource: gwObj, Listener: "unknown", Count: 1, Deps: []objects.Ref{gwObj, a}})
+	v.Attachment.Counts = append(v.Attachment.Counts, computed.ListenerCount{Resource: gwObj, Listener: "unknown", Count: 1})
 	v.Attachment.Members = append(v.Attachment.Members, computed.Member{Resource: gwObj, Listener: "unknown", Route: a, Deps: []objects.Ref{a, gwObj}})
 	ix := buildViews(t, v)
 	route := routeRef("shop", "a")
@@ -787,8 +787,8 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) {
 	}
 }
 
-// sort=routes uses the computed member count; a row without one (unknown,
-// or restricted for the caller) sorts after rows with one, both ways.
+// sort=routes uses the computed member count; a row without one (unknown)
+// sorts after rows with one, both ways. A hidden dependency changes nothing.
 func TestGatewaysSortByMemberCount(t *testing.T) {
 	w := viewWorld()
 	w.objs = append(w.objs, testutil.Gateway("infra", "other", "kgateway", nil), testutil.Gateway("infra", "third", "kgateway", nil))
@@ -796,8 +796,8 @@ func TestGatewaysSortByMemberCount(t *testing.T) {
 	v := views()
 	other, third := testutil.GwRef("infra", "other").Ref(), testutil.GwRef("infra", "third").Ref()
 	v.Attachment.Counts = append(v.Attachment.Counts,
-		computed.ListenerCount{Resource: other, Listener: "http", Deps: []objects.Ref{other}},
-		computed.ListenerCount{Resource: third, Listener: "http", Unknown: computed.UnknownNamespaceLabels, Deps: []objects.Ref{third}})
+		computed.ListenerCount{Resource: other, Listener: "http"},
+		computed.ListenerCount{Resource: third, Listener: "http", Unknown: computed.UnknownNamespaceLabels})
 	in.Computed = v
 	ix := Build(in)
 	gname := func(p Page) []string {
@@ -816,8 +816,8 @@ func TestGatewaysSortByMemberCount(t *testing.T) {
 	}{
 		{"desc", nil, true, []string{"edge", "other", "third"}},
 		{"asc", nil, false, []string{"other", "edge", "third"}},
-		{"restricted desc", noNS, true, []string{"other", "edge", "third"}},
-		{"restricted asc", noNS, false, []string{"other", "edge", "third"}},
+		{"hidden namespace desc", noNS, true, []string{"edge", "other", "third"}},
+		{"hidden namespace asc", noNS, false, []string{"other", "edge", "third"}},
 	} {
 		q := Query{Sort: Sort{Key: "routes", Desc: tc.desc}}
 		p, err := ix.QueryGateways(q, tc.visible)

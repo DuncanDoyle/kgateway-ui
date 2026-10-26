@@ -153,8 +153,8 @@ type GatewayListRow struct {
 	Listeners      int          `json:"listeners"`
 	AttachedRoutes int32        `json:"attachedRoutes"`
 	NotAccepted    int          `json:"notAccepted"`
-	// Routes is view A's distinct routes on the Gateway's own listeners;
-	// nil when a count is unknown or depends on a hidden object (rule 5).
+	// Routes is view A's distinct routes on the Gateway's own listeners,
+	// hidden ones too; nil when a count is unknown (rule 5).
 	Routes       *int `json:"routes,omitempty"`
 	ListenerSets int  `json:"listenerSets"`
 	// Disagreements counts the Gateway's checks in state disagrees. Like
@@ -239,7 +239,7 @@ type ListenerDTO struct {
 	TLS           *ListenerTLSDTO    `json:"tls,omitempty"`
 	AllowedRoutes AllowedRoutesDTO   `json:"allowedRoutes"`
 	Status        *ListenerStatusDTO `json:"status,omitempty"`
-	// ComputedRoutes is view A's count; nil when unknown or restricted (rule 5).
+	// ComputedRoutes is view A's count, hidden members too; nil when unknown (rule 5).
 	ComputedRoutes *int      `json:"computedRoutes,omitempty"`
 	Computed       *Computed `json:"computed,omitempty"`
 	// IsolationNote: Envoy may serve fewer hostnames on this listener (rules §4.5).

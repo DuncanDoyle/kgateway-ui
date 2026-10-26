@@ -144,8 +144,7 @@ View A shows status semantics. On 2.4, a plain-HTTP listener carries the note "E
 |---|---|---|---|
 | Listener membership | (resource, listener, route, parentRef index) | effective hostnames | route, resource, the route's Namespace when the listener uses `Selector` |
 | ParentRef outcome | (route, parentRef index) | accepted with listeners, or one of three reasons | route, resource; Namespaces evaluated by `Selector` on any listener of the resource |
-| Listener count | (resource, listener) | number | resource, every candidate route, every Namespace evaluated by `Selector` |
-| Isolation note (2.4) | (resource, listener) | the note of §4.5 | the Gateway and its accepted ListenerSets, the ones §4.5 merges; a denied or statusless one is never read. Sent only when these and the count's dependencies are visible **(our call, 2.3 review)** |
+| Listener count | (resource, listener) | number | none: a fact of its listener, with the isolation note (2.4) of §4.5. Shown to every caller who sees the listener, hidden members included (design §7.4 rule 5) **(user, 2026-10-26)** |
 | Explanation | per non-accepted outcome | the listener facts that failed, e.g. "listener `https` allows namespaces with `team=web`; namespace `shop` has `team=retail`" | as the outcome |
 
 ## 5. View B — delegation selection, permission and fit with ancestor context

@@ -487,3 +487,8 @@ quirk 2 (prefix /q):
 **Consequences:**
 - A caller who cannot view a count's dependencies may see a membership as checked where an unrestricted caller sees it unknown. That reveals nothing hidden.
 - No wire format change: `ParentSummary` keeps its shape.
+
+**Amended 2026-10-26 (user):**
+- Decision 1 is replaced. Listener facts are shown to every caller who can see the listener: the computed count, its cross-check, its unknown state and reason, and its isolation note. The count includes members the caller cannot see, as `attachedRoutes` does. A visible route's membership takes the count's state again, so an unknown count makes it unknown for every caller, and `listener=` has no members under it. Per-route facts of hidden routes stay hidden (design §7.2, §7.4 rules 4 and 5).
+- Why: the re-review (R1, R2) showed that restricting a count leaks. Moving a hidden route or ListenerSet into or out of a listener's dependencies flipped visible facts between "Hidden" and their real state. The number of routes a Gateway serves is also a property of that Gateway.
+- Decision 2, the written-ref merge, stands.

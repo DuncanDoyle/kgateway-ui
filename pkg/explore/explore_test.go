@@ -739,9 +739,9 @@ func views() *computed.Views {
 			{Route: u, ParentRef: 0, Resource: gwObj, Unknown: computed.UnknownNamespaceLabels, Deps: []objects.Ref{u, gwObj, shopNS}},
 		},
 		Counts: []computed.ListenerCount{
-			{Resource: gwObj, Listener: "http", Count: 1, Deps: []objects.Ref{gwObj, a, r, u}},
-			{Resource: gwObj, Listener: "https", Count: 2, Deps: []objects.Ref{gwObj, a, b, r, u, shopNS}},
-			{Resource: lsObj, Listener: "extra", Count: 1, Deps: []objects.Ref{lsObj, c}},
+			{Resource: gwObj, Listener: "http", Count: 1},
+			{Resource: gwObj, Listener: "https", Count: 2},
+			{Resource: lsObj, Listener: "extra", Count: 1},
 		},
 	}}
 }
@@ -800,7 +800,7 @@ func TestByListenerMembers(t *testing.T) {
 		t.Errorf("rule set %q note %q", ix.RuleSet, ix.RuleNote)
 	}
 	lf := ix.Listeners[ListenerKey{Resource: gwObj, Listener: "https"}]
-	if !lf.Known || lf.Count != 2 || len(lf.Deps) != 6 {
+	if !lf.Known || lf.Count != 2 {
 		t.Errorf("https facts %+v", lf)
 	}
 	_, rr := row(t, ix, "shop", "r")
@@ -810,30 +810,34 @@ func TestByListenerMembers(t *testing.T) {
 }
 
 // A listener whose count is unknown presents no members, even when the rules
-// listed some (setting-unknown); the ref keeps its listener. A caller who may
-// not view the count's deps cannot tell it is unknown, so sees the member.
-func TestListenerRowsUnderUnknownCount(t *testing.T) {
+// listed some (setting-unknown); the ref keeps its listener. Every caller sees
+// the count unknown, so listener= finds no rows for any of them.
+func TestByListenerHidesMembersUnderUnknownCount(t *testing.T) {
 	v := views()
 	v.Attachment.Counts[0].Unknown = computed.UnknownSetting
 	ix := buildViews(t, v)
 	key := ListenerKey{Resource: gwObj, Listener: "http"}
+	if m := ix.ByListener[key]; len(m) != 0 {
+		t.Errorf("members under an unknown count: %+v", m)
+	}
 	if f := ix.Listeners[key]; f.Known || f.Unknown != computed.UnknownSetting {
 		t.Errorf("facts %+v", f)
 	}
 	if _, r := row(t, ix, "shop", "a"); len(r.Computed) != 1 || r.Computed[0].Listeners[0].Hostnames[0] != "a.example.com" {
 		t.Errorf("a facts %+v", r.Computed)
 	}
-	if n, ok := ix.GatewayMemberCount(0, nil); ok {
+	if g := ix.Gateways[0]; slices.Contains(g.Members, ids(t, ix, "a")[0]) {
+		t.Errorf("members %v", g.Members)
+	}
+	if n, ok := ix.GatewayMemberCount(0); ok {
 		t.Errorf("gateway member count %d under an unknown count", n)
 	}
-	q := Query{Parent: &gwObj, Listener: "http"}
-	if p := mustRoutes(t, ix, q, nil); len(p.IDs) != 0 {
-		t.Errorf("members under an unknown count: %v", names(ix, p))
-	}
 	a := routeRef("shop", "a")
-	onlyA := func(r objects.Ref) bool { return r == a || r == gwObj }
-	if p := mustRoutes(t, ix, q, onlyA); !slices.Equal(names(ix, p), []string{"a"}) {
-		t.Errorf("hidden count deps: %v", names(ix, p))
+	q := Query{Parent: &gwObj, Listener: "http"}
+	for _, visible := range []func(objects.Ref) bool{nil, func(r objects.Ref) bool { return r == a || r == gwObj }} {
+		if p := mustRoutes(t, ix, q, visible); len(p.IDs) != 0 {
+			t.Errorf("members under an unknown count: %v", names(ix, p))
+		}
 	}
 }
 
@@ -931,11 +935,8 @@ func TestGatewayRowComputedCounts(t *testing.T) {
 	if l := ix.ListenerSets[0]; !slices.Equal(l.Members, ids(t, ix, "c")) || l.Disagreements != 1 {
 		t.Errorf("listenerset members %v disagreements %d", l.Members, l.Disagreements)
 	}
-	if n, ok := ix.GatewayMemberCount(0, nil); n != 2 || !ok {
+	if n, ok := ix.GatewayMemberCount(0); n != 2 || !ok {
 		t.Errorf("member count %d %v", n, ok)
-	}
-	if _, ok := ix.GatewayMemberCount(0, func(r objects.Ref) bool { return r.Kind != "Namespace" }); ok {
-		t.Error("a hidden dependency leaves a count")
 	}
 	if f := ix.Listeners[ListenerKey{Resource: gwObj, Listener: "http"}]; f.Check == nil || f.Check.State != computed.StateDisagrees {
 		t.Errorf("listener check %+v", f.Check)

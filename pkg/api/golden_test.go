@@ -147,7 +147,7 @@ func detailCases(t *testing.T) []goldenCase {
 // reports one route more than view A counts, so the world disputes view A on
 // purpose. tcp's candidate infra/stream is a pre-v1 TCPRoute under an unknown
 // experimental setting. A caller who cannot view Namespaces sees http, a
-// Selector listener, restricted.
+// Selector listener, as an unrestricted one does: a count is the listener's.
 func viewAStates() (setup, []runtime.Object) {
 	stream := tcpRoute("v1alpha2", "infra", "stream", []objects.ParentRef{sectionRef("tcp")}, testutil.AcceptedBy(sectionRef("tcp"), testutil.Controller))
 	objs := listenerEdge(explorerWorld(partialLS(), stream))

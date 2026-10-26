@@ -140,7 +140,8 @@ func TestListenerCountAgreesAndDisagrees(t *testing.T) {
 			if c.ID != wantID {
 				t.Errorf("identity %+v, want %+v", c.ID, wantID)
 			}
-			if !slices.Contains(c.Deps, r1.Ref) || !slices.Contains(c.Deps, g.Ref) {
+			// A count is its listener's fact, so its finding quotes no other object (design §7.4 rule 5).
+			if len(c.Deps) != 0 {
 				t.Errorf("deps %v", c.Deps)
 			}
 		})
@@ -386,11 +387,6 @@ func TestCheckLeavesResultUnchanged(t *testing.T) {
 	for i := range res.Outcomes {
 		if !slices.Equal(res.Outcomes[i].Deps, want.Outcomes[i].Deps) {
 			t.Errorf("outcome deps changed")
-		}
-	}
-	for i := range res.Counts {
-		if !slices.Equal(res.Counts[i].Deps, want.Counts[i].Deps) {
-			t.Errorf("count deps changed")
 		}
 	}
 }

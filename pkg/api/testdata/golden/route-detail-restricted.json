@@ -132,6 +132,7 @@
               "computed": {
                 "by": "ui",
                 "coverage": [
+                  "count-agrees",
                   "status-compatible"
                 ],
                 "rule": "hostname-intersection",

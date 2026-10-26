@@ -76,17 +76,8 @@ func TestIsolationNote(t *testing.T) {
 			t.Errorf("kgw23 %s/%s: note set", lc.Resource.Name, lc.Listener)
 		}
 	}
-	// The note's deps are its Gateway and its accepted ListenerSets: a denied or statusless one is never read.
-	deps := map[string][]objects.Ref{"edge/a": {g.Ref, ls.Ref}, "extra/e": {g.Ref, ls.Ref}, "other/f": {g2.Ref}, "fourth/p": {g4.Ref}}
 	for i := range res.Counts {
-		lc := &res.Counts[i]
-		if d, ok := deps[lc.Resource.Name+"/"+lc.Listener]; ok && !reflect.DeepEqual(lc.NoteDeps, sortRefs(d)) {
-			t.Errorf("%s/%s: note deps %v", lc.Resource.Name, lc.Listener, lc.NoteDeps)
-		}
-		if lc.Unknown != "" && lc.NoteDeps != nil {
-			t.Errorf("%s/%s: unknown count has note deps %v", lc.Resource.Name, lc.Listener, lc.NoteDeps)
-		}
-		lc.IsolationNote, lc.NoteDeps = false, nil
+		res.Counts[i].IsolationNote = false
 	}
 	if !reflect.DeepEqual(res, old) {
 		t.Errorf("kgw24 result differs from kgw23 beyond the note:\n%+v\n%+v", res, old)

@@ -564,7 +564,7 @@ func (b *builder) views(ix *Index) {
 	for i := range a.Counts {
 		c := &a.Counts[i]
 		ix.Listeners[ListenerKey{c.Resource, c.Listener}] = ListenerFacts{Count: c.Count, Known: c.Unknown == "", Unknown: c.Unknown,
-			Error: c.Error, IsolationNote: c.IsolationNote, Deps: n.deps(c.Deps), NoteDeps: n.deps(c.NoteDeps)}
+			Error: c.Error, IsolationNote: c.IsolationNote}
 	}
 	b.refFacts(ix, n)
 	ix.ByListener = make(map[ListenerKey][]Member, len(a.Counts))
@@ -584,8 +584,11 @@ func (b *builder) views(ix *Index) {
 				}
 			}
 		}
-		// Members of an unknown count are kept for callers who may not see that it is unknown (listenerRows).
+		// An unknown count presents no members, even when the rules list some (setting-unknown).
 		k := ListenerKey{m.Resource, m.Listener}
+		if !ix.Listeners[k].Known {
+			continue
+		}
 		ms, ok := ix.ByListener[k]
 		if !ok {
 			j := i + 1

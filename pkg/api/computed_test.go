@@ -328,9 +328,10 @@ var hideNamespaces = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool 
 // flagged reports whether row r carries flag f.
 func flagged(r RouteRow, f string) bool { return slices.Contains(r.Flags, f) }
 
-// Design §9.1 (2.3): a Selector over a hidden Namespace restricts membership,
-// count and check; listener-unknown follows the caller (rule 6); health,
-// row states and disagreements do not (rule 9).
+// Design §9.1 (2.3): a Selector over a hidden Namespace restricts membership;
+// listener-unknown follows the caller (rule 6); health, row states and
+// disagreements do not (rule 9). The count, its check and the routes column
+// are the listener's, so every caller sees them (rule 5, user 2026-10-26).
 func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
 	_, all, _ := startWith(t, setup{disputes: true}, selectorWorld()...)
 	_, some, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, selectorWorld()...)
@@ -360,9 +361,8 @@ func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
 	if l := ad.Listeners[0]; l.ComputedRoutes == nil || *l.ComputedRoutes != 1 || l.Computed.State != "disagrees" {
 		t.Errorf("sel unrestricted: %v %+v", l.ComputedRoutes, l.Computed)
 	}
-	if l := hd.Listeners[0]; l.ComputedRoutes != nil || l.Computed == nil ||
-		!reflect.DeepEqual(*l.Computed, Computed{By: "ui", Rules: "kgateway-2.4", Rule: "listener-count", State: "restricted"}) || l.Status.AttachedRoutes != 2 {
-		t.Errorf("sel restricted: %v %+v", l.ComputedRoutes, l.Computed)
+	if !reflect.DeepEqual(ad.Listeners[0], hd.Listeners[0]) {
+		t.Errorf("sel with a hidden Namespace: %+v, unrestricted %+v", hd.Listeners[0], ad.Listeners[0])
 	}
 	if ad.Health != hd.Health {
 		t.Errorf("gateway health %s, restricted %s", ad.Health, hd.Health)
@@ -370,9 +370,9 @@ func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
 	if a, h := get[HealthResponse](t, all, base+"/health", 200), get[HealthResponse](t, some, base+"/health", 200); a.State != h.State || !reflect.DeepEqual(a.Counts, h.Counts) {
 		t.Errorf("install health %s %v, restricted %s %v", a.State, a.Counts, h.State, h.Counts)
 	}
-	// Disagreements count every check, as health does; routes is restricted.
+	// Disagreements count every check, as health does.
 	ag, hg := get[Page[GatewayListRow]](t, all, listBase+"/gateways?q=edge", 200).Items[0], get[Page[GatewayListRow]](t, some, listBase+"/gateways?q=edge", 200).Items[0]
-	if ag.Routes == nil || *ag.Routes != 1 || hg.Routes != nil || ag.Disagreements != 1 || hg.Disagreements != 1 || ag.Health != hg.Health {
+	if ag.Routes == nil || *ag.Routes != 1 || hg.Routes == nil || *hg.Routes != 1 || ag.Disagreements != 1 || hg.Disagreements != 1 || ag.Health != hg.Health {
 		t.Errorf("gateway rows %+v / %+v", ag, hg)
 	}
 }
@@ -406,62 +406,8 @@ func memberWorld() []runtime.Object {
 		testutil.HTTPRoute("shop", "via-ls", []objects.ParentRef{ls1Ref}, testutil.AcceptedBy(ls1Ref, testutil.Controller)))
 }
 
-// Rule 5: a hidden member restricts its listener's count and the row's routes;
-// a Gateway counts its own listeners only. Rule 10: AllowAll asks nothing.
-func TestHiddenMemberRestrictsCounts(t *testing.T) {
-	routes := func(srv string, p Page[GatewayListRow], ls Page[ListenerSetRow]) (gw, set *int) {
-		t.Helper()
-		if len(p.Items) != 1 || len(ls.Items) != 1 {
-			t.Fatalf("%s: rows %d / %d", srv, len(p.Items), len(ls.Items))
-		}
-		return p.Items[0].Routes, ls.Items[0].Routes
-	}
-	n := func(p *int) int {
-		if p == nil {
-			return -1
-		}
-		return *p
-	}
-	for _, tc := range []struct {
-		name   string
-		hidden string
-		gw, ls int
-	}{{"all visible", "", 1, 1}, {"gateway member hidden", "cart", -1, 1}, {"listenerset member hidden", "via-ls", 1, -1}} {
-		t.Run(tc.name, func(t *testing.T) {
-			authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != tc.hidden })
-			_, srv, _ := startWith(t, setup{authz: authz}, memberWorld()...)
-			gw, set := routes(tc.name, get[Page[GatewayListRow]](t, srv, listBase+"/gateways?q=edge", 200), get[Page[ListenerSetRow]](t, srv, listBase+"/listenersets", 200))
-			if n(gw) != tc.gw || n(set) != tc.ls {
-				t.Errorf("routes: gateway %d, listenerset %d", n(gw), n(set))
-			}
-			l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]
-			if n(l.ComputedRoutes) != tc.gw || (tc.gw < 0) != (l.Computed.State == "restricted") {
-				t.Errorf("gateway listener %v %+v", l.ComputedRoutes, l.Computed)
-			}
-			x := get[ListenerSetDetail](t, srv, lsDetail+"infra/ls1", 200)
-			if l := x.Listeners[0]; n(l.ComputedRoutes) != tc.ls || (tc.ls < 0) != (l.Computed.State == "restricted") || x.RuleSet != "kgateway-2.4" {
-				t.Errorf("listenerset listener %v %+v", l.ComputedRoutes, l.Computed)
-			}
-		})
-	}
-	t.Run("AllowAll", func(t *testing.T) {
-		a := &countingAuthz{all: true}
-		_, srv, _ := startWith(t, setup{authz: a}, memberWorld()...)
-		_, ref, _ := startWith(t, setup{}, memberWorld()...)
-		for _, p := range []string{underEdge, underEdge + "&listener=http", listBase + "/routes?state=listener-unknown", listBase + "/gateways",
-			listBase + "/listenersets", gwDetail, lsDetail + "infra/ls1", routeDetail + "shop/cart", routeDetail + "shop/via-ls"} {
-			if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
-				t.Errorf("GET %s differs from AllowAll", p)
-			}
-			if n := len(a.take()); n != 0 {
-				t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
-			}
-		}
-	})
-}
-
 // Rule 7: KGWUI-012 on a visible object whose evidence names a hidden one
-// is listed with its detail replaced.
+// is listed with its detail replaced. A count's finding names none (rule 5).
 func TestKGWUI012EvidenceRestricted(t *testing.T) {
 	kgwui012 := func(t *testing.T, srv string, h HealthResponse, on string) FindingDTO {
 		t.Helper()
@@ -479,10 +425,6 @@ func TestKGWUI012EvidenceRestricted(t *testing.T) {
 		authz Authorizer
 		on    string
 	}{
-		// edge's http reports 2; the hidden candidate shop/cart is its only member.
-		{"hidden candidate route", viewAWorld(edgeWith([]objects.Listener{lst("http", 8080, "")}, up("http", 2)),
-			testutil.HTTPRoute("shop", "cart", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller))),
-			AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "cart" }), "infra/edge"},
 		{"hidden selector namespace", selectorWorld(), hideNamespaces, "infra/odd"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -535,29 +477,6 @@ func TestNoteOnUnknownVersion(t *testing.T) {
 	b, err := json.Marshal(cs[0])
 	if err != nil || !bytes.Contains(b, []byte(`"note":"`+unknownNote+`"`)) {
 		t.Errorf("wire %s", b)
-	}
-}
-
-// Rule 4: the note depends only on the ListenerSets it reads. A hidden
-// denied or statusless ListenerSet naming edge is never read, so the note on
-// wide, which narrow on the same port always gives, stays visible.
-func TestIsolationNoteIgnoresUnreadListenerSets(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cs   []metav1.Condition
-	}{
-		{"denied", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowed")}},
-		{"no status", []metav1.Condition{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ls := admitAll(testutil.ListenerSet("infra", "ls1", edgeRef, tc.cs, up("extra", 0)))
-			gw := edgeWith([]objects.Listener{lst("wide", 8081, "*.example.com"), lst("narrow", 8081, "a.example.com")}, up("wide", 0), up("narrow", 0))
-			hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "ls1" })
-			_, srv, _ := startWith(t, setup{authz: hide}, viewAWorld(gw, ls)...)
-			if l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]; l.Name != "wide" || !l.IsolationNote {
-				t.Errorf("wide: isolationNote %v, computed %+v", l.IsolationNote, l.Computed)
-			}
-		})
 	}
 }
 
@@ -616,56 +535,6 @@ func TestUnknownCountHasNoMembers(t *testing.T) {
 	}
 	if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200); p.Total != 0 {
 		t.Errorf("listener=tls lists %v", routeNames(p))
-	}
-}
-
-// Rules 4, 4a and 5: the unknown state comes from the count, so a hidden
-// candidate behind it cannot move a visible route's membership. shop/tcp
-// either names the tls listener's port, making the count unknown, or misses
-// it, leaving the count known; a caller who may not view shop/tcp sees one
-// answer. Route detail is HTTPRoute only; it shares the list's projection. Rule 10: AllowAll asks nothing.
-func TestHiddenCandidateCannotMoveMembership(t *testing.T) {
-	miss := edgeRef
-	miss.Port = 9999
-	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "tcp" })
-	type seen struct {
-		List  []byte
-		Total int
-	}
-	look := func(t *testing.T, tcpRef objects.ParentRef, authz Authorizer) seen {
-		t.Helper()
-		s, objs := unknownCountWorld(tcpRef)
-		s.authz = authz
-		_, srv, _ := startWith(t, s, objs...)
-		row := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/tls")
-		list, err := json.Marshal(row.Parents[0].Computed)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return seen{list, get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200).Total}
-	}
-	if u, k := look(t, edgeRef, nil), look(t, miss, nil); bytes.Equal(u.List, k.List) || u.Total == k.Total {
-		t.Fatalf("visible shop/tcp should move the membership:\n%s\n%s", u.List, k.List)
-	}
-	u, k := look(t, edgeRef, hide), look(t, miss, hide)
-	if !bytes.Equal(u.List, k.List) {
-		t.Errorf("list: hidden shop/tcp moves the membership:\n%s\n%s", u.List, k.List)
-	}
-	if u.Total != k.Total {
-		t.Errorf("listener=tls: hidden shop/tcp moves the total: %d, %d", u.Total, k.Total)
-	}
-	a := &countingAuthz{all: true}
-	s, objs := unknownCountWorld(edgeRef)
-	_, ref, _ := startWith(t, s, objs...)
-	s.authz = a
-	_, srv, _ := startWith(t, s, objs...)
-	for _, p := range []string{underEdge, underEdge + "&listener=tls", gwDetail} {
-		if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
-			t.Errorf("GET %s differs from AllowAll", p)
-		}
-		if n := len(a.take()); n != 0 {
-			t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
-		}
 	}
 }
 
@@ -1070,9 +939,11 @@ func isolationWorld(host string) []runtime.Object {
 	return viewAWorld(edgeWith([]objects.Listener{lst("wide", 8081, "*.example.com")}, up("wide", 0)), ls)
 }
 
-// Rule 4: the isolation note reads its sibling ListenerSets, so a hidden one
-// cannot move a visible listener's note. Rule 10: AllowAll asks nothing.
-func TestIsolationNoteNeedsItsListenerSets(t *testing.T) {
+// Rule 5 (user, 2026-10-26): the isolation note is wide's own fact, so a
+// caller who cannot view ls1 sees it as an unrestricted one does, including
+// how ls1's hostname moves it, as a count includes hidden members. Rule 10:
+// AllowAll asks nothing.
+func TestIsolationNoteIsTheListeners(t *testing.T) {
 	note := func(t *testing.T, s setup, host string) bool {
 		t.Helper()
 		_, srv, _ := startWith(t, s, isolationWorld(host)...)
@@ -1082,12 +953,11 @@ func TestIsolationNoteNeedsItsListenerSets(t *testing.T) {
 		}
 		return l.IsolationNote
 	}
-	if in, out := note(t, setup{}, "a.example.com"), note(t, setup{}, "a.example.org"); !in || out {
-		t.Fatalf("visible ListenerSet: note %v inside, %v outside", in, out)
-	}
 	hide := setup{authz: AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "ls1" })}
-	if in, out := note(t, hide, "a.example.com"), note(t, hide, "a.example.org"); in != out {
-		t.Errorf("hidden ListenerSet moves the note: %v inside, %v outside", in, out)
+	for _, s := range []setup{{}, hide} {
+		if in, out := note(t, s, "a.example.com"), note(t, s, "a.example.org"); !in || out {
+			t.Errorf("hidden %v: note %v inside, %v outside", s.authz != nil, in, out)
+		}
 	}
 	a := &countingAuthz{all: true}
 	_, srv, _ := startWith(t, setup{authz: a}, isolationWorld("a.example.com")...)
@@ -1146,4 +1016,140 @@ func TestMergeComputed(t *testing.T) {
 			t.Errorf("merge(%s, %s) = %+v, want %+v", tc.a.State, tc.b.State, got, tc.want)
 		}
 	}
+}
+
+// otherGateway is the owned Gateway infra/other, so a hidden object can name it instead of edge.
+var otherRef = testutil.GwRef("infra", "other")
+
+func otherGateway() *unstructured.Unstructured {
+	return testutil.GatewayWithListeners("infra", "other", "kgateway", []objects.Listener{lst("web", 8080, "")}, up("web", 0))
+}
+
+// Rule 5 (user, 2026-10-26), Codex R2: a count's facts belong to its visible
+// listener. A visible TCPRoute makes tls setting-unknown; a hidden route h
+// naming edge or another Gateway moves neither the count, the visible
+// TLSRoute's membership nor listener=tls. Rule 10: AllowAll asks nothing.
+func TestHiddenRouteCannotMoveListenerFacts(t *testing.T) {
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "h" })
+	look := func(t *testing.T, hRef objects.ParentRef, authz Authorizer) (count, member, filter []byte) {
+		t.Helper()
+		s, objs := unknownCountWorld(edgeRef)
+		s.authz = authz
+		objs = append(objs, otherGateway(), testutil.HTTPRoute("shop", "h", []objects.ParentRef{hRef}))
+		_, srv, _ := startWith(t, s, objs...)
+		l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]
+		if l.Name != "tls" || l.ComputedRoutes != nil || l.Computed == nil || l.Computed.State != "unknown" || l.Computed.Reason != string(computed.UnknownSetting) {
+			t.Errorf("h on %s: tls count %v %+v", hRef.Name, l.ComputedRoutes, l.Computed)
+		}
+		m := routeByName(t, get[Page[RouteRow]](t, srv, underEdge, 200), "shop/tls").Parents[0].Computed
+		if m == nil || len(m.Listeners) != 1 || m.Listeners[0].Computed.State != "unknown" {
+			t.Errorf("h on %s: tls membership %+v", hRef.Name, m)
+		}
+		if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=tls", 200); p.Total != 0 {
+			t.Errorf("h on %s: listener=tls lists %v", hRef.Name, routeNames(p))
+		}
+		count, err := json.Marshal(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if member, err = json.Marshal(m); err != nil {
+			t.Fatal(err)
+		}
+		return count, member, wire(t, srv, underEdge+"&listener=tls")
+	}
+	for _, authz := range []Authorizer{nil, hide} {
+		c1, m1, f1 := look(t, edgeRef, authz)
+		c2, m2, f2 := look(t, otherRef, authz)
+		if !bytes.Equal(c1, c2) || !bytes.Equal(m1, m2) || !bytes.Equal(f1, f2) {
+			t.Errorf("h moves a visible fact (hidden %v):\ncount %s\n      %s\nmember %s\n       %s", authz != nil, c1, c2, m1, m2)
+		}
+	}
+	a := &countingAuthz{all: true}
+	s, objs := unknownCountWorld(edgeRef)
+	objs = append(objs, otherGateway(), testutil.HTTPRoute("shop", "h", []objects.ParentRef{edgeRef}))
+	_, ref, _ := startWith(t, s, objs...)
+	s.authz = a
+	_, srv, _ := startWith(t, s, objs...)
+	for _, p := range []string{underEdge, underEdge + "&listener=tls", gwDetail} {
+		if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
+			t.Errorf("GET %s differs from AllowAll", p)
+		}
+		if n := len(a.take()); n != 0 {
+			t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
+		}
+	}
+}
+
+// Rule 5 (user, 2026-10-26), Codex R1: the isolation note belongs to its
+// visible listener. wide always has it from narrow on the same port; a hidden
+// accepted ListenerSet ls1 naming edge or another Gateway does not move it.
+func TestHiddenListenerSetCannotMoveIsolationNote(t *testing.T) {
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "ls1" })
+	look := func(t *testing.T, parent objects.ParentRef) []byte {
+		t.Helper()
+		ls := admitAll(testutil.ListenerSet("infra", "ls1", parent, nil, up("extra", 0)))
+		gw := edgeWith([]objects.Listener{lst("wide", 8081, "*.example.com"), lst("narrow", 8081, "a.example.com")}, up("wide", 0), up("narrow", 0))
+		_, srv, _ := startWith(t, setup{authz: hide}, viewAWorld(gw, otherGateway(), ls)...)
+		l := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]
+		if l.Name != "wide" || !l.IsolationNote || l.ComputedRoutes == nil || l.Computed == nil || l.Computed.State != "checked" {
+			t.Errorf("ls1 on %s: wide note %v, routes %v, %+v", parent.Name, l.IsolationNote, l.ComputedRoutes, l.Computed)
+		}
+		b, err := json.Marshal(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	if on, off := look(t, edgeRef), look(t, otherRef); !bytes.Equal(on, off) {
+		t.Errorf("hidden ls1 moves wide:\n%s\n%s", on, off)
+	}
+}
+
+// Rule 5 (user, 2026-10-26): a count with a hidden member shows the full
+// number, which equals attachedRoutes (rule 8), with its check; the hidden
+// route's row stays absent (rule 1). The rows' routes column counts it too.
+func TestHiddenMemberIsCounted(t *testing.T) {
+	for _, hidden := range []string{"", "cart", "via-ls"} {
+		t.Run("hidden "+hidden, func(t *testing.T) {
+			authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != hidden })
+			_, srv, _ := startWith(t, setup{authz: authz}, memberWorld()...)
+			gw := get[GatewayDetail](t, srv, gwDetail, 200).Listeners[0]
+			ls := get[ListenerSetDetail](t, srv, lsDetail+"infra/ls1", 200).Listeners[0]
+			for _, l := range []ListenerDTO{gw, ls} {
+				if l.ComputedRoutes == nil || *l.ComputedRoutes != 1 || l.Status == nil || int32(*l.ComputedRoutes) != l.Status.AttachedRoutes ||
+					l.Computed == nil || l.Computed.State != "checked" || !slices.Equal(l.Computed.Coverage, []string{"count-agrees"}) {
+					t.Errorf("%s: routes %v, status %+v, computed %+v", l.Name, l.ComputedRoutes, l.Status, l.Computed)
+				}
+			}
+			g := get[Page[GatewayListRow]](t, srv, listBase+"/gateways?q=edge", 200).Items[0]
+			s := get[Page[ListenerSetRow]](t, srv, listBase+"/listenersets", 200).Items[0]
+			if g.Routes == nil || *g.Routes != 1 || s.Routes == nil || *s.Routes != 1 {
+				t.Errorf("routes columns %v / %v", g.Routes, s.Routes)
+			}
+			want := []string{"shop/cart"}
+			if hidden == "cart" {
+				want = []string{}
+			}
+			if p := get[Page[RouteRow]](t, srv, underEdge+"&listener=http", 200); !slices.Equal(routeNames(p), want) || p.Total != len(want) {
+				t.Errorf("listener=http: %v total %d", routeNames(p), p.Total)
+			}
+			if p := get[Page[RouteRow]](t, srv, underEdge, 200); hidden == "cart" && slices.Contains(routeNames(p), "shop/cart") {
+				t.Errorf("hidden shop/cart listed: %v", routeNames(p))
+			}
+		})
+	}
+	t.Run("AllowAll", func(t *testing.T) {
+		a := &countingAuthz{all: true}
+		_, srv, _ := startWith(t, setup{authz: a}, memberWorld()...)
+		_, ref, _ := startWith(t, setup{}, memberWorld()...)
+		for _, p := range []string{underEdge, underEdge + "&listener=http", listBase + "/routes?state=listener-unknown", listBase + "/gateways",
+			listBase + "/listenersets", gwDetail, lsDetail + "infra/ls1", routeDetail + "shop/cart", routeDetail + "shop/via-ls"} {
+			if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
+				t.Errorf("GET %s differs from AllowAll", p)
+			}
+			if n := len(a.take()); n != 0 {
+				t.Errorf("GET %s asked the Authorizer about %d refs", p, n)
+			}
+		}
+	})
 }

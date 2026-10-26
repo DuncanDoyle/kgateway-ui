@@ -50,10 +50,14 @@
         },
         "computed": {
           "by": "ui",
+          "coverage": [
+            "count-agrees"
+          ],
           "rule": "listener-count",
           "rules": "kgateway-2.4",
-          "state": "restricted"
+          "state": "checked"
         },
+        "computedRoutes": 6,
         "name": "http",
         "port": 8080,
         "protocol": "HTTP",

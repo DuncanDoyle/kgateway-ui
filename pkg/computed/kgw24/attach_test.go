@@ -358,7 +358,7 @@ func TestAttachExperimental(t *testing.T) {
 	if len(res.Members) != 0 || len(res.Outcomes) != 0 {
 		t.Errorf("false: %+v", res)
 	}
-	if c := count(t, res, g, "tcp"); c.Count != 0 || c.Unknown != "" || slices.Contains(c.Deps, tcp.Ref) {
+	if c := count(t, res, g, "tcp"); c.Count != 0 || c.Unknown != "" {
 		t.Errorf("false count: %+v", c)
 	}
 
@@ -395,12 +395,6 @@ func TestAttachDeps(t *testing.T) {
 		if !sameRefs(m.Deps, want) {
 			t.Errorf("member %s/%s deps %v, want %v", m.Route.Name, m.Listener, m.Deps, want)
 		}
-	}
-	if c := count(t, res, g, "all"); !sameRefs(c.Deps, []objects.Ref{g.Ref, a.Ref, b.Ref}) {
-		t.Errorf("all count deps %v", c.Deps)
-	}
-	if c := count(t, res, g, "sel"); !sameRefs(c.Deps, []objects.Ref{g.Ref, a.Ref, b.Ref, nsRef("shop"), nsRef("web")}) {
-		t.Errorf("sel count deps %v", c.Deps)
 	}
 	if o := outcome(t, res, a, 0); !sameRefs(o.Deps, []objects.Ref{g.Ref, a.Ref, nsRef("shop")}) {
 		t.Errorf("outcome deps %v", o.Deps)
@@ -560,9 +554,6 @@ func TestAttachNoSelectorNoNamespaceDep(t *testing.T) {
 	if o := outcome(t, res, rt, 0); !sameRefs(o.Deps, want) {
 		t.Errorf("outcome deps %v", o.Deps)
 	}
-	if c := count(t, res, g, "all"); !sameRefs(c.Deps, want) {
-		t.Errorf("count deps %v", c.Deps)
-	}
 }
 
 // Results share Deps slices internally, but never across calls or with the input.
@@ -591,11 +582,6 @@ func TestAttachResultsIndependent(t *testing.T) {
 		}
 		for j := range got.Outcomes[i].Listeners {
 			got.Outcomes[i].Listeners[j] = "junk"
-		}
-	}
-	for i := range got.Counts {
-		for j := range got.Counts[i].Deps {
-			got.Counts[i].Deps[j] = junk
 		}
 	}
 	if again := run(in); !reflect.DeepEqual(again, want) {

@@ -502,6 +502,7 @@ describe("types.ts matches the golden v1 wire format", () => {
     };
     walk([
       routesByListenerGolden.body,
+      routesRestrictedGolden.body,
       gatewayDetailRestrictedGolden.body,
       gatewayDetailGolden.body,
       routeDetailGolden.body,

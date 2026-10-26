@@ -2442,7 +2442,8 @@ func TestKGWUI011OnKgateway23ForUnreportedRefForms(t *testing.T) {
 
 // KGWUI-012 through the handlers (2.3): shop/drift attaches to edge, which still
 // reports one route; the harness computes 61 s apart, so the window has held.
-// A caller who cannot view shop/drift gets no detail and the Gateway's own since.
+// A count is its listener's fact, so a caller who cannot view shop/drift gets
+// the same detail (design §7.4 rule 5, user 2026-10-26).
 func TestComputedDisagreementAtTheAPI(t *testing.T) {
 	gw := testutil.GwRef("infra", "edge")
 	drift := testutil.HTTPRoute("shop", "drift", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
@@ -2454,7 +2455,7 @@ func TestComputedDisagreementAtTheAPI(t *testing.T) {
 		restricted bool
 	}{
 		{"all visible", nil, "Listener `http`: computed 2 routes, controller reports 1. Rule set kgateway-2.4.", false},
-		{"dep hidden", hide, restrictedEvidence, true},
+		{"member hidden", hide, "Listener `http`: computed 2 routes, controller reports 1. Rule set kgateway-2.4.", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, srv, _ := startWith(t, setup{authz: tc.authz, disputes: true}, withEdge(world(drift), 1)...)

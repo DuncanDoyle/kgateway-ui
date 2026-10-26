@@ -752,16 +752,16 @@ it("a disagreeing listener shows both numbers and the warning icon with text", a
   expect(within(badge).getByText("Disagrees")).toBeInTheDocument();
 });
 
-it("unknown and restricted listeners show no number", async () => {
+it("unknown listeners show no number; a hidden Namespace hides no count", async () => {
   serve(api({ gateway: { ...(gatewayRestrictedGolden.body as GatewayDetail), collectedAt: now() } }));
   mount(GW_PATH);
   const listeners = await screen.findByRole("table", { name: "Listeners" });
   const cell = (name: string) => within(rowOf(listeners, name)).getByTestId("computed-cell");
-  // tcp: unknown with its reason; http (a Selector over a hidden Namespace): restricted. Neither has a number.
+  // tcp: unknown with its reason, no number. http, a Selector over a hidden Namespace, keeps its count.
   expect(cell("tcp")).toHaveTextContent("Unknown");
   expect(cell("tcp")).not.toHaveTextContent(/\d/);
-  expect(cell("http")).toHaveTextContent("Hidden");
-  expect(cell("http")).not.toHaveTextContent(/\d/);
+  expect(cell("http")).toHaveTextContent("6");
+  expect(cell("http")).not.toHaveTextContent("Hidden");
   // The expanded row never reads an unknown count as "None".
   await userEvent.click(within(rowOf(listeners, "tcp")).getByRole("button", { name: /Show conditions/ }));
   const details = screen.getByTestId("listener-tcp-details");
@@ -866,14 +866,6 @@ it("an unknown-count listener shows the unknown state and its reason, never an e
   );
   // No member query for a listener whose count is unknown.
   expect(listCalls("routes").some((u) => u.searchParams.get("listener") === "tcp")).toBe(false);
-});
-
-it("a restricted listener shows its state, not an empty table", async () => {
-  serve(viewA({ gateway: { ...(gatewayRestrictedGolden.body as GatewayDetail), collectedAt: now() } }));
-  mount(`${GW_PATH}?listener=http`);
-  const box = await screen.findByTestId("listener-routes-unknown");
-  expect(box).toHaveTextContent("Hidden: depends on objects you cannot view");
-  expect(screen.queryByRole("table", { name: "Computed routes on listener http" })).toBeNull();
 });
 
 it("an older server without the listener filter gets no selector and no listener param", async () => {

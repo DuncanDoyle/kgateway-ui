@@ -219,7 +219,8 @@ func (c *checker) counts(out []CheckResult) []CheckResult {
 func (c *checker) count(lc *ListenerCount, res *Resource, routes, nsLabels uint64) CheckResult {
 	r := lc.Resource
 	out := c.result(KindListenerCount, Subject(r.Group, r.Kind, r.Namespace, r.Name, lc.Listener), r)
-	out.Listener, out.Deps = lc.Listener, lc.Deps
+	// A count is a fact of its listener, shown to whoever sees it (design §7.4 rule 5): no Deps.
+	out.Listener = lc.Listener
 	if lc.Unknown != "" || res == nil {
 		out.Class = ClassUnknown
 		return out
