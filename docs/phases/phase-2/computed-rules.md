@@ -173,12 +173,12 @@ An empty result is an unresolved reference. No ReferenceGrant is involved. Out-o
 
 ### 5.3 Permission
 
-`ChildRouteCanAttachToParentRef` (`utils/delegation/delegation.go` V4:20-34, V3:20-47):
+`ChildRouteCanAttachToParentRef` (`pkg/kgateway/utils/delegation/delegation.go` V4:20-34, V3:20-46):
 - a child with an empty `parentRefs` list may be selected by any parent;
 - otherwise it needs a parentRef with **explicit** `group: gateway.networking.k8s.io` and `kind: HTTPRoute` (nil does not match), the parent's name, and a namespace equal to the parent's (nil means the child's own);
 - sectionName and port are ignored.
 
-A forbidden child is skipped silently, with no status, before the cycle check (`query/route.go` V4:266-269, V3:240-242).
+A forbidden child is skipped silently, with no status, before the cycle check (`pkg/kgateway/query/route.go` V4:266-269, V3:240-242).
 
 ### 5.4 Algorithm
 

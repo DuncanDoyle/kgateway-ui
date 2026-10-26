@@ -70,6 +70,7 @@ func (s *selector) fetch(ref objects.DelegationRef) (children, possible []object
 		if !s.known {
 			return nil, s.refs(s.byLabel[ref.Label]), "", computed.UnknownSetting
 		}
+		// An explicit empty namespace (CRD-forbidden) selects nothing here; upstream selects everywhere.
 		if ref.Namespace == s.wildcard {
 			idx = s.byLabel[ref.Label]
 		} else {

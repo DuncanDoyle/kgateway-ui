@@ -2,6 +2,7 @@ package kgw23
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
@@ -128,6 +129,11 @@ func TestPermits(t *testing.T) {
 		{"another parent", []objects.WrittenRef{{Group: gw, Kind: hr, Name: "other"}}, false, computed.AllowsOther},
 		{"another ns", []objects.WrittenRef{{Group: gw, Kind: hr, Namespace: "orders", Name: "api"}}, false, computed.AllowsOther},
 		{"gateway parent only", []objects.WrittenRef{{Name: "edge", Namespace: "infra"}}, false, computed.AllowsOther},
+		// Group is compared case-sensitively, as upstream does.
+		{"group other case", []objects.WrittenRef{{Group: "Gateway.networking.k8s.io", Kind: hr, Name: "api"}}, false, computed.AllowsOther},
+		// A written "" decodes like an omitted field; neither matches upstream.
+		{"empty-string group", []objects.WrittenRef{{Group: "", Kind: hr, Name: "api"}}, false, computed.AllowsOther},
+		{"empty-string kind", []objects.WrittenRef{{Group: gw, Kind: "", Name: "api"}}, false, computed.AllowsOther},
 		{"second ref matches", []objects.WrittenRef{{Group: gw, Kind: hr, Name: "other"}, {Group: gw, Kind: hr, Name: "api"}}, true, computed.AllowsThis},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -140,5 +146,15 @@ func TestPermits(t *testing.T) {
 	// The child's own namespace is the default, not the parent's.
 	if ok, _ := permits(&objects.HTTPRouteView{WrittenRefs: []objects.WrittenRef{{Group: gw, Kind: hr, Name: "api"}}}, "orders", parent); ok {
 		t.Fatal("child in orders with no ref namespace permitted shop/api")
+	}
+}
+
+// Unwatched routes are never candidates, not even as uncertain points.
+func TestPossibleExcludesUnwatched(t *testing.T) {
+	unwatched := map[objects.Ref]bool{routeRef("blog", "posts"): true} // carries label v, outside the scope
+	s := newSelector(selectWorld(), unwatched, install.Setting{Reason: "valueFrom"})
+	_, possible, _, unknown := s.fetch(objects.DelegationRef{Mode: objects.DelegationLabel, Namespace: "all", Label: "v"})
+	if unknown != computed.UnknownSetting || slices.Contains(possible, routeRef("blog", "posts")) || len(possible) != 4 {
+		t.Fatalf("possible %v, unknown %q", possible, unknown)
 	}
 }
