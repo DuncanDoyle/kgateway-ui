@@ -35,7 +35,11 @@ func (h *handler) view(r *http.Request) *view {
 
 // seenPool recycles the memos of route list requests, which ask about
 // every row: a memo grown afresh per request was most of their garbage.
-var seenPool = sync.Pool{New: func() any { return map[objects.Ref]bool{} }}
+// Tests swap it to control reuse.
+var seenPool interface {
+	Get() any
+	Put(any)
+} = &sync.Pool{New: func() any { return map[objects.Ref]bool{} }}
 
 // borrow swaps v's memo for one from seenPool; release returns it.
 func (v *view) borrow() {
