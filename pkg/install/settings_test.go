@@ -111,3 +111,35 @@ func TestNamespaceLabels(t *testing.T) {
 		t.Error("failed access must report ok=false")
 	}
 }
+
+func TestReadWildcard(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     []corev1.EnvVar
+		envFrom bool
+		want    Setting // Reason compared with strings.Contains
+	}{
+		{"absent", nil, false, Setting{Value: "all", Known: true}},
+		{"empty means all", []corev1.EnvVar{testutil.Env(WildcardEnv, "")}, false, Setting{Value: "all", Known: true}},
+		{"namespace", []corev1.EnvVar{testutil.Env(WildcardEnv, "team-a")}, false, Setting{Value: "team-a", Known: true}},
+		{"last duplicate wins", []corev1.EnvVar{testutil.Env(WildcardEnv, "team-a"), testutil.Env(WildcardEnv, "team-b")}, false, Setting{Value: "team-b", Known: true}},
+		{"valueFrom", []corev1.EnvVar{{Name: WildcardEnv, ValueFrom: &corev1.EnvVarSource{}}}, false, Setting{Reason: "valueFrom"}},
+		{"envFrom without entry", nil, true, Setting{Reason: "envFrom"}},
+		{"entry beats envFrom", []corev1.EnvVar{testutil.Env(WildcardEnv, "team-a")}, true, Setting{Value: "team-a", Known: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ReadSettings(settingsInstall(tc.env, tc.envFrom, true)).WildcardNamespace
+			if got.Value != tc.want.Value || got.Known != tc.want.Known || !strings.Contains(got.Reason, tc.want.Reason) {
+				t.Fatalf("want %+v got %+v", tc.want, got)
+			}
+			if got.Source != "pod pod-a" {
+				t.Errorf("source: %q", got.Source)
+			}
+		})
+	}
+	// No workload: unknown, like the experimental setting.
+	if s := ReadSettings(Install{Container: "kgateway"}).WildcardNamespace; s.Known || s.Reason == "" {
+		t.Errorf("no workload must be unknown: %+v", s)
+	}
+}

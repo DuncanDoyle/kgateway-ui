@@ -31,36 +31,33 @@ func (s Setting) Bool() (v, known bool) {
 	return b, true
 }
 
+// WildcardEnv is the controller env var that names the namespace whose delegation
+// label selects routes in every namespace.
+const WildcardEnv = "DELEGATION_WILDCARD_NAMESPACE"
+
+// WildcardAll is the wildcard namespace's default: no namespace is special.
+const WildcardAll = "all"
+
 // Settings are the controller settings the UI reads.
 type Settings struct {
 	Experimental Setting
+	// WildcardNamespace is the delegation wildcard namespace; "all" when absent or empty.
+	WildcardNamespace Setting
 }
 
 // ReadSettings reads the controller settings from the same source as Scope (D-015).
-// An absent experimental entry means "true", the controller's default.
+// An absent experimental entry means "true", the controller's default; an
+// absent or empty wildcard entry means "all".
 func ReadSettings(inst Install) Settings {
 	c, source, errMsg := controllerContainer(inst)
 	if c == nil {
-		return Settings{Experimental: Setting{Reason: errMsg, Source: source}}
+		s := Setting{Reason: errMsg, Source: source}
+		return Settings{Experimental: s, WildcardNamespace: s}
 	}
-	last := -1
-	for i := range c.Env { // duplicate entries: the last one wins, as in Kubernetes
-		if c.Env[i].Name == ExperimentalEnv {
-			last = i
-		}
+	return Settings{
+		Experimental:      readEnv(c, source, ExperimentalEnv, "true"),
+		WildcardNamespace: readEnv(c, source, WildcardEnv, WildcardAll),
 	}
-	s := Setting{Source: source}
-	switch {
-	case last < 0 && len(c.EnvFrom) > 0:
-		s.Reason = "container uses envFrom, which may set " + ExperimentalEnv + "; the UI cannot resolve it"
-	case last < 0:
-		s.Value, s.Known = "true", true
-	case c.Env[last].ValueFrom != nil:
-		s.Reason = ExperimentalEnv + " uses valueFrom, which the UI cannot resolve"
-	default:
-		s.Value, s.Known = c.Env[last].Value, true
-	}
-	return Settings{Experimental: s}
 }
 
 // NamespaceLabels returns the labels of every cached Namespace by name; ok is

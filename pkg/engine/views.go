@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -82,4 +84,119 @@ func acceptance(u *unstructured.Unstructured, v *objects.ListenerSetView) comput
 		return computed.Denied
 	}
 	return computed.Accepted
+}
+
+// delegationInput is views B and C's input for one install (rules §5.1, §5.6):
+// every in-scope HTTPRoute, those outside the scope, and the roots taken from
+// view A a. Views come from dec, so they are shared and read-only.
+func delegationInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, dec objects.Decoder, a computed.AttachmentResult) computed.DelegationInput {
+	in := computed.DelegationInput{Wildcard: res.Settings.WildcardNamespace, ControllerNames: res.ControllerNames,
+		Bounds: computed.DefaultBounds, ScopeUnknown: res.Scope.Mode == install.ScopeUnknown, Unwatched: map[objects.Ref]bool{}}
+	nss := make(map[string]int, len(snap.Namespaces)) // name → index in snap.Namespaces
+	for i, n := range snap.Namespaces {
+		nss[n.Name] = i
+	}
+	inScope := func(ns string) bool {
+		if i, ok := nss[ns]; ok {
+			return res.Scope.Contains(ns, snap.Namespaces[i])
+		}
+		return res.Scope.Contains(ns, nil)
+	}
+	own := map[objects.Ref]bool{} // owned HTTPRoute → has a Gateway or ListenerSet parent
+	if owned != nil {
+		for _, r := range owned.Routes {
+			if r.Kind.Group == objects.GatewayAPIGroup && r.Kind.Kind == "HTTPRoute" {
+				own[objects.RefOf(r.Obj)] = len(r.Parents) > 0
+			}
+		}
+	}
+	objs := map[objects.Ref]*unstructured.Unstructured{}
+	for gvr, us := range snap.Objects {
+		if gvr.Group != objects.GatewayAPIGroup || gvr.Resource != "httproutes" {
+			continue
+		}
+		for _, u := range us {
+			ref := objects.RefOf(u)
+			if !inScope(u.GetNamespace()) {
+				in.Unwatched[ref] = true
+				continue
+			}
+			topLevel, isOwned := own[ref]
+			objs[ref] = u
+			in.Routes = append(in.Routes, computed.DelegRoute{Ref: ref, Generation: u.GetGeneration(), View: dec.HTTPRoute(u),
+				Owned: isOwned, TopLevel: topLevel})
+		}
+	}
+	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
+	in.Roots = roots(res, in.Routes, objs, a)
+	return in
+}
+
+// roots takes the roots from view A a (rules §5.1, §5.6). A route is a root
+// when an outcome is accepted; with every outcome unknown, a current
+// Accepted=True status entry makes it a status root, else an unknown one.
+func roots(res install.Resolved, routes []computed.DelegRoute, objs map[objects.Ref]*unstructured.Unstructured, a computed.AttachmentResult) []computed.Root {
+	byRoute := map[objects.Ref][]computed.RefOutcome{}
+	for _, o := range a.Outcomes {
+		byRoute[o.Route] = append(byRoute[o.Route], o)
+	}
+	var out []computed.Root
+	for _, r := range routes {
+		outs := byRoute[r.Ref]
+		if !r.TopLevel || len(outs) == 0 {
+			continue
+		}
+		var deps []objects.Ref
+		addDeps := func(ds ...objects.Ref) {
+			for _, d := range ds {
+				if !slices.Contains(deps, d) {
+					deps = append(deps, d)
+				}
+			}
+		}
+		accepted, allUnknown := false, true
+		for _, o := range outs {
+			if o.Unknown == "" {
+				allUnknown = false
+			}
+			if o.Outcome == computed.OutcomeAccepted && o.Unknown == "" {
+				accepted = true
+				addDeps(o.Deps...)
+			}
+		}
+		switch {
+		case accepted:
+			// The union over every outcome, not only the accepted ones (rules §5.6).
+			for _, o := range outs {
+				addDeps(o.Deps...)
+			}
+			out = append(out, computed.Root{Route: r.Ref, Deps: deps})
+		case !allUnknown:
+		default:
+			root := computed.Root{Route: r.Ref, Unknown: true, Deps: []objects.Ref{r.Ref}}
+			if target, ok := statusTarget(res, r, objs[r.Ref]); ok {
+				root = computed.Root{Route: r.Ref, FromStatus: true, Deps: []objects.Ref{r.Ref, target}}
+			}
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+// statusTarget is the target of r's first current Accepted=True status entry
+// from the install's controllers that names one of its parents.
+func statusTarget(res install.Resolved, r computed.DelegRoute, u *unstructured.Unstructured) (objects.Ref, bool) {
+	for _, e := range r.View.Parents {
+		if !slices.Contains(res.ControllerNames, e.ControllerName) {
+			continue
+		}
+		c := objects.FindCondition(e.Conditions, "Accepted")
+		if c == nil || c.Status != metav1.ConditionTrue || objects.IsStale(u, *c) {
+			continue
+		}
+		if slices.ContainsFunc(r.View.ParentRefs, func(p objects.ParentRef) bool { return p.Ref() == e.ParentRef.Ref() }) {
+			return e.ParentRef.Ref(), true
+		}
+	}
+	return objects.Ref{}, false
 }

@@ -124,6 +124,31 @@ func (NamespaceSelectorScope) Scope(inst Install) Scope {
 	return sc
 }
 
+// readEnv reads env var name from c; absent means def.
+func readEnv(c *corev1.Container, source, name, def string) Setting {
+	last := -1
+	for i := range c.Env { // duplicate entries: the last one wins, as in Kubernetes
+		if c.Env[i].Name == name {
+			last = i
+		}
+	}
+	s := Setting{Source: source}
+	switch {
+	case last < 0 && len(c.EnvFrom) > 0:
+		s.Reason = "container uses envFrom, which may set " + name + "; the UI cannot resolve it"
+	case last < 0:
+		s.Value, s.Known = def, true
+	case c.Env[last].ValueFrom != nil:
+		s.Reason = name + " uses valueFrom, which the UI cannot resolve"
+	default:
+		s.Value, s.Known = c.Env[last].Value, true
+	}
+	if name == WildcardEnv && s.Known && s.Value == "" {
+		s.Value = WildcardAll
+	}
+	return s
+}
+
 // controllerContainer finds the controller container in the first of a Ready
 // Pod, any Pod, or the Deployment template. On failure c is nil and errMsg says why.
 func controllerContainer(inst Install) (c *corev1.Container, source, errMsg string) {
