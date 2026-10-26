@@ -119,7 +119,7 @@ func addresses(u *unstructured.Unstructured, path ...string) []string {
 
 // DecodeGateway decodes a Gateway. It never fails.
 func DecodeGateway(u *unstructured.Unstructured) *GatewayView {
-	rv := view(u)
+	rv := view(u, vConditions|vListeners)
 	v := &GatewayView{
 		Class:           GatewayClassName(u),
 		Listeners:       listeners(u),
@@ -140,6 +140,6 @@ func DecodeGateway(u *unstructured.Unstructured) *GatewayView {
 
 // DecodeListenerSet decodes a ListenerSet. It never fails.
 func DecodeListenerSet(u *unstructured.Unstructured) *ListenerSetView {
-	rv := view(u)
+	rv := view(u, vConditions|vListeners)
 	return &ListenerSetView{Parent: ListenerSetParent(u), Listeners: listeners(u), Conditions: rv.Status.Conditions, ListenerStatus: listenerStatus(rv)}
 }

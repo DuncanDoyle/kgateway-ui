@@ -117,7 +117,7 @@ type BackendTarget struct {
 
 // DecodeHTTPRoute decodes an HTTPRoute. It never fails.
 func DecodeHTTPRoute(u *unstructured.Unstructured) *HTTPRouteView {
-	rv, ns := view(u), u.GetNamespace()
+	rv, ns := view(u, vParentRefs|vParents), u.GetNamespace()
 	v := &HTTPRouteView{
 		Hostnames:   stringList(field(u, "spec", "hostnames")),
 		ParentRefs:  parentRefs(rv, ns),

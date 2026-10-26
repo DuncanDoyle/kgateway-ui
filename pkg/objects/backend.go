@@ -42,7 +42,7 @@ type RouteView struct {
 
 // DecodeRoute decodes the shared fields of any route kind in one pass. It never fails.
 func DecodeRoute(u *unstructured.Unstructured) *RouteView {
-	rv, ns := view(u), u.GetNamespace()
+	rv, ns := view(u, vParentRefs|vParents), u.GetNamespace()
 	return &RouteView{Hostnames: stringList(field(u, "spec", "hostnames")), ParentRefs: parentRefs(rv, ns),
 		WrittenRefs: writtenRefs(rv), Parents: routeParents(rv, ns), Targets: RouteBackendTargets(u)}
 }
