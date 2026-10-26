@@ -131,87 +131,10 @@ func delegationInput(res install.Resolved, owned *install.Owned, snap *cache.Sna
 		}
 	}
 	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
-	in.Roots = roots(res, in.Routes, objs, own, a)
+	in.Roots = computed.Roots(in.Routes, a, func(r computed.DelegRoute) (objects.Ref, computed.ReportKey, bool) {
+		return statusTarget(res, r, objs[r.Ref], own[r.Ref])
+	})
 	return in
-}
-
-// roots takes the roots from view A a (rules §5.1, §5.6). A route is a root
-// when an outcome is accepted. Otherwise, with every outcome unknown, a
-// current Accepted=True entry for one of its Gateway or ListenerSet parents
-// makes it a status root. Any other route with an unknown outcome is an
-// unknown root; one with only known rejections is not a root (rules §5.1, §8.5).
-func roots(res install.Resolved, routes []computed.DelegRoute, objs map[objects.Ref]*unstructured.Unstructured, parents map[objects.Ref][]objects.ParentRef, a computed.AttachmentResult) []computed.Root {
-	byRoute := map[objects.Ref][]computed.RefOutcome{}
-	for _, o := range a.Outcomes {
-		byRoute[o.Route] = append(byRoute[o.Route], o)
-	}
-	var out []computed.Root
-	for _, r := range routes {
-		outs := byRoute[r.Ref]
-		if !r.TopLevel || len(outs) == 0 {
-			continue
-		}
-		var deps []objects.Ref
-		addDeps := func(ds ...objects.Ref) {
-			for _, d := range ds {
-				if !slices.Contains(deps, d) {
-					deps = append(deps, d)
-				}
-			}
-		}
-		accepted, allUnknown, anyUnknown := false, true, false
-		for _, o := range outs {
-			if o.Unknown == "" {
-				allUnknown = false
-			} else {
-				anyUnknown = true
-			}
-			if o.Outcome == computed.OutcomeAccepted && o.Unknown == "" {
-				accepted = true
-				addDeps(o.Deps...)
-			}
-		}
-		switch {
-		case accepted:
-			// The union over every outcome, not only the accepted ones (rules §5.6).
-			for _, o := range outs {
-				addDeps(o.Deps...)
-			}
-			keys := refKeys(r.View, outs, func(o computed.RefOutcome) bool { return o.Outcome == computed.OutcomeAccepted && o.Unknown == "" }, nil)
-			out = append(out, computed.Root{Route: r.Ref, Deps: deps, Keys: keys,
-				UncertainKeys: refKeys(r.View, outs, func(o computed.RefOutcome) bool { return o.Unknown != "" }, keys)})
-		case !anyUnknown:
-		default:
-			root := computed.Root{Route: r.Ref, Unknown: true, Deps: []objects.Ref{r.Ref}}
-			if target, key, ok := statusTarget(res, r, objs[r.Ref], parents[r.Ref]); allUnknown && ok {
-				keys := []computed.ReportKey{key}
-				root = computed.Root{Route: r.Ref, FromStatus: true, Deps: []objects.Ref{r.Ref, target}, Keys: keys,
-					UncertainKeys: refKeys(r.View, outs, func(o computed.RefOutcome) bool { return true }, keys)}
-			}
-			out = append(out, root)
-		}
-	}
-	return out
-}
-
-// refKeys are the report keys, as written, of the parentRefs whose outcomes
-// pass keep, in spec order, without repeats and without those in skip.
-// Rejected parentRefs and other controllers' Gateways (no outcome) get none.
-func refKeys(v *objects.HTTPRouteView, outs []computed.RefOutcome, keep func(computed.RefOutcome) bool, skip []computed.ReportKey) []computed.ReportKey {
-	var idx []int
-	for _, o := range outs {
-		if keep(o) && o.ParentRef < len(v.WrittenRefs) {
-			idx = append(idx, o.ParentRef)
-		}
-	}
-	slices.Sort(idx)
-	var out []computed.ReportKey
-	for _, i := range idx {
-		if k := computed.KeyOf(v.WrittenRefs[i]); !slices.Contains(out, k) && !slices.Contains(skip, k) {
-			out = append(out, k)
-		}
-	}
-	return out
 }
 
 // statusTarget is the target and report key of r's first current

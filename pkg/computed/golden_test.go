@@ -313,7 +313,7 @@ func scope(c testutil.RuleCase) install.Scope {
 
 // delegationInput builds views B and C's input from the case as the engine
 // does (pkg/engine/views.go): in-scope HTTPRoutes, ownership from Gateway and
-// ListenerSet parents then reported edges, and roots from view A.
+// ListenerSet parents then reported edges, and computed.Roots from view A.
 func delegationInput(t *testing.T, c testutil.RuleCase, ain computed.AttachmentInput, att computed.AttachmentResult) computed.DelegationInput {
 	t.Helper()
 	sc := scope(c)
@@ -349,7 +349,8 @@ func delegationInput(t *testing.T, c testutil.RuleCase, ain computed.AttachmentI
 		in.Routes = append(in.Routes, computed.DelegRoute{Ref: ref, Generation: u.GetGeneration(), View: v, Owned: top, TopLevel: top})
 	}
 	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
-	// Children are owned over reported edges from owned routes (pkg/install/delegation.go).
+	// Children are owned over reported edges from owned routes, as pkg/install's
+	// delegate does (pkg/install/delegation.go); it works on an Assignment, so it is mirrored.
 	for changed := true; changed; {
 		changed = false
 		for i := range in.Routes {
@@ -365,75 +366,25 @@ func delegationInput(t *testing.T, c testutil.RuleCase, ain computed.AttachmentI
 			}
 		}
 	}
-	in.Roots = roots(in.Routes, objs, parents, att)
+	in.Roots = computed.Roots(in.Routes, att, statusTarget(objs, parents))
 	return in
 }
 
-// roots are the engine's roots (pkg/engine/views.go roots): accepted on some
-// parentRef, else a status root when every outcome is unknown and a current
-// Accepted=True entry names a case parent, else unknown when any outcome is.
-func roots(routes []computed.DelegRoute, objs map[objects.Ref]*unstructured.Unstructured, parents map[objects.Ref]bool, att computed.AttachmentResult) []computed.Root {
-	byRoute := map[objects.Ref][]computed.RefOutcome{}
-	for _, o := range att.Outcomes {
-		byRoute[o.Route] = append(byRoute[o.Route], o)
+// statusTarget is the case's computed.StatusTarget, as the engine's
+// (pkg/engine/views.go statusTarget): the first current Accepted=True entry of
+// testutil.Controller for one of the case's Gateways or ListenerSets.
+func statusTarget(objs map[objects.Ref]*unstructured.Unstructured, parents map[objects.Ref]bool) computed.StatusTarget {
+	return func(r computed.DelegRoute) (objects.Ref, computed.ReportKey, bool) {
+		for _, e := range r.View.Parents {
+			cond := objects.FindCondition(e.Conditions, "Accepted")
+			if e.ControllerName != testutil.Controller || !parents[e.ParentRef.Ref()] ||
+				cond == nil || cond.Status != "True" || objects.IsStale(objs[r.Ref], *cond) {
+				continue
+			}
+			return e.ParentRef.Ref(), computed.KeyOf(e.Written), true
+		}
+		return objects.Ref{}, computed.ReportKey{}, false
 	}
-	keys := func(v *objects.HTTPRouteView, outs []computed.RefOutcome, keep func(computed.RefOutcome) bool, skip []computed.ReportKey) []computed.ReportKey {
-		var idx []int
-		for _, o := range outs {
-			if keep(o) {
-				idx = append(idx, o.ParentRef)
-			}
-		}
-		slices.Sort(idx)
-		var out []computed.ReportKey
-		for _, i := range idx {
-			if k := computed.KeyOf(v.WrittenRefs[i]); !slices.Contains(out, k) && !slices.Contains(skip, k) {
-				out = append(out, k)
-			}
-		}
-		return out
-	}
-	accepted := func(o computed.RefOutcome) bool { return o.Outcome == computed.OutcomeAccepted && o.Unknown == "" }
-	var out []computed.Root
-	for _, r := range routes {
-		outs := byRoute[r.Ref]
-		if !r.TopLevel || len(outs) == 0 {
-			continue
-		}
-		var deps []objects.Ref
-		anyAccepted, allUnknown, anyUnknown := false, true, false
-		for _, o := range outs {
-			anyAccepted = anyAccepted || accepted(o)
-			allUnknown = allUnknown && o.Unknown != ""
-			anyUnknown = anyUnknown || o.Unknown != ""
-			for _, d := range o.Deps {
-				if !slices.Contains(deps, d) {
-					deps = append(deps, d)
-				}
-			}
-		}
-		switch {
-		case anyAccepted:
-			ks := keys(r.View, outs, accepted, nil)
-			out = append(out, computed.Root{Route: r.Ref, Deps: deps, Keys: ks,
-				UncertainKeys: keys(r.View, outs, func(o computed.RefOutcome) bool { return o.Unknown != "" }, ks)})
-		case anyUnknown:
-			root := computed.Root{Route: r.Ref, Unknown: true, Deps: []objects.Ref{r.Ref}}
-			for _, e := range r.View.Parents {
-				cond := objects.FindCondition(e.Conditions, "Accepted")
-				if !allUnknown || e.ControllerName != testutil.Controller || !parents[e.ParentRef.Ref()] ||
-					cond == nil || cond.Status != "True" || objects.IsStale(objs[r.Ref], *cond) {
-					continue
-				}
-				ks := []computed.ReportKey{computed.KeyOf(e.Written)}
-				root = computed.Root{Route: r.Ref, FromStatus: true, Deps: []objects.Ref{r.Ref, e.ParentRef.Ref()}, Keys: ks,
-					UncertainKeys: keys(r.View, outs, func(computed.RefOutcome) bool { return true }, ks)}
-				break
-			}
-			out = append(out, root)
-		}
-	}
-	return out
 }
 
 // bounds is DefaultBounds with the case's overrides, by field name.
