@@ -143,7 +143,7 @@ func heldRoutes(o *install.Owned) map[objects.Ref]*unstructured.Unstructured {
 // trigger findings start at declared. A computed finding on the (route,
 // parent) of a status one is merged into it: the computed reason is
 // appended, the higher severity and the computed window start kept, and the
-// evidence united (PF13). The caller has already read the status
+// evidence united without routes (PF13, D-024). The caller has already read the status
 // severity for its grace.
 func mergeTriggers(fs []Finding, declared int, cs []Finding) []Finding {
 	for _, c := range cs {
@@ -163,9 +163,11 @@ func mergeTriggers(fs []Finding, declared int, cs []Finding) []Finding {
 		if rank(c.Severity) < rank(f.Severity) {
 			f.Severity = c.Severity
 		}
-		ev := slices.Clone(f.Evidence)
-		for _, r := range c.Evidence {
-			if !slices.Contains(ev, r) {
+		// The computed trigger puts the parent on the route's delegation paths:
+		// it is an ancestor, so the evidence keeps no route (D-024, rule 7).
+		ev := make([]objects.Ref, 0, len(f.Evidence)+len(c.Evidence))
+		for _, r := range slices.Concat(f.Evidence, c.Evidence) {
+			if (r.Group != objects.GatewayAPIGroup || r.Kind != "HTTPRoute") && !slices.Contains(ev, r) {
 				ev = append(ev, r)
 			}
 		}

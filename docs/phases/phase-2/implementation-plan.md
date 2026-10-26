@@ -2140,6 +2140,7 @@ it("a selected route's candidate banner names its parent", ...);
 **Files:** Modify `web/packages/shell/src/copy/explorer.ts`, `pkg/health/messages.go`, `pkg/api/explain.go`, the components of Task 66, `pkg/computed/check.go` (check notes), the goldens the copy touches; Create `docs/phases/phase-2/phase-2.4-wording.md` (PF9).
 
 - [ ] **Step 1: List every 2.4 string** with its draft: the eight outcomes and their reasons, each fit clause, the three remaining unknown reasons, "Some paths not computed", "Dropped on the paths computed; other paths not computed", "Not all paths computed", "Status cannot confirm this path", "Selects no routes" and "Not watched by the controller" (rendered in `explain.go` from the unresolved codes), allows labels, mode labels, truncation notes, the `dropped` flag label, KGWUI-011 computed and orphan details, the "selected" banner reason.
+- [ ] **Step 1b: KGWUI-012 detail:** a `child-entry` or `parent-resolvedrefs` detail quotes the ancestor's delegated match next to its name (design §7.4 rule 7; carried from Task 64).
 - [ ] **Step 2: Pick per string** as in Task 31; record the choices in `phase-2.4-wording.md`.
 - [ ] **Step 3: Apply;** update quoting tests and goldens.
 - [ ] **Step 4: Run** `go test ./pkg/... && cd web && npm test` → PASS.

@@ -1,10 +1,12 @@
 package api
 
 import (
+	"cmp"
 	"fmt"
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -295,7 +297,7 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 	for _, rule := range v.Rules {
 		out.Rules = append(out.Rules, d.rule(ref, rule))
 	}
-	out.Effective, out.EffectiveTruncated = d.effective(ref)
+	out.Effective, out.EffectiveTruncated = d.effective(ref, v.InheritParentMatcher)
 	out.Ancestors, out.AncestorsTruncated = d.ancestors(ref)
 	writeJSON(w, out)
 }
@@ -572,12 +574,12 @@ func (d *detail) refCounts(dto *DelegationRefDTO, k explore.RefKey) {
 // effective is view C of route per parent edge, and whether edges were cut
 // (rules §5.7, §6). A hidden parent is named with link none (D-024). A
 // restricted edge's hidden contexts are one trailing {restricted: true}, as
-// on a delegation row (design §7.4 rule 4).
-func (d *detail) effective(route objects.Ref) ([]EffectiveDTO, bool) {
-	e, ok := d.ix.Effective[route]
-	if !ok || len(e.Edges) == 0 {
-		return nil, false
-	}
+// on a delegation row (design §7.4 rule 4). A parent no root reached has no
+// edge; when whether one could reach it is hidden, the caller gets the same
+// restricted edge as a reached one would give. inherit is the route's
+// inherit-parent-matcher annotation.
+func (d *detail) effective(route objects.Ref, inherit bool) ([]EffectiveDTO, bool) {
+	e := d.ix.Effective[route]
 	out := make([]EffectiveDTO, 0, len(e.Edges))
 	for j := range e.Edges {
 		ed := &e.Edges[j]
@@ -600,7 +602,41 @@ func (d *detail) effective(route objects.Ref) ([]EffectiveDTO, bool) {
 		}
 		out = append(out, dto)
 	}
-	return out, e.Truncated
+	truncated := e.Truncated
+	if n := len(out); d.unreachedEdges(route, inherit, &out) && len(out) > n {
+		// Every parent is an HTTPRoute: edges sort by (namespace, name), as view C's do.
+		slices.SortStableFunc(out, func(a, b EffectiveDTO) int {
+			return cmp.Or(strings.Compare(a.Parent.Namespace, b.Parent.Namespace), strings.Compare(a.Parent.Name, b.Parent.Name))
+		})
+		if limit := computed.DefaultBounds.EffectiveEdges; len(out) > limit {
+			out, truncated = out[:limit], true
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, truncated
+}
+
+// unreachedEdges appends a restricted edge to out for each parent of route
+// whose rows no context reached and whose root eligibility the caller may not
+// view; it reports whether route has such rows at all.
+func (d *detail) unreachedEdges(route objects.Ref, inherit bool, out *[]EffectiveDTO) bool {
+	ids := d.ix.Unreached[route]
+	mode := computed.ModeDefault
+	if inherit {
+		mode = computed.ModeInherit
+	}
+	for _, i := range ids {
+		r := &d.ix.DelegRows[i]
+		p := r.Key.Parent
+		if d.v.allowDeps(d.ix, r.Deps) || slices.ContainsFunc(*out, func(e EffectiveDTO) bool { return e.Parent.Ref == p }) {
+			continue
+		}
+		*out = append(*out, EffectiveDTO{Parent: d.l.linked(p), Mode: mode, Contexts: []EffectiveContext{{Restricted: true}},
+			Computed: d.f.restricted(ruleEffective)})
+	}
+	return len(ids) > 0
 }
 
 // routeDelegation is GET …/routes/{group}/{kind}/{ns}/{name}/delegation:

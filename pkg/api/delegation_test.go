@@ -419,6 +419,94 @@ func TestHiddenRootNamespace(t *testing.T) {
 	}
 }
 
+// onlySelectorWorld: shop/api attaches only through edge2's Selector listener
+// (zone=in), so whether it is a root depends on shop's labels, zone. api
+// delegates /api to shop/mid, which delegates /api/m to shop/kid.
+func onlySelectorWorld(zone string) []runtime.Object {
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	edge2 := testutil.GatewayWithListeners("infra", "edge2", "kgateway", []objects.Listener{sel}, up("sel", 1))
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edge2Ref}, testutil.AcceptedBy(edge2Ref, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "mid")))
+	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", nil, testutil.AcceptedBy(shopAPI, testutil.Controller)),
+		delegRule([]string{"/api/m"}, testutil.DelegateTo("shop", "kid")))
+	objs := isolated(edge2, api, mid, leaf("shop", "kid", nil, "/api/m/k", testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "mid"), testutil.Controller)))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": zone})
+		}
+	}
+	return objs
+}
+
+// Fix round 1: whether a route is a root at all can depend on a hidden
+// Namespace. Rows no context reached take the view A deps of every
+// top-level route that reaches their parent, and an unreached edge is a
+// restricted placeholder, so the caller sees the same either way.
+func TestUnreachedRowsFollowRootEligibility(t *testing.T) {
+	// api's own detail is left out: its health follows its status (rule 9), and
+	// its view A attachment is a 2.3 fact.
+	paths := []string{delegURL("shop", "api", ""), delegURL("shop", "mid", ""), routeDetail + "shop/mid", routeDetail + "shop/kid",
+		delegURL("shop", "mid", "?outcome=unknown")}
+	var bodies [][]byte
+	for _, zone := range []string{"in", "out"} {
+		_, srv, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, onlySelectorWorld(zone)...)
+		for _, ref := range []string{"api", "mid"} {
+			r := get[Page[DelegationRow]](t, srv, delegURL("shop", ref, ""), 200).Items
+			if len(r) != 1 || r[0].Computed.State != "restricted" || r[0].Outcome != "" {
+				t.Errorf("zone %s: %s rows %+v", zone, ref, r)
+			}
+		}
+		for _, ref := range []string{"mid", "kid"} {
+			e := get[RouteDetail](t, srv, routeDetail+"shop/"+ref, 200).Effective
+			if len(e) != 1 || e[0].Computed.State != "restricted" || !reflect.DeepEqual(e[0].Contexts, []EffectiveContext{{Restricted: true}}) {
+				t.Errorf("zone %s: %s effective %+v", zone, ref, e)
+			}
+		}
+		var b []byte
+		for _, p := range paths {
+			b = append(b, wire(t, srv, p)...)
+		}
+		bodies = append(bodies, b)
+	}
+	if !bytes.Equal(bodies[0], bodies[1]) {
+		t.Errorf("the hidden Namespace's labels change what the caller sees")
+	}
+	// Unrestricted, zone=out is not reached and has no edge.
+	_, out, _ := startWith(t, setup{disputes: true}, onlySelectorWorld("out")...)
+	if r := get[Page[DelegationRow]](t, out, delegURL("shop", "mid", ""), 200).Items; len(r) != 1 || r[0].Outcome != "unknown" || r[0].Computed.Reason != string(computed.UnknownNotReached) {
+		t.Errorf("unrestricted unreached row %+v", r)
+	}
+	if e := get[RouteDetail](t, out, routeDetail+"shop/kid", 200).Effective; e != nil {
+		t.Errorf("unrestricted unreached edge %+v", e)
+	}
+}
+
+// D-024, rule 7: a merged KGWUI-011 (status and computed trigger) names a
+// parent that is on the child's delegation paths, so a hidden parent does
+// not restrict its evidence.
+func TestMergedTriggerUnderHiddenParent(t *testing.T) {
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "c")))
+	objs := isolated(api, leaf("shop", "c", []objects.ParentRef{shopAPI}, "/other"))
+	hideAPI := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != route("shop", "api") })
+	trigger := func(t *testing.T, authz Authorizer) FindingDTO {
+		t.Helper()
+		_, srv, _ := startWith(t, setup{disputes: true, authz: authz}, objs...)
+		for _, f := range findingsOn(get[HealthResponse](t, srv, base+"/health", 200), "shop/c") {
+			if f.Code == health.CodeDelegatedNotAttached {
+				return f
+			}
+		}
+		t.Fatal("no KGWUI-011 on shop/c")
+		return FindingDTO{}
+	}
+	full, f := trigger(t, nil), trigger(t, hideAPI)
+	if !strings.Contains(full.Detail, "UI computes") || f.EvidenceRestricted || f.Detail != full.Detail {
+		t.Fatalf("hidden parent: %+v, want %+v", f, full)
+	}
+}
+
 // statusRootWorld: shop/sr attaches to the ListenerSet ls1, which has no
 // status, so view A is unknown and sr is a status root through its entry for
 // ls1 (rules §5.1). sr delegates /s to shop/sk. ls1's listener is named ln.

@@ -225,8 +225,8 @@ func TestMergedTriggerSeverity(t *testing.T) {
 	if len(fs) != 1 || fs[0].Severity != SeverityWarning || fs[0].Detail != want || fs[0].Since == nil || !fs[0].Since.Equal(since) {
 		t.Fatalf("want one merged warning: %+v", r.Findings)
 	}
-	// Evidence keeps the status trigger's parent and adds the computed non-route deps.
-	if ev := fs[0].Evidence; !reflect.DeepEqual(ev, []objects.Ref{testutil.HTTPRouteRef("shop", "api").Ref(), testutil.GwRef("infra", "edge").Ref()}) {
+	// The parent is on the route's delegation paths, so the merged evidence names no route (D-024, rule 7).
+	if ev := fs[0].Evidence; !reflect.DeepEqual(ev, []objects.Ref{testutil.GwRef("infra", "edge").Ref()}) {
 		t.Fatalf("evidence %v", ev)
 	}
 	if c := statusCheck(r); c.OK || !c.Pending {

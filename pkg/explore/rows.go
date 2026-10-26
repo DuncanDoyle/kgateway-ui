@@ -669,6 +669,7 @@ func (b *builder) delegation(ix *Index, n *interner, v *computed.Views) {
 	ix.DelegationCap = d.Cap
 	if len(d.Rows) > 0 {
 		delegRows(ix, n, d.Rows, v.Checks)
+		unreached(ix, n, v)
 	}
 	if len(d.Effective) > 0 {
 		effective(ix, n, d.Effective)
@@ -757,6 +758,112 @@ func delegRows(ix *Index, n *interner, src []computed.Row, checks []computed.Che
 			}
 		}
 	}
+}
+
+// isUnreached reports whether no context reached row r: it is unknown,
+// not-reached, with no dependencies of its own.
+func isUnreached(r *DelegRow) bool {
+	return r.Outcome == computed.OutcomeUnknown && r.Unknown == computed.UnknownNotReached && len(r.Row.Deps) == 0
+}
+
+// unreached gives each row no context reached the dependencies that decide
+// whether a root reaches its parent: the view A outcome deps, without routes,
+// of every top-level route that reaches the parent in the reach graph,
+// itself included (rules §8.5). Whether a route is a root at all can depend
+// on a hidden Namespace or target, so these rows restrict like reached ones
+// (design §7.4 rule 4). The sets flow forward from each top-level route
+// along reach edges until nothing grows: each node grows at most once per
+// distinct dependency, so the work is O(edges × dependencies).
+func unreached(ix *Index, n *interner, v *computed.Views) {
+	any := false
+	for i := range ix.DelegRows {
+		any = any || isUnreached(&ix.DelegRows[i])
+	}
+	if !any {
+		return
+	}
+	reach, outs := v.Delegation.Reach, v.Attachment.Outcomes
+	id := make(map[objects.Ref]int32, len(reach)+len(outs))
+	node := func(r objects.Ref) int32 {
+		i, ok := id[r]
+		if !ok {
+			i = int32(len(id)) // #nosec G115 -- a route count fits in int32
+			id[r] = i
+		}
+		return i
+	}
+	// Reach is sorted by parent: each parent's children are one window of kids.
+	kids := make([]int32, len(reach))
+	for i, e := range reach {
+		node(e.Parent)
+		kids[i] = node(e.Child)
+	}
+	for i := range outs {
+		node(outs[i].Route)
+	}
+	lo, hi := make([]int, len(id)), make([]int, len(id))
+	for i, e := range reach {
+		p := id[e.Parent]
+		if hi[p] == 0 {
+			lo[p] = i
+		}
+		hi[p] = i + 1
+	}
+	sets := make([]DepSet, len(id))
+	queued := make([]bool, len(id))
+	var queue []int32
+	for i := range outs {
+		p := id[outs[i].Route]
+		if grown := unionSorted(sets[p], n.offPath(outs[i].Deps)); len(grown) > len(sets[p]) {
+			sets[p] = grown
+			if !queued[p] {
+				queued[p], queue = true, append(queue, p)
+			}
+		}
+	}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue, queued[p] = queue[1:], false
+		for _, c := range kids[lo[p]:hi[p]] {
+			if grown := unionSorted(sets[c], sets[p]); len(grown) > len(sets[c]) {
+				sets[c] = grown
+				if !queued[c] {
+					queued[c], queue = true, append(queue, c)
+				}
+			}
+		}
+	}
+	for i := range ix.DelegRows {
+		r := &ix.DelegRows[i]
+		if !isUnreached(r) {
+			continue
+		}
+		if p, ok := id[r.Key.Parent]; ok && len(sets[p]) > 0 {
+			r.Deps = sets[p]
+			if r.Key.Child != (objects.Ref{}) {
+				if ix.Unreached == nil {
+					ix.Unreached = map[objects.Ref][]int{}
+				}
+				ix.Unreached[r.Key.Child] = append(ix.Unreached[r.Key.Child], i)
+			}
+		}
+	}
+}
+
+// unionSorted is the sorted union of a, which is sorted, and b; a itself
+// when b adds nothing.
+func unionSorted(a, b DepSet) DepSet {
+	out := a
+	for _, x := range b {
+		if _, found := slices.BinarySearch(out, x); !found {
+			if len(out) == len(a) {
+				out = slices.Clone(a)
+			}
+			i, _ := slices.BinarySearch(out, x)
+			out = slices.Insert(out, i, x)
+		}
+	}
+	return out
 }
 
 // effective fills ix.Effective from view C. Children are interned in row

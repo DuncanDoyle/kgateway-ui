@@ -247,6 +247,10 @@ type Index struct {
 	RefRows map[RefKey][]int
 	// Effective is view C per child route.
 	Effective map[objects.Ref]EffectiveEntry
+	// Unreached maps a child route to its rows that no context reached and
+	// whose Deps, its parent's root eligibility, are not empty, as
+	// DelegRows indexes in order. Such a row has no effective edge.
+	Unreached map[objects.Ref][]int
 	// DelegationCap names the first compute cap views B and C hit, or "".
 	DelegationCap string
 	admitted      map[objects.Ref]Admission
