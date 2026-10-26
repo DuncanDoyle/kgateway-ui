@@ -123,20 +123,24 @@ func delegationInput(res install.Resolved, owned *install.Owned, snap *cache.Sna
 		}
 		return res.Scope.Contains(ns, nil)
 	}
-	own := map[objects.Ref][]objects.ParentRef{} // owned HTTPRoute → its Gateway and ListenerSet parents
+	var own map[objects.Ref][]objects.ParentRef // owned HTTPRoute → its Gateway and ListenerSet parents
 	if owned != nil {
+		own = make(map[objects.Ref][]objects.ParentRef, len(owned.Routes))
 		for _, r := range owned.Routes {
 			if r.Kind.Group == objects.GatewayAPIGroup && r.Kind.Kind == "HTTPRoute" {
 				own[objects.RefOf(r.Obj)] = r.Parents
 			}
 		}
 	}
-	objs := map[objects.Ref]*unstructured.Unstructured{}
 	var us []*unstructured.Unstructured
 	for _, k := range kinds.ByCategory(served, kinds.CategoryRoute) {
 		if k.Group == objects.GatewayAPIGroup && k.Kind == "HTTPRoute" {
 			us = snap.Objects[k.GVR()]
 		}
+	}
+	objs := make(map[objects.Ref]*unstructured.Unstructured, len(us))
+	if len(us) > 0 {
+		in.Routes = make([]computed.DelegRoute, 0, len(us))
 	}
 	{
 		for _, u := range us {

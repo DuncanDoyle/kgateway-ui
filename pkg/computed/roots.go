@@ -17,14 +17,30 @@ type StatusTarget func(r DelegRoute) (objects.Ref, ReportKey, bool)
 // root. Any other route with an unknown outcome is an unknown root; one with
 // only known rejections is not a root (rules §5.1, §8.5).
 func Roots(routes []DelegRoute, att AttachmentResult, status StatusTarget) []Root {
-	byRoute := map[objects.Ref][]RefOutcome{}
-	for _, o := range att.Outcomes {
-		byRoute[o.Route] = append(byRoute[o.Route], o)
+	// View A sorts its outcomes by route; each route's are then a sub-slice, in order.
+	byRoute := func(a, b RefOutcome) int { return compareRef(a.Route, b.Route) }
+	all := att.Outcomes
+	if !slices.IsSortedFunc(all, byRoute) {
+		all = slices.SortedStableFunc(slices.Values(all), byRoute)
 	}
-	var out []Root
+	top := 0
 	for _, r := range routes {
-		outs := byRoute[r.Ref]
-		if !r.TopLevel || len(outs) == 0 {
+		if r.TopLevel {
+			top++
+		}
+	}
+	out := make([]Root, 0, top)
+	for _, r := range routes {
+		if !r.TopLevel {
+			continue
+		}
+		lo, _ := slices.BinarySearchFunc(all, r.Ref, func(o RefOutcome, t objects.Ref) int { return compareRef(o.Route, t) })
+		hi := lo
+		for hi < len(all) && all[hi].Route == r.Ref {
+			hi++
+		}
+		outs := all[lo:hi:hi]
+		if len(outs) == 0 {
 			continue
 		}
 		var deps []objects.Ref
@@ -68,6 +84,9 @@ func Roots(routes []DelegRoute, att AttachmentResult, status StatusTarget) []Roo
 			}
 			out = append(out, root)
 		}
+	}
+	if len(out) == 0 {
+		return nil // no roots is nil, not empty
 	}
 	return out
 }
