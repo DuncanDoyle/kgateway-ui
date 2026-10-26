@@ -25,6 +25,7 @@ func outcome(route objects.Ref, o computed.Outcome, unknown computed.UnknownReas
 // Roots follow view A (rules §5.1, §5.6).
 func TestRootsFromViewA(t *testing.T) {
 	gw := testutil.GwRef("infra", "edge")
+	okParent := testutil.HTTPRouteRef("shop", "ok")
 	gwRef, nsRef := gw.Ref(), objects.Ref{Kind: "Namespace", Name: "shop"}
 	routes := []*unstructured.Unstructured{
 		testutil.HTTPRoute("shop", "ok", []objects.ParentRef{gw}),
@@ -35,6 +36,10 @@ func TestRootsFromViewA(t *testing.T) {
 			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners")}}),
 		testutil.HTTPRoute("shop", "nostatus", []objects.ParentRef{gw}),
 		testutil.HTTPRoute("shop", "mixed", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		// A Gateway and an HTTPRoute parent: top-level, rooted by view A.
+		testutil.HTTPRoute("shop", "both", []objects.ParentRef{gw, okParent}, testutil.AcceptedBy(okParent, testutil.Controller)),
+		// An unknown Gateway parent; the Accepted=True entry is for the HTTPRoute parent.
+		testutil.HTTPRoute("shop", "viahttp", []objects.ParentRef{gw, okParent}, testutil.AcceptedBy(okParent, testutil.Controller)),
 	}
 	routes[3].SetGeneration(2) // the Accepted entry was observed at generation 1
 	nss := []*corev1.Namespace{testutil.Namespace("infra", nil), testutil.Namespace("shop", nil)}
@@ -57,8 +62,10 @@ func TestRootsFromViewA(t *testing.T) {
 		outcome(r("nostatus"), "", computed.UnknownNamespaceLabels, r("nostatus")),
 		outcome(r("mixed"), computed.OutcomeNotAllowed, "", r("mixed")),
 		outcome(r("mixed"), "", computed.UnknownNamespaceLabels, r("mixed")),
+		outcome(r("both"), computed.OutcomeAccepted, "", r("both"), gwRef),
+		outcome(r("viahttp"), "", computed.UnknownNamespaceLabels, r("viahttp")),
 	}}
-	in := delegationInput(res, owned, snap, dec, a)
+	in := delegationInput(res, owned, snap, served, dec, a)
 	got := map[objects.Ref]computed.Root{}
 	for _, rt := range in.Roots {
 		got[rt.Route] = rt
@@ -66,6 +73,9 @@ func TestRootsFromViewA(t *testing.T) {
 	want := map[objects.Ref]computed.Root{
 		r("ok"):       {Route: r("ok"), Deps: []objects.Ref{r("ok"), gwRef, nsRef}},
 		r("status"):   {Route: r("status"), FromStatus: true, Deps: []objects.Ref{r("status"), gwRef}},
+		r("both"):     {Route: r("both"), Deps: []objects.Ref{r("both"), gwRef}},
+		r("viahttp"):  {Route: r("viahttp"), Unknown: true, Deps: []objects.Ref{r("viahttp")}},
+		r("mixed"):    {Route: r("mixed"), Unknown: true, Deps: []objects.Ref{r("mixed")}},
 		r("denied"):   {Route: r("denied"), Unknown: true, Deps: []objects.Ref{r("denied")}},
 		r("stale"):    {Route: r("stale"), Unknown: true, Deps: []objects.Ref{r("stale")}},
 		r("nostatus"): {Route: r("nostatus"), Unknown: true, Deps: []objects.Ref{r("nostatus")}},
@@ -99,7 +109,7 @@ func TestDelegationInputScope(t *testing.T) {
 	dec := newDecodeCache()
 	owned := install.Assign(snap, served, []install.Resolved{res}, dec).PerInstall[res.ID()]
 
-	in := delegationInput(res, owned, snap, dec, computed.AttachmentResult{})
+	in := delegationInput(res, owned, snap, served, dec, computed.AttachmentResult{})
 	var names []string
 	for _, r := range in.Routes {
 		names = append(names, r.Ref.String())
@@ -132,7 +142,7 @@ func TestDelegationInputScope(t *testing.T) {
 	}
 
 	unknown := resolved("i", "v2.4.7", install.Scope{Mode: install.ScopeUnknown}, nil, testutil.Controller)
-	if !delegationInput(unknown, owned, snap, dec, computed.AttachmentResult{}).ScopeUnknown {
+	if !delegationInput(unknown, owned, snap, served, dec, computed.AttachmentResult{}).ScopeUnknown {
 		t.Fatal("an unknown scope must set ScopeUnknown")
 	}
 }

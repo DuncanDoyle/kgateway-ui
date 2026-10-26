@@ -54,10 +54,11 @@ func ReadSettings(inst Install) Settings {
 		s := Setting{Reason: errMsg, Source: source}
 		return Settings{Experimental: s, WildcardNamespace: s}
 	}
-	return Settings{
-		Experimental:      readEnv(c, source, ExperimentalEnv, "true"),
-		WildcardNamespace: readEnv(c, source, WildcardEnv, WildcardAll),
+	wc := readEnv(c, source, WildcardEnv, WildcardAll)
+	if wc.Known && wc.Value == "" {
+		wc.Value = WildcardAll // an empty value also means all (rules §5.2)
 	}
+	return Settings{Experimental: readEnv(c, source, ExperimentalEnv, "true"), WildcardNamespace: wc}
 }
 
 // NamespaceLabels returns the labels of every cached Namespace by name; ok is

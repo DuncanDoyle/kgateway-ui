@@ -143,9 +143,6 @@ func readEnv(c *corev1.Container, source, name, def string) Setting {
 	default:
 		s.Value, s.Known = c.Env[last].Value, true
 	}
-	if name == WildcardEnv && s.Known && s.Value == "" {
-		s.Value = WildcardAll
-	}
 	return s
 }
 
