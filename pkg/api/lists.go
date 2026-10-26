@@ -67,6 +67,8 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 	if ls == nil {
 		return
 	}
+	ls.v.borrow()
+	defer ls.v.release()
 	pg, err := ls.ix.QueryRoutes(ls.q, ls.v.visible())
 	if err != nil {
 		fail(w, err)

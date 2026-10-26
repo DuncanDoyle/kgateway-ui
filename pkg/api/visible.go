@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -17,6 +18,8 @@ type view struct {
 	r    *http.Request
 	all  bool
 	seen map[objects.Ref]bool
+	// pooled is set when seen came from seenPool.
+	pooled bool
 	// deps memoises allowDeps per index of the request's dependency table: 1 visible, -1 hidden.
 	deps []int8
 }
@@ -28,6 +31,29 @@ func (h *handler) view(r *http.Request) *view {
 		v.seen = map[objects.Ref]bool{}
 	}
 	return v
+}
+
+// seenPool recycles the memos of route list requests, which ask about
+// every row: a memo grown afresh per request was most of their garbage.
+var seenPool = sync.Pool{New: func() any { return map[objects.Ref]bool{} }}
+
+// borrow swaps v's memo for one from seenPool; release returns it.
+func (v *view) borrow() {
+	if v.all || v.pooled {
+		return
+	}
+	v.seen, v.pooled = seenPool.Get().(map[objects.Ref]bool), true
+}
+
+// release clears a borrowed memo and returns it to seenPool. v asks the
+// Authorizer afresh after it.
+func (v *view) release() {
+	if !v.pooled {
+		return
+	}
+	clear(v.seen)
+	seenPool.Put(v.seen)
+	v.seen, v.pooled = map[objects.Ref]bool{}, false
 }
 
 // can reports whether the caller may view ref.
