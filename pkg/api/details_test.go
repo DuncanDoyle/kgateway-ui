@@ -70,7 +70,9 @@ func delegationWorld(extra ...runtime.Object) []runtime.Object {
 	parents := []objects.ParentRef{edgeRef, testutil.HTTPRouteRef("shop", "loop")}
 	status := []testutil.RouteParent{testutil.AcceptedBy(edgeRef, testutil.Controller), testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "loop"), testutil.Controller)}
 	objs := []runtime.Object{
-		testutil.HTTPRoute("shop", "child", []objects.ParentRef{midRef}, testutil.AcceptedBy(midRef, testutil.Controller)),
+		// The child's match fits mid's /api, so its entry agrees with view B.
+		testutil.WithRules(testutil.HTTPRoute("shop", "child", []objects.ParentRef{midRef}, testutil.AcceptedBy(midRef, testutil.Controller)),
+			testutil.Rule(matchPath("/api/child"))),
 		testutil.HTTPRoute("shop", "declared", []objects.ParentRef{midRef}),
 		testutil.HTTPRoute("shop", "loop", []objects.ParentRef{midRef}, testutil.AcceptedBy(midRef, testutil.Controller)),
 		testutil.Backend("shop", "be1", nil),

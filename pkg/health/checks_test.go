@@ -17,6 +17,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -39,6 +40,7 @@ type world struct {
 	metrics   *ctrlmetrics.Result                          // nil = not collected yet
 	access    map[schema.GroupVersionResource]cache.Access // overrides on top of "everything readable"
 	platform  platform.Info                                // zero = Kubernetes
+	computed  *computed.Views                              // nil = none
 }
 
 func healthyWorld() *world {
@@ -85,7 +87,7 @@ func (w *world) report(t *testing.T) Report {
 	if w.metrics != nil {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
-	hi.FirstSeen = w.firstSeen
+	hi.FirstSeen, hi.Computed = w.firstSeen, w.computed
 	return Evaluate(hi, Upstream())
 }
 

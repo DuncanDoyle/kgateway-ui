@@ -367,6 +367,7 @@ func TestCandidate(t *testing.T) {
 	for cl, want := range map[computed.Class]bool{
 		computed.ClassContradicting: true, computed.ClassMissing: true, computed.ClassStale: false, computed.ClassUnexpected: false,
 		computed.ClassCompatible: false, computed.ClassNotObservable: false, computed.ClassInconclusive: false, computed.ClassUnknown: false,
+		computed.ClassTrigger: true,
 	} {
 		if got := (computed.CheckResult{Class: cl}).Candidate(); got != want {
 			t.Errorf("%s: %v", cl, got)
@@ -1178,5 +1179,189 @@ func TestParentDepsPerKey(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// wild is a wildcard delegation backendRef to every route in ns.
+func wild(ns string) string { return to(ns, "'*'") }
+
+// triggers returns cs's checks of kind k on route ns/name.
+func triggers(cs []computed.CheckResult, k computed.CheckKind, ns, name string) []computed.CheckResult {
+	var out []computed.CheckResult
+	for _, c := range cs {
+		if c.ID.Kind == k && c.On == hRef(ns, name) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// KGWUI-011's computed trigger (design §6.2, rules §9.3): a route an owned
+// parent's name or label ref selects, dropped or forbidden in every context,
+// complete, with no eligible entry. One trigger check per (route, parent).
+func TestDelegatedNotAttachedTrigger(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// R /api → c by name; c's /other fits no context: dropped.
+			r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "c"))+"]")
+			c := child(t, "apps", "c", []string{"/other"})
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			got := triggers(cs, computed.KindDelegatedNotAttached, "apps", "c")
+			if len(got) != 1 {
+				t.Fatalf("want one delegated-not-attached on apps/c, got %+v", got)
+			}
+			tr := got[0]
+			if p, ok := tr.Parent(); !ok || p != hRef("infra", "r") {
+				t.Fatalf("parent %v %v", p, ok)
+			}
+			if tr.Class != computed.ClassTrigger || !tr.Candidate() || tr.Expected != "dropped" || tr.Fingerprint == 0 ||
+				!slices.Contains(tr.Deps, hRef("infra", "r")) || !slices.Contains(tr.Contributors, hRef("apps", "c")) {
+				t.Fatalf("trigger %+v", tr)
+			}
+			if n := len(triggers(cs, computed.KindOrphan, "apps", "c")); n != 0 {
+				t.Fatalf("%d orphan triggers for a name ref", n)
+			}
+
+			// Forbidden: c's parentRefs name another parent.
+			fc := child(t, "apps", "c", []string{"/api/c"}, "parentRefs: ["+to("apps", "other")+"]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, fc}, roots: []string{"infra/r"}}.run(v)
+			if got := triggers(cs, computed.KindDelegatedNotAttached, "apps", "c"); len(got) != 1 || got[0].Expected != "forbidden" {
+				t.Fatalf("forbidden: %+v", got)
+			}
+
+			// A label ref triggers too.
+			lr := root(t, "r", "["+rule([]string{"/api"}, "{group: delegation.kgateway.dev, kind: label, name: team, namespace: apps}")+"]")
+			lc := child(t, "apps", "c", []string{"/other"})
+			lc.SetLabels(map[string]string{objects.DelegationLabelKey: "team"})
+			_, cs = dworld{routes: []*unstructured.Unstructured{lr, lc}, roots: []string{"infra/r"}}.run(v)
+			if n := len(triggers(cs, computed.KindDelegatedNotAttached, "apps", "c")); n != 1 {
+				t.Fatalf("label ref: %d triggers", n)
+			}
+
+			// No trigger: attached; an eligible entry, even a stale one; a wildcard ref only.
+			ac := child(t, "apps", "c", []string{"/api/c"})
+			sc := child(t, "apps", "c", []string{"/other"})
+			entry(t, sc, synth("infra", "r"), gen-1, "Accepted=True")
+			wr := root(t, "r", "["+rule([]string{"/api"}, wild("apps"))+"]")
+			for name, w := range map[string]dworld{
+				"attached":      {routes: []*unstructured.Unstructured{r, ac}, roots: []string{"infra/r"}},
+				"stale entry":   {routes: []*unstructured.Unstructured{r, sc}, roots: []string{"infra/r"}},
+				"wildcard only": {routes: []*unstructured.Unstructured{wr, child(t, "apps", "c", []string{"/other"})}, roots: []string{"infra/r"}},
+			} {
+				if _, cs := w.run(v); len(triggers(cs, computed.KindDelegatedNotAttached, "apps", "c")) != 0 {
+					t.Errorf("%s: unexpected trigger", name)
+				}
+			}
+		})
+	}
+}
+
+// An incomplete traversal gives no computed trigger (rules §8.5): here the
+// parent p is in a reach closure, below an unknown root.
+func TestDelegatedNotAttachedIncomplete(t *testing.T) {
+	r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+	u := root(t, "u", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+	p := hr(t, "metadata: {name: p, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api/p"}, to("apps", "c"))+"]")
+	c := child(t, "apps", "c", []string{"/api/p/c"}, "parentRefs: ["+to("apps", "other")+"]")
+	w := dworld{routes: []*unstructured.Unstructured{r, u, p, c}, roots: []string{"infra/r"}}
+	if _, cs := w.run(v24); len(triggers(cs, computed.KindDelegatedNotAttached, "apps", "c")) != 1 {
+		t.Fatal("control: want a trigger with every root known")
+	}
+	w.unknown = []string{"infra/u"}
+	if _, cs := w.run(v24); len(triggers(cs, computed.KindDelegatedNotAttached, "apps", "c")) != 0 {
+		t.Fatal("trigger on an incomplete traversal")
+	}
+}
+
+// KGWUI-011's orphan trigger (rules §9.3, §11.5 rows 18–24): one per route.
+func TestOrphanTrigger(t *testing.T) {
+	orphan := func() *unstructured.Unstructured { return child(t, "apps", "o", []string{"/other"}) }
+	r := root(t, "r", "["+rule([]string{"/api"}, wild("apps"))+"]")
+	r2 := root(t, "r2", "["+rule([]string{"/web"}, wild("apps"))+"]")
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// Row 18: two wildcard parents drop it; complete; one check.
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, r2, orphan()}, roots: []string{"infra/r", "infra/r2"}}.run(v)
+			got := triggers(cs, computed.KindOrphan, "apps", "o")
+			if len(got) != 1 || got[0].Class != computed.ClassTrigger || got[0].Fingerprint == 0 ||
+				!slices.Contains(got[0].Deps, hRef("infra", "r")) || !slices.Contains(got[0].Deps, hRef("infra", "r2")) {
+				t.Fatalf("want one orphan trigger with both parents' deps, got %+v", got)
+			}
+			if n := len(triggers(cs, computed.KindDelegatedNotAttached, "apps", "o")); n != 0 {
+				t.Fatalf("%d per-parent triggers for wildcard refs", n)
+			}
+			// Row 22's premise: a new selecting parent changes the fingerprint.
+			_, one := dworld{routes: []*unstructured.Unstructured{r, orphan()}, roots: []string{"infra/r"}}.run(v)
+			if o := triggers(one, computed.KindOrphan, "apps", "o"); len(o) != 1 || o[0].Fingerprint == got[0].Fingerprint {
+				t.Fatalf("one parent: %+v", o)
+			}
+
+			// Row 19: a selecting parent in a reach closure.
+			u := root(t, "u", "["+rule([]string{"/u"}, wild("apps"))+"]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, u, orphan()}, roots: []string{"infra/r"}, unknown: []string{"infra/u"}}.run(v)
+			if n := len(triggers(cs, computed.KindOrphan, "apps", "o")); n != 0 {
+				t.Fatal("orphan trigger on an incomplete aggregate")
+			}
+
+			// Row 20: a route with its own parentRefs, wildcard-selected and forbidden.
+			g := child(t, "apps", "o", []string{"/other"}, "parentRefs: ["+gwEntry+"]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, g}, roots: []string{"infra/r"}}.run(v)
+			if n := len(triggers(cs, computed.KindOrphan, "apps", "o")) + len(triggers(cs, computed.KindDelegatedNotAttached, "apps", "o")); n != 0 {
+				t.Fatal("trigger on a route with parentRefs")
+			}
+
+			// Row 21: dropped by r, attached by r3.
+			r3 := root(t, "r3", "["+rule([]string{"/other"}, wild("apps"))+"]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, r3, orphan()}, roots: []string{"infra/r", "infra/r3"}}.run(v)
+			if n := len(triggers(cs, computed.KindOrphan, "apps", "o")); n != 0 {
+				t.Fatal("orphan trigger on a route another parent attaches")
+			}
+
+			// Row 23: the only selecting ref fails with a cycle (p selects itself).
+			cr := root(t, "r", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+			p := hr(t, "metadata: {name: p, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api/p"}, wild("apps"))+"]")
+			res, cs := dworld{routes: []*unstructured.Unstructured{cr, p, orphan()}, roots: []string{"infra/r"}}.run(v)
+			cycle := false
+			for _, row := range res.Rows {
+				cycle = cycle || row.Key.Child == hRef("apps", "o") && row.Outcome == computed.OutcomeCycle
+			}
+			if !cycle || len(triggers(cs, computed.KindOrphan, "apps", "o")) != 0 {
+				t.Fatalf("cycle row %v; orphan triggers %d", cycle, len(triggers(cs, computed.KindOrphan, "apps", "o")))
+			}
+
+			// Row 24: also selected by a label ref: only the label parent's trigger.
+			lr := root(t, "l", "["+rule([]string{"/l"}, "{group: delegation.kgateway.dev, kind: label, name: team, namespace: apps}")+"]")
+			lo := orphan()
+			lo.SetLabels(map[string]string{objects.DelegationLabelKey: "team"})
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, lr, lo}, roots: []string{"infra/r", "infra/l"}}.run(v)
+			per := triggers(cs, computed.KindDelegatedNotAttached, "apps", "o")
+			if len(triggers(cs, computed.KindOrphan, "apps", "o")) != 0 || len(per) != 1 {
+				t.Fatalf("orphan %d, per-parent %+v", len(triggers(cs, computed.KindOrphan, "apps", "o")), per)
+			}
+			if p, _ := per[0].Parent(); p != hRef("infra", "l") {
+				t.Fatalf("per-parent trigger for %v", p)
+			}
+
+			// An entry from this controller under any parent is not an orphan.
+			eo := orphan()
+			entry(t, eo, synth("infra", "x"), gen, "Accepted=True")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, eo}, roots: []string{"infra/r"}}.run(v)
+			if n := len(triggers(cs, computed.KindOrphan, "apps", "o")); n != 0 {
+				t.Fatal("orphan trigger on a route with an entry")
+			}
+		})
+	}
+}
+
+// D-024: an unknown scope raises no trigger.
+func TestScopeUnknownNoTriggers(t *testing.T) {
+	r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "c"), wild("apps"))+"]")
+	w := dworld{routes: []*unstructured.Unstructured{r, child(t, "apps", "c", []string{"/other"}), child(t, "apps", "o", []string{"/other"})},
+		roots: []string{"infra/r"}, mod: func(in *computed.DelegationInput) { in.ScopeUnknown = true }}
+	_, cs := w.run(v24)
+	for _, c := range cs {
+		if c.Class == computed.ClassTrigger {
+			t.Fatalf("trigger %s on %s", c.ID.Kind, c.On)
+		}
 	}
 }

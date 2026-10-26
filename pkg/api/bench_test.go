@@ -58,7 +58,7 @@ func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer) (http.Handler,
 	e := engine.New(cfg)
 	if tier.Contradict {
 		e.Compute()
-		now = now.Add(engine.Window + time.Second)
+		now = now.Add(max(engine.Window, health.Grace) + time.Second) // past every window and grace end
 	}
 	return NewHandler(e, fstest.MapFS{}, authz), e.Compute()
 }

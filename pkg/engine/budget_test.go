@@ -24,6 +24,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
@@ -264,8 +265,9 @@ func BenchmarkConfirmTick(b *testing.B) {
 // A, and the worst case, where every check contradicts and has matured.
 var largeCases = []scale.Tier{scale.Large, scale.Large.Contradicting()}
 
-// matureAt is a time past every window opened at testutil.Now.
-var matureAt = testutil.Now.Add(Window + time.Second)
+// matureAt is a time past every window opened at testutil.Now, and past a
+// missing child entry's grace end.
+var matureAt = testutil.Now.Add(max(Window, health.Grace) + time.Second)
 
 // largeEngine is an engine over tier's snapshot on a settable clock, with
 // metrics that never go stale. Under Contradict it computes once at
@@ -284,7 +286,8 @@ func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
 	return e, now
 }
 
-// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 120 ms
+// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 150 ms
+// with views B and C (design §9.6, 2.4)
 // and the median of 5 cold ones ≤ 1 s, for the consistent world and the worst
 // case. Allocation per warm Compute and the persistence step are reported (D-022).
 func TestBudgetWarmRecompute(t *testing.T) {
@@ -319,7 +322,7 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			step := make([]time.Duration, 20)
 			for i := range step {
 				t0 := time.Now()
-				e.persist.persist(*now, views)
+				e.persist.persist(*now, views, nil)
 				step[i] = time.Since(t0)
 			}
 			slices.Sort(cold)
@@ -331,7 +334,7 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			if tier.Contradict {
 				coldNote = ", a first compute with no matured windows"
 			}
-			t.Logf("%s: cold median %v max %v%s (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 120 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
+			t.Logf("%s: cold median %v max %v%s (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 150 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
 				tier.Name, cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond), coldNote,
 				warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
 				float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib,
@@ -345,8 +348,8 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			if cold[len(cold)/2] > time.Second {
 				t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
 			}
-			if warm[len(warm)/2] > 120*time.Millisecond {
-				t.Errorf("warm recompute median %v, budget ≤ 120 ms", warm[len(warm)/2])
+			if warm[len(warm)/2] > 150*time.Millisecond {
+				t.Errorf("warm recompute median %v, budget ≤ 150 ms", warm[len(warm)/2])
 			}
 		})
 	}
@@ -464,6 +467,7 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("index: lookups", func() { m.Installs[0].Index = nil })
 	drop("health: findings", func() { m.Installs[0].Health.Findings = nil })
 	drop("computed: checks", func() { m.Installs[0].Computed.Checks = nil })
+	drop("computed: delegation", func() { m.Installs[0].Computed.Delegation = computed.DelegationResult{} })
 	drop("computed: attachment", func() { m.Installs[0].Computed = nil })
 	drop("persistence: windows", func() { e.persist = newPersistence() })
 	drop("decode: HTTPRoute views", func() { e.decode.httpRoutes = viewCache[objects.HTTPRouteView]{} })

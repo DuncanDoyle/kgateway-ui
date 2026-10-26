@@ -2,11 +2,13 @@ package health
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -41,6 +43,129 @@ func declaredFinding(in Input, d install.DeclaredCandidate) Finding {
 	return Finding{Code: CodeDelegatedNotAttached, Slug: "delegated-route-not-attached", Severity: sev, Install: in.Install.ID(),
 		Resource: ref(d.Route.Obj), Message: DelegatedNotAttachedMessage, Detail: fmt.Sprintf(DelegatedNotAttachedDetail, parent.String()),
 		Evidence: []objects.Ref{parent}, ResourceSince: &own, parent: &d.Parent}
+}
+
+// computedTriggerFindings is KGWUI-011's computed and orphan triggers (design
+// §6.2): one warning per mature delegated-not-attached or orphan-not-attached
+// check, since its window start. None while the scope is unknown (D-024).
+// conditionsCheck merges a computed one into the status trigger of its
+// (route, parent).
+func computedTriggerFindings(in Input) []Finding {
+	v := in.Computed
+	if v == nil || in.Install.Scope.Mode == install.ScopeUnknown {
+		return nil
+	}
+	var fs []Finding
+	for i := range v.Checks {
+		c := &v.Checks[i]
+		if c.Class != computed.ClassTrigger || !c.Mature {
+			continue
+		}
+		on, since := c.On, c.Since
+		f := Finding{Code: CodeDelegatedNotAttached, Slug: "delegated-route-not-attached", Severity: SeverityWarning, Install: in.Install.ID(),
+			Resource: &on, Message: ComputedNotAttachedMessage, Since: &since}
+		if u := routeObject(in.Owned, on); u != nil {
+			own := in.firstSeen(u)
+			f.ResourceSince = &own
+		}
+		switch c.ID.Kind {
+		case computed.KindDelegatedNotAttached:
+			parent, ok := c.Parent()
+			if !ok {
+				continue
+			}
+			f.Detail = computedReason(parent, c.Expected)
+			// The detail quotes the routes on the paths by name only (design §7.4 rule 7, D-024).
+			f.Evidence = withoutRoutes(c.Deps, c.Contributors)
+			f.parent = &objects.ParentRef{Group: parent.Group, Kind: parent.Kind, Namespace: parent.Namespace, Name: parent.Name}
+		case computed.KindOrphan:
+			f.Detail, f.Evidence = OrphanDetail, c.Deps
+		default:
+			continue
+		}
+		fs = append(fs, f)
+	}
+	return fs
+}
+
+// computedReason is the computed trigger's reason: parent drops the route, or
+// the route's parentRefs forbid it.
+func computedReason(parent objects.Ref, outcome string) string {
+	if outcome == string(computed.OutcomeForbidden) {
+		return fmt.Sprintf(computedForbidden, parent.String())
+	}
+	return fmt.Sprintf(computedDropped, parent.String())
+}
+
+// withoutRoutes is deps without routes, a sorted subslice of it (computed.CheckResult.Contributors).
+func withoutRoutes(deps, routes []objects.Ref) []objects.Ref {
+	if len(routes) == 0 {
+		return deps
+	}
+	out := make([]objects.Ref, 0, len(deps)-len(routes))
+	for _, d := range deps {
+		if _, found := slices.BinarySearchFunc(routes, d, objects.Ref.Compare); !found {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// routeObject returns in-scope route ref: owned, a declared candidate or one
+// with no parent; nil otherwise.
+func routeObject(o *install.Owned, ref objects.Ref) *unstructured.Unstructured {
+	if o == nil {
+		return nil
+	}
+	if r, ok := o.Route(ref); ok {
+		return r.Obj
+	}
+	for _, d := range o.Declared {
+		if objects.RefOf(d.Route.Obj) == ref {
+			return d.Route.Obj
+		}
+	}
+	for _, r := range o.NoParent {
+		if objects.RefOf(r.Obj) == ref {
+			return r.Obj
+		}
+	}
+	return nil
+}
+
+// mergeTriggers adds the computed trigger findings cs to fs, whose status
+// trigger findings start at declared. A computed finding on the (route,
+// parent) of a status one is merged into it: the computed reason is
+// appended, the higher severity and the computed window start kept, and the
+// evidence united (PF13). The caller has already read the status
+// severity for its grace.
+func mergeTriggers(fs []Finding, declared int, cs []Finding) []Finding {
+	for _, c := range cs {
+		i := -1
+		if c.parent != nil {
+			i = slices.IndexFunc(fs[declared:], func(f Finding) bool {
+				return f.Code == CodeDelegatedNotAttached && *f.Resource == *c.Resource && f.parent != nil && f.parent.Ref() == c.parent.Ref()
+			})
+		}
+		if i < 0 {
+			fs = append(fs, c)
+			continue
+		}
+		f := &fs[declared+i]
+		f.Detail += ". " + c.Detail
+		f.Since = c.Since
+		if rank(c.Severity) < rank(f.Severity) {
+			f.Severity = c.Severity
+		}
+		ev := slices.Clone(f.Evidence)
+		for _, r := range c.Evidence {
+			if !slices.Contains(ev, r) {
+				ev = append(ev, r)
+			}
+		}
+		f.Evidence = ev
+	}
+	return fs
 }
 
 // delegationOnly reports whether u is an HTTPRoute whose every backendRef

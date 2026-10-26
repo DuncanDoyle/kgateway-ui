@@ -63,5 +63,7 @@ type Views struct {
 	// RuleSet is the rule set's Version; Note is its selection label.
 	RuleSet, Note string
 	Attachment    AttachmentResult
-	Checks        []CheckResult
+	// Delegation is views B and C (rules §5, §6).
+	Delegation DelegationResult
+	Checks     []CheckResult
 }

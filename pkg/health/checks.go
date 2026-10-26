@@ -327,6 +327,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	}
 	// Declared candidates: KGWUI-011's status trigger. Inside its grace the
 	// route is being processed, so this check is pending (design §6.2).
+	declared := len(fs)
 	for _, d := range in.Owned.Declared {
 		f := declaredFinding(in, d)
 		if f.Severity == SeverityInfo {
@@ -334,6 +335,9 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		fs = append(fs, f)
 	}
+	// The computed and orphan triggers never make this check pending; a
+	// computed one joins the status trigger of its (route, parent) (PF13).
+	fs = mergeTriggers(fs, declared, computedTriggerFindings(in))
 	// Policies: ancestors written by this install's controller, for a Gateway
 	// or ListenerSet it owns or for any other kind. Assign drops policies
 	// processed only for another install, so none here means not yet processed;

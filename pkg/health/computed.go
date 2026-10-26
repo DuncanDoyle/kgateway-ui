@@ -53,55 +53,74 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), false, in.Now)
 }
 
-// ownedResources maps the owned Gateways, then ListenerSets, by ref; the first of duplicates wins.
+// ownedResources maps the owned Gateways, ListenerSets and routes by ref; the
+// first of duplicates wins. Built once, so a KGWUI-012 on a route no install
+// owns, such as a delegated child without an entry, never scans the routes.
 func ownedResources(o *install.Owned) map[objects.Ref]*unstructured.Unstructured {
 	if o == nil {
 		return nil
 	}
-	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets))
+	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets)+len(o.Routes))
+	add := func(u *unstructured.Unstructured) {
+		if r := objects.RefOf(u); m[r] == nil {
+			m[r] = u
+		}
+	}
 	for _, us := range [][]*unstructured.Unstructured{o.Gateways, o.ListenerSets} {
 		for _, u := range us {
-			if r := objects.RefOf(u); m[r] == nil {
-				m[r] = u
-			}
+			add(u)
 		}
+	}
+	for _, r := range o.Routes {
+		add(r.Obj)
 	}
 	return m
 }
 
-// ownedObject returns the owned Gateway or ListenerSet (from resources) or route ref, or nil.
+// ownedObject returns the owned Gateway, ListenerSet or route ref from resources, or nil.
 func ownedObject(o *install.Owned, resources map[objects.Ref]*unstructured.Unstructured, ref objects.Ref) *unstructured.Unstructured {
 	if o == nil {
 		return nil
 	}
-	if u := resources[ref]; u != nil {
-		return u
-	}
-	if r, ok := o.Route(ref); ok {
-		return r.Obj
-	}
-	return nil
+	return resources[ref]
 }
 
 // disagreeDetail says what was computed and what the controller reports, and
 // under which rule set (wording pass, Task 48).
 func disagreeDetail(c computed.CheckResult, ruleSet string) string {
 	var d string
+	key := "`" + c.Key.Name + "`"
+	if c.Key.SectionName != "" {
+		key += " (section `" + c.Key.SectionName + "`)"
+	}
 	switch c.ID.Kind {
 	case computed.KindListenerCount:
 		d = fmt.Sprintf(countDisagrees, c.Listener, routes(c.Expected), c.Observed)
+	case computed.KindChildEntry:
+		parent, _ := c.Parent()
+		d = fmt.Sprintf(childDisagrees, parent.String(), entryText(c.Expected), entryText(c.Observed))
+	case computed.KindParentResolvedRefs:
+		d = fmt.Sprintf(resolvedDisagrees, key, c.Expected, c.Observed)
 	default:
-		parent := "`" + c.Key.Name + "`"
-		if c.Key.SectionName != "" {
-			parent += " (section `" + c.Key.SectionName + "`)"
-		}
-		d = fmt.Sprintf(parentDisagrees, parent, c.Expected, c.Observed)
+		d = fmt.Sprintf(parentDisagrees, key, c.Expected, c.Observed)
 	}
 	d += fmt.Sprintf(ruleSetDetail, ruleSet)
 	if c.Note != "" {
 		d += " " + c.Note + "."
 	}
 	return d
+}
+
+// entryText words a child-entry expectation or observation: an entry, no
+// entry, or its Accepted condition.
+func entryText(s string) string {
+	switch s {
+	case "entry":
+		return "an entry"
+	case "none":
+		return "no entry"
+	}
+	return "Accepted=" + s
 }
 
 // routes is "1 route" or "n routes"; a non-number is kept as is.

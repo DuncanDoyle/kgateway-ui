@@ -160,3 +160,34 @@ func TestKGWUI012SubjectsResourceSince(t *testing.T) {
 		}
 	}
 }
+
+// The child-entry detail names the parent route; the parent-resolvedrefs
+// detail names ResolvedRefs and the parent's own report key (PF7).
+func TestDisagreeDetailDelegation(t *testing.T) {
+	c := countCheck(computed.StateDisagrees, computed.ClassMissing)
+	c.ID.Kind, c.Listener = computed.KindChildEntry, ""
+	c.On = objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "c"}
+	c.ID.Subject = computed.Subject(objects.GatewayAPIGroup, "HTTPRoute", "shop", "c", objects.GatewayAPIGroup, "HTTPRoute", "shop", "api",
+		objects.GatewayAPIGroup, "HTTPRoute", "shop", "api", "")
+	c.Key = computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "api"}
+	for _, tc := range []struct{ expected, observed, want string }{
+		{"entry", "none", "Status entry for parent HTTPRoute `shop/api`: computed an entry, controller reports no entry. Rule set kgateway-2.4."},
+		{"none", "True", "Status entry for parent HTTPRoute `shop/api`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4."},
+		{"False/UnsupportedValue", "True", "Status entry for parent HTTPRoute `shop/api`: computed Accepted=False/UnsupportedValue, controller reports Accepted=True. Rule set kgateway-2.4."},
+	} {
+		c.Expected, c.Observed = tc.expected, tc.observed
+		if rep := runComputed(t, c); len(rep.Findings) != 1 || rep.Findings[0].Detail != tc.want {
+			t.Errorf("got %+v\nwant detail %q", rep.Findings, tc.want)
+		}
+	}
+
+	p := countCheck(computed.StateDisagrees, computed.ClassContradicting)
+	p.ID.Kind, p.Listener = computed.KindParentResolvedRefs, ""
+	p.On = objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "api"}
+	p.Key = computed.ReportKey{Name: "edge", SectionName: "http"}
+	p.Expected, p.Observed = "False/BackendNotFound", "True"
+	want := "ResolvedRefs under parent `edge` (section `http`): computed False/BackendNotFound, controller reports True. Rule set kgateway-2.4."
+	if rep := runComputed(t, p); len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
+		t.Fatalf("got %+v\nwant detail %q", rep.Findings, want)
+	}
+}

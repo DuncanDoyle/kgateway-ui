@@ -114,8 +114,10 @@ func scopeViews(t *testing.T, e *engine.Engine, srv *httptest.Server, unknown bo
 	}
 }
 
-// consistentWithViews fails t when m has a matured disagreement: every
+// consistentWithViews fails t when m has a matured view A disagreement: every
 // seeded object was first seen 61 s earlier, so only late objects may be pending.
+// Views B and C join when Task 65 makes the 2.2 worlds consistent with them:
+// many keep reported children under parents that do not delegate to them.
 func consistentWithViews(t *testing.T, m *engine.Model) {
 	t.Helper()
 	for _, im := range m.Installs {
@@ -123,7 +125,7 @@ func consistentWithViews(t *testing.T, m *engine.Model) {
 			continue
 		}
 		for _, c := range im.Computed.Checks {
-			if c.State == computed.StateDisagrees {
+			if c.State == computed.StateDisagrees && (c.ID.Kind == computed.KindListenerCount || c.ID.Kind == computed.KindRouteAccepted) {
 				t.Fatalf("the test world disagrees with view A: %s %s on %s (expected %s, observed %s)", c.ID.Kind, c.Class, c.On, c.Expected, c.Observed)
 			}
 		}
@@ -2115,11 +2117,15 @@ func TestExistingHTTPRouteParentIsNotMissing(t *testing.T) {
 // (design §4.2; pre-flight PF16, a known limitation after a child-edit drop).
 func TestStaleEligibleEntryKeepsEdge(t *testing.T) {
 	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	// api delegates to child, whose match fits, so the current entry agrees with view B.
 	parent := func() *unstructured.Unstructured {
-		return testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+		r := testutil.Rule(matchPath("/api"))
+		r["backendRefs"] = []any{testutil.DelegateTo("shop", "child")}
+		return testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), r)
 	}
 	child := func() *unstructured.Unstructured {
-		return testutil.HTTPRoute("shop", "child", []objects.ParentRef{api}, testutil.AcceptedBy(api, testutil.Controller))
+		return testutil.WithRules(testutil.HTTPRoute("shop", "child", []objects.ParentRef{api}, testutil.AcceptedBy(api, testutil.Controller)),
+			testutil.Rule(matchPath("/api/child")))
 	}
 	cases := []struct {
 		name    string

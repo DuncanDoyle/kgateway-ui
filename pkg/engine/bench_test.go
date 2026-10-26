@@ -8,11 +8,12 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 )
 
 // scaleEngine is an upstream engine over tier's scale snapshot with fresh
 // metrics. Under Contradict it has computed once and its clock is past the
-// window, so every check matures.
+// window and the grace end, so every check that can mature does.
 func scaleEngine(tier scale.Tier) *Engine {
 	now := testutil.Now
 	cfg := config(scale.Snapshot(tier, 1), metricsAt(testutil.Now), func() time.Time { return now })
@@ -20,7 +21,7 @@ func scaleEngine(tier scale.Tier) *Engine {
 	e := New(cfg)
 	if tier.Contradict {
 		e.Compute()
-		now = now.Add(Window + time.Second)
+		now = now.Add(max(Window, health.Grace) + time.Second)
 	}
 	return e
 }
@@ -70,30 +71,58 @@ func TestScaleComputeSanity(t *testing.T) {
 	if len(children) == 0 || owned != scale.Large.HTTPRoutes || reported != len(children) {
 		t.Fatalf("owned HTTPRoutes %d, want %d; children with a reported parent %d, want %d", owned, scale.Large.HTTPRoutes, reported, len(children))
 	}
+	// Views B and C agree with the consistent world: no delegation check is a candidate (PF2).
+	v := m.Installs[0].Computed
+	n := 0
+	for _, c := range v.Checks {
+		if c.ID.Kind == computed.KindListenerCount || c.ID.Kind == computed.KindRouteAccepted {
+			continue
+		}
+		if n++; c.Candidate() {
+			t.Fatalf("%s %s: %s, expected %s observed %s", c.ID.Kind, c.On, c.Class, c.Expected, c.Observed)
+		}
+	}
+	if len(v.Delegation.Rows) == 0 || n == 0 {
+		t.Fatalf("%d delegation rows, %d delegation checks", len(v.Delegation.Rows), n)
+	}
 }
 
-// Every tier's statuses agree with view A, so the budgets measure realistic
-// data; under Contradicting every check contradicts.
+// Every tier's statuses agree with the computed views, so the budgets
+// measure realistic data: at Large every check is compatible; elsewhere no
+// view B check is a candidate (Extreme hits caps, and Typical has one child
+// entry under a rejected parent, which no context reaches). Under
+// Contradicting every view A and parent check contradicts and every child
+// entry is missing; a parent whose own entry was dropped is stale.
 func TestScaleViewsConsistent(t *testing.T) {
 	tiers := append(slices.Clone(scale.Tiers), scale.Large.Contradicting())
 	for _, tier := range tiers {
 		t.Run(tier.Name, func(t *testing.T) {
 			m := New(config(scale.Snapshot(tier, 1), metricsAt(testutil.Now), func() time.Time { return testutil.Now })).Compute()
-			want := computed.ClassCompatible
-			if tier.Contradict {
-				want = computed.ClassContradicting
+			want := func(c computed.CheckResult) bool {
+				viewA := c.ID.Kind == computed.KindListenerCount || c.ID.Kind == computed.KindRouteAccepted
+				switch {
+				case !tier.Contradict && !viewA && tier.Name != scale.Large.Name:
+					return !c.Candidate()
+				case !tier.Contradict:
+					return c.Class == computed.ClassCompatible
+				case c.ID.Kind == computed.KindChildEntry:
+					return c.Class == computed.ClassMissing
+				case c.ID.Kind == computed.KindParentResolvedRefs && !c.ParentCurrent:
+					return c.Class == computed.ClassStale
+				}
+				return c.Class == computed.ClassContradicting
 			}
 			checks := m.Installs[0].Computed.Checks
 			bad := 0
 			for _, c := range checks {
-				if c.Class != want {
+				if !want(c) {
 					if bad++; bad <= 5 {
 						t.Errorf("%s %s: %s, expected %s observed %s", c.ID.Kind, c.On, c.Class, c.Expected, c.Observed)
 					}
 				}
 			}
 			if bad > 0 || len(checks) == 0 {
-				t.Fatalf("%d of %d checks not %s", bad, len(checks), want)
+				t.Fatalf("%d of %d checks not as expected", bad, len(checks))
 			}
 		})
 	}

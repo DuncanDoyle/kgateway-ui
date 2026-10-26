@@ -20,6 +20,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
@@ -50,6 +51,8 @@ type Config struct {
 	ProxyMode proxymode.Resolver
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
+	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
+	DelegationBounds computed.Bounds
 	// Logger receives install rejections; nil means slog.Default().
 	Logger *slog.Logger
 	// MetricsMaxAge is the age beyond which a metrics result is stale
@@ -119,7 +122,8 @@ type Engine struct {
 	computeMu sync.Mutex
 	seq       uint64
 	seen      map[generation]time.Time
-	rejected  map[string]bool // install errors already logged
+	rejected  map[string]bool   // install errors already logged
+	caps      map[string]string // each install's last logged delegation cap
 	// decode caches typed views by (uid, resourceVersion); only touched under computeMu.
 	decode *decodeCache
 	// persist holds the KGWUI-012 windows; only touched under computeMu.
@@ -154,7 +158,11 @@ func New(cfg Config) *Engine {
 	if cfg.RulesFor == nil {
 		cfg.RulesFor = rulesets.Select
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache(), persist: newPersistence()}
+	if cfg.DelegationBounds == (computed.Bounds{}) {
+		cfg.DelegationBounds = computed.DefaultBounds
+	}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]string{},
+		decode: newDecodeCache(), persist: newPersistence()}
 }
 
 // Platform returns the platform the engine computes models for.
@@ -195,6 +203,34 @@ func (e *Engine) firstSeen(now time.Time) func(u *unstructured.Unstructured) tim
 			return t
 		}
 		return now
+	}
+}
+
+// graceEnd returns a missing child entry's grace end (rules §9.3 step 3):
+// Grace after the latest first-seen time of the current generation of the
+// routes on its contributing paths, the child and P included; zero for any
+// other check. HTTPRoutes are indexed on the first call. Called under computeMu.
+func (e *Engine) graceEnd(snap *cache.Snapshot, served []kinds.Served, firstSeen func(*unstructured.Unstructured) time.Time) func(computed.CheckResult) time.Time {
+	var routes map[objects.Ref]*unstructured.Unstructured
+	return func(c computed.CheckResult) time.Time {
+		if c.ID.Kind != computed.KindChildEntry {
+			return time.Time{}
+		}
+		if routes == nil {
+			routes = httpRoutes(snap, served)
+		}
+		var t time.Time
+		for _, r := range c.Contributors {
+			if u := routes[r]; u != nil {
+				if s := firstSeen(u); s.After(t) {
+					t = s
+				}
+			}
+		}
+		if t.IsZero() {
+			return t
+		}
+		return t.Add(health.Grace)
 	}
 }
 
@@ -256,10 +292,18 @@ func (e *Engine) compute() *Published {
 		}
 		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion())}
 		runs = append(runs, r)
-		views = append(views, computeViews(r.sel, res, r.owned, snap, served, e.decode))
+		v := computeViews(r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		views = append(views, v)
+		// The cap hit is logged once per change, as rejections are (rules §5.7).
+		if c := v.Delegation.Cap; c != e.caps[res.ID()] {
+			e.caps[res.ID()] = c
+			if c != "" {
+				e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
+			}
+		}
 	}
-	if at := e.persist.persist(now, views); !at.IsZero() {
-		next.add(at, false) // mature once now − since ≥ Window
+	if at := e.persist.persist(now, views, e.graceEnd(snap, served, firstSeen)); !at.IsZero() {
+		next.add(at, false) // mature once now − since ≥ Window, or at a missing entry's grace end
 	}
 	for i, r := range runs {
 		res, owned := r.res, r.owned

@@ -1,7 +1,7 @@
 # A root behind a Selector listener (rules §5.6): r is admitted through Namespace web's labels.
 # Every context below r depends on r's eligibility set plus the routes on its path, so c's row
 # and effective edge depend on that Namespace; a caller who may not view it gets them restricted
-# (design §7.4). View A status is hand-written to agree.
+# (design §7.4). Status is hand-written to agree, the child's entry included.
 provenance: computed-rules §5.6, §11.2
 controllerVersion: v2.4.7
 namespaces: {infra: {}, web: {team: web}, apps: {}}
@@ -37,7 +37,9 @@ objects:
       conditions:
       - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
-  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /w/c}}]}]}}
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /w/c}}]}]},
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: web},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}}
 expect:
   listeners:
     Gateway infra/gw http: {count: 1}

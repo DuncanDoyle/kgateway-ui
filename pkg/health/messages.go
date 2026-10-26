@@ -60,6 +60,14 @@ const (
 	DelegationNoChildMessage = "A delegating rule has no accepted child route"
 	// DelegationNoChildDetail starts that finding's detail; the raw condition follows.
 	DelegationNoChildDetail = "A delegating rule selects no child route the controller accepted"
+	// ComputedNotAttachedMessage is the message of KGWUI-011's computed and orphan triggers (draft).
+	ComputedNotAttachedMessage = "Parent route does not use this route"
+	// OrphanDetail is the orphan trigger's detail (design §6.2 draft).
+	OrphanDetail = "No parent route in this install keeps this route, and it has no parentRefs of its own."
+	// computedDropped and computedForbidden are the computed trigger's
+	// reason; %s is the parent (draft, wording pass Task 67).
+	computedDropped   = "The UI computes that HTTPRoute %s drops this route: no rule fits the parent's matches."
+	computedForbidden = "The UI computes that HTTPRoute %s selects this route, but the route's parentRefs do not permit that parent."
 )
 
 // Wording for KGWUI-012 (design §6.2), from the wording pass (Task 48).
@@ -72,4 +80,8 @@ const (
 	parentDisagrees = "Parent %s: computed %s, controller reports %s."
 	// ruleSetDetail ends every detail with the rule set.
 	ruleSetDetail = " Rule set %s."
+	// childDisagrees is a child-entry detail: parent, computed, controller.
+	childDisagrees = "Status entry for parent HTTPRoute `%s`: computed %s, controller reports %s."
+	// resolvedDisagrees is a parent-resolvedrefs detail: the parent's report key, computed, controller.
+	resolvedDisagrees = "ResolvedRefs under parent %s: computed %s, controller reports %s."
 )

@@ -1,7 +1,7 @@
 # A row with no contexts kept at the install cap (rules §5.7, bounds ContextsPerInstall 1): c's
 # context is the install's only retained one, so d's row keeps none and is contextsTruncated, and
 # d's effective edge is sent as contexts [] with contextsTruncated, never as complete.
-# View A status is hand-written to agree (rules §8.3); children have no status.
+# Status is hand-written to agree (rules §8.3), the children's entries included.
 provenance: computed-rules §5.7, §11.2
 controllerVersion: v2.4.7
 bounds: {ContextsPerInstall: 1}
@@ -37,9 +37,13 @@ objects:
       conditions:
       - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
 - {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
-  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/c}}]}]}}
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/c}}]}]},
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}}
 - {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: d, namespace: apps},
-  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /b/d}}]}]}}
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /b/d}}]}]},
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}}
 expect:
   listeners:
     Gateway infra/gw http: {count: 1}

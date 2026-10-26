@@ -13,15 +13,36 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// computeViews runs sel's view A over one install and cross-checks it. The
-// checks' State, Mature and Since are left for the persistence step.
+// computeViews runs sel's views A, B and C over one install, within bounds,
+// and cross-checks them. The checks' State, Mature and Since are left for
+// the persistence step.
 func computeViews(sel computed.Selection, res install.Resolved, owned *install.Owned, snap *cache.Snapshot,
-	served []kinds.Served, dec objects.Decoder,
+	served []kinds.Served, dec objects.Decoder, bounds computed.Bounds,
 ) *computed.Views {
 	in := attachmentInput(res, owned, snap, served, dec)
 	att := sel.Rules.Attachment(in)
-	return &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: att,
-		Checks: computed.CheckAttachment(res.ID(), sel, in, att)}
+	a := computed.CheckAttachment(res.ID(), sel, in, att)
+	din := delegationInput(res, owned, snap, served, dec, att)
+	din.Bounds = bounds
+	v := &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: att, Delegation: sel.Rules.Delegation(din)}
+	d := computed.CheckDelegation(res.ID(), sel, din, &v.Delegation)
+	v.Checks = append(append(make([]computed.CheckResult, 0, len(a)+len(d)), a...), d...)
+	return v
+}
+
+// httpRoutes maps the snapshot's HTTPRoutes by ref.
+func httpRoutes(snap *cache.Snapshot, served []kinds.Served) map[objects.Ref]*unstructured.Unstructured {
+	for _, k := range kinds.ByCategory(served, kinds.CategoryRoute) {
+		if k.Group == objects.GatewayAPIGroup && k.Kind == "HTTPRoute" {
+			us := snap.Objects[k.GVR()]
+			m := make(map[objects.Ref]*unstructured.Unstructured, len(us))
+			for _, u := range us {
+				m[objects.RefOf(u)] = u
+			}
+			return m
+		}
+	}
+	return map[objects.Ref]*unstructured.Unstructured{}
 }
 
 // attachmentInput is view A's input for one install (rules §3.1, §4.6): its

@@ -24,6 +24,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -302,7 +303,9 @@ func liveHeap() uint64 {
 	return ms.HeapAlloc
 }
 
-// matured reports whether every computed check of m raised KGWUI-012.
+// matured counts m's KGWUI-012 findings and the checks that can raise one: a
+// candidate that is no trigger, and no missing child entry whose parent's own
+// entry is not current, which waits on that status, not on time (rules §9.3).
 func matured(m *engine.Model) (findings, checks int) {
 	in := m.Installs[0]
 	for _, f := range in.Health.Findings {
@@ -311,7 +314,11 @@ func matured(m *engine.Model) (findings, checks int) {
 		}
 	}
 	if in.Computed != nil {
-		checks = len(in.Computed.Checks)
+		for _, c := range in.Computed.Checks {
+			if c.Candidate() && c.Class != computed.ClassTrigger && (c.Class != computed.ClassMissing || c.ParentCurrent) {
+				checks++
+			}
+		}
 	}
 	return findings, checks
 }
@@ -348,7 +355,7 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	for testutil.Recv(t, ev, "loop event").Kind != engine.EvPublished { // the start-up publication
 	}
 	if tier.Contradict {
-		// Windows mature on the real clock about 30 s after start-up.
+		// Windows mature on the real clock 30 s after start-up, missing child entries at 60 s.
 		for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
 			if f, c := matured(e.Current().Model); f == c && c > 0 {
 				break

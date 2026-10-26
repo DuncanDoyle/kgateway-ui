@@ -27,6 +27,13 @@ const (
 	KindParentResolvedRefs CheckKind = "parent-resolvedrefs"
 )
 
+// Trigger kinds of KGWUI-011 (rules §9.1): the computed trigger per (route,
+// parent) and the orphan trigger per route.
+const (
+	KindDelegatedNotAttached CheckKind = "delegated-not-attached"
+	KindOrphan               CheckKind = "orphan-not-attached"
+)
+
 // Identity is a check's identity: a rule set change gives a new one (rules §9.1).
 type Identity struct {
 	Install, RuleSet string
@@ -62,6 +69,9 @@ const (
 	ClassNotObservable Class = "not-observable"
 	ClassInconclusive  Class = "inconclusive"
 	ClassUnknown       Class = "unknown"
+	// ClassTrigger is a KGWUI-011 trigger whose predicate holds (our call:
+	// rules §8.3 gives it no class). It matures but never makes a check pending.
+	ClassTrigger Class = "trigger"
 )
 
 // noteInconclusive is the note of an inconclusive check (rules §8.1).
@@ -94,10 +104,24 @@ type CheckResult struct {
 	Since  time.Time
 }
 
+// Parent is the parent route of a child-entry or delegated-not-attached
+// check, read from its subject; ok is false for other kinds.
+func (c CheckResult) Parent() (objects.Ref, bool) {
+	if c.ID.Kind != KindChildEntry && c.ID.Kind != KindDelegatedNotAttached {
+		return objects.Ref{}, false
+	}
+	// Subject: child group, kind, namespace, name, then the parent's.
+	p := strings.SplitN(c.ID.Subject, "\x00", 9)
+	if len(p) < 8 {
+		return objects.Ref{}, false
+	}
+	return objects.Ref{Group: p[4], Kind: p[5], Namespace: p[6], Name: p[7]}, true
+}
+
 // Candidate reports whether c can mature into KGWUI-012 (rules §9.3 step 1).
 func (c CheckResult) Candidate() bool {
 	switch c.Class {
-	case ClassContradicting, ClassMissing:
+	case ClassContradicting, ClassMissing, ClassTrigger:
 		return true
 	case ClassUnexpected:
 		return c.Verified
@@ -512,6 +536,9 @@ type delegChecker struct {
 	idx  []int
 	// seen are the (parent, key) pairs of one route's leftover entries.
 	seen []RouteKey
+	// hashes and parentsSeen are one orphan's per-parent prints.
+	hashes      []uint64
+	parentsSeen []objects.Ref
 }
 
 // CheckDelegation cross-checks views B and C against the controller's status
@@ -535,7 +562,11 @@ func CheckDelegation(install string, sel Selection, in DelegationInput, r *Deleg
 	out := make([]CheckResult, 0, len(c.byChild)+len(r.Signals))
 	out = c.childEntries(out)
 	out = c.leftEntries(out)
-	return c.parents(out)
+	out = c.parents(out)
+	if in.ScopeUnknown {
+		return out // no trigger while the scope is unknown (D-024)
+	}
+	return c.triggers(out)
 }
 
 func (c *delegChecker) result(kind CheckKind, subject string, on objects.Ref) CheckResult {
@@ -1081,3 +1112,151 @@ func delegationOnly(v *objects.HTTPRouteView) bool {
 }
 
 func extensionRef(f objects.Filter) bool { return f.Type == "ExtensionRef" || f.ExtensionRef != nil }
+
+// triggers adds KGWUI-011's computed and orphan trigger checks whose
+// predicates hold (design §6.2, rules §9.3). Each is ClassTrigger: it matures
+// 30 s after its window starts and never makes a check pending.
+func (c *delegChecker) triggers(out []CheckResult) []CheckResult {
+	rows := c.r.Rows
+	for i := 0; i < len(c.byChild); {
+		child := rows[c.byChild[i]].Key.Child
+		j := i + 1
+		for j < len(c.byChild) && rows[c.byChild[j]].Key.Child == child {
+			j++
+		}
+		if ci := c.route(child); ci >= 0 {
+			out = c.childTriggers(out, ci, c.byChild[i:j])
+		}
+		i = j
+	}
+	return out
+}
+
+// childTriggers checks the rows (indices, by parent) that select route ci:
+// one computed trigger per (route, parent), or one orphan trigger.
+func (c *delegChecker) childTriggers(out []CheckResult, ci int, rows []int) []CheckResult {
+	rt := &c.in.Routes[ci]
+	if c.r.Complete.Incomplete(rt.Ref) {
+		return out
+	}
+	// An orphan: no parentRefs, no entry, only wildcard refs of owned parents,
+	// each dropping or forbidding it in every context, each complete.
+	orphan := len(rt.View.ParentRefs) == 0 && !c.anyEntry(ci)
+	for a := 0; a < len(rows); {
+		parent := c.r.Rows[rows[a]].Key.Parent
+		b := a + 1
+		for b < len(rows) && c.r.Rows[rows[b]].Key.Parent == parent {
+			b++
+		}
+		group := rows[a:b]
+		ok, named, forbidden := c.unkept(parent, group)
+		orphan = orphan && ok && !named
+		if ok && named && !c.eligible(ci, parent) {
+			out = append(out, c.notAttached(ci, parent, group, forbidden))
+		}
+		a = b
+	}
+	if orphan {
+		out = append(out, c.orphan(ci, rows))
+	}
+	return out
+}
+
+// unkept reports whether owned parent keeps none of group's rows, complete:
+// each is dropped or forbidden in every context. named: a name or label ref
+// selects the child; forbidden: a row is forbidden.
+func (c *delegChecker) unkept(parent objects.Ref, group []int) (ok, named, forbidden bool) {
+	if pi := c.route(parent); pi < 0 || !c.in.Routes[pi].Owned || c.r.Complete.Incomplete(parent) {
+		return false, false, false
+	}
+	for _, g := range group {
+		row := &c.r.Rows[g]
+		switch row.Outcome {
+		case OutcomeForbidden:
+			forbidden = true
+		case OutcomeDropped:
+		default:
+			return false, false, false
+		}
+		named = named || row.RefAsWritten.Mode != objects.DelegationWildcard
+	}
+	return true, named, forbidden
+}
+
+// eligible reports whether route ci has an entry from this install's
+// controllers for parent that its parentRefs permit (design §4.2).
+func (c *delegChecker) eligible(ci int, parent objects.Ref) bool {
+	v := c.in.Routes[ci].View
+	for i := range v.Parents {
+		e := &v.Parents[i]
+		if e.ParentRef.Ref() == parent && slices.Contains(c.in.ControllerNames, e.ControllerName) &&
+			(len(v.ParentRefs) == 0 || slices.Contains(v.ParentRefs, e.ParentRef)) {
+			return true
+		}
+	}
+	return false
+}
+
+// anyEntry reports whether route ci has an entry from this install's controllers.
+func (c *delegChecker) anyEntry(ci int) bool {
+	return slices.ContainsFunc(c.in.Routes[ci].View.Parents, func(e objects.RouteParentStatus) bool {
+		return slices.Contains(c.in.ControllerNames, e.ControllerName)
+	})
+}
+
+// notAttached is the computed trigger of route ci under parent; its
+// fingerprint is child-entry's with no entry (rules §9.2).
+func (c *delegChecker) notAttached(ci int, parent objects.Ref, group []int, forbidden bool) CheckResult {
+	child := c.in.Routes[ci].Ref
+	out := c.result(KindDelegatedNotAttached, Subject(child.Group, child.Kind, child.Namespace, child.Name,
+		parent.Group, parent.Kind, parent.Namespace, parent.Name), child)
+	out.Class, out.Expected, out.Observed = ClassTrigger, string(OutcomeDropped), expectNone
+	if forbidden {
+		out.Expected = string(OutcomeForbidden)
+	}
+	out.Deps = c.unionDeps(group, nil, nil, child, parent)
+	out.Contributors = routesOf(out.Deps)
+	out.Fingerprint = c.unkeptPrint(ci, group)
+	return out
+}
+
+// unkeptPrint is the child-entry fingerprint of group's rows on route ci, complete and with no entry.
+func (c *delegChecker) unkeptPrint(ci int, group []int) uint64 {
+	var digest uint64
+	for _, g := range group {
+		digest += c.r.Rows[g].ContextDigest
+	}
+	return childEntryPrint(c.p, c.childInputs(ci), c.rowRefs(group, false), digest, c.in.Wildcard, false, nil)
+}
+
+// orphan is the orphan trigger of route ci over every selecting row (rules
+// §9.2): its parentRefs, each selecting parent and ref, and each parent's
+// child-entry inputs.
+func (c *delegChecker) orphan(ci int, rows []int) CheckResult {
+	child := c.in.Routes[ci].Ref
+	out := c.result(KindOrphan, Subject(child.Group, child.Kind, child.Namespace, child.Name), child)
+	out.Class, out.Observed = ClassTrigger, expectNone
+	out.Deps = c.unionDeps(rows, nil, nil, child)
+	out.Contributors = routesOf(out.Deps)
+	// childEntryPrint uses c.p, so each parent's print is taken before the total.
+	c.hashes, c.parentsSeen = c.hashes[:0], c.parentsSeen[:0]
+	for a := 0; a < len(rows); {
+		parent := c.r.Rows[rows[a]].Key.Parent
+		b := a + 1
+		for b < len(rows) && c.r.Rows[rows[b]].Key.Parent == parent {
+			b++
+		}
+		c.hashes = append(c.hashes, c.unkeptPrint(ci, rows[a:b]))
+		c.parentsSeen = append(c.parentsSeen, parent)
+		a = b
+	}
+	p := c.p
+	p.start()
+	p.flag(len(c.in.Routes[ci].View.ParentRefs) == 0)
+	for i, h := range c.hashes {
+		p.ref(c.parentsSeen[i])
+		p.u64(h)
+	}
+	out.Fingerprint = p.sum()
+	return out
+}
