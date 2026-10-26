@@ -1,0 +1,76 @@
+# Input: translator/gateway/testutils/inputs/listener-sets/basic.yaml@v2.3.11, with
+# namespace default written out and the Service left out. Status is copied from the output.
+provenance: translator/gateway/testutils/outputs/listener-sets/basic.yaml@v2.3.11
+controllerVersion: v2.3.11
+namespaces:
+  default: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: example-gateway, namespace: default}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http-8080, protocol: HTTP, port: 8080}
+    allowedListeners:
+      namespaces: {from: All}
+  status:
+    attachedListenerSets: 1
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: http-8080
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: foo-listenerset, namespace: default}
+  spec:
+    parentRef: {name: example-gateway, kind: Gateway, group: gateway.networking.k8s.io}
+    listeners:
+    - name: http-9090
+      protocol: HTTP
+      port: 9090
+      allowedRoutes:
+        namespaces: {from: All}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: http-9090
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: foo-route, namespace: default}
+  spec:
+    parentRefs:
+    - {name: foo-listenerset, group: gateway.networking.k8s.io, kind: ListenerSet}
+    hostnames: [foo.example.com]
+    rules:
+    - matches:
+      - path: {type: PathPrefix, value: /}
+      backendRefs:
+      - {name: foo-svc, port: 8080}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {group: gateway.networking.k8s.io, kind: ListenerSet, name: foo-listenerset}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+      - {type: ResolvedRefs, status: "True", reason: ResolvedRefs, observedGeneration: 1}
+expect:
+  listeners:
+    Gateway default/example-gateway http-8080: {count: 0}
+    ListenerSet default/foo-listenerset http-9090: {count: 1}
+  parentRefs:
+    "HTTPRoute default/foo-route #0": {outcome: accepted}
+  checks:
+    Gateway default/example-gateway http-8080: {state: checked, coverage: [count-agrees]}
+    ListenerSet default/foo-listenerset http-9090: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute default/foo-route #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

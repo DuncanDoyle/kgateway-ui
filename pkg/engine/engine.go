@@ -13,6 +13,8 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -46,6 +48,8 @@ type Config struct {
 	Platform platform.Info
 	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
 	ProxyMode proxymode.Resolver
+	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
+	RulesFor func(controllerVersion string) computed.Selection
 	// Logger receives install rejections; nil means slog.Default().
 	Logger *slog.Logger
 	// MetricsMaxAge is the age beyond which a metrics result is stale
@@ -76,6 +80,10 @@ type InstallModel struct {
 	Health   health.Report
 	// Index is the explorer's immutable index; handlers never decode objects.
 	Index *explore.Index
+	// Rules is the computed rule set selected for this install's controller (D-020).
+	Rules computed.Selection
+	// Computed are the install's computed views with their check states.
+	Computed *computed.Views
 }
 
 // Model is one consistent computation over a snapshot.
@@ -114,6 +122,8 @@ type Engine struct {
 	rejected  map[string]bool // install errors already logged
 	// decode caches typed views by (uid, resourceVersion); only touched under computeMu.
 	decode *decodeCache
+	// persist holds the KGWUI-012 windows; only touched under computeMu.
+	persist persistence
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -141,7 +151,10 @@ func New(cfg Config) *Engine {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache()}
+	if cfg.RulesFor == nil {
+		cfg.RulesFor = rulesets.Select
+	}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache(), persist: newPersistence()}
 }
 
 // Platform returns the platform the engine computes models for.
@@ -229,10 +242,27 @@ func (e *Engine) compute() *Published {
 		}
 		return t
 	}
+	// Views first: one persistence step over every install's checks precedes health.
+	type run struct {
+		res   install.Resolved
+		owned *install.Owned
+		sel   computed.Selection
+	}
+	var runs []run
+	var views []*computed.Views
 	for _, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion())}
+		runs = append(runs, r)
+		views = append(views, computeViews(r.sel, res, r.owned, snap, served, e.decode))
+	}
+	if at := e.persist.persist(now, views); !at.IsZero() {
+		next.add(at, false) // mature once now − since ≥ Window
+	}
+	for i, r := range runs {
+		res, owned := r.res, r.owned
 		// Read once: the verifier, health and the source fingerprint share this evidence.
 		met, has := e.cfg.Metrics.Get(res.ID())
 		m.MetricsRead = append(m.MetricsRead, MetricsRead{ID: res.ID(), Result: met, Present: has})
@@ -244,12 +274,14 @@ func (e *Engine) compute() *Published {
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
-		owned := asg.PerInstall[res.ID()]
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
-			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode}, e.cfg.Checks)
+			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
+			Computed: views[i], Views: e.decode}, e.cfg.Checks)
 		// The index decodes through the cache, so it runs here under computeMu.
-		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode})
-		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform)})
+		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
+			Computed: views[i]})
+		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
+			Rules: r.sel, Computed: views[i]})
 	}
 	m.Next = next.next
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}

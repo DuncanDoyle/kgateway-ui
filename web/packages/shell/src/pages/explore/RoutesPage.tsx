@@ -2,8 +2,9 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useMemo } from "react";
 import { useRoutes } from "../../api/exploreHooks";
+import { useListFilter } from "../../api/hooks";
 import type { ParentSummary, RouteRow } from "../../api/types";
-import { columnCopy, listCopy, parentLineCopy, routeStateCopy } from "../../copy/explorer";
+import { columnCopy, listCopy, parentLineCopy, routeStateCopy, viewACopy } from "../../copy/explorer";
 import { LinkedName } from "../../explore/LinkedName";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
@@ -39,6 +40,11 @@ const NOUN = ["route", "routes"] as const;
 
 /** The 2.2 route state flags (design §6.1); the wording pass (Task 31) finalises the labels. */
 const stateOptions: FilterOption[] = Object.entries(routeStateCopy).map(([value, label]) => ({ value, label }));
+/** View A's computed flags (2.3); offered only to a server that advertises view A, as strict params reject them before. */
+const viewAOptions: FilterOption[] = [
+  ...stateOptions,
+  ...Object.entries(viewACopy.stateFlags).map(([value, label]) => ({ value, label })),
+];
 
 /** One parent of a row as text, for the cell's Tooltip. */
 function parentText(p: ParentSummary): string {
@@ -127,6 +133,8 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
   const l = useListPage("routes", useRoutes);
   const page = useShownPage(l.data, !!l.error);
   const cols = useMemo(() => columns(l.id), [l.id]);
+  // The listener filter and the computed flags arrive together in 2.3, so /meta's listener entry gates both.
+  const viewA = useListFilter("routes", "listener");
   return (
     <ListFrame
       title={listCopy.routes.title}
@@ -150,7 +158,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
         >
           <StateFilter
             label={listCopy.routeState}
-            options={stateOptions}
+            options={viewA ? viewAOptions : stateOptions}
             selected={listValues(l.params, "state")}
             onChange={(v) => l.setFilter({ state: v.join(",") })}
           />

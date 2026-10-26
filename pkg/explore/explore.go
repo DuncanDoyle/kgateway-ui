@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -25,6 +26,8 @@ type Input struct {
 	Health     health.Report
 	// Views decodes typed views; nil decodes directly.
 	Views objects.Decoder
+	// Computed is the install's view A; nil computes no members or computed flags.
+	Computed *computed.Views
 }
 
 // RowID indexes Index.Routes, Index.Gateways or Index.ListenerSets, as the
@@ -43,6 +46,10 @@ const (
 	FlagPending
 	FlagDeclared
 	FlagNoParent
+	// FlagDisagrees: the row's object has KGWUI-012.
+	FlagDisagrees
+	// FlagListenerUnknown: a status-accepted parentRef whose outcome is unknown or has no listener.
+	FlagListenerUnknown
 )
 
 // flagNames are the wire names of design §6.1, in bit order.
@@ -57,6 +64,8 @@ var flagNames = []struct {
 	{FlagPending, "pending"},
 	{FlagDeclared, "declared"},
 	{FlagNoParent, "no-parent"},
+	{FlagDisagrees, "disagrees"},
+	{FlagListenerUnknown, "listener-unknown"},
 }
 
 // ParseFlag returns the flag with wire name s.
@@ -105,6 +114,11 @@ type ParentLink struct {
 	Cond *metav1.Condition
 	// Pending is why the status entry is not current, for a pending link.
 	Pending string
+	// Spec is the index of Ref in the row's spec parentRefs, or -1.
+	Spec int
+	// Dups are the later spec indexes that resolve to Ref; one written
+	// differently has its own report key and check (rules §8.2). Usually nil.
+	Dups []int
 }
 
 // RouteRow is one route the install lists (design §3.5): an owned route,
@@ -126,6 +140,10 @@ type RouteRow struct {
 	State    health.State
 	// Owned is true when the install owns the route.
 	Owned bool
+	// Computed is view A per parentRef to a Gateway or ListenerSet, in parentRef order.
+	Computed []RefFacts
+	// UnknownDeps are the dependencies of FlagListenerUnknown.
+	UnknownDeps DepSet
 	// search is the lower-cased "namespace/name" and hostnames.
 	search string
 }
@@ -150,6 +168,10 @@ type GatewayRow struct {
 	Routes, NotAccepted []RowID
 	// ListenerSets index Index.ListenerSets.
 	ListenerSets []RowID
+	// Members are the distinct member routes of the Gateway's own listeners whose count is known.
+	Members []RowID
+	// Disagreements counts the checks in state disagrees on the Gateway.
+	Disagreements int
 }
 
 // ListenerSetRow is one ListenerSet of the install.
@@ -164,6 +186,9 @@ type ListenerSetRow struct {
 	AcceptedReason string
 	// Routes index Index.Routes.
 	Routes []RowID
+	// Members and Disagreements are as on GatewayRow.
+	Members       []RowID
+	Disagreements int
 }
 
 // Worst is the first error and the first warning finding on one object.
@@ -196,7 +221,93 @@ type Index struct {
 	NoParent     []RowID
 	// Findings holds the worst error and warning finding per object.
 	Findings map[objects.Ref]Worst
-	admitted map[objects.Ref]Admission
+	// Refs is the install's dependency table; a DepSet indexes it (design §7.4 rule 10).
+	// Refs[i] for i < len(Routes) is route row i's ref.
+	Refs []objects.Ref
+	// ByListener lists view A's members per listener whose count is known, by row and parentRef.
+	ByListener map[ListenerKey][]Member
+	// Listeners holds every computed listener count.
+	Listeners map[ListenerKey]ListenerFacts
+	// RuleSet and RuleNote are view A's rule set and its selection label.
+	RuleSet, RuleNote string
+	admitted          map[objects.Ref]Admission
+	// parentKinds are the served Gateway and ListenerSet kinds.
+	parentKinds map[objects.GroupKind]bool
+}
+
+// DepSet is a computed result's dependencies, as indexes into Index.Refs.
+type DepSet []int32
+
+// ListenerKey names one listener of a Gateway or ListenerSet.
+type ListenerKey struct {
+	Resource objects.Ref
+	Listener string
+}
+
+// Member is a route row on a listener through one parentRef (spec index).
+type Member struct {
+	Row       RowID
+	ParentRef int
+	Hostnames []string
+	Deps      DepSet
+}
+
+// ListenerFacts is a listener's computed count and its cross-check.
+type ListenerFacts struct {
+	Count         int
+	Known         bool
+	Unknown       computed.UnknownReason
+	Error         string
+	IsolationNote bool
+	// Check is the listener-count cross-check, shared with the views; nil when none.
+	Check *computed.CheckResult
+}
+
+// ListenerHit is one listener an accepted parentRef attaches to.
+type ListenerHit struct {
+	Listener  string
+	Hostnames []string
+	Deps      DepSet
+}
+
+// RefFacts is view A's outcome of one parentRef of a route row. Out is the
+// source outcome, shared with the views: its ParentRef is the spec index and
+// its Resource the target. Listeners and Deps replace Out's.
+type RefFacts struct {
+	Out       *computed.RefOutcome
+	Listeners []ListenerHit
+	// Check is the route-accepted cross-check of the ref's report key, shared with the views; nil when none.
+	Check *computed.CheckResult
+	Deps  DepSet
+}
+
+// Facts returns view A's facts for parent link l of row id, or nil.
+func (ix *Index) Facts(id RowID, l ParentLink) *RefFacts {
+	if l.Spec < 0 {
+		return nil
+	}
+	return ix.Routes[id].facts(l.Spec, l.Target)
+}
+
+// DupFacts returns view A's facts for l's spec index l.Dups[k], or nil.
+func (ix *Index) DupFacts(id RowID, l ParentLink, k int) *RefFacts {
+	return ix.Routes[id].facts(l.Dups[k], l.Target)
+}
+
+// Ref returns the ref at index i of the dependency table.
+func (ix *Index) Ref(i int32) objects.Ref { return ix.Refs[i] }
+
+// Visible reports whether visible admits every ref of d; nil admits all.
+func (ix *Index) Visible(d DepSet, visible func(objects.Ref) bool) bool {
+	if visible == nil {
+		return true
+	}
+	for _, i := range d {
+		if !visible(ix.Refs[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // RowState is the state of ref's row from rep (design §6.3): any error

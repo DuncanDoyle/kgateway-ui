@@ -20,6 +20,7 @@ type list struct {
 	q  explore.Query
 	v  *view
 	l  linker
+	f  facts
 }
 
 // startList finds the install and parses the query, or writes 503, 404 or 400.
@@ -38,7 +39,8 @@ func (h *handler) startList(w http.ResponseWriter, r *http.Request, kind listKin
 		ix = &explore.Index{}
 	}
 	v := h.view(r)
-	return &list{h: h, r: r, p: p, i: i, ix: ix, q: q, v: v, l: linkerFor(v, p.Model, i)}
+	l := linkerFor(v, p.Model, i)
+	return &list{h: h, r: r, p: p, i: i, ix: ix, q: q, v: v, l: l, f: facts{ix: ix, v: v, l: l}}
 }
 
 func (ls *list) routeRef(id explore.RowID) objects.Ref { return ls.ix.Routes[id].Ref }
@@ -65,6 +67,8 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 	if ls == nil {
 		return
 	}
+	ls.v.borrow()
+	defer ls.v.release()
 	pg, err := ls.ix.QueryRoutes(ls.q, ls.v.visible())
 	if err != nil {
 		fail(w, err)
@@ -81,12 +85,12 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 func (ls *list) routeRow(id explore.RowID) RouteRow {
 	r := &ls.ix.Routes[id]
 	out := RouteRow{Ref: ls.l.linked(r.Ref), Hostnames: r.Hostnames, Parents: make([]ParentSummary, 0, len(r.Parents)),
-		ParentRoutes: make([]LinkedRef, 0, len(r.ParentRoutes)), Children: r.Children, Flags: r.Flags.Names(), Health: r.State}
+		ParentRoutes: make([]LinkedRef, 0, len(r.ParentRoutes)), Children: r.Children, Flags: ls.ix.RowFlags(id, ls.v.visible()).Names(), Health: r.State}
 	if out.Hostnames == nil {
 		out.Hostnames = []string{}
 	}
 	for _, p := range r.Parents {
-		out.Parents = append(out.Parents, ls.parentSummary(p))
+		out.Parents = append(out.Parents, ls.parentSummary(id, p))
 	}
 	// Reported edges are the row's own status (rule 8); link() decides each.
 	for _, p := range r.ParentRoutes {
@@ -103,8 +107,8 @@ func (ls *list) routeRow(id explore.RowID) RouteRow {
 
 // parentSummary is one parent link on the wire. Via comes from the
 // ListenerSet's spec, so it is sent only when the caller may view both the
-// ListenerSet and its Gateway (rule 3).
-func (ls *list) parentSummary(p explore.ParentLink) ParentSummary {
+// ListenerSet and its Gateway (rule 3). Computed is view A for row id's parentRef.
+func (ls *list) parentSummary(id explore.RowID, p explore.ParentLink) ParentSummary {
 	s := ParentSummary{Ref: ls.l.linked(p.Target), SectionName: p.Ref.SectionName, Port: p.Ref.Port, Attachment: p.Attachment}
 	if p.Via != nil {
 		if ls.v.can(p.Target) && ls.v.can(*p.Via) {
@@ -119,6 +123,15 @@ func (ls *list) parentSummary(p explore.ParentLink) ParentSummary {
 		s.ConditionType, s.Reason, s.Message = p.Cond.Type, p.Cond.Reason, p.Cond.Message
 	case p.Attachment == explore.AttachmentPending:
 		s.Reason = p.Pending
+	}
+	if f := ls.ix.Facts(id, p); f != nil {
+		a := ls.f.attachment(f)
+		for k := range p.Dups {
+			if d := ls.ix.DupFacts(id, p, k); d != nil {
+				a = mergeAttachment(a, ls.f.attachment(d))
+			}
+		}
+		s.Computed = &a
 	}
 	return s
 }
@@ -155,10 +168,13 @@ func (h *handler) gateways(w http.ResponseWriter, r *http.Request) {
 	for _, id := range pg.IDs {
 		g := &ls.ix.Gateways[id]
 		row := GatewayListRow{Ref: ls.l.linked(g.Ref), Health: g.State, AttachedRoutes: g.AttachedRoutes,
-			NotAccepted: ls.notAccepted(g), ListenerSets: ls.v.recount(g.ListenerSets, ls.lsRef), Addresses: []string{}}
+			NotAccepted: ls.notAccepted(g), ListenerSets: ls.v.recount(g.ListenerSets, ls.lsRef), Disagreements: g.Disagreements, Addresses: []string{}}
 		if v := g.View; v != nil {
 			row.Class, row.Listeners = v.Class, len(v.Listeners)
 			row.Addresses = append(row.Addresses, v.StatusAddresses...)
+		}
+		if n, ok := ls.ix.GatewayMemberCount(id); ok {
+			row.Routes = &n
 		}
 		items = append(items, row)
 	}
@@ -193,9 +209,13 @@ func (h *handler) listenerSets(w http.ResponseWriter, r *http.Request) {
 	items := make([]ListenerSetRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
 		s := &ls.ix.ListenerSets[id]
-		row := ListenerSetRow{Ref: ls.l.linked(s.Ref), Parent: ls.l.linked(s.Parent), Health: s.State, AcceptedReason: s.AcceptedReason}
+		row := ListenerSetRow{Ref: ls.l.linked(s.Ref), Parent: ls.l.linked(s.Parent), Health: s.State, AcceptedReason: s.AcceptedReason,
+			Disagreements: s.Disagreements}
 		if s.View != nil {
 			row.Listeners = len(s.View.Listeners)
+		}
+		if n, ok := ls.ix.ListenerSetMemberCount(id); ok {
+			row.Routes = &n
 		}
 		items = append(items, row)
 	}

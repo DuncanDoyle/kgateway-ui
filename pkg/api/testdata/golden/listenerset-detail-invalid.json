@@ -32,6 +32,16 @@
             "from": "Same"
           }
         },
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "count-agrees"
+          ],
+          "rule": "listener-count",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "computedRoutes": 0,
         "name": "extra",
         "port": 8081,
         "protocol": "HTTP",
@@ -81,7 +91,8 @@
       "notAccepted": 0,
       "pending": 0,
       "unwatched": 0
-    }
+    },
+    "ruleSet": "kgateway-2.4"
   },
   "headers": {
     "Cache-Control": "no-store",

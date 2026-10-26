@@ -4,6 +4,8 @@
 package objects
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,6 +28,21 @@ func (r Ref) String() string {
 		return r.Name
 	}
 	return r.Namespace + "/" + r.Name
+}
+
+// Compare orders r and o by group, kind, namespace and name, stopping at
+// the first field that differs.
+func (r Ref) Compare(o Ref) int {
+	if c := strings.Compare(r.Group, o.Group); c != 0 {
+		return c
+	}
+	if c := strings.Compare(r.Kind, o.Kind); c != 0 {
+		return c
+	}
+	if c := strings.Compare(r.Namespace, o.Namespace); c != 0 {
+		return c
+	}
+	return strings.Compare(r.Name, o.Name)
 }
 
 // RefOf returns the Ref of u.
@@ -138,27 +155,55 @@ type routeView struct {
 	} `json:"status"`
 }
 
-// view decodes the subset of fields used by this package. Unknown fields are
-// ignored; a malformed field yields its zero value rather than an error,
-// because the UI must keep rendering the rest of the cluster. Each field
-// decodes on its own, so a malformed one never wipes another.
-func view(u *unstructured.Unstructured) routeView {
+// viewField selects the routeView fields that view decodes.
+type viewField uint8
+
+const (
+	vParentRefs viewField = 1 << iota
+	vSpecListeners
+	vParents
+	vAncestors
+	vConditions
+	vListeners
+	vAddresses
+)
+
+// view decodes the fields of want, a subset of those used by this package.
+// Unknown fields are ignored; a malformed field yields its zero value rather
+// than an error, because the UI must keep rendering the rest of the cluster.
+// Each field decodes on its own, so a malformed one never wipes another, and
+// decoding only some of them gives those the same values.
+func view(u *unstructured.Unstructured, want viewField) routeView {
 	var v routeView
 	spec, _ := u.Object["spec"].(map[string]any)
-	decodeKey(spec, "parentRefs", &v.Spec.ParentRefs)
-	decodeKey(spec, "listeners", &v.Spec.Listeners)
 	st, _ := u.Object["status"].(map[string]any)
-	decodeKey(st, "parents", &v.Status.Parents)
-	decodeKey(st, "ancestors", &v.Status.Ancestors)
-	decodeKey(st, "conditions", &v.Status.Conditions)
-	decodeKey(st, "listeners", &v.Status.Listeners)
-	decodeKey(st, "addresses", &v.Status.Addresses)
+	if want&vParentRefs != 0 {
+		decodeKey(spec, "parentRefs", &v.Spec.ParentRefs)
+	}
+	if want&vSpecListeners != 0 {
+		decodeKey(spec, "listeners", &v.Spec.Listeners)
+	}
+	if want&vParents != 0 {
+		decodeKey(st, "parents", &v.Status.Parents)
+	}
+	if want&vAncestors != 0 {
+		decodeKey(st, "ancestors", &v.Status.Ancestors)
+	}
+	if want&vConditions != 0 {
+		decodeKey(st, "conditions", &v.Status.Conditions)
+	}
+	if want&vListeners != 0 {
+		decodeKey(st, "listeners", &v.Status.Listeners)
+	}
+	if want&vAddresses != 0 {
+		decodeKey(st, "addresses", &v.Status.Addresses)
+	}
 	return v
 }
 
 // RouteParentRefs returns spec.parentRefs with defaults applied.
 func RouteParentRefs(u *unstructured.Unstructured) []ParentRef {
-	return parentRefs(view(u), u.GetNamespace())
+	return parentRefs(view(u, vParentRefs), u.GetNamespace())
 }
 
 func parentRefs(v routeView, ns string) []ParentRef {
@@ -171,7 +216,9 @@ func parentRefs(v routeView, ns string) []ParentRef {
 
 // WrittenParentRefs returns spec.parentRefs of any route kind as written,
 // index-aligned with RouteParentRefs.
-func WrittenParentRefs(u *unstructured.Unstructured) []WrittenRef { return writtenRefs(view(u)) }
+func WrittenParentRefs(u *unstructured.Unstructured) []WrittenRef {
+	return writtenRefs(view(u, vParentRefs))
+}
 
 func writtenRefs(v routeView) []WrittenRef {
 	out := make([]WrittenRef, 0, len(v.Spec.ParentRefs))
@@ -192,7 +239,7 @@ type RouteParentStatus struct {
 
 // RouteParents returns status.parents with defaults applied to each parentRef.
 func RouteParents(u *unstructured.Unstructured) []RouteParentStatus {
-	return routeParents(view(u), u.GetNamespace())
+	return routeParents(view(u, vParents), u.GetNamespace())
 }
 
 func routeParents(v routeView, ns string) []RouteParentStatus {
@@ -213,7 +260,7 @@ type AncestorStatus struct {
 
 // PolicyAncestors returns status.ancestors with defaults applied.
 func PolicyAncestors(u *unstructured.Unstructured) []AncestorStatus {
-	v := view(u)
+	v := view(u, vAncestors)
 	out := make([]AncestorStatus, 0, len(v.Status.Ancestors))
 	for _, a := range v.Status.Ancestors {
 		out = append(out, AncestorStatus{AncestorRef: a.AncestorRef.resolve(u.GetNamespace()), ControllerName: a.ControllerName, Conditions: a.Conditions})
@@ -222,7 +269,9 @@ func PolicyAncestors(u *unstructured.Unstructured) []AncestorStatus {
 }
 
 // Conditions returns status.conditions.
-func Conditions(u *unstructured.Unstructured) []metav1.Condition { return view(u).Status.Conditions }
+func Conditions(u *unstructured.Unstructured) []metav1.Condition {
+	return view(u, vConditions).Status.Conditions
+}
 
 // ListenerStatus is one entry of a Gateway's status.listeners.
 type ListenerStatus struct {
@@ -233,7 +282,9 @@ type ListenerStatus struct {
 }
 
 // GatewayListeners returns status.listeners.
-func GatewayListeners(u *unstructured.Unstructured) []ListenerStatus { return listenerStatus(view(u)) }
+func GatewayListeners(u *unstructured.Unstructured) []ListenerStatus {
+	return listenerStatus(view(u, vListeners))
+}
 
 func listenerStatus(v routeView) []ListenerStatus {
 	out := make([]ListenerStatus, 0, len(v.Status.Listeners))
@@ -246,7 +297,7 @@ func listenerStatus(v routeView) []ListenerStatus {
 // GatewayAddresses returns the values of status.addresses.
 func GatewayAddresses(u *unstructured.Unstructured) []string {
 	var out []string
-	for _, a := range view(u).Status.Addresses {
+	for _, a := range view(u, vAddresses).Status.Addresses {
 		out = append(out, a.Value)
 	}
 	return out
@@ -255,7 +306,7 @@ func GatewayAddresses(u *unstructured.Unstructured) []string {
 // GatewaySpecListeners returns the names in a Gateway's spec.listeners.
 func GatewaySpecListeners(u *unstructured.Unstructured) []string {
 	var out []string
-	for _, l := range view(u).Spec.Listeners {
+	for _, l := range view(u, vSpecListeners).Spec.Listeners {
 		out = append(out, l.Name)
 	}
 	return out

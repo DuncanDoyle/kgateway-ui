@@ -60,7 +60,13 @@ type MetaResponse struct {
 	Kinds []kinds.Served `json:"kinds"`
 	// Views are the group/kinds with a detail view; informational only.
 	Views []objects.GroupKind `json:"views,omitempty"`
+	// Filters lists, per list, the filters added after v1, so a client sends
+	// one only when this backend applies it (design §7.2).
+	Filters map[string][]string `json:"filters,omitempty"`
 }
+
+// addedFilters are the list filters added after API v1 (design §7.2).
+var addedFilters = map[string][]string{"routes": {"listener"}}
 
 // deploymentKind is listed in /api/v1/meta because finding links reach
 // controller Deployments (D-013). It is read through typed informers, not counted.

@@ -195,6 +195,7 @@ func TestSecondStepIsNone(t *testing.T) {
 						objs[k] = testutil.Namespace("blog", map[string]string{"team": "a"})
 					}
 				}
+				settleEdge(objs) // blog/posts is now watched
 			}
 			e, srv, _ := startWith(t, setup{}, objs...)
 			l := engineLinks{e: e, authz: AllowAll{}}

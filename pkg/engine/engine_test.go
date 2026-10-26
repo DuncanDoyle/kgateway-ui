@@ -9,11 +9,14 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -48,8 +51,16 @@ func gvr(t *testing.T, kind string) schema.GroupVersionResource {
 // with its proxy, the kgateway class and objs.
 func snapshot(t *testing.T, objs ...*unstructured.Unstructured) *cache.Snapshot {
 	t.Helper()
+	return snapshotEdge(t, 0, objs...)
+}
+
+// snapshotEdge is snapshot with edge's listener http reporting attached routes.
+func snapshotEdge(t *testing.T, attached int32, objs ...*unstructured.Unstructured) *cache.Snapshot {
+	t.Helper()
 	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
-	all := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil)}, objs...)
+	edge := testutil.Gateway("infra", "edge", "kgateway", nil, testutil.Listener{Name: "http", Attached: attached, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}})
+	all := append([]*unstructured.Unstructured{testutil.GatewayClass("kgateway", testutil.Controller, true), edge}, objs...)
 	access := map[schema.GroupVersionResource]cache.Access{}
 	for _, k := range testutil.ServedUpstream() {
 		access[k.GVR()] = cache.Access{OK: true}
@@ -273,5 +284,19 @@ func TestComputeStoresIndexFromDecodeCache(t *testing.T) {
 	}
 	if a, b := view(e.Compute()), view(e.Compute()); a != b {
 		t.Fatal("the index decoded an unchanged route again")
+	}
+}
+
+// Each install gets the rule set for its kgateway version; RulesFor replaces the default (D-020).
+func TestComputeSelectsRulesPerInstall(t *testing.T) {
+	now := func() time.Time { return testutil.Now }
+	cfg := config(snapshot(t), metricsAt(testutil.Now), now)
+	if s := New(cfg).Compute().Installs[0].Rules; s.Rules.Version() != "kgateway-2.4" || s.Note != "" {
+		t.Fatalf("2.4.7 controller: got %s %q", s.Rules.Version(), s.Note)
+	}
+	var got string
+	cfg.RulesFor = func(v string) computed.Selection { got = v; return rulesets.Select("2.3.0") }
+	if s := New(cfg).Compute().Installs[0].Rules; got != "2.4.7" || s.Rules.Version() != "kgateway-2.3" {
+		t.Fatalf("RulesFor must get the kgateway version and decide: got %q, %s", got, s.Rules.Version())
 	}
 }

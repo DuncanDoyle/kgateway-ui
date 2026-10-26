@@ -14,10 +14,14 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
@@ -59,9 +63,12 @@ func wireCases(t *testing.T) []goldenCase {
 	denied := testutil.HTTPRoute("shop", "denied", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
 		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")}})
 	authz := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Namespace != "shop" || ref.Name != "broken" })
-	_, kube, _ := startWith(t, setup{authz: authz, late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})}}, world(broken, denied)...)
+	// golden-v1 is frozen at attachedRoutes 0, so these worlds skip view A rather than loosen additivity.
+	_, kube, _ := startWith(t, setup{authz: authz, late: []*unstructured.Unstructured{testutil.HTTPRoute("shop", "young", []objects.ParentRef{gw})},
+		rulesFor: computedtest.NoViews}, frozenWorld(broken, denied)...)
 	// D-016 H2/H3: no namespace, name, scope or replica counts.
-	_, bare, _ := startWith(t, setup{detectors: []install.Detector{idDetector{id: "acme~edge_1"}}, metrics: okMetrics("acme~edge_1"), platform: platform.Info{Name: "Test"}}, world()...)
+	_, bare, _ := startWith(t, setup{detectors: []install.Detector{idDetector{id: "acme~edge_1"}}, metrics: okMetrics("acme~edge_1"), platform: platform.Info{Name: "Test"},
+		rulesFor: computedtest.NoViews}, frozenWorld()...)
 
 	return []goldenCase{
 		{"meta", kube, "/api/v1/meta"},
@@ -85,6 +92,8 @@ func listCases(t *testing.T) []goldenCase {
 	_, srv, _ := startWith(t, setup{}, explorerWorld(partialLS())...)
 	_, denied, _ := startWith(t, setup{authz: restrictedAuthz()}, explorerWorld(append(probeRoutes(), testutil.Backend("shop", "be-x", nil))...)...)
 	_, absent, _ := startWith(t, setup{authz: restrictedAuthz()}, explorerWorld(probeRoutes()...)...)
+	s, objs := viewAStates()
+	_, states, _ := startWith(t, s, objs...)
 	const base, edge = "/api/v1/installs/kgw.kgateway", "gateway.networking.k8s.io/Gateway/infra/edge"
 	return []goldenCase{
 		{"routes", srv, base + "/routes"},
@@ -96,6 +105,7 @@ func listCases(t *testing.T) []goldenCase {
 		{"routes-restricted", denied, base + "/routes"},
 		{"routes-by-backend-restricted", denied, base + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"},
 		{"routes-by-backend-restricted", absent, base + "/routes?backend=gateway.kgateway.dev/Backend/shop/be-x"},
+		{"routes-by-listener", states, base + "/routes?" + edgeParent + "&listener=drift"},
 	}
 }
 
@@ -108,6 +118,10 @@ func detailCases(t *testing.T) []goldenCase {
 		return lsWith("na", "ListenerSet", edgeRef, notAllowed, testutil.Listener{Name: "extra"})
 	}
 	_, gws, _ := startWith(t, setup{}, listenerEdge(explorerWorld(partialLS()))...)
+	s, objs := viewAStates()
+	_, states, _ := startWith(t, s, objs...)
+	s.authz = hideNamespaces
+	_, statesRestricted, _ := startWith(t, s, objs...)
 	_, unset, _ := startWith(t, setup{}, world(na())...)
 	_, allowed, _ := startWith(t, setup{}, edgeAllowing(map[string]any{"namespaces": map[string]any{"from": "Same"}}, world(na()))...)
 	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
@@ -116,7 +130,8 @@ func detailCases(t *testing.T) []goldenCase {
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
 	_, cand, _ := startWith(t, setup{}, world(append(farWorld(), mid)...)...)
 	return []goldenCase{
-		{"gateway-detail", gws, gwDetail},
+		{"gateway-detail", states, gwDetail},
+		{"gateway-detail-restricted", statesRestricted, gwDetail},
 		{"listenerset-detail", unset, lsDetail + "infra/na"},
 		{"listenerset-detail-allowed", allowed, lsDetail + "infra/na"},
 		{"listenerset-detail-invalid", gws, lsDetail + "infra/partial"},
@@ -124,6 +139,53 @@ func detailCases(t *testing.T) []goldenCase {
 		{"route-detail-restricted", restricted, routeDetail + "shop/mid"},
 		{"route-detail-candidate", cand, routeDetail + "blog/far"},
 	}
+}
+
+// viewAStates is the 2.2 gateway-detail world with one listener per check
+// state (design §7.6): http checked, https and new pending (no conditions, no
+// entry), drift disagrees and tcp unknown. drift admits every namespace and
+// reports one route more than view A counts, so the world disputes view A on
+// purpose. tcp's candidate infra/stream is a pre-v1 TCPRoute under an unknown
+// experimental setting. A caller who cannot view Namespaces sees http, a
+// Selector listener, as an unrestricted one does: a count is the listener's.
+func viewAStates() (setup, []runtime.Object) {
+	stream := tcpRoute("v1alpha2", "infra", "stream", []objects.ParentRef{sectionRef("tcp")}, testutil.AcceptedBy(sectionRef("tcp"), testutil.Controller))
+	objs := listenerEdge(explorerWorld(partialLS(), stream))
+	exp := corev1.EnvVar{Name: install.ExperimentalEnv, ValueFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}
+	d := testutil.ControllerDeployment("kgw", "kgateway", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`), exp)
+	for i, o := range objs {
+		switch v := o.(type) {
+		case *appsv1.Deployment:
+			if v.Name == "kgateway" {
+				objs[i] = d
+			}
+		case *corev1.Pod:
+			if v.Name == "kgateway-0" {
+				objs[i] = testutil.ControllerPod(d, "kgateway-0", true)
+			}
+		case *unstructured.Unstructured:
+			if v.GetKind() != "Gateway" || v.GetName() != "edge" {
+				continue
+			}
+			spec, status := v.Object["spec"].(map[string]any), v.Object["status"].(map[string]any)
+			spec["listeners"] = append(spec["listeners"].([]any),
+				map[string]any{"name": "drift", "port": int64(8081), "protocol": "HTTP", "allowedRoutes": map[string]any{"namespaces": map[string]any{"from": "All"}}},
+				map[string]any{"name": "tcp", "port": int64(9000), "protocol": "TCP"})
+			http := status["listeners"].([]any)[0].(map[string]any)
+			entry := func(name string, n int64) map[string]any {
+				return map[string]any{"name": name, "attachedRoutes": n, "supportedKinds": []any{}, "conditions": http["conditions"]}
+			}
+			// drift admits what http admits: every plain parentRef from a watched namespace.
+			status["listeners"] = append(status["listeners"].([]any), entry("drift", http["attachedRoutes"].(int64)+1), entry("tcp", 1))
+		}
+	}
+	served := testutil.ServedUpstream()
+	for i := range served {
+		if served[i].Kind == "TCPRoute" {
+			served[i].Version = "v1alpha2"
+		}
+	}
+	return setup{served: served, disputes: true}, objs
 }
 
 // partialLS is an accepted ListenerSet whose one listener is not programmed.
@@ -167,7 +229,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 166
+	const want = 208
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}

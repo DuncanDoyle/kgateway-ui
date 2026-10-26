@@ -83,6 +83,51 @@ type ParentSummary struct {
 	ConditionType string             `json:"conditionType,omitempty"`
 	Reason        string             `json:"reason,omitempty"`
 	Message       string             `json:"message,omitempty"`
+	// Computed is view A's outcome for this parentRef (2.3); nil when none was computed.
+	Computed *Attachment `json:"computed,omitempty"`
+}
+
+// ComputedBy marks a fact the UI computed (D-020).
+const ComputedBy = "ui"
+
+// Computed labels a computed fact with its rule set, rule and check state
+// (design §7.3, rules §8.4). By is always ComputedBy. Reason is the unknown
+// reason; a restricted fact carries neither Reason nor Note (design §7.4 rule 4).
+type Computed struct {
+	By       string   `json:"by"`
+	Rules    string   `json:"rules"`
+	Rule     string   `json:"rule"`
+	State    string   `json:"state"`
+	Coverage []string `json:"coverage,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
+	Note     string   `json:"note,omitempty"`
+}
+
+// ListenerAttachment is one listener a parentRef attaches to (view A).
+// EffectiveHostnames is sent only in state checked or disagrees.
+type ListenerAttachment struct {
+	Resource           LinkedRef `json:"resource"`
+	Listener           string    `json:"listener"`
+	EffectiveHostnames []string  `json:"effectiveHostnames,omitempty"`
+	Computed           Computed  `json:"computed"`
+}
+
+// Attachment is view A's outcome of one parentRef. Outcome is absent when
+// the outcome is unknown or restricted; Explanation is set on a rejection.
+type Attachment struct {
+	Outcome     string               `json:"outcome,omitempty"`
+	Listeners   []ListenerAttachment `json:"listeners"`
+	Explanation string               `json:"explanation,omitempty"`
+	Computed    Computed             `json:"computed"`
+}
+
+// RouteAttachment is view A for one Gateway or ListenerSet parentRef of a
+// route, by its index in spec.parentRefs.
+type RouteAttachment struct {
+	ParentRef objects.ParentRef `json:"parentRef"`
+	Index     int               `json:"index"`
+	Target    LinkedRef         `json:"target"`
+	Result    Attachment        `json:"result"`
 }
 
 // RouteRow is one row of the routes list. Mirror is set only under a
@@ -108,8 +153,14 @@ type GatewayListRow struct {
 	Listeners      int          `json:"listeners"`
 	AttachedRoutes int32        `json:"attachedRoutes"`
 	NotAccepted    int          `json:"notAccepted"`
-	ListenerSets   int          `json:"listenerSets"`
-	Addresses      []string     `json:"addresses"`
+	// Routes is view A's distinct routes on the Gateway's own listeners,
+	// hidden ones too; nil when a count is unknown (rule 5).
+	Routes       *int `json:"routes,omitempty"`
+	ListenerSets int  `json:"listenerSets"`
+	// Disagreements counts the Gateway's checks in state disagrees. Like
+	// health it is not filtered per caller (rule 9).
+	Disagreements int      `json:"disagreements,omitempty"`
+	Addresses     []string `json:"addresses"`
 }
 
 // ListenerSetRow is one row of the ListenerSets list.
@@ -119,6 +170,9 @@ type ListenerSetRow struct {
 	Health         health.State `json:"health"`
 	Listeners      int          `json:"listeners"`
 	AcceptedReason string       `json:"acceptedReason,omitempty"`
+	// Routes and Disagreements are as on GatewayListRow.
+	Routes        *int `json:"routes,omitempty"`
+	Disagreements int  `json:"disagreements,omitempty"`
 }
 
 // Condition is a status condition on the wire. Stale marks one whose
@@ -185,6 +239,11 @@ type ListenerDTO struct {
 	TLS           *ListenerTLSDTO    `json:"tls,omitempty"`
 	AllowedRoutes AllowedRoutesDTO   `json:"allowedRoutes"`
 	Status        *ListenerStatusDTO `json:"status,omitempty"`
+	// ComputedRoutes is view A's count, hidden members too; nil when unknown (rule 5).
+	ComputedRoutes *int      `json:"computedRoutes,omitempty"`
+	Computed       *Computed `json:"computed,omitempty"`
+	// IsolationNote: Envoy may serve fewer hostnames on this listener (rules §4.5).
+	IsolationNote bool `json:"isolationNote,omitempty"`
 }
 
 // RouteCounts counts the visible routes under a parent per attachment, as
@@ -273,6 +332,7 @@ type RouteDetail struct {
 	Annotations        RouteAnnotations  `json:"annotations"`
 	ParentRefs         []SpecParentRef   `json:"parentRefs"`
 	Parents            []ParentStatus    `json:"parents"`
+	Attachments        []RouteAttachment `json:"attachments,omitempty"`
 	Rules              []RuleDTO         `json:"rules"`
 	Ancestors          []AncestorPathDTO `json:"ancestors"`
 	AncestorsTruncated bool              `json:"ancestorsTruncated"`

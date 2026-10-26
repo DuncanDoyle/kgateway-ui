@@ -4,6 +4,11 @@
       "scope",
       "workloads"
     ],
+    "filters": {
+      "routes": [
+        "listener"
+      ]
+    },
     "kinds": [
       {
         "category": "gatewayclass",

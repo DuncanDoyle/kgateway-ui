@@ -37,6 +37,16 @@ type Tier struct {
 	Namespaces, Backends int
 	// LatticeDepth is the number of layers of the repeated diamond; 0 means none.
 	LatticeDepth int
+	// Contradict inverts every route's Accepted status and adds one to every
+	// attachedRoutes, so every view A check contradicts.
+	Contradict bool
+}
+
+// Contradicting is t with every view A check contradicting its status.
+func (t Tier) Contradicting() Tier {
+	t.Name += "-contradicting"
+	t.Contradict = true
+	return t
 }
 
 // The tiers of design §9.6, at their benchmark sizes.
@@ -59,9 +69,15 @@ const Class = "kgateway"
 // namespaces labelled testutil.ScaleTeamLabel.
 const SelectorListener = "web"
 
-// FailedEvery makes every FailedEvery-th parentRef, in generation order,
-// Accepted=False/NotAllowedByListeners: 5 %.
+// FailedEvery makes every FailedEvery-th parentRef, in generation order, one
+// the listeners reject (Accepted=False/NotAllowedByListeners): 5 %. An
+// HTTPRoute or GRPCRoute names a ListenerSet in another namespace; a TCPRoute
+// or TLSRoute a Gateway without a listener for its kind.
 const FailedEvery = 20
+
+// MixedEvery makes every MixedEvery-th Gateway carry a TCP and a TLS
+// listener, the parents of TCPRoutes and TLSRoutes.
+const MixedEvery = 10
 
 const (
 	gwAPI      = "gateway.networking.k8s.io/v1"
@@ -88,6 +104,7 @@ type world struct {
 	routes   []*route
 	gwNS     []string
 	lsNS     []string
+	lsByNS   [][]int    // namespace index → its ListenerSets
 	nsBE     [][]string // namespace index → its Backends
 	beNext   []int      // namespace index → next Backend to use
 	refCount int        // parentRefs generated so far
@@ -99,7 +116,8 @@ func beName(i int) string { return fmt.Sprintf("be-%04d", i) }
 
 // World returns tier t's GatewayClass, Gateways, ListenerSets, Backends
 // and routes, identical for equal seeds. Every route parentRef has a status
-// entry, Accepted=True except every FailedEvery-th one. Delegated children
+// entry, Accepted=True except every FailedEvery-th one, as view A computes
+// them (inverted under Contradict). Delegated children
 // have an entry under the parent route's ref for every delegating parent;
 // leaves reference Backends. Namespaces come from testutil.ScaleNamespaces.
 func World(t Tier, seed int64) []*unstructured.Unstructured {
@@ -107,8 +125,11 @@ func World(t Tier, seed int64) []*unstructured.Unstructured {
 	for i := range t.Gateways {
 		w.gwNS = append(w.gwNS, testutil.ScaleNamespace(i%t.Namespaces))
 	}
+	w.lsByNS = make([][]int, t.Namespaces)
 	for i := range t.ListenerSets {
 		w.lsNS = append(w.lsNS, w.gwNS[i%t.Gateways])
+		ni := nsIndex(w.lsNS[i])
+		w.lsByNS[ni] = append(w.lsByNS[ni], i)
 	}
 	w.nsBE = make([][]string, t.Namespaces)
 	w.beNext = make([]int, t.Namespaces)
@@ -151,8 +172,11 @@ func (w *world) genRoutes() {
 	}
 }
 
-// attach draws r's parentRefs: 1 + Binomial(3, (mean−1)/3) distinct parents,
-// a tenth of them ListenerSets, a fifth of the Gateway refs with a sectionName.
+// attach draws r's parentRefs: 1 + Binomial(3, (mean−1)/3) distinct parents
+// that the listeners admit, but for every FailedEvery-th. An HTTPRoute or
+// GRPCRoute names a ListenerSet of its namespace a tenth of the time, else a
+// Gateway; a TCPRoute or TLSRoute names a mixed Gateway. A fifth of the
+// Gateway refs carry a sectionName of a listener for the kind.
 func (w *world) attach(r *route) {
 	p := (w.t.ParentRefsMean - 1) / 3
 	n := 1
@@ -162,20 +186,50 @@ func (w *world) attach(r *route) {
 		}
 	}
 	labelled := testutil.ScaleLabelled(nsIndex(r.ns))
+	http := r.kind == "HTTPRoute" || r.kind == "GRPCRoute"
 	seen := map[objects.ParentRef]bool{}
 	for len(r.parents) < n {
+		failed := (w.refCount+1)%FailedEvery == 0
 		var ref objects.ParentRef
 		section := ""
-		if w.t.ListenerSets > 0 && w.rng.Float64() < 0.1 {
+		switch {
+		case failed && http:
 			i := w.rng.IntN(w.t.ListenerSets)
-			ref = objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: w.lsNS[i], Name: lsName(i)}
-		} else {
+			if w.lsNS[i] == r.ns {
+				continue
+			}
+			ref = w.lsRef(i)
+		case failed:
 			i := w.rng.IntN(w.t.Gateways)
+			if mixed(i) {
+				continue
+			}
+			ref = testutil.GwRef(w.gwNS[i], gwName(i))
+		case http && w.rng.Float64() < 0.1 && len(w.lsByNS[nsIndex(r.ns)]) > 0:
+			own := w.lsByNS[nsIndex(r.ns)]
+			ref = w.lsRef(own[w.rng.IntN(len(own))])
+		case http:
+			i := w.rng.IntN(w.t.Gateways)
+			if len(w.httpSections(i)) == 0 && !labelled {
+				continue // only SelectorListener would admit it
+			}
 			ref = testutil.GwRef(w.gwNS[i], gwName(i))
 			if w.rng.Float64() < 0.2 {
-				section = listenerName(w.rng.IntN(w.t.ListenersPerGateway-1), w.t.ListenersPerGateway)
+				if s := w.httpSections(i); len(s) > 0 {
+					section = s[w.rng.IntN(len(s))]
+				}
 				if labelled && w.rng.Float64() < 0.5 {
 					section = SelectorListener
+				}
+			}
+		default:
+			i := w.rng.IntN(w.t.Gateways/MixedEvery)*MixedEvery + MixedEvery - 1
+			ref = testutil.GwRef(w.gwNS[i], gwName(i))
+			if w.rng.Float64() < 0.2 {
+				for j := range w.t.ListenersPerGateway {
+					if allows(w.protocol(i, j), r.kind) {
+						section = listenerName(j, w.t.ListenersPerGateway)
+					}
 				}
 			}
 		}
@@ -188,8 +242,52 @@ func (w *world) attach(r *route) {
 		w.refCount++
 		r.parents = append(r.parents, key)
 		r.sections = append(r.sections, section)
-		r.failed = append(r.failed, w.refCount%FailedEvery == 0)
+		r.failed = append(r.failed, failed)
 	}
+}
+
+func (w *world) lsRef(i int) objects.ParentRef {
+	return objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: w.lsNS[i], Name: lsName(i)}
+}
+
+// mixed reports whether Gateway i has a TCP and a TLS listener.
+func mixed(i int) bool { return i%MixedEvery == MixedEvery-1 }
+
+// protocol is the protocol of Gateway i's listener j: the two before
+// SelectorListener are TCP and TLS on a mixed Gateway, every other is HTTP.
+func (w *world) protocol(i, j int) string {
+	n := w.t.ListenersPerGateway
+	switch {
+	case !mixed(i) || j == n-1:
+		return "HTTP"
+	case j == n-3:
+		return "TCP"
+	case j == n-2:
+		return "TLS"
+	}
+	return "HTTP"
+}
+
+// httpSections names Gateway i's HTTP listeners but SelectorListener.
+func (w *world) httpSections(i int) []string {
+	var out []string
+	for j := range w.t.ListenersPerGateway - 1 {
+		if w.protocol(i, j) == "HTTP" {
+			out = append(out, listenerName(j, w.t.ListenersPerGateway))
+		}
+	}
+	return out
+}
+
+// allows reports whether a listener of protocol admits kind by default.
+func allows(protocol, kind string) bool {
+	switch protocol {
+	case "TCP":
+		return kind == "TCPRoute"
+	case "TLS":
+		return kind == "TLSRoute"
+	}
+	return kind == "HTTPRoute" || kind == "GRPCRoute"
 }
 
 // delegate turns HTTPRoutes [top, top+children) into delegated children: the
@@ -268,7 +366,7 @@ func (w *world) delegate(top, children int) {
 }
 
 // objects renders the world, counting attachedRoutes per listener as the
-// controller would for accepted, non-delegated parentRefs.
+// controller would for accepted, non-delegated parentRefs; Contradict adds one.
 func (w *world) objects() []*unstructured.Unstructured {
 	t := w.t
 	gwAttached := map[string][]int{} // ns/name → per listener
@@ -291,14 +389,19 @@ func (w *world) objects() []*unstructured.Unstructured {
 				continue
 			}
 			counts := gwAttached[p.Namespace+"/"+p.Name]
+			gi := gwIndex(p.Name)
 			for j, l := range listeners {
-				if (p.SectionName == "" || p.SectionName == l) && (l != SelectorListener || labelled) {
+				if allows(w.protocol(gi, j), r.kind) && (p.SectionName == "" || p.SectionName == l) && (l != SelectorListener || labelled) {
 					counts[j]++
 				}
 			}
 		}
 	}
 
+	extra := 0
+	if t.Contradict {
+		extra = 1
+	}
 	out := []*unstructured.Unstructured{testutil.GatewayClass(Class, testutil.Controller, true)}
 	ok := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
 	for i := range t.Gateways {
@@ -306,13 +409,17 @@ func (w *world) objects() []*unstructured.Unstructured {
 		var spec []any
 		counts := gwAttached[w.gwNS[i]+"/"+gwName(i)]
 		for j, l := range listeners {
-			ls = append(ls, testutil.Listener{Name: l, Attached: int32(counts[j]), Conds: ok}) //nolint:gosec // small counts
+			ls = append(ls, testutil.Listener{Name: l, Attached: int32(counts[j] + extra), Conds: ok}) //nolint:gosec // small counts
 			from := map[string]any{"namespaces": map[string]any{"from": "All"}}
 			if l == SelectorListener {
 				from = map[string]any{"namespaces": map[string]any{"from": "Selector",
 					"selector": map[string]any{"matchLabels": map[string]any{"team": testutil.ScaleTeamLabel["team"]}}}}
 			}
-			spec = append(spec, map[string]any{"name": l, "port": int64(8080 + j), "protocol": "HTTP", "allowedRoutes": from})
+			ln := map[string]any{"name": l, "port": int64(8080 + j), "protocol": w.protocol(i, j), "allowedRoutes": from}
+			if ln["protocol"] == "TLS" {
+				ln["tls"] = map[string]any{"mode": "Passthrough"}
+			}
+			spec = append(spec, ln)
 		}
 		gw := testutil.Gateway(w.gwNS[i], gwName(i), Class, nil, ls...)
 		gw.Object["spec"].(map[string]any)["listeners"] = spec
@@ -321,7 +428,7 @@ func (w *world) objects() []*unstructured.Unstructured {
 	}
 	for i := range t.ListenerSets {
 		g := i % t.Gateways
-		n := lsAttached[w.lsNS[i]+"/"+lsName(i)]
+		n := lsAttached[w.lsNS[i]+"/"+lsName(i)] + extra
 		out = append(out, testutil.ListenerSet(w.lsNS[i], lsName(i), testutil.GwRef(w.gwNS[g], gwName(g)), nil,
 			testutil.Listener{Name: "extra", Attached: int32(n), Conds: ok})) //nolint:gosec // small counts
 	}
@@ -343,7 +450,7 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 	var status []testutil.RouteParent
 	for k, p := range r.parents {
 		spec = append(spec, p)
-		if r.failed[k] {
+		if r.failed[k] != w.t.Contradict {
 			status = append(status, testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"),
 				testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
@@ -434,6 +541,12 @@ func listenerName(j, n int) string {
 		return SelectorListener
 	}
 	return fmt.Sprintf("l%d", j)
+}
+
+func gwIndex(name string) int {
+	var i int
+	_, _ = fmt.Sscanf(name, "gw-%d", &i)
+	return i
 }
 
 func nsIndex(ns string) int {

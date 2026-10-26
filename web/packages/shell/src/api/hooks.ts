@@ -84,3 +84,14 @@ export function useCapabilities(): ReadonlySet<string> | undefined {
   const { data } = useMeta();
   return useMemo(() => (data ? new Set(data.capabilities ?? []) : undefined), [data]);
 }
+
+/** True when /meta advertises the post-v1 filter on list (2.3: routes has listener); false for an older server. */
+export function supportsFilter(meta: MetaResponse | undefined, list: string, filter: string): boolean {
+  return !!meta?.filters?.[list]?.includes(filter);
+}
+
+/** Whether list accepts filter, so pages send it only when advertised; undefined until meta loads. */
+export function useListFilter(list: string, filter: string): boolean | undefined {
+  const { data } = useMeta();
+  return data ? supportsFilter(data, list, filter) : undefined;
+}

@@ -400,6 +400,7 @@ Shadowed-match detection stays the controller's job: an upstream ask, consumed l
 - A new kgateway minor needs a rule-set review before it is supported.
 - The kind e2e asserts that computed and controller counts agree on 2.3 and 2.4.
 - New finding KGWUI-012. KGWUI-011 gains a computed trigger.
+- When an install's discovery scope is unknown, view A is unknown (`scope-unknown`), so no KGWUI-012 comes from guessed candidates (user, 2026-10-24).
 - Upstream asks: resolved route → listener relationships, delegation resolution per child, a controller-written state CRD outside Gateway API, shadowed-match conditions, and hostname resolution (Phase 2 design §14).
 
 ## D-021 — Delegation and attachment status, observed on a cluster (2026-10-23, phase 2)
@@ -457,3 +458,37 @@ quirk 2 (prefix /q):
 - When delegation and backend failures meet on one key, the last rule in spec order wins (observed with two rule orderings). §8.2 already compares the reason only without non-delegation backendRefs; unchanged.
 - `attachedRoutes` never counts delegated children. A ListenerSet or XListenerSet route counts only on that set's listener, not on the Gateway's. View A (2.3) uses this.
 - Phase 1's base fixtures attach `good` and `broken`; `blog/posts` is outside install A's scope and was not counted.
+
+## D-022 — Memory is gated on CPU and retained heap, not allocation (2026-10-25, phase 2)
+**Status:** accepted 2026-10-25 (user)
+**Context:**
+- Design §9.6 gated allocation per warm recompute at ≤ 32 MiB at the Large tier, an unexplained number of our own (all §9.6 budgets are "our call"). The user kept it on 2026-10-23 when 2.2 measured 35.7 MB on CI.
+- Allocation is short-lived garbage; it costs only through garbage collection. The stream budget (engine CPU ≤ 15 % of one core) measures that cost directly, and retained heap measures what the UI holds against the chart's pod limit (`limits.memory: 512Mi`).
+- 2.3 at Large: 29.2 MiB per recompute in a consistent world, 44.2 MiB in a worst case where every route status contradicts view A (3,309 KGWUI-012 and 2,574 Phase 1 KGWUI-002 findings), 35.1 MiB after the cuts below; retained heap +13.6 and +16.1 MiB over the baseline.
+
+**Decision:**
+1. Allocation per warm recompute is reported, not gated.
+2. The gates are engine CPU in the sustained stream (≤ 15 % of one core), retained heap (≤ 32 MiB above the baseline) and staying well inside the pod memory limit, each in the consistent world and in the worst case. "Well inside" is memory obtained from the OS during the sustained stream ≤ 256 MiB, half the limit **(our call)**.
+
+**Consequences:**
+- Task 49 runs the sustained stream in both worlds and applies the cheap allocation cuts anyway (pre-sized finding slices, `Finding.parent` as a pointer), which bring the worst case from 44.2 to 35.1 MiB.
+- Replaces the user's 2026-10-23 "keep 32 MiB" for allocation; the ledger note to revisit it at each sub-phase close now applies to CPU and retained heap.
+
+## D-023 — View A on the wire: hidden counts and merged written refs (2026-10-25, phase 2)
+**Status:** accepted 2026-10-25 (user)
+**Context:**
+- The 2.3 cross-model review found that a hidden candidate route moved a visible route's membership: the count's unknown state and the `listener=` filter ignored the count's dependencies.
+- The review also found that the route list showed only the first of several written parentRefs that resolve to one parent. Each has its own report key and check (rules §8.2), so a contradicting second check was invisible in the list.
+
+**Decision:**
+1. A count's facts, its check and its unknown state, reach a membership and the `listener=` filter only when the count's dependencies are visible. Otherwise the membership carries only its parentRef's check (design §7.2, §7.4 rule 5).
+2. The list's one `ParentSummary.computed` merges those checks: worst state first (`disagrees` > `pending` > `unknown` > `restricted` > `checked`), coverage united, `restricted` if any side is. Route detail keeps each written ref separate (design §7.3, rules §8.4).
+
+**Consequences:**
+- A caller who cannot view a count's dependencies may see a membership as checked where an unrestricted caller sees it unknown. That reveals nothing hidden.
+- No wire format change: `ParentSummary` keeps its shape.
+
+**Amended 2026-10-26 (user):**
+- Decision 1 is replaced. Listener facts are shown to every caller who can see the listener: the computed count, its cross-check, its unknown state and reason, and its isolation note. The count includes members the caller cannot see, as `attachedRoutes` does. A visible route's membership takes the count's state again, so an unknown count makes it unknown for every caller, and `listener=` has no members under it. Per-route facts of hidden routes stay hidden (design §7.2, §7.4 rules 4 and 5).
+- Why: the re-review (R1, R2) showed that restricting a count leaks. Moving a hidden route or ListenerSet into or out of a listener's dependencies flipped visible facts between "Hidden" and their real state. The number of routes a Gateway serves is also a property of that Gateway.
+- Decision 2, the written-ref merge, stands.

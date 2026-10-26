@@ -1,0 +1,100 @@
+# Plain-HTTP listeners sharing port 8080 on one Gateway and its ListenerSet. kgateway 2.3 has
+# no listener isolation, so no listener carries the note; counts are view A's as usual.
+# Status is hand-written to agree with view A (rules §8.3).
+provenance: computed-rules §4.5, §11.1
+controllerVersion: v2.3.11
+namespaces:
+  infra: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    allowedListeners: {namespaces: {from: Same}}
+    listeners:
+    - {name: a, protocol: HTTP, port: 8080}
+    - {name: b, protocol: HTTP, port: 8080, hostname: api.example.com}
+    - {name: c, protocol: HTTP, port: 8080, hostname: "*.example.com"}
+    - {name: d, protocol: HTTPS, port: 8443, tls: {mode: Terminate}}
+  status:
+    listeners:
+    - name: a
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: b
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: c
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: d
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls, namespace: infra}
+  spec:
+    parentRef: {name: gw}
+    listeners:
+    - {name: e, protocol: HTTP, port: 8080, hostname: "*.com"}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    listeners:
+    - name: e
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    hostnames: [api.example.com]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r-ls, namespace: infra}
+  spec:
+    parentRefs: [{name: ls, kind: ListenerSet}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: ls, kind: ListenerSet}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+expect:
+  listeners:
+    Gateway infra/gw a: {count: 1}
+    Gateway infra/gw b: {count: 1}
+    Gateway infra/gw c: {count: 1}
+    Gateway infra/gw d: {count: 1}
+    ListenerSet infra/ls e: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted, listeners: [a, b, c, d]}
+    "HTTPRoute infra/r-ls #0": {outcome: accepted, listeners: [e]}
+  members:
+    "HTTPRoute infra/r #0 -> Gateway infra/gw a": [api.example.com]
+    "HTTPRoute infra/r #0 -> Gateway infra/gw b": [api.example.com]
+    "HTTPRoute infra/r #0 -> Gateway infra/gw c": [api.example.com]
+    "HTTPRoute infra/r #0 -> Gateway infra/gw d": [api.example.com]
+    "HTTPRoute infra/r-ls #0 -> ListenerSet infra/ls e": ["*.com"]
+  checks:
+    Gateway infra/gw a: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw b: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw c: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw d: {state: checked, coverage: [count-agrees]}
+    ListenerSet infra/ls e: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/r #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute infra/r-ls #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

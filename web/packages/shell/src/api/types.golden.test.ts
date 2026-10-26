@@ -3,6 +3,7 @@ import bareInstalls from "../../../../../pkg/api/testdata/golden/bare-installs.j
 import bareMeta from "../../../../../pkg/api/testdata/golden/bare-meta.json";
 import bareOverview from "../../../../../pkg/api/testdata/golden/bare-overview.json";
 import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
+import gatewayDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-restricted.json";
 import gatewaysGolden from "../../../../../pkg/api/testdata/golden/gateways.json";
 import health from "../../../../../pkg/api/testdata/golden/health.json";
 import installs from "../../../../../pkg/api/testdata/golden/installs.json";
@@ -19,6 +20,7 @@ import routeDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/
 import routesGolden from "../../../../../pkg/api/testdata/golden/routes.json";
 import routesByBackendGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend.json";
 import routesByBackendRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend-restricted.json";
+import routesByListenerGolden from "../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import routesFilteredGolden from "../../../../../pkg/api/testdata/golden/routes-filtered.json";
 import routesRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-restricted.json";
 import type {
@@ -31,6 +33,8 @@ import type {
   BackendState,
   Candidate,
   CheckResult,
+  Computed,
+  ComputedAttachment,
   Condition,
   Count,
   DelegationRef,
@@ -49,6 +53,7 @@ import type {
   LabelSelector,
   LinkedRef,
   Listener,
+  ListenerAttachment,
   ListenerSetDetail,
   ListenerSetRow,
   ListenerStatus,
@@ -64,6 +69,7 @@ import type {
   PathMatch,
   Readiness,
   Ref,
+  RouteAttachment,
   RouteCounts,
   RouteDetail,
   RouteRow,
@@ -162,7 +168,7 @@ const kind = shape<ServedKind>({
 });
 const groupKind = shape<NonNullable<MetaResponse["views"]>[number]>({ group: "!", kind: "!" });
 const metaShape = shape<MetaResponse>(
-  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!", views: "?" },
+  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!", views: "?", filters: "?" },
   { kinds: kind, views: groupKind },
 );
 const errorShape = shape<ErrorResponse>({ error: "!" });
@@ -178,6 +184,18 @@ const pageKeys = {
   collectedAt: "!",
 } as const satisfies Spec<Page<unknown>>;
 const page = (items: Shape) => shape<Page<unknown>>(pageKeys, { items });
+// View A (sub-phase 2.3).
+const computed = shape<Computed>({ by: "!", rules: "!", rule: "!", state: "!", coverage: "?", reason: "?", note: "?" });
+const computedAttachment = shape<ComputedAttachment>(
+  { outcome: "?", listeners: "!", explanation: "?", computed: "!" },
+  {
+    listeners: shape<ListenerAttachment>(
+      { resource: "!", listener: "!", effectiveHostnames: "?", computed: "!" },
+      { resource: linkedRef, computed },
+    ),
+    computed,
+  },
+);
 const parentSummary = shape<ParentSummary>(
   {
     ref: "!",
@@ -189,8 +207,9 @@ const parentSummary = shape<ParentSummary>(
     conditionType: "?",
     reason: "?",
     message: "?",
+    computed: "?",
   },
-  { ref: linkedRef, via: linkedRef },
+  { ref: linkedRef, via: linkedRef, computed: computedAttachment },
 );
 const routeRow = shape<RouteRow>(
   {
@@ -215,11 +234,13 @@ const gatewayListRow = shape<GatewayListRow>(
     notAccepted: "!",
     listenerSets: "!",
     addresses: "!",
+    routes: "?",
+    disagreements: "?",
   },
   { ref: linkedRef },
 );
 const listenerSetRow = shape<ListenerSetRow>(
-  { ref: "!", parent: "!", health: "!", listeners: "!", acceptedReason: "?" },
+  { ref: "!", parent: "!", health: "!", listeners: "!", acceptedReason: "?", routes: "?", disagreements: "?" },
   { ref: linkedRef, parent: linkedRef },
 );
 const condition = shape<Condition>({
@@ -258,8 +279,19 @@ const listenerStatus = shape<ListenerStatus>(
   { supportedKinds: gk, conditions: condition },
 );
 const listener = shape<Listener>(
-  { name: "!", port: "?", protocol: "!", hostname: "?", tls: "?", allowedRoutes: "!", status: "?" },
-  { tls, allowedRoutes, status: listenerStatus },
+  {
+    name: "!",
+    port: "?",
+    protocol: "!",
+    hostname: "?",
+    tls: "?",
+    allowedRoutes: "!",
+    status: "?",
+    computedRoutes: "?",
+    computed: "?",
+    isolationNote: "?",
+  },
+  { tls, allowedRoutes, status: listenerStatus, computed },
 );
 const routeCounts = shape<RouteCounts>({ accepted: "!", notAccepted: "!", pending: "!", unwatched: "!" });
 const candidate = shape<Candidate>({ reason: "!", by: "?" }, { by: linkedRef });
@@ -354,6 +386,7 @@ const routeDetail = shape<RouteDetail>(
     annotations: "!",
     parentRefs: "!",
     parents: "!",
+    attachments: "?",
     rules: "!",
     ancestors: "!",
     ancestorsTruncated: "!",
@@ -367,6 +400,10 @@ const routeDetail = shape<RouteDetail>(
     annotations: shape<RouteDetail["annotations"]>({ inheritParentMatcher: "?" }),
     parentRefs: specParentRef,
     parents: parentStatus,
+    attachments: shape<RouteAttachment>(
+      { parentRef: "!", index: "!", target: "!", result: "!" },
+      { parentRef, target: linkedRef, result: computedAttachment },
+    ),
     rules: rule,
     ancestors: ancestor,
   },
@@ -406,10 +443,12 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["routes-restricted", routesRestrictedGolden, page(routeRow)],
     ["routes-by-backend", routesByBackendGolden, page(routeRow)],
     ["routes-by-backend-restricted", routesByBackendRestrictedGolden, page(routeRow)],
+    ["routes-by-listener", routesByListenerGolden, page(routeRow)],
     ["gateways", gatewaysGolden, page(gatewayListRow)],
     ["listenersets", listenersetsGolden, page(listenerSetRow)],
     ["bad-request", badRequestGolden, errorShape],
     ["gateway-detail", gatewayDetailGolden, gatewayDetail],
+    ["gateway-detail-restricted", gatewayDetailRestrictedGolden, gatewayDetail],
     ["listenerset-detail", listenersetDetailGolden, listenerSetDetail],
     ["listenerset-detail-allowed", listenersetDetailAllowedGolden, listenerSetDetail],
     ["listenerset-detail-invalid", listenersetDetailInvalidGolden, listenerSetDetail],
@@ -447,5 +486,37 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(routeDetailCandidateGolden.body.candidate.by).toBeDefined();
     expect(routeDetailGolden.body.parentRefs.every((p) => "target" in p)).toBe(true);
     expect(listenersetDetailAllowedGolden.body.parentAllowedListeners.set).toBe(true);
+  });
+
+  // View A: every computed label the fixtures carry uses a state and coverage ComputedBadge renders.
+  it("covers view A labels: known states and coverage, restricted with no reason or note", () => {
+    const labels: Computed[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === "object") {
+        for (const [k, x] of Object.entries(v)) {
+          if (k === "computed" && x && typeof x === "object" && "by" in x) labels.push(x as Computed);
+          walk(x);
+        }
+      }
+    };
+    walk([
+      routesByListenerGolden.body,
+      routesRestrictedGolden.body,
+      gatewayDetailRestrictedGolden.body,
+      gatewayDetailGolden.body,
+      routeDetailGolden.body,
+    ]);
+    const states: Computed["state"][] = ["checked", "disagrees", "pending", "unknown", "restricted"];
+    const coverage: NonNullable<Computed["coverage"]>[number][] = ["count-agrees", "status-compatible", "not-verified"];
+    expect(new Set(labels.map((c) => c.state))).toEqual(new Set(states));
+    expect(labels.some((c) => c.state === "unknown" && c.reason)).toBe(true);
+    for (const c of labels) {
+      expect(c.by).toBe("ui");
+      expect(states).toContain(c.state);
+      for (const v of c.coverage ?? []) expect(coverage).toContain(v);
+      if (c.state === "restricted") expect([c.reason, c.note]).toEqual([undefined, undefined]);
+    }
+    expect(meta.body.filters?.routes).toContain("listener");
   });
 });

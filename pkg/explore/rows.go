@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -33,6 +34,8 @@ type aux struct {
 	edges []objects.Ref
 	// targets are the row's backend targets; nil for an HTTPRoute until index.
 	targets []objects.BackendTarget
+	// written are the spec parentRefs as written, index-aligned with specRefs.
+	written []objects.WrittenRef
 }
 
 // builder holds Build's per-call state.
@@ -48,6 +51,9 @@ type builder struct {
 	parents map[objects.GroupKind]bool // served Gateway and ListenerSet kinds
 	unknown bool                       // a required check is not OK
 	worst   map[objects.Ref]Worst
+	// disagrees are the objects with KGWUI-012; disagreements counts disagreeing checks per object.
+	disagrees     map[objects.Ref]bool
+	disagreements map[objects.Ref]int
 }
 
 // Build builds the index of one install. It is pure: the same input gives
@@ -80,8 +86,10 @@ func Build(in Input) *Index {
 		b.sort()
 		ix.Routes = b.rows
 		b.index(ix)
+		b.views(ix)
 		b.gateways(ix, lsViews)
 	}
+	ix.parentKinds = b.parents
 	ix.Findings = b.worst
 	ix.admitted = b.admit(ix)
 	return ix
@@ -97,6 +105,12 @@ func (b *builder) findings() {
 			continue
 		}
 		b.worst[*f.Resource] = b.worst[*f.Resource].add(f)
+		if f.Code == health.CodeComputedDisagrees {
+			if b.disagrees == nil {
+				b.disagrees = map[objects.Ref]bool{}
+			}
+			b.disagrees[*f.Resource] = true
+		}
 	}
 	b.unknown = requiredNotOK(b.in.Health)
 }
@@ -113,10 +127,10 @@ func (b *builder) rowFor(k kinds.Served, u *unstructured.Unstructured, owned boo
 		r, a := RouteRow{Ref: ref, Kind: k, Obj: u}, aux{}
 		if isHTTPRoute(k.Group, k.Kind) {
 			v := b.dec.HTTPRoute(u)
-			r.View, r.Hostnames, a.status, a.specRefs = v, v.Hostnames, v.Parents, v.ParentRefs
+			r.View, r.Hostnames, a.status, a.specRefs, a.written = v, v.Hostnames, v.Parents, v.ParentRefs, v.WrittenRefs
 		} else {
 			v := b.dec.Route(u)
-			r.Hostnames, a.status, a.specRefs, a.targets = v.Hostnames, v.Parents, v.ParentRefs, v.Targets
+			r.Hostnames, a.status, a.specRefs, a.targets, a.written = v.Hostnames, v.Parents, v.ParentRefs, v.Targets, v.WrittenRefs
 		}
 		b.at[ref] = i
 		b.rows, b.aux = append(b.rows, r), append(b.aux, a)
@@ -130,6 +144,13 @@ func (b *builder) link(i int, l ParentLink) {
 	r := &b.rows[i]
 	if slices.ContainsFunc(r.Parents, func(x ParentLink) bool { return x.Ref == l.Ref && x.Target == l.Target }) {
 		return
+	}
+	specs := b.aux[i].specRefs
+	l.Spec = slices.Index(specs, l.Ref)
+	for j := l.Spec + 1; l.Spec >= 0 && j < len(specs); j++ {
+		if specs[j] == l.Ref {
+			l.Dups = append(l.Dups, j)
+		}
 	}
 	r.Parents = append(r.Parents, l)
 }
@@ -285,8 +306,18 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 }
 
 // compareRefs orders by namespace, name, group and kind (design §3.6 tie-break).
+// It stops at the first field that differs: Index.Row calls it per probe.
 func compareRefs(a, b objects.Ref) int {
-	return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Group, b.Group), cmp.Compare(a.Kind, b.Kind))
+	if c := strings.Compare(a.Namespace, b.Namespace); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Name, b.Name); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Group, b.Group); c != 0 {
+		return c
+	}
+	return strings.Compare(a.Kind, b.Kind)
 }
 
 func compareParentRefs(a, b objects.ParentRef) int {
@@ -413,7 +444,8 @@ func (b *builder) gateways(ix *Index, lsViews []*objects.ListenerSetView) {
 	for i, u := range gws {
 		ref := objects.RefOf(u)
 		v := b.dec.Gateway(u)
-		g := GatewayRow{Ref: ref, Obj: u, View: v, State: b.state(ref), Routes: ix.ByParent[ref]}
+		g := GatewayRow{Ref: ref, Obj: u, View: v, State: b.state(ref), Routes: ix.ByParent[ref],
+			Members: ix.members(ref, v.Listeners), Disagreements: b.disagreements[ref]}
 		for _, l := range v.ListenerStatus {
 			g.AttachedRoutes += l.AttachedRoutes
 		}
@@ -437,7 +469,8 @@ func (b *builder) gateways(ix *Index, lsViews []*objects.ListenerSetView) {
 	for i, j := range order {
 		u, v := o.ListenerSets[j], lsViews[j]
 		ref := objects.RefOf(u)
-		l := ListenerSetRow{Ref: ref, Obj: u, View: v, Parent: v.Parent.Ref(), State: b.state(ref), Routes: ix.ByParent[ref]}
+		l := ListenerSetRow{Ref: ref, Obj: u, View: v, Parent: v.Parent.Ref(), State: b.state(ref), Routes: ix.ByParent[ref],
+			Members: ix.members(ref, v.Listeners), Disagreements: b.disagreements[ref]}
 		if c := objects.FindCondition(v.Conditions, "Accepted"); c != nil && c.Status != metav1.ConditionTrue {
 			l.AcceptedReason = c.Reason
 		}
@@ -447,4 +480,266 @@ func (b *builder) gateways(ix *Index, lsViews []*objects.ListenerSetView) {
 		}
 		ix.ListenerSets[i] = l
 	}
+}
+
+// interner maps refs to Index.Refs indexes. A route row's index is its RowID;
+// other refs are added on first use. Source dep slices are shared between
+// results, so each one is converted once and its DepSet reused.
+type interner struct {
+	ix *Index
+	// routes are the served route kinds.
+	routes map[objects.GroupKind]bool
+	at     map[objects.Ref]int32
+	refs   []objects.Ref
+	seen   map[depKey]DepSet
+	// buf is the current arena chunk for new DepSets.
+	buf []int32
+}
+
+// depKey identifies a source dep slice by its first element and length.
+type depKey struct {
+	p *objects.Ref
+	n int
+}
+
+// deps interns src without changing it.
+func (n *interner) deps(src []objects.Ref) DepSet {
+	if len(src) == 0 {
+		return nil
+	}
+	k := depKey{&src[0], len(src)}
+	if d, ok := n.seen[k]; ok {
+		return d
+	}
+	if cap(n.buf)-len(n.buf) < len(src) {
+		n.buf = make([]int32, 0, max(1024, len(src)))
+	}
+	start := len(n.buf)
+	for _, r := range src {
+		n.buf = append(n.buf, n.ref(r))
+	}
+	d := DepSet(n.buf[start:len(n.buf):len(n.buf)])
+	n.seen[k] = d
+	return d
+}
+
+// ref returns r's index, adding it on first use.
+func (n *interner) ref(r objects.Ref) int32 {
+	if n.routes[objects.GroupKind{Group: r.Group, Kind: r.Kind}] {
+		if id, ok := n.ix.Row(r); ok {
+			return int32(id)
+		}
+	}
+	i, ok := n.at[r]
+	if !ok {
+		i = int32(len(n.refs)) // #nosec G115 -- a ref count fits in int32
+		n.at[r] = i
+		n.refs = append(n.refs, r)
+	}
+	return i
+}
+
+// union32 is the union of a and b; it shares one when the other adds nothing, else sorts.
+func union32(a, b DepSet) DepSet {
+	switch {
+	case len(b) == 0 || slices.Equal(a, b):
+		return a
+	case len(a) == 0:
+		return b
+	}
+	out := append(slices.Clone(a), b...)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// views fills view A into the index: listener facts, per-ref facts, the
+// listener index, cross-checks and the computed flags (design §3.5).
+func (b *builder) views(ix *Index) {
+	v := b.in.Computed
+	if v == nil {
+		return
+	}
+	ix.RuleSet, ix.RuleNote = v.RuleSet, v.Note
+	a := &v.Attachment
+	// Route rows take the first indexes; the map holds resources and Namespaces.
+	n := &interner{ix: ix, routes: map[objects.GroupKind]bool{}, at: map[objects.Ref]int32{}, seen: map[depKey]DepSet{},
+		refs: make([]objects.Ref, len(ix.Routes), len(ix.Routes)+len(a.Counts))}
+	for i := range ix.Routes {
+		n.refs[i] = ix.Routes[i].Ref
+	}
+	for _, k := range kinds.ByCategory(b.in.Served, kinds.CategoryRoute) {
+		n.routes[objects.GroupKind{Group: k.Group, Kind: k.Kind}] = true
+	}
+	ix.Listeners = make(map[ListenerKey]ListenerFacts, len(a.Counts))
+	for i := range a.Counts {
+		c := &a.Counts[i]
+		ix.Listeners[ListenerKey{c.Resource, c.Listener}] = ListenerFacts{Count: c.Count, Known: c.Unknown == "", Unknown: c.Unknown,
+			Error: c.Error, IsolationNote: c.IsolationNote}
+	}
+	b.refFacts(ix, n)
+	ix.ByListener = make(map[ListenerKey][]Member, len(a.Counts))
+	// Members come grouped by listener: each group takes a window of one arena.
+	arena := make([]Member, len(a.Members))
+	for i := range a.Members {
+		m := &a.Members[i]
+		id, ok := ix.Row(m.Route)
+		if !ok {
+			continue
+		}
+		deps := n.deps(m.Deps)
+		if f := ix.Routes[id].facts(m.ParentRef, m.Resource); f != nil {
+			for j := range f.Listeners {
+				if h := &f.Listeners[j]; h.Listener == m.Listener {
+					h.Hostnames, h.Deps = m.Hostnames, deps
+				}
+			}
+		}
+		// An unknown count presents no members, even when the rules list some (setting-unknown).
+		k := ListenerKey{m.Resource, m.Listener}
+		if !ix.Listeners[k].Known {
+			continue
+		}
+		ms, ok := ix.ByListener[k]
+		if !ok {
+			j := i + 1
+			for j < len(a.Members) && a.Members[j].Resource == k.Resource && a.Members[j].Listener == k.Listener {
+				j++
+			}
+			ms = arena[i:i:j]
+		}
+		ix.ByListener[k] = append(ms, Member{Row: id, ParentRef: m.ParentRef, Hostnames: m.Hostnames, Deps: deps})
+	}
+	for _, ms := range ix.ByListener {
+		slices.SortFunc(ms, func(x, y Member) int { return cmp.Or(cmp.Compare(x.Row, y.Row), cmp.Compare(x.ParentRef, y.ParentRef)) })
+	}
+	b.checks(ix, v.Checks)
+	for i := range ix.Routes {
+		r := &ix.Routes[i]
+		if b.disagrees[r.Ref] {
+			r.Flags |= FlagDisagrees
+		}
+		b.listenerUnknown(ix, i, n)
+	}
+	ix.Refs = n.refs
+}
+
+// refFacts fills each row's Computed from the outcomes, in one arena.
+func (b *builder) refFacts(ix *Index, n *interner) {
+	outs := b.in.Computed.Attachment.Outcomes
+	rows := make([]RowID, len(outs))
+	per := make([]int, len(ix.Routes))
+	hits := 0
+	for i := range outs {
+		id, ok := ix.Row(outs[i].Route)
+		if !ok {
+			rows[i] = -1
+			continue
+		}
+		rows[i] = id
+		per[id]++
+		hits += len(outs[i].Listeners)
+	}
+	arena, hitArena := make([]RefFacts, len(outs)), make([]ListenerHit, hits)
+	for id, k := range per {
+		if k > 0 {
+			ix.Routes[id].Computed, arena = arena[:0:k], arena[k:]
+		}
+	}
+	for i := range outs {
+		o := &outs[i]
+		if rows[i] < 0 {
+			continue
+		}
+		f := RefFacts{Out: o, Deps: n.deps(o.Deps)}
+		if k := len(o.Listeners); k > 0 {
+			f.Listeners, hitArena = hitArena[:k:k], hitArena[k:]
+			for j, l := range o.Listeners {
+				f.Listeners[j] = ListenerHit{Listener: l, Deps: f.Deps}
+			}
+		}
+		r := &ix.Routes[rows[i]]
+		r.Computed = append(r.Computed, f)
+	}
+	for i := range ix.Routes {
+		slices.SortStableFunc(ix.Routes[i].Computed, func(x, y RefFacts) int { return cmp.Compare(x.Out.ParentRef, y.Out.ParentRef) })
+	}
+}
+
+// facts returns the facts of parentRef p to target, or nil.
+func (r *RouteRow) facts(p int, target objects.Ref) *RefFacts {
+	for i := range r.Computed {
+		if f := &r.Computed[i]; f.Out.ParentRef == p && f.Out.Resource == target {
+			return f
+		}
+	}
+	return nil
+}
+
+// checks attaches each cross-check to its listener or parentRefs and counts disagreements.
+func (b *builder) checks(ix *Index, cs []computed.CheckResult) {
+	for i := range cs {
+		c := &cs[i]
+		if c.State == computed.StateDisagrees {
+			if b.disagreements == nil {
+				b.disagreements = map[objects.Ref]int{}
+			}
+			b.disagreements[c.On]++
+		}
+		switch c.ID.Kind {
+		case computed.KindListenerCount:
+			k := ListenerKey{c.On, c.Listener}
+			if f, ok := ix.Listeners[k]; ok {
+				f.Check = c
+				ix.Listeners[k] = f
+			}
+		case computed.KindRouteAccepted:
+			id, ok := ix.Row(c.On)
+			if !ok {
+				continue
+			}
+			r, written := &ix.Routes[id], b.aux[id].written
+			// One check covers every parentRef with its report key (rules §8.2).
+			for j := range r.Computed {
+				if p := r.Computed[j].Out.ParentRef; p < len(written) && computed.KeyOf(written[p]) == c.Key {
+					r.Computed[j].Check = c
+				}
+			}
+		}
+	}
+}
+
+// listenerUnknown flags row i when a status-accepted parentRef to a Gateway
+// or ListenerSet has an unknown outcome or none with a listener.
+func (b *builder) listenerUnknown(ix *Index, i int, n *interner) {
+	r, a := &ix.Routes[i], &b.aux[i]
+	for _, l := range r.Parents {
+		if l.Attachment != AttachmentAccepted || !b.parents[objects.GroupKind{Group: l.Target.Group, Kind: l.Target.Kind}] {
+			continue
+		}
+		var f *RefFacts
+		if p := slices.Index(a.specRefs, l.Ref); p >= 0 {
+			f = r.facts(p, l.Target)
+		}
+		switch {
+		case f == nil:
+			r.UnknownDeps = union32(r.UnknownDeps, DepSet{n.ref(r.Ref), n.ref(l.Target)})
+		case f.Out.Unknown != "" || len(f.Listeners) == 0:
+			r.UnknownDeps = union32(r.UnknownDeps, f.Deps)
+		default:
+			continue
+		}
+		r.Flags |= FlagListenerUnknown
+	}
+}
+
+// members is the sorted distinct member rows of resource's listeners.
+func (ix *Index) members(resource objects.Ref, ls []objects.Listener) []RowID {
+	var out []RowID
+	for _, l := range ls {
+		for _, m := range ix.ByListener[ListenerKey{resource, l.Name}] {
+			out = append(out, m.Row)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }

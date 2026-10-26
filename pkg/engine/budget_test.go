@@ -23,6 +23,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
@@ -256,52 +257,98 @@ func BenchmarkConfirmTick(b *testing.B) {
 	}
 }
 
-// The 2.2 budgets of design §9.6 at Large: the explorer's index and decode cache.
+// The 2.2 and 2.3 budgets of design §9.6 at Large: the explorer's index,
+// view A, KGWUI-012 persistence and the decode cache.
 
-// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 100 ms,
-// every warm Compute allocates ≤ 32 MiB, and the median of 5 cold ones ≤ 1 s.
+// largeCases are the consistent Large world, whose statuses agree with view
+// A, and the worst case, where every check contradicts and has matured.
+var largeCases = []scale.Tier{scale.Large, scale.Large.Contradicting()}
+
+// matureAt is a time past every window opened at testutil.Now.
+var matureAt = testutil.Now.Add(Window + time.Second)
+
+// largeEngine is an engine over tier's snapshot on a settable clock, with
+// metrics that never go stale. Under Contradict it computes once at
+// testutil.Now and moves the clock to matureAt, so the next Compute matures
+// every check.
+func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
+	now := new(time.Time)
+	*now = testutil.Now
+	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return *now })
+	cfg.MetricsMaxAge = 0
+	e := New(cfg)
+	if tier.Contradict {
+		e.Compute()
+		*now = matureAt
+	}
+	return e, now
+}
+
+// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 120 ms
+// and the median of 5 cold ones ≤ 1 s, for the consistent world and the worst
+// case. Allocation per warm Compute and the persistence step are reported (D-022).
 func TestBudgetWarmRecompute(t *testing.T) {
 	const mib = 1 << 20
-	snap := scale.Snapshot(scale.Large, 1)
-	newEngine := func() *Engine {
-		return New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
-	}
-	cold := make([]time.Duration, 5)
-	for i := range cold {
-		e := newEngine()
-		t0 := time.Now()
-		e.Compute()
-		cold[i] = time.Since(t0)
-	}
-	e := newEngine()
-	e.Compute()
-	warm := make([]time.Duration, 20)
-	alloc := make([]uint64, len(warm))
-	var ms runtime.MemStats
-	for i := range warm {
-		runtime.ReadMemStats(&ms)
-		a0 := ms.TotalAlloc
-		t0 := time.Now()
-		e.Compute()
-		warm[i] = time.Since(t0)
-		runtime.ReadMemStats(&ms)
-		alloc[i] = ms.TotalAlloc - a0
-	}
-	slices.Sort(cold)
-	slices.Sort(warm)
-	slices.Sort(alloc)
-	t.Logf("large: cold median %v max %v (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 100 ms); warm alloc median %.1f MiB max %.1f MiB (budget ≤ 32 MiB)",
-		cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond),
-		warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
-		float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib)
-	if cold[len(cold)/2] > time.Second {
-		t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
-	}
-	if warm[len(warm)/2] > 100*time.Millisecond {
-		t.Errorf("warm recompute median %v, budget ≤ 100 ms", warm[len(warm)/2])
-	}
-	if alloc[len(alloc)-1] > 32*mib {
-		t.Errorf("warm recompute allocation %d B, budget ≤ 32 MiB", alloc[len(alloc)-1])
+	for _, tier := range largeCases {
+		t.Run(tier.Name, func(t *testing.T) {
+			snap := scale.Snapshot(tier, 1)
+			cold := make([]time.Duration, 5)
+			for i := range cold {
+				// The first Compute of a fresh engine, before any window matures.
+				e := New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+				t0 := time.Now()
+				e.Compute()
+				cold[i] = time.Since(t0)
+			}
+			e, now := largeEngine(snap, tier)
+			m := e.Compute()
+			warm := make([]time.Duration, 20)
+			alloc := make([]uint64, len(warm))
+			var ms runtime.MemStats
+			for i := range warm {
+				runtime.ReadMemStats(&ms)
+				a0 := ms.TotalAlloc
+				t0 := time.Now()
+				m = e.Compute()
+				warm[i] = time.Since(t0)
+				runtime.ReadMemStats(&ms)
+				alloc[i] = ms.TotalAlloc - a0
+			}
+			// The persistence step alone, over the last model's checks: same IDs and prints keep every window.
+			views := []*computed.Views{m.Installs[0].Computed}
+			step := make([]time.Duration, 20)
+			for i := range step {
+				t0 := time.Now()
+				e.persist.persist(*now, views)
+				step[i] = time.Since(t0)
+			}
+			slices.Sort(cold)
+			slices.Sort(warm)
+			slices.Sort(alloc)
+			slices.Sort(step)
+			t.Logf("%s: %d checks, %d KGWUI-012 findings, %d persistence entries", tier.Name, len(views[0].Checks), len(disagreements(m)), len(e.persist.m))
+			coldNote := ""
+			if tier.Contradict {
+				coldNote = ", a first compute with no matured windows"
+			}
+			t.Logf("%s: cold median %v max %v%s (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 120 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
+				tier.Name, cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond), coldNote,
+				warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
+				float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib,
+				step[len(step)/2].Round(time.Microsecond), step[len(step)-1].Round(time.Microsecond))
+			if tier.Contradict && len(disagreements(m)) == 0 {
+				t.Fatal("the worst case raised no KGWUI-012")
+			}
+			if !tier.Contradict && (len(disagreements(m)) != 0 || len(e.persist.m) != 0) {
+				t.Fatalf("the consistent world has %d KGWUI-012 findings and %d windows", len(disagreements(m)), len(e.persist.m))
+			}
+			if cold[len(cold)/2] > time.Second {
+				t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
+			}
+			if warm[len(warm)/2] > 120*time.Millisecond {
+				t.Errorf("warm recompute median %v, budget ≤ 120 ms", warm[len(warm)/2])
+			}
+		})
 	}
 }
 
@@ -325,18 +372,27 @@ type heapPart struct {
 }
 
 // TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
-// and five runs, the median retained heap at Large ≤ 32 MiB above it. Each
-// part is then dropped in turn; its freed HeapAlloc is reported per kind.
+// and five runs, the median retained heap at Large ≤ 32 MiB above it, for the
+// consistent world and the worst case. Each part is then dropped in turn; its
+// freed HeapAlloc is reported per kind.
 func TestBudgetHeap(t *testing.T) {
-	if os.Getenv(heapChildEnv) != "" {
-		heapChild(t)
+	if name := os.Getenv(heapChildEnv); name != "" {
+		i := slices.IndexFunc(largeCases, func(x scale.Tier) bool { return x.Name == name })
+		heapChild(t, largeCases[i])
 		return
 	}
+	for _, tier := range largeCases {
+		t.Run(tier.Name, func(t *testing.T) { heapBudget(t, tier) })
+	}
+}
+
+// heapBudget runs five heap children for tier and checks their median.
+func heapBudget(t *testing.T, tier scale.Tier) {
 	const mib = 1 << 20
 	var runs []heapRun
 	for range 5 {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestBudgetHeap$", "-test.count=1")
-		cmd.Env = append(os.Environ(), heapChildEnv+"=1")
+		cmd.Env = append(os.Environ(), heapChildEnv+"="+tier.Name)
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("heap child: %v\n%s", err, out)
@@ -370,8 +426,8 @@ func TestBudgetHeap(t *testing.T) {
 	}
 }
 
-// heapChild measures one heapRun at Large and prints it.
-func heapChild(t *testing.T) {
+// heapChild measures one heapRun of tier and prints it.
+func heapChild(t *testing.T, tier scale.Tier) {
 	stats := func() runtime.MemStats {
 		runtime.GC()
 		runtime.GC()
@@ -381,11 +437,11 @@ func heapChild(t *testing.T) {
 	}
 	var r heapRun
 	r.Start = stats().HeapInuse
-	snap := scale.Snapshot(scale.Large, 1)
+	snap := scale.Snapshot(tier, 1)
 	st := stats()
 	r.Snapshot = st.HeapInuse
 	snapAlloc := st.HeapAlloc
-	e := New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+	e, _ := largeEngine(snap, tier)
 	e.Compute()
 	m := e.Compute()
 	before := stats()
@@ -406,13 +462,17 @@ func heapChild(t *testing.T) {
 	drop("index: Gateway rows", func() { ix.Gateways = nil })
 	drop("index: ListenerSet rows", func() { ix.ListenerSets = nil })
 	drop("index: lookups", func() { m.Installs[0].Index = nil })
+	drop("health: findings", func() { m.Installs[0].Health.Findings = nil })
+	drop("computed: checks", func() { m.Installs[0].Computed.Checks = nil })
+	drop("computed: attachment", func() { m.Installs[0].Computed = nil })
+	drop("persistence: windows", func() { e.persist = newPersistence() })
 	drop("decode: HTTPRoute views", func() { e.decode.httpRoutes = viewCache[objects.HTTPRouteView]{} })
 	drop("decode: route views", func() { e.decode.routes = viewCache[objects.RouteView]{} })
 	drop("decode: route hostnames", func() { e.decode.routeHostname = viewCache[objects.RouteHostnames]{} })
 	drop("decode: Gateway views", func() { e.decode.gateways = viewCache[objects.GatewayView]{} })
 	drop("decode: ListenerSet views", func() { e.decode.listenerSets = viewCache[objects.ListenerSetView]{} })
 	drop("decode: Backend views", func() { e.decode.backends = viewCache[objects.BackendView]{} })
-	// What the engine and model still hold above the snapshot: health, overview, first-seen.
+	// What the engine and model still hold above the snapshot: the rest of health, overview, first-seen.
 	r.Parts = append(r.Parts, heapPart{"rest of engine and model", int64(prev) - int64(snapAlloc)})
 	runtime.KeepAlive(e)
 	runtime.KeepAlive(m)

@@ -1,0 +1,116 @@
+# Input: translator/gateway/testutils/inputs/listener-sets/shared-port-policy-isolation.yaml@v2.4.7,
+# with namespace default written out and the TrafficPolicy and Services left out. Status is copied
+# from the output. kgateway programs specific.example.com only on the specific listener, yet both
+# listeners report attachedRoutes 1: the wildcard listener carries the note, its count unchanged.
+provenance: translator/gateway/testutils/outputs/listener-sets/shared-port-policy-isolation.yaml@v2.4.7
+controllerVersion: v2.4.7
+namespaces:
+  default: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: example-gateway, namespace: default}
+  spec:
+    gatewayClassName: kgateway
+    listeners: []
+    allowedListeners:
+      namespaces: {from: All}
+  status:
+    attachedListenerSets: 2
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: wildcard-listenerset, namespace: default}
+  spec:
+    parentRef: {name: example-gateway, kind: Gateway, group: gateway.networking.k8s.io}
+    listeners:
+    - name: http-9090
+      protocol: HTTP
+      port: 9090
+      hostname: "*.example.com"
+      allowedRoutes:
+        namespaces: {from: All}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: http-9090
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: specific-listenerset, namespace: default}
+  spec:
+    parentRef: {name: example-gateway, kind: Gateway, group: gateway.networking.k8s.io}
+    listeners:
+    - name: http-9090
+      protocol: HTTP
+      port: 9090
+      hostname: specific.example.com
+      allowedRoutes:
+        namespaces: {from: All}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: http-9090
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: wildcard-route, namespace: default}
+  spec:
+    parentRefs:
+    - {name: wildcard-listenerset, group: gateway.networking.k8s.io, kind: ListenerSet}
+    hostnames: [specific.example.com]
+    rules:
+    - matches:
+      - path: {type: PathPrefix, value: /}
+      backendRefs:
+      - {name: wildcard-svc, port: 8080}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {group: gateway.networking.k8s.io, kind: ListenerSet, name: wildcard-listenerset}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+      - {type: ResolvedRefs, status: "True", reason: ResolvedRefs, observedGeneration: 1}
+      - {type: kgateway.dev/Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: specific-route, namespace: default}
+  spec:
+    parentRefs:
+    - {name: specific-listenerset, group: gateway.networking.k8s.io, kind: ListenerSet}
+    rules:
+    - matches:
+      - path: {type: PathPrefix, value: /}
+      backendRefs:
+      - {name: specific-svc, port: 8080}
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {group: gateway.networking.k8s.io, kind: ListenerSet, name: specific-listenerset}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+      - {type: ResolvedRefs, status: "True", reason: ResolvedRefs, observedGeneration: 1}
+      - {type: kgateway.dev/Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+expect:
+  listeners:
+    ListenerSet default/wildcard-listenerset http-9090: {count: 1, isolationNote: true}
+    ListenerSet default/specific-listenerset http-9090: {count: 1}
+  parentRefs:
+    "HTTPRoute default/wildcard-route #0": {outcome: accepted}
+    "HTTPRoute default/specific-route #0": {outcome: accepted}
+  checks:
+    ListenerSet default/wildcard-listenerset http-9090: {state: checked, coverage: [count-agrees]}
+    ListenerSet default/specific-listenerset http-9090: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute default/wildcard-route #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute default/specific-route #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

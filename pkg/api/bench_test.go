@@ -35,16 +35,31 @@ var restricting = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { r
 // largeHandlerWith is the handler over a Large-tier model under authz (nil:
 // AllowAll). The snapshot is sorted as the cache sorts it.
 func largeHandlerWith(b testing.TB, authz Authorizer) (http.Handler, *engine.Model) {
+	return tierHandler(b, scale.Large, authz)
+}
+
+// tierHandler is largeHandlerWith over tier. Under Contradict the model is
+// computed again past the persistence window, so every check has matured.
+func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer) (http.Handler, *engine.Model) {
 	b.Helper()
-	snap := scale.Snapshot(scale.Large, 1)
+	snap := scale.Snapshot(tier, 1)
 	for _, objs := range snap.Objects {
 		slices.SortFunc(objs, func(x, y *unstructured.Unstructured) int {
 			return strings.Compare(x.GetNamespace()+"/"+x.GetName(), y.GetNamespace()+"/"+y.GetName())
 		})
 	}
-	e := engine.New(engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
+	now := testutil.Now
+	cfg := engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
-		Checks: health.Upstream(), MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return testutil.Now }})
+		Checks: health.Upstream(), MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return now }}
+	if tier.Contradict {
+		cfg.MetricsMaxAge = 0 // the static metrics must not go stale when the clock moves
+	}
+	e := engine.New(cfg)
+	if tier.Contradict {
+		e.Compute()
+		now = now.Add(engine.Window + time.Second)
+	}
 	return NewHandler(e, fstest.MapFS{}, authz), e.Compute()
 }
 

@@ -251,3 +251,34 @@ func TestPodIsHardened(t *testing.T) {
 		}
 	}
 }
+
+// containerArgs is the UI container's args as rendered with args.
+func containerArgs(t *testing.T, args ...string) []string {
+	t.Helper()
+	ds := kind(render(t, args...), "Deployment")
+	if len(ds) != 1 {
+		t.Fatalf("want 1 Deployment, got %d", len(ds))
+	}
+	b, _ := yaml.Marshal(ds[0])
+	var d struct {
+		Spec struct {
+			Template struct {
+				Spec struct{ Containers []struct{ Args []string } }
+			}
+		}
+	}
+	if err := yaml.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	return d.Spec.Template.Spec.Containers[0].Args
+}
+
+func TestExtraArgsAppended(t *testing.T) {
+	if got, want := containerArgs(t), []string{"--listen=:8080"}; !slices.Equal(got, want) {
+		t.Errorf("default args = %v, want %v", got, want)
+	}
+	got := containerArgs(t, "--set", "install.pin=kgw/kgateway", "--set", "extraArgs={--poll-interval=10m}")
+	if want := []string{"--listen=:8080", "--install=kgw/kgateway", "--poll-interval=10m"}; !slices.Equal(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+}

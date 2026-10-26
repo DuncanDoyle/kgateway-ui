@@ -446,7 +446,7 @@ it("parent cells say how each parent took the route, in words", async () => {
   await screen.findByText("rejected");
   expect(within(rowOf("rejected")).getByText("Not accepted")).toBeInTheDocument();
   // The raw condition reason is never shown as a code.
-  expect(within(rowOf("rejected")).queryByText("NotAllowedByListeners")).toBeNull();
+  expect(within(rowOf("rejected")).queryByText("UnsupportedValue")).toBeNull();
   expect(within(rowOf("via-ls")).getByText(/on Gateway/)).toHaveTextContent("on Gateway infra/edge");
 });
 
@@ -530,4 +530,99 @@ it("a tag value that is not a full ref stays as written", async () => {
   mount(`/i/${ID}/routes?backend=shop/be1`);
   await screen.findByText("rejected");
   expect(screen.getByText("Backend: shop/be1")).toBeInTheDocument();
+});
+
+// region View A (2.3)
+const meta = { capabilities: [], kinds: [], filters: { routes: ["listener"] } };
+
+it("Routes state filter offers disagrees and listener-unknown", async () => {
+  serve((u) => (u.pathname === "/api/v1/meta" ? meta : u.pathname.endsWith("/routes") ? routes() : undefined));
+  mountWithLocation(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const group = screen.getByRole("group", { name: "Route state" });
+  await userEvent.click(await within(group).findByRole("button", { name: "UI disagrees with the controller" }));
+  await waitFor(() => expect(search().get("state")).toBe("disagrees"));
+  await userEvent.click(within(group).getByRole("button", { name: "Unknown listener" }));
+  await waitFor(() =>
+    expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["disagrees", "listener-unknown"]),
+  );
+});
+
+it("an older server is not offered the 2.3 state values", async () => {
+  serve((u) =>
+    u.pathname === "/api/v1/meta"
+      ? { ...meta, filters: undefined }
+      : u.pathname.endsWith("/routes")
+        ? routes()
+        : undefined,
+  );
+  mount(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const group = screen.getByRole("group", { name: "Route state" });
+  expect(within(group).queryByRole("button", { name: "Unknown listener" })).toBeNull();
+});
+
+it("Gateways list has a sortable routes column with view A's count", async () => {
+  const gws = () => {
+    const b = fresh(gatewaysGolden.body as GatewayList);
+    const first = b.items[0];
+    if (!first) throw new Error("golden has no Gateway");
+    return {
+      ...b,
+      items: [
+        { ...first, disagreements: 1 },
+        { ...first, ref: { ...first.ref, name: "hidden" }, routes: undefined },
+      ],
+    };
+  };
+  serve((u) => (u.pathname.endsWith("/gateways") ? gws() : undefined));
+  mountWithLocation(`/i/${ID}/gateways`);
+  await screen.findByText("hidden");
+  const header = screen.getByRole("columnheader", { name: /^Routes\s*Computed$/ });
+  // A computed column: the header carries the Computed chip; controller columns do not.
+  expect(within(header).getByText("Computed")).toBeInTheDocument();
+  expect(within(screen.getByRole("columnheader", { name: /Attached routes/ })).queryByText("Computed")).toBeNull();
+  const edge = within(rowOf("edge")).getByTestId("routes-cell");
+  expect(edge).toHaveTextContent("6");
+  expect(edge).toHaveTextContent("Disagreements: 1");
+  expect(within(edge).getByTestId("health-icon-warning")).toBeInTheDocument();
+  // No count: no number shown as if known.
+  expect(within(rowOf("hidden")).getByTestId("routes-cell")).toHaveTextContent("No count");
+  await userEvent.click(within(header).getByRole("button", { name: /Routes/ }));
+  await waitFor(() => expect(search().get("sort")).toBe("routes.asc"));
+  await waitFor(() => expect(listCalls("gateways").at(-1)?.searchParams.get("sort")).toBe("routes.asc"));
+  expect(screen.getByRole("columnheader", { name: /^Routes\s*Computed$/ })).toHaveAttribute("aria-sort", "ascending");
+});
+
+it("ListenerSets list shows view A's routes count", async () => {
+  serve((u) => (u.pathname.endsWith("/listenersets") ? fresh(listenersetsGolden.body as ListenerSetList) : undefined));
+  mount(`/i/${ID}/listenersets`);
+  await screen.findByText("partial");
+  expect(within(rowOf("ls1")).getByTestId("routes-cell")).toHaveTextContent("1");
+  expect(within(rowOf("partial")).getByTestId("routes-cell")).toHaveTextContent("0");
+});
+
+it("a server before 2.3 gets no Routes column, not No count in every row", async () => {
+  serve((u) =>
+    u.pathname === "/api/v1/meta"
+      ? { ...meta, filters: undefined }
+      : u.pathname.endsWith("/gateways")
+        ? fresh(gatewaysGolden.body as GatewayList)
+        : u.pathname.endsWith("/listenersets")
+          ? fresh(listenersetsGolden.body as ListenerSetList)
+          : undefined,
+  );
+  const { unmount } = renderWithTheme(
+    <Routes>
+      <Route path="/i/:id/gateways" element={<GatewaysPage />} />
+    </Routes>,
+    { path: `/i/${ID}/gateways` },
+  );
+  await screen.findByText("edge");
+  await waitFor(() => expect(screen.queryByRole("columnheader", { name: /^Routes\s*Computed$/ })).toBeNull());
+  expect(screen.getByRole("columnheader", { name: "Attached routes" })).toBeInTheDocument();
+  unmount();
+  mount(`/i/${ID}/listenersets`);
+  await screen.findByText("partial");
+  await waitFor(() => expect(screen.queryAllByTestId("routes-cell")).toHaveLength(0));
 });

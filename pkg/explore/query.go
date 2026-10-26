@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -40,14 +41,21 @@ type Sort struct {
 	Desc bool
 }
 
+// ListenerUnknown is the listener filter value that selects unknown refs.
+// No listener name can contain "_", so it never shadows a listener.
+const ListenerUnknown = "_unknown"
+
 // Query is one list request after parsing (design §7.2). Zero fields do not
-// filter. Kinds, Parent, Attachment, Backends and States apply to routes
-// only; Parent on ListenerSets is a Gateway.
+// filter. Kinds, Parent, Attachment, Listener, Backends and States apply to
+// routes only; Parent on ListenerSets is a Gateway.
 type Query struct {
 	Namespaces []string
 	Kinds      []objects.GroupKind
 	Parent     *objects.Ref
 	Attachment Attachment
+	// Listener needs a Gateway or ListenerSet Parent: a listener name selects
+	// its computed members; ListenerUnknown the rows whose ref to Parent is unknown.
+	Listener string
 	// Backends are OR-ed through ByBackend: specs only, never the backend object.
 	Backends []objects.Ref
 	States   Flag
@@ -68,7 +76,7 @@ type Page struct {
 }
 
 // sortVal is a row's sort value: group and kind for kind; n is the health
-// rank or the visible route count.
+// rank or the member count, -1 when the caller has no count.
 type sortVal struct {
 	group, kind string
 	n           int
@@ -80,6 +88,14 @@ type entry struct {
 	ref objects.Ref
 	v   sortVal
 }
+
+// entryBufs recycles the route queries' entry buffers, which hold every
+// matching row: one per request was most of a route list's garbage. Tests
+// swap it to see what goes back.
+var entryBufs interface {
+	Get() any
+	Put(any)
+} = &sync.Pool{New: func() any { return new([]entry) }}
 
 // healthStates are in ascending sort order: health.desc lists errors first.
 var healthStates = []health.State{health.StateHealthy, health.StateWarning, health.StateUnknown, health.StateError}
@@ -104,6 +120,12 @@ func compareEntries(a, b entry, s Sort) int {
 		c = compareRefs(a.ref, b.ref)
 	case sortKind:
 		c = cmp.Or(cmp.Compare(a.v.group, b.v.group), cmp.Compare(a.v.kind, b.v.kind))
+	case sortRoutes:
+		// A row without a count (-1) sorts after rows with one, either way.
+		if none := cmp.Compare(noCount(a.v.n), noCount(b.v.n)); none != 0 {
+			return none
+		}
+		c = cmp.Compare(a.v.n, b.v.n)
 	default:
 		c = cmp.Compare(a.v.n, b.v.n)
 	}
@@ -111,6 +133,14 @@ func compareEntries(a, b entry, s Sort) int {
 		c = -c
 	}
 	return cmp.Or(c, compareRefs(a.ref, b.ref))
+}
+
+// noCount is 1 for a row without a member count, else 0.
+func noCount(n int) int {
+	if n < 0 {
+		return 1
+	}
+	return 0
 }
 
 // query is a validated query with its decoded cursor.
@@ -240,6 +270,9 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 	if err := checkAttachment(q.Parent, q.Attachment); err != nil {
 		return Page{}, 0, err
 	}
+	if q.Listener != "" && (q.Parent == nil || !ix.parentKinds[objects.GroupKind{Group: q.Parent.Group, Kind: q.Parent.Kind}]) {
+		return Page{}, 0, fmt.Errorf("%w: listener needs a Gateway or ListenerSet parent", ErrBadQuery)
+	}
 	var backends map[RowID]bool
 	if len(q.Backends) > 0 {
 		backends = map[RowID]bool{}
@@ -249,9 +282,11 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 			}
 		}
 	}
-	// Candidates from the narrowest index: parent, then backend, then namespace.
+	// Candidates from the narrowest index: listener, parent, backend, then namespace.
 	var cands []RowID
 	switch {
+	case q.Listener != "" && q.Listener != ListenerUnknown:
+		cands = ix.listenerRows(ListenerKey{*q.Parent, q.Listener}, visible)
 	case q.Parent != nil:
 		cands = ix.ByParent[*q.Parent]
 		if isHTTPRoute(q.Parent.Group, q.Parent.Kind) {
@@ -278,14 +313,22 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 	default:
 		cands = allRows(len(ix.Routes))
 	}
-	es := make([]entry, 0, len(cands))
+	buf := entryBufs.Get().(*[]entry)
+	es := slices.Grow((*buf)[:0], len(cands))
+	defer func() {
+		// es is every entry written, on unwind too: the pool must not pin a retired Index.
+		clear(es)
+		*buf = es[:0]
+		entryBufs.Put(buf)
+	}()
 	for _, id := range cands {
 		r := &ix.Routes[id]
 		gk := objects.GroupKind{Group: r.Ref.Group, Kind: r.Ref.Kind}
 		if !q.common(r.Ref, r.State, func() string { return r.search }) ||
 			len(q.Kinds) > 0 && !slices.Contains(q.Kinds, gk) ||
 			backends != nil && !backends[id] ||
-			q.States != 0 && r.Flags&q.States == 0 ||
+			q.States != 0 && ix.RowFlags(id, visible)&q.States == 0 ||
+			q.Listener == ListenerUnknown && !ix.unknownRef(id, *q.Parent, visible) ||
 			visible != nil && !visible(r.Ref) ||
 			q.Parent != nil && (q.Attachment != "" || visible != nil) && !ix.Under(id, *q.Parent, q.Attachment, visible) {
 			continue
@@ -293,6 +336,40 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 		es = append(es, entry{id: id, ref: r.Ref, v: sortVal{group: r.Ref.Group, kind: r.Ref.Kind, n: healthRank(r.State)}})
 	}
 	return q.page(es), len(cands), nil
+}
+
+// listenerRows are the distinct rows with a member on k whose dependencies
+// visible admits (design §7.4 rule 4a).
+func (ix *Index) listenerRows(k ListenerKey, visible func(objects.Ref) bool) []RowID {
+	ms := ix.ByListener[k]
+	out := make([]RowID, 0, len(ms))
+	for _, m := range ms {
+		if (len(out) == 0 || out[len(out)-1] != m.Row) && ix.Visible(m.Deps, visible) {
+			out = append(out, m.Row)
+		}
+	}
+	return out
+}
+
+// unknownRef reports whether row id has a parentRef to parent itself whose
+// outcome is unknown, with dependencies visible admits.
+func (ix *Index) unknownRef(id RowID, parent objects.Ref, visible func(objects.Ref) bool) bool {
+	for _, f := range ix.Routes[id].Computed {
+		if f.Out.Resource == parent && f.Out.Unknown != "" && ix.Visible(f.Deps, visible) {
+			return true
+		}
+	}
+	return false
+}
+
+// RowFlags are row id's flags for a caller: listener-unknown needs its
+// dependencies visible (design §7.4 rule 6); disagrees is a finding (rule 9).
+func (ix *Index) RowFlags(id RowID, visible func(objects.Ref) bool) Flag {
+	r := &ix.Routes[id]
+	if r.Flags&FlagListenerUnknown != 0 && !ix.Visible(r.UnknownDeps, visible) {
+		return r.Flags &^ FlagListenerUnknown
+	}
+	return r.Flags
 }
 
 // checkAttachment validates the attachment filter (design §7.2).
@@ -330,7 +407,7 @@ func (ix *Index) Under(id RowID, parent objects.Ref, a Attachment, visible func(
 
 // routeOnly rejects the route filters on another list.
 func routeOnly(q Query, parent bool) error {
-	if len(q.Kinds) > 0 || q.Parent != nil && !parent || q.Attachment != "" || len(q.Backends) > 0 || q.States != 0 {
+	if len(q.Kinds) > 0 || q.Parent != nil && !parent || q.Attachment != "" || q.Listener != "" || len(q.Backends) > 0 || q.States != 0 {
 		return fmt.Errorf("%w: a route filter on another list", ErrBadQuery)
 	}
 	return nil
@@ -340,7 +417,7 @@ func routeOnly(q Query, parent bool) error {
 func lowerName(ref objects.Ref) string { return strings.ToLower(ref.Namespace + "/" + ref.Name) }
 
 // QueryGateways pages the Gateway rows, as QueryRoutes does. The routes sort
-// uses GatewayRouteCount, as the list row's routes column does.
+// uses GatewayMemberCount, as the list row's routes column does.
 func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, error) {
 	if err := routeOnly(in, false); err != nil {
 		return Page{}, err
@@ -357,32 +434,49 @@ func (ix *Index) QueryGateways(in Query, visible func(objects.Ref) bool) (Page, 
 		}
 		v := sortVal{group: g.Ref.Group, kind: g.Ref.Kind, n: healthRank(g.State)}
 		if q.Sort.Key == sortRoutes {
-			v.n = ix.GatewayRouteCount(RowID(i), visible) // #nosec G115 -- a row count fits in int32
+			if n, ok := ix.GatewayMemberCount(RowID(i)); ok { // #nosec G115 -- a row count fits in int32
+				v.n = n
+			} else {
+				v.n = -1
+			}
 		}
 		es = append(es, entry{id: RowID(i), ref: g.Ref, v: v}) // #nosec G115 -- a row count fits in int32
 	}
 	return q.page(es), nil
 }
 
-// GatewayRouteCount is the routes column of Gateway row id and its sort
-// value. §7.3 makes the column a 2.3 field without fixing its set; until 2.3
-// it is every route listed under the Gateway (Routes, which include
-// not-accepted, pending and unwatched rows and routes through its
-// ListenerSets) that visible admits (§7.4 rule 5), through visible
-// ListenerSets only (Under), which is the Total of
-// QueryRoutes with that Gateway as Parent. nil admits every route.
-func (ix *Index) GatewayRouteCount(id RowID, visible func(objects.Ref) bool) int {
+// GatewayMemberCount is the routes column of Gateway row id and its sort
+// value: its distinct member routes, hidden ones too, as a listener's count
+// (design §7.4 rule 5). ok is false when a listener's count is unknown.
+func (ix *Index) GatewayMemberCount(id RowID) (n int, ok bool) {
 	g := &ix.Gateways[id]
-	if visible == nil {
-		return len(g.Routes)
+	if g.View == nil {
+		return 0, false
 	}
-	n := 0
-	for _, rid := range g.Routes {
-		if visible(ix.Routes[rid].Ref) && ix.Under(rid, g.Ref, "", visible) {
-			n++
+	return ix.memberCount(g.Ref, g.View.Listeners, g.Members)
+}
+
+// ListenerSetMemberCount is GatewayMemberCount for ListenerSet row id.
+func (ix *Index) ListenerSetMemberCount(id RowID) (n int, ok bool) {
+	l := &ix.ListenerSets[id]
+	if l.View == nil {
+		return 0, false
+	}
+	return ix.memberCount(l.Ref, l.View.Listeners, l.Members)
+}
+
+// memberCount is len(members) when every listener's count is known.
+func (ix *Index) memberCount(ref objects.Ref, ls []objects.Listener, members []RowID) (int, bool) {
+	if ix.Listeners == nil {
+		return 0, false
+	}
+	for _, l := range ls {
+		f, ok := ix.Listeners[ListenerKey{ref, l.Name}]
+		if !ok || !f.Known {
+			return 0, false
 		}
 	}
-	return n
+	return len(members), true
 }
 
 // QueryListenerSets pages the ListenerSet rows, as QueryRoutes does. Parent,

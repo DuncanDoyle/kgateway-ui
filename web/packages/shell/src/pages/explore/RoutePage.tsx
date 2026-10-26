@@ -87,7 +87,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
             </h2>
             {data.parentRefs.length || unlisted.length ? (
               <Cards>
-                {data.parentRefs.map((p) => (
+                {data.parentRefs.map((p, i) => (
                   <ParentCard
                     key={refKey(p)}
                     installId={id}
@@ -95,6 +95,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
                     entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
                     generation={data.generation}
                     hasDelegation={hasDelegation}
+                    attachment={data.attachments?.find((a) => a.index === i)?.result}
                   />
                 ))}
                 {unlisted.map((p) => (

@@ -1,0 +1,55 @@
+# Input: translator/gateway/testutils/inputs/multiple-listeners-https-routing/gateway.yaml@v2.4.7,
+# with namespace default written out and the Secrets left out. Status is copied from the output.
+provenance: translator/gateway/testutils/outputs/multiple-listeners-https-routing-proxy.yaml@v2.4.7
+controllerVersion: v2.4.7
+namespaces:
+  default: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: http, namespace: default}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - name: https-httpbin
+      hostname: httpbin.example.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+        - {group: "", kind: Secret, name: httpbin-tls-secret}
+      allowedRoutes:
+        namespaces: {from: All}
+    - name: https-bookinfo
+      hostname: bookinfo.example.com
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+        - {group: "", kind: Secret, name: bookinfo-tls-secret}
+      allowedRoutes:
+        namespaces: {from: All}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: https-httpbin
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: https-bookinfo
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+expect:
+  listeners:
+    Gateway default/http https-httpbin: {count: 0}
+    Gateway default/http https-bookinfo: {count: 0}
+  parentRefs: {}
+  checks:
+    Gateway default/http https-httpbin: {state: checked, coverage: [count-agrees]}
+    Gateway default/http https-bookinfo: {state: checked, coverage: [count-agrees]}
+  kgwui012: []

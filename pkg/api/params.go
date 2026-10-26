@@ -30,11 +30,11 @@ const coreGroup = "core"
 var (
 	commonParams = []string{"namespace", "health", "q", "sort", "limit", "cursor"}
 	listParams   = map[listKind][]string{
-		listRoutes:       {"kind", "parent", "attachment", "state", "backend"},
+		listRoutes:       {"kind", "parent", "attachment", "listener", "state", "backend"},
 		listGateways:     nil,
 		listListenerSets: {"parent"},
 	}
-	singleParams = []string{"parent", "attachment", "q", "sort", "limit", "cursor"}
+	singleParams = []string{"parent", "attachment", "listener", "q", "sort", "limit", "cursor"}
 )
 
 // badParam is a 400 for a parameter value; it wraps explore.ErrBadQuery so
@@ -68,6 +68,11 @@ func parseQuery(r *http.Request, list listKind) (explore.Query, error) {
 	}
 	q.Q, q.Cursor = vals.Get("q"), vals.Get("cursor")
 	q.Attachment = explore.Attachment(vals.Get("attachment"))
+	if vals.Has("listener") {
+		if q.Listener = vals.Get("listener"); q.Listener == "" {
+			return q, badParam("listener: want a listener name or %q", explore.ListenerUnknown)
+		}
+	}
 	if v := vals.Get("limit"); vals.Has("limit") {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > explore.MaxLimit {

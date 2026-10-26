@@ -307,3 +307,63 @@ spec:
     - matches: [{ path: { type: PathPrefix, value: /mirror } }]
       filters: [{ type: RequestMirror, requestMirror: { backendRef: { name: shadow, port: 8000 } } }]
       backendRefs: [{ name: httpbin, port: 8000 }]
+---
+# View A (design §9.5, 2.3). TestComputedAgreesWithController compares every computed count and outcome with the controller.
+# The allowed quirk (computed-rules.md §4.1): http admits shop and https does not, so a ref to section https
+# gives NoMatchingParent.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: quirk, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: https }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /quirk } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Two parentRefs that both land on edge's http listener: attachedRoutes counts the route twice. The CRD
+# allows two refs to one parent on one section only when one omits the namespace and the other writes it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: two-refs, namespace: infra, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, sectionName: http }, { name: edge, namespace: infra, sectionName: http }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /two-refs } }], backendRefs: [{ name: web, port: 8000 }] }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web, namespace: infra, labels: { e2e: explorer } }
+spec: { ports: [{ port: 8000 }] }
+---
+# A route on the denied ListenerSet shop/denied: view A never evaluates a denied set.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: on-denied, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: ListenerSet, name: denied, sectionName: other }]
+  rules: [{ backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# One hostname fits *.example.com and one does not: the effective hostname is the one that fits.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: mixed-hosts, namespace: store, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: https }]
+  hostnames: [shop.example.com, shop.example.org]
+  rules: [{ backendRefs: [{ name: web, port: 8000 }] }]
+---
+# Selected by https's label Selector. TestForcedDisagreementRaisesKGWUI012 removes the label while the
+# controller is stopped, so the UI computes NoMatchingParent against a status that still says Accepted.
+apiVersion: v1
+kind: Namespace
+metadata: { name: flip, labels: { team: a, edge-https: allowed, e2e: explorer } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: flip, namespace: flip, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: https }]
+  hostnames: [flip.example.com]
+  rules: [{ backendRefs: [{ name: web, port: 8000 }] }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web, namespace: flip, labels: { e2e: explorer } }
+spec: { ports: [{ port: 8000 }] }

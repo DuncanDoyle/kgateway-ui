@@ -1,0 +1,59 @@
+# Input: translator/gateway/testutils/inputs/listener-sets/no-allowed-lis.yaml@v2.3.11, with
+# namespace default written out and the Service left out. Status is copied from the output:
+# the ListenerSet is not allowed, so it has no listener status and the route has no status.
+provenance: translator/gateway/testutils/outputs/listener-sets/no-allowed-lis.yaml@v2.3.11
+controllerVersion: v2.3.11
+namespaces:
+  default: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: example-gateway, namespace: default}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http-8080, protocol: HTTP, port: 8080}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - {type: Programmed, status: "True", reason: Programmed, observedGeneration: 1}
+    listeners:
+    - name: http-8080
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: foo-listenerset, namespace: default}
+  spec:
+    parentRef: {name: example-gateway, kind: Gateway, group: gateway.networking.k8s.io}
+    listeners:
+    - name: http-9090
+      protocol: HTTP
+      port: 9090
+      allowedRoutes:
+        namespaces: {from: All}
+  status:
+    conditions:
+    - {type: Accepted, status: "False", reason: NotAllowed, observedGeneration: 1}
+    - {type: Programmed, status: "False", reason: NotAllowed, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: foo-route, namespace: default}
+  spec:
+    parentRefs:
+    - {name: foo-listenerset, group: gateway.networking.k8s.io, kind: ListenerSet}
+    hostnames: [foo.example.com]
+    rules:
+    - matches:
+      - path: {type: PathPrefix, value: /}
+      backendRefs:
+      - {name: foo-svc, port: 8080}
+expect:
+  listeners:
+    Gateway default/example-gateway http-8080: {count: 0}
+  # A denied ListenerSet is never evaluated: no counts and no outcome for its route.
+  parentRefs: {}
+  checks:
+    Gateway default/example-gateway http-8080: {state: checked, coverage: [count-agrees]}
+  kgwui012: []

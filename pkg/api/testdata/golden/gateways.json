@@ -7,7 +7,7 @@
         "addresses": [
           "10.0.0.1"
         ],
-        "attachedRoutes": 0,
+        "attachedRoutes": 6,
         "class": "kgateway",
         "health": "healthy",
         "listenerSets": 2,
@@ -19,7 +19,8 @@
           "link": "detail",
           "name": "edge",
           "namespace": "infra"
-        }
+        },
+        "routes": 6
       }
     ],
     "total": 1

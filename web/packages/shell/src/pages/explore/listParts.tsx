@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
 import type { Attachment, LinkedRef, Page } from "../../api/types";
-import { attachmentCopy, listCopy, tagCopy } from "../../copy/explorer";
+import { attachmentCopy, listCopy, tagCopy, viewACopy } from "../../copy/explorer";
+import { ComputedChip } from "../../explore/ComputedBadge";
 import { LinkedName } from "../../explore/LinkedName";
 import { listValues } from "../../explore/listQuery";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
@@ -37,6 +38,19 @@ const Line = styled.span`
   &:focus-visible {
     outline: 2px solid ${(p) => p.theme.color.focus};
     outline-offset: 2px;
+  }
+`;
+const RoutesLine = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: ${(p) => p.theme.space(2)};
+  white-space: nowrap;
+  .disagrees {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: ${(p) => p.theme.font.size.sm};
+    color: ${(p) => p.theme.color.status.warning.fg};
   }
 `;
 export const Muted = styled.span`
@@ -131,5 +145,23 @@ export function ListFilters({ params, setFilter, tags, children }: FiltersProps)
         }),
       )}
     </>
+  );
+}
+
+/** Marks a list's view A routes column as computed (design §8.4): the chip sits in the header, not in every cell. */
+export const routesHeaderExtra = <ComputedChip label={viewACopy.routesTooltip} />;
+
+/** View A's distinct-route count of a Gateway or ListenerSet row; an omitted count is never shown as a number. */
+export function RoutesCell({ routes, disagreements }: { routes?: number; disagreements?: number }) {
+  return (
+    <RoutesLine data-testid="routes-cell">
+      {routes ?? <Muted>{viewACopy.noCount}</Muted>}
+      {disagreements ? (
+        <span className="disagrees">
+          <HealthIcon state="warning" />
+          {viewACopy.disagreements(disagreements)}
+        </span>
+      ) : null}
+    </RoutesLine>
   );
 }

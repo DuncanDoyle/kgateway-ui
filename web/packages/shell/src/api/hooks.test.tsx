@@ -2,7 +2,17 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { renderWithTheme, stubApi } from "../test/render";
 import { ApiError, apiFetch } from "./client";
 import { useNow } from "./clock";
-import { isLinkable, isStale, POLL_MS, useHealth, useInstalls, useOverview, useResource } from "./hooks";
+import {
+  isLinkable,
+  isStale,
+  POLL_MS,
+  supportsFilter,
+  useHealth,
+  useInstalls,
+  useListFilter,
+  useOverview,
+  useResource,
+} from "./hooks";
 import type { MetaResponse } from "./types";
 
 afterEach(() => {
@@ -219,4 +229,30 @@ it("does not re-render useResource consumers on a revalidation with unchanged da
   });
   expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   expect(renders).toBe(before);
+});
+
+it("supportsFilter reads the post-v1 filters /meta advertises", () => {
+  const meta = { filters: { routes: ["listener"] } } as unknown as MetaResponse;
+  expect(supportsFilter(meta, "routes", "listener")).toBe(true);
+  expect(supportsFilter(meta, "routes", "backend")).toBe(false);
+  expect(supportsFilter(meta, "gateways", "listener")).toBe(false);
+  // A 2.2 server sends no filters object; nothing post-v1 is supported.
+  expect(supportsFilter({} as MetaResponse, "routes", "listener")).toBe(false);
+  expect(supportsFilter(undefined, "routes", "listener")).toBe(false);
+});
+
+function FilterProbe() {
+  const ok = useListFilter("routes", "listener");
+  return <p>{ok === undefined ? "loading" : `listener ${ok}`}</p>;
+}
+
+it("useListFilter is undefined until /meta loads, then says whether the filter is advertised", async () => {
+  stubApi({ "/api/v1/meta": { kinds: [], capabilities: [], filters: { routes: ["listener"] } } });
+  const r = renderWithTheme(<FilterProbe />);
+  expect(screen.getByText("loading")).toBeInTheDocument();
+  await screen.findByText("listener true");
+  r.unmount();
+  stubApi({ "/api/v1/meta": { kinds: [], capabilities: [] } });
+  renderWithTheme(<FilterProbe />);
+  await screen.findByText("listener false");
 });

@@ -27,6 +27,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
@@ -250,6 +252,38 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 	}
 	if !tile {
 		t.Fatalf("HTTPRoute tile missing: %+v", o.Counts)
+	}
+}
+
+// D-020: rules registered with extension.WithComputedRules reach the engine
+// through Build: a 2.4 install computes with them, as the API shows.
+func TestComputedRulesSeamReachesTheEngine(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	gw := testutil.GwRef("infra", "edge")
+	var asked atomic.Value
+	down := func(v string) computed.Selection {
+		asked.Store(v)
+		return computed.Selection{Rules: kgw23.New(), Note: "Downstream rules"}
+	}
+	_, srv := start(t, []runtime.Object{
+		testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), testutil.Namespace("shop", nil),
+		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.ProxyDeployment("infra", "edge", 1, 1),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+	}, nil, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{}, extension.WithComputedRules(down))
+
+	var g api.GatewayDetail
+	eventually(t, "gateway detail never computed", func() bool {
+		g = api.GatewayDetail{}
+		return getJSON(t, srv, "/api/v1/installs/kgw.kgateway/gateways/infra/edge", &g) == http.StatusOK && g.RuleSet != ""
+	})
+	if g.RuleSet != "kgateway-2.3" || asked.Load() != "2.4.7" || len(g.Listeners) == 0 {
+		t.Fatalf("ruleSet %q for version %v, %d listeners; want the downstream kgateway-2.3", g.RuleSet, asked.Load(), len(g.Listeners))
+	}
+	for _, l := range g.Listeners {
+		if l.Computed == nil || l.Computed.Rules != "kgateway-2.3" || l.Computed.Note != "Downstream rules" {
+			t.Errorf("%s: computed %+v", l.Name, l.Computed)
+		}
 	}
 }
 

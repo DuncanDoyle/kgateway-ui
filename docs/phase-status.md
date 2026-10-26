@@ -4,16 +4,16 @@
 Phase: 2 — Gateway & Route Explorer
 Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
 Docs: docs/phases/phase-2/
-Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #7 (35f105d); sub-phase 2.2 complete (PR #8, merge pending); 2.3 next; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #7 (35f105d); sub-phase 2.2 complete, merged in #8 (f01bb0a); sub-phase 2.3 complete (phase-2.3-complete.md), PR pending merge; next: 2.4; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
 
 ### Queue
 - [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
 - [x] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 (Tasks 1–70)
 - [x] Q3 Cross-model review of design + plan, triage, user approval — reviews/design-codex.md, design-r4-codex.md, plan-codex.md; plan approved by user 2026-10-23 (with chart `extraArgs`, Task 50)
 - [x] Q4 Sub-phase 2.1 — event-driven recompute (plan Tasks 1–10) — phases/phase-2/phase-2.1-complete.md; merged in #7 (35f105d)
-- [x] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) — phases/phase-2/phase-2.2-complete.md; review reviews/2.2-codex.md; PR #8
-- [ ] Q6 Sub-phase 2.3 — view A (Tasks 35–51) ← NEXT
-- [ ] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70)
+- [x] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) — phases/phase-2/phase-2.2-complete.md; review reviews/2.2-codex.md; merged in #8 (f01bb0a)
+- [x] Q6 Sub-phase 2.3 — view A (Tasks 35–51) — phases/phase-2/phase-2.3-complete.md; review reviews/2.3-codex.md
+- [ ] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70) ← NEXT
 - [ ] Q8 Phase cross-model review + triage
 
 ### Exit gates
@@ -25,7 +25,7 @@ Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #
 - [ ] phase-2-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none (2.2 closed 2026-10-23; next: 2.3, after PR #8 merges)
+none (next: 2.4 Views B and C, after the 2.3 PR merges)
 
 ## Carry-over (deferred to later phases)
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
@@ -39,6 +39,7 @@ none (2.2 closed 2026-10-23; next: 2.3, after PR #8 merges)
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
+- 2026-10-25: sub-phase 2.3 closed. Gates green on 33cc71e; Codex review triaged and fixed (reviews/2.3-codex.md). User decisions D-022 (memory gates) and D-023 (restricted memberships, written-ref merge). No waivers.
 - 2026-10-23: sub-phase 2.2 closed. Gates green on 0855652; Codex review triaged and fixed (reviews/2.2-codex.md). No waivers.
 - 2026-10-23: user approved the plan and a chart `extraArgs` value (Task 50 Step 0).
 - 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.

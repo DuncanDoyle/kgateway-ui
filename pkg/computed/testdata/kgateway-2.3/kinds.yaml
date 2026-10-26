@@ -1,0 +1,151 @@
+# Each protocol's default kinds, and allowedRoutes.kinds with a nil group (kept) and an
+# empty group (ignored). Every listener admits All namespaces.
+# Status is hand-written to agree with view A (rules §8.3).
+provenance: computed-rules §4.2, §11.1
+controllerVersion: v2.3.11
+namespaces:
+  infra: {}
+  apps: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+    - {name: https, protocol: HTTPS, port: 443, tls: {mode: Terminate}, allowedRoutes: {namespaces: {from: All}}}
+    - {name: tls-term, protocol: TLS, port: 8443, tls: {mode: Terminate}, allowedRoutes: {namespaces: {from: All}}}
+    - {name: tls-pass, protocol: TLS, port: 8444, tls: {mode: Passthrough}, allowedRoutes: {namespaces: {from: All}}}
+    - {name: tcp, protocol: TCP, port: 9000, allowedRoutes: {namespaces: {from: All}}}
+    - {name: udp, protocol: UDP, port: 9001, allowedRoutes: {namespaces: {from: All}}}
+    - name: http-only
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces: {from: All}
+        kinds: [{kind: HTTPRoute}]
+    - name: grpc-empty-group
+      protocol: HTTP
+      port: 8081
+      allowedRoutes:
+        namespaces: {from: All}
+        kinds: [{group: "", kind: GRPCRoute}]
+  status:
+    listeners:
+    - name: http
+      attachedRoutes: 2
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: https
+      attachedRoutes: 2
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: tls-term
+      attachedRoutes: 2
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: tls-pass
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: tcp
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: udp
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "False", reason: UnsupportedProtocol, observedGeneration: 1}
+    - name: http-only
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    - name: grpc-empty-group
+      attachedRoutes: 0
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: h, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: GRPCRoute
+  metadata: {name: g, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: TLSRoute
+  metadata: {name: t, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+# Experimental-only on both minors; the absent setting means true, so it is a candidate.
+- apiVersion: gateway.networking.k8s.io/v1alpha2
+  kind: TCPRoute
+  metadata: {name: c, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 2}
+    Gateway infra/gw https: {count: 2}
+    Gateway infra/gw tls-term: {count: 2}
+    Gateway infra/gw tls-pass: {count: 1}
+    Gateway infra/gw tcp: {count: 1}
+    Gateway infra/gw udp: {count: 0}
+    Gateway infra/gw http-only: {count: 1}
+    Gateway infra/gw grpc-empty-group: {count: 0}
+  parentRefs:
+    "HTTPRoute apps/h #0": {outcome: accepted, listeners: [http, https, http-only]}
+    "GRPCRoute apps/g #0": {outcome: accepted, listeners: [http, https]}
+    "TLSRoute apps/t #0": {outcome: accepted, listeners: [tls-term, tls-pass]}
+    "TCPRoute apps/c #0": {outcome: accepted, listeners: [tls-term, tcp]}
+  members:
+    "HTTPRoute apps/h #0 -> Gateway infra/gw http": []
+    "HTTPRoute apps/h #0 -> Gateway infra/gw https": []
+    "HTTPRoute apps/h #0 -> Gateway infra/gw http-only": []
+    "GRPCRoute apps/g #0 -> Gateway infra/gw http": []
+    "GRPCRoute apps/g #0 -> Gateway infra/gw https": []
+    "TLSRoute apps/t #0 -> Gateway infra/gw tls-term": []
+    "TLSRoute apps/t #0 -> Gateway infra/gw tls-pass": []
+    "TCPRoute apps/c #0 -> Gateway infra/gw tls-term": []
+    "TCPRoute apps/c #0 -> Gateway infra/gw tcp": []
+  checks:
+    Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw https: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw tls-term: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw tls-pass: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw tcp: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw udp: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw http-only: {state: checked, coverage: [count-agrees]}
+    Gateway infra/gw grpc-empty-group: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute apps/h #0": {state: checked, coverage: [status-compatible]}
+    "GRPCRoute apps/g #0": {state: checked, coverage: [status-compatible]}
+    "TLSRoute apps/t #0": {state: checked, coverage: [status-compatible]}
+    "TCPRoute apps/c #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

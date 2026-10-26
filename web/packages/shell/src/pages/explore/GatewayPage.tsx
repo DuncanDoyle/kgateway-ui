@@ -1,7 +1,8 @@
 import type { SerializedStyles } from "@emotion/react";
-import { useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useCallback, useMemo } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useGatewayDetail, useListenerSets } from "../../api/exploreHooks";
+import { useListFilter } from "../../api/hooks";
 import type { LinkedRef, ListenerSetRow } from "../../api/types";
 import { columnCopy, detailCopy, gatewayCopy } from "../../copy/explorer";
 import { ConditionList } from "../../explore/ConditionList";
@@ -11,7 +12,7 @@ import { useInstallId } from "../../shell/extension";
 import { DetailFrame, expectedRows, Facts, refParam, Section, SubList } from "./detailParts";
 import { ListenerTable } from "./gateway/ListenerTable";
 import { Muted, NameCell } from "./listParts";
-import { RouteSections } from "./RouteSections";
+import { type ListenerPick, RouteSections } from "./RouteSections";
 
 // region Helpers
 const GW = "gateway.networking.k8s.io";
@@ -43,6 +44,28 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
   );
   const lsQuery = useMemo(() => ({ parent: refParam(ref) }), [ref]);
   const lsCols = useMemo(() => lsColumns(id), [id]);
+  // ?listener= selects a listener: the one detail param besides ?tab (design §8.1). Selecting pushes, so back clears it.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const selected = new URLSearchParams(location.search).get("listener") ?? undefined;
+  const supported = useListFilter("routes", "listener");
+  const onSelect = useCallback(
+    (name?: string) => {
+      const q = new URLSearchParams(location.search);
+      if ((q.get("listener") ?? undefined) === name) return;
+      if (name) q.set("listener", name);
+      else q.delete("listener");
+      const s = q.toString();
+      navigate({ search: s ? `?${s}` : "" });
+    },
+    [location.search, navigate],
+  );
+  // An older server rejects listener= (strict params), so it gets no selector and the URL value is ignored.
+  // While /meta loads the selector keeps its place (ready false), so the route sections never move.
+  const pick: ListenerPick | undefined =
+    supported !== false && data
+      ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
+      : undefined;
   return (
     <DetailFrame installId={id} refValue={ref} noun="Gateway" data={data} error={error} stylesOverride={stylesOverride}>
       {data ? (
@@ -85,7 +108,7 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
               skeletonRows={expectedRows(data.listenerSets ?? data.attachedListenerSets ?? 1)}
             />
           </Section>
-          <RouteSections installId={id} parent={ref} counts={data.routeCounts} />
+          <RouteSections installId={id} parent={ref} counts={data.routeCounts} pick={pick} />
         </>
       ) : null}
     </DetailFrame>

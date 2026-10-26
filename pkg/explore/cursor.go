@@ -92,7 +92,7 @@ func decodeCursor(c string, s Sort) (cursor, error) {
 		ok = ok && validHealth(v)
 		e.v.n = healthRank(v)
 	case sortRoutes:
-		ok = ok && json.Unmarshal(w.V, &e.v.n) == nil && e.v.n >= 0
+		ok = ok && json.Unmarshal(w.V, &e.v.n) == nil && e.v.n >= -1 // -1: no count
 	}
 	if !ok {
 		return bad("bad sort value")

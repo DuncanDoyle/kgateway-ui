@@ -1,0 +1,91 @@
+# A Gateway parentRef never reaches ListenerSet listeners, and a denied ListenerSet's routes
+# are not evaluated: no counts and no outcome for it.
+# Status is hand-written to agree with view A (rules §8.3).
+provenance: computed-rules §4.1, §3.1, §11.1; e2e
+controllerVersion: v2.4.7
+namespaces:
+  infra: {}
+  apps: {}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    allowedListeners: {namespaces: {from: Same}}
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+  status:
+    listeners:
+    - name: http
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls, namespace: infra}
+  spec:
+    parentRef: {name: gw}
+    listeners:
+    - {name: extra, protocol: HTTP, port: 90, allowedRoutes: {namespaces: {from: All}}}
+  status:
+    conditions:
+    - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+    listeners:
+    - name: extra
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: denied, namespace: apps}
+  spec:
+    parentRef: {name: gw, namespace: infra}
+    listeners:
+    - {name: d, protocol: HTTP, port: 91, allowedRoutes: {namespaces: {from: All}}}
+  status:
+    conditions:
+    - {type: Accepted, status: "False", reason: NotAllowed, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: to-gw, namespace: apps}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: to-ls, namespace: apps}
+  spec:
+    parentRefs: [{name: ls, namespace: infra, kind: ListenerSet}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: ls, namespace: infra, kind: ListenerSet}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: to-denied, namespace: apps}
+  spec:
+    parentRefs: [{name: denied, kind: ListenerSet}]
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+    ListenerSet infra/ls extra: {count: 1}
+  parentRefs:
+    "HTTPRoute apps/to-gw #0": {outcome: accepted, listeners: [http]}
+    "HTTPRoute apps/to-ls #0": {outcome: accepted, listeners: [extra]}
+  members:
+    "HTTPRoute apps/to-gw #0 -> Gateway infra/gw http": []
+    "HTTPRoute apps/to-ls #0 -> ListenerSet infra/ls extra": []
+  checks:
+    Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
+    ListenerSet infra/ls extra: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute apps/to-gw #0": {state: checked, coverage: [status-compatible]}
+    "HTTPRoute apps/to-ls #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []

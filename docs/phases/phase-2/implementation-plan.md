@@ -1248,7 +1248,7 @@ func TestNamespaceLabels(t *testing.T)     // access OK → labels by name, an u
   - `type State string`: `StateChecked`, `StateDisagrees`, `StatePending`, `StateUnknown`, `StateRestricted` (wire values of rules §8.4)
   - `type Coverage string`: `CoverageCount = "count-agrees"`, `CoverageStatus = "status-compatible"`, `CoverageNone = "not-verified"`
   - `attach.go` (view A, rules §4.6):
-    - `type Acceptance int` (`Accepted`, `Denied`, `NoStatus`); `type Resource struct { Ref objects.Ref; Generation int64; Listeners []objects.Listener; ListenerStatus []objects.ListenerStatus; Acceptance Acceptance }` (a Gateway is `Accepted`)
+    - `type Acceptance int` (`Accepted`, `Denied`, `NoStatus`); `type Resource struct { Ref objects.Ref; Parent objects.Ref; Generation int64; Listeners []objects.Listener; ListenerStatus []objects.ListenerStatus; Acceptance Acceptance }` (a Gateway is `Accepted`; `Parent` is a ListenerSet's Gateway, zero for a Gateway)
     - `type Route struct { Ref objects.Ref; Generation int64; Hostnames []string; ParentRefs []objects.ParentRef; Written []objects.WrittenRef; Parents []objects.RouteParentStatus; ExperimentalOnly bool }` — `Written` is index-aligned with `ParentRefs`; each status entry carries its own `Written` (Task 12)
     - `type AttachmentInput struct { Resources []Resource; Routes []Route; NamespaceLabels map[string]map[string]string; NamespacesOK bool; Experimental install.Setting; ControllerNames []string }`
     - `type Outcome string`: `OutcomeAccepted = "accepted"`, `OutcomeNotAllowed = "NotAllowedByListeners"`, `OutcomeNoParent = "NoMatchingParent"`, `OutcomeNoHostname = "NoMatchingListenerHostname"`
@@ -1338,6 +1338,7 @@ func TestIntersect(t *testing.T) {
 **Interfaces:**
 - Consumes: Task 37 types; Task 38 helpers.
 - Produces: `func (Rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult` — rules §4.1 per Gateway and per `Accepted` ListenerSet (the `allowed` quirk exactly as written), §4.4 counts, §4.6 dependencies, one `Fact` per listener that failed for a non-accepted outcome. Sorted: Members by (resource, listener, route, parentRef); Outcomes by (route, parentRef); Counts by resource, then listener order as written. Namespace deps are `objects.Ref{Kind: "Namespace", Name: ns}`.
+- Members follow the listener order as written, as Counts do, not listener name.
 - Unknown rules (rules §3.3; the precise reach is our call): a `Denied` ListenerSet gives no members, outcomes or counts; a `NoStatus` ListenerSet makes its counts and the refs naming it `listenerset-no-status`. An experimental-only route with the setting false is not a candidate; with the setting unknown its outcomes are `setting-unknown`, and so is every count of a listener it names whose allowed kinds include its kind. A listener whose namespace verdict is unknown has an unknown count and no members; a ref is unknown when any kind-matching listener of its resource has an unknown verdict.
 
 - [ ] **Step 1: Write the failing tests** (rules §11.1, rule level; test-local builders `gw(ns, name string, ls ...objects.Listener) computed.Resource`, `route(kind, ns, name string, refs ...objects.ParentRef) computed.Route`)
@@ -1437,14 +1438,14 @@ func TestAttachmentFingerprints(t *testing.T) {
 
 **Files:**
 - Create: `pkg/engine/views.go`, `pkg/engine/views_test.go`, `pkg/engine/persist.go`, `pkg/engine/persist_test.go`, `pkg/health/computed.go`, `pkg/health/computed_test.go`
-- Modify: `pkg/computed/rules.go` (`Views`), `pkg/engine/engine.go` (`InstallModel.Computed`, the persistence field, `Compute`: views → persistence → health; Task 43 hands `Views` to `explore.Build`), `pkg/health/finding.go` (`CodeComputedDisagrees`; `Input.Computed` on the `Input` at `:93`), `pkg/health/checks.go:23-25` (register `computedCheck`, named `computed views`, not required, appended after `backend status`), `pkg/health/messages.go` (drafts), `internal/testutil/fixtures.go` (`GatewayWithListeners`)
+- Modify: `pkg/computed/rules.go` (`Views`), `pkg/engine/engine.go` (`InstallModel.Computed`, the persistence field, `Compute`: views → persistence → health; Task 43 hands `Views` to `explore.Build`), `pkg/health/finding.go` (`CodeComputedDisagrees`; `Input.Computed` on the `Input` at `:93`), `pkg/health/checks.go:23-25` (register `computedCheck`, named `computed views`, not required, appended after `backend status`), `pkg/health/messages.go` (drafts), `internal/testutil/fixtures.go` (`GatewayWithListeners`; the default Gateway listener admits all namespaces), `pkg/objects/backend.go` (`RouteView.WrittenRefs`, so report keys reuse the cached decode), `internal/testutil/computedtest` (`NoViews`, for the frozen v1 wire worlds and the idle budget until Task 49)
 
 **Interfaces:**
 - Consumes: Tasks 36–41; `deadlines.add` (Task 6).
 - Regenerate: `pkg/api/testdata/golden/health.json` (the appended `computed views` check, design §7.6; nothing else changes)
 - Produces:
   - `type Views struct { RuleSet, Note string; Attachment AttachmentResult; Checks []CheckResult }` (Task 62 adds `Delegation`)
-  - `func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, dec objects.Decoder) computed.AttachmentInput` — owned Gateways and owned ListenerSets (acceptance from the current `Accepted`); in-scope routes of route kinds with a parentRef naming one of them, with `Written` from `objects.WrittenParentRefs`; `ExperimentalOnly` from `Served.ExperimentalOnly(res.KgatewayVersion())`; labels from `install.NamespaceLabels`
+  - `func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, dec objects.Decoder) computed.AttachmentInput` — owned Gateways and owned ListenerSets (acceptance from the current `Accepted`; `Resource.Parent` from `objects.ListenerSetParent(u).Ref()`, which the 2.4 isolation note needs, rules §4.5); in-scope routes of route kinds with a parentRef naming one of them, with `Written` from `objects.WrittenParentRefs`; `ExperimentalOnly` from `Served.ExperimentalOnly(res.KgatewayVersion())`; labels from `install.NamespaceLabels`
   - `InstallModel.Computed *computed.Views`
   - `const Window = 30 * time.Second`
   - `type persistence struct{...}` (map `computed.Identity → {print uint64; since time.Time}`, under `computeMu`); `func (p *persistence) step(now time.Time, checks []computed.CheckResult, graceEnd func(computed.CheckResult) time.Time) (next time.Time)` — one call per `Compute` over every install's checks; rules §9.3 steps 1–8: sets `State`, `Mature` and `Since` in place, deletes every entry not a candidate this run, returns the earliest future maturation (zero when none), which `Compute` passes to `deadlines.add(next, false)`. A non-candidate's state: stale → `pending`; compatible, not observable → `checked`; unknown → `unknown`.
@@ -1489,19 +1490,19 @@ func TestAttachmentInputScope(t *testing.T)            // views_test.go: an out-
   - `type DepSet []int32`; `Index.Refs []objects.Ref` (interned per install, design §7.4 rule 10); `func (ix *Index) Ref(i int32) objects.Ref`
   - `type ListenerKey struct { Resource objects.Ref; Listener string }`
   - `type Member struct { Row RowID; ParentRef int; Hostnames []string; Deps DepSet }`; `Index.ByListener map[ListenerKey][]Member`
-  - `type ListenerFacts struct { Count int; Known bool; Unknown computed.UnknownReason; Error string; IsolationNote bool; Check computed.CheckResult; Deps DepSet }`; `Index.Listeners map[ListenerKey]ListenerFacts`
-  - `type ListenerHit struct { Listener string; Hostnames []string; Deps DepSet }`; `type RefFacts struct { ParentRef int; Target objects.Ref; Outcome computed.Outcome; Unknown computed.UnknownReason; Rule string; Listeners []ListenerHit; Facts []computed.Fact; Check computed.CheckResult; Deps DepSet }`; `RouteRow.Computed []RefFacts`; `RouteRow.UnknownDeps DepSet` (dependencies of `listener-unknown`)
+  - `type ListenerFacts struct { Count int; Known bool; Unknown computed.UnknownReason; Error string; IsolationNote bool; Check *computed.CheckResult; Deps DepSet }`; `Index.Listeners map[ListenerKey]ListenerFacts`
+  - `type ListenerHit struct { Listener string; Hostnames []string; Deps DepSet }`; `type RefFacts struct { Out *computed.RefOutcome; Listeners []ListenerHit; Check *computed.CheckResult; Deps DepSet }` (`Out` and `Check` are shared with the views, Task 43 fix round 1); `RouteRow.Computed []RefFacts`; `RouteRow.UnknownDeps DepSet` (dependencies of `listener-unknown`)
   - `FlagDisagrees` (wire `disagrees`: the row's object has KGWUI-012), `FlagListenerUnknown` (wire `listener-unknown`: a status-accepted parentRef whose outcome is unknown or has no listener)
   - `GatewayRow.Members []RowID`, `GatewayRow.Disagreements int` (checks in state `disagrees` on the Gateway); the same on `ListenerSetRow`
   - `Index.RuleSet, Index.RuleNote string`
-  - `Query.Listener string` — needs `Parent` of a Gateway or ListenerSet kind, else `ErrBadQuery`; a name selects `ByListener[{parent, name}]`; `unknown` selects rows whose ref to that parent is unknown; a Gateway's listener never matches ListenerSet routes; the listener index is the narrowest (design §3.8)
-  - Computed predicates are caller-visible (design §7.4 rule 4a): `listener=<name>`, `listener=unknown` and `state=listener-unknown` match a row only when `visible` holds for every ref of the deciding fact's `DepSet`, checked before `Total`, sorting and paging. `state=disagrees` is a finding and is not filtered (rule 9).
+  - `Query.Listener string` — needs `Parent` of a Gateway or ListenerSet kind, else `ErrBadQuery`; a name selects `ByListener[{parent, name}]`; `_unknown` (never a listener name) selects rows whose ref to that parent is unknown; a Gateway's listener never matches ListenerSet routes; the listener index is the narrowest (design §3.8)
+  - Computed predicates are caller-visible (design §7.4 rule 4a): `listener=<name>`, `listener=_unknown` and `state=listener-unknown` match a row only when `visible` holds for every ref of the deciding fact's `DepSet`, checked before `Total`, sorting and paging. `state=disagrees` is a finding and is not filtered (rule 9).
 
 - [ ] **Step 1: Write the failing tests**
 
 ```go
 func TestByListenerMembers(t *testing.T) // hostnames per listener; a route with two refs on one listener: one row on the page, two Members
-func TestListenerFilter(t *testing.T)    // listener=https → members; listener=unknown → unknown rows; no parent or an HTTPRoute parent → ErrBadQuery; a name absent on the parent → empty page
+func TestListenerFilter(t *testing.T)    // listener=https → members; listener=_unknown → unknown rows; no parent or an HTTPRoute parent → ErrBadQuery; a name absent on the parent → empty page
 func TestComputedFlags(t *testing.T)     // disagrees from the findings map; listener-unknown only on a status-accepted ref with an unknown outcome
 func TestDepSetsInterned(t *testing.T)   // equal refs share one index; Ref(i) round-trips
 func TestGatewayRowComputedCounts(t *testing.T) // Members distinct; Disagreements counts disagreeing checks on the Gateway
@@ -1527,7 +1528,7 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) // a member whose Select
   - `type Attachment struct { Outcome string \`json:"outcome,omitempty"\`; Listeners []ListenerAttachment \`json:"listeners"\`; Explanation string \`json:"explanation,omitempty"\`; Computed Computed }`
   - `ParentSummary.Computed *Attachment`; `type RouteAttachment struct { ParentRef objects.ParentRef; Index int; Target LinkedRef; Result Attachment }`; `RouteDetail.Attachments []RouteAttachment` (one per Gateway or ListenerSet parentRef)
   - `ListenerDTO.ComputedRoutes *int`, `.Computed *Computed`, `.IsolationNote bool \`json:"isolationNote,omitempty"\``; `GatewayListRow.Routes *int`, `.Disagreements int \`json:"disagreements,omitempty"\``; the same two on `ListenerSetRow`
-  - `ruleSet` on every detail payload is `Views.RuleSet`; every `Computed.Rules` is the same value and `Computed.Note` is `Views.Note`
+  - `ruleSet` on every detail payload is `Views.RuleSet`; every `Computed.Rules` is the same value; `Computed.Note` is the check's own `CheckResult.Note` when a check exists (it includes `Views.Note`, and carries the rules §8.1 inconclusive sentence), the ref check's note for a membership, and `Views.Note` when there is no check
   - `func explain(fs []computed.Fact) string` — drafts as design §7.5 ("listener https has *.example.org; route has shop.example.com"), finalised in Task 48
   - `func memberCoverage(listener, ref computed.CheckResult, matched int) []computed.Coverage` — rules §8.4: the listener's `count-agrees`, the ref's `status-compatible`, and `not-verified` when the ref matched more than one listener; a membership is `disagrees` or `pending` when either check is
   - `func (v *view) allowDeps(ix *explore.Index, d explore.DepSet) bool` — memoised per ref index; under `AllowAll` true without calls
@@ -1539,7 +1540,7 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) // a member whose Select
 func TestRouteListCarriesAttachment(t *testing.T)  // design §7.5 body: outcome, listeners [], explanation, rule hostname-intersection, rules kgateway-2.4, state checked, coverage [status-compatible]
 func TestRouteDetailAttachments(t *testing.T)      // per listener effectiveHostnames; HTTPRoute parentRefs have no entry
 func TestGatewayDetailListenerStates(t *testing.T) // checked [count-agrees]; disagrees with computedRoutes and status attachedRoutes both sent; pending; unknown (reason, no computedRoutes); isolationNote
-func TestListenerParam(t *testing.T)               // 400 without parent and with an HTTPRoute parent; listener=unknown 200
+func TestListenerParam(t *testing.T)               // 400 without parent and with an HTTPRoute parent; listener=_unknown 200
 func TestMemberCoverage(t *testing.T)              // one listener → [count-agrees status-compatible]; two → + not-verified
 func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) // design §9.1 (2.3): membership, count, check restricted with no value; no listener-unknown; state=listener-unknown does not match; health and row states unchanged
 func TestListenerFilterCannotProbe(t *testing.T)   // design §9.1: listener=https over a hidden Selector Namespace returns the rows and total it returns when those facts are unknown; deniedInInstall unchanged
@@ -1603,7 +1604,8 @@ it("stale data turns the badge unknown", ...);                 // fake timers pa
 it("listener table shows the status count and the computed count with its check", ...);   // "Count agrees with the controller"
 it("a disagreeing listener shows both numbers and the warning icon with text", ...);
 it("selecting a listener sets ?listener= and filters attached routes to its members", ...); // effective hostnames per row; survives reload; back clears it
-it("listener=unknown lists the routes the UI could not place", ...);
+it("listener=_unknown lists the routes the UI could not place", ...);
+it("an unknown-count listener shows the unknown state and its reason, never an empty table", ...);
 it("failed-route rows show the computed explanation", ...);
 it("a shared plain-HTTP port shows the isolation note", ...);
 it("parent card lists computed listeners, each with its own effective hostnames marked Not checked by the controller", ...);

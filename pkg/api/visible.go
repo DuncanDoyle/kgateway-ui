@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -17,6 +18,10 @@ type view struct {
 	r    *http.Request
 	all  bool
 	seen map[objects.Ref]bool
+	// pooled is set when seen came from seenPool.
+	pooled bool
+	// deps memoises allowDeps per index of the request's dependency table: 1 visible, -1 hidden.
+	deps []int8
 }
 
 // view returns the view of the caller of r.
@@ -26,6 +31,33 @@ func (h *handler) view(r *http.Request) *view {
 		v.seen = map[objects.Ref]bool{}
 	}
 	return v
+}
+
+// seenPool recycles the memos of route list requests, which ask about
+// every row: a memo grown afresh per request was most of their garbage.
+// Tests swap it to control reuse.
+var seenPool interface {
+	Get() any
+	Put(any)
+} = &sync.Pool{New: func() any { return map[objects.Ref]bool{} }}
+
+// borrow swaps v's memo for one from seenPool; release returns it.
+func (v *view) borrow() {
+	if v.all || v.pooled {
+		return
+	}
+	v.seen, v.pooled = seenPool.Get().(map[objects.Ref]bool), true
+}
+
+// release clears a borrowed memo and returns it to seenPool. v asks the
+// Authorizer afresh after it.
+func (v *view) release() {
+	if !v.pooled {
+		return
+	}
+	clear(v.seen)
+	seenPool.Put(v.seen)
+	v.seen, v.pooled = map[objects.Ref]bool{}, false
 }
 
 // can reports whether the caller may view ref.
@@ -48,6 +80,31 @@ func (v *view) visible() func(objects.Ref) bool {
 		return nil
 	}
 	return v.can
+}
+
+// allowDeps reports whether the caller may view every dependency in d
+// (design §7.4 rule 4). Answers are memoised per ref index; under AllowAll it
+// is true without calls (rule 10). A view serves one index.
+func (v *view) allowDeps(ix *explore.Index, d explore.DepSet) bool {
+	if v.all {
+		return true
+	}
+	if v.deps == nil {
+		v.deps = make([]int8, len(ix.Refs))
+	}
+	for _, i := range d {
+		switch v.deps[i] {
+		case -1:
+			return false
+		case 0:
+			if !v.can(ix.Ref(i)) {
+				v.deps[i] = -1
+				return false
+			}
+			v.deps[i] = 1
+		}
+	}
+	return true
 }
 
 // anyOf reports whether the caller may view at least one of refs.

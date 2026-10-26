@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -51,6 +52,7 @@ const (
 	CodeAmbiguousOwnership   = "KGWUI-009"
 	CodeSelfManagedProxy     = "KGWUI-010"
 	CodeDelegatedNotAttached = "KGWUI-011"
+	CodeComputedDisagrees    = "KGWUI-012"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -78,8 +80,9 @@ type Finding struct {
 	// generation. It replaces Since for a caller who may not view all of
 	// Evidence, so Since tells that caller nothing about it. Never serialised.
 	ResourceSince *time.Time `json:"-"`
-	// parent is the route parentRef a KGWUI-003 finding is about; it orders findings.
-	parent objects.ParentRef
+	// parent is the route parentRef a KGWUI-003 or KGWUI-011 finding is about;
+	// it orders findings. A pointer keeps the other findings small.
+	parent *objects.ParentRef
 }
 
 // CheckResult records whether a check could collect current input. A Required
@@ -121,6 +124,27 @@ type Input struct {
 	Platform platform.Info
 	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
 	ProxyMode proxymode.Resolver
+	// Computed are the install's computed views with their check states; nil means none.
+	Computed *computed.Views
+	// Views decodes Gateways, ListenerSets and routes; nil means objects.Direct.
+	// Its views are shared and read-only.
+	Views objects.Decoder
+}
+
+// views returns in.Views, or objects.Direct when it is unset.
+func (in Input) views() objects.Decoder {
+	if in.Views == nil {
+		return objects.Direct{}
+	}
+	return in.Views
+}
+
+// routeParents returns route u's status.parents, decoded through in.Views.
+func (in Input) routeParents(u *unstructured.Unstructured) []objects.RouteParentStatus {
+	if gvk := u.GroupVersionKind(); gvk.Group == objects.GatewayAPIGroup && gvk.Kind == "HTTPRoute" {
+		return in.views().HTTPRoute(u).Parents
+	}
+	return in.views().Route(u).Parents
 }
 
 // firstSeen returns when the grace period for u's current generation started.

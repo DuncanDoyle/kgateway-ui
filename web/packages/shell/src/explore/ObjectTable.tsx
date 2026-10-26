@@ -76,6 +76,18 @@ const Table = styled.table`
   th button:focus-visible {
     outline: 2px solid ${(p) => p.theme.color.focus};
   }
+  /* The chip's tooltip must not be clipped by the header cell. */
+  th.has-extra {
+    overflow: visible;
+  }
+  th .extra {
+    display: inline-flex;
+    margin-left: 8px;
+    vertical-align: middle;
+    text-transform: none;
+    letter-spacing: normal;
+    font-weight: ${(p) => p.theme.font.weight.regular};
+  }
   td {
     padding: 6px 12px;
     vertical-align: middle;
@@ -182,6 +194,8 @@ const Footer = styled.div`
 export interface ObjectColumn<T> {
   id: string;
   header: string;
+  /** Shown after the header, outside its sort button, e.g. the Computed chip of a computed column. */
+  headerExtra?: ReactNode;
   /** A fixed width from the first render (design §8.7), e.g. "120px" or "18%"; absent columns share the rest. */
   width?: string;
   cell: (row: T) => ReactNode;
@@ -345,6 +359,7 @@ export function ObjectTable<T>({
                 <th
                   key={c.id}
                   scope="col"
+                  className={col?.headerExtra ? "has-extra" : undefined}
                   aria-sort={s === "asc" ? "ascending" : s === "desc" ? "descending" : undefined}
                 >
                   {col?.sortKey ? (
@@ -356,6 +371,7 @@ export function ObjectTable<T>({
                   ) : (
                     (col?.header ?? <VisuallyHidden>{listCopy.details}</VisuallyHidden>)
                   )}
+                  {col?.headerExtra ? <span className="extra">{col.headerExtra}</span> : null}
                 </th>
               );
             })}

@@ -32,7 +32,7 @@
 - Selection returns `Selection{Rules, Note}` from `pkg/computed/rulesets`. The factory lives there, not in `pkg/computed`, so the rule-set packages can import `pkg/computed` without an import cycle **(our call)**.
 - An unknown version uses the newest set, labelled "Controller version unknown; using the 2.4 rules".
 - A minor newer than the newest set uses the newest set, labelled "Rules not yet verified for 2.5".
-- A controller older than 2.3 uses the 2.3 set, labelled "Rules not yet verified for <version>" **(our call)**.
+- A controller older than 2.3 uses the 2.3 set, labelled "Rules not yet verified for <major.minor>", for example "2.2" **(our call)**.
 - The cross-check runs in both cases. The label is part of every result's check note.
 
 ## 3. Inputs
@@ -60,12 +60,15 @@
 
 | Reason | When | What is unknown |
 |---|---|---|
+| `scope-unknown` | the install's discovery scope is unknown, so its candidate routes are a guess **(user, 2026-10-24)** | every listener count and parentRef outcome of view A; no members |
 | `namespace-labels-unavailable` | Namespace access is not OK and a listener uses `From: Selector` | that listener's count, its members and their parentRef outcomes |
 | `listenerset-no-status` | a ListenerSet has no current `Accepted` | that ListenerSet's listeners |
 | `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs whose namespace could be the wildcard |
 | `not-reached` | an owned parent route is not reached from any root (§5.1) | its contexts, so its delegation outcomes; selection and permission stay known |
 | `context-unknown` | an ancestor on the path is unknown or was cut by a bound | everything below that point |
 | `too-large` | a compute bound of §5.7 stopped the computation | everything not yet computed, in the deterministic order of §5.7 |
+
+**Precedence.** `scope-unknown` wins over every other reason, since it affects every candidate **(user, 2026-10-24)**; then `listenerset-no-status`, which covers a whole ListenerSet; then, per ref, `setting-unknown` before `namespace-labels-unavailable`.
 
 **Uncertainty is never evidence (our call).** An unknown setting, a boolean setting that does not parse, and the over-approximation used for label selection under an unknown wildcard setting all stay uncertainty. They never select a route, never make a route a candidate, and never count as negative evidence. They feed only the uncertain points of §8.5.
 
@@ -104,17 +107,17 @@ viewA(resource, route):                               # processRoute: V4 query/r
 
 ### 4.2 Allowed routes
 
-- **Kinds.** Protocol defaults: HTTP and HTTPS → HTTPRoute, GRPCRoute; TLS with mode Terminate → TLSRoute, TCPRoute; any other TLS mode → TLSRoute; TCP → TCPRoute; UDP → none; any other protocol → HTTPRoute (`query/route.go` V4:198-221). A set `allowedRoutes.kinds` is intersected with those defaults; a nil group means `gateway.networking.k8s.io` (V4:163-175).
-- **Namespaces.** The default `Same` means the namespace of the resource; for a ListenerSet listener that is the ListenerSet's. `All` allows every namespace. `Selector` is evaluated against the Namespace object's labels. A missing Namespace matches only an empty selector (`pkg/krtcollections/namespaceselector.go` V4:20-28).
+- **Kinds.** Protocol defaults: HTTP and HTTPS → HTTPRoute, GRPCRoute; TLS with mode Terminate → TLSRoute, TCPRoute; any other TLS mode → TLSRoute; TCP → TCPRoute; UDP → none; any other protocol → HTTPRoute (`query/route.go` V4:198-221). A set `allowedRoutes.kinds` is intersected with those defaults; a nil group means `gateway.networking.k8s.io` (V4:163-175). An explicit empty `kinds` list allows no kinds; an entry with an empty group is ignored, and the requested order and duplicates are kept (`query/route.go` V4:163-174, V3:136-147; `filterSupportedRouteKinds` V4:223-231, V3:196-204).
+- **Namespaces.** The default `Same` means the namespace of the resource; for a ListenerSet listener that is the ListenerSet's. `All` allows every namespace. `Selector` is evaluated against the Namespace object's labels. A missing Namespace is admitted only by an empty selector, via `sel.Empty()` (`pkg/krtcollections/namespaceselector.go` V4:20-28). An unknown `From` acts as `Same` (`query/route.go` V4:178-192, V3:151-165).
 - **Experimental kinds.** A route of an experimental-only kind (D-018) is a candidate only when the experimental setting is true.
 
 ### 4.3 Hostname intersection
 
 From `query/query.go` V4:231-296 (both). Matching is a case-sensitive string suffix match.
 - A route with no hostnames attaches. Its effective hostname is the listener's, or none.
-- A listener with no hostname gives the route's hostnames.
-- Otherwise, per pair: two exact names must be equal (result: the listener's); a `*.x` listener matches an exact route name ending in `.x` at any depth (result: the route's); an exact listener matches a `*.x` route when it ends in `.x` (result: the listener's); two wildcards give the more specific.
-- Duplicates are removed. Attachment fails only when the result is empty.
+- A listener with no hostname gives the route's hostnames as written (`query/query.go` V4:248-250); duplicates are removed only when intersecting.
+- Otherwise, per pair: two exact names must be equal (result: the listener's); a `*.x` listener matches an exact route name ending in `.x` at any depth (result: the route's); an exact listener matches a `*.x` route when it ends in `.x` (result: the listener's); two wildcards give the more specific. Duplicates are removed.
+- Attachment fails only when the result is empty.
 - The result is the **effective hostnames per (parentRef, listener)**. Each listener has its own list (`query/route.go` V4:457-521, V3:417-481).
 
 ### 4.4 Listener count
@@ -130,7 +133,10 @@ Two things narrow what Envoy serves without changing status or counts:
 - 2.4's plain-HTTP listener isolation drops a hostname from a less specific listener on the same port (`translator/listener/gateway_listener_translator.go` V4:689-747; V3 has none);
 - listeners that fail validation are dropped later (`TranslateListeners`, V4:62). Their routes still count and keep `Accepted=True`.
 
-View A shows status semantics. On 2.4, a listener that shares its port with a more specific listener carries the note "Envoy may serve fewer hostnames on this listener" **(our call)**.
+View A shows status semantics. On 2.4, a plain-HTTP listener carries the note "Envoy may serve fewer hostnames on this listener" when another plain-HTTP listener on the same port of the same Gateway (its own listeners and those of its allowed ListenerSets, `appendHttpListener` V4:135-173) has a hostname inside this listener's and ranks above it in kgateway's precedence: empty < wildcard < exact, a wildcard with more labels first, equal hostnames never (`translator/listener/gateway_listener_translator.go` V4:700-747). So an empty-hostname listener is noted when any other has a hostname, and a `*.x` listener when another is an exact name ending in `.x` or a longer wildcard under `.x`. The count never changes **(our call)**.
+- Only listeners kgateway merges take part, so a listener whose current status is `Accepted=False` neither gives nor gets the note: kgateway drops rejected and conflicted listeners before merging (V4:62-63; `translator/listener/validation.go` V4:166, 518-546).
+- A ListenerSet without a current `Accepted` (§3.3), or whose parent Gateway is not known, neither gives nor gets the note: its listeners' counts are unknown **(our call)**.
+- A listener whose count is unknown, for any reason of §3.3, gets no note; under `scope-unknown` no listener does **(our call, 2.3; follows the user decision on scope-unknown, 2026-10-24)**.
 
 ### 4.6 Output
 
@@ -138,7 +144,7 @@ View A shows status semantics. On 2.4, a listener that shares its port with a mo
 |---|---|---|---|
 | Listener membership | (resource, listener, route, parentRef index) | effective hostnames | route, resource, the route's Namespace when the listener uses `Selector` |
 | ParentRef outcome | (route, parentRef index) | accepted with listeners, or one of three reasons | route, resource; Namespaces evaluated by `Selector` on any listener of the resource |
-| Listener count | (resource, listener) | number | resource, every candidate route, every Namespace evaluated by `Selector` |
+| Listener count | (resource, listener) | number | none: a fact of its listener, with the isolation note (2.4) of §4.5. Shown to every caller who sees the listener, hidden members included (design §7.4 rule 5) **(user, 2026-10-26)** |
 | Explanation | per non-accepted outcome | the listener facts that failed, e.g. "listener `https` allows namespaces with `team=web`; namespace `shop` has `team=retail`" | as the outcome |
 
 ## 5. View B — delegation selection, permission and fit with ancestor context
@@ -347,7 +353,7 @@ kgateway merges every write for one report key into one entry, and a later write
 | Check | Key | Expected |
 |---|---|---|
 | `listener-count` | (resource, listener) | the computed count (§4.4) |
-| `route-accepted` | (route, report key of the parentRef, as written) | refs sharing a key with the **same** computed outcome are merged; refs sharing a key with different outcomes are inconclusive (§8.1). A rejection expects `Accepted=False` with an attachment reason; an observed non-attachment reason is inconclusive. An acceptance expects no `False` with an attachment reason |
+| `route-accepted` | (route, report key of the parentRef, as written) | refs sharing a key with the **same** computed outcome are merged; refs sharing a key with different outcomes are inconclusive (§8.1). A rejection expects `Accepted=False` with **the computed** attachment reason; another attachment reason contradicts; an observed non-attachment reason is inconclusive. An acceptance expects no `False` with an attachment reason |
 | `child-entry` | (child, report key under P, §7) | an entry iff **any** context, over every rule and ref of P and every root, gives `attached` or `rejected-hostnames`. With a rejection: `Accepted=False/UnsupportedValue`. With an attachment: no `UnsupportedValue`. No entry when every context gives `dropped`, `forbidden`, `cycle` or `unresolved`. |
 | `parent-resolvedrefs` | (P, P's reporter key) | `False` when any context with that key records a delegation failure. The reason is compared only when the aggregate is **complete** (§8.5), all its failures share one reason, **and** P has no non-delegation backendRef and no `ExtensionRef` filter. An incomplete aggregate with a known failure establishes only `ResolvedRefs=False`, because an omitted context could add another reason (`query/utils.go` V4:38-50, V3:37-49), and writes to one key replace each other (`pkg/reports/reporter.go` V4:505-512, V3:447-454); otherwise only the status is compared. A computed "no delegation failure" against an observed `False` contradicts only under the same condition; otherwise it is compatible. |
 
@@ -360,9 +366,9 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Class | When | Check state | KGWUI-012 |
 |---|---|---|---|
 | Contradicting current status | the signal exists, is current, and contradicts the expectation | `pending` until mature, then `disagrees` | when mature (§9.3) |
-| Stale status | the signal exists and is stale | `pending`, "Waiting for the controller" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
+| Stale status | the signal exists and is stale | `pending`, "Waiting for the controller's status" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
-| Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route is Phase 1's KGWUI-003, and the check stays `pending`. |
+| Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route, and a missing listener entry on an owned Gateway or ListenerSet (`pkg/health/checks.go:264`), is Phase 1's KGWUI-003, and the check stays `pending`. |
 | Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (both sets: a drop or deselection caused by a parent edit, D-021); otherwise, including a drop caused by a child edit, `not-verified`, "The controller may keep old status". Cause: a child edit when the child's current generation was first seen after the parent's current generation, or when either time is unknown; otherwise a parent edit (our call) | where verified, when mature |
 | Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
 | Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
@@ -374,12 +380,14 @@ A cross-check that passes says what it verified. "Agrees" is never shown for a f
 | Coverage | Means | Shown as (draft) |
 |---|---|---|
 | `count-agrees` | the listener's count equals `attachedRoutes`; membership and effective hostnames are not verified | "Count agrees with the controller" |
-| `status-compatible` | the parentRef's or child's status is consistent with the outcome | "Status agrees" |
-| `not-verified` | nothing the controller writes covers this fact | "Not checked by the controller" |
+| `status-compatible` | the parentRef's or child's status is consistent with the outcome | "Consistent with the status" |
+| `not-verified` | nothing the controller writes covers this fact | "The controller does not report this" |
 
 A result may carry several labels. A route's listener membership carries the listener's `count-agrees` and the parentRef's `status-compatible`, and stays `not-verified` for which listener it is on when its parentRef matched several. An effective matcher is always `not-verified`.
 
 Check states on the wire are `checked`, `disagrees`, `pending`, `unknown` and `restricted`. `restricted` is set at serve time when the caller may not view a dependency (design §7.4).
+
+A route list row merges the checks of written parentRefs that resolve to one parent: worst state first (`disagrees` > `pending` > `unknown` > `restricted` > `checked`), coverage united, and `restricted` if any side is. Route detail shows each check (design §7.3) **(user, 2026-10-25)**.
 
 ### 8.5 Completeness
 
@@ -424,12 +432,14 @@ Each check kind has its own fingerprint: a hash over exactly the decoded inputs 
 
 | Kind | Inputs | Observed evidence |
 |---|---|---|
-| `listener-count` | the listener's spec (name, port, protocol, hostname, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; candidate namespaces' labels when the listener uses `Selector`; the experimental setting | `attachedRoutes`; the listener conditions' `observedGeneration` |
-| `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs; namespace labels when `Selector` is used | for the key: `Accepted` status, reason and `observedGeneration`, but the reason only when it is an attachment reason (another reason is compatible and is hashed as "other") |
+| `listener-count` | the listener's spec (name, port, protocol, hostname, TLS mode, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; candidate namespaces' labels when the listener uses `Selector`; the experimental setting | `attachedRoutes`; the listener conditions' `observedGeneration` |
+| `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs (as for `listener-count`); namespace labels when `Selector` is used | for the key: `Accepted` status, reason and `observedGeneration`, but the reason only when it is an attachment reason (another reason is compatible and is hashed as "other") |
 | `child-entry` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; the aggregate's completeness | for the key: entry presence; `Accepted` status and `observedGeneration`, with the reason only when it is `UnsupportedValue`. **Not** `ResolvedRefs` or `Programmed`. |
 | `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
 | `delegated-not-attached` | as `child-entry` | none |
 | `orphan-not-attached` | the route's `parentRefs` (empty or not); the set of owned parents and refs that select it; for each, the `child-entry` inputs of its contexts; completeness of every selecting parent | none |
+
+An input whose change can only remove the check or make it `unknown` (ListenerSet acceptance; the experimental setting for `route-accepted`) need not be hashed: §9.3 clears the window.
 
 Not in any fingerprint: `resourceVersion`, `managedFields`, labels and annotations not listed, conditions not listed for that kind, `lastTransitionTime`, metrics, Pods and Deployments. A child's backend `ResolvedRefs` toggling never restarts its `child-entry` window. An unrelated status write, annotation edit or metrics arrival never restarts any window.
 

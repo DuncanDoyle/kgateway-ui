@@ -14,6 +14,8 @@ package extension
 
 import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -35,6 +37,9 @@ type Registry struct {
 	// ProxyMode decides whether a Gateway's proxy is self-managed. It mirrors
 	// controller logic, so a downstream with its own parameters kind replaces it.
 	ProxyMode proxymode.Resolver
+	// RulesFor selects the computed rule set for a controller's kgateway
+	// version, "" when unknown (D-020).
+	RulesFor func(controllerVersion string) computed.Selection
 }
 
 // Option modifies a Registry.
@@ -72,6 +77,13 @@ func WithAuthorizer(a api.Authorizer) Option { return func(r *Registry) { r.Auth
 // WithProxyModeResolver replaces the upstream GatewayParameters resolution.
 func WithProxyModeResolver(p proxymode.Resolver) Option { return func(r *Registry) { r.ProxyMode = p } }
 
+// WithComputedRules replaces rulesets.Select. A downstream distribution maps
+// its controller to a rule set; a build that is not the kgateway edition
+// receives "" as the version (D-018 §3).
+func WithComputedRules(f func(controllerVersion string) computed.Selection) Option {
+	return func(r *Registry) { r.RulesFor = f }
+}
+
 // New returns the upstream registry with opts applied.
 func New(opts ...Option) *Registry {
 	r := &Registry{
@@ -81,6 +93,7 @@ func New(opts ...Option) *Registry {
 		Checks:     health.Upstream(),
 		Authorizer: api.AllowAll{},
 		ProxyMode:  proxymode.GatewayParameters{},
+		RulesFor:   rulesets.Select,
 	}
 	for _, o := range opts {
 		o(r)

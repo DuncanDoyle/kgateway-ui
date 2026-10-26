@@ -472,7 +472,8 @@ func severity(p *Published) health.Severity {
 
 func TestGraceDeadlineTurnsFindingToWarning(t *testing.T) {
 	h := newHarness(t, nil)
-	h.src.base = snapshot(t, testutil.HTTPRoute("shop", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")}))
+	// edge already counts shop/r, so only its missing route status is pending.
+	h.src.base = snapshotEdge(t, 1, testutil.HTTPRoute("shop", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")}))
 	h.start(time.Hour)
 	if s := severity(h.e.Current()); s != health.SeverityInfo {
 		t.Fatalf("inside grace: %q", s)
@@ -673,7 +674,7 @@ func TestAllGreenSchedulesNoGraceRecompute(t *testing.T) {
 	h := newHarness(t, func(c *Config) {
 		c.Metrics = metricsFunc(func(string) (ctrlmetrics.Result, bool) { return agree, true })
 	})
-	h.src.base = snapshot(t, route)
+	h.src.base = snapshotEdge(t, 1, route)
 	h.start(time.Hour)
 	p := h.e.Current()
 	if p.Model.Installs[0].Health.State != health.StateHealthy || !p.Model.Next.IsZero() {
@@ -695,7 +696,8 @@ func TestPendingObjectMaturesAtItsGraceInstant(t *testing.T) {
 	h.await(EvConfirmed)
 	h.await(EvArmed)
 	added := h.c.Now()
-	h.src.setBase(snapshot(t, testutil.HTTPRoute("shop", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")})), fprint(2, accessOK))
+	// edge counts shop/r at once, as in TestGraceDeadlineTurnsFindingToWarning.
+	h.src.setBase(snapshotEdge(t, 1, testutil.HTTPRoute("shop", "r", []objects.ParentRef{testutil.GwRef("infra", "edge")})), fprint(2, accessOK))
 	h.notify()
 	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
 	p := h.await(EvPublished).Published
@@ -1099,14 +1101,14 @@ func TestDeclaredCandidateMaturesAtItsGraceInstant(t *testing.T) {
 		return ""
 	}
 	h := newHarness(t, nil)
-	h.src.base = snapshot(t, parent)
+	h.src.base = snapshotEdge(t, 1, parent)
 	h.start(time.Hour)
 	// The parent's own grace is long over before the child appears.
 	h.c.Step(2 * health.Grace)
 	h.await(EvConfirmed)
 	h.await(EvArmed)
 	added := h.c.Now()
-	h.src.setBase(snapshot(t, parent, testutil.HTTPRoute("shop", "c", []objects.ParentRef{api})), fprint(2, accessOK))
+	h.src.setBase(snapshotEdge(t, 1, parent, testutil.HTTPRoute("shop", "c", []objects.ParentRef{api})), fprint(2, accessOK))
 	h.notify()
 	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
 	p := h.await(EvPublished).Published

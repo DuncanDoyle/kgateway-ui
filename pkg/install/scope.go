@@ -97,26 +97,9 @@ const SourceDeploymentTemplate = "deployment template"
 // no Pod exists (for example scaled to zero). A Pod comes first because it
 // reflects what is running during a rollout; the template is only what will run.
 func (NamespaceSelectorScope) Scope(inst Install) Scope {
-	var (
-		spec   corev1.PodSpec
-		source string
-		where  string
-	)
-	if pod := pickPod(inst.Pods); pod != nil {
-		spec, source, where = pod.Spec, "pod "+pod.Name, "pod "+pod.Name
-	} else if inst.Deployment != nil {
-		spec, source, where = inst.Deployment.Spec.Template.Spec, SourceDeploymentTemplate, "the Deployment template"
-	} else {
-		return Scope{Mode: ScopeUnknown, Err: "no controller pod or deployment found"}
-	}
-	var c *corev1.Container
-	for i := range spec.Containers {
-		if spec.Containers[i].Name == inst.Container {
-			c = &spec.Containers[i]
-		}
-	}
+	c, source, errMsg := controllerContainer(inst)
 	if c == nil {
-		return Scope{Mode: ScopeUnknown, Source: source, Err: fmt.Sprintf("container %q not found in %s", inst.Container, where)}
+		return Scope{Mode: ScopeUnknown, Source: source, Err: errMsg}
 	}
 	var last *corev1.EnvVar
 	for i := range c.Env { // duplicate entries: the last one wins, as in Kubernetes
@@ -139,6 +122,31 @@ func (NamespaceSelectorScope) Scope(inst Install) Scope {
 	}
 	sc.Source = source
 	return sc
+}
+
+// controllerContainer finds the controller container in the first of a Ready
+// Pod, any Pod, or the Deployment template. On failure c is nil and errMsg says why.
+func controllerContainer(inst Install) (c *corev1.Container, source, errMsg string) {
+	var (
+		spec  corev1.PodSpec
+		where string
+	)
+	if pod := pickPod(inst.Pods); pod != nil {
+		spec, source, where = pod.Spec, "pod "+pod.Name, "pod "+pod.Name
+	} else if inst.Deployment != nil {
+		spec, source, where = inst.Deployment.Spec.Template.Spec, SourceDeploymentTemplate, "the Deployment template"
+	} else {
+		return nil, "", "no controller pod or deployment found"
+	}
+	for i := range spec.Containers {
+		if spec.Containers[i].Name == inst.Container {
+			c = &spec.Containers[i]
+		}
+	}
+	if c == nil {
+		return nil, source, fmt.Sprintf("container %q not found in %s", inst.Container, where)
+	}
+	return c, source, ""
 }
 
 func pickPod(pods []*corev1.Pod) *corev1.Pod {
@@ -181,14 +189,15 @@ func ParseSelectors(raw string) Scope {
 // Resolved is an Install with its resolved Scope.
 type Resolved struct {
 	Install
-	Scope Scope
+	Scope    Scope
+	Settings Settings
 }
 
 // Resolve applies p to every install.
 func Resolve(insts []Install, p ScopeProvider) []Resolved {
 	out := make([]Resolved, 0, len(insts))
 	for _, in := range insts {
-		out = append(out, Resolved{Install: in, Scope: p.Scope(in)})
+		out = append(out, Resolved{Install: in, Scope: p.Scope(in), Settings: ReadSettings(in)})
 	}
 	return out
 }

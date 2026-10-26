@@ -24,14 +24,17 @@ export {
   isLinkable,
   isStale,
   POLL_MS,
+  supportsFilter,
   useCapabilities,
   useHealth,
   useInstalls,
+  useListFilter,
   useMeta,
   useOverview,
   useResource,
 } from "./api/hooks";
 export * from "./api/types";
+export { ComputedBadge } from "./explore/ComputedBadge";
 export { CopyCommandButton } from "./explore/CopyCommandButton";
 export { LinkedName } from "./explore/LinkedName";
 export { objectPath } from "./explore/objectPath";

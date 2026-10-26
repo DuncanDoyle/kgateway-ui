@@ -1,6 +1,13 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type { Page as ListPage, RouteDetail, RouteRow } from "../packages/shell/src/api/types";
-import { gatewayCopy, listCopy, navCopy, routeCopy, routeStateCopy } from "../packages/shell/src/copy/explorer";
+import {
+  gatewayCopy,
+  listCopy,
+  navCopy,
+  routeCopy,
+  routeStateCopy,
+  viewACopy,
+} from "../packages/shell/src/copy/explorer";
 
 // Walks the explorer over test/e2e/fixtures/explorer.yaml. Expected reasons come from the API,
 // which TestExplorerShowsControllerStatus checks against the controller, so no version's wording is hard-coded.
@@ -85,6 +92,56 @@ test("Gateway, failed route, its parent and back up the chain", async ({ page })
   await expect(page).toHaveURL(/\/HTTPRoute\/shop\/store$/);
   await page.getByRole("navigation", { name: routeCopy.upChain }).getByRole("link", { name: "infra/edge" }).click();
   await expect(page).toHaveURL(new RegExp(`${install}/gateways/infra/edge$`));
+});
+
+test("Gateway listener https lists its computed routes with effective hostnames", async ({ page }) => {
+  // Expected rows and hostnames come from the API, which TestComputedAgreesWithController checks against the controller.
+  const parent = encodeURIComponent("gateway.networking.k8s.io/Gateway/infra/edge");
+  const want: ListPage<RouteRow> = await (
+    await page.request.get(`${api}/routes?parent=${parent}&listener=https&limit=200`)
+  ).json();
+  const ids = want.items.map((r) => `${r.ref.namespace}/${r.ref.name}`);
+  expect(ids, "the fixture's matching https routes").toEqual(
+    expect.arrayContaining(["store/secure", "store/mixed-hosts", "flip/flip"]),
+  );
+
+  await page.goto(`${install}/gateways/infra/edge`);
+  await page
+    .getByRole("group", { name: viewACopy.listenerGroup })
+    .getByRole("button", { name: "https", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`${install}/gateways/infra/edge\\?listener=https$`));
+  const table = page.getByRole("table", { name: viewACopy.routesOnListener("https"), exact: true });
+  const rows = await dataRows(table);
+  await expect(rows).toHaveCount(want.items.length);
+  const tableBox = await table.boundingBox();
+  for (const r of want.items) {
+    const id = `${r.ref.namespace}/${r.ref.name}`;
+    const hosts = r.parents
+      .filter((p) => p.ref.kind === "Gateway" && p.ref.namespace === "infra" && p.ref.name === "edge")
+      .flatMap((p) => p.computed?.listeners ?? [])
+      .filter((l) => l.listener === "https" && l.resource.kind === "Gateway" && l.resource.name === "edge")
+      .flatMap((l) => l.effectiveHostnames ?? []);
+    expect(hosts.length, `${id} has effective hostnames`).toBeGreaterThan(0);
+    const row = rows.filter({ has: page.getByRole("link", { name: id, exact: true }) });
+    // The effective hostnames cell is the one with the badge; the row's Hostnames column is the spec.
+    const cell = row.locator("td").filter({ has: page.getByTestId("computed-badge") });
+    await expect(cell).toContainText([...new Set(hosts)].join(", "));
+    const badge = cell.getByTestId("computed-badge");
+    await expect(badge.getByTestId("computed-state-agrees")).toBeVisible();
+    // Layout: the badge sits inside its row and the table, so the hostname column never pushes it out.
+    const [rowBox, badgeBox] = [await row.boundingBox(), await badge.boundingBox()];
+    if (!rowBox || !badgeBox || !tableBox) throw new Error(`${id}: no layout box`);
+    expect(badgeBox.y).toBeGreaterThanOrEqual(rowBox.y);
+    expect(badgeBox.y + badgeBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height);
+    expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(tableBox.x + tableBox.width);
+  }
+  // mixed-hosts names a .org host too; only the one that fits *.example.com is effective.
+  const mixed = rows.filter({ has: page.getByRole("link", { name: "store/mixed-hosts" }) });
+  await expect(mixed.locator("td").filter({ has: page.getByTestId("computed-badge") })).not.toContainText(
+    "shop.example.org",
+  );
+  await shot(page, "listener-https");
 });
 
 test("Routes filtered by replaced or dropped rules", async ({ page }) => {

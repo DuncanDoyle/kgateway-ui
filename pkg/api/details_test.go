@@ -102,7 +102,7 @@ func stepNames(p AncestorPathDTO) string {
 func TestRouteDetailDelegation(t *testing.T) {
 	_, srv, _ := startWith(t, setup{}, delegationWorld()...)
 	d := get[RouteDetail](t, srv, routeDetail+"shop/mid", 200)
-	if d.Install != "kgw.kgateway" || d.Ref.Ref != midRef.Ref() || d.Ref.Link != LinkDetail || d.Candidate != nil || d.Generation != 1 || d.RuleSet != "" {
+	if d.Install != "kgw.kgateway" || d.Ref.Ref != midRef.Ref() || d.Ref.Link != LinkDetail || d.Candidate != nil || d.Generation != 1 || d.RuleSet != "kgateway-2.4" {
 		t.Fatalf("header %+v", d)
 	}
 	if !slices.Equal(d.Hostnames, []string{"mid.example.com"}) || len(d.ParentRefs) != 7 || d.ParentRefs[0].ParentRef != edgeRef || d.Annotations.InheritParentMatcher != nil {
@@ -216,7 +216,7 @@ func listenerEdge(objs []runtime.Object) []runtime.Object {
 		}
 		u.Object["status"].(map[string]any)["attachedListenerSets"] = int64(1)
 	}
-	return objs
+	return settleEdge(objs)
 }
 
 // ListenerSets is the total the ListenerSets list returns for the Gateway,
@@ -251,7 +251,7 @@ func TestGatewayDetailListeners(t *testing.T) {
 		h.AllowedRoutes.Namespaces.Selector.MatchLabels["team"] != "a" || !slices.Equal(h.AllowedRoutes.Kinds, []objects.GroupKind{{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}}) {
 		t.Errorf("http %+v", h)
 	}
-	if h.Status == nil || h.Status.AttachedRoutes != 3 || len(h.Status.SupportedKinds) != 1 || len(h.Status.Conditions) != 1 || h.Status.Conditions[0].Stale {
+	if h.Status == nil || h.Status.AttachedRoutes != 6 || len(h.Status.SupportedKinds) != 1 || len(h.Status.Conditions) != 1 || h.Status.Conditions[0].Stale {
 		t.Errorf("http status %+v", h.Status)
 	}
 	if s.Hostname != "*.example.com" || s.TLS == nil || s.TLS.Mode != "Terminate" || len(s.TLS.CertificateRefs) != 1 ||
@@ -569,7 +569,10 @@ func TestSpecParentRefsAreLinked(t *testing.T) {
 }
 
 func TestNonHTTPRouteDetailIs404(t *testing.T) {
-	_, srv, _ := startWith(t, setup{}, world(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)))...)
+	// edge's HTTP listener does not admit a TCPRoute.
+	st := testutil.AcceptedBy(edgeRef, testutil.Controller)
+	st.Conds[0] = testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners")
+	_, srv, _ := startWith(t, setup{}, world(tcpRoute("v1alpha2", "shop", "tcp", []objects.ParentRef{edgeRef}, st))...)
 	for _, p := range []string{
 		base + "/routes/gateway.networking.k8s.io/TCPRoute/shop/tcp",
 		base + "/routes/gateway.networking.k8s.io/GRPCRoute/shop/cart",

@@ -1,20 +1,22 @@
 import type { SerializedStyles } from "@emotion/react";
 import { useMemo } from "react";
 import { useGateways } from "../../api/exploreHooks";
+import { useListFilter } from "../../api/hooks";
 import type { GatewayListRow } from "../../api/types";
-import { columnCopy, listCopy } from "../../copy/explorer";
+import { columnCopy, listCopy, viewACopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
-import { ListFilters, Muted, NameCell, OneLine, useShownPage } from "./listParts";
+import { ListFilters, Muted, NameCell, OneLine, RoutesCell, routesHeaderExtra, useShownPage } from "./listParts";
 
 // region Helpers
 const NOUN = ["Gateway", "Gateways"] as const;
 
-// The server's "routes" sort counts visible routes, not the status sum shown here, so that column does not sort.
-function columns(installId: string): ObjectColumn<GatewayListRow>[] {
-  return [
+// sort=routes orders by view A's distinct-route count, the Routes column; Attached routes is the status sum and does not sort.
+/** viewA is false on a server before 2.3, which sends no routes: the Routes column is left out. */
+function columns(installId: string, viewA: boolean): ObjectColumn<GatewayListRow>[] {
+  const cols: ObjectColumn<GatewayListRow>[] = [
     {
       id: "health",
       header: columnCopy.status,
@@ -28,9 +30,23 @@ function columns(installId: string): ObjectColumn<GatewayListRow>[] {
       sortKey: "name",
       cell: (r) => <NameCell r={r.ref} installId={installId} />,
     },
-    { id: "class", header: columnCopy.class, width: "14%", secondary: true, cell: (r) => <OneLine text={r.class} /> },
+    { id: "class", header: columnCopy.class, width: "12%", secondary: true, cell: (r) => <OneLine text={r.class} /> },
     { id: "listeners", header: columnCopy.listeners, width: "100px", cell: (r) => r.listeners },
-    { id: "attachedRoutes", header: columnCopy.attachedRoutes, width: "140px", cell: (r) => r.attachedRoutes },
+    {
+      id: "routes",
+      header: viewACopy.routesColumn,
+      headerExtra: routesHeaderExtra,
+      width: "184px",
+      sortKey: "routes",
+      cell: (r) => <RoutesCell routes={r.routes} disagreements={r.disagreements} />,
+    },
+    {
+      id: "attachedRoutes",
+      header: columnCopy.attachedRoutes,
+      width: "130px",
+      secondary: true,
+      cell: (r) => r.attachedRoutes,
+    },
     { id: "notAccepted", header: columnCopy.notAccepted, width: "120px", secondary: true, cell: (r) => r.notAccepted },
     {
       id: "listenerSets",
@@ -42,11 +58,14 @@ function columns(installId: string): ObjectColumn<GatewayListRow>[] {
     {
       id: "addresses",
       header: columnCopy.addresses,
-      width: "18%",
+      width: "12%",
       secondary: true,
       cell: (r) => (r.addresses.length ? <OneLine text={r.addresses.join(", ")} /> : <Muted>{columnCopy.none}</Muted>),
     },
   ];
+  return viewA
+    ? cols
+    : cols.filter((c) => c.id !== "routes").map((c) => (c.id === "attachedRoutes" ? { ...c, secondary: false } : c));
 }
 const rowRef = (r: GatewayListRow) => r.ref;
 
@@ -59,7 +78,9 @@ interface GatewaysPageProps {
 export function GatewaysPage({ stylesOverride }: GatewaysPageProps = {}) {
   const l = useListPage("gateways", useGateways);
   const page = useShownPage(l.data, !!l.error);
-  const cols = useMemo(() => columns(l.id), [l.id]);
+  // Shown until /meta says otherwise, so a 2.3 server never sees the column appear late.
+  const viewA = useListFilter("routes", "listener") !== false;
+  const cols = useMemo(() => columns(l.id, viewA), [l.id, viewA]);
   return (
     <ListFrame
       title={listCopy.gateways.title}

@@ -35,6 +35,7 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `image.tag` | `""` | Image tag; defaults to the chart `appVersion`. Required for a local-path install. |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `install.pin` | `""` | Pin the UI to one controller install: an install ID (e.g. `kgw.kgateway`) or `namespace/name`. Empty shows all installs. |
+| `extraArgs` | `[]` | More flags for the UI binary, appended after the chart's own args, e.g. `--set extraArgs={--poll-interval=10m}`. |
 | `httpRoute.enabled` | `false` | Create an HTTPRoute on an existing Gateway. Read [Security and trust model](#security-and-trust-model) first. |
 | `httpRoute.parentRefs` | `[]` | Gateway parentRefs for the route. See [Security and trust model](#security-and-trust-model). |
 | `httpRoute.hostnames` | `[]` | Hostnames for the route. See [Security and trust model](#security-and-trust-model). |
@@ -46,7 +47,7 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 
 ## Recompute
 
-The UI recomputes its model when a watched object, an access state, a metrics scrape or the served kinds change, debounced to at most about one recompute per second. The binary's `--poll-interval` (default 30s, not set by the chart) is only the safety timer: the longest time between recomputes. Setting it to `2s` restores the earlier fixed 2 s cadence as a floor.
+The UI recomputes its model when a watched object, an access state, a metrics scrape or the served kinds change, debounced to at most about one recompute per second. The binary's `--poll-interval` (default 30s; the chart sets it only through `extraArgs`) is only the safety timer: the longest time between recomputes. Setting it to `2s` restores the earlier fixed 2 s cadence as a floor.
 
 ## RBAC
 

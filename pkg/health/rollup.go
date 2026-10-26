@@ -45,9 +45,18 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // warning and info becomes a warning whose detail names the original, so a
 // check can neither hide a problem from the roll-up nor invent a severity.
 func Evaluate(in Input, checks []Check) Report {
-	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now, Findings: []Finding{}}
-	for _, c := range checks {
+	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
+	// Run every check first so the findings are allocated once.
+	runs := make([][]Finding, len(checks))
+	n := 0
+	for i, c := range checks {
 		fs, cr := c.Run(in)
+		runs[i] = fs
+		n += len(fs)
+		r.Checks = append(r.Checks, cr)
+	}
+	r.Findings = make([]Finding, 0, n)
+	for _, fs := range runs {
 		for _, f := range fs {
 			if _, known := sevRank[f.Severity]; !known {
 				note := fmt.Sprintf("unrecognised severity %q", f.Severity)
@@ -56,7 +65,6 @@ func Evaluate(in Input, checks []Check) Report {
 			}
 			r.Findings = append(r.Findings, f)
 		}
-		r.Checks = append(r.Checks, cr)
 	}
 	slices.SortStableFunc(r.Findings, compareFindings)
 	for _, f := range r.Findings {
@@ -91,10 +99,15 @@ func compareOptRefs(a, b *objects.Ref) int {
 }
 
 // compareRefs orders by group, kind, namespace and name.
-func compareRefs(a, b objects.Ref) int {
-	return cmp.Or(cmp.Compare(a.Group, b.Group), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-}
+func compareRefs(a, b objects.Ref) int { return a.Compare(b) }
 
-func compareParents(a, b objects.ParentRef) int {
+func compareParents(pa, pb *objects.ParentRef) int {
+	var a, b objects.ParentRef
+	if pa != nil {
+		a = *pa
+	}
+	if pb != nil {
+		b = *pb
+	}
 	return cmp.Or(compareRefs(a.Ref(), b.Ref()), cmp.Compare(a.SectionName, b.SectionName), cmp.Compare(a.Port, b.Port))
 }
