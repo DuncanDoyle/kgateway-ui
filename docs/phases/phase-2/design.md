@@ -764,7 +764,7 @@ The user set three tiers **(user, 2026-10-22)**. The user accepted the proposed 
 | parentRefs per route | mean 1.2 | mean 1.3 | 1–4, mean 1.5 |
 | ListenerSets | 10 | 200 | 2,000 |
 | Delegated children | 10 %, depth ≤ 2, fan-out ≤ 10 | 10 %, depth ≤ 3, fan-out ≤ 50 | 10 %, depth ≤ 4, fan-out ≤ 100, plus a diamond lattice 8 layers deep |
-| Parent matches per delegating rule | 1 | 2 | 4 |
+| Parent matches per delegating rule (top-level; a child has one per incoming match of its delegators, PF2) | 1 | 2 | 4 |
 | Dense selection (separate run) | — | 20 wildcard parents over a namespace of 500 routes | 100 wildcard parents over a namespace of 1,000 routes (hits the edge cap) |
 | Namespaces / Backends | 20 / 50 | 100 / 200 | 500 / 1,000 |
 

@@ -471,7 +471,11 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 			continue
 		}
 		st := testutil.AcceptedBy(p, testutil.Controller)
-		st.Conds[1] = resolved
+		for i := range st.Conds {
+			if st.Conds[i].Type == resolved.Type {
+				st.Conds[i] = resolved
+			}
+		}
 		status = append(status, st)
 	}
 	for _, d := range r.delegators {
