@@ -107,11 +107,11 @@ it("up-chain shows a restricted step and 'More paths not shown'", async () => {
   serve(api({ mid: detail(restrictedGolden) }));
   mount(MID);
   const nav2 = await loaded();
-  const restricted = within(nav2).getAllByTestId("route-path")[3] as HTMLElement;
-  expect(restricted).toHaveTextContent("A parent you cannot view");
-  // A restricted step has no identity: nothing but the visible route on that path.
-  expect(within(restricted).queryAllByRole("link")).toHaveLength(0);
-  expect(within(nav2).queryByText("More paths not shown")).toBeNull();
+  // A hidden parent route keeps its name with no link (D-024); the walk stops there.
+  const hidden = within(nav2).getAllByTestId("route-path")[3] as HTMLElement;
+  expect(hidden).toHaveTextContent("shop/top1");
+  expect(within(hidden).queryAllByRole("link")).toHaveLength(0);
+  expect(within(nav2).getByText("More paths not shown")).toBeInTheDocument();
 });
 
 it("hostnames or inherited text for a child", async () => {

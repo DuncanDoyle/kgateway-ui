@@ -482,7 +482,12 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(routesRestrictedGolden.body.items.some((r) => r.parents.some((p) => "viaRestricted" in p))).toBe(true);
     expect(routesFilteredGolden.body.next).toBeTruthy();
     expect(routesByBackendGolden.body.items.some((r) => "mirror" in r)).toBe(true);
-    expect(routeDetailRestrictedGolden.body.ancestors.some((a) => a.steps.some((s) => "restricted" in s))).toBe(true);
+    // A hidden ancestor route keeps its name with link none (D-024).
+    expect(
+      routeDetailRestrictedGolden.body.ancestors.some((a) =>
+        a.steps.some((s) => "ref" in s && s.ref?.kind === "HTTPRoute" && s.ref.link === "none"),
+      ),
+    ).toBe(true);
     expect(routeDetailCandidateGolden.body.candidate.by).toBeDefined();
     expect(routeDetailGolden.body.parentRefs.every((p) => "target" in p)).toBe(true);
     expect(listenersetDetailAllowedGolden.body.parentAllowedListeners.set).toBe(true);

@@ -17,10 +17,14 @@ const (
 	MaxNodes = 256
 )
 
-// AncestorStep is one step of an up-chain. A Restricted step has a zero Ref.
+// AncestorStep is one step of an up-chain. A Restricted step, a Gateway or
+// ListenerSet the caller may not view, has a zero Ref. A Hidden step is an
+// ancestor route the caller may not view: it keeps its Ref, which the API
+// sends with link none (design §7.4 rule 3, D-024).
 type AncestorStep struct {
 	Ref        objects.Ref
 	Restricted bool
+	Hidden     bool
 }
 
 // AncestorPath runs from the root (a Gateway or ListenerSet) down to the
@@ -39,10 +43,11 @@ type AncestorPath struct {
 // A path ends at a Gateway or ListenerSet whose status reported the route as
 // accepted or not accepted. A route with no such root yields no path.
 //
-// An ancestor that visible rejects becomes a Restricted step with no
-// identity, and the walk does not continue past it, so a hidden route's own
-// parents are never named (design §7.4 rule 3). Paths that are identical
-// after redaction are returned once.
+// A Gateway or ListenerSet that visible rejects becomes a Restricted step
+// with no identity; paths identical after that redaction are returned once.
+// An ancestor route that visible rejects becomes a Hidden step that keeps its
+// name (D-024). The walk does not continue past either, so a hidden route's
+// own parents, read from its status, are never named (design §7.4 rule 3).
 func (ix *Index) Ancestors(route objects.Ref, visible func(objects.Ref) bool) (paths []AncestorPath, truncated bool) {
 	paths, truncated, _ = ix.walkUp(route, visible)
 	return paths, truncated
@@ -89,15 +94,23 @@ func (w *walker) parents(route objects.Ref) []candidate {
 			out = append(out, candidate{l.Target, false})
 		}
 	}
-	// Visible parents first in name order; hidden ones last and unordered, so
-	// the order never reflects hidden names.
-	hidden := map[objects.Ref]bool{}
+	// Visible parents first in name order, then hidden routes, whose names
+	// are shown, in name order; hidden roots last and unordered, so the
+	// order never reflects their names.
+	rank := map[objects.Ref]int{}
 	for _, c := range out {
-		hidden[c.ref] = !w.visible(c.ref)
+		switch {
+		case w.visible(c.ref):
+		case c.route:
+			rank[c.ref] = 1
+		default:
+			rank[c.ref] = 2
+		}
 	}
 	slices.SortStableFunc(out, func(a, b candidate) int {
-		if ha, hb := hidden[a.ref], hidden[b.ref]; ha || hb {
-			return cmp.Compare(btoi(ha), btoi(hb))
+		ra, rb := rank[a.ref], rank[b.ref]
+		if ra == 2 || rb == 2 || ra != rb {
+			return cmp.Compare(ra, rb)
 		}
 		return compareRefs(a.ref, b.ref)
 	})
@@ -114,7 +127,7 @@ func (w *walker) visit(route objects.Ref, start bool) {
 		return
 	}
 	if !start && !w.visible(route) {
-		w.emit(AncestorStep{Restricted: true}, false)
+		w.emit(AncestorStep{Ref: route, Hidden: true}, false)
 		return
 	}
 	if w.visits == MaxNodes {
@@ -152,8 +165,11 @@ func (w *walker) emit(tail AncestorStep, cycle bool) {
 	}
 	for _, s := range steps {
 		key = append(key, s.Ref.Group+"|"+s.Ref.Kind+"|"+s.Ref.Namespace+"|"+s.Ref.Name+";"...)
-		if s.Restricted {
+		switch {
+		case s.Restricted:
 			key = append(key, '!')
+		case s.Hidden:
+			key = append(key, '~')
 		}
 	}
 	if cycle {
@@ -170,8 +186,9 @@ func (w *walker) emit(tail AncestorStep, cycle bool) {
 	w.paths = append(w.paths, AncestorPath{Steps: steps, Cycle: cycle})
 }
 
+// restricted reports whether p has a step the caller may not view.
 func restricted(p AncestorPath) bool {
-	return slices.ContainsFunc(p.Steps, func(s AncestorStep) bool { return s.Restricted })
+	return slices.ContainsFunc(p.Steps, func(s AncestorStep) bool { return s.Restricted || s.Hidden })
 }
 
 func btoi(b bool) int {

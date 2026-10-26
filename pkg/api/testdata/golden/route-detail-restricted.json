@@ -92,7 +92,36 @@
         "cycle": false,
         "steps": [
           {
-            "restricted": true
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "top1",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "top2",
+              "namespace": "shop"
+            }
           },
           {
             "ref": {
@@ -106,7 +135,7 @@
         ]
       }
     ],
-    "ancestorsTruncated": false,
+    "ancestorsTruncated": true,
     "annotations": {},
     "attachments": [
       {

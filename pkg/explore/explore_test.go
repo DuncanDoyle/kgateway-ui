@@ -1,6 +1,7 @@
 package explore
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"reflect"
 	"slices"
@@ -331,8 +332,8 @@ func TestFlags(t *testing.T) {
 	if _, r := row(t, ix, "shop", "accepted"); r.Parents[0].Cond != nil {
 		t.Errorf("accepted has deciding condition %+v", r.Parents[0].Cond)
 	}
-	all := Flag(1<<9 - 1)
-	if want := []string{"accepted", "not-accepted", "refs-unresolved", "not-programmed", "pending", "declared", "no-parent", "disagrees", "listener-unknown"}; !slices.Equal(all.Names(), want) {
+	all := Flag(1<<10 - 1)
+	if want := []string{"accepted", "not-accepted", "refs-unresolved", "not-programmed", "pending", "declared", "no-parent", "disagrees", "listener-unknown", "dropped"}; !slices.Equal(all.Names(), want) {
 		t.Fatalf("names %q", all.Names())
 	}
 	for _, n := range all.Names() {
@@ -340,8 +341,8 @@ func TestFlags(t *testing.T) {
 			t.Errorf("ParseFlag(%q) = %v, %v", n, f, ok)
 		}
 	}
-	if _, ok := ParseFlag("dropped"); ok {
-		t.Error("ParseFlag accepted a 2.4 flag")
+	if _, ok := ParseFlag("partial"); ok {
+		t.Error("ParseFlag accepted a row outcome that is no flag")
 	}
 }
 
@@ -960,5 +961,252 @@ func TestBuildDeterministicWithViews(t *testing.T) {
 	}
 	if len(a.Refs) == 0 || len(a.ByListener) != 3 {
 		t.Fatalf("refs %d listeners %d", len(a.Refs), len(a.ByListener))
+	}
+}
+
+// Views B and C fixtures: owned parents a and b; k1 and k3 are no-parent
+// rows, k2 a declared candidate of a; k1 is not owned, so its row with k3
+// is selected by no owned parent.
+var (
+	dA, dB     = routeRef("shop", "a"), routeRef("shop", "b")
+	k1, k2, k3 = routeRef("shop", "k1"), routeRef("shop", "k2"), routeRef("shop", "k3")
+)
+
+// delegWorld is viewWorld with the children k1, k2 and k3.
+func delegWorld() *world {
+	w := viewWorld()
+	w.objs = append(w.objs,
+		testutil.HTTPRoute("shop", "k1", nil),
+		testutil.HTTPRoute("shop", "k2", []objects.ParentRef{testutil.HTTPRouteRef("shop", "a")}),
+		testutil.HTTPRoute("shop", "k3", nil))
+	return w
+}
+
+// childKeyOf is the report key a child writes under parent.
+func childKeyOf(parent objects.Ref) computed.ReportKey {
+	return computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Name: parent.Name}
+}
+
+// drow is a view B row with one retained context; the context's path is
+// the HTTPRoutes of deps, in order.
+func drow(parent objects.Ref, rule, ref int, child objects.Ref, o computed.RowOutcome, deps ...objects.Ref) computed.Row {
+	m := objects.Match{Path: &objects.PathMatch{Type: "PathPrefix", Value: "/"}}
+	var path []computed.PathStep
+	for _, d := range deps {
+		if isHTTPRoute(d.Group, d.Kind) {
+			path = append(path, computed.PathStep{Route: d, Match: m})
+		}
+	}
+	r := computed.Row{Key: computed.RowKey{Parent: parent, Rule: rule, Ref: ref, Child: child}, Outcome: o, Deps: deps,
+		Contexts: []computed.Context{{ParentMatch: m, Path: path, Outcome: o, Deps: deps}}}
+	if child != (objects.Ref{}) {
+		r.ChildKey = childKeyOf(parent)
+	}
+	return r
+}
+
+// childEntry is a child-entry check of child under parent and key.
+func childEntry(child, parent objects.Ref, key computed.ReportKey, st computed.State) computed.CheckResult {
+	return computed.CheckResult{ID: computed.Identity{Kind: computed.KindChildEntry, Subject: computed.Subject(child.Group, child.Kind, child.Namespace, child.Name,
+		parent.Group, parent.Kind, parent.Namespace, parent.Name, key.Group, key.Kind, key.Namespace, key.Name, key.SectionName)},
+		On: child, Key: key, State: st}
+}
+
+// delegViews are views() with views B and C over delegWorld. The row of
+// (a, 1, 0, k1) depends on a Selector Namespace; (k1, 0, 0, k3) has a and
+// k1 on its path.
+func delegViews() *computed.Views {
+	v := views()
+	gwDeps, nsDeps := []objects.Ref{dA, gwObj}, []objects.Ref{dA, gwObj, shopNS}
+	v.Delegation = computed.DelegationResult{Cap: computed.CapContexts, Rows: []computed.Row{
+		drow(dA, 0, 0, objects.Ref{}, computed.OutcomeUnresolved, gwDeps...),
+		drow(dA, 0, 1, k1, computed.OutcomeAttached, gwDeps...),
+		drow(dA, 0, 1, k2, computed.OutcomeDropped, gwDeps...),
+		drow(dA, 1, 0, k1, computed.OutcomeDropped, nsDeps...),
+		drow(dA, 1, 0, k2, computed.OutcomeForbidden, gwDeps...),
+		drow(dB, 0, 0, k1, computed.OutcomeRejectedHostnames, dB, gwObj, shopNS),
+		drow(k1, 0, 0, k3, computed.OutcomeDropped, dA, k1, gwObj),
+	}, Effective: map[objects.Ref]computed.ChildEffective{k1: {Edges: []computed.EffectiveEdge{{Parent: dA, Mode: computed.ModeDefault,
+		Contexts: []computed.Context{{Outcome: computed.OutcomeAttached, Deps: gwDeps}, {Outcome: computed.OutcomeDropped, Deps: nsDeps}},
+		Deps:     nsDeps}}}}}
+	v.Checks = append(v.Checks,
+		childEntry(k1, dA, childKeyOf(dA), computed.StateChecked),
+		childEntry(k1, dB, childKeyOf(dB), computed.StateDisagrees),
+		// Another key of (k2, a): never joined to the rows, whose key is childKeyOf(a).
+		childEntry(k2, dA, computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "a"}, computed.StatePending))
+	return v
+}
+
+func buildDeleg(t *testing.T) *Index {
+	t.Helper()
+	in := delegWorld().input(t)
+	in.Computed = delegViews()
+	return Build(in)
+}
+
+// delegNames renders rows as "rule.ref:child" with "-" for no child.
+func delegNames(ix *Index, ids []int) []string {
+	out := []string{}
+	for _, i := range ids {
+		k := ix.DelegRows[i].Key
+		c := k.Child.Name
+		if c == "" {
+			c = "-"
+		}
+		out = append(out, fmt.Sprintf("%d.%d:%s", k.Rule, k.Ref, c))
+	}
+	return out
+}
+
+// Rows of a parent are ordered by (rule, ref, namespace, name, group, kind),
+// whatever order the views list them in.
+func TestDelegationRowsOrder(t *testing.T) {
+	in := delegWorld().input(t)
+	v := delegViews()
+	rand.New(rand.NewPCG(7, 7)).Shuffle(len(v.Delegation.Rows), func(i, j int) {
+		v.Delegation.Rows[i], v.Delegation.Rows[j] = v.Delegation.Rows[j], v.Delegation.Rows[i]
+	})
+	in.Computed = v
+	ix := Build(in)
+	if got, want := delegNames(ix, ix.Delegation[dA]), []string{"0.0:-", "0.1:k1", "0.1:k2", "1.0:k1", "1.0:k2"}; !slices.Equal(got, want) {
+		t.Errorf("rows of a %v, want %v", got, want)
+	}
+	if got := delegNames(ix, ix.Delegation[k1]); !slices.Equal(got, []string{"0.0:k3"}) {
+		t.Errorf("rows of k1 %v", got)
+	}
+	if len(ix.DelegRows) != 7 || ix.DelegationCap != computed.CapContexts {
+		t.Errorf("%d rows, cap %q", len(ix.DelegRows), ix.DelegationCap)
+	}
+	// Deps leave out the routes on the path (D-024); ContextDeps follow the contexts.
+	r := &ix.DelegRows[ix.Delegation[k1][0]]
+	if got := refsOf(ix, r.Deps); !slices.Equal(got, []objects.Ref{gwObj}) {
+		t.Errorf("row deps %v", got)
+	}
+	if len(r.ContextDeps) != 1 || !slices.Equal(refsOf(ix, r.ContextDeps[0]), []objects.Ref{gwObj}) {
+		t.Errorf("context deps %v", r.ContextDeps)
+	}
+	if r := &ix.DelegRows[ix.Delegation[dA][3]]; !slices.Equal(refsOf(ix, r.Deps), []objects.Ref{gwObj, shopNS}) {
+		t.Errorf("namespace row deps %v", refsOf(ix, r.Deps))
+	}
+	e, ok := ix.Effective[k1]
+	if !ok || len(e.Edges) != 1 || len(e.EdgeDeps) != 1 || len(e.ContextDeps) != 1 || len(e.ContextDeps[0]) != 2 {
+		t.Fatalf("effective %+v", e)
+	}
+	if !slices.Equal(refsOf(ix, e.EdgeDeps[0]), []objects.Ref{gwObj, shopNS}) || !slices.Equal(refsOf(ix, e.ContextDeps[0][0]), []objects.Ref{gwObj}) ||
+		!slices.Equal(refsOf(ix, e.ContextDeps[0][1]), []objects.Ref{gwObj, shopNS}) {
+		t.Errorf("effective deps %v %v", e.EdgeDeps, e.ContextDeps)
+	}
+	// The same input gives the same index, dependency table included.
+	w := delegWorld()
+	for w.seed = 1; w.seed < 4; w.seed++ {
+		in := w.input(t)
+		in.Computed = delegViews()
+		if !reflect.DeepEqual(buildDeleg(t), Build(in)) {
+			t.Fatalf("seed %d: Builds differ", w.seed)
+		}
+	}
+	// No views: no rows, and Build does not fail.
+	in.Computed = nil
+	if ix := Build(in); ix.DelegRows != nil || ix.Delegation != nil {
+		t.Errorf("no views: %d rows", len(ix.DelegRows))
+	}
+}
+
+// PF14: a row's Check is the child-entry check of its (child, parent, ChildKey).
+func TestRowCheckJoin(t *testing.T) {
+	ix := buildDeleg(t)
+	for _, tc := range []struct {
+		parent objects.Ref
+		at     int
+		want   computed.State
+	}{
+		{dA, 1, computed.StateChecked}, // (a, 0, 1, k1)
+		{dA, 3, computed.StateChecked}, // (a, 1, 0, k1): same child and parent
+		{dB, 0, computed.StateDisagrees},
+		{dA, 2, ""}, // (a, 0, 1, k2): its check is under another key
+		{dA, 0, ""}, // no child
+	} {
+		r := &ix.DelegRows[ix.Delegation[tc.parent][tc.at]]
+		var got computed.State
+		if r.Check != nil {
+			got = r.Check.State
+			if r.Check.ID.Kind != computed.KindChildEntry || r.Check.On != r.Key.Child {
+				t.Errorf("%v: joined %+v", r.Key, r.Check.ID)
+			}
+		}
+		if got != tc.want {
+			t.Errorf("%v: check state %q, want %q", r.Key, got, tc.want)
+		}
+	}
+}
+
+func TestRefRows(t *testing.T) {
+	ix := buildDeleg(t)
+	for _, tc := range []struct {
+		k    RefKey
+		want []string
+	}{
+		{RefKey{Parent: dA, Rule: 0, Ref: 0}, []string{"0.0:-"}},
+		{RefKey{Parent: dA, Rule: 0, Ref: 1}, []string{"0.1:k1", "0.1:k2"}},
+		{RefKey{Parent: dA, Rule: 1, Ref: 0}, []string{"1.0:k1", "1.0:k2"}},
+		{RefKey{Parent: dB, Rule: 0, Ref: 0}, []string{"0.0:k1"}},
+		{RefKey{Parent: dA, Rule: 2, Ref: 0}, []string{}},
+	} {
+		if got := delegNames(ix, ix.RefRows[tc.k]); !slices.Equal(got, tc.want) {
+			t.Errorf("%+v: %v, want %v", tc.k, got, tc.want)
+		}
+	}
+}
+
+// A row selected by an owned parent that is dropped, forbidden or
+// rejected-hostnames flags its child; its deps leave out path routes (D-024).
+func TestFlagDropped(t *testing.T) {
+	ix := buildDeleg(t)
+	for name, want := range map[string]bool{"k1": true, "k2": true, "k3": false, "a": false} {
+		if _, r := row(t, ix, "shop", name); (r.Flags&FlagDropped != 0) != want {
+			t.Errorf("%s: flags %v", name, r.Flags.Names())
+		}
+	}
+	id1, r1 := row(t, ix, "shop", "k1")
+	if got := refsOf(ix, r1.DroppedDeps); !slices.Equal(got, []objects.Ref{gwObj, shopNS}) {
+		t.Errorf("k1 dropped deps %v", got)
+	}
+	id2, _ := row(t, ix, "shop", "k2")
+	noNS := func(r objects.Ref) bool { return r.Kind != "Namespace" }
+	noA := func(r objects.Ref) bool { return r != dA }
+	if ix.RowFlags(id1, noNS)&FlagDropped != 0 || ix.RowFlags(id2, noNS)&FlagDropped == 0 {
+		t.Errorf("hidden Namespace: k1 %v k2 %v", ix.RowFlags(id1, noNS).Names(), ix.RowFlags(id2, noNS).Names())
+	}
+	if ix.RowFlags(id2, noA)&FlagDropped == 0 || ix.RowFlags(id1, noA)&FlagDropped == 0 {
+		t.Error("a hidden parent route hid the dropped flag (D-024)")
+	}
+	for _, tc := range []struct {
+		visible func(objects.Ref) bool
+		want    []string
+	}{{nil, []string{"k1", "k2"}}, {noNS, []string{"k2"}}, {noA, []string{"k1", "k2"}}} {
+		if p := mustRoutes(t, ix, Query{States: FlagDropped}, tc.visible); !slices.Equal(names(ix, p), tc.want) || p.Total != len(tc.want) {
+			t.Errorf("state=dropped: %v total %d, want %v", names(ix, p), p.Total, tc.want)
+		}
+	}
+}
+
+// A route an owned parent selects is a "selected" candidate, By its first
+// selecting parent; a no-parent row keeps NoParent. Others are unchanged.
+func TestSelectedAdmission(t *testing.T) {
+	ix := buildDeleg(t)
+	for _, tc := range []struct {
+		name string
+		ref  objects.Ref
+		want Admission
+	}{
+		{"selected no-parent row", k1, Admission{Reason: ReasonSelected, By: &dA, Referrers: []objects.Ref{dA, dB}, NoParent: true}},
+		{"a finding wins over selected", k2, Admission{Reason: ReasonFinding}},
+		{"selected only by a parent the install does not own", k3, Admission{NoParent: true}},
+		{"owned parent", dA, Admission{Owned: true}},
+	} {
+		got, ok := ix.Admission(tc.ref)
+		if !ok || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: %+v %v, want %+v", tc.name, got, ok, tc.want)
+		}
 	}
 }

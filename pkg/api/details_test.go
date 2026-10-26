@@ -675,19 +675,20 @@ func TestRouteDetailRestricted(t *testing.T) {
 	if kids := get[Page[RouteRow]](t, srv, base+"/routes?parent=gateway.networking.k8s.io/HTTPRoute/shop/mid", 200); kids.Total != d.ChildCount || len(kids.Items) != d.ChildCount {
 		t.Errorf("list under mid: total %d rows %d, childCount %d", kids.Total, len(kids.Items), d.ChildCount)
 	}
-	var restricted int
+	// Hidden parent routes come last, named with link none (D-024); the
+	// walk stops at them, and the five-path bound truncates the rest.
+	var got []string
 	for _, p := range d.Ancestors {
+		got = append(got, stepNames(p))
 		for _, s := range p.Steps {
-			if s.Restricted {
-				restricted++
-				if s.Ref != nil {
-					t.Errorf("a restricted step has an identity: %+v", s)
-				}
+			hidden := strings.HasPrefix(s.Ref.Name, "top") && s.Ref.Name != "top5"
+			if s.Restricted || (s.Ref.Link == LinkNone) != hidden {
+				t.Errorf("step %+v", s)
 			}
 		}
 	}
-	// Hidden parents come last; the four redacted paths are one.
-	if restricted != 1 || len(d.Ancestors) != 4 || !d.Ancestors[3].Steps[0].Restricted || stepNames(d.Ancestors[2]) != "infra/edge > shop/top5 > shop/mid" {
-		t.Errorf("ancestors %+v", d.Ancestors)
+	want := []string{"infra/edge > shop/mid", "shop/mid > shop/loop > shop/mid", "infra/edge > shop/top5 > shop/mid", "shop/top1 > shop/mid", "shop/top2 > shop/mid"}
+	if !slices.Equal(got, want) || !d.AncestorsTruncated {
+		t.Errorf("ancestors %q truncated %v", got, d.AncestorsTruncated)
 	}
 }

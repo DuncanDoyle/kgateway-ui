@@ -492,6 +492,8 @@ type interner struct {
 	at     map[objects.Ref]int32
 	refs   []objects.Ref
 	seen   map[depKey]DepSet
+	// offSeen caches offPath's results as seen caches deps'.
+	offSeen map[depKey]DepSet
 	// buf is the current arena chunk for new DepSets.
 	buf []int32
 }
@@ -520,6 +522,34 @@ func (n *interner) deps(src []objects.Ref) DepSet {
 	}
 	d := DepSet(n.buf[start:len(n.buf):len(n.buf)])
 	n.seen[k] = d
+	return d
+}
+
+// offPath interns src without its HTTPRoutes. Every route in a view B or C
+// dependency set is on the result's path, and those never restrict (rules
+// §5.6, D-024).
+func (n *interner) offPath(src []objects.Ref) DepSet {
+	if len(src) == 0 {
+		return nil
+	}
+	k := depKey{&src[0], len(src)}
+	if d, ok := n.offSeen[k]; ok {
+		return d
+	}
+	if cap(n.buf)-len(n.buf) < len(src) {
+		n.buf = make([]int32, 0, max(1024, len(src)))
+	}
+	start := len(n.buf)
+	for _, r := range src {
+		if !isHTTPRoute(r.Group, r.Kind) {
+			n.buf = append(n.buf, n.ref(r))
+		}
+	}
+	var d DepSet
+	if len(n.buf) > start {
+		d = DepSet(n.buf[start:len(n.buf):len(n.buf)])
+	}
+	n.offSeen[k] = d
 	return d
 }
 
@@ -562,7 +592,7 @@ func (b *builder) views(ix *Index) {
 	ix.RuleSet, ix.RuleNote = v.RuleSet, v.Note
 	a := &v.Attachment
 	// Route rows take the first indexes; the map holds resources and Namespaces.
-	n := &interner{ix: ix, routes: map[objects.GroupKind]bool{}, at: map[objects.Ref]int32{}, seen: map[depKey]DepSet{},
+	n := &interner{ix: ix, routes: map[objects.GroupKind]bool{}, at: map[objects.Ref]int32{}, seen: map[depKey]DepSet{}, offSeen: map[depKey]DepSet{},
 		refs: make([]objects.Ref, len(ix.Routes), len(ix.Routes)+len(a.Counts))}
 	for i := range ix.Routes {
 		n.refs[i] = ix.Routes[i].Ref
@@ -620,7 +650,159 @@ func (b *builder) views(ix *Index) {
 		}
 		b.listenerUnknown(ix, i, n)
 	}
+	b.delegation(ix, n, v)
 	ix.Refs = n.refs
+}
+
+// compareRowKeys orders delegation rows by parent, rule, ref and child,
+// refs as compareRefs orders them (design §3.6).
+func compareRowKeys(a, b *computed.RowKey) int {
+	return cmp.Or(compareRefs(a.Parent, b.Parent), cmp.Compare(a.Rule, b.Rule), cmp.Compare(a.Ref, b.Ref), compareRefs(a.Child, b.Child))
+}
+
+// delegation fills views B and C into the index: the rows in order, their
+// per-parent and per-ref windows, DepSets, child-entry checks, the dropped
+// flag and the effective edges (design §3.5). The windows share one array.
+func (b *builder) delegation(ix *Index, n *interner, v *computed.Views) {
+	d := &v.Delegation
+	ix.DelegationCap = d.Cap
+	if len(d.Rows) > 0 {
+		delegRows(ix, n, d.Rows, v.Checks)
+	}
+	if len(d.Effective) > 0 {
+		effective(ix, n, d.Effective)
+	}
+}
+
+// delegRows copies rows into ix.DelegRows, sorted, and indexes them.
+func delegRows(ix *Index, n *interner, src []computed.Row, checks []computed.CheckResult) {
+	// The views list rows in RowKey order, which agrees with ours; sort only when not.
+	order := make([]int, len(src))
+	for i := range order {
+		order[i] = i
+	}
+	for i := 1; i < len(src); i++ {
+		if compareRowKeys(&src[i-1].Key, &src[i].Key) > 0 {
+			slices.SortStableFunc(order, func(x, y int) int { return compareRowKeys(&src[x].Key, &src[y].Key) })
+			break
+		}
+	}
+	rows := make([]DelegRow, len(src))
+	nctx, parents, refs := 0, 0, 0
+	for i, j := range order {
+		rows[i].Row = src[j]
+		nctx += len(src[j].Contexts)
+		if k := &src[j].Key; i == 0 || k.Parent != rows[i-1].Key.Parent {
+			parents, refs = parents+1, refs+1
+		} else if k.Rule != rows[i-1].Key.Rule || k.Ref != rows[i-1].Key.Ref {
+			refs++
+		}
+	}
+	ix.DelegRows = rows
+	ix.Delegation, ix.RefRows = make(map[objects.Ref][]int, parents), make(map[RefKey][]int, refs)
+	// order now holds 0..n-1: each parent and ref takes a window of it.
+	for i := range order {
+		order[i] = i
+	}
+	type checkKey struct {
+		child, parent objects.Ref
+		key           computed.ReportKey
+	}
+	byKey := map[checkKey]*computed.CheckResult{}
+	for i := range checks {
+		if c := &checks[i]; c.ID.Kind == computed.KindChildEntry {
+			if p, ok := c.Parent(); ok {
+				byKey[checkKey{c.On, p, c.Key}] = c
+			}
+		}
+	}
+	ctxDeps := make([]DepSet, nctx)
+	pLo, rLo, owned := 0, 0, false
+	for i := range rows {
+		r := &rows[i]
+		k := &r.Key
+		if i == 0 || k.Parent != rows[i-1].Key.Parent {
+			id, ok := ix.Row(k.Parent)
+			pLo, rLo, owned = i, i, ok && ix.Routes[id].Owned
+		} else if k.Rule != rows[i-1].Key.Rule || k.Ref != rows[i-1].Key.Ref {
+			rLo = i
+		}
+		// Close the windows at the last row of a ref and of a parent.
+		if last := i+1 == len(rows); last || rows[i+1].Key.Parent != k.Parent {
+			ix.Delegation[k.Parent] = order[pLo : i+1 : i+1]
+			ix.RefRows[RefKey{k.Parent, k.Rule, k.Ref}] = order[rLo : i+1 : i+1]
+		} else if nx := &rows[i+1].Key; nx.Rule != k.Rule || nx.Ref != k.Ref {
+			ix.RefRows[RefKey{k.Parent, k.Rule, k.Ref}] = order[rLo : i+1 : i+1]
+		}
+		r.Deps = n.offPath(r.Row.Deps)
+		if c := len(r.Contexts); c > 0 {
+			r.ContextDeps, ctxDeps = ctxDeps[:c:c], ctxDeps[c:]
+			for j := range r.Contexts {
+				r.ContextDeps[j] = n.offPath(r.Contexts[j].Deps)
+			}
+		}
+		if k.Child == (objects.Ref{}) {
+			continue
+		}
+		r.Check = byKey[checkKey{k.Child, k.Parent, r.ChildKey}]
+		switch r.Outcome {
+		case computed.OutcomeDropped, computed.OutcomeForbidden, computed.OutcomeRejectedHostnames:
+			if id, ok := ix.Row(k.Child); ok && owned {
+				c := &ix.Routes[id]
+				c.Flags |= FlagDropped
+				c.DroppedDeps = union32(c.DroppedDeps, r.Deps)
+			}
+		}
+	}
+}
+
+// effective fills ix.Effective from view C. Children are interned in row
+// order, so the dependency table does not depend on map order.
+func effective(ix *Index, n *interner, src map[objects.Ref]computed.ChildEffective) {
+	ne, nc := 0, 0
+	for _, ce := range src {
+		ne += len(ce.Edges)
+		for j := range ce.Edges {
+			nc += len(ce.Edges[j].Contexts)
+		}
+	}
+	edges, outer, inner := make([]DepSet, ne), make([][]DepSet, ne), make([]DepSet, nc)
+	ix.Effective = make(map[objects.Ref]EffectiveEntry, len(src))
+	add := func(child objects.Ref) {
+		ce, ok := src[child]
+		if _, done := ix.Effective[child]; !ok || done {
+			return
+		}
+		k := len(ce.Edges)
+		e := EffectiveEntry{ChildEffective: ce, EdgeDeps: edges[:k:k], ContextDeps: outer[:k:k]}
+		edges, outer = edges[k:], outer[k:]
+		for j := range ce.Edges {
+			ed := &ce.Edges[j]
+			e.EdgeDeps[j] = n.offPath(ed.Deps)
+			c := len(ed.Contexts)
+			e.ContextDeps[j], inner = inner[:c:c], inner[c:]
+			for x := range ed.Contexts {
+				e.ContextDeps[j][x] = n.offPath(ed.Contexts[x].Deps)
+			}
+		}
+		ix.Effective[child] = e
+	}
+	for i := range ix.DelegRows {
+		add(ix.DelegRows[i].Key.Child)
+	}
+	// An edge needs a row of its (parent, child), so this is normally empty.
+	if len(ix.Effective) < len(src) {
+		rest := make([]objects.Ref, 0, len(src)-len(ix.Effective))
+		for c := range src {
+			if _, ok := ix.Effective[c]; !ok {
+				rest = append(rest, c)
+			}
+		}
+		slices.SortFunc(rest, compareRefs)
+		for _, c := range rest {
+			add(c)
+		}
+	}
 }
 
 // refFacts fills each row's Computed from the outcomes, in one arena.

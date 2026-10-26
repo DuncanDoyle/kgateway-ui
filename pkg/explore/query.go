@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -362,14 +363,107 @@ func (ix *Index) unknownRef(id RowID, parent objects.Ref, visible func(objects.R
 	return false
 }
 
-// RowFlags are row id's flags for a caller: listener-unknown needs its
-// dependencies visible (design §7.4 rule 6); disagrees is a finding (rule 9).
+// RowFlags are row id's flags for a caller: listener-unknown and dropped
+// need their dependencies visible (design §7.4 rule 6); disagrees is a
+// finding (rule 9).
 func (ix *Index) RowFlags(id RowID, visible func(objects.Ref) bool) Flag {
 	r := &ix.Routes[id]
-	if r.Flags&FlagListenerUnknown != 0 && !ix.Visible(r.UnknownDeps, visible) {
-		return r.Flags &^ FlagListenerUnknown
+	f := r.Flags
+	if f&FlagListenerUnknown != 0 && !ix.Visible(r.UnknownDeps, visible) {
+		f &^= FlagListenerUnknown
 	}
-	return r.Flags
+	if f&FlagDropped != 0 && !ix.Visible(r.DroppedDeps, visible) {
+		f &^= FlagDropped
+	}
+	return f
+}
+
+// DelegationQuery is one delegation page request after parsing (design
+// §7.2). Zero fields do not filter; Outcomes are OR-ed. The order is fixed.
+type DelegationQuery struct {
+	Rule, Ref *int
+	Outcomes  []computed.RowOutcome
+	// Limit is 1–MaxLimit; 0 means DefaultLimit.
+	Limit  int
+	Cursor string
+}
+
+// rowOutcomes are the outcomes a delegation row can have (rules §5.5).
+var rowOutcomes = []computed.RowOutcome{computed.OutcomeAttached, computed.OutcomePartial, computed.OutcomeDropped, computed.OutcomeForbidden,
+	computed.OutcomeRejectedHostnames, computed.OutcomeCycle, computed.OutcomeUnresolved, computed.OutcomeUnknown}
+
+// QueryDelegation pages parent's delegation rows that match q; Page.IDs
+// index DelegRows. A row whose child visible rejects is left out; a row with
+// no child never is (design §7.4 rule 3). The outcome filter matches a row
+// only when visible admits every ref of its Deps, which leave out the routes
+// on its paths (rules 4a, 4b). Both apply before Total and paging; nil
+// admits every row.
+func (ix *Index) QueryDelegation(parent objects.Ref, q DelegationQuery, visible func(objects.Ref) bool) (Page, error) {
+	switch {
+	case q.Limit == 0:
+		q.Limit = DefaultLimit
+	case q.Limit < 0 || q.Limit > MaxLimit:
+		return Page{}, fmt.Errorf("%w: limit %d", ErrBadQuery, q.Limit)
+	}
+	if q.Rule != nil && *q.Rule < 0 || q.Ref != nil && *q.Ref < 0 {
+		return Page{}, fmt.Errorf("%w: negative rule or ref", ErrBadQuery)
+	}
+	for _, o := range q.Outcomes {
+		if !slices.Contains(rowOutcomes, o) {
+			return Page{}, fmt.Errorf("%w: outcome %q", ErrBadQuery, o)
+		}
+	}
+	var cur *delegCursor
+	if q.Cursor != "" {
+		c, err := decodeDelegCursor(q.Cursor)
+		if err != nil {
+			return Page{}, err
+		}
+		cur = &c
+	}
+	cands := ix.Delegation[parent]
+	if q.Rule != nil && q.Ref != nil {
+		cands = ix.RefRows[RefKey{parent, *q.Rule, *q.Ref}]
+	}
+	match := make([]int, 0, len(cands))
+	for _, i := range cands {
+		r := &ix.DelegRows[i]
+		k := &r.Key
+		if q.Rule != nil && k.Rule != *q.Rule || q.Ref != nil && k.Ref != *q.Ref ||
+			len(q.Outcomes) > 0 && (!slices.Contains(q.Outcomes, r.Outcome) || !ix.Visible(r.Deps, visible)) ||
+			visible != nil && k.Child != (objects.Ref{}) && !visible(k.Child) {
+			continue
+		}
+		match = append(match, i)
+	}
+	// The same slicing as page, over the fixed order (design §3.6).
+	n := len(match)
+	start, end := 0, min(n, q.Limit)
+	if cur != nil && cur.before {
+		end = sort.Search(n, func(i int) bool { return cur.compare(&ix.DelegRows[match[i]].Key) >= 0 })
+		start = max(0, end-q.Limit)
+	} else if cur != nil {
+		start = sort.Search(n, func(i int) bool { return cur.compare(&ix.DelegRows[match[i]].Key) > 0 })
+		end = min(n, start+q.Limit)
+	}
+	p := Page{IDs: make([]RowID, 0, end-start), Total: n}
+	for _, i := range match[start:end] {
+		p.IDs = append(p.IDs, RowID(i)) // #nosec G115 -- a row count fits in int32
+	}
+	switch {
+	case end > start:
+		if end < n {
+			p.Next = encodeDelegCursor(false, &ix.DelegRows[match[end-1]].Key)
+		}
+		if start > 0 {
+			p.Prev = encodeDelegCursor(true, &ix.DelegRows[match[start]].Key)
+		}
+	case cur != nil && !cur.before && start > 0:
+		p.Prev = encodeDelegCursor(true, cur.key())
+	case cur != nil && cur.before && end < n:
+		p.Next = encodeDelegCursor(false, cur.key())
+	}
+	return p, nil
 }
 
 // checkAttachment validates the attachment filter (design §7.2).
