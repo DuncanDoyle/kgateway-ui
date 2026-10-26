@@ -89,9 +89,13 @@ type entry struct {
 	v   sortVal
 }
 
-// entryPool recycles the route queries' entry buffers, which hold every
-// matching row: one per request was most of a route list's garbage.
-var entryPool = sync.Pool{New: func() any { return new([]entry) }}
+// entryBufs recycles the route queries' entry buffers, which hold every
+// matching row: one per request was most of a route list's garbage. Tests
+// swap it to see what goes back.
+var entryBufs interface {
+	Get() any
+	Put(any)
+} = &sync.Pool{New: func() any { return new([]entry) }}
 
 // healthStates are in ascending sort order: health.desc lists errors first.
 var healthStates = []health.State{health.StateHealthy, health.StateWarning, health.StateUnknown, health.StateError}
@@ -309,12 +313,14 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 	default:
 		cands = allRows(len(ix.Routes))
 	}
-	buf := entryPool.Get().(*[]entry)
-	defer func() {
-		clear(*buf) // drop the strings, so the pool does not pin a retired Index
-		entryPool.Put(buf)
-	}()
+	buf := entryBufs.Get().(*[]entry)
 	es := slices.Grow((*buf)[:0], len(cands))
+	defer func() {
+		// es is every entry written, on unwind too: the pool must not pin a retired Index.
+		clear(es)
+		*buf = es[:0]
+		entryBufs.Put(buf)
+	}()
 	for _, id := range cands {
 		r := &ix.Routes[id]
 		gk := objects.GroupKind{Group: r.Ref.Group, Kind: r.Ref.Kind}
@@ -329,7 +335,6 @@ func (ix *Index) queryRoutes(in Query, visible func(objects.Ref) bool) (Page, in
 		}
 		es = append(es, entry{id: id, ref: r.Ref, v: sortVal{group: r.Ref.Group, kind: r.Ref.Kind, n: healthRank(r.State)}})
 	}
-	*buf = es
 	return q.page(es), len(cands), nil
 }
 

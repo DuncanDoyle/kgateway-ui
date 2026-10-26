@@ -841,3 +841,49 @@ func TestGatewaysSortByMemberCount(t *testing.T) {
 		}
 	}
 }
+
+// fakeBufs hands out one buffer and keeps what comes back.
+type fakeBufs struct{ out, back *[]entry }
+
+func (f *fakeBufs) Get() any  { return f.out }
+func (f *fakeBufs) Put(x any) { f.back = x.(*[]entry) }
+
+// A visibility callback that panics after an entry was appended still
+// returns the buffer with no entry left in its backing array.
+func TestQueryRoutesClearsBufferOnPanic(t *testing.T) {
+	f := &fakeBufs{out: new([]entry)}
+	*f.out = make([]entry, 0, 8)
+	saved := entryBufs
+	entryBufs = f
+	t.Cleanup(func() { entryBufs = saved })
+	ix := hand(hr("a", health.StateHealthy), hr("b", health.StateHealthy), hr("c", health.StateHealthy))
+	calls := 0
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("the callback did not panic")
+			}
+		}()
+		_, _ = ix.QueryRoutes(Query{}, func(objects.Ref) bool {
+			if calls++; calls == 2 {
+				panic("authorizer failed")
+			}
+			return true
+		})
+	}()
+	if calls != 2 {
+		t.Fatalf("visible called %d times, want 2 (one entry appended first)", calls)
+	}
+	if f.back == nil {
+		t.Fatal("the buffer was not returned")
+	}
+	b := *f.back
+	if len(b) != 0 {
+		t.Errorf("returned buffer has length %d, want 0", len(b))
+	}
+	for i, e := range b[:cap(b)] {
+		if e != (entry{}) {
+			t.Errorf("returned buffer slot %d holds %+v", i, e)
+		}
+	}
+}
