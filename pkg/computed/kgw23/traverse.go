@@ -37,6 +37,11 @@ type refSel struct {
 	// unknown is set when the selection is unknown: setting-unknown, or
 	// too-large when the edge cap cut it.
 	unknown computed.UnknownReason
+	// partial is set when kids are certain but the selection may hold more:
+	// a label ref under an unknown wildcard setting, whose possible routes
+	// elsewhere carry the label (rules §3.3, §5.2).
+	partial  computed.UnknownReason
+	possible []int32
 }
 
 // evalSel is childrenFor's answer for one ref under one path: the
@@ -45,6 +50,8 @@ type evalSel struct {
 	kids    []int32
 	err     errKind
 	unknown computed.UnknownReason
+	// partial: kids are certain, but a possible child may also be selected.
+	partial computed.UnknownReason
 }
 
 // routeSel is a route's delegation refs in (rule, ref) order, with the
@@ -53,8 +60,9 @@ type routeSel struct {
 	refs  []refSel
 	plain []evalSel
 	// permitted are the permitted selected children, sorted and unique: the
-	// route's reach edges (rules §8.5).
-	permitted []int32
+	// route's reach edges (rules §8.5). possible are the refs' possible
+	// children, sorted and unique, which a path may also hold.
+	permitted, possible []int32
 }
 
 // ruleRange is the range of refs of rule.
@@ -242,12 +250,6 @@ func (w *walker) selectAll() {
 				switch {
 				case w.edgeCut:
 					sel.unknown = computed.UnknownTooLarge
-				case unknown != "":
-					// Uncertainty is never a selection: no edges, only uncertain points (rules §3.3, §8.5).
-					sel.unknown = unknown
-					for _, r := range possible {
-						w.uncertain = append(w.uncertain, computed.Uncertain{Route: r, Rule: computed.UncertainPossible, Ref: -1, Reason: unknown})
-					}
 				case w.edges+len(children) > w.b.Edges:
 					w.edgeCut, sel.unknown = true, computed.UnknownTooLarge
 					w.hit(computed.CapEdges)
@@ -260,9 +262,19 @@ func (w *walker) selectAll() {
 						sel.kids[k] = int32(i) //nolint:gosec // route counts fit in int32
 						_, sel.allows[k] = permits(w.routes[i].View, c.Namespace, p.Ref)
 					}
+					if unknown != "" {
+						// Uncertainty is never a selection: the possible routes get no
+						// edges, only uncertain points (rules §3.3, §8.5).
+						sel.partial = unknown
+						for _, r := range possible {
+							i, _ := w.index(r)
+							sel.possible = append(sel.possible, int32(i)) //nolint:gosec // route counts fit in int32
+							w.uncertain = append(w.uncertain, computed.Uncertain{Route: r, Rule: computed.UncertainPossible, Ref: -1, Reason: unknown})
+						}
+					}
 				}
-				if sel.unknown != "" {
-					w.uncertain = append(w.uncertain, computed.Uncertain{Route: p.Ref, Rule: sel.rule, Ref: sel.ref, Reason: sel.unknown})
+				if u := cmp.Or(sel.unknown, sel.partial); u != "" {
+					w.uncertain = append(w.uncertain, computed.Uncertain{Route: p.Ref, Rule: sel.rule, Ref: sel.ref, Reason: u})
 				}
 				rs.refs = append(rs.refs, sel)
 			}
@@ -278,10 +290,11 @@ func (w *walker) selectAll() {
 					rs.permitted = append(rs.permitted, c)
 				}
 			}
+			rs.possible = append(rs.possible, r.possible...)
 			if !p.Owned || r.unknown != "" {
 				continue
 			}
-			if r.unresolved != "" {
+			if r.unresolved != "" || r.partial != "" {
 				w.open(pi, r, -1)
 			}
 			for _, c := range r.kids {
@@ -290,6 +303,8 @@ func (w *walker) selectAll() {
 		}
 		slices.Sort(rs.permitted)
 		rs.permitted = slices.Compact(rs.permitted)
+		slices.Sort(rs.possible)
+		rs.possible = slices.Compact(rs.possible)
 	}
 }
 
@@ -335,6 +350,9 @@ func selectTree(refs []refSel, onPath func(int32) bool) []evalSel {
 			st.err = errUnresolved
 			continue
 		}
+		// A possible child on the path may fail the ref with a cycle, so its
+		// children are unknown under this path.
+		mayCycle := onPath != nil && slices.ContainsFunc(r.possible, onPath)
 		for k, c := range r.kids {
 			if r.allows[k] == computed.AllowsOther {
 				continue
@@ -347,6 +365,11 @@ func selectTree(refs []refSel, onPath func(int32) bool) []evalSel {
 		}
 		// Clipped, so a later append to acc never writes into a stored list.
 		st.items, st.has, st.itemsUnknown = slices.Clip(acc), true, accUnknown
+		if mayCycle {
+			st.itemsUnknown = cmp.Or(st.itemsUnknown, r.partial)
+		}
+		// Quirk 1 hands the possible children to the rule's later refs too.
+		accUnknown = cmp.Or(accUnknown, r.partial)
 	}
 	out := make([]evalSel, len(refs))
 	for i := range refs {
@@ -357,7 +380,7 @@ func selectTree(refs []refSel, onPath func(int32) bool) []evalSel {
 		case st.unknown != "":
 			out[i].unknown = st.unknown
 		case st.has:
-			out[i].kids, out[i].unknown = st.items, st.itemsUnknown
+			out[i].kids, out[i].unknown, out[i].partial = st.items, st.itemsUnknown, refs[i].partial
 		default:
 			out[i].err = errUnresolved
 		}
@@ -369,8 +392,10 @@ func selectTree(refs []refSel, onPath func(int32) bool) []evalSel {
 // child of P is on the path, when selectTree runs again with the path.
 func (w *walker) eval(pi, ri int, path []computed.PathStep) evalSel {
 	rs := &w.sels[pi]
+	byRef := func(i int32, t objects.Ref) int { return w.routes[i].Ref.Compare(t) }
 	for _, s := range path {
-		if _, ok := slices.BinarySearchFunc(rs.permitted, s.Route, func(i int32, t objects.Ref) int { return w.routes[i].Ref.Compare(t) }); ok {
+		_, permitted := slices.BinarySearchFunc(rs.permitted, s.Route, byRef)
+		if _, possible := slices.BinarySearchFunc(rs.possible, s.Route, byRef); permitted || possible {
 			return selectTree(rs.refs, func(c int32) bool {
 				return slices.ContainsFunc(path, func(s computed.PathStep) bool { return s.Route == w.routes[c].Ref })
 			})[ri]
@@ -477,7 +502,10 @@ func (w *walker) flatten(pi, ri int, f *frame) {
 			w.add(pi, rs, c, f, computed.Context{Outcome: computed.OutcomeUnknown, Unknown: ev.unknown})
 		}
 	default:
-		w.children(pi, rs, ev.kids, f)
+		if ev.partial != "" {
+			w.add(pi, rs, -1, f, computed.Context{Outcome: computed.OutcomeUnknown, Unknown: ev.partial})
+		}
+		w.children(pi, rs, ev.kids, f, ev.partial != "")
 	}
 }
 
@@ -485,8 +513,8 @@ func (w *walker) flatten(pi, ri int, f *frame) {
 // delegation_helpers.go V3:34-108), then checks hostnames after the fit
 // (delegation.go V3:90-98) and recurses into each kept child (V3:100-103).
 // With no kept child the parent gets BackendNotFound (V3:105-107), unless a
-// cap cut a child.
-func (w *walker) children(pi int, rs *refSel, kids []int32, f *frame) {
+// cap cut a child or the selection is partial: a possible child may fit.
+func (w *walker) children(pi int, rs *refSel, kids []int32, f *frame, partial bool) {
 	valid, cut := 0, false
 	for _, ki := range kids {
 		e := f.memo[ki]
@@ -525,7 +553,7 @@ func (w *walker) children(pi int, rs *refSel, kids []int32, f *frame) {
 	}
 	if cut {
 		w.uncertainRef(w.routes[pi].Ref, rs, computed.UnknownTooLarge)
-	} else if valid == 0 {
+	} else if valid == 0 && !partial {
 		w.signal(w.routes[pi].Ref, f, computed.ReasonBackendNotFound)
 	}
 }
@@ -595,7 +623,7 @@ func (w *walker) cut(pi, ri int, f *frame) {
 		return
 	}
 	c := computed.Context{Outcome: computed.OutcomeUnknown, Unknown: computed.UnknownTooLarge}
-	if rs.unresolved != "" {
+	if rs.unresolved != "" || rs.partial != "" {
 		w.add(pi, rs, -1, f, c)
 	}
 	for _, k := range rs.kids {
@@ -643,7 +671,9 @@ func (w *walker) open(pi int, rs *refSel, child int32) *rowAcc {
 	}
 	meta := computed.RowMeta{RefAsWritten: rs.as, ScopeUnknown: w.in.ScopeUnknown}
 	if child < 0 {
-		meta.Unresolved = cmp.Or(rs.unresolved, computed.UnresolvedMissing)
+		if rs.partial == "" {
+			meta.Unresolved = cmp.Or(rs.unresolved, computed.UnresolvedMissing)
+		}
 	} else {
 		c := &w.routes[child]
 		_, meta.Allows = permits(c.View, c.Ref.Namespace, key.Parent)

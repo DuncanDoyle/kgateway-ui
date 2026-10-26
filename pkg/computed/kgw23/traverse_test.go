@@ -567,31 +567,72 @@ func cmpEdge(a, b computed.Edge) int {
 	return a.Child.Compare(b.Child)
 }
 
-func TestUncertainSelectionAddsNoEdges(t *testing.T) {
+// An unknown wildcard setting (rules §3.3, §5.2): a label ref selects its own
+// namespace's routes with certainty; routes elsewhere stay possible, with no
+// edge. The ref keeps a zero-child row, unknown and setting-unknown, and no
+// context of it records a delegation failure, since a possible child may fit.
+func TestUnknownWildcardSelectsOwnNamespace(t *testing.T) {
 	s1 := route23("shop", "s1").label("v").rule(at("/r/s1"), service("shop", "be"))
+	s2 := route23("shop", "s2").label("v").rule(at("/x"), service("shop", "be"))
 	t1 := route23("team", "t1").label("v").rule(at("/r/t1"), service("team", "be"))
 	r := route23("shop", "r").top().rule(at("/r"), toLabel("shop", "v"))
-	in := world(r, s1, t1)
+	in := world(r, s1, s2, t1)
 	in.Wildcard = install.Setting{} // valueFrom: unknown
 	res := delegate(in)
 	for _, e := range res.Reach {
-		if e.Parent == r.r.Ref {
-			t.Fatalf("edge %v from an uncertain selection", e)
+		if e.Parent == r.r.Ref && e.Child == t1.r.Ref {
+			t.Fatalf("edge %v to a possible child", e)
 		}
+	}
+	if !slices.Contains(res.Reach, computed.Edge{Parent: r.r.Ref, Child: s1.r.Ref}) {
+		t.Fatalf("no edge to the own-namespace child: %v", res.Reach)
 	}
 	for _, want := range []computed.Uncertain{
 		{Route: r.r.Ref, Rule: 0, Ref: 0, Reason: computed.UnknownSetting},
-		{Route: s1.r.Ref, Rule: computed.UncertainPossible, Ref: -1, Reason: computed.UnknownSetting},
 		{Route: t1.r.Ref, Rule: computed.UncertainPossible, Ref: -1, Reason: computed.UnknownSetting},
 	} {
 		if !slices.Contains(res.Uncertain, want) {
 			t.Fatalf("no %+v in %+v", want, res.Uncertain)
 		}
 	}
-	for _, s := range res.Signals {
-		if s.Parent == r.r.Ref {
-			t.Fatalf("signal %+v from an uncertain selection", s)
-		}
+	if slices.ContainsFunc(res.Uncertain, func(u computed.Uncertain) bool { return u.Route == s1.r.Ref }) {
+		t.Fatalf("own-namespace child is uncertain: %+v", res.Uncertain)
+	}
+	if got := row(t, res, r, 0, 0, s1); got.Outcome != computed.OutcomeAttached {
+		t.Fatalf("s1 %s", got.Outcome)
+	}
+	// s2 is dropped in its only context, but r is uncertain, so it is never dropped (rules §5.5).
+	if got := row(t, res, r, 0, 0, s2); got.Outcome != computed.OutcomeUnknown {
+		t.Fatalf("s2 %s", got.Outcome)
+	}
+	if got := row(t, res, r, 0, 0, nil); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownSetting {
+		t.Fatalf("zero-child row %s %s", got.Outcome, got.Unknown)
+	}
+
+	// Only dropped own children: still no BackendNotFound.
+	only := route23("shop", "r").top().rule(at("/r"), toLabel("shop", "v"))
+	in = world(only, s2, t1)
+	in.Wildcard = install.Setting{}
+	res = delegate(in)
+	if len(res.Signals) != 0 {
+		t.Fatalf("signals %+v from an uncertain selection", res.Signals)
+	}
+	if got := row(t, res, only, 0, 0, nil); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownSetting {
+		t.Fatalf("zero-child row %s %s", got.Outcome, got.Unknown)
+	}
+}
+
+// A possible child on the path may fail the ref with a cycle, so its own
+// children are unknown there, never attached or dropped (rules §3.3, §5.4).
+func TestUnknownWildcardPossibleChildOnPath(t *testing.T) {
+	s1 := route23("shop", "s1").label("v").rule(at("/x/s1"), service("shop", "be"))
+	x := route23("lab", "x").label("v").rule(at("/x"), toLabel("shop", "v"))
+	r := route23("infra", "r").top().rule(at("/x"), toName("lab", "x"))
+	in := world(r, x, s1)
+	in.Wildcard = install.Setting{}
+	res := delegate(in)
+	if got := row(t, res, x, 0, 0, s1); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownSetting {
+		t.Fatalf("x→s1 %s %s, want unknown setting-unknown", got.Outcome, got.Unknown)
 	}
 }
 
@@ -777,9 +818,10 @@ func TestUnknownRootIsUncertain(t *testing.T) {
 }
 
 func TestUnknownWildcardLabelRef(t *testing.T) {
-	// rules §11.2: R's label ref has an unknown wildcard setting; S may be selected, and C is below S.
+	// rules §11.2: R's label ref has an unknown wildcard setting; S, in another namespace, may be
+	// selected, and C is below S. A labelled route in R's own namespace would be selected for certain.
 	c := route23("shop", "c").rule(at("/r/s/c"), service("shop", "be"))
-	s := route23("shop", "s").label("v").rule(at("/r/s"), toName("shop", "c"))
+	s := route23("lab", "s").label("v").rule(at("/r/s"), toName("shop", "c"))
 	n := route23("shop", "n").rule(at("/n"), service("shop", "be"))
 	r := route23("shop", "r").top().rule(at("/r"), toLabel("shop", "v"))
 	in := world(r, s, c, n)

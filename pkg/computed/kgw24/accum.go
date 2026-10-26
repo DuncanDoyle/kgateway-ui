@@ -176,6 +176,13 @@ func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool, tooLarge bool) {
 	case row.Allows == computed.AllowsOther || r.count(computed.OutcomeForbidden) > 0:
 		row.Outcome = computed.OutcomeForbidden
 		return
+	case row.Key.Child == (objects.Ref{}) && row.Unresolved == "":
+		// A partial selection's row: what a possible child would add is unknown (rules §3.3).
+		row.Outcome, row.Unknown = computed.OutcomeUnknown, computed.UnknownNotReached
+		if r.n > 0 {
+			row.Unknown = r.unknown
+		}
+		return
 	case row.Key.Child == (objects.Ref{}):
 		// The ref selected nothing, whatever the context.
 		row.Outcome = computed.OutcomeUnresolved

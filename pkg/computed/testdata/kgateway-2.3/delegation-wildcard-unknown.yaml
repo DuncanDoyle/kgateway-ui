@@ -1,7 +1,8 @@
-# The wildcard namespace setting from valueFrom (rules §3.3, §5.2, §8.5): the label ref is
-# setting-unknown, selects nothing and opens no row. Every route with that label is a possible
-# child, so it and what it reaches (deep/c2) are incomplete; so are r and apps/c, which stays
-# attached with "Some paths not computed" (rules §5.5).
+# The wildcard namespace setting from valueFrom (rules §3.3, §5.2, §8.5). The label ref in lab
+# selects lab/s1 for certain, since kgateway selects the ref's own namespace whatever the
+# setting; east/s2 carries the label elsewhere, so it is only possible: an uncertain point with no
+# edge. The ref keeps a zero-child row, unknown and setting-unknown. r is an uncertain point, so
+# everything it reaches is incomplete and its attached rows say "Some paths not computed".
 provenance: computed-rules §3.3, §5.2, §8.5, §11.2
 ruleOnly: true
 controllerVersion: v2.3.11
@@ -46,9 +47,16 @@ expect:
     "HTTPRoute infra/r #0": {outcome: accepted}
   rows:
     infra/r 0.0 apps/c: {outcome: attached, someNotComputed: true}
+    infra/r 1.0 -: {outcome: unknown, unknown: setting-unknown}
+    infra/r 1.0 lab/s1: {outcome: attached, someNotComputed: true}
+    lab/s1 0.0 deep/c2: {outcome: attached, someNotComputed: true}
   entries:
     "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "lab/s1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "deep/c2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: s1, namespace: lab}": Accepted
   effective:
     apps/c <- infra/r: {contexts: [r0 PathPrefix /w/c]}
-  uncertain: [east/s2 possible setting-unknown, infra/r 1.0 setting-unknown, lab/s1 possible setting-unknown]
+    lab/s1 <- infra/r: {contexts: [r0 PathPrefix /l/1]}
+    deep/c2 <- lab/s1: {contexts: [r0 PathPrefix /l/1/c2]}
+  uncertain: [east/s2 possible setting-unknown, infra/r 1.0 setting-unknown]
   incomplete: [apps/c, deep/c2, east/s2, infra/r, lab/s1]

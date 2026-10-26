@@ -52,8 +52,9 @@ func newSelector(routes []computed.DelegRoute, unwatched map[objects.Ref]bool, w
 // fetch returns the routes ref selects, sorted by (namespace, name), as
 // fetchRoutesByRef does (pkg/kgateway/query/route.go V4:315-361). An empty
 // selection is unresolved. With the wildcard setting unknown, a label ref
-// selects nothing and is setting-unknown; possible then lists every route with
-// that label value, as uncertain points only (rules §3.3).
+// selects its own namespace's routes with that label, as kgateway does
+// whatever the setting is, and is setting-unknown when routes elsewhere carry
+// the label: possible lists those, as uncertain points only (rules §3.3, §5.2).
 func (s *selector) fetch(ref objects.DelegationRef) (children, possible []objects.Ref, unresolved computed.Unresolved, unknown computed.UnknownReason) {
 	var idx []int
 	switch ref.Mode {
@@ -69,14 +70,26 @@ func (s *selector) fetch(ref objects.DelegationRef) (children, possible []object
 	case objects.DelegationWildcard:
 		idx = s.byNS[ref.Namespace]
 	case objects.DelegationLabel:
+		own := s.byNSLabel[nsLabel{ref.Namespace, ref.Label}]
 		if !s.known {
-			return nil, s.refs(s.byLabel[ref.Label]), "", computed.UnknownSetting
+			var others []int
+			for _, i := range s.byLabel[ref.Label] {
+				if s.routes[i].Ref.Namespace != ref.Namespace {
+					others = append(others, i)
+				}
+			}
+			if len(others) > 0 {
+				return s.refs(own), s.refs(others), "", computed.UnknownSetting
+			}
+			// Nothing elsewhere: the selection is the same under any setting.
+			idx = own
+			break
 		}
 		// An explicit empty namespace (CRD-forbidden) selects nothing here; upstream selects everywhere.
 		if ref.Namespace == s.wildcard {
 			idx = s.byLabel[ref.Label]
 		} else {
-			idx = s.byNSLabel[nsLabel{ref.Namespace, ref.Label}]
+			idx = own
 		}
 	}
 	if len(idx) == 0 {

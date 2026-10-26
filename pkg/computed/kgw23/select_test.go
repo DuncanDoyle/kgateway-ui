@@ -97,14 +97,27 @@ func TestLabelWildcardNamespace(t *testing.T) {
 
 	t.Run("valueFrom", func(t *testing.T) {
 		s := newSelector(selectWorld(), nil, install.Setting{Reason: "valueFrom"})
-		for _, ns := range []string{"all", "shop"} {
-			children, possible, unresolved, unknown := s.fetch(label(ns))
-			if children != nil || unresolved != "" || unknown != computed.UnknownSetting || !reflect.DeepEqual(possible, everywhere) {
-				t.Fatalf("%s: got %v %v %q %q", ns, children, possible, unresolved, unknown)
+		// The ref's own namespace is selected whatever the setting; the rest is only possible.
+		for _, c := range []struct {
+			ns                 string
+			children, possible []objects.Ref
+		}{
+			{"all", refs(routeRef("all", "a1")), refs(routeRef("orders", "o2"), routeRef("shop", "s1"), routeRef("team-a", "t1"))},
+			{"shop", refs(routeRef("shop", "s1")), refs(routeRef("all", "a1"), routeRef("orders", "o2"), routeRef("team-a", "t1"))},
+			{"empty", nil, everywhere},
+		} {
+			children, possible, unresolved, unknown := s.fetch(label(c.ns))
+			if !reflect.DeepEqual(children, c.children) || unresolved != "" || unknown != computed.UnknownSetting || !reflect.DeepEqual(possible, c.possible) {
+				t.Fatalf("%s: got %v %v %q %q", c.ns, children, possible, unresolved, unknown)
 			}
 		}
+		// With no labelled route elsewhere the selection is known: only shop/s2 has label w.
+		children, possible, unresolved, unknown := s.fetch(objects.DelegationRef{Mode: objects.DelegationLabel, Namespace: "shop", Label: "w"})
+		if !reflect.DeepEqual(children, refs(routeRef("shop", "s2"))) || possible != nil || unresolved != "" || unknown != "" {
+			t.Fatalf("label w: got %v %v %q %q", children, possible, unresolved, unknown)
+		}
 		// Name and wildcard refs do not read the setting.
-		children, _, _, unknown := s.fetch(objects.DelegationRef{Mode: objects.DelegationWildcard, Namespace: "shop"})
+		children, _, _, unknown = s.fetch(objects.DelegationRef{Mode: objects.DelegationWildcard, Namespace: "shop"})
 		if len(children) != 2 || unknown != "" {
 			t.Fatalf("wildcard ref under unknown setting: %v %q", children, unknown)
 		}
@@ -154,7 +167,7 @@ func TestPossibleExcludesUnwatched(t *testing.T) {
 	unwatched := map[objects.Ref]bool{routeRef("blog", "posts"): true} // carries label v, outside the scope
 	s := newSelector(selectWorld(), unwatched, install.Setting{Reason: "valueFrom"})
 	_, possible, _, unknown := s.fetch(objects.DelegationRef{Mode: objects.DelegationLabel, Namespace: "all", Label: "v"})
-	if unknown != computed.UnknownSetting || slices.Contains(possible, routeRef("blog", "posts")) || len(possible) != 4 {
+	if unknown != computed.UnknownSetting || slices.Contains(possible, routeRef("blog", "posts")) || len(possible) != 3 {
 		t.Fatalf("possible %v, unknown %q", possible, unknown)
 	}
 }
