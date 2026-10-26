@@ -2,6 +2,7 @@ package kgw23
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
@@ -179,7 +180,7 @@ func TestDepsAndReportersSurviveRetention(t *testing.T) {
 	if len(r.Reporters) != 2 {
 		t.Errorf("Reporters = %v, want repA and repB", r.Reporters)
 	}
-	if _, ok := r.KeyDigests[repB]; !ok {
+	if _, ok := keyDigest(r, repB); !ok {
 		t.Errorf("KeyDigests lacks the dropped context's reporter")
 	}
 }
@@ -204,10 +205,10 @@ func TestUnretainedContextChangesDigest(t *testing.T) {
 	if x.ContextDigest == y.ContextDigest {
 		t.Error("ContextDigest ignores the unretained context")
 	}
-	if x.KeyDigests[repA] == y.KeyDigests[repA] {
+	if kd(x, repA) == kd(y, repA) {
 		t.Error("KeyDigests[repA] ignores the unretained context")
 	}
-	if x.KeyDigests[repB] != y.KeyDigests[repB] {
+	if kd(x, repB) != kd(y, repB) {
 		t.Error("KeyDigests[repB] changed with another reporter's context")
 	}
 }
@@ -216,7 +217,7 @@ func TestDigestIsOrderIndependent(t *testing.T) {
 	a, b := ctx("/a", computed.OutcomeAttached), ctx("/b", computed.OutcomeDropped)
 	x := one(t, computed.DefaultBounds, rowKey(0, 0, accChild), computed.RowMeta{}, never, a, b)
 	y := one(t, computed.DefaultBounds, rowKey(0, 0, accChild), computed.RowMeta{}, never, b, a)
-	if x.ContextDigest != y.ContextDigest || x.KeyDigests[repA] != y.KeyDigests[repA] {
+	if x.ContextDigest != y.ContextDigest || kd(x, repA) != kd(y, repA) {
 		t.Error("digests depend on add order")
 	}
 }
@@ -300,3 +301,13 @@ func TestOneContextRowStaysSmall(t *testing.T) {
 		t.Errorf("cap(Contexts) = %d, want <= 2", cap(r.Contexts))
 	}
 }
+
+// keyDigest is r's digest under reporter k, and whether k reported.
+func keyDigest(r computed.Row, k computed.ReportKey) (uint64, bool) {
+	if i, ok := slices.BinarySearchFunc(r.Reporters, k, computed.ReportKey.Compare); ok {
+		return r.KeyDigests[i], true
+	}
+	return 0, false
+}
+
+func kd(r computed.Row, k computed.ReportKey) uint64 { d, _ := keyDigest(r, k); return d }

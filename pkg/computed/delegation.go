@@ -314,9 +314,10 @@ type Row struct {
 	WritesEntry                    bool
 	// ContextDigest is an order-independent digest of every contributing
 	// context's incoming match, path, reporter and outcome; KeyDigests is the
-	// same digest per reporter. Fingerprints read them (rules §9.2).
+	// same digest per reporter, index-aligned with Reporters. Fingerprints
+	// read them (rules §9.2).
 	ContextDigest uint64
-	KeyDigests    map[ReportKey]uint64
+	KeyDigests    []uint64
 	// KeyDeps are Deps per reporter, index-aligned with Reporters: the sorted
 	// union of the deps of every context under that key. Its slices are
 	// read-only and may be shared.

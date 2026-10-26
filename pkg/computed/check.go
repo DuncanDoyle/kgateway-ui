@@ -994,9 +994,9 @@ func (c *delegChecker) parentResolvedRefs(parent objects.Ref, key ReportKey, lo,
 	c.idx = c.idx[:0]
 	for k := lo; k < hi; k++ {
 		row := &c.r.Rows[k]
-		if _, ok := slices.BinarySearchFunc(row.Reporters, key, ReportKey.Compare); ok {
+		if i, ok := slices.BinarySearchFunc(row.Reporters, key, ReportKey.Compare); ok {
 			c.idx = append(c.idx, k)
-			digest += row.KeyDigests[key]
+			digest += row.KeyDigests[i]
 		}
 	}
 	sig := c.signal(parent, key)

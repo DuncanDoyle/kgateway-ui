@@ -78,9 +78,6 @@ func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64, frame uint3
 func (a *accumulator) addCounted(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, 0, false) }
 
 func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32, retain bool) {
-	if r.n == 0 {
-		r.row.KeyDigests = map[computed.ReportKey]uint64{}
-	}
 	r.seen[outcomeIndex(c.Outcome)]++
 	r.n++
 	switch {
@@ -97,11 +94,12 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	if i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare); !ok {
 		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
 		r.row.KeyDeps = slices.Insert(r.row.KeyDeps, i, c.Deps)
+		r.row.KeyDigests = slices.Insert(r.row.KeyDigests, i, d)
 	} else {
 		r.row.KeyDeps[i] = unionRefs(r.row.KeyDeps[i], c.Deps)
+		r.row.KeyDigests[i] += d
 	}
 	r.row.ContextDigest += d // wrapping sum: order-independent
-	r.row.KeyDigests[c.Reporter] += d
 	if n := len(r.row.Contexts); retain && n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
 		if n == cap(r.row.Contexts) {
 			// Double, but never past the per-row cap.
