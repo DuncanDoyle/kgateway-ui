@@ -185,7 +185,7 @@ const pageKeys = {
 } as const satisfies Spec<Page<unknown>>;
 const page = (items: Shape) => shape<Page<unknown>>(pageKeys, { items });
 // View A (sub-phase 2.3).
-const computed = shape<Computed>({ by: "!", rules: "!", rule: "!", state: "!", coverage: "?", reason: "?", note: "?" });
+const computed = shape<Computed>({ by: "!", rules: "!", rule: "?", state: "!", coverage: "?", reason: "?", note: "?" });
 const computedAttachment = shape<ComputedAttachment>(
   { outcome: "?", listeners: "!", explanation: "?", computed: "!" },
   {

@@ -93,9 +93,11 @@ func (f facts) label(rule string, st computed.State) Computed {
 	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Rule: rule, State: string(st), Note: f.ix.RuleNote}
 }
 
-// restricted is a fact with a hidden dependency: no reason and no note (rule 4).
-func (f facts) restricted(rule string) Computed {
-	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Rule: rule, State: string(computed.StateRestricted)}
+// restricted is a fact with a hidden dependency (rule 4). It names no rule,
+// reason or note: the deciding rule can vary with the hidden data. Only the
+// rule set, which is the install's, stays.
+func (f facts) restricted() Computed {
+	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, State: string(computed.StateRestricted)}
 }
 
 // unknown is a fact that could not be computed, with why.
@@ -176,7 +178,7 @@ func (f facts) attachment(rf *explore.RefFacts) Attachment {
 	rule := rf.Out.Rule
 	switch {
 	case !f.v.allowDeps(f.ix, rf.Deps):
-		return Attachment{Listeners: []ListenerAttachment{}, Computed: f.restricted(rule)}
+		return Attachment{Listeners: []ListenerAttachment{}, Computed: f.restricted()}
 	case rf.Out.Unknown != "":
 		return Attachment{Listeners: []ListenerAttachment{}, Computed: f.unknown(rule, rf.Out.Unknown)}
 	}
@@ -203,7 +205,7 @@ func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.Listen
 	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: rf.Out.Resource, Listener: h.Listener}]
 	switch {
 	case !f.v.allowDeps(f.ix, h.Deps):
-		out.Computed = f.restricted(rule)
+		out.Computed = f.restricted()
 		return out
 	case ok && !lf.Known:
 		out.Computed = f.unknown(rule, lf.Unknown)
@@ -445,7 +447,7 @@ func joinNotes(a, b string) string {
 // with the row's own note (PF14).
 func (f facts) delegation(r *explore.DelegRow) Computed {
 	if !f.v.allowDeps(f.ix, r.Deps) {
-		return f.restricted(ruleDelegation)
+		return f.restricted()
 	}
 	var c Computed
 	if r.Outcome == computed.OutcomeUnknown {
@@ -465,7 +467,7 @@ func (f facts) delegation(r *explore.DelegRow) Computed {
 // dependency other than the routes on its paths is hidden.
 func (f facts) effective(e *computed.EffectiveEdge, deps explore.DepSet) Computed {
 	if !f.v.allowDeps(f.ix, deps) {
-		return f.restricted(ruleEffective)
+		return f.restricted()
 	}
 	c := f.label(ruleEffective, computed.StateChecked)
 	for i := range e.Contexts {

@@ -343,7 +343,7 @@ func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
 		}
 		c := h.Parents[0].Computed
 		if c == nil || c.Outcome != "" || len(c.Listeners) != 0 || c.Explanation != "" ||
-			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", Rule: a.Parents[0].Computed.Computed.Rule, State: "restricted"}) {
+			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", State: "restricted"}) {
 			t.Errorf("%s restricted: %+v", name, c)
 		}
 		if a.Health != h.Health {

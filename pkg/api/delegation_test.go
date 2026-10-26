@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
@@ -368,9 +369,43 @@ func selectorRootWorld(zone string) []runtime.Object {
 	return objs
 }
 
-// restrictedComputed is a fact whose dependency is hidden (design §7.4 rule 4).
-func restrictedComputed(rule string) Computed {
-	return Computed{By: ComputedBy, Rules: "kgateway-2.4", Rule: rule, State: "restricted"}
+// restrictedComputed is a fact whose dependency is hidden (design §7.4 rule
+// 4): no rule, reason or note, since each could vary with hidden data.
+func restrictedComputed(string) Computed {
+	return Computed{By: ComputedBy, Rules: "kgateway-2.4", State: "restricted"}
+}
+
+// withoutHealth is GET path's canonical JSON without any "health" field or
+// "disagrees" flag, which cover every finding (design §7.4 rule 9).
+func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
+	t.Helper()
+	var strip func(v any)
+	strip = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			delete(x, "health")
+			if fs, ok := x["flags"].([]any); ok {
+				x["flags"] = slices.DeleteFunc(fs, func(f any) bool { return f == "disagrees" })
+			}
+			for _, e := range x {
+				strip(e)
+			}
+		case []any:
+			for _, e := range x {
+				strip(e)
+			}
+		}
+	}
+	var body any
+	if err := json.Unmarshal(wire(t, srv, path), &body); err != nil {
+		t.Fatal(err)
+	}
+	strip(body)
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 // Rules §11.2: a root behind a Selector listener whose Namespace the caller
@@ -444,10 +479,10 @@ func onlySelectorWorld(zone string) []runtime.Object {
 // top-level route that reaches their parent, and an unreached edge is a
 // restricted placeholder, so the caller sees the same either way.
 func TestUnreachedRowsFollowRootEligibility(t *testing.T) {
-	// api's own detail is left out: its health follows its status (rule 9), and
-	// its view A attachment is a 2.3 fact.
+	// api's own detail and list row too, without health and the disagrees
+	// flag: they follow api's status (rule 9), which this world leaves accepted.
 	paths := []string{delegURL("shop", "api", ""), delegURL("shop", "mid", ""), routeDetail + "shop/mid", routeDetail + "shop/kid",
-		delegURL("shop", "mid", "?outcome=unknown")}
+		delegURL("shop", "mid", "?outcome=unknown"), routeDetail + "shop/api", listBase + "/routes?namespace=shop"}
 	var bodies [][]byte
 	for _, zone := range []string{"in", "out"} {
 		_, srv, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, onlySelectorWorld(zone)...)
@@ -465,7 +500,7 @@ func TestUnreachedRowsFollowRootEligibility(t *testing.T) {
 		}
 		var b []byte
 		for _, p := range paths {
-			b = append(b, wire(t, srv, p)...)
+			b = append(b, withoutHealth(t, srv, p)...)
 		}
 		bodies = append(bodies, b)
 	}

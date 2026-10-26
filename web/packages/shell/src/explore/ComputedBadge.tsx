@@ -85,8 +85,9 @@ function ruleSetLabel(rules: string): string {
   return m ? `kgateway ${m[1]}` : rules;
 }
 
-/** The chip's tooltip: which rule of which rule set computed the fact (design §8.4). */
+/** The chip's tooltip: which rule of which rule set computed the fact (design §8.4); a restricted fact names none. */
 export function computedTooltip(c: Computed): string {
+  if (c.state === "restricted" || c.rule === undefined) return computedCopy.restricted;
   const family = attachmentRules.has(c.rule) ? computedCopy.attachmentRules : computedCopy.otherRules;
   return computedCopy.tooltip(ruleSetLabel(c.rules), family, computedCopy.ruleNames[c.rule] ?? c.rule);
 }

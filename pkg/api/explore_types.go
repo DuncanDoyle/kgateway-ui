@@ -92,11 +92,11 @@ const ComputedBy = "ui"
 
 // Computed labels a computed fact with its rule set, rule and check state
 // (design §7.3, rules §8.4). By is always ComputedBy. Reason is the unknown
-// reason; a restricted fact carries neither Reason nor Note (design §7.4 rule 4).
+// reason; a restricted fact carries no Rule, Reason or Note (design §7.4 rule 4).
 type Computed struct {
 	By       string   `json:"by"`
 	Rules    string   `json:"rules"`
-	Rule     string   `json:"rule"`
+	Rule     string   `json:"rule,omitempty"`
 	State    string   `json:"state"`
 	Coverage []string `json:"coverage,omitempty"`
 	Reason   string   `json:"reason,omitempty"`

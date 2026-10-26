@@ -45,7 +45,8 @@ export type Attachment = "accepted" | "not-accepted" | "pending" | "unwatched" |
 export interface Computed {
   by: "ui";
   rules: string;
-  rule: string;
+  /** Absent on a restricted fact: the deciding rule can depend on hidden objects. */
+  rule?: string;
   state: "checked" | "disagrees" | "pending" | "unknown" | "restricted";
   coverage?: ("count-agrees" | "status-compatible" | "not-verified")[];
   reason?: string;

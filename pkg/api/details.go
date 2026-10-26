@@ -634,7 +634,7 @@ func (d *detail) unreachedEdges(route objects.Ref, inherit bool, out *[]Effectiv
 			continue
 		}
 		*out = append(*out, EffectiveDTO{Parent: d.l.linked(p), Mode: mode, Contexts: []EffectiveContext{{Restricted: true}},
-			Computed: d.f.restricted(ruleEffective)})
+			Computed: d.f.restricted()})
 	}
 	return len(ids) > 0
 }
