@@ -39,6 +39,10 @@ type rowAcc struct {
 	tags []ctxTag
 	// child is the child's index in the walker's routes, or -1.
 	child int32
+	// lastDeps and lastKey are the previous context's deps and reporter index:
+	// a frame's contexts share one deps set, so a repeat is merged already.
+	lastDeps []objects.Ref
+	lastKey  int
 }
 
 // ctxTag is where a retained context came from: its install-wide retention
@@ -88,15 +92,22 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	if r.row.Reason == nil {
 		r.row.Reason = c.Reason
 	}
-	r.addDeps(c.Deps)
-	if i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare); !ok {
+	repeat := len(c.Deps) > 0 && len(c.Deps) == len(r.lastDeps) && &c.Deps[0] == &r.lastDeps[0]
+	if !repeat {
+		r.addDeps(c.Deps)
+	}
+	i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare)
+	if !ok {
 		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
 		r.row.KeyDeps = slices.Insert(r.row.KeyDeps, i, c.Deps)
 		r.row.KeyDigests = slices.Insert(r.row.KeyDigests, i, d)
 	} else {
-		r.row.KeyDeps[i] = unionRefs(r.row.KeyDeps[i], c.Deps)
+		if !repeat || i != r.lastKey {
+			r.row.KeyDeps[i] = unionRefs(r.row.KeyDeps[i], c.Deps)
+		}
 		r.row.KeyDigests[i] += d
 	}
+	r.lastDeps, r.lastKey = c.Deps, i
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	if n := len(r.row.Contexts); retain && n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
 		if n == cap(r.row.Contexts) {
