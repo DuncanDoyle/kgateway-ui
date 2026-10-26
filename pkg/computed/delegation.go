@@ -166,19 +166,22 @@ type Context struct {
 	Path        []PathStep
 	// Reporter is the report key of the parent's reporter (rules §7).
 	Reporter ReportKey
-	Outcome  RowOutcome
-	Unknown  UnknownReason
-	Reason   *FitFailure
-	Rules    []EffectiveRule
-	Deps     []objects.Ref
+	// Outcome must be set by the caller; an empty or unknown value counts as unknown.
+	Outcome RowOutcome
+	Unknown UnknownReason
+	Reason  *FitFailure
+	Rules   []EffectiveRule
+	Deps    []objects.Ref
 }
 
 // RowMeta is what a row knows before its contexts: the ref as written, the
 // child's permission and, for a zero-child row, why the ref selected nothing.
+// ScopeUnknown makes the row unknown/scope-unknown even with no contexts (D-024).
 type RowMeta struct {
 	RefAsWritten objects.DelegationRef
 	Allows       Allows
 	Unresolved   Unresolved
+	ScopeUnknown bool
 }
 
 // Row is one delegation row aggregated over its contexts (rules §5.5). Deps,
@@ -189,7 +192,8 @@ type Row struct {
 	Allows       Allows
 	Outcome      RowOutcome
 	Unknown      UnknownReason
-	// SomeNotComputed: attached, but some paths were not computed.
+	// SomeNotComputed: a positive outcome (attached, partial or
+	// rejected-hostnames) while some paths were not computed.
 	// Unconfirmable: status cannot confirm this row's own outcome.
 	SomeNotComputed, Unconfirmable bool
 	Reason                         *FitFailure
@@ -205,6 +209,28 @@ type Row struct {
 	// same digest per reporter. Fingerprints read them (rules §9.2).
 	ContextDigest uint64
 	KeyDigests    map[ReportKey]uint64
+}
+
+// ContextHasher hashes contexts for the row digests with the fingerprint
+// encoding (rules §9.2). It reuses its buffers, so one hasher serves one caller.
+type ContextHasher struct{ p *printer }
+
+// NewContextHasher returns a ContextHasher.
+func NewContextHasher() *ContextHasher { return &ContextHasher{p: newPrinter()} }
+
+// Sum hashes c's incoming match, path, reporter and outcome.
+func (h *ContextHasher) Sum(c *Context) uint64 {
+	p := h.p
+	p.start()
+	p.match(c.ParentMatch)
+	p.num(int64(len(c.Path)))
+	for _, s := range c.Path {
+		p.ref(s.Route)
+		p.match(s.Match)
+	}
+	p.reportKey(c.Reporter)
+	p.str(string(c.Outcome))
+	return p.sum()
 }
 
 // Compare orders report keys field by field.

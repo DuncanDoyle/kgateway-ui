@@ -56,6 +56,42 @@ func (p *printer) strs(s []string) {
 	}
 }
 
+// ref writes an object reference.
+func (p *printer) ref(r objects.Ref) {
+	p.str(r.Group)
+	p.str(r.Kind)
+	p.str(r.Namespace)
+	p.str(r.Name)
+}
+
+// reportKey writes a report key.
+func (p *printer) reportKey(k ReportKey) {
+	p.str(k.Group)
+	p.str(k.Kind)
+	p.str(k.Namespace)
+	p.str(k.Name)
+	p.str(k.SectionName)
+}
+
+// match writes an HTTPRouteMatch: path (nil or type and value), headers,
+// query params and method.
+func (p *printer) match(m objects.Match) {
+	p.flag(m.Path != nil)
+	if m.Path != nil {
+		p.str(m.Path.Type)
+		p.str(m.Path.Value)
+	}
+	for _, kms := range [][]objects.KeyMatch{m.Headers, m.QueryParams} {
+		p.num(int64(len(kms)))
+		for _, km := range kms {
+			p.str(km.Type)
+			p.str(km.Name)
+			p.str(km.Value)
+		}
+	}
+	p.str(m.Method)
+}
+
 // labels writes a label map in key order.
 func (p *printer) labels(m map[string]string) {
 	p.keys = p.keys[:0]

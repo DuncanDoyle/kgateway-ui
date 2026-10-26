@@ -233,10 +233,14 @@ Per context, a row (parent, rule index, ref index, child) gets one outcome: `att
 
 The row aggregates its contexts **(our call)**. A bound reduces certainty; it never changes a conclusion:
 - every context known and the same → that outcome;
-- `attached` in some contexts and `dropped` in others → `partial`, "Attached under some parent matches";
-- `attached` in a known context while others are unknown → `attached`, with "Some paths not computed". A positive outcome stays true whatever the other paths do;
-- no `attached` context and some contexts unknown, or the row's aggregate incomplete (§8.5) → `unknown`, "Dropped on the paths computed; other paths not computed". Never `dropped`;
-- `forbidden` does not depend on context and is always known.
+- `attached` in some contexts and `dropped`, `cycle` or `rejected-hostnames` in others → `partial`, "Attached under some parent matches";
+- `attached` in a known context while others are unknown, or the row's aggregate incomplete (§8.5) → `attached` (or `partial`), with "Some paths not computed". A positive outcome stays true whatever the other paths do;
+- `rejected-hostnames` with no `attached` context, while others are unknown or the aggregate incomplete → `rejected-hostnames`, with "Some paths not computed". A rejection is positive evidence (§8.5) **(user, 2026-10-26)**;
+- no `attached` or `rejected-hostnames` context and some contexts unknown, or the row's aggregate incomplete (§8.5) → `unknown`, "Dropped on the paths computed; other paths not computed". Never `dropped`;
+- known contexts that differ with no `attached` among them → the first present of `rejected-hostnames`, `cycle`, `unresolved`, `dropped`: an outcome the controller signals wins over a silent drop **(user, 2026-10-26)**;
+- `forbidden` does not depend on context and is always known: a child whose parentRefs name other parents only is `forbidden` even with no context;
+- a `scope-unknown` install makes every row `unknown`, `scope-unknown`, even with no context (D-024);
+- an `unresolved` ref's row has no child but still gets one context per evaluation, so its reporter keys, digests and dependencies are known (§8.2, §9.2).
 
 ### 5.6 Dependencies
 

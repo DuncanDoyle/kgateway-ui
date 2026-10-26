@@ -1,9 +1,6 @@
 package kgw23
 
 import (
-	"encoding/binary"
-	"hash"
-	"hash/fnv"
 	"maps"
 	"slices"
 
@@ -18,10 +15,8 @@ type accumulator struct {
 	bounds computed.Bounds
 	byKey  map[computed.RowKey]*rowAcc
 	// kept counts the retained contexts of the install.
-	kept int
-	// h and b hash one context at a time; b is reused across contexts.
-	h hash.Hash64
-	b []byte
+	kept   int
+	hasher *computed.ContextHasher
 }
 
 // rowAcc is one row's running aggregate.
@@ -30,7 +25,7 @@ type rowAcc struct {
 	// seen counts the contexts per outcome index; n is their total.
 	seen [len(outcomes)]int
 	n    int
-	// unknown is the first unknown reason seen; scope is set once any context is scope-unknown.
+	// unknown is the first unknown reason seen; scope is set by the meta or by any scope-unknown context.
 	unknown computed.UnknownReason
 	scope   bool
 	// sharedDeps is true while row.Deps is a caller's slice, so it must be cloned before it grows.
@@ -38,16 +33,17 @@ type rowAcc struct {
 }
 
 func newAccumulator(b computed.Bounds) *accumulator {
-	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, h: fnv.New64a()}
+	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, hasher: computed.NewContextHasher()}
 }
 
 // open starts a row. It is called once per row before any add.
 func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta) {
 	a.byKey[key] = &rowAcc{row: computed.Row{Key: key, RefAsWritten: meta.RefAsWritten, Allows: meta.Allows,
-		Unresolved: meta.Unresolved}}
+		Unresolved: meta.Unresolved}, scope: meta.ScopeUnknown}
 }
 
-// add folds c into the row of key. c's slices are shared, never copied.
+// add folds c into the row of key. c's slices are shared, never copied. A
+// zero-child unresolved row gets its contexts too, for their reporters and deps.
 func (a *accumulator) add(key computed.RowKey, c computed.Context) {
 	r := a.byKey[key]
 	if r.n == 0 {
@@ -69,10 +65,13 @@ func (a *accumulator) add(key computed.RowKey, c computed.Context) {
 	if i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare); !ok {
 		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
 	}
-	d := a.digest(&c)
+	d := a.hasher.Sum(&c)
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	r.row.KeyDigests[c.Reporter] += d
 	if len(r.row.Contexts) < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
+		if r.row.Contexts == nil {
+			r.row.Contexts = make([]computed.Context, 0, min(a.bounds.ContextsPerRow, a.bounds.ContextsPerInstall-a.kept))
+		}
 		r.row.Contexts = append(r.row.Contexts, c)
 		a.kept++
 	} else {
@@ -123,23 +122,24 @@ func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
 	return out
 }
 
-// nonAttached are the known outcomes besides attached and forbidden, the
-// first present winning when no context attached (our call: an outcome the
-// controller signals wins over a silent drop).
-var nonAttached = []computed.RowOutcome{computed.OutcomeRejectedHostnames, computed.OutcomeCycle,
+// signalled are the known outcomes besides attached and forbidden, the first
+// present winning when no context attached (rules §5.5): an outcome the
+// controller signals wins over a silent drop.
+var signalled = []computed.RowOutcome{computed.OutcomeRejectedHostnames, computed.OutcomeCycle,
 	computed.OutcomeUnresolved, computed.OutcomeDropped}
 
-// aggregate sets the row's outcome from its contexts (rules §5.5).
+// aggregate sets the row's outcome from its meta and contexts (rules §5.5).
 func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool) {
 	row := &r.row
 	switch {
 	case r.scope:
 		row.Outcome, row.Unknown = computed.OutcomeUnknown, computed.UnknownScope
 		return
-	case r.count(computed.OutcomeForbidden) > 0:
+	case row.Allows == computed.AllowsOther || r.count(computed.OutcomeForbidden) > 0:
 		row.Outcome = computed.OutcomeForbidden
 		return
-	case r.n == 0 && row.Key.Child == (objects.Ref{}):
+	case row.Key.Child == (objects.Ref{}):
+		// The ref selected nothing, whatever the context.
 		row.Outcome = computed.OutcomeUnresolved
 		return
 	case r.n == 0:
@@ -148,24 +148,27 @@ func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool) {
 		return
 	}
 	missing := r.count(computed.OutcomeUnknown) > 0 || incomplete(row.Key.Child)
-	if att := r.count(computed.OutcomeAttached); att > 0 {
+	att := r.count(computed.OutcomeAttached)
+	switch {
+	case att > 0:
 		row.Outcome, row.SomeNotComputed = computed.OutcomeAttached, missing
 		if att+r.count(computed.OutcomeUnknown) < r.n {
 			row.Outcome = computed.OutcomePartial
 		}
-		return
-	}
-	if missing {
+	case r.count(computed.OutcomeRejectedHostnames) > 0 && missing:
+		// A rejection is positive evidence, like attached (rules §8.5).
+		row.Outcome, row.SomeNotComputed = computed.OutcomeRejectedHostnames, true
+	case missing:
 		row.Outcome, row.Unknown = computed.OutcomeUnknown, r.unknown
 		if row.Unknown == "" {
 			row.Unknown = computed.UnknownContext // known contexts, but the child is in a reach closure
 		}
-		return
-	}
-	for _, o := range nonAttached {
-		if r.count(o) > 0 {
-			row.Outcome = o
-			return
+	default:
+		for _, o := range signalled {
+			if r.count(o) > 0 {
+				row.Outcome = o
+				return
+			}
 		}
 	}
 }
@@ -184,58 +187,3 @@ func outcomeIndex(o computed.RowOutcome) int {
 
 // count is the number of contexts with outcome o.
 func (r *rowAcc) count(o computed.RowOutcome) int { return r.seen[outcomeIndex(o)] }
-
-// digest hashes c's incoming match, path, reporter and outcome with FNV-64a
-// over a length-prefixed encoding, as the 2.3 fingerprints do.
-func (a *accumulator) digest(c *computed.Context) uint64 {
-	a.b = a.b[:0]
-	a.match(c.ParentMatch)
-	a.num(len(c.Path))
-	for _, s := range c.Path {
-		a.ref(s.Route)
-		a.match(s.Match)
-	}
-	k := c.Reporter
-	a.str(k.Group)
-	a.str(k.Kind)
-	a.str(k.Namespace)
-	a.str(k.Name)
-	a.str(k.SectionName)
-	a.str(string(c.Outcome))
-	a.h.Reset()
-	_, _ = a.h.Write(a.b)
-	return a.h.Sum64()
-}
-
-func (a *accumulator) str(s string) {
-	a.b = binary.AppendUvarint(a.b, uint64(len(s)))
-	a.b = append(a.b, s...)
-}
-
-func (a *accumulator) num(n int) { a.b = binary.AppendVarint(a.b, int64(n)) }
-
-func (a *accumulator) ref(r objects.Ref) {
-	a.str(r.Group)
-	a.str(r.Kind)
-	a.str(r.Namespace)
-	a.str(r.Name)
-}
-
-func (a *accumulator) match(m objects.Match) {
-	if m.Path == nil {
-		a.num(0)
-	} else {
-		a.num(1)
-		a.str(m.Path.Type)
-		a.str(m.Path.Value)
-	}
-	for _, kms := range [][]objects.KeyMatch{m.Headers, m.QueryParams} {
-		a.num(len(kms))
-		for _, km := range kms {
-			a.str(km.Type)
-			a.str(km.Name)
-			a.str(km.Value)
-		}
-	}
-	a.str(m.Method)
-}

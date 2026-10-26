@@ -71,6 +71,14 @@ func TestAggregateOutcomes(t *testing.T) {
 		{"attached with incomplete child", []computed.Context{att}, isChild, computed.OutcomeAttached, "", true},
 		{"Dropped on the paths computed; other paths not computed", []computed.Context{drop, cut}, never, computed.OutcomeUnknown, computed.UnknownTooLarge, false},
 		{"dropped with incomplete child is never dropped", []computed.Context{drop}, isChild, computed.OutcomeUnknown, computed.UnknownContext, false},
+		{"rejected with incomplete child", []computed.Context{ctx("/a", computed.OutcomeRejectedHostnames)}, isChild, computed.OutcomeRejectedHostnames, "", true},
+		{"rejected with unknown", []computed.Context{drop, ctx("/a", computed.OutcomeRejectedHostnames), cut}, never, computed.OutcomeRejectedHostnames, "", true},
+		{"attached and cycle", []computed.Context{att, ctx("/a", computed.OutcomeCycle)}, never, computed.OutcomePartial, "", false},
+		{"attached and rejected", []computed.Context{att, ctx("/a", computed.OutcomeRejectedHostnames)}, never, computed.OutcomePartial, "", false},
+		{"rejected before cycle", []computed.Context{ctx("/a", computed.OutcomeCycle), ctx("/a", computed.OutcomeRejectedHostnames)}, never, computed.OutcomeRejectedHostnames, "", false},
+		{"cycle before unresolved", []computed.Context{ctx("/a", computed.OutcomeUnresolved), ctx("/a", computed.OutcomeCycle)}, never, computed.OutcomeCycle, "", false},
+		{"unresolved before dropped", []computed.Context{drop, ctx("/a", computed.OutcomeUnresolved)}, never, computed.OutcomeUnresolved, "", false},
+		{"empty outcome counts as unknown", []computed.Context{drop, ctx("/a", "")}, never, computed.OutcomeUnknown, computed.UnknownContext, false},
 		{"forbidden is always known", []computed.Context{ctx("/a", computed.OutcomeForbidden), cut}, isChild, computed.OutcomeForbidden, "", false},
 		{"scope unknown wins", []computed.Context{att, unknownCtx("/a", computed.UnknownScope)}, never, computed.OutcomeUnknown, computed.UnknownScope, false},
 	} {
@@ -246,5 +254,42 @@ func TestUnresolvedRowHasZeroChild(t *testing.T) {
 	}
 	if len(r.Contexts) != 0 || r.ContextsTruncated {
 		t.Errorf("zero-child row has contexts %v, truncated %v", r.Contexts, r.ContextsTruncated)
+	}
+}
+
+func TestForbiddenRowWithoutContexts(t *testing.T) {
+	r := one(t, computed.DefaultBounds, rowKey(0, 0, accChild), computed.RowMeta{Allows: computed.AllowsOther}, never)
+	if r.Outcome != computed.OutcomeForbidden {
+		t.Errorf("Outcome = %s, want forbidden", r.Outcome)
+	}
+}
+
+func TestScopeUnknownOpenOnlyRow(t *testing.T) {
+	for _, key := range []computed.RowKey{rowKey(0, 0, accChild), rowKey(0, 0, objects.Ref{})} {
+		meta := computed.RowMeta{Allows: computed.AllowsOther, Unresolved: computed.UnresolvedMissing, ScopeUnknown: true}
+		r := one(t, computed.DefaultBounds, key, meta, never)
+		if r.Outcome != computed.OutcomeUnknown || r.Unknown != computed.UnknownScope {
+			t.Errorf("%v: got (%s, %q), want unknown, scope-unknown", key.Child, r.Outcome, r.Unknown)
+		}
+	}
+}
+
+func TestUnresolvedRowKeepsContextFacts(t *testing.T) {
+	a, b := ctx("/a", computed.OutcomeUnresolved), ctx("/b", computed.OutcomeUnresolved)
+	other := routeRef("shop", "grandparent")
+	b.Reporter, b.Deps = repB, []objects.Ref{other, accParent}
+	always := func(objects.Ref) bool { return true }
+	r := one(t, computed.DefaultBounds, rowKey(0, 0, objects.Ref{}), computed.RowMeta{Unresolved: computed.UnresolvedMissing}, always, a, b)
+	if r.Outcome != computed.OutcomeUnresolved {
+		t.Errorf("Outcome = %s, want unresolved", r.Outcome)
+	}
+	if len(r.Reporters) != 2 || len(r.KeyDigests) != 2 || r.ContextDigest == 0 {
+		t.Errorf("Reporters %v, KeyDigests %v, ContextDigest %d; want both reporters", r.Reporters, r.KeyDigests, r.ContextDigest)
+	}
+	if want := []objects.Ref{accChild, other, accParent}; !sameRefs(r.Deps, want) {
+		t.Errorf("Deps = %v, want %v", r.Deps, want)
+	}
+	if len(r.Contexts) != 2 {
+		t.Errorf("kept %d contexts, want 2", len(r.Contexts))
 	}
 }
