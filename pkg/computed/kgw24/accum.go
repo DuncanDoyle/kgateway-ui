@@ -102,8 +102,10 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	r.row.ContextDigest += d // wrapping sum: order-independent
 	if n := len(r.row.Contexts); retain && n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
 		if n == cap(r.row.Contexts) {
-			// Double, but never past the per-row cap.
-			r.row.Contexts = slices.Grow(r.row.Contexts, min(max(n, 1), a.bounds.ContextsPerRow-n))
+			// Start at two, then quadruple, never past the per-row cap: a context
+			// is large, so fewer regrowths matter.
+			r.row.Contexts = slices.Grow(r.row.Contexts, min(max(3*n, 2), a.bounds.ContextsPerRow-n))
+			r.tags = slices.Grow(r.tags, cap(r.row.Contexts)-len(r.tags))
 		}
 		r.row.Contexts = append(r.row.Contexts, c)
 		r.tags = append(r.tags, ctxTag{seq: uint32(a.kept), frame: frame}) //nolint:gosec // bounded by ContextsPerInstall
