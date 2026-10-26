@@ -162,14 +162,13 @@ func hasAdjacentDup(s []objects.Ref) bool {
 // rows returns every row in RowKey order with its final outcome (rules §5.5).
 // incomplete reports whether a child is in a reach closure (rules §8.5).
 func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
-	keys := slices.SortedFunc(maps.Keys(a.byKey), computed.RowKey.Compare)
-	out := make([]computed.Row, 0, len(keys))
-	a.sorted = make([]*rowAcc, 0, len(keys))
-	for _, k := range keys {
-		r := a.byKey[k]
+	// Sort the rows themselves: a pointer is cheaper to move than a RowKey.
+	a.sorted = slices.AppendSeq(make([]*rowAcc, 0, len(a.byKey)), maps.Values(a.byKey))
+	slices.SortFunc(a.sorted, func(x, y *rowAcc) int { return x.row.Key.Compare(y.row.Key) })
+	out := make([]computed.Row, 0, len(a.sorted))
+	for _, r := range a.sorted {
 		r.aggregate(incomplete, a.tooLarge)
 		out = append(out, r.row)
-		a.sorted = append(a.sorted, r)
 	}
 	return out
 }
