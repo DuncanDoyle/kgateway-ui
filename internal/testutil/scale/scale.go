@@ -4,9 +4,11 @@
 package scale
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,13 +34,16 @@ type Tier struct {
 	DelegatedPct float64
 	// MaxDepth and MaxFanOut bound the delegation trees; the lattice is exempt.
 	MaxDepth, MaxFanOut int
-	// ParentMatches is the number of path matches per delegating rule.
+	// ParentMatches is the number of path matches of a top-level delegating
+	// rule; a child has one per incoming match of each delegator.
 	ParentMatches        int
 	Namespaces, Backends int
 	// LatticeDepth is the number of layers of the repeated diamond; 0 means none.
 	LatticeDepth int
 	// Contradict inverts every route's Accepted status and adds one to every
-	// attachedRoutes, so every view A check contradicts.
+	// attachedRoutes, so every view A check contradicts. It also drops every
+	// child entry and makes delegating parents ResolvedRefs=False, so view B's
+	// checks contradict too (PF2).
 	Contradict bool
 }
 
@@ -94,6 +99,7 @@ type route struct {
 	delegators     []int               // indices of HTTPRoutes delegating to this one
 	children       []int               // indices of HTTPRoutes this one delegates to
 	explicit       bool                // a child naming its parents in spec.parentRefs
+	segment        string              // path segment of a lattice node, shared by its layer; else its name
 	backend        string              // Backend name of a leaf rule
 }
 
@@ -108,6 +114,7 @@ type world struct {
 	nsBE     [][]string // namespace index → its Backends
 	beNext   []int      // namespace index → next Backend to use
 	refCount int        // parentRefs generated so far
+	paths    map[*route][]string
 }
 
 func gwName(i int) string { return fmt.Sprintf("gw-%03d", i) }
@@ -117,11 +124,12 @@ func beName(i int) string { return fmt.Sprintf("be-%04d", i) }
 // World returns tier t's GatewayClass, Gateways, ListenerSets, Backends
 // and routes, identical for equal seeds. Every route parentRef has a status
 // entry, Accepted=True except every FailedEvery-th one, as view A computes
-// them (inverted under Contradict). Delegated children
-// have an entry under the parent route's ref for every delegating parent;
-// leaves reference Backends. Namespaces come from testutil.ScaleNamespaces.
+// them (inverted under Contradict). Delegated children fit every incoming
+// match and have an entry under the parent route's ref for every delegating
+// parent, as view B computes them (PF2); leaves reference Backends.
+// Namespaces come from testutil.ScaleNamespaces.
 func World(t Tier, seed int64) []*unstructured.Unstructured {
-	w := &world{t: t, rng: rand.New(rand.NewPCG(uint64(seed), 0x5ca1e))} //nolint:gosec // deterministic test data
+	w := &world{t: t, rng: rand.New(rand.NewPCG(uint64(seed), 0x5ca1e)), paths: map[*route][]string{}} //nolint:gosec // deterministic test data
 	for i := range t.Gateways {
 		w.gwNS = append(w.gwNS, testutil.ScaleNamespace(i%t.Namespaces))
 	}
@@ -319,11 +327,12 @@ func (w *world) delegate(top, children int) {
 		prev := []int{roots[0]}
 		roots = roots[1:]
 		ns := w.routes[prev[0]].ns
-		for range t.LatticeDepth {
+		for l := range t.LatticeDepth {
 			layer := []int{next, next + 1}
 			next += 2
 			for _, c := range layer {
 				w.routes[c].ns = ns
+				w.routes[c].segment = fmt.Sprintf("layer-%d", l)
 				for _, p := range prev {
 					link(p, c)
 				}
@@ -444,19 +453,26 @@ func (w *world) objects() []*unstructured.Unstructured {
 	return out
 }
 
-// render builds route r.
+// render builds route r. Under Contradict a child has no entry under its
+// delegators and a delegating parent reports ResolvedRefs=False/BackendNotFound,
+// so view B's child-entry and parent-resolvedrefs checks contradict too (PF2).
 func (w *world) render(r *route) *unstructured.Unstructured {
 	var spec []objects.ParentRef
 	var status []testutil.RouteParent
+	resolved := testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")
+	if w.t.Contradict && len(r.children) > 0 {
+		resolved = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	}
 	for k, p := range r.parents {
 		spec = append(spec, p)
 		if r.failed[k] != w.t.Contradict {
 			status = append(status, testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
-				testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"),
-				testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+				testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), resolved}})
 			continue
 		}
-		status = append(status, testutil.AcceptedBy(p, testutil.Controller))
+		st := testutil.AcceptedBy(p, testutil.Controller)
+		st.Conds[1] = resolved
+		status = append(status, st)
 	}
 	for _, d := range r.delegators {
 		p := w.routes[d]
@@ -464,7 +480,9 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 		if r.explicit {
 			spec = append(spec, ref)
 		}
-		status = append(status, testutil.AcceptedBy(ref, testutil.Controller))
+		if !w.t.Contradict {
+			status = append(status, testutil.AcceptedBy(ref, testutil.Controller))
+		}
 	}
 	u := testutil.HTTPRoute(r.ns, r.name, spec, status...)
 	u.SetAPIVersion(gwAPI)
@@ -477,11 +495,9 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 	return u
 }
 
-// rules is one delegating rule with ParentMatches matches for a parent, or
-// one rule to a Backend for a leaf. A child's prefix extends its first
-// delegator's.
+// rules is one delegating rule for a parent, or one rule to a Backend for a
+// leaf, with r's path prefixes as matches.
 func (w *world) rules(r *route) []any {
-	prefix := w.prefixOf(r)
 	match := func(path string) map[string]any {
 		return map[string]any{"path": map[string]any{"type": "PathPrefix", "value": path}}
 	}
@@ -491,17 +507,14 @@ func (w *world) rules(r *route) []any {
 	case "GRPCRoute":
 		return []any{map[string]any{"backendRefs": []any{backendRef(r)}}}
 	}
-	if len(r.children) == 0 {
-		return []any{map[string]any{"matches": []any{match(prefix)}, "backendRefs": []any{backendRef(r)}}}
-	}
-	var ms, refs []any
-	for k := range w.t.ParentMatches {
-		p := prefix
-		if k > 0 {
-			p = fmt.Sprintf("%s-alt%d", prefix, k)
-		}
+	var ms []any
+	for _, p := range w.pathsOf(r) {
 		ms = append(ms, match(p))
 	}
+	if len(r.children) == 0 {
+		return []any{map[string]any{"matches": ms, "backendRefs": []any{backendRef(r)}}}
+	}
+	var refs []any
 	for _, c := range r.children {
 		cr := w.routes[c]
 		refs = append(refs, map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute", "name": cr.name, "namespace": cr.ns})
@@ -509,12 +522,39 @@ func (w *world) rules(r *route) []any {
 	return []any{map[string]any{"matches": ms, "backendRefs": refs}}
 }
 
-// prefixOf is r's first path prefix, following first delegators up.
-func (w *world) prefixOf(r *route) string {
-	if len(r.delegators) == 0 {
-		return "/" + r.name
+// pathsOf is r's path prefixes. A top-level parent has ParentMatches: /name,
+// then /altK/name, so none is a raw prefix of another. A child has one per
+// distinct incoming match of its delegators, that match plus its segment, so
+// every context attaches and each match fits exactly one incoming match
+// (PF2). A lattice layer shares one segment, so its paths do not double per layer.
+func (w *world) pathsOf(r *route) []string {
+	if ps, ok := w.paths[r]; ok {
+		return ps
 	}
-	return w.prefixOf(w.routes[r.delegators[0]]) + "/" + r.name
+	var ps []string
+	switch {
+	case len(r.delegators) > 0:
+		seg := cmp.Or(r.segment, r.name)
+		for _, d := range r.delegators {
+			for _, p := range w.pathsOf(w.routes[d]) {
+				if !slices.Contains(ps, p+"/"+seg) {
+					ps = append(ps, p+"/"+seg)
+				}
+			}
+		}
+	case len(r.children) > 0:
+		for k := range w.t.ParentMatches {
+			if k == 0 {
+				ps = append(ps, "/"+r.name)
+			} else {
+				ps = append(ps, fmt.Sprintf("/alt%d/%s", k, r.name))
+			}
+		}
+	default:
+		ps = []string{"/" + r.name}
+	}
+	w.paths[r] = ps
+	return ps
 }
 
 func backendRef(r *route) map[string]any {
@@ -585,4 +625,50 @@ func Snapshot(t Tier, seed int64) *cache.Snapshot {
 		s.Deployments = append(s.Deployments, testutil.ProxyDeployment(testutil.ScaleNamespace(i%t.Namespaces), gwName(i), 1, 1))
 	}
 	return s
+}
+
+// DenseNamespace holds DenseSelection's selected routes; DenseParents its parents and Gateway.
+var (
+	DenseNamespace = testutil.ScaleNamespace(1)
+	DenseParents   = testutil.ScaleNamespace(0)
+)
+
+// DenseSelection is the dense-selection shape of design §9.6: parents
+// HTTPRoutes on one Gateway, each with one wildcard ref to DenseNamespace,
+// whose routes HTTPRoutes have no parentRefs and match under every parent's
+// /dense, each to one Backend. So every parent selects, permits and attaches every route. Status
+// is what the controller writes: each parent Accepted on the Gateway, each
+// route Accepted under every parent. Namespaces come from
+// testutil.ScaleNamespaces(2).
+func DenseSelection(parents, routes int) []*unstructured.Unstructured {
+	ok := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
+	gw := testutil.Gateway(DenseParents, "dense", Class, nil, testutil.Listener{Name: "http", Attached: int32(parents), Conds: ok}) //nolint:gosec // small counts
+	gw.Object["spec"].(map[string]any)["listeners"] = []any{map[string]any{"name": "http", "port": int64(8080), "protocol": "HTTP",
+		"allowedRoutes": map[string]any{"namespaces": map[string]any{"from": "All"}}}}
+	out := []*unstructured.Unstructured{testutil.GatewayClass(Class, testutil.Controller, true), gw, backend(DenseNamespace, "be")}
+	gwRef := testutil.GwRef(DenseParents, "dense")
+	match := func(path string) []any {
+		return []any{map[string]any{"path": map[string]any{"type": "PathPrefix", "value": path}}}
+	}
+	var under []testutil.RouteParent // each route's entries, one per parent
+	for i := range parents {
+		name := fmt.Sprintf("p-%03d", i)
+		u := testutil.HTTPRoute(DenseParents, name, []objects.ParentRef{gwRef}, testutil.AcceptedBy(gwRef, testutil.Controller))
+		u.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"matches": match("/dense"),
+			"backendRefs": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute", "name": "*", "namespace": DenseNamespace}}}}
+		out = append(out, u)
+		under = append(under, testutil.AcceptedBy(testutil.HTTPRouteRef(DenseParents, name), testutil.Controller))
+	}
+	for i := range routes {
+		name := fmt.Sprintf("r-%05d", i)
+		u := testutil.HTTPRoute(DenseNamespace, name, nil, under...)
+		u.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"matches": match("/dense/" + name),
+			"backendRefs": []any{map[string]any{"group": kinds.KgatewayGroup, "kind": "Backend", "name": "be", "namespace": DenseNamespace}}}}
+		out = append(out, u)
+	}
+	for _, o := range out {
+		o.SetResourceVersion("1")
+		o.SetUID(types.UID(o.GetKind() + "/" + o.GetNamespace() + "/" + o.GetName()))
+	}
+	return out
 }

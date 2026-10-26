@@ -29,6 +29,9 @@ func viewC(child *objects.HTTPRouteView, parent objects.Match) (rules []computed
 		if inherit && len(ms) == 0 {
 			eff.Matches = append(eff.Matches, cloneMatch(parent))
 		}
+		// The reason is the first failing match's clause, built only for a dropped rule.
+		var why computed.FitFailure
+		failed := false
 		for i, m := range ms {
 			if inherit {
 				eff.Matches = append(eff.Matches, merge(parent, m))
@@ -39,19 +42,22 @@ func viewC(child *objects.HTTPRouteView, parent objects.Match) (rules []computed
 				eff.Matches = append(eff.Matches, cloneMatch(m))
 				continue
 			}
-			// The reason is the first failing match's clause.
-			if eff.Reason == nil {
+			if !failed {
 				if omitted && clause == computed.ClausePathPrefix {
 					clause = computed.ClauseDefaultSlash
 				}
-				eff.Reason = &computed.FitFailure{Rule: r.Index, Match: i, Clause: clause, Parent: pv, Child: cv}
+				why, failed = computed.FitFailure{Rule: r.Index, Match: i, Clause: clause, Parent: pv, Child: cv}, true
 			}
 		}
 		if len(ms) == 0 && !inherit {
-			eff.Reason = &computed.FitFailure{Rule: r.Index, Match: -1, Clause: computed.ClauseNoMatches, Parent: pathValue(parent)}
+			why, failed = computed.FitFailure{Rule: r.Index, Match: -1, Clause: computed.ClauseNoMatches, Parent: pathValue(parent)}, true
 		}
-		if len(eff.Matches) > 0 {
-			eff.Kept, eff.Reason, kept = true, nil, true
+		switch {
+		case len(eff.Matches) > 0:
+			eff.Kept, kept = true, true
+		case failed:
+			reason := why // only a dropped rule's reason escapes
+			eff.Reason = &reason
 		}
 		rules = append(rules, eff)
 	}

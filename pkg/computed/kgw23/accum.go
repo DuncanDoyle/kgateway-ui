@@ -17,6 +17,8 @@ type accumulator struct {
 	// kept counts the retained contexts of the install.
 	kept   int
 	hasher *computed.ContextHasher
+	// sorted are the rows in RowKey order, set by rows.
+	sorted []*rowAcc
 	// tooLarge is set when a compute cap was hit, so a row with no context
 	// may have been reached: it is too-large, not not-reached (rules §3.3).
 	tooLarge bool
@@ -33,7 +35,16 @@ type rowAcc struct {
 	scope   bool
 	// sharedDeps is true while row.Deps is a caller's slice, so it must be cloned before it grows.
 	sharedDeps bool
+	// tags has one entry per retained context, for the effective projection.
+	tags []ctxTag
+	// child is the child's index in the walker's routes, or -1.
+	child int32
 }
+
+// ctxTag is where a retained context came from: its install-wide retention
+// order and its frame. Contexts of one frame and child are the same view C
+// evaluation; frame 0 is never shared.
+type ctxTag struct{ seq, frame uint32 }
 
 func newAccumulator(b computed.Bounds) *accumulator {
 	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, hasher: computed.NewContextHasher()}
@@ -42,7 +53,7 @@ func newAccumulator(b computed.Bounds) *accumulator {
 // open starts a row and returns it. It is called once per row before any add.
 func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta) *rowAcc {
 	r := &rowAcc{row: computed.Row{Key: key, RefAsWritten: meta.RefAsWritten, Allows: meta.Allows,
-		Unresolved: meta.Unresolved}, scope: meta.ScopeUnknown}
+		Unresolved: meta.Unresolved}, scope: meta.ScopeUnknown, child: -1}
 	a.byKey[key] = r
 	return r
 }
@@ -50,18 +61,21 @@ func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta) *rowAcc {
 // add folds c into the row of key. c's slices are shared, never copied. A
 // zero-child unresolved row gets its contexts too, for their reporters and deps.
 func (a *accumulator) add(key computed.RowKey, c computed.Context) {
-	a.addTo(a.byKey[key], c, a.hasher.Sum(&c))
+	a.addTo(a.byKey[key], c, a.hasher.Sum(&c), 0)
 }
 
-// addTo is add for an open row r, with d the context's ContextHasher sum.
-func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, true) }
+// addTo is add for an open row r, with d the context's ContextHasher sum and
+// frame the id of the frame it was evaluated under.
+func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64, frame uint32) {
+	a.fold(r, c, d, frame, true)
+}
 
 // addCounted folds c like addTo but never retains it: a context cut by a compute
 // cap carries nothing a sample would show. The row is marked truncated, so
 // its contexts never read as complete.
-func (a *accumulator) addCounted(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, false) }
+func (a *accumulator) addCounted(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, 0, false) }
 
-func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, retain bool) {
+func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32, retain bool) {
 	if r.n == 0 {
 		r.row.KeyDigests = map[computed.ReportKey]uint64{}
 	}
@@ -89,6 +103,7 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, retain bool)
 			r.row.Contexts = slices.Grow(r.row.Contexts, min(max(n, 1), a.bounds.ContextsPerRow-n))
 		}
 		r.row.Contexts = append(r.row.Contexts, c)
+		r.tags = append(r.tags, ctxTag{seq: uint32(a.kept), frame: frame}) //nolint:gosec // bounded by ContextsPerInstall
 		a.kept++
 	} else {
 		r.row.ContextsTruncated = true
@@ -133,10 +148,12 @@ func hasAdjacentDup(s []objects.Ref) bool {
 func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
 	keys := slices.SortedFunc(maps.Keys(a.byKey), computed.RowKey.Compare)
 	out := make([]computed.Row, 0, len(keys))
+	a.sorted = make([]*rowAcc, 0, len(keys))
 	for _, k := range keys {
 		r := a.byKey[k]
 		r.aggregate(incomplete, a.tooLarge)
 		out = append(out, r.row)
+		a.sorted = append(a.sorted, r)
 	}
 	return out
 }

@@ -108,6 +108,37 @@ type DelegationResult struct {
 	UncertainKeys []RouteKey
 	// Cap names the first compute cap hit: "", "edges", "contexts" or "matchers".
 	Cap string
+	// Complete says which routes are in a reach closure (rules §8.5).
+	Complete Completeness
+	// Effective is view C per child, projected from the retained contexts (rules §5.7, §6).
+	Effective map[objects.Ref]ChildEffective
+}
+
+// Effective matcher modes (rules §6).
+const (
+	ModeDefault = "default"
+	ModeInherit = "inherit"
+)
+
+// EffectiveEdge is view C for one (parent, child) edge: the union of the
+// retained contexts of every row with that parent and child whose fit ran,
+// in traversal order, at most Bounds.ContextsPerEdge (rules §5.7). Contexts
+// is non-nil; ContextsTruncated is set when any contributing row was
+// truncated or the union passed the cap. Deps cover every contributing row.
+type EffectiveEdge struct {
+	Parent objects.Ref
+	// Mode is ModeDefault or ModeInherit, from the child's annotation.
+	Mode              string
+	Contexts          []Context
+	ContextsTruncated bool
+	Deps              []objects.Ref
+}
+
+// ChildEffective is one child's effective edges, sorted by parent, at most
+// Bounds.EffectiveEdges; Truncated is set when more parents had one.
+type ChildEffective struct {
+	Edges     []EffectiveEdge
+	Truncated bool
 }
 
 // Compute caps, as DelegationResult.Cap names them (rules §5.7).

@@ -86,6 +86,8 @@ type frame struct {
 	// digest reads only the match, path, reporter and outcome.
 	dig   [len(outcomes)]uint64
 	digOK uint16
+	// id names the frame in its retained contexts (ctxTag).
+	id uint32
 }
 
 // kidEval is one child's evaluation under one frame (rules §5.4 flatten
@@ -123,10 +125,15 @@ type walker struct {
 	acc    *accumulator
 
 	edges, contexts, matchers int
+	frames                    uint32
 	cap                       string
 	// edgeCut: the edge cap was hit, so every later selection is unknown.
 	// halted: the contexts or matchers cap was hit, so every later flatten is cut.
 	edgeCut, halted bool
+
+	// projBuf and projSeen are the effective projection's scratch space.
+	projBuf  []tagged
+	projSeen map[uint32]int
 
 	signals   []computed.ParentSignal
 	sigIdx    map[sigKey]int
@@ -134,23 +141,44 @@ type walker struct {
 }
 
 // delegation computes views B and C (rules §5): selection and permission for
-// every in-scope route, then the context-aware traversal from the roots.
+// every in-scope route, the context-aware traversal from the roots, the reach
+// closures, the final row outcomes and the effective projection.
 func delegation(in computed.DelegationInput) computed.DelegationResult {
+	w := newWalker(in)
+	w.run()
+	return w.result()
+}
+
+// newWalker is a walker over in with its bounds defaulted.
+func newWalker(in computed.DelegationInput) *walker {
 	w := &walker{in: &in, b: withDefaults(in.Bounds), routes: in.Routes, sigIdx: map[sigKey]int{}}
 	w.acc = newAccumulator(w.b)
+	return w
+}
+
+// run selects every ref and walks the roots.
+func (w *walker) run() {
 	w.selectAll()
-	if in.ScopeUnknown {
+	if w.in.ScopeUnknown {
 		// D-024: no traversal; every row is scope-unknown and every root uncertain.
-		for _, r := range in.Roots {
+		for _, r := range w.in.Roots {
 			w.uncertain = append(w.uncertain, computed.Uncertain{Route: r.Route, Rule: computed.UncertainRoot, Ref: -1, Reason: computed.UnknownScope})
 		}
 	} else {
 		w.walkRoots()
 	}
 	w.acc.tooLarge = w.cap != ""
-	res := computed.DelegationResult{Rows: w.acc.rows(func(objects.Ref) bool { return false }),
-		Signals: w.signals, Reach: w.reach(), Uncertain: w.sortedUncertain(), UncertainKeys: uncertainKeys(in.Roots), Cap: w.cap}
+}
+
+// result completes the traversal: the reach closures first, since a row's
+// final outcome reads them (rules §5.5, §8.5), then the effective projection.
+func (w *walker) result() computed.DelegationResult {
+	res := computed.DelegationResult{Signals: w.signals, Reach: w.reach(), Uncertain: w.sortedUncertain(),
+		UncertainKeys: uncertainKeys(w.in.Roots), Cap: w.cap}
+	res.Complete = computed.NewCompleteness(res)
+	res.Rows = w.acc.rows(res.Complete.Incomplete)
 	w.setChildKeys(res.Rows)
+	res.Effective = w.project()
 	slices.SortFunc(res.Signals, func(a, b computed.ParentSignal) int {
 		return cmp.Or(a.Parent.Compare(b.Parent), a.Key.Compare(b.Key))
 	})
@@ -176,6 +204,12 @@ func withDefaults(b computed.Bounds) computed.Bounds {
 	return computed.Bounds{Edges: or(b.Edges, d.Edges), Contexts: or(b.Contexts, d.Contexts), Matchers: or(b.Matchers, d.Matchers),
 		ContextsPerRow: or(b.ContextsPerRow, d.ContextsPerRow), ContextsPerInstall: or(b.ContextsPerInstall, d.ContextsPerInstall),
 		EffectiveEdges: or(b.EffectiveEdges, d.EffectiveEdges), ContextsPerEdge: or(b.ContextsPerEdge, d.ContextsPerEdge)}
+}
+
+// frameID is a new frame's id, never 0.
+func (w *walker) frameID() uint32 {
+	w.frames++
+	return w.frames
 }
 
 func (w *walker) hit(c string) {
@@ -375,6 +409,7 @@ func (w *walker) walkRoots() {
 			}
 			for _, m := range rootMatches(rule.Matches) {
 				f := newFrame(m, nil, computed.PathStep{Route: root.Route, Match: m}, keys, ds, lo, hi)
+				f.id = w.frameID()
 				for ri := lo; ri < hi; ri++ {
 					w.flatten(pi, ri, &f)
 				}
@@ -536,7 +571,9 @@ func (w *walker) descend(pi int, ki int32, e *kidEval, f *frame) {
 				continue
 			}
 			for _, m := range er.Matches {
-				e.frames = append(e.frames, newFrame(m, f.path, computed.PathStep{Route: kid.Ref, Match: m}, e.key[:], deps, lo, hi))
+				nf := newFrame(m, f.path, computed.PathStep{Route: kid.Ref, Match: m}, e.key[:], deps, lo, hi)
+				nf.id = w.frameID()
+				e.frames = append(e.frames, nf)
 			}
 		}
 	}
@@ -611,7 +648,9 @@ func (w *walker) open(pi int, rs *refSel, child int32) *rowAcc {
 		c := &w.routes[child]
 		_, meta.Allows = permits(c.View, c.Ref.Namespace, key.Parent)
 	}
-	return w.acc.open(key, meta)
+	r := w.acc.open(key, meta)
+	r.child = child
+	return r
 }
 
 // add folds c into row (P, ref, child), once per reporter key of f. A
@@ -625,7 +664,7 @@ func (w *walker) add(pi int, rs *refSel, child int32, f *frame, c computed.Conte
 		if cut {
 			w.acc.addCounted(r, c, w.digest(f, &c))
 		} else {
-			w.acc.addTo(r, c, w.digest(f, &c))
+			w.acc.addTo(r, c, w.digest(f, &c), f.id)
 		}
 	}
 }

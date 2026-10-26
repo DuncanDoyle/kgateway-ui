@@ -3,6 +3,8 @@ package scale
 import (
 	"math"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -243,5 +245,143 @@ func TestWorldSelectorListeners(t *testing.T) {
 func TestWorldSeedMatters(t *testing.T) {
 	if reflect.DeepEqual(World(Typical, 1), World(Typical, 2)) {
 		t.Fatal("seed ignored")
+	}
+}
+
+// paths lists the PathPrefix values of each HTTPRoute's rules that delegate
+// (delegating) and of every rule (all), by route key.
+func paths(objs []*unstructured.Unstructured) (delegating, all map[string][]string) {
+	delegating, all = map[string][]string{}, map[string][]string{}
+	for _, o := range objs {
+		if o.GetKind() != "HTTPRoute" {
+			continue
+		}
+		k := key(o.GetNamespace(), o.GetName())
+		rules, _, _ := unstructured.NestedSlice(o.Object, "spec", "rules")
+		for _, r := range rules {
+			rm := r.(map[string]any)
+			ms, _, _ := unstructured.NestedSlice(rm, "matches")
+			refs, _, _ := unstructured.NestedSlice(rm, "backendRefs")
+			deleg := slices.ContainsFunc(refs, func(b any) bool { return b.(map[string]any)["kind"] == "HTTPRoute" })
+			for _, m := range ms {
+				v, _, _ := unstructured.NestedString(m.(map[string]any), "path", "value")
+				all[k] = append(all[k], v)
+				if deleg {
+					delegating[k] = append(delegating[k], v)
+				}
+			}
+		}
+	}
+	return delegating, all
+}
+
+// Every match a delegator hands a child fits one of the child's matches, and
+// every child match fits one incoming match, so view B attaches every child
+// under every context (PF2). Under Contradict the child entries are gone and
+// each delegating parent reports ResolvedRefs=False/BackendNotFound.
+func TestWorldChildrenFitEveryDelegator(t *testing.T) {
+	for _, tier := range []Tier{Typical, Large, Extreme} {
+		t.Run(tier.Name, func(t *testing.T) {
+			objs := World(tier, 1)
+			deleg, all := paths(objs)
+			incoming := map[string][]string{}
+			for p, cs := range delegation(objs) {
+				for _, c := range cs {
+					incoming[c] = append(incoming[c], deleg[p]...)
+				}
+			}
+			if len(incoming) == 0 {
+				t.Fatal("no children")
+			}
+			// The fit of rules §6: a raw string prefix under a PathPrefix parent.
+			fits := func(parent, child string) bool { return strings.HasPrefix(child, parent) }
+			for c, in := range incoming {
+				for _, m := range in {
+					if !slices.ContainsFunc(all[c], func(cm string) bool { return fits(m, cm) }) {
+						t.Fatalf("%s: no match fits incoming %s (has %v)", c, m, all[c])
+					}
+				}
+				uniq := slices.Compact(slices.Sorted(slices.Values(in)))
+				for _, cm := range all[c] {
+					n := 0
+					for _, m := range uniq {
+						if fits(m, cm) {
+							n++
+						}
+					}
+					if n != 1 {
+						t.Fatalf("%s: match %s fits %d incoming matches", c, cm, n)
+					}
+				}
+			}
+			byKey := map[string]*unstructured.Unstructured{}
+			for _, o := range World(tier.Contradicting(), 1) {
+				if o.GetKind() == "HTTPRoute" {
+					byKey[key(o.GetNamespace(), o.GetName())] = o
+				}
+			}
+			for c := range incoming {
+				for _, s := range objects.RouteParents(byKey[c]) {
+					if s.ParentRef.Kind == "HTTPRoute" {
+						t.Fatalf("contradicting %s keeps child entry %+v", c, s.ParentRef)
+					}
+				}
+			}
+			for p := range deleg {
+				for _, s := range objects.RouteParents(byKey[p]) {
+					if rr := objects.FindCondition(s.Conditions, "ResolvedRefs"); rr == nil || rr.Status != "False" || rr.Reason != "BackendNotFound" {
+						t.Fatalf("contradicting parent %s: ResolvedRefs %+v", p, rr)
+					}
+				}
+			}
+			for _, o := range objs {
+				if _, ok := deleg[key(o.GetNamespace(), o.GetName())]; ok && o.GetKind() == "HTTPRoute" {
+					for _, s := range objects.RouteParents(o) {
+						if rr := objects.FindCondition(s.Conditions, "ResolvedRefs"); rr == nil || rr.Status != "True" {
+							t.Fatalf("consistent parent %s: ResolvedRefs %+v", o.GetName(), rr)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// DenseSelection: every parent selects the whole namespace and every route
+// fits every parent's match.
+func TestDenseSelection(t *testing.T) {
+	objs := DenseSelection(3, 5)
+	c := countKinds(objs)
+	if c["HTTPRoute"] != 8 || c["Gateway"] != 1 || c["GatewayClass"] != 1 {
+		t.Fatalf("%v", c)
+	}
+	deleg, all := paths(objs)
+	if len(deleg) != 3 {
+		t.Fatalf("parents %v", deleg)
+	}
+	for _, o := range objs {
+		if o.GetKind() != "HTTPRoute" {
+			continue
+		}
+		k := key(o.GetNamespace(), o.GetName())
+		if _, parent := deleg[k]; parent {
+			rules, _, _ := unstructured.NestedSlice(o.Object, "spec", "rules")
+			ref := rules[0].(map[string]any)["backendRefs"].([]any)[0].(map[string]any)
+			if ref["name"] != "*" || ref["namespace"] != DenseNamespace || len(objects.RouteParentRefs(o)) != 1 {
+				t.Fatalf("parent %s: ref %v", k, ref)
+			}
+			continue
+		}
+		if o.GetNamespace() != DenseNamespace || len(objects.RouteParentRefs(o)) != 0 || len(objects.RouteParents(o)) != 3 {
+			t.Fatalf("child %s", k)
+		}
+		for _, ps := range deleg {
+			if !strings.HasPrefix(all[k][0], ps[0]) {
+				t.Fatalf("child %s %v does not fit %v", k, all[k], ps)
+			}
+		}
+	}
+	if !reflect.DeepEqual(objs, DenseSelection(3, 5)) {
+		t.Fatal("not deterministic")
 	}
 }

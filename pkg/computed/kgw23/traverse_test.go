@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -631,12 +633,16 @@ func TestScopeUnknownRowsUnknown(t *testing.T) {
 	}
 }
 
-// delegationInput builds tier t's views B and C input from the scale world:
-// every HTTPRoute owned, each with a Gateway or ListenerSet parent a root
-// reporting under all of them.
-func delegationInput(b *testing.B, t scale.Tier) computed.DelegationInput {
+// delegationInput builds tier t's views B and C input from the scale world.
+func delegationInput(tb testing.TB, t scale.Tier) computed.DelegationInput {
+	return inputOf(tb, scale.World(t, 1))
+}
+
+// inputOf builds views B and C input from objs' HTTPRoutes: every one owned,
+// each with a Gateway or ListenerSet parent a root reporting under all of them.
+func inputOf(tb testing.TB, objs []*unstructured.Unstructured) computed.DelegationInput {
 	in := computed.DelegationInput{Wildcard: known(install.WildcardAll), Bounds: computed.DefaultBounds}
-	for _, u := range scale.World(t, 1) {
+	for _, u := range objs {
 		if u.GetKind() != "HTTPRoute" {
 			continue
 		}
@@ -661,7 +667,7 @@ func delegationInput(b *testing.B, t scale.Tier) computed.DelegationInput {
 	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
 	slices.SortFunc(in.Roots, func(x, y computed.Root) int { return x.Route.Compare(y.Route) })
 	if len(in.Roots) == 0 {
-		b.Fatal("empty scale world")
+		tb.Fatal("empty scale world")
 	}
 	return in
 }
@@ -678,3 +684,190 @@ func benchmarkDelegation(b *testing.B, t scale.Tier) {
 
 func BenchmarkDelegationLarge(b *testing.B)   { benchmarkDelegation(b, scale.Large) }
 func BenchmarkDelegationExtreme(b *testing.B) { benchmarkDelegation(b, scale.Extreme) }
+
+// incomplete fails unless each route is in a reach closure.
+func incomplete(t *testing.T, res computed.DelegationResult, want bool, bs ...*hr) {
+	t.Helper()
+	for _, b := range bs {
+		if got := res.Complete.Incomplete(b.r.Ref); got != want {
+			t.Fatalf("%s: incomplete %v, want %v", b.r.Ref.Name, got, want)
+		}
+	}
+}
+
+func TestClosureFollowsReach(t *testing.T) {
+	// Roots a and r. Q drops C, so C has a complete dropped row; P's ref to C is cut.
+	v := route23("cf", "v").rule(at("/a/v"), service("cf", "be"))
+	a := route23("cf", "a").top().rule(at("/a"), toName("cf", "v"))
+	g := route23("cf", "g").rule(at("/x/g"), service("cf", "be"))
+	c := route23("cf", "c").rule(at("/x"), toName("cf", "g"))
+	q := route23("cf", "q").rule(at("/r/q"), toName("cf", "c"))
+	p := route23("cf", "p").rule(at("/r/p"), toName("cf", "c"))
+	r := route23("cf", "r").top().rule(at("/r"), toName("cf", "q")).rule(at("/r"), toName("cf", "p"))
+	in := world(a, v, r, q, p, c, g)
+	in.Bounds.Contexts = 4 // a→v, r→q, q→c, r→p; p→c is cut
+	res := delegate(in)
+	if !slices.Contains(res.Uncertain, computed.Uncertain{Route: p.r.Ref, Rule: 0, Ref: 0, Reason: computed.UnknownTooLarge}) {
+		t.Fatalf("no cut at P: %+v", res.Uncertain)
+	}
+	incomplete(t, res, true, p, c, g)
+	incomplete(t, res, false, a, v, r, q)
+	if got := row(t, res, q, 0, 0, c); got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownContext {
+		t.Fatalf("Q→C %s %s, want unknown: C is in a reach closure", got.Outcome, got.Unknown)
+	}
+}
+
+func TestDroppedNonOwnedRouteInClosure(t *testing.T) {
+	// rules §11.5: D is not owned and dropped under R; P's ref to D is cut, so E below D is incomplete.
+	e := route23("dn", "e").owned().rule(at("/other/e"), service("dn", "be"))
+	d := route23("dn", "d").rule(at("/other"), toName("dn", "e"))
+	p := route23("dn", "p").owned().rule(at("/r/p"), toName("dn", "d"))
+	r := route23("dn", "r").top().rule(at("/r"), toName("dn", "d")).rule(at("/r"), toName("dn", "p"))
+	in := world(r, p, d, e)
+	in.Bounds.Contexts = 2 // r→d, r→p; p→d is cut
+	res := delegate(in)
+	incomplete(t, res, true, d, e)
+	if got := row(t, res, r, 0, 0, d); got.Outcome != computed.OutcomeUnknown {
+		t.Fatalf("R→D %s, want unknown", got.Outcome)
+	}
+}
+
+func TestEdgeCapMakesEverythingIncomplete(t *testing.T) {
+	x := route23("ec", "x").rule(at("/elsewhere"), service("ec", "be"))
+	k := route23("ec", "k").rule(at("/r/k"), service("ec", "be"))
+	u := route23("ec", "u").rule(at("/r/u"), service("ec", "be"))
+	r := route23("ec", "r").top().rule(at("/r"), toName("ec", "x"), toName("ec", "k")).rule(at("/r"), toName("ec", "u"))
+	in := world(r, x, k, u)
+	in.Bounds.Edges = 2 // rule 1's ref passes the cap
+	res := delegate(in)
+	if res.Cap != computed.CapEdges {
+		t.Fatalf("cap %q", res.Cap)
+	}
+	incomplete(t, res, true, r, x, k, u)
+	if got := row(t, res, r, 0, 0, x); got.Outcome != computed.OutcomeUnknown {
+		t.Fatalf("R→X %s, want unknown: a drop needs completeness", got.Outcome)
+	}
+	if got := row(t, res, r, 0, 1, k); got.Outcome != computed.OutcomeAttached || !got.SomeNotComputed {
+		t.Fatalf("R→K %s, SomeNotComputed %v", got.Outcome, got.SomeNotComputed)
+	}
+}
+
+func TestUnknownRootIsUncertain(t *testing.T) {
+	g := route23("ur", "g").rule(at("/u/c/g"), service("ur", "be"))
+	c := route23("ur", "c").rule(at("/u/c"), toName("ur", "g"))
+	u := route23("ur", "u").top().rule(at("/u"), toName("ur", "c"))
+	z := route23("ur", "z").rule(at("/z"), service("ur", "be"))
+	k := route23("ur", "k").top().rule(at("/k"), toName("ur", "z"))
+	in := world(u, c, g, k, z)
+	for i := range in.Roots {
+		if in.Roots[i].Route == u.r.Ref {
+			in.Roots[i].Unknown, in.Roots[i].Keys = true, nil
+		}
+	}
+	res := delegate(in)
+	if !slices.Contains(res.Uncertain, computed.Uncertain{Route: u.r.Ref, Rule: computed.UncertainRoot, Ref: -1, Reason: computed.UnknownContext}) {
+		t.Fatalf("uncertain %+v", res.Uncertain)
+	}
+	incomplete(t, res, true, u, c, g)
+	incomplete(t, res, false, k)
+	// K→Z drops Z completely: a known negative.
+	if got := row(t, res, k, 0, 0, z); got.Outcome != computed.OutcomeDropped {
+		t.Fatalf("K→Z %s", got.Outcome)
+	}
+}
+
+func TestUnknownWildcardLabelRef(t *testing.T) {
+	// rules §11.2: R's label ref has an unknown wildcard setting; S may be selected, and C is below S.
+	c := route23("shop", "c").rule(at("/r/s/c"), service("shop", "be"))
+	s := route23("shop", "s").label("v").rule(at("/r/s"), toName("shop", "c"))
+	n := route23("shop", "n").rule(at("/n"), service("shop", "be"))
+	r := route23("shop", "r").top().rule(at("/r"), toLabel("shop", "v"))
+	in := world(r, s, c, n)
+	in.Wildcard = install.Setting{} // valueFrom: unknown
+	res := delegate(in)
+	incomplete(t, res, true, r, s, c)
+	incomplete(t, res, false, n)
+}
+
+func TestCutAfterDropBeforeAttach(t *testing.T) {
+	// The /a context drops C; the cap cuts the /b context, which would attach it.
+	c := route23("ca", "c").rule(at("/b/c"), service("ca", "be"))
+	p := route23("ca", "p").top().rule(at("/a", "/b"), toName("ca", "c"))
+	in := world(p, c)
+	in.Bounds.Contexts = 1
+	res := delegate(in)
+	got := row(t, res, p, 0, 0, c)
+	if got.Outcome != computed.OutcomeUnknown || got.Unknown != computed.UnknownTooLarge {
+		t.Fatalf("row %s %s, want unknown too-large, not dropped", got.Outcome, got.Unknown)
+	}
+	incomplete(t, res, true, c)
+}
+
+func TestCutBeforeAnyContextAttachedComputed(t *testing.T) {
+	// A attaches C; B's ref to C is cut before it reaches C, so A's row is attached with some paths not computed.
+	c := route23("cb", "c").rule(at("/a/c", "/b/c"), service("cb", "be"))
+	a := route23("cb", "a").top().rule(at("/a"), toName("cb", "c"))
+	b := route23("cb", "b").top().rule(at("/b"), toName("cb", "c"))
+	in := world(a, b, c)
+	in.Bounds.Contexts = 1
+	res := delegate(in)
+	got := row(t, res, a, 0, 0, c)
+	if got.Outcome != computed.OutcomeAttached || !got.SomeNotComputed || !slices.Equal(ctxOutcomes(got), []computed.RowOutcome{computed.OutcomeAttached}) {
+		t.Fatalf("A→C %s SomeNotComputed %v contexts %v", got.Outcome, got.SomeNotComputed, ctxOutcomes(got))
+	}
+}
+
+func TestDenseSelectionCut(t *testing.T) {
+	// PF16: decoded directly; pkg/engine imports the rule sets.
+	in := inputOf(t, scale.DenseSelection(100, 1000))
+	res := delegate(in)
+	if res.Cap != computed.CapEdges || len(res.Rows) != 50_000 {
+		t.Fatalf("cap %q, %d rows", res.Cap, len(res.Rows))
+	}
+	cut := 0
+	for _, u := range res.Uncertain {
+		if u.Reason != computed.UnknownTooLarge || u.Rule != 0 || u.Ref != 0 {
+			t.Fatalf("uncertain %+v", u)
+		}
+		cut++
+	}
+	if cut != 50 {
+		t.Fatalf("%d cut parents, want 50", cut)
+	}
+	for _, r := range res.Rows {
+		if r.Outcome != computed.OutcomeAttached || !r.SomeNotComputed {
+			t.Fatalf("row %+v: %s, SomeNotComputed %v", r.Key, r.Outcome, r.SomeNotComputed)
+		}
+	}
+	if again := delegate(in); !reflect.DeepEqual(res, again) {
+		t.Fatal("two runs differ")
+	}
+}
+
+// The consistent scale worlds attach every child under every context (PF2):
+// no parent failure, every row attached, and Large inside every cap.
+func TestScaleWorldViewBConsistent(t *testing.T) {
+	for _, tier := range []scale.Tier{scale.Typical, scale.Large} {
+		t.Run(tier.Name, func(t *testing.T) {
+			in := delegationInput(t, tier)
+			w := newWalker(in)
+			w.run()
+			res := w.result()
+			if res.Cap != "" || len(res.Signals) != 0 || len(res.Uncertain) != 0 {
+				t.Fatalf("cap %q, %d signals, %d uncertain", res.Cap, len(res.Signals), len(res.Uncertain))
+			}
+			for _, r := range res.Rows {
+				if r.Outcome != computed.OutcomeAttached || r.SomeNotComputed {
+					t.Fatalf("row %+v: %s", r.Key, r.Outcome)
+				}
+			}
+			b := w.b
+			t.Logf("%s: %d rows, contexts %d/%d, matchers %d/%d, edges %d/%d, retained %d/%d",
+				tier.Name, len(res.Rows), w.contexts, b.Contexts, w.matchers, b.Matchers, w.edges, b.Edges, w.acc.kept, b.ContextsPerInstall)
+			// Room to spare: the budget tier must never sit at a cap.
+			if 4*w.contexts > 3*b.Contexts || 4*w.matchers > 3*b.Matchers || 4*w.edges > 3*b.Edges || 4*w.acc.kept > 3*b.ContextsPerInstall {
+				t.Fatal("Large is within a quarter of a cap")
+			}
+		})
+	}
+}
