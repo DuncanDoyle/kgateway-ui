@@ -1,11 +1,15 @@
 package computed_test
 
 import (
+	"cmp"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
@@ -427,5 +431,686 @@ func BenchmarkCheckAttachmentLarge(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		computed.CheckAttachment("kgw/kgateway", sel, in, res)
+	}
+}
+
+// Views B and C cross-checks (rules §8.1–§8.5, §11.4).
+
+// both are the two rule sets' controller versions.
+var both = []string{v23, v24}
+
+// gwRef is the Gateway every delegation root is accepted on.
+var gwRef = objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "gw"}
+
+// Written parentRefs of status entries: a root's Gateway, and the ref a child
+// reports under for parent infra/<name>, as kgateway writes it.
+const gwEntry = "{name: gw}"
+
+func synth(ns, name string) string {
+	return "{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: " + ns + ", name: " + name + "}"
+}
+
+// hr decodes one HTTPRoute written as YAML (metadata and spec); its generation is gen.
+func hr(t testing.TB, doc string) *unstructured.Unstructured {
+	t.Helper()
+	j, err := yaml.YAMLToJSON([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &unstructured.Unstructured{}
+	if err := u.UnmarshalJSON(append([]byte(`{"apiVersion":"gateway.networking.k8s.io/v1","kind":"HTTPRoute",`), j[1:]...)); err != nil {
+		t.Fatal(err)
+	}
+	u.SetGeneration(gen)
+	return u
+}
+
+// root is a top-level route infra/<name> on gwRef with one rule per match
+// list, each delegating to refs; its own entry is current.
+func root(t testing.TB, name, rules string) *unstructured.Unstructured {
+	u := hr(t, "metadata: {name: "+name+", namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: "+rules)
+	entry(t, u, gwEntry, gen, "Accepted=True", "ResolvedRefs=True")
+	return u
+}
+
+// to is a delegation backendRef to route ns/name.
+func to(ns, name string) string {
+	return "{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: " + ns + ", name: " + name + "}"
+}
+
+// rule is one rule with the given path prefixes, delegating to refs.
+func rule(paths []string, refs ...string) string {
+	ms := make([]string, len(paths))
+	for i, p := range paths {
+		ms[i] = "{path: {type: PathPrefix, value: " + p + "}}"
+	}
+	return "{matches: [" + strings.Join(ms, ", ") + "], backendRefs: [" + strings.Join(refs, ", ") + "]}"
+}
+
+// child is route ns/name with one rule of the given prefixes and extra spec lines.
+func child(t testing.TB, ns, name string, paths []string, extra ...string) *unstructured.Unstructured {
+	spec := "  rules: [" + rule(paths) + "]"
+	for _, e := range extra {
+		spec += "\n  " + e
+	}
+	return hr(t, "metadata: {name: "+name+", namespace: "+ns+"}\nspec:\n"+spec)
+}
+
+// entry adds this controller's status entry under parentRef ref (a YAML flow
+// map) with conds, each "Type=Status[/Reason]", observed at obsGen.
+func entry(t testing.TB, u *unstructured.Unstructured, ref string, obsGen int64, conds ...string) {
+	t.Helper()
+	j, err := yaml.YAMLToJSON([]byte(ref))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := map[string]any{}
+	if err := json.Unmarshal(j, &pr); err != nil {
+		t.Fatal(err)
+	}
+	var cs []any
+	for _, c := range conds {
+		typ, rest, _ := strings.Cut(c, "=")
+		st, reason, _ := strings.Cut(rest, "/")
+		cs = append(cs, map[string]any{"type": typ, "status": st, "reason": cmp.Or(reason, typ), "observedGeneration": obsGen,
+			"lastTransitionTime": "2026-10-26T00:00:00Z", "message": ""})
+	}
+	parents, _, _ := unstructured.NestedSlice(u.Object, "status", "parents")
+	parents = append(parents, map[string]any{"parentRef": pr, "controllerName": testutil.Controller, "conditions": cs})
+	if err := unstructured.SetNestedSlice(u.Object, parents, "status", "parents"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// dworld is views B and C's input: every route owned, the roots accepted on
+// gwRef, and unknown the routes whose root eligibility is unknown.
+type dworld struct {
+	routes  []*unstructured.Unstructured
+	roots   []string
+	unknown []string
+	mod     func(*computed.DelegationInput)
+}
+
+// input builds the world's DelegationInput as the engine does.
+func (w dworld) input() computed.DelegationInput {
+	in := computed.DelegationInput{Wildcard: install.Setting{Value: install.WildcardAll, Known: true},
+		ControllerNames: []string{testutil.Controller}, Bounds: computed.DefaultBounds, Unwatched: map[objects.Ref]bool{}}
+	for _, u := range w.routes {
+		ref, name := objects.RefOf(u), u.GetNamespace()+"/"+u.GetName()
+		v := objects.DecodeHTTPRoute(u)
+		top := slices.Contains(w.roots, name) || slices.Contains(w.unknown, name)
+		in.Routes = append(in.Routes, computed.DelegRoute{Ref: ref, Generation: u.GetGeneration(), View: v, Owned: true, TopLevel: top})
+		switch {
+		case slices.Contains(w.roots, name):
+			in.Roots = append(in.Roots, computed.Root{Route: ref, Deps: []objects.Ref{gwRef, ref}, Keys: []computed.ReportKey{computed.KeyOf(v.WrittenRefs[0])}})
+		case slices.Contains(w.unknown, name):
+			in.Roots = append(in.Roots, computed.Root{Route: ref, Unknown: true, Deps: []objects.Ref{ref}})
+		}
+	}
+	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
+	slices.SortFunc(in.Roots, func(x, y computed.Root) int { return x.Route.Compare(y.Route) })
+	if w.mod != nil {
+		w.mod(&in)
+	}
+	return in
+}
+
+// run computes views B and C with version's rule set and cross-checks them.
+func (w dworld) run(version string) (*computed.DelegationResult, []computed.CheckResult) {
+	in := w.input()
+	sel := rulesets.Select(version)
+	res := sel.Rules.Delegation(in)
+	return &res, computed.CheckDelegation("kgw/kgateway", sel, in, &res)
+}
+
+func hRef(ns, name string) objects.Ref {
+	return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: ns, Name: name}
+}
+
+// childEntries returns the child-entry checks on child ns/name under parent pns/pname.
+func childEntries(cs []computed.CheckResult, ns, name, pns, pname string) []computed.CheckResult {
+	var out []computed.CheckResult
+	p := hRef(pns, pname)
+	for _, c := range cs {
+		parts := strings.Split(c.ID.Subject, "\x00")
+		if c.ID.Kind == computed.KindChildEntry && c.On == hRef(ns, name) && len(parts) == 13 &&
+			(objects.Ref{Group: parts[4], Kind: parts[5], Namespace: parts[6], Name: parts[7]}) == p {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func oneChildEntry(t *testing.T, cs []computed.CheckResult, ns, name, pns, pname string) computed.CheckResult {
+	t.Helper()
+	got := childEntries(cs, ns, name, pns, pname)
+	if len(got) != 1 {
+		t.Fatalf("want one child-entry check on %s/%s under %s/%s, got %+v", ns, name, pns, pname, got)
+	}
+	return got[0]
+}
+
+// parentChecks returns the parent-resolvedrefs checks on ns/name.
+func parentChecks(cs []computed.CheckResult, ns, name string) []computed.CheckResult {
+	var out []computed.CheckResult
+	for _, c := range cs {
+		if c.ID.Kind == computed.KindParentResolvedRefs && c.On == hRef(ns, name) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func oneParentCheck(t *testing.T, cs []computed.CheckResult, ns, name string) computed.CheckResult {
+	t.Helper()
+	got := parentChecks(cs, ns, name)
+	if len(got) != 1 {
+		t.Fatalf("want one parent-resolvedrefs check on %s/%s, got %+v", ns, name, got)
+	}
+	return got[0]
+}
+
+// is fails unless c has class cl, and coverage cov when cov is set.
+func is(t *testing.T, c computed.CheckResult, cl computed.Class, cov ...computed.Coverage) {
+	t.Helper()
+	if c.Class != cl || len(cov) > 0 && !slices.Equal(c.Coverage, cov) {
+		t.Fatalf("got %s %v (expected %q, observed %q, note %q), want %s %v", c.Class, c.Coverage, c.Expected, c.Observed, c.Note, cl, cov)
+	}
+}
+
+// basic is root infra/r delegating under prefixes to apps/c, which has the
+// match /api/c and extra spec lines. c reports under synth(infra, r).
+func basic(t *testing.T, prefixes []string, extra ...string) (r, c *unstructured.Unstructured) {
+	r = root(t, "r", "["+rule(prefixes, to("apps", "c"))+"]")
+	c = child(t, "apps", "c", []string{"/api/c"}, extra...)
+	return r, c
+}
+
+func TestChildEntryAggregation(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// One rule, two matches: /api attaches c, /v2 drops it. The row is partial; one entry is expected.
+			r, c := basic(t, []string{"/api", "/v2"})
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
+			res, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			if res.Rows[0].Outcome != computed.OutcomePartial {
+				t.Fatalf("row %s", res.Rows[0].Outcome)
+			}
+			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			is(t, ce, computed.ClassCompatible, computed.CoverageStatus)
+			if ce.Expected != "entry" || ce.Observed != "True" {
+				t.Fatalf("expected %q observed %q", ce.Expected, ce.Observed)
+			}
+
+			// Two rules: rule 0 (/x) drops c and rule 1 (/api) attaches it: one check, one entry.
+			r = root(t, "r", "["+rule([]string{"/x"}, to("apps", "c"))+", "+rule([]string{"/api"}, to("apps", "c"))+"]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			is(t, oneChildEntry(t, cs, "apps", "c", "infra", "r"), computed.ClassCompatible, computed.CoverageStatus)
+
+			// Diamond: r → b1, b2 → c. Two checks, one per parent key.
+			r = root(t, "r", "["+rule([]string{"/api"}, to("apps", "b1"), to("apps", "b2"))+"]")
+			b1 := hr(t, "metadata: {name: b1, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api/b"}, to("apps", "c"))+"]")
+			b2 := hr(t, "metadata: {name: b2, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api/b"}, to("apps", "c"))+"]")
+			c = child(t, "apps", "c", []string{"/api/b/c"})
+			entry(t, c, synth("apps", "b1"), gen, "Accepted=True")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, b1, b2, c}, roots: []string{"infra/r"}}.run(v)
+			for _, p := range []string{"b1", "b2"} {
+				if n := len(childEntries(cs, "apps", "c", "apps", p)); n != 1 {
+					t.Fatalf("%d checks under %s", n, p)
+				}
+			}
+			is(t, oneChildEntry(t, cs, "apps", "c", "apps", "b1"), computed.ClassCompatible)
+			is(t, oneChildEntry(t, cs, "apps", "c", "apps", "b2"), computed.ClassMissing)
+		})
+	}
+}
+
+func TestAncestorPrunedExpectsNoEntry(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// R /api → P {/api, /other} → C /other/item: C is dropped under the only context.
+			r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+			p := hr(t, "metadata: {name: p, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api", "/other"}, to("apps", "c"))+"]")
+			entry(t, p, synth("infra", "r"), gen, "Accepted=True")
+			c := child(t, "apps", "c", []string{"/other/item"})
+			w := dworld{routes: []*unstructured.Unstructured{r, p, c}, roots: []string{"infra/r"}}
+			_, cs := w.run(v)
+			ce := oneChildEntry(t, cs, "apps", "c", "apps", "p")
+			is(t, ce, computed.ClassCompatible, computed.CoverageStatus)
+			if ce.Expected != "none" || ce.Observed != "none" {
+				t.Fatalf("expected %q observed %q", ce.Expected, ce.Observed)
+			}
+
+			// A current entry left after the parent edit: unexpected and verified.
+			entry(t, c, synth("apps", "p"), gen, "Accepted=True")
+			_, cs = w.run(v)
+			ce = oneChildEntry(t, cs, "apps", "c", "apps", "p")
+			is(t, ce, computed.ClassUnexpected)
+			if !ce.Verified || !ce.Candidate() {
+				t.Fatalf("verified %v candidate %v", ce.Verified, ce.Candidate())
+			}
+		})
+	}
+}
+
+func TestAttachedChildMissingBackend(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			r, c := basic(t, []string{"/api"})
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True", "ResolvedRefs=False/BackendNotFound")
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			is(t, ce, computed.ClassCompatible, computed.CoverageStatus)
+			if ce.Candidate() {
+				t.Fatal("candidate")
+			}
+		})
+	}
+}
+
+func TestAttachedChildReplacedRule(t *testing.T) {
+	conds := map[string][]string{v23: {"Accepted=False/RouteRuleReplaced"}, v24: {"Accepted=True", "kgateway.dev/Programmed=False/RouteRuleReplaced"}}
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			r, c := basic(t, []string{"/api"})
+			entry(t, c, synth("infra", "r"), gen, conds[v]...)
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			is(t, oneChildEntry(t, cs, "apps", "c", "infra", "r"), computed.ClassCompatible, computed.CoverageStatus)
+		})
+	}
+}
+
+func TestRejectedHostnamesExpectsUnsupportedValue(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			r, c := basic(t, []string{"/api"}, "hostnames: [c.example.com]")
+			entry(t, c, synth("infra", "r"), gen, "Accepted=False/UnsupportedValue")
+			w := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}
+			_, cs := w.run(v)
+			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			is(t, ce, computed.ClassCompatible, computed.CoverageStatus)
+			if ce.Expected != "False/UnsupportedValue" {
+				t.Fatalf("expected %q", ce.Expected)
+			}
+
+			// Accepted=True contradicts a complete rejection.
+			_, c2 := basic(t, []string{"/api"}, "hostnames: [c.example.com]")
+			entry(t, c2, synth("infra", "r"), gen, "Accepted=True")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, c2}, roots: []string{"infra/r"}}.run(v)
+			is(t, oneChildEntry(t, cs, "apps", "c", "infra", "r"), computed.ClassContradicting)
+
+			// Incomplete (an unknown root u also selects c): the row stays rejected
+			// with SomeNotComputed, an entry is still expected, but its Accepted value is uncertain.
+			u := hr(t, "metadata: {name: u, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: ["+rule([]string{"/api"}, to("apps", "c"))+"]")
+			res, cs := dworld{routes: []*unstructured.Unstructured{r, u, c2}, roots: []string{"infra/r"}, unknown: []string{"infra/u"}}.run(v)
+			for _, rw := range res.Rows {
+				if rw.Key.Parent.Name == "r" && (rw.Outcome != computed.OutcomeRejectedHostnames || !rw.SomeNotComputed) {
+					t.Fatalf("row %s someNotComputed %v", rw.Outcome, rw.SomeNotComputed)
+				}
+			}
+			is(t, oneChildEntry(t, cs, "apps", "c", "infra", "r"), computed.ClassInconclusive, computed.CoverageNone)
+
+			// With no entry at all, the rejection still expects one: missing.
+			_, c3 := basic(t, []string{"/api"}, "hostnames: [c.example.com]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, u, c3}, roots: []string{"infra/r"}, unknown: []string{"infra/u"}}.run(v)
+			is(t, oneChildEntry(t, cs, "apps", "c", "infra", "r"), computed.ClassMissing)
+		})
+	}
+}
+
+func TestParentWithOneUnresolvedRef(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			for _, tc := range []struct {
+				observed string
+				class    computed.Class
+			}{
+				{"ResolvedRefs=False/BackendNotFound", computed.ClassCompatible},
+				{"ResolvedRefs=False/RefNotPermitted", computed.ClassContradicting},
+				{"ResolvedRefs=True", computed.ClassContradicting},
+			} {
+				// Rule 0 attaches c; rule 1's ref selects nothing.
+				r := hr(t, "metadata: {name: r, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: ["+
+					rule([]string{"/api"}, to("apps", "c"))+", "+rule([]string{"/b"}, to("apps", "missing"))+"]")
+				entry(t, r, gwEntry, gen, "Accepted=True", tc.observed)
+				c := child(t, "apps", "c", []string{"/api/c"})
+				_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+				pc := oneParentCheck(t, cs, "infra", "r")
+				is(t, pc, tc.class)
+				if pc.Expected != "False/BackendNotFound" || pc.Key != (computed.ReportKey{Name: "gw"}) {
+					t.Fatalf("expected %q key %+v", pc.Expected, pc.Key)
+				}
+			}
+		})
+	}
+}
+
+func TestTruncatedParentAggregate(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// p's rule 0 is unresolved (BackendNotFound); the contexts cap cuts its
+			// rule 1, a cycle. The observed RefNotPermitted is compatible: the reason is not compared.
+			r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+			p := hr(t, "metadata: {name: p, namespace: apps}\nspec:\n  rules: ["+
+				rule([]string{"/api/a"}, to("apps", "missing"))+", "+rule([]string{"/api/b"}, to("apps", "p"))+"]")
+			entry(t, p, synth("infra", "r"), gen, "Accepted=True", "ResolvedRefs=False/RefNotPermitted")
+			w := dworld{routes: []*unstructured.Unstructured{r, p}, roots: []string{"infra/r"},
+				mod: func(in *computed.DelegationInput) { in.Bounds.Contexts = 2 }}
+			res, cs := w.run(v)
+			if !res.Complete.Incomplete(hRef("apps", "p")) {
+				t.Fatal("p complete")
+			}
+			pc := oneParentCheck(t, cs, "apps", "p")
+			is(t, pc, computed.ClassCompatible, computed.CoverageStatus)
+			if pc.Expected != "False" || pc.Candidate() {
+				t.Fatalf("expected %q candidate %v", pc.Expected, pc.Candidate())
+			}
+		})
+	}
+}
+
+func TestParentMissingServiceBackend(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			svc := "{name: svc, port: 80}"
+			for _, tc := range []struct {
+				name  string
+				rules string
+				class computed.Class
+			}{
+				// A Service backend may be what failed: an observed False is compatible.
+				{"service", "[" + rule([]string{"/api"}, to("apps", "c")) + ", " + rule([]string{"/s"}, svc) + "]", computed.ClassCompatible},
+				// Only delegation refs, none failed: an observed False contradicts.
+				{"delegation only", "[" + rule([]string{"/api"}, to("apps", "c")) + "]", computed.ClassContradicting},
+			} {
+				r := hr(t, "metadata: {name: r, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: "+tc.rules)
+				entry(t, r, gwEntry, gen, "Accepted=True", "ResolvedRefs=False/BackendNotFound")
+				c := child(t, "apps", "c", []string{"/api/c"})
+				_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+				pc := oneParentCheck(t, cs, "infra", "r")
+				if pc.Class != tc.class || pc.Expected != "True" {
+					t.Fatalf("%s: %s expected %q", tc.name, pc.Class, pc.Expected)
+				}
+			}
+		})
+	}
+}
+
+func TestComputedAttachedNoEntry(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			for _, pGen := range []int64{gen, gen - 1} {
+				// r → p → c; c is attached under p and has no entry.
+				r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "p"))+"]")
+				p := hr(t, "metadata: {name: p, namespace: apps}\nspec:\n  rules: ["+rule([]string{"/api/p"}, to("apps", "c"))+"]")
+				entry(t, p, synth("infra", "r"), pGen, "Accepted=True")
+				c := child(t, "apps", "c", []string{"/api/p/c"})
+				_, cs := dworld{routes: []*unstructured.Unstructured{r, p, c}, roots: []string{"infra/r"}}.run(v)
+				ce := oneChildEntry(t, cs, "apps", "c", "apps", "p")
+				is(t, ce, computed.ClassMissing)
+				want := []objects.Ref{hRef("apps", "c"), hRef("apps", "p"), hRef("infra", "r")}
+				if !ce.Candidate() || !slices.Equal(ce.Contributors, want) || ce.ParentCurrent != (pGen == gen) {
+					t.Fatalf("p at %d: candidate %v contributors %v parentCurrent %v", pGen, ce.Candidate(), ce.Contributors, ce.ParentCurrent)
+				}
+				if !slices.Contains(ce.Deps, gwRef) || !slices.Contains(ce.Deps, hRef("apps", "c")) {
+					t.Fatalf("deps %v", ce.Deps)
+				}
+			}
+		})
+	}
+}
+
+func TestStaleChildEntryIsStale(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// Attached, but the stale entry says UnsupportedValue; dropped, with a stale entry left.
+			for _, prefix := range []string{"/api", "/other"} {
+				r, c := basic(t, []string{prefix})
+				entry(t, c, synth("infra", "r"), gen-1, "Accepted=False/UnsupportedValue")
+				_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+				ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+				is(t, ce, computed.ClassStale)
+				if ce.Candidate() {
+					t.Fatal("candidate")
+				}
+			}
+		})
+	}
+}
+
+func TestForbiddenEntryLeftNotVerified(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// c's parentRefs name another parent only, so r may not select it.
+			r, c := basic(t, []string{"/api"}, "parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: infra, name: other}]")
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			is(t, ce, computed.ClassUnexpected)
+			if ce.Verified || ce.Candidate() || !strings.Contains(ce.Note, "The controller may keep old status") {
+				t.Fatalf("verified %v note %q", ce.Verified, ce.Note)
+			}
+		})
+	}
+}
+
+func TestLeftEntryAnyCause(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// A parent edit (r's match becomes /store) and a child edit (c's match
+			// becomes /other/six) both drop c. No first-seen time is needed.
+			parentEdit := func() []*unstructured.Unstructured { return pair(basic(t, []string{"/store"})) }
+			childEdit := func() []*unstructured.Unstructured {
+				r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "c"))+"]")
+				return []*unstructured.Unstructured{r, child(t, "apps", "c", []string{"/other/six"})}
+			}
+			for name, world := range map[string]func() []*unstructured.Unstructured{"parent edit": parentEdit, "child edit": childEdit} {
+				routes := world()
+				entry(t, routes[1], synth("infra", "r"), gen, "Accepted=True")
+				_, cs := dworld{routes: routes, roots: []string{"infra/r"}}.run(v)
+				ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+				if ce.Class != computed.ClassUnexpected || !ce.Verified || !ce.Candidate() {
+					t.Fatalf("%s: %s verified %v", name, ce.Class, ce.Verified)
+				}
+			}
+		})
+	}
+}
+
+func pair(a, b *unstructured.Unstructured) []*unstructured.Unstructured {
+	return []*unstructured.Unstructured{a, b}
+}
+
+func TestDeselectedEntryLeft(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// r now selects c2, not c; c keeps a current entry under r's key.
+			r := root(t, "r", "["+rule([]string{"/api"}, to("apps", "c2"))+"]")
+			c := child(t, "apps", "c", []string{"/api/c"})
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
+			c2 := child(t, "apps", "c2", []string{"/api/c2"})
+			_, cs := dworld{routes: []*unstructured.Unstructured{r, c, c2}, roots: []string{"infra/r"}}.run(v)
+			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			if ce.Class != computed.ClassUnexpected || !ce.Verified || !ce.Candidate() || ce.Expected != "none" {
+				t.Fatalf("%s verified %v expected %q", ce.Class, ce.Verified, ce.Expected)
+			}
+
+			// An unknown root u that selects c makes it incomplete: no negative expectation.
+			u := hr(t, "metadata: {name: u, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: ["+rule([]string{"/api"}, to("apps", "c"))+"]")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, u, c, c2}, roots: []string{"infra/r"}, unknown: []string{"infra/u"}}.run(v)
+			ce = oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			if ce.Class != computed.ClassUnknown || ce.Note != "Not all paths computed" {
+				t.Fatalf("%s note %q", ce.Class, ce.Note)
+			}
+		})
+	}
+}
+
+func TestScopeUnknownChecksUnknown(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			r, c := basic(t, []string{"/api"})
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
+			left := child(t, "apps", "left", []string{"/api/l"})
+			entry(t, left, synth("infra", "r"), gen, "Accepted=True")
+			w := dworld{routes: []*unstructured.Unstructured{r, c, left}, roots: []string{"infra/r"},
+				mod: func(in *computed.DelegationInput) { in.ScopeUnknown = true }}
+			_, cs := w.run(v)
+			n := 0
+			for _, ck := range cs {
+				if ck.ID.Kind != computed.KindChildEntry && ck.ID.Kind != computed.KindParentResolvedRefs {
+					continue
+				}
+				n++
+				if ck.Class != computed.ClassUnknown || ck.Unknown != computed.UnknownScope || ck.Candidate() {
+					t.Fatalf("%s %s: %s %s", ck.ID.Kind, ck.On, ck.Class, ck.Unknown)
+				}
+			}
+			if n < 2 {
+				t.Fatalf("%d checks, want the attached child's and the leftover's", n)
+			}
+		})
+	}
+}
+
+func TestNoEntryIncompleteIsUnknown(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// §11.2 cut row: /x drops c, then the contexts cap cuts /api, which would attach it.
+			r, c := basic(t, []string{"/x", "/api"})
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
+			w := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"},
+				mod: func(in *computed.DelegationInput) { in.Bounds.Contexts = 1 }}
+			res, cs := w.run(v)
+			if res.Rows[0].Outcome != computed.OutcomeUnknown {
+				t.Fatalf("row %s", res.Rows[0].Outcome)
+			}
+			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
+			if ce.Class != computed.ClassUnknown || ce.Note != "Not all paths computed" || ce.Candidate() {
+				t.Fatalf("%s note %q", ce.Class, ce.Note)
+			}
+			// /x records a failure, so False is expected; the cut leaves the reason uncompared.
+			if pc := oneParentCheck(t, cs, "infra", "r"); pc.Expected != "False" {
+				t.Fatalf("parent expected %q", pc.Expected)
+			}
+
+			// An unknown wildcard setting with labelled routes elsewhere: possible
+			// route other/d keeps an entry under r; its negative check is unknown.
+			lr := root(t, "r", "["+rule([]string{"/api"}, "{group: delegation.kgateway.dev, kind: label, name: team, namespace: apps}")+"]")
+			kid := child(t, "apps", "kid", []string{"/api/k"})
+			kid.SetLabels(map[string]string{"delegation.kgateway.dev/label": "team"})
+			d := child(t, "other", "d", []string{"/zzz"})
+			d.SetLabels(map[string]string{"delegation.kgateway.dev/label": "team"})
+			entry(t, d, synth("infra", "r"), gen, "Accepted=True")
+			w = dworld{routes: []*unstructured.Unstructured{lr, kid, d}, roots: []string{"infra/r"},
+				mod: func(in *computed.DelegationInput) { in.Wildcard = install.Setting{} }}
+			_, cs = w.run(v)
+			ce = oneChildEntry(t, cs, "other", "d", "infra", "r")
+			if ce.Class != computed.ClassUnknown || ce.Note != "Not all paths computed" {
+				t.Fatalf("possible child: %s note %q", ce.Class, ce.Note)
+			}
+			if pc := oneParentCheck(t, cs, "infra", "r"); pc.Class != computed.ClassUnknown {
+				t.Fatalf("parent %s", pc.Class)
+			}
+		})
+	}
+}
+
+func Test23ChildWithoutEntryNotVerified(t *testing.T) {
+	// §11.3: on 2.3 a permitting ref that omits the namespace or sets
+	// sectionName gets no entry: not observable. 2.4 writes one under the ref as written.
+	for _, ref := range []string{
+		"{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r}",
+		"{group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: infra, name: r, sectionName: s}",
+	} {
+		for _, hostnames := range []string{"hostnames: []", "hostnames: [c.example.com]"} {
+			r := root(t, "r", "["+rule([]string{"/api"}, to("infra", "c"))+"]")
+			c := child(t, "infra", "c", []string{"/api/c"}, "parentRefs: ["+ref+"]", hostnames)
+			w := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}
+			_, cs := w.run(v23)
+			ce := oneChildEntry(t, cs, "infra", "c", "infra", "r")
+			is(t, ce, computed.ClassNotObservable, computed.CoverageNone)
+			_, cs = w.run(v24)
+			is(t, oneChildEntry(t, cs, "infra", "c", "infra", "r"), computed.ClassMissing)
+		}
+	}
+}
+
+func TestUnconfirmableRow(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// Rule 0 (/x) drops c, rule 1 (/api) attaches it: the entry rule 1
+			// expects cannot confirm rule 0's drop.
+			r := root(t, "r", "["+rule([]string{"/x"}, to("apps", "c"))+", "+rule([]string{"/api"}, to("apps", "c"))+"]")
+			c := child(t, "apps", "c", []string{"/api/c"})
+			entry(t, c, synth("infra", "r"), gen, "Accepted=True")
+			res, _ := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"}}.run(v)
+			if len(res.Rows) != 2 || !res.Rows[0].Unconfirmable || res.Rows[1].Unconfirmable {
+				t.Fatalf("rows %+v", res.Rows)
+			}
+			// Dropped everywhere: the absent entry confirms the drop.
+			r = root(t, "r", "["+rule([]string{"/x"}, to("apps", "c"))+"]")
+			res, _ = dworld{routes: []*unstructured.Unstructured{r, child(t, "apps", "c", []string{"/api/c"})}, roots: []string{"infra/r"}}.run(v)
+			if res.Rows[0].Unconfirmable {
+				t.Fatal("dropped row unconfirmable")
+			}
+		})
+	}
+}
+
+func TestUncertainRootKeyMakesNoNegativeExpectation(t *testing.T) {
+	for _, v := range both {
+		t.Run(v, func(t *testing.T) {
+			// View A is unknown for r's parentRef gw2: no context reports under it,
+			// so "no failure" there is not expected, whatever the entry says.
+			r := hr(t, "metadata: {name: r, namespace: infra}\nspec:\n  parentRefs: [{name: gw}, {name: gw2}]\n  rules: ["+rule([]string{"/api"}, to("apps", "c"))+"]")
+			entry(t, r, gwEntry, gen, "Accepted=True", "ResolvedRefs=True")
+			entry(t, r, "{name: gw2}", gen, "Accepted=True", "ResolvedRefs=False/BackendNotFound")
+			c := child(t, "apps", "c", []string{"/api/c"})
+			w := dworld{routes: []*unstructured.Unstructured{r, c}, roots: []string{"infra/r"},
+				mod: func(in *computed.DelegationInput) { in.Roots[0].UncertainKeys = []computed.ReportKey{{Name: "gw2"}} }}
+			_, cs := w.run(v)
+			pcs := parentChecks(cs, "infra", "r")
+			if len(pcs) != 2 {
+				t.Fatalf("checks %+v", pcs)
+			}
+			for _, pc := range pcs {
+				switch pc.Key.Name {
+				case "gw":
+					is(t, pc, computed.ClassCompatible, computed.CoverageStatus)
+				case "gw2":
+					if pc.Class != computed.ClassUnknown || pc.Note != "Not all paths computed" {
+						t.Fatalf("gw2: %s note %q", pc.Class, pc.Note)
+					}
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCheckDelegationLarge(b *testing.B) {
+	var objs []*unstructured.Unstructured
+	for _, u := range scale.World(scale.Large, 1) {
+		if u.GetKind() == "HTTPRoute" {
+			objs = append(objs, u)
+		}
+	}
+	w := dworld{routes: objs}
+	for _, u := range objs {
+		for _, p := range objects.DecodeHTTPRoute(u).ParentRefs {
+			if p.Kind != "HTTPRoute" {
+				w.roots = append(w.roots, u.GetNamespace()+"/"+u.GetName())
+				break
+			}
+		}
+	}
+	in := w.input()
+	sel := rulesets.Select(v24)
+	res := sel.Rules.Delegation(in)
+	cs := computed.CheckDelegation("kgw/kgateway", sel, in, &res)
+	b.ReportMetric(float64(len(cs)), "checks")
+	b.ReportAllocs()
+	for b.Loop() {
+		computed.CheckDelegation("kgw/kgateway", sel, in, &res)
 	}
 }
