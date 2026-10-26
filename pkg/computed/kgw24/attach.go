@@ -405,7 +405,4 @@ func sortRefs(refs []objects.Ref) []objects.Ref {
 }
 
 // compareRef orders refs by group, kind, namespace and name.
-func compareRef(a, b objects.Ref) int {
-	return cmp.Or(cmp.Compare(a.Group, b.Group), cmp.Compare(a.Kind, b.Kind),
-		cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-}
+func compareRef(a, b objects.Ref) int { return a.Compare(b) }

@@ -473,7 +473,4 @@ func compareKey(a, b ReportKey) int {
 		cmp.Compare(a.Name, b.Name), cmp.Compare(a.SectionName, b.SectionName))
 }
 
-func compareRef(a, b objects.Ref) int {
-	return cmp.Or(cmp.Compare(a.Group, b.Group), cmp.Compare(a.Kind, b.Kind),
-		cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
-}
+func compareRef(a, b objects.Ref) int { return a.Compare(b) }

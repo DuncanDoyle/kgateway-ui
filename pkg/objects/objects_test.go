@@ -108,3 +108,22 @@ func TestParentRefIdentityKeepsGroup(t *testing.T) {
 		t.Fatal("a foreign-group Gateway must not share an identity with a Gateway API Gateway")
 	}
 }
+
+// Ref.Compare orders by group, kind, namespace, then name; an earlier field decides.
+func TestRefCompare(t *testing.T) {
+	r := Ref{Group: "g", Kind: "k", Namespace: "ns", Name: "n"}
+	for _, c := range []struct {
+		o    Ref
+		want int
+	}{
+		{r, 0},
+		{Ref{Group: "h", Kind: "a", Namespace: "a", Name: "a"}, -1},
+		{Ref{Group: "g", Kind: "j", Namespace: "z", Name: "z"}, 1},
+		{Ref{Group: "g", Kind: "k", Namespace: "nt", Name: "a"}, -1},
+		{Ref{Group: "g", Kind: "k", Namespace: "ns", Name: "m"}, 1},
+	} {
+		if got := r.Compare(c.o); got != c.want {
+			t.Errorf("%+v.Compare(%+v) = %d, want %d", r, c.o, got, c.want)
+		}
+	}
+}

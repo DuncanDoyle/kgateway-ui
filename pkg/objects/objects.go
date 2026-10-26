@@ -4,6 +4,8 @@
 package objects
 
 import (
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,6 +28,21 @@ func (r Ref) String() string {
 		return r.Name
 	}
 	return r.Namespace + "/" + r.Name
+}
+
+// Compare orders r and o by group, kind, namespace and name, stopping at
+// the first field that differs.
+func (r Ref) Compare(o Ref) int {
+	if c := strings.Compare(r.Group, o.Group); c != 0 {
+		return c
+	}
+	if c := strings.Compare(r.Kind, o.Kind); c != 0 {
+		return c
+	}
+	if c := strings.Compare(r.Namespace, o.Namespace); c != 0 {
+		return c
+	}
+	return strings.Compare(r.Name, o.Name)
 }
 
 // RefOf returns the Ref of u.
