@@ -12,6 +12,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -964,6 +965,9 @@ func (b *builder) refScopes(ix *Index, n *interner) {
 	}
 	all = sortedDeps(all)
 	wild := res.Settings.WildcardNamespace
+	if wild.Known && wild.Value == "" {
+		wild.Value = install.WildcardAll // an empty value means all, as the selector reads it
+	}
 	ix.RefScope = make(map[RefKey]DepSet, len(ix.RefRows))
 	for i := range ix.DelegRows {
 		r := &ix.DelegRows[i]

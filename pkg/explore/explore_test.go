@@ -1237,3 +1237,23 @@ func TestFlagDroppedAnyVisibleRow(t *testing.T) {
 		t.Errorf("every flagging row hidden, flag shown")
 	}
 }
+
+// An empty wildcard setting means "all", as the selector reads it: a label
+// ref in namespace "all" reads every in-scope HTTPRoute.
+func TestRefScopeEmptyWildcardIsAll(t *testing.T) {
+	in := delegWorld().input(t)
+	in.Install.Settings.WildcardNamespace = install.Setting{Value: "", Known: true}
+	v := delegViews()
+	v.Delegation.Rows[0].RefAsWritten = objects.DelegationRef{Mode: objects.DelegationLabel, Namespace: install.WildcardAll, Label: "team"}
+	in.Computed = v
+	ix := Build(in)
+	scope := ix.RefScope[RefKey{dA, 0, 0}]
+	if len(scope) < 2 {
+		t.Fatalf("label scope %v", scope)
+	}
+	for _, r := range ix.Routes {
+		if isHTTPRoute(r.Ref.Group, r.Ref.Kind) && r.Ref.Namespace == "shop" && !slices.ContainsFunc(scope, func(i int32) bool { return ix.Ref(i) == r.Ref }) {
+			t.Errorf("%s missing from the label scope", r.Ref)
+		}
+	}
+}
