@@ -173,7 +173,7 @@ An empty result is an unresolved reference. No ReferenceGrant is involved. Out-o
 
 ### 5.3 Permission
 
-`ChildRouteCanAttachToParentRef` (`pkg/kgateway/utils/delegation/delegation.go` V4:20-34, V3:20-46):
+`ChildRouteCanAttachToParentRef` (`pkg/kgateway/utils/delegation/delegation.go` V4:20-31, calling `MatchingParentRef` at V4:36-56; V3:20-46):
 - a child with an empty `parentRefs` list may be selected by any parent;
 - otherwise it needs a parentRef with **explicit** `group: gateway.networking.k8s.io` and `kind: HTTPRoute` (nil does not match), the parent's name, and a namespace equal to the parent's (nil means the child's own);
 - sectionName and port are ignored.
@@ -317,7 +317,7 @@ kgateway keys a status report on (group, kind, namespace, name, sectionName) **a
 |---|---|---|
 | Top-level route, both | the parentRef as written | for every parentRef the translation reported |
 | Child with empty `parentRefs`, both | synthesized `{gateway.networking.k8s.io, HTTPRoute, P.namespace, P.name}` | yes, under the synthesized ref |
-| Child with an explicit permitting ref, 2.4 | the child's matching ref as written (`childParentRef`, `query/route.go` V4:300-310; reporter at `delegation.go` V4:81) | yes, under that ref |
+| Child with an explicit permitting ref, 2.4 | the child's first matching ref as written (`MatchingParentRef`) (`childParentRef`, `query/route.go` V4:300-310; reporter at `delegation.go` V4:81) | yes, under that ref |
 | Child with an explicit permitting ref, 2.3 | always synthesized (`query/route.go` V3:252-259; reporter at `delegation.go` V3:83-88) | **only** when some spec ref has the same key: explicit group and kind, an **explicit** namespace equal to P's, and no sectionName. A port is allowed; the entry then carries it. |
 
 **Written versus resolved (our call).** A report key is built from the parentRef **as written**, with empty strings for omitted fields (`pkg/reports/reporter.go` V4:424-450, V3:369-394). Two refs that differ only by an omitted versus an explicit namespace are therefore two keys, and two checks. The resolved identity (defaults applied) is used only to find the target object. The typed views keep both forms for spec and status refs from sub-phase 2.2 on (design §4.1).

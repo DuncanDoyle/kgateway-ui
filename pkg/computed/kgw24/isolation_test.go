@@ -38,16 +38,16 @@ func TestIsolationNote(t *testing.T) {
 	// Two empty hostnames do not precede each other either.
 	g6 := gw("infra", "empties", lis("e1", "HTTP", 80), lis("e2", "HTTP", 80))
 	// A ListenerSet with a zero Parent neither feeds nor receives notes, even on a shared port.
-	orphan := lset("infra", "orphan", computed.Accepted, lis("o1", "HTTP", 7070), named(lis("o2", "HTTP", 7070), "o.example.com"))
+	orphan := lset("infra", "orphan", computed.Accepted, lis("o1", "HTTP", 7070), withHostname(lis("o2", "HTTP", 7070), "o.example.com"))
 	orphan2 := lset("infra", "orphan2", computed.Accepted, lis("o3", "HTTP", 7070))
 	// A ListenerSet without status neither feeds p nor receives a note on q1.
 	g4 := gw("infra", "fourth", lis("p", "HTTP", 8080))
 	nostat := childOf(g4, "infra", "nostat", computed.NoStatus)
 	nostat.Listeners = append(nostat.Listeners, lis("q1", "HTTP", 8081),
-		named(lis("q2", "HTTP", 8080), "q.example.net"), named(lis("q3", "HTTP", 8081), "r.example.net"))
+		withHostname(lis("q2", "HTTP", 8080), "q.example.net"), withHostname(lis("q3", "HTTP", 8081), "r.example.net"))
 	// A listener kgateway rejected (current Accepted=False) does not feed m; a stale rejection still feeds m2.
-	g5 := gw("infra", "fifth", lis("m", "HTTP", 8080), named(lis("n", "HTTP", 8080), "n.example.net"),
-		lis("m2", "HTTP", 8081), named(lis("n2", "HTTP", 8081), "n2.example.net"))
+	g5 := gw("infra", "fifth", lis("m", "HTTP", 8080), withHostname(lis("n", "HTTP", 8080), "n.example.net"),
+		lis("m2", "HTTP", 8081), withHostname(lis("n2", "HTTP", 8081), "n2.example.net"))
 	g5.Generation = 2
 	g5.ListenerStatus = []objects.ListenerStatus{
 		{Name: "n", Conditions: []metav1.Condition{{Type: "Accepted", Status: metav1.ConditionFalse, Reason: "HostnameConflict", ObservedGeneration: 2}}},
@@ -84,8 +84,8 @@ func TestIsolationNote(t *testing.T) {
 	}
 }
 
-// named sets l's hostname.
-func named(l objects.Listener, h string) objects.Listener {
+// withHostname sets l's hostname.
+func withHostname(l objects.Listener, h string) objects.Listener {
 	l.Hostname = h
 	return l
 }
@@ -95,7 +95,7 @@ func named(l objects.Listener, h string) objects.Listener {
 // listener loses its note, and it still narrows the others.
 func TestIsolationNoteSkipsUnknownCounts(t *testing.T) {
 	sel := withFrom(lis("a", "HTTP", 8080), "Selector", map[string]string{"team": "web"})
-	g := gw("infra", "edge", sel, lis("b", "HTTP", 8080), named(lis("c", "HTTP", 8080), "c.example.com"))
+	g := gw("infra", "edge", sel, lis("b", "HTTP", 8080), withHostname(lis("c", "HTTP", 8080), "c.example.com"))
 	rt := route("HTTPRoute", "infra", "r", pref(g, ""))
 	notes := func(in computed.AttachmentInput) map[string]bool {
 		out := map[string]bool{}
