@@ -126,6 +126,25 @@ type Input struct {
 	ProxyMode proxymode.Resolver
 	// Computed are the install's computed views with their check states; nil means none.
 	Computed *computed.Views
+	// Views decodes Gateways, ListenerSets and routes; nil means objects.Direct.
+	// Its views are shared and read-only.
+	Views objects.Decoder
+}
+
+// views returns in.Views, or objects.Direct when it is unset.
+func (in Input) views() objects.Decoder {
+	if in.Views == nil {
+		return objects.Direct{}
+	}
+	return in.Views
+}
+
+// routeParents returns route u's status.parents, decoded through in.Views.
+func (in Input) routeParents(u *unstructured.Unstructured) []objects.RouteParentStatus {
+	if gvk := u.GroupVersionKind(); gvk.Group == objects.GatewayAPIGroup && gvk.Kind == "HTTPRoute" {
+		return in.views().HTTPRoute(u).Parents
+	}
+	return in.views().Route(u).Parents
 }
 
 // firstSeen returns when the grace period for u's current generation started.

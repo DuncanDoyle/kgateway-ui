@@ -252,9 +252,9 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// listeners evaluates the listener status of a Gateway or ListenerSet; both
 	// share the listener status shape. With all, every configured listener
 	// needs a status block; otherwise only present blocks are judged.
-	listeners := func(u *unstructured.Unstructured, all bool) {
+	listeners := func(u *unstructured.Unstructured, status []objects.ListenerStatus, all bool) {
 		byName := map[string]objects.ListenerStatus{}
-		for _, l := range objects.GatewayListeners(u) {
+		for _, l := range status {
 			byName[l.Name] = l
 		}
 		for _, name := range objects.GatewaySpecListeners(u) {
@@ -279,17 +279,19 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// is Accepted=False only the listener blocks present are judged.
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
-		cs := objects.Conditions(ls)
+		v := in.views().ListenerSet(ls)
+		cs := v.Conditions
 		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
 			continue
 		}
 		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "")
-		listeners(ls, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
+		listeners(ls, v.ListenerStatus, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
-		evaluate(gw, objects.ParentRef{}, objects.Conditions(gw), gatewayRequired, nil, "")
-		listeners(gw, true)
+		v := in.views().Gateway(gw)
+		evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "")
+		listeners(gw, v.ListenerStatus, true)
 	}
 	// Routes: one status block per current parentRef of this install, and per
 	// reported HTTPRoute parent, matched on the full parentRef including section name and port.
@@ -297,7 +299,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		if in.ignored(r.Obj) {
 			continue
 		}
-		status := objects.RouteParents(r.Obj)
+		status := in.routeParents(r.Obj)
 		for _, p := range slices.Concat(r.Parents, r.RouteParents) {
 			extra := "parent " + parentDesc(p)
 			var st *objects.RouteParentStatus
@@ -449,7 +451,7 @@ func (in Input) ignored(u *unstructured.Unstructured) bool {
 	if _, exp := in.experimentalKind(u); !exp {
 		return false
 	}
-	status := objects.RouteParents(u)
+	status := in.routeParents(u)
 	for _, p := range status {
 		if slices.Contains(in.Install.ControllerNames, p.ControllerName) {
 			return false
