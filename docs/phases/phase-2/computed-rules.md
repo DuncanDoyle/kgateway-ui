@@ -25,7 +25,7 @@
 | Success conditions filled in by default | `Accepted`, `ResolvedRefs` | adds `kgateway.dev/Programmed` (`pkg/reports/status.go` V4:752-780; `api/conditions/conditions.go` absent at V3) |
 | Rule replaced or dropped | `Accepted=False`, `RouteRuleReplaced`/`RouteRuleDropped` (`translator/irtranslator/route.go` V3:291-313) | `kgateway.dev/Programmed=False`, same reasons (V4:325-350) |
 | TCP or TLS route conflict | `Accepted=False/Conflicted` (`translator/listener/gateway_listener_translator.go` V3:645-656, called at :463) | `kgateway.dev/Programmed=False/Conflicted` (V4:648-660, called at :466) |
-| Old status of a dropped or deselected child | after a parent edit (deselection or matcher drop): cleared to `parents: []`, observed (D-021, items 1 and 6). After a child edit: not observed | after a parent edit: cleared to `parents: []` (`pkg/krtcollections/policy.go` V4:1150-1178), observed (D-021, items 1 and 6). After a child edit: not observed |
+| Old status of a dropped or deselected child | cleared to `parents: []` for any cause: parent edit (deselection or matcher drop) and child edit (match change, parentRefs that do not permit the parent), observed (D-021 items 1 and 6; child edits observed 2026-10-26, D-021 amendment). `ProcessHTTPRouteStatusMarkers` clears every kgateway entry that is not reported (`pkg/krtcollections/policy.go` V3:1119-1137, called from `proxy_syncer.go` V3:292-293) | the same, observed for every cause (`pkg/krtcollections/policy.go` V4:1147-1178). Cleared before the first poll (under 0.15 s) on both tags |
 | Plain-HTTP listener isolation (programming only, §4.5) | none | `translator/listener/gateway_listener_translator.go` V4:689-747 |
 
 **Selection.** The rule set follows the controller minor, as `kinds.ExperimentalOnly` does (`pkg/kinds/upstream.go:55-94`).
@@ -374,7 +374,7 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Stale status | the signal exists and is stale | `pending`, "Waiting for the controller's status" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
 | Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route, and a missing listener entry on an owned Gateway or ListenerSet (`pkg/health/checks.go:264`), is Phase 1's KGWUI-003, and the check stays `pending`. |
-| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (both sets: a drop or deselection caused by a parent edit, D-021); otherwise, including a drop caused by a child edit, `not-verified`, "The controller may keep old status". Cause: a child edit when the child's current generation was first seen after the parent's current generation, or when either time is unknown; otherwise a parent edit (our call) | where verified, when mature |
+| Unexpected status | no entry is expected and a current one exists | `disagrees` after the 30 s window, for any cause of the drop or deselection: parent edit or child edit, both sets (observed 2026-10-26, D-021 amendment). Only a `forbidden` child's leftover entry is `not-verified`, "The controller may keep old status" | when mature |
 | Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
 | Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
 
@@ -470,7 +470,7 @@ The first task of sub-phase 2.1 records, on 2.3.11 and 2.4.7, whether status is 
 3. an explicit child whose parentRef sets `sectionName`, and one that sets only `port` (§7); **answered (D-021): as §7 states, on both.**
 4. an implicit child selected by name, wildcard and label; **answered (D-021): synthesized entry for each, on both.**
 5. a hostname-bearing child whose rules all fail the fit (§5.4); **answered (D-021): no entry, on both.**
-6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4? **Answered (D-021): yes, when a parent edit causes the drop; a child-edit drop is not observed.**
+6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4? **Answered (D-021): yes, for any cause: parent edit, and child edit (observed 2026-10-26, D-021 amendment).**
 7. the two quirks of §5.4: a second delegation ref in one rule, and the same ref in two rules; **answered (D-021): both reproduce, on both.**
 8. a parent with both a Service backendRef and a delegation ref: which `ResolvedRefs` reason wins (§8.2)? **Answered (D-021): the last rule in spec order.**
 9. a child kept under one parent match and dropped under another: one entry (§8.2)? **Answered (D-021): one entry, `Accepted=True`.**
@@ -556,9 +556,8 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Computed-attached child, no entry, P current | `pending` until `max(since + 30 s, graceEnd)`, then KGWUI-012 on the child |
 | The same with P stale | stays `pending`; no KGWUI-012 |
 | Stale child entry contradicting | `pending`; never KGWUI-012 |
-| Matcher-dropped child (parent edit) with a current entry left, both sets | `disagrees` after 30 s |
-| Matcher-dropped child (child edit) with a current entry left | `not-verified`; no KGWUI-012 |
-| Drop with an unknown first-seen time for child or parent, current entry left | treated as a child edit: `not-verified`; no KGWUI-012 |
+| Matcher-dropped child (parent edit or child edit) with a current entry left, both sets | `disagrees` after 30 s; KGWUI-012 (observed 2026-10-26, D-021 amendment) |
+| Drop with an unknown first-seen time for child or parent, current entry left | the same: `disagrees` after 30 s; the cause is not needed |
 | Forbidden child with a current entry left | `not-verified` |
 | Effective matcher | always `not-verified` |
 

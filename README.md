@@ -172,7 +172,7 @@ Counts and colours change on clusters that use route delegation:
 
 - A delegated child route with a controller status entry for its parent HTTPRoute now counts in the HTTPRoute tile and in install health. Its failures can turn the install yellow or red.
 - A route that names an HTTPRoute parent but has no status entry for it gets KGWUI-011: info while the controller may still be processing it, a warning after that. On kgateway 2.3, a child ref that omits the namespace or sets `sectionName` gets no status entry, so it always gets this warning.
-- Known limitation: after a child edit drops its parent, the child keeps the controller's stale status entry. It stays owned and counted, and gets KGWUI-003 until the controller updates its status.
+- After a child edit drops its parent, the controller clears the child's old status entry within a second. For that moment the child may still count and show KGWUI-003.
 - The KGWUI-004 detail names the target's kind, so a route targeting a ListenerSet reads "targets ListenerSet `<ns/name>`".
 
 For downstream builds:
