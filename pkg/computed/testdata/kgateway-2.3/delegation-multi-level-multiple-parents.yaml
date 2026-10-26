@@ -1,0 +1,241 @@
+# Input: translator/gateway/testutils/inputs/delegation/multi_level_multiple_parents.yaml@v2.3.11 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. A diamond: two inheriting products both
+# delegate to httpbin, which gets one entry per parent and is merged to /api1 and /api2.
+provenance: translator/gateway/testutils/outputs/delegation/multi_level_multiple_parents.yaml@v2.3.11
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces:
+  default: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 1
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: api-example-com
+      namespace: infra
+      labels:
+        app: apis
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - api.example.com
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /api1
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: apiproduct-1
+              namespace: default
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /api2
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: apiproduct-2
+              namespace: default
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: apiproduct-1
+      namespace: default
+      labels:
+        app: apis
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          filters:
+            - type: URLRewrite
+              urlRewrite:
+                path:
+                  type: ReplacePrefixMatch
+                  replacePrefixMatch: /
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: httpbin
+              namespace: default
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: api-example-com
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: apiproduct-2
+      namespace: default
+      labels:
+        app: apis
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          filters:
+            - type: URLRewrite
+              urlRewrite:
+                path:
+                  type: ReplacePrefixMatch
+                  replacePrefixMatch: /
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: httpbin
+              namespace: default
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: api-example-com
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: httpbin
+      namespace: default
+      labels:
+        app: apis
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          backendRefs:
+            - name: httpbin
+              namespace: default
+              port: 8000
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: apiproduct-1
+            namespace: default
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: apiproduct-2
+            namespace: default
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/api-example-com #0": {outcome: accepted}
+  rows:
+    infra/api-example-com 0.0 default/apiproduct-1: {outcome: attached}
+    infra/api-example-com 1.0 default/apiproduct-2: {outcome: attached}
+    default/apiproduct-1 0.0 default/httpbin: {outcome: attached}
+    default/apiproduct-2 0.0 default/httpbin: {outcome: attached}
+  entries:
+    "default/apiproduct-1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: api-example-com, namespace: infra}": Accepted
+    "default/apiproduct-2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: api-example-com, namespace: infra}": Accepted
+    "default/httpbin {group: gateway.networking.k8s.io, kind: HTTPRoute, name: apiproduct-1, namespace: default}": Accepted
+    "default/httpbin {group: gateway.networking.k8s.io, kind: HTTPRoute, name: apiproduct-2, namespace: default}": Accepted
+  effective:
+    default/apiproduct-1 <- infra/api-example-com: {contexts: [r0 PathPrefix /api1]}
+    default/apiproduct-2 <- infra/api-example-com: {contexts: [r0 PathPrefix /api2]}
+    default/httpbin <- default/apiproduct-1: {contexts: [r0 PathPrefix /api1]}
+    default/httpbin <- default/apiproduct-2: {contexts: [r0 PathPrefix /api2]}

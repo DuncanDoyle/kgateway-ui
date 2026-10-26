@@ -1,0 +1,54 @@
+# Permission (rules §5.3): no parentRefs and an explicit ref by name are permitted; a ref to
+# another parent, and refs naming r without an explicit group or kind, are forbidden.
+# The ref without a kind defaults to a Gateway named r, which does not exist.
+provenance: computed-rules §5.3, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, kids: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /p}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: kids}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: empty, namespace: kids},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /p/empty}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: by-name, namespace: kids},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}],
+    rules: [{matches: [{path: {type: PathPrefix, value: /p/by-name}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: other, namespace: kids},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: other, namespace: infra}],
+    rules: [{matches: [{path: {type: PathPrefix, value: /p/other}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: no-group, namespace: kids},
+  spec: {parentRefs: [{kind: HTTPRoute, name: r, namespace: infra}],
+    rules: [{matches: [{path: {type: PathPrefix, value: /p/no-group}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: no-kind, namespace: kids},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, name: r, namespace: infra}],
+    rules: [{matches: [{path: {type: PathPrefix, value: /p/no-kind}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 kids/by-name: {outcome: attached}
+    infra/r 0.0 kids/empty: {outcome: attached}
+    infra/r 0.0 kids/no-group: {outcome: forbidden}
+    infra/r 0.0 kids/no-kind: {outcome: forbidden}
+    infra/r 0.0 kids/other: {outcome: forbidden}
+  entries:
+    "kids/by-name {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "kids/empty {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    kids/by-name <- infra/r: {contexts: [r0 PathPrefix /p/by-name]}
+    kids/empty <- infra/r: {contexts: [r0 PathPrefix /p/empty]}

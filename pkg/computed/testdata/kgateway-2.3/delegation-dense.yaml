@@ -1,0 +1,88 @@
+# Dense selection, cut by the edge cap (rules §5.7, bounds Edges 7): edges are charged per
+# selection in route order, so r (3), p1 (5) and p2 (7) are selected and p3's ref, which would
+# pass the cap, is too-large and opens no row. With the edge cap hit every aggregate is
+# incomplete, so attached rows say "Some paths not computed". Entries of p1-p3 are hand-written.
+provenance: computed-rules §5.7, §8.5, §11.2
+ruleOnly: true
+controllerVersion: v2.3.11
+bounds: {Edges: 7}
+namespaces: {infra: {}, mid: {}, leaf: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /d}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: mid}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c1, namespace: leaf},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /d/c1}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c2, namespace: leaf},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /d/c2}}]}]}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p1, namespace: mid}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /d}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: leaf}]
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p2, namespace: mid}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /d}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: leaf}]
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p3, namespace: mid}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /d}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: leaf}]
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 mid/p1: {outcome: attached, someNotComputed: true}
+    infra/r 0.0 mid/p2: {outcome: attached, someNotComputed: true}
+    infra/r 0.0 mid/p3: {outcome: attached, someNotComputed: true}
+    mid/p1 0.0 leaf/c1: {outcome: attached, someNotComputed: true}
+    mid/p1 0.0 leaf/c2: {outcome: attached, someNotComputed: true}
+    mid/p2 0.0 leaf/c1: {outcome: attached, someNotComputed: true}
+    mid/p2 0.0 leaf/c2: {outcome: attached, someNotComputed: true}
+  entries:
+    "mid/p1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "mid/p2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "mid/p3 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "leaf/c1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p1, namespace: mid}": Accepted
+    "leaf/c2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p1, namespace: mid}": Accepted
+    "leaf/c1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p2, namespace: mid}": Accepted
+    "leaf/c2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p2, namespace: mid}": Accepted
+  effective:
+    mid/p1 <- infra/r: {contexts: [r0 PathPrefix /d]}
+    mid/p2 <- infra/r: {contexts: [r0 PathPrefix /d]}
+    mid/p3 <- infra/r: {contexts: [r0 PathPrefix /d]}
+    leaf/c1 <- mid/p1: {contexts: [r0 PathPrefix /d/c1]}
+    leaf/c2 <- mid/p1: {contexts: [r0 PathPrefix /d/c2]}
+    leaf/c1 <- mid/p2: {contexts: [r0 PathPrefix /d/c1]}
+    leaf/c2 <- mid/p2: {contexts: [r0 PathPrefix /d/c2]}
+  cap: edges
+  uncertain: [mid/p3 0.0 too-large]
+  incomplete: [infra/r, leaf/c1, leaf/c2, mid/p1, mid/p2, mid/p3]

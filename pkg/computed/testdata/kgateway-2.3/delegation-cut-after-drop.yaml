@@ -1,0 +1,56 @@
+# A cut after a context that drops c, before one that would attach it (rules §5.5, §8.5,
+# bounds Contexts 1): the row is unknown, too-large, never dropped, and c is incomplete, so no
+# entry is expected or ruled out. The /x context has no valid child: ResolvedRefs=False on r.
+# View A status is hand-written to agree (rules §8.3); c has no status.
+provenance: computed-rules §5.5, §8.5, §11.2
+controllerVersion: v2.3.11
+bounds: {Contexts: 1}
+namespaces: {infra: {}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+  status:
+    listeners:
+    - name: http
+      attachedRoutes: 1
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /x}}, {path: {type: PathPrefix, value: /a}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/c}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  checks:
+    Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
+    "HTTPRoute infra/r #0": {state: checked, coverage: [status-compatible]}
+  kgwui012: []
+  rows:
+    infra/r 0.0 apps/c: {outcome: unknown, unknown: too-large, reason: path-prefix, contextsTruncated: true}
+  signals:
+    "infra/r {name: gw}": [BackendNotFound]
+  effective:
+    apps/c <- infra/r: {contexts: [r0 dropped path-prefix], contextsTruncated: true}
+  cap: contexts
+  uncertain: [infra/r 0.0 too-large]
+  incomplete: [apps/c, infra/r]

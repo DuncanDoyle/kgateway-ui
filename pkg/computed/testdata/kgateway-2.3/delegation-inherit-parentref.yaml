@@ -1,0 +1,158 @@
+# Input: translator/gateway/testutils/inputs/delegation/inherit_parentref.yaml@v2.3.11 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. Both children inherit the parent's match. route-a names
+# another parent, so it is forbidden; route-b is merged into Exact /a/bar with the parent's header
+# and query param and its own POST, as in the output's Routes.
+provenance: translator/gateway/testutils/outputs/delegation/inherit_parentref.yaml@v2.3.11
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces:
+  a: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 1
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: example-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - example.com
+      rules:
+        - backendRefs:
+            - name: example-svc
+              port: 80
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a
+              headers:
+                - type: Exact
+                  name: header1
+                  value: val1
+              queryParams:
+                - type: Exact
+                  name: query1
+                  value: val1
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: a
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-a
+      namespace: a
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      parentRefs:
+        - name: invalid
+          namespace: infra
+          group: gateway.networking.k8s.io
+          kind: HTTPRoute
+      rules:
+        - matches:
+            - path:
+                type: Exact
+                value: /foo
+              method: PUT
+          backendRefs:
+            - name: svc-a
+              port: 8080
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-b
+      namespace: a
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      parentRefs:
+        - name: example-route
+          namespace: infra
+          group: gateway.networking.k8s.io
+          kind: HTTPRoute
+      rules:
+        - matches:
+            - path:
+                type: Exact
+                value: /bar
+              method: POST
+          backendRefs:
+            - name: svc-a
+              port: 8080
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/example-route #0": {outcome: accepted}
+  rows:
+    infra/example-route 1.0 a/route-a: {outcome: forbidden}
+    infra/example-route 1.0 a/route-b: {outcome: attached}
+  entries:
+    "a/route-b {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+  effective:
+    a/route-b <- infra/example-route: {contexts: [r0 Exact /a/bar h:header1=val1 q:query1=val1 m:POST]}

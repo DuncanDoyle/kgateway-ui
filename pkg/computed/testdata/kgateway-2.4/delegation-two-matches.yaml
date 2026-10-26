@@ -1,0 +1,38 @@
+# One child, two matches of one rule (rules §5.5): c attaches under /api and is dropped under
+# /v2, so the row is partial, with the dropped context's clause, and an entry is expected.
+# The /v2 context has no valid child, so r gets ResolvedRefs=False/BackendNotFound (D-021 item 9).
+provenance: computed-rules §5.5, §11.2; e2e
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /api}}, {path: {type: PathPrefix, value: /v2}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /api/x}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c: {outcome: partial, reason: path-prefix}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  signals:
+    "infra/r {name: gw}": [BackendNotFound]
+  effective:
+    apps/c <- infra/r: {contexts: [r0 PathPrefix /api/x, r0 dropped path-prefix]}

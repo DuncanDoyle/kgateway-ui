@@ -1,0 +1,258 @@
+# Input: translator/gateway/testutils/inputs/delegation/relative_paths.yaml@v2.3.11 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. Two parents, two inheriting children. route-a's paths
+# are joined under /a and /x, keeping their types; under foo-route the parent's GET replaces
+# route-a's PUT. route-b omits matches and gets the parent's match.
+provenance: translator/gateway/testutils/outputs/delegation/relative_paths.yaml@v2.3.11
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces:
+  a: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 2
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: example-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - example.com
+      rules:
+        - backendRefs:
+            - name: example-svc
+              port: 80
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: a
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: foo-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - foo.com
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /x
+              headers:
+                - type: Exact
+                  name: header1
+                  value: val1
+              queryParams:
+                - type: Exact
+                  name: query1
+                  value: val1
+              method: GET
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: a
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-a
+      namespace: a
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: Exact
+                value: /a/1
+              method: PUT
+          backendRefs:
+            - name: svc-a
+              port: 8080
+        - matches:
+            - path:
+                type: RegularExpression
+                value: /a/2/.*
+          backendRefs:
+            - name: svc-a
+              port: 8080
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a/3
+              headers:
+                - type: Exact
+                  name: headerA
+                  value: valA
+              queryParams:
+                - type: Exact
+                  name: queryA
+                  value: valA
+          backendRefs:
+            - name: svc-a
+              port: 8080
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: foo-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-b
+      namespace: a
+      annotations:
+        delegation.kgateway.dev/inherit-parent-matcher: "true"
+    spec:
+      rules:
+        - backendRefs:
+            - name: svc-b
+              port: 8090
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: foo-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 2}
+  parentRefs:
+    "HTTPRoute infra/example-route #0": {outcome: accepted}
+    "HTTPRoute infra/foo-route #0": {outcome: accepted}
+  rows:
+    infra/example-route 1.0 a/route-a: {outcome: attached}
+    infra/example-route 1.0 a/route-b: {outcome: attached}
+    infra/foo-route 0.0 a/route-a: {outcome: attached}
+    infra/foo-route 0.0 a/route-b: {outcome: attached}
+  entries:
+    "a/route-a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+    "a/route-a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: foo-route, namespace: infra}": Accepted
+    "a/route-b {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+    "a/route-b {group: gateway.networking.k8s.io, kind: HTTPRoute, name: foo-route, namespace: infra}": Accepted
+  effective:
+    a/route-a <- infra/example-route:
+      contexts: ["r0 Exact /a/a/1 m:PUT; r1 RegularExpression /a/a/2/.*; r2 PathPrefix /a/a/3 h:headerA=valA q:queryA=valA"]
+    a/route-a <- infra/foo-route:
+      contexts: ["r0 Exact /x/a/1 h:header1=val1 q:query1=val1 m:GET; r1 RegularExpression /x/a/2/.* h:header1=val1 q:query1=val1 m:GET; r2 PathPrefix /x/a/3 h:header1=val1 h:headerA=valA q:query1=val1 q:queryA=valA m:GET"]
+    a/route-b <- infra/example-route: {contexts: [r0 PathPrefix /a]}
+    a/route-b <- infra/foo-route: {contexts: [r0 PathPrefix /x h:header1=val1 q:query1=val1 m:GET]}

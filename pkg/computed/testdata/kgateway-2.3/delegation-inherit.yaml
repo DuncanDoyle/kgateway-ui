@@ -1,0 +1,62 @@
+# Inherit mode, merge (rules §6): path.Join cleans (Exact / gives Exact /api; /v1/../v2/ gives
+# /api/v2), the child's path type is kept, a match with no path takes the parent's path,
+# headers and query params are united by name with the parent winning a conflict, the parent's
+# method replaces the child's, and an explicit empty list takes the parent's match.
+provenance: computed-rules §6, §11.2
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces: {infra: {}, inh: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /api}, headers: [{name: h, value: p}], queryParams: [{name: q, value: p}], method: GET}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: inh}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: join, namespace: inh, annotations: {delegation.kgateway.dev/inherit-parent-matcher: "true"}},
+  spec: {rules: [{matches: [{path: {type: Exact, value: /}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: dots, namespace: inh, annotations: {delegation.kgateway.dev/inherit-parent-matcher: "true"}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /v1/../v2/}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: no-path, namespace: inh, annotations: {delegation.kgateway.dev/inherit-parent-matcher: "true"}},
+  spec: {rules: [{matches: [{headers: [{name: x, value: "1"}]}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: union, namespace: inh, annotations: {delegation.kgateway.dev/inherit-parent-matcher: "true"}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /u}, headers: [{name: x, value: "1"}, {name: h, value: c}], queryParams: [{name: qy, value: "1"}, {name: q, value: c}], method: POST}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: empty, namespace: inh, annotations: {delegation.kgateway.dev/inherit-parent-matcher: "true"}},
+  spec: {rules: [{matches: []}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 inh/dots: {outcome: attached}
+    infra/r 0.0 inh/empty: {outcome: attached}
+    infra/r 0.0 inh/join: {outcome: attached}
+    infra/r 0.0 inh/no-path: {outcome: attached}
+    infra/r 0.0 inh/union: {outcome: attached}
+  entries:
+    "inh/dots {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "inh/empty {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "inh/join {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "inh/no-path {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "inh/union {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    inh/dots <- infra/r: {contexts: [r0 PathPrefix /api/v2 h:h=p q:q=p m:GET]}
+    inh/empty <- infra/r: {contexts: [r0 PathPrefix /api h:h=p q:q=p m:GET]}
+    inh/join <- infra/r: {contexts: [r0 Exact /api h:h=p q:q=p m:GET]}
+    inh/no-path <- infra/r: {contexts: [r0 PathPrefix /api h:h=p h:x=1 q:q=p m:GET]}
+    inh/union <- infra/r: {contexts: [r0 PathPrefix /api/u h:h=p h:x=1 q:q=p q:qy=1 m:GET]}

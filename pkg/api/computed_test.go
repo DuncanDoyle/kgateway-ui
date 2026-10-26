@@ -567,6 +567,15 @@ type matrixExpect struct {
 	Members    *map[string][]string      `json:"members"`
 	Checks     map[string]matrixCheck    `json:"checks"`
 	KGWUI012   *[]string                 `json:"kgwui012"`
+	// Views B and C (pkg/computed's golden); not served through the handlers yet.
+	Rows               json.RawMessage `json:"rows"`
+	Entries            json.RawMessage `json:"entries"`
+	Signals            json.RawMessage `json:"signals"`
+	Effective          json.RawMessage `json:"effective"`
+	EffectiveTruncated json.RawMessage `json:"effectiveTruncated"`
+	Incomplete         json.RawMessage `json:"incomplete"`
+	Uncertain          json.RawMessage `json:"uncertain"`
+	Cap                json.RawMessage `json:"cap"`
 }
 
 // decodeMatrix decodes expect strictly; every listener and parentRef key needs a check.
@@ -705,8 +714,9 @@ func TestViewAMatrixThroughAPI(t *testing.T) {
 			checkMatrix(t, h.srv, rules, c, want, false)
 		})
 	}
-	// Every fixture of rules §11.1 and §11.4 (view A) that is not rule-only.
-	if want := 41; ran != want {
+	// Every fixture that is not rule-only: rules §11.1 and §11.4 (view A),
+	// and three of §11.2 per rule set, whose view A is checked here.
+	if want := 47; ran != want {
 		t.Errorf("ran %d cases, want %d", ran, want)
 	}
 }

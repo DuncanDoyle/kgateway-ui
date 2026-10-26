@@ -1,0 +1,73 @@
+# Selection modes (rules §5.2): a name ref, a wildcard ref, a label ref in one namespace (l2's
+# label differs, so it is not selected) and a label ref in the wildcard namespace under the
+# default setting, which selects that label in every namespace. Children have no parentRefs.
+provenance: computed-rules §5.2, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, apps: {}, wild: {}, lab: {}, east: {}, west: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /n}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /w}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: wild}]
+    - matches: [{path: {type: PathPrefix, value: /l}}]
+      backendRefs: [{group: delegation.kgateway.dev, kind: label, name: team, namespace: lab}]
+    - matches: [{path: {type: PathPrefix, value: /all}}]
+      backendRefs: [{group: delegation.kgateway.dev, kind: label, name: shared, namespace: all}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /n/c}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: w1, namespace: wild},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /w/1}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: w2, namespace: wild},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /w/2}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: l1, namespace: lab, labels: {delegation.kgateway.dev/label: team}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /l/1}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: l2, namespace: lab, labels: {delegation.kgateway.dev/label: other}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /l/2}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: s1, namespace: east, labels: {delegation.kgateway.dev/label: shared}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /all/1}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: s2, namespace: west, labels: {delegation.kgateway.dev/label: shared}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /all/2}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c: {outcome: attached}
+    infra/r 1.0 wild/w1: {outcome: attached}
+    infra/r 1.0 wild/w2: {outcome: attached}
+    infra/r 2.0 lab/l1: {outcome: attached}
+    infra/r 3.0 east/s1: {outcome: attached}
+    infra/r 3.0 west/s2: {outcome: attached}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "wild/w1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "wild/w2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "lab/l1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "east/s1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "west/s2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    apps/c <- infra/r: {contexts: [r0 PathPrefix /n/c]}
+    wild/w1 <- infra/r: {contexts: [r0 PathPrefix /w/1]}
+    wild/w2 <- infra/r: {contexts: [r0 PathPrefix /w/2]}
+    lab/l1 <- infra/r: {contexts: [r0 PathPrefix /l/1]}
+    east/s1 <- infra/r: {contexts: [r0 PathPrefix /all/1]}
+    west/s2 <- infra/r: {contexts: [r0 PathPrefix /all/2]}

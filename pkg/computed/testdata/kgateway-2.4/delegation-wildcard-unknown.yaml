@@ -1,0 +1,54 @@
+# The wildcard namespace setting from valueFrom (rules §3.3, §5.2, §8.5): the label ref is
+# setting-unknown, selects nothing and opens no row. Every route with that label is a possible
+# child, so it and what it reaches (deep/c2) are incomplete; so are r and apps/c, which stays
+# attached with "Some paths not computed" (rules §5.5).
+provenance: computed-rules §3.3, §5.2, §8.5, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+settings: {DELEGATION_WILDCARD_NAMESPACE: <valueFrom>}
+namespaces: {infra: {}, apps: {}, lab: {}, east: {}, deep: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /w}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /l}}]
+      backendRefs: [{group: delegation.kgateway.dev, kind: label, name: shared, namespace: lab}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /w/c}}]}]}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: s1, namespace: lab, labels: {delegation.kgateway.dev/label: shared}}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /l/1}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c2, namespace: deep}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: s2, namespace: east, labels: {delegation.kgateway.dev/label: shared}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /l/2}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c2, namespace: deep},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /l/1/c2}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c: {outcome: attached, someNotComputed: true}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    apps/c <- infra/r: {contexts: [r0 PathPrefix /w/c]}
+  uncertain: [east/s2 possible setting-unknown, infra/r 1.0 setting-unknown, lab/s1 possible setting-unknown]
+  incomplete: [apps/c, deep/c2, east/s2, infra/r, lab/s1]

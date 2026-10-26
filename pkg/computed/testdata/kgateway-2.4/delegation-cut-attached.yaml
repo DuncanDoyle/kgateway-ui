@@ -1,0 +1,41 @@
+# A cut after an attached context (rules §5.5, §5.7, bounds Contexts 1): c attaches under /a,
+# then the contexts cap cuts /x. The row stays attached with "Some paths not computed" and an
+# entry is expected. The cut context is counted, never retained, so the row and its edge are
+# contextsTruncated (addCounted in both rule sets).
+provenance: computed-rules §5.5, §5.7, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+bounds: {Contexts: 1}
+namespaces: {infra: {}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /a}}, {path: {type: PathPrefix, value: /x}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/c}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c: {outcome: attached, someNotComputed: true, contextsTruncated: true}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    apps/c <- infra/r: {contexts: [r0 PathPrefix /a/c], contextsTruncated: true}
+  cap: contexts
+  uncertain: [infra/r 0.0 too-large]
+  incomplete: [apps/c, infra/r]

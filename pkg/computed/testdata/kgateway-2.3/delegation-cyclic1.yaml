@@ -1,0 +1,130 @@
+# Input: translator/gateway/testutils/inputs/delegation/cyclic1.yaml@v2.3.11 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. Child route-a delegates /a/b to itself: that ref is a cycle,
+# so route-a gets ResolvedRefs=False/RefNotPermitted and /a/b is a 500; /a/1 is in the Routes.
+provenance: translator/gateway/testutils/outputs/delegation/cyclic1.yaml@v2.3.11
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces:
+  a: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 1
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: example-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - example.com
+      rules:
+        - backendRefs:
+            - name: example-svc
+              port: 80
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: a
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-a
+      namespace: a
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a/1
+          backendRefs:
+            - name: svc-a
+              port: 8080
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a/b
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: route-a
+              namespace: a
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: ResolvedRefs
+              status: "False"
+              reason: RefNotPermitted
+              observedGeneration: 1
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/example-route #0": {outcome: accepted}
+  rows:
+    infra/example-route 1.0 a/route-a: {outcome: attached}
+    a/route-a 1.0 a/route-a: {outcome: cycle}
+  entries:
+    "a/route-a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+  signals:
+    "a/route-a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": [RefNotPermitted]
+  effective:
+    a/route-a <- infra/example-route: {contexts: [r0 PathPrefix /a/1; r1 PathPrefix /a/b]}

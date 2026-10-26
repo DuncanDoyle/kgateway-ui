@@ -1,0 +1,105 @@
+# Input: translator/gateway/testutils/inputs/delegation/basic_parentref_mismatch.yaml@v2.4.7 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. Child route-a names another parent, so it is
+# forbidden: no entry, no /a/1 in the output's Routes, and the parent's ref under /a has no valid
+# child (ResolvedRefs=False/BackendNotFound).
+provenance: translator/gateway/testutils/outputs/delegation/basic_parentref_mismatch.yaml@v2.4.7
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces:
+  a: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 1
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: example-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - example.com
+      rules:
+        - backendRefs:
+            - name: example-svc
+              port: 80
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: a
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: ResolvedRefs
+              status: "False"
+              reason: BackendNotFound
+              observedGeneration: 1
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-a
+      namespace: a
+    spec:
+      parentRefs:
+        - name: invalid
+          namespace: infra
+          group: gateway.networking.k8s.io
+          kind: HTTPRoute
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a/1
+          backendRefs:
+            - name: svc-a
+              port: 8080
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/example-route #0": {outcome: accepted}
+  rows:
+    infra/example-route 1.0 a/route-a: {outcome: forbidden}
+  signals:
+    "infra/example-route {name: example-gateway}": [BackendNotFound]

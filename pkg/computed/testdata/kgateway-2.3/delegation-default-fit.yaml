@@ -1,0 +1,87 @@
+# The default-mode fit, clause by clause (rules §6), one child per rule of r: an Exact parent
+# fails every child (path-type); /apiv2 fits /api as a raw prefix; the child's path type is not
+# checked; omitted matches default to / (default-slash), or report the clause they fail
+# (path-type, header); missing header, query param and method; an explicit empty list
+# (no-matches). Each dropped child leaves its context without a valid child, so r gets
+# ResolvedRefs=False/BackendNotFound. Every case also checks that each effective context is a
+# retained context of its row: the matcher shown is the one the traversal used (rules §5.7).
+provenance: computed-rules §6, §11.2
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces: {infra: {}, fit: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - {matches: [{path: {type: Exact, value: /e}}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: path-type, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /api}}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: raw-prefix, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /api}}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: regex-child, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /api}}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: omitted, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /h}, headers: [{name: h, value: "1"}]}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: header, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /q}, queryParams: [{name: q, value: "1"}]}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: query, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /m}, method: GET}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: method, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /n}}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: empty, namespace: fit}]}
+    - {matches: [{path: {type: PathPrefix, value: /}, headers: [{name: h, value: "1"}]}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: omitted-header, namespace: fit}]}
+    - {matches: [{path: {type: Exact, value: /x}}], backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: omitted-exact, namespace: fit}]}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: path-type, namespace: fit},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /e/x}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: raw-prefix, namespace: fit},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /apiv2}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: regex-child, namespace: fit},
+  spec: {rules: [{matches: [{path: {type: RegularExpression, value: /api/.*}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: omitted, namespace: fit},
+  spec: {rules: [{backendRefs: [{name: svc, port: 80}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: header, namespace: fit},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /h/x}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: query, namespace: fit},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /q/x}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: method, namespace: fit},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /m/x}, method: POST}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: empty, namespace: fit},
+  spec: {rules: [{matches: []}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: omitted-header, namespace: fit},
+  spec: {rules: [{backendRefs: [{name: svc, port: 80}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: omitted-exact, namespace: fit},
+  spec: {rules: [{backendRefs: [{name: svc, port: 80}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 fit/path-type: {outcome: dropped, reason: path-type}
+    infra/r 1.0 fit/raw-prefix: {outcome: attached}
+    infra/r 2.0 fit/regex-child: {outcome: attached}
+    infra/r 3.0 fit/omitted: {outcome: dropped, reason: default-slash}
+    infra/r 4.0 fit/header: {outcome: dropped, reason: header}
+    infra/r 5.0 fit/query: {outcome: dropped, reason: query}
+    infra/r 6.0 fit/method: {outcome: dropped, reason: method}
+    infra/r 7.0 fit/empty: {outcome: dropped, reason: no-matches}
+    infra/r 8.0 fit/omitted-header: {outcome: dropped, reason: header}
+    infra/r 9.0 fit/omitted-exact: {outcome: dropped, reason: path-type}
+  entries:
+    "fit/raw-prefix {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "fit/regex-child {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  signals:
+    "infra/r {name: gw}": [BackendNotFound]
+  effective:
+    fit/path-type <- infra/r: {contexts: [r0 dropped path-type]}
+    fit/raw-prefix <- infra/r: {contexts: [r0 PathPrefix /apiv2]}
+    fit/regex-child <- infra/r: {contexts: [r0 RegularExpression /api/.*]}
+    fit/omitted <- infra/r: {contexts: [r0 dropped default-slash]}
+    fit/header <- infra/r: {contexts: [r0 dropped header]}
+    fit/query <- infra/r: {contexts: [r0 dropped query]}
+    fit/method <- infra/r: {contexts: [r0 dropped method]}
+    fit/empty <- infra/r: {contexts: [r0 dropped no-matches]}
+    fit/omitted-header <- infra/r: {contexts: [r0 dropped header]}
+    fit/omitted-exact <- infra/r: {contexts: [r0 dropped path-type]}

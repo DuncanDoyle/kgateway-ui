@@ -1,0 +1,66 @@
+# The two quirks of rules §5.4, as observed in D-021 item 7. Quirk 1: rule 0's second ref gets
+# both c7a and c7b, so c7a has two rows with one evaluation. Quirk 2: rule 2's refs store
+# [c7d, c7c] under c7c's key, overwriting rule 1's, so c7d attaches under /q2, a rule that never
+# names it. Under /q3, c7d's own ref has no valid child: ResolvedRefs=False/BackendNotFound.
+provenance: computed-rules §5.4, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, shop: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /q1}}]
+      backendRefs:
+      - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7a, namespace: shop}
+      - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7b, namespace: shop}
+    - matches: [{path: {type: PathPrefix, value: /q2}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7c, namespace: shop}]
+    - matches: [{path: {type: PathPrefix, value: /q3}}]
+      backendRefs:
+      - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7d, namespace: shop}
+      - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: c7c, namespace: shop}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c7a, namespace: shop},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /q1/a}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c7b, namespace: shop},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /q1/b}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c7c, namespace: shop},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /q2/c}}, {path: {type: PathPrefix, value: /q3/c}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c7d, namespace: shop},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /q2/d}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 shop/c7a: {outcome: attached}
+    infra/r 0.1 shop/c7a: {outcome: attached}
+    infra/r 0.1 shop/c7b: {outcome: attached}
+    infra/r 1.0 shop/c7c: {outcome: attached}
+    infra/r 1.0 shop/c7d: {outcome: attached}
+    infra/r 2.0 shop/c7d: {outcome: dropped, reason: path-prefix}
+    infra/r 2.1 shop/c7c: {outcome: attached}
+    infra/r 2.1 shop/c7d: {outcome: dropped, reason: path-prefix}
+  entries:
+    "shop/c7a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "shop/c7b {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "shop/c7c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "shop/c7d {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  signals:
+    "infra/r {name: gw}": [BackendNotFound]
+  effective:
+    shop/c7a <- infra/r: {contexts: [r0 PathPrefix /q1/a]}
+    shop/c7b <- infra/r: {contexts: [r0 PathPrefix /q1/b]}
+    shop/c7c <- infra/r: {contexts: [r0 PathPrefix /q2/c, r0 PathPrefix /q3/c]}
+    shop/c7d <- infra/r: {contexts: [r0 PathPrefix /q2/d, r0 dropped path-prefix]}

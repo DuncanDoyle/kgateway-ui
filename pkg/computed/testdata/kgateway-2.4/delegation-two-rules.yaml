@@ -1,0 +1,40 @@
+# One child under two rules of r (rules §5.5): rule 0 (/x) drops c and rule 1 (/api) attaches
+# it. Two rows with their own identities, one entry. Rule 0's context has no valid child.
+provenance: computed-rules §5.5, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /x}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /api}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /api/c}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c: {outcome: dropped, reason: path-prefix}
+    infra/r 1.0 apps/c: {outcome: attached}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  signals:
+    "infra/r {name: gw}": [BackendNotFound]
+  effective:
+    apps/c <- infra/r: {contexts: [r0 dropped path-prefix, r0 PathPrefix /api/c]}
