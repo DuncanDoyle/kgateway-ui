@@ -63,6 +63,7 @@ it("keeps the public export surface", () => {
         "stateLabel",
         "supportsFilter",
         "useCapabilities",
+        "useDelegation",
         "useGatewayDetail",
         "useGateways",
         "useHealth",

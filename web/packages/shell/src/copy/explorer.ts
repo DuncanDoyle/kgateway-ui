@@ -77,6 +77,11 @@ export const routeStateCopy = {
   "no-parent": "No parent", // S18
 };
 
+/** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
+export const routeStateDelegationCopy = {
+  dropped: "Dropped by a parent route", // S189 draft
+};
+
 /** How a parent took a route. */
 export const attachmentCopy = {
   accepted: "Accepted", // S12
@@ -113,6 +118,7 @@ export const detailCopy = {
   bannerFinding: "a finding of this install names it.", // S95
   bannerRefersTo: "refers to it.",
   bannerObject: "an object of this install refers to it.",
+  bannerSelected: "selects it through a delegation ref.", // S188 draft
   backendLookup: "Routes that send traffic here", // S96 (fixed)
 };
 
@@ -242,6 +248,8 @@ export const computedCopy = {
     "section-and-port": "section name and port", // S116
     "hostname-intersection": "hostname intersection", // S117
     "listener-count": "routes per listener", // S118
+    delegation: "delegation", // S190 draft
+    "effective-matchers": "effective matches", // S191 draft
   } as Record<string, string>,
   coverage: {
     "count-agrees": "Count agrees with the controller", // S119
@@ -306,4 +314,56 @@ export const viewACopy = {
     disagrees: "UI disagrees with the controller", // S157
     "listener-unknown": "Unknown listener", // S158
   },
+};
+
+// region Views B and C on pages (2.4). S188–S230 are drafts; Task 67 runs the wording pass.
+export const delegationCopy = {
+  tab: "Delegation", // S192 draft
+  outcomeGroup: "Outcome", // S193 draft
+  ruleFilter: "Rule", // S194 draft
+  refFilter: "Ref", // S195 draft
+  allRules: "All rules", // S196 draft
+  allRefs: "All refs", // S197 draft
+  refTitle: (rule: number, ref: number) => `Rule ${rule}, ref ${ref}`, // S198 draft
+  toggleRows: (open: boolean) => (open ? "Hide rows" : "Show rows"), // S199 draft
+  noRefs: "This route has no delegation refs.", // S200 draft
+  noRows: "No rows for this ref.", // S201 draft
+  noRowsFiltered: "No rows match these filters.", // S202 draft
+  outcomes: {
+    attached: "Attached", // S203 draft
+    partial: "Partly attached", // S204 draft
+    dropped: "Dropped", // S205 draft
+    forbidden: "Not permitted", // S206 draft
+    "rejected-hostnames": "Rejected: has hostnames", // S207 draft
+    cycle: "Cycle", // S208 draft
+    unresolved: "Not resolved", // S209 draft
+    unknown: "Unknown", // S210 draft
+  },
+  notShown: "Routes not shown", // S211 draft: a selection-restricted row
+  noChild: "No route", // S212 draft
+  entry: (type: string, status: string) => `${type}: ${status}`, // S213 draft: the child's status entry
+  noEntry: "No status entry", // S214 draft
+  childStatus: "Child's status entry", // S215 draft
+  parentCondition: "Parent's condition", // S216 draft
+  togglePaths: (open: boolean, n: number) => `${open ? "Hide" : "Show"} paths (${n})`, // S217 draft
+  parentMatch: "Parent match", // S218 draft
+  morePaths: "More paths exist than are shown.", // S219 draft
+  noPathsKept: "No paths kept. More paths exist than the UI computed.", // S220 draft
+  hiddenRoute: "A route you cannot open", // S221 draft: tooltip on a hidden ancestor
+  selected: (n: number) => `Selected: ${n}`, // S222 draft
+  attached: (n: number) => `Attached: ${n}`, // S223 draft
+  // Quirk 1: selected can include children an earlier ref in the same rule passes on.
+  selectedHint: "Selected can include routes that an earlier ref in the same rule passes on", // S224 draft
+};
+
+export const effectiveCopy = {
+  title: "Effective matches", // S225 draft
+  from: "From", // S226 draft, followed by the parent route
+  modes: {
+    default: "Rule matches apply as written", // S227 draft
+    inherit: "Rule matches extend the parent's match", // S228 draft
+  },
+  kept: "Kept", // S229 draft
+  dropped: "Dropped", // S205 draft
+  moreParents: "More parent routes not shown.", // S230 draft
 };

@@ -4,7 +4,14 @@ import { useMemo } from "react";
 import { useRoutes } from "../../api/exploreHooks";
 import { useListFilter } from "../../api/hooks";
 import type { ParentSummary, RouteRow } from "../../api/types";
-import { columnCopy, listCopy, parentLineCopy, routeStateCopy, viewACopy } from "../../copy/explorer";
+import {
+  columnCopy,
+  listCopy,
+  parentLineCopy,
+  routeStateCopy,
+  routeStateDelegationCopy,
+  viewACopy,
+} from "../../copy/explorer";
 import { LinkedName } from "../../explore/LinkedName";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
@@ -45,6 +52,11 @@ const viewAOptions: FilterOption[] = [
   ...stateOptions,
   ...Object.entries(viewACopy.stateFlags).map(([value, label]) => ({ value, label })),
 ];
+/** View B's dropped flag (2.4), offered only to a server that advertises the delegation endpoint. */
+const viewBOptions: FilterOption[] = Object.entries(routeStateDelegationCopy).map(([value, label]) => ({
+  value,
+  label,
+}));
 
 /** One parent of a row as text, for the cell's Tooltip. */
 function parentText(p: ParentSummary): string {
@@ -135,6 +147,12 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
   const cols = useMemo(() => columns(l.id), [l.id]);
   // The listener filter and the computed flags arrive together in 2.3, so /meta's listener entry gates both.
   const viewA = useListFilter("routes", "listener");
+  // The dropped flag arrives with view B, which /meta advertises as the delegation list's filters (PF8).
+  const viewB = useListFilter("delegation", "outcome");
+  const options = useMemo(
+    () => [...(viewA ? viewAOptions : stateOptions), ...(viewB ? viewBOptions : [])],
+    [viewA, viewB],
+  );
   return (
     <ListFrame
       title={listCopy.routes.title}
@@ -158,7 +176,7 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
         >
           <StateFilter
             label={listCopy.routeState}
-            options={viewA ? viewAOptions : stateOptions}
+            options={options}
             selected={listValues(l.params, "state")}
             onChange={(v) => l.setFilter({ state: v.join(",") })}
           />
