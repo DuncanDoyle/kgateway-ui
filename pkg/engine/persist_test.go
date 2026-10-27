@@ -735,7 +735,7 @@ func TestComputedKGWUI011(t *testing.T) {
 	m = e.Published.Model
 	f := oneFinding(t, m, health.CodeDelegatedNotAttached, "shop/c", testutil.Now)
 	if f.Severity != health.SeverityWarning || f.Message != health.ComputedNotAttachedMessage ||
-		f.Detail != "The UI computes that HTTPRoute `shop/api` drops this route: no rule fits the parent's matches." {
+		f.Detail != "The UI computes that HTTPRoute shop/api drops this route: no rule fits the parent's matches." {
 		t.Fatalf("finding %+v", f)
 	}
 	if tr := delegCheck(t, m, computed.KindDelegatedNotAttached, "shop/c"); tr.State != computed.StateChecked || !tr.Mature {
@@ -843,7 +843,7 @@ func TestOrphanAlsoLabelSelected(t *testing.T) {
 	s := newDStepper(t, nil)
 	w.step(s, 0)
 	f := oneFinding(t, w.step(s, Window), health.CodeDelegatedNotAttached, "apps/o", testutil.Now)
-	if f.Detail != "The UI computes that HTTPRoute `shop/lab` drops this route: no rule fits the parent's matches." {
+	if f.Detail != "The UI computes that HTTPRoute shop/lab drops this route: no rule fits the parent's matches." {
 		t.Fatalf("detail %q", f.Detail)
 	}
 }
@@ -876,7 +876,7 @@ func TestKGWUI011OnePerRouteParent(t *testing.T) {
 	w.step(s, 0)
 	m := w.step(s, health.Grace+time.Second)
 	f := oneFinding(t, m, health.CodeDelegatedNotAttached, "shop/c", testutil.Now)
-	want := "No status entry for parent HTTPRoute shop/api. The UI computes that HTTPRoute `shop/api` drops this route: no rule fits the parent's matches."
+	want := "No status entry for parent HTTPRoute shop/api. The UI computes that HTTPRoute shop/api drops this route: no rule fits the parent's matches."
 	if f.Severity != health.SeverityWarning || f.Detail != want || f.Message != health.DelegatedNotAttachedMessage {
 		t.Fatalf("finding %+v", f)
 	}

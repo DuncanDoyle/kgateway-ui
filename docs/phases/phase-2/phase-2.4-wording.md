@@ -109,13 +109,13 @@ Fit clauses carry no backticks; in this table they mark placeholders only. View 
 
 ## Server text: findings
 
-`pkg/health/messages.go` and `pkg/health/computed.go`. Names and matches are in backticks in the text.
+`pkg/health/messages.go` and `pkg/health/computed.go`. S258 and S259 name the parent without backticks, like S98 (ruling 4). S261 and S262 put names and matches in backticks.
 
 | id | Text | Where |
 |---|---|---|
 | S257 | A parent route does not attach this route | KGWUI-011 message, computed and orphan triggers |
-| S258 | The UI computes that HTTPRoute `<parent>` drops this route: no rule fits the parent's matches. | KGWUI-011 computed detail, dropped |
-| S259 | The UI computes that HTTPRoute `<parent>` selects this route, but the route's parentRefs do not permit that parent. | KGWUI-011 computed detail, forbidden |
+| S258 | The UI computes that HTTPRoute `<parent>` drops this route: no rule fits the parent's matches. | KGWUI-011 computed detail, dropped; the name has no backticks in the text (ruling 4) |
+| S259 | The UI computes that HTTPRoute `<parent>` selects this route, but the route's parentRefs do not permit that parent. | KGWUI-011 computed detail, forbidden; the name has no backticks in the text (ruling 4) |
 | S260 | The UI computes that no parent route in this install keeps this route. The route has no parentRefs. | KGWUI-011 orphan detail |
 | S261 | Status entry for parent HTTPRoute `<parent>` at `<match>`: computed `<x>`, controller reports `<y>`. | KGWUI-012 detail, `child-entry` |
 | S262 | ResolvedRefs under parent `<key>` at `<match>`: computed `<x>`, controller reports `<y>`. | KGWUI-012 detail, `parent-resolvedrefs` |
@@ -136,7 +136,8 @@ In S261 and S262, `<match>` is the match the ancestor delegated under, worded as
 
 1. **`allows` labels (S235–S237) are dropped for 2.4.** No component renders the row's `allows`, and the one case that matters (forbidden) already shows as S206 with S239's reason. They are removed from the copy and from the Task 67 step in the plan. If they are rendered later, use "Allows any parent route", "Allows this parent" and "Allows other parents only".
 2. **The open path list is named "Paths (`<n>`)" (S264)**, a new string, not S217. `aria-expanded` on the S217 button carries the open state, so the list name stays out of the toggle text.
-3. **Fit clauses S248–S254 carry no backticks.** The Why cell and path lines render text as is, so backticks showed literally. The KGWUI details S258–S262 keep theirs, because the findings view renders them.
+3. **Fit clauses S248–S254 carry no backticks.** The Why cell and path lines render text as is, so backticks showed literally. The KGWUI-012 details S261–S262 keep theirs, because the findings view renders them.
+4. **S258 and S259 name the parent without backticks.** The pick assumed the shipped S98 quotes the name in backticks; it does not ("No status entry for parent HTTPRoute shop/api"). A computed finding on the same (route, parent) is merged into the S98 finding, so its detail must quote the name the same way. S260–S262 are never merged with S98: the orphan has no parent, and KGWUI-012 is its own finding.
 
 ## Accuracy fixes
 

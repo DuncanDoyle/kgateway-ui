@@ -66,8 +66,8 @@ const (
 	OrphanDetail = "The UI computes that no parent route in this install keeps this route. The route has no parentRefs."
 	// computedDropped and computedForbidden are the computed trigger's
 	// reason; %s is the parent (Task 67).
-	computedDropped   = "The UI computes that HTTPRoute `%s` drops this route: no rule fits the parent's matches."
-	computedForbidden = "The UI computes that HTTPRoute `%s` selects this route, but the route's parentRefs do not permit that parent."
+	computedDropped   = "The UI computes that HTTPRoute %s drops this route: no rule fits the parent's matches."
+	computedForbidden = "The UI computes that HTTPRoute %s selects this route, but the route's parentRefs do not permit that parent."
 )
 
 // Wording for KGWUI-012 (design §6.2), from the wording passes (Tasks 48 and 67).
