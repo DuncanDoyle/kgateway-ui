@@ -100,7 +100,7 @@ it("up-chain shows a restricted step and 'More paths not shown'", async () => {
       .getByLabelText("shop/mid")
       .closest("[aria-current]"),
   ).toHaveAttribute("aria-current", "page");
-  expect(within(paths[1] as HTMLElement).getByText("Cycle")).toBeInTheDocument();
+  expect(within(paths[2] as HTMLElement).getByText("Cycle")).toBeInTheDocument();
   expect(within(nav).getByText("More paths not shown")).toBeInTheDocument();
   first.unmount();
 
@@ -108,17 +108,19 @@ it("up-chain shows a restricted step and 'More paths not shown'", async () => {
   mount(MID);
   const nav2 = await loaded();
   // A hidden parent route keeps its name with no link (D-024); the walk stops there.
-  const hidden = within(nav2).getAllByTestId("route-path")[3] as HTMLElement;
+  const hidden = within(nav2).getAllByTestId("route-path")[4] as HTMLElement;
   expect(hidden).toHaveTextContent("shop/top1");
   expect(within(hidden).queryAllByRole("link")).toHaveLength(0);
   expect(within(nav2).getByText("More paths not shown")).toBeInTheDocument();
 });
 
 it("hostnames or inherited text for a child", async () => {
-  serve(api());
+  // The golden's mid is a delegated child, so it has none; give it its own here.
+  const own = detail(routeGolden);
+  own.hostnames = ["mid.example.com"];
+  serve(api({ mid: own }));
   const first = mount(MID);
   await loaded();
-  // The route's own hostnames; the parent card's effective hostnames repeat it.
   expect(screen.getAllByText("mid.example.com").length).toBeGreaterThan(0);
   first.unmount();
 
@@ -560,6 +562,7 @@ it("parent card lists computed listeners, one line each, with effective hostname
     "not-verified",
   ];
   first.computed = { ...first.computed, coverage };
+  first.effectiveHostnames = ["mid.example.com"];
   a.result.listeners.push({
     ...structuredClone(first),
     listener: "https",

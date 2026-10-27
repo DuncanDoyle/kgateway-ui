@@ -86,9 +86,11 @@ type setup struct {
 	zone *time.Location
 	// rulesFor replaces the engine's rule selection; nil runs the real rule sets.
 	rulesFor func(string) computed.Selection
-	// disputes marks a world that disagrees with view A on purpose; every other
-	// world must agree, so fixture drift fails here (consistentWithViews).
+	// disputes marks a world that disagrees with the computed views on purpose;
+	// every other world must agree, so fixture drift fails here (consistentWithViews).
 	disputes bool
+	// bounds caps views B and C; zero is computed.DefaultBounds.
+	bounds computed.Bounds
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -114,21 +116,24 @@ func scopeViews(t *testing.T, e *engine.Engine, srv *httptest.Server, unknown bo
 	}
 }
 
-// consistentWithViews fails t when m has a matured view A disagreement: every
-// seeded object was first seen 61 s earlier, so only late objects may be pending.
-// Views B and C join when Task 65 makes the 2.2 worlds consistent with them:
-// many keep reported children under parents that do not delegate to them.
+// consistentWithViews fails t when m has a matured disagreement with any
+// view, A, B or C: every seeded object was first seen 61 s earlier, so only
+// late objects may be pending.
 func consistentWithViews(t *testing.T, m *engine.Model) {
 	t.Helper()
+	var bad []string
 	for _, im := range m.Installs {
 		if im.Computed == nil {
 			continue
 		}
 		for _, c := range im.Computed.Checks {
-			if c.State == computed.StateDisagrees && (c.ID.Kind == computed.KindListenerCount || c.ID.Kind == computed.KindRouteAccepted) {
-				t.Fatalf("the test world disagrees with view A: %s %s on %s (expected %s, observed %s)", c.ID.Kind, c.Class, c.On, c.Expected, c.Observed)
+			if c.State == computed.StateDisagrees {
+				bad = append(bad, fmt.Sprintf("%s %s on %s (expected %s, observed %s)", c.ID.Kind, c.Class, c.On, c.Expected, c.Observed))
 			}
 		}
+	}
+	if len(bad) > 0 {
+		t.Fatalf("the test world disagrees with the computed views:\n%s", strings.Join(bad, "\n"))
 	}
 }
 
@@ -204,7 +209,8 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor})
+		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
+		DelegationBounds: s.bounds})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -2180,22 +2186,28 @@ func TestQ12CountsBeforeAndAfter(t *testing.T) {
 	objs := isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
 		testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"}), testutil.Namespace("leaving", map[string]string{"team": "a"}),
 		d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
-		// Phase 1: owned (kgw), unchanged.
-		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
-		testutil.HTTPRoute("shop", "api2", []objects.ParentRef{gw}, ok(gw)),
-		testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, ok(gwB)),
+		// Phase 1: owned (kgw), unchanged. Each delegates to the children reported
+		// under it, so the world agrees with views B and C: api selects shop's
+		// q12-labelled routes (mixed is rejected for its hostnames, two attaches).
+		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
+			delegRule([]string{"/api"}, testutil.DelegateLabel("shop", "q12"), testutil.DelegateTo("shared", "both"), testutil.DelegateTo("leaving", "child"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "api2", []objects.ParentRef{gw}, ok(gw)),
+			delegRule([]string{"/v2"}, testutil.DelegateTo("shop", "two"), testutil.DelegateTo("shop", "moved"))),
+		testutil.WithRules(testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, ok(gwB)),
+			delegRule([]string{"/pb"}, testutil.DelegateTo("shared", "both"))),
 		// Phase 1: owned through the Gateway; its HTTPRoute entry was ignored. Now judged on both.
-		testutil.HTTPRoute("shop", "mixed", []objects.ParentRef{gw, api}, ok(gw), rejected(api)),
+		q12(testutil.WithHostnames(leaf("shop", "mixed", []objects.ParentRef{gw, api}, "/api/mixed", ok(gw), rejected(api)), "mixed.example.com")),
 		// Phase 1: not owned. Now owned once with two reported parents.
-		testutil.HTTPRoute("shop", "two", nil, ok(api), ok(api2)),
-		// Phase 1: not owned. Now owned through api2 only; the entry for the removed api ref is ignored.
-		testutil.HTTPRoute("shop", "moved", []objects.ParentRef{api2}, rejected(api), ok(api2)),
+		q12(testutil.WithRules(testutil.HTTPRoute("shop", "two", nil, ok(api), ok(api2)), testutil.Rule(matchPath("/api/two"), matchPath("/v2/two")))),
+		// Phase 1: not owned. Now owned through api2 only; the entry for the removed
+		// api ref is ignored. It is a leftover from generation 1.
+		bumped(leaf("shop", "moved", []objects.ParentRef{api2}, "/v2/moved", rejected(api), ok(api2)), 0),
 		// Phase 1: owned by neither. Now owned by both installs, each through its own parent.
-		testutil.HTTPRoute("shared", "both", nil, ok(api), ok(pb)),
+		testutil.WithRules(testutil.HTTPRoute("shared", "both", nil, ok(api), ok(pb)), testutil.Rule(matchPath("/api/both"), matchPath("/pb/both"))),
 		// Phase 1: not owned. Now owned while its namespace is in scope.
-		testutil.HTTPRoute("leaving", "child", nil, ok(api)),
+		leaf("leaving", "child", nil, "/api/child", ok(api)),
 		// Phase 1: not owned. Now owned with a stale implicit edge: KGWUI-003 warning.
-		stale(testutil.HTTPRoute("shop", "stale", nil, ok(api))),
+		q12(stale(leaf("shop", "stale", nil, "/api/stale", ok(api)))),
 		// Phase 1 and now: a policy with an HTTPRoute ancestor stays owned (PF8).
 		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: api, Controller: testutil.Controller,
 			Conds: []metav1.Condition{cond("Accepted", metav1.ConditionTrue, "Accepted")}}),
@@ -2245,6 +2257,29 @@ func TestQ12CountsBeforeAndAfter(t *testing.T) {
 	}
 }
 
+// q12 labels u for TestQ12CountsBeforeAndAfter's label ref.
+func q12(u *unstructured.Unstructured) *unstructured.Unstructured {
+	u.SetLabels(map[string]string{"delegation.kgateway.dev/label": "q12"})
+	return u
+}
+
+// bumped moves u to generation 2; entry i keeps observing generation 1, so it is a leftover.
+func bumped(u *unstructured.Unstructured, i int) *unstructured.Unstructured {
+	u.SetGeneration(2)
+	parents, _, _ := unstructured.NestedSlice(u.Object, "status", "parents")
+	for j, p := range parents {
+		if j == i {
+			continue
+		}
+		cs := p.(map[string]any)["conditions"].([]any)
+		for _, c := range cs {
+			c.(map[string]any)["observedGeneration"] = int64(2)
+		}
+	}
+	_ = unstructured.SetNestedSlice(u.Object, parents, "status", "parents")
+	return u
+}
+
 // A child naming one parent twice (by section and by port) has each entry
 // judged: a stale one is pending while the current one is clean.
 func TestEveryEligibleEntryIsJudged(t *testing.T) {
@@ -2256,7 +2291,10 @@ func TestEveryEligibleEntryIsJudged(t *testing.T) {
 		fresh.Conds[i].ObservedGeneration = 2
 	}
 	child := stale(testutil.HTTPRoute("shop", "child", []objects.ParentRef{s1, s2}, fresh, testutil.AcceptedBy(s2, testutil.Controller)))
-	_, srv, _ := startWith(t, setup{}, isolated(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), child)...)
+	testutil.WithRules(child, testutil.Rule(matchPath("/api/child")))
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "child")))
+	_, srv, _ := startWith(t, setup{}, isolated(api, child)...)
 	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	var details []string
 	for _, f := range h.Findings {
@@ -2340,8 +2378,8 @@ func TestKGWUI004DetailNamesParentKind(t *testing.T) {
 	api, child := testutil.HTTPRouteRef("shop", "api"), testutil.HTTPRouteRef("shop", "child")
 	_, srv, _ := startWith(t, setup{}, isolated(
 		testutil.ListenerSet("infra", "ls", gw, nil),
-		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)),
-		testutil.HTTPRoute("shop", "child", nil, ok(api)),
+		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, ok(gw)), delegRule([]string{"/api"}, testutil.DelegateTo("shop", "child"))),
+		leaf("shop", "child", nil, "/api/child", ok(api)),
 		testutil.HTTPRoute("blog", "to-gw", []objects.ParentRef{gw}),
 		testutil.HTTPRoute("blog", "to-ls", []objects.ParentRef{ls}),
 		testutil.HTTPRoute("blog", "to-route", []objects.ParentRef{api}),

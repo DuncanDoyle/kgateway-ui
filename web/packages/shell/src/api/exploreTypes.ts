@@ -179,7 +179,7 @@ export interface RouteCounts {
 }
 /** Why an object the install does not own has a detail page; by is the owned object that names it. */
 export interface Candidate {
-  reason: "finding" | "referenced";
+  reason: "finding" | "referenced" | "selected";
   by?: LinkedRef;
 }
 export interface GatewayDetail {
@@ -287,9 +287,10 @@ export interface Rule {
   filters: Filter[];
   backendRefs: BackendRef[];
 }
-/** One up-chain step: a ref, or restricted with no identity. */
+/** One up-chain step: a ref, or restricted with no identity. A hidden ancestor route has link none and the matches it delegated under (D-024). */
 export interface AncestorStep {
   ref?: LinkedRef;
+  matches?: Match[];
   restricted?: boolean;
 }
 /** One up-chain path, root first. */
@@ -310,9 +311,70 @@ export interface RouteDetail {
   parents: ParentStatus[];
   attachments?: RouteAttachment[];
   rules: Rule[];
+  effective?: EffectiveEdge[];
+  effectiveTruncated?: boolean;
   ancestors: AncestorPath[];
   ancestorsTruncated: boolean;
   childCount: number;
   declaredCount: number;
   collectedAt: string;
+}
+
+// Views B and C (2.4). Task 66 renders them.
+/** One rule under a parent match: kept with its effective matches, or dropped with the failing clause. */
+export interface EffectiveRule {
+  index: number;
+  kept: boolean;
+  matches: Match[];
+  reason?: string;
+}
+/** A route's rules under one parent match, or only restricted. */
+export interface EffectiveContext {
+  restricted?: boolean;
+  parentMatch?: Match;
+  rules?: EffectiveRule[];
+}
+/** View C for one parent edge; contexts is [] when none was kept. */
+export interface EffectiveEdge {
+  parent: LinkedRef;
+  mode: "default" | "inherit";
+  contextsTruncated?: boolean;
+  contexts: EffectiveContext[];
+  computed: Computed;
+}
+/** A route on a context's path and the match it delegated under. */
+export interface PathStep {
+  ref: LinkedRef;
+  match: Match;
+}
+/** One retained context of a delegation row, or only restricted. */
+export interface DelegationContext {
+  restricted?: boolean;
+  parentMatch?: Match;
+  path?: PathStep[];
+  outcome?: DelegationOutcome;
+  reason?: string;
+}
+export type DelegationOutcome =
+  | "attached"
+  | "partial"
+  | "dropped"
+  | "forbidden"
+  | "rejected-hostnames"
+  | "cycle"
+  | "unresolved"
+  | "unknown";
+/** One view B row of GET …/delegation; child is absent when the ref selected no route. */
+export interface DelegationRow {
+  rule: number;
+  ref: number;
+  refAsWritten: DelegationRef;
+  child?: LinkedRef;
+  allows?: "any" | "this" | "other";
+  outcome?: DelegationOutcome;
+  reason?: string;
+  contexts: DelegationContext[];
+  contextsTruncated?: boolean;
+  computed: Computed;
+  observed: { entry?: ParentStatus; parentCondition?: Condition };
 }

@@ -1,0 +1,140 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "children": 0,
+        "flags": [
+          "no-parent",
+          "dropped"
+        ],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "drop",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "pending",
+          "dropped"
+        ],
+        "health": "warning",
+        "hostnames": [],
+        "parentRoutes": [],
+        "parents": [
+          {
+            "attachment": "pending",
+            "reason": "parent not found",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "else",
+              "namespace": "shop"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "forb",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "not-accepted",
+          "dropped"
+        ],
+        "health": "error",
+        "hostnames": [
+          "h.example.org"
+        ],
+        "parentRoutes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "m",
+            "namespace": "shop"
+          }
+        ],
+        "parents": [
+          {
+            "attachment": "not-accepted",
+            "conditionType": "Accepted",
+            "reason": "UnsupportedValue",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "m",
+              "namespace": "shop"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "host",
+          "namespace": "shop"
+        }
+      },
+      {
+        "children": 0,
+        "flags": [
+          "accepted",
+          "dropped"
+        ],
+        "health": "healthy",
+        "hostnames": [],
+        "parentRoutes": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "m",
+            "namespace": "shop"
+          }
+        ],
+        "parents": [
+          {
+            "attachment": "accepted",
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "m",
+              "namespace": "shop"
+            }
+          }
+        ],
+        "ref": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "kid",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "total": 4
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

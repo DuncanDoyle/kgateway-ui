@@ -52,7 +52,10 @@ expect:
   checks:
     Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
     "HTTPRoute infra/r #0": {state: checked, coverage: [status-compatible]}
+    infra/r 0.0 apps/c: {state: checked, coverage: [status-compatible]}
+    infra/r 1.0 apps/d: {state: checked, coverage: [status-compatible]}
   kgwui012: []
+  kgwui011: []
   rows:
     infra/r 0.0 apps/c: {outcome: attached, contexts: 1}
     infra/r 1.0 apps/d: {outcome: attached, contexts: 0, contextsTruncated: true}

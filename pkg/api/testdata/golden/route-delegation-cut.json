@@ -1,0 +1,98 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "allows": "any",
+        "child": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "late",
+          "namespace": "shop"
+        },
+        "computed": {
+          "by": "ui",
+          "reason": "too-large",
+          "rule": "delegation",
+          "rules": "kgateway-2.4",
+          "state": "unknown"
+        },
+        "contexts": [],
+        "contextsTruncated": true,
+        "observed": {
+          "entry": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-10-17T11:00:00Z",
+                "message": "",
+                "observedGeneration": 1,
+                "reason": "Accepted",
+                "stale": false,
+                "status": "True",
+                "type": "Accepted"
+              },
+              {
+                "lastTransitionTime": "2026-10-17T11:00:00Z",
+                "message": "",
+                "observedGeneration": 1,
+                "reason": "ResolvedRefs",
+                "stale": false,
+                "status": "True",
+                "type": "ResolvedRefs"
+              },
+              {
+                "lastTransitionTime": "2026-10-17T11:00:00Z",
+                "message": "",
+                "observedGeneration": 1,
+                "reason": "Programmed",
+                "stale": false,
+                "status": "True",
+                "type": "kgateway.dev/Programmed"
+              }
+            ],
+            "controllerName": "kgateway.dev/kgateway",
+            "ours": true,
+            "parentRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "name": "m",
+              "namespace": "shop"
+            },
+            "target": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "m",
+              "namespace": "shop"
+            }
+          },
+          "parentCondition": {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "BackendNotFound",
+            "stale": false,
+            "status": "False",
+            "type": "ResolvedRefs"
+          }
+        },
+        "outcome": "unknown",
+        "ref": 0,
+        "refAsWritten": {
+          "mode": "name",
+          "name": "late",
+          "namespace": "shop"
+        },
+        "rule": 9
+      }
+    ],
+    "total": 1
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

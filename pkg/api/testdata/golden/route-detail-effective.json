@@ -1,0 +1,271 @@
+{
+  "body": {
+    "ancestors": [
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "a",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "x",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "b",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "x",
+              "namespace": "shop"
+            }
+          }
+        ]
+      }
+    ],
+    "ancestorsTruncated": false,
+    "annotations": {
+      "inheritParentMatcher": true
+    },
+    "childCount": 0,
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "declaredCount": 0,
+    "effective": [
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/a"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/a/x"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "contextsTruncated": true,
+        "mode": "inherit",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "a",
+          "namespace": "shop"
+        }
+      },
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [],
+        "contextsTruncated": true,
+        "mode": "inherit",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "b",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "generation": 1,
+    "health": "healthy",
+    "hostnames": [],
+    "install": "kgw.kgateway",
+    "parentRefs": [],
+    "parents": [
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "a",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "a",
+          "namespace": "shop"
+        }
+      },
+      {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Accepted",
+            "stale": false,
+            "status": "True",
+            "type": "Accepted"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "ResolvedRefs",
+            "stale": false,
+            "status": "True",
+            "type": "ResolvedRefs"
+          },
+          {
+            "lastTransitionTime": "2026-10-17T11:00:00Z",
+            "message": "",
+            "observedGeneration": 1,
+            "reason": "Programmed",
+            "stale": false,
+            "status": "True",
+            "type": "kgateway.dev/Programmed"
+          }
+        ],
+        "controllerName": "kgateway.dev/kgateway",
+        "ours": true,
+        "parentRef": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "name": "b",
+          "namespace": "shop"
+        },
+        "target": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "b",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "HTTPRoute",
+      "link": "detail",
+      "name": "x",
+      "namespace": "shop"
+    },
+    "ruleSet": "kgateway-2.4",
+    "rules": [
+      {
+        "backendRefs": [],
+        "filters": [],
+        "index": 0,
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/x"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

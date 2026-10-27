@@ -48,7 +48,9 @@ expect:
   checks:
     Gateway infra/gw http: {state: checked, coverage: [count-agrees]}
     "HTTPRoute web/r #0": {state: checked, coverage: [status-compatible]}
+    web/r 0.0 apps/c: {state: checked, coverage: [status-compatible]}
   kgwui012: []
+  kgwui011: []
   rows:
     web/r 0.0 apps/c: {outcome: attached, deps: [Namespace /web, Gateway infra/gw, HTTPRoute web/r]}
   entries:

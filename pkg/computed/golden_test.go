@@ -49,9 +49,10 @@ type viewAExpect struct {
 	ParentRefs map[string]refExpect      `json:"parentRefs"`
 	// Members is compared only when written.
 	Members *map[string][]string `json:"members"`
-	// Checks and KGWUI012 are the cross-check's; pkg/api's matrix reads them.
+	// Checks, KGWUI012 and KGWUI011 are the cross-check's; pkg/api's matrix reads them.
 	Checks   json.RawMessage `json:"checks"`
 	KGWUI012 json.RawMessage `json:"kgwui012"`
+	KGWUI011 json.RawMessage `json:"kgwui011"`
 	delegationExpect
 }
 
