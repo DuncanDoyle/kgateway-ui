@@ -112,7 +112,7 @@ const budgetLabel = "budget-label"
 // labelWidest rewrites the first child ref of the viewable HTTPRoute with the
 // most child refs into a label ref under the wildcard namespace and labels
 // that child. The selection is unchanged, but its scope is every in-scope
-// HTTPRoute: the costliest SelectionHidden check (Task 64).
+// HTTPRoute: the widest SelectionHidden scope (Task 64).
 func labelWidest(can func(objects.Ref) bool) func(*cache.Snapshot) {
 	return func(snap *cache.Snapshot) {
 		var routes []*unstructured.Unstructured
@@ -213,13 +213,17 @@ func TestBudgetListRequests(t *testing.T) {
 					deleg = r
 				}
 			}
-			// It carries labelWidest's label ref, so the restricted run pays the costliest SelectionHidden check.
+			// It carries labelWidest's label ref. The restricted run hides part of its scope, so its
+			// SelectionHidden check stops at the first hidden route; it is not a worst-case scan.
 			label := slices.IndexFunc(ix.Delegation[deleg], func(i int) bool { return ix.DelegRows[i].RefAsWritten.Mode == objects.DelegationLabel })
 			if label < 0 {
 				t.Fatalf("the widest delegating parent %s has no label ref", deleg)
 			}
 			lr := ix.DelegRows[ix.Delegation[deleg][label]].Key
 			labelKey := explore.RefKey{Parent: deleg, Rule: lr.Rule, Ref: lr.Ref}
+			if a.authz != nil && !ix.SelectionHidden(labelKey, can) {
+				t.Fatalf("the restricting Authorizer must hide the label ref's selection of %s", deleg)
+			}
 			t.Logf("widest delegating parent %s: %d view B rows; label ref rule %d ref %d, scope %d HTTPRoutes, selection hidden %v",
 				deleg, len(ix.Delegation[deleg]), lr.Rule, lr.Ref, len(ix.RefScope[labelKey]), a.authz != nil && ix.SelectionHidden(labelKey, can))
 			deepest, depth := deepestChild(ix, can)

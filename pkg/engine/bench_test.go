@@ -74,7 +74,8 @@ func denseSnapshot(parents, routes int) *cache.Snapshot {
 
 // BenchmarkDenseSelection measures one warm Compute over the dense-selection
 // shape of design §9.6 and reports its rows and whether a cap was hit. Two
-// fresh engines must agree on the cap and the last row: the cut is deterministic.
+// fresh engines must agree on the cap and the last row's key and outcome: the
+// cut is deterministic.
 func BenchmarkDenseSelection(b *testing.B) {
 	for _, c := range []struct {
 		name            string
@@ -97,7 +98,8 @@ func BenchmarkDenseSelection(b *testing.B) {
 			e := newEngine()
 			first, second := deleg(e), deleg(newEngine())
 			if len(first.Rows) == 0 || first.Cap != second.Cap || len(first.Rows) != len(second.Rows) ||
-				first.Rows[len(first.Rows)-1].Key != second.Rows[len(second.Rows)-1].Key {
+				first.Rows[len(first.Rows)-1].Key != second.Rows[len(second.Rows)-1].Key ||
+				first.Rows[len(first.Rows)-1].Outcome != second.Rows[len(second.Rows)-1].Outcome {
 				b.Fatalf("two runs differ: cap %q/%q, %d/%d rows", first.Cap, second.Cap, len(first.Rows), len(second.Rows))
 			}
 			last := first.Rows[len(first.Rows)-1]
