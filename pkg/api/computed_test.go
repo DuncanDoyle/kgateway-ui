@@ -959,7 +959,7 @@ func TestDelegationMatrixThroughAPI(t *testing.T) {
 			s.disputes = len(*want.KGWUI012)+len(*want.KGWUI011) > 0
 			h := newHarness(t, s, append(objs, asObjects(us)...)...)
 			checkDelegationMatrix(t, h.srv, rules, c, want)
-			for _, dep := range hiddenDeps(want) {
+			for _, dep := range hiddenDeps(t, want) {
 				s.authz = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != dep })
 				checkRestrictedRows(t, newHarness(t, s, append(objs, asObjects(us)...)...).srv, rules, want, dep)
 			}
@@ -1201,7 +1201,8 @@ func writtenKey(p objects.ParentRef) string {
 
 // hiddenDeps are the non-route dependencies written on the case's rows:
 // hiding any of them restricts the row (routes on a path never do, rule 4b).
-func hiddenDeps(want matrixExpect) []objects.Ref {
+func hiddenDeps(t *testing.T, want matrixExpect) []objects.Ref {
+	t.Helper()
 	var out []objects.Ref
 	for _, k := range slices.Sorted(maps.Keys(*want.Rows)) {
 		w := (*want.Rows)[k]
@@ -1211,12 +1212,18 @@ func hiddenDeps(want matrixExpect) []objects.Ref {
 		for _, d := range *w.Deps {
 			kind, nsName, _ := strings.Cut(d, " ")
 			ns, name, _ := strings.Cut(nsName, "/")
-			ref := objects.Ref{Group: objects.GatewayAPIGroup, Kind: kind, Namespace: ns, Name: name}
+			ref := objects.Ref{Kind: kind, Namespace: ns, Name: name}
+			// Each dependency kind has its own group (pkg/kinds); routes never restrict (rule 4b).
 			switch kind {
 			case "HTTPRoute":
 				continue
 			case "Namespace":
-				ref.Group = ""
+			case "XListenerSet":
+				ref.Group = "gateway.networking.x-k8s.io"
+			case "Gateway", "ListenerSet":
+				ref.Group = objects.GatewayAPIGroup
+			default:
+				t.Fatalf("dependency %s: no group known for kind %s", d, kind)
 			}
 			if !slices.Contains(out, ref) {
 				out = append(out, ref)

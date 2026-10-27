@@ -1077,3 +1077,24 @@ func TestExplainDelegation(t *testing.T) {
 		t.Errorf("attached: %q", got)
 	}
 }
+
+// Rules §5.7: a route with more parent edges than EffectiveEdges keeps the
+// first ones, by parent, and the detail says so with effectiveTruncated.
+func TestEffectiveTruncatedServed(t *testing.T) {
+	b := computed.DefaultBounds
+	b.EffectiveEdges = 1
+	_, srv, _ := startWith(t, setup{bounds: b}, inheritWorld()...)
+	d := get[RouteDetail](t, srv, routeDetail+"shop/x", 200)
+	if !d.EffectiveTruncated || len(d.Effective) != 1 || d.Effective[0].Parent.Name != "a" {
+		t.Fatalf("effective %+v truncated %v, want a's edge only, truncated", d.Effective, d.EffectiveTruncated)
+	}
+	raw := get[map[string]any](t, srv, routeDetail+"shop/x", 200)
+	if raw["effectiveTruncated"] != true {
+		t.Fatalf("effectiveTruncated on the wire: %v", raw["effectiveTruncated"])
+	}
+	// Under the default bound both edges are kept and the flag is absent.
+	_, all, _ := startWith(t, setup{}, inheritWorld()...)
+	if d := get[RouteDetail](t, all, routeDetail+"shop/x", 200); d.EffectiveTruncated || len(d.Effective) != 2 {
+		t.Fatalf("default bound: effective %d truncated %v", len(d.Effective), d.EffectiveTruncated)
+	}
+}
