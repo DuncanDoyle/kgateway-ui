@@ -520,3 +520,23 @@ quirk 2 (prefix /q):
 - Non-route dependencies still restrict: a root admitted through a `Selector` over a hidden Namespace, or a status root whose target is hidden, keeps its descendants' contexts, rows and effective matchers `restricted` (rules §11.2). Those facts are decided by hidden labels or hidden objects, not handed over by an ancestor **(our call; raised with the user)**.
 - The same rule holds everywhere a hidden ancestor route of a visible child appears: the route header's up-chain step (design §7.4 rule 3, ancestor routes only) and KGWUI-011 and KGWUI-012 evidence (rule 7) show its name and the matches it delegated under, with no link and nothing else. A finding whose only hidden dependencies are such ancestors is not `evidenceRestricted`. Hidden Gateways and ListenerSets on the up-chain keep `{restricted: true}` **(our call, extends D-024)**.
 - The computed `dropped` flag follows decision 2 (our call).
+
+## D-025 — Delegation edge cap: lower default, configurable, GOMEMLIMIT (2026-10-27, phase 2)
+**Status:** accepted 2026-10-27 (user)
+**Context:**
+- The Task 68 review measured Extreme dense selection (100 wildcard parents × 1,000 routes) with realistic status: at most 32 entries per route, the Gateway API MaxItems. At the 50,000 edge cap the peak heap was 640 MiB and the peak RSS 730 MiB, past the chart's 512Mi limit. `GOMEMLIMIT=400MiB` held the heap at 393 MiB but thrashed the GC (RSS 505 MiB). An edge cap of 10,000 gave 361 and 427 MiB; Large dense (20 × 500) 179 and 215 MiB.
+- The scale fixture wrote 100 status entries per route, which a real API server rejects.
+- Measured again for the cap (`bench/2.4-dense-memory.txt`, Apple M5, GOMAXPROCS=4, no `GOMEMLIMIT`): peak RSS 423–465 MiB at 10,000, 509–566 MiB at 20,000, 702–760 MiB at 50,000. Below 10,000 the curve flattens: 404–412 MiB at 5,000 and 372–433 MiB at 2,000 or less. The floor is the snapshot (69 MiB live) plus the rest of the engine and model (54 MiB live), doubled by the GC's heap target while two models are live.
+
+**Decision:**
+1. The default edge cap is 10,000 selected edges per install, down from 50,000 (rules §5.7) **(user, 2026-10-27)**. It is the largest round value inside the limit; it keeps Large dense (10,000 edges) uncut and Large's 2,017 view B rows well under it.
+2. The cap is configurable: the binary flag `--delegation-edge-cap` and the chart value `delegation.edgeCap`. Zero keeps the default; a negative value fails start-up. The other bounds stay unexposed **(user, 2026-10-27)**.
+3. The chart sets `GOMEMLIMIT` to the container's `limits.memory` through the downward API, and leaves it unset without a memory limit **(user, 2026-10-27)**. The downward API cannot scale the value, so it is the whole limit, not a fraction of it.
+- The gate `TestBudgetDenseMemory` (bench tag) holds Extreme dense at the default, with no `GOMEMLIMIT`, to peak RSS ≤ 480 MiB and peak heap ≤ 432 MiB. The 400 and 320 MiB first proposed sit below the floor at any cap, so no cap meets them **(our call; raised with the user)**.
+
+**Consequences:**
+- Past the cap, parents read "too large to compute"; rows already computed keep their outcomes with some paths not computed.
+- A hit edge cap makes every route incomplete (rules §8.5), so negative checks are silent across the install: no missing child entry and no computed KGWUI-011.
+- A higher cap needs a higher memory limit. The user docs say so (`docs/documentation-notes.md`).
+- `GOMEMLIMIT` follows the pod limit, so raising `limits.memory` raises it too. It is a safety net, not a substitute for the cap: at 50,000 with the limit set the RSS still reached 599 MiB.
+- `scale.DenseSelection` writes at most 32 status entries per route (`scale.MaxRouteParentStatuses`).

@@ -1,0 +1,102 @@
+# D-025 dense memory: DenseSelection(100, 1000), status capped at 32 entries per route, no GOMEMLIMIT unless noted.
+# Peak heap is HeapInuse sampled every 5 ms over one cold and five warm Computes; peak RSS is the child's rusage maxrss.
+
+go version go1.27.3 darwin/arm64
+machine: Darwin arm64, 18 CPUs, Apple M5 Max
+load:  7:52  up 23:12, 12 users, load averages: 3.06 2.89 2.54
+GOMAXPROCS=4 go test -tags bench -v -run 'TestBudget|Dense' ./pkg/engine/ -count=1
+=== RUN   TestBudgetBurst
+    budget_test.go:176: burst 999ms; recomputes in burst + 2 s: 1 (budget ≤ 2); event-to-publication p50 565ms p95 1.015s p99 1.055s max 1.065s (budget p95 ≤ 1.2 s)
+--- PASS: TestBudgetBurst (4.08s)
+=== RUN   TestBudgetIdleTenMinutes
+    budget_test.go:211: idle 10 min: 20 recomputes (20 safety timer, 0 staleness deadline, 0 both), 600 confirmations, 60 scrapes
+--- PASS: TestBudgetIdleTenMinutes (1.13s)
+=== RUN   TestBudgetConfirmTick
+    budget_test.go:240: confirm tick large: median 221µs, max 287.75µs (budget at Large ≤ 5 ms)
+2026/10/27 07:52:46 WARN delegation compute cap hit; later work is unknown install=kgw.kgateway cap=contexts
+    budget_test.go:240: confirm tick extreme: median 824.084µs, max 1.452333ms (budget at Large ≤ 5 ms)
+--- PASS: TestBudgetConfirmTick (0.50s)
+=== RUN   TestBudgetWarmRecompute
+=== RUN   TestBudgetWarmRecompute/large
+    budget_test.go:334: large: 3551 checks, 0 KGWUI-012 findings, 0 persistence entries
+    budget_test.go:339: large: cold median 50ms max 52ms (budget median ≤ 1 s); warm median 35ms p95 37.8ms max 39.5ms (budget median ≤ 150 ms); warm alloc median 36.2 MiB max 36.3 MiB (reported, D-022); persistence step median 6µs max 25µs
+=== RUN   TestBudgetWarmRecompute/large-contradicting
+    budget_test.go:334: large-contradicting: 3551 checks, 3391 KGWUI-012 findings, 3511 persistence entries
+    budget_test.go:339: large-contradicting: cold median 54ms max 54ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 45.4ms p95 49.1ms max 51ms (budget median ≤ 150 ms); warm alloc median 43.5 MiB max 43.6 MiB (reported, D-022); persistence step median 219µs max 289µs
+--- PASS: TestBudgetWarmRecompute (2.31s)
+    --- PASS: TestBudgetWarmRecompute/large (1.03s)
+    --- PASS: TestBudgetWarmRecompute/large-contradicting (1.28s)
+=== RUN   TestBudgetHeap
+=== RUN   TestBudgetHeap/large
+    budget_test.go:418: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+    budget_test.go:420: 1    3055616    21757952      45465600      23707648
+    budget_test.go:420: 2    3047424    21725184      45260800      23535616
+    budget_test.go:420: 3    2891776    21635072      45211648      23576576
+    budget_test.go:420: 4    2891776    21700608      45277184      23576576
+    budget_test.go:420: 5    3055616    21700608      45318144      23617536
+    budget_test.go:425: median retained 45277184 B (43.2 MiB); +18.9 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB)
+    budget_test.go:427:   index: route rows               2.14 MiB
+    budget_test.go:427:   index: Gateway rows             0.05 MiB
+    budget_test.go:427:   index: ListenerSet rows         0.05 MiB
+    budget_test.go:427:   index: lookups                  2.64 MiB
+    budget_test.go:427:   health: findings                0.04 MiB
+    budget_test.go:427:   computed: checks                2.36 MiB
+    budget_test.go:427:   computed: delegation            3.78 MiB
+    budget_test.go:427:   computed: attachment            2.49 MiB
+    budget_test.go:427:   persistence: windows            0.00 MiB
+    budget_test.go:427:   decode: HTTPRoute views         2.79 MiB
+    budget_test.go:427:   decode: route views             0.33 MiB
+    budget_test.go:427:   decode: route hostnames         0.00 MiB
+    budget_test.go:427:   decode: Gateway views           0.28 MiB
+    budget_test.go:427:   decode: ListenerSet views       0.15 MiB
+    budget_test.go:427:   decode: Backend views           0.00 MiB
+    budget_test.go:427:   rest of engine and model        1.38 MiB
+=== RUN   TestBudgetHeap/large-contradicting
+    budget_test.go:418: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
+    budget_test.go:420: 1    3063808    19939328      47087616      27148288
+    budget_test.go:420: 2    3063808    19898368      47210496      27312128
+    budget_test.go:420: 3    3055616    19972096      47202304      27230208
+    budget_test.go:420: 4    3039232    19906560      47235072      27328512
+    budget_test.go:420: 5    3055616    19881984      47128576      27246592
+    budget_test.go:425: median retained 47202304 B (45.0 MiB); +20.8 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB)
+    budget_test.go:427:   index: route rows               2.08 MiB
+    budget_test.go:427:   index: Gateway rows             0.07 MiB
+    budget_test.go:427:   index: ListenerSet rows         0.05 MiB
+    budget_test.go:427:   index: lookups                  2.92 MiB
+    budget_test.go:427:   health: findings                2.15 MiB
+    budget_test.go:427:   computed: checks                2.02 MiB
+    budget_test.go:427:   computed: delegation            3.78 MiB
+    budget_test.go:427:   computed: attachment            2.49 MiB
+    budget_test.go:427:   persistence: windows            0.90 MiB
+    budget_test.go:427:   decode: HTTPRoute views         2.50 MiB
+    budget_test.go:427:   decode: route views             0.30 MiB
+    budget_test.go:427:   decode: route hostnames         0.00 MiB
+    budget_test.go:427:   decode: Gateway views           0.28 MiB
+    budget_test.go:427:   decode: ListenerSet views       0.15 MiB
+    budget_test.go:427:   decode: Backend views           0.00 MiB
+    budget_test.go:427:   rest of engine and model        1.41 MiB
+--- PASS: TestBudgetHeap (2.16s)
+    --- PASS: TestBudgetHeap/large (0.96s)
+    --- PASS: TestBudgetHeap/large-contradicting (1.21s)
+=== RUN   TestBudgetDenseMemory
+    budget_test.go:523: edges  10000:  10000 rows; peak RSS  436 MiB; peak HeapInuse cold  220 MiB warm  391 MiB; peak HeapAlloc cold  213 MiB warm  383 MiB
+    budget_test.go:523: edges  20000:  20000 rows; peak RSS  509 MiB; peak HeapInuse cold  236 MiB warm  450 MiB; peak HeapAlloc cold  229 MiB warm  440 MiB
+    budget_test.go:523: edges  50000:  50000 rows; peak RSS  702 MiB; peak HeapInuse cold  316 MiB warm  644 MiB; peak HeapAlloc cold  307 MiB warm  630 MiB
+--- PASS: TestBudgetDenseMemory (3.81s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	14.342s
+
+# Cap selection, 2026-10-27, same machine, GOMAXPROCS=4: one child per line
+# (KGWUI_DENSE_MEM_CHILD=<edges>, /usr/bin/time -l). Peak warm HeapInuse / peak RSS, MiB.
+edges      1:  345 / 387     (floor: snapshot 69 MiB live + engine and model 54 MiB live)
+edges   1000:  341 / 433
+edges   2000:  327 / 372
+edges   5000:  365 / 412, 349 / 404, 365 / 412
+edges   8000:  391 / 438
+edges  10000:  409 / 456, 403 / 465, 410 / 445
+edges  20000:  501 / 566, 501 / 554
+edges  50000:  657 / 760
+# Live heap after a forced GC, cap 1 / 5,000 / 10,000 / 50,000: 123 / 135 / 146 / 235 MiB.
+# With GOMEMLIMIT=483183820 (90 % of 512Mi): 10,000 → 402 / 469; 20,000 → 435 / 527; 50,000 → 458 / 599.
+# Scale tiers' view B rows at the default: Typical 154, Large 2,017, Extreme 5,479 (Extreme stops on the contexts cap).
+# BenchmarkDenseSelection/large (20 × 500) = 10,000 rows, uncut at the default; /extreme cut at 10,000.

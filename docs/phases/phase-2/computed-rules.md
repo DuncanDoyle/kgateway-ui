@@ -258,7 +258,7 @@ This is the one policy for how much is computed, kept and served **(our call)**.
 
 | Stage | Bound | Cap | On reaching it |
 |---|---|---|---|
-| Compute | selected edges: (parent, rule, ref, child) rows, forbidden included | 50,000 per install | the rest is `unknown`, `too-large` |
+| Compute | selected edges: (parent, rule, ref, child) rows, forbidden included | 10,000 per install by default, set by `--delegation-edge-cap` **(user, 2026-10-27; D-025)** | the rest is `unknown`, `too-large` |
 | Compute | contexts: `flatten` calls | 20,000 per install | the rest is `unknown`, `too-large` |
 | Compute | matcher evaluations: (child match, context) fit or merge steps | 200,000 per install | the rest is `unknown`, `too-large` |
 | Retain | contexts kept per row, each with its incoming match, path, outcome and effective rules | first 20 in traversal order | `contextsTruncated` on the row; the outcome still aggregates all contexts |
