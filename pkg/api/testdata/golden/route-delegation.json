@@ -189,7 +189,7 @@
                 }
               }
             ],
-            "reason": "rule 0: path `/other` is outside the parent's `/api`"
+            "reason": "the route's rule 1: path /other is outside the parent's /api"
           }
         ],
         "observed": {
@@ -204,7 +204,7 @@
           }
         },
         "outcome": "dropped",
-        "reason": "rule 0: path `/other` is outside the parent's `/api`",
+        "reason": "the route's rule 1: path /other is outside the parent's /api",
         "ref": 0,
         "refAsWritten": {
           "mode": "name",
@@ -347,7 +347,7 @@
                 }
               }
             ],
-            "reason": "Selects no routes"
+            "reason": "No such route"
           }
         ],
         "observed": {
@@ -362,7 +362,7 @@
           }
         },
         "outcome": "unresolved",
-        "reason": "Selects no routes",
+        "reason": "No such route",
         "ref": 0,
         "refAsWritten": {
           "mode": "name",
@@ -550,7 +550,7 @@
                 }
               }
             ],
-            "reason": "The route is already on this path"
+            "reason": "A delegation loop fails this ref"
           }
         ],
         "observed": {
@@ -565,7 +565,7 @@
           }
         },
         "outcome": "cycle",
-        "reason": "The route is already on this path",
+        "reason": "A delegation loop fails this ref",
         "ref": 0,
         "refAsWritten": {
           "mode": "name",
@@ -674,7 +674,7 @@
                 }
               }
             ],
-            "reason": "rule 0: path `/api/p/x` is outside the parent's `/api/q`"
+            "reason": "the route's rule 1: path /api/p/x is outside the parent's /api/q"
           }
         ],
         "observed": {
@@ -735,7 +735,7 @@
           }
         },
         "outcome": "partial",
-        "reason": "Attached under some parent matches; rule 0: path `/api/p/x` is outside the parent's `/api/q`",
+        "reason": "Attached on some paths only; the route's rule 1: path /api/p/x is outside the parent's /api/q",
         "ref": 0,
         "refAsWritten": {
           "mode": "name",
@@ -804,7 +804,7 @@
                 }
               }
             ],
-            "reason": "rule 0: path `/api/v1` is outside the parent's `/api/zzz`"
+            "reason": "the route's rule 1: path /api/v1 is outside the parent's /api/zzz"
           }
         ],
         "observed": {
@@ -865,7 +865,7 @@
           }
         },
         "outcome": "dropped",
-        "reason": "rule 0: path `/api/v1` is outside the parent's `/api/zzz`",
+        "reason": "the route's rule 1: path /api/v1 is outside the parent's /api/zzz",
         "ref": 0,
         "refAsWritten": {
           "mode": "name",
@@ -925,7 +925,7 @@
                 }
               }
             ],
-            "reason": "Not watched by the controller"
+            "reason": "Namespace not watched"
           }
         ],
         "observed": {
@@ -940,7 +940,7 @@
           }
         },
         "outcome": "unresolved",
-        "reason": "Not watched by the controller",
+        "reason": "Namespace not watched",
         "ref": 0,
         "refAsWritten": {
           "mode": "name",

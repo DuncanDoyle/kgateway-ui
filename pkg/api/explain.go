@@ -322,32 +322,33 @@ const (
 	ruleEffective  = "effective-matchers"
 )
 
-// View B and C text (drafts, wording pass Task 67). Outcome reasons are
+// View B and C text, from the wording pass (Task 67). Outcome reasons are
 // sentences without a final period, like 2.3's notes; fit clauses hold no
 // ";", since a partial row joins its reason and clause with "; ".
 const (
-	reasonPartial           = "Attached under some parent matches"
+	reasonPartial           = "Attached on some paths only"
 	reasonForbidden         = "The route's parentRefs do not permit this parent"
 	reasonRejectedHostnames = "A delegated route may not set hostnames"
-	reasonCycle             = "The route is already on this path"
-	reasonMissing           = "Selects no routes"
-	reasonUnwatched         = "Not watched by the controller"
-	reasonDroppedSome       = "Dropped on the paths computed; other paths not computed"
+	reasonCycle             = "A delegation loop fails this ref"
+	reasonMissing           = "No such route"
+	reasonUnwatched         = "Namespace not watched"
+	reasonDroppedSome       = "No computed path attaches it. Others not computed"
 	noteSomeNotComputed     = "Some paths not computed"
 	noteUnconfirmable       = "Status cannot confirm this path"
-	// rowFit prefixes a row's fit clause with the child rule that failed.
-	rowFit = "rule %d: %s"
+	// rowFit prefixes a row's fit clause with the child's rule that failed, counted from 1.
+	rowFit = "the route's rule %d: %s"
 )
 
-// Fit clauses (rules §6), drafts. Values are in backticks.
+// Fit clauses (rules §6). Values carry no backticks: the Why cell and path
+// lines render text as is.
 const (
-	fitPathType     = "the parent matches its path as %s, not as PathPrefix"
+	fitPathType     = "the parent's path match is %s, not PathPrefix"
 	fitNoPath       = "the parent has no path match"
-	fitPathPrefix   = "path `%s` is outside the parent's `%s`"
-	fitDefaultSlash = "this rule has no matches, so it defaults to `/`, which is outside the parent's `%s`"
-	fitKey          = "the parent needs %s `%s`, this rule has `%s`"
-	fitKeyNone      = "the parent needs %s `%s`, this rule has none"
-	fitNoMatches    = "this rule has an empty match list, so nothing fits the parent's match"
+	fitPathPrefix   = "path %s is outside the parent's %s"
+	fitDefaultSlash = "no matches, so it defaults to /, which is outside the parent's %s"
+	fitKey          = "the parent needs %s %s, the rule has %s"
+	fitKeyNone      = "the parent needs %s %s, the rule has none"
+	fitNoMatches    = "an empty match list fits no parent match"
 )
 
 // explainFit is the clause a child rule failed, as text; "" for nil.
@@ -390,7 +391,7 @@ func explainFit(f *computed.FitFailure) string {
 func explainRow(o computed.RowOutcome, f *computed.FitFailure, u computed.Unresolved) string {
 	fit := ""
 	if f != nil {
-		fit = fmt.Sprintf(rowFit, f.Rule, explainFit(f))
+		fit = fmt.Sprintf(rowFit, f.Rule+1, explainFit(f))
 	}
 	switch o {
 	case computed.OutcomeDropped:

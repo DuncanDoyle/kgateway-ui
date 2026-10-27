@@ -40,7 +40,7 @@
                 "index": 0,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/other` is outside the parent's `/w`"
+                "reason": "path /other is outside the parent's /w"
               }
             ]
           }

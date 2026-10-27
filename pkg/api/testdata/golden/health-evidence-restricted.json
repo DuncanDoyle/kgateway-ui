@@ -145,7 +145,7 @@
       },
       {
         "code": "KGWUI-012",
-        "detail": "Status entry for parent HTTPRoute `shop/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
+        "detail": "Status entry for parent HTTPRoute `shop/hp` at `PathPrefix /rb/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -41,7 +42,7 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 			on, since := ch.On, ch.Since
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
-				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet),
+				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet, v.Delegation.Rows),
 				Since: &since, Evidence: evidence(ch, v.Delegation.Rows)}
 			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
 			if u := ownedObject(in.Owned, owned, on); u != nil {
@@ -112,8 +113,9 @@ func ownedObject(o *install.Owned, resources map[objects.Ref]*unstructured.Unstr
 }
 
 // disagreeDetail says what was computed and what the controller reports, and
-// under which rule set (wording pass, Task 48).
-func disagreeDetail(c computed.CheckResult, ruleSet string) string {
+// under which rule set (wording passes, Tasks 48 and 67). A views B check
+// quotes the match its ancestor delegated under, from rows (design §7.4 rule 7).
+func disagreeDetail(c computed.CheckResult, ruleSet string, rows []computed.Row) string {
 	var d string
 	key := "`" + c.Key.Name + "`"
 	if c.Key.SectionName != "" {
@@ -124,9 +126,9 @@ func disagreeDetail(c computed.CheckResult, ruleSet string) string {
 		d = fmt.Sprintf(countDisagrees, c.Listener, routes(c.Expected), c.Observed)
 	case computed.KindChildEntry:
 		parent, _ := c.Parent()
-		d = fmt.Sprintf(childDisagrees, parent.String(), entryText(c.Expected), entryText(c.Observed))
+		d = fmt.Sprintf(childDisagrees, parent.String(), delegatedAt(c, parent, rows), entryText(c.Expected), entryText(c.Observed))
 	case computed.KindParentResolvedRefs:
-		d = fmt.Sprintf(resolvedDisagrees, key, c.Expected, c.Observed)
+		d = fmt.Sprintf(resolvedDisagrees, key, delegatedAt(c, c.On, rows), c.Expected, c.Observed)
 	default:
 		d = fmt.Sprintf(parentDisagrees, key, c.Expected, c.Observed)
 	}
@@ -147,6 +149,77 @@ func entryText(s string) string {
 		return "no entry"
 	}
 	return "Accepted=" + s
+}
+
+// maxMatches is how many distinct delegated matches a detail quotes.
+const maxMatches = 3
+
+// delegatedAt is atMatch with the distinct matches parent's ancestor
+// delegated under, from the retained contexts of parent's rows; "" when none
+// is known. For child-entry the ancestor is parent itself, selecting c.On;
+// for parent-resolvedrefs it is the HTTPRoute that reports under c.Key, the
+// step before parent on each path; under a Gateway or ListenerSet key parent
+// is a root, its paths have one step and there is none.
+func delegatedAt(c computed.CheckResult, parent objects.Ref, rows []computed.Row) string {
+	resolved := c.ID.Kind == computed.KindParentResolvedRefs
+	var seen []string
+	more := false
+	i, _ := slices.BinarySearchFunc(rows, parent, func(r computed.Row, p objects.Ref) int { return r.Key.Parent.Compare(p) })
+	for ; i < len(rows) && rows[i].Key.Parent == parent; i++ {
+		r := &rows[i]
+		if !resolved && r.Key.Child != c.On {
+			continue
+		}
+		for j := range r.Contexts {
+			x := &r.Contexts[j]
+			m, ok := x.ParentMatch, true
+			if resolved {
+				// The step before parent is the ancestor writing under c.Key.
+				ok = x.Reporter == c.Key && len(x.Path) >= 2
+				if ok {
+					m = x.Path[len(x.Path)-2].Match
+				}
+			}
+			if !ok {
+				continue
+			}
+			t := "`" + matchText(m) + "`"
+			switch {
+			case slices.Contains(seen, t):
+			case len(seen) == maxMatches:
+				more = true
+			default:
+				seen = append(seen, t)
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	out := strings.Join(seen, matchOr)
+	if more {
+		out += matchMore
+	}
+	return fmt.Sprintf(atMatch, out)
+}
+
+// matchText words a match as the SPA's MatchLine does, e.g.
+// "PathPrefix /api Header x-env Exact prod".
+func matchText(m objects.Match) string {
+	var ps []string
+	if m.Path != nil {
+		ps = append(ps, m.Path.Type+" "+m.Path.Value)
+	}
+	for _, h := range m.Headers {
+		ps = append(ps, "Header "+h.Name+" "+h.Type+" "+h.Value)
+	}
+	for _, q := range m.QueryParams {
+		ps = append(ps, "Query "+q.Name+" "+q.Type+" "+q.Value)
+	}
+	if m.Method != "" {
+		ps = append(ps, "Method "+m.Method)
+	}
+	return strings.Join(ps, " ")
 }
 
 // routes is "1 route" or "n routes"; a non-number is kept as is.

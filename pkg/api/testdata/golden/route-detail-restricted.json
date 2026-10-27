@@ -245,13 +245,13 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
               },
               {
                 "index": 2,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/` is outside the parent's `/api`"
+                "reason": "path / is outside the parent's /api"
               }
             ]
           }
@@ -300,13 +300,13 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
               },
               {
                 "index": 2,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/` is outside the parent's `/api`"
+                "reason": "path / is outside the parent's /api"
               }
             ]
           }
@@ -355,13 +355,13 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
               },
               {
                 "index": 2,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/` is outside the parent's `/api`"
+                "reason": "path / is outside the parent's /api"
               }
             ]
           }
@@ -410,13 +410,13 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
               },
               {
                 "index": 2,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/` is outside the parent's `/api`"
+                "reason": "path / is outside the parent's /api"
               }
             ]
           }
@@ -465,13 +465,13 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
               },
               {
                 "index": 2,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/` is outside the parent's `/api`"
+                "reason": "path / is outside the parent's /api"
               }
             ]
           }
@@ -520,13 +520,13 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
               },
               {
                 "index": 2,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/` is outside the parent's `/api`"
+                "reason": "path / is outside the parent's /api"
               }
             ]
           }

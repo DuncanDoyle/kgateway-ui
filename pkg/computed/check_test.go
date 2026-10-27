@@ -941,7 +941,7 @@ func TestDeselectedEntryLeft(t *testing.T) {
 			u := hr(t, "metadata: {name: u, namespace: infra}\nspec:\n  parentRefs: ["+gwEntry+"]\n  rules: ["+rule([]string{"/api"}, to("apps", "c"))+"]")
 			_, cs = dworld{routes: []*unstructured.Unstructured{r, u, c, c2}, roots: []string{"infra/r"}, unknown: []string{"infra/u"}}.run(v)
 			ce = oneChildEntry(t, cs, "apps", "c", "infra", "r")
-			if ce.Class != computed.ClassUnknown || ce.Note != "Not all paths computed" {
+			if ce.Class != computed.ClassUnknown || ce.Note != "Some paths not computed" {
 				t.Fatalf("%s note %q", ce.Class, ce.Note)
 			}
 		})
@@ -988,7 +988,7 @@ func TestNoEntryIncompleteIsUnknown(t *testing.T) {
 				t.Fatalf("row %s", res.Rows[0].Outcome)
 			}
 			ce := oneChildEntry(t, cs, "apps", "c", "infra", "r")
-			if ce.Class != computed.ClassUnknown || ce.Note != "Not all paths computed" || ce.Candidate() {
+			if ce.Class != computed.ClassUnknown || ce.Note != "Some paths not computed" || ce.Candidate() {
 				t.Fatalf("%s note %q", ce.Class, ce.Note)
 			}
 			// /x records a failure, so False is expected; the cut leaves the reason uncompared.
@@ -1008,7 +1008,7 @@ func TestNoEntryIncompleteIsUnknown(t *testing.T) {
 				mod: func(in *computed.DelegationInput) { in.Wildcard = install.Setting{} }}
 			_, cs = w.run(v)
 			ce = oneChildEntry(t, cs, "other", "d", "infra", "r")
-			if ce.Class != computed.ClassUnknown || ce.Note != "Not all paths computed" {
+			if ce.Class != computed.ClassUnknown || ce.Note != "Some paths not computed" {
 				t.Fatalf("possible child: %s note %q", ce.Class, ce.Note)
 			}
 			if pc := oneParentCheck(t, cs, "infra", "r"); pc.Class != computed.ClassUnknown {
@@ -1081,7 +1081,7 @@ func TestUncertainRootKeyMakesNoNegativeExpectation(t *testing.T) {
 				case "gw":
 					is(t, pc, computed.ClassCompatible, computed.CoverageStatus)
 				case "gw2":
-					if pc.Class != computed.ClassUnknown || pc.Note != "Not all paths computed" {
+					if pc.Class != computed.ClassUnknown || pc.Note != "Some paths not computed" {
 						t.Fatalf("gw2: %s note %q", pc.Class, pc.Note)
 					}
 				}

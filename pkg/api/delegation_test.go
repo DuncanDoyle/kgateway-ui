@@ -127,13 +127,13 @@ func TestDelegationEndpoint(t *testing.T) {
 	rows := rowsByKey(p)
 	for key, w := range map[string]struct{ outcome, reason string }{
 		"0.0:shop/kid":  {"attached", ""},
-		"1.0:shop/drop": {"dropped", "rule 0: path `/other` is outside the parent's `/api`"},
+		"1.0:shop/drop": {"dropped", "the route's rule 1: path /other is outside the parent's /api"},
 		"2.0:shop/forb": {"forbidden", reasonForbidden},
 		"3.0:":          {"unresolved", reasonMissing},
 		"4.0:shop/host": {"rejected-hostnames", reasonRejectedHostnames},
 		"5.0:shop/loop": {"attached", ""},
-		"6.0:shop/part": {"partial", reasonPartial + "; rule 0: path `/p/x` is outside the parent's `/q`"},
-		"7.0:shop/kid":  {"dropped", "rule 0: path `/api/v1` is outside the parent's `/zzz`"},
+		"6.0:shop/part": {"partial", reasonPartial + "; the route's rule 1: path /p/x is outside the parent's /q"},
+		"7.0:shop/kid":  {"dropped", "the route's rule 1: path /api/v1 is outside the parent's /zzz"},
 		"8.0:":          {"unresolved", reasonUnwatched},
 	} {
 		if r := rows[key]; r.Outcome != w.outcome || r.Reason != w.reason {
@@ -178,7 +178,7 @@ func TestDelegationEndpoint(t *testing.T) {
 	}
 	part := rows["6.0:shop/part"]
 	if len(part.Contexts) != 2 || part.Contexts[0].Outcome != "attached" || part.Contexts[1].Outcome != "dropped" ||
-		part.Contexts[1].Reason != "rule 0: path `/p/x` is outside the parent's `/q`" || !reflect.DeepEqual(part.Contexts[1].ParentMatch, ptr(pathMatch("/q"))) {
+		part.Contexts[1].Reason != "the route's rule 1: path /p/x is outside the parent's /q" || !reflect.DeepEqual(part.Contexts[1].ParentMatch, ptr(pathMatch("/q"))) {
 		t.Errorf("part contexts %+v", part.Contexts)
 	}
 	// An unconfirmable row says so in its check's note (design §5.2).
@@ -287,7 +287,7 @@ func TestEffectiveOnRoutePage(t *testing.T) {
 	want := []EffectiveDTO{{Parent: LinkedRef{Ref: route("shop", "api"), Link: LinkDetail}, Mode: computed.ModeDefault, Computed: notVerified,
 		Contexts: []EffectiveContext{
 			{ParentMatch: ptr(pathMatch("/api")), Rules: []EffectiveRuleDTO{{Index: 0, Kept: true, Matches: []MatchDTO{pathMatch("/api/v1")}}}},
-			{ParentMatch: ptr(pathMatch("/zzz")), Rules: []EffectiveRuleDTO{{Index: 0, Matches: []MatchDTO{}, Reason: "path `/api/v1` is outside the parent's `/zzz`"}}},
+			{ParentMatch: ptr(pathMatch("/zzz")), Rules: []EffectiveRuleDTO{{Index: 0, Matches: []MatchDTO{}, Reason: "path /api/v1 is outside the parent's /zzz"}}},
 		}}}
 	if !reflect.DeepEqual(d.Effective, want) || d.EffectiveTruncated {
 		t.Fatalf("kid effective %+v", d.Effective)
@@ -1055,13 +1055,13 @@ func TestExplainDelegation(t *testing.T) {
 		f    computed.FitFailure
 		want string
 	}{
-		{computed.FitFailure{Clause: computed.ClausePathType, Parent: "Exact", Child: "/a"}, "the parent matches its path as Exact, not as PathPrefix"},
-		{computed.FitFailure{Clause: computed.ClausePathPrefix, Parent: "/api", Child: "/x"}, "path `/x` is outside the parent's `/api`"},
-		{computed.FitFailure{Clause: computed.ClauseDefaultSlash, Parent: "/api", Child: "/"}, "this rule has no matches, so it defaults to `/`, which is outside the parent's `/api`"},
-		{computed.FitFailure{Clause: computed.ClauseHeader, Parent: "x=1", Child: ""}, "the parent needs header `x=1`, this rule has none"},
-		{computed.FitFailure{Clause: computed.ClauseQuery, Parent: "q=1", Child: "q=2"}, "the parent needs query parameter `q=1`, this rule has `q=2`"},
-		{computed.FitFailure{Clause: computed.ClauseMethod, Parent: "GET", Child: "POST"}, "the parent needs method `GET`, this rule has `POST`"},
-		{computed.FitFailure{Clause: computed.ClauseNoMatches, Parent: "/api"}, "this rule has an empty match list, so nothing fits the parent's match"},
+		{computed.FitFailure{Clause: computed.ClausePathType, Parent: "Exact", Child: "/a"}, "the parent's path match is Exact, not PathPrefix"},
+		{computed.FitFailure{Clause: computed.ClausePathPrefix, Parent: "/api", Child: "/x"}, "path /x is outside the parent's /api"},
+		{computed.FitFailure{Clause: computed.ClauseDefaultSlash, Parent: "/api", Child: "/"}, "no matches, so it defaults to /, which is outside the parent's /api"},
+		{computed.FitFailure{Clause: computed.ClauseHeader, Parent: "x=1", Child: ""}, "the parent needs header x=1, the rule has none"},
+		{computed.FitFailure{Clause: computed.ClauseQuery, Parent: "q=1", Child: "q=2"}, "the parent needs query parameter q=1, the rule has q=2"},
+		{computed.FitFailure{Clause: computed.ClauseMethod, Parent: "GET", Child: "POST"}, "the parent needs method GET, the rule has POST"},
+		{computed.FitFailure{Clause: computed.ClauseNoMatches, Parent: "/api"}, "an empty match list fits no parent match"},
 	} {
 		if got := explainFit(&tc.f); got != tc.want || strings.Contains(got, ";") {
 			t.Errorf("%s: %q, want %q", tc.f.Clause, got, tc.want)

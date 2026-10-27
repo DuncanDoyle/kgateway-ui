@@ -132,7 +132,7 @@
                 "index": 1,
                 "kept": false,
                 "matches": [],
-                "reason": "path `/s` is outside the parent's `/api/h`"
+                "reason": "path /s is outside the parent's /api/h"
               }
             ]
           }

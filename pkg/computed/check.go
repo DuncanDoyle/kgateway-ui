@@ -508,7 +508,7 @@ func compareKey(a, b ReportKey) int {
 func compareRef(a, b objects.Ref) int { return a.Compare(b) }
 
 // noteIncomplete is the note of a negative check on an incomplete aggregate (rules §8.5).
-const noteIncomplete = "Not all paths computed"
+const noteIncomplete = "Some paths not computed"
 
 // Child entry expectations, as CheckResult.Expected shows them (rules §8.2).
 const (

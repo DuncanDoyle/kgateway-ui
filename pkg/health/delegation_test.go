@@ -221,7 +221,7 @@ func TestMergedTriggerSeverity(t *testing.T) {
 	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{trigger(since)}}
 	r := w.report(t)
 	fs := findingsFor(r, CodeDelegatedNotAttached, "shop/c")
-	want := "No status entry for parent HTTPRoute shop/api. The UI computes that HTTPRoute shop/api drops this route: no rule fits the parent's matches."
+	want := "No status entry for parent HTTPRoute shop/api. The UI computes that HTTPRoute `shop/api` drops this route: no rule fits the parent's matches."
 	if len(fs) != 1 || fs[0].Severity != SeverityWarning || fs[0].Detail != want || fs[0].Since == nil || !fs[0].Since.Equal(since) {
 		t.Fatalf("want one merged warning: %+v", r.Findings)
 	}
@@ -248,7 +248,7 @@ func TestMergedTriggerSeverity(t *testing.T) {
 	w.computed.Checks[0].Mature = true
 	r = w.report(t)
 	fs = findingsFor(r, CodeDelegatedNotAttached, "shop/c")
-	if len(fs) != 1 || fs[0].Message != ComputedNotAttachedMessage || fs[0].Detail != "The UI computes that HTTPRoute shop/api drops this route: no rule fits the parent's matches." ||
+	if len(fs) != 1 || fs[0].Message != ComputedNotAttachedMessage || fs[0].Detail != "The UI computes that HTTPRoute `shop/api` drops this route: no rule fits the parent's matches." ||
 		!reflect.DeepEqual(fs[0].Evidence, []objects.Ref{testutil.GwRef("infra", "edge").Ref()}) || fs[0].ResourceSince == nil {
 		t.Fatalf("standalone: %+v", fs)
 	}
@@ -259,7 +259,7 @@ func TestMergedTriggerSeverity(t *testing.T) {
 	// Forbidden reads differently; an unknown scope raises nothing (D-024).
 	w.computed.Checks[0].Expected = "forbidden"
 	if fs := findingsFor(w.report(t), CodeDelegatedNotAttached, "shop/c"); len(fs) != 1 ||
-		fs[0].Detail != "The UI computes that HTTPRoute shop/api selects this route, but the route's parentRefs do not permit that parent." {
+		fs[0].Detail != "The UI computes that HTTPRoute `shop/api` selects this route, but the route's parentRefs do not permit that parent." {
 		t.Fatalf("forbidden: %+v", fs)
 	}
 	w.scope = `[{`
