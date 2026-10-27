@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noRedundantRoles: WebKit drops implicit table roles under display grid/block, so the rows state them.
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { ChevronDown, ChevronRight, EyeOff, Info, Lock } from "lucide-react";
@@ -473,9 +474,9 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
   const note = restricted ? undefined : r.computed.note;
   const expandable = !restricted || r.contexts.length > 0;
   return (
-    <tbody className="item" data-testid="delegation-row">
-      <RowLine>
-        <td className="toggle">
+    <tbody className="item" role="rowgroup" data-testid="delegation-row">
+      <RowLine role="row">
+        <td className="toggle" role="cell">
           {expandable ? (
             <RowToggle
               type="button"
@@ -488,7 +489,7 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
             </RowToggle>
           ) : null}
         </td>
-        <td className="child">
+        <td className="child" role="cell">
           {r.child ? (
             <Tooltip label={`${r.child.namespace}/${r.child.name}`} stylesOverride={nameTip}>
               <LinkedName refValue={r.child} installId={installId} truncate />
@@ -502,8 +503,10 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
             <Muted>{delegationCopy.noChild}</Muted>
           )}
         </td>
-        <td className="outcome">{r.outcome ? <OutcomeLabel outcome={r.outcome} /> : <HiddenLabel />}</td>
-        <td className="reason">
+        <td className="outcome" role="cell">
+          {r.outcome ? <OutcomeLabel outcome={r.outcome} /> : <HiddenLabel />}
+        </td>
+        <td className="reason" role="cell">
           {reason ? <OneLine text={reason} /> : null}
           {note ? (
             <Note data-testid="row-note">
@@ -512,14 +515,16 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
             </Note>
           ) : null}
         </td>
-        <td className="signal">{restricted ? null : <Signal r={r} />}</td>
-        <td className="badge">
+        <td className="signal" role="cell">
+          {restricted ? null : <Signal r={r} />}
+        </td>
+        <td className="badge" role="cell">
           <ComputedBadge computed={r.computed} compact chip={false} />
         </td>
       </RowLine>
       {open ? (
-        <tr>
-          <td colSpan={6}>
+        <tr role="row">
+          <td colSpan={6} role="cell">
             <Panel id={panelId}>
               {r.contexts.length ? (
                 <ol aria-label={delegationCopy.togglePaths(true, r.contexts.length)}>
@@ -613,18 +618,30 @@ function RefRows({
     body = <Muted>{outcomes.length ? delegationCopy.noRowsFiltered : delegationCopy.noRows}</Muted>;
   else
     body = (
-      <Rows aria-label={delegationCopy.refTitle(at.rule + 1, at.ref + 1)} aria-busy={l.isLaggy || undefined}>
-        <thead>
-          <tr className="cols" data-testid="delegation-cols">
-            <th scope="col">
+      <Rows
+        role="table"
+        aria-label={delegationCopy.refTitle(at.rule + 1, at.ref + 1)}
+        aria-busy={l.isLaggy || undefined}
+      >
+        <thead role="rowgroup">
+          <tr className="cols" role="row" data-testid="delegation-cols">
+            <th scope="col" role="columnheader">
               {/* The expanders' column needs a name for screen readers, not a visible label. */}
               <span className="sr">{delegationCopy.pathsColumn}</span>
             </th>
-            <th scope="col">{columnCopy.route}</th>
-            <th scope="col">{delegationCopy.outcomeGroup}</th>
-            <th scope="col">{columnCopy.why}</th>
-            <th scope="col">{delegationCopy.childStatus}</th>
-            <th scope="col">
+            <th scope="col" role="columnheader">
+              {columnCopy.route}
+            </th>
+            <th scope="col" role="columnheader">
+              {delegationCopy.outcomeGroup}
+            </th>
+            <th scope="col" role="columnheader">
+              {columnCopy.why}
+            </th>
+            <th scope="col" role="columnheader">
+              {delegationCopy.childStatus}
+            </th>
+            <th scope="col" role="columnheader">
               <ComputedChip label={computedTooltip(l.data.items.find((r) => r.computed.rule)?.computed ?? CHIP)} />
             </th>
           </tr>
