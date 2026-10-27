@@ -38,11 +38,15 @@ func largeHandlerWith(b testing.TB, authz Authorizer) (http.Handler, *engine.Mod
 	return tierHandler(b, scale.Large, authz)
 }
 
-// tierHandler is largeHandlerWith over tier. Under Contradict the model is
-// computed again past the persistence window, so every check has matured.
-func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer) (http.Handler, *engine.Model) {
+// tierHandler is largeHandlerWith over tier, after mut edits the snapshot.
+// Under Contradict the model is computed again past the persistence window,
+// so every check has matured.
+func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer, mut ...func(*cache.Snapshot)) (http.Handler, *engine.Model) {
 	b.Helper()
 	snap := scale.Snapshot(tier, 1)
+	for _, f := range mut {
+		f(snap)
+	}
 	for _, objs := range snap.Objects {
 		slices.SortFunc(objs, func(x, y *unstructured.Unstructured) int {
 			return strings.Compare(x.GetNamespace()+"/"+x.GetName(), y.GetNamespace()+"/"+y.GetName())

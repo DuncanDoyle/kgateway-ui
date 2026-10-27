@@ -1,0 +1,18 @@
+# GOMAXPROCS=4, Apple M5 Max, go version go1.27.3 darwin/arm64
+go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 30m ./pkg/api
+=== RUN   TestBudgetSustainedStream
+=== RUN   TestBudgetSustainedStream/large
+    budget_test.go:365: budget_test.go:542: stream 10m0.001s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 41.896s = 7.0 % of one core (budget ≤ 15 %); recompute wall 29.268s = 4.9 %; GC share 23.8 % of used CPU (1.7 % of one core)
+    budget_test.go:365: budget_test.go:544: polls: 2400, p50 707µs p95 1.08ms max 9.6ms
+    budget_test.go:365: budget_test.go:549: large: heap after GC 67.3 MiB at 1 min, 57.2 MiB at the end (-10.0 MiB)
+    budget_test.go:365: budget_test.go:554: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 184.9 MiB, heap in use 79.2 MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)
+=== RUN   TestBudgetSustainedStream/large-contradicting
+    budget_test.go:365: budget_test.go:542: stream 10m0.003s: 6000 updates, 566 recomputes (0.94/s, budget ≤ 1/s), 566 publications; process CPU 47.743s = 8.0 % of one core (budget ≤ 15 %); recompute wall 34.001s = 5.7 %; GC share 23.4 % of used CPU (1.9 % of one core)
+    budget_test.go:365: budget_test.go:544: polls: 2401, p50 673µs p95 1.06ms max 7.8ms
+    budget_test.go:365: budget_test.go:549: large-contradicting: heap after GC 65.8 MiB at 1 min, 57.2 MiB at the end (-8.6 MiB)
+    budget_test.go:365: budget_test.go:554: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 193.5 MiB, heap in use 73.9 MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)
+--- PASS: TestBudgetSustainedStream (1260.45s)
+    --- PASS: TestBudgetSustainedStream/large (600.16s)
+    --- PASS: TestBudgetSustainedStream/large-contradicting (660.30s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	1260.696s

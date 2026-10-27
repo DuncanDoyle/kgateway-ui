@@ -22,8 +22,11 @@ import (
 	"testing/fstest"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
@@ -33,7 +36,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
-// The 2.2 request and stream budgets of design §9.6 at Large.
+// The request and stream budgets of design §9.6 at Large (2.2–2.4).
 
 // requestsPerMix is the sample count per filter mix (design §9.6 method).
 const requestsPerMix = 10_000
@@ -103,19 +106,71 @@ func widest(m map[objects.Ref][]explore.RowID, keep func(objects.Ref) bool) obje
 
 func refParam(r objects.Ref) string { return r.Group + "/" + r.Kind + "/" + r.Namespace + "/" + r.Name }
 
+// budgetLabel is the label value labelWidest selects.
+const budgetLabel = "budget-label"
+
+// labelWidest rewrites the first child ref of the viewable HTTPRoute with the
+// most child refs into a label ref under the wildcard namespace and labels
+// that child. The selection is unchanged, but its scope is every in-scope
+// HTTPRoute: the costliest SelectionHidden check (Task 64).
+func labelWidest(can func(objects.Ref) bool) func(*cache.Snapshot) {
+	return func(snap *cache.Snapshot) {
+		var routes []*unstructured.Unstructured
+		for gvr, objs := range snap.Objects {
+			if gvr.Resource == "httproutes" {
+				routes = objs
+			}
+		}
+		childRefs := func(u *unstructured.Unstructured) []any {
+			rules, _ := u.Object["spec"].(map[string]any)["rules"].([]any) // not NestedSlice, which copies
+			if len(rules) == 0 {
+				return nil
+			}
+			refs, _ := rules[0].(map[string]any)["backendRefs"].([]any)
+			if len(refs) == 0 || refs[0].(map[string]any)["kind"] != "HTTPRoute" {
+				return nil
+			}
+			return refs
+		}
+		var widest *unstructured.Unstructured
+		for _, u := range routes {
+			if n := len(childRefs(u)); n > 0 && can(objects.RefOf(u)) && (widest == nil || n > len(childRefs(widest))) {
+				widest = u
+			}
+		}
+		ref := childRefs(widest)[0].(map[string]any)
+		for _, u := range routes {
+			if u.GetNamespace() == ref["namespace"] && u.GetName() == ref["name"] {
+				lbls := u.GetLabels()
+				if lbls == nil {
+					lbls = map[string]string{}
+				}
+				lbls[objects.DelegationLabelKey] = budgetLabel
+				u.SetLabels(lbls)
+			}
+		}
+		clear(ref)
+		ref["group"], ref["kind"], ref["name"], ref["namespace"] = "delegation.kgateway.dev", "label", budgetLabel, install.WildcardAll
+	}
+}
+
 // TestBudgetListRequests: per filter mix, 10,000 sequential requests give
 // p95 < 50 ms and p99 < 100 ms, and 10,000 from 20 goroutines p95 < 100 ms;
-// the deepest delegated child's detail p95 < 50 ms. Run under AllowAll, whose
-// answers are precomputed, and under a restricting Authorizer.
+// the details of the deepest delegated child and of the widest delegating
+// parent p95 < 50 ms. Run under AllowAll, whose answers are precomputed, and
+// under a restricting Authorizer, over Large with labelWidest's label ref.
 func TestBudgetListRequests(t *testing.T) {
 	for _, a := range []struct {
 		name  string
 		authz Authorizer
 	}{{"allow-all", nil}, {"restricted", restricting}} {
 		t.Run(a.name, func(t *testing.T) {
-			h, m := largeHandlerWith(t, a.authz)
-			ix := m.Installs[0].Index
 			can := func(r objects.Ref) bool { return a.authz == nil || a.authz.Authorize(nil, r) }
+			h, m := tierHandler(t, scale.Large, a.authz, labelWidest(can))
+			ix := m.Installs[0].Index
+			if f, c := matured(m); f != 0 || c != 0 {
+				t.Fatalf("the labelled Large world has %d KGWUI-012 of %d checks", f, c)
+			}
 			kindIs := func(k string) func(objects.Ref) bool {
 				return func(r objects.Ref) bool { return r.Kind == k && can(r) }
 			}
@@ -158,6 +213,15 @@ func TestBudgetListRequests(t *testing.T) {
 					deleg = r
 				}
 			}
+			// It carries labelWidest's label ref, so the restricted run pays the costliest SelectionHidden check.
+			label := slices.IndexFunc(ix.Delegation[deleg], func(i int) bool { return ix.DelegRows[i].RefAsWritten.Mode == objects.DelegationLabel })
+			if label < 0 {
+				t.Fatalf("the widest delegating parent %s has no label ref", deleg)
+			}
+			lr := ix.DelegRows[ix.Delegation[deleg][label]].Key
+			labelKey := explore.RefKey{Parent: deleg, Rule: lr.Rule, Ref: lr.Ref}
+			t.Logf("widest delegating parent %s: %d view B rows; label ref rule %d ref %d, scope %d HTTPRoutes, selection hidden %v",
+				deleg, len(ix.Delegation[deleg]), lr.Rule, lr.Ref, len(ix.RefScope[labelKey]), a.authz != nil && ix.SelectionHidden(labelKey, can))
 			deepest, depth := deepestChild(ix, can)
 			if depth == 0 || len(ix.ByParentRoute[parent]) == 0 {
 				t.Fatal("the Large tier has no delegation")
@@ -173,8 +237,8 @@ func TestBudgetListRequests(t *testing.T) {
 				{"namespace+state", base + "/routes?namespace=" + ns + "&state=not-accepted"},
 				{"q", base + "/routes?q=r-01"},
 				{"sort=health", base + "/routes?sort=health.desc"},
-				{"delegation-widest-parent", base + "/routes?parent=" + refParam(parent)},
-				{"delegation-rows", base + "/routes/gateway.networking.k8s.io/HTTPRoute/" + deleg.Namespace + "/" + deleg.Name + "/delegation"},
+				{"parent-httproute", base + "/routes?parent=" + refParam(parent)},
+				{"delegation-widest-parent", base + "/routes/gateway.networking.k8s.io/HTTPRoute/" + deleg.Namespace + "/" + deleg.Name + "/delegation"},
 			}
 			for _, mx := range mixes {
 				items, total := listRows(t, h, mx.path)
@@ -197,10 +261,15 @@ func TestBudgetListRequests(t *testing.T) {
 					t.Errorf("%s: 20-client p95 %v, budget < 100 ms", mx.name, p)
 				}
 			}
-			d := latencies(t, h, base+"/routes/gateway.networking.k8s.io/HTTPRoute/"+deepest.Namespace+"/"+deepest.Name, requestsPerMix, 1)
-			t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", "detail-deepest-child", rd(percentile(d, 50)), rd(percentile(d, 95)), rd(percentile(d, 99)))
-			if p := percentile(d, 95); p >= 50*time.Millisecond {
-				t.Errorf("deepest child detail p95 %v, budget < 50 ms", p)
+			for _, dt := range []struct {
+				name string
+				ref  objects.Ref
+			}{{"detail-deepest-child", deepest}, {"detail-widest-parent", deleg}} {
+				d := latencies(t, h, base+"/routes/gateway.networking.k8s.io/HTTPRoute/"+dt.ref.Namespace+"/"+dt.ref.Name, requestsPerMix, 1)
+				t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", dt.name, rd(percentile(d, 50)), rd(percentile(d, 95)), rd(percentile(d, 99)))
+				if p := percentile(d, 95); p >= 50*time.Millisecond {
+					t.Errorf("%s p95 %v, budget < 50 ms", dt.name, p)
+				}
 			}
 		})
 	}
@@ -486,6 +555,9 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib)
 	if tier.Contradict && f != c {
 		t.Errorf("worst case: %d KGWUI-012 of %d checks at the end", f, c)
+	}
+	if !tier.Contradict && (f != 0 || c != 0) {
+		t.Errorf("consistent world: %d KGWUI-012 of %d checks at the end", f, c)
 	}
 	if ms.Sys > 256*mib {
 		t.Errorf("memory from the OS %.1f MiB, budget ≤ 256 MiB", float64(ms.Sys)/mib)

@@ -258,8 +258,8 @@ func BenchmarkConfirmTick(b *testing.B) {
 	}
 }
 
-// The 2.2 and 2.3 budgets of design §9.6 at Large: the explorer's index,
-// view A, KGWUI-012 persistence and the decode cache.
+// The 2.2–2.4 budgets of design §9.6 at Large: the explorer's index,
+// views A, B and C with their retained contexts, KGWUI-012 persistence and the decode cache.
 
 // largeCases are the consistent Large world, whose statuses agree with view
 // A, and the worst case, where every check contradicts and has matured.
