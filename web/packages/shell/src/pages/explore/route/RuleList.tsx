@@ -164,6 +164,21 @@ const delegationState: Record<NonNullable<DelegationRef["state"]>, { label: stri
   restricted: { label: routeCopy.delegation.restricted, state: "unknown" },
 };
 
+/** A ref's counts. While the ref is Hidden they cover visible routes only, and say so (S234). */
+export function RefCounts({ d }: { d: DelegationRef }) {
+  const visible = d.computed?.state === "restricted";
+  return (
+    <>
+      {d.selected !== undefined ? (
+        <span>{visible ? delegationCopy.visibleSelected(d.selected) : delegationCopy.selected(d.selected)}</span>
+      ) : null}
+      {d.attached !== undefined ? (
+        <span>{visible ? delegationCopy.visibleAttached(d.attached) : delegationCopy.attached(d.attached)}</span>
+      ) : null}
+    </>
+  );
+}
+
 function Delegation({ b, installId }: { b: BackendRef & { delegation: DelegationRef }; installId: string }) {
   const d = b.delegation;
   const stale = useContext(StaleView);
@@ -191,8 +206,7 @@ function Delegation({ b, installId }: { b: BackendRef & { delegation: Delegation
       {d.computed ? (
         // View B's counts of visible children (2.4); absent when the UI could not compute them.
         <span className="line" data-testid="ref-counts">
-          {d.selected !== undefined ? <span>{delegationCopy.selected(d.selected)}</span> : null}
-          {d.attached !== undefined ? <span>{delegationCopy.attached(d.attached)}</span> : null}
+          <RefCounts d={d} />
           <ComputedBadge computed={d.computed} compact extra={delegationCopy.selectedHint} />
         </span>
       ) : null}

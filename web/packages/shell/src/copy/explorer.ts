@@ -79,7 +79,7 @@ export const routeStateCopy = {
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
 export const routeStateDelegationCopy = {
-  dropped: "Dropped by a parent route", // S189 draft
+  dropped: "Selected but not attached", // S189
 };
 
 /** How a parent took a route. */
@@ -118,7 +118,7 @@ export const detailCopy = {
   bannerFinding: "a finding of this install names it.", // S95
   bannerRefersTo: "refers to it.",
   bannerObject: "an object of this install refers to it.",
-  bannerSelected: "selects it through a delegation ref.", // S188 draft
+  bannerSelected: "selects it through a delegation ref.", // S188
   backendLookup: "Routes that send traffic here", // S96 (fixed)
 };
 
@@ -248,8 +248,8 @@ export const computedCopy = {
     "section-and-port": "section name and port", // S116
     "hostname-intersection": "hostname intersection", // S117
     "listener-count": "routes per listener", // S118
-    delegation: "delegation", // S190 draft
-    "effective-matchers": "effective matches", // S191 draft
+    delegation: "delegation", // S190
+    "effective-matchers": "effective matches", // S191
   } as Record<string, string>,
   coverage: {
     "count-agrees": "Count agrees with the controller", // S119
@@ -264,8 +264,8 @@ export const computedCopy = {
     "namespace-labels-unavailable": "Unknown: the UI cannot read namespace labels", // S126
     "listenerset-no-status": "Unknown: the ListenerSet has no current status", // S127
     "setting-unknown": "Unknown: the UI cannot read a controller setting", // S128
-    "not-reached": "Unknown: no root route reaches this route", // S129
-    "context-unknown": "Unknown: a route above this one is unknown", // S130
+    "not-reached": "Unknown: the parent route has no path from a Gateway or ListenerSet", // S129
+    "context-unknown": "Unknown: part of the path above is unknown", // S130
     "too-large": "Unknown: too large to compute", // S131
   } as Record<string, string>,
   unknownOther: (reason: string) => `Unknown (${reason})`, // S132
@@ -316,54 +316,59 @@ export const viewACopy = {
   },
 };
 
-// region Views B and C on pages (2.4). S188–S231 are drafts (S200 retired); Task 67 runs the wording pass.
+// region Views B and C on pages (2.4). S188–S234 (S200 retired); final wording from Task 67 (phase-2.4-wording.md).
 export const delegationCopy = {
-  tab: "Delegation", // S192 draft
-  outcomeGroup: "Outcome", // S193 draft
-  ruleFilter: "Rule", // S194 draft
-  refFilter: "Ref", // S195 draft
-  allRules: "All rules", // S196 draft
-  allRefs: "All refs", // S197 draft
-  refTitle: (rule: number, ref: number) => `Rule ${rule}, ref ${ref}`, // S198 draft
-  toggleRows: (open: boolean) => (open ? "Hide rows" : "Show rows"), // S199 draft
-  noRows: "No rows for this ref.", // S201 draft
-  noRowsFiltered: "No rows match these filters.", // S202 draft
+  tab: "Delegation", // S192 (fixed)
+  outcomeGroup: "Outcome", // S193
+  ruleFilter: "Rule", // S194
+  refFilter: "Ref", // S195
+  allRules: "All rules", // S196
+  allRefs: "All refs", // S197
+  refTitle: (rule: number, ref: number) => `Rule ${rule}, ref ${ref}`, // S198
+  toggleRows: (open: boolean) => (open ? "Hide rows" : "Show rows"), // S199
+  noRows: "This ref selects no routes.", // S201
+  noRowsFiltered: "No rows match these filters.", // S202
   outcomes: {
-    attached: "Attached", // S203 draft
-    partial: "Partly attached", // S204 draft
-    dropped: "Dropped", // S205 draft
-    forbidden: "Not permitted", // S206 draft
-    "rejected-hostnames": "Rejected: has hostnames", // S207 draft
-    cycle: "Cycle", // S208 draft
-    unresolved: "Not resolved", // S209 draft
-    unknown: "Unknown", // S210 draft
+    attached: "Attached", // S203
+    partial: "Partly attached", // S204
+    dropped: "Dropped", // S205
+    forbidden: "Not permitted", // S206
+    "rejected-hostnames": "Rejected: has hostnames", // S207
+    cycle: "Cycle", // S208
+    unresolved: "Not resolved", // S209
+    unknown: "Unknown", // S210 (fixed)
   },
-  notShown: "Routes not shown", // S211 draft: a selection-restricted row
-  noChild: "No route", // S212 draft
-  entry: (type: string, status: string) => `${type}: ${status}`, // S213 draft: the child's status entry
-  noEntry: "No status entry", // S214 draft
-  childStatus: "Child's status entry", // S215 draft
-  pathsColumn: "Paths", // S231 draft: header of the row expanders' column
-  parentCondition: "Parent's condition", // S216 draft
-  togglePaths: (open: boolean, n: number) => `${open ? "Hide" : "Show"} paths (${n})`, // S217 draft
-  parentMatch: "Parent match", // S218 draft
-  morePaths: "More paths exist than are shown.", // S219 draft
-  noPathsKept: "No paths kept. More paths exist than the UI computed.", // S220 draft
-  hiddenRoute: "A route you cannot open", // S221 draft: tooltip on a hidden ancestor
-  selected: (n: number) => `Selected: ${n}`, // S222 draft
-  attached: (n: number) => `Attached: ${n}`, // S223 draft
-  // Quirk 1: selected can include children an earlier ref in the same rule passes on.
-  selectedHint: "Selected can include routes that an earlier ref in the same rule passes on", // S224 draft
+  notShown: "You cannot view this ref's full selection", // S211: a selection-restricted row
+  noChild: "No route", // S212
+  entry: (type: string, status: string) => `${type}: ${status}`, // S213 (fixed): the child's status entry
+  noEntry: "No status entry", // S214
+  noCondition: "No condition reported", // S232
+  childStatus: "Child's status entry", // S215
+  pathsColumn: "Paths", // S231: header of the row expanders' column
+  parentCondition: "Parent's condition", // S216
+  togglePaths: (open: boolean, n: number) => `${open ? "Hide" : "Show"} paths (${n})`, // S217
+  pathList: (n: number) => `Paths (${n})`, // S264: the open path list (S231 plus the count)
+  parentMatch: "Parent match", // S218
+  morePaths: "More paths not shown.", // S219
+  noPathsKept: "No paths shown. This list is not complete.", // S220
+  hiddenRoute: "A route you cannot view", // S221: label of a hidden ancestor
+  selected: (n: number) => `Selected: ${n}`, // S222
+  attached: (n: number) => `Attached: ${n}`, // S223
+  // A Hidden ref's counts cover the routes the caller can view (design §7.4 rule 5).
+  visibleSelected: (n: number) => `Visible selected: ${n}`, // S234
+  visibleAttached: (n: number) => `Visible attached: ${n}`, // S234
+  // Quirk 1: selected can include children of an earlier ref in the same rule.
+  selectedHint: "Selected can include routes from an earlier ref in this rule", // S224
 };
 
 export const effectiveCopy = {
-  title: "Effective matches", // S225 draft
-  from: "From", // S226 draft, followed by the parent route
+  title: "Effective matches", // S225
+  from: "From", // S226, followed by the parent route
   modes: {
-    default: "Rule matches apply as written", // S227 draft
-    inherit: "Rule matches extend the parent's match", // S228 draft
+    default: "Matches as written, inside the parent's match", // S227
+    inherit: "Rule matches extend the parent's match", // S228
   },
-  kept: "Kept", // S229 draft
-  dropped: "Dropped", // S205 draft
-  moreParents: "More parent routes not shown.", // S230 draft
+  kept: "Fits", // S229
+  dropped: "Does not fit", // S229
+  moreParents: "More parent routes not shown.", // S230
 };

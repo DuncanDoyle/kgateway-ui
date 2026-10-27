@@ -30,6 +30,7 @@ import { expectedRows, Facts } from "../detailParts";
 import { Muted, nameTip, OneLine } from "../listParts";
 import { CutNote, NeutralBox, Placeholder } from "./EffectiveMatches";
 import { MatchLine } from "./MatchLine";
+import { RefCounts } from "./RuleList";
 
 // region Styles
 /** Below this width a row's secondary cells move under its name (design §8.7). */
@@ -400,8 +401,13 @@ function reasonText(r: DelegationRow): string {
   // A restricted row carries no reason (design §7.4 rule 4); never show one even if sent.
   if (r.computed.state === "restricted") return "";
   if (r.reason) return r.reason;
-  if (r.outcome === "unknown" && r.computed.reason)
-    return computedCopy.unknownReasons[r.computed.reason] ?? computedCopy.unknownOther(r.computed.reason);
+  if (r.outcome === "unknown" && r.computed.reason) {
+    const t = computedCopy.unknownReasons[r.computed.reason];
+    if (!t) return computedCopy.unknownOther(r.computed.reason);
+    // The outcome cell already says "Unknown", so the Why cell drops the badge's prefix (S233).
+    const f = t.replace(/^Unknown: /, "");
+    return f.charAt(0).toUpperCase() + f.slice(1);
+  }
   return "";
 }
 
@@ -527,7 +533,7 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
           <td colSpan={6} role="cell">
             <Panel id={panelId}>
               {r.contexts.length ? (
-                <ol aria-label={delegationCopy.togglePaths(true, r.contexts.length)}>
+                <ol aria-label={delegationCopy.pathList(r.contexts.length)}>
                   {r.contexts.map((c, i) => (
                     // biome-ignore lint/suspicious/noArrayIndexKey: contexts keep the server's order
                     <ContextItem key={i} c={c} installId={installId} />
@@ -556,7 +562,7 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
                         generation={r.observed.parentCondition.observedGeneration}
                       />
                     ) : (
-                      <Muted>{delegationCopy.noEntry}</Muted>
+                      <Muted>{delegationCopy.noCondition}</Muted>
                     )}
                   </dd>
                 </Facts>
@@ -696,8 +702,7 @@ function RefSection({
           {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
           {delegationCopy.toggleRows(open)}
         </Toggle>
-        {d.selected !== undefined ? <span>{delegationCopy.selected(d.selected)}</span> : null}
-        {d.attached !== undefined ? <span>{delegationCopy.attached(d.attached)}</span> : null}
+        <RefCounts d={d} />
         {d.computed ? <ComputedBadge computed={d.computed} compact extra={delegationCopy.selectedHint} /> : null}
       </div>
       {open ? <RefRows installId={installId} route={route} at={at} outcomes={outcomes} id={bodyId} /> : null}

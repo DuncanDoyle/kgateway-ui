@@ -191,12 +191,12 @@ describe("Delegation tab", () => {
     await tabLoaded();
     const want: [number, keyof typeof delegationCopy.outcomes, string][] = [
       [0, "attached", ""],
-      [1, "dropped", "path `/other` is outside the parent's `/api`"],
+      [1, "dropped", "the route's rule 1: path /other is outside the parent's /api"],
       [2, "forbidden", "The route's parentRefs do not permit this parent"],
-      [3, "unresolved", "Selects no routes"],
+      [3, "unresolved", "No such route"],
       [4, "rejected-hostnames", "A delegated route may not set hostnames"],
-      [5, "cycle", "The route is already on this path"],
-      [6, "partial", "Attached under some parent matches"],
+      [5, "cycle", "A delegation loop fails this ref"],
+      [6, "partial", "Attached on some paths only"],
     ];
     for (const [rule, outcome, reason] of want) {
       const [r] = await rowsIn(await openRef(rule, 0));
@@ -207,6 +207,19 @@ describe("Delegation tab", () => {
     }
   });
 
+  it("a missing parent condition is worded apart from a missing entry", async () => {
+    const rs = structuredClone(rows) as DelegationRow[];
+    delete (rs[1] as DelegationRow).observed.parentCondition;
+    serve(api({ name: "m", d: m(), rows: (u) => rowPage(rs, u) }));
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const [r] = await rowsIn(await openRef(1, 0));
+    fireEvent.click(within(r as HTMLElement).getByRole("button", { name: delegationCopy.togglePaths(false, 1) }));
+    // S232 under the parent's label; S214 stays the child's.
+    expect(r).toHaveTextContent(`${delegationCopy.parentCondition}${delegationCopy.noCondition}`);
+    expect(r).toHaveTextContent(`${delegationCopy.childStatus}${delegationCopy.noEntry}`);
+  });
+
   it("an unknown row names its reason", async () => {
     const cut = rowsOf(cutGolden);
     serve(api({ name: "m", d: parentOf("m", cut), rows: (u) => rowPage(cut, u) }));
@@ -214,7 +227,8 @@ describe("Delegation tab", () => {
     await tabLoaded();
     const [r] = await rowsIn(await openRef(9, 0));
     expect(within(r as HTMLElement).getByTestId("outcome")).toHaveTextContent(delegationCopy.outcomes.unknown);
-    expect(r).toHaveTextContent(computedCopy.unknownReasons["too-large"] as string);
+    // The Why cell drops the badge's "Unknown: " prefix (S233).
+    expect((r as HTMLElement).querySelector(".reason")).toHaveTextContent(/^Too large to compute$/);
   });
 
   it("contexts expand with aria-expanded; a restricted context shows the placeholder", async () => {
@@ -229,6 +243,8 @@ describe("Delegation tab", () => {
     expect(within(r as HTMLElement).queryAllByTestId("delegation-context")).toHaveLength(0);
     fireEvent.click(t);
     expect(t).toHaveAttribute("aria-expanded", "true");
+    // The open list has its own name, not the toggle's (S217, S231).
+    expect(within(r as HTMLElement).getByRole("list", { name: delegationCopy.pathList(2) })).toBeInTheDocument();
     const ctx = within(r as HTMLElement).getAllByTestId("delegation-context");
     expect(ctx).toHaveLength(2);
     expect(ctx[1]).toHaveTextContent(computedCopy.restricted);
@@ -328,7 +344,7 @@ it("effective matches per parent path in both modes, marked with the not-verifie
   expect(loop).toHaveTextContent(computedCopy.coverage["not-verified"]);
   expect(within(loop).getByTestId("effective-rule-0")).toHaveTextContent(effectiveCopy.kept);
   expect(within(loop).getByTestId("effective-rule-0")).toHaveTextContent("PathPrefix /api");
-  expect(within(loop).getByTestId("effective-rule-2")).toHaveTextContent("path `/` is outside the parent's `/api`");
+  expect(within(loop).getByTestId("effective-rule-2")).toHaveTextContent("path / is outside the parent's /api");
   first.unmount();
 
   serve(api({ name: "x", d: detail(effectiveGolden) }));
@@ -447,6 +463,9 @@ it("a restricted delegation ref shows its badge hidden and no attached count", a
   const c = screen.getByTestId("backend-c");
   expect(within(c).getByTestId("computed-badge")).toHaveTextContent(computedCopy.short.restricted);
   expect(c).not.toHaveTextContent(delegationCopy.attached(0));
+  // A Hidden ref's count covers visible routes only, and says so (S234).
+  expect(c).toHaveTextContent(delegationCopy.visibleSelected(1));
+  expect(c).not.toHaveTextContent(delegationCopy.selected(1));
 });
 
 it("a selected route's candidate banner names its parent", async () => {
