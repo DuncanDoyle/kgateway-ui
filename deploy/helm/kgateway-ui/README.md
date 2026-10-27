@@ -35,13 +35,14 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `image.tag` | `""` | Image tag; defaults to the chart `appVersion`. Required for a local-path install. |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `install.pin` | `""` | Pin the UI to one controller install: an install ID (e.g. `kgw.kgateway`) or `namespace/name`. Empty shows all installs. |
+| `delegation.edgeCap` | `0` | Selected delegation edges computed per install, passed as `--delegation-edge-cap`; `0` keeps the binary's default (10000). A higher cap needs a higher `resources.limits.memory`. |
 | `extraArgs` | `[]` | More flags for the UI binary, appended after the chart's own args, e.g. `--set extraArgs={--poll-interval=10m}`. |
 | `httpRoute.enabled` | `false` | Create an HTTPRoute on an existing Gateway. Read [Security and trust model](#security-and-trust-model) first. |
 | `httpRoute.parentRefs` | `[]` | Gateway parentRefs for the route. See [Security and trust model](#security-and-trust-model). |
 | `httpRoute.hostnames` | `[]` | Hostnames for the route. See [Security and trust model](#security-and-trust-model). |
 | `serviceAccount.create` | `true` | Create the ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name; defaults to `<release>-kgateway-ui`. |
-| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. |
+| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. With a memory limit, `GOMEMLIMIT` is set to it through the downward API. |
 | `podSecurityContext` | `runAsNonRoot`, `RuntimeDefault` seccomp | Pod security context. |
 | `securityContext` | no privilege escalation, read-only root FS, all capabilities dropped | Container security context. |
 

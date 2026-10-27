@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
@@ -280,5 +282,49 @@ func TestExtraArgsAppended(t *testing.T) {
 	got := containerArgs(t, "--set", "install.pin=kgw/kgateway", "--set", "extraArgs={--poll-interval=10m}")
 	if want := []string{"--listen=:8080", "--install=kgw/kgateway", "--poll-interval=10m"}; !slices.Equal(got, want) {
 		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+func TestDelegationEdgeCapPassedAsFlag(t *testing.T) {
+	if got := containerArgs(t); slices.ContainsFunc(got, func(a string) bool { return strings.HasPrefix(a, "--delegation-edge-cap") }) {
+		t.Errorf("no edge cap flag by default: %v", got)
+	}
+	got := containerArgs(t, "--set", "delegation.edgeCap=20000", "--set", "extraArgs={--poll-interval=10m}")
+	if want := []string{"--listen=:8080", "--delegation-edge-cap=20000", "--poll-interval=10m"}; !slices.Equal(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+// containerEnv is the UI container's env as rendered with args.
+func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
+	t.Helper()
+	ds := kind(render(t, args...), "Deployment")
+	if len(ds) != 1 {
+		t.Fatalf("want 1 Deployment, got %d", len(ds))
+	}
+	b, _ := yaml.Marshal(ds[0])
+	var d appsv1.Deployment
+	if err := yaml.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	return d.Spec.Template.Spec.Containers[0].Env
+}
+
+// GOMEMLIMIT follows the container's memory limit through the downward API,
+// and is unset without one (D-025).
+func TestGOMEMLIMITFollowsTheMemoryLimit(t *testing.T) {
+	env := containerEnv(t)
+	i := slices.IndexFunc(env, func(e corev1.EnvVar) bool { return e.Name == "GOMEMLIMIT" })
+	if i < 0 {
+		t.Fatalf("no GOMEMLIMIT with the default 512Mi limit: %+v", env)
+	}
+	f := env[i].ValueFrom
+	if env[i].Value != "" || f == nil || f.ResourceFieldRef == nil || f.ResourceFieldRef.Resource != "limits.memory" ||
+		f.ResourceFieldRef.ContainerName != "kgateway-ui" || f.ResourceFieldRef.Divisor.String() != "1" {
+		t.Fatalf("GOMEMLIMIT must be the container's limits.memory in bytes: %+v", env[i])
+	}
+	env = containerEnv(t, "--set", "resources.limits.memory=null")
+	if slices.ContainsFunc(env, func(e corev1.EnvVar) bool { return e.Name == "GOMEMLIMIT" }) {
+		t.Fatalf("GOMEMLIMIT must be unset without a memory limit: %+v", env)
 	}
 }

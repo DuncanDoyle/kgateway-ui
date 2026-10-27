@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -483,4 +485,141 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	runtime.KeepAlive(snap)
 	j, _ := json.Marshal(r)
 	fmt.Println("heap: " + string(j))
+}
+
+// The 2.4 dense-memory budget (D-025): the edge cap keeps the densest
+// delegation inside the chart's 512Mi memory limit.
+
+// denseMemChildEnv makes TestBudgetDenseMemory measure one edge cap in this process.
+const denseMemChildEnv = "KGWUI_DENSE_MEM_CHILD"
+
+// denseMemRun is one child's measurement: the peak heap sampled during the
+// cold Compute and during the warm ones, and the view B rows.
+type denseMemRun struct {
+	Edges, Rows                  int
+	ColdHeapInuse, WarmHeapInuse uint64
+	ColdHeapAlloc, WarmHeapAlloc uint64
+}
+
+// TestBudgetDenseMemory: DenseSelection(100, 1000) with realistic status, in a
+// fresh process with no GOMEMLIMIT, at the default edge cap: peak RSS ≤ 480
+// MiB and peak heap (HeapInuse) ≤ 432 MiB, under the chart's 512Mi limit.
+// Twice the default and the old 50,000 are measured and reported. The 400/320
+// MiB first asked for is below this world's floor at any cap (D-025).
+func TestBudgetDenseMemory(t *testing.T) {
+	if v := os.Getenv(denseMemChildEnv); v != "" {
+		edges, err := strconv.Atoi(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		denseMemChild(t, edges)
+		return
+	}
+	const mib = 1 << 20
+	def := computed.DefaultBounds.Edges
+	for _, edges := range slices.Compact([]int{def, 2 * def, 50_000}) {
+		r, rss := denseMemParent(t, edges)
+		heap := max(r.ColdHeapInuse, r.WarmHeapInuse)
+		t.Logf("edges %6d: %6d rows; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
+			edges, r.Rows, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
+		if edges != def {
+			continue
+		}
+		if rss > 480*mib {
+			t.Errorf("peak RSS %d MiB at the default edge cap %d, budget ≤ 480 MiB", rss/mib, def)
+		}
+		if heap > 432*mib {
+			t.Errorf("peak heap %d MiB at the default edge cap %d, budget ≤ 432 MiB", heap/mib, def)
+		}
+	}
+}
+
+// denseMemParent runs one child at edges and returns its run and peak RSS in bytes.
+func denseMemParent(t *testing.T, edges int) (denseMemRun, uint64) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestBudgetDenseMemory$", "-test.count=1")
+	// The budget holds without a memory limit or a GC tuning.
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "GOMEMLIMIT=") || strings.HasPrefix(kv, "GOGC=")
+	})
+	cmd.Env = append(cmd.Env, denseMemChildEnv+"="+strconv.Itoa(edges))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("dense memory child: %v\n%s", err, out)
+	}
+	var r denseMemRun
+	for line := range strings.Lines(string(out)) {
+		if j, ok := strings.CutPrefix(line, "densemem: "); ok {
+			if err := json.Unmarshal([]byte(j), &r); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if r.Rows == 0 {
+		t.Fatalf("dense memory child printed no result:\n%s", out)
+	}
+	return r, maxRSS(t, cmd.ProcessState)
+}
+
+// maxRSS is a finished process's peak resident set in bytes.
+func maxRSS(t *testing.T, ps *os.ProcessState) uint64 {
+	ru, ok := ps.SysUsage().(*syscall.Rusage)
+	if !ok {
+		t.Skipf("no rusage on %s", runtime.GOOS)
+	}
+	if runtime.GOOS == "darwin" {
+		return uint64(ru.Maxrss) //nolint:gosec // never negative
+	}
+	return uint64(ru.Maxrss) * 1024 //nolint:gosec // Linux reports KiB
+}
+
+// denseMemChild computes the dense world once cold and five times warm at
+// edges, sampling the heap every 5 ms, and prints one denseMemRun.
+func denseMemChild(t *testing.T, edges int) {
+	snap := denseSnapshot(100, 1000)
+	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+	cfg.Logger = slog.New(slog.DiscardHandler)
+	cfg.DelegationBounds.Edges = edges
+	e := New(cfg)
+	// sample runs f while sampling the heap and returns the peak HeapInuse and HeapAlloc.
+	sample := func(f func()) (inuse, alloc uint64) {
+		stop, done := make(chan struct{}), make(chan struct{})
+		var ms runtime.MemStats
+		read := func() {
+			runtime.ReadMemStats(&ms)
+			inuse, alloc = max(inuse, ms.HeapInuse), max(alloc, ms.HeapAlloc)
+		}
+		go func() {
+			defer close(done)
+			tk := time.NewTicker(5 * time.Millisecond)
+			defer tk.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-tk.C:
+					read()
+				}
+			}
+		}()
+		f()
+		close(stop)
+		<-done
+		read()
+		return inuse, alloc
+	}
+	var m *Model
+	r := denseMemRun{Edges: edges}
+	r.ColdHeapInuse, r.ColdHeapAlloc = sample(func() { m = e.Compute() })
+	r.WarmHeapInuse, r.WarmHeapAlloc = sample(func() {
+		for range 5 {
+			m = e.Compute()
+		}
+	})
+	if len(m.Installs) != 1 || m.Installs[0].Computed == nil {
+		t.Fatalf("installs %d", len(m.Installs))
+	}
+	r.Rows = len(m.Installs[0].Computed.Delegation.Rows)
+	runtime.KeepAlive(snap)
+	j, _ := json.Marshal(r)
+	fmt.Println("densemem: " + string(j))
 }

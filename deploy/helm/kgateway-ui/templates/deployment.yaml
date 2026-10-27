@@ -22,9 +22,19 @@ spec:
             {{- with .Values.install.pin }}
             - --install={{ . }}
             {{- end }}
+            {{- with .Values.delegation.edgeCap }}
+            - --delegation-edge-cap={{ . }}
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . | quote }}
             {{- end }}
+          {{- if dig "limits" "memory" "" .Values.resources }}
+          env:
+            # The Go runtime's soft memory limit: the container's limit in bytes (D-025).
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef: { containerName: kgateway-ui, resource: limits.memory, divisor: "1" }
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
           readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }

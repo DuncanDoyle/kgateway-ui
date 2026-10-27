@@ -47,8 +47,9 @@ type Bounds struct {
 }
 
 // DefaultBounds are the caps of rules §5.7. ContextsPerInstall is 30,000
-// (our call, 2.4; D-022 retained heap).
-var DefaultBounds = Bounds{Edges: 50_000, Contexts: 20_000, Matchers: 200_000,
+// (our call, 2.4; D-022 retained heap). Edges is 10,000 (user, 2026-10-27;
+// D-025): dense delegation must stay inside the chart's 512Mi memory limit.
+var DefaultBounds = Bounds{Edges: 10_000, Contexts: 20_000, Matchers: 200_000,
 	ContextsPerRow: 20, ContextsPerInstall: 30_000, EffectiveEdges: 20, ContextsPerEdge: 20}
 
 // DelegationInput is everything views B and C read for one install.

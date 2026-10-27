@@ -21,6 +21,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
@@ -42,6 +43,10 @@ type Options struct {
 	PollInterval time.Duration
 	// MetricsInterval is the controller metrics scrape interval.
 	MetricsInterval time.Duration
+	// DelegationEdgeCap caps the selected delegation edges per install (rules
+	// §5.7); zero means computed.DefaultBounds.Edges. A higher cap needs more
+	// memory (D-025).
+	DelegationEdgeCap int
 	// KindsInterval is how often served kinds are re-resolved; zero means 60 s.
 	KindsInterval time.Duration
 	// UI is the single-page application served at /.
@@ -78,10 +83,13 @@ type App struct {
 }
 
 // Build resolves the served kinds and constructs every component. Both
-// intervals must be positive.
+// intervals must be positive and the delegation edge cap not negative.
 func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.PollInterval <= 0 || o.MetricsInterval <= 0 {
 		return nil, fmt.Errorf("poll interval (%v) and metrics interval (%v) must be positive", o.PollInterval, o.MetricsInterval)
+	}
+	if o.DelegationEdgeCap < 0 {
+		return nil, fmt.Errorf("delegation edge cap %d must not be negative", o.DelegationEdgeCap)
 	}
 	pinned, err := install.ParsePinned(o.Pinned)
 	if err != nil {
@@ -127,6 +135,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
 		RulesFor: reg.RulesFor,
 		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop,
+		// The other bounds stay zero: the walker gives each its default.
+		DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap},
 		OnCompute: func(m *engine.Model) {
 			// An unsettled cache can hold a Deployment without its Pods; scraping
 			// that install fails and is not retried for a full metrics interval.

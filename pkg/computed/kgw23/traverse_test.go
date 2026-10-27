@@ -863,7 +863,8 @@ func TestDenseSelectionCut(t *testing.T) {
 	// PF16: decoded directly; pkg/engine imports the rule sets.
 	in := inputOf(t, scale.DenseSelection(100, 1000))
 	res := delegate(in)
-	if res.Cap != computed.CapEdges || len(res.Rows) != 50_000 {
+	edges := computed.DefaultBounds.Edges
+	if res.Cap != computed.CapEdges || len(res.Rows) != edges {
 		t.Fatalf("cap %q, %d rows", res.Cap, len(res.Rows))
 	}
 	cut := 0
@@ -873,8 +874,9 @@ func TestDenseSelectionCut(t *testing.T) {
 		}
 		cut++
 	}
-	if cut != 50 {
-		t.Fatalf("%d cut parents, want 50", cut)
+	// Each parent selects 1,000 routes; the parents past the cap are cut.
+	if want := 100 - edges/1000; cut != want {
+		t.Fatalf("%d cut parents, want %d", cut, want)
 	}
 	for _, r := range res.Rows {
 		if r.Outcome != computed.OutcomeAttached || !r.SomeNotComputed {

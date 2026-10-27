@@ -384,4 +384,14 @@ func TestDenseSelection(t *testing.T) {
 	if !reflect.DeepEqual(objs, DenseSelection(3, 5)) {
 		t.Fatal("not deterministic")
 	}
+	// A route's status keeps the first 32 parents' entries, the Gateway API MaxItems.
+	for _, o := range DenseSelection(40, 1) {
+		if o.GetKind() != "HTTPRoute" || o.GetNamespace() != DenseNamespace {
+			continue
+		}
+		ps := objects.RouteParents(o)
+		if len(ps) != 32 || ps[0].ParentRef.Name != "p-000" || ps[31].ParentRef.Name != "p-031" {
+			t.Fatalf("child %s has %d status entries", o.GetName(), len(ps))
+		}
+	}
 }

@@ -632,6 +632,9 @@ func Snapshot(t Tier, seed int64) *cache.Snapshot {
 	return s
 }
 
+// MaxRouteParentStatuses is the Gateway API MaxItems of a route's status.parents.
+const MaxRouteParentStatuses = 32
+
 // DenseNamespace holds DenseSelection's selected routes; DenseParents its parents and Gateway.
 var (
 	DenseNamespace = testutil.ScaleNamespace(1)
@@ -643,7 +646,8 @@ var (
 // whose routes HTTPRoutes have no parentRefs and match under every parent's
 // /dense, each to one Backend. So every parent selects, permits and attaches every route. Status
 // is what the controller writes: each parent Accepted on the Gateway, each
-// route Accepted under every parent. Namespaces come from
+// route Accepted under the first MaxRouteParentStatuses parents, as the API
+// server admits no more. Namespaces come from
 // testutil.ScaleNamespaces(2).
 func DenseSelection(parents, routes int) []*unstructured.Unstructured {
 	ok := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
@@ -666,7 +670,7 @@ func DenseSelection(parents, routes int) []*unstructured.Unstructured {
 	}
 	for i := range routes {
 		name := fmt.Sprintf("r-%05d", i)
-		u := testutil.HTTPRoute(DenseNamespace, name, nil, under...)
+		u := testutil.HTTPRoute(DenseNamespace, name, nil, under[:min(len(under), MaxRouteParentStatuses)]...)
 		u.Object["spec"].(map[string]any)["rules"] = []any{map[string]any{"matches": match("/dense/" + name),
 			"backendRefs": []any{map[string]any{"group": kinds.KgatewayGroup, "kind": "Backend", "name": "be", "namespace": DenseNamespace}}}}
 		out = append(out, u)

@@ -43,6 +43,7 @@ Flags:
 - `--listen`: listen address (default `:8080` in-cluster, `127.0.0.1:8080` locally).
 - `--poll-interval`: maximum time between model recomputes, the safety timer (default 30s). The model recomputes on object, access, metrics and served-kind changes; `2s` restores the earlier fixed cadence as a floor.
 - `--metrics-interval`: controller metrics scrape interval (default 10s).
+- `--delegation-edge-cap`: selected delegation edges computed per install (default 10000; 0 keeps the default). Past the cap, parents read "too large to compute". A higher cap needs a higher memory limit.
 
 `make test`, `make lint` and `make e2e` run the Go tests, the linters and the kind end-to-end suite. `make help` lists all targets.
 
