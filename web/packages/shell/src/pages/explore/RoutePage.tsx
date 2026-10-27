@@ -1,12 +1,13 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useRouteDetail } from "../../api/exploreHooks";
 import { useListFilter } from "../../api/hooks";
 import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
 import { delegationCopy, detailCopy, routeCopy } from "../../copy/explorer";
 import { useInstallId } from "../../shell/extension";
+import { Shimmer } from "../../states/Shimmer";
 import { DetailFrame, type ExtraTab, Facts, Section } from "./detailParts";
 import { Muted } from "./listParts";
 import { ChildRoutes } from "./route/ChildRoutes";
@@ -67,18 +68,23 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
   // View B's tab, only for a parent route on a server that serves …/delegation (/meta filters.delegation, PF8).
   const viewB = useListFilter("delegation", "outcome");
   const rules = data?.rules;
+  // A deep link keeps its tab while the detail or /meta loads, so the strip never jumps; it falls back to Overview
+  // only once the data says the route has no delegation refs or the server has no view B.
+  const asked = new URLSearchParams(useLocation().search).get("tab") === "delegation";
+  const show = viewB !== false && (data ? hasDelegation : asked) && (viewB === true || asked);
   const extraTabs = useMemo<ExtraTab[] | undefined>(
     () =>
-      viewB && hasDelegation && rules
+      show
         ? [
             {
               id: "delegation",
               label: delegationCopy.tab,
-              content: <DelegationTab installId={id} route={ref} rules={rules} />,
+              content:
+                viewB && rules ? <DelegationTab installId={id} route={ref} rules={rules} /> : <Shimmer h={120} />,
             },
           ]
         : undefined,
-    [viewB, hasDelegation, rules, id, ref],
+    [show, viewB, rules, id, ref],
   );
   return (
     <DetailFrame

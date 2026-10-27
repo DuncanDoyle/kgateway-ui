@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router-dom";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
@@ -12,6 +12,7 @@ import selectedGolden from "../../../../../../pkg/api/testdata/golden/route-deta
 import droppedGolden from "../../../../../../pkg/api/testdata/golden/routes-dropped.json";
 import type { DelegationRow, LinkedRef, MetaResponse, Page, RouteDetail, RouteList, Rule } from "../../api/types";
 import {
+  columnCopy,
   computedCopy,
   delegationCopy,
   detailCopy,
@@ -432,8 +433,11 @@ it("a delegation ref shows selected and attached counts with a ComputedBadge", a
   expect(declared).toHaveTextContent(delegationCopy.selected(2));
   expect(declared).toHaveTextContent(delegationCopy.attached(1));
   expect(within(declared).getByTestId("computed-badge")).toBeInTheDocument();
-  // Selected may include routes passed on from an earlier ref: the badge says so, never "routes this ref names".
+  // Selected may include routes passed on from an earlier ref: the badge's tooltip says so (quirk 1).
   expect(declared.textContent).not.toMatch(/this ref names/i);
+  const counts = within(declared).getByTestId("ref-counts");
+  await userEvent.hover(within(counts).getByText(computedCopy.chip));
+  expect(within(counts).getByRole("tooltip")).toHaveTextContent(delegationCopy.selectedHint);
 });
 
 it("a restricted delegation ref shows its badge hidden and no attached count", async () => {
@@ -484,4 +488,68 @@ describe.each([controlRoomLight, controlRoomDark])("interactive styles in $id", 
           `${el.getAttribute("aria-label") ?? el.textContent} ${pseudo}`,
         ).toBeGreaterThan(0);
   });
+});
+
+it("a deep link to the Delegation tab keeps it selected while loading; no delegation refs falls back to Overview", async () => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const rows = rowsOf(delegationGolden);
+  const reply = api({ name: "m", d: parentOf("m", rows), rows: (u) => rowPage(rows, u) });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      await gate;
+      return new Response(JSON.stringify(reply(new URL(url, "http://ui"))), { status: 200 });
+    }),
+  );
+  const first = mount(`${page("shop/m")}?tab=delegation`);
+  const tab = screen.getByRole("tab", { name: delegationCopy.tab });
+  expect(tab).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByTestId("detail-skeleton")).toBeInTheDocument();
+  await act(async () => release?.());
+  await tabLoaded();
+  expect(screen.getByRole("tab", { name: delegationCopy.tab })).toHaveAttribute("aria-selected", "true");
+  first.unmount();
+
+  serve(api({ name: "x", d: detail(effectiveGolden) }));
+  mount(`${page("shop/x")}?tab=delegation`);
+  await loaded();
+  expect(screen.queryByRole("tab", { name: delegationCopy.tab })).toBeNull();
+  expect(screen.getByRole("tab", { name: detailCopy.overview })).toHaveAttribute("aria-selected", "true");
+});
+
+it("a restricted row shows no reason even if one is sent", async () => {
+  const rs = rowsOf(delegRestrictedGolden);
+  const hidden = rs.find((r) => r.computed.state === "restricted") as DelegationRow;
+  hidden.reason = "leaked reason";
+  serve(api({ name: "p2", d: parentOf("p2", rs), rows: (u) => rowPage(rs, u) }));
+  mount(`${page("shop/p2")}?tab=delegation`);
+  await tabLoaded();
+  const s = await openRef(1, 0);
+  await rowsIn(s);
+  expect(s).not.toHaveTextContent("leaked reason");
+});
+
+it("rows are a table whose cells sit under named column headers", async () => {
+  const rows = rowsOf(delegationGolden);
+  serve(api({ name: "m", d: parentOf("m", rows), rows: (u) => rowPage(rows, u) }));
+  mount(`${page("shop/m")}?tab=delegation`);
+  await tabLoaded();
+  const s = await openRef(1, 0);
+  const t = await within(s).findByRole("table", { name: delegationCopy.refTitle(2, 1) });
+  const heads = within(t).getAllByRole("columnheader");
+  expect(heads.map((h) => h.textContent)).toEqual([
+    delegationCopy.pathsColumn,
+    columnCopy.route,
+    delegationCopy.outcomeGroup,
+    columnCopy.why,
+    delegationCopy.childStatus,
+    computedCopy.chip,
+  ]);
+  const [, row] = within(t).getAllByRole("row");
+  const cells = within(row as HTMLElement).getAllByRole("cell");
+  expect(cells).toHaveLength(heads.length);
+  expect(cells[2]).toHaveTextContent(delegationCopy.outcomes.dropped);
 });

@@ -141,11 +141,22 @@ const RowToggle = styled(Toggle)`
   padding: 0;
 `;
 const GRID = "28px minmax(0, 1.1fr) 168px minmax(0, 2fr) 168px 104px";
-const Rows = styled.ul`
+/** The rows as an ARIA table, so each cell is tied to its column header. */
+const Rows = styled.table`
   display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  width: 100%;
+  border-spacing: 0;
+  thead,
+  tbody {
+    display: block;
+  }
+  th,
+  td {
+    display: block;
+    padding: 0;
+    text-align: left;
+    font-weight: inherit;
+  }
   border: 1px solid ${(p) => p.theme.color.border};
   border-radius: ${(p) => p.theme.radius.sm};
   background: ${(p) => p.theme.color.bg};
@@ -164,22 +175,36 @@ const Rows = styled.ul`
     ${NARROW} {
       display: flex;
       justify-content: flex-end;
-      & > span:not(:last-child) {
-        display: none;
+      /* Hidden from sight only: the headers still name each cell's column. */
+      & > th:not(:last-child) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
     }
   }
-  .cols > span {
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .cols > th {
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  & > li + li {
+  .item + .item {
     border-top: 1px solid ${(p) => p.theme.color.border};
   }
 `;
-const RowLine = styled.div`
+const RowLine = styled.tr`
   display: grid;
   grid-template-columns: ${GRID};
   grid-template-areas: "toggle child outcome reason signal badge";
@@ -371,6 +396,8 @@ function Target({ at, installId }: { at: RefAt; installId: string }) {
 
 /** The row's reason: the server's text, or for unknown the missing input. */
 function reasonText(r: DelegationRow): string {
+  // A restricted row carries no reason (design §7.4 rule 4); never show one even if sent.
+  if (r.computed.state === "restricted") return "";
   if (r.reason) return r.reason;
   if (r.outcome === "unknown" && r.computed.reason)
     return computedCopy.unknownReasons[r.computed.reason] ?? computedCopy.unknownOther(r.computed.reason);
@@ -446,9 +473,9 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
   const note = restricted ? undefined : r.computed.note;
   const expandable = !restricted || r.contexts.length > 0;
   return (
-    <li data-testid="delegation-row">
+    <tbody className="item" data-testid="delegation-row">
       <RowLine>
-        <span className="toggle">
+        <td className="toggle">
           {expandable ? (
             <RowToggle
               type="button"
@@ -460,8 +487,8 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
               {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
             </RowToggle>
           ) : null}
-        </span>
-        <span className="child">
+        </td>
+        <td className="child">
           {r.child ? (
             <Tooltip label={`${r.child.namespace}/${r.child.name}`} stylesOverride={nameTip}>
               <LinkedName refValue={r.child} installId={installId} truncate />
@@ -474,9 +501,9 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
           ) : (
             <Muted>{delegationCopy.noChild}</Muted>
           )}
-        </span>
-        <span className="outcome">{r.outcome ? <OutcomeLabel outcome={r.outcome} /> : <HiddenLabel />}</span>
-        <span className="reason">
+        </td>
+        <td className="outcome">{r.outcome ? <OutcomeLabel outcome={r.outcome} /> : <HiddenLabel />}</td>
+        <td className="reason">
           {reason ? <OneLine text={reason} /> : null}
           {note ? (
             <Note data-testid="row-note">
@@ -484,52 +511,56 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
               {note}
             </Note>
           ) : null}
-        </span>
-        <span className="signal">{restricted ? null : <Signal r={r} />}</span>
-        <span className="badge">
+        </td>
+        <td className="signal">{restricted ? null : <Signal r={r} />}</td>
+        <td className="badge">
           <ComputedBadge computed={r.computed} compact chip={false} />
-        </span>
+        </td>
       </RowLine>
       {open ? (
-        <Panel id={panelId}>
-          {r.contexts.length ? (
-            <ol aria-label={delegationCopy.togglePaths(true, r.contexts.length)}>
-              {r.contexts.map((c, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: contexts keep the server's order
-                <ContextItem key={i} c={c} installId={installId} />
-              ))}
-            </ol>
-          ) : null}
-          {restricted ? null : <CutNote kept={r.contexts.length} truncated={r.contextsTruncated} />}
-          {restricted ? null : (
-            <Facts>
-              <dt>{delegationCopy.childStatus}</dt>
-              <dd>
-                {r.observed.entry ? (
-                  <ConditionList
-                    conditions={r.observed.entry.conditions}
-                    generation={entryCondition(r)?.observedGeneration ?? 0}
-                  />
-                ) : (
-                  <Muted>{delegationCopy.noEntry}</Muted>
-                )}
-              </dd>
-              <dt>{delegationCopy.parentCondition}</dt>
-              <dd>
-                {r.observed.parentCondition ? (
-                  <ConditionList
-                    conditions={[r.observed.parentCondition]}
-                    generation={r.observed.parentCondition.observedGeneration}
-                  />
-                ) : (
-                  <Muted>{delegationCopy.noEntry}</Muted>
-                )}
-              </dd>
-            </Facts>
-          )}
-        </Panel>
+        <tr>
+          <td colSpan={6}>
+            <Panel id={panelId}>
+              {r.contexts.length ? (
+                <ol aria-label={delegationCopy.togglePaths(true, r.contexts.length)}>
+                  {r.contexts.map((c, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: contexts keep the server's order
+                    <ContextItem key={i} c={c} installId={installId} />
+                  ))}
+                </ol>
+              ) : null}
+              {restricted ? null : <CutNote kept={r.contexts.length} truncated={r.contextsTruncated} />}
+              {restricted ? null : (
+                <Facts>
+                  <dt>{delegationCopy.childStatus}</dt>
+                  <dd>
+                    {r.observed.entry ? (
+                      <ConditionList
+                        conditions={r.observed.entry.conditions}
+                        generation={entryCondition(r)?.observedGeneration ?? 0}
+                      />
+                    ) : (
+                      <Muted>{delegationCopy.noEntry}</Muted>
+                    )}
+                  </dd>
+                  <dt>{delegationCopy.parentCondition}</dt>
+                  <dd>
+                    {r.observed.parentCondition ? (
+                      <ConditionList
+                        conditions={[r.observed.parentCondition]}
+                        generation={r.observed.parentCondition.observedGeneration}
+                      />
+                    ) : (
+                      <Muted>{delegationCopy.noEntry}</Muted>
+                    )}
+                  </dd>
+                </Facts>
+              )}
+            </Panel>
+          </td>
+        </tr>
       ) : null}
-    </li>
+    </tbody>
   );
 }
 
@@ -583,16 +614,22 @@ function RefRows({
   else
     body = (
       <Rows aria-label={delegationCopy.refTitle(at.rule + 1, at.ref + 1)} aria-busy={l.isLaggy || undefined}>
-        <li className="cols" data-testid="delegation-cols">
-          <span />
-          <span>{columnCopy.route}</span>
-          <span>{delegationCopy.outcomeGroup}</span>
-          <span>{columnCopy.why}</span>
-          <span>{delegationCopy.childStatus}</span>
-          <span>
-            <ComputedChip label={computedTooltip(l.data.items.find((r) => r.computed.rule)?.computed ?? CHIP)} />
-          </span>
-        </li>
+        <thead>
+          <tr className="cols" data-testid="delegation-cols">
+            <th scope="col">
+              {/* The expanders' column needs a name for screen readers, not a visible label. */}
+              <span className="sr">{delegationCopy.pathsColumn}</span>
+            </th>
+            <th scope="col">{columnCopy.route}</th>
+            <th scope="col">{delegationCopy.outcomeGroup}</th>
+            <th scope="col">{columnCopy.why}</th>
+            <th scope="col">{delegationCopy.childStatus}</th>
+            <th scope="col">
+              <ComputedChip label={computedTooltip(l.data.items.find((r) => r.computed.rule)?.computed ?? CHIP)} />
+            </th>
+          </tr>
+        </thead>
+        {/* One tbody per row: its line and, when open, its paths. */}
         {l.data.items.map((r, i) => (
           <RowItem key={rowKey(r, i)} r={r} installId={installId} />
         ))}
@@ -672,7 +709,8 @@ export function DelegationTab({ installId, route, rules, stylesOverride }: Deleg
   const inRule = refs.filter((r) => rule === "" || r.rule === Number(rule));
   const refIds = [...new Set(inRule.map((r) => r.ref))].sort((a, b) => a - b);
   const shown = inRule.filter((r) => ref === "" || r.ref === Number(ref));
-  if (!refs.length) return <Muted>{delegationCopy.noRefs}</Muted>;
+  // The tab exists only for a route with delegation refs.
+  if (!refs.length) return null;
   return (
     <Wrap stylesOverride={stylesOverride}>
       <Bar>

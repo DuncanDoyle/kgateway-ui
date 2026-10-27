@@ -73,11 +73,6 @@ const RuleBox = styled.section`
     gap: 2px ${(p) => p.theme.space(3)};
     min-width: 0;
   }
-  .match {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px ${(p) => p.theme.space(3)};
-  }
   .backend {
     display: grid;
     gap: 6px;

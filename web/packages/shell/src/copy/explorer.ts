@@ -316,7 +316,7 @@ export const viewACopy = {
   },
 };
 
-// region Views B and C on pages (2.4). S188–S230 are drafts; Task 67 runs the wording pass.
+// region Views B and C on pages (2.4). S188–S231 are drafts (S200 retired); Task 67 runs the wording pass.
 export const delegationCopy = {
   tab: "Delegation", // S192 draft
   outcomeGroup: "Outcome", // S193 draft
@@ -326,7 +326,6 @@ export const delegationCopy = {
   allRefs: "All refs", // S197 draft
   refTitle: (rule: number, ref: number) => `Rule ${rule}, ref ${ref}`, // S198 draft
   toggleRows: (open: boolean) => (open ? "Hide rows" : "Show rows"), // S199 draft
-  noRefs: "This route has no delegation refs.", // S200 draft
   noRows: "No rows for this ref.", // S201 draft
   noRowsFiltered: "No rows match these filters.", // S202 draft
   outcomes: {
@@ -344,6 +343,7 @@ export const delegationCopy = {
   entry: (type: string, status: string) => `${type}: ${status}`, // S213 draft: the child's status entry
   noEntry: "No status entry", // S214 draft
   childStatus: "Child's status entry", // S215 draft
+  pathsColumn: "Paths", // S231 draft: header of the row expanders' column
   parentCondition: "Parent's condition", // S216 draft
   togglePaths: (open: boolean, n: number) => `${open ? "Hide" : "Show"} paths (${n})`, // S217 draft
   parentMatch: "Parent match", // S218 draft
