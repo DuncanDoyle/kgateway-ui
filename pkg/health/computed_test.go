@@ -206,7 +206,9 @@ func TestDisagreeDetailQuotesDelegatedMatch(t *testing.T) {
 	route := func(n string) objects.Ref {
 		return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: n}
 	}
-	prefix := func(v string) objects.Match { return objects.Match{Path: &objects.PathMatch{Type: "PathPrefix", Value: v}} }
+	prefix := func(v string) objects.Match {
+		return objects.Match{Path: &objects.PathMatch{Type: "PathPrefix", Value: v}}
+	}
 	top, api, c := route("top"), route("api"), route("c")
 	topKey := computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "top"}
 	gwKey := computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
