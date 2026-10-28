@@ -386,6 +386,39 @@ describe("Delegation tab", () => {
     vi.useRealTimers();
   });
 
+  it("a collapsed ref keeps its failed poll's unknown summary until a good poll on reopen", async () => {
+    const notice = new RegExp(`^${listCopy.cannotLoad(delegationCopy.tab)}: `);
+    let polls = 0;
+    serve(api({ name: "m", d: mSummed(), rows: (u) => (polls++ === 1 ? [500, { error: "boom" }] : rowPage(rows, u)) }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const s = await openRef(0, 0);
+    await rowsIn(s);
+    const summary = () => within(s).getAllByTestId("computed-badge")[0]?.querySelector("[data-text]")?.textContent;
+    expect(summary()).toBe(computedCopy.short.agrees);
+
+    // 1. The poll fails while the section is open.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+    });
+    await within(s).findByText(notice);
+    expect(summary()).toBe(computedCopy.short.unknown);
+
+    // 2. Collapsed, no poll has succeeded: the summary stays unknown.
+    fireEvent.click(within(s).getByRole("button", { name: delegationCopy.toggleRows(true) }));
+    expect(within(s).queryByRole("table")).toBeNull();
+    expect(summary()).toBe(computedCopy.short.unknown);
+    vi.useRealTimers();
+
+    // 3. Reopened with a good poll: the summary agrees again.
+    fireEvent.click(within(s).getByRole("button", { name: delegationCopy.toggleRows(false) }));
+    expect(summary()).toBe(computedCopy.short.unknown);
+    await waitFor(() => expect(within(s).queryByText(notice)).toBeNull());
+    await waitFor(() => expect(summary()).toBe(computedCopy.short.agrees));
+    expect(polls).toBeGreaterThanOrEqual(3);
+  });
+
   it("stale delegation data turns the ref section's states unknown and says it is stale, under a fresh route detail", async () => {
     const old = new Date(Date.now() - 10 * 60_000).toISOString();
     serve(api({ name: "m", d: mSummed(), rows: (u) => ({ ...rowPage(rows, u), collectedAt: old }) }));

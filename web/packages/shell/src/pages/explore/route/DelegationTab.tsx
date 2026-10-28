@@ -632,9 +632,12 @@ function RefRows({
   // A stale route detail above keeps the rows stale too.
   const own = !!l.data && (!!l.error || old);
   const stale = useContext(StaleView) || own;
-  // Only this poll's own state goes up, before paint, so the summary never shows agreement over a failed poll.
-  useLayoutEffect(() => onStale(own), [onStale, own]);
-  useLayoutEffect(() => () => onStale(false), [onStale]);
+  // Only this poll's own state goes up, before paint. Nothing is sent while loading, so a collapsed or reopened
+  // section keeps its last state until fresh data arrives.
+  const known = l.data ? own : l.error ? true : undefined;
+  useLayoutEffect(() => {
+    if (known !== undefined) onStale(known);
+  }, [onStale, known]);
   let body: ReactNode;
   if (!l.data && l.error) body = null;
   else if (!l.data)
