@@ -512,8 +512,9 @@ type denseMemRun struct {
 
 // TestBudgetDenseMemory: DenseSelection(100, 1000) with realistic status, in a
 // fresh process with no GOMEMLIMIT, at the default edge cap: peak heap
-// (HeapInuse) ≤ 432 MiB. RSS is logged, not gated: its margin is too thin for
-// CI. Twice the default and 50,000 are measured and reported (D-025).
+// (HeapInuse) ≤ 432 MiB, as the median of five children since one sample
+// flakes on GC timing. RSS is logged, not gated. Twice the default and 50,000
+// run once and are reported only (D-025).
 func TestBudgetDenseMemory(t *testing.T) {
 	if v := os.Getenv(denseMemChildEnv); v != "" {
 		edges, err := strconv.Atoi(v)
@@ -525,16 +526,27 @@ func TestBudgetDenseMemory(t *testing.T) {
 	}
 	const mib = 1 << 20
 	def := computed.DefaultBounds.Edges
+	const gateRuns = 5
 	for _, edges := range slices.Compact([]int{def, 2 * def, 50_000}) {
-		r, rss := denseMemParent(t, edges)
-		heap := max(r.ColdHeapInuse, r.WarmHeapInuse)
-		t.Logf("edges %6d: %6d rows; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
-			edges, r.Rows, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
+		runs := 1
+		if edges == def {
+			runs = gateRuns
+		}
+		heaps := make([]uint64, 0, runs)
+		for range runs {
+			r, rss := denseMemParent(t, edges)
+			heaps = append(heaps, max(r.ColdHeapInuse, r.WarmHeapInuse))
+			t.Logf("edges %6d: %6d rows; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
+				edges, r.Rows, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
+		}
 		if edges != def {
 			continue
 		}
-		if heap > 432*mib {
-			t.Errorf("peak heap %d MiB at the default edge cap %d, budget ≤ 432 MiB", heap/mib, def)
+		slices.Sort(heaps)
+		median := heaps[len(heaps)/2]
+		t.Logf("edges %6d: median peak HeapInuse over %d runs %4d MiB", edges, runs, median/mib)
+		if median > 432*mib {
+			t.Errorf("median peak heap %d MiB over %d runs at the default edge cap %d, budget ≤ 432 MiB", median/mib, runs, def)
 		}
 	}
 }

@@ -546,6 +546,9 @@ quirk 2 (prefix /q):
 - The gate `TestBudgetDenseMemory` checks peak heap only (≤ 432 MiB at the default cap). RSS stays measured and logged but is not gated: it had about 11 MiB of margin and could flake on CI. This replaces the RSS ≤ 480 MiB part of the gate above.
 - `GOMEMLIMIT` is 90 % of the pod memory limit, not the whole limit, and the binary sets it. The chart passes the raw limit in `KGWUI_MEMORY_LIMIT` through the downward API (only with `resources.limits.memory`), and at start-up the binary calls `debug.SetMemoryLimit` with 90 % of it. An explicit `GOMEMLIMIT` wins; a missing, zero or unparsable value is ignored and logged. This replaces decision 3's chart-set `GOMEMLIMIT` and the matching consequence.
 
+**Amended 2026-10-28 (user):**
+- The gate takes the median peak heap of five child processes at the default cap, still ≤ 432 MiB. A single peak sample flakes on GC timing: the same code and allocations ranged 362–452 MiB. Twice the default and 50,000 run once and are reported only.
+
 ## D-026 — Sub-phase 2.5: expected outputs the design does not state (2026-10-28, phase 2)
 **Status:** accepted 2026-10-28 (our call)
 
