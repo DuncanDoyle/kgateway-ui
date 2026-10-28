@@ -76,6 +76,7 @@ func (w *walker) project() map[objects.Ref]computed.ChildEffective {
 // prefix of one row's contexts, it shares that row's slice (contexts are read-only).
 func (w *walker) edge(rows []*rowAcc) computed.EffectiveEdge {
 	var e computed.EffectiveEdge
+	var deps computed.DepAcc
 	// Quirk 1 hands a child to several refs under one frame: one evaluation,
 	// one context, the first in traversal order.
 	if w.projSeen == nil {
@@ -85,9 +86,7 @@ func (w *walker) edge(rows []*rowAcc) computed.EffectiveEdge {
 	all := w.projBuf[:0]
 	for _, r := range rows {
 		e.ContextsTruncated = e.ContextsTruncated || r.row.ContextsTruncated
-		if len(e.Deps) != len(r.row.Deps) || len(e.Deps) > 0 && &e.Deps[0] != &r.row.Deps[0] {
-			e.Deps = w.acc.deps.Union(e.Deps, r.row.Deps)
-		}
+		deps.Add(r.row.Deps)
 		for i := range r.row.Contexts {
 			switch r.row.Contexts[i].Outcome {
 			case computed.OutcomeAttached, computed.OutcomeDropped, computed.OutcomeRejectedHostnames:
@@ -109,6 +108,7 @@ func (w *walker) edge(rows []*rowAcc) computed.EffectiveEdge {
 		slices.SortFunc(all, func(a, b tagged) int { return cmp.Compare(a.tag.seq, b.tag.seq) })
 	}
 	w.projBuf = all
+	e.Deps = w.acc.deps.Finish(&deps)
 	if len(all) > w.b.ContextsPerEdge {
 		all, e.ContextsTruncated = all[:w.b.ContextsPerEdge], true
 	}

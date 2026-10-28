@@ -9,22 +9,29 @@ import (
 
 func dep(n string) objects.Ref { return objects.Ref{Kind: "Gateway", Namespace: "infra", Name: n} }
 
-// Equal sets share one backing slice, and equal unions are computed once.
+// Equal sets share one backing slice, and equal aggregates finish as one set.
 func TestDepSetsShareEqualSets(t *testing.T) {
 	s := NewDepSets()
 	a, b := []objects.Ref{dep("a"), dep("c")}, []objects.Ref{dep("a"), dep("c")}
 	if ca, cb := s.Intern(a), s.Intern(b); &ca[0] != &a[0] || &cb[0] != &a[0] {
 		t.Fatal("equal sets not shared")
 	}
-	u1 := s.Union(a, []objects.Ref{dep("b")})
-	u2 := s.Union(b, []objects.Ref{dep("b")})
+	x, y := DepAcc{}, DepAcc{}
+	x.Add(a)
+	x.Add([]objects.Ref{dep("b")})
+	y.Add([]objects.Ref{dep("b")})
+	y.Add(b)
+	y.Add(a)
+	u1, u2 := s.Finish(&x), s.Finish(&y)
 	if !slices.Equal(u1, []objects.Ref{dep("a"), dep("b"), dep("c")}) || &u1[0] != &u2[0] {
-		t.Fatalf("unions %v %v not one shared set", u1, u2)
+		t.Fatalf("aggregates %v %v not one shared set", u1, u2)
 	}
-	if u := s.Union(u1, a); &u[0] != &u1[0] {
-		t.Fatal("a subset grew the set")
+	one := DepAcc{}
+	one.Add(b)
+	if u := s.Finish(&one); &u[0] != &a[0] {
+		t.Fatal("a one-set aggregate is not its canonical set")
 	}
-	if s.Intern(nil) != nil || s.Union(nil, nil) != nil {
+	if s.Intern(nil) != nil || s.Finish(&DepAcc{}) != nil {
 		t.Fatal("empty sets not kept empty")
 	}
 }

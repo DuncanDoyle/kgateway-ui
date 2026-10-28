@@ -5,7 +5,10 @@ package kgw23
 import (
 	"fmt"
 	"runtime"
+	"runtime/metrics"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -223,5 +226,60 @@ func TestBudgetInheritedMerges(t *testing.T) {
 		t.Errorf("inherited merges retain %.1f MiB, want at most 64", float64(total)/mib)
 	}
 	runtime.KeepAlive(res)
+	runtime.KeepAlive(in)
+}
+
+// hub is roots roots, each delegating to one hub that delegates to one leaf:
+// the hub→leaf row gains a new root dependency from every root.
+func hub(roots int) computed.DelegationInput {
+	h := route23("hub", "hub").owned().rule(at("/"), toName("hub", "leaf"))
+	bs := []*hr{h, route23("hub", "leaf").owned().rule(at("/"), service("hub", "svc"))}
+	for i := range roots {
+		bs = append(bs, route23("roots", fmt.Sprintf("r%05d", i)).top().rule(at("/"), toName("hub", "hub")))
+	}
+	return world(bs...)
+}
+
+// peakHeap is the most heap in use above the starting live heap while f
+// runs, sampled every 50µs rather than after a GC.
+func peakHeap(f func()) uint64 {
+	base := liveHeap()
+	s := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+	var peak atomic.Uint64
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			metrics.Read(s)
+			if v := s[0].Value.Uint64(); v > peak.Load() {
+				peak.Store(v)
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(50 * time.Microsecond):
+			}
+		}
+	}()
+	f()
+	close(stop)
+	<-done
+	return peak.Load() - min(base, peak.Load())
+}
+
+// TestBudgetHubPeak: a growing aggregate keeps no superseded prefixes, so the
+// peak heap of a run stays small while one row gains thousands of deps.
+func TestBudgetHubPeak(t *testing.T) {
+	const mib = 1 << 20
+	in := hub(9000)
+	var res computed.DelegationResult
+	peak := peakHeap(func() { res = delegate(in) })
+	t.Logf("hub, 9,000 roots: cap %q, peak heap %.1f MiB during the run", res.Cap, float64(peak)/mib)
+	if res.Cap != "" {
+		t.Errorf("hub hit the %s cap", res.Cap)
+	}
+	if peak > 64*mib {
+		t.Errorf("hub peaks at %.1f MiB, want at most 64", float64(peak)/mib)
+	}
 	runtime.KeepAlive(in)
 }

@@ -147,7 +147,9 @@ type walker struct {
 	projBuf  []tagged
 	projSeen map[uint32]int
 
-	signals   []computed.ParentSignal
+	signals []computed.ParentSignal
+	// sigDeps gathers each signal's Deps until result finishes them.
+	sigDeps   []computed.DepAcc
 	sigIdx    map[sigKey]int
 	uncertain []computed.Uncertain
 }
@@ -185,6 +187,9 @@ func (w *walker) run() {
 // result completes the traversal: the reach closures first, since a row's
 // final outcome reads them (rules §5.5, §8.5), then the effective projection.
 func (w *walker) result() computed.DelegationResult {
+	for i := range w.signals {
+		w.signals[i].Deps = w.acc.deps.Finish(&w.sigDeps[i])
+	}
 	res := computed.DelegationResult{Signals: w.signals, Reach: w.reach(), Uncertain: w.sortedUncertain(),
 		UncertainKeys: uncertainKeys(w.in.Roots), Cap: w.cap}
 	res.Complete = computed.NewCompleteness(res)
@@ -773,12 +778,13 @@ func (w *walker) signal(parent objects.Ref, f *frame, reason string) {
 			i = len(w.signals)
 			w.sigIdx[sk] = i
 			w.signals = append(w.signals, computed.ParentSignal{Parent: parent, Key: k})
+			w.sigDeps = append(w.sigDeps, computed.DepAcc{})
 		}
 		s := &w.signals[i]
 		if !slices.Contains(s.Reasons, reason) {
 			s.Reasons = append(s.Reasons, reason)
 		}
-		s.Deps = w.acc.deps.Union(s.Deps, f.deps)
+		w.sigDeps[i].Add(f.deps)
 	}
 }
 

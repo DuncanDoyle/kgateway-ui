@@ -41,6 +41,10 @@ type rowAcc struct {
 	tags []ctxTag
 	// child is the child's index in the walker's routes, or -1.
 	child int32
+	// deps and keyDeps gather Deps and KeyDeps (index-aligned with Reporters)
+	// until rows finishes them.
+	deps    computed.DepAcc
+	keyDeps []computed.DepAcc
 	// lastDeps and lastKey are the previous context's deps and reporter index:
 	// a frame's contexts share one deps set, so a repeat is merged already.
 	lastDeps []objects.Ref
@@ -98,16 +102,17 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	c.Deps = a.deps.Intern(c.Deps)
 	repeat := len(c.Deps) > 0 && len(c.Deps) == len(r.lastDeps) && &c.Deps[0] == &r.lastDeps[0]
 	if !repeat {
-		a.addDeps(r, c.Deps)
+		r.deps.Add(c.Deps)
 	}
 	i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare)
 	if !ok {
 		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
-		r.row.KeyDeps = slices.Insert(r.row.KeyDeps, i, c.Deps)
+		r.keyDeps = slices.Insert(r.keyDeps, i, computed.DepAcc{})
+		r.keyDeps[i].Add(c.Deps)
 		r.row.KeyDigests = slices.Insert(r.row.KeyDigests, i, d)
 	} else {
 		if !repeat || i != r.lastKey {
-			r.row.KeyDeps[i] = a.deps.Union(r.row.KeyDeps[i], c.Deps)
+			r.keyDeps[i].Add(c.Deps)
 		}
 		r.row.KeyDigests[i] += d
 	}
@@ -128,27 +133,6 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	}
 }
 
-// addDeps merges deps into the row's sorted set, interned so that rows
-// reached the same ways share one set.
-func (a *accumulator) addDeps(r *rowAcc, deps []objects.Ref) {
-	if len(deps) == 0 {
-		return
-	}
-	if !slices.IsSortedFunc(deps, compareRef) || hasAdjacentDup(deps) {
-		deps = slices.Compact(slices.SortedFunc(slices.Values(deps), compareRef))
-	}
-	r.row.Deps = a.deps.Union(r.row.Deps, deps)
-}
-
-func hasAdjacentDup(s []objects.Ref) bool {
-	for i := 1; i < len(s); i++ {
-		if s[i] == s[i-1] {
-			return true
-		}
-	}
-	return false
-}
-
 // rows returns every row in RowKey order with its final outcome (rules §5.5).
 // incomplete reports whether a child is in a reach closure (rules §8.5).
 func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
@@ -157,6 +141,14 @@ func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
 	slices.SortFunc(a.sorted, func(x, y *rowAcc) int { return x.row.Key.Compare(y.row.Key) })
 	out := make([]computed.Row, 0, len(a.sorted))
 	for _, r := range a.sorted {
+		r.row.Deps = a.deps.Finish(&r.deps)
+		if len(r.keyDeps) > 0 {
+			r.row.KeyDeps = make([][]objects.Ref, len(r.keyDeps))
+			for k := range r.keyDeps {
+				r.row.KeyDeps[k] = a.deps.Finish(&r.keyDeps[k])
+			}
+			r.keyDeps = nil
+		}
 		r.aggregate(incomplete, a.tooLarge)
 		out = append(out, r.row)
 	}
