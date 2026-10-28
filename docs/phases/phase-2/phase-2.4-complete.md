@@ -61,7 +61,7 @@ none
   - On both tags all 16 `child-entry` and 4 `parent-resolvedrefs` checks agree with the controller.
 
 ### Benchmarks (Large tier)
-Laptop numbers (Apple M5 Max, GOMAXPROCS=4) from `bench/2.4.txt` and `bench/2.4-stream-10m.txt`; the 2.3 column is CI (EPYC 7763), so compare with care. The CI record `bench/2.4-ci.txt` comes from the PR's bench job and will be added at merge.
+Laptop numbers (Apple M5 Max, GOMAXPROCS=4) from `bench/2.4.txt` and `bench/2.4-stream-10m.txt`; the 2.3 column is CI (EPYC 7763), so compare with care. CI record `bench/2.4-ci.txt` (PR #10, 4-vCPU EPYC 9V74): warm recompute median 104 ms (large) and 125 ms (large-contradicting), budget ≤ 150 ms; with unchanged views input 60 and 82 ms; stream CPU 10.1 % and 11.8 %, budget ≤ 15 %. The stream test edits annotations only, so its recomputes reuse the views memo; a stream of spec edits costs about the full recompute (tracked below).
 
 | Measure | 2.3 (CI) | 2.4 consistent | 2.4 worst case | Limit |
 |---|---|---|---|---|
@@ -124,7 +124,8 @@ These are recorded in the plan workspace ledger. The ones that changed behaviour
 
 ## Notes for later phases
 - The Phase 2 cross-model review is next, after the 2.4 PR merges.
-- Add `bench/2.4-ci.txt` from the PR's bench job at merge. The local `bench/2.4.txt` predates D-025 and the memory fixes.
+- (P3) The sustained-stream test edits annotations only, so it measures the views memo's hit path. Add a reported (not gated) stream variant with spec edits to show the full-recompute CPU on CI. The local `bench/2.4.txt` predates D-025 and the memory fixes; `bench/2.4-ci.txt` is the reference for HEAD.
+- (P4) Apps that embed `Shell` must wait for fonts before rendering, as `web/app/src/main.tsx` does (`cc85f1c`), or long names can shift the layout on load.
 - The compute caps are install-wide by design (rule 4d). A per-root budget would change outcomes and needs a design change.
 - The API serves no `parent-resolvedrefs` check, so the e2e builds the backend in-process to list them.
 - The context and matcher caps are not configurable, so an effective matcher can only be unknown through them, not through the edge cap.

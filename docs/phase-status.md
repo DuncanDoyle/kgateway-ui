@@ -28,6 +28,7 @@ Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #
 Sub-phase: none (next: Phase 2 cross-model review, after the 2.4 PR merges)
 
 ## Carry-over (deferred to later phases)
+- (P3) Stream CPU gate measures the views-memo hit path (annotation-only edits); add a reported spec-edit stream variant — src: phases/phase-2/phase-2.4-complete.md
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
 - (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: reviews/phase-codex.md#5
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
