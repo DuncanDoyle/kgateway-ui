@@ -133,4 +133,4 @@ Out:
 - [x] Q4 (P2) `scope-unknown` wins over the edge cap's `too-large` — src: reviews/phase-codex.md#4 — `fix(api): scope-unknown wins over too-large`: a cut ref was labelled too-large without checking the install's scope
 - [x] Q5 (P2) Computed-only candidates keep `since` under restricted evidence — src: reviews/phase-codex.md#5 — `fix(health): computed-only candidates keep since under restricted evidence`: the first-seen lookup covered owned objects only, not declared or no-parent candidates
 - [x] Q6 (P2) Implementation plan Task 44 matches the D-023 amendment — src: reviews/phase-codex.md#6 — `docs: plan Task 44 follows D-023`: Task 44 predated the D-023 amendment; the Q6 grep matched 2 lines on the base, none after
-- [ ] Q7 (P3) TypeScript golden guard checks value types — src: reviews/phase-codex.md#7
+- [x] Q7 (P3) TypeScript golden guard checks value types — src: reviews/phase-codex.md#7 — `test(shell): golden guard checks wire value types`: `Spec<T>` kept only keys and optionality, never the value types
