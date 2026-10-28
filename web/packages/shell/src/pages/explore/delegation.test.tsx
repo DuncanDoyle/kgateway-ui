@@ -322,26 +322,39 @@ describe("Delegation tab", () => {
     expect(within(r as HTMLElement).getByTestId("row-note")).toHaveTextContent("Status cannot confirm this path");
   });
 
-  /** Health icon states and compact computed states in one ref's rows. */
+  /** m() whose first ref also carries its own summary badge, agreeing like its row. */
+  const mSummed = () => {
+    const d = m();
+    const ref = d.rules[0]?.backendRefs[0]?.delegation;
+    if (!ref || !rows[0]) throw new Error("fixture: rule 1 delegates");
+    ref.computed = structuredClone(rows[0].computed);
+    return d;
+  };
+
+  /** Health icon states and computed states across one ref's whole section: summary and rows. */
   const rowStates = (s: HTMLElement) => {
-    const t = within(s).getByRole("table");
+    const badges = within(s)
+      .getAllByTestId("computed-badge")
+      .map((e) => [...e.querySelectorAll("[data-text]")].map((t) => t.textContent).join());
+    // The summary badge and the row's badge are both counted.
+    expect(badges).toHaveLength(2);
     return {
-      icons: within(t)
+      // The notice's own error icon is not a state.
+      icons: within(s)
         .getAllByTestId(/^health-icon-/)
+        .filter((e) => !e.closest("[data-testid='page-notice']"))
         .map((e) => e.getAttribute("data-testid")),
-      badges: within(t)
-        .getAllByTestId("computed-badge")
-        .map((e) => e.textContent),
+      badges: [...new Set(badges)],
     };
   };
 
-  it("a failed delegation poll turns the rows' states unknown under the notice; a good poll restores them", async () => {
+  it("a failed delegation poll turns the ref section's states unknown under the notice; a good poll restores them", async () => {
     const notice = new RegExp(`^${listCopy.cannotLoad(delegationCopy.tab)}: `);
     let polls = 0;
     serve(
       api({
         name: "m",
-        d: m(),
+        d: mSummed(),
         // Only the delegation poll fails; route detail stays fresh.
         rows: (u) => (polls++ === 1 ? [500, { error: "boom" }] : rowPage(rows, u)),
       }),
@@ -373,9 +386,9 @@ describe("Delegation tab", () => {
     vi.useRealTimers();
   });
 
-  it("stale delegation data turns the rows' states unknown and says it is stale, under a fresh route detail", async () => {
+  it("stale delegation data turns the ref section's states unknown and says it is stale, under a fresh route detail", async () => {
     const old = new Date(Date.now() - 10 * 60_000).toISOString();
-    serve(api({ name: "m", d: m(), rows: (u) => ({ ...rowPage(rows, u), collectedAt: old }) }));
+    serve(api({ name: "m", d: mSummed(), rows: (u) => ({ ...rowPage(rows, u), collectedAt: old }) }));
     mount(`${page("shop/m")}?tab=delegation`);
     await tabLoaded();
     const s = await openRef(0, 0);

@@ -2,7 +2,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { ChevronDown, ChevronRight, EyeOff, Info, Lock } from "lucide-react";
-import { type ReactNode, useContext, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useContext, useEffect, useId, useLayoutEffect, useMemo, useState } from "react";
 import { useNow } from "../../../api/clock";
 import { useDelegation } from "../../../api/exploreHooks";
 import { isStale } from "../../../api/hooks";
@@ -599,12 +599,15 @@ function RefRows({
   at,
   outcomes,
   id,
+  onStale,
 }: {
   installId: string;
   route: LinkedRef;
   at: RefAt;
   outcomes: string[];
   id: string;
+  /** Tells the section whether this poll failed or went stale, so its summary badge follows it too. */
+  onStale: (stale: boolean) => void;
 }) {
   const base = useMemo(() => {
     const q = new URLSearchParams({ rule: String(at.rule), ref: String(at.ref) });
@@ -627,7 +630,11 @@ function RefRows({
   // The rows follow their own poll, not the route detail: a failed or stale poll turns their states unknown (§8.6).
   const old = !!l.data && !l.error && isStale(l.data.collectedAt, now);
   // A stale route detail above keeps the rows stale too.
-  const stale = useContext(StaleView) || (!!l.data && (!!l.error || old));
+  const own = !!l.data && (!!l.error || old);
+  const stale = useContext(StaleView) || own;
+  // Only this poll's own state goes up, before paint, so the summary never shows agreement over a failed poll.
+  useLayoutEffect(() => onStale(own), [onStale, own]);
+  useLayoutEffect(() => () => onStale(false), [onStale]);
   let body: ReactNode;
   if (!l.data && l.error) body = null;
   else if (!l.data)
@@ -704,30 +711,37 @@ function RefSection({
   outcomes: string[];
 }) {
   const [open, setOpen] = useState(false);
+  // The whole section follows the ref's own /delegation poll while it is open (§8.6).
+  const [rowsStale, setRowsStale] = useState(false);
+  const stale = useContext(StaleView) || rowsStale;
   const bodyId = useId();
   const d = at.b.delegation;
   const title = delegationCopy.refTitle(at.rule + 1, at.ref + 1);
   return (
-    <RefBox aria-label={title} data-testid="delegation-ref">
-      <h3>
-        {title}
-        <Target at={at} installId={installId} />
-      </h3>
-      <div className="summary">
-        <Toggle
-          type="button"
-          aria-expanded={open}
-          aria-controls={open ? bodyId : undefined}
-          onClick={() => setOpen((o) => !o)}
-        >
-          {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-          {delegationCopy.toggleRows(open)}
-        </Toggle>
-        <RefCounts d={d} />
-        {d.computed ? <ComputedBadge computed={d.computed} compact extra={delegationCopy.selectedHint} /> : null}
-      </div>
-      {open ? <RefRows installId={installId} route={route} at={at} outcomes={outcomes} id={bodyId} /> : null}
-    </RefBox>
+    <StaleView.Provider value={stale}>
+      <RefBox aria-label={title} data-testid="delegation-ref">
+        <h3>
+          {title}
+          <Target at={at} installId={installId} />
+        </h3>
+        <div className="summary">
+          <Toggle
+            type="button"
+            aria-expanded={open}
+            aria-controls={open ? bodyId : undefined}
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+            {delegationCopy.toggleRows(open)}
+          </Toggle>
+          <RefCounts d={d} />
+          {d.computed ? <ComputedBadge computed={d.computed} compact extra={delegationCopy.selectedHint} /> : null}
+        </div>
+        {open ? (
+          <RefRows installId={installId} route={route} at={at} outcomes={outcomes} id={bodyId} onStale={setRowsStale} />
+        ) : null}
+      </RefBox>
+    </StaleView.Provider>
   );
 }
 
