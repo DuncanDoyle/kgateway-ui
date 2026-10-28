@@ -47,13 +47,16 @@ type Bounds struct {
 	ContextsPerRow, ContextsPerInstall int
 	// Projection caps: parent edges per route, contexts per edge.
 	EffectiveEdges, ContextsPerEdge int
+	// Depth caps the routes on one path, which bounds each context's deps.
+	Depth int
 }
 
 // DefaultBounds are the caps of rules §5.7. ContextsPerInstall is 30,000
 // (our call, 2.4; D-022 retained heap). Edges is 10,000 (user, 2026-10-27;
 // D-025): dense delegation must stay inside the chart's 512Mi memory limit.
+// Depth is 100 (our call, 2.4; D-025): deep chains stay linear in memory.
 var DefaultBounds = Bounds{Edges: 10_000, Contexts: 20_000, Matchers: 200_000,
-	ContextsPerRow: 20, ContextsPerInstall: 30_000, EffectiveEdges: 20, ContextsPerEdge: 20}
+	ContextsPerRow: 20, ContextsPerInstall: 30_000, EffectiveEdges: 20, ContextsPerEdge: 20, Depth: 100}
 
 // DelegationInput is everything views B and C read for one install.
 type DelegationInput struct {
@@ -110,7 +113,7 @@ type DelegationResult struct {
 	// UncertainKeys are each root's Root.UncertainKeys, sorted: a check under
 	// one of them makes no negative expectation (rules §8.5).
 	UncertainKeys []RouteKey
-	// Cap names the first compute cap hit: "", "edges", "contexts" or "matchers".
+	// Cap names the first compute cap hit: "", "edges", "contexts", "matchers" or "depth".
 	Cap string
 	// Complete says which routes are in a reach closure (rules §8.5).
 	Complete Completeness
@@ -150,6 +153,7 @@ const (
 	CapEdges    = "edges"
 	CapContexts = "contexts"
 	CapMatchers = "matchers"
+	CapDepth    = "depth"
 )
 
 // Parent signal reasons: ResolvedRefs=False reasons a delegation failure

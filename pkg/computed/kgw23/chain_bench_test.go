@@ -63,10 +63,11 @@ func dropDeps(res *computed.DelegationResult) {
 	}
 }
 
-// retained is the live heap of a chain's result, in total and without its
-// dependency sets.
-func retained(n int) (total, noDeps uint64) {
+// retained is the live heap of a chain's result under depth cap depth, in
+// total and without its dependency sets.
+func retained(n, depth int) (total, noDeps uint64) {
 	in := chain(n)
+	in.Bounds.Depth = depth
 	before := liveHeap()
 	res := delegate(in)
 	total = liveHeap() - before
@@ -77,14 +78,15 @@ func retained(n int) (total, noDeps uint64) {
 	return total, noDeps
 }
 
-// TestBudgetDeepChain: the paths of a deep chain share prefixes, so the
-// result without its dependency sets grows linearly with depth.
+// TestBudgetDeepChain: with the depth cap lifted, paths share prefixes, so the
+// result without its dependency sets grows linearly; at the default cap the
+// whole result stays small.
 func TestBudgetDeepChain(t *testing.T) {
 	const mib = 1 << 20
 	var half uint64
 	for _, n := range []int{1500, 3000} {
-		total, noDeps := retained(n)
-		t.Logf("chain %d: retained %.1f MiB, %.1f MiB without dependency sets", n, float64(total)/mib, float64(noDeps)/mib)
+		total, noDeps := retained(n, n)
+		t.Logf("chain %d, no depth cap: retained %.1f MiB, %.1f MiB without dependency sets", n, float64(total)/mib, float64(noDeps)/mib)
 		if n == 1500 {
 			half = noDeps
 			continue
@@ -93,5 +95,10 @@ func TestBudgetDeepChain(t *testing.T) {
 			t.Errorf("chain of %d retains %.1f MiB without dependency sets (%.1f MiB at half depth), want linear and at most 16 MiB",
 				n, float64(noDeps)/mib, float64(half)/mib)
 		}
+	}
+	total, _ := retained(3000, computed.DefaultBounds.Depth)
+	t.Logf("chain 3000, depth cap %d: retained %.2f MiB", computed.DefaultBounds.Depth, float64(total)/mib)
+	if total > 4*mib {
+		t.Errorf("chain of 3000 at the default depth cap retains %.2f MiB, want at most 4", float64(total)/mib)
 	}
 }

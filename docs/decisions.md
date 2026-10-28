@@ -540,6 +540,7 @@ quirk 2 (prefix /q):
 - A higher cap needs a higher memory limit. The user docs say so (`docs/documentation-notes.md`).
 - `GOMEMLIMIT` follows the pod limit, so raising `limits.memory` raises it too. It is a safety net, not a substitute for the cap: at 50,000 with the limit set the RSS still reached 599 MiB.
 - `scale.DenseSelection` writes at most 32 status entries per route (`scale.MaxRouteParentStatuses`).
+- Depth bound 100 (our call, 2.4): a path of more than 100 routes is cut there as `too-large` (rules §5.7). Each context's deps hold its path's routes, so an uncapped 3,000-route chain retained 290 MiB; at the cap it retains about 1 MiB (`TestBudgetDeepChain`). It is not exposed as a flag.
 
 **Amended 2026-10-27 (user sign-off):**
 - The gate `TestBudgetDenseMemory` checks peak heap only (≤ 432 MiB at the default cap). RSS stays measured and logged but is not gated: it had about 11 MiB of margin and could flake on CI. This replaces the RSS ≤ 480 MiB part of the gate above.

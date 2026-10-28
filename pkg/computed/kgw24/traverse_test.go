@@ -517,6 +517,27 @@ func TestComputeCaps(t *testing.T) {
 			}
 		}
 	})
+	t.Run("depth", func(t *testing.T) {
+		// A path of more than Depth routes is cut there; other paths go on.
+		e := leaf("dep", "e", "/d/b/c/e")
+		c := route23("dep", "c").rule(at("/d/b/c"), toName("dep", "e"))
+		b := route23("dep", "b").rule(at("/d/b"), toName("dep", "c"))
+		a := route23("dep", "a").top().rule(at("/d"), toName("dep", "b"))
+		y := leaf("dep", "y", "/z/y")
+		z := route23("dep", "z").top().rule(at("/z"), toName("dep", "y"))
+		res := run(t, computed.Bounds{Depth: 2}, a, b, c, e, y, z)
+		if res.Cap != computed.CapDepth {
+			t.Fatalf("cap %q", res.Cap)
+		}
+		cut(t, res, c, 0, 0)
+		tooLarge(t, row(t, res, c, 0, 0, e))
+		if r := row(t, res, c, 0, 0, e); len(r.Contexts) != 0 {
+			t.Fatalf("cut row retains %d contexts", len(r.Contexts))
+		}
+		if row(t, res, b, 0, 0, c).Outcome != computed.OutcomeAttached || row(t, res, z, 0, 0, y).Outcome != computed.OutcomeAttached {
+			t.Fatal("rows within the depth must stay computed")
+		}
+	})
 }
 
 func TestContextDeps(t *testing.T) {

@@ -215,7 +215,7 @@ func withDefaults(b computed.Bounds) computed.Bounds {
 	or := func(v, def int) int { return cmp.Or(v, def) }
 	return computed.Bounds{Edges: or(b.Edges, d.Edges), Contexts: or(b.Contexts, d.Contexts), Matchers: or(b.Matchers, d.Matchers),
 		ContextsPerRow: or(b.ContextsPerRow, d.ContextsPerRow), ContextsPerInstall: or(b.ContextsPerInstall, d.ContextsPerInstall),
-		EffectiveEdges: or(b.EffectiveEdges, d.EffectiveEdges), ContextsPerEdge: or(b.ContextsPerEdge, d.ContextsPerEdge)}
+		EffectiveEdges: or(b.EffectiveEdges, d.EffectiveEdges), ContextsPerEdge: or(b.ContextsPerEdge, d.ContextsPerEdge), Depth: or(b.Depth, d.Depth)}
 }
 
 // frameID is a new frame's id, never 0.
@@ -469,12 +469,17 @@ func rootMatches(ms []objects.Match) []objects.Match {
 // flatten is rules §5.4 flatten for P's ref ri under f
 // (translator/httproute/delegation.go V3:28-109). The contexts cap is charged
 // per call and the matchers cap per child before viewC; past either cap,
-// everything is cut.
+// everything is cut. A path longer than the depth cap is cut alone.
 func (w *walker) flatten(pi, ri int, f *frame) {
 	rs := &w.sels[pi].refs[ri]
 	if !w.halted && w.contexts >= w.b.Contexts {
 		w.halted = true
 		w.hit(computed.CapContexts)
+	}
+	if !w.halted && f.path.Len() > w.b.Depth {
+		w.hit(computed.CapDepth)
+		w.cut(pi, ri, f)
+		return
 	}
 	if w.halted {
 		w.cut(pi, ri, f)
