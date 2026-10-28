@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -203,24 +204,46 @@ func delegatedAt(c computed.CheckResult, parent objects.Ref, rows []computed.Row
 	return fmt.Sprintf(atMatch, out)
 }
 
-// matchText words a match as the SPA's MatchLine does, e.g.
-// "PathPrefix /api Header x-env Exact prod".
+// matchText words a match as the SPA's MatchLine does, e.g. "PathPrefix /api
+// Header x-env Exact prod", cut to maxMatchText bytes and "…" when longer.
 func matchText(m objects.Match) string {
-	var ps []string
-	if m.Path != nil {
-		ps = append(ps, m.Path.Type+" "+m.Path.Value)
+	var b strings.Builder
+	add := func(s ...string) bool {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		for _, x := range s {
+			b.WriteString(x)
+		}
+		return b.Len() <= maxMatchText
 	}
-	for _, h := range m.Headers {
-		ps = append(ps, "Header "+h.Name+" "+h.Type+" "+h.Value)
+	done := m.Path != nil && !add(m.Path.Type, " ", m.Path.Value)
+	for _, ks := range [...]struct {
+		label string
+		ks    []objects.KeyMatch
+	}{{"Header ", m.Headers}, {"Query ", m.QueryParams}} {
+		for _, k := range ks.ks {
+			if !done {
+				done = !add(ks.label, k.Name, " ", k.Type, " ", k.Value)
+			}
+		}
 	}
-	for _, q := range m.QueryParams {
-		ps = append(ps, "Query "+q.Name+" "+q.Type+" "+q.Value)
+	if !done && m.Method != "" {
+		add("Method ", m.Method)
 	}
-	if m.Method != "" {
-		ps = append(ps, "Method "+m.Method)
+	out := b.String()
+	if len(out) <= maxMatchText {
+		return out
 	}
-	return strings.Join(ps, " ")
+	cut := maxMatchText
+	for cut > 0 && !utf8.RuneStart(out[cut]) {
+		cut--
+	}
+	return out[:cut] + "…"
 }
+
+// maxMatchText bounds one match's text in a finding (our call, 2.4).
+const maxMatchText = 512
 
 // routes is "1 route" or "n routes"; a non-number is kept as is.
 func routes(n string) string {
