@@ -1261,12 +1261,89 @@ func checkText(c computed.CheckResult) string {
 		c.ID.Kind, c.On, parent, c.Key, c.State, c.Coverage, c.Expected, c.Observed, c.Note)
 }
 
-// compatible reports whether a check agrees with the controller: checked,
-// and either status-compatible or not-verified (rules §8.4).
+// compatible reports whether a row's computed state agrees with the
+// controller: checked, and either status-compatible or not-verified (rules §8.4).
 func compatible(state string, coverage []string) bool {
 	return state == string(computed.StateChecked) && len(coverage) > 0 && !slices.ContainsFunc(coverage, func(c string) bool {
 		return c != string(computed.CoverageStatus) && c != string(computed.CoverageNone)
 	})
+}
+
+// wantCheck is one expected delegation check: status-compatible unless
+// notVerified says why status cannot show it; observed, if set, is pinned.
+type wantCheck struct {
+	kind               computed.CheckKind
+	on, parent         string // parent is empty for parent-resolvedrefs
+	key                computed.ReportKey
+	expected, observed string
+	notVerified        string
+}
+
+func checkID(kind computed.CheckKind, on, parent string, key computed.ReportKey) string {
+	return fmt.Sprintf("%s on %s (parent %s, key %+v)", kind, on, parent, key)
+}
+
+// wantDelegChecks are the fixture's delegation checks on a kgateway minor
+// (phase-2.4-evidence.md).
+func wantDelegChecks(minor string) []wantCheck {
+	routeKey := func(ns, name string) computed.ReportKey {
+		return computed.ReportKey{Group: gwGroup, Kind: "HTTPRoute", Namespace: ns, Name: name}
+	}
+	store, tree, mid, cycle := routeKey("shop", "store"), routeKey("shop", "tree"), routeKey("shop", "t-mid"), routeKey("shop", "c-cycle")
+	edge := computed.ReportKey{Group: gwGroup, Kind: "Gateway", Namespace: "infra", Name: "edge", SectionName: "http"}
+	entry := func(on, parent string, key computed.ReportKey, expected string) wantCheck {
+		return wantCheck{kind: computed.KindChildEntry, on: on, parent: parent, key: key, expected: expected}
+	}
+	resolved := func(on string, key computed.ReportKey, expected string) wantCheck {
+		return wantCheck{kind: computed.KindParentResolvedRefs, on: on, key: key, expected: expected}
+	}
+	cycleRefs := resolved("shop/c-cycle", store, "False")
+	cycleRefs.observed = "False/RefNotPermitted" // reason not compared: c-cycle also has a Service backendRef
+	out := []wantCheck{
+		entry("deleg/c-forbidden", "shop/store", store, "none"),
+		entry("deleg/c-wild", "shop/store", store, "entry"),
+		entry("shop/c-cycle", "shop/c-cycle", cycle, "none"),
+		entry("shop/c-cycle", "shop/store", store, "entry"),
+		entry("shop/c-hdr", "shop/store", store, "none"),
+		entry("shop/c-host", "shop/store", store, "False/UnsupportedValue"),
+		entry("shop/c-ihost", "shop/store", store, "False/UnsupportedValue"),
+		entry("shop/c-inherit", "shop/store", store, "entry"),
+		entry("shop/c-label", "shop/store", store, "entry"),
+		entry("shop/c-name", "shop/store", store, "entry"),
+		entry("shop/t-mid", "shop/tree", tree, "entry"),
+		entry("shop/t-nobe", "shop/tree", tree, "entry"),
+		entry("shop/t-partial", "shop/tree", tree, "entry"),
+		entry("shop/t-port", "shop/tree", tree, "entry"),
+		entry("shop/t-pruned", "shop/t-mid", mid, "none"),
+		resolved("shop/store", edge, "False/BackendNotFound"),
+		resolved("shop/t-mid", tree, "False/BackendNotFound"),
+		resolved("shop/tree", edge, "False/BackendNotFound"),
+		cycleRefs,
+	}
+	if minor == "2.3" {
+		nons := entry("shop/c-nons", "shop/store", store, "")
+		nons.notVerified = "2.3 writes no entry when the permitting ref omits the namespace (rules §7)"
+		return append(out, nons)
+	}
+	// 2.4 writes the entry under the parentRef as written, without a namespace.
+	return append(out, entry("shop/c-nons", "shop/store", routeKey("", "store"), "entry"))
+}
+
+// checkMismatch says how c differs from w, or "" when it matches.
+func checkMismatch(c computed.CheckResult, w wantCheck) string {
+	cov := computed.CoverageStatus
+	if w.notVerified != "" {
+		cov = computed.CoverageNone
+	}
+	switch {
+	case c.State != computed.StateChecked || !slices.Equal(c.Coverage, []computed.Coverage{cov}):
+		return fmt.Sprintf("want checked with %s", cov)
+	case c.Expected != w.expected:
+		return fmt.Sprintf("want expected %q", w.expected)
+	case w.observed != "" && c.Observed != w.observed:
+		return fmt.Sprintf("want observed %q", w.observed)
+	}
+	return ""
 }
 
 // delegationRows returns every view B row of parent route id (one page: the fixture is small).
@@ -1339,38 +1416,40 @@ func TestDelegationAgreesWithController(t *testing.T) {
 				if v.RuleSet != ruleSet || v.Note != "" {
 					t.Fatalf("rule set %q (note %q), want %s", v.RuleSet, v.Note, ruleSet)
 				}
-				kinds := map[computed.CheckKind]int{}
+				got := map[string]computed.CheckResult{}
 				for _, c := range delegChecks(v) {
-					kinds[c.ID.Kind]++
 					if c.ID.RuleSet != ruleSet {
 						t.Fatalf("%s: rule set %s, want %s", checkText(c), c.ID.RuleSet, ruleSet)
 					}
-					cov := make([]string, len(c.Coverage))
-					for i, x := range c.Coverage {
-						cov[i] = string(x)
-					}
-					switch {
-					case c.State == computed.StateDisagrees:
+					if c.State == computed.StateDisagrees {
 						t.Fatalf("disagrees: %s", checkText(c))
-					case !compatible(string(c.State), cov):
-						open = append(open, checkText(c))
 					}
+					parent, _ := c.Parent()
+					id := checkID(c.ID.Kind, c.On.String(), parent.String(), c.Key)
+					if _, dup := got[id]; dup {
+						open = append(open, "duplicate: "+id)
+					}
+					got[id] = c
 				}
-				if kinds[computed.KindChildEntry] == 0 || kinds[computed.KindParentResolvedRefs] == 0 {
-					open = append(open, fmt.Sprintf("checks per kind %v, want both kinds", kinds))
+				want := wantDelegChecks(minor)
+				for _, w := range want {
+					id := checkID(w.kind, w.on, w.parent, w.key)
+					c, ok := got[id]
+					switch {
+					case !ok:
+						open = append(open, "missing: "+id)
+					case checkMismatch(c, w) != "":
+						open = append(open, checkText(c)+": "+checkMismatch(c, w))
+					}
+					delete(got, id)
+				}
+				for _, c := range got {
+					open = append(open, "unexpected: "+checkText(c))
 				}
 				if len(open) == 0 {
-					t.Logf("%d child-entry and %d parent-resolvedrefs checks, all compatible under %s",
-						kinds[computed.KindChildEntry], kinds[computed.KindParentResolvedRefs], ruleSet)
+					t.Logf("%d delegation checks as expected under %s", len(want), ruleSet)
 					for _, c := range delegChecks(v) {
 						t.Log(checkText(c))
-					}
-					expectNone := slices.ContainsFunc(delegChecks(v), func(c computed.CheckResult) bool {
-						p, _ := c.Parent()
-						return c.ID.Kind == computed.KindChildEntry && c.On.String() == "shop/t-pruned" && p.String() == "shop/t-mid" && c.Expected == "none"
-					})
-					if !expectNone {
-						t.Errorf("shop/t-pruned: no child-entry check under shop/t-mid expecting no entry")
 					}
 					return
 				}
@@ -1455,8 +1534,12 @@ func TestDelegationAgreesWithController(t *testing.T) {
 			if err != nil || nons == nil {
 				return fmt.Errorf("shop/store → shop/c-nons: row %+v (%v)", nons, err)
 			}
-			if minor == "2.3" && !slices.Equal(nons.Computed.Coverage, []string{string(computed.CoverageNone)}) {
-				return fmt.Errorf("2.3: shop/c-nons computed %+v, want %s", nons.Computed, computed.CoverageNone)
+			nonsCov := computed.CoverageStatus // 2.4 writes the entry as written
+			if minor == "2.3" {
+				nonsCov = computed.CoverageNone
+			}
+			if !slices.Equal(nons.Computed.Coverage, []string{string(nonsCov)}) {
+				return fmt.Errorf("%s: shop/c-nons computed %+v, want %s", minor, nons.Computed, nonsCov)
 			}
 			return nil
 		})
