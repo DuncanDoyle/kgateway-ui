@@ -129,7 +129,7 @@ func TestComputedWithoutPodsOrUIDs(t *testing.T) {
 	views := func(res install.Resolved, us []*unstructured.Unstructured, dec objects.Decoder) *computed.Views {
 		snap := viewSnapshot(t, nss, us...)
 		owned := install.Assign(snap, served, []install.Resolved{res}, dec).PerInstall[res.ID()]
-		return computeViews(sel, res, owned, snap, served, dec, computed.DefaultBounds)
+		return computeViews(nil, sel, res, owned, snap, served, dec, computed.DefaultBounds)
 	}
 	d := testutil.ControllerDeployment("kgw", "kgateway", image23, 1, 1)
 	all := install.Scope{Mode: install.ScopeAll}

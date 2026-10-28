@@ -128,6 +128,8 @@ type Engine struct {
 	decode *decodeCache
 	// persist holds the KGWUI-012 windows; only touched under computeMu.
 	persist persistence
+	// views holds each install's last view inputs and results; only touched under computeMu.
+	views map[string]*viewsMemo
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -286,13 +288,19 @@ func (e *Engine) compute() *Published {
 	}
 	var runs []run
 	var views []*computed.Views
+	memos := make(map[string]*viewsMemo, len(all))
 	for _, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
 		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion())}
 		runs = append(runs, r)
-		v := computeViews(r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		m := e.views[res.ID()]
+		if m == nil {
+			m = &viewsMemo{}
+		}
+		memos[res.ID()] = m
+		v := computeViews(m, r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
 		views = append(views, v)
 		// Each cap hit is logged once per distinct value, as rejections are (rules §5.7).
 		if c := v.Delegation.Cap; c != "" && !e.caps[res.ID()+"\x00"+c] {
@@ -300,6 +308,7 @@ func (e *Engine) compute() *Published {
 			e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
 		}
 	}
+	e.views = memos // a vanished install's memo is dropped
 	if at := e.persist.persist(now, views, e.graceEnd(snap, served, firstSeen)); !at.IsZero() {
 		next.add(at, false) // mature once now − since ≥ Window, or at a missing entry's grace end
 	}

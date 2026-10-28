@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"reflect"
 	"slices"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,19 +16,48 @@ import (
 
 // computeViews runs sel's views A, B and C over one install, within bounds,
 // and cross-checks them. The checks' State, Mature and Since are left for
-// the persistence step.
-func computeViews(sel computed.Selection, res install.Resolved, owned *install.Owned, snap *cache.Snapshot,
+// the persistence step. With m, a view whose input equals m's last one
+// reuses m's results; m is then updated.
+func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, owned *install.Owned, snap *cache.Snapshot,
 	served []kinds.Served, dec objects.Decoder, bounds computed.Bounds,
 ) *computed.Views {
+	if m == nil {
+		m = &viewsMemo{}
+	}
+	same := m.set && m.rules == sel.Rules.Version() && m.note == sel.Note
+	m.set, m.rules, m.note = true, sel.Rules.Version(), sel.Note
 	in := attachmentInput(res, owned, snap, served, dec)
-	att := sel.Rules.Attachment(in)
-	a := computed.CheckAttachment(res.ID(), sel, in, att)
-	din := delegationInput(res, owned, snap, served, dec, att)
+	if !same || !reflect.DeepEqual(m.in, in) {
+		m.att = sel.Rules.Attachment(in)
+		m.a = computed.CheckAttachment(res.ID(), sel, in, m.att)
+		same = false
+	}
+	m.in = in
+	din := delegationInput(res, owned, snap, served, dec, m.att)
 	din.Bounds = bounds
-	v := &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: att, Delegation: sel.Rules.Delegation(din)}
-	d := computed.CheckDelegation(res.ID(), sel, din, &v.Delegation)
-	v.Checks = append(append(make([]computed.CheckResult, 0, len(a)+len(d)), a...), d...)
+	if !same || !reflect.DeepEqual(m.din, din) {
+		m.del = sel.Rules.Delegation(din)
+		// CheckDelegation also marks unconfirmable rows in m.del.
+		m.d = computed.CheckDelegation(res.ID(), sel, din, &m.del)
+	}
+	m.din = din
+	v := &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
+	v.Checks = append(append(make([]computed.CheckResult, 0, len(m.a)+len(m.d)), m.a...), m.d...)
 	return v
+}
+
+// viewsMemo is one install's last view inputs and results. Views are pure
+// functions of their input, so an equal input reuses the results, which are
+// shared and read-only; Checks are copied, as persistence sets their state.
+type viewsMemo struct {
+	set         bool
+	rules, note string
+	in          computed.AttachmentInput
+	att         computed.AttachmentResult
+	a           []computed.CheckResult
+	din         computed.DelegationInput
+	del         computed.DelegationResult
+	d           []computed.CheckResult
 }
 
 // httpRoutes maps the snapshot's HTTPRoutes by ref.
