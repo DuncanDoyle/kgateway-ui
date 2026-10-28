@@ -14,6 +14,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -595,9 +596,14 @@ func matchKey(m objects.Match) string {
 func (d *detail) refCounts(dto *DelegationRefDTO, k explore.RefKey) {
 	ids := d.ix.RefRows[k]
 	if len(ids) == 0 {
-		// The edge cap cut it before selection: too large, not empty (rules §5.7, D-025).
+		// The edge cap cut it before selection: too large, not empty (rules §5.7,
+		// D-025). An unknown scope wins over every other reason (rules §3.3).
 		if d.ix.TooLarge[k] {
-			c := d.f.unknown(ruleDelegation, computed.UnknownTooLarge)
+			reason := computed.UnknownTooLarge
+			if d.i.Resolved.Scope.Mode == install.ScopeUnknown {
+				reason = computed.UnknownScope
+			}
+			c := d.f.unknown(ruleDelegation, reason)
 			if d.ix.SelectionHidden(k, d.v.visible()) {
 				c = d.f.restricted()
 			}

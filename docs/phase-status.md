@@ -34,6 +34,7 @@ Branch: duncandoyle/phase2Stabilize
 Queue (brief §Queue):
 - [x] Q2 orphan KGWUI-011 is install-local — `fix(computed): orphan KGWUI-011 is install-local`
 - [x] Q3 listener-unknown per parent — `fix(explore): listener-unknown per parent`
+- [x] Q4 scope-unknown wins over too-large — `fix(api): scope-unknown wins over too-large`
 
 ## Carry-over (deferred to later phases)
 - (P4) Stable finding identity for Phase 3 diagnostics — src: reviews/phase-codex.md#8
