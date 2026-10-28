@@ -789,7 +789,7 @@ Every tier also has 5 % each of GRPC, TCP and TLS routes, labelled namespaces be
 | List request per filter mix (none, parent, listener, namespace+state, `q`, `sort=health`, delegation of the widest parent) | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 2.2–2.4 |
 | Route detail on the deepest child | p95 < 50 ms | 2.2, 2.4 |
 | Dense selection recompute | reported; the cut is deterministic | 2.4 |
-| Dense selection memory | Extreme dense selection with realistic status (≤ 32 entries per route, the Gateway API MaxItems), in a fresh process with no `GOMEMLIMIT`, at the default edge cap: peak RSS ≤ 480 MiB and peak heap ≤ 432 MiB, under the 512Mi limit. The default cap is 10,000 and configurable; the chart sets `GOMEMLIMIT` from the pod's memory limit **(user, 2026-10-27; D-025)** | 2.4 |
+| Dense selection memory | Extreme dense selection with realistic status (≤ 32 entries per route, the Gateway API MaxItems), in a fresh process with no `GOMEMLIMIT`, at the default edge cap: peak heap ≤ 432 MiB, under the 512Mi limit; RSS is logged, not gated. The default cap is 10,000 and configurable; the binary sets its Go memory target to 90 % of the pod's memory limit unless `GOMEMLIMIT` is set **(user, 2026-10-27; D-025)** | 2.4 |
 
 **Method.** Go benchmarks with `-benchmem`. Percentiles come from a harness that sends 10,000 requests per filter mix through `httptest` and reports p50, p95 and p99 with `b.ReportMetric` (20 goroutines for the concurrent run). Burst and stream runs use a real clock, so latency is measured while Models swap. Numbers go into the sub-phase record with machine and Go version. A failing Large budget blocks the sub-phase.
 
