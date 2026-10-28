@@ -573,19 +573,6 @@ func (n *interner) ref(r objects.Ref) int32 {
 	return i
 }
 
-// union32 is the union of a and b; it shares one when the other adds nothing, else sorts.
-func union32(a, b DepSet) DepSet {
-	switch {
-	case len(b) == 0 || slices.Equal(a, b):
-		return a
-	case len(a) == 0:
-		return b
-	}
-	out := append(slices.Clone(a), b...)
-	slices.Sort(out)
-	return slices.Compact(out)
-}
-
 // views fills view A into the index: listener facts, per-ref facts, the
 // listener index, cross-checks and the computed flags (design §3.5).
 func (b *builder) views(ix *Index) {
@@ -1175,13 +1162,18 @@ func (b *builder) listenerUnknown(ix *Index, i int, n *interner) {
 		if p := slices.Index(a.specRefs, l.Ref); p >= 0 {
 			f = r.facts(p, l.Target)
 		}
+		var d DepSet
 		switch {
 		case f == nil:
-			r.UnknownDeps = union32(r.UnknownDeps, DepSet{n.ref(r.Ref), n.ref(l.Target)})
+			d = DepSet{n.ref(r.Ref), n.ref(l.Target)}
+			slices.Sort(d)
 		case f.Out.Unknown != "" || len(f.Listeners) == 0:
-			r.UnknownDeps = union32(r.UnknownDeps, f.Deps)
+			d = f.Deps
 		default:
 			continue
+		}
+		if !slices.ContainsFunc(r.UnknownDeps, func(e DepSet) bool { return slices.Equal(e, d) }) {
+			r.UnknownDeps = append(r.UnknownDeps, d)
 		}
 		r.Flags |= FlagListenerUnknown
 	}

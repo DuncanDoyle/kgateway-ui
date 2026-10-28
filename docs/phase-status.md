@@ -33,6 +33,7 @@ Brief: docs/phases/phase-2/phase-2.5-brief.md
 Branch: duncandoyle/phase2Stabilize
 Queue (brief §Queue):
 - [x] Q2 orphan KGWUI-011 is install-local — `fix(computed): orphan KGWUI-011 is install-local`
+- [x] Q3 listener-unknown per parent — `fix(explore): listener-unknown per parent`
 
 ## Carry-over (deferred to later phases)
 - (P4) Stable finding identity for Phase 3 diagnostics — src: reviews/phase-codex.md#8

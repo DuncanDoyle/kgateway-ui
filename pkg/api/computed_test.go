@@ -1617,3 +1617,92 @@ func TestOrphanIgnoresOtherInstallsEntry(t *testing.T) {
 		t.Errorf("A, entry under its own parent: want no orphan, got %+v", got)
 	}
 }
+
+// Design §7.4 rules 4a and 6: listener-unknown shows when any one unknown
+// parent's dependencies are visible, so a hidden parent does not remove the
+// flag a visible one sets, and state=listener-unknown agrees with
+// parent=…&listener=_unknown.
+func TestListenerUnknownPerParent(t *testing.T) {
+	lsRef := func(name string) objects.ParentRef {
+		return objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: name}
+	}
+	a, b := lsRef("lsa"), lsRef("lsb")
+	// Neither ListenerSet has an Accepted condition, so view A cannot place r under either.
+	objs := viewAWorld(edgeWith([]objects.Listener{lst("http", 8080, "")}, up("http", 0)),
+		admitAll(testutil.ListenerSet("infra", "lsa", edgeRef, []metav1.Condition{})),
+		admitAll(testutil.ListenerSet("infra", "lsb", edgeRef, []metav1.Condition{})),
+		testutil.HTTPRoute("shop", "r", []objects.ParentRef{a, b}, testutil.AcceptedBy(a, testutil.Controller), testutil.AcceptedBy(b, testutil.Controller)))
+	const state = listBase + "/routes?state=listener-unknown"
+	under := func(p objects.ParentRef) string {
+		return listBase + "/routes?parent=gateway.networking.k8s.io/ListenerSet/infra/" + p.Name + "&listener=_unknown"
+	}
+	hide := func(names ...string) Authorizer {
+		return AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
+			return ref.Kind != "ListenerSet" || !slices.Contains(names, ref.Name)
+		})
+	}
+	var denied []int
+	for _, tc := range []struct {
+		name         string
+		authz        Authorizer
+		flag, ua, ub bool
+	}{
+		{"allow all", nil, true, true, true},
+		{"hide lsb", hide("lsb"), true, true, false},
+		{"hide both", hide("lsa", "lsb"), false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{disputes: true, authz: tc.authz}, objs...)
+			all := get[Page[RouteRow]](t, srv, listBase+"/routes", 200)
+			if got := flagged(routeByName(t, all, "shop/r"), "listener-unknown"); got != tc.flag {
+				t.Errorf("row flag %v, want %v", got, tc.flag)
+			}
+			want := []string{}
+			if tc.flag {
+				want = []string{"shop/r"}
+			}
+			if p := get[Page[RouteRow]](t, srv, state, 200); !slices.Equal(routeNames(p), want) || p.Total != len(want) {
+				t.Errorf("state=listener-unknown: %v total %d, want %v", routeNames(p), p.Total, want)
+			}
+			for _, c := range []struct {
+				p    objects.ParentRef
+				want bool
+			}{{a, tc.ua}, {b, tc.ub}} {
+				resp, err := http.Get(srv.URL + under(c.p))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var p Page[RouteRow]
+				if resp.StatusCode == http.StatusOK {
+					_ = json.NewDecoder(resp.Body).Decode(&p)
+				}
+				_ = resp.Body.Close()
+				if got := slices.Contains(routeNames(p), "shop/r"); got != c.want {
+					t.Errorf("parent=%s&listener=_unknown includes r: %v, want %v (status %d)", c.p.Name, got, c.want, resp.StatusCode)
+				}
+			}
+			denied = append(denied, all.DeniedInInstall)
+			for _, p := range []string{state, under(a), under(b)} {
+				if d := get[Page[RouteRow]](t, srv, p, 200).DeniedInInstall; d != all.DeniedInInstall {
+					t.Errorf("%s: deniedInInstall %d, unfiltered %d", p, d, all.DeniedInInstall)
+				}
+			}
+		})
+	}
+	t.Run("AllowAll", func(t *testing.T) {
+		c := &countingAuthz{all: true}
+		_, srv, _ := startWith(t, setup{disputes: true, authz: c}, objs...)
+		_, ref, _ := startWith(t, setup{disputes: true}, objs...)
+		for _, p := range []string{listBase + "/routes", state, under(a), under(b), routeDetail + "shop/r"} {
+			if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
+				t.Errorf("GET %s differs from AllowAll", p)
+			}
+		}
+		if n := len(c.take()); n != 0 {
+			t.Errorf("AllowAll asked the Authorizer about %d refs", n)
+		}
+	})
+	if len(denied) != 3 || denied[0] != denied[1] || denied[1] != denied[2] {
+		t.Errorf("deniedInInstall per caller %v, want identical", denied)
+	}
+}

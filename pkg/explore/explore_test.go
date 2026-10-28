@@ -853,8 +853,8 @@ func TestComputedFlags(t *testing.T) {
 			t.Errorf("%s: flags %v, want %v", name, r.Flags.Names(), want.Names())
 		}
 	}
-	if _, r := row(t, ix, "shop", "u"); !slices.Equal(refsOf(ix, r.UnknownDeps), []objects.Ref{routeRef("shop", "u"), gwObj, shopNS}) {
-		t.Errorf("unknown deps %v", refsOf(ix, r.UnknownDeps))
+	if _, r := row(t, ix, "shop", "u"); len(r.UnknownDeps) != 1 || !slices.Equal(refsOf(ix, r.UnknownDeps[0]), []objects.Ref{routeRef("shop", "u"), gwObj, shopNS}) {
+		t.Errorf("unknown deps %v", r.UnknownDeps)
 	}
 	for _, n := range []string{"disagrees", "listener-unknown"} {
 		if f, ok := ParseFlag(n); !ok || f.Names()[0] != n {
