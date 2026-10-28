@@ -69,6 +69,8 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - controller and proxy pod health.
 - "Pod health" is "process health": restarts and readiness come from the provider (D-016).
 
+Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier.
+
 ### Phase 4 — Traffic Flow & Backends
 **Status:** Not started
 **Docs:** `docs/phases/phase-4/`
