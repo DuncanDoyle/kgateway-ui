@@ -17,6 +17,8 @@ type accumulator struct {
 	// kept counts the retained contexts of the install.
 	kept   int
 	hasher *computed.ContextHasher
+	// deps interns every dependency set the rows and contexts hold.
+	deps *computed.DepSets
 	// sorted are the rows in RowKey order, set by rows.
 	sorted []*rowAcc
 	// tooLarge is set when a compute cap was hit, so a row with no context
@@ -33,8 +35,6 @@ type rowAcc struct {
 	// unknown is the first unknown reason seen; scope is set by the meta or by any scope-unknown context.
 	unknown computed.UnknownReason
 	scope   bool
-	// sharedDeps is true while row.Deps is a caller's slice, so it must be cloned before it grows.
-	sharedDeps bool
 	// tags has one entry per retained context, for the effective projection.
 	tags []ctxTag
 	// child is the child's index in the walker's routes, or -1.
@@ -51,7 +51,8 @@ type rowAcc struct {
 type ctxTag struct{ seq, frame uint32 }
 
 func newAccumulator(b computed.Bounds) *accumulator {
-	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, hasher: computed.NewContextHasher()}
+	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, hasher: computed.NewContextHasher(),
+		deps: computed.NewDepSets()}
 }
 
 // open starts a row and returns it. It is called once per row before any add.
@@ -92,9 +93,10 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	if r.row.Reason == nil {
 		r.row.Reason = c.Reason
 	}
+	c.Deps = a.deps.Intern(c.Deps)
 	repeat := len(c.Deps) > 0 && len(c.Deps) == len(r.lastDeps) && &c.Deps[0] == &r.lastDeps[0]
 	if !repeat {
-		r.addDeps(c.Deps)
+		a.addDeps(r, c.Deps)
 	}
 	i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare)
 	if !ok {
@@ -103,7 +105,7 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 		r.row.KeyDigests = slices.Insert(r.row.KeyDigests, i, d)
 	} else {
 		if !repeat || i != r.lastKey {
-			r.row.KeyDeps[i] = unionRefs(r.row.KeyDeps[i], c.Deps)
+			r.row.KeyDeps[i] = a.deps.Union(r.row.KeyDeps[i], c.Deps)
 		}
 		r.row.KeyDigests[i] += d
 	}
@@ -124,28 +126,16 @@ func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32
 	}
 }
 
-// addDeps merges deps into the row's sorted set. The first sorted set is
-// shared rather than copied, since contexts' Deps are read-only.
-func (r *rowAcc) addDeps(deps []objects.Ref) {
-	if len(deps) == 0 || r.sharedDeps && len(deps) == len(r.row.Deps) && &deps[0] == &r.row.Deps[0] {
-		return // nothing new: the same shared set again
+// addDeps merges deps into the row's sorted set, interned so that rows
+// reached the same ways share one set.
+func (a *accumulator) addDeps(r *rowAcc, deps []objects.Ref) {
+	if len(deps) == 0 {
+		return
 	}
-	if len(r.row.Deps) == 0 {
-		if slices.IsSortedFunc(deps, compareRef) && !hasAdjacentDup(deps) {
-			r.row.Deps, r.sharedDeps = deps, true
-			return
-		}
+	if !slices.IsSortedFunc(deps, compareRef) || hasAdjacentDup(deps) {
+		deps = slices.Compact(slices.SortedFunc(slices.Values(deps), compareRef))
 	}
-	for _, d := range deps {
-		i, ok := slices.BinarySearchFunc(r.row.Deps, d, compareRef)
-		if ok {
-			continue
-		}
-		if r.sharedDeps {
-			r.row.Deps, r.sharedDeps = slices.Clone(r.row.Deps), false
-		}
-		r.row.Deps = slices.Insert(r.row.Deps, i, d)
-	}
+	r.row.Deps = a.deps.Union(r.row.Deps, deps)
 }
 
 func hasAdjacentDup(s []objects.Ref) bool {

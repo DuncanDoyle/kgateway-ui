@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 // chain is a valid delegation chain of n routes, each with one / match and one ref.
@@ -100,5 +101,73 @@ func TestBudgetDeepChain(t *testing.T) {
 	t.Logf("chain 3000, depth cap %d: retained %.2f MiB", computed.DefaultBounds.Depth, float64(total)/mib)
 	if total > 4*mib {
 		t.Errorf("chain of 3000 at the default depth cap retains %.2f MiB, want at most 4", float64(total)/mib)
+	}
+}
+
+// fanIn is the re-review's dependency construction: roots roots, each accepted
+// by gws Gateways of its own, delegate to one chain of depth routes whose last
+// route wildcards into leaves leaves.
+func fanIn(roots, gws, depth, leaves int) computed.DelegationInput {
+	bs := make([]*hr, 0, roots+depth+leaves)
+	chain := make([]*hr, depth)
+	for i := range chain {
+		chain[i] = route23("chain", fmt.Sprintf("c%03d", i)).owned()
+		if i > 0 {
+			chain[i].parentOf(chain[i-1].r.Ref)
+		}
+	}
+	for i, b := range chain {
+		if i+1 < depth {
+			b.rule(at("/"), toName("chain", chain[i+1].r.Ref.Name))
+		} else {
+			b.rule(at("/"), toWildcard("leaves"))
+		}
+	}
+	for i := range leaves {
+		bs = append(bs, route23("leaves", fmt.Sprintf("l%05d", i)).owned().parentOf(chain[depth-1].r.Ref).rule(at("/"), service("leaves", "svc")))
+	}
+	tops := make([]*hr, roots)
+	for i := range tops {
+		tops[i] = route23("roots", fmt.Sprintf("r%02d", i)).top().rule(at("/"), toName("chain", chain[0].r.Ref.Name))
+		chain[0].parentOf(tops[i].r.Ref)
+	}
+	bs = append(append(bs, chain...), tops...)
+	in := world(bs...)
+	for i := range in.Roots {
+		rt := &in.Roots[i]
+		rt.Deps, rt.Keys = []objects.Ref{rt.Route}, nil
+		for g := range gws {
+			ref := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: fmt.Sprintf("%s-g%02d", rt.Route.Name, g)}
+			rt.Deps = append(rt.Deps, ref)
+			rt.Keys = append(rt.Keys, computed.ReportKey{Group: ref.Group, Kind: ref.Kind, Namespace: ref.Namespace, Name: ref.Name})
+		}
+	}
+	return in
+}
+
+// fanInRetained is the live heap of fanIn's result.
+func fanInRetained(t *testing.T, leaves int) uint64 {
+	in := fanIn(20, 32, 90, leaves)
+	before := liveHeap()
+	res := delegate(in)
+	total := liveHeap() - before
+	if res.Cap != "" {
+		t.Errorf("fan-in with %d leaves hit the %s cap", leaves, res.Cap)
+	}
+	runtime.KeepAlive(res)
+	runtime.KeepAlive(in)
+	return total
+}
+
+// TestBudgetDependencyAggregates: rows reached from many roots share their
+// dependency sets, so the retained result stays small under every compute cap.
+func TestBudgetDependencyAggregates(t *testing.T) {
+	const mib = 1 << 20
+	for _, leaves := range []int{2450, 9800} {
+		total := fanInRetained(t, leaves)
+		t.Logf("fan-in, 20 roots × 32 Gateways, chain 90, %d leaves: retained %.1f MiB", leaves, float64(total)/mib)
+		if total > 64*mib {
+			t.Errorf("fan-in with %d leaves retains %.1f MiB, want at most 64", leaves, float64(total)/mib)
+		}
 	}
 }

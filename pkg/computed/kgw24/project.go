@@ -86,7 +86,7 @@ func (w *walker) edge(rows []*rowAcc) computed.EffectiveEdge {
 	for _, r := range rows {
 		e.ContextsTruncated = e.ContextsTruncated || r.row.ContextsTruncated
 		if len(e.Deps) != len(r.row.Deps) || len(e.Deps) > 0 && &e.Deps[0] != &r.row.Deps[0] {
-			e.Deps = unionRefs(e.Deps, r.row.Deps)
+			e.Deps = w.acc.deps.Union(e.Deps, r.row.Deps)
 		}
 		for i := range r.row.Contexts {
 			switch r.row.Contexts[i].Outcome {

@@ -438,7 +438,7 @@ func (w *walker) walkRoots() {
 		deps := slices.Clone(root.Deps)
 		slices.SortFunc(deps, compareRef)
 		// Only keys view A accepted, or the status entry's, are written under.
-		keys, ds := root.Keys, withDep(slices.Compact(deps), root.Route)
+		keys, ds := root.Keys, w.acc.deps.Intern(withDep(slices.Compact(deps), root.Route))
 		for _, rule := range v.Rules {
 			lo, hi := rs.ruleRange(rule.Index)
 			if lo == hi {
@@ -606,7 +606,7 @@ func (w *walker) descend(pi int, ki int32, e *kidEval, f *frame) {
 		e.built = true
 		kid := &w.routes[ki]
 		e.key[0], _ = childKey(kid.View, kid.Ref.Namespace, w.routes[pi].Ref)
-		deps := withDep(f.deps, kid.Ref)
+		deps := w.acc.deps.Intern(withDep(f.deps, kid.Ref))
 		for _, er := range e.rules {
 			if !er.Kept {
 				continue
@@ -761,7 +761,7 @@ func (w *walker) signal(parent objects.Ref, f *frame, reason string) {
 		if !slices.Contains(s.Reasons, reason) {
 			s.Reasons = append(s.Reasons, reason)
 		}
-		s.Deps = unionRefs(s.Deps, f.deps)
+		s.Deps = w.acc.deps.Union(s.Deps, f.deps)
 	}
 }
 
@@ -819,35 +819,4 @@ func withDep(deps []objects.Ref, r objects.Ref) []objects.Ref {
 	out = append(out, deps[:i]...)
 	out = append(out, r)
 	return append(out, deps[i:]...)
-}
-
-// unionRefs merges sorted sets; it returns a or b unchanged when one holds
-// the other's elements, and never writes either.
-func unionRefs(a, b []objects.Ref) []objects.Ref {
-	switch {
-	case len(a) == 0:
-		return b
-	case len(b) == 0 || len(a) == len(b) && &a[0] == &b[0]:
-		return a // nothing new, or the same shared set
-	}
-	if !slices.ContainsFunc(b, func(r objects.Ref) bool { _, ok := slices.BinarySearchFunc(a, r, compareRef); return !ok }) {
-		return a
-	}
-	out := make([]objects.Ref, 0, len(a)+len(b))
-	i, j := 0, 0
-	for i < len(a) && j < len(b) {
-		switch c := compareRef(a[i], b[j]); {
-		case c < 0:
-			out = append(out, a[i])
-			i++
-		case c > 0:
-			out = append(out, b[j])
-			j++
-		default:
-			out = append(out, a[i])
-			i, j = i+1, j+1
-		}
-	}
-	out = append(out, a[i:]...)
-	return append(out, b[j:]...)
 }
