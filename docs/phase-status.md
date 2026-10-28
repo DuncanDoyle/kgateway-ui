@@ -14,7 +14,8 @@ Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #
 - [x] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) — phases/phase-2/phase-2.2-complete.md; review reviews/2.2-codex.md; merged in #8 (f01bb0a)
 - [x] Q6 Sub-phase 2.3 — view A (Tasks 35–51) — phases/phase-2/phase-2.3-complete.md; review reviews/2.3-codex.md; merged in #9 (86c70a4)
 - [x] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70) — phases/phase-2/phase-2.4-complete.md; review reviews/2.4-codex.md; PR pending
-- [ ] Q8 Phase cross-model review + triage ← NEXT
+- [x] Q8 Phase cross-model review + triage — done: reviews/phase-codex.md; 7 findings accepted for 2.5, 1 deferred to Phase 3 planning
+- [ ] Q9 Sub-phase 2.5 — stabilization of the phase review findings ← CURRENT
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -25,9 +26,14 @@ Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #
 - [ ] phase-2-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: none (next: Phase 2 cross-model review, after the 2.4 PR merges)
+Sub-phase: 2.5 Stabilization (Phase 2 review findings)
+Status: active
+Base: 29b8792191b48e4e3d83000f063be44eba8d687a
+Brief: docs/phases/phase-2/phase-2.5-brief.md
+Branch: duncandoyle/phase2Stabilize
 
 ## Carry-over (deferred to later phases)
+- (P4) Stable finding identity for Phase 3 diagnostics — src: reviews/phase-codex.md#8
 - (P3) Stream CPU gate measures the views-memo hit path (annotation-only edits); add a reported spec-edit stream variant — src: phases/phase-2/phase-2.4-complete.md
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
 - (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: reviews/phase-codex.md#5
@@ -41,6 +47,7 @@ Sub-phase: none (next: Phase 2 cross-model review, after the 2.4 PR merges)
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 
 ## Notes
+- 2026-10-28: Phase 2 cross-model review done (reviews/phase-codex.md): 7 findings accepted for stabilization, 1 deferred to Phase 3 planning. Sub-phase 2.5 started on duncandoyle/phase2Stabilize from 29b8792; brief phases/phase-2/phase-2.5-brief.md. Its inferred rows (Q1, Q4, Q7) need user confirmation before implementation.
 - 2026-10-28: sub-phase 2.4 closed. Gates green on f399c89 (vet, race tests, lint, web, kind e2e on both tags). Three Codex rounds triaged (reviews/2.4-codex.md). Decisions: D-025 and its amendment; the shared compute caps accepted (user, design §7.4 rule 4d). Known limits: inherited path bytes and failure-reason text, carried as P3. No waivers. bench/2.4-ci.txt comes from the PR's bench job at merge.
 - 2026-10-27: paused after D-025 (23e5266). Done in 2.4: Tasks 52–68, plus D-024, the D-021 amendment (child-edit drops clear on both tags), D-025 (delegation edge cap 10,000, configurable, GOMEMLIMIT). User signed off 2026-10-27: keep the 10,000 default; gate the dense case on peak heap ≤ 432 MiB only (RSS reported, not gated, to avoid CI flakes); set GOMEMLIMIT to 90 % of the pod limit in the binary (read the limit, debug.SetMemoryLimit). Next: Task 69 (kind e2e on both tags), Task 70 (close: Codex review, 2.4-ci.txt from the PR bench job, complete record, README notes, PR, user merge). User-doc topics are collected in docs/documentation-notes.md.
 - 2026-10-26: sub-phase 2.3 merged in #9 (86c70a4). Sub-phase 2.4 started with D-024 (unknown scope and the inherited match) and the pre-flight rulings PF1–PF26 folded into plan Tasks 52–70.
