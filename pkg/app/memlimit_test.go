@@ -1,6 +1,11 @@
 package app
 
-import "testing"
+import (
+	"context"
+	"path/filepath"
+	"runtime/debug"
+	"testing"
+)
 
 func TestApplyMemoryLimit(t *testing.T) {
 	const gi = 1 << 30
@@ -24,5 +29,17 @@ func TestApplyMemoryLimit(t *testing.T) {
 				t.Errorf("target %d, set %d, want %d", got, set, tc.want)
 			}
 		})
+	}
+}
+
+// Run applies the limit before it touches the cluster, so downstream mains get it.
+func TestRunAppliesMemoryLimit(t *testing.T) {
+	old := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(old) })
+	t.Setenv("GOMEMLIMIT", "")
+	t.Setenv(MemoryLimitEnv, "536870912")
+	_ = Run(context.Background(), filepath.Join(t.TempDir(), "missing"), Options{})
+	if got, want := debug.SetMemoryLimit(-1), int64(536870912/10*9); got != want {
+		t.Errorf("memory limit %d, want %d", got, want)
 	}
 }

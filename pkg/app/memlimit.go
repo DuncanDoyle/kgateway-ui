@@ -13,6 +13,7 @@ const MemoryLimitEnv = "KGWUI_MEMORY_LIMIT"
 // ApplyMemoryLimit sets the Go memory target to 90 % of the limit in
 // MemoryLimitEnv (D-025). An explicit GOMEMLIMIT wins; a missing, zero or
 // unparsable limit is ignored and logged. It returns the target set, or zero.
+// Run calls it first; repeated calls are harmless.
 func ApplyMemoryLimit() int64 {
 	return applyMemoryLimit(os.Getenv, debug.SetMemoryLimit)
 }

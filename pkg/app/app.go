@@ -171,6 +171,7 @@ func (a *App) Start(ctx context.Context) {
 // Run builds clients from kubeconfig (or the in-cluster config when empty and
 // running in a pod), then serves until ctx is done.
 func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Option) error {
+	ApplyMemoryLimit()
 	cfg, inCluster, err := restConfig(kubeconfig)
 	if err != nil {
 		return err
