@@ -127,10 +127,10 @@ Out:
 - [ ] `phase-2.5-complete.md` written; `phase-status.md` updated; `phase-codex.md` triage notes point at the fixing commits
 
 ## Queue
-- [x] Q1 (P1) Delegation tab rows turn Unknown when their own poll fails or goes stale — src: reviews/phase-codex.md#1 — `fix(shell): delegation tab goes unknown when its poll fails`: the rows' own poll set no stale view; only the route detail's did
-- [x] Q2 (P1) Orphan KGWUI-011 ignores entries naming another install's parent — src: reviews/phase-codex.md#2 — `fix(computed): orphan KGWUI-011 is install-local`: any entry from the shared controller name counted, not only eligible entries under owned parents
-- [x] Q3 (P1) A visible unknown parent keeps `listener-unknown` when another parent is hidden — src: reviews/phase-codex.md#3 — `fix(explore): listener-unknown per parent`: unknown parents' deps were unioned into one set that had to be visible whole
-- [x] Q4 (P2) `scope-unknown` wins over the edge cap's `too-large` — src: reviews/phase-codex.md#4 — `fix(api): scope-unknown wins over too-large`: a cut ref was labelled too-large without checking the install's scope
-- [x] Q5 (P2) Computed-only candidates keep `since` under restricted evidence — src: reviews/phase-codex.md#5 — `fix(health): computed-only candidates keep since under restricted evidence`: the first-seen lookup covered owned objects only, not declared or no-parent candidates
-- [x] Q6 (P2) Implementation plan Task 44 matches the D-023 amendment — src: reviews/phase-codex.md#6 — `docs: plan Task 44 follows D-023`: Task 44 predated the D-023 amendment; the Q6 grep matched 2 lines on the base, none after
-- [x] Q7 (P3) TypeScript golden guard checks value types — src: reviews/phase-codex.md#7 — `test(shell): golden guard checks wire value types`: `Spec<T>` kept only keys and optionality, never the value types
+- [x] Q1 (P1) Delegation tab rows turn Unknown when their own poll fails or goes stale — src: reviews/phase-codex.md#1 — 45baa25 plus 6670b0a and 0d07532: the rows' own poll set no stale view; only the route detail's did
+- [x] Q2 (P1) Orphan KGWUI-011 ignores entries naming another install's parent — src: reviews/phase-codex.md#2 — 7f6ee7b: any entry from the shared controller name counted, not only eligible entries under owned parents
+- [x] Q3 (P1) A visible unknown parent keeps `listener-unknown` when another parent is hidden — src: reviews/phase-codex.md#3 — 12be26a: unknown parents' deps were unioned into one set that had to be visible whole
+- [x] Q4 (P2) `scope-unknown` wins over the edge cap's `too-large` — src: reviews/phase-codex.md#4 — 197101b: a cut ref was labelled too-large without checking the install's scope
+- [x] Q5 (P2) Computed-only candidates keep `since` under restricted evidence — src: reviews/phase-codex.md#5 — dbff6b2 plus 6b04ccd: the first-seen lookup covered owned objects only, not declared or no-parent candidates
+- [x] Q6 (P2) Implementation plan Task 44 matches the D-023 amendment — src: reviews/phase-codex.md#6 — a5ea505: Task 44 predated the D-023 amendment; the Q6 grep matched 2 lines on the base, none after
+- [x] Q7 (P3) TypeScript golden guard checks value types — src: reviews/phase-codex.md#7 — 97d02d0 plus 8d771b1 and 7c63cb8: `Spec<T>` kept only keys and optionality, never the value types
