@@ -2,8 +2,10 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { ChevronDown, ChevronRight, EyeOff, Info, Lock } from "lucide-react";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useContext, useEffect, useId, useMemo, useState } from "react";
+import { useNow } from "../../../api/clock";
 import { useDelegation } from "../../../api/exploreHooks";
+import { isStale } from "../../../api/hooks";
 import type {
   BackendRef,
   Condition,
@@ -22,10 +24,12 @@ import { ROW_H } from "../../../explore/ObjectTable";
 import { Pager } from "../../../explore/Pager";
 import { type FilterOption, StateFilter } from "../../../explore/StateFilter";
 import { HealthIcon } from "../../../health/HealthIcon";
+import { StaleView } from "../../../health/staleView";
 import { Tooltip } from "../../../shell/Tooltip";
 import { PageNotice } from "../../../states/PageNotice";
 import { Shimmer } from "../../../states/Shimmer";
 import type { HealthState } from "../../../theme/tokens";
+import { DataAge } from "../../DataAge";
 import { expectedRows, Facts } from "../detailParts";
 import { Muted, nameTip, OneLine } from "../listParts";
 import { CutNote, NeutralBox, Placeholder } from "./EffectiveMatches";
@@ -619,6 +623,11 @@ function RefRows({
     if (l.cursorRejected) setCursor(undefined);
   }, [l.cursorRejected]);
   const expected = expectedRows(Math.max(1, at.b.delegation.selected ?? 1));
+  const now = useNow();
+  // The rows follow their own poll, not the route detail: a failed or stale poll turns their states unknown (§8.6).
+  const old = !!l.data && !l.error && isStale(l.data.collectedAt, now);
+  // A stale route detail above keeps the rows stale too.
+  const stale = useContext(StaleView) || (!!l.data && (!!l.error || old));
   let body: ReactNode;
   if (!l.data && l.error) body = null;
   else if (!l.data)
@@ -668,15 +677,18 @@ function RefRows({
       </Rows>
     );
   return (
-    <div id={id}>
-      {l.error ? <PageNotice error={l.error} title={listCopy.cannotLoad(delegationCopy.tab)} /> : null}
-      {body}
-      {l.data?.next || l.data?.prev ? (
-        <div className="footer">
-          <Pager prev={l.data.prev} next={l.data.next} onPage={(next) => setCursor({ key: base, c: next })} />
-        </div>
-      ) : null}
-    </div>
+    <StaleView.Provider value={stale}>
+      <div id={id}>
+        {l.error ? <PageNotice error={l.error} title={listCopy.cannotLoad(delegationCopy.tab)} /> : null}
+        {old && l.data ? <DataAge collectedAt={l.data.collectedAt} /> : null}
+        {body}
+        {l.data?.next || l.data?.prev ? (
+          <div className="footer">
+            <Pager prev={l.data.prev} next={l.data.next} onPage={(next) => setCursor({ key: base, c: next })} />
+          </div>
+        ) : null}
+      </div>
+    </StaleView.Provider>
   );
 }
 

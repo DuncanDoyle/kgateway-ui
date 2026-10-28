@@ -127,7 +127,7 @@ Out:
 - [ ] `phase-2.5-complete.md` written; `phase-status.md` updated; `phase-codex.md` triage notes point at the fixing commits
 
 ## Queue
-- [ ] Q1 (P1) Delegation tab rows turn Unknown when their own poll fails or goes stale — src: reviews/phase-codex.md#1
+- [x] Q1 (P1) Delegation tab rows turn Unknown when their own poll fails or goes stale — src: reviews/phase-codex.md#1 — `fix(shell): delegation tab goes unknown when its poll fails`: the rows' own poll set no stale view; only the route detail's did
 - [x] Q2 (P1) Orphan KGWUI-011 ignores entries naming another install's parent — src: reviews/phase-codex.md#2 — `fix(computed): orphan KGWUI-011 is install-local`: any entry from the shared controller name counted, not only eligible entries under owned parents
 - [x] Q3 (P1) A visible unknown parent keeps `listener-unknown` when another parent is hidden — src: reviews/phase-codex.md#3 — `fix(explore): listener-unknown per parent`: unknown parents' deps were unioned into one set that had to be visible whole
 - [x] Q4 (P2) `scope-unknown` wins over the edge cap's `too-large` — src: reviews/phase-codex.md#4 — `fix(api): scope-unknown wins over too-large`: a cut ref was labelled too-large without checking the install's scope

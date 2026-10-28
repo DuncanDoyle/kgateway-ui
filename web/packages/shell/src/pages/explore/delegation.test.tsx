@@ -10,6 +10,7 @@ import detailRestrictedGolden from "../../../../../../pkg/api/testdata/golden/ro
 import effectiveGolden from "../../../../../../pkg/api/testdata/golden/route-detail-effective.json";
 import selectedGolden from "../../../../../../pkg/api/testdata/golden/route-detail-selected.json";
 import droppedGolden from "../../../../../../pkg/api/testdata/golden/routes-dropped.json";
+import { POLL_MS } from "../../api/hooks";
 import type { DelegationRow, LinkedRef, MetaResponse, Page, RouteDetail, RouteList, Rule } from "../../api/types";
 import {
   columnCopy,
@@ -17,6 +18,7 @@ import {
   delegationCopy,
   detailCopy,
   effectiveCopy,
+  listCopy,
   routeCopy,
   routeStateDelegationCopy,
 } from "../../copy/explorer";
@@ -318,6 +320,71 @@ describe("Delegation tab", () => {
     await tabLoaded();
     const [r] = await rowsIn(await openRef(7, 0));
     expect(within(r as HTMLElement).getByTestId("row-note")).toHaveTextContent("Status cannot confirm this path");
+  });
+
+  /** Health icon states and compact computed states in one ref's rows. */
+  const rowStates = (s: HTMLElement) => {
+    const t = within(s).getByRole("table");
+    return {
+      icons: within(t)
+        .getAllByTestId(/^health-icon-/)
+        .map((e) => e.getAttribute("data-testid")),
+      badges: within(t)
+        .getAllByTestId("computed-badge")
+        .map((e) => e.textContent),
+    };
+  };
+
+  it("a failed delegation poll turns the rows' states unknown under the notice; a good poll restores them", async () => {
+    const notice = new RegExp(`^${listCopy.cannotLoad(delegationCopy.tab)}: `);
+    let polls = 0;
+    serve(
+      api({
+        name: "m",
+        d: m(),
+        // Only the delegation poll fails; route detail stays fresh.
+        rows: (u) => (polls++ === 1 ? [500, { error: "boom" }] : rowPage(rows, u)),
+      }),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const s = await openRef(0, 0);
+    await rowsIn(s);
+    expect(rowStates(s).icons).toContain("health-icon-healthy");
+    expect(rowStates(s).badges).toEqual([computedCopy.short.agrees]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+    });
+    expect(polls).toBe(2);
+    await within(s).findByText(notice);
+    expect(new Set(rowStates(s).icons)).toEqual(new Set(["health-icon-unknown"]));
+    expect(rowStates(s).badges).toEqual([computedCopy.short.unknown]);
+
+    // The test SWR config retries an error once per poll interval.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+    });
+    expect(polls).toBe(3);
+    await waitFor(() => expect(within(s).queryByText(notice)).toBeNull());
+    expect(rowStates(s).icons).toContain("health-icon-healthy");
+    expect(rowStates(s).badges).toEqual([computedCopy.short.agrees]);
+    vi.useRealTimers();
+  });
+
+  it("stale delegation data turns the rows' states unknown and says it is stale, under a fresh route detail", async () => {
+    const old = new Date(Date.now() - 10 * 60_000).toISOString();
+    serve(api({ name: "m", d: m(), rows: (u) => ({ ...rowPage(rows, u), collectedAt: old }) }));
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const s = await openRef(0, 0);
+    await rowsIn(s);
+    await within(s).findByText(/Data is stale/);
+    expect(new Set(rowStates(s).icons)).toEqual(new Set(["health-icon-unknown"]));
+    expect(rowStates(s).badges).toEqual([computedCopy.short.unknown]);
+    // The route detail is fresh: the page header keeps its own state.
+    expect(within(screen.getByTestId("detail-header")).queryByText(/Data is stale/)).toBeNull();
   });
 
   it("outcome, rule and ref filters stay page-local and only ?tab=delegation is in the URL; a 400 cursor reloads page one", async () => {
