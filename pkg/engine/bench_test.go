@@ -31,8 +31,17 @@ func scaleEngine(tier scale.Tier) *Engine {
 	return e
 }
 
+// forgetViews makes e's next Compute recompute every view, as when their
+// input changed; the memo's old inputs and results stay live until then.
+func (e *Engine) forgetViews() {
+	for _, m := range e.views {
+		m.set = false
+	}
+}
+
 // BenchmarkCompute measures one warm Compute per iteration: the engine has
-// already seen the snapshot once, as after the first run in production.
+// already seen the snapshot once, as after the first run in production. The
+// views are recomputed each time; the hit sub-benchmark reuses them.
 func BenchmarkCompute(b *testing.B) {
 	for _, tier := range append(slices.Clone(scale.Tiers), scale.Large.Contradicting()) {
 		b.Run(tier.Name, func(b *testing.B) {
@@ -41,10 +50,20 @@ func BenchmarkCompute(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
+				e.forgetViews()
 				e.Compute()
 			}
 		})
 	}
+	b.Run("large-hit", func(b *testing.B) {
+		e := scaleEngine(scale.Large)
+		e.Compute()
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			e.Compute()
+		}
+	})
 }
 
 // denseSnapshot is a synced snapshot of scale.DenseSelection(parents, routes)
@@ -112,6 +131,7 @@ func BenchmarkDenseSelection(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
+				e.forgetViews()
 				e.Compute()
 			}
 			b.ReportMetric(float64(len(first.Rows)), "rows")

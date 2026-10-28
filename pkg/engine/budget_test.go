@@ -311,6 +311,7 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			alloc := make([]uint64, len(warm))
 			var ms runtime.MemStats
 			for i := range warm {
+				e.forgetViews() // the gate is a recompute with views B and C
 				runtime.ReadMemStats(&ms)
 				a0 := ms.TotalAlloc
 				t0 := time.Now()
@@ -319,6 +320,13 @@ func TestBudgetWarmRecompute(t *testing.T) {
 				runtime.ReadMemStats(&ms)
 				alloc[i] = ms.TotalAlloc - a0
 			}
+			hit := make([]time.Duration, 20)
+			for i := range hit {
+				t0 := time.Now()
+				e.Compute()
+				hit[i] = time.Since(t0)
+			}
+			slices.Sort(hit)
 			// The persistence step alone, over the last model's checks: same IDs and prints keep every window.
 			views := []*computed.Views{m.Installs[0].Computed}
 			step := make([]time.Duration, 20)
@@ -341,6 +349,7 @@ func TestBudgetWarmRecompute(t *testing.T) {
 				warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
 				float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib,
 				step[len(step)/2].Round(time.Microsecond), step[len(step)-1].Round(time.Microsecond))
+			t.Logf("%s: warm median with unchanged views input %v (reported)", tier.Name, hit[len(hit)/2].Round(100*time.Microsecond))
 			if tier.Contradict && len(disagreements(m)) == 0 {
 				t.Fatal("the worst case raised no KGWUI-012")
 			}
@@ -608,6 +617,7 @@ func denseMemChild(t *testing.T, edges int) {
 	r.ColdHeapInuse, r.ColdHeapAlloc = sample(func() { m = e.Compute() })
 	r.WarmHeapInuse, r.WarmHeapAlloc = sample(func() {
 		for range 5 {
+			e.forgetViews()
 			m = e.Compute()
 		}
 	})
