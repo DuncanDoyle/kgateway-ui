@@ -5,6 +5,11 @@
       "workloads"
     ],
     "filters": {
+      "delegation": [
+        "rule",
+        "ref",
+        "outcome"
+      ],
       "routes": [
         "listener"
       ]

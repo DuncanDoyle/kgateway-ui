@@ -22,6 +22,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
@@ -126,7 +127,8 @@ func detailCases(t *testing.T) []goldenCase {
 	_, allowed, _ := startWith(t, setup{}, edgeAllowing(map[string]any{"namespaces": map[string]any{"from": "Same"}}, world(na()))...)
 	_, deleg, _ := startWith(t, setup{}, delegationWorld()...)
 	_, restricted, _ := startWith(t, setup{authz: hideMidDeps()}, delegationWorld()...)
-	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+	// far is not watched, so mid's ref is unresolved (D-021 item 8).
+	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef}, unresolvedBy(edgeRef)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
 	_, cand, _ := startWith(t, setup{}, world(append(farWorld(), mid)...)...)
 	return []goldenCase{
@@ -199,7 +201,7 @@ func partialLS() *unstructured.Unstructured {
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
 		if !ok { // meta and installs: no install segment, and no links
 			continue
@@ -229,7 +231,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 208
+	const want = 314
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -251,7 +253,7 @@ func detailPath(r objects.Ref) (string, bool) {
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
 func TestGoldenFilesHaveCases(t *testing.T) {
 	cased := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
 		cased[tc.golden+".json"] = true
 	}
 	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
@@ -381,3 +383,151 @@ func wire(t *testing.T, srv *httptest.Server, path string) []byte {
 	}
 	return out.Bytes()
 }
+
+// TestGoldenDelegation pins the 2.4 bodies (design §7.6): the delegation
+// endpoint, effective matchers and restricted views B and C.
+func TestGoldenDelegation(t *testing.T) { runGolden(t, delegationCases(t)) }
+
+func delegationCases(t *testing.T) []goldenCase {
+	_, outcomes, _ := startWith(t, setup{}, goldenOutcomeWorld()...)
+	// a's context, then one per kept match and ref of m: 11 stops before m's last rule (rules §5.7).
+	cut := computed.DefaultBounds
+	cut.Contexts = 11
+	_, cutSrv, _ := startWith(t, setup{bounds: cut}, goldenOutcomeWorld()...)
+	// The install keeps two contexts, both of a's; an edge keeps one.
+	capped := computed.DefaultBounds
+	capped.ContextsPerInstall, capped.ContextsPerEdge = 2, 1
+	_, eff, _ := startWith(t, setup{bounds: capped}, inheritWorld()...)
+	_, sel, _ := startWith(t, setup{disputes: true, late: []*unstructured.Unstructured{leaf("kids", "s", nil, "/other")}},
+		isolated(kidsNS, testutil.WithRules(testutil.HTTPRoute("shop", "w", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/w"}, testutil.DelegateWildcard("kids"))))...)
+	_, hidden, _ := startWith(t, setup{authz: hideInDelegation}, hiddenAncestorWorld()...)
+	_, evidence, _ := startWith(t, setup{disputes: true, authz: hideEvidence}, evidenceWorld()...)
+	return []goldenCase{
+		{"route-delegation", outcomes, delegURL("shop", "m", "")},
+		{"route-delegation-cut", cutSrv, delegURL("shop", "m", "?rule=9")},
+		{"routes-dropped", outcomes, base + "/routes?state=dropped"},
+		{"route-detail-effective", eff, routeDetail + "shop/x"},
+		{"route-detail-selected", sel, routeDetail + "kids/s"},
+		{"route-detail-delegation-restricted", hidden, routeDetail + "shop/p"},
+		{"route-delegation-restricted", hidden, delegURL("shop", "p2", "")},
+		{"health-evidence-restricted", evidence, base + "/health"},
+	}
+}
+
+// goldenOutcomeWorld: the root shop/a delegates /api to shop/m, which has
+// one rule per outcome of view B (rules §5.5), each with one name ref:
+//
+//	0 /api → kid attached          5 /api → m: m is on the path, cycle
+//	1 /api → drop dropped          6 /api/p,/api/q → part partial
+//	2 /api → forb forbidden        7 /api/zzz → kid dropped, unconfirmable
+//	3 /api → ghost unresolved      8 /api → blog/b unresolved, not watched
+//	4 /api → host rejected-hostnames  9 /api → late attached
+//
+// A cut makes m's aggregate incomplete, so no negative outcome stays known
+// beside it (rules §8.5): route-delegation-cut is the same world cut after
+// m's ninth rule, and route-delegation has no unknown row.
+// m's entry under a reports its failed refs (ResolvedRefs=False).
+func goldenOutcomeWorld() []runtime.Object {
+	top, m := testutil.HTTPRouteRef("shop", "a"), testutil.HTTPRouteRef("shop", "m")
+	mr := testutil.WithRules(testutil.HTTPRoute("shop", "m", nil, unresolvedBy(top)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "kid")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "drop")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "forb")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "ghost")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "host")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "m")),
+		delegRule([]string{"/api/p", "/api/q"}, testutil.DelegateTo("shop", "part")),
+		delegRule([]string{"/api/zzz"}, testutil.DelegateTo("shop", "kid")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("blog", "b")),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "late")))
+	return isolated(mr,
+		testutil.WithRules(testutil.HTTPRoute("shop", "a", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/api"}, testutil.DelegateTo("shop", "m"))),
+		leaf("shop", "kid", nil, "/api/v1", testutil.AcceptedBy(m, testutil.Controller)),
+		leaf("shop", "drop", nil, "/other"),
+		leaf("shop", "forb", []objects.ParentRef{testutil.HTTPRouteRef("shop", "else")}, "/api/f"),
+		testutil.WithHostnames(leaf("shop", "host", nil, "/api/h", entry(m, metav1.ConditionFalse, "UnsupportedValue")), "h.example.org"),
+		leaf("shop", "part", nil, "/api/p/x", testutil.AcceptedBy(m, testutil.Controller)),
+		leaf("shop", "late", nil, "/api/late", testutil.AcceptedBy(m, testutil.Controller)),
+		leaf("blog", "b", nil, "/b"))
+}
+
+// inheritWorld: shop/x inherits its parents' matches and has two parents,
+// shop/a under /a and /a2 and shop/b under /b, so under the golden's bounds
+// a's edge keeps one of two contexts and b's edge keeps none (rules §5.7).
+func inheritWorld() []runtime.Object {
+	a, b := testutil.HTTPRouteRef("shop", "a"), testutil.HTTPRouteRef("shop", "b")
+	x := testutil.WithRules(testutil.HTTPRoute("shop", "x", nil, testutil.AcceptedBy(a, testutil.Controller), testutil.AcceptedBy(b, testutil.Controller)),
+		testutil.Rule(matchPath("/x")))
+	x.SetAnnotations(map[string]string{objects.InheritParentMatcherAnnotation: "true"})
+	return isolated(x,
+		testutil.WithRules(testutil.HTTPRoute("shop", "a", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/a", "/a2"}, testutil.DelegateTo("shop", "x"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "b", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/b"}, testutil.DelegateTo("shop", "x"))))
+}
+
+// hiddenAncestorWorld: edge → shop/r → shop/h under /api, and h delegates
+// /api/h to shop/p and to shop/p2. web/s also delegates /s to p; s attaches
+// through infra/sel, a Selector over web's zone label, and through infra/hgw.
+// p delegates /api/h to shop/c and /s to shop/d. No root behind web reaches
+// p2, which delegates /api/h/2 to shop/c2 and, in its next rule, to every route in kids.
+func hiddenAncestorWorld() []runtime.Object {
+	sl := lst("sel", 8080, "")
+	sl.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "web"}}}
+	selRef, hgwRef := testutil.GwRef("infra", "sel"), testutil.GwRef("infra", "hgw")
+	r, h, s := testutil.HTTPRouteRef("shop", "r"), testutil.HTTPRouteRef("shop", "h"), testutil.HTTPRouteRef("web", "s")
+	p, p2 := testutil.HTTPRouteRef("shop", "p"), testutil.HTTPRouteRef("shop", "p2")
+	return isolated(kidsNS, testutil.Namespace("web", map[string]string{"team": "a", "zone": "web"}),
+		testutil.GatewayWithListeners("infra", "sel", "kgateway", []objects.Listener{sl}, up("sel", 1)),
+		testutil.GatewayWithListeners("infra", "hgw", "kgateway", []objects.Listener{lst("http", 80, "")}, up("http", 1)),
+		testutil.WithRules(testutil.HTTPRoute("shop", "r", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/api"}, testutil.DelegateTo("shop", "h"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "h", nil, testutil.AcceptedBy(r, testutil.Controller)),
+			delegRule([]string{"/api/h"}, testutil.DelegateTo("shop", "p")), delegRule([]string{"/api/h"}, testutil.DelegateTo("shop", "p2"))),
+		testutil.WithRules(testutil.HTTPRoute("web", "s", []objects.ParentRef{selRef, hgwRef}, testutil.AcceptedBy(selRef, testutil.Controller), testutil.AcceptedBy(hgwRef, testutil.Controller)),
+			delegRule([]string{"/s"}, testutil.DelegateTo("shop", "p"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "p", nil, testutil.AcceptedBy(h, testutil.Controller), testutil.AcceptedBy(s, testutil.Controller)),
+			delegRule([]string{"/api/h"}, testutil.DelegateTo("shop", "c")), delegRule([]string{"/s"}, testutil.DelegateTo("shop", "d"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "p2", nil, testutil.AcceptedBy(h, testutil.Controller)),
+			delegRule([]string{"/api/h/2"}, testutil.DelegateTo("shop", "c2")), delegRule([]string{"/api/h/2"}, testutil.DelegateWildcard("kids"))),
+		leaf("shop", "c", nil, "/api/h/c", testutil.AcceptedBy(p, testutil.Controller)),
+		leaf("shop", "d", nil, "/s/d", testutil.AcceptedBy(p, testutil.Controller)),
+		leaf("shop", "c2", nil, "/api/h/2/c", testutil.AcceptedBy(p2, testutil.Controller)),
+		leaf("kids", "x", nil, "/api/h/2/x", testutil.AcceptedBy(p2, testutil.Controller)),
+		leaf("kids", "y", nil, "/api/h/2/y", testutil.AcceptedBy(p2, testutil.Controller)))
+}
+
+// hideInDelegation hides the ancestor route shop/h, the route kids/x, the
+// Namespace web and the Gateway infra/hgw.
+var hideInDelegation = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
+	return ref != route("shop", "h") && ref != route("kids", "x") && (ref.Kind != "Namespace" || ref.Name != "web") && ref != testutil.GwRef("infra", "hgw").Ref()
+})
+
+// evidenceWorld: edge has http (All) and sel (a Selector over a zone label).
+// zoned/api attaches through sel and delegates /api to zoned/c, which keeps
+// an entry although it is dropped (KGWUI-012), and to zoned/d, which declares
+// api and is dropped (KGWUI-011). shop/rb attaches through http and
+// delegates /rb to shop/hp, which delegates /rb/hp to shop/e, dropped with an
+// entry (KGWUI-012).
+func evidenceWorld() []runtime.Object {
+	sl := lst("sel", 8080, "")
+	sl.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	api, rb, hp := testutil.HTTPRouteRef("zoned", "api"), testutil.HTTPRouteRef("shop", "rb"), testutil.HTTPRouteRef("shop", "hp")
+	return viewAWorld(edgeWith([]objects.Listener{lst("http", 80, ""), sl}, up("http", 1), up("sel", 1)),
+		testutil.Namespace("zoned", map[string]string{"team": "a", "zone": "in"}),
+		testutil.WithRules(testutil.HTTPRoute("zoned", "api", []objects.ParentRef{sectionRef("sel")}, unresolvedBy(sectionRef("sel"))),
+			delegRule([]string{"/api"}, testutil.DelegateTo("zoned", "c"), testutil.DelegateTo("zoned", "d"))),
+		leaf("zoned", "c", nil, "/other", testutil.AcceptedBy(api, testutil.Controller)),
+		leaf("zoned", "d", []objects.ParentRef{api}, "/other"),
+		testutil.WithRules(testutil.HTTPRoute("shop", "rb", []objects.ParentRef{sectionRef("http")}, testutil.AcceptedBy(sectionRef("http"), testutil.Controller)),
+			delegRule([]string{"/rb"}, testutil.DelegateTo("shop", "hp"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "hp", nil, unresolvedBy(rb)), delegRule([]string{"/rb/hp"}, testutil.DelegateTo("shop", "e"))),
+		leaf("shop", "e", nil, "/zzz", testutil.AcceptedBy(hp, testutil.Controller)))
+}
+
+// hideEvidence hides the Namespace zoned and the route shop/hp.
+var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
+	return (ref.Kind != "Namespace" || ref.Name != "zoned") && ref != route("shop", "hp")
+})

@@ -41,7 +41,8 @@ export function CandidateBanner({ candidate, installId, stylesOverride }: Candid
       detailCopy.bannerFinding
     ) : candidate.by ? (
       <>
-        {candidate.by.kind} <LinkedName refValue={candidate.by} installId={installId} /> {detailCopy.bannerRefersTo}
+        {candidate.by.kind} <LinkedName refValue={candidate.by} installId={installId} />{" "}
+        {candidate.reason === "selected" ? detailCopy.bannerSelected : detailCopy.bannerRefersTo}
       </>
     ) : (
       detailCopy.bannerObject

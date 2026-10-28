@@ -111,6 +111,11 @@ it("names the listener-count rule and falls back to the raw ids for unknown rule
   );
 });
 
+it("names no rule for a restricted fact, which the server sends without one", () => {
+  const { rule: _, ...restricted } = { ...base, state: "restricted" as const };
+  expect(computedTooltip(restricted)).toBe(computedCopy.restricted);
+});
+
 it("shows the selection note", () => {
   const note = "Controller version unknown; using the 2.4 rules";
   renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["count-agrees"], note }} />);

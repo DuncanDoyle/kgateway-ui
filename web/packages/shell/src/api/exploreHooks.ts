@@ -4,6 +4,7 @@ import type { ApiError } from "./client";
 import { apiFetch } from "./client";
 import { installApi, live, POLL_MS } from "./hooks";
 import type {
+  DelegationRow,
   GatewayDetail,
   GatewayListRow,
   ListenerSetDetail,
@@ -96,4 +97,9 @@ export function useListenerSetDetail(id: string, r: Ref) {
 /** GET …/routes/{group}/{kind}/{ns}/{name}; HTTPRoute only, other kinds 404. */
 export function useRouteDetail(id: string, r: Ref) {
   return useDetail<RouteDetail>(id, `routes/${refPath(r)}`);
+}
+
+/** GET …/routes/{group}/{kind}/{ns}/{name}/delegation: view B's rows of one parent route, paged (rule, ref, outcome, cursor). */
+export function useDelegation(id: string, r: Ref, query: URLSearchParams) {
+  return useList<DelegationRow>(id, `routes/${refPath(r)}/delegation`, query);
 }

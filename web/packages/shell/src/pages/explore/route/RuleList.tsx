@@ -2,8 +2,9 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { dump } from "js-yaml";
 import { useContext } from "react";
-import type { BackendRef, Condition, DelegationRef, Filter, Match, Rule } from "../../../api/types";
-import { routeCopy } from "../../../copy/explorer";
+import type { BackendRef, Condition, DelegationRef, Filter, Rule } from "../../../api/types";
+import { delegationCopy, routeCopy } from "../../../copy/explorer";
+import { ComputedBadge } from "../../../explore/ComputedBadge";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
 import { HealthBadge } from "../../../health/HealthBadge";
@@ -14,6 +15,7 @@ import { YamlBlock } from "../../../resource/ResourceYaml";
 import { installPath } from "../../../shell/paths";
 import { InlineLink } from "../../../states/controls";
 import type { HealthState } from "../../../theme/tokens";
+import { MatchLine } from "./MatchLine";
 import { backendParam } from "./refs";
 
 // region Styles
@@ -71,11 +73,6 @@ const RuleBox = styled.section`
     gap: 2px ${(p) => p.theme.space(3)};
     min-width: 0;
   }
-  .match {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px ${(p) => p.theme.space(3)};
-  }
   .backend {
     display: grid;
     gap: 6px;
@@ -108,33 +105,6 @@ const Config = styled(YamlBlock)`
 `;
 
 // region Helpers
-
-function MatchLine({ m }: { m: Match }) {
-  return (
-    <span className="match code">
-      {m.path ? (
-        <span>
-          {m.path.type} {m.path.value}
-        </span>
-      ) : null}
-      {m.headers?.map((h) => (
-        <span key={`h-${h.name}`}>
-          {routeCopy.header} {h.name} {h.type} {h.value}
-        </span>
-      ))}
-      {m.queryParams?.map((q) => (
-        <span key={`q-${q.name}`}>
-          {routeCopy.query} {q.name} {q.type} {q.value}
-        </span>
-      ))}
-      {m.method ? (
-        <span>
-          {routeCopy.method} {m.method}
-        </span>
-      ) : null}
-    </span>
-  );
-}
 
 const pct = (f: Filter) => {
   const m = f.mirror;
@@ -194,6 +164,21 @@ const delegationState: Record<NonNullable<DelegationRef["state"]>, { label: stri
   restricted: { label: routeCopy.delegation.restricted, state: "unknown" },
 };
 
+/** A ref's counts. While the ref is Hidden they cover visible routes only, and say so (S234). */
+export function RefCounts({ d }: { d: DelegationRef }) {
+  const visible = d.computed?.state === "restricted";
+  return (
+    <>
+      {d.selected !== undefined ? (
+        <span>{visible ? delegationCopy.visibleSelected(d.selected) : delegationCopy.selected(d.selected)}</span>
+      ) : null}
+      {d.attached !== undefined ? (
+        <span>{visible ? delegationCopy.visibleAttached(d.attached) : delegationCopy.attached(d.attached)}</span>
+      ) : null}
+    </>
+  );
+}
+
 function Delegation({ b, installId }: { b: BackendRef & { delegation: DelegationRef }; installId: string }) {
   const d = b.delegation;
   const stale = useContext(StaleView);
@@ -216,6 +201,13 @@ function Delegation({ b, installId }: { b: BackendRef & { delegation: Delegation
         <span className="state">
           <HealthIcon state={s.state} size={14} />
           {s.label}
+        </span>
+      ) : null}
+      {d.computed ? (
+        // View B's counts of visible children (2.4); absent when the UI could not compute them.
+        <span className="line" data-testid="ref-counts">
+          <RefCounts d={d} />
+          <ComputedBadge computed={d.computed} compact extra={delegationCopy.selectedHint} />
         </span>
       ) : null}
     </span>

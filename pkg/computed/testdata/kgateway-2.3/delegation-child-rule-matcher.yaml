@@ -1,0 +1,198 @@
+# Input: translator/gateway/testutils/inputs/delegation/child_rule_matcher.yaml@v2.3.11 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. Child route-a carries the parent's header and query
+# param and is attached (Exact /a/1 under PathPrefix /a: the child's path type is not checked).
+# Child route-b lacks header3, so it is dropped and /b is a 500 with ResolvedRefs=False/BackendNotFound.
+provenance: translator/gateway/testutils/outputs/delegation/child_rule_matcher.yaml@v2.3.11
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces:
+  a: {}
+  b: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 1
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: example-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - example.com
+      rules:
+        - backendRefs:
+            - name: example-svc
+              port: 80
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a
+              headers:
+                - type: Exact
+                  name: header1
+                  value: val1
+              queryParams:
+                - type: Exact
+                  name: query1
+                  value: val1
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: a
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /b
+              headers:
+                - type: Exact
+                  name: header2
+                  value: val2
+                - type: Exact
+                  name: header3
+                  value: val3
+              queryParams:
+                - type: Exact
+                  name: query2
+                  value: val2
+                - type: Exact
+                  name: query3
+                  value: val3
+          backendRefs:
+            - group: gateway.networking.k8s.io
+              kind: HTTPRoute
+              name: '*'
+              namespace: b
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: ResolvedRefs
+              status: "False"
+              reason: BackendNotFound
+              observedGeneration: 1
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-a
+      namespace: a
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: Exact
+                value: /a/1
+              headers:
+                - type: Exact
+                  name: header1
+                  value: val1
+                - type: Exact
+                  name: headerX
+                  value: valX
+              queryParams:
+                - type: Exact
+                  name: query1
+                  value: val1
+                - type: Exact
+                  name: queryX
+                  value: valX
+          backendRefs:
+            - name: svc-a
+              port: 8080
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-b
+      namespace: b
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: RegularExpression
+                value: /b/.*
+              headers:
+                - type: Exact
+                  name: header2
+                  value: val2
+                - type: Exact
+                  name: headerX
+                  value: valX
+              queryParams:
+                - type: Exact
+                  name: query2
+                  value: val2
+                - type: Exact
+                  name: queryX
+                  value: valX
+          backendRefs:
+            - name: svc-b
+              port: 8080
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/example-route #0": {outcome: accepted}
+  rows:
+    infra/example-route 1.0 a/route-a: {outcome: attached}
+    infra/example-route 2.0 b/route-b: {outcome: dropped, reason: header}
+  entries:
+    "a/route-a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+  signals:
+    "infra/example-route {name: example-gateway}": [BackendNotFound]
+  effective:
+    a/route-a <- infra/example-route:
+      contexts: [r0 Exact /a/1 h:header1=val1 h:headerX=valX q:query1=val1 q:queryX=valX]
+    b/route-b <- infra/example-route: {contexts: [r0 dropped header]}

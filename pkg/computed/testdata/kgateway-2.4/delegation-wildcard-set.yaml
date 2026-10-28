@@ -1,0 +1,49 @@
+# The wildcard namespace setting set to "any" (rules §5.2): a label ref in namespace any selects
+# the label everywhere; one in namespace all is now an ordinary namespace with no routes, so it
+# is unresolved and the parent gets ResolvedRefs=False/BackendNotFound.
+provenance: computed-rules §5.2, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+settings: {DELEGATION_WILDCARD_NAMESPACE: any}
+namespaces: {infra: {}, east: {}, west: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /a}}]
+      backendRefs: [{group: delegation.kgateway.dev, kind: label, name: shared, namespace: any}]
+    - matches: [{path: {type: PathPrefix, value: /b}}]
+      backendRefs: [{group: delegation.kgateway.dev, kind: label, name: shared, namespace: all}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: s1, namespace: east, labels: {delegation.kgateway.dev/label: shared}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/1}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute,
+  metadata: {name: s2, namespace: west, labels: {delegation.kgateway.dev/label: shared}},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/2}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 east/s1: {outcome: attached}
+    infra/r 0.0 west/s2: {outcome: attached}
+    infra/r 1.0 -: {outcome: unresolved}
+  entries:
+    "east/s1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "west/s2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  signals:
+    "infra/r {name: gw}": [BackendNotFound]
+  effective:
+    east/s1 <- infra/r: {contexts: [r0 PathPrefix /a/1]}
+    west/s2 <- infra/r: {contexts: [r0 PathPrefix /a/2]}

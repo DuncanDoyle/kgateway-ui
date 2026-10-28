@@ -16,15 +16,18 @@ type CandidateReason string
 const (
 	ReasonFinding    CandidateReason = "finding"
 	ReasonReferenced CandidateReason = "referenced"
+	// ReasonSelected: a view B row of an owned parent selects the route (2.4).
+	ReasonSelected CandidateReason = "selected"
 )
 
 // Admission is why an object may be shown for the install (design §7.1).
 type Admission struct {
 	Owned  bool
 	Reason CandidateReason
-	// By is the first owned object that names a referenced candidate;
-	// Referrers are all of them, in row order, then ListenerSet order. Under
-	// a restricting Authorizer the handler shows the first visible one.
+	// By is the first owned object that names a referenced candidate, or
+	// the first owned parent route that selects a selected one; Referrers
+	// are all of them, in row order, then ListenerSet order. Under a
+	// restricting Authorizer the handler shows the first visible one.
 	By        *objects.Ref
 	Referrers []objects.Ref
 	// NoParent marks a no-parent row; alone it admits the YAML view only.
@@ -56,9 +59,9 @@ func (ix *Index) Row(ref objects.Ref) (RowID, bool) {
 
 // admit fills the admission table of design §7.1 for what the rows do not
 // answer: owned objects other than routes, then current findings'
-// resources, then what owned objects name by parentRef or backendRef.
-// Owned routes and no-parent rows are answered from the rows. Admission
-// does not follow chains.
+// resources, then what owned objects name by parentRef or backendRef, then
+// the routes view B rows of owned parents select. Owned routes and
+// no-parent rows are answered from the rows. Admission does not follow chains.
 func (b *builder) admit(ix *Index) map[objects.Ref]Admission {
 	m := map[objects.Ref]Admission{}
 	o := b.in.Owned
@@ -126,8 +129,28 @@ func (b *builder) admit(ix *Index) map[objects.Ref]Admission {
 	for i := range ix.ListenerSets {
 		refer(ix.ListenerSets[i].Ref, ix.ListenerSets[i].Parent)
 	}
+	// Rows are grouped by parent, so a repeated parent is the last referrer.
+	parentOwned := false
+	for i := range ix.DelegRows {
+		k := &ix.DelegRows[i].Key
+		if i == 0 || k.Parent != ix.DelegRows[i-1].Key.Parent {
+			parentOwned = ownedRoute(k.Parent)
+		}
+		if !parentOwned || k.Child == (objects.Ref{}) || ownedRoute(k.Child) {
+			continue
+		}
+		a, ok := m[k.Child]
+		switch {
+		case !ok:
+			a = Admission{Reason: ReasonSelected}
+		case a.Reason != ReasonSelected || a.Referrers[len(a.Referrers)-1] == k.Parent:
+			continue
+		}
+		a.Referrers = append(a.Referrers, k.Parent)
+		m[k.Child] = a
+	}
 	for ref, a := range m {
-		if a.Reason == ReasonReferenced {
+		if a.Reason == ReasonReferenced || a.Reason == ReasonSelected {
 			a.By = &a.Referrers[0]
 			m[ref] = a
 		}

@@ -2,6 +2,8 @@
 package overview
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -121,8 +123,10 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	if owned == nil {
 		return o
 	}
+	worst, unknown := severities(owned.Gateways, rep)
 	for _, g := range owned.Gateways {
-		row := GatewayRow{Ref: objects.RefOf(g), Class: objects.GatewayClassName(g), Addresses: objects.GatewayAddresses(g), State: rowState(g, rep)}
+		ref := objects.RefOf(g)
+		row := GatewayRow{Ref: ref, Class: objects.GatewayClassName(g), Addresses: objects.GatewayAddresses(g), State: rowState(worst[ref], unknown)}
 		if row.Addresses == nil {
 			row.Addresses = []string{}
 		}
@@ -161,26 +165,40 @@ func header(res install.Resolved, snap *cache.Snapshot, plat platform.Info) Head
 	return h
 }
 
-// rowState is the worst finding on the gateway; if a required signal is
-// missing and there is no error, the row is unknown, never green (D-006).
-func rowState(g *unstructured.Unstructured, rep health.Report) health.State {
-	ref := objects.RefOf(g)
-	worst := health.StateHealthy
+// severities maps each of gws to its worst finding state, error, warning or
+// none; unknown is whether a required signal is missing.
+func severities(gws []*unstructured.Unstructured, rep health.Report) (map[objects.Ref]health.State, bool) {
+	worst := make(map[objects.Ref]health.State, len(gws))
+	for _, g := range gws {
+		worst[objects.RefOf(g)] = ""
+	}
 	for _, f := range rep.Findings {
-		if f.Resource == nil || *f.Resource != ref {
+		if f.Resource == nil {
 			continue
 		}
-		switch f.Severity {
-		case health.SeverityError:
-			return health.StateError
-		case health.SeverityWarning:
-			worst = health.StateWarning
+		cur, ok := worst[*f.Resource]
+		switch {
+		case !ok:
+		case f.Severity == health.SeverityError:
+			worst[*f.Resource] = health.StateError
+		case f.Severity == health.SeverityWarning && cur != health.StateError:
+			worst[*f.Resource] = health.StateWarning
 		}
 	}
-	for _, c := range rep.Checks {
-		if c.Required && !c.OK {
-			return health.StateUnknown
-		}
+	unknown := slices.ContainsFunc(rep.Checks, func(c health.CheckResult) bool { return c.Required && !c.OK })
+	return worst, unknown
+}
+
+// rowState is a gateway's state from its worst finding; if a required signal
+// is missing and there is no error, the row is unknown, never green (D-006).
+func rowState(worst health.State, unknown bool) health.State {
+	switch {
+	case worst == health.StateError:
+		return health.StateError
+	case unknown:
+		return health.StateUnknown
+	case worst == "":
+		return health.StateHealthy
 	}
 	return worst
 }

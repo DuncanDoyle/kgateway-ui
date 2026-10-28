@@ -28,8 +28,8 @@ func linkerFor(v *view, m *engine.Model, i *engine.InstallModel) linker {
 // link is admit(install, caller, ref) of design §7.1, the one place that
 // joins admission, existence and the Authorizer. It is none when ref is
 // denied, absent, never served or not admitted; detail when it is admitted
-// and its kind has a detail view; else yaml. A referenced candidate needs a
-// referrer the caller may view. Admission never follows chains.
+// and its kind has a detail view; else yaml. A referenced or selected
+// candidate needs a referrer the caller may view. Admission never follows chains.
 func (l linker) link(ref objects.Ref) Link {
 	if l.i.Index == nil || !l.v.can(ref) {
 		return LinkNone
@@ -38,7 +38,8 @@ func (l linker) link(ref objects.Ref) Link {
 	if !ok {
 		return LinkNone
 	}
-	candidate := a.Owned || a.Reason == explore.ReasonFinding || (a.Reason == explore.ReasonReferenced && l.v.anyOf(a.Referrers))
+	byReferrer := a.Reason == explore.ReasonReferenced || a.Reason == explore.ReasonSelected
+	candidate := a.Owned || a.Reason == explore.ReasonFinding || (byReferrer && l.v.anyOf(a.Referrers))
 	if !candidate && !a.NoParent {
 		return LinkNone
 	}

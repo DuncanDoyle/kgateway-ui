@@ -2,6 +2,11 @@
   "body": {
     "capabilities": [],
     "filters": {
+      "delegation": [
+        "rule",
+        "ref",
+        "outcome"
+      ],
       "routes": [
         "listener"
       ]

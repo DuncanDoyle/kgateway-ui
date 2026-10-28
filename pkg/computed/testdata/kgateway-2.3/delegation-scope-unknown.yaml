@@ -1,0 +1,50 @@
+# An unknown discovery scope (D-024; rules §3.3): view A is unknown, and views B and C make every
+# row unknown, scope-unknown, with no context, entry, signal or effective matcher. r is a root
+# from status and an uncertain point. p's entry is hand-written.
+provenance: computed-rules §3.3, §11.2
+ruleOnly: true
+controllerVersion: v2.3.11
+settings: {KGW_DISCOVERY_NAMESPACE_SELECTORS: <valueFrom>}
+namespaces: {infra: {}, mid: {}, leaf: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /a}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: mid}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p, namespace: mid}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /a/b}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: leaf}]
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: leaf},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/b/c}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 0, unknown: scope-unknown}
+  parentRefs:
+    "HTTPRoute infra/r #0": {unknown: scope-unknown}
+  rows:
+    infra/r 0.0 mid/p: {outcome: unknown, unknown: scope-unknown, contexts: 0}
+    mid/p 0.0 leaf/c: {outcome: unknown, unknown: scope-unknown, contexts: 0}
+  uncertain: [infra/r root scope-unknown]

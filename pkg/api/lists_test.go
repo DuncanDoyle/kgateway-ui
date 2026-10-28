@@ -72,7 +72,9 @@ func explorerWorld(extra ...runtime.Object) []runtime.Object {
 		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 			backendRule([]any{testutil.DelegateTo("shop", "child")})),
 		testutil.HTTPRoute("shop", "declared", []objects.ParentRef{apiRef}),
-		testutil.HTTPRoute("shop", "child", []objects.ParentRef{apiRef}, testutil.AcceptedBy(apiRef, testutil.Controller)),
+		// The child's match fits api's, so its entry agrees with view B.
+		testutil.WithRules(testutil.HTTPRoute("shop", "child", []objects.ParentRef{apiRef}, testutil.AcceptedBy(apiRef, testutil.Controller)),
+			testutil.Rule(matchPath("/child"))),
 		testutil.HTTPRoute("blog", "sub", []objects.ParentRef{apiRef}),
 		testutil.WithRules(testutil.HTTPRoute("shop", "backends", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 			backendRule([]any{svcRef("cart-svc"), beRef("be1")}, mirrorFilter("mirror-svc"))),

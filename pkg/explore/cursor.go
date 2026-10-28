@@ -2,12 +2,14 @@ package explore
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -16,14 +18,19 @@ import (
 const maxCursor = 1024
 
 // wireCursor is the JSON inside a cursor (design §3.6). B is true for a
-// prev cursor; T is the anchor's (namespace, name, group, kind).
+// prev cursor; T is the anchor's (namespace, name, group, kind). R is a
+// delegation anchor's (rule, ref); T is then its child, all empty for none.
 type wireCursor struct {
 	S string          `json:"s"`
 	D string          `json:"d"`
 	B bool            `json:"b"`
 	V json.RawMessage `json:"v,omitempty"`
+	R []int           `json:"r,omitempty"`
 	T []string        `json:"t"`
 }
+
+// sortDelegation is the delegation rows' only order (design §3.6).
+const sortDelegation = "delegation"
 
 // cursor is a decoded cursor: the anchor row's key and the direction.
 type cursor struct {
@@ -53,23 +60,35 @@ func encodeCursor(s Sort, before bool, e entry) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// decodeCursor parses c for sort s. Every failure is ErrBadCursor.
-func decodeCursor(c string, s Sort) (cursor, error) {
-	bad := func(why string) (cursor, error) { return cursor{}, fmt.Errorf("%w: %s", ErrBadCursor, why) }
+// badCursor is ErrBadCursor with why.
+func badCursor(why string) error { return fmt.Errorf("%w: %s", ErrBadCursor, why) }
+
+// parseCursor decodes c's JSON without checking its fields.
+func parseCursor(c string) (wireCursor, error) {
+	var w wireCursor
 	if len(c) > maxCursor {
-		return bad("too long")
+		return w, badCursor("too long")
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(c)
 	if err != nil {
-		return bad("not base64url")
+		return w, badCursor("not base64url")
 	}
-	var w wireCursor
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&w); err != nil || dec.More() {
-		return bad("not a cursor")
+		return w, badCursor("not a cursor")
 	}
-	if w.S != s.Key || w.D != direction(s.Desc) {
+	return w, nil
+}
+
+// decodeCursor parses c for sort s. Every failure is ErrBadCursor.
+func decodeCursor(c string, s Sort) (cursor, error) {
+	bad := func(why string) (cursor, error) { return cursor{}, badCursor(why) }
+	w, err := parseCursor(c)
+	if err != nil {
+		return cursor{}, err
+	}
+	if w.S != s.Key || w.D != direction(s.Desc) || w.R != nil {
 		return bad("from another sort")
 	}
 	if len(w.T) != 4 || w.T[1] == "" || w.T[3] == "" {
@@ -98,4 +117,49 @@ func decodeCursor(c string, s Sort) (cursor, error) {
 		return bad("bad sort value")
 	}
 	return cursor{before: w.B, anchor: e}, nil
+}
+
+// delegCursor is a decoded delegation cursor: the anchor row's key and the direction.
+type delegCursor struct {
+	before    bool
+	rule, ref int
+	child     objects.Ref
+}
+
+// compare orders row key k against the anchor, as compareRowKeys does within one parent.
+func (c *delegCursor) compare(k *computed.RowKey) int {
+	return cmp.Or(cmp.Compare(k.Rule, c.rule), cmp.Compare(k.Ref, c.ref), compareRefs(k.Child, c.child))
+}
+
+// key is the anchor as a row key, with no parent.
+func (c *delegCursor) key() *computed.RowKey {
+	return &computed.RowKey{Rule: c.rule, Ref: c.ref, Child: c.child}
+}
+
+// encodeDelegCursor returns the delegation cursor anchored at k.
+func encodeDelegCursor(before bool, k *computed.RowKey) string {
+	c := k.Child
+	w := wireCursor{S: sortDelegation, D: direction(false), B: before, R: []int{k.Rule, k.Ref}, T: []string{c.Namespace, c.Name, c.Group, c.Kind}}
+	b, _ := json.Marshal(w) // marshalling strings and ints cannot fail
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// decodeDelegCursor parses a delegation cursor. Every failure is ErrBadCursor.
+func decodeDelegCursor(c string) (delegCursor, error) {
+	w, err := parseCursor(c)
+	if err != nil {
+		return delegCursor{}, err
+	}
+	if w.S != sortDelegation || w.D != direction(false) || len(w.V) > 0 {
+		return delegCursor{}, badCursor("from another sort")
+	}
+	if len(w.R) != 2 || w.R[0] < 0 || w.R[1] < 0 || len(w.T) != 4 {
+		return delegCursor{}, badCursor("bad anchor")
+	}
+	child := objects.Ref{Namespace: w.T[0], Name: w.T[1], Group: w.T[2], Kind: w.T[3]}
+	// A row with no child has an all-empty child; any other needs a name and kind.
+	if child != (objects.Ref{}) && (child.Name == "" || child.Kind == "") {
+		return delegCursor{}, badCursor("bad anchor")
+	}
+	return delegCursor{before: w.B, rule: w.R[0], ref: w.R[1], child: child}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -45,13 +46,17 @@ func upIx(parents map[string][]string, gws ...string) *Index {
 
 func all(objects.Ref) bool { return true }
 
-// render prints a path root first, "?" for a restricted step.
+// render prints a path root first, "?" for a restricted step and "~name"
+// for a hidden route.
 func render(p AncestorPath) string {
 	var s []string
 	for _, st := range p.Steps {
-		if st.Restricted {
+		switch {
+		case st.Restricted:
 			s = append(s, "?")
-		} else {
+		case st.Hidden:
+			s = append(s, "~"+st.Ref.Name)
+		default:
 			s = append(s, st.Ref.Name)
 		}
 	}
@@ -196,8 +201,9 @@ func TestAncestorsRestrictedStep(t *testing.T) {
 		name, hidden string
 		want         []string
 	}{
-		{"hidden middle route", "mid", []string{"?>child"}},
-		{"hidden top route", "top", []string{"?>mid>child"}},
+		// A hidden route keeps its name (D-024); a hidden Gateway does not.
+		{"hidden middle route", "mid", []string{"~mid>child"}},
+		{"hidden top route", "top", []string{"~top>mid>child"}},
 		{"hidden Gateway", "edge", []string{"?>top>mid>child"}},
 	}
 	for _, c := range cases {
@@ -226,27 +232,27 @@ func TestAncestorsRestrictedStep(t *testing.T) {
 	}
 }
 
-func TestAncestorsHiddenParentsCollapse(t *testing.T) {
+// Hidden parent routes are named, one path each (D-024); hidden Gateways
+// collapse into one redacted path, so their number is not shown.
+func TestAncestorsHiddenParents(t *testing.T) {
 	ix := upIx(map[string][]string{"c": {"h1", "h2", "v"}, "v": {}}, "v", "h1", "h2")
 	got, _ := ix.Ancestors(routeRef("shop", "c"), func(r objects.Ref) bool { return r.Name != "h1" && r.Name != "h2" })
-	// One redacted path, so the number of hidden parents is not shown.
-	if want := []string{"edge>v>c", "?>c"}; !reflect.DeepEqual(renders(got), want) {
+	if want := []string{"edge>v>c", "~h1>c", "~h2>c"}; !reflect.DeepEqual(renders(got), want) {
 		t.Fatalf("paths %v, want %v", renders(got), want)
+	}
+	ix = upIx(map[string][]string{"c": {}}, "c")
+	ix.Routes[0].Parents = append(ix.Routes[0].Parents, ParentLink{Target: testutil.GwRef("infra", "g2").Ref(), Attachment: AttachmentAccepted})
+	got, _ = ix.Ancestors(routeRef("shop", "c"), func(r objects.Ref) bool { return r.Kind != "Gateway" })
+	if want := []string{"?>c"}; !reflect.DeepEqual(renders(got), want) {
+		t.Fatalf("hidden Gateways: %v, want %v", renders(got), want)
 	}
 }
 
-func TestAncestorsOrderIgnoresHiddenNames(t *testing.T) {
-	run := func(hiddenName string) []string {
-		ix := upIx(map[string][]string{"c": {hiddenName, "m", "v"}, "m": {hiddenName + "2"}}, "m", "v", hiddenName, hiddenName+"2")
-		got, _ := ix.Ancestors(routeRef("shop", "c"), func(r objects.Ref) bool { return !strings.HasPrefix(r.Name, hiddenName) })
-		return renders(got)
-	}
-	// "a" sorts before the visible parents, "z" after.
-	a, z := run("a"), run("z")
-	if !reflect.DeepEqual(a, z) {
-		t.Fatalf("renaming a hidden parent changed the response: %v vs %v", a, z)
-	}
-	if want := []string{"edge>m>c", "edge>v>c", "?>m>c", "?>c"}; !reflect.DeepEqual(a, want) {
-		t.Fatalf("paths %v, want %v", a, want)
+// Fully visible paths come first; paths through a hidden route follow, in walk order.
+func TestAncestorsOrderPutsHiddenLast(t *testing.T) {
+	ix := upIx(map[string][]string{"c": {"a", "m", "v"}, "m": {"a2"}}, "m", "v", "a", "a2")
+	got, _ := ix.Ancestors(routeRef("shop", "c"), func(r objects.Ref) bool { return !strings.HasPrefix(r.Name, "a") })
+	if want := []string{"edge>m>c", "edge>v>c", "~a2>m>c", "~a>c"}; !reflect.DeepEqual(renders(got), want) {
+		t.Fatalf("paths %v, want %v", renders(got), want)
 	}
 }

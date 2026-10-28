@@ -2,9 +2,10 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { EyeOff, Repeat } from "lucide-react";
 import type { AncestorPath, LinkedRef } from "../../../api/types";
-import { routeCopy } from "../../../copy/explorer";
+import { delegationCopy, routeCopy } from "../../../copy/explorer";
 import { LinkedName } from "../../../explore/LinkedName";
 import { ResourceName } from "../../../resource/ResourceName";
+import { MatchLine } from "./MatchLine";
 import { sameRef } from "./refs";
 
 // region Styles
@@ -41,6 +42,11 @@ const Nav = styled.nav<{ stylesOverride?: SerializedStyles }>`
   }
   [aria-current="page"] {
     font-weight: ${(p) => p.theme.font.weight.semibold};
+  }
+  .eye,
+  .match {
+    align-self: center;
+    color: ${(p) => p.theme.color.textMuted};
   }
   .hidden,
   .cycle {
@@ -96,8 +102,16 @@ export function UpChain({ installId, self, paths, truncated, stylesOverride }: U
                       </span>
                     ) : (
                       <>
+                        {s.ref.link === "none" ? (
+                          // A hidden ancestor route: its name and the match it delegated under, no link (D-024).
+                          <EyeOff size={14} className="eye" role="img" aria-label={delegationCopy.hiddenRoute} />
+                        ) : null}
                         <LinkedName refValue={s.ref} installId={installId} />
                         <span className="kind">({s.ref.kind})</span>
+                        {s.matches?.map((m, k) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: matches keep written order
+                          <MatchLine key={k} m={m} className="match" />
+                        ))}
                       </>
                     )}
                   </li>

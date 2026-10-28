@@ -65,8 +65,10 @@ type MetaResponse struct {
 	Filters map[string][]string `json:"filters,omitempty"`
 }
 
-// addedFilters are the list filters added after API v1 (design §7.2).
-var addedFilters = map[string][]string{"routes": {"listener"}}
+// addedFilters are the list filters added after API v1 (design §7.2). The
+// delegation list is new in 2.4; listing its filters tells a client the
+// endpoint exists (PF8).
+var addedFilters = map[string][]string{"routes": {"listener"}, "delegation": {"rule", "ref", "outcome"}}
 
 // deploymentKind is listed in /api/v1/meta because finding links reach
 // controller Deployments (D-013). It is read through typed informers, not counted.

@@ -281,7 +281,7 @@ func TestListenerParam(t *testing.T) {
 			t.Errorf("listener=%s: %v", l, routeNames(p))
 		}
 	}
-	if m := get[MetaResponse](t, srv, "/api/v1/meta", 200); !reflect.DeepEqual(m.Filters, map[string][]string{"routes": {"listener"}}) {
+	if m := get[MetaResponse](t, srv, "/api/v1/meta", 200); !reflect.DeepEqual(m.Filters["routes"], []string{"listener"}) {
 		t.Errorf("meta filters %v", m.Filters)
 	}
 }
@@ -343,7 +343,7 @@ func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
 		}
 		c := h.Parents[0].Computed
 		if c == nil || c.Outcome != "" || len(c.Listeners) != 0 || c.Explanation != "" ||
-			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", Rule: a.Parents[0].Computed.Computed.Rule, State: "restricted"}) {
+			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", State: "restricted"}) {
 			t.Errorf("%s restricted: %+v", name, c)
 		}
 		if a.Health != h.Health {
@@ -560,16 +560,47 @@ type matrixCheck struct {
 }
 
 // matrixExpect is a rules fixture's expect block (pkg/computed's keys, plus
-// checks and kgwui012, the objects each KGWUI-012 is on).
+// checks, and kgwui012 and kgwui011, the objects each finding is on). Checks
+// are keyed by listener, parentRef and, for views B and C, row.
 type matrixExpect struct {
 	Listeners  map[string]matrixListener `json:"listeners"`
 	ParentRefs map[string]matrixRef      `json:"parentRefs"`
 	Members    *map[string][]string      `json:"members"`
 	Checks     map[string]matrixCheck    `json:"checks"`
 	KGWUI012   *[]string                 `json:"kgwui012"`
+	KGWUI011   *[]string                 `json:"kgwui011"`
+	// Views B and C, as pkg/computed's golden writes them (see its delegationExpect).
+	Rows               *map[string]matrixRow `json:"rows"`
+	Entries            map[string]string     `json:"entries"`
+	Signals            map[string][]string   `json:"signals"`
+	Effective          map[string]matrixEdge `json:"effective"`
+	EffectiveTruncated []string              `json:"effectiveTruncated"`
+	// Incomplete, Uncertain and Cap are rule-level and never served.
+	Incomplete json.RawMessage `json:"incomplete"`
+	Uncertain  json.RawMessage `json:"uncertain"`
+	Cap        json.RawMessage `json:"cap"`
 }
 
-// decodeMatrix decodes expect strictly; every listener and parentRef key needs a check.
+// matrixRow is a view B row, keyed "<parent> <rule>.<ref> <child>" ("-" for none).
+type matrixRow struct {
+	Outcome           string    `json:"outcome"`
+	Unknown           string    `json:"unknown"`
+	Reason            string    `json:"reason"`
+	SomeNotComputed   bool      `json:"someNotComputed"`
+	ContextsTruncated bool      `json:"contextsTruncated"`
+	Contexts          *int      `json:"contexts"`
+	Paths             *[]string `json:"paths"`
+	Deps              *[]string `json:"deps"`
+}
+
+// matrixEdge is a view C edge, keyed "<child> <- <parent>"; each context is
+// "r<i> <match> | <match>" for a kept rule or "r<i> dropped <clause>", joined by "; ".
+type matrixEdge struct {
+	Contexts          []string `json:"contexts"`
+	ContextsTruncated bool     `json:"contextsTruncated"`
+}
+
+// decodeMatrix decodes expect strictly; every listener, parentRef and row key needs a check.
 func decodeMatrix(t *testing.T, m map[string]any) matrixExpect {
 	t.Helper()
 	b, err := json.Marshal(m)
@@ -586,8 +617,14 @@ func decodeMatrix(t *testing.T, m map[string]any) matrixExpect {
 		t.Fatal("expect needs kgwui012, even when empty")
 	}
 	keys := slices.Concat(slices.Collect(maps.Keys(e.Listeners)), slices.Collect(maps.Keys(e.ParentRefs)))
+	if e.Rows != nil {
+		if e.KGWUI011 == nil {
+			t.Fatal("a delegation case needs kgwui011, even when empty")
+		}
+		keys = append(keys, slices.Collect(maps.Keys(*e.Rows))...)
+	}
 	if len(keys) != len(e.Checks) {
-		t.Fatalf("expect has %d checks for %d listeners and parentRefs", len(e.Checks), len(keys))
+		t.Fatalf("expect has %d checks for %d listeners, parentRefs and rows", len(e.Checks), len(keys))
 	}
 	for _, k := range keys {
 		if _, ok := e.Checks[k]; !ok {
@@ -615,6 +652,18 @@ func ruleCaseWorld(t *testing.T, c testutil.RuleCase) (setup, []runtime.Object, 
 	d.Labels["app.kubernetes.io/version"] = strings.TrimPrefix(c.ControllerVersion, "v")
 	objs := []runtime.Object{d, testutil.ControllerPod(d, "kgateway-0", true)}
 	s := setup{served: testutil.ServedUpstream()}
+	if len(c.Bounds) > 0 {
+		// The case's bounds run through the engine, as in production (rules §5.7).
+		s.bounds = computed.DefaultBounds
+		v := reflect.ValueOf(&s.bounds).Elem()
+		for _, name := range slices.Sorted(maps.Keys(c.Bounds)) {
+			f := v.FieldByName(name)
+			if !f.IsValid() {
+				t.Fatalf("bounds: no field %q", name)
+			}
+			f.SetInt(int64(c.Bounds[name]))
+		}
+	}
 	if c.NamespacesOK {
 		objs = append(objs, testutil.Namespace("kgw", nil))
 		for _, ns := range slices.Sorted(maps.Keys(c.Namespaces)) {
@@ -705,8 +754,9 @@ func TestViewAMatrixThroughAPI(t *testing.T) {
 			checkMatrix(t, h.srv, rules, c, want, false)
 		})
 	}
-	// Every fixture of rules §11.1 and §11.4 (view A) that is not rule-only.
-	if want := 41; ran != want {
+	// Every fixture that is not rule-only: rules §11.1 and §11.4 (view A),
+	// and three of §11.2 per rule set, whose view A is checked here.
+	if want := 47; ran != want {
 		t.Errorf("ran %d cases, want %d", ran, want)
 	}
 }
@@ -885,6 +935,336 @@ func checkMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.Ru
 	slices.Sort(wantOn)
 	if !slices.Equal(on, wantOn) {
 		t.Errorf("KGWUI-012 on %v, want %v", on, wantOn)
+	}
+}
+
+// Design §9.1 for views B and C: every delegation fixture not marked
+// ruleOnly is seeded as a cluster, with its bounds through
+// engine.Config.DelegationBounds, and read back through the delegation
+// endpoint, route detail and health. A row with written deps also runs once
+// per hidden non-route dependency, which restricts it (design §7.4 rule 4).
+func TestDelegationMatrixThroughAPI(t *testing.T) {
+	ran := 0
+	for _, f := range ruleCaseFiles(t) {
+		c := testutil.LoadRuleCase(t, f)
+		if c.RuleOnly || c.Expect["rows"] == nil {
+			continue
+		}
+		ran++
+		rules := filepath.Base(filepath.Dir(f))
+		t.Run(rules+"/"+filepath.Base(f), func(t *testing.T) {
+			t.Parallel()
+			want := decodeMatrix(t, c.Expect)
+			s, objs, us := ruleCaseWorld(t, c)
+			s.disputes = len(*want.KGWUI012)+len(*want.KGWUI011) > 0
+			h := newHarness(t, s, append(objs, asObjects(us)...)...)
+			checkDelegationMatrix(t, h.srv, rules, c, want)
+			for _, dep := range hiddenDeps(t, want) {
+				s.authz = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != dep })
+				checkRestrictedRows(t, newHarness(t, s, append(objs, asObjects(us)...)...).srv, rules, want, dep)
+			}
+		})
+	}
+	// Three per rule set: a cut after a dropping context, a row with no
+	// contexts kept at the install cap, and a root behind a Selector.
+	if want := 6; ran != want {
+		t.Errorf("ran %d cases, want %d", ran, want)
+	}
+}
+
+// matrixRouteKey parses "<ns>/<name>" as an HTTPRoute.
+func matrixRouteKey(k string) objects.Ref {
+	ns, name, _ := strings.Cut(k, "/")
+	return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: ns, Name: name}
+}
+
+// delegRowKey is r's key under parent, as the fixtures write it.
+func delegRowKey(parent objects.Ref, r DelegationRow) string {
+	child := "-"
+	if r.Child != nil {
+		child = r.Child.Namespace + "/" + r.Child.Name
+	}
+	return fmt.Sprintf("%s/%s %d.%d %s", parent.Namespace, parent.Name, r.Rule, r.Ref, child)
+}
+
+// dtoMatch writes m as pkg/computed's golden does: "<type> <path>", then
+// " h:<name>=<value>", " q:<name>=<value>" (~ for a regex) and " m:<method>".
+func dtoMatch(m MatchDTO) string {
+	s := "PathPrefix /"
+	if m.Path != nil {
+		s = m.Path.Type + " " + m.Path.Value
+	}
+	kv := func(p string, ks []KeyMatchDTO) {
+		for _, k := range ks {
+			op := "="
+			if k.Type == "RegularExpression" {
+				op = "~"
+			}
+			s += " " + p + ":" + k.Name + op + k.Value
+		}
+	}
+	kv("h", m.Headers)
+	kv("q", m.QueryParams)
+	if m.Method != "" {
+		s += " m:" + m.Method
+	}
+	return s
+}
+
+// effectiveContext writes c as the fixtures do. A dropped rule's clause is
+// served as text, so it is compared by presence (the goldens pin the text).
+func effectiveContext(c EffectiveContext) (string, []string) {
+	var out, dropped []string
+	for _, r := range c.Rules {
+		if !r.Kept {
+			out = append(out, fmt.Sprintf("r%d dropped", r.Index))
+			dropped = append(dropped, r.Reason)
+			continue
+		}
+		ms := make([]string, 0, len(r.Matches))
+		for _, m := range r.Matches {
+			ms = append(ms, dtoMatch(m))
+		}
+		out = append(out, fmt.Sprintf("r%d %s", r.Index, strings.Join(ms, " | ")))
+	}
+	return strings.Join(out, "; "), dropped
+}
+
+// withoutClauses drops each dropped rule's clause from a fixture context.
+func withoutClauses(c string) string {
+	parts := strings.Split(c, "; ")
+	for i, p := range parts {
+		if f := strings.Fields(p); len(f) == 3 && f[1] == "dropped" {
+			parts[i] = f[0] + " " + f[1]
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// checkDelegationMatrix asserts the case's rows, entries, signals, effective
+// edges, checks and findings through the handlers.
+func checkDelegationMatrix(t *testing.T, srv *httptest.Server, rules string, c testutil.RuleCase, want matrixExpect) {
+	t.Helper()
+	var routes []objects.Ref
+	for _, u := range c.Objects {
+		if r := objects.RefOf(u); r.Kind == "HTTPRoute" {
+			routes = append(routes, r)
+		}
+	}
+	// Rows: every row of every route, by the fixtures' key.
+	got := map[string]DelegationRow{}
+	for _, p := range routes {
+		page := get[Page[DelegationRow]](t, srv, delegURL(p.Namespace, p.Name, "?limit=200"), 200)
+		if page.Total != len(page.Items) {
+			t.Errorf("%s: total %d for %d rows", refName(LinkedRef{Ref: p}), page.Total, len(page.Items))
+		}
+		for _, r := range page.Items {
+			got[delegRowKey(p, r)] = r
+		}
+	}
+	if g, w := slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(*want.Rows)); !slices.Equal(g, w) {
+		t.Fatalf("rows %v, want %v", g, w)
+	}
+	for k, w := range *want.Rows {
+		r, chk := got[k], want.Checks[k]
+		if r.Outcome != w.Outcome || r.ContextsTruncated != w.ContextsTruncated || (w.Contexts != nil && len(r.Contexts) != *w.Contexts) {
+			t.Errorf("%s: outcome %q contextsTruncated %v contexts %d, want %+v", k, r.Outcome, r.ContextsTruncated, len(r.Contexts), w)
+		}
+		// The row's reason is text; a fit clause shows on the row or, for an unknown row, as "dropped on the paths computed".
+		if (w.Reason != "") != (r.Reason != "") {
+			t.Errorf("%s: reason %q, want clause %q", k, r.Reason, w.Reason)
+		}
+		cmp := r.Computed
+		if cmp.By != ComputedBy || cmp.Rules != rules || cmp.Rule != ruleDelegation || cmp.State != chk.State || !slices.Equal(cmp.Coverage, chk.Coverage) ||
+			cmp.Reason != w.Unknown || (chk.Note != "" && cmp.Note != chk.Note) || w.SomeNotComputed != strings.Contains(cmp.Note, noteSomeNotComputed) {
+			t.Errorf("%s: computed %+v, want %+v unknown %q someNotComputed %v", k, cmp, chk, w.Unknown, w.SomeNotComputed)
+		}
+		if w.Paths != nil {
+			ps := []string{}
+			for _, ctx := range r.Contexts {
+				var steps []string
+				for _, st := range ctx.Path {
+					steps = append(steps, st.Ref.Namespace+"/"+st.Ref.Name+" "+dtoMatch(st.Match))
+				}
+				ps = append(ps, strings.Join(steps, " > "))
+			}
+			if !slices.Equal(ps, *w.Paths) {
+				t.Errorf("%s: paths %q, want %q", k, ps, *w.Paths)
+			}
+		}
+	}
+	// Entries: each expected entry is the row's observed entry under its report key.
+	for k, w := range want.Entries {
+		child, key, _ := strings.Cut(k, " ")
+		var seen bool
+		for rk, r := range got {
+			if r.Child == nil || r.Child.Namespace+"/"+r.Child.Name != child || r.Observed.Entry == nil {
+				continue
+			}
+			e := r.Observed.Entry
+			if writtenKey(e.ParentRef) != key {
+				t.Errorf("%s: entry under %s, want %s", rk, writtenKey(e.ParentRef), key)
+			}
+			acc := slices.IndexFunc(e.Conditions, func(c Condition) bool { return c.Type == "Accepted" })
+			if acc < 0 || e.Conditions[acc].Reason != w {
+				t.Errorf("%s: entry %+v, want Accepted %s", rk, e.Conditions, w)
+			}
+			seen = true
+		}
+		if !seen {
+			t.Errorf("entry %s: no row observes it", k)
+		}
+	}
+	// Signals have no field of their own: the parent's KGWUI-012 below says
+	// whether status agrees. Each signalled parent has rows.
+	for k := range want.Signals {
+		p, _, _ := strings.Cut(k, " ")
+		if !slices.ContainsFunc(slices.Collect(maps.Keys(got)), func(rk string) bool { return strings.HasPrefix(rk, p+" ") }) {
+			t.Errorf("signal %s: the parent has no rows", k)
+		}
+	}
+	// Effective edges: every edge of every route, and the truncated routes.
+	edges := map[string]matrixEdge{}
+	var truncated []string
+	for _, r := range routes {
+		path := routeDetail + r.Namespace + "/" + r.Name
+		d := get[RouteDetail](t, srv, path, 200)
+		if d.EffectiveTruncated {
+			truncated = append(truncated, r.Namespace+"/"+r.Name)
+		}
+		raw := get[map[string]any](t, srv, path, 200)
+		rawEdges, _ := raw["effective"].([]any)
+		for i, e := range d.Effective {
+			k := r.Namespace + "/" + r.Name + " <- " + e.Parent.Namespace + "/" + e.Parent.Name
+			// An edge with no contexts kept is sent as [], never omitted (rules §5.7).
+			if cs, ok := rawEdges[i].(map[string]any)["contexts"].([]any); !ok || cs == nil {
+				t.Errorf("%s: contexts %v, want a list", k, rawEdges[i].(map[string]any)["contexts"])
+			}
+			if e.Computed.State != "checked" || e.Computed.Rule != ruleEffective || !slices.Equal(e.Computed.Coverage, []string{"not-verified"}) {
+				t.Errorf("%s: computed %+v", k, e.Computed)
+			}
+			cs := []string{}
+			for _, ctx := range e.Contexts {
+				s, dropped := effectiveContext(ctx)
+				for _, why := range dropped {
+					if why == "" {
+						t.Errorf("%s: a dropped rule without its clause", k)
+					}
+				}
+				cs = append(cs, s)
+			}
+			edges[k] = matrixEdge{Contexts: cs, ContextsTruncated: e.ContextsTruncated}
+		}
+	}
+	wantEdges := map[string]matrixEdge{}
+	for k, e := range want.Effective {
+		cs := []string{}
+		for _, c := range e.Contexts {
+			cs = append(cs, withoutClauses(c))
+		}
+		wantEdges[k] = matrixEdge{Contexts: cs, ContextsTruncated: e.ContextsTruncated}
+	}
+	if !reflect.DeepEqual(edges, wantEdges) {
+		t.Errorf("effective %+v, want %+v", edges, wantEdges)
+	}
+	if !slices.Equal(truncated, want.EffectiveTruncated) && len(truncated)+len(want.EffectiveTruncated) > 0 {
+		t.Errorf("effectiveTruncated %v, want %v", truncated, want.EffectiveTruncated)
+	}
+	// Findings: KGWUI-012 (child-entry, parent-resolvedrefs) and KGWUI-011.
+	h := get[HealthResponse](t, srv, base+"/health", 200)
+	for code, w := range map[string][]string{health.CodeComputedDisagrees: *want.KGWUI012, health.CodeDelegatedNotAttached: *want.KGWUI011} {
+		var on []string
+		for _, f := range h.Findings {
+			if f.Code == code {
+				on = append(on, f.Resource.Kind+" "+f.Resource.Namespace+"/"+f.Resource.Name)
+			}
+		}
+		slices.Sort(on)
+		w = slices.Sorted(slices.Values(w))
+		if !slices.Equal(on, w) {
+			t.Errorf("%s on %v, want %v", code, on, w)
+		}
+	}
+}
+
+// writtenKey writes a parentRef as the fixtures write a report key: the
+// fields set, in kgateway's status order.
+func writtenKey(p objects.ParentRef) string {
+	var f []string
+	for _, kv := range [][2]string{{"group", p.Group}, {"kind", p.Kind}, {"name", p.Name}, {"namespace", p.Namespace}, {"sectionName", p.SectionName}} {
+		if kv[1] != "" {
+			f = append(f, kv[0]+": "+kv[1])
+		}
+	}
+	return "{" + strings.Join(f, ", ") + "}"
+}
+
+// hiddenDeps are the non-route dependencies written on the case's rows:
+// hiding any of them restricts the row (routes on a path never do, rule 4b).
+func hiddenDeps(t *testing.T, want matrixExpect) []objects.Ref {
+	t.Helper()
+	var out []objects.Ref
+	for _, k := range slices.Sorted(maps.Keys(*want.Rows)) {
+		w := (*want.Rows)[k]
+		if w.Deps == nil {
+			continue
+		}
+		for _, d := range *w.Deps {
+			kind, nsName, _ := strings.Cut(d, " ")
+			ns, name, _ := strings.Cut(nsName, "/")
+			ref := objects.Ref{Kind: kind, Namespace: ns, Name: name}
+			// Each dependency kind has its own group (pkg/kinds); routes never restrict (rule 4b).
+			switch kind {
+			case "HTTPRoute":
+				continue
+			case "Namespace":
+			case "XListenerSet":
+				ref.Group = "gateway.networking.x-k8s.io"
+			case "Gateway", "ListenerSet":
+				ref.Group = objects.GatewayAPIGroup
+			default:
+				t.Fatalf("dependency %s: no group known for kind %s", d, kind)
+			}
+			if !slices.Contains(out, ref) {
+				out = append(out, ref)
+			}
+		}
+	}
+	return out
+}
+
+// checkRestrictedRows asserts that every row whose deps include dep, and
+// its child's effective edge, is restricted for a caller who cannot view dep.
+func checkRestrictedRows(t *testing.T, srv *httptest.Server, rules string, want matrixExpect, dep objects.Ref) {
+	t.Helper()
+	hidden := Computed{By: ComputedBy, Rules: rules, State: string(computed.StateRestricted)}
+	for _, k := range slices.Sorted(maps.Keys(*want.Rows)) {
+		w := (*want.Rows)[k]
+		if w.Deps == nil || !slices.Contains(*w.Deps, dep.Kind+" "+dep.Namespace+"/"+dep.Name) {
+			continue
+		}
+		f := strings.Fields(k)
+		parent, child := matrixRouteKey(f[0]), matrixRouteKey(f[2])
+		page := get[Page[DelegationRow]](t, srv, delegURL(parent.Namespace, parent.Name, "?limit=200"), 200)
+		i := slices.IndexFunc(page.Items, func(r DelegationRow) bool { return delegRowKey(parent, r) == k })
+		if i < 0 {
+			t.Errorf("hidden %v: row %s not listed", dep, k)
+			continue
+		}
+		r := page.Items[i]
+		if !reflect.DeepEqual(r.Computed, hidden) || r.Outcome != "" || r.Reason != "" ||
+			!reflect.DeepEqual(r.Contexts, []DelegationContext{{Restricted: true}}) || r.Observed.ParentCondition != nil {
+			t.Errorf("hidden %v: row %s %+v, want restricted", dep, k, r)
+		}
+		if f[2] == "-" {
+			continue
+		}
+		d := get[RouteDetail](t, srv, routeDetail+child.Namespace+"/"+child.Name, 200)
+		j := slices.IndexFunc(d.Effective, func(e EffectiveDTO) bool { return e.Parent.Ref == parent })
+		if j < 0 || !reflect.DeepEqual(d.Effective[j].Computed, hidden) ||
+			!reflect.DeepEqual(d.Effective[j].Contexts, []EffectiveContext{{Restricted: true}}) {
+			t.Errorf("hidden %v: edge %s <- %s %+v, want restricted", dep, f[2], f[0], d.Effective)
+		}
 	}
 }
 
@@ -1152,4 +1532,31 @@ func TestHiddenMemberIsCounted(t *testing.T) {
 			}
 		}
 	})
+}
+
+// D-024 and design §7.4 rule 7: an orphan's evidence names no route on its
+// paths, so a hidden wildcard parent never restricts it.
+func TestOrphanUnderHiddenParentNotRestricted(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	rule := testutil.Rule(matchPath("/api"))
+	rule["backendRefs"] = []any{testutil.DelegateWildcard("shop")}
+	// api keeps no child, so it reports ResolvedRefs=False/BackendNotFound, as kgateway does (D-021 item 9).
+	st := testutil.AcceptedBy(gw, testutil.Controller)
+	st.Conds[1] = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	objs := isolated(
+		testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, st), rule),
+		testutil.WithRules(testutil.HTTPRoute("shop", "o", nil), testutil.Rule(matchPath("/other"))))
+	hideAPI := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "HTTPRoute" || ref.Name != "api" })
+	for _, authz := range []Authorizer{nil, hideAPI} {
+		_, srv, _ := startWith(t, setup{authz: authz}, objs...)
+		var got []FindingDTO
+		for _, f := range findingsOn(get[HealthResponse](t, srv, base+"/health", 200), "shop/o") {
+			if f.Code == health.CodeDelegatedNotAttached {
+				got = append(got, f)
+			}
+		}
+		if len(got) != 1 || got[0].EvidenceRestricted || got[0].Detail != health.OrphanDetail {
+			t.Fatalf("hidden parent %v: %+v", authz != nil, got)
+		}
+	}
 }

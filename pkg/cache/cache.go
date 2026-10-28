@@ -4,7 +4,8 @@ package cache
 
 import (
 	"context"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -409,10 +410,27 @@ func (c *Cache) Snapshot() *Snapshot {
 		}
 	})
 	for _, objs := range s.Objects {
-		sort.Slice(objs, func(i, j int) bool { return key(objs[i]) < key(objs[j]) })
+		sortByKey(objs)
 	}
 	s.Source = p.finish(s.Access)
 	return s
 }
 
 func key(u *unstructured.Unstructured) string { return u.GetNamespace() + "/" + u.GetName() }
+
+// sortByKey orders objs by key, computing each key once: reading it from the
+// object's maps on every comparison dominated a snapshot.
+func sortByKey(objs []*unstructured.Unstructured) {
+	type keyed struct {
+		k string
+		u *unstructured.Unstructured
+	}
+	ks := make([]keyed, len(objs))
+	for i, u := range objs {
+		ks[i] = keyed{key(u), u}
+	}
+	slices.SortFunc(ks, func(a, b keyed) int { return strings.Compare(a.k, b.k) })
+	for i, k := range ks {
+		objs[i] = k.u
+	}
+}

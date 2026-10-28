@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -194,5 +195,115 @@ func TestDelegationBackendNotFoundHasDelegationDetail(t *testing.T) {
 				t.Fatalf("delegation wording %v, want %v: %q / %q", got, tc.delegation, fs[0].Message, fs[0].Detail)
 			}
 		})
+	}
+}
+
+// trigger is a mature delegated-not-attached check on shop/c under shop/api,
+// its window started at since.
+func trigger(since time.Time) computed.CheckResult {
+	c, api := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "c"}, testutil.HTTPRouteRef("shop", "api").Ref()
+	gw := testutil.GwRef("infra", "edge").Ref()
+	return computed.CheckResult{
+		ID: computed.Identity{Install: "kgw.kgateway", RuleSet: "kgateway-2.4", Kind: computed.KindDelegatedNotAttached,
+			Subject: computed.Subject(c.Group, c.Kind, c.Namespace, c.Name, api.Group, api.Kind, api.Namespace, api.Name)},
+		Class: computed.ClassTrigger, On: c, Expected: "dropped", Deps: []objects.Ref{gw, api, c}, Contributors: []objects.Ref{api, c},
+		State: computed.StateChecked, Mature: true, Since: since,
+	}
+}
+
+// PF13: a status trigger in grace (info) and a mature computed trigger on
+// one (route, parent) are one warning; the resource status check follows the
+// status trigger's own grace clock, so it stays pending.
+func TestMergedTriggerSeverity(t *testing.T) {
+	w := delegationWorld(testutil.HTTPRoute("shop", "c", []objects.ParentRef{testutil.HTTPRouteRef("shop", "api")}))
+	w.firstSeen = seenAt(map[string]time.Duration{"shop/c": 10 * time.Second})
+	since := testutil.Now.Add(-40 * time.Second)
+	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{trigger(since)}}
+	r := w.report(t)
+	fs := findingsFor(r, CodeDelegatedNotAttached, "shop/c")
+	want := "No status entry for parent HTTPRoute shop/api. The UI computes that HTTPRoute shop/api drops this route: no rule fits the parent's matches."
+	if len(fs) != 1 || fs[0].Severity != SeverityWarning || fs[0].Detail != want || fs[0].Since == nil || !fs[0].Since.Equal(since) {
+		t.Fatalf("want one merged warning: %+v", r.Findings)
+	}
+	// The parent is on the route's delegation paths, so the merged evidence names no route (D-024, rule 7).
+	if ev := fs[0].Evidence; !reflect.DeepEqual(ev, []objects.Ref{testutil.GwRef("infra", "edge").Ref()}) {
+		t.Fatalf("evidence %v", ev)
+	}
+	if c := statusCheck(r); c.OK || !c.Pending {
+		t.Fatalf("resource status: %+v", c)
+	}
+	if r.State != StateUnknown {
+		t.Fatalf("state %s, want unknown", r.State)
+	}
+
+	// Without the status trigger the computed one stands alone, and a
+	// trigger still in its window raises nothing.
+	w = delegationWorld(testutil.HTTPRoute("shop", "c", nil))
+	early := trigger(since)
+	early.Mature = false
+	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{early}}
+	if fs := findingsFor(w.report(t), CodeDelegatedNotAttached, "shop/c"); len(fs) != 0 {
+		t.Fatalf("immature trigger raised %+v", fs)
+	}
+	w.computed.Checks[0].Mature = true
+	r = w.report(t)
+	fs = findingsFor(r, CodeDelegatedNotAttached, "shop/c")
+	if len(fs) != 1 || fs[0].Message != ComputedNotAttachedMessage || fs[0].Detail != "The UI computes that HTTPRoute shop/api drops this route: no rule fits the parent's matches." ||
+		!reflect.DeepEqual(fs[0].Evidence, []objects.Ref{testutil.GwRef("infra", "edge").Ref()}) || fs[0].ResourceSince == nil {
+		t.Fatalf("standalone: %+v", fs)
+	}
+	if c := statusCheck(r); !c.OK || c.Pending {
+		t.Fatalf("resource status: %+v", c)
+	}
+
+	// Forbidden reads differently; an unknown scope raises nothing (D-024).
+	w.computed.Checks[0].Expected = "forbidden"
+	if fs := findingsFor(w.report(t), CodeDelegatedNotAttached, "shop/c"); len(fs) != 1 ||
+		fs[0].Detail != "The UI computes that HTTPRoute shop/api selects this route, but the route's parentRefs do not permit that parent." {
+		t.Fatalf("forbidden: %+v", fs)
+	}
+	w.scope = `[{`
+	if fs := findingsFor(w.report(t), CodeDelegatedNotAttached, "shop/c"); len(fs) != 0 {
+		t.Fatalf("scope unknown: %+v", fs)
+	}
+}
+
+// A computed or orphan finding's ResourceSince is its route's first-seen
+// time, whether the route is owned, a declared candidate or has no parent;
+// nil for a route the install does not hold.
+func TestComputedTriggerResourceSince(t *testing.T) {
+	gw, api := testutil.GwRef("infra", "edge"), testutil.HTTPRouteRef("shop", "api")
+	w := delegationWorld(
+		testutil.HTTPRoute("shop", "owned", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)),
+		testutil.HTTPRoute("shop", "declared", []objects.ParentRef{api}),
+		testutil.HTTPRoute("shop", "loose", nil))
+	ages := map[string]time.Duration{"shop/owned": time.Minute, "shop/declared": 2 * time.Minute, "shop/loose": 3 * time.Minute}
+	w.firstSeen = seenAt(ages)
+	var cs []computed.CheckResult
+	for _, n := range []string{"owned", "declared", "loose", "absent"} {
+		c := trigger(testutil.Now)
+		c.On.Name = n
+		c.ID.Kind, c.ID.Subject = computed.KindOrphan, n
+		cs = append(cs, c)
+	}
+	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: cs}
+	r := w.report(t)
+	for _, n := range []string{"owned", "declared", "loose", "absent"} {
+		var fs []Finding
+		for _, f := range findingsFor(r, CodeDelegatedNotAttached, "shop/"+n) {
+			if f.Message == ComputedNotAttachedMessage { // declared also has the status trigger
+				fs = append(fs, f)
+			}
+		}
+		if len(fs) != 1 {
+			t.Fatalf("%s: %+v", n, fs)
+		}
+		age, held := ages["shop/"+n]
+		switch got := fs[0].ResourceSince; {
+		case !held && got != nil:
+			t.Errorf("%s: ResourceSince %v, want none", n, got)
+		case held && (got == nil || !got.Equal(testutil.Now.Add(-age))):
+			t.Errorf("%s: ResourceSince %v, want %v", n, got, testutil.Now.Add(-age))
+		}
 	}
 }

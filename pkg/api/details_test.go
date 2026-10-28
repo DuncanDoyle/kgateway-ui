@@ -66,22 +66,47 @@ func midRules() []map[string]any {
 // edge and reported under shop/loop (a cycle) and shop/top1..top5 (more
 // paths than the up-chain keeps); shop/child is its reported child,
 // shop/declared declares it without status, and the Backend shop/be1 exists.
+// The world agrees with views B and C: loop and top1..top5 are
+// roots that delegate to mid under /api, so mid has no hostnames; loop is
+// also mid's child, so mid → loop → mid is a cycle, and loop's entry under
+// mid says RefNotPermitted. mid's ghost, label and declared refs select
+// nothing usable, so its entries say ResolvedRefs=False (D-021 item 8).
 func delegationWorld(extra ...runtime.Object) []runtime.Object {
-	parents := []objects.ParentRef{edgeRef, testutil.HTTPRouteRef("shop", "loop")}
-	status := []testutil.RouteParent{testutil.AcceptedBy(edgeRef, testutil.Controller), testutil.AcceptedBy(testutil.HTTPRouteRef("shop", "loop"), testutil.Controller)}
+	loopRef, midEntry := testutil.HTTPRouteRef("shop", "loop"), unresolvedBy
+	parents := []objects.ParentRef{edgeRef, loopRef}
+	status := []testutil.RouteParent{midEntry(edgeRef), midEntry(loopRef)}
+	cycle := testutil.RouteParent{Ref: midRef, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")}}
 	objs := []runtime.Object{
-		testutil.HTTPRoute("shop", "child", []objects.ParentRef{midRef}, testutil.AcceptedBy(midRef, testutil.Controller)),
+		// The child's match fits mid's /api, so its entry agrees with view B.
+		testutil.WithRules(testutil.HTTPRoute("shop", "child", []objects.ParentRef{midRef}, testutil.AcceptedBy(midRef, testutil.Controller)),
+			testutil.Rule(matchPath("/api/child"))),
 		testutil.HTTPRoute("shop", "declared", []objects.ParentRef{midRef}),
-		testutil.HTTPRoute("shop", "loop", []objects.ParentRef{midRef}, testutil.AcceptedBy(midRef, testutil.Controller)),
+		testutil.WithRules(testutil.HTTPRoute("shop", "loop", []objects.ParentRef{midRef, edgeRef}, cycle, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/api"}, testutil.DelegateTo("shop", "mid"))),
 		testutil.Backend("shop", "be1", nil),
 	}
 	for _, n := range []string{"top1", "top2", "top3", "top4", "top5"} {
 		top := testutil.HTTPRouteRef("shop", n)
-		parents, status = append(parents, top), append(status, testutil.AcceptedBy(top, testutil.Controller))
-		objs = append(objs, testutil.HTTPRoute("shop", n, []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)))
+		parents, status = append(parents, top), append(status, midEntry(top))
+		r := testutil.WithRules(testutil.HTTPRoute("shop", n, []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+			delegRule([]string{"/api"}, testutil.DelegateTo("shop", "mid")))
+		if n == "top5" {
+			// A root keeps its hostnames; a delegated child may not set any.
+			r = testutil.WithHostnames(r, "top.example.com")
+		}
+		objs = append(objs, r)
 	}
-	mid := testutil.WithHostnames(testutil.WithRules(testutil.HTTPRoute("shop", "mid", parents, status...), midRules()...), "mid.example.com")
+	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", parents, status...), midRules()...)
 	return world(append(append(objs, mid), extra...)...)
+}
+
+// unresolvedBy is an accepted entry under p whose delegation refs select
+// nothing usable: ResolvedRefs=False/BackendNotFound (D-021 item 8).
+func unresolvedBy(p objects.ParentRef) testutil.RouteParent {
+	return testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound"),
+		testutil.Cond("kgateway.dev/Programmed", metav1.ConditionTrue, "Programmed")}}
 }
 
 func refName(r LinkedRef) string { return r.Namespace + "/" + r.Name }
@@ -105,7 +130,7 @@ func TestRouteDetailDelegation(t *testing.T) {
 	if d.Install != "kgw.kgateway" || d.Ref.Ref != midRef.Ref() || d.Ref.Link != LinkDetail || d.Candidate != nil || d.Generation != 1 || d.RuleSet != "kgateway-2.4" {
 		t.Fatalf("header %+v", d)
 	}
-	if !slices.Equal(d.Hostnames, []string{"mid.example.com"}) || len(d.ParentRefs) != 7 || d.ParentRefs[0].ParentRef != edgeRef || d.Annotations.InheritParentMatcher != nil {
+	if d.Hostnames == nil || len(d.Hostnames) != 0 || len(d.ParentRefs) != 7 || d.ParentRefs[0].ParentRef != edgeRef || d.Annotations.InheritParentMatcher != nil {
 		t.Fatalf("hostnames %v parentRefs %v annotations %+v", d.Hostnames, d.ParentRefs, d.Annotations)
 	}
 	if d.ChildCount != 2 || d.DeclaredCount != 1 {
@@ -149,13 +174,17 @@ func TestRouteDetailDelegation(t *testing.T) {
 		}
 		paths = append(paths, s)
 	}
-	wantPaths := []string{"infra/edge > shop/mid", "shop/mid > shop/loop > shop/mid (cycle)", "infra/edge > shop/top1 > shop/mid",
-		"infra/edge > shop/top2 > shop/mid", "infra/edge > shop/top3 > shop/mid"}
+	wantPaths := []string{"infra/edge > shop/mid", "infra/edge > shop/loop > shop/mid", "shop/mid > shop/loop > shop/mid (cycle)",
+		"infra/edge > shop/top1 > shop/mid", "infra/edge > shop/top2 > shop/mid"}
 	if !slices.Equal(paths, wantPaths) || !d.AncestorsTruncated {
 		t.Errorf("ancestors %q truncated %v, want %q truncated", paths, d.AncestorsTruncated, wantPaths)
 	}
 	if root := d.Ancestors[0].Steps[0].Ref; root.Kind != "Gateway" || root.Link != LinkDetail {
 		t.Errorf("root step %+v", root)
+	}
+	// A root keeps its hostnames (mid, a child, has none).
+	if h := get[RouteDetail](t, srv, routeDetail+"shop/top5", 200).Hostnames; !slices.Equal(h, []string{"top.example.com"}) {
+		t.Errorf("top5 hostnames %v", h)
 	}
 	// The child's page names its reported parent and has no children.
 	c := get[RouteDetail](t, srv, routeDetail+"shop/child", 200)
@@ -503,10 +532,10 @@ func farWorld() []runtime.Object {
 
 func TestCandidateDetail(t *testing.T) {
 	foreign := testutil.GwRef("infra", "foreign")
-	// blog/far is named by shop/mid's delegation ref.
-	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef, foreign}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+	// blog/far is named by shop/mid's delegation ref; far is not watched, so the ref is unresolved.
+	mid := testutil.WithRules(testutil.HTTPRoute("shop", "mid", []objects.ParentRef{edgeRef, foreign}, unresolvedBy(edgeRef)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
-	mid2 := testutil.WithRules(testutil.HTTPRoute("shop", "mid2", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+	mid2 := testutil.WithRules(testutil.HTTPRoute("shop", "mid2", []objects.ParentRef{edgeRef}, unresolvedBy(edgeRef)),
 		map[string]any{"backendRefs": []any{testutil.DelegateTo("blog", "far")}})
 	objs := world(append(farWorld(), mid, mid2, testutil.HTTPRoute("shop", "declared", []objects.ParentRef{testutil.HTTPRouteRef("shop", "mid")}))...)
 	_, srv, _ := startWith(t, setup{}, objs...)
@@ -673,19 +702,24 @@ func TestRouteDetailRestricted(t *testing.T) {
 	if kids := get[Page[RouteRow]](t, srv, base+"/routes?parent=gateway.networking.k8s.io/HTTPRoute/shop/mid", 200); kids.Total != d.ChildCount || len(kids.Items) != d.ChildCount {
 		t.Errorf("list under mid: total %d rows %d, childCount %d", kids.Total, len(kids.Items), d.ChildCount)
 	}
-	var restricted int
+	// Hidden parent routes come last, named with link none (D-024); the
+	// walk stops at them, and the five-path bound truncates the rest.
+	var got []string
 	for _, p := range d.Ancestors {
+		got = append(got, stepNames(p))
 		for _, s := range p.Steps {
-			if s.Restricted {
-				restricted++
-				if s.Ref != nil {
-					t.Errorf("a restricted step has an identity: %+v", s)
-				}
+			hidden := strings.HasPrefix(s.Ref.Name, "top") && s.Ref.Name != "top5"
+			if s.Restricted || (s.Ref.Link == LinkNone) != hidden {
+				t.Errorf("step %+v", s)
 			}
 		}
 	}
-	// Hidden parents come last; the four redacted paths are one.
-	if restricted != 1 || len(d.Ancestors) != 4 || !d.Ancestors[3].Steps[0].Restricted || stepNames(d.Ancestors[2]) != "infra/edge > shop/top5 > shop/mid" {
-		t.Errorf("ancestors %+v", d.Ancestors)
+	want := []string{"infra/edge > shop/mid", "infra/edge > shop/loop > shop/mid", "shop/mid > shop/loop > shop/mid", "infra/edge > shop/top5 > shop/mid", "shop/top1 > shop/mid"}
+	if !slices.Equal(got, want) || !d.AncestorsTruncated {
+		t.Errorf("ancestors %q truncated %v", got, d.AncestorsTruncated)
+	}
+	// The hidden top1 shows only the match it delegated mid under (rule 3, D-024).
+	if s := d.Ancestors[4].Steps[0]; len(s.Matches) != 1 || *s.Matches[0].Path != (PathMatchDTO{"PathPrefix", "/api"}) {
+		t.Errorf("hidden ancestor step %+v", s)
 	}
 }

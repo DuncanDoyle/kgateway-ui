@@ -1,6 +1,8 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { Page as ListPage, RouteDetail, RouteRow } from "../packages/shell/src/api/types";
+import type { DelegationRow, Page as ListPage, RouteDetail, RouteRow } from "../packages/shell/src/api/types";
 import {
+  delegationCopy,
+  effectiveCopy,
   gatewayCopy,
   listCopy,
   navCopy,
@@ -160,6 +162,54 @@ test("Routes filtered by replaced or dropped rules", async ({ page }) => {
   for (const r of want.items) {
     await expect(rows.getByRole("link", { name: `${r.ref.namespace}/${r.ref.name}` })).toBeVisible();
   }
+});
+
+test("Delegation tab: a partly attached row, its paths, then the child's effective matches", async ({ page }) => {
+  // Rows come from the API, which TestDelegationAgreesWithController checks against the controller.
+  const rows: ListPage<DelegationRow> = await (
+    await page.request.get(`${api}/routes/gateway.networking.k8s.io/HTTPRoute/shop/tree/delegation?limit=200`)
+  ).json();
+  const partial = rows.items.find((r) => r.child?.namespace === "shop" && r.child.name === "t-partial");
+  expect(partial?.outcome, "shop/tree's row for shop/t-partial").toBe("partial");
+  const partialRow = partial as DelegationRow;
+
+  await page.goto(`${install}/routes/gateway.networking.k8s.io/HTTPRoute/shop/tree`);
+  await page.getByRole("tab", { name: delegationCopy.tab }).click();
+  await expect(page).toHaveURL(/[?&]tab=delegation/);
+  const ref = page.getByRole("region", { name: delegationCopy.refTitle(partialRow.rule + 1, partialRow.ref + 1) });
+  await ref.getByRole("button", { name: delegationCopy.toggleRows(false) }).click();
+  const table = ref.getByRole("table", { name: delegationCopy.refTitle(partialRow.rule + 1, partialRow.ref + 1) });
+  const row = table.getByTestId("delegation-row").filter({ has: page.getByRole("link", { name: "shop/t-partial" }) });
+  await expect(row.getByTestId("outcome")).toHaveText(delegationCopy.outcomes.partial);
+
+  // One path per parent match: attached under one, dropped under the other.
+  await row.getByRole("button", { name: delegationCopy.togglePaths(false, partialRow.contexts.length) }).click();
+  const paths = row.getByRole("list", { name: delegationCopy.pathList(partialRow.contexts.length) });
+  await expect(paths.getByTestId("delegation-context")).toHaveCount(partialRow.contexts.length);
+  for (const c of partialRow.contexts) {
+    if (c.parentMatch?.path) await expect(paths).toContainText(c.parentMatch.path.value);
+  }
+  await shot(page, "delegation-partial");
+
+  // The child's page shows its rules under each of the parent's matches.
+  await row.getByRole("link", { name: "shop/t-partial" }).click();
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/t-partial$/);
+  const d: RouteDetail = await (
+    await page.request.get(`${api}/routes/gateway.networking.k8s.io/HTTPRoute/shop/t-partial`)
+  ).json();
+  const want = d.effective?.find((e) => e.parent.namespace === "shop" && e.parent.name === "tree")?.contexts ?? [];
+  expect(want.map((c) => c.rules?.[0]?.kept)).toEqual([true, false]);
+  const contexts = page
+    .getByRole("article", { name: `${effectiveCopy.from} shop/tree` })
+    .getByTestId("effective-context");
+  await expect(contexts).toHaveCount(want.length);
+  for (const [i, c] of want.entries()) {
+    const rule = contexts.nth(i).getByTestId("effective-rule-0");
+    await expect(contexts.nth(i)).toContainText(c.parentMatch?.path?.value ?? "");
+    await expect(rule).toContainText(c.rules?.[0]?.kept ? effectiveCopy.kept : effectiveCopy.dropped);
+  }
+  await expect(contexts.nth(0).getByTestId("effective-rule-0")).toContainText("/tree/a/x");
+  await shot(page, "effective-matches");
 });
 
 for (const theme of themes) {

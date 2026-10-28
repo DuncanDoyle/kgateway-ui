@@ -1,0 +1,73 @@
+# Effective projection caps (rules §5.7, bounds ContextsPerRow 1, ContextsPerEdge 2,
+# EffectiveEdges 1). c1's edge unites three untruncated rows, past the edge cap: two contexts,
+# truncated. c2's edge unites a truncated row and another: two contexts, flagged by the row.
+# c3 has edges from r and s; only r's is kept and c3 is effectiveTruncated.
+provenance: computed-rules §5.7, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+bounds: {ContextsPerRow: 1, ContextsPerEdge: 2, EffectiveEdges: 1}
+namespaces: {infra: {}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /a}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c1, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /a}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c1, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /a}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c1, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /b}}, {path: {type: PathPrefix, value: /b/x}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c2, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /b}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c2, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /c}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c3, namespace: apps}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: s, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /c}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c3, namespace: apps}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c1, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/c1}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c2, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /b/x/c2}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c3, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /c/c3}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 2}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+    "HTTPRoute infra/s #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c1: {outcome: attached, contexts: 1}
+    infra/r 1.0 apps/c1: {outcome: attached, contexts: 1}
+    infra/r 2.0 apps/c1: {outcome: attached, contexts: 1}
+    infra/r 3.0 apps/c2: {outcome: attached, contexts: 1, contextsTruncated: true}
+    infra/r 4.0 apps/c2: {outcome: attached, contexts: 1}
+    infra/r 5.0 apps/c3: {outcome: attached}
+    infra/s 0.0 apps/c3: {outcome: attached}
+  entries:
+    "apps/c1 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "apps/c2 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "apps/c3 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+    "apps/c3 {group: gateway.networking.k8s.io, kind: HTTPRoute, name: s, namespace: infra}": Accepted
+  effective:
+    apps/c1 <- infra/r: {contexts: [r0 PathPrefix /a/c1, r0 PathPrefix /a/c1], contextsTruncated: true}
+    apps/c2 <- infra/r: {contexts: [r0 PathPrefix /b/x/c2, r0 PathPrefix /b/x/c2], contextsTruncated: true}
+    apps/c3 <- infra/r: {contexts: [r0 PathPrefix /c/c3]}
+  effectiveTruncated: [apps/c3]

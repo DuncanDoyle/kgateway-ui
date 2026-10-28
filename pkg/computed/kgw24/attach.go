@@ -1,3 +1,5 @@
+// Port of kgw23 for v2.4.7; keep in sync.
+
 package kgw24
 
 import (

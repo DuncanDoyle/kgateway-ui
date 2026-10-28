@@ -1,0 +1,74 @@
+# Status roots (rules §5.1, §5.6, §8.5): without Namespace access view A is unknown for both
+# routes on the Selector listener. r has a current Accepted=True entry for the Gateway, so it is
+# a root from status: its contexts depend on r and the Gateway, and its unresolved ref reports
+# under the entry's key.
+# u's entry is stale, so u is an unknown root: an uncertain point, never traversed, so its row
+# is not-reached (rules §3.3).
+provenance: computed-rules §5.1, §5.6, §8.5, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+namespacesOK: false
+namespaces: {infra: {}, web: {team: web}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes: {namespaces: {from: Selector, selector: {matchLabels: {team: web}}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: web}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /w}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+    - matches: [{path: {type: PathPrefix, value: /z}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: missing, namespace: apps}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: u, namespace: web, generation: 2}
+  spec:
+    parentRefs: [{name: gw, namespace: infra}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /u}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: d, namespace: apps}]
+  status:
+    parents:
+    - controllerName: kgateway.dev/kgateway
+      parentRef: {name: gw, namespace: infra}
+      conditions:
+      - {type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /w/c}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: d, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /u/d}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 0, unknown: namespace-labels-unavailable}
+  parentRefs:
+    "HTTPRoute web/r #0": {unknown: namespace-labels-unavailable}
+    "HTTPRoute web/u #0": {unknown: namespace-labels-unavailable}
+  rows:
+    web/r 0.0 apps/c: {outcome: attached, deps: [Gateway infra/gw, HTTPRoute web/r]}
+    web/r 1.0 -: {outcome: unresolved}
+    web/u 0.0 apps/d: {outcome: unknown, unknown: not-reached}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: web}": Accepted
+  signals:
+    "web/r {name: gw, namespace: infra}": [BackendNotFound]
+  effective:
+    apps/c <- web/r: {contexts: [r0 PathPrefix /w/c]}
+  uncertain: [web/u root context-unknown]
+  incomplete: [apps/d, web/u]

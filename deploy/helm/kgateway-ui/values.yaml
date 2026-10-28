@@ -6,6 +6,10 @@ install:
   # Pin the UI to one kgateway controller install: an install ID (e.g. kgw.kgateway)
   # or the controller's namespace/name. Empty shows all installs.
   pin: ""
+delegation:
+  # Selected delegation edges computed per install; 0 keeps the binary's
+  # default (10000). A higher cap needs a higher memory limit.
+  edgeCap: 0
 # More flags for the UI binary, appended after the chart's own args,
 # e.g. ["--poll-interval=10m"].
 extraArgs: []
@@ -22,6 +26,7 @@ httpRoute:
 serviceAccount:
   create: true
   name: ""
+# With limits.memory the binary uses 90 % of it as its Go memory target.
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { memory: 512Mi }

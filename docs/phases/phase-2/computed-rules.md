@@ -25,7 +25,7 @@
 | Success conditions filled in by default | `Accepted`, `ResolvedRefs` | adds `kgateway.dev/Programmed` (`pkg/reports/status.go` V4:752-780; `api/conditions/conditions.go` absent at V3) |
 | Rule replaced or dropped | `Accepted=False`, `RouteRuleReplaced`/`RouteRuleDropped` (`translator/irtranslator/route.go` V3:291-313) | `kgateway.dev/Programmed=False`, same reasons (V4:325-350) |
 | TCP or TLS route conflict | `Accepted=False/Conflicted` (`translator/listener/gateway_listener_translator.go` V3:645-656, called at :463) | `kgateway.dev/Programmed=False/Conflicted` (V4:648-660, called at :466) |
-| Old status of a dropped or deselected child | after a parent edit (deselection or matcher drop): cleared to `parents: []`, observed (D-021, items 1 and 6). After a child edit: not observed | after a parent edit: cleared to `parents: []` (`pkg/krtcollections/policy.go` V4:1150-1178), observed (D-021, items 1 and 6). After a child edit: not observed |
+| Old status of a dropped or deselected child | cleared to `parents: []` for any cause: parent edit (deselection or matcher drop) and child edit (match change, parentRefs that do not permit the parent), observed (D-021 items 1 and 6; child edits observed 2026-10-26, D-021 amendment). `ProcessHTTPRouteStatusMarkers` clears every kgateway entry that is not reported (`pkg/krtcollections/policy.go` V3:1119-1137, called from `proxy_syncer.go` V3:292-293) | the same, observed for every cause (`pkg/krtcollections/policy.go` V4:1147-1178). Cleared before the first poll (under 0.15 s) on both tags |
 | Plain-HTTP listener isolation (programming only, §4.5) | none | `translator/listener/gateway_listener_translator.go` V4:689-747 |
 
 **Selection.** The rule set follows the controller minor, as `kinds.ExperimentalOnly` does (`pkg/kinds/upstream.go:55-94`).
@@ -60,17 +60,17 @@
 
 | Reason | When | What is unknown |
 |---|---|---|
-| `scope-unknown` | the install's discovery scope is unknown, so its candidate routes are a guess **(user, 2026-10-24)** | every listener count and parentRef outcome of view A; no members |
+| `scope-unknown` | the install's discovery scope is unknown, so its candidate routes are a guess **(user, 2026-10-24)** | every listener count and parentRef outcome of view A; no members. Every view B row, context, effective matcher and check (`child-entry`, `parent-resolvedrefs`); no computed or orphan KGWUI-011 and no KGWUI-012 from them while it holds **(user, 2026-10-26; D-024)** |
 | `namespace-labels-unavailable` | Namespace access is not OK and a listener uses `From: Selector` | that listener's count, its members and their parentRef outcomes |
 | `listenerset-no-status` | a ListenerSet has no current `Accepted` | that ListenerSet's listeners |
-| `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs whose namespace could be the wildcard |
+| `setting-unknown` | a setting comes from `valueFrom`, or from `envFrom` with no explicit entry | experimental flag: every route of an experimental-only kind, and the listeners it could count on. Wildcard: label refs that may select a labelled route outside their own namespace (§5.2) |
 | `not-reached` | an owned parent route is not reached from any root (§5.1) | its contexts, so its delegation outcomes; selection and permission stay known |
 | `context-unknown` | an ancestor on the path is unknown or was cut by a bound | everything below that point |
 | `too-large` | a compute bound of §5.7 stopped the computation | everything not yet computed, in the deterministic order of §5.7 |
 
 **Precedence.** `scope-unknown` wins over every other reason, since it affects every candidate **(user, 2026-10-24)**; then `listenerset-no-status`, which covers a whole ListenerSet; then, per ref, `setting-unknown` before `namespace-labels-unavailable`.
 
-**Uncertainty is never evidence (our call).** An unknown setting, a boolean setting that does not parse, and the over-approximation used for label selection under an unknown wildcard setting all stay uncertainty. They never select a route, never make a route a candidate, and never count as negative evidence. They feed only the uncertain points of §8.5.
+**Uncertainty is never evidence (our call).** An unknown setting, a boolean setting that does not parse, and the over-approximation used for label selection under an unknown wildcard setting all stay uncertainty. They never select a route, never make a route a candidate, and never count as negative evidence. They feed only the uncertain points of §8.5. Under an unknown wildcard setting, a label ref still selects its own namespace's labelled routes, which are certain (§5.2).
 
 Missing objects are rules, not unknowns. A missing Namespace matches only an empty selector (§4.2). A missing `name` target is an unresolved reference (§5.2).
 
@@ -169,16 +169,18 @@ Example: root R delegates under `/api` to P. P has matches `/api` and `/other` o
 | `label` | group `delegation.kgateway.dev`, kind `label`, `name: v` | HTTPRoutes in ns whose label `delegation.kgateway.dev/label` is exactly `v` (`api/labels/delegation.go:7`) |
 | `label`, namespace equals the wildcard setting | `name: v` | that label value in every namespace. The setting defaults to `all`; an empty value also means `all` (`api/labels/delegation.go:12`) |
 
-An empty result is an unresolved reference. No ReferenceGrant is involved. Out-of-scope routes are never selected; a `name` ref to one shows "Not watched by the controller".
+An empty result is an unresolved reference. No ReferenceGrant is involved.
+
+**Unknown wildcard setting (our call, faithful to §5.2).** kgateway selects a label ref's own namespace whatever the setting is; only the routes elsewhere depend on it. So with the setting unknown, a label ref selects its own namespace's routes with that label as usual: they are rows like any other. When routes in other namespaces carry the label, they are only possible (§3.3, §8.5): no edges, no rows. The ref then also has one row with no child, `unknown`, `setting-unknown`, and no context of it records a delegation failure, since a possible child might fit. A possible child on the context's path may fail the ref with a cycle, so the ref's children are `unknown` under that path. With no labelled route elsewhere, the selection is the same under any setting and is fully known. Out-of-scope routes are never selected; a `name` ref to one shows "Not watched by the controller".
 
 ### 5.3 Permission
 
-`ChildRouteCanAttachToParentRef` (`utils/delegation/delegation.go` V4:20-34, V3:20-47):
+`ChildRouteCanAttachToParentRef` (`pkg/kgateway/utils/delegation/delegation.go` V4:20-31, calling `MatchingParentRef` at V4:36-56; V3:20-46):
 - a child with an empty `parentRefs` list may be selected by any parent;
 - otherwise it needs a parentRef with **explicit** `group: gateway.networking.k8s.io` and `kind: HTTPRoute` (nil does not match), the parent's name, and a namespace equal to the parent's (nil means the child's own);
 - sectionName and port are ignored.
 
-A forbidden child is skipped silently, with no status, before the cycle check (`query/route.go` V4:266-269, V3:240-242).
+A forbidden child is skipped silently, with no status, before the cycle check (`pkg/kgateway/query/route.go` V4:266-269, V3:240-242).
 
 ### 5.4 Algorithm
 
@@ -233,17 +235,21 @@ Per context, a row (parent, rule index, ref index, child) gets one outcome: `att
 
 The row aggregates its contexts **(our call)**. A bound reduces certainty; it never changes a conclusion:
 - every context known and the same → that outcome;
-- `attached` in some contexts and `dropped` in others → `partial`, "Attached under some parent matches";
-- `attached` in a known context while others are unknown → `attached`, with "Some paths not computed". A positive outcome stays true whatever the other paths do;
-- no `attached` context and some contexts unknown, or the row's aggregate incomplete (§8.5) → `unknown`, "Dropped on the paths computed; other paths not computed". Never `dropped`;
-- `forbidden` does not depend on context and is always known.
+- `attached` in some contexts and `dropped`, `cycle` or `rejected-hostnames` in others → `partial`, "Attached under some parent matches". The row carries the failing fit clause of its first non-attached context that has one **(our call)**;
+- `attached` in a known context while others are unknown, or the row's aggregate incomplete (§8.5) → `attached` (or `partial`), with "Some paths not computed". A positive outcome stays true whatever the other paths do;
+- `rejected-hostnames` with no `attached` context, while others are unknown or the aggregate incomplete → `rejected-hostnames`, with "Some paths not computed". A rejection is positive evidence (§8.5) **(user, 2026-10-26)**;
+- no `attached` or `rejected-hostnames` context and some contexts unknown, or the row's aggregate incomplete (§8.5) → `unknown`, "Dropped on the paths computed; other paths not computed". Never `dropped`;
+- known contexts that differ with no `attached` among them → the first present of `rejected-hostnames`, `cycle`, `unresolved`, `dropped`: an outcome the controller signals wins over a silent drop **(user, 2026-10-26)**;
+- `forbidden` does not depend on context and is always known: a child whose parentRefs name other parents only is `forbidden` even with no context;
+- a `scope-unknown` install makes every row `unknown`, `scope-unknown`, even with no context (D-024);
+- an `unresolved` ref's row has no child but still gets one context per evaluation, so its reporter keys, digests and dependencies are known (§8.2, §9.2).
 
 ### 5.6 Dependencies
 
 Every result carries the set of objects whose data decided it; the design's Authorizer filters on it (design §7.4).
 - **Root eligibility.** A view A root depends on the union of the dependencies of all its parentRef outcomes (§4.6): the route, each Gateway or ListenerSet, and each Namespace a `Selector` evaluated. A status root depends on the route and the target of the `Accepted=True` entry it used.
 - **Context.** A context depends on its root's eligibility set plus every route on its path. Each child context inherits its parent context's set and adds the child.
-- **Row and effective matcher.** The union of the sets of its contexts. A context the caller may not view is projected as `{restricted: true}`; an outcome that aggregates over a hidden context is `restricted` as a whole, so the presence of a hidden path is never revealed.
+- **Row and effective matcher.** The union of the sets of its contexts. Routes on a context's path never restrict it: a caller who can see the child gets each ancestor's name and the match it delegated under, and nothing else of a hidden ancestor (design §7.4 rule 4b) **(user, 2026-10-26; D-024)**. A context whose other dependencies (the root's Gateways, ListenerSets, `Selector` Namespaces, or a status root's target) the caller may not view is projected as `{restricted: true}`; an outcome that aggregates over such a context is `restricted` as a whole.
 - **Aggregate checks** (§8.2) and the findings they raise: the union over every context in the aggregate.
 
 ### 5.7 Budget, retention and projection
@@ -252,18 +258,26 @@ This is the one policy for how much is computed, kept and served **(our call)**.
 
 | Stage | Bound | Cap | On reaching it |
 |---|---|---|---|
-| Compute | selected edges: (parent, rule, ref, child) rows, forbidden included | 50,000 per install | the rest is `unknown`, `too-large` |
+| Compute | selected edges: (parent, rule, ref, child) rows, forbidden included | 10,000 per install by default, set by `--delegation-edge-cap` **(user, 2026-10-27; D-025)** | the rest is `unknown`, `too-large` |
 | Compute | contexts: `flatten` calls | 20,000 per install | the rest is `unknown`, `too-large` |
-| Compute | matcher evaluations: (child match, context) fit or merge steps | 200,000 per install | the rest is `unknown`, `too-large` |
+| Compute | matcher steps: one per (child match, context) fit or merge; an inherit merge costs one per 4 header and query matches it copies, at least one **(our call, 2.4)** | 200,000 per install | the rest is `unknown`, `too-large` |
+| Compute | path depth: routes on one context's path | 100 **(our call, 2.4; D-025)** | that ref under that context is `unknown`, `too-large`; other paths go on |
 | Retain | contexts kept per row, each with its incoming match, path, outcome and effective rules | first 20 in traversal order | `contextsTruncated` on the row; the outcome still aggregates all contexts |
-| Retain | contexts kept per install | 100,000 | later rows keep their outcome with no contexts and `contextsTruncated` |
+| Retain | contexts kept per install | 30,000 **(our call, 2.4; D-022 retained heap)** | later rows keep their outcome with no contexts and `contextsTruncated` |
 | Project | rows per delegation page | the page `limit` (≤ 200) | cursor (design §3.6) |
+| Project | contexts materialized per response: path steps, header and query matches and their text | 100,000 units **(our call, 2.4)**; design §7.3 | later rows and effective edges send no more contexts and carry `contextsTruncated` |
 | Project | parent edges in a route's `effective` | 20, sorted by parent (namespace, name) | `effectiveTruncated` |
 | Project | contexts per parent edge in `effective` | the union of the retained contexts of every row with that (parent, child), in traversal order, at most 20 | the edge's `contextsTruncated`: true when any of those rows is truncated (per-row or install cap) or the union exceeds 20. At the install cap an edge can have no contexts; it is then sent with `contexts: []` and `contextsTruncated: true`, never as complete |
 
-- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). A cut is deterministic, so the same Model gives the same cut. Which cap was hit is **logged** once per change of the summary; it is not served on the API **(our call)**.
+- Work runs in a fixed order: roots by (namespace, name), rules and refs by index, children by (namespace, name). Selected edges are charged in a deterministic selection pass before the traversal: routes by (namespace, name), rules and refs by index, per selection (a ref's children at once), not per row; a ref that would pass the cap, and every ref after it, is `too-large` **(our call, 2.4)**. A cut is deterministic, so the same Model gives the same cut. Which cap was hit is **logged** once per change of the summary; it is not served on the API **(our call)**.
+- **Inherit merges are charged by size (our call, 2.4).** An inherit merge copies the parent's header and query matches, which accumulate along the path, so one merge can copy thousands. Charging one step per 4 copied matches (about 200 bytes) bounds merged matches near 40 MiB at the default cap. Merges of 4 matches or fewer cost one step, as before.
+- **The depth cap is per path (our call, 2.4).** A context's deps hold every route on its path, so without a cap a chain of n routes retains O(n²) deps. Past depth 100 the parent's ref is an uncertain point with `too-large` and its rows are counted, not retained; work on other paths goes on. It names `depth` as the cap hit when it is the first one. It is not configurable.
+- **A cut context is counted, never retained (our call).** A context cut by a compute bound carries no evaluation to show. It is folded into its row's aggregates like any other, but never kept as a sample, so its row is `contextsTruncated` and so is the row's effective edge (`addCounted`, both rule sets).
 - **Retention is streaming (our call).** Each `flatten` result is folded into its row's aggregate as it is produced: the outcome aggregate, the dependency set, the completeness inputs and the report-key aggregates are updated in full, and the context itself is kept only while the row's and the install's retention caps allow. Nothing is materialised first and trimmed later, so memory is bounded by the retention caps plus the aggregates. Dependency and completeness data are never dropped by retention; only context samples are.
+- **Dependency sets are interned (our call, 2.4).** Rows, report keys, signals, effective edges and contexts reached the same ways hold equal dependency sets. Each run interns finished sets by content, so equal sets share one copy. A growing aggregate keeps only the sets it absorbed and is united once, when its row is emitted, so no superseded prefix is kept. Memory then follows the distinct sets the compute caps allow, not rows × roots.
+- **Known limits (2.4).** Very long inherited path segments across deep chains, and very long header values in failure reasons, can use a lot of memory; tracked for a later phase.
 - An effective matcher shown on a page is exactly the one the traversal used for the outcome and the cross-check in the same Model.
+- **Effective edges (our call, 2.4).** The union counts only contexts where the fit ran (`attached`, `dropped`, `rejected-hostnames`), and one context per evaluation: quirk 1 hands a child to several refs under one parent context, and those rows share that evaluation. A root frame with several report keys folds one context per key; those also come from one evaluation and merge into one. An edge exists only where some row of (parent, child) ran the fit, so a forbidden, cycle-only or unresolved edge has no effective matcher.
 - Retained contexts are counted in the heap budget (design §9.6).
 - View A has no cap. It is linear in parentRefs × listeners.
 - The design's benchmarks include a dense-selection shape, separate from the diamond lattice (design §9.6).
@@ -292,13 +306,13 @@ viewC(child, parentMatch):
 - every parent header and query param must appear in the child, equal in name, type and value;
 - a parent method must be matched by the same child method.
 
-A rule with omitted `matches` has the default `PathPrefix /`, which fails under any parent prefix but `/`. The reason reads "This rule has no matches, so it defaults to `/`, which is outside the parent's `/api`".
+A rule with omitted `matches` has the default `PathPrefix /`, which fails under any parent prefix but `/`. The reason reads "This rule has no matches, so it defaults to `/`, which is outside the parent's `/api`". That reason is `default-slash`; an omitted list that fails another clause reports that clause, e.g. `path-type` under an Exact parent, or `header` under `/` when the parent has a header.
 
 An explicit `matches: []` in default mode has no match to fit, so the rule is dropped with reason `no-matches`: "This rule has an empty match list, so nothing fits the parent's match" **(our call)**.
 
-**Inherit mode, `merge`** (`mergeParentChildRouteMatch`, `delegation_helpers.go` V4:117-142, V3:118-146). The parent path type is not checked.
+**Inherit mode, `merge`** (`mergeParentChildRouteMatch`, `delegation_helpers.go` V4:117-142, V3:118-143). The parent path type is not checked.
 - Path: `path.Join(parent, child)`, keeping the child's path type. A nil child path counts as Prefix `""`. `path.Join` cleans the result, so `/api` + `/` gives `/api`.
-- Headers and query params: the union by name, the parent winning on a conflict, sorted by name (V4:146-196, V3:147-196).
+- Headers and query params: the union by name, the parent winning on a conflict, sorted by name (V4:146-196, V3:147-197).
 - Method: the parent's, if set.
 - Nothing is dropped.
 
@@ -312,7 +326,7 @@ kgateway keys a status report on (group, kind, namespace, name, sectionName) **a
 |---|---|---|
 | Top-level route, both | the parentRef as written | for every parentRef the translation reported |
 | Child with empty `parentRefs`, both | synthesized `{gateway.networking.k8s.io, HTTPRoute, P.namespace, P.name}` | yes, under the synthesized ref |
-| Child with an explicit permitting ref, 2.4 | the child's matching ref as written (`childParentRef`, `query/route.go` V4:300-310; reporter at `delegation.go` V4:81) | yes, under that ref |
+| Child with an explicit permitting ref, 2.4 | the child's first matching ref as written (`MatchingParentRef` via `childParentRef`, `query/route.go` V4:300-310; reporter at `delegation.go` V4:81) | yes, under that ref |
 | Child with an explicit permitting ref, 2.3 | always synthesized (`query/route.go` V3:252-259; reporter at `delegation.go` V3:83-88) | **only** when some spec ref has the same key: explicit group and kind, an **explicit** namespace equal to P's, and no sectionName. A port is allowed; the entry then carries it. |
 
 **Written versus resolved (our call).** A report key is built from the parentRef **as written**, with empty strings for omitted fields (`pkg/reports/reporter.go` V4:424-450, V3:369-394). Two refs that differ only by an omitted versus an explicit namespace are therefore two keys, and two checks. The resolved identity (defaults applied) is used only to find the target object. The typed views keep both forms for spec and status refs from sub-phase 2.2 on (design §4.1).
@@ -369,7 +383,7 @@ Individual rows keep their own outcomes. A row whose outcome the aggregated sign
 | Stale status | the signal exists and is stale | `pending`, "Waiting for the controller's status" | never. Phase 1's KGWUI-003 already reports status that stays stale. |
 | Trigger | a computed or orphan KGWUI-011 predicate holds (§9.3) | the check state is unaffected; maturity is tracked separately | never; it raises only KGWUI-011 |
 | Missing expected status | an entry is expected and this controller wrote none | `pending` until mature, then `disagrees` | `child-entry` only, when mature (§9.3). A missing entry on an owned top-level route, and a missing listener entry on an owned Gateway or ListenerSet (`pkg/health/checks.go:264`), is Phase 1's KGWUI-003, and the check stays `pending`. |
-| Unexpected status | no entry is expected and a current one exists | `disagrees` where the rule set marks the clearing as verified (both sets: a drop or deselection caused by a parent edit, D-021); otherwise, including a drop caused by a child edit, `not-verified`, "The controller may keep old status". Cause: a child edit when the child's current generation was first seen after the parent's current generation, or when either time is unknown; otherwise a parent edit (our call) | where verified, when mature |
+| Unexpected status | no entry is expected and a current one exists | `disagrees` after the 30 s window, for any cause of the drop or deselection: parent edit or child edit, both sets (observed 2026-10-26, D-021 amendment). A child that became `forbidden` is one such cause: its leftover entry is cleared too | when mature |
 | Compatible | the signal is consistent with the expectation | `checked`, with coverage (§8.4) | none |
 | Not observable | no signal can show it | `checked` with coverage `not-verified` | none |
 
@@ -394,8 +408,8 @@ A route list row merges the checks of written parentRefs that resolve to one par
 An aggregate (§8.2) is **complete** when every context that could contribute to it was evaluated. Positive evidence needs no completeness; negative evidence does.
 
 - **Uncertain points.** A cut by a compute bound (the (parent, ref) not flattened), a context or selection that is `unknown` (§3.3), and an owned top-level route whose root eligibility is unknown.
-- **Reach graph (the input).** The traversal produces, besides its outcomes, a graph of (route → permitted selected child) edges for **every** HTTPRoute in scope that has delegation refs, owned or not, kept or dropped, reached or not, computed from selection (§5.2) and permission (§5.3) alone, never from the matcher fit or the context. Edges below a non-owned or dropped route, and below a context or matcher cut, are therefore present. A selection that is itself uncertain (§3.3) marks its parent as an uncertain point instead of adding edges. Every route that uncertain selection might select (for a label ref under an unknown wildcard setting: every route with that label value, in any namespace) is itself an uncertain point, so it and everything it reaches are incomplete (our call). This graph is bounded by the selected-edge cap.
-- **Reach closure.** From each uncertain point, follow the reach graph: (parent → permitted selected child), transitively. This over-approximates every route the missing work could reach. It is linear in selected edges. If the edge cap itself was hit, every aggregate in the install is incomplete.
+- **Reach graph (the input).** The traversal produces, besides its outcomes, a graph of (route → permitted selected child) edges for **every** HTTPRoute in scope that has delegation refs, owned or not, kept or dropped, reached or not, computed from selection (§5.2) and permission (§5.3) alone, never from the matcher fit or the context. Edges below a non-owned or dropped route, and below a context or matcher cut, are therefore present. A selection that is itself uncertain (§3.3) marks its parent as an uncertain point instead of adding edges. Every route that uncertain selection might select (for a label ref under an unknown wildcard setting: every route with that label value outside the ref's own namespace, §5.2) is itself an uncertain point, so it and everything it reaches are incomplete (our call). This graph is bounded by the selected-edge cap.
+- **Reach closure.** From each uncertain point, follow the reach graph: (parent → permitted selected child), transitively. This over-approximates every route the missing work could reach. It is linear in selected edges. If the edge cap itself was hit, every aggregate in the install is incomplete. A root's uncertain report key (a parentRef whose view A outcome is unknown) is not an uncertain point: the evaluation below the root is the same under every key, so only the root's own aggregate under that key is incomplete **(our call, 2.4)**.
 - An aggregate whose child (for `child-entry`), parent P (for `parent-resolvedrefs`) or route (for KGWUI-011) is in a reach closure is **incomplete**. For the orphan trigger the aggregate is the route across **every** owned parent of this install that selects it; it is incomplete when the route, or any selecting parent, is in a reach closure. Completeness, and the conclusion it supports, are **install-local**: a parent of another install may still select the route, since an empty `parentRefs` list permits any parent (`utils/delegation/delegation.go` V4:25-27, V3:25-27).
 
 | Expectation | Needs completeness | If incomplete |
@@ -435,7 +449,7 @@ Each check kind has its own fingerprint: a hash over exactly the decoded inputs 
 | `listener-count` | the listener's spec (name, port, protocol, hostname, TLS mode, allowedRoutes); for a ListenerSet, its acceptance; each candidate route's kind, namespace, hostnames and parentRefs to this resource; candidate namespaces' labels when the listener uses `Selector`; the experimental setting | `attachedRoutes`; the listener conditions' `observedGeneration` |
 | `route-accepted` | the route's kind, namespace, hostnames and parentRefs to the resource; the resource's listener specs (as for `listener-count`); namespace labels when `Selector` is used | for the key: `Accepted` status, reason and `observedGeneration`, but the reason only when it is an attachment reason (another reason is compatible and is hashed as "other") |
 | `child-entry` | per contributing context: its incoming match and path; the child's matches, hostnames, parentRefs and inherit annotation; the ref; the wildcard setting; the aggregate's completeness | for the key: entry presence; `Accepted` status and `observedGeneration`, with the reason only when it is `UnsupportedValue`. **Not** `ResolvedRefs` or `Programmed`. |
-| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and `ExtensionRef` filters; the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
+| `parent-resolvedrefs` | per context with P's reporter key: its incoming match and path; every input of each selected child that can change whether it is kept, and so whether P records a failure: its rules' matches, hostnames, parentRefs, labels used by label refs, and the `inherit-parent-matcher` annotation; the ref; the wildcard setting; P's backendRef kinds and whether P has an `ExtensionRef` filter (not its target); the aggregate's completeness | for P's key: `ResolvedRefs` status, its reason when §8.2 compares it, and `observedGeneration`. **Not** `Accepted` or `Programmed`. |
 | `delegated-not-attached` | as `child-entry` | none |
 | `orphan-not-attached` | the route's `parentRefs` (empty or not); the set of owned parents and refs that select it; for each, the `child-entry` inputs of its contexts; completeness of every selecting parent | none |
 
@@ -465,7 +479,7 @@ The first task of sub-phase 2.1 records, on 2.3.11 and 2.4.7, whether status is 
 3. an explicit child whose parentRef sets `sectionName`, and one that sets only `port` (§7); **answered (D-021): as §7 states, on both.**
 4. an implicit child selected by name, wildcard and label; **answered (D-021): synthesized entry for each, on both.**
 5. a hostname-bearing child whose rules all fail the fit (§5.4); **answered (D-021): no entry, on both.**
-6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4? **Answered (D-021): yes, when a parent edit causes the drop; a child-edit drop is not observed.**
+6. a matcher-dropped child on 2.3: is old status cleared, as on 2.4? **Answered (D-021): yes, for any cause: parent edit, and child edit (observed 2026-10-26, D-021 amendment).**
 7. the two quirks of §5.4: a second delegation ref in one rule, and the same ref in two rules; **answered (D-021): both reproduce, on both.**
 8. a parent with both a Service backendRef and a delegation ref: which `ResolvedRefs` reason wins (§8.2)? **Answered (D-021): the last rule in spec order.**
 9. a child kept under one parent match and dropped under another: one entry (§8.2)? **Answered (D-021): one entry, `Accepted=True`.**
@@ -505,16 +519,18 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Hostname-bearing child that fits; one that does not | `rejected-hostnames`; `dropped` |
 | Cycle: the ref fails, its siblings drop, parent `RefNotPermitted` | as stated |
 | Diamond A→B1→C, A→B2→C | two child entries, one per parent |
-| The two quirks of §5.4 | as written, flagged |
+| The two quirks of §5.4 | as written (verified, D-021 item 7; no note) |
 | An owned parent not reached from a root | `not-reached`; selection still shown |
 | Dense selection: 100 wildcard parents over a namespace of 1,000 routes | `too-large` after the edge cap, deterministic cut |
-| Contexts per row above 20; retained contexts above 100,000 | `contextsTruncated`; outcomes unchanged |
+| Contexts per row above 20; retained contexts above 30,000 | `contextsTruncated`; outcomes unchanged |
 | One parent edge with 21 contexts; an edge from two rows, one truncated; an edge with no contexts kept at the install cap | `effective` edge has 20 contexts and `contextsTruncated`; flag set; `contexts: []` with `contextsTruncated` |
 | A cut after a context that drops C, before one that would attach it | row `unknown`, not `dropped`; `child-entry` incomplete, no KGWUI-012 on an existing entry; no computed KGWUI-011 |
 | A cut before any context reaches C, and an attached context already computed | row `attached`, "Some paths not computed"; entry expected |
 | A label ref with an unknown wildcard setting above C | C in the reach closure; negative checks `unknown` |
 | Root behind a `Selector` listener; caller denied that Namespace | every descendant context, row and effective matcher `restricted` |
 | Status root; caller denied the entry's target Gateway | descendants `restricted` |
+| Hidden ancestor route between a visible root and a visible child | the child's contexts, rows and effective matchers shown, with the ancestor's name and delegating match only (D-024) |
+| The install's discovery scope is unknown | every row and check `unknown`, `scope-unknown`; no KGWUI-011 or KGWUI-012 from views B and C (D-024) |
 | Two rows of one child under rules 0 and 1 | separate identities; both listed |
 | An effective matcher on the route page | equal to the one the traversal used in the same Model |
 | Default fit: each clause, raw prefix `/apiv2`, child path type ignored, omitted `matches` under `/api` | kept or the failing clause |
@@ -549,10 +565,9 @@ Each case is a fixture world (Gateways, ListenerSets, routes, Namespaces, settin
 | Computed-attached child, no entry, P current | `pending` until `max(since + 30 s, graceEnd)`, then KGWUI-012 on the child |
 | The same with P stale | stays `pending`; no KGWUI-012 |
 | Stale child entry contradicting | `pending`; never KGWUI-012 |
-| Matcher-dropped child (parent edit) with a current entry left, both sets | `disagrees` after 30 s |
-| Matcher-dropped child (child edit) with a current entry left | `not-verified`; no KGWUI-012 |
-| Drop with an unknown first-seen time for child or parent, current entry left | treated as a child edit: `not-verified`; no KGWUI-012 |
-| Forbidden child with a current entry left | `not-verified` |
+| Matcher-dropped child (parent edit or child edit) with a current entry left, both sets | `disagrees` after 30 s; KGWUI-012 (observed 2026-10-26, D-021 amendment) |
+| Drop with an unknown first-seen time for child or parent, current entry left | the same: `disagrees` after 30 s; the cause is not needed |
+| Forbidden child with a current entry left | `disagrees` after 30 s; KGWUI-012 (D-021 amendment, case 2) |
 | Effective matcher | always `not-verified` |
 
 ### 11.5 Persistence and deadlines (sub-phase 2.3; extended in 2.4)

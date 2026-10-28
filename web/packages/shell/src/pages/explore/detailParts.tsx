@@ -107,6 +107,14 @@ const TABS = [
   { id: "yaml", label: detailCopy.yaml },
 ];
 
+/** A page's own tab after Overview and YAML, e.g. the route's Delegation tab (`?tab=delegation`). */
+export interface ExtraTab {
+  id: string;
+  label: string;
+  /** Rendered only once data has loaded. */
+  content: ReactNode;
+}
+
 /** group/Kind/namespace/name, as the list endpoints take a parent (design §7.2). */
 export const refParam = (r: LinkedRef) => [r.group, r.kind, r.namespace ?? "", r.name].join("/");
 
@@ -120,14 +128,28 @@ interface DetailFrameProps {
   error?: ApiError;
   /** The Overview tab; rendered only once data has loaded. */
   children: ReactNode;
+  /** Tabs after YAML; a ?tab= naming none of them shows Overview. */
+  extraTabs?: ExtraTab[];
   stylesOverride?: SerializedStyles;
 }
 
 /** A detail page: candidate banner, header, Overview and YAML tabs (`?tab=yaml`), and the detail states (design §8.6). */
-export function DetailFrame({ installId, refValue, noun, data, error, children, stylesOverride }: DetailFrameProps) {
+export function DetailFrame({
+  installId,
+  refValue,
+  noun,
+  data,
+  error,
+  children,
+  extraTabs,
+  stylesOverride,
+}: DetailFrameProps) {
   const vocab = useVocabulary();
   const [params, update] = useUrlParams();
-  const tab = params.get("tab") === "yaml" ? "yaml" : "overview";
+  const tabs = useMemo(() => [...TABS, ...(extraTabs ?? []).map(({ id, label }) => ({ id, label }))], [extraTabs]);
+  const asked = params.get("tab");
+  const tab = tabs.find((t) => t.id === asked)?.id ?? "overview";
+  const extra = extraTabs?.find((t) => t.id === tab);
   const errorTitle = listCopy.cannotLoad(noun);
   const now = useNow();
   // Stale data or a failed poll turns every state on the page unknown, as on the lists (design §6.3).
@@ -148,7 +170,7 @@ export function DetailFrame({ installId, refValue, noun, data, error, children, 
       />
     );
   const overview = data ? (
-    children
+    (extra?.content ?? children)
   ) : error?.status === 503 ? (
     <PageState kind="connecting" title={vocab.connecting} message={error.message} />
   ) : error ? (
@@ -178,9 +200,9 @@ export function DetailFrame({ installId, refValue, noun, data, error, children, 
         </header>
         <DetailTabs
           label={detailCopy.views(refValue.kind)}
-          tabs={TABS}
+          tabs={tabs}
           selected={tab}
-          onSelect={(t) => update({ tab: t === "yaml" ? t : null })}
+          onSelect={(t) => update({ tab: t === "overview" ? null : t })}
         >
           {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
         </DetailTabs>

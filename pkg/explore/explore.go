@@ -50,6 +50,9 @@ const (
 	FlagDisagrees
 	// FlagListenerUnknown: a status-accepted parentRef whose outcome is unknown or has no listener.
 	FlagListenerUnknown
+	// FlagDropped: a view B row of an owned parent selects the route and is
+	// dropped, forbidden or rejected-hostnames (2.4).
+	FlagDropped
 )
 
 // flagNames are the wire names of design §6.1, in bit order.
@@ -66,6 +69,7 @@ var flagNames = []struct {
 	{FlagNoParent, "no-parent"},
 	{FlagDisagrees, "disagrees"},
 	{FlagListenerUnknown, "listener-unknown"},
+	{FlagDropped, "dropped"},
 }
 
 // ParseFlag returns the flag with wire name s.
@@ -144,6 +148,10 @@ type RouteRow struct {
 	Computed []RefFacts
 	// UnknownDeps are the dependencies of FlagListenerUnknown.
 	UnknownDeps DepSet
+	// DroppedDeps are the distinct Deps of the rows that set FlagDropped,
+	// which leave out the routes on their paths (D-024). The flag shows when
+	// any one of them is visible.
+	DroppedDeps []DepSet
 	// search is the lower-cased "namespace/name" and hostnames.
 	search string
 }
@@ -230,7 +238,28 @@ type Index struct {
 	Listeners map[ListenerKey]ListenerFacts
 	// RuleSet and RuleNote are view A's rule set and its selection label.
 	RuleSet, RuleNote string
-	admitted          map[objects.Ref]Admission
+	// DelegRows are view B's rows, sorted by (parent, rule, ref, child), each
+	// ref by (namespace, name, group, kind).
+	DelegRows []DelegRow
+	// Delegation maps a parent route to its rows, as DelegRows indexes in order.
+	Delegation map[objects.Ref][]int
+	// RefRows maps one delegation ref of a parent to its rows, as Delegation does.
+	RefRows map[RefKey][]int
+	// Effective is view C per child route.
+	Effective map[objects.Ref]EffectiveEntry
+	// RefScope is, per delegation ref, the routes its selection reads; a
+	// caller who cannot view them all sees the ref as selection-restricted.
+	RefScope map[RefKey]DepSet
+	// TooLarge holds the refs a compute cap (edges, contexts or matchers) cut;
+	// one with no rows reads too large to compute (rules §5.7, D-025).
+	TooLarge map[RefKey]bool
+	// Unreached maps a child route to its rows that no context reached and
+	// whose Deps, its parent's root eligibility, are not empty, as
+	// DelegRows indexes in order. Such a row has no effective edge.
+	Unreached map[objects.Ref][]int
+	// DelegationCap names the first compute cap views B and C hit, or "".
+	DelegationCap string
+	admitted      map[objects.Ref]Admission
 	// parentKinds are the served Gateway and ListenerSet kinds.
 	parentKinds map[objects.GroupKind]bool
 }
@@ -263,6 +292,33 @@ type ListenerFacts struct {
 	Check *computed.CheckResult
 }
 
+// DelegRow is one view B row (rules §5.5) with its dependencies interned.
+// Deps and ContextDeps, index-aligned with Contexts, leave out the routes on
+// each context's path, which never restrict (design §7.4 rule 4b, D-024).
+// Check is the row's child-entry check, joined by (child, parent, ChildKey);
+// nil when none.
+type DelegRow struct {
+	computed.Row
+	Deps        DepSet
+	ContextDeps []DepSet
+	Check       *computed.CheckResult
+}
+
+// EffectiveEntry is view C of one child (rules §6). EdgeDeps are index-aligned
+// with Edges and ContextDeps with each edge's Contexts; both leave out the
+// routes on the paths, as DelegRow's do.
+type EffectiveEntry struct {
+	computed.ChildEffective
+	EdgeDeps    []DepSet
+	ContextDeps [][]DepSet
+}
+
+// RefKey names one delegation ref of a parent route by rule and ref index.
+type RefKey struct {
+	Parent    objects.Ref
+	Rule, Ref int
+}
+
 // ListenerHit is one listener an accepted parentRef attaches to.
 type ListenerHit struct {
 	Listener  string
@@ -292,6 +348,12 @@ func (ix *Index) Facts(id RowID, l ParentLink) *RefFacts {
 // DupFacts returns view A's facts for l's spec index l.Dups[k], or nil.
 func (ix *Index) DupFacts(id RowID, l ParentLink, k int) *RefFacts {
 	return ix.Routes[id].facts(l.Dups[k], l.Target)
+}
+
+// SelectionHidden reports whether visible rejects a route that ref k's
+// selection reads: the ref is then selection-restricted (our call, 2.4).
+func (ix *Index) SelectionHidden(k RefKey, visible func(objects.Ref) bool) bool {
+	return visible != nil && !ix.Visible(ix.RefScope[k], visible)
 }
 
 // Ref returns the ref at index i of the dependency table.

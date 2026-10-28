@@ -25,6 +25,38 @@
         ]
       },
       {
+        "cycle": false,
+        "steps": [
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "link": "detail",
+              "name": "edge",
+              "namespace": "infra"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "loop",
+              "namespace": "shop"
+            }
+          },
+          {
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "detail",
+              "name": "mid",
+              "namespace": "shop"
+            }
+          }
+        ]
+      },
+      {
         "cycle": true,
         "steps": [
           {
@@ -92,7 +124,21 @@
         "cycle": false,
         "steps": [
           {
-            "restricted": true
+            "matches": [
+              {
+                "path": {
+                  "type": "PathPrefix",
+                  "value": "/api"
+                }
+              }
+            ],
+            "ref": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "HTTPRoute",
+              "link": "none",
+              "name": "top1",
+              "namespace": "shop"
+            }
           },
           {
             "ref": {
@@ -106,7 +152,7 @@
         ]
       }
     ],
-    "ancestorsTruncated": false,
+    "ancestorsTruncated": true,
     "annotations": {},
     "attachments": [
       {
@@ -139,9 +185,6 @@
                 "rules": "kgateway-2.4",
                 "state": "checked"
               },
-              "effectiveHostnames": [
-                "mid.example.com"
-              ],
               "listener": "http",
               "resource": {
                 "group": "gateway.networking.k8s.io",
@@ -166,11 +209,341 @@
     "childCount": 1,
     "collectedAt": "2026-10-17T12:00:00Z",
     "declaredCount": 1,
-    "generation": 1,
-    "health": "healthy",
-    "hostnames": [
-      "mid.example.com"
+    "effective": [
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/api"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/api"
+                    }
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "kept": false,
+                "matches": [],
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
+              },
+              {
+                "index": 2,
+                "kept": false,
+                "matches": [],
+                "reason": "path / is outside the parent's /api"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "loop",
+          "namespace": "shop"
+        }
+      },
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/api"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/api"
+                    }
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "kept": false,
+                "matches": [],
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
+              },
+              {
+                "index": 2,
+                "kept": false,
+                "matches": [],
+                "reason": "path / is outside the parent's /api"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top1",
+          "namespace": "shop"
+        }
+      },
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/api"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/api"
+                    }
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "kept": false,
+                "matches": [],
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
+              },
+              {
+                "index": 2,
+                "kept": false,
+                "matches": [],
+                "reason": "path / is outside the parent's /api"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top2",
+          "namespace": "shop"
+        }
+      },
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/api"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/api"
+                    }
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "kept": false,
+                "matches": [],
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
+              },
+              {
+                "index": 2,
+                "kept": false,
+                "matches": [],
+                "reason": "path / is outside the parent's /api"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top3",
+          "namespace": "shop"
+        }
+      },
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/api"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/api"
+                    }
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "kept": false,
+                "matches": [],
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
+              },
+              {
+                "index": 2,
+                "kept": false,
+                "matches": [],
+                "reason": "path / is outside the parent's /api"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "top4",
+          "namespace": "shop"
+        }
+      },
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/api"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": true,
+                "matches": [
+                  {
+                    "path": {
+                      "type": "PathPrefix",
+                      "value": "/api"
+                    }
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "kept": false,
+                "matches": [],
+                "reason": "no matches, so it defaults to /, which is outside the parent's /api"
+              },
+              {
+                "index": 2,
+                "kept": false,
+                "matches": [],
+                "reason": "path / is outside the parent's /api"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "top5",
+          "namespace": "shop"
+        }
+      }
     ],
+    "generation": 1,
+    "health": "error",
+    "hostnames": [],
     "install": "kgw.kgateway",
     "parentRefs": [
       {
@@ -281,9 +654,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -327,9 +700,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -373,9 +746,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -419,9 +792,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -465,9 +838,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -511,9 +884,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -557,9 +930,9 @@
             "lastTransitionTime": "2026-10-17T11:00:00Z",
             "message": "",
             "observedGeneration": 1,
-            "reason": "ResolvedRefs",
+            "reason": "BackendNotFound",
             "stale": false,
-            "status": "True",
+            "status": "False",
             "type": "ResolvedRefs"
           },
           {
@@ -602,9 +975,16 @@
         "backendRefs": [
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "rules": "kgateway-2.4",
+                "state": "restricted"
+              },
               "mode": "name",
               "name": "child",
               "namespace": "shop",
+              "selected": 0,
               "state": "restricted"
             },
             "filters": [],
@@ -620,9 +1000,20 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "status-compatible"
+                ],
+                "rule": "delegation",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
               "mode": "name",
               "name": "declared",
               "namespace": "shop",
+              "selected": 1,
               "state": "not-reported"
             },
             "filters": [],
@@ -638,9 +1029,20 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "coverage": [
+                  "not-verified"
+                ],
+                "rule": "delegation",
+                "rules": "kgateway-2.4",
+                "state": "checked"
+              },
               "mode": "name",
               "name": "ghost",
               "namespace": "shop",
+              "selected": 0,
               "state": "not-found"
             },
             "filters": [],
@@ -656,8 +1058,15 @@
           },
           {
             "delegation": {
+              "attached": 1,
+              "computed": {
+                "by": "ui",
+                "rules": "kgateway-2.4",
+                "state": "restricted"
+              },
               "mode": "wildcard",
-              "namespace": "shop"
+              "namespace": "shop",
+              "selected": 5
             },
             "filters": [],
             "ref": {
@@ -672,9 +1081,16 @@
           },
           {
             "delegation": {
+              "attached": 0,
+              "computed": {
+                "by": "ui",
+                "rules": "kgateway-2.4",
+                "state": "restricted"
+              },
               "label": "team",
               "mode": "label",
-              "namespace": "shop"
+              "namespace": "shop",
+              "selected": 0
             },
             "filters": [],
             "ref": {

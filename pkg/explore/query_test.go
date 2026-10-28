@@ -887,3 +887,195 @@ func TestQueryRoutesClearsBufferOnPanic(t *testing.T) {
 		}
 	}
 }
+
+func mustDeleg(t *testing.T, ix *Index, parent objects.Ref, q DelegationQuery, visible func(objects.Ref) bool) Page {
+	t.Helper()
+	p, err := ix.QueryDelegation(parent, q, visible)
+	if err != nil {
+		t.Fatalf("QueryDelegation(%v, %+v): %v", parent, q, err)
+	}
+	return p
+}
+
+// dpage renders a delegation page's rows as delegNames does.
+func dpage(ix *Index, p Page) []string {
+	ids := make([]int, len(p.IDs))
+	for i, id := range p.IDs {
+		ids[i] = int(id)
+	}
+	return delegNames(ix, ids)
+}
+
+var allOfA = []string{"0.0:-", "0.1:k1", "0.1:k2", "1.0:k1", "1.0:k2"}
+
+// Design §9.1: pages that end between two rows of one child under
+// different rules or refs; next returns the rest and prev the same set.
+func TestDelegationCursorBetweenRowsOfOneChild(t *testing.T) {
+	ix := buildDeleg(t)
+	p := mustDeleg(t, ix, dA, DelegationQuery{Limit: 2, Cursor: mustDeleg(t, ix, dA, DelegationQuery{Limit: 2}, nil).Next}, nil)
+	if got := dpage(ix, p); !slices.Equal(got, []string{"0.1:k2", "1.0:k1"}) || p.Total != 5 {
+		t.Fatalf("second page %v total %d", got, p.Total)
+	}
+	for limit := 1; limit <= 5; limit++ {
+		var fwd []string
+		q := DelegationQuery{Limit: limit}
+		var last Page
+		for {
+			last = mustDeleg(t, ix, dA, q, nil)
+			fwd = append(fwd, dpage(ix, last)...)
+			if q.Cursor = last.Next; q.Cursor == "" {
+				break
+			}
+		}
+		if !slices.Equal(fwd, allOfA) {
+			t.Errorf("limit %d forward %v", limit, fwd)
+		}
+		back := dpage(ix, last)
+		for q.Cursor = last.Prev; q.Cursor != ""; q.Cursor = last.Prev {
+			last = mustDeleg(t, ix, dA, q, nil)
+			back = append(dpage(ix, last), back...)
+		}
+		if !slices.Equal(back, allOfA) {
+			t.Errorf("limit %d backward %v", limit, back)
+		}
+	}
+}
+
+// An anchor row deleted in the next Model: next starts where its tuple sorts.
+func TestDelegationCursorAnchorGone(t *testing.T) {
+	first := mustDeleg(t, buildDeleg(t), dA, DelegationQuery{Limit: 2}, nil)
+	third := mustDeleg(t, buildDeleg(t), dA, DelegationQuery{Limit: 1, Cursor: first.Next}, nil)
+	in := delegWorld().input(t)
+	v := delegViews()
+	v.Delegation.Rows = slices.Delete(v.Delegation.Rows, 1, 2) // (a, 0, 1, k1), first's last row
+	in.Computed = v
+	ix := Build(in)
+	if p := mustDeleg(t, ix, dA, DelegationQuery{Limit: 2, Cursor: first.Next}, nil); !slices.Equal(dpage(ix, p), []string{"0.1:k2", "1.0:k1"}) {
+		t.Errorf("next after a deleted anchor %v", dpage(ix, p))
+	}
+	// third.Prev is anchored at (a, 0, 1, k2); before it now is only the no-child row.
+	if p := mustDeleg(t, ix, dA, DelegationQuery{Limit: 2, Cursor: third.Prev}, nil); !slices.Equal(dpage(ix, p), []string{"0.0:-"}) || p.Prev != "" || p.Next == "" {
+		t.Errorf("prev %v prev %q next %q", dpage(ix, p), p.Prev, p.Next)
+	}
+}
+
+func TestDelegationFilters(t *testing.T) {
+	ix := buildDeleg(t)
+	one, zero, neg := 1, 0, -1
+	for _, tc := range []struct {
+		name string
+		q    DelegationQuery
+		want []string
+	}{
+		{"all", DelegationQuery{}, allOfA},
+		{"rule", DelegationQuery{Rule: &one}, []string{"1.0:k1", "1.0:k2"}},
+		{"ref", DelegationQuery{Ref: &one}, []string{"0.1:k1", "0.1:k2"}},
+		{"rule and ref", DelegationQuery{Rule: &zero, Ref: &zero}, []string{"0.0:-"}},
+		{"outcomes OR", DelegationQuery{Outcomes: []computed.RowOutcome{computed.OutcomeForbidden, computed.OutcomeDropped}}, []string{"0.1:k2", "1.0:k1", "1.0:k2"}},
+		{"outcome and rule", DelegationQuery{Rule: &one, Outcomes: []computed.RowOutcome{computed.OutcomeDropped}}, []string{"1.0:k1"}},
+	} {
+		if p := mustDeleg(t, ix, dA, tc.q, nil); !slices.Equal(dpage(ix, p), tc.want) || p.Total != len(tc.want) {
+			t.Errorf("%s: %v total %d, want %v", tc.name, dpage(ix, p), p.Total, tc.want)
+		}
+	}
+	if p := mustDeleg(t, ix, routeRef("shop", "none"), DelegationQuery{}, nil); len(p.IDs) != 0 || p.Total != 0 {
+		t.Errorf("a parent with no rows: %+v", p)
+	}
+	routesCur := mustRoutes(t, ix, Query{Limit: 1}, nil).Next
+	delegCur := mustDeleg(t, ix, dA, DelegationQuery{Limit: 1}, nil).Next
+	enc := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+	for _, tc := range []struct {
+		name string
+		q    DelegationQuery
+		want error
+	}{
+		{"object-list cursor", DelegationQuery{Cursor: routesCur}, ErrBadCursor},
+		{"garbage", DelegationQuery{Cursor: "!!"}, ErrBadCursor},
+		{"one index", DelegationQuery{Cursor: enc(`{"s":"delegation","d":"asc","b":false,"r":[0],"t":["","","",""]}`)}, ErrBadCursor},
+		{"negative index", DelegationQuery{Cursor: enc(`{"s":"delegation","d":"asc","b":false,"r":[0,-1],"t":["","","",""]}`)}, ErrBadCursor},
+		{"descending", DelegationQuery{Cursor: enc(`{"s":"delegation","d":"desc","b":false,"r":[0,0],"t":["","","",""]}`)}, ErrBadCursor},
+		{"half a child", DelegationQuery{Cursor: enc(`{"s":"delegation","d":"asc","b":false,"r":[0,0],"t":["shop","","",""]}`)}, ErrBadCursor},
+		{"sort value", DelegationQuery{Cursor: enc(`{"s":"delegation","d":"asc","b":false,"v":1,"r":[0,0],"t":["","","",""]}`)}, ErrBadCursor},
+		{"limit", DelegationQuery{Limit: 201}, ErrBadQuery},
+		{"negative rule", DelegationQuery{Rule: &neg}, ErrBadQuery},
+		{"outcome", DelegationQuery{Outcomes: []computed.RowOutcome{"maybe"}}, ErrBadQuery},
+	} {
+		if _, err := ix.QueryDelegation(dA, tc.q, nil); !errors.Is(err, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, err, tc.want)
+		}
+	}
+	if _, err := ix.QueryDelegation(dA, DelegationQuery{Cursor: enc(`{"s":"delegation","d":"asc","b":false,"r":[0,0],"t":["","","",""]}`)}, nil); err != nil {
+		t.Errorf("a no-child anchor: %v", err)
+	}
+	if _, err := ix.QueryRoutes(Query{Cursor: delegCur}, nil); !errors.Is(err, ErrBadCursor) {
+		t.Errorf("a delegation cursor on routes: %v", err)
+	}
+}
+
+// Design §7.4 rule 4a: outcome= needs the row's deps visible; routes on its
+// path are not hidden deps (rule 4b, D-024).
+func TestOutcomeFilterUsesVisibleDeps(t *testing.T) {
+	ix := buildDeleg(t)
+	noNS := func(r objects.Ref) bool { return r.Kind != "Namespace" }
+	noA := func(r objects.Ref) bool { return r != dA && r != k1 }
+	dropped := DelegationQuery{Outcomes: []computed.RowOutcome{computed.OutcomeDropped}}
+	if p := mustDeleg(t, ix, dA, dropped, nil); !slices.Equal(dpage(ix, p), []string{"0.1:k2", "1.0:k1"}) || p.Total != 2 {
+		t.Errorf("AllowAll: %v total %d", dpage(ix, p), p.Total)
+	}
+	if p := mustDeleg(t, ix, dA, dropped, noNS); !slices.Equal(dpage(ix, p), []string{"0.1:k2"}) || p.Total != 1 {
+		t.Errorf("hidden Namespace: %v total %d", dpage(ix, p), p.Total)
+	}
+	// Unfiltered, the row is listed; its deps say it is restricted.
+	p := mustDeleg(t, ix, dA, DelegationQuery{}, noNS)
+	if !slices.Equal(dpage(ix, p), allOfA) || p.Total != 5 {
+		t.Fatalf("unfiltered: %v total %d", dpage(ix, p), p.Total)
+	}
+	if r := &ix.DelegRows[p.IDs[3]]; ix.Visible(r.Deps, noNS) || !ix.Visible(ix.DelegRows[p.IDs[2]].Deps, noNS) {
+		t.Errorf("row deps visibility")
+	}
+	// Under hidden ancestor routes a and k1, k3's row still matches.
+	if p := mustDeleg(t, ix, k1, dropped, noA); !slices.Equal(dpage(ix, p), []string{"0.0:k3"}) || p.Total != 1 {
+		t.Errorf("hidden ancestors: %v total %d", dpage(ix, p), p.Total)
+	}
+}
+
+// A row with no child is never dropped for child visibility; rows whose
+// child is hidden are, before total (rule 3).
+func TestUnresolvedRowSurvivesAuthorization(t *testing.T) {
+	ix := buildDeleg(t)
+	noKids := func(r objects.Ref) bool { return r != k1 && r != k2 && r != k3 }
+	if p := mustDeleg(t, ix, dA, DelegationQuery{}, noKids); !slices.Equal(dpage(ix, p), []string{"0.0:-"}) || p.Total != 1 {
+		t.Errorf("hidden children: %v total %d", dpage(ix, p), p.Total)
+	}
+	unresolved := DelegationQuery{Outcomes: []computed.RowOutcome{computed.OutcomeUnresolved}}
+	if p := mustDeleg(t, ix, dA, unresolved, noKids); !slices.Equal(dpage(ix, p), []string{"0.0:-"}) || p.Total != 1 {
+		t.Errorf("outcome=unresolved: %v total %d", dpage(ix, p), p.Total)
+	}
+	if p := mustDeleg(t, ix, k1, DelegationQuery{}, noKids); len(p.IDs) != 0 || p.Total != 0 {
+		t.Errorf("k1's hidden child: %v total %d", dpage(ix, p), p.Total)
+	}
+}
+
+// Design §7.4 rule 4b, second clause: a status root's hidden target Gateway
+// still restricts its rows, while the root route itself does not.
+func TestStatusRootTargetRestricts(t *testing.T) {
+	in := delegWorld().input(t)
+	v := delegViews()
+	// b is a status root: its deps are b and the target of its Accepted entry.
+	v.Delegation.Rows[5] = drow(dB, 0, 0, k1, computed.OutcomeDropped, dB, gwObj)
+	in.Computed = v
+	ix := Build(in)
+	dropped := DelegationQuery{Outcomes: []computed.RowOutcome{computed.OutcomeDropped}}
+	noB := func(r objects.Ref) bool { return r != dB }
+	if p := mustDeleg(t, ix, dB, dropped, noB); !slices.Equal(dpage(ix, p), []string{"0.0:k1"}) || p.Total != 1 {
+		t.Errorf("hidden root route: %v total %d", dpage(ix, p), p.Total)
+	}
+	noGW := func(r objects.Ref) bool { return r != gwObj }
+	if p := mustDeleg(t, ix, dB, dropped, noGW); len(p.IDs) != 0 || p.Total != 0 {
+		t.Errorf("hidden target Gateway: %v total %d", dpage(ix, p), p.Total)
+	}
+	p := mustDeleg(t, ix, dB, DelegationQuery{}, noGW)
+	if !slices.Equal(dpage(ix, p), []string{"0.0:k1"}) || ix.Visible(ix.DelegRows[p.IDs[0]].Deps, noGW) {
+		t.Errorf("unfiltered: %v, want the row listed as restricted", dpage(ix, p))
+	}
+}

@@ -1,0 +1,48 @@
+# An owned parent not reached from a root (rules §3.3, §5.1): p is owned through its leftover
+# entry under r, but r no longer selects it. p's row keeps its selection and is unknown,
+# not-reached.
+provenance: computed-rules §3.3, §5.1, §11.2
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, apps: {}, mid: {}, leaf: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /x}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: x, namespace: apps}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: x, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /x/1}}]}]}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p, namespace: mid}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /p}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: leaf}]
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: leaf},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /p/c}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/x: {outcome: attached}
+    mid/p 0.0 leaf/c: {outcome: unknown, unknown: not-reached}
+  entries:
+    "apps/x {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    apps/x <- infra/r: {contexts: [r0 PathPrefix /x/1]}

@@ -1,0 +1,188 @@
+{
+  "body": {
+    "checks": [
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "cluster access",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "served kinds",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "controller scope",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "controller pods",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "resource status",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "gateway proxies",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "xDS rejects",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "watched namespaces",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "gateway ownership",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "scope matches controller",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "backend status",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "computed views",
+        "ok": true,
+        "required": false
+      }
+    ],
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "counts": {
+      "error": 2,
+      "warning": 4
+    },
+    "findings": [
+      {
+        "code": "KGWUI-002",
+        "install": "kgw.kgateway",
+        "message": "",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "hp",
+          "namespace": "shop"
+        },
+        "restricted": true,
+        "severity": "error",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-002",
+        "detail": "A delegating rule selects no child route the controller accepted; ResolvedRefs=False, reason BackendNotFound (parent Gateway infra/edge section sel)",
+        "install": "kgw.kgateway",
+        "message": "A delegating rule has no accepted child route",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "api",
+          "namespace": "zoned"
+        },
+        "severity": "error",
+        "since": "2026-10-17T11:00:00Z",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-004",
+        "detail": "targets Gateway infra/edge",
+        "install": "kgw.kgateway",
+        "message": "Namespace not watched by the controller",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "posts",
+          "namespace": "blog"
+        },
+        "severity": "warning",
+        "slug": "namespace-not-watched"
+      },
+      {
+        "code": "KGWUI-011",
+        "detail": "Details depend on objects you cannot view",
+        "evidenceRestricted": true,
+        "install": "kgw.kgateway",
+        "message": "No status for the named parent route",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "d",
+          "namespace": "zoned"
+        },
+        "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
+        "slug": "delegated-route-not-attached"
+      },
+      {
+        "code": "KGWUI-012",
+        "detail": "Status entry for parent HTTPRoute `shop/hp` at `PathPrefix /rb/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
+        "install": "kgw.kgateway",
+        "message": "The UI's computed view disagrees with the controller",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "e",
+          "namespace": "shop"
+        },
+        "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
+        "slug": "computed-view-disagrees"
+      },
+      {
+        "code": "KGWUI-012",
+        "detail": "Details depend on objects you cannot view",
+        "evidenceRestricted": true,
+        "install": "kgw.kgateway",
+        "message": "The UI's computed view disagrees with the controller",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "c",
+          "namespace": "zoned"
+        },
+        "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
+        "slug": "computed-view-disagrees"
+      }
+    ],
+    "install": "kgw.kgateway",
+    "state": "error"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

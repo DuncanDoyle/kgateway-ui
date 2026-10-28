@@ -1,0 +1,42 @@
+# Contexts per row above the cap (rules §5.7, bounds ContextsPerRow 2): c fits all three of r's
+# matches, so its row keeps two contexts and is truncated; the outcome still aggregates all three.
+# The effective edge carries the row's flag.
+provenance: computed-rules §5.7, §11.2
+ruleOnly: true
+controllerVersion: v2.3.11
+bounds: {ContextsPerRow: 2}
+namespaces: {infra: {}, apps: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches:
+      - {path: {type: PathPrefix, value: /a}}
+      - {path: {type: PathPrefix, value: /a}, headers: [{name: h1, value: "1"}]}
+      - {path: {type: PathPrefix, value: /a}, headers: [{name: h2, value: "2"}]}
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: apps}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: apps},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /a/x}, headers: [{name: h1, value: "1"}, {name: h2, value: "2"}]}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 apps/c: {outcome: attached, contexts: 2, contextsTruncated: true}
+  entries:
+    "apps/c {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  effective:
+    apps/c <- infra/r:
+      contexts: [r0 PathPrefix /a/x h:h1=1 h:h2=2, r0 PathPrefix /a/x h:h1=1 h:h2=2]
+      contextsTruncated: true

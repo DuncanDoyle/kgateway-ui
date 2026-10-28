@@ -66,7 +66,7 @@ func Evaluate(in Input, checks []Check) Report {
 			r.Findings = append(r.Findings, f)
 		}
 	}
-	slices.SortStableFunc(r.Findings, compareFindings)
+	r.Findings = sortFindings(r.Findings)
 	for _, f := range r.Findings {
 		r.Counts[f.Severity]++
 	}
@@ -74,15 +74,44 @@ func Evaluate(in Input, checks []Check) Report {
 	return r
 }
 
+// sortFindings returns fs sorted stably by compareFindings. It sorts
+// pointers, as moving a whole Finding per swap dominated a large report's sort.
+func sortFindings(fs []Finding) []Finding {
+	ps := make([]*Finding, len(fs))
+	for i := range fs {
+		ps[i] = &fs[i]
+	}
+	slices.SortStableFunc(ps, func(a, b *Finding) int { return compareFindings(*a, *b) })
+	sorted := make([]Finding, len(fs))
+	for i, p := range ps {
+		sorted[i] = *p
+	}
+	return sorted
+}
+
+// compareFindings orders by severity, code, resource, parentRef, message and
+// detail. Each key is compared only when the earlier ones tie.
 func compareFindings(a, b Finding) int {
-	return cmp.Or(
-		cmp.Compare(rank(a.Severity), rank(b.Severity)),
-		cmp.Compare(a.Code, b.Code),
-		compareOptRefs(a.Resource, b.Resource),
-		compareParents(a.parent, b.parent),
-		cmp.Compare(a.Message, b.Message),
-		cmp.Compare(a.Detail, b.Detail),
-	)
+	if a.Severity != b.Severity {
+		if c := cmp.Compare(rank(a.Severity), rank(b.Severity)); c != 0 {
+			return c
+		}
+	}
+	if c := cmp.Compare(a.Code, b.Code); c != 0 {
+		return c
+	}
+	if c := compareOptRefs(a.Resource, b.Resource); c != 0 {
+		return c
+	}
+	if a.parent != nil || b.parent != nil {
+		if c := compareParents(a.parent, b.parent); c != 0 {
+			return c
+		}
+	}
+	if c := cmp.Compare(a.Message, b.Message); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Detail, b.Detail)
 }
 
 // compareOptRefs orders findings without a resource first.

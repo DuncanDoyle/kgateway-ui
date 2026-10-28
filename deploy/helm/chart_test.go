@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
@@ -280,5 +282,53 @@ func TestExtraArgsAppended(t *testing.T) {
 	got := containerArgs(t, "--set", "install.pin=kgw/kgateway", "--set", "extraArgs={--poll-interval=10m}")
 	if want := []string{"--listen=:8080", "--install=kgw/kgateway", "--poll-interval=10m"}; !slices.Equal(got, want) {
 		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+func TestDelegationEdgeCapPassedAsFlag(t *testing.T) {
+	if got := containerArgs(t); slices.ContainsFunc(got, func(a string) bool { return strings.HasPrefix(a, "--delegation-edge-cap") }) {
+		t.Errorf("no edge cap flag by default: %v", got)
+	}
+	got := containerArgs(t, "--set", "delegation.edgeCap=20000", "--set", "extraArgs={--poll-interval=10m}")
+	if want := []string{"--listen=:8080", "--delegation-edge-cap=20000", "--poll-interval=10m"}; !slices.Equal(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+// containerEnv is the UI container's env as rendered with args.
+func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
+	t.Helper()
+	ds := kind(render(t, args...), "Deployment")
+	if len(ds) != 1 {
+		t.Fatalf("want 1 Deployment, got %d", len(ds))
+	}
+	b, _ := yaml.Marshal(ds[0])
+	var d appsv1.Deployment
+	if err := yaml.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	return d.Spec.Template.Spec.Containers[0].Env
+}
+
+// The container's memory limit reaches the binary as KGWUI_MEMORY_LIMIT, and
+// the chart sets no GOMEMLIMIT of its own (D-025).
+func TestMemoryLimitEnv(t *testing.T) {
+	named := func(n string) func(corev1.EnvVar) bool { return func(e corev1.EnvVar) bool { return e.Name == n } }
+	env := containerEnv(t)
+	i := slices.IndexFunc(env, named("KGWUI_MEMORY_LIMIT"))
+	if i < 0 {
+		t.Fatalf("no KGWUI_MEMORY_LIMIT with the default 512Mi limit: %+v", env)
+	}
+	f := env[i].ValueFrom
+	if env[i].Value != "" || f == nil || f.ResourceFieldRef == nil || f.ResourceFieldRef.Resource != "limits.memory" ||
+		f.ResourceFieldRef.ContainerName != "kgateway-ui" || f.ResourceFieldRef.Divisor.String() != "1" {
+		t.Fatalf("KGWUI_MEMORY_LIMIT must be the container's limits.memory in bytes: %+v", env[i])
+	}
+	if slices.ContainsFunc(env, named("GOMEMLIMIT")) {
+		t.Fatalf("the chart must not set GOMEMLIMIT: %+v", env)
+	}
+	env = containerEnv(t, "--set", "resources.limits.memory=null")
+	if slices.ContainsFunc(env, named("KGWUI_MEMORY_LIMIT")) {
+		t.Fatalf("KGWUI_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
 	}
 }

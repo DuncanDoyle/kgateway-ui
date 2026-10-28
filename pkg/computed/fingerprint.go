@@ -56,6 +56,42 @@ func (p *printer) strs(s []string) {
 	}
 }
 
+// ref writes an object reference.
+func (p *printer) ref(r objects.Ref) {
+	p.str(r.Group)
+	p.str(r.Kind)
+	p.str(r.Namespace)
+	p.str(r.Name)
+}
+
+// reportKey writes a report key.
+func (p *printer) reportKey(k ReportKey) {
+	p.str(k.Group)
+	p.str(k.Kind)
+	p.str(k.Namespace)
+	p.str(k.Name)
+	p.str(k.SectionName)
+}
+
+// match writes an HTTPRouteMatch: path (nil or type and value), headers,
+// query params and method.
+func (p *printer) match(m objects.Match) {
+	p.flag(m.Path != nil)
+	if m.Path != nil {
+		p.str(m.Path.Type)
+		p.str(m.Path.Value)
+	}
+	for _, kms := range [][]objects.KeyMatch{m.Headers, m.QueryParams} {
+		p.num(int64(len(kms)))
+		for _, km := range kms {
+			p.str(km.Type)
+			p.str(km.Name)
+			p.str(km.Value)
+		}
+	}
+	p.str(m.Method)
+}
+
 // labels writes a label map in key order.
 func (p *printer) labels(m map[string]string) {
 	p.keys = p.keys[:0]
@@ -194,4 +230,121 @@ func minObserved(cs []metav1.Condition) int64 {
 		m = min(m, c.ObservedGeneration)
 	}
 	return m
+}
+
+// setting writes a setting's value and whether it is known.
+func (p *printer) setting(s install.Setting) {
+	p.flag(s.Known)
+	p.str(s.Value)
+}
+
+// delegationRef writes a delegation ref as written.
+func (p *printer) delegationRef(d objects.DelegationRef) {
+	p.str(string(d.Mode))
+	p.str(d.Namespace)
+	p.str(d.Name)
+	p.str(d.Label)
+}
+
+// writtenRef writes a parentRef as written, port included.
+func (p *printer) writtenRef(w objects.WrittenRef) {
+	p.str(w.Group)
+	p.str(w.Kind)
+	p.str(w.Namespace)
+	p.str(w.Name)
+	p.str(w.SectionName)
+	p.flag(w.PortSet)
+	p.num(int64(w.Port))
+}
+
+// childRoute writes what decides a delegated child's outcome and report key
+// (rules §9.2): its rules' matches, hostnames, parentRefs as written and the
+// inherit-parent-matcher annotation.
+func (p *printer) childRoute(v *objects.HTTPRouteView) {
+	p.num(int64(len(v.Rules)))
+	for _, r := range v.Rules {
+		// An omitted list and an explicit empty one differ (rules §6).
+		p.flag(r.Matches != nil)
+		p.num(int64(len(r.Matches)))
+		for _, m := range r.Matches {
+			p.match(m)
+		}
+	}
+	p.strs(v.Hostnames)
+	p.num(int64(len(v.WrittenRefs)))
+	for _, w := range v.WrittenRefs {
+		p.writtenRef(w)
+	}
+	p.flag(v.InheritParentMatcher)
+}
+
+// childEntryPrint is the child-entry fingerprint (rules §9.2). digest sums
+// the contributing rows' ContextDigest, so unretained contexts count; child
+// is the child's input hash and refs that of the rows' refs; e is the
+// child's entry under the key, or nil. Not ResolvedRefs or Programmed.
+func childEntryPrint(p *printer, child, refs, digest uint64, wildcard install.Setting, incomplete bool, e *objects.RouteParentStatus) uint64 {
+	p.start()
+	p.u64(digest)
+	p.u64(child)
+	p.u64(refs)
+	p.setting(wildcard)
+	p.flag(incomplete)
+	p.flag(e != nil)
+	if e != nil {
+		acc := objects.FindCondition(e.Conditions, "Accepted")
+		p.flag(acc != nil)
+		if acc != nil {
+			p.str(string(acc.Status))
+			// Only the hostname stage's reason is compared.
+			p.flag(acc.Reason == reasonUnsupportedValue)
+		}
+		p.num(entryGeneration(e, acc))
+	}
+	return p.sum()
+}
+
+// parentResolvedRefsPrint is the parent-resolvedrefs fingerprint (rules
+// §9.2). digest sums the KeyDigests of the parent's rows under the key; refs
+// hashes the rows' refs and each selected child's inputs; v is the parent,
+// read for its backendRef kinds and whether it has ExtensionRef filters; e is its entry
+// under the key, whose ResolvedRefs reason is read only when compared. Not
+// Accepted or Programmed.
+func parentResolvedRefsPrint(p *printer, v *objects.HTTPRouteView, digest, refs uint64, wildcard install.Setting,
+	incomplete bool, e *objects.RouteParentStatus, reason bool,
+) uint64 {
+	p.start()
+	p.u64(digest)
+	p.u64(refs)
+	p.setting(wildcard)
+	p.flag(incomplete)
+	if v != nil {
+		for _, r := range v.Rules {
+			p.num(int64(r.Index))
+			p.extensionRefs(r.Filters)
+			for _, b := range r.BackendRefs {
+				p.str(b.Ref.Group)
+				p.str(b.Ref.Kind)
+				p.extensionRefs(b.Filters)
+			}
+		}
+	}
+	var rr *metav1.Condition
+	if e != nil {
+		rr = objects.FindCondition(e.Conditions, "ResolvedRefs")
+	}
+	p.flag(rr != nil)
+	if rr != nil {
+		p.str(string(rr.Status))
+		if reason {
+			p.str(rr.Reason)
+		}
+		p.num(rr.ObservedGeneration)
+	}
+	return p.sum()
+}
+
+// extensionRefs writes whether fs has an ExtensionRef filter: the
+// expectation reads only that, not the target (rules §8.2).
+func (p *printer) extensionRefs(fs []objects.Filter) {
+	p.flag(slices.ContainsFunc(fs, extensionRef))
 }

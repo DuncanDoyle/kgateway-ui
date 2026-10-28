@@ -1,0 +1,49 @@
+# Ancestor-pruned parent match (rules §5.1, §5.4): r's fit reduces p's rule to /api, so c
+# (/other/item) is dropped in the only context although p also matches /other. p then has no
+# valid child: ResolvedRefs=False/BackendNotFound under its key. p's entry is hand-written.
+provenance: computed-rules §5.1, §5.4, §11.2; e2e
+ruleOnly: true
+controllerVersion: v2.4.7
+namespaces: {infra: {}, mid: {}, leaf: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /api}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: mid}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p, namespace: mid}
+  spec:
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /api}}, {path: {type: PathPrefix, value: /other}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: c, namespace: leaf}]
+  status: {parents: [{controllerName: kgateway.dev/kgateway, parentRef: {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra},
+    conditions: [{type: Accepted, status: "True", reason: Accepted, observedGeneration: 1}]}]}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: c, namespace: leaf},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /other/item}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/r #0": {outcome: accepted}
+  rows:
+    infra/r 0.0 mid/p: {outcome: attached}
+    mid/p 0.0 leaf/c: {outcome: dropped, reason: path-prefix, paths: [infra/r PathPrefix /api > mid/p PathPrefix /api]}
+  entries:
+    "mid/p {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": Accepted
+  signals:
+    "mid/p {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r, namespace: infra}": [BackendNotFound]
+  effective:
+    mid/p <- infra/r: {contexts: [r0 PathPrefix /api]}
+    leaf/c <- mid/p: {contexts: [r0 dropped path-prefix]}

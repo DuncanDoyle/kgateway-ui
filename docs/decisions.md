@@ -459,6 +459,11 @@ quirk 2 (prefix /q):
 - `attachedRoutes` never counts delegated children. A ListenerSet or XListenerSet route counts only on that set's listener, not on the Gateway's. View A (2.3) uses this.
 - Phase 1's base fixtures attach `good` and `broken`; `blog/posts` is outside install A's scope and was not counted.
 
+**Amended 2026-10-26 (observation):** A kind observation on kgateway v2.4.7 (Gateway API v1.6.1) and v2.3.11 (v1.5.1) showed that the controller clears a delegated child's stale status entry for a parent when the child is edited. Results are in `.superpowers/sdd/implementation-plan/observe-child-edit.md`; fixtures `test/e2e/fixtures/observe/11-child-matcher-edit.yaml` (child match becomes `/other/six`) and `12-child-parentrefs-edit.yaml` (child adds a parentRef the parent does not satisfy).
+- Per tag, on v2.4.7 and on v2.3.11: case 1 (the child's match changes, so it no longer fits) and case 2 (the child adds parentRefs that do not permit the parent) each went from one entry to `[]` before the first poll (under 0.15 s). The control, a parent edit (`06b-matcher-dropped.yaml`), cleared too, in the same time.
+- Code reading agrees: `ProcessHTTPRouteStatusMarkers` (`pkg/krtcollections/policy.go` V3:1119-1137, called from `proxy_syncer.go` V3:292-293; V4:1147-1178) clears any kgateway entry that is not reported, whatever caused the drop.
+- Consequence: clearing is verified on both rule sets for every cause. A current leftover entry after any drop or deselection is `disagrees` after the 30 s window, and so KGWUI-012, on both sets. The split by cause in the consequences above, and PF1's use of first-seen times to decide the cause, are removed. Case 2 was a child that became `forbidden` (its new parentRef no longer permits the parent), so a forbidden child's leftover entry is verified too (ruling 2026-10-26, Task 61 fix round). Rules §2, §8.3, §10 and §11.4, design §5.2 and §14.5, the 2.4 brief and Task 61 follow.
+
 ## D-022 — Memory is gated on CPU and retained heap, not allocation (2026-10-25, phase 2)
 **Status:** accepted 2026-10-25 (user)
 **Context:**
@@ -492,3 +497,51 @@ quirk 2 (prefix /q):
 - Decision 1 is replaced. Listener facts are shown to every caller who can see the listener: the computed count, its cross-check, its unknown state and reason, and its isolation note. The count includes members the caller cannot see, as `attachedRoutes` does. A visible route's membership takes the count's state again, so an unknown count makes it unknown for every caller, and `listener=` has no members under it. Per-route facts of hidden routes stay hidden (design §7.2, §7.4 rules 4 and 5).
 - Why: the re-review (R1, R2) showed that restricting a count leaks. Moving a hidden route or ListenerSet into or out of a listener's dependencies flipped visible facts between "Hidden" and their real state. The number of routes a Gateway serves is also a property of that Gateway.
 - Decision 2, the written-ref merge, stands.
+
+## D-024 — Views B and C: unknown scope and the inherited match (2026-10-26, phase 2)
+**Status:** accepted 2026-10-26 (user; sub-phase 2.4 pre-flight PF4, PF5)
+**Context:**
+- When an install's discovery scope is unknown, view A is unknown: its candidates are a guess (user, 2026-10-24; rules §3.3). Views B and C had no such rule. With an unknown scope every namespace counts as in scope (`pkg/install/scope.go:45-48`), so view B would select routes the controller may not watch and could raise computed KGWUI-011 and KGWUI-012 on them.
+- Design §7.4 rule 4 made a delegation context, row or effective matcher `restricted` when any route on its path was hidden. D-023's amendment showed that such restriction leaks: a fact flips between "Hidden" and its real state as a hidden object enters or leaves its dependencies. A hidden ancestor gaining or losing a path to a visible child flips that child's rows the same way.
+
+**Decision:**
+1. **Unknown scope.** An unknown discovery scope makes views B and C unknown. Every delegation row, context, effective matcher and check is `unknown` with reason `scope-unknown`. No computed or orphan KGWUI-011 and no KGWUI-012 from `child-entry` or `parent-resolvedrefs` is raised while it holds. This extends the 2026-10-24 decision.
+2. **Inherited match.** A delegation row, delegation context or effective matcher on a child the caller can see shows its inherited match: the match each ancestor rule on the path delegated under, and the ancestors' names, even when an ancestor is hidden. Nothing else of a hidden ancestor is sent: no other rules, filters, backends, status or detail link (`link: none`). So these facts never turn "Hidden" because of a hidden ancestor.
+3. The rule covers `GET …/delegation` (rows, contexts and the `outcome` filter), `RouteDetail.effective` and the computed `dropped` flag. Per-route facts of hidden routes that are not ancestors of a visible row stay hidden (design §7.4 rule 4). Row presence and `total` still count visible children only (rule 3).
+- Why (user): the child's owner needs the inherited match to manage the child; the ancestor's name is already in the child's status (design §7.4 rule 8); the delegating match is what the parent deliberately handed to the child.
+
+**Alternatives:**
+- Restrict every fact with a hidden route on its path (design §7.4 rule 4 as first written). Rejected: visible rows flip to "Hidden" as hidden ancestors come and go, and the child's owner loses what they need.
+- Compute views B and C over a guessed scope. Rejected: selection outside the controller's real scope raises false warnings.
+
+**Consequences:**
+- Rules §3.3, §5.6 and §11.2, and design §6.2, §7.3, §7.4 (rule 4b) and §9.1 change with this entry.
+- A context's path steps carry each ancestor's name and the match it delegated under. Retained contexts grow by one match per path step, inside the retention caps of rules §5.7.
+- Non-route dependencies still restrict: a root admitted through a `Selector` over a hidden Namespace, or a status root whose target is hidden, keeps its descendants' contexts, rows and effective matchers `restricted` (rules §11.2). Those facts are decided by hidden labels or hidden objects, not handed over by an ancestor **(our call; raised with the user)**.
+- The same rule holds everywhere a hidden ancestor route of a visible child appears: the route header's up-chain step (design §7.4 rule 3, ancestor routes only) and KGWUI-011 and KGWUI-012 evidence (rule 7) show its name and the matches it delegated under, with no link and nothing else. A finding whose only hidden dependencies are such ancestors is not `evidenceRestricted`. Hidden Gateways and ListenerSets on the up-chain keep `{restricted: true}` **(our call, extends D-024)**.
+- The computed `dropped` flag follows decision 2 (our call).
+
+## D-025 — Delegation edge cap: lower default, configurable, GOMEMLIMIT (2026-10-27, phase 2)
+**Status:** accepted 2026-10-27 (user)
+**Context:**
+- The Task 68 review measured Extreme dense selection (100 wildcard parents × 1,000 routes) with realistic status: at most 32 entries per route, the Gateway API MaxItems. At the 50,000 edge cap the peak heap was 640 MiB and the peak RSS 730 MiB, past the chart's 512Mi limit. `GOMEMLIMIT=400MiB` held the heap at 393 MiB but thrashed the GC (RSS 505 MiB). An edge cap of 10,000 gave 361 and 427 MiB; Large dense (20 × 500) 179 and 215 MiB.
+- The scale fixture wrote 100 status entries per route, which a real API server rejects.
+- Measured again for the cap (`bench/2.4-dense-memory.txt`, Apple M5, GOMAXPROCS=4, no `GOMEMLIMIT`): peak RSS 423–465 MiB at 10,000, 509–566 MiB at 20,000, 702–760 MiB at 50,000. Below 10,000 the curve flattens: 404–412 MiB at 5,000 and 372–433 MiB at 2,000 or less. The floor is the snapshot (69 MiB live) plus the rest of the engine and model (54 MiB live), doubled by the GC's heap target while two models are live.
+
+**Decision:**
+1. The default edge cap is 10,000 selected edges per install, down from 50,000 (rules §5.7) **(user, 2026-10-27)**. It is the largest round value inside the limit; it keeps Large dense (10,000 edges) uncut and Large's 2,017 view B rows well under it.
+2. The cap is configurable: the binary flag `--delegation-edge-cap` and the chart value `delegation.edgeCap`. Zero keeps the default; a negative value fails start-up. The other bounds stay unexposed **(user, 2026-10-27)**.
+3. The chart sets `GOMEMLIMIT` to the container's `limits.memory` through the downward API, and leaves it unset without a memory limit **(user, 2026-10-27)**. The downward API cannot scale the value, so it is the whole limit, not a fraction of it.
+- The gate `TestBudgetDenseMemory` (bench tag) holds Extreme dense at the default, with no `GOMEMLIMIT`, to peak RSS ≤ 480 MiB and peak heap ≤ 432 MiB. The 400 and 320 MiB first proposed sit below the floor at any cap, so no cap meets them **(our call; raised with the user)**.
+
+**Consequences:**
+- Past the cap, parents read "too large to compute"; rows already computed keep their outcomes with some paths not computed.
+- A hit edge cap makes every route incomplete (rules §8.5), so negative checks are silent across the install: no missing child entry and no computed KGWUI-011.
+- A higher cap needs a higher memory limit. The user docs say so (`docs/documentation-notes.md`).
+- `GOMEMLIMIT` follows the pod limit, so raising `limits.memory` raises it too. It is a safety net, not a substitute for the cap: at 50,000 with the limit set the RSS still reached 599 MiB.
+- `scale.DenseSelection` writes at most 32 status entries per route (`scale.MaxRouteParentStatuses`).
+- Depth bound 100 (our call, 2.4): a path of more than 100 routes is cut there as `too-large` (rules §5.7). Each context's deps hold its path's routes, so an uncapped 3,000-route chain retained 290 MiB; at the cap it retains about 1 MiB (`TestBudgetDeepChain`). It is not exposed as a flag.
+
+**Amended 2026-10-27 (user sign-off):**
+- The gate `TestBudgetDenseMemory` checks peak heap only (≤ 432 MiB at the default cap). RSS stays measured and logged but is not gated: it had about 11 MiB of margin and could flake on CI. This replaces the RSS ≤ 480 MiB part of the gate above.
+- `GOMEMLIMIT` is 90 % of the pod memory limit, not the whole limit, and the binary sets it. The chart passes the raw limit in `KGWUI_MEMORY_LIMIT` through the downward API (only with `resources.limits.memory`), and at start-up the binary calls `debug.SetMemoryLimit` with 90 % of it. An explicit `GOMEMLIMIT` wins; a missing, zero or unparsable value is ignored and logged. This replaces decision 3's chart-set `GOMEMLIMIT` and the matching consequence.

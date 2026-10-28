@@ -410,6 +410,26 @@ func TestBuildDerivesMetricsTimingsFromTheInterval(t *testing.T) {
 	}
 }
 
+// The delegation edge cap reaches the engine; zero keeps the default and a
+// negative cap is a start-up error (D-025).
+func TestBuildSetsTheDelegationEdgeCap(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	o := Options{PollInterval: time.Second, MetricsInterval: time.Second, UI: ui}
+	a, err := Build(c, o, extension.New())
+	if err != nil || a.cfg.DelegationBounds != (computed.Bounds{}) {
+		t.Fatalf("zero must keep the engine's default bounds: %+v, %v", a.cfg.DelegationBounds, err)
+	}
+	o.DelegationEdgeCap = 1234
+	if a, err = Build(c, o, extension.New()); err != nil || a.cfg.DelegationBounds != (computed.Bounds{Edges: 1234}) {
+		t.Fatalf("the cap must set Edges only: %+v, %v", a.cfg.DelegationBounds, err)
+	}
+	o.DelegationEdgeCap = -1
+	if _, err := Build(c, o, extension.New()); err == nil || !strings.Contains(err.Error(), "delegation edge cap") {
+		t.Fatalf("a negative cap must fail: %v", err)
+	}
+}
+
 // build builds the app over fake clients without starting it.
 func build(t *testing.T, objs ...runtime.Object) *App {
 	t.Helper()

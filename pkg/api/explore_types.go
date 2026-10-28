@@ -92,11 +92,11 @@ const ComputedBy = "ui"
 
 // Computed labels a computed fact with its rule set, rule and check state
 // (design §7.3, rules §8.4). By is always ComputedBy. Reason is the unknown
-// reason; a restricted fact carries neither Reason nor Note (design §7.4 rule 4).
+// reason; a restricted fact carries no Rule, Reason or Note (design §7.4 rule 4).
 type Computed struct {
 	By       string   `json:"by"`
 	Rules    string   `json:"rules"`
-	Rule     string   `json:"rule"`
+	Rule     string   `json:"rule,omitempty"`
 	State    string   `json:"state"`
 	Coverage []string `json:"coverage,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
@@ -321,6 +321,8 @@ type RouteAnnotations struct {
 
 // RouteDetail is GET …/routes/{group}/{kind}/{ns}/{name}, HTTPRoute only.
 // ChildCount and DeclaredCount count visible routes only.
+// Effective is view C per parent edge (2.4); EffectiveTruncated says the
+// route had more parent edges than were kept.
 type RouteDetail struct {
 	Install            string            `json:"install"`
 	Ref                LinkedRef         `json:"ref"`
@@ -334,6 +336,8 @@ type RouteDetail struct {
 	Parents            []ParentStatus    `json:"parents"`
 	Attachments        []RouteAttachment `json:"attachments,omitempty"`
 	Rules              []RuleDTO         `json:"rules"`
+	Effective          []EffectiveDTO    `json:"effective,omitempty"`
+	EffectiveTruncated bool              `json:"effectiveTruncated,omitempty"`
 	Ancestors          []AncestorPathDTO `json:"ancestors"`
 	AncestorsTruncated bool              `json:"ancestorsTruncated"`
 	ChildCount         int               `json:"childCount"`
@@ -404,13 +408,19 @@ const (
 	DelegationRestricted  = "restricted"
 )
 
-// DelegationRefDTO is a delegation backendRef as classified.
+// DelegationRefDTO is a delegation backendRef as classified. Selected and
+// Attached count the visible children of view B's rows (2.4, design §7.4
+// rule 5); each is nil when the count is not known to the caller. Computed
+// merges the rows' checks worst first (D-023 decision 2, PF14).
 type DelegationRefDTO struct {
 	Mode      objects.DelegationMode `json:"mode"`
 	Namespace string                 `json:"namespace"`
 	Name      string                 `json:"name,omitempty"`
 	Label     string                 `json:"label,omitempty"`
 	State     string                 `json:"state,omitempty"`
+	Selected  *int                   `json:"selected,omitempty"`
+	Attached  *int                   `json:"attached,omitempty"`
+	Computed  *Computed              `json:"computed,omitempty"`
 }
 
 // BackendStateDTO is a Backend's state and Accepted condition, or only
@@ -433,9 +443,12 @@ type BackendRefDTO struct {
 	Backend         *BackendStateDTO  `json:"backend,omitempty"`
 }
 
-// AncestorStepDTO is one up-chain step: a ref, or Restricted with no identity.
+// AncestorStepDTO is one up-chain step: a ref, or Restricted with no
+// identity. A hidden ancestor route has link none and Matches, the matches
+// it delegated under in view B, and nothing else (design §7.4 rule 3, D-024).
 type AncestorStepDTO struct {
 	Ref        *LinkedRef `json:"ref,omitempty"`
+	Matches    []MatchDTO `json:"matches,omitempty"`
 	Restricted bool       `json:"restricted,omitempty"`
 }
 
@@ -443,4 +456,75 @@ type AncestorStepDTO struct {
 type AncestorPathDTO struct {
 	Steps []AncestorStepDTO `json:"steps"`
 	Cycle bool              `json:"cycle"`
+}
+
+// DelegationRow is one view B row of GET …/delegation (design §7.3). Child
+// is absent on a row whose ref selected no route. A restricted row has no
+// Outcome and no Reason (design §7.4 rule 4).
+type DelegationRow struct {
+	Rule              int                 `json:"rule"`
+	Ref               int                 `json:"ref"`
+	RefAsWritten      DelegationRefDTO    `json:"refAsWritten"`
+	Child             *LinkedRef          `json:"child,omitempty"`
+	Allows            string              `json:"allows,omitempty"`
+	Outcome           string              `json:"outcome,omitempty"`
+	Reason            string              `json:"reason,omitempty"`
+	Contexts          []DelegationContext `json:"contexts"`
+	ContextsTruncated bool                `json:"contextsTruncated,omitempty"`
+	Computed          Computed            `json:"computed"`
+	Observed          DelegationObserved  `json:"observed"`
+}
+
+// DelegationContext is one retained context of a row, or only Restricted
+// when a dependency other than the routes on its path is hidden (design
+// §7.4 rules 4, 4b).
+type DelegationContext struct {
+	Restricted  bool          `json:"restricted,omitempty"`
+	ParentMatch *MatchDTO     `json:"parentMatch,omitempty"`
+	Path        []PathStepDTO `json:"path,omitempty"`
+	Outcome     string        `json:"outcome,omitempty"`
+	Reason      string        `json:"reason,omitempty"`
+}
+
+// PathStepDTO is a route on a context's path and the match it delegated
+// under. A hidden ancestor has link none and nothing else (D-024).
+type PathStepDTO struct {
+	Ref   LinkedRef `json:"ref"`
+	Match MatchDTO  `json:"match"`
+}
+
+// DelegationObserved is what the controller wrote for a row: the child's
+// status entry under the row's report key, and the parent's ResolvedRefs
+// condition under one of its reporter keys.
+type DelegationObserved struct {
+	Entry           *ParentStatus `json:"entry,omitempty"`
+	ParentCondition *Condition    `json:"parentCondition,omitempty"`
+}
+
+// EffectiveDTO is view C for one parent edge of a route (computed-rules
+// §5.7, §6). Contexts is sent as [] when none was kept; ContextsTruncated
+// says contexts were cut.
+type EffectiveDTO struct {
+	Parent            LinkedRef          `json:"parent"`
+	Mode              string             `json:"mode"`
+	ContextsTruncated bool               `json:"contextsTruncated,omitempty"`
+	Contexts          []EffectiveContext `json:"contexts"`
+	Computed          Computed           `json:"computed"`
+}
+
+// EffectiveContext is the route's rules under one parent match, or only
+// Restricted (design §7.4 rule 4).
+type EffectiveContext struct {
+	Restricted  bool               `json:"restricted,omitempty"`
+	ParentMatch *MatchDTO          `json:"parentMatch,omitempty"`
+	Rules       []EffectiveRuleDTO `json:"rules,omitempty"`
+}
+
+// EffectiveRuleDTO is one rule under a parent match: kept with its
+// effective matches, or dropped with Reason.
+type EffectiveRuleDTO struct {
+	Index   int        `json:"index"`
+	Kept    bool       `json:"kept"`
+	Matches []MatchDTO `json:"matches"`
+	Reason  string     `json:"reason,omitempty"`
 }

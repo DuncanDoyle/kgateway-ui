@@ -1,6 +1,7 @@
 package health_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -29,9 +30,15 @@ func countCheck(state computed.State, class computed.Class) computed.CheckResult
 
 func runComputed(t *testing.T, cs ...computed.CheckResult) health.Report {
 	t.Helper()
+	return runComputedRows(t, nil, cs...)
+}
+
+// runComputedRows is runComputed with view B rows, which details may quote.
+func runComputedRows(t *testing.T, rows []computed.Row, cs ...computed.CheckResult) health.Report {
+	t.Helper()
 	in := health.Input{Install: install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway"}},
 		Snapshot: &cache.Snapshot{Synced: true}, Now: testutil.Now.Add(time.Minute),
-		Computed: &computed.Views{RuleSet: "kgateway-2.4", Checks: cs}}
+		Computed: &computed.Views{RuleSet: "kgateway-2.4", Checks: cs, Delegation: computed.DelegationResult{Rows: rows}}}
 	var check health.Check
 	for _, c := range health.Upstream() {
 		if c.Name() == "computed views" {
@@ -158,5 +165,104 @@ func TestKGWUI012SubjectsResourceSince(t *testing.T) {
 		case owned && (f.ResourceSince == nil || !f.ResourceSince.Equal(want)):
 			t.Errorf("%s: ResourceSince %v, want %v", f.Resource, f.ResourceSince, want)
 		}
+	}
+}
+
+// The child-entry detail names the parent route; the parent-resolvedrefs
+// detail names ResolvedRefs and the parent's own report key (PF7).
+func TestDisagreeDetailDelegation(t *testing.T) {
+	c := countCheck(computed.StateDisagrees, computed.ClassMissing)
+	c.ID.Kind, c.Listener = computed.KindChildEntry, ""
+	c.On = objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "c"}
+	c.ID.Subject = computed.Subject(objects.GatewayAPIGroup, "HTTPRoute", "shop", "c", objects.GatewayAPIGroup, "HTTPRoute", "shop", "api",
+		objects.GatewayAPIGroup, "HTTPRoute", "shop", "api", "")
+	c.Key = computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "api"}
+	for _, tc := range []struct{ expected, observed, want string }{
+		{"entry", "none", "Status entry for parent HTTPRoute `shop/api`: computed an entry, controller reports no entry. Rule set kgateway-2.4."},
+		{"none", "True", "Status entry for parent HTTPRoute `shop/api`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4."},
+		{"False/UnsupportedValue", "True", "Status entry for parent HTTPRoute `shop/api`: computed Accepted=False/UnsupportedValue, controller reports Accepted=True. Rule set kgateway-2.4."},
+	} {
+		c.Expected, c.Observed = tc.expected, tc.observed
+		if rep := runComputed(t, c); len(rep.Findings) != 1 || rep.Findings[0].Detail != tc.want {
+			t.Errorf("got %+v\nwant detail %q", rep.Findings, tc.want)
+		}
+	}
+
+	p := countCheck(computed.StateDisagrees, computed.ClassContradicting)
+	p.ID.Kind, p.Listener = computed.KindParentResolvedRefs, ""
+	p.On = objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "api"}
+	p.Key = computed.ReportKey{Name: "edge", SectionName: "http"}
+	p.Expected, p.Observed = "False/BackendNotFound", "True"
+	want := "ResolvedRefs under parent `edge` (section `http`): computed False/BackendNotFound, controller reports True. Rule set kgateway-2.4."
+	if rep := runComputed(t, p); len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
+		t.Fatalf("got %+v\nwant detail %q", rep.Findings, want)
+	}
+}
+
+// A views B detail quotes the match its ancestor delegated under next to its
+// name (design §7.4 rule 7): distinct matches, at most three, then "or more";
+// a root's Gateway key has none (Task 67 step 1b).
+func TestDisagreeDetailQuotesDelegatedMatch(t *testing.T) {
+	route := func(n string) objects.Ref {
+		return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: n}
+	}
+	prefix := func(v string) objects.Match {
+		return objects.Match{Path: &objects.PathMatch{Type: "PathPrefix", Value: v}}
+	}
+	top, api, c := route("top"), route("api"), route("c")
+	topKey := computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "top"}
+	gwKey := computed.ReportKey{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
+	hdr := prefix("/api")
+	hdr.Headers = []objects.KeyMatch{{Type: "Exact", Name: "x-env", Value: "prod"}}
+	// api delegates c under /api with a header and under /v2; top delegated api under /api.
+	ctx := func(pm objects.Match, key computed.ReportKey, path ...computed.PathStep) computed.Context {
+		return computed.Context{ParentMatch: pm, Reporter: key, Path: computed.PathOf(path...)}
+	}
+	rows := []computed.Row{
+		{Key: computed.RowKey{Parent: api, Child: c}, Contexts: []computed.Context{
+			ctx(hdr, topKey, computed.PathStep{Route: top, Match: prefix("/api")}, computed.PathStep{Route: api, Match: hdr}),
+			ctx(hdr, topKey, computed.PathStep{Route: top, Match: prefix("/api")}, computed.PathStep{Route: api, Match: hdr}),
+			ctx(prefix("/v2"), gwKey, computed.PathStep{Route: api, Match: prefix("/v2")}),
+		}},
+		{Key: computed.RowKey{Parent: api, Rule: 1, Child: route("other")}, Contexts: []computed.Context{
+			ctx(prefix("/zzz"), topKey, computed.PathStep{Route: top, Match: prefix("/zzz")}, computed.PathStep{Route: api, Match: prefix("/zzz")}),
+		}},
+	}
+
+	ce := countCheck(computed.StateDisagrees, computed.ClassMissing)
+	ce.ID.Kind, ce.Listener, ce.On, ce.Expected, ce.Observed = computed.KindChildEntry, "", c, "none", "True"
+	ce.ID.Subject = computed.Subject(objects.GatewayAPIGroup, "HTTPRoute", "shop", "c", objects.GatewayAPIGroup, "HTTPRoute", "shop", "api",
+		objects.GatewayAPIGroup, "HTTPRoute", "shop", "api", "")
+	want := "Status entry for parent HTTPRoute `shop/api` at `PathPrefix /api Header x-env Exact prod` or `PathPrefix /v2`: " +
+		"computed no entry, controller reports Accepted=True. Rule set kgateway-2.4."
+	if rep := runComputedRows(t, rows, ce); len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
+		t.Errorf("child-entry: got %+v\nwant detail %q", rep.Findings, want)
+	}
+
+	// More than three distinct matches: the first three, then "or more".
+	many := slices.Clone(rows)
+	many[0].Contexts = nil
+	for _, v := range []string{"/a", "/b", "/c", "/d"} {
+		many[0].Contexts = append(many[0].Contexts, ctx(prefix(v), gwKey, computed.PathStep{Route: api, Match: prefix(v)}))
+	}
+	want = "Status entry for parent HTTPRoute `shop/api` at `PathPrefix /a` or `PathPrefix /b` or `PathPrefix /c` or more: " +
+		"computed no entry, controller reports Accepted=True. Rule set kgateway-2.4."
+	if rep := runComputedRows(t, many, ce); len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
+		t.Errorf("or more: got %+v\nwant detail %q", rep.Findings, want)
+	}
+
+	// parent-resolvedrefs under an HTTPRoute key: the match that route delegated api under.
+	pr := countCheck(computed.StateDisagrees, computed.ClassContradicting)
+	pr.ID.Kind, pr.Listener, pr.On, pr.Key = computed.KindParentResolvedRefs, "", api, topKey
+	pr.Expected, pr.Observed = "False/BackendNotFound", "True"
+	want = "ResolvedRefs under parent `top` at `PathPrefix /api` or `PathPrefix /zzz`: computed False/BackendNotFound, controller reports True. Rule set kgateway-2.4."
+	if rep := runComputedRows(t, rows, pr); len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
+		t.Errorf("resolvedrefs route key: got %+v\nwant detail %q", rep.Findings, want)
+	}
+	// Under a Gateway key api is a root: no match to quote.
+	pr.Key = gwKey
+	want = "ResolvedRefs under parent `edge`: computed False/BackendNotFound, controller reports True. Rule set kgateway-2.4."
+	if rep := runComputedRows(t, rows, pr); len(rep.Findings) != 1 || rep.Findings[0].Detail != want {
+		t.Errorf("resolvedrefs gateway key: got %+v\nwant detail %q", rep.Findings, want)
 	}
 }

@@ -1,0 +1,69 @@
+# Child report keys per version (rules §7, §11.3). 2.4 writes a child's entry under its first
+# permitting ref as written: no namespace, a sectionName and a port (dropped from the key) stay
+# as written, and empty parentRefs get the synthesized ref. 2.3 always reports under the
+# synthesized ref and writes it only where a spec ref has the same key, so the refs without a
+# namespace (attached or hostname-rejected) or with a sectionName get no entry, and the port ref
+# does. A ref without a namespace permits only a parent in the child's own namespace, so those
+# children are in infra; the rejected one leaves rule 2 without a valid child
+# (ResolvedRefs=False/BackendNotFound). The port case runs in the kind e2e (D-021 item 3).
+provenance: computed-rules §7, §11.3; e2e
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces: {infra: {}, keys: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: infra}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 80, allowedRoutes: {namespaces: {from: All}}}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: p, namespace: infra}
+  spec:
+    parentRefs: [{name: gw}]
+    rules:
+    - matches: [{path: {type: PathPrefix, value: /k}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: "*", namespace: keys}]
+    - matches: [{path: {type: PathPrefix, value: /k}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: no-ns, namespace: infra}]
+    - matches: [{path: {type: PathPrefix, value: /k}}]
+      backendRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: no-ns-host, namespace: infra}]
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: empty, namespace: keys},
+  spec: {rules: [{matches: [{path: {type: PathPrefix, value: /k/empty}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: full, namespace: keys},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: infra}], rules: [{matches: [{path: {type: PathPrefix, value: /k/full}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: port, namespace: keys},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: infra, port: 8080}], rules: [{matches: [{path: {type: PathPrefix, value: /k/port}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: no-ns, namespace: infra},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p}], rules: [{matches: [{path: {type: PathPrefix, value: /k/no-ns}}]}]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: no-ns-host, namespace: infra},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p}], rules: [{matches: [{path: {type: PathPrefix, value: /k/no-ns-host}}]}], hostnames: [h.example.com]}}
+- {apiVersion: gateway.networking.k8s.io/v1, kind: HTTPRoute, metadata: {name: section, namespace: keys},
+  spec: {parentRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: infra, sectionName: s}], rules: [{matches: [{path: {type: PathPrefix, value: /k/section}}]}]}}
+expect:
+  listeners:
+    Gateway infra/gw http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/p #0": {outcome: accepted}
+  rows:
+    infra/p 0.0 keys/empty: {outcome: attached}
+    infra/p 0.0 keys/full: {outcome: attached}
+    infra/p 0.0 keys/port: {outcome: attached}
+    infra/p 0.0 keys/section: {outcome: attached}
+    infra/p 1.0 infra/no-ns: {outcome: attached}
+    infra/p 2.0 infra/no-ns-host: {outcome: rejected-hostnames}
+  entries:
+    "keys/empty {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: infra}": Accepted
+    "keys/full {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: infra}": Accepted
+    "keys/port {group: gateway.networking.k8s.io, kind: HTTPRoute, name: p, namespace: infra}": Accepted
+  signals:
+    "infra/p {name: gw}": [BackendNotFound]
+  effective:
+    keys/empty <- infra/p: {contexts: [r0 PathPrefix /k/empty]}
+    keys/full <- infra/p: {contexts: [r0 PathPrefix /k/full]}
+    infra/no-ns <- infra/p: {contexts: [r0 PathPrefix /k/no-ns]}
+    infra/no-ns-host <- infra/p: {contexts: [r0 PathPrefix /k/no-ns-host]}
+    keys/port <- infra/p: {contexts: [r0 PathPrefix /k/port]}
+    keys/section <- infra/p: {contexts: [r0 PathPrefix /k/section]}

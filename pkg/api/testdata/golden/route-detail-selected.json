@@ -1,0 +1,93 @@
+{
+  "body": {
+    "ancestors": [],
+    "ancestorsTruncated": false,
+    "annotations": {},
+    "candidate": {
+      "by": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "detail",
+        "name": "w",
+        "namespace": "shop"
+      },
+      "reason": "selected"
+    },
+    "childCount": 0,
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "declaredCount": 0,
+    "effective": [
+      {
+        "computed": {
+          "by": "ui",
+          "coverage": [
+            "not-verified"
+          ],
+          "rule": "effective-matchers",
+          "rules": "kgateway-2.4",
+          "state": "checked"
+        },
+        "contexts": [
+          {
+            "parentMatch": {
+              "path": {
+                "type": "PathPrefix",
+                "value": "/w"
+              }
+            },
+            "rules": [
+              {
+                "index": 0,
+                "kept": false,
+                "matches": [],
+                "reason": "path /other is outside the parent's /w"
+              }
+            ]
+          }
+        ],
+        "mode": "default",
+        "parent": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "w",
+          "namespace": "shop"
+        }
+      }
+    ],
+    "generation": 1,
+    "health": "healthy",
+    "hostnames": [],
+    "install": "kgw.kgateway",
+    "parentRefs": [],
+    "parents": [],
+    "ref": {
+      "group": "gateway.networking.k8s.io",
+      "kind": "HTTPRoute",
+      "link": "detail",
+      "name": "s",
+      "namespace": "kids"
+    },
+    "ruleSet": "kgateway-2.4",
+    "rules": [
+      {
+        "backendRefs": [],
+        "filters": [],
+        "index": 0,
+        "matches": [
+          {
+            "path": {
+              "type": "PathPrefix",
+              "value": "/other"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

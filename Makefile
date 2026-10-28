@@ -30,7 +30,9 @@ bench:
 	@echo "machine: $$(uname -sm), $$(getconf _NPROCESSORS_ONLN) CPUs"
 	@echo "load: $$(uptime)"
 	@# -short shortens only the API stream; no engine or cache budget may read testing.Short().
-	go test -tags bench -v -short -run 'Budget' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache
+	@# The budget tests run once; the benchmarks five times.
+	go test -tags bench -v -short -run 'Budget' -count 1 ./pkg/engine ./pkg/cache
+	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache
 	@# The API budgets take 10,000 samples per case, so they run once; -short keeps the stream at 60 s.
 	go test -tags bench -v -short -run 'Budget' -count 1 -timeout 20m ./pkg/api
 	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/api

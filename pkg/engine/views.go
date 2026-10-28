@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"reflect"
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -11,15 +14,65 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// computeViews runs sel's view A over one install and cross-checks it. The
-// checks' State, Mature and Since are left for the persistence step.
-func computeViews(sel computed.Selection, res install.Resolved, owned *install.Owned, snap *cache.Snapshot,
-	served []kinds.Served, dec objects.Decoder,
+// computeViews runs sel's views A, B and C over one install, within bounds,
+// and cross-checks them. The checks' State, Mature and Since are left for
+// the persistence step. With m, a view whose input equals m's last one
+// reuses m's results; m is then updated.
+func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, owned *install.Owned, snap *cache.Snapshot,
+	served []kinds.Served, dec objects.Decoder, bounds computed.Bounds,
 ) *computed.Views {
+	if m == nil {
+		m = &viewsMemo{}
+	}
+	same := m.set && m.rules == sel.Rules.Version() && m.note == sel.Note
+	m.set, m.rules, m.note = true, sel.Rules.Version(), sel.Note
 	in := attachmentInput(res, owned, snap, served, dec)
-	att := sel.Rules.Attachment(in)
-	return &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: att,
-		Checks: computed.CheckAttachment(res.ID(), sel, in, att)}
+	if !same || !reflect.DeepEqual(m.in, in) {
+		m.att = sel.Rules.Attachment(in)
+		m.a = computed.CheckAttachment(res.ID(), sel, in, m.att)
+		same = false
+	}
+	m.in = in
+	din := delegationInput(res, owned, snap, served, dec, m.att)
+	din.Bounds = bounds
+	if !same || !reflect.DeepEqual(m.din, din) {
+		m.del = sel.Rules.Delegation(din)
+		// CheckDelegation also marks unconfirmable rows in m.del.
+		m.d = computed.CheckDelegation(res.ID(), sel, din, &m.del)
+	}
+	m.din = din
+	v := &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
+	v.Checks = append(append(make([]computed.CheckResult, 0, len(m.a)+len(m.d)), m.a...), m.d...)
+	return v
+}
+
+// viewsMemo is one install's last view inputs and results. Views are pure
+// functions of their input, so an equal input reuses the results, which are
+// shared and read-only; Checks are copied, as persistence sets their state.
+type viewsMemo struct {
+	set         bool
+	rules, note string
+	in          computed.AttachmentInput
+	att         computed.AttachmentResult
+	a           []computed.CheckResult
+	din         computed.DelegationInput
+	del         computed.DelegationResult
+	d           []computed.CheckResult
+}
+
+// httpRoutes maps the snapshot's HTTPRoutes by ref.
+func httpRoutes(snap *cache.Snapshot, served []kinds.Served) map[objects.Ref]*unstructured.Unstructured {
+	for _, k := range kinds.ByCategory(served, kinds.CategoryRoute) {
+		if k.Group == objects.GatewayAPIGroup && k.Kind == "HTTPRoute" {
+			us := snap.Objects[k.GVR()]
+			m := make(map[objects.Ref]*unstructured.Unstructured, len(us))
+			for _, u := range us {
+				m[objects.RefOf(u)] = u
+			}
+			return m
+		}
+	}
+	return map[objects.Ref]*unstructured.Unstructured{}
 }
 
 // attachmentInput is view A's input for one install (rules §3.1, §4.6): its
@@ -82,4 +135,78 @@ func acceptance(u *unstructured.Unstructured, v *objects.ListenerSetView) comput
 		return computed.Denied
 	}
 	return computed.Accepted
+}
+
+// delegationInput is views B and C's input for one install (rules §5.1, §5.6):
+// every in-scope HTTPRoute, those outside the scope, and the roots taken from
+// view A a. Views come from dec, so they are shared and read-only.
+func delegationInput(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, served []kinds.Served, dec objects.Decoder, a computed.AttachmentResult) computed.DelegationInput {
+	in := computed.DelegationInput{Wildcard: res.Settings.WildcardNamespace, ControllerNames: res.ControllerNames,
+		Bounds: computed.DefaultBounds, ScopeUnknown: res.Scope.Mode == install.ScopeUnknown, Unwatched: map[objects.Ref]bool{}}
+	nss := make(map[string]int, len(snap.Namespaces)) // name → index in snap.Namespaces
+	for i, n := range snap.Namespaces {
+		nss[n.Name] = i
+	}
+	inScope := func(ns string) bool {
+		if i, ok := nss[ns]; ok {
+			return res.Scope.Contains(ns, snap.Namespaces[i])
+		}
+		return res.Scope.Contains(ns, nil)
+	}
+	var own map[objects.Ref][]objects.ParentRef // owned HTTPRoute → its Gateway and ListenerSet parents
+	if owned != nil {
+		own = make(map[objects.Ref][]objects.ParentRef, len(owned.Routes))
+		for _, r := range owned.Routes {
+			if r.Kind.Group == objects.GatewayAPIGroup && r.Kind.Kind == "HTTPRoute" {
+				own[objects.RefOf(r.Obj)] = r.Parents
+			}
+		}
+	}
+	var us []*unstructured.Unstructured
+	for _, k := range kinds.ByCategory(served, kinds.CategoryRoute) {
+		if k.Group == objects.GatewayAPIGroup && k.Kind == "HTTPRoute" {
+			us = snap.Objects[k.GVR()]
+		}
+	}
+	objs := make(map[objects.Ref]*unstructured.Unstructured, len(us))
+	if len(us) > 0 {
+		in.Routes = make([]computed.DelegRoute, 0, len(us))
+	}
+	{
+		for _, u := range us {
+			ref := objects.RefOf(u)
+			if !inScope(u.GetNamespace()) {
+				in.Unwatched[ref] = true
+				continue
+			}
+			parents, isOwned := own[ref]
+			objs[ref] = u
+			in.Routes = append(in.Routes, computed.DelegRoute{Ref: ref, Generation: u.GetGeneration(), View: dec.HTTPRoute(u),
+				Owned: isOwned, TopLevel: len(parents) > 0})
+		}
+	}
+	slices.SortFunc(in.Routes, func(x, y computed.DelegRoute) int { return x.Ref.Compare(y.Ref) })
+	in.Roots = computed.Roots(in.Routes, a, func(r computed.DelegRoute) (objects.Ref, computed.ReportKey, bool) {
+		return statusTarget(res, r, objs[r.Ref], own[r.Ref])
+	})
+	return in
+}
+
+// statusTarget is the target and report key of r's first current
+// Accepted=True status entry from the install's controllers that names one of
+// parents, the route's Gateway and ListenerSet parents of this install.
+func statusTarget(res install.Resolved, r computed.DelegRoute, u *unstructured.Unstructured, parents []objects.ParentRef) (objects.Ref, computed.ReportKey, bool) {
+	for _, e := range r.View.Parents {
+		if !slices.Contains(res.ControllerNames, e.ControllerName) {
+			continue
+		}
+		c := objects.FindCondition(e.Conditions, "Accepted")
+		if c == nil || c.Status != metav1.ConditionTrue || objects.IsStale(u, *c) {
+			continue
+		}
+		if slices.ContainsFunc(parents, func(p objects.ParentRef) bool { return p.Ref() == e.ParentRef.Ref() }) {
+			return e.ParentRef.Ref(), computed.KeyOf(e.Written), true
+		}
+	}
+	return objects.Ref{}, computed.ReportKey{}, false
 }

@@ -6,6 +6,7 @@ import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-
 import gatewayDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-restricted.json";
 import gatewaysGolden from "../../../../../pkg/api/testdata/golden/gateways.json";
 import health from "../../../../../pkg/api/testdata/golden/health.json";
+import healthEvidenceRestrictedGolden from "../../../../../pkg/api/testdata/golden/health-evidence-restricted.json";
 import installs from "../../../../../pkg/api/testdata/golden/installs.json";
 import listenersetDetailGolden from "../../../../../pkg/api/testdata/golden/listenerset-detail.json";
 import listenersetDetailAllowedGolden from "../../../../../pkg/api/testdata/golden/listenerset-detail-allowed.json";
@@ -14,13 +15,20 @@ import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listeners
 import meta from "../../../../../pkg/api/testdata/golden/meta.json";
 import notFound from "../../../../../pkg/api/testdata/golden/not-found.json";
 import overview from "../../../../../pkg/api/testdata/golden/overview.json";
+import routeDelegationGolden from "../../../../../pkg/api/testdata/golden/route-delegation.json";
+import routeDelegationCutGolden from "../../../../../pkg/api/testdata/golden/route-delegation-cut.json";
+import routeDelegationRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-delegation-restricted.json";
 import routeDetailGolden from "../../../../../pkg/api/testdata/golden/route-detail.json";
 import routeDetailCandidateGolden from "../../../../../pkg/api/testdata/golden/route-detail-candidate.json";
+import routeDetailDelegationRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-delegation-restricted.json";
+import routeDetailEffectiveGolden from "../../../../../pkg/api/testdata/golden/route-detail-effective.json";
 import routeDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-detail-restricted.json";
+import routeDetailSelectedGolden from "../../../../../pkg/api/testdata/golden/route-detail-selected.json";
 import routesGolden from "../../../../../pkg/api/testdata/golden/routes.json";
 import routesByBackendGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend.json";
 import routesByBackendRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-by-backend-restricted.json";
 import routesByListenerGolden from "../../../../../pkg/api/testdata/golden/routes-by-listener.json";
+import routesDroppedGolden from "../../../../../pkg/api/testdata/golden/routes-dropped.json";
 import routesFilteredGolden from "../../../../../pkg/api/testdata/golden/routes-filtered.json";
 import routesRestrictedGolden from "../../../../../pkg/api/testdata/golden/routes-restricted.json";
 import type {
@@ -37,7 +45,12 @@ import type {
   ComputedAttachment,
   Condition,
   Count,
+  DelegationContext,
   DelegationRef,
+  DelegationRow,
+  EffectiveContext,
+  EffectiveEdge,
+  EffectiveRule,
   ErrorResponse,
   Filter,
   Finding,
@@ -67,6 +80,7 @@ import type {
   ParentStatus,
   ParentSummary,
   PathMatch,
+  PathStep,
   Readiness,
   Ref,
   RouteAttachment,
@@ -185,7 +199,7 @@ const pageKeys = {
 } as const satisfies Spec<Page<unknown>>;
 const page = (items: Shape) => shape<Page<unknown>>(pageKeys, { items });
 // View A (sub-phase 2.3).
-const computed = shape<Computed>({ by: "!", rules: "!", rule: "!", state: "!", coverage: "?", reason: "?", note: "?" });
+const computed = shape<Computed>({ by: "!", rules: "!", rule: "?", state: "!", coverage: "?", reason: "?", note: "?" });
 const computedAttachment = shape<ComputedAttachment>(
   { outcome: "?", listeners: "!", explanation: "?", computed: "!" },
   {
@@ -362,7 +376,10 @@ const backendRef = shape<BackendRef>(
   {
     ref: linkedRef,
     filters: filter,
-    delegation: shape<DelegationRef>({ mode: "!", namespace: "!", name: "?", label: "?", state: "?" }),
+    delegation: shape<DelegationRef>(
+      { mode: "!", namespace: "!", name: "?", label: "?", state: "?", selected: "?", attached: "?", computed: "?" },
+      { computed },
+    ),
     backend: shape<BackendState>({ state: "?", accepted: "?", restricted: "?" }, { accepted: condition }),
   },
 );
@@ -372,7 +389,59 @@ const rule = shape<Rule>(
 );
 const ancestor = shape<AncestorPath>(
   { steps: "!", cycle: "!" },
-  { steps: shape<AncestorStep>({ ref: "?", restricted: "?" }, { ref: linkedRef }) },
+  { steps: shape<AncestorStep>({ ref: "?", matches: "?", restricted: "?" }, { ref: linkedRef, matches: match }) },
+);
+// Views B and C (sub-phase 2.4).
+const effectiveEdge = shape<EffectiveEdge>(
+  { parent: "!", mode: "!", contextsTruncated: "?", contexts: "!", computed: "!" },
+  {
+    parent: linkedRef,
+    contexts: shape<EffectiveContext>(
+      { restricted: "?", parentMatch: "?", rules: "?" },
+      {
+        parentMatch: match,
+        rules: shape<EffectiveRule>({ index: "!", kept: "!", matches: "!", reason: "?" }, { matches: match }),
+      },
+    ),
+    computed,
+  },
+);
+const delegationRow = shape<DelegationRow>(
+  {
+    rule: "!",
+    ref: "!",
+    refAsWritten: "!",
+    child: "?",
+    allows: "?",
+    outcome: "?",
+    reason: "?",
+    contexts: "!",
+    contextsTruncated: "?",
+    computed: "!",
+    observed: "!",
+  },
+  {
+    refAsWritten: shape<DelegationRef>({
+      mode: "!",
+      namespace: "!",
+      name: "?",
+      label: "?",
+      state: "?",
+      selected: "?",
+      attached: "?",
+      computed: "?",
+    }),
+    child: linkedRef,
+    contexts: shape<DelegationContext>(
+      { restricted: "?", parentMatch: "?", path: "?", outcome: "?", reason: "?" },
+      { parentMatch: match, path: shape<PathStep>({ ref: "!", match: "!" }, { ref: linkedRef, match }) },
+    ),
+    computed,
+    observed: shape<DelegationRow["observed"]>(
+      { entry: "?", parentCondition: "?" },
+      { entry: parentStatus, parentCondition: condition },
+    ),
+  },
 );
 const routeDetail = shape<RouteDetail>(
   {
@@ -388,6 +457,8 @@ const routeDetail = shape<RouteDetail>(
     parents: "!",
     attachments: "?",
     rules: "!",
+    effective: "?",
+    effectiveTruncated: "?",
     ancestors: "!",
     ancestorsTruncated: "!",
     childCount: "!",
@@ -405,6 +476,7 @@ const routeDetail = shape<RouteDetail>(
       { parentRef, target: linkedRef, result: computedAttachment },
     ),
     rules: rule,
+    effective: effectiveEdge,
     ancestors: ancestor,
   },
 );
@@ -455,6 +527,14 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["route-detail", routeDetailGolden, routeDetail],
     ["route-detail-restricted", routeDetailRestrictedGolden, routeDetail],
     ["route-detail-candidate", routeDetailCandidateGolden, routeDetail],
+    ["route-delegation", routeDelegationGolden, page(delegationRow)],
+    ["route-delegation-cut", routeDelegationCutGolden, page(delegationRow)],
+    ["route-delegation-restricted", routeDelegationRestrictedGolden, page(delegationRow)],
+    ["routes-dropped", routesDroppedGolden, page(routeRow)],
+    ["route-detail-effective", routeDetailEffectiveGolden, routeDetail],
+    ["route-detail-selected", routeDetailSelectedGolden, routeDetail],
+    ["route-detail-delegation-restricted", routeDetailDelegationRestrictedGolden, routeDetail],
+    ["health-evidence-restricted", healthEvidenceRestrictedGolden, healthReport],
   ] as const)("%s", (_, golden, s) => {
     expect(problems(s, golden.body, "body")).toEqual([]);
   });
@@ -482,7 +562,12 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(routesRestrictedGolden.body.items.some((r) => r.parents.some((p) => "viaRestricted" in p))).toBe(true);
     expect(routesFilteredGolden.body.next).toBeTruthy();
     expect(routesByBackendGolden.body.items.some((r) => "mirror" in r)).toBe(true);
-    expect(routeDetailRestrictedGolden.body.ancestors.some((a) => a.steps.some((s) => "restricted" in s))).toBe(true);
+    // A hidden ancestor route keeps its name with link none (D-024).
+    expect(
+      routeDetailRestrictedGolden.body.ancestors.some((a) =>
+        a.steps.some((s) => "ref" in s && s.ref?.kind === "HTTPRoute" && s.ref.link === "none"),
+      ),
+    ).toBe(true);
     expect(routeDetailCandidateGolden.body.candidate.by).toBeDefined();
     expect(routeDetailGolden.body.parentRefs.every((p) => "target" in p)).toBe(true);
     expect(listenersetDetailAllowedGolden.body.parentAllowedListeners.set).toBe(true);
@@ -518,5 +603,51 @@ describe("types.ts matches the golden v1 wire format", () => {
       if (c.state === "restricted") expect([c.reason, c.note]).toEqual([undefined, undefined]);
     }
     expect(meta.body.filters?.routes).toContain("listener");
+  });
+
+  // Views B and C: the fixtures carry the shapes the Delegation tab and effective matches branch on.
+  it("covers 2.4: outcomes, truncation, hidden ancestors, restricted rows and evidence", () => {
+    const outcomes = new Set(
+      [...routeDelegationGolden.body.items, ...routeDelegationCutGolden.body.items].map((r) => r.outcome),
+    );
+    for (const o of [
+      "attached",
+      "partial",
+      "dropped",
+      "forbidden",
+      "rejected-hostnames",
+      "cycle",
+      "unresolved",
+      "unknown",
+    ])
+      expect(outcomes).toContain(o);
+    expect(routeDelegationCutGolden.body.items.some((r) => r.contextsTruncated && r.contexts.length === 0)).toBe(true);
+    const edges = routeDetailEffectiveGolden.body.effective;
+    expect(edges.every((e) => e.mode === "inherit")).toBe(true);
+    expect(edges.some((e) => e.contextsTruncated && e.contexts.length > 0)).toBe(true);
+    expect(edges.some((e) => e.contextsTruncated && e.contexts.length === 0)).toBe(true);
+    expect(routeDetailGolden.body.effective.every((e) => e.mode === "default")).toBe(true);
+    // A hidden ancestor route: name with link none and its delegated match (D-024).
+    const rows = routeDelegationRestrictedGolden.body.items;
+    expect(rows.some((r) => r.contexts.some((c) => c.path?.some((p) => p.ref.link === "none")))).toBe(true);
+    expect(rows.some((r) => !("child" in r) && r.computed.state === "restricted" && r.contexts.length === 0)).toBe(
+      true,
+    );
+    const detail = routeDetailDelegationRestrictedGolden.body;
+    expect(detail.effective.some((e) => e.parent.link === "none" && e.computed.state === "checked")).toBe(true);
+    expect(
+      detail.effective.some((e) => e.computed.state === "restricted" && e.contexts.some((c) => "restricted" in c)),
+    ).toBe(true);
+    expect(detail.ancestors.some((a) => a.steps.some((s) => "restricted" in s))).toBe(true);
+    expect(detail.ancestors.some((a) => a.steps.some((s) => "matches" in s && s.ref?.link === "none"))).toBe(true);
+    expect(routesDroppedGolden.body.items.every((r) => r.flags.includes("dropped"))).toBe(true);
+    expect(routeDetailSelectedGolden.body.candidate.reason).toBe("selected");
+    const findings = healthEvidenceRestrictedGolden.body.findings;
+    for (const code of ["KGWUI-011", "KGWUI-012"])
+      expect(findings.some((f) => f.code === code && "evidenceRestricted" in f && f.evidenceRestricted)).toBe(true);
+    expect(
+      findings.some((f) => f.code === "KGWUI-012" && !("evidenceRestricted" in f) && f.detail?.includes("shop/hp")),
+    ).toBe(true);
+    expect(meta.body.filters?.delegation).toEqual(["rule", "ref", "outcome"]);
   });
 });

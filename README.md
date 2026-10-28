@@ -43,6 +43,7 @@ Flags:
 - `--listen`: listen address (default `:8080` in-cluster, `127.0.0.1:8080` locally).
 - `--poll-interval`: maximum time between model recomputes, the safety timer (default 30s). The model recomputes on object, access, metrics and served-kind changes; `2s` restores the earlier fixed cadence as a floor.
 - `--metrics-interval`: controller metrics scrape interval (default 10s).
+- `--delegation-edge-cap`: selected delegation edges computed per install (default 10000; 0 keeps the default). Past the cap, parents read "too large to compute". A higher cap needs a higher memory limit.
 
 `make test`, `make lint` and `make e2e` run the Go tests, the linters and the kind end-to-end suite. `make help` lists all targets.
 
@@ -150,6 +151,24 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 
 ## Upgrade notes
 
+### Computed route delegation (sub-phase 2.4)
+
+The UI now computes route delegation, using kgateway 2.3's or 2.4's own rules, and cross-checks the result with the controller's status:
+
+- A parent HTTPRoute has a Delegation tab. Per delegation ref, it lists the routes the ref selects and whether each is attached, dropped or not permitted, and why. Each row opens its paths from a Gateway or ListenerSet.
+- A child route shows its effective matches: what it really serves under each parent, after the parent's match is applied.
+- The rules list shows selected and attached counts per ref. The routes list flags a child that is selected but not attached.
+- KGWUI-011 also fires when the UI computes that a parent drops or does not permit a child, and for a route with no parentRefs that no parent keeps. These are warnings.
+- KGWUI-012 now covers delegation: a child's status entry or a parent's `ResolvedRefs` that disagrees with the computation for over 30 seconds.
+- When the install's discovery scope is unknown, delegation rows and effective matches read "Unknown" too.
+- A child you can see shows its hidden ancestor routes by name and delegated match only.
+- Delegation work is capped at 10,000 selected edges per install. Past the cap, parents read "too large to compute". Raise it with `--delegation-edge-cap` or the chart's `delegation.edgeCap`; a higher cap needs more memory.
+- The binary sets its Go memory limit to 90 % of the pod's memory limit, unless `GOMEMLIMIT` is set. The chart passes the limit in `KGWUI_MEMORY_LIMIT`.
+
+For downstream builds:
+
+- `app.Run` applies the memory limit, so a downstream `main` gets it too.
+
 ### Computed listener attachment (sub-phase 2.3)
 
 The UI now computes which routes attach to each listener, using kgateway 2.3's or 2.4's own attachment rules, and cross-checks the result with the controller's status:
@@ -172,7 +191,7 @@ Counts and colours change on clusters that use route delegation:
 
 - A delegated child route with a controller status entry for its parent HTTPRoute now counts in the HTTPRoute tile and in install health. Its failures can turn the install yellow or red.
 - A route that names an HTTPRoute parent but has no status entry for it gets KGWUI-011: info while the controller may still be processing it, a warning after that. On kgateway 2.3, a child ref that omits the namespace or sets `sectionName` gets no status entry, so it always gets this warning.
-- Known limitation: after a child edit drops its parent, the child keeps the controller's stale status entry. It stays owned and counted, and gets KGWUI-003 until the controller updates its status.
+- After a child edit drops its parent, the controller clears the child's old status entry within a second. For that moment the child may still count and show KGWUI-003.
 - The KGWUI-004 detail names the target's kind, so a route targeting a ListenerSet reads "targets ListenerSet `<ns/name>`".
 
 For downstream builds:

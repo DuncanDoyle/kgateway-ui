@@ -1,0 +1,210 @@
+# Input: translator/gateway/testutils/inputs/delegation/label_based.yaml@v2.3.11 with its common.yaml, the
+# Services left out. Status is copied from the output, with controllerName kgateway.dev/kgateway
+# and without kgateway.dev/Programmed. Label refs in the route's namespace, in a, and in the
+# wildcard namespace all (the default setting) each select one child, all attached.
+provenance: translator/gateway/testutils/outputs/delegation/label_based.yaml@v2.3.11
+ruleOnly: true
+controllerVersion: v2.3.11
+namespaces:
+  a: {}
+  b: {}
+  infra: {}
+objects:
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: Gateway
+    metadata:
+      name: example-gateway
+      namespace: infra
+    spec:
+      gatewayClassName: example-gateway-class
+      listeners:
+        - name: http
+          protocol: HTTP
+          port: 80
+          allowedRoutes:
+            namespaces:
+              from: All
+    status:
+      conditions:
+        - type: Accepted
+          status: "True"
+          reason: Accepted
+          observedGeneration: 1
+      listeners:
+        - name: http
+          attachedRoutes: 1
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: example-route
+      namespace: infra
+    spec:
+      parentRefs:
+        - name: example-gateway
+      hostnames:
+        - example.com
+      rules:
+        - backendRefs:
+            - name: example-svc
+              port: 80
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /infra
+          backendRefs:
+            - group: delegation.kgateway.dev
+              kind: label
+              name: infra-routes
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a
+          backendRefs:
+            - group: delegation.kgateway.dev
+              kind: label
+              name: a-routes
+              namespace: a
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /all
+          backendRefs:
+            - group: delegation.kgateway.dev
+              kind: label
+              name: all-routes
+              namespace: all
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            name: example-gateway
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: infra-child
+      namespace: infra
+      labels:
+        delegation.kgateway.dev/label: infra-routes
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /infra/1
+          backendRefs:
+            - name: example-svc
+              port: 80
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-a
+      namespace: a
+      labels:
+        delegation.kgateway.dev/label: a-routes
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /a/1
+          backendRefs:
+            - name: svc-a
+              port: 8080
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+  - apiVersion: gateway.networking.k8s.io/v1
+    kind: HTTPRoute
+    metadata:
+      name: route-b
+      namespace: b
+      labels:
+        delegation.kgateway.dev/label: all-routes
+    spec:
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /all/b
+          backendRefs:
+            - name: svc-b
+              port: 8080
+    status:
+      parents:
+        - controllerName: kgateway.dev/kgateway
+          parentRef:
+            group: gateway.networking.k8s.io
+            kind: HTTPRoute
+            name: example-route
+            namespace: infra
+          conditions:
+            - type: Accepted
+              status: "True"
+              reason: Accepted
+              observedGeneration: 1
+            - type: ResolvedRefs
+              status: "True"
+              reason: ResolvedRefs
+              observedGeneration: 1
+expect:
+  listeners:
+    Gateway infra/example-gateway http: {count: 1}
+  parentRefs:
+    "HTTPRoute infra/example-route #0": {outcome: accepted}
+  rows:
+    infra/example-route 1.0 infra/infra-child: {outcome: attached}
+    infra/example-route 2.0 a/route-a: {outcome: attached}
+    infra/example-route 3.0 b/route-b: {outcome: attached}
+  entries:
+    "infra/infra-child {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+    "a/route-a {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+    "b/route-b {group: gateway.networking.k8s.io, kind: HTTPRoute, name: example-route, namespace: infra}": Accepted
+  effective:
+    infra/infra-child <- infra/example-route: {contexts: [r0 PathPrefix /infra/1]}
+    a/route-a <- infra/example-route: {contexts: [r0 PathPrefix /a/1]}
+    b/route-b <- infra/example-route: {contexts: [r0 PathPrefix /all/b]}

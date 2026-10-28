@@ -20,6 +20,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
@@ -50,6 +51,8 @@ type Config struct {
 	ProxyMode proxymode.Resolver
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
+	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
+	DelegationBounds computed.Bounds
 	// Logger receives install rejections; nil means slog.Default().
 	Logger *slog.Logger
 	// MetricsMaxAge is the age beyond which a metrics result is stale
@@ -120,10 +123,13 @@ type Engine struct {
 	seq       uint64
 	seen      map[generation]time.Time
 	rejected  map[string]bool // install errors already logged
+	caps      map[string]bool // install and delegation cap pairs already logged
 	// decode caches typed views by (uid, resourceVersion); only touched under computeMu.
 	decode *decodeCache
 	// persist holds the KGWUI-012 windows; only touched under computeMu.
 	persist persistence
+	// views holds each install's last view inputs and results; only touched under computeMu.
+	views map[string]*viewsMemo
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -154,7 +160,11 @@ func New(cfg Config) *Engine {
 	if cfg.RulesFor == nil {
 		cfg.RulesFor = rulesets.Select
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, decode: newDecodeCache(), persist: newPersistence()}
+	if cfg.DelegationBounds == (computed.Bounds{}) {
+		cfg.DelegationBounds = computed.DefaultBounds
+	}
+	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
+		decode: newDecodeCache(), persist: newPersistence()}
 }
 
 // Platform returns the platform the engine computes models for.
@@ -195,6 +205,34 @@ func (e *Engine) firstSeen(now time.Time) func(u *unstructured.Unstructured) tim
 			return t
 		}
 		return now
+	}
+}
+
+// graceEnd returns a missing child entry's grace end (rules §9.3 step 3):
+// Grace after the latest first-seen time of the current generation of the
+// routes on its contributing paths, the child and P included; zero for any
+// other check. HTTPRoutes are indexed on the first call. Called under computeMu.
+func (e *Engine) graceEnd(snap *cache.Snapshot, served []kinds.Served, firstSeen func(*unstructured.Unstructured) time.Time) func(computed.CheckResult) time.Time {
+	var routes map[objects.Ref]*unstructured.Unstructured
+	return func(c computed.CheckResult) time.Time {
+		if c.ID.Kind != computed.KindChildEntry {
+			return time.Time{}
+		}
+		if routes == nil {
+			routes = httpRoutes(snap, served)
+		}
+		var t time.Time
+		for _, r := range c.Contributors {
+			if u := routes[r]; u != nil {
+				if s := firstSeen(u); s.After(t) {
+					t = s
+				}
+			}
+		}
+		if t.IsZero() {
+			return t
+		}
+		return t.Add(health.Grace)
 	}
 }
 
@@ -250,16 +288,29 @@ func (e *Engine) compute() *Published {
 	}
 	var runs []run
 	var views []*computed.Views
+	memos := make(map[string]*viewsMemo, len(all))
 	for _, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
 		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion())}
 		runs = append(runs, r)
-		views = append(views, computeViews(r.sel, res, r.owned, snap, served, e.decode))
+		m := e.views[res.ID()]
+		if m == nil {
+			m = &viewsMemo{}
+		}
+		memos[res.ID()] = m
+		v := computeViews(m, r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		views = append(views, v)
+		// Each cap hit is logged once per distinct value, as rejections are (rules §5.7).
+		if c := v.Delegation.Cap; c != "" && !e.caps[res.ID()+"\x00"+c] {
+			e.caps[res.ID()+"\x00"+c] = true
+			e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
+		}
 	}
-	if at := e.persist.persist(now, views); !at.IsZero() {
-		next.add(at, false) // mature once now − since ≥ Window
+	e.views = memos // a vanished install's memo is dropped
+	if at := e.persist.persist(now, views, e.graceEnd(snap, served, firstSeen)); !at.IsZero() {
+		next.add(at, false) // mature once now − since ≥ Window, or at a missing entry's grace end
 	}
 	for i, r := range runs {
 		res, owned := r.res, r.owned

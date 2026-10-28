@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
@@ -257,15 +260,16 @@ func BenchmarkConfirmTick(b *testing.B) {
 	}
 }
 
-// The 2.2 and 2.3 budgets of design §9.6 at Large: the explorer's index,
-// view A, KGWUI-012 persistence and the decode cache.
+// The 2.2–2.4 budgets of design §9.6 at Large: the explorer's index,
+// views A, B and C with their retained contexts, KGWUI-012 persistence and the decode cache.
 
 // largeCases are the consistent Large world, whose statuses agree with view
 // A, and the worst case, where every check contradicts and has matured.
 var largeCases = []scale.Tier{scale.Large, scale.Large.Contradicting()}
 
-// matureAt is a time past every window opened at testutil.Now.
-var matureAt = testutil.Now.Add(Window + time.Second)
+// matureAt is a time past every window opened at testutil.Now, and past a
+// missing child entry's grace end.
+var matureAt = testutil.Now.Add(max(Window, health.Grace) + time.Second)
 
 // largeEngine is an engine over tier's snapshot on a settable clock, with
 // metrics that never go stale. Under Contradict it computes once at
@@ -284,7 +288,8 @@ func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
 	return e, now
 }
 
-// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 120 ms
+// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 150 ms
+// with views B and C (design §9.6, 2.4)
 // and the median of 5 cold ones ≤ 1 s, for the consistent world and the worst
 // case. Allocation per warm Compute and the persistence step are reported (D-022).
 func TestBudgetWarmRecompute(t *testing.T) {
@@ -306,6 +311,7 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			alloc := make([]uint64, len(warm))
 			var ms runtime.MemStats
 			for i := range warm {
+				e.forgetViews() // the gate is a recompute with views B and C
 				runtime.ReadMemStats(&ms)
 				a0 := ms.TotalAlloc
 				t0 := time.Now()
@@ -314,12 +320,19 @@ func TestBudgetWarmRecompute(t *testing.T) {
 				runtime.ReadMemStats(&ms)
 				alloc[i] = ms.TotalAlloc - a0
 			}
+			hit := make([]time.Duration, 20)
+			for i := range hit {
+				t0 := time.Now()
+				e.Compute()
+				hit[i] = time.Since(t0)
+			}
+			slices.Sort(hit)
 			// The persistence step alone, over the last model's checks: same IDs and prints keep every window.
 			views := []*computed.Views{m.Installs[0].Computed}
 			step := make([]time.Duration, 20)
 			for i := range step {
 				t0 := time.Now()
-				e.persist.persist(*now, views)
+				e.persist.persist(*now, views, nil)
 				step[i] = time.Since(t0)
 			}
 			slices.Sort(cold)
@@ -331,11 +344,12 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			if tier.Contradict {
 				coldNote = ", a first compute with no matured windows"
 			}
-			t.Logf("%s: cold median %v max %v%s (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 120 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
+			t.Logf("%s: cold median %v max %v%s (budget median ≤ 1 s); warm median %v p95 %v max %v (budget median ≤ 150 ms); warm alloc median %.1f MiB max %.1f MiB (reported, D-022); persistence step median %v max %v",
 				tier.Name, cold[len(cold)/2].Round(time.Millisecond), cold[len(cold)-1].Round(time.Millisecond), coldNote,
 				warm[len(warm)/2].Round(100*time.Microsecond), percentile(warm, 95).Round(100*time.Microsecond), warm[len(warm)-1].Round(100*time.Microsecond),
 				float64(alloc[len(alloc)/2])/mib, float64(alloc[len(alloc)-1])/mib,
 				step[len(step)/2].Round(time.Microsecond), step[len(step)-1].Round(time.Microsecond))
+			t.Logf("%s: warm median with unchanged views input %v (reported)", tier.Name, hit[len(hit)/2].Round(100*time.Microsecond))
 			if tier.Contradict && len(disagreements(m)) == 0 {
 				t.Fatal("the worst case raised no KGWUI-012")
 			}
@@ -345,8 +359,8 @@ func TestBudgetWarmRecompute(t *testing.T) {
 			if cold[len(cold)/2] > time.Second {
 				t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
 			}
-			if warm[len(warm)/2] > 120*time.Millisecond {
-				t.Errorf("warm recompute median %v, budget ≤ 120 ms", warm[len(warm)/2])
+			if warm[len(warm)/2] > 150*time.Millisecond {
+				t.Errorf("warm recompute median %v, budget ≤ 150 ms", warm[len(warm)/2])
 			}
 		})
 	}
@@ -464,6 +478,7 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("index: lookups", func() { m.Installs[0].Index = nil })
 	drop("health: findings", func() { m.Installs[0].Health.Findings = nil })
 	drop("computed: checks", func() { m.Installs[0].Computed.Checks = nil })
+	drop("computed: delegation", func() { m.Installs[0].Computed.Delegation = computed.DelegationResult{} })
 	drop("computed: attachment", func() { m.Installs[0].Computed = nil })
 	drop("persistence: windows", func() { e.persist = newPersistence() })
 	drop("decode: HTTPRoute views", func() { e.decode.httpRoutes = viewCache[objects.HTTPRouteView]{} })
@@ -479,4 +494,138 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	runtime.KeepAlive(snap)
 	j, _ := json.Marshal(r)
 	fmt.Println("heap: " + string(j))
+}
+
+// The 2.4 dense-memory budget (D-025): the edge cap keeps the densest
+// delegation inside the chart's 512Mi memory limit.
+
+// denseMemChildEnv makes TestBudgetDenseMemory measure one edge cap in this process.
+const denseMemChildEnv = "KGWUI_DENSE_MEM_CHILD"
+
+// denseMemRun is one child's measurement: the peak heap sampled during the
+// cold Compute and during the warm ones, and the view B rows.
+type denseMemRun struct {
+	Edges, Rows                  int
+	ColdHeapInuse, WarmHeapInuse uint64
+	ColdHeapAlloc, WarmHeapAlloc uint64
+}
+
+// TestBudgetDenseMemory: DenseSelection(100, 1000) with realistic status, in a
+// fresh process with no GOMEMLIMIT, at the default edge cap: peak heap
+// (HeapInuse) ≤ 432 MiB. RSS is logged, not gated: its margin is too thin for
+// CI. Twice the default and 50,000 are measured and reported (D-025).
+func TestBudgetDenseMemory(t *testing.T) {
+	if v := os.Getenv(denseMemChildEnv); v != "" {
+		edges, err := strconv.Atoi(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		denseMemChild(t, edges)
+		return
+	}
+	const mib = 1 << 20
+	def := computed.DefaultBounds.Edges
+	for _, edges := range slices.Compact([]int{def, 2 * def, 50_000}) {
+		r, rss := denseMemParent(t, edges)
+		heap := max(r.ColdHeapInuse, r.WarmHeapInuse)
+		t.Logf("edges %6d: %6d rows; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
+			edges, r.Rows, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
+		if edges != def {
+			continue
+		}
+		if heap > 432*mib {
+			t.Errorf("peak heap %d MiB at the default edge cap %d, budget ≤ 432 MiB", heap/mib, def)
+		}
+	}
+}
+
+// denseMemParent runs one child at edges and returns its run and peak RSS in bytes.
+func denseMemParent(t *testing.T, edges int) (denseMemRun, uint64) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestBudgetDenseMemory$", "-test.count=1")
+	// The budget holds without a memory limit or a GC tuning.
+	cmd.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool {
+		return strings.HasPrefix(kv, "GOMEMLIMIT=") || strings.HasPrefix(kv, "GOGC=")
+	})
+	cmd.Env = append(cmd.Env, denseMemChildEnv+"="+strconv.Itoa(edges))
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("dense memory child: %v\n%s", err, out)
+	}
+	var r denseMemRun
+	for line := range strings.Lines(string(out)) {
+		if j, ok := strings.CutPrefix(line, "densemem: "); ok {
+			if err := json.Unmarshal([]byte(j), &r); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if r.Rows == 0 {
+		t.Fatalf("dense memory child printed no result:\n%s", out)
+	}
+	return r, maxRSS(t, cmd.ProcessState)
+}
+
+// maxRSS is a finished process's peak resident set in bytes.
+func maxRSS(t *testing.T, ps *os.ProcessState) uint64 {
+	ru, ok := ps.SysUsage().(*syscall.Rusage)
+	if !ok {
+		t.Skipf("no rusage on %s", runtime.GOOS)
+	}
+	if runtime.GOOS == "darwin" {
+		return uint64(ru.Maxrss) //nolint:gosec // never negative
+	}
+	return uint64(ru.Maxrss) * 1024 //nolint:gosec // Linux reports KiB
+}
+
+// denseMemChild computes the dense world once cold and five times warm at
+// edges, sampling the heap every 5 ms, and prints one denseMemRun.
+func denseMemChild(t *testing.T, edges int) {
+	snap := denseSnapshot(100, 1000)
+	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+	cfg.Logger = slog.New(slog.DiscardHandler)
+	cfg.DelegationBounds.Edges = edges
+	e := New(cfg)
+	// sample runs f while sampling the heap and returns the peak HeapInuse and HeapAlloc.
+	sample := func(f func()) (inuse, alloc uint64) {
+		stop, done := make(chan struct{}), make(chan struct{})
+		var ms runtime.MemStats
+		read := func() {
+			runtime.ReadMemStats(&ms)
+			inuse, alloc = max(inuse, ms.HeapInuse), max(alloc, ms.HeapAlloc)
+		}
+		go func() {
+			defer close(done)
+			tk := time.NewTicker(5 * time.Millisecond)
+			defer tk.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-tk.C:
+					read()
+				}
+			}
+		}()
+		f()
+		close(stop)
+		<-done
+		read()
+		return inuse, alloc
+	}
+	var m *Model
+	r := denseMemRun{Edges: edges}
+	r.ColdHeapInuse, r.ColdHeapAlloc = sample(func() { m = e.Compute() })
+	r.WarmHeapInuse, r.WarmHeapAlloc = sample(func() {
+		for range 5 {
+			e.forgetViews()
+			m = e.Compute()
+		}
+	})
+	if len(m.Installs) != 1 || m.Installs[0].Computed == nil {
+		t.Fatalf("installs %d", len(m.Installs))
+	}
+	r.Rows = len(m.Installs[0].Computed.Delegation.Rows)
+	runtime.KeepAlive(snap)
+	j, _ := json.Marshal(r)
+	fmt.Println("densemem: " + string(j))
 }

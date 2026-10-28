@@ -17,6 +17,6 @@ func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
 }
 
 // Delegation implements computed.Rules.
-func (rules) Delegation(computed.DelegationInput) computed.DelegationResult {
-	return computed.DelegationResult{}
+func (rules) Delegation(in computed.DelegationInput) computed.DelegationResult {
+	return delegation(in)
 }

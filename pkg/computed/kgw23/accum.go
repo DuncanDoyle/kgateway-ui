@@ -1,0 +1,230 @@
+package kgw23
+
+import (
+	"maps"
+	"slices"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+// accumulator folds delegation contexts into rows as the traversal produces
+// them (rules §5.7). Aggregates, Deps, Reporters and digests take every
+// context; a context itself is kept only within the retention caps.
+type accumulator struct {
+	bounds computed.Bounds
+	byKey  map[computed.RowKey]*rowAcc
+	// kept counts the retained contexts of the install.
+	kept   int
+	hasher *computed.ContextHasher
+	// deps interns every dependency set the rows and contexts hold.
+	deps *computed.DepSets
+	// sorted are the rows in RowKey order, set by rows.
+	sorted []*rowAcc
+	// tooLarge is set when a compute cap was hit, so a row with no context
+	// may have been reached: it is too-large, not not-reached (rules §3.3).
+	tooLarge bool
+}
+
+// rowAcc is one row's running aggregate.
+type rowAcc struct {
+	row computed.Row
+	// seen counts the contexts per outcome index; n is their total.
+	seen [len(outcomes)]int
+	n    int
+	// unknown is the first unknown reason seen; scope is set by the meta or by any scope-unknown context.
+	unknown computed.UnknownReason
+	scope   bool
+	// tags has one entry per retained context, for the effective projection.
+	tags []ctxTag
+	// child is the child's index in the walker's routes, or -1.
+	child int32
+	// deps and keyDeps gather Deps and KeyDeps (index-aligned with Reporters)
+	// until rows finishes them.
+	deps    computed.DepAcc
+	keyDeps []computed.DepAcc
+	// lastDeps and lastKey are the previous context's deps and reporter index:
+	// a frame's contexts share one deps set, so a repeat is merged already.
+	lastDeps []objects.Ref
+	lastKey  int
+}
+
+// ctxTag is where a retained context came from: its install-wide retention
+// order and its frame. Contexts of one frame and child are the same view C
+// evaluation; frame 0 is never shared.
+type ctxTag struct{ seq, frame uint32 }
+
+func newAccumulator(b computed.Bounds) *accumulator {
+	return &accumulator{bounds: b, byKey: map[computed.RowKey]*rowAcc{}, hasher: computed.NewContextHasher(),
+		deps: computed.NewDepSets()}
+}
+
+// open starts a row and returns it. It is called once per row before any add.
+func (a *accumulator) open(key computed.RowKey, meta computed.RowMeta) *rowAcc {
+	r := &rowAcc{row: computed.Row{Key: key, RefAsWritten: meta.RefAsWritten, Allows: meta.Allows,
+		Unresolved: meta.Unresolved}, scope: meta.ScopeUnknown, child: -1}
+	a.byKey[key] = r
+	return r
+}
+
+// add folds c into the row of key. c's slices are shared, never copied. A
+// zero-child unresolved row gets its contexts too, for their reporters and deps.
+func (a *accumulator) add(key computed.RowKey, c computed.Context) {
+	a.addTo(a.byKey[key], c, a.hasher.Sum(&c), 0)
+}
+
+// addTo is add for an open row r, with d the context's ContextHasher sum and
+// frame the id of the frame it was evaluated under.
+func (a *accumulator) addTo(r *rowAcc, c computed.Context, d uint64, frame uint32) {
+	a.fold(r, c, d, frame, true)
+}
+
+// addCounted folds c like addTo but never retains it: a context cut by a compute
+// cap carries nothing a sample would show. The row is marked truncated, so
+// its contexts never read as complete.
+func (a *accumulator) addCounted(r *rowAcc, c computed.Context, d uint64) { a.fold(r, c, d, 0, false) }
+
+func (a *accumulator) fold(r *rowAcc, c computed.Context, d uint64, frame uint32, retain bool) {
+	r.seen[outcomeIndex(c.Outcome)]++
+	r.n++
+	switch {
+	case c.Outcome != computed.OutcomeUnknown:
+	case c.Unknown == computed.UnknownScope:
+		r.scope = true
+	case r.unknown == "":
+		r.unknown = c.Unknown
+	}
+	if r.row.Reason == nil {
+		r.row.Reason = c.Reason
+	}
+	c.Deps = a.deps.Intern(c.Deps)
+	repeat := len(c.Deps) > 0 && len(c.Deps) == len(r.lastDeps) && &c.Deps[0] == &r.lastDeps[0]
+	if !repeat {
+		r.deps.Add(c.Deps)
+	}
+	i, ok := slices.BinarySearchFunc(r.row.Reporters, c.Reporter, computed.ReportKey.Compare)
+	if !ok {
+		r.row.Reporters = slices.Insert(r.row.Reporters, i, c.Reporter)
+		r.keyDeps = slices.Insert(r.keyDeps, i, computed.DepAcc{})
+		r.keyDeps[i].Add(c.Deps)
+		r.row.KeyDigests = slices.Insert(r.row.KeyDigests, i, d)
+	} else {
+		if !repeat || i != r.lastKey {
+			r.keyDeps[i].Add(c.Deps)
+		}
+		r.row.KeyDigests[i] += d
+	}
+	r.lastDeps, r.lastKey = c.Deps, i
+	r.row.ContextDigest += d // wrapping sum: order-independent
+	if n := len(r.row.Contexts); retain && n < a.bounds.ContextsPerRow && a.kept < a.bounds.ContextsPerInstall {
+		if n == cap(r.row.Contexts) {
+			// Start at two, then quadruple, never past the per-row cap: a context
+			// is large, so fewer regrowths matter.
+			r.row.Contexts = slices.Grow(r.row.Contexts, min(max(3*n, 2), a.bounds.ContextsPerRow-n))
+			r.tags = slices.Grow(r.tags, cap(r.row.Contexts)-len(r.tags))
+		}
+		r.row.Contexts = append(r.row.Contexts, c)
+		r.tags = append(r.tags, ctxTag{seq: uint32(a.kept), frame: frame}) //nolint:gosec // bounded by ContextsPerInstall
+		a.kept++
+	} else {
+		r.row.ContextsTruncated = true
+	}
+}
+
+// rows returns every row in RowKey order with its final outcome (rules §5.5).
+// incomplete reports whether a child is in a reach closure (rules §8.5).
+func (a *accumulator) rows(incomplete func(objects.Ref) bool) []computed.Row {
+	// Sort the rows themselves: a pointer is cheaper to move than a RowKey.
+	a.sorted = slices.AppendSeq(make([]*rowAcc, 0, len(a.byKey)), maps.Values(a.byKey))
+	slices.SortFunc(a.sorted, func(x, y *rowAcc) int { return x.row.Key.Compare(y.row.Key) })
+	out := make([]computed.Row, 0, len(a.sorted))
+	for _, r := range a.sorted {
+		r.row.Deps = a.deps.Finish(&r.deps)
+		if len(r.keyDeps) > 0 {
+			r.row.KeyDeps = make([][]objects.Ref, len(r.keyDeps))
+			for k := range r.keyDeps {
+				r.row.KeyDeps[k] = a.deps.Finish(&r.keyDeps[k])
+			}
+			r.keyDeps = nil
+		}
+		r.aggregate(incomplete, a.tooLarge)
+		out = append(out, r.row)
+	}
+	return out
+}
+
+// signalled are the known outcomes besides attached and forbidden, the first
+// present winning when no context attached (rules §5.5): an outcome the
+// controller signals wins over a silent drop.
+var signalled = []computed.RowOutcome{computed.OutcomeRejectedHostnames, computed.OutcomeCycle,
+	computed.OutcomeUnresolved, computed.OutcomeDropped}
+
+// aggregate sets the row's outcome from its meta and contexts (rules §5.5).
+func (r *rowAcc) aggregate(incomplete func(objects.Ref) bool, tooLarge bool) {
+	row := &r.row
+	switch {
+	case r.scope:
+		row.Outcome, row.Unknown = computed.OutcomeUnknown, computed.UnknownScope
+		return
+	case row.Allows == computed.AllowsOther || r.count(computed.OutcomeForbidden) > 0:
+		row.Outcome = computed.OutcomeForbidden
+		return
+	case row.Key.Child == (objects.Ref{}) && row.Unresolved == "":
+		// A partial selection's row: what a possible child would add is unknown (rules §3.3).
+		row.Outcome, row.Unknown = computed.OutcomeUnknown, computed.UnknownNotReached
+		if r.n > 0 {
+			row.Unknown = r.unknown
+		}
+		return
+	case row.Key.Child == (objects.Ref{}):
+		// The ref selected nothing, whatever the context.
+		row.Outcome = computed.OutcomeUnresolved
+		return
+	case r.n == 0:
+		// Selected, but no context reached it.
+		row.Outcome, row.Unknown = computed.OutcomeUnknown, computed.UnknownNotReached
+		if tooLarge {
+			row.Unknown = computed.UnknownTooLarge
+		}
+		return
+	}
+	missing := r.count(computed.OutcomeUnknown) > 0 || incomplete(row.Key.Child)
+	att := r.count(computed.OutcomeAttached)
+	switch {
+	case att > 0:
+		row.Outcome, row.SomeNotComputed = computed.OutcomeAttached, missing
+		if att+r.count(computed.OutcomeUnknown) < r.n {
+			row.Outcome = computed.OutcomePartial
+		}
+	case r.count(computed.OutcomeRejectedHostnames) > 0 && missing:
+		// A rejection is positive evidence, like attached (rules §8.5).
+		row.Outcome, row.SomeNotComputed = computed.OutcomeRejectedHostnames, true
+	case missing:
+		row.Outcome, row.Unknown = computed.OutcomeUnknown, r.unknown
+		if row.Unknown == "" {
+			row.Unknown = computed.UnknownContext // known contexts, but the child is in a reach closure
+		}
+	default:
+		for _, o := range signalled {
+			if r.count(o) > 0 {
+				row.Outcome = o
+				return
+			}
+		}
+	}
+}
+
+// outcomes are the per-context outcomes, in the order rowAcc.seen counts them.
+var outcomes = [...]computed.RowOutcome{computed.OutcomeAttached, computed.OutcomeDropped, computed.OutcomeForbidden,
+	computed.OutcomeRejectedHostnames, computed.OutcomeCycle, computed.OutcomeUnresolved, computed.OutcomeUnknown}
+
+// outcomeIndex is o's index in outcomes; any other value counts as unknown.
+func outcomeIndex(o computed.RowOutcome) int {
+	if i := slices.Index(outcomes[:], o); i >= 0 {
+		return i
+	}
+	return len(outcomes) - 1
+}
+
+// count is the number of contexts with outcome o.
+func (r *rowAcc) count(o computed.RowOutcome) int { return r.seen[outcomeIndex(o)] }

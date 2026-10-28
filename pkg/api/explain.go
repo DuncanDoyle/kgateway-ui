@@ -93,9 +93,11 @@ func (f facts) label(rule string, st computed.State) Computed {
 	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Rule: rule, State: string(st), Note: f.ix.RuleNote}
 }
 
-// restricted is a fact with a hidden dependency: no reason and no note (rule 4).
-func (f facts) restricted(rule string) Computed {
-	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Rule: rule, State: string(computed.StateRestricted)}
+// restricted is a fact with a hidden dependency (rule 4). It names no rule,
+// reason or note: the deciding rule can vary with the hidden data. Only the
+// rule set, which is the install's, stays.
+func (f facts) restricted() Computed {
+	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, State: string(computed.StateRestricted)}
 }
 
 // unknown is a fact that could not be computed, with why.
@@ -176,7 +178,7 @@ func (f facts) attachment(rf *explore.RefFacts) Attachment {
 	rule := rf.Out.Rule
 	switch {
 	case !f.v.allowDeps(f.ix, rf.Deps):
-		return Attachment{Listeners: []ListenerAttachment{}, Computed: f.restricted(rule)}
+		return Attachment{Listeners: []ListenerAttachment{}, Computed: f.restricted()}
 	case rf.Out.Unknown != "":
 		return Attachment{Listeners: []ListenerAttachment{}, Computed: f.unknown(rule, rf.Out.Unknown)}
 	}
@@ -203,7 +205,7 @@ func (f facts) membership(res LinkedRef, rf *explore.RefFacts, h *explore.Listen
 	lf, ok := f.ix.Listeners[explore.ListenerKey{Resource: rf.Out.Resource, Listener: h.Listener}]
 	switch {
 	case !f.v.allowDeps(f.ix, h.Deps):
-		out.Computed = f.restricted(rule)
+		out.Computed = f.restricted()
 		return out
 	case ok && !lf.Known:
 		out.Computed = f.unknown(rule, lf.Unknown)
@@ -312,4 +314,169 @@ func mergeAttachment(a, b Attachment) Attachment {
 		}
 	}
 	return a
+}
+
+// Rules of views B and C's computed facts; the rule sets name none (our call).
+const (
+	ruleDelegation = "delegation"
+	ruleEffective  = "effective-matchers"
+)
+
+// View B and C text, from the wording pass (Task 67). Outcome reasons are
+// sentences without a final period, like 2.3's notes; fit clauses hold no
+// ";", since a partial row joins its reason and clause with "; ".
+const (
+	reasonPartial           = "Attached on some paths only"
+	reasonForbidden         = "The route's parentRefs do not permit this parent"
+	reasonRejectedHostnames = "A delegated route may not set hostnames"
+	reasonCycle             = "A delegation loop fails this ref"
+	reasonMissing           = "No such route"
+	reasonUnwatched         = "Namespace not watched"
+	reasonDroppedSome       = "No computed path attaches it. Others not computed"
+	noteSomeNotComputed     = "Some paths not computed"
+	noteUnconfirmable       = "Status cannot confirm this path"
+	// rowFit prefixes a row's fit clause with the child's rule that failed, counted from 1.
+	rowFit = "the route's rule %d: %s"
+)
+
+// Fit clauses (rules §6). Values carry no backticks: the Why cell and path
+// lines render text as is.
+const (
+	fitPathType     = "the parent's path match is %s, not PathPrefix"
+	fitNoPath       = "the parent has no path match"
+	fitPathPrefix   = "path %s is outside the parent's %s"
+	fitDefaultSlash = "no matches, so it defaults to /, which is outside the parent's %s"
+	fitKey          = "the parent needs %s %s, the rule has %s"
+	fitKeyNone      = "the parent needs %s %s, the rule has none"
+	fitNoMatches    = "an empty match list fits no parent match"
+)
+
+// explainFit is the clause a child rule failed, as text; "" for nil.
+func explainFit(f *computed.FitFailure) string {
+	if f == nil {
+		return ""
+	}
+	key := func(what string) string {
+		if f.Child == "" {
+			return fmt.Sprintf(fitKeyNone, what, f.Parent)
+		}
+		return fmt.Sprintf(fitKey, what, f.Parent, f.Child)
+	}
+	switch f.Clause {
+	case computed.ClausePathType:
+		if f.Parent == "" {
+			return fitNoPath
+		}
+		return fmt.Sprintf(fitPathType, f.Parent)
+	case computed.ClausePathPrefix:
+		return fmt.Sprintf(fitPathPrefix, f.Child, f.Parent)
+	case computed.ClauseDefaultSlash:
+		return fmt.Sprintf(fitDefaultSlash, f.Parent)
+	case computed.ClauseHeader:
+		return key("header")
+	case computed.ClauseQuery:
+		return key("query parameter")
+	case computed.ClauseMethod:
+		return key("method")
+	case computed.ClauseNoMatches:
+		return fitNoMatches
+	}
+	return string(f.Clause)
+}
+
+// explainRow is a row's or context's reason: the outcome's text, the failing
+// fit clause with its child rule, or why the ref selected nothing. An
+// unknown outcome has text only when some path dropped the child; its
+// unknown reason is the Computed's.
+func explainRow(o computed.RowOutcome, f *computed.FitFailure, u computed.Unresolved) string {
+	fit := ""
+	if f != nil {
+		fit = fmt.Sprintf(rowFit, f.Rule+1, explainFit(f))
+	}
+	switch o {
+	case computed.OutcomeDropped:
+		return fit
+	case computed.OutcomePartial:
+		if fit == "" {
+			return reasonPartial
+		}
+		return reasonPartial + "; " + fit
+	case computed.OutcomeForbidden:
+		return reasonForbidden
+	case computed.OutcomeRejectedHostnames:
+		return reasonRejectedHostnames
+	case computed.OutcomeCycle:
+		return reasonCycle
+	case computed.OutcomeUnresolved:
+		if u == computed.UnresolvedUnwatched {
+			return reasonUnwatched
+		}
+		return reasonMissing
+	case computed.OutcomeUnknown:
+		if f != nil {
+			return reasonDroppedSome
+		}
+	}
+	return ""
+}
+
+// rowNote is what a row adds to its check's note (rules §5.5, design §5.2).
+func rowNote(r *computed.Row) string {
+	switch {
+	case r.SomeNotComputed:
+		return noteSomeNotComputed
+	case r.Unconfirmable:
+		return noteUnconfirmable
+	}
+	return ""
+}
+
+// joinNotes joins two notes as sentences; either may be empty.
+func joinNotes(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + ". " + b
+}
+
+// delegation is a view B row's Computed for the caller: restricted when a
+// dependency other than the routes on its paths is hidden (design §7.4
+// rules 4, 4b); unknown with the row's reason; else its child-entry check,
+// with the row's own note (PF14).
+func (f facts) delegation(r *explore.DelegRow) Computed {
+	if !f.v.allowDeps(f.ix, r.Deps) {
+		return f.restricted()
+	}
+	var c Computed
+	if r.Outcome == computed.OutcomeUnknown {
+		c = f.unknown(ruleDelegation, r.Unknown)
+	} else {
+		c = f.checked(ruleDelegation, r.Check)
+		if c.State == string(computed.StateUnknown) && r.Check.Unknown != "" {
+			c.Reason = string(r.Check.Unknown)
+		}
+	}
+	c.Note = joinNotes(c.Note, rowNote(&r.Row))
+	return c
+}
+
+// effective is a view C edge's Computed for the caller: never verified by
+// the controller (rules §8.4), unknown when a context is, restricted when a
+// dependency other than the routes on its paths is hidden.
+func (f facts) effective(e *computed.EffectiveEdge, deps explore.DepSet) Computed {
+	if !f.v.allowDeps(f.ix, deps) {
+		return f.restricted()
+	}
+	c := f.label(ruleEffective, computed.StateChecked)
+	for i := range e.Contexts {
+		if u := e.Contexts[i].Unknown; u != "" {
+			c = f.unknown(ruleEffective, u)
+			break
+		}
+	}
+	c.Coverage = []string{string(computed.CoverageNone)}
+	return c
 }

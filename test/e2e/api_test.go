@@ -6,6 +6,7 @@ package e2e
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,8 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
@@ -230,16 +237,7 @@ func kubectl(t *testing.T, v any, args ...string) {
 // kubectlRun runs kubectl against the harness cluster and returns its stdout.
 func kubectlRun(t *testing.T, args ...string) ([]byte, error) {
 	t.Helper()
-	dir := os.Getenv("E2E_DIR")
-	if dir == "" {
-		cluster := cmp.Or(os.Getenv("CLUSTER"), "kgwui-e2e")
-		dir = filepath.Join(cmp.Or(os.Getenv("TMPDIR"), "/tmp"), cluster) // as setup.sh
-	}
-	kc := filepath.Join(dir, "kubeconfig")
-	if _, err := os.Stat(kc); err != nil {
-		t.Fatalf("harness kubeconfig: %v", err)
-	}
-	return exec.Command("kubectl", append([]string{"--kubeconfig", kc}, args...)...).Output()
+	return exec.Command("kubectl", append([]string{"--kubeconfig", harnessKubeconfig(t)}, args...)...).Output()
 }
 
 // kcond is a condition as the controller wrote it; lastTransitionTime is left out.
@@ -279,6 +277,14 @@ type kentry struct {
 	ParentRef      kref    `json:"parentRef"`
 	ControllerName string  `json:"controllerName"`
 	Conditions     []kcond `json:"conditions"`
+}
+
+// condsOrNil is e's conditions; none when e is nil.
+func (e *kentry) condsOrNil() []kcond {
+	if e == nil {
+		return nil
+	}
+	return e.Conditions
 }
 
 // kobj is the part of a Gateway API or kgateway object the comparisons read.
@@ -1179,4 +1185,398 @@ func TestForcedDisagreementRaisesKGWUI012(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+// region Views B and C (2.4)
+
+// harnessKubeconfig is the kubeconfig setup.sh wrote for the harness cluster.
+func harnessKubeconfig(t *testing.T) string {
+	t.Helper()
+	dir := os.Getenv("E2E_DIR")
+	if dir == "" {
+		cluster := cmp.Or(os.Getenv("CLUSTER"), "kgwui-e2e")
+		dir = filepath.Join(cmp.Or(os.Getenv("TMPDIR"), "/tmp"), cluster) // as setup.sh
+	}
+	kc := filepath.Join(dir, "kubeconfig")
+	if _, err := os.Stat(kc); err != nil {
+		t.Fatalf("harness kubeconfig: %v", err)
+	}
+	return kc
+}
+
+// localViews runs the backend in-process against the harness cluster, as the
+// deployed UI does, and returns a reader of install A's computed views. The
+// API serves no parent-resolvedrefs check, so only this run lists them all.
+func localViews(t *testing.T) func() *computed.Views {
+	t.Helper()
+	cfg, err := clientcmd.BuildConfigFromFlags("", harnessKubeconfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()},
+		app.Options{PollInterval: 30 * time.Second, MetricsInterval: 10 * time.Second}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	id := strings.TrimPrefix(install, "/api/v1/installs/")
+	return func() *computed.Views {
+		p := a.Engine.Current()
+		if p == nil || !p.Model.Snapshot.Synced {
+			return nil
+		}
+		for _, im := range p.Model.Installs {
+			if im.Resolved.ID() == id {
+				return im.Computed
+			}
+		}
+		return nil
+	}
+}
+
+// delegChecks are the child-entry and parent-resolvedrefs checks of v.
+func delegChecks(v *computed.Views) []computed.CheckResult {
+	var out []computed.CheckResult
+	for _, c := range v.Checks {
+		if c.ID.Kind == computed.KindChildEntry || c.ID.Kind == computed.KindParentResolvedRefs {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func checkText(c computed.CheckResult) string {
+	parent, _ := c.Parent()
+	return fmt.Sprintf("%s on %s (parent %s, key %+v): %s, coverage %v, expected %q, observed %q, note %q",
+		c.ID.Kind, c.On, parent, c.Key, c.State, c.Coverage, c.Expected, c.Observed, c.Note)
+}
+
+// compatible reports whether a row's computed state agrees with the
+// controller: checked, and either status-compatible or not-verified (rules §8.4).
+func compatible(state string, coverage []string) bool {
+	return state == string(computed.StateChecked) && len(coverage) > 0 && !slices.ContainsFunc(coverage, func(c string) bool {
+		return c != string(computed.CoverageStatus) && c != string(computed.CoverageNone)
+	})
+}
+
+// wantCheck is one expected delegation check: status-compatible unless
+// notVerified says why status cannot show it; observed, if set, is pinned.
+type wantCheck struct {
+	kind               computed.CheckKind
+	on, parent         string // parent is empty for parent-resolvedrefs
+	key                computed.ReportKey
+	expected, observed string
+	notVerified        string
+}
+
+func checkID(kind computed.CheckKind, on, parent string, key computed.ReportKey) string {
+	return fmt.Sprintf("%s on %s (parent %s, key %+v)", kind, on, parent, key)
+}
+
+// wantDelegChecks are the fixture's delegation checks on a kgateway minor
+// (phase-2.4-evidence.md).
+func wantDelegChecks(minor string) []wantCheck {
+	routeKey := func(ns, name string) computed.ReportKey {
+		return computed.ReportKey{Group: gwGroup, Kind: "HTTPRoute", Namespace: ns, Name: name}
+	}
+	store, tree, mid, cycle := routeKey("shop", "store"), routeKey("shop", "tree"), routeKey("shop", "t-mid"), routeKey("shop", "c-cycle")
+	edge := computed.ReportKey{Group: gwGroup, Kind: "Gateway", Namespace: "infra", Name: "edge", SectionName: "http"}
+	entry := func(on, parent string, key computed.ReportKey, expected string) wantCheck {
+		return wantCheck{kind: computed.KindChildEntry, on: on, parent: parent, key: key, expected: expected}
+	}
+	resolved := func(on string, key computed.ReportKey, expected string) wantCheck {
+		return wantCheck{kind: computed.KindParentResolvedRefs, on: on, key: key, expected: expected}
+	}
+	cycleRefs := resolved("shop/c-cycle", store, "False")
+	cycleRefs.observed = "False/RefNotPermitted" // reason not compared: c-cycle also has a Service backendRef
+	out := []wantCheck{
+		entry("deleg/c-forbidden", "shop/store", store, "none"),
+		entry("deleg/c-wild", "shop/store", store, "entry"),
+		entry("shop/c-cycle", "shop/c-cycle", cycle, "none"),
+		entry("shop/c-cycle", "shop/store", store, "entry"),
+		entry("shop/c-hdr", "shop/store", store, "none"),
+		entry("shop/c-host", "shop/store", store, "False/UnsupportedValue"),
+		entry("shop/c-ihost", "shop/store", store, "False/UnsupportedValue"),
+		entry("shop/c-inherit", "shop/store", store, "entry"),
+		entry("shop/c-label", "shop/store", store, "entry"),
+		entry("shop/c-name", "shop/store", store, "entry"),
+		entry("shop/t-mid", "shop/tree", tree, "entry"),
+		entry("shop/t-nobe", "shop/tree", tree, "entry"),
+		entry("shop/t-partial", "shop/tree", tree, "entry"),
+		entry("shop/t-port", "shop/tree", tree, "entry"),
+		entry("shop/t-pruned", "shop/t-mid", mid, "none"),
+		resolved("shop/store", edge, "False/BackendNotFound"),
+		resolved("shop/t-mid", tree, "False/BackendNotFound"),
+		resolved("shop/tree", edge, "False/BackendNotFound"),
+		cycleRefs,
+	}
+	if minor == "2.3" {
+		nons := entry("shop/c-nons", "shop/store", store, "")
+		nons.notVerified = "2.3 writes no entry when the permitting ref omits the namespace (rules §7)"
+		return append(out, nons)
+	}
+	// 2.4 writes the entry under the parentRef as written, without a namespace.
+	return append(out, entry("shop/c-nons", "shop/store", routeKey("", "store"), "entry"))
+}
+
+// checkMismatch says how c differs from w, or "" when it matches.
+func checkMismatch(c computed.CheckResult, w wantCheck) string {
+	cov := computed.CoverageStatus
+	if w.notVerified != "" {
+		cov = computed.CoverageNone
+	}
+	switch {
+	case c.State != computed.StateChecked || !slices.Equal(c.Coverage, []computed.Coverage{cov}):
+		return fmt.Sprintf("want checked with %s", cov)
+	case c.Expected != w.expected:
+		return fmt.Sprintf("want expected %q", w.expected)
+	case w.observed != "" && c.Observed != w.observed:
+		return fmt.Sprintf("want observed %q", w.observed)
+	}
+	return ""
+}
+
+// delegationRows returns every view B row of parent route id (one page: the fixture is small).
+func delegationRows(t *testing.T, id string) []api.DelegationRow {
+	t.Helper()
+	var p api.Page[api.DelegationRow]
+	get(t, install+"/routes/gateway.networking.k8s.io/HTTPRoute/"+id+"/delegation?limit=200", &p)
+	if p.Next != "" {
+		t.Fatalf("%s/delegation: more than one page", id)
+	}
+	return p.Items
+}
+
+// childRow is parent's view B row for child, or nil; a child selected twice is an error.
+func childRow(rows []api.DelegationRow, child string) (*api.DelegationRow, error) {
+	var out *api.DelegationRow
+	for i, r := range rows {
+		if r.Child == nil || r.Child.String() != child {
+			continue
+		}
+		if out != nil {
+			return nil, fmt.Errorf("%s: more than one row", child)
+		}
+		out = &rows[i]
+	}
+	return out, nil
+}
+
+// TestDelegationAgreesWithController checks views B and C against the
+// controller on a settled cluster (design §9.5, 2.4): every child-entry and
+// parent-resolvedrefs check is compatible under the tag's rule set, the
+// controller-backed cases of rules §11.2-§11.4 hold, and nothing raises KGWUI-012.
+func TestDelegationAgreesWithController(t *testing.T) {
+	w := settledWorld(t)
+	minor := kgwMinor(t)
+	ruleSet := "kgateway-" + minor
+	t.Logf("kgateway %s", minor)
+	synth := objects.ParentRef{Group: gwGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "tree"}
+
+	t.Run("fixture", func(t *testing.T) {
+		// What the controller wrote for the cases the checks exist for (D-021 items 3, 9; rules §5.1).
+		if ps := w.routes["shop/t-pruned"].Status.Parents; len(ps) != 0 {
+			t.Errorf("shop/t-pruned: want no entry, controller wrote %+v", ps)
+		}
+		e := ourEntry(w.routes["shop/t-partial"], synth)
+		if c := findCond(e.condsOrNil(), "Accepted"); c == nil || c.Status != "True" {
+			t.Errorf("shop/t-partial: want Accepted=True from shop/tree, controller wrote %+v", e)
+		}
+		e = ourEntry(w.routes["shop/t-nobe"], synth)
+		if c := findCond(e.condsOrNil(), "ResolvedRefs"); c == nil || c.Status != "False" || c.Reason != "BackendNotFound" {
+			t.Errorf("shop/t-nobe: want ResolvedRefs=False/BackendNotFound from shop/tree, controller wrote %+v", e)
+		}
+		withPort := synth
+		withPort.Port = 8080
+		if e := ourEntry(w.routes["shop/t-port"], withPort); e == nil || deref(e.ParentRef.Port, 0) != 8080 {
+			t.Errorf("shop/t-port: want an entry with port 8080, controller wrote %+v", w.routes["shop/t-port"].Status.Parents)
+		}
+	})
+
+	t.Run("checks", func(t *testing.T) {
+		views := localViews(t)
+		// Missing entries wait out the 60 s grace from this run's start, contradictions 30 s.
+		deadline := time.Now().Add(3 * time.Minute)
+		for {
+			v := views()
+			var open []string
+			if v == nil {
+				open = append(open, "no model for install A yet")
+			} else {
+				if v.RuleSet != ruleSet || v.Note != "" {
+					t.Fatalf("rule set %q (note %q), want %s", v.RuleSet, v.Note, ruleSet)
+				}
+				got := map[string]computed.CheckResult{}
+				for _, c := range delegChecks(v) {
+					if c.ID.RuleSet != ruleSet {
+						t.Fatalf("%s: rule set %s, want %s", checkText(c), c.ID.RuleSet, ruleSet)
+					}
+					if c.State == computed.StateDisagrees {
+						t.Fatalf("disagrees: %s", checkText(c))
+					}
+					parent, _ := c.Parent()
+					id := checkID(c.ID.Kind, c.On.String(), parent.String(), c.Key)
+					if _, dup := got[id]; dup {
+						open = append(open, "duplicate: "+id)
+					}
+					got[id] = c
+				}
+				want := wantDelegChecks(minor)
+				for _, w := range want {
+					id := checkID(w.kind, w.on, w.parent, w.key)
+					c, ok := got[id]
+					switch {
+					case !ok:
+						open = append(open, "missing: "+id)
+					case checkMismatch(c, w) != "":
+						open = append(open, checkText(c)+": "+checkMismatch(c, w))
+					}
+					delete(got, id)
+				}
+				for _, c := range got {
+					open = append(open, "unexpected: "+checkText(c))
+				}
+				if len(open) == 0 {
+					t.Logf("%d delegation checks as expected under %s", len(want), ruleSet)
+					for _, c := range delegChecks(v) {
+						t.Log(checkText(c))
+					}
+					return
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("checks not compatible after 3 min:\n%s", strings.Join(open, "\n"))
+			}
+			time.Sleep(3 * time.Second)
+		}
+	})
+
+	t.Run("rows", func(t *testing.T) {
+		eventually(t, func() error {
+			want := func(parent, child string, outcome computed.RowOutcome, cov computed.Coverage, entry bool) (*api.DelegationRow, error) {
+				r, err := childRow(delegationRows(t, parent), child)
+				switch {
+				case err != nil:
+					return nil, err
+				case r == nil:
+					return nil, fmt.Errorf("%s: no row for %s", parent, child)
+				case r.Outcome != string(outcome):
+					return nil, fmt.Errorf("%s → %s: outcome %s, want %s", parent, child, r.Outcome, outcome)
+				case r.Computed.Rules != ruleSet || r.Computed.State != string(computed.StateChecked) || !slices.Equal(r.Computed.Coverage, []string{string(cov)}):
+					return nil, fmt.Errorf("%s → %s: computed %+v, want checked with %s under %s", parent, child, r.Computed, cov, ruleSet)
+				case (r.Observed.Entry != nil) != entry:
+					return nil, fmt.Errorf("%s → %s: entry %+v, want present %v", parent, child, r.Observed.Entry, entry)
+				}
+				return r, nil
+			}
+			// The pruned child: dropped under its only context, no entry expected (rules §11.2).
+			if _, err := want("shop/t-mid", "shop/t-pruned", computed.OutcomeDropped, computed.CoverageStatus, false); err != nil {
+				return err
+			}
+			// Attached under /tree/a and dropped under /tree/b: partial, one entry.
+			if _, err := want("shop/tree", "shop/t-partial", computed.OutcomePartial, computed.CoverageStatus, true); err != nil {
+				return err
+			}
+			// A missing Service is a later stage: the child stays attached and compatible (rules §11.4).
+			r, err := want("shop/tree", "shop/t-nobe", computed.OutcomeAttached, computed.CoverageStatus, true)
+			if err != nil {
+				return err
+			}
+			if !slices.ContainsFunc(r.Observed.Entry.Conditions, func(c api.Condition) bool {
+				return c.Type == "ResolvedRefs" && c.Status == "False" && c.Reason == "BackendNotFound"
+			}) {
+				return fmt.Errorf("shop/t-nobe: entry %+v, want ResolvedRefs=False/BackendNotFound", r.Observed.Entry)
+			}
+			// The port-only ref: the entry carries the port on 2.3 (D-021 item 3) and, as written, on 2.4.
+			if r, err = want("shop/tree", "shop/t-port", computed.OutcomeAttached, computed.CoverageStatus, true); err != nil {
+				return err
+			}
+			if r.Observed.Entry.ParentRef.Port != 8080 {
+				return fmt.Errorf("shop/t-port: entry parentRef %+v, want port 8080", r.Observed.Entry.ParentRef)
+			}
+
+			// The 2.2 tree under shop/store: every row compatible or not-verified (PF18).
+			outcomes := map[string]string{}
+			for _, r := range delegationRows(t, "shop/store") {
+				name := "(no child)"
+				if r.Child != nil {
+					name = r.Child.String()
+				}
+				if r.Computed.Rules != ruleSet || !compatible(r.Computed.State, r.Computed.Coverage) {
+					return fmt.Errorf("shop/store → %s (rule %d ref %d): computed %+v, want compatible under %s", name, r.Rule, r.Ref, r.Computed, ruleSet)
+				}
+				outcomes[name] = r.Outcome
+			}
+			for child, o := range map[string]computed.RowOutcome{
+				"deleg/c-forbidden": computed.OutcomeForbidden, "shop/c-hdr": computed.OutcomeDropped, "shop/c-cycle": computed.OutcomeAttached,
+				"shop/c-host": computed.OutcomeRejectedHostnames, "shop/c-ihost": computed.OutcomeRejectedHostnames,
+			} {
+				if outcomes[child] != string(o) {
+					return fmt.Errorf("shop/store → %s: outcome %q, want %s (all: %v)", child, outcomes[child], o, outcomes)
+				}
+			}
+			cyc, err := childRow(delegationRows(t, "shop/c-cycle"), "shop/c-cycle")
+			if err != nil || cyc == nil || cyc.Outcome != string(computed.OutcomeCycle) || !compatible(cyc.Computed.State, cyc.Computed.Coverage) {
+				return fmt.Errorf("shop/c-cycle → itself: row %+v (%v), want a compatible cycle", cyc, err)
+			}
+			// 2.3 writes no entry for a ref without a namespace, so nothing can confirm it (rules §7).
+			nons, err := childRow(delegationRows(t, "shop/store"), "shop/c-nons")
+			if err != nil || nons == nil {
+				return fmt.Errorf("shop/store → shop/c-nons: row %+v (%v)", nons, err)
+			}
+			nonsCov := computed.CoverageStatus // 2.4 writes the entry as written
+			if minor == "2.3" {
+				nonsCov = computed.CoverageNone
+			}
+			if !slices.Equal(nons.Computed.Coverage, []string{string(nonsCov)}) {
+				return fmt.Errorf("%s: shop/c-nons computed %+v, want %s", minor, nons.Computed, nonsCov)
+			}
+			return nil
+		})
+	})
+
+	t.Run("effective", func(t *testing.T) {
+		// View C on the partial child: one parent edge, kept under /tree/a, dropped under /tree/b.
+		eventually(t, func() error {
+			var d api.RouteDetail
+			get(t, install+"/routes/gateway.networking.k8s.io/HTTPRoute/shop/t-partial", &d)
+			if len(d.Effective) != 1 || d.Effective[0].Parent.String() != "shop/tree" {
+				return fmt.Errorf("shop/t-partial: effective %+v, want one edge from shop/tree", d.Effective)
+			}
+			kept := map[string]bool{}
+			for _, c := range d.Effective[0].Contexts {
+				if c.ParentMatch == nil || c.ParentMatch.Path == nil || len(c.Rules) != 1 {
+					return fmt.Errorf("shop/t-partial: context %+v", c)
+				}
+				kept[c.ParentMatch.Path.Value] = c.Rules[0].Kept
+			}
+			if !maps.Equal(kept, map[string]bool{"/tree/a": true, "/tree/b": false}) {
+				return fmt.Errorf("shop/t-partial: kept per parent match %v, want /tree/a kept and /tree/b dropped", kept)
+			}
+			if c := d.Effective[0].Computed; c.Rules != ruleSet || !slices.Equal(c.Coverage, []string{string(computed.CoverageNone)}) {
+				return fmt.Errorf("shop/t-partial: effective computed %+v, want %s under %s", c, computed.CoverageNone, ruleSet)
+			}
+			return nil
+		})
+	})
+
+	t.Run("health", func(t *testing.T) {
+		var h api.HealthResponse
+		get(t, install+"/health", &h)
+		for _, f := range h.Findings {
+			if f.Code == health.CodeComputedDisagrees {
+				t.Errorf("KGWUI-012 on %v: %s", f.Resource, f.Detail)
+			}
+		}
+	})
 }

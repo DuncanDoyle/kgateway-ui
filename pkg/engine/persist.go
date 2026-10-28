@@ -31,6 +31,7 @@ func newPersistence() persistence { return persistence{m: map[computed.Identity]
 // recompute. It sets State, Mature and Since in place, deletes every entry
 // not a candidate this run, and returns the earliest future maturation (zero
 // when none). graceEnd gives a missing entry's grace end; nil means none.
+// A KGWUI-011 trigger matures like any candidate but keeps state checked.
 func (p *persistence) step(now time.Time, checks []computed.CheckResult, graceEnd func(computed.CheckResult) time.Time) (next time.Time) {
 	p.run++
 	next = p.visit(now, checks, graceEnd)
@@ -39,10 +40,10 @@ func (p *persistence) step(now time.Time, checks []computed.CheckResult, graceEn
 }
 
 // persist is step over each install's checks in place, so no slice is copied.
-func (p *persistence) persist(now time.Time, views []*computed.Views) (next time.Time) {
+func (p *persistence) persist(now time.Time, views []*computed.Views, graceEnd func(computed.CheckResult) time.Time) (next time.Time) {
 	p.run++
 	for _, v := range views {
-		if at := p.visit(now, v.Checks, nil); !at.IsZero() && (next.IsZero() || at.Before(next)) {
+		if at := p.visit(now, v.Checks, graceEnd); !at.IsZero() && (next.IsZero() || at.Before(next)) {
 			next = at
 		}
 	}
@@ -67,6 +68,11 @@ func (p *persistence) visit(now time.Time, checks []computed.CheckResult, graceE
 		p.m[c.ID] = w
 		c.Since, c.State = w.since, computed.StatePending
 		at := w.since.Add(Window)
+		if c.Class == computed.ClassTrigger {
+			// A trigger waits on no controller output: its window is tracked,
+			// its state stays checked (rules §8.3, PF12).
+			c.State = computed.StateChecked
+		}
 		if c.Class == computed.ClassMissing {
 			// Without P's current entry it waits on P's status, not on time (step 3).
 			if !c.ParentCurrent {
@@ -84,7 +90,10 @@ func (p *persistence) visit(now time.Time, checks []computed.CheckResult, graceE
 			}
 			continue
 		}
-		c.State, c.Mature = computed.StateDisagrees, true
+		c.Mature = true
+		if c.Class != computed.ClassTrigger {
+			c.State = computed.StateDisagrees
+		}
 	}
 	return next
 }
