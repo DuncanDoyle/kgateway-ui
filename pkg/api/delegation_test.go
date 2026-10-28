@@ -202,6 +202,48 @@ func TestDelegationEndpoint(t *testing.T) {
 
 func ptr[T any](v T) *T { return &v }
 
+// Rules §5.7, D-025: a ref the edge cap cut has no rows and reads too large
+// to compute, not "selects nothing"; a hidden selection stays restricted (rule 4c).
+func TestDelegationEdgeCapCutRef(t *testing.T) {
+	// shop/api's refs charge kid, drop and forb (3 edges), then ghost (none); host would pass the cap.
+	cut := computed.DefaultBounds
+	cut.Edges = 3
+	_, srv, _ := startWith(t, setup{disputes: true, bounds: cut}, outcomeWorld()...)
+	d := get[RouteDetail](t, srv, routeDetail+"shop/api", 200)
+	// Refs charged before the cut keep their rows.
+	if got, want := rowKeys(get[Page[DelegationRow]](t, srv, delegURL("shop", "api", ""), 200)), []string{"0.0:shop/kid", "1.0:shop/drop", "2.0:shop/forb", "3.0:"}; !slices.Equal(got, want) {
+		t.Errorf("rows %v, want %v", got, want)
+	}
+	refComputed := func(d RouteDetail, rule int) *Computed {
+		return d.Rules[rule].BackendRefs[0].Delegation.Computed
+	}
+	if c := refComputed(d, 3); c == nil || c.State != "checked" || c.Reason != "" {
+		t.Errorf("rule 3 (charged, unresolved): computed %+v, want checked", c)
+	}
+	for _, rule := range []int{4, 8} {
+		want := Computed{By: ComputedBy, Rules: "kgateway-2.4", Rule: ruleDelegation, State: "unknown", Reason: "too-large"}
+		if c := refComputed(d, rule); c == nil || !reflect.DeepEqual(*c, want) {
+			t.Errorf("rule %d (cut): computed %+v, want %+v", rule, c, want)
+		}
+		if b := d.Rules[rule].BackendRefs[0].Delegation; b.Selected != nil || b.Attached != nil {
+			t.Errorf("rule %d (cut): selected %v attached %v, want unknown", rule, b.Selected, b.Attached)
+		}
+		if p := get[Page[DelegationRow]](t, srv, delegURL("shop", "api", fmt.Sprintf("?rule=%d&ref=0", rule)), 200); len(p.Items) != 0 {
+			t.Errorf("rule %d (cut): rows %v, want none", rule, rowKeys(p))
+		}
+	}
+	// A route after the cut in selection order is cut as a whole.
+	if c := get[RouteDetail](t, srv, routeDetail+"shop/loop", 200).Rules[0].BackendRefs[0].Delegation.Computed; c == nil || c.Reason != "too-large" {
+		t.Errorf("shop/loop: computed %+v, want too-large", c)
+	}
+
+	hideHost := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != route("shop", "host") })
+	_, hidden, _ := startWith(t, setup{disputes: true, bounds: cut, authz: hideHost}, outcomeWorld()...)
+	if c := refComputed(get[RouteDetail](t, hidden, routeDetail+"shop/api", 200), 4); c == nil || c.State != "restricted" || c.Reason != "" {
+		t.Errorf("hidden cut ref: computed %+v, want restricted", c)
+	}
+}
+
 // Design §7.2: rule and ref are integers, outcome a row outcome; no sort;
 // paging over the fixed order.
 func TestDelegationParams(t *testing.T) {

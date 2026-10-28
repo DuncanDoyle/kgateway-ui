@@ -578,6 +578,16 @@ function RowItem({ r, installId }: { r: DelegationRow; installId: string }) {
 const rowKey = (r: DelegationRow, i: number) =>
   r.child ? `${r.child.group}/${r.child.kind}/${r.child.namespace}/${r.child.name}` : `none-${i}`;
 
+/** A ref with no rows: a ref the edge cap cut reads as its unknown reason, not empty (rules §5.7). */
+function emptyText(at: RefAt, filtered: boolean): string {
+  if (filtered) return delegationCopy.noRowsFiltered;
+  const c = at.b.delegation.computed;
+  if (c?.state === "restricted") return delegationCopy.notShown;
+  if (c?.state === "unknown" && c.reason)
+    return computedCopy.unknownReasons[c.reason] ?? computedCopy.unknownOther(c.reason);
+  return delegationCopy.noRows;
+}
+
 /** One ref's rows, one paged list; its cursor is local, and a rejected one reloads page one (design §8.6). */
 function RefRows({
   installId,
@@ -620,8 +630,7 @@ function RefRows({
         ))}
       </div>
     );
-  else if (!l.data.items.length)
-    body = <Muted>{outcomes.length ? delegationCopy.noRowsFiltered : delegationCopy.noRows}</Muted>;
+  else if (!l.data.items.length) body = <Muted>{emptyText(at, outcomes.length > 0)}</Muted>;
   else
     body = (
       <Rows

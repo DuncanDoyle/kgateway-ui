@@ -231,6 +231,30 @@ describe("Delegation tab", () => {
     expect((r as HTMLElement).querySelector(".reason")).toHaveTextContent(/^Too large to compute$/);
   });
 
+  it("a ref the edge cap cut reads too large to compute, not empty; a hidden one reads not shown", async () => {
+    const d = m();
+    const cutRef = d.rules[1]?.backendRefs[0]?.delegation;
+    const hiddenRef = d.rules[2]?.backendRefs[0]?.delegation;
+    if (!cutRef || !hiddenRef) throw new Error("fixture: rules 2 and 3 delegate");
+    const base = { by: "ui", rules: "kgateway-2.4", rule: "delegation" } as const;
+    // The API sends no rows for a cut ref, only its ref-level computed (rules §5.7, D-025).
+    cutRef.computed = { ...base, state: "unknown", reason: "too-large" };
+    hiddenRef.computed = { by: "ui", rules: "kgateway-2.4", state: "restricted" } as const;
+    serve(api({ name: "m", d, rows: (u) => rowPage([], u) }));
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const cut = await openRef(1, 0);
+    expect(await within(cut).findByText(computedCopy.unknownReasons["too-large"] as string)).toBeInTheDocument();
+    expect(cut).not.toHaveTextContent(delegationCopy.noRows);
+    expect(within(cut).getByTestId("computed-badge")).toHaveTextContent(computedCopy.short.unknown);
+    const hidden = await openRef(2, 0);
+    expect(await within(hidden).findByText(delegationCopy.notShown)).toBeInTheDocument();
+    expect(hidden).not.toHaveTextContent(delegationCopy.noRows);
+    // A ref with no rows and no unknown computed still selects nothing.
+    const plain = await openRef(3, 0);
+    expect(await within(plain).findByText(delegationCopy.noRows)).toBeInTheDocument();
+  });
+
   it("contexts expand with aria-expanded; a restricted context shows the placeholder", async () => {
     const rs = rowsOf(delegRestrictedGolden);
     (rs[0] as DelegationRow).contexts.push({ restricted: true });

@@ -3,6 +3,7 @@ package explore
 import (
 	"cmp"
 	"encoding/binary"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -670,8 +671,19 @@ func (b *builder) delegation(ix *Index, n *interner, v *computed.Views) {
 	d := &v.Delegation
 	ix.DelegationCap = d.Cap
 	el := eligibility(n, v)
+	for _, u := range d.Uncertain {
+		// A cut selection is an uncertain point on its ref; a context cut keeps its rows.
+		if k := (RefKey{u.Route, u.Rule, u.Ref}); u.Reason == computed.UnknownTooLarge && u.Ref >= 0 {
+			if ix.TooLarge == nil {
+				ix.TooLarge = map[RefKey]bool{}
+			}
+			ix.TooLarge[k] = true
+		}
+	}
 	if len(d.Rows) > 0 {
 		delegRows(ix, n, d.Rows, v.Checks, el)
+	}
+	if len(d.Rows) > 0 || len(ix.TooLarge) > 0 {
 		b.refScopes(ix, n)
 	}
 	if len(d.Effective) > 0 {
@@ -968,27 +980,53 @@ func (b *builder) refScopes(ix *Index, n *interner) {
 	if wild.Known && wild.Value == "" {
 		wild.Value = install.WildcardAll // an empty value means all, as the selector reads it
 	}
-	ix.RefScope = make(map[RefKey]DepSet, len(ix.RefRows))
+	scope := func(as objects.DelegationRef) DepSet {
+		switch as.Mode {
+		case objects.DelegationName:
+			return DepSet{n.ref(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: as.Namespace, Name: as.Name})}
+		case objects.DelegationLabel:
+			if !wild.Known || as.Namespace == wild.Value {
+				return all
+			}
+		}
+		return byNS[as.Namespace]
+	}
+	ix.RefScope = make(map[RefKey]DepSet, len(ix.RefRows)+len(ix.TooLarge))
 	for i := range ix.DelegRows {
 		r := &ix.DelegRows[i]
 		k := RefKey{r.Key.Parent, r.Key.Rule, r.Key.Ref}
+		if _, done := ix.RefScope[k]; !done {
+			ix.RefScope[k] = scope(r.RefAsWritten)
+		}
+	}
+	// A cut ref has no row, so its spec comes from its parent's view; in key order, for a stable table.
+	for _, k := range slices.SortedFunc(maps.Keys(ix.TooLarge), compareRefKeys) {
 		if _, done := ix.RefScope[k]; done {
 			continue
 		}
-		as := r.RefAsWritten
-		switch as.Mode {
-		case objects.DelegationName:
-			ix.RefScope[k] = DepSet{n.ref(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: as.Namespace, Name: as.Name})}
-		case objects.DelegationLabel:
-			if !wild.Known || as.Namespace == wild.Value {
-				ix.RefScope[k] = all
-			} else {
-				ix.RefScope[k] = byNS[as.Namespace]
-			}
-		default:
-			ix.RefScope[k] = byNS[as.Namespace]
+		if as := cutRef(ix, k); as != nil {
+			ix.RefScope[k] = scope(*as)
 		}
 	}
+}
+
+// compareRefKeys orders refs by parent, rule and ref.
+func compareRefKeys(a, b RefKey) int {
+	return cmp.Or(compareRefs(a.Parent, b.Parent), cmp.Compare(a.Rule, b.Rule), cmp.Compare(a.Ref, b.Ref))
+}
+
+// cutRef is the delegation ref k as its parent's spec writes it, or nil.
+func cutRef(ix *Index, k RefKey) *objects.DelegationRef {
+	id, ok := ix.Row(k.Parent)
+	if !ok || ix.Routes[id].View == nil {
+		return nil
+	}
+	for _, rule := range ix.Routes[id].View.Rules {
+		if rule.Index == k.Rule && k.Ref < len(rule.BackendRefs) {
+			return rule.BackendRefs[k.Ref].Delegation
+		}
+	}
+	return nil
 }
 
 // effective fills ix.Effective from view C. Children are interned in row
