@@ -81,14 +81,15 @@ func evidence(c *computed.CheckResult, rows []computed.Row) []objects.Ref {
 	return ev
 }
 
-// ownedResources maps the owned Gateways, ListenerSets and routes by ref; the
-// first of duplicates wins. Built once, so a KGWUI-012 on a route no install
-// owns, such as a delegated child without an entry, never scans the routes.
+// ownedResources maps the owned Gateways, ListenerSets and routes, and the
+// declared and no-parent candidates, by ref; the first of duplicates wins.
+// A computed-only child is a candidate, so its KGWUI-012 keeps its first-seen
+// (design §7.4 rule 9).
 func ownedResources(o *install.Owned) map[objects.Ref]*unstructured.Unstructured {
 	if o == nil {
 		return nil
 	}
-	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets)+len(o.Routes))
+	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets)+len(o.Routes)+len(o.Declared)+len(o.NoParent))
 	add := func(u *unstructured.Unstructured) {
 		if r := objects.RefOf(u); m[r] == nil {
 			m[r] = u
@@ -102,10 +103,16 @@ func ownedResources(o *install.Owned) map[objects.Ref]*unstructured.Unstructured
 	for _, r := range o.Routes {
 		add(r.Obj)
 	}
+	for _, d := range o.Declared {
+		add(d.Route.Obj)
+	}
+	for _, r := range o.NoParent {
+		add(r.Obj)
+	}
 	return m
 }
 
-// ownedObject returns the owned Gateway, ListenerSet or route ref from resources, or nil.
+// ownedObject returns the owned Gateway, ListenerSet, route or candidate ref from resources, or nil.
 func ownedObject(o *install.Owned, resources map[objects.Ref]*unstructured.Unstructured, ref objects.Ref) *unstructured.Unstructured {
 	if o == nil {
 		return nil

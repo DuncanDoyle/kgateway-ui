@@ -1706,3 +1706,46 @@ func TestListenerUnknownPerParent(t *testing.T) {
 		t.Errorf("deniedInInstall per caller %v, want identical", denied)
 	}
 }
+
+// Design §7.4 rules 7 and 9: a computed-only KGWUI-012 whose evidence is
+// restricted keeps a since: the child's own first-seen time, as an owned
+// child's does. Here api's root is admitted through a Selector over shop.
+func TestComputedOnlyCandidateKeepsSince(t *testing.T) {
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "c"), testutil.DelegateTo("shop", "d")))
+	objs := viewAWorld(edgeWith([]objects.Listener{sel}, up("sel", 1)), api,
+		// c has no parentRefs, d declares api; api attaches both, and neither has an entry from it.
+		leaf("shop", "c", nil, "/api/c"),
+		leaf("shop", "d", []objects.ParentRef{apiRef}, "/api/d"))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": "in"})
+		}
+	}
+	kgwui012 := func(t *testing.T, h HealthResponse, on string) FindingDTO {
+		t.Helper()
+		for _, f := range findingsOn(h, on) {
+			if f.Code == health.CodeComputedDisagrees {
+				return f
+			}
+		}
+		t.Fatalf("no KGWUI-012 on %s: %+v", on, h.Findings)
+		return FindingDTO{}
+	}
+	_, all, _ := startWith(t, setup{disputes: true}, objs...)
+	_, some, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, objs...)
+	ha, hs := get[HealthResponse](t, all, base+"/health", 200), get[HealthResponse](t, some, base+"/health", 200)
+	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
+	for _, on := range []string{"shop/c", "shop/d"} {
+		full := kgwui012(t, ha, on)
+		if full.EvidenceRestricted || full.Detail == restrictedEvidence || full.Since == nil {
+			t.Errorf("%s AllowAll: %+v", on, full)
+		}
+		f := kgwui012(t, hs, on)
+		if !f.EvidenceRestricted || f.Detail != restrictedEvidence || f.Since == nil || !f.Since.Equal(childSeen) {
+			t.Errorf("%s restricted: since %v, want the child's first-seen %v; %+v", on, f.Since, childSeen, f)
+		}
+	}
+}
