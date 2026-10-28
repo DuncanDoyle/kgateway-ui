@@ -596,10 +596,10 @@ function problems(s: Shape, v: unknown, path: string): string[] {
   if (v === null || typeof v !== "object") return [`${path}: want an object, got ${JSON.stringify(v)}`];
   const o = v as Record<string, unknown>;
   const out = Object.keys(o)
-    .filter((k) => !(k in s.keys))
+    .filter((k) => !Object.hasOwn(s.keys, k))
     .map((k) => `${path}.${k}: not in types.ts`);
   for (const [k, opt] of Object.entries(s.keys)) {
-    if (!(k in o)) {
+    if (!Object.hasOwn(o, k)) {
       if (opt === "!") out.push(`${path}.${k}: required in types.ts, absent on the wire`);
       continue;
     }
@@ -681,6 +681,12 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(problems(page(delegationRow), body, "body")).toEqual([
       'body.items[0].computed.state: "bogus" not in types.ts',
     ]);
+  });
+
+  it("reports a wire key named constructor as undeclared", () => {
+    const body = structuredClone(routeDelegationGolden.body);
+    Object.assign(body.items[0] as object, { constructor: "x" });
+    expect(problems(page(delegationRow), body, "body")).toEqual(["body.items[0].constructor: not in types.ts"]);
   });
 
   // `in` would let names inherited from Object.prototype through.
