@@ -608,7 +608,7 @@ function problems(s: Shape, v: unknown, path: string): string[] {
     const e = s.enums[k];
     if (e)
       for (const [i, x] of (Array.isArray(o[k]) ? o[k] : [o[k]]).entries())
-        if (typeof x !== "string" || !(x in e))
+        if (typeof x !== "string" || !Object.hasOwn(e, x))
           out.push(`${path}.${k}${Array.isArray(o[k]) ? `[${i}]` : ""}: ${JSON.stringify(x)} not in types.ts`);
   }
   return out;
@@ -680,6 +680,15 @@ describe("types.ts matches the golden v1 wire format", () => {
     (body.items[0] as { computed: { state: string } }).computed.state = "bogus";
     expect(problems(page(delegationRow), body, "body")).toEqual([
       'body.items[0].computed.state: "bogus" not in types.ts',
+    ]);
+  });
+
+  // `in` would let names inherited from Object.prototype through.
+  it.each(["toString", "constructor", "__proto__"])("rejects the inherited name %s as a union value", (x) => {
+    const body = structuredClone(routeDelegationGolden.body);
+    (body.items[0] as { computed: { state: string } }).computed.state = x;
+    expect(problems(page(delegationRow), body, "body")).toEqual([
+      `body.items[0].computed.state: ${JSON.stringify(x)} not in types.ts`,
     ]);
   });
 
