@@ -17,7 +17,7 @@ The Phase 2 cross-model review (`reviews/phase-codex.md`) found seven defects th
 7. **TypeScript golden guard.** `types.golden.test.ts` checks keys and nesting only, so a golden whose values contradict `types.ts` (scalar type, enum value, array versus object) passes.
 
 ## Expected behaviour
-Each table states observable behaviour at the boundary where it is tested. Rows marked **(inferred)** are not stated by the design; confirm them with the user, or record them in `decisions.md`, before implementing that item.
+Each table states observable behaviour at the boundary where it is tested. Rows marked **(inferred; D-026)** are not stated by the design; confirm them with the user, or record them in `decisions.md`, before implementing that item.
 
 ### Q1 — Delegation tab keeps freshness (design §8.6, §9.4)
 | Input / action | Expected |

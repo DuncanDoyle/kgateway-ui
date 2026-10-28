@@ -545,3 +545,17 @@ quirk 2 (prefix /q):
 **Amended 2026-10-27 (user sign-off):**
 - The gate `TestBudgetDenseMemory` checks peak heap only (≤ 432 MiB at the default cap). RSS stays measured and logged but is not gated: it had about 11 MiB of margin and could flake on CI. This replaces the RSS ≤ 480 MiB part of the gate above.
 - `GOMEMLIMIT` is 90 % of the pod memory limit, not the whole limit, and the binary sets it. The chart passes the raw limit in `KGWUI_MEMORY_LIMIT` through the downward API (only with `resources.limits.memory`), and at start-up the binary calls `debug.SetMemoryLimit` with 90 % of it. An explicit `GOMEMLIMIT` wins; a missing, zero or unparsable value is ignored and logged. This replaces decision 3's chart-set `GOMEMLIMIT` and the matching consequence.
+
+## D-026 — Sub-phase 2.5: expected outputs the design does not state (2026-10-28, phase 2)
+**Status:** accepted 2026-10-28 (our call)
+
+**Context:** The 2.5 brief marks three expected outputs as inferred. The process requires each to be confirmed or recorded before implementation.
+
+**Decision:**
+1. A failed or stale `/delegation` poll turns the Delegation tab's states Unknown at once, and the next good poll restores them. This is how the 2.2 detail pages behave (design §8.6).
+2. A hidden ref that the edge cap cut reads the same as an uncut restricted ref: `restricted`, nothing more (design §7.4 rule 4c).
+3. The TypeScript golden guard fails typecheck or the tests when a wire value's type in `types.ts` stops matching the goldens.
+
+**Consequences:** These are the 2.5 acceptance rows for Q1, Q4 and Q7. Each reuses an existing rule, so no new behaviour is introduced.
+
+**Alternatives:** n/a.
