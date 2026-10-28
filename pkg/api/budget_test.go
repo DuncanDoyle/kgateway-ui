@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	kruntime "k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
@@ -571,5 +572,118 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	}
 	if share > 0.15 {
 		t.Errorf("process CPU %.1f %% of one core, budget ≤ 15 %%", 100*share)
+	}
+}
+
+// chainShape is an inherit chain world: edge → shop/api, then depth-1
+// inheriting chain routes, the last one delegating to leaves leaves. Each
+// match adds keys headers and keys query parameters with values of size
+// bytes; the root has fan path matches, so each leaf row gets fan contexts.
+type chainShape struct{ depth, leaves, keys, size, fan int }
+
+// inheritChain builds s; {100, 200, 16, 1, 1} is the re-review's construction.
+func inheritChain(s chainShape) []kruntime.Object {
+	v := strings.Repeat("v", s.size)
+	match := func(level int, path string) map[string]any {
+		var hs, qs []any
+		for k := range s.keys {
+			hs = append(hs, map[string]any{"type": "Exact", "name": fmt.Sprintf("x-l%03d-h%02d", level, k), "value": v})
+			qs = append(qs, map[string]any{"type": "Exact", "name": fmt.Sprintf("l%03d-q%02d", level, k), "value": v})
+		}
+		m := matchPath(path)
+		if s.keys > 0 {
+			m["headers"], m["queryParams"] = hs, qs
+		}
+		return m
+	}
+	name := func(i int) string { return fmt.Sprintf("c%03d", i) }
+	team := map[string]string{"team": "a"}
+	var ms []map[string]any
+	for k := range s.fan {
+		ms = append(ms, match(0, fmt.Sprintf("/a%02d", k)))
+	}
+	root := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		testutil.Rule(ms...))
+	root.Object["spec"].(map[string]any)["rules"].([]any)[0].(map[string]any)["backendRefs"] = []any{testutil.DelegateTo("chain", name(1))}
+	objs := []kruntime.Object{testutil.Namespace("chain", team), testutil.Namespace("leaves", team), root}
+	for i := 1; i < s.depth; i++ {
+		to := testutil.DelegateTo("chain", name(i+1))
+		if i+1 == s.depth {
+			to = testutil.DelegateWildcard("leaves")
+		}
+		r := testutil.Rule(match(i, "/"))
+		r["backendRefs"] = []any{to}
+		parent := testutil.HTTPRouteRef("chain", name(i-1))
+		if i == 1 {
+			parent = shopAPI
+		}
+		u := testutil.WithRules(testutil.HTTPRoute("chain", name(i), nil, testutil.AcceptedBy(parent, testutil.Controller)), r)
+		u.SetAnnotations(map[string]string{objects.InheritParentMatcherAnnotation: "true"})
+		objs = append(objs, u)
+	}
+	last := testutil.HTTPRouteRef("chain", name(s.depth-1))
+	for i := range s.leaves {
+		objs = append(objs, leaf("leaves", fmt.Sprintf("l%03d", i), nil, "/", testutil.AcceptedBy(last, testutil.Controller)))
+	}
+	return isolated(objs...)
+}
+
+// countingWriter is a ResponseWriter that only counts the body, as a socket would take it.
+type countingWriter struct {
+	h    http.Header
+	n    int
+	code int
+}
+
+func (w *countingWriter) Header() http.Header         { return w.h }
+func (w *countingWriter) WriteHeader(code int)        { w.code = code }
+func (w *countingWriter) Write(b []byte) (int, error) { w.n += len(b); return len(b), nil }
+
+// pageCost is the bytes one delegation page of the chain's last route
+// allocates and sends.
+func pageCost(t *testing.T, s chainShape) (alloc, body uint64) {
+	e, srv, _ := startWith(t, setup{disputes: true}, inheritChain(s)...)
+	url := delegURL("chain", fmt.Sprintf("c%03d", s.depth-1), "?limit=200")
+	p := get[Page[DelegationRow]](t, srv, url, 200)
+	steps, keys, truncated := 0, 0, 0
+	for _, r := range p.Items {
+		for _, c := range r.Contexts {
+			steps += len(c.Path)
+			for _, s := range c.Path {
+				keys += len(s.Match.Headers) + len(s.Match.QueryParams)
+			}
+		}
+		if r.ContextsTruncated {
+			truncated++
+		}
+	}
+	t.Logf("%+v: %d rows, %d path steps, %d key matches, %d rows truncated", s, len(p.Items), steps, keys, truncated)
+	// Two GCs empty the encoder's buffer pool, so the request grows its own.
+	h := NewHandler(e, fstest.MapFS{}, nil)
+	w := &countingWriter{h: http.Header{}}
+	runtime.GC()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, url, nil))
+	runtime.ReadMemStats(&after)
+	if w.code != 0 && w.code != http.StatusOK {
+		t.Fatalf("delegation page: %d", w.code)
+	}
+	return after.TotalAlloc - before.TotalAlloc, uint64(w.n)
+}
+
+// TestBudgetMatcherMaterialization: inherited matches grow with depth, so a
+// page is bounded by the units it materializes, not by path steps alone. The
+// worst shape measured 24.7 MiB, mostly the encoder's buffer (about 6× the body).
+func TestBudgetMatcherMaterialization(t *testing.T) {
+	const mib = 1 << 20
+	for _, s := range []chainShape{{100, 200, 16, 1, 1}, {25, 200, 16, 1, 1}, {10, 200, 16, 1, 1}, {25, 200, 16, 200, 1},
+		{100, 200, 16, 4096, 1}, {26, 200, 0, 0, 20}} {
+		alloc, body := pageCost(t, s)
+		t.Logf("%+v: one page allocates %.1f MiB, body %.1f MiB", s, float64(alloc)/mib, float64(body)/mib)
+		if alloc > 32*mib {
+			t.Errorf("a page of %+v allocates %.1f MiB, want at most 32", s, float64(alloc)/mib)
+		}
 	}
 }

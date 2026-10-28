@@ -265,6 +265,7 @@ This is the one policy for how much is computed, kept and served **(our call)**.
 | Retain | contexts kept per row, each with its incoming match, path, outcome and effective rules | first 20 in traversal order | `contextsTruncated` on the row; the outcome still aggregates all contexts |
 | Retain | contexts kept per install | 30,000 **(our call, 2.4; D-022 retained heap)** | later rows keep their outcome with no contexts and `contextsTruncated` |
 | Project | rows per delegation page | the page `limit` (≤ 200) | cursor (design §3.6) |
+| Project | contexts materialized per response: path steps, header and query matches and their text | 100,000 units **(our call, 2.4)**; design §7.3 | later rows and effective edges send no more contexts and carry `contextsTruncated` |
 | Project | parent edges in a route's `effective` | 20, sorted by parent (namespace, name) | `effectiveTruncated` |
 | Project | contexts per parent edge in `effective` | the union of the retained contexts of every row with that (parent, child), in traversal order, at most 20 | the edge's `contextsTruncated`: true when any of those rows is truncated (per-row or install cap) or the union exceeds 20. At the install cap an edge can have no contexts; it is then sent with `contexts: []` and `contextsTruncated: true`, never as complete |
 

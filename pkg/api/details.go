@@ -37,13 +37,57 @@ type detail struct {
 	f  facts
 	// links memoises link per ref for the many path steps of one delegation page.
 	links map[objects.Ref]Link
-	// steps counts the path steps the page has materialized (maxPagePathSteps).
-	steps int
+	// units counts what the response has materialized (maxPageUnits).
+	units int
 }
 
-// maxPagePathSteps bounds the path steps one delegation page materializes.
-// Without it a page costs rows × contexts × path depth.
-var maxPagePathSteps = 100_000
+// maxPageUnits bounds the contexts one response materializes (design §7.3).
+// A unit is about 32 bytes of JSON: contexts and path steps cost 4, header
+// and query matches 1, and their text 1 per 32 bytes.
+var maxPageUnits = 100_000
+
+// charge adds to the response the cost of a context with parent match pm,
+// path and the effective rules shown with it. It reports false, and charges
+// no further, once the response is past maxPageUnits.
+func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.EffectiveRule) bool {
+	if d.units > maxPageUnits {
+		return false
+	}
+	n, text := 4, 0
+	add := func(m objects.Match) {
+		k, b := matchSize(m)
+		n, text = n+k, text+b
+	}
+	add(pm)
+	for s := range path.All() {
+		n, text = n+4, text+len(s.Route.Namespace)+len(s.Route.Name)
+		if add(s.Match); d.units+n+text/32 > maxPageUnits {
+			d.units = maxPageUnits + 1
+			return false
+		}
+	}
+	for _, r := range rules {
+		for _, m := range r.Matches {
+			add(m)
+		}
+	}
+	d.units += n + text/32
+	return d.units <= maxPageUnits
+}
+
+// matchSize is m's header and query matches and the bytes of its text.
+func matchSize(m objects.Match) (keys, text int) {
+	text = len(m.Method)
+	if m.Path != nil {
+		text += len(m.Path.Type) + len(m.Path.Value)
+	}
+	for _, ks := range [...][]objects.KeyMatch{m.Headers, m.QueryParams} {
+		for _, k := range ks {
+			text += len(k.Type) + len(k.Name) + len(k.Value)
+		}
+	}
+	return len(m.Headers) + len(m.QueryParams), text
+}
 
 // startDetail finds the install, or writes 503 or 404.
 func (h *handler) startDetail(w http.ResponseWriter, r *http.Request) *detail {
@@ -623,6 +667,10 @@ func (d *detail) effective(route objects.Ref, inherit bool) ([]EffectiveDTO, boo
 				continue
 			}
 			c := &ed.Contexts[x]
+			if !d.charge(c.ParentMatch, nil, c.Rules) {
+				dto.ContextsTruncated = true
+				break
+			}
 			pm := matchDTO(c.ParentMatch)
 			ec := EffectiveContext{ParentMatch: &pm, Rules: make([]EffectiveRuleDTO, 0, len(c.Rules))}
 			for _, er := range c.Rules {
@@ -734,7 +782,7 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 		if !d.v.allowDeps(d.ix, r.ContextDeps[j]) {
 			continue
 		}
-		if d.steps += r.Contexts[j].Path.Len(); d.steps > maxPagePathSteps {
+		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil) {
 			out.ContextsTruncated = true
 			break
 		}

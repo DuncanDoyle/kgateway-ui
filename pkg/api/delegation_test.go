@@ -643,11 +643,11 @@ func ancestorWorld(sibPath, k2Host string) []runtime.Object {
 		leaf("kids", "k1", nil, "/api/m/l/1", testutil.AcceptedBy(leafRef, testutil.Controller)))
 }
 
-// A page materializes at most maxPagePathSteps path steps: later contexts
-// are left out and their rows marked truncated, so deep paths stay bounded.
-func TestDelegationPagePathBudget(t *testing.T) {
-	defer func(n int) { maxPagePathSteps = n }(maxPagePathSteps)
-	maxPagePathSteps = 5
+// A response materializes at most maxPageUnits: later contexts are left out
+// and their rows and edges marked truncated, so deep paths stay bounded.
+func TestDelegationPageBudget(t *testing.T) {
+	defer func(n int) { maxPageUnits = n }(maxPageUnits)
+	maxPageUnits = 25
 	_, srv, _ := startWith(t, setup{disputes: true}, ancestorWorld("/api/s", "")...)
 	p := get[Page[DelegationRow]](t, srv, delegURL("shop", "leaf", ""), 200)
 	if !slices.Equal(rowKeys(p), []string{"0.0:kids/k1", "0.0:kids/k2"}) {
@@ -655,7 +655,11 @@ func TestDelegationPagePathBudget(t *testing.T) {
 	}
 	if a, b := p.Items[0], p.Items[1]; len(a.Contexts) != 1 || len(a.Contexts[0].Path) != 3 || a.ContextsTruncated ||
 		len(b.Contexts) != 0 || !b.ContextsTruncated || b.Outcome != "attached" {
-		t.Fatalf("rows past the path budget: %+v", p.Items)
+		t.Fatalf("rows past the page budget: %+v", p.Items)
+	}
+	maxPageUnits = 0
+	if e := get[RouteDetail](t, srv, routeDetail+"kids/k1", 200).Effective; len(e) != 1 || len(e[0].Contexts) != 0 || !e[0].ContextsTruncated {
+		t.Fatalf("effective past the page budget: %+v", e)
 	}
 }
 
