@@ -34,11 +34,11 @@ No additional API v1 path/body-shape break or forwarding defect in `WithComputed
 ## Triage
 | # | Finding | Source | Decision | Note |
 |---|---|---|---|---|
-| 1 | P1 Delegation tab keeps showing checked rows after its own poll fails | reviewer | accept | Stabilization 2.5; confirm with a failing test first |
-| 2 | P1 Another install's status suppresses an install-local orphan KGWUI-011 | reviewer | accept | Stabilization 2.5; the entry must belong to an eligible parent owned by this install |
-| 3 | P1 A hidden parent suppresses a visible `listener-unknown` flag | reviewer | accept | Stabilization 2.5; per-parent dep sets, any visible fact wins, as `dropped` does |
-| 4 | P2 Edge-cap `too-large` overrides `scope-unknown` | reviewer | accept | Stabilization 2.5; rules §3.3 precedence |
-| 5 | P2 Computed-only candidates lose `ResourceSince` under restricted evidence | reviewer | accept | Stabilization 2.5; rule 9 |
-| 6 | P2 Implementation plan still prescribes restricted listener counts | reviewer | accept | Stabilization 2.5 (docs) |
-| 7 | P3 TS golden guard checks keys, not value types | reviewer | accept | Stabilization 2.5 |
+| 1 | P1 Delegation tab keeps showing checked rows after its own poll fails | reviewer | accept | Fixed in 2.5: [`45baa25`](https://github.com/DuncanDoyle/kgateway-ui/commit/45baa25), [`6670b0a`](https://github.com/DuncanDoyle/kgateway-ui/commit/6670b0a), [`0d07532`](https://github.com/DuncanDoyle/kgateway-ui/commit/0d07532) |
+| 2 | P1 Another install's status suppresses an install-local orphan KGWUI-011 | reviewer | accept | Fixed in 2.5: [`7f6ee7b`](https://github.com/DuncanDoyle/kgateway-ui/commit/7f6ee7b) |
+| 3 | P1 A hidden parent suppresses a visible `listener-unknown` flag | reviewer | accept | Fixed in 2.5: [`12be26a`](https://github.com/DuncanDoyle/kgateway-ui/commit/12be26a) |
+| 4 | P2 Edge-cap `too-large` overrides `scope-unknown` | reviewer | accept | Fixed in 2.5: [`197101b`](https://github.com/DuncanDoyle/kgateway-ui/commit/197101b) |
+| 5 | P2 Computed-only candidates lose `ResourceSince` under restricted evidence | reviewer | accept | Fixed in 2.5: [`dbff6b2`](https://github.com/DuncanDoyle/kgateway-ui/commit/dbff6b2), [`6b04ccd`](https://github.com/DuncanDoyle/kgateway-ui/commit/6b04ccd) |
+| 6 | P2 Implementation plan still prescribes restricted listener counts | reviewer | accept | Fixed in 2.5: [`a5ea505`](https://github.com/DuncanDoyle/kgateway-ui/commit/a5ea505) |
+| 7 | P3 TS golden guard checks keys, not value types | reviewer | accept | Fixed in 2.5: [`97d02d0`](https://github.com/DuncanDoyle/kgateway-ui/commit/97d02d0), [`8d771b1`](https://github.com/DuncanDoyle/kgateway-ui/commit/8d771b1), [`7c63cb8`](https://github.com/DuncanDoyle/kgateway-ui/commit/7c63cb8) |
 | 8 | P4 Findings drop the check's stable identity | reviewer | defer: Phase 3 planning | An optional stable finding ID keeps API v1 compatible; Phase 3 diagnostics need it |
