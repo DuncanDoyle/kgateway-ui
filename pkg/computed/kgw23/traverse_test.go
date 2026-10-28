@@ -936,3 +936,23 @@ func TestScaleWorldViewBConsistent(t *testing.T) {
 		})
 	}
 }
+
+// An inherit merge is charged one step per 4 copied key matches; small and default-mode matches cost one.
+func TestMatchCostWeighsMerges(t *testing.T) {
+	small := withHeaders(prefix("/a"), kv("a", "1"), kv("b", "2"))
+	big := prefix("/a")
+	for k := range 10 {
+		big.Headers = append(big.Headers, kv(string(rune('a'+k)), "v"))
+	}
+	child := route23("shop", "c").rule(at("/x", "/y")).rule(nil).rule([]objects.Match{})
+	if got := matchCost(child.r.View, big); got != 4 {
+		t.Errorf("default mode under 10 headers costs %d, want 4", got)
+	}
+	child.inherit()
+	if got := matchCost(child.r.View, small); got != 4 {
+		t.Errorf("inherit under 2 headers costs %d, want 4", got)
+	}
+	if got := matchCost(child.r.View, big); got != 12 {
+		t.Errorf("inherit under 10 headers costs %d, want 12", got)
+	}
+}

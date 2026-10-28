@@ -540,7 +540,7 @@ func (w *walker) children(pi int, rs *refSel, kids []int32, f *frame, partial bo
 			if e != nil {
 				n = e.n
 			} else {
-				n = matchCount(w.routes[ki].View)
+				n = matchCost(w.routes[ki].View, f.match)
 			}
 			// PF15: charge the child's matches before viewC; a call that would pass the cap is not made.
 			if w.matchers+n > w.b.Matchers {
@@ -656,15 +656,34 @@ func (w *walker) cut(pi, ri int, f *frame) {
 	}
 }
 
-// matchCount is the matcher steps viewC takes for child: its matches, at
-// least one per rule.
-func matchCount(v *objects.HTTPRouteView) int {
+// matchCost is the matcher steps viewC takes for child under parent: one per
+// match, at least one per rule. An inherit merge costs one per keysPerStep
+// header and query matches it copies (rules §5.7).
+func matchCost(v *objects.HTTPRouteView, parent objects.Match) int {
 	n := 0
+	pk := len(parent.Headers) + len(parent.QueryParams)
 	for _, r := range v.Rules {
-		n += max(1, len(r.Matches))
+		switch {
+		case !v.InheritParentMatcher:
+			n += max(1, len(r.Matches))
+		case len(r.Matches) == 0:
+			n += mergeCost(pk) // the parent's match, or the default under it
+		default:
+			for _, m := range r.Matches {
+				n += mergeCost(pk + len(m.Headers) + len(m.QueryParams))
+			}
+		}
 	}
 	return n
 }
+
+// keysPerStep is the key matches one matcher step may copy, about 200 bytes,
+// so the cap bounds merged matches near 40 MiB (our call, 2.4).
+const keysPerStep = 4
+
+// mergeCost is the matcher steps of a merge copying keys key matches: one,
+// plus one per further keysPerStep.
+func mergeCost(keys int) int { return max(1, (keys+keysPerStep-1)/keysPerStep) }
 
 // firstReason is the reason of the first dropped rule.
 func firstReason(rules []computed.EffectiveRule) *computed.FitFailure {

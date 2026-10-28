@@ -173,3 +173,57 @@ func TestBudgetDependencyAggregates(t *testing.T) {
 		}
 	}
 }
+
+// inheritFan is depth inheriting routes, each match adding 16 headers and 16
+// query parameters, the last one wildcarding into leaves inheriting leaves of
+// per matches each: every leaf merge copies the whole chain's keys.
+func inheritFan(depth, leaves, per int) computed.DelegationInput {
+	keyed := func(level int) objects.Match {
+		m := prefix("/")
+		for k := range 16 {
+			m.Headers = append(m.Headers, kv(fmt.Sprintf("x-l%03d-h%02d", level, k), "v"))
+			m.QueryParams = append(m.QueryParams, kv(fmt.Sprintf("l%03d-q%02d", level, k), "v"))
+		}
+		return m
+	}
+	bs := make([]*hr, depth, depth+leaves)
+	for i := range bs {
+		bs[i] = route23("chain", fmt.Sprintf("c%03d", i))
+		if i == 0 {
+			bs[i].top()
+		} else {
+			bs[i].owned().inherit().parentOf(bs[i-1].r.Ref)
+		}
+	}
+	for i, b := range bs {
+		to := toWildcard("leaves")
+		if i+1 < depth {
+			to = toName("chain", bs[i+1].r.Ref.Name)
+		}
+		b.rule([]objects.Match{keyed(i)}, to)
+	}
+	for i := range leaves {
+		ms := make([]objects.Match, per)
+		for j := range ms {
+			ms[j] = prefix(fmt.Sprintf("/m%02d", j))
+		}
+		bs = append(bs, route23("leaves", fmt.Sprintf("l%05d", i)).owned().inherit().rule(ms, service("leaves", "svc")))
+	}
+	return world(bs...)
+}
+
+// TestBudgetInheritedMerges: a merge is charged by the keys it copies, so
+// deep inherited matches reach the matcher cap before they exhaust memory.
+func TestBudgetInheritedMerges(t *testing.T) {
+	const mib = 1 << 20
+	in := inheritFan(99, 9800, 8)
+	before := liveHeap()
+	res := delegate(in)
+	total := liveHeap() - before
+	t.Logf("inherit chain 99, 9,800 leaves × 8 matches: cap %q, retained %.1f MiB", res.Cap, float64(total)/mib)
+	if total > 64*mib {
+		t.Errorf("inherited merges retain %.1f MiB, want at most 64", float64(total)/mib)
+	}
+	runtime.KeepAlive(res)
+	runtime.KeepAlive(in)
+}
