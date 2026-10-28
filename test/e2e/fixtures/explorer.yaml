@@ -367,3 +367,58 @@ apiVersion: v1
 kind: Service
 metadata: { name: web, namespace: flip, labels: { e2e: explorer } }
 spec: { ports: [{ port: 8000 }] }
+---
+# Views B and C (design §9.5, 2.4). TestDelegationAgreesWithController compares every child-entry and
+# parent-resolvedrefs check with the controller. Shapes from the D-021 observations (fixtures/observe/).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: tree, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra, sectionName: http }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /tree/prune } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: t-mid, namespace: shop }]
+    # One rule, two matches: t-partial fits /tree/a and not /tree/b (D-021 item 9).
+    - matches: [{ path: { type: PathPrefix, value: /tree/a } }, { path: { type: PathPrefix, value: /tree/b } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: t-partial, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /tree/nobe } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: t-nobe, namespace: shop }]
+    - matches: [{ path: { type: PathPrefix, value: /tree/port } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: t-port, namespace: shop }]
+---
+# Ancestor-pruned parent match (rules §5.1): tree's /tree/prune leaves t-mid only /tree/prune, so
+# t-pruned's /other/item fits nothing, though it fits t-mid's own /other.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: t-mid, namespace: shop, labels: { e2e: explorer } }
+spec:
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /tree/prune } }, { path: { type: PathPrefix, value: /other } }]
+      backendRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: t-pruned, namespace: shop }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: t-pruned, namespace: shop, labels: { e2e: explorer } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /other/item } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: t-partial, namespace: shop, labels: { e2e: explorer } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /tree/a/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
+---
+# Attached, with a Service that does not exist: ResolvedRefs=False/BackendNotFound on its entry.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: t-nobe, namespace: shop, labels: { e2e: explorer } }
+spec:
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /tree/nobe/x } }], backendRefs: [{ name: no-such-service, port: 8000 }] }]
+---
+# A parentRef with only a port: 2.3 writes its entry with the port (D-021 item 3), 2.4 as written.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: t-port, namespace: shop, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: tree, namespace: shop, port: 8080 }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /tree/port/x } }], backendRefs: [{ name: httpbin, port: 8000 }] }]
