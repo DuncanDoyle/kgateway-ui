@@ -1532,7 +1532,7 @@ func TestComputedPredicatesUseVisibleDeps(t *testing.T) // a member whose Select
   - `func explain(fs []computed.Fact) string` — drafts as design §7.5 ("listener https has *.example.org; route has shop.example.com"), finalised in Task 48
   - `func memberCoverage(listener, ref computed.CheckResult, matched int) []computed.Coverage` — rules §8.4: the listener's `count-agrees`, the ref's `status-compatible`, and `not-verified` when the ref matched more than one listener; a membership is `disagrees` or `pending` when either check is
   - `func (v *view) allowDeps(ix *explore.Index, d explore.DepSet) bool` — memoised per ref index; under `AllowAll` true without calls
-  - Rule 4: a hidden dependency makes the state `restricted` and drops outcome, listeners, hostnames, explanation, reason and note. Rule 5: `computedRoutes` and `routes` are omitted when any dependency is hidden, else recounted. Rule 6: `listener-unknown` is dropped and does not match a `state` filter for a caller who cannot view its `UnknownDeps`. Rule 7: KGWUI-012 whose evidence is hidden gets `evidenceRestricted`.
+  - Rule 4: a hidden dependency makes the state `restricted` and drops outcome, listeners, hostnames, explanation, reason and note. Rule 5 (D-023 amendment): listener facts are always shown to a caller who can see the listener: `computedRoutes`, its check, its unknown state and reason, the isolation note, and a Gateway or ListenerSet row's `routes`. They count hidden members, as `attachedRoutes` does; derived counts count visible objects only. Rule 6: `listener-unknown` is dropped and does not match a `state` filter for a caller who cannot view the `UnknownDeps` of any one unknown parent. Rule 7: KGWUI-012 whose evidence is hidden gets `evidenceRestricted`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1542,9 +1542,9 @@ func TestRouteDetailAttachments(t *testing.T)      // per listener effectiveHost
 func TestGatewayDetailListenerStates(t *testing.T) // checked [count-agrees]; disagrees with computedRoutes and status attachedRoutes both sent; pending; unknown (reason, no computedRoutes); isolationNote
 func TestListenerParam(t *testing.T)               // 400 without parent and with an HTTPRoute parent; listener=_unknown 200
 func TestMemberCoverage(t *testing.T)              // one listener → [count-agrees status-compatible]; two → + not-verified
-func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) // design §9.1 (2.3): membership, count, check restricted with no value; no listener-unknown; state=listener-unknown does not match; health and row states unchanged
+func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) // design §9.1 (2.3): membership restricted with no value; the count, its check and the routes column shown (rule 5); no listener-unknown; state=listener-unknown does not match; health and row states unchanged
 func TestListenerFilterCannotProbe(t *testing.T)   // design §9.1: listener=https over a hidden Selector Namespace returns the rows and total it returns when those facts are unknown; deniedInInstall unchanged
-func TestHiddenMemberRestrictsCounts(t *testing.T) // computedRoutes and Gateway row routes omitted; AllowAll: zero Authorizer calls
+func TestHiddenMemberIsCounted(t *testing.T)      // rule 5: computedRoutes and Gateway or ListenerSet row routes count a hidden member; its row stays absent; AllowAll: zero Authorizer calls
 func TestKGWUI012EvidenceRestricted(t *testing.T)  // visible Gateway, hidden candidate route → detail replaced, evidenceRestricted true
 func TestNoteOnUnknownVersion(t *testing.T)        // an install without a kgateway version: every computed.note is the unknown-version note
 ```
