@@ -45,8 +45,12 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet, v.Delegation.Rows),
 				Since: &since, Evidence: evidence(ch, v.Delegation.Rows)}
-			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
-			if u := ownedObject(in.Owned, owned, on); u != nil {
+			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rules 7, 9).
+			u := ownedObject(in.Owned, owned, on)
+			if u == nil {
+				u = in.stored(on)
+			}
+			if u != nil {
 				own := in.firstSeen(u)
 				f.ResourceSince = &own
 			}
@@ -118,6 +122,27 @@ func ownedObject(o *install.Owned, resources map[objects.Ref]*unstructured.Unstr
 		return nil
 	}
 	return resources[ref]
+}
+
+// stored returns the snapshot object ref names, or nil. A computed subject
+// may sit outside every assignment bucket, so its first-seen comes from here.
+func (in Input) stored(ref objects.Ref) *unstructured.Unstructured {
+	if in.Snapshot == nil {
+		return nil
+	}
+	for _, k := range in.Served {
+		if k.Group != ref.Group || k.Kind != ref.Kind {
+			continue
+		}
+		// The cache sorts each kind by "namespace/name".
+		objs, key := in.Snapshot.Objects[k.GVR()], ref.Namespace+"/"+ref.Name
+		if j, ok := slices.BinarySearchFunc(objs, key, func(u *unstructured.Unstructured, key string) int {
+			return strings.Compare(u.GetNamespace()+"/"+u.GetName(), key)
+		}); ok {
+			return objs[j]
+		}
+	}
+	return nil
 }
 
 // disagreeDetail says what was computed and what the controller reports, and

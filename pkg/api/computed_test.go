@@ -1737,15 +1737,64 @@ func TestComputedOnlyCandidateKeepsSince(t *testing.T) {
 	_, all, _ := startWith(t, setup{disputes: true}, objs...)
 	_, some, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, objs...)
 	ha, hs := get[HealthResponse](t, all, base+"/health", 200), get[HealthResponse](t, some, base+"/health", 200)
+	// The check's window starts at the engine's first computation, when every child was first seen.
 	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
 	for _, on := range []string{"shop/c", "shop/d"} {
 		full := kgwui012(t, ha, on)
-		if full.EvidenceRestricted || full.Detail == restrictedEvidence || full.Since == nil {
-			t.Errorf("%s AllowAll: %+v", on, full)
+		if full.EvidenceRestricted || full.Detail == restrictedEvidence || full.Since == nil || !full.Since.Equal(childSeen) {
+			t.Errorf("%s AllowAll: since %v, want the window start %v; %+v", on, full.Since, childSeen, full)
 		}
 		f := kgwui012(t, hs, on)
 		if !f.EvidenceRestricted || f.Detail != restrictedEvidence || f.Since == nil || !f.Since.Equal(childSeen) {
 			t.Errorf("%s restricted: since %v, want the child's first-seen %v; %+v", on, f.Since, childSeen, f)
 		}
+	}
+}
+
+// Design §7.4 rule 9: a computed child outside every assignment bucket keeps
+// its since. c has no parentRefs and an entry from a shared controller name
+// under install B's pb, so A neither owns, declares nor lists it as no-parent,
+// yet A's api attaches it and its missing entry matures.
+func TestComputedChildOutsideBucketsKeepsSince(t *testing.T) {
+	gwB, pb := testutil.GwRef("infra-b", "edge"), testutil.HTTPRouteRef("infra-b", "pb")
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "c")))
+	// kgw2 shares the controller name and watches env=b; shop is in both scopes.
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"env":"b"}}]`))
+	objs := viewAWorld(edgeWith([]objects.Listener{sel}, up("sel", 1)), api,
+		testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"env": "b"}),
+		d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		testutil.WithRules(testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, testutil.AcceptedBy(gwB, testutil.Controller)),
+			delegRule([]string{"/pb"}, testutil.DelegateTo("shop", "c"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(pb, testutil.Controller)),
+			testutil.Rule(matchPath("/api/c"), matchPath("/pb/c"))))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": "in", "env": "b"})
+		}
+	}
+	kgwui012 := func(t *testing.T, h HealthResponse) FindingDTO {
+		t.Helper()
+		for _, f := range findingsOn(h, "shop/c") {
+			if f.Code == health.CodeComputedDisagrees {
+				return f
+			}
+		}
+		t.Fatalf("no KGWUI-012 on shop/c: %+v", h.Findings)
+		return FindingDTO{}
+	}
+	m := okMetrics("kgw.kgateway", "kgw2.kgateway2")
+	_, all, _ := startWith(t, setup{disputes: true, metrics: m}, objs...)
+	_, some, _ := startWith(t, setup{disputes: true, metrics: m, authz: hideNamespaces}, objs...)
+	// Every seeded object, and the check's window, start at the engine's first computation.
+	seen := testutil.Now.Add(-health.Grace - time.Second).UTC()
+	if f := kgwui012(t, get[HealthResponse](t, all, base+"/health", 200)); f.EvidenceRestricted || f.Since == nil || !f.Since.Equal(seen) {
+		t.Errorf("AllowAll: since %v, want the window start %v; %+v", f.Since, seen, f)
+	}
+	f := kgwui012(t, get[HealthResponse](t, some, base+"/health", 200))
+	if !f.EvidenceRestricted || f.Detail != restrictedEvidence || f.Since == nil || !f.Since.Equal(seen) {
+		t.Errorf("restricted: since %v, want c's first-seen %v; %+v", f.Since, seen, f)
 	}
 }
