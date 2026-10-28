@@ -672,7 +672,7 @@ func (b *builder) delegation(ix *Index, n *interner, v *computed.Views) {
 	ix.DelegationCap = d.Cap
 	el := eligibility(n, v)
 	for _, u := range d.Uncertain {
-		// A cut selection is an uncertain point on its ref; a context cut keeps its rows.
+		// Any compute cap marks a cut ref too-large; only a ref with no rows reads it.
 		if k := (RefKey{u.Route, u.Rule, u.Ref}); u.Reason == computed.UnknownTooLarge && u.Ref >= 0 {
 			if ix.TooLarge == nil {
 				ix.TooLarge = map[RefKey]bool{}

@@ -250,8 +250,8 @@ type Index struct {
 	// RefScope is, per delegation ref, the routes its selection reads; a
 	// caller who cannot view them all sees the ref as selection-restricted.
 	RefScope map[RefKey]DepSet
-	// TooLarge holds the refs the edge cap cut before selection: they have
-	// no rows and read too large to compute (rules §5.7, D-025).
+	// TooLarge holds the refs a compute cap (edges, contexts or matchers) cut;
+	// one with no rows reads too large to compute (rules §5.7, D-025).
 	TooLarge map[RefKey]bool
 	// Unreached maps a child route to its rows that no context reached and
 	// whose Deps, its parent's root eligibility, are not empty, as

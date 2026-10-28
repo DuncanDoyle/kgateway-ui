@@ -544,18 +544,18 @@ func matchKey(m objects.Match) string {
 // are left out; it still counts its visible children (our call, 2.4).
 func (d *detail) refCounts(dto *DelegationRefDTO, k explore.RefKey) {
 	ids := d.ix.RefRows[k]
-	hidden := d.ix.SelectionHidden(k, d.v.visible())
 	if len(ids) == 0 {
 		// The edge cap cut it before selection: too large, not empty (rules §5.7, D-025).
 		if d.ix.TooLarge[k] {
 			c := d.f.unknown(ruleDelegation, computed.UnknownTooLarge)
-			if hidden {
+			if d.ix.SelectionHidden(k, d.v.visible()) {
 				c = d.f.restricted()
 			}
 			dto.Computed = &c
 		}
 		return
 	}
+	hidden := d.ix.SelectionHidden(k, d.v.visible())
 	var c *Computed
 	if hidden {
 		rc := d.f.restricted()
