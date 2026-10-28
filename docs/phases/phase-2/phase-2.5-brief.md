@@ -128,7 +128,7 @@ Out:
 
 ## Queue
 - [ ] Q1 (P1) Delegation tab rows turn Unknown when their own poll fails or goes stale — src: reviews/phase-codex.md#1
-- [ ] Q2 (P1) Orphan KGWUI-011 ignores entries naming another install's parent — src: reviews/phase-codex.md#2
+- [x] Q2 (P1) Orphan KGWUI-011 ignores entries naming another install's parent — src: reviews/phase-codex.md#2 — `fix(computed): orphan KGWUI-011 is install-local`: any entry from the shared controller name counted, not only eligible entries under owned parents
 - [ ] Q3 (P1) A visible unknown parent keeps `listener-unknown` when another parent is hidden — src: reviews/phase-codex.md#3
 - [ ] Q4 (P2) `scope-unknown` wins over the edge cap's `too-large` — src: reviews/phase-codex.md#4
 - [ ] Q5 (P2) Computed-only candidates keep `since` under restricted evidence — src: reviews/phase-codex.md#5

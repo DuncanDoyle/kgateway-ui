@@ -1139,9 +1139,9 @@ func (c *delegChecker) childTriggers(out []CheckResult, ci int, rows []int) []Ch
 	if c.r.Complete.Incomplete(rt.Ref) {
 		return out
 	}
-	// An orphan: no parentRefs, no entry, only wildcard refs of owned parents,
-	// each dropping or forbidding it in every context, each complete.
-	orphan := len(rt.View.ParentRefs) == 0 && !c.anyEntry(ci)
+	// An orphan: no parentRefs, no eligible entry, only wildcard refs of owned
+	// parents, each dropping or forbidding it in every context, each complete.
+	orphan := len(rt.View.ParentRefs) == 0 && !c.anyEligible(ci)
 	for a := 0; a < len(rows); {
 		parent := c.r.Rows[rows[a]].Key.Parent
 		b := a + 1
@@ -1197,11 +1197,16 @@ func (c *delegChecker) eligible(ci int, parent objects.Ref) bool {
 	return false
 }
 
-// anyEntry reports whether route ci has an entry from this install's controllers.
-func (c *delegChecker) anyEntry(ci int) bool {
-	return slices.ContainsFunc(c.in.Routes[ci].View.Parents, func(e objects.RouteParentStatus) bool {
-		return slices.Contains(c.in.ControllerNames, e.ControllerName)
-	})
+// anyEligible reports whether route ci has an eligible entry for any owned
+// parent (design §4.2). Another install sharing a controller name writes
+// entries under its own parents; those do not count here (rules §9.3).
+func (c *delegChecker) anyEligible(ci int) bool {
+	for _, e := range c.in.Routes[ci].View.Parents {
+		if pi := c.route(e.ParentRef.Ref()); pi >= 0 && c.in.Routes[pi].Owned && c.eligible(ci, e.ParentRef.Ref()) {
+			return true
+		}
+	}
+	return false
 }
 
 // notAttached is the computed trigger of route ci under parent; its

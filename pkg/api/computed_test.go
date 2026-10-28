@@ -1560,3 +1560,60 @@ func TestOrphanUnderHiddenParentNotRestricted(t *testing.T) {
 		}
 	}
 }
+
+// Design §6.2 and rules §9.3: the orphan conclusion is install-local. An entry
+// from a shared controller name that names another install's parent does not
+// suppress this install's orphan KGWUI-011; one naming this install's parent does.
+func TestOrphanIgnoresOtherInstallsEntry(t *testing.T) {
+	gw, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	api, pb := testutil.HTTPRouteRef("shop", "api"), testutil.HTTPRouteRef("infra-b", "pb")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	// api keeps no child, so it reports ResolvedRefs=False/BackendNotFound (D-021 item 9).
+	apiSt := ok(gw)
+	apiSt.Conds[1] = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	// kgw2 shares the controller name and watches team=b or env=b; shared is in both scopes.
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1,
+		testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}},{"matchLabels":{"env":"b"}}]`))
+	world := func(entry objects.ParentRef) []runtime.Object {
+		return isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+			testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"}),
+			d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+			// A's api selects shared by wildcard and drops c (no /api match); B's pb keeps it.
+			testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, apiSt), delegRule([]string{"/api"}, testutil.DelegateWildcard("shared"))),
+			testutil.WithRules(testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, ok(gwB)), delegRule([]string{"/pb"}, testutil.DelegateTo("shared", "c"))),
+			leaf("shared", "c", nil, "/pb/c", ok(entry)))
+	}
+	orphans := func(h HealthResponse) []FindingDTO {
+		var out []FindingDTO
+		for _, f := range findingsOn(h, "shared/c") {
+			if f.Code == health.CodeDelegatedNotAttached {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	m := okMetrics("kgw.kgateway", "kgw2.kgateway2")
+	hideAPI := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != api.Ref() })
+	for _, authz := range []Authorizer{nil, hideAPI} {
+		_, srv, _ := startWith(t, setup{metrics: m, authz: authz}, world(pb)...)
+		h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+		got := orphans(h)
+		if len(got) != 1 || got[0].Detail != health.OrphanDetail || got[0].Severity != health.SeverityWarning ||
+			got[0].Since == nil || got[0].EvidenceRestricted {
+			t.Fatalf("A, entry under B's parent, hidden api %v: want one orphan warning, got %+v", authz != nil, got)
+		}
+		for _, c := range h.Checks {
+			if c.Pending {
+				t.Errorf("check %s pending", c.Name)
+			}
+		}
+		if got := orphans(get[HealthResponse](t, srv, "/api/v1/installs/kgw2.kgateway2/health", 200)); len(got) != 0 {
+			t.Errorf("B: want no orphan, got %+v", got)
+		}
+	}
+	// The entry names A's own parent: an eligible entry of A (§4.2), so no orphan.
+	_, srv, _ := startWith(t, setup{metrics: m, disputes: true}, world(api)...)
+	if got := orphans(get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)); len(got) != 0 {
+		t.Errorf("A, entry under its own parent: want no orphan, got %+v", got)
+	}
+}
