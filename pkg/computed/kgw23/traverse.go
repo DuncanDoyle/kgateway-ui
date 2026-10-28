@@ -85,7 +85,7 @@ func (s *routeSel) ruleRange(rule int) (lo, hi int) {
 // slices are shared and never written.
 type frame struct {
 	match objects.Match
-	path  []computed.PathStep
+	path  *computed.Path
 	// keys has one entry for a child; a root reports under each of its
 	// Gateway and ListenerSet parentRef keys.
 	keys   []computed.ReportKey
@@ -114,9 +114,9 @@ type kidEval struct {
 }
 
 // newFrame is a frame for refs [lo, hi) under match m, extending path.
-func newFrame(m objects.Match, path []computed.PathStep, step computed.PathStep, keys []computed.ReportKey, deps []objects.Ref, lo, hi int) frame {
-	// Each frame gets its own path, so retained contexts never alias.
-	f := frame{match: m, path: append(slices.Clip(path), step), keys: keys, deps: deps, lo: lo, hi: hi}
+func newFrame(m objects.Match, path *computed.Path, step computed.PathStep, keys []computed.ReportKey, deps []objects.Ref, lo, hi int) frame {
+	// Frames share their parent's path, so retained paths grow linearly.
+	f := frame{match: m, path: path.Extend(step), keys: keys, deps: deps, lo: lo, hi: hi}
 	if hi-lo > 1 {
 		f.memo = map[int32]*kidEval{}
 	}
@@ -395,14 +395,19 @@ func selectTree(refs []refSel, onPath func(int32) bool) []evalSel {
 
 // eval is childrenFor(P, ref, path): the memoised answer unless a permitted
 // child of P is on the path, when selectTree runs again with the path.
-func (w *walker) eval(pi, ri int, path []computed.PathStep) evalSel {
+func (w *walker) eval(pi, ri int, path *computed.Path) evalSel {
 	rs := &w.sels[pi]
 	byRef := func(i int32, t objects.Ref) int { return w.routes[i].Ref.Compare(t) }
-	for _, s := range path {
+	for s := range path.All() {
 		_, permitted := slices.BinarySearchFunc(rs.permitted, s.Route, byRef)
 		if _, possible := slices.BinarySearchFunc(rs.possible, s.Route, byRef); permitted || possible {
 			return selectTree(rs.refs, func(c int32) bool {
-				return slices.ContainsFunc(path, func(s computed.PathStep) bool { return s.Route == w.routes[c].Ref })
+				for s := range path.All() {
+					if s.Route == w.routes[c].Ref {
+						return true
+					}
+				}
+				return false
 			})[ri]
 		}
 	}

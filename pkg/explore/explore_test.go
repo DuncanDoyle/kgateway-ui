@@ -998,7 +998,7 @@ func drow(parent objects.Ref, rule, ref int, child objects.Ref, o computed.RowOu
 		}
 	}
 	r := computed.Row{Key: computed.RowKey{Parent: parent, Rule: rule, Ref: ref, Child: child}, Outcome: o, Deps: deps,
-		Contexts: []computed.Context{{ParentMatch: m, Path: path, Outcome: o, Deps: deps}}}
+		Contexts: []computed.Context{{ParentMatch: m, Path: computed.PathOf(path...), Outcome: o, Deps: deps}}}
 	if child != (objects.Ref{}) {
 		r.ChildKey = childKeyOf(parent)
 	}

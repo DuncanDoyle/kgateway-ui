@@ -24,7 +24,7 @@ func rowKey(rule, ref int, child objects.Ref) computed.RowKey {
 
 // ctx is a context under prefix p with outcome o, reporter repA and deps {parent, child}.
 func ctx(p string, o computed.RowOutcome) computed.Context {
-	return computed.Context{ParentMatch: prefix(p), Path: []computed.PathStep{{Route: accParent, Match: prefix("/")}},
+	return computed.Context{ParentMatch: prefix(p), Path: computed.PathOf(computed.PathStep{Route: accParent, Match: prefix("/")}),
 		Reporter: repA, Outcome: o, Deps: []objects.Ref{accChild, accParent}}
 }
 

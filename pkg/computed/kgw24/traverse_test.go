@@ -158,7 +158,7 @@ func under(p *hr) computed.ReportKey {
 
 func pathOf(c computed.Context) []string {
 	var out []string
-	for _, s := range c.Path {
+	for _, s := range c.Path.Steps() {
 		out = append(out, s.Route.Name+" "+pathValue(s.Match))
 	}
 	return out
@@ -647,7 +647,7 @@ func TestPathCarriesDelegatingMatches(t *testing.T) {
 	if want := []string{"r /api", "c /api/v1"}; !slices.Equal(pathOf(cx), want) {
 		t.Fatalf("path %v, want %v", pathOf(cx), want)
 	}
-	if !reflect.DeepEqual(cx.Path[len(cx.Path)-1].Match, cx.ParentMatch) {
+	if !reflect.DeepEqual(cx.Path.Last().Match, cx.ParentMatch) {
 		t.Fatal("the last step's match must equal ParentMatch")
 	}
 	if got := pathOf(row(t, res, r, 0, 0, c).Contexts[0]); !slices.Equal(got, []string{"r /api"}) {

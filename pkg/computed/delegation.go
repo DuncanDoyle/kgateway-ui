@@ -2,6 +2,9 @@ package computed
 
 import (
 	"cmp"
+	"encoding/json"
+	"iter"
+	"slices"
 	"strings"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -268,11 +271,86 @@ type PathStep struct {
 	Match objects.Match
 }
 
+// Path is a context's path, held as its last step and a link to the path
+// before it. Paths are immutable, so the contexts under one parent share its
+// prefix and retained paths grow linearly with depth. A nil Path is empty.
+type Path struct {
+	step   PathStep
+	parent *Path
+	n      int
+}
+
+// PathOf returns a path of steps, root first.
+func PathOf(steps ...PathStep) *Path {
+	var p *Path
+	for _, s := range steps {
+		p = p.Extend(s)
+	}
+	return p
+}
+
+// Extend returns p followed by s. It never changes p.
+func (p *Path) Extend(s PathStep) *Path { return &Path{step: s, parent: p, n: p.Len() + 1} }
+
+// Len is the number of steps.
+func (p *Path) Len() int {
+	if p == nil {
+		return 0
+	}
+	return p.n
+}
+
+// Last is the last step; p must not be empty.
+func (p *Path) Last() PathStep { return p.step }
+
+// Parent is p without its last step.
+func (p *Path) Parent() *Path {
+	if p == nil {
+		return nil
+	}
+	return p.parent
+}
+
+// All yields the steps from the last to the root.
+func (p *Path) All() iter.Seq[PathStep] {
+	return func(yield func(PathStep) bool) {
+		for ; p != nil; p = p.parent {
+			if !yield(p.step) {
+				return
+			}
+		}
+	}
+}
+
+// Steps copies the steps, root first. Callers materialize only the paths
+// they return, so the copy stays linear per context.
+func (p *Path) Steps() []PathStep {
+	return p.AppendSteps(nil)
+}
+
+// AppendSteps appends the steps, root first, to dst.
+func (p *Path) AppendSteps(dst []PathStep) []PathStep {
+	n := len(dst)
+	dst = slices.Grow(dst, p.Len())[:n+p.Len()]
+	for i := len(dst) - 1; p != nil; p, i = p.parent, i-1 {
+		dst[i] = p.step
+	}
+	return dst
+}
+
+// MarshalJSON encodes the steps root first, as a slice would be.
+func (p *Path) MarshalJSON() ([]byte, error) {
+	if p == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal(p.Steps())
+}
+
 // Context is one evaluation of a row under one incoming parent match (rules
 // §5.1). Its slices are read-only once added to a row, so they may be shared.
 type Context struct {
 	ParentMatch objects.Match
-	Path        []PathStep
+	Path        *Path
 	// Reporter is the report key of the parent's reporter (rules §7).
 	Reporter ReportKey
 	// Outcome must be set by the caller; an empty or unknown value counts as unknown.
@@ -327,7 +405,10 @@ type Row struct {
 
 // ContextHasher hashes contexts for the row digests with the fingerprint
 // encoding (rules §9.2). It reuses its buffers, so one hasher serves one caller.
-type ContextHasher struct{ p *printer }
+type ContextHasher struct {
+	p     *printer
+	steps []PathStep
+}
 
 // NewContextHasher returns a ContextHasher.
 func NewContextHasher() *ContextHasher { return &ContextHasher{p: newPrinter()} }
@@ -337,8 +418,9 @@ func (h *ContextHasher) Sum(c *Context) uint64 {
 	p := h.p
 	p.start()
 	p.match(c.ParentMatch)
-	p.num(int64(len(c.Path)))
-	for _, s := range c.Path {
+	p.num(int64(c.Path.Len()))
+	h.steps = c.Path.AppendSteps(h.steps[:0])
+	for _, s := range h.steps {
 		p.ref(s.Route)
 		p.match(s.Match)
 	}

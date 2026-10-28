@@ -216,7 +216,7 @@ func TestDisagreeDetailQuotesDelegatedMatch(t *testing.T) {
 	hdr.Headers = []objects.KeyMatch{{Type: "Exact", Name: "x-env", Value: "prod"}}
 	// api delegates c under /api with a header and under /v2; top delegated api under /api.
 	ctx := func(pm objects.Match, key computed.ReportKey, path ...computed.PathStep) computed.Context {
-		return computed.Context{ParentMatch: pm, Reporter: key, Path: path}
+		return computed.Context{ParentMatch: pm, Reporter: key, Path: computed.PathOf(path...)}
 	}
 	rows := []computed.Row{
 		{Key: computed.RowKey{Parent: api, Child: c}, Contexts: []computed.Context{

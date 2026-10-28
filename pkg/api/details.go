@@ -37,7 +37,13 @@ type detail struct {
 	f  facts
 	// links memoises link per ref for the many path steps of one delegation page.
 	links map[objects.Ref]Link
+	// steps counts the path steps the page has materialized (maxPagePathSteps).
+	steps int
 }
+
+// maxPagePathSteps bounds the path steps one delegation page materializes.
+// Without it a page costs rows × contexts × path depth.
+var maxPagePathSteps = 100_000
 
 // startDetail finds the install, or writes 503 or 404.
 func (h *handler) startDetail(w http.ResponseWriter, r *http.Request) *detail {
@@ -725,9 +731,14 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 		out.Observed.Entry = d.childEntry(child, r.ChildKey)
 	}
 	for j := range r.Contexts {
-		if d.v.allowDeps(d.ix, r.ContextDeps[j]) {
-			out.Contexts = append(out.Contexts, d.delegationContext(r, j))
+		if !d.v.allowDeps(d.ix, r.ContextDeps[j]) {
+			continue
 		}
+		if d.steps += r.Contexts[j].Path.Len(); d.steps > maxPagePathSteps {
+			out.ContextsTruncated = true
+			break
+		}
+		out.Contexts = append(out.Contexts, d.delegationContext(r, j))
 	}
 	if !shown {
 		out.Contexts, out.ContextsTruncated = append(out.Contexts, DelegationContext{Restricted: true}), false
@@ -754,15 +765,17 @@ func (d *detail) delegationContext(r *explore.DelegRow, j int) DelegationContext
 		o = computed.OutcomeUnknown // an empty outcome counts as unknown
 	}
 	pm := matchDTO(c.ParentMatch)
-	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, 0, len(c.Path)), Outcome: string(o)}
+	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, c.Path.Len()), Outcome: string(o)}
 	// An unknown context's reason is its unknown code, as Computed.Reason is.
 	if o == computed.OutcomeUnknown {
 		out.Reason = string(c.Unknown)
 	} else {
 		out.Reason = explainRow(o, c.Reason, r.Unresolved)
 	}
-	for _, s := range c.Path {
-		out.Path = append(out.Path, PathStepDTO{Ref: d.cachedLink(s.Route), Match: matchDTO(s.Match)})
+	i := len(out.Path)
+	for s := range c.Path.All() { // last step first
+		i--
+		out.Path[i] = PathStepDTO{Ref: d.cachedLink(s.Route), Match: matchDTO(s.Match)}
 	}
 	return out
 }

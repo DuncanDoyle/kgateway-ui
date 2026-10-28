@@ -175,9 +175,9 @@ func delegatedAt(c computed.CheckResult, parent objects.Ref, rows []computed.Row
 			m, ok := x.ParentMatch, true
 			if resolved {
 				// The step before parent is the ancestor writing under c.Key.
-				ok = x.Reporter == c.Key && len(x.Path) >= 2
+				ok = x.Reporter == c.Key && x.Path.Len() >= 2
 				if ok {
-					m = x.Path[len(x.Path)-2].Match
+					m = x.Path.Parent().Last().Match
 				}
 			}
 			if !ok {

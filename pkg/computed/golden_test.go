@@ -426,7 +426,7 @@ func compareDelegation(t *testing.T, want delegationExpect, in computed.Delegati
 			if w.Paths != nil {
 				ps := []string{}
 				for _, c := range r.Contexts {
-					ps = append(ps, pathString(c.Path))
+					ps = append(ps, pathString(c.Path.Steps()))
 				}
 				g.Paths = &ps
 			}

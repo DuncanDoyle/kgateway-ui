@@ -643,6 +643,22 @@ func ancestorWorld(sibPath, k2Host string) []runtime.Object {
 		leaf("kids", "k1", nil, "/api/m/l/1", testutil.AcceptedBy(leafRef, testutil.Controller)))
 }
 
+// A page materializes at most maxPagePathSteps path steps: later contexts
+// are left out and their rows marked truncated, so deep paths stay bounded.
+func TestDelegationPagePathBudget(t *testing.T) {
+	defer func(n int) { maxPagePathSteps = n }(maxPagePathSteps)
+	maxPagePathSteps = 5
+	_, srv, _ := startWith(t, setup{disputes: true}, ancestorWorld("/api/s", "")...)
+	p := get[Page[DelegationRow]](t, srv, delegURL("shop", "leaf", ""), 200)
+	if !slices.Equal(rowKeys(p), []string{"0.0:kids/k1", "0.0:kids/k2"}) {
+		t.Fatalf("leaf rows %v", rowKeys(p))
+	}
+	if a, b := p.Items[0], p.Items[1]; len(a.Contexts) != 1 || len(a.Contexts[0].Path) != 3 || a.ContextsTruncated ||
+		len(b.Contexts) != 0 || !b.ContextsTruncated || b.Outcome != "attached" {
+		t.Fatalf("rows past the path budget: %+v", p.Items)
+	}
+}
+
 var hideAncestor = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 	return ref.Kind != "HTTPRoute" || !slices.Contains([]string{"shop/mid", "shop/sib", "kids/k2"}, ref.Namespace+"/"+ref.Name)
 })
