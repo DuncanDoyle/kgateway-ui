@@ -42,7 +42,7 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `httpRoute.hostnames` | `[]` | Hostnames for the route. See [Security and trust model](#security-and-trust-model). |
 | `serviceAccount.create` | `true` | Create the ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name; defaults to `<release>-kgateway-ui`. |
-| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. With a memory limit, `GOMEMLIMIT` is set to it through the downward API. |
+| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. The chart no longer sets `GOMEMLIMIT`: the binary uses 90 % of the pod's memory limit unless `GOMEMLIMIT` is set. |
 | `podSecurityContext` | `runAsNonRoot`, `RuntimeDefault` seccomp | Pod security context. |
 | `securityContext` | no privilege escalation, read-only root FS, all capabilities dropped | Container security context. |
 

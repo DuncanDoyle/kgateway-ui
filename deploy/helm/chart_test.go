@@ -310,21 +310,25 @@ func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
 	return d.Spec.Template.Spec.Containers[0].Env
 }
 
-// GOMEMLIMIT follows the container's memory limit through the downward API,
-// and is unset without one (D-025).
-func TestGOMEMLIMITFollowsTheMemoryLimit(t *testing.T) {
+// The container's memory limit reaches the binary as KGWUI_MEMORY_LIMIT, and
+// the chart sets no GOMEMLIMIT of its own (D-025).
+func TestMemoryLimitEnv(t *testing.T) {
+	named := func(n string) func(corev1.EnvVar) bool { return func(e corev1.EnvVar) bool { return e.Name == n } }
 	env := containerEnv(t)
-	i := slices.IndexFunc(env, func(e corev1.EnvVar) bool { return e.Name == "GOMEMLIMIT" })
+	i := slices.IndexFunc(env, named("KGWUI_MEMORY_LIMIT"))
 	if i < 0 {
-		t.Fatalf("no GOMEMLIMIT with the default 512Mi limit: %+v", env)
+		t.Fatalf("no KGWUI_MEMORY_LIMIT with the default 512Mi limit: %+v", env)
 	}
 	f := env[i].ValueFrom
 	if env[i].Value != "" || f == nil || f.ResourceFieldRef == nil || f.ResourceFieldRef.Resource != "limits.memory" ||
 		f.ResourceFieldRef.ContainerName != "kgateway-ui" || f.ResourceFieldRef.Divisor.String() != "1" {
-		t.Fatalf("GOMEMLIMIT must be the container's limits.memory in bytes: %+v", env[i])
+		t.Fatalf("KGWUI_MEMORY_LIMIT must be the container's limits.memory in bytes: %+v", env[i])
+	}
+	if slices.ContainsFunc(env, named("GOMEMLIMIT")) {
+		t.Fatalf("the chart must not set GOMEMLIMIT: %+v", env)
 	}
 	env = containerEnv(t, "--set", "resources.limits.memory=null")
-	if slices.ContainsFunc(env, func(e corev1.EnvVar) bool { return e.Name == "GOMEMLIMIT" }) {
-		t.Fatalf("GOMEMLIMIT must be unset without a memory limit: %+v", env)
+	if slices.ContainsFunc(env, named("KGWUI_MEMORY_LIMIT")) {
+		t.Fatalf("KGWUI_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
 	}
 }

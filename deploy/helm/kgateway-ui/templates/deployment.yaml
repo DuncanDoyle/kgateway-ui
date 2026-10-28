@@ -30,8 +30,8 @@ spec:
             {{- end }}
           {{- if dig "limits" "memory" "" .Values.resources }}
           env:
-            # The Go runtime's soft memory limit: the container's limit in bytes (D-025).
-            - name: GOMEMLIMIT
+            # The container's memory limit in bytes; the binary sets the Go memory target to 90 % of it (D-025).
+            - name: KGWUI_MEMORY_LIMIT
               valueFrom:
                 resourceFieldRef: { containerName: kgateway-ui, resource: limits.memory, divisor: "1" }
           {{- end }}

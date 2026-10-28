@@ -26,7 +26,7 @@ httpRoute:
 serviceAccount:
   create: true
   name: ""
-# GOMEMLIMIT is set from limits.memory when there is one.
+# With limits.memory the binary uses 90 % of it as its Go memory target.
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { memory: 512Mi }
