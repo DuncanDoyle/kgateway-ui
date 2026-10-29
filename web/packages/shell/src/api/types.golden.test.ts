@@ -64,6 +64,7 @@ import type {
   InstallSummary,
   KeyMatch,
   LabelSelector,
+  LabelSelectorRequirement,
   LinkedRef,
   Listener,
   ListenerAttachment,
@@ -96,17 +97,57 @@ import type {
 // Checks the backend's golden wire format (pkg/api golden_test.go) against these types.
 // Spec<T> must list every key of T with its optionality, so tsc fails when types.ts drifts from a spec.
 type Spec<T> = { [K in keyof T]-?: object extends Pick<T, K> ? "?" : "!" };
+// Value types: each golden body must satisfy Wide<T>, so tsc checks scalars and arrays versus objects.
+// JSON imports type strings as string, so Wide<T> widens unions and Enums<T> checks their values at run time.
+type Wide<T> = T extends string
+  ? string
+  : T extends readonly (infer E)[]
+    ? Wide<E>[]
+    : T extends object
+      ? { [K in keyof T]: Wide<T[K]> }
+      : T;
+type Lit<V> = V extends string ? (string extends V ? never : V) : never;
+type Union<V> = Lit<NonNullable<V> extends readonly (infer E)[] ? E : NonNullable<V>>;
+type EnumKey<T> = { [K in keyof T]-?: [Union<T[K]>] extends [never] ? never : K }[keyof T];
+/** Every key of T typed as a string-literal union (or an array of one), with each of its members. */
+type Enums<T> = { [K in EnumKey<T>]-?: Record<Union<T[K]>, 1> };
 interface Shape {
   keys: Record<string, "!" | "?">;
   nested: Record<string, Shape>;
+  enums: Record<string, Record<string, 1>>;
 }
-const shape = <T>(keys: Spec<T>, nested: Partial<Record<keyof T, Shape>> = {}): Shape => ({
+const shape = <T>(
+  keys: Spec<T>,
+  nested: Partial<Record<keyof T, Shape>> = {},
+  ...[enums]: EnumKey<T> extends never ? [] : [Enums<T>]
+): Shape => ({
   keys,
   nested: nested as Record<string, Shape>,
+  enums: (enums ?? {}) as Record<string, Record<string, 1>>,
 });
 
+// The members of each union in types.ts; Record<U, 1> makes tsc require every member and nothing else.
+const healthState = { healthy: 1, warning: 1, error: 1, unknown: 1 } as const;
+const link = { link: { detail: 1, yaml: 1, none: 1 } } as const;
+const category = {
+  category: {
+    gatewayclass: 1,
+    gateway: 1,
+    listenerset: 1,
+    route: 1,
+    policy: 1,
+    workload: 1,
+    parameters: 1,
+    backend: 1,
+  },
+} as const;
+const delegationRefEnums = {
+  mode: { name: 1, wildcard: 1, label: 1 },
+  state: { reported: 1, "not-reported": 1, "not-found": 1, restricted: 1 },
+} as const;
+
 const ref = shape<Ref>({ group: "!", kind: "!", namespace: "?", name: "!" });
-const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "!" });
+const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "!" }, {}, link);
 const finding = shape<Finding>(
   {
     code: "!",
@@ -121,6 +162,7 @@ const finding = shape<Finding>(
     evidenceRestricted: "?",
   },
   { resource: linkedRef },
+  { severity: { error: 1, warning: 1, info: 1 } },
 );
 const check = shape<CheckResult>({
   name: "!",
@@ -134,13 +176,28 @@ const check = shape<CheckResult>({
 const healthReport = shape<HealthReport>(
   { install: "!", state: "!", findings: "!", checks: "!", counts: "!", collectedAt: "!" },
   { findings: finding, checks: check },
+  { state: healthState },
 );
-const selector = shape<LabelSelector>({ matchLabels: "?", matchExpressions: "?" });
+const selector = shape<LabelSelector>(
+  { matchLabels: "?", matchExpressions: "?" },
+  {
+    matchExpressions: shape<LabelSelectorRequirement>(
+      { key: "!", operator: "!", values: "?" },
+      {},
+      { operator: { In: 1, NotIn: 1, Exists: 1, DoesNotExist: 1 } },
+    ),
+  },
+);
 const scope = shape<ScopeSummary>(
   { mode: "!", selectors: "?", error: "?", source: "?", watched: "!", total: "!" },
   { selectors: selector },
+  { mode: { all: 1, selectors: 1, unknown: 1 } },
 );
-const readiness = shape<Readiness>({ state: "!", ready: "?", desired: "?" });
+const readiness = shape<Readiness>(
+  { state: "!", ready: "?", desired: "?" },
+  {},
+  { state: { ready: 1, "not-ready": 1, unknown: 1, "not-observed": 1 } },
+);
 const headerKeys = {
   id: "!",
   displayName: "!",
@@ -155,31 +212,41 @@ const headerKeys = {
 const header = shape<InstallHeader>(headerKeys, { readiness, scope });
 const summary = shape<InstallSummary>(
   { ...headerKeys, health: "!", computedAt: "!", confirmedAt: "?" },
-  { readiness, scope },
+  {
+    readiness,
+    scope,
+    health: shape<InstallSummary["health"]>({ state: "!", counts: "!" }, {}, { state: healthState }),
+  },
 );
 const access = shape<Access>({ ok: "!", error: "?" });
 const count = shape<Count>(
   { group: "!", kind: "!", category: "!", displayName: "!", count: "!", access: "!" },
   { access },
+  category,
 );
 const row = shape<GatewayRow>(
   { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?" },
   { ref },
+  { state: healthState, ...link },
 );
 const overviewShape = shape<OverviewResponse>(
   { header: "!", counts: "!", gateways: "!", collectedAt: "!" },
   { header, counts: count, gateways: row },
 );
-const kind = shape<ServedKind>({
-  group: "!",
-  kind: "!",
-  resource: "!",
-  versions: "!",
-  namespaced: "!",
-  category: "!",
-  displayName: "!",
-  version: "!",
-});
+const kind = shape<ServedKind>(
+  {
+    group: "!",
+    kind: "!",
+    resource: "!",
+    versions: "!",
+    namespaced: "!",
+    category: "!",
+    displayName: "!",
+    version: "!",
+  },
+  {},
+  category,
+);
 const groupKind = shape<NonNullable<MetaResponse["views"]>[number]>({ group: "!", kind: "!" });
 const metaShape = shape<MetaResponse>(
   { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!", views: "?", filters: "?" },
@@ -199,7 +266,15 @@ const pageKeys = {
 } as const satisfies Spec<Page<unknown>>;
 const page = (items: Shape) => shape<Page<unknown>>(pageKeys, { items });
 // View A (sub-phase 2.3).
-const computed = shape<Computed>({ by: "!", rules: "!", rule: "?", state: "!", coverage: "?", reason: "?", note: "?" });
+const computed = shape<Computed>(
+  { by: "!", rules: "!", rule: "?", state: "!", coverage: "?", reason: "?", note: "?" },
+  {},
+  {
+    by: { ui: 1 },
+    state: { checked: 1, disagrees: 1, pending: 1, unknown: 1, restricted: 1 },
+    coverage: { "count-agrees": 1, "status-compatible": 1, "not-verified": 1 },
+  },
+);
 const computedAttachment = shape<ComputedAttachment>(
   { outcome: "?", listeners: "!", explanation: "?", computed: "!" },
   {
@@ -209,6 +284,7 @@ const computedAttachment = shape<ComputedAttachment>(
     ),
     computed,
   },
+  { outcome: { accepted: 1, NotAllowedByListeners: 1, NoMatchingParent: 1, NoMatchingListenerHostname: 1 } },
 );
 const parentSummary = shape<ParentSummary>(
   {
@@ -224,6 +300,7 @@ const parentSummary = shape<ParentSummary>(
     computed: "?",
   },
   { ref: linkedRef, via: linkedRef, computed: computedAttachment },
+  { attachment: { accepted: 1, "not-accepted": 1, pending: 1, unwatched: 1, declared: 1 } },
 );
 const routeRow = shape<RouteRow>(
   {
@@ -237,6 +314,7 @@ const routeRow = shape<RouteRow>(
     mirror: "?",
   },
   { ref: linkedRef, parents: parentSummary, parentRoutes: linkedRef },
+  { health: healthState },
 );
 const gatewayListRow = shape<GatewayListRow>(
   {
@@ -252,10 +330,12 @@ const gatewayListRow = shape<GatewayListRow>(
     disagreements: "?",
   },
   { ref: linkedRef },
+  { health: healthState },
 );
 const listenerSetRow = shape<ListenerSetRow>(
   { ref: "!", parent: "!", health: "!", listeners: "!", acceptedReason: "?", routes: "?", disagreements: "?" },
   { ref: linkedRef, parent: linkedRef },
+  { health: healthState },
 );
 const condition = shape<Condition>({
   type: "!",
@@ -308,7 +388,11 @@ const listener = shape<Listener>(
   { tls, allowedRoutes, status: listenerStatus, computed },
 );
 const routeCounts = shape<RouteCounts>({ accepted: "!", notAccepted: "!", pending: "!", unwatched: "!" });
-const candidate = shape<Candidate>({ reason: "!", by: "?" }, { by: linkedRef });
+const candidate = shape<Candidate>(
+  { reason: "!", by: "?" },
+  { by: linkedRef },
+  { reason: { finding: 1, referenced: 1, selected: 1 } },
+);
 const gatewayDetail = shape<GatewayDetail>(
   {
     install: "!",
@@ -327,6 +411,7 @@ const gatewayDetail = shape<GatewayDetail>(
     collectedAt: "!",
   },
   { ref: linkedRef, candidate, conditions: condition, listeners: listener, routeCounts },
+  { health: healthState },
 );
 // value is the Gateway's field as written, so its keys are not checked.
 const allowedListeners = shape<AllowedListeners>({ set: "!", value: "?", crdHint: "!" });
@@ -356,6 +441,7 @@ const listenerSetDetail = shape<ListenerSetDetail>(
     routeCounts,
     parentAllowedListeners: allowedListeners,
   },
+  { health: healthState },
 );
 const keyMatch = shape<KeyMatch>({ type: "!", name: "!", value: "!" });
 const match = shape<Match>(
@@ -379,8 +465,13 @@ const backendRef = shape<BackendRef>(
     delegation: shape<DelegationRef>(
       { mode: "!", namespace: "!", name: "?", label: "?", state: "?", selected: "?", attached: "?", computed: "?" },
       { computed },
+      delegationRefEnums,
     ),
-    backend: shape<BackendState>({ state: "?", accepted: "?", restricted: "?" }, { accepted: condition }),
+    backend: shape<BackendState>(
+      { state: "?", accepted: "?", restricted: "?" },
+      { accepted: condition },
+      { state: healthState },
+    ),
   },
 );
 const rule = shape<Rule>(
@@ -405,7 +496,18 @@ const effectiveEdge = shape<EffectiveEdge>(
     ),
     computed,
   },
+  { mode: { default: 1, inherit: 1 } },
 );
+const outcomes = {
+  attached: 1,
+  partial: 1,
+  dropped: 1,
+  forbidden: 1,
+  "rejected-hostnames": 1,
+  cycle: 1,
+  unresolved: 1,
+  unknown: 1,
+} as const;
 const delegationRow = shape<DelegationRow>(
   {
     rule: "!",
@@ -421,20 +523,25 @@ const delegationRow = shape<DelegationRow>(
     observed: "!",
   },
   {
-    refAsWritten: shape<DelegationRef>({
-      mode: "!",
-      namespace: "!",
-      name: "?",
-      label: "?",
-      state: "?",
-      selected: "?",
-      attached: "?",
-      computed: "?",
-    }),
+    refAsWritten: shape<DelegationRef>(
+      {
+        mode: "!",
+        namespace: "!",
+        name: "?",
+        label: "?",
+        state: "?",
+        selected: "?",
+        attached: "?",
+        computed: "?",
+      },
+      {},
+      delegationRefEnums,
+    ),
     child: linkedRef,
     contexts: shape<DelegationContext>(
       { restricted: "?", parentMatch: "?", path: "?", outcome: "?", reason: "?" },
       { parentMatch: match, path: shape<PathStep>({ ref: "!", match: "!" }, { ref: linkedRef, match }) },
+      { outcome: outcomes },
     ),
     computed,
     observed: shape<DelegationRow["observed"]>(
@@ -442,6 +549,7 @@ const delegationRow = shape<DelegationRow>(
       { entry: parentStatus, parentCondition: condition },
     ),
   },
+  { allows: { any: 1, this: 1, other: 1 }, outcome: outcomes },
 );
 const routeDetail = shape<RouteDetail>(
   {
@@ -479,64 +587,129 @@ const routeDetail = shape<RouteDetail>(
     effective: effectiveEdge,
     ancestors: ancestor,
   },
+  { health: healthState },
 );
 
-/** problems lists keys the types do not declare and required keys the wire omits, recursing into nested shapes. */
+/** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
 function problems(s: Shape, v: unknown, path: string): string[] {
   if (Array.isArray(v)) return v.flatMap((e, i) => problems(s, e, `${path}[${i}]`));
   if (v === null || typeof v !== "object") return [`${path}: want an object, got ${JSON.stringify(v)}`];
   const o = v as Record<string, unknown>;
   const out = Object.keys(o)
-    .filter((k) => !(k in s.keys))
+    .filter((k) => !Object.hasOwn(s.keys, k))
     .map((k) => `${path}.${k}: not in types.ts`);
   for (const [k, opt] of Object.entries(s.keys)) {
-    if (!(k in o)) {
+    if (!Object.hasOwn(o, k)) {
       if (opt === "!") out.push(`${path}.${k}: required in types.ts, absent on the wire`);
       continue;
     }
     const n = s.nested[k];
     if (n && o[k] !== null) out.push(...problems(n, o[k], `${path}.${k}`));
+    const e = s.enums[k];
+    if (e)
+      for (const [i, x] of (Array.isArray(o[k]) ? o[k] : [o[k]]).entries())
+        if (typeof x !== "string" || !Object.hasOwn(e, x))
+          out.push(`${path}.${k}${Array.isArray(o[k]) ? `[${i}]` : ""}: ${JSON.stringify(x)} not in types.ts`);
   }
   return out;
 }
 
 describe("types.ts matches the golden v1 wire format", () => {
+  // satisfies Wide<T> is the compile-time half of the guard.
   it.each([
-    ["meta", meta, metaShape],
-    ["bare-meta", bareMeta, metaShape],
-    ["installs", installs, summary],
-    ["bare-installs", bareInstalls, summary],
-    ["overview", overview, overviewShape],
-    ["bare-overview", bareOverview, overviewShape],
-    ["health", health, healthReport],
-    ["not-found", notFound, errorShape],
-    ["routes", routesGolden, page(routeRow)],
-    ["routes-filtered", routesFilteredGolden, page(routeRow)],
-    ["routes-restricted", routesRestrictedGolden, page(routeRow)],
-    ["routes-by-backend", routesByBackendGolden, page(routeRow)],
-    ["routes-by-backend-restricted", routesByBackendRestrictedGolden, page(routeRow)],
-    ["routes-by-listener", routesByListenerGolden, page(routeRow)],
-    ["gateways", gatewaysGolden, page(gatewayListRow)],
-    ["listenersets", listenersetsGolden, page(listenerSetRow)],
-    ["bad-request", badRequestGolden, errorShape],
-    ["gateway-detail", gatewayDetailGolden, gatewayDetail],
-    ["gateway-detail-restricted", gatewayDetailRestrictedGolden, gatewayDetail],
-    ["listenerset-detail", listenersetDetailGolden, listenerSetDetail],
-    ["listenerset-detail-allowed", listenersetDetailAllowedGolden, listenerSetDetail],
-    ["listenerset-detail-invalid", listenersetDetailInvalidGolden, listenerSetDetail],
-    ["route-detail", routeDetailGolden, routeDetail],
-    ["route-detail-restricted", routeDetailRestrictedGolden, routeDetail],
-    ["route-detail-candidate", routeDetailCandidateGolden, routeDetail],
-    ["route-delegation", routeDelegationGolden, page(delegationRow)],
-    ["route-delegation-cut", routeDelegationCutGolden, page(delegationRow)],
-    ["route-delegation-restricted", routeDelegationRestrictedGolden, page(delegationRow)],
-    ["routes-dropped", routesDroppedGolden, page(routeRow)],
-    ["route-detail-effective", routeDetailEffectiveGolden, routeDetail],
-    ["route-detail-selected", routeDetailSelectedGolden, routeDetail],
-    ["route-detail-delegation-restricted", routeDetailDelegationRestrictedGolden, routeDetail],
-    ["health-evidence-restricted", healthEvidenceRestrictedGolden, healthReport],
-  ] as const)("%s", (_, golden, s) => {
-    expect(problems(s, golden.body, "body")).toEqual([]);
+    ["meta", meta.body satisfies Wide<MetaResponse>, metaShape],
+    ["bare-meta", bareMeta.body satisfies Wide<MetaResponse>, metaShape],
+    ["installs", installs.body satisfies Wide<InstallSummary[]>, summary],
+    ["bare-installs", bareInstalls.body satisfies Wide<InstallSummary[]>, summary],
+    ["overview", overview.body satisfies Wide<OverviewResponse>, overviewShape],
+    ["bare-overview", bareOverview.body satisfies Wide<OverviewResponse>, overviewShape],
+    ["health", health.body satisfies Wide<HealthReport>, healthReport],
+    ["not-found", notFound.body satisfies Wide<ErrorResponse>, errorShape],
+    ["routes", routesGolden.body satisfies Wide<Page<RouteRow>>, page(routeRow)],
+    ["routes-filtered", routesFilteredGolden.body satisfies Wide<Page<RouteRow>>, page(routeRow)],
+    ["routes-restricted", routesRestrictedGolden.body satisfies Wide<Page<RouteRow>>, page(routeRow)],
+    ["routes-by-backend", routesByBackendGolden.body satisfies Wide<Page<RouteRow>>, page(routeRow)],
+    [
+      "routes-by-backend-restricted",
+      routesByBackendRestrictedGolden.body satisfies Wide<Page<RouteRow>>,
+      page(routeRow),
+    ],
+    ["routes-by-listener", routesByListenerGolden.body satisfies Wide<Page<RouteRow>>, page(routeRow)],
+    ["gateways", gatewaysGolden.body satisfies Wide<Page<GatewayListRow>>, page(gatewayListRow)],
+    ["listenersets", listenersetsGolden.body satisfies Wide<Page<ListenerSetRow>>, page(listenerSetRow)],
+    ["bad-request", badRequestGolden.body satisfies Wide<ErrorResponse>, errorShape],
+    ["gateway-detail", gatewayDetailGolden.body satisfies Wide<GatewayDetail>, gatewayDetail],
+    ["gateway-detail-restricted", gatewayDetailRestrictedGolden.body satisfies Wide<GatewayDetail>, gatewayDetail],
+    ["listenerset-detail", listenersetDetailGolden.body satisfies Wide<ListenerSetDetail>, listenerSetDetail],
+    [
+      "listenerset-detail-allowed",
+      listenersetDetailAllowedGolden.body satisfies Wide<ListenerSetDetail>,
+      listenerSetDetail,
+    ],
+    [
+      "listenerset-detail-invalid",
+      listenersetDetailInvalidGolden.body satisfies Wide<ListenerSetDetail>,
+      listenerSetDetail,
+    ],
+    ["route-detail", routeDetailGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-restricted", routeDetailRestrictedGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-candidate", routeDetailCandidateGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-delegation", routeDelegationGolden.body satisfies Wide<Page<DelegationRow>>, page(delegationRow)],
+    ["route-delegation-cut", routeDelegationCutGolden.body satisfies Wide<Page<DelegationRow>>, page(delegationRow)],
+    [
+      "route-delegation-restricted",
+      routeDelegationRestrictedGolden.body satisfies Wide<Page<DelegationRow>>,
+      page(delegationRow),
+    ],
+    ["routes-dropped", routesDroppedGolden.body satisfies Wide<Page<RouteRow>>, page(routeRow)],
+    ["route-detail-effective", routeDetailEffectiveGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    ["route-detail-selected", routeDetailSelectedGolden.body satisfies Wide<RouteDetail>, routeDetail],
+    [
+      "route-detail-delegation-restricted",
+      routeDetailDelegationRestrictedGolden.body satisfies Wide<RouteDetail>,
+      routeDetail,
+    ],
+    ["health-evidence-restricted", healthEvidenceRestrictedGolden.body satisfies Wide<HealthReport>, healthReport],
+  ] as const)("%s", (_, body, s) => {
+    expect(problems(s, body, "body")).toEqual([]);
+  });
+
+  // Each mismatch class in a mutated copy fails the guard and names the JSON path.
+  it("rejects a value outside a declared union and names its path", () => {
+    const body = structuredClone(routeDelegationGolden.body);
+    (body.items[0] as { computed: { state: string } }).computed.state = "bogus";
+    expect(problems(page(delegationRow), body, "body")).toEqual([
+      'body.items[0].computed.state: "bogus" not in types.ts',
+    ]);
+  });
+
+  it("reports a wire key named constructor as undeclared", () => {
+    const body = structuredClone(routeDelegationGolden.body);
+    Object.assign(body.items[0] as object, { constructor: "x" });
+    expect(problems(page(delegationRow), body, "body")).toEqual(["body.items[0].constructor: not in types.ts"]);
+  });
+
+  // `in` would let names inherited from Object.prototype through.
+  it.each(["toString", "constructor", "__proto__"])("rejects the inherited name %s as a union value", (x) => {
+    const body = structuredClone(routeDelegationGolden.body);
+    (body.items[0] as { computed: { state: string } }).computed.state = x;
+    expect(problems(page(delegationRow), body, "body")).toEqual([
+      `body.items[0].computed.state: ${JSON.stringify(x)} not in types.ts`,
+    ]);
+  });
+
+  // Scalars and arrays versus objects fail at compile time: tsc names the property, and an unused directive fails too.
+  it("rejects a scalar or an array versus object mismatch at compile time", () => {
+    const d = routeDetailGolden.body;
+    // @ts-expect-error a string where a number is declared
+    const str = { ...d, generation: "1" } satisfies Wide<RouteDetail>;
+    // @ts-expect-error a number where a string is declared
+    const num = { ...d, install: 1 } satisfies Wide<RouteDetail>;
+    // @ts-expect-error an object where an array is declared
+    const obj = { ...d, rules: {} } satisfies Wide<RouteDetail>;
+    // @ts-expect-error an array where an object is declared
+    const arr = { ...d, ref: [] } satisfies Wide<RouteDetail>;
+    expect([str, num, obj, arr]).toHaveLength(4);
   });
 
   // Guards against a vacuous pass: the fixtures carry the optional fields the SPA branches on.

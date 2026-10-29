@@ -244,6 +244,41 @@ func TestDelegationEdgeCapCutRef(t *testing.T) {
 	}
 }
 
+// Rules §3.3, D-024, D-025: scope-unknown wins over the edge cap's too-large.
+// Every ref of an unknown-scope install reads scope-unknown, cut or not; a
+// hidden cut ref reads as the same ref uncut, restricted (D-026 item 2).
+func TestScopeUnknownWinsOverTooLarge(t *testing.T) {
+	cut := computed.DefaultBounds
+	cut.Edges = 3
+	objs := unknownScope(outcomeWorld())
+	_, srv, _ := startWith(t, setup{disputes: true, bounds: cut}, objs...)
+	want := Computed{By: ComputedBy, Rules: "kgateway-2.4", Rule: ruleDelegation, State: "unknown", Reason: string(computed.UnknownScope)}
+	for _, route := range []string{"api", "loop"} {
+		d := get[RouteDetail](t, srv, routeDetail+"shop/"+route, 200)
+		for i, r := range d.Rules {
+			if c := r.BackendRefs[0].Delegation.Computed; c == nil || !reflect.DeepEqual(*c, want) {
+				t.Errorf("shop/%s rule %d: computed %+v, want %+v", route, i, c, want)
+			}
+		}
+		for _, p := range []string{routeDetail + "shop/" + route, delegURL("shop", route, "")} {
+			if b := wire(t, srv, p); bytes.Contains(b, []byte("too-large")) {
+				t.Errorf("GET %s carries too-large:\n%s", p, b)
+			}
+		}
+	}
+
+	// A hidden cut ref: the same computed as the ref uncut, under the same caller.
+	hideHost := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != route("shop", "host") })
+	_, hidCut, _ := startWith(t, setup{disputes: true, bounds: cut, authz: hideHost}, objs...)
+	_, hidAll, _ := startWith(t, setup{disputes: true, authz: hideHost}, objs...)
+	c4 := func(srv *httptest.Server) *Computed {
+		return get[RouteDetail](t, srv, routeDetail+"shop/api", 200).Rules[4].BackendRefs[0].Delegation.Computed
+	}
+	if c, u := c4(hidCut), c4(hidAll); c == nil || u == nil || !reflect.DeepEqual(*c, *u) || c.State != "restricted" {
+		t.Errorf("hidden cut ref %+v, uncut %+v, want both restricted", c, u)
+	}
+}
+
 // Design §7.2: rule and ref are integers, outcome a row outcome; no sort;
 // paging over the fixed order.
 func TestDelegationParams(t *testing.T) {

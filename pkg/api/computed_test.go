@@ -1560,3 +1560,241 @@ func TestOrphanUnderHiddenParentNotRestricted(t *testing.T) {
 		}
 	}
 }
+
+// Design §6.2 and rules §9.3: the orphan conclusion is install-local. An entry
+// from a shared controller name that names another install's parent does not
+// suppress this install's orphan KGWUI-011; one naming this install's parent does.
+func TestOrphanIgnoresOtherInstallsEntry(t *testing.T) {
+	gw, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	api, pb := testutil.HTTPRouteRef("shop", "api"), testutil.HTTPRouteRef("infra-b", "pb")
+	ok := func(p objects.ParentRef) testutil.RouteParent { return testutil.AcceptedBy(p, testutil.Controller) }
+	// api keeps no child, so it reports ResolvedRefs=False/BackendNotFound (D-021 item 9).
+	apiSt := ok(gw)
+	apiSt.Conds[1] = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+	// kgw2 shares the controller name and watches team=b or env=b; shared is in both scopes.
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1,
+		testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}},{"matchLabels":{"env":"b"}}]`))
+	world := func(entry objects.ParentRef) []runtime.Object {
+		return isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+			testutil.Namespace("shared", map[string]string{"team": "a", "env": "b"}),
+			d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+			// A's api selects shared by wildcard and drops c (no /api match); B's pb keeps it.
+			testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, apiSt), delegRule([]string{"/api"}, testutil.DelegateWildcard("shared"))),
+			testutil.WithRules(testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, ok(gwB)), delegRule([]string{"/pb"}, testutil.DelegateTo("shared", "c"))),
+			leaf("shared", "c", nil, "/pb/c", ok(entry)))
+	}
+	orphans := func(h HealthResponse) []FindingDTO {
+		var out []FindingDTO
+		for _, f := range findingsOn(h, "shared/c") {
+			if f.Code == health.CodeDelegatedNotAttached {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	m := okMetrics("kgw.kgateway", "kgw2.kgateway2")
+	hideAPI := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != api.Ref() })
+	for _, authz := range []Authorizer{nil, hideAPI} {
+		_, srv, _ := startWith(t, setup{metrics: m, authz: authz}, world(pb)...)
+		h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+		got := orphans(h)
+		if len(got) != 1 || got[0].Detail != health.OrphanDetail || got[0].Severity != health.SeverityWarning ||
+			got[0].Since == nil || got[0].EvidenceRestricted {
+			t.Fatalf("A, entry under B's parent, hidden api %v: want one orphan warning, got %+v", authz != nil, got)
+		}
+		for _, c := range h.Checks {
+			if c.Pending {
+				t.Errorf("check %s pending", c.Name)
+			}
+		}
+		if got := orphans(get[HealthResponse](t, srv, "/api/v1/installs/kgw2.kgateway2/health", 200)); len(got) != 0 {
+			t.Errorf("B: want no orphan, got %+v", got)
+		}
+	}
+	// The entry names A's own parent: an eligible entry of A (§4.2), so no orphan.
+	_, srv, _ := startWith(t, setup{metrics: m, disputes: true}, world(api)...)
+	if got := orphans(get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)); len(got) != 0 {
+		t.Errorf("A, entry under its own parent: want no orphan, got %+v", got)
+	}
+}
+
+// Design §7.4 rules 4a and 6: listener-unknown shows when any one unknown
+// parent's dependencies are visible, so a hidden parent does not remove the
+// flag a visible one sets, and state=listener-unknown agrees with
+// parent=…&listener=_unknown.
+func TestListenerUnknownPerParent(t *testing.T) {
+	lsRef := func(name string) objects.ParentRef {
+		return objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: name}
+	}
+	a, b := lsRef("lsa"), lsRef("lsb")
+	// Neither ListenerSet has an Accepted condition, so view A cannot place r under either.
+	objs := viewAWorld(edgeWith([]objects.Listener{lst("http", 8080, "")}, up("http", 0)),
+		admitAll(testutil.ListenerSet("infra", "lsa", edgeRef, []metav1.Condition{})),
+		admitAll(testutil.ListenerSet("infra", "lsb", edgeRef, []metav1.Condition{})),
+		testutil.HTTPRoute("shop", "r", []objects.ParentRef{a, b}, testutil.AcceptedBy(a, testutil.Controller), testutil.AcceptedBy(b, testutil.Controller)))
+	const state = listBase + "/routes?state=listener-unknown"
+	under := func(p objects.ParentRef) string {
+		return listBase + "/routes?parent=gateway.networking.k8s.io/ListenerSet/infra/" + p.Name + "&listener=_unknown"
+	}
+	hide := func(names ...string) Authorizer {
+		return AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
+			return ref.Kind != "ListenerSet" || !slices.Contains(names, ref.Name)
+		})
+	}
+	var denied []int
+	for _, tc := range []struct {
+		name         string
+		authz        Authorizer
+		flag, ua, ub bool
+	}{
+		{"allow all", nil, true, true, true},
+		{"hide lsb", hide("lsb"), true, true, false},
+		{"hide both", hide("lsa", "lsb"), false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{disputes: true, authz: tc.authz}, objs...)
+			all := get[Page[RouteRow]](t, srv, listBase+"/routes", 200)
+			if got := flagged(routeByName(t, all, "shop/r"), "listener-unknown"); got != tc.flag {
+				t.Errorf("row flag %v, want %v", got, tc.flag)
+			}
+			want := []string{}
+			if tc.flag {
+				want = []string{"shop/r"}
+			}
+			if p := get[Page[RouteRow]](t, srv, state, 200); !slices.Equal(routeNames(p), want) || p.Total != len(want) {
+				t.Errorf("state=listener-unknown: %v total %d, want %v", routeNames(p), p.Total, want)
+			}
+			for _, c := range []struct {
+				p    objects.ParentRef
+				want bool
+			}{{a, tc.ua}, {b, tc.ub}} {
+				resp, err := http.Get(srv.URL + under(c.p))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var p Page[RouteRow]
+				if resp.StatusCode == http.StatusOK {
+					_ = json.NewDecoder(resp.Body).Decode(&p)
+				}
+				_ = resp.Body.Close()
+				if got := slices.Contains(routeNames(p), "shop/r"); got != c.want {
+					t.Errorf("parent=%s&listener=_unknown includes r: %v, want %v (status %d)", c.p.Name, got, c.want, resp.StatusCode)
+				}
+			}
+			denied = append(denied, all.DeniedInInstall)
+			for _, p := range []string{state, under(a), under(b)} {
+				if d := get[Page[RouteRow]](t, srv, p, 200).DeniedInInstall; d != all.DeniedInInstall {
+					t.Errorf("%s: deniedInInstall %d, unfiltered %d", p, d, all.DeniedInInstall)
+				}
+			}
+		})
+	}
+	t.Run("AllowAll", func(t *testing.T) {
+		c := &countingAuthz{all: true}
+		_, srv, _ := startWith(t, setup{disputes: true, authz: c}, objs...)
+		_, ref, _ := startWith(t, setup{disputes: true}, objs...)
+		for _, p := range []string{listBase + "/routes", state, under(a), under(b), routeDetail + "shop/r"} {
+			if got, want := wire(t, srv, p), wire(t, ref, p); !bytes.Equal(got, want) {
+				t.Errorf("GET %s differs from AllowAll", p)
+			}
+		}
+		if n := len(c.take()); n != 0 {
+			t.Errorf("AllowAll asked the Authorizer about %d refs", n)
+		}
+	})
+	if len(denied) != 3 || denied[0] != denied[1] || denied[1] != denied[2] {
+		t.Errorf("deniedInInstall per caller %v, want identical", denied)
+	}
+}
+
+// Design §7.4 rules 7 and 9: a computed-only KGWUI-012 whose evidence is
+// restricted keeps a since: the child's own first-seen time, as an owned
+// child's does. Here api's root is admitted through a Selector over shop.
+func TestComputedOnlyCandidateKeepsSince(t *testing.T) {
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "c"), testutil.DelegateTo("shop", "d")))
+	objs := viewAWorld(edgeWith([]objects.Listener{sel}, up("sel", 1)), api,
+		// c has no parentRefs, d declares api; api attaches both, and neither has an entry from it.
+		leaf("shop", "c", nil, "/api/c"),
+		leaf("shop", "d", []objects.ParentRef{apiRef}, "/api/d"))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": "in"})
+		}
+	}
+	kgwui012 := func(t *testing.T, h HealthResponse, on string) FindingDTO {
+		t.Helper()
+		for _, f := range findingsOn(h, on) {
+			if f.Code == health.CodeComputedDisagrees {
+				return f
+			}
+		}
+		t.Fatalf("no KGWUI-012 on %s: %+v", on, h.Findings)
+		return FindingDTO{}
+	}
+	_, all, _ := startWith(t, setup{disputes: true}, objs...)
+	_, some, _ := startWith(t, setup{disputes: true, authz: hideNamespaces}, objs...)
+	ha, hs := get[HealthResponse](t, all, base+"/health", 200), get[HealthResponse](t, some, base+"/health", 200)
+	// The check's window starts at the engine's first computation, when every child was first seen.
+	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
+	for _, on := range []string{"shop/c", "shop/d"} {
+		full := kgwui012(t, ha, on)
+		if full.EvidenceRestricted || full.Detail == restrictedEvidence || full.Since == nil || !full.Since.Equal(childSeen) {
+			t.Errorf("%s AllowAll: since %v, want the window start %v; %+v", on, full.Since, childSeen, full)
+		}
+		f := kgwui012(t, hs, on)
+		if !f.EvidenceRestricted || f.Detail != restrictedEvidence || f.Since == nil || !f.Since.Equal(childSeen) {
+			t.Errorf("%s restricted: since %v, want the child's first-seen %v; %+v", on, f.Since, childSeen, f)
+		}
+	}
+}
+
+// Design §7.4 rule 9: a computed child outside every assignment bucket keeps
+// its since. c has no parentRefs and an entry from a shared controller name
+// under install B's pb, so A neither owns, declares nor lists it as no-parent,
+// yet A's api attaches it and its missing entry matures.
+func TestComputedChildOutsideBucketsKeepsSince(t *testing.T) {
+	gwB, pb := testutil.GwRef("infra-b", "edge"), testutil.HTTPRouteRef("infra-b", "pb")
+	sel := lst("sel", 8080, "")
+	sel.AllowedRoutes.Namespaces = objects.RouteNamespaces{From: "Selector", Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"zone": "in"}}}
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "c")))
+	// kgw2 shares the controller name and watches env=b; shop is in both scopes.
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"env":"b"}}]`))
+	objs := viewAWorld(edgeWith([]objects.Listener{sel}, up("sel", 1)), api,
+		testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"env": "b"}),
+		d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		testutil.WithRules(testutil.HTTPRoute("infra-b", "pb", []objects.ParentRef{gwB}, testutil.AcceptedBy(gwB, testutil.Controller)),
+			delegRule([]string{"/pb"}, testutil.DelegateTo("shop", "c"))),
+		testutil.WithRules(testutil.HTTPRoute("shop", "c", nil, testutil.AcceptedBy(pb, testutil.Controller)),
+			testutil.Rule(matchPath("/api/c"), matchPath("/pb/c"))))
+	for i, o := range objs {
+		if ns, ok := o.(*corev1.Namespace); ok && ns.Name == "shop" {
+			objs[i] = testutil.Namespace("shop", map[string]string{"team": "a", "zone": "in", "env": "b"})
+		}
+	}
+	kgwui012 := func(t *testing.T, h HealthResponse) FindingDTO {
+		t.Helper()
+		for _, f := range findingsOn(h, "shop/c") {
+			if f.Code == health.CodeComputedDisagrees {
+				return f
+			}
+		}
+		t.Fatalf("no KGWUI-012 on shop/c: %+v", h.Findings)
+		return FindingDTO{}
+	}
+	m := okMetrics("kgw.kgateway", "kgw2.kgateway2")
+	_, all, _ := startWith(t, setup{disputes: true, metrics: m}, objs...)
+	_, some, _ := startWith(t, setup{disputes: true, metrics: m, authz: hideNamespaces}, objs...)
+	// Every seeded object, and the check's window, start at the engine's first computation.
+	seen := testutil.Now.Add(-health.Grace - time.Second).UTC()
+	if f := kgwui012(t, get[HealthResponse](t, all, base+"/health", 200)); f.EvidenceRestricted || f.Since == nil || !f.Since.Equal(seen) {
+		t.Errorf("AllowAll: since %v, want the window start %v; %+v", f.Since, seen, f)
+	}
+	f := kgwui012(t, get[HealthResponse](t, some, base+"/health", 200))
+	if !f.EvidenceRestricted || f.Detail != restrictedEvidence || f.Since == nil || !f.Since.Equal(seen) {
+		t.Errorf("restricted: since %v, want c's first-seen %v; %+v", f.Since, seen, f)
+	}
+}

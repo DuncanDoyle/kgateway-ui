@@ -10,6 +10,7 @@ import detailRestrictedGolden from "../../../../../../pkg/api/testdata/golden/ro
 import effectiveGolden from "../../../../../../pkg/api/testdata/golden/route-detail-effective.json";
 import selectedGolden from "../../../../../../pkg/api/testdata/golden/route-detail-selected.json";
 import droppedGolden from "../../../../../../pkg/api/testdata/golden/routes-dropped.json";
+import { POLL_MS } from "../../api/hooks";
 import type { DelegationRow, LinkedRef, MetaResponse, Page, RouteDetail, RouteList, Rule } from "../../api/types";
 import {
   columnCopy,
@@ -17,6 +18,7 @@ import {
   delegationCopy,
   detailCopy,
   effectiveCopy,
+  listCopy,
   routeCopy,
   routeStateDelegationCopy,
 } from "../../copy/explorer";
@@ -318,6 +320,117 @@ describe("Delegation tab", () => {
     await tabLoaded();
     const [r] = await rowsIn(await openRef(7, 0));
     expect(within(r as HTMLElement).getByTestId("row-note")).toHaveTextContent("Status cannot confirm this path");
+  });
+
+  /** m() whose first ref also carries its own summary badge, agreeing like its row. */
+  const mSummed = () => {
+    const d = m();
+    const ref = d.rules[0]?.backendRefs[0]?.delegation;
+    if (!ref || !rows[0]) throw new Error("fixture: rule 1 delegates");
+    ref.computed = structuredClone(rows[0].computed);
+    return d;
+  };
+
+  /** Health icon states and computed states across one ref's whole section: summary and rows. */
+  const rowStates = (s: HTMLElement) => {
+    const badges = within(s)
+      .getAllByTestId("computed-badge")
+      .map((e) => [...e.querySelectorAll("[data-text]")].map((t) => t.textContent).join());
+    // The summary badge and the row's badge are both counted.
+    expect(badges).toHaveLength(2);
+    return {
+      // The notice's own error icon is not a state.
+      icons: within(s)
+        .getAllByTestId(/^health-icon-/)
+        .filter((e) => !e.closest("[data-testid='page-notice']"))
+        .map((e) => e.getAttribute("data-testid")),
+      badges: [...new Set(badges)],
+    };
+  };
+
+  it("a failed delegation poll turns the ref section's states unknown under the notice; a good poll restores them", async () => {
+    const notice = new RegExp(`^${listCopy.cannotLoad(delegationCopy.tab)}: `);
+    let polls = 0;
+    serve(
+      api({
+        name: "m",
+        d: mSummed(),
+        // Only the delegation poll fails; route detail stays fresh.
+        rows: (u) => (polls++ === 1 ? [500, { error: "boom" }] : rowPage(rows, u)),
+      }),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const s = await openRef(0, 0);
+    await rowsIn(s);
+    expect(rowStates(s).icons).toContain("health-icon-healthy");
+    expect(rowStates(s).badges).toEqual([computedCopy.short.agrees]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+    });
+    expect(polls).toBe(2);
+    await within(s).findByText(notice);
+    expect(new Set(rowStates(s).icons)).toEqual(new Set(["health-icon-unknown"]));
+    expect(rowStates(s).badges).toEqual([computedCopy.short.unknown]);
+
+    // The test SWR config retries an error once per poll interval.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+    });
+    expect(polls).toBe(3);
+    await waitFor(() => expect(within(s).queryByText(notice)).toBeNull());
+    expect(rowStates(s).icons).toContain("health-icon-healthy");
+    expect(rowStates(s).badges).toEqual([computedCopy.short.agrees]);
+    vi.useRealTimers();
+  });
+
+  it("a collapsed ref keeps its failed poll's unknown summary until a good poll on reopen", async () => {
+    const notice = new RegExp(`^${listCopy.cannotLoad(delegationCopy.tab)}: `);
+    let polls = 0;
+    serve(api({ name: "m", d: mSummed(), rows: (u) => (polls++ === 1 ? [500, { error: "boom" }] : rowPage(rows, u)) }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const s = await openRef(0, 0);
+    await rowsIn(s);
+    const summary = () => within(s).getAllByTestId("computed-badge")[0]?.querySelector("[data-text]")?.textContent;
+    expect(summary()).toBe(computedCopy.short.agrees);
+
+    // 1. The poll fails while the section is open.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_MS + 100);
+    });
+    await within(s).findByText(notice);
+    expect(summary()).toBe(computedCopy.short.unknown);
+
+    // 2. Collapsed, no poll has succeeded: the summary stays unknown.
+    fireEvent.click(within(s).getByRole("button", { name: delegationCopy.toggleRows(true) }));
+    expect(within(s).queryByRole("table")).toBeNull();
+    expect(summary()).toBe(computedCopy.short.unknown);
+    vi.useRealTimers();
+
+    // 3. Reopened with a good poll: the summary agrees again.
+    fireEvent.click(within(s).getByRole("button", { name: delegationCopy.toggleRows(false) }));
+    expect(summary()).toBe(computedCopy.short.unknown);
+    await waitFor(() => expect(within(s).queryByText(notice)).toBeNull());
+    await waitFor(() => expect(summary()).toBe(computedCopy.short.agrees));
+    expect(polls).toBeGreaterThanOrEqual(3);
+  });
+
+  it("stale delegation data turns the ref section's states unknown and says it is stale, under a fresh route detail", async () => {
+    const old = new Date(Date.now() - 10 * 60_000).toISOString();
+    serve(api({ name: "m", d: mSummed(), rows: (u) => ({ ...rowPage(rows, u), collectedAt: old }) }));
+    mount(`${page("shop/m")}?tab=delegation`);
+    await tabLoaded();
+    const s = await openRef(0, 0);
+    await rowsIn(s);
+    await within(s).findByText(/Data is stale/);
+    expect(new Set(rowStates(s).icons)).toEqual(new Set(["health-icon-unknown"]));
+    expect(rowStates(s).badges).toEqual([computedCopy.short.unknown]);
+    // The route detail is fresh: the page header keeps its own state.
+    expect(within(screen.getByTestId("detail-header")).queryByText(/Data is stale/)).toBeNull();
   });
 
   it("outcome, rule and ref filters stay page-local and only ?tab=delegation is in the URL; a 400 cursor reloads page one", async () => {

@@ -1342,12 +1342,19 @@ func TestOrphanTrigger(t *testing.T) {
 				t.Fatalf("per-parent trigger for %v", p)
 			}
 
-			// An entry from this controller under any parent is not an orphan.
+			// An entry under an owned parent is eligible: not an orphan (design §4.2).
 			eo := orphan()
-			entry(t, eo, synth("infra", "x"), gen, "Accepted=True")
+			entry(t, eo, synth("infra", "r"), gen, "Accepted=True")
 			_, cs = dworld{routes: []*unstructured.Unstructured{r, eo}, roots: []string{"infra/r"}}.run(v)
 			if n := len(triggers(cs, computed.KindOrphan, "apps", "o")); n != 0 {
-				t.Fatal("orphan trigger on a route with an entry")
+				t.Fatal("orphan trigger on a route with an eligible entry")
+			}
+			// An entry under a parent this install does not own is another install's (rules §9.3).
+			xo := orphan()
+			entry(t, xo, synth("infra", "x"), gen, "Accepted=True")
+			_, cs = dworld{routes: []*unstructured.Unstructured{r, xo}, roots: []string{"infra/r"}}.run(v)
+			if n := len(triggers(cs, computed.KindOrphan, "apps", "o")); n != 1 {
+				t.Fatalf("entry under an unowned parent: %d orphan triggers, want 1", n)
 			}
 		})
 	}

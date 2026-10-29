@@ -146,8 +146,10 @@ type RouteRow struct {
 	Owned bool
 	// Computed is view A per parentRef to a Gateway or ListenerSet, in parentRef order.
 	Computed []RefFacts
-	// UnknownDeps are the dependencies of FlagListenerUnknown.
-	UnknownDeps DepSet
+	// UnknownDeps are the distinct dependency sets of the parentRefs that set
+	// FlagListenerUnknown, one per parent. The flag shows when any one of them
+	// is visible (design §7.4 rule 6).
+	UnknownDeps []DepSet
 	// DroppedDeps are the distinct Deps of the rows that set FlagDropped,
 	// which leave out the routes on their paths (D-024). The flag shows when
 	// any one of them is visible.

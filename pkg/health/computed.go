@@ -45,8 +45,12 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet, v.Delegation.Rows),
 				Since: &since, Evidence: evidence(ch, v.Delegation.Rows)}
-			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rule 7).
-			if u := ownedObject(in.Owned, owned, on); u != nil {
+			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rules 7, 9).
+			u := ownedObject(in.Owned, owned, on)
+			if u == nil {
+				u = in.stored(on)
+			}
+			if u != nil {
 				own := in.firstSeen(u)
 				f.ResourceSince = &own
 			}
@@ -81,14 +85,15 @@ func evidence(c *computed.CheckResult, rows []computed.Row) []objects.Ref {
 	return ev
 }
 
-// ownedResources maps the owned Gateways, ListenerSets and routes by ref; the
-// first of duplicates wins. Built once, so a KGWUI-012 on a route no install
-// owns, such as a delegated child without an entry, never scans the routes.
+// ownedResources maps the owned Gateways, ListenerSets and routes, and the
+// declared and no-parent candidates, by ref; the first of duplicates wins.
+// A computed-only child is a candidate, so its KGWUI-012 keeps its first-seen
+// (design §7.4 rule 9).
 func ownedResources(o *install.Owned) map[objects.Ref]*unstructured.Unstructured {
 	if o == nil {
 		return nil
 	}
-	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets)+len(o.Routes))
+	m := make(map[objects.Ref]*unstructured.Unstructured, len(o.Gateways)+len(o.ListenerSets)+len(o.Routes)+len(o.Declared)+len(o.NoParent))
 	add := func(u *unstructured.Unstructured) {
 		if r := objects.RefOf(u); m[r] == nil {
 			m[r] = u
@@ -102,15 +107,42 @@ func ownedResources(o *install.Owned) map[objects.Ref]*unstructured.Unstructured
 	for _, r := range o.Routes {
 		add(r.Obj)
 	}
+	for _, d := range o.Declared {
+		add(d.Route.Obj)
+	}
+	for _, r := range o.NoParent {
+		add(r.Obj)
+	}
 	return m
 }
 
-// ownedObject returns the owned Gateway, ListenerSet or route ref from resources, or nil.
+// ownedObject returns the owned Gateway, ListenerSet, route or candidate ref from resources, or nil.
 func ownedObject(o *install.Owned, resources map[objects.Ref]*unstructured.Unstructured, ref objects.Ref) *unstructured.Unstructured {
 	if o == nil {
 		return nil
 	}
 	return resources[ref]
+}
+
+// stored returns the snapshot object ref names, or nil. A computed subject
+// may sit outside every assignment bucket, so its first-seen comes from here.
+func (in Input) stored(ref objects.Ref) *unstructured.Unstructured {
+	if in.Snapshot == nil {
+		return nil
+	}
+	for _, k := range in.Served {
+		if k.Group != ref.Group || k.Kind != ref.Kind {
+			continue
+		}
+		// The cache sorts each kind by "namespace/name".
+		objs, key := in.Snapshot.Objects[k.GVR()], ref.Namespace+"/"+ref.Name
+		if j, ok := slices.BinarySearchFunc(objs, key, func(u *unstructured.Unstructured, key string) int {
+			return strings.Compare(u.GetNamespace()+"/"+u.GetName(), key)
+		}); ok {
+			return objs[j]
+		}
+	}
+	return nil
 }
 
 // disagreeDetail says what was computed and what the controller reports, and
