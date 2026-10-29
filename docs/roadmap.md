@@ -1,6 +1,6 @@
 # kgateway UI — Roadmap
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-29
 
 ## Goal
 A read-only web UI for kgateway (Envoy data plane) that lets platform operators see at a glance whether their gateways are healthy, understand where traffic goes and which policies apply, and debug misrouted traffic in large deployments (100s of hostnames, 1000s of routes). It layers the higher-level semantics of Gateway API and kgateway policies on top of the cluster state, rather than being yet another Kubernetes resource viewer. The project is built so that downstream distributions can extend it without forking or copying code.
@@ -51,7 +51,7 @@ A minimal UI that is deployable and operational and already provides value. It c
 It also delivers the build foundation: the Go binary with the embedded SPA, a container image, a Helm chart, CI, and the extension registry seam. It also delivers the design foundation: the chosen component library, design tokens and themes (including the downstream override), and the health states.
 
 ### Phase 2 — Gateway & Route Explorer
-**Status:** In progress — sub-phases 2.1–2.4 complete; phase review next
+**Status:** Complete (2026-10-29; `docs/phases/phase-2/phase-2-complete.md`)
 **Docs:** `docs/phases/phase-2/`
 
 - Drill into a Gateway: its listeners, ports, hostnames, TLS mode, addresses and attached routes.

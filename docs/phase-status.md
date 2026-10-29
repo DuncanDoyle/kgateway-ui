@@ -1,56 +1,44 @@
 # Phase status
 
 ## Phase
-Phase: 2 — Gateway & Route Explorer
-Base: 6b5dcc2b6e69854496a47ed904f2b13d715eeff2
-Docs: docs/phases/phase-2/
-Status: design and plan approved 2026-10-23; sub-phase 2.1 complete, merged in #7 (35f105d); sub-phase 2.2 complete, merged in #8 (f01bb0a); sub-phase 2.3 complete, merged in #9 (86c70a4); sub-phase 2.4 complete, merged in #10 (b829c5d); sub-phase 2.5 complete (phases/phase-2/phase-2.5-complete.md), PR pending; Phase 1 complete (phases/phase-1/phase-1-complete.md, merged through #6, 6cd6111)
+Phase: 3 — Health & Diagnostics
+Base: TBD at phase start
+Docs: docs/phases/phase-3/
+Status: not started; Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.md)
 
 ### Queue
-- [x] Q1 Phase 2 design (`design.md`, `computed-rules.md`, D-019, D-020) — approved by user 2026-10-23; reviews: reviews/design-codex.md, design-r4-codex.md
-- [x] Q2 Phase 2 implementation plan (`implementation-plan.md`), planned sub-phases 2.1–2.4 (Tasks 1–70)
-- [x] Q3 Cross-model review of design + plan, triage, user approval — reviews/design-codex.md, design-r4-codex.md, plan-codex.md; plan approved by user 2026-10-23 (with chart `extraArgs`, Task 50)
-- [x] Q4 Sub-phase 2.1 — event-driven recompute (plan Tasks 1–10) — phases/phase-2/phase-2.1-complete.md; merged in #7 (35f105d)
-- [x] Q5 Sub-phase 2.2 — explorer on observed status (Tasks 11–34) — phases/phase-2/phase-2.2-complete.md; review reviews/2.2-codex.md; merged in #8 (f01bb0a)
-- [x] Q6 Sub-phase 2.3 — view A (Tasks 35–51) — phases/phase-2/phase-2.3-complete.md; review reviews/2.3-codex.md; merged in #9 (86c70a4)
-- [x] Q7 Sub-phase 2.4 — views B and C (Tasks 52–70) — phases/phase-2/phase-2.4-complete.md; review reviews/2.4-codex.md; PR pending
-- [x] Q8 Phase cross-model review + triage — done: reviews/phase-codex.md; 7 findings accepted for 2.5, 1 deferred to Phase 3 planning
-- [x] Q9 Sub-phase 2.5 — stabilization of the phase review findings — phases/phase-2/phase-2.5-complete.md; review reviews/2.5-codex.md; PR pending
+- [ ] Q1 Phase 3 design (`design.md`), incl. the KRT incremental-recompute question in the roadmap and stable finding identity (phase-2 review finding 8) ← CURRENT
+- [ ] Q2 Phase 3 implementation plan (`implementation-plan.md`)
+- [ ] Q3 Cross-model review of design + plan, triage, user approval
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
-- [x] design+plan cross-model review + triage: docs/phases/phase-2/reviews/design-codex.md, design-r4-codex.md, plan-codex.md
-- [ ] phase cross-model review + triage: docs/phases/phase-2/reviews/phase-codex.md
+- [ ] design+plan cross-model review + triage: docs/phases/phase-3/reviews/
+- [ ] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
-- [ ] phase-2-complete.md written, roadmap updated, tracked items closed
+- [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none (next: Phase 2 close, after the 2.5 PR merges)
+none
 
 ## Carry-over (deferred to later phases)
-- (P4) Stable finding identity for Phase 3 diagnostics — src: reviews/phase-codex.md#8
-- (P3) Stream CPU gate measures the views-memo hit path (annotation-only edits); add a reported spec-edit stream variant — src: phases/phase-2/phase-2.4-complete.md
-- (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
-- (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: reviews/phase-codex.md#5
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
+- (P3) Delegation memory: bound generated path bytes in inherit merges and charge failure-reason text and JSON escaping in the page budget — src: phases/phase-2/reviews/2.4-codex.md (final round)
+- (P3) Stream CPU gate measures the views-memo hit path (annotation-only edits); add a reported spec-edit stream variant — src: phases/phase-2/phase-2.4-complete.md
+- (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: phases/phase-1/reviews/phase-codex.md#5
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
-- (P3) Delegation memory: bound generated path bytes in inherit merges and charge failure-reason text and JSON escaping in the page budget — src: reviews/2.4-codex.md (final round)
+- (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md
+- (P4) Stable finding identity for Phase 3 diagnostics — src: phases/phase-2/reviews/phase-codex.md#8
+- (P4) Apps that embed `Shell` must wait for fonts before rendering, as `web/app/src/main.tsx` does, or long names shift the layout on load — src: phases/phase-2/phase-2.4-complete.md
+- (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
 - (P4) Extension seam: finding-code prefix registry (Phase 1 uses a documented convention) — for the seam milestone after Phase 2 — src: phases/phase-1/phase-1.1-complete.md
 - (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
-- (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md
 - (P4) Refactors of design §14.4, triggered by the standalone PoC; neutral `Install` and `Detector` before the seam milestone
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
+- Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
-- 2026-10-28: sub-phase 2.5 closed. Gates green on 0d07532 (vet, race tests, lint, web); kind e2e runs in the PR's CI. Codex review in two rounds triaged (reviews/2.5-codex.md): 4 findings accepted and fixed. D-026 recorded the inferred outputs. Finding 8 of the phase review stays deferred to Phase 3 planning. No waivers.
-- 2026-10-28: Phase 2 cross-model review done (reviews/phase-codex.md): 7 findings accepted for stabilization, 1 deferred to Phase 3 planning. Sub-phase 2.5 started on duncandoyle/phase2Stabilize from 29b8792; brief phases/phase-2/phase-2.5-brief.md. Its inferred rows (Q1, Q4, Q7) need user confirmation before implementation.
-- 2026-10-28: sub-phase 2.4 closed. Gates green on f399c89 (vet, race tests, lint, web, kind e2e on both tags). Three Codex rounds triaged (reviews/2.4-codex.md). Decisions: D-025 and its amendment; the shared compute caps accepted (user, design §7.4 rule 4d). Known limits: inherited path bytes and failure-reason text, carried as P3. No waivers. bench/2.4-ci.txt comes from the PR's bench job at merge.
-- 2026-10-27: paused after D-025 (23e5266). Done in 2.4: Tasks 52–68, plus D-024, the D-021 amendment (child-edit drops clear on both tags), D-025 (delegation edge cap 10,000, configurable, GOMEMLIMIT). User signed off 2026-10-27: keep the 10,000 default; gate the dense case on peak heap ≤ 432 MiB only (RSS reported, not gated, to avoid CI flakes); set GOMEMLIMIT to 90 % of the pod limit in the binary (read the limit, debug.SetMemoryLimit). Next: Task 69 (kind e2e on both tags), Task 70 (close: Codex review, 2.4-ci.txt from the PR bench job, complete record, README notes, PR, user merge). User-doc topics are collected in docs/documentation-notes.md.
-- 2026-10-26: sub-phase 2.3 merged in #9 (86c70a4). Sub-phase 2.4 started with D-024 (unknown scope and the inherited match) and the pre-flight rulings PF1–PF26 folded into plan Tasks 52–70.
-- 2026-10-25: sub-phase 2.3 closed. Gates green on 33cc71e; Codex review triaged and fixed (reviews/2.3-codex.md). User decisions D-022 (memory gates) and D-023 (restricted memberships, written-ref merge). No waivers.
-- 2026-10-23: sub-phase 2.2 closed. Gates green on 0855652; Codex review triaged and fixed (reviews/2.2-codex.md). No waivers.
-- 2026-10-23: user approved the plan and a chart `extraArgs` value (Task 50 Step 0).
-- 2026-10-21: Phase 1 closed. All exit gates held (observed on 6cd6111; CI green on PR #6). No waivers.
+- 2026-10-29: Phase 2 closed. All exit gates held (CI on PR #11 green; merge 8b988e1 has the same tree). No waivers. Record: phases/phase-2/phase-2-complete.md.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
 - The repo is public: per the public-repo hygiene rules, vendor and commercial edition names must not appear in code, file names, commit messages or PR text. Refer to them as "downstream distributions".
