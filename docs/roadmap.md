@@ -68,6 +68,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - xDS rejects (NACKs) per gateway;
 - controller and proxy pod health.
 - "Pod health" is "process health": restarts and readiness come from the provider (D-016).
+- A deterministic **suggested fix** where the evidence leaves exactly one correct change, such as the missing ReferenceGrant as YAML. No model: this is the first layer of AI-assisted diagnosis (Phase 11).
 
 Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier.
 
@@ -138,13 +139,35 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - Namespace-scoped views, so an application developer sees only their own routes and their health.
 - SubjectAccessReview and impersonation are one `Authorizer`, behind a `kubernetes-rbac` capability; a neutral authorisation story is a Phase 10 design question (D-016).
 
+### Phase 11 — AI-Assisted Diagnosis
+**Status:** Not started
+**Sequence:** after Phase 6, before Phase 7. It is numbered 11 so existing references to Phases 7–10 stay valid.
+**Docs:** `docs/phases/phase-11/`
+
+"Explain this problem and suggest a fix", on a finding, a Gateway or a route. It builds on three layers:
+1. Deterministic suggested fixes (Phase 3), which need no model.
+2. The MCP server milestone, which lets any agent reason over the UI's data.
+3. In this phase, an assistant inside the UI, behind a pluggable model provider. Any OpenAI-compatible endpoint works, which includes a local model, so no data has to leave the network.
+
+The evidence from Phases 4–6 (backends, policies, the route tester) is what makes its suggestions good, which is why it comes after Phase 6.
+
+**Constraints, from the product principles:**
+- Optional and off by default, behind a provider interface like the metrics backend (principle 6, D-007).
+- Read-only: suggestions are text and YAML the user applies; the UI never acts (principle 2, D-001).
+- The model sees only what the viewer may see (the `Authorizer`), and never Secret material (principle 8).
+- Every suggestion cites the evidence it rests on and is labelled as a suggestion. A model's guess about kgateway behaviour is not translation logic and is never presented as fact (principle 4).
+- Cluster text (annotations, status messages, names) is untrusted input to the model. Prompt injection can at worst produce a bad suggestion, never an action.
+
+**Design questions:** offline validation of suggested YAML (CRD schemas; a server-side dry-run needs write access); whether a kgateway debugging skill ships with the MCP server; how suggestions are evaluated before release.
+
 ## Milestones outside the phase sequence
 - **Extension seam proof (after Phase 2):** a throwaway downstream build, in a separate repository, registers one extra policy kind and edition detection. This validates D-003 before later phases build on it.
+- **MCP server (after Phase 3):** API v1 exposed as MCP tools: installs, findings with their evidence and suggested fixes, and the computed views. It grows as later phases add API, such as the route tester (Phase 6). It is a thin, read-only adapter over the API. It goes through the same `Authorizer` and adds no new data access. Any agent, cloud or local, can then diagnose a kgateway install and propose fixes. Needs Phase 3.1's stable finding IDs, and API v1 released.
 
 ## Deferred / out of roadmap
 - **Per-user authentication and authorisation** (D-013). OIDC login, Kubernetes SubjectAccessReview per request against the shared cache, with health roll-ups that still show which resource is wrong when the user may not see its details (D-013). It plugs into the Phase 1 `Authorizer` seam. Required before the UI reads Secrets (Phase 7 certificate details).
 - **Pre-apply "what-if" analysis of pasted YAML** (like gwctl `analyze -f`). Valuable, but write-path adjacent; revisit after Phase 6.
-- **A CLI sharing the analyzer library.** Possible once the Phase 3 analyzer exists as a package.
+- **A CLI sharing the analyzer library.** Possible once the Phase 3 analyzer exists as a package. The MCP server milestone covers part of this need.
 - **A Headlamp plugin.** It would be a second surface; one surface comes first.
 - **A support-bundle export.** Revisit after Phase 9.
 - **The agentgateway data plane.** It has its own controller, so this roadmap covers the Envoy data plane only.

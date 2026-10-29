@@ -4,7 +4,7 @@
 **Date:** 2026-10-29
 **Base:** `544dcd5`
 **Roadmap:** `docs/roadmap.md`, Phase 3
-**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-035 (§22).
+**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-036 (§22).
 **kgateway refs:** behaviour claims cite `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`), as in Phase 2. Claims about unreleased behaviour cite `main` at `643f50b` (2026-10-28) or tag `v2.5.0-rc.1` (published 2026-10-27). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`.
 
 Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. Decisions from the user's answers are marked **(user, 2026-10-29)**; those from the builder check are marked **(our call, 2.4 builder check)**. §25 holds the one open item.
@@ -24,6 +24,7 @@ Every choice in this draft is **(our call)** unless it repeats an earlier user d
 | 7 | The UI reads no logs, not even opt-in. Guided commands cover log-only diagnostics | (our call) | §2, §12 |
 | 8 | Filing the upstream reject-status and scope-endpoint issues stays the user's call. It is the only open item | (our call) | §8.7, §24, §25 |
 | 9 | Shell and navigation land in 3.1, before the new pages: a prominent object header, a fluid layout that uses wide screens, and **path-based** breadcrumbs carried in the URL (from user testing on a 3008 × 1692 monitor) | (user, 2026-10-29) | §17.6, §21, §23 |
+| 10 | Findings carry a deterministic **suggested fix** (YAML, target, basis) where the evidence leaves exactly one correct change: 014, and 013 for a wrong group or port. No model; the first layer of the roadmap's AI-assisted diagnosis | (user, 2026-10-29) | §7.7, §13.3, §17.2 |
 
 ## 1. Intent and why
 
@@ -265,6 +266,24 @@ Until 2.5.0 GA ships and 3.4 adds its rule set, a 2.5 controller runs on the 2.4
 - **Verifier.** If the controller writes a current ancestor for a target the rule called missing, the check disagrees and raises KGWUI-012 with check kind `policy-target`.
 - An unknown discovery scope makes the rule unknown, as in D-024.
 - On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5).
+
+### 7.7 Suggested fixes (user, 2026-10-29)
+
+Where the evidence leaves exactly one correct change, the finding carries a **suggested fix**: the YAML to apply, the object it changes, and the rule it rests on. Elsewhere the finding keeps its next steps (§8.5). This is the deterministic first layer of the roadmap's AI-assisted diagnosis (Phase 11); it uses no model.
+
+| Code | Suggested fix | Basis |
+|---|---|---|
+| 014 | the ReferenceGrant the spec requires, as a new object in the target namespace | Gateway API spec, for the spec-defined fields of §7.3 only |
+| 013, explanation 1 | the ref with the corrected group, when exactly one served group has a kind of that name | API discovery |
+| 013, explanation 3 | the ref with the corrected port, when the Service has exactly one port | the Service object |
+
+Rules **(our call)**:
+- A fix is only suggested when exactly one answer follows from the spec, discovery or a watched object. More than one candidate, or any kgateway-specific behaviour, gives no fix, only next steps. The UI never derives a fix from translation logic (principle 4).
+- The UI never applies a fix (D-001). The user copies the YAML, or downloads it as a file.
+- A fix for an existing object is the changed fragment with its location (`spec.rules[2].backendRefs[0]`), not the whole object, so it cannot overwrite fields the user did not see.
+- A fix names only objects the caller may view (§14 rule 15). If it would need a hidden name, there is no fix.
+- The grant YAML of §7.3 moves from the evidence into the suggested fix, so it has one home.
+- The set of codes with a fix grows per code in later phases; each new entry needs its basis row.
 
 ## 8. xDS rejects per Gateway
 
@@ -513,19 +532,21 @@ Existing payloads gain:
 ```jsonc
 FindingRow     { id, code, slug, severity, resource: LinkedRef, message?, detail?, since?, group?,
                  restricted?, evidenceRestricted? }
-FindingDetail  { install, finding: FindingRow, evidence?: Evidence, nextSteps?: NextStep[],
-                 affected: Page<LinkedRef>, collectedAt }
+FindingDetail  { install, finding: FindingRow, evidence?: Evidence, suggestedFix?: SuggestedFix,
+                 nextSteps?: NextStep[], affected: Page<LinkedRef>, collectedAt }
 Evidence       // a tagged union on "kind"; one shape per code. Examples:
   { kind: "xds-rejects", types: { typeUrl, streams, reportedBy: string[], firstSeen, totalSinceFirstSeen }[],
     proxies: { ready, desired }, statusSaysHealthy: boolean, recentlyChanged: LinkedRef[] }
   { kind: "ref-unresolved", ref: BackendRefDTO, reason, message, explanation?: string, computed?: Computed }
-  { kind: "ref-not-permitted", ref, grantYaml?: string }
+  { kind: "ref-not-permitted", ref }                              // the grant is the suggested fix (§7.7)
   { kind: "rule-replaced", matchIndex, reason, message, policy?: LinkedRef }
   { kind: "process", restarts?, termination?: { reason, exitCode, at }, waiting?, probe?: { type, failures, last } }
   { kind: "version-skew", controller, proxies: { version, pods }[], crds?: { name, bundleVersion, channel }[], expected? }
   { kind: "endpoints", service: LinkedRef, port, ready: 0, total, slices }
   { kind: "freshness", freshness: "never-written"|"stale"|"pending"|"no-ancestor", observed?, current?, since? }
 NextStep       { title, command, needs?: string[], note? }       // needs: e.g. ["pods/log"]
+SuggestedFix   { title, target: LinkedRef, create: boolean, path?: string, yaml, basis }
+                                                                // path: the fragment's location when create is false
 GroupRow       { id, title, severity, class, cause: LinkedRef, members: number, affected: LinkedRef[],
                  affectedTotal, since, nextSteps?: NextStep[], restricted? }
 Diagnostics    { install, verdict: { state, problems, oldestSince?, reason? }, groups: GroupRow[], groupTotal,
@@ -685,6 +706,7 @@ The install nav gains Processes. `CorePages` gains optional `DiagnosticsSection`
 ### 17.2 Components
 
 - `NextSteps`: numbered steps, each a code block with a copy button, the needed permission and a note. Commands render as text, never as HTML.
+- `SuggestedFix`: the target object as a link, the fragment's location, the YAML with copy and download buttons, and the basis in one line. Shown above the next steps (§7.7).
 - `EvidenceView`: one renderer per evidence `kind`. A downstream renders its own kinds through the finding-renderer extension point (Phase 1 design §6.3).
 - `GroupRow`: state, title, cause link, blast radius, age, code chip and the next-step expander.
 - `ProcessLine`, `ProcessTable`.
@@ -793,8 +815,8 @@ This phase generates no data-plane configuration and no xDS churn.
 The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 
 **API boundary tests (Go), per code, positive and negative:**
-- **013:** each explanation branch (kind not served, Service missing, port missing, controller message), and a certificate ref.
-- **014:** the grant YAML for a backendRef and a certificateRef; a wrong group explained as a wrong group, not a missing grant; a kgateway-specific field with no YAML.
+- **013:** each explanation branch (kind not served, Service missing, port missing, controller message), and a certificate ref. Suggested fixes (§7.7): one served group with that kind gives the corrected group, two give none; a one-port Service gives the corrected port, a two-port Service gives none.
+- **014:** the grant as the suggested fix for a backendRef and a certificateRef; no fix when the grant would name an object the caller may not view; a wrong group explained as a wrong group, not a missing grant; a kgateway-specific field with no YAML.
 - **015:** 2.3 `Accepted=False` and 2.4 `kgateway.dev/Programmed=False`; a parsed policy and an unparseable message; the 10-minute hint.
 - **016:** controller-reported; computed missing target, missing section and empty selector; partial targets; the verifier raising KGWUI-012; scope unknown; a rule set with the controller reason, where the computed rule is off.
 - **017:** a conflict with both sides named, and a conflict with no other side found.
@@ -876,6 +898,7 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 | D-033 | kgateway 2.5 joins the support matrix at GA, in 3.4; before GA it runs on the 2.4 rule set **(user, 2026-10-29)** | §7.6, §8.6, §23 |
 | D-034 | No Phase 3 check is required; unavailable checks give a reason and never turn the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones **(our call, 2.4 builder check)** | §5.1, §7.1 |
 | D-035 | Path-based breadcrumbs carried in the URL (`via`), a shared object header, and a fluid layout up to 2400 px with two columns on detail pages from 1600 px **(user, 2026-10-29)** | §17.6 |
+| D-036 | Deterministic suggested fixes: only where exactly one change follows from the spec, discovery or a watched object; a fragment with its location for existing objects; never applied, never from translation logic **(user, 2026-10-29)** | §7.7 |
 
 The "Decisions for this phase" table near the top lists every decision from the builder check and the user's answers, with its marker.
 
@@ -887,7 +910,7 @@ Each sub-phase has its own brief, a cross-model review of its diff, its benchmar
 |---|---|---|
 | **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap. Shell and navigation (§17.6, D-035): `ObjectHeader`, the fluid and two-column layout, path-based breadcrumbs | Same pages, easier to read and navigate; findings have ids and page on the server |
 | **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
-| **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; `docs/findings.md`. Wording pass | The analyzer floor and freshness findings |
+| **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; suggested fixes for 013 and 014 (§7.7); `docs/findings.md`. Wording pass | The analyzer floor and freshness findings, with suggested fixes |
 | **3.4 Backends and kgateway 2.5** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. Once 2.5.0 GA ships (D-033): the 2.5 rule set, a 2.5 e2e row, 024, the controller-reported `TargetNotFound` path for 016, `kgateway_build_info` for the controller version, and the 2.5 fixtures if 3.1 did not capture them | Empty backends; kgateway 2.5 supported |
 
 A stabilization sub-phase follows the phase review, as in Phases 1 and 2. Every sub-phase builds on 3.1's check contract, Store, identity and paging; 3.4's 013 explanation depends on 3.3's 013. Each of 3.2, 3.3 and 3.4 shows its benchmarks within the §16.3 gates before it ships. The order puts the research's top-ranked signals (rejects, processes) first, after the performance work. If 2.5.0 GA is not out when the rest of 3.4 is ready, the 2.5 items wait for it and the rest ships.
