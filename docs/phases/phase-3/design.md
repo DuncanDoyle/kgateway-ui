@@ -4,7 +4,7 @@
 **Date:** 2026-10-29
 **Base:** `544dcd5`
 **Roadmap:** `docs/roadmap.md`, Phase 3
-**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-034 (§22).
+**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-035 (§22).
 **kgateway refs:** behaviour claims cite `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`), as in Phase 2. Claims about unreleased behaviour cite `main` at `643f50b` (2026-10-28) or tag `v2.5.0-rc.1` (published 2026-10-27). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`.
 
 Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. Decisions from the user's answers are marked **(user, 2026-10-29)**; those from the builder check are marked **(our call, 2.4 builder check)**. §25 holds the one open item.
@@ -23,6 +23,7 @@ Every choice in this draft is **(our call)** unless it repeats an earlier user d
 | 6 | RBAC toggles default on. 022 and 023 are warnings. KGWUI-001 is re-specified, not replaced; specific codes replace KGWUI-002 for their reasons. A route row is never green while its Gateway rejects config | (our call) | §7.1, §8.3, §8.4, §9.4, §11, §18.1 |
 | 7 | The UI reads no logs, not even opt-in. Guided commands cover log-only diagnostics | (our call) | §2, §12 |
 | 8 | Filing the upstream reject-status and scope-endpoint issues stays the user's call. It is the only open item | (our call) | §8.7, §24, §25 |
+| 9 | Shell and navigation land in 3.1, before the new pages: a prominent object header, a fluid layout that uses wide screens, and **path-based** breadcrumbs carried in the URL (from user testing on a 3008 × 1692 monitor) | (user, 2026-10-29) | §17.6, §21, §23 |
 
 ## 1. Intent and why
 
@@ -705,7 +706,36 @@ Phase 2 design §8.7 applies.
 
 ### 17.5 Wording pass
 
-All new copy goes through the wording pass (Phase 2 design §8.8): titles and messages per code, freshness kinds, the status-says-healthy message, next-step titles and notes, the restart hold, "not available on this version", "not observed", the secret-care note, and the empty states. Drafts in this design are placeholders.
+All new copy goes through the wording pass (Phase 2 design §8.8): titles and messages per code, freshness kinds, the status-says-healthy message, next-step titles and notes, the restart hold, "not available on this version", "not observed", the secret-care note, the breadcrumb and header labels (§17.6), and the empty states. Drafts in this design are placeholders.
+
+### 17.6 Shell and navigation (user, 2026-10-29)
+
+User testing of the Phase 2 explorer on a 3008 × 1692 monitor found three problems. On a detail page, the object's identity is a small line of text at the top and easy to miss. Content is capped at 1400 px (`ListFrame`), so a wide screen shows mostly blank margins. A drill-down has no way back except the browser's back button. These changes land in 3.1, so the Phase 3 pages are built on them rather than retrofitted.
+
+**Object header.** Every object detail page opens with one shared `ObjectHeader`:
+- the kind's icon and label, then the name in the largest type on the page, then the namespace, muted;
+- the object's health state (icon, colour and text) and its data age;
+- a fixed height from the first render, so late data moves nothing.
+
+Extension pages for downstream kinds use the same component, exported from the shell. The browser tab title already names the object (`DocumentTitle`) and stays.
+
+**Layout on wide screens.**
+- Lists and tables are fluid: they fill the viewport minus the gutters, up to 2400 px, instead of stopping at 1400 px.
+- Prose (messages, descriptions, next steps) keeps a readable line length of about 80 characters wherever it sits.
+- At 1600 px and wider, detail pages use two columns. The main column holds the object's structure (listeners, rules, attached routes). The side column holds conditions, findings and related objects. Below 1600 px the side column stacks under the main one, in the same order.
+- Type sizes do not grow with the viewport; browser zoom stays the way to enlarge text **(our call)**.
+- The Phase 2 widths stay correct: 720 px, 1280 px and the narrow-table breakpoint keep their layouts.
+
+**Path-based breadcrumbs (user, 2026-10-29).** The trail shows how the user got here, not the object hierarchy. A route reached from Gateway `infra/edge` shows `<install> › Gateway infra/edge › HTTPRoute shop/store`; each crumb links back to that page with its own trail.
+- The trail lives in the URL, as a `via` query parameter listing the earlier object pages. It survives reloads, back and forward, and shared links. Each entry is the object path the page already uses (`group/kind/namespace/name`), so no new identifier is introduced.
+- Following an in-app link from an object page appends the current page to the trail. Linking to a page already in the trail cuts the trail back to that entry, so cycles (delegation, route ↔ Gateway) never grow it.
+- The trail keeps at most 6 entries. When it would grow past that, the oldest entries collapse into a "…" crumb that opens a short menu of them.
+- A page with no `via` (typed URL, a link from outside, a list page) shows the plain hierarchy instead: `<install> › <kind list> › <object>`.
+- A `via` entry that no longer resolves (deleted object, malformed value) is shown as plain text, not a link, and the page itself still loads. A `via` entry is never trusted for content: each crumb shows only what its own path says.
+- Authorization (§14): a crumb for an object the caller may not view shows the restricted label, never its name. The current Authorizer rule for names applies unchanged.
+- The first entry may be a list page (an object list or the findings page) with its filters, which already live in the URL (Phase 2 design §8.7). Its crumb returns to that list with those filters. Every later entry is an object page.
+
+The "back to install" links in the error and not-found states stay as they are.
 
 ## 18. RBAC, chart and security
 
@@ -810,7 +840,14 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - evidence renderers per kind;
 - the stale state turning every group unknown;
 - findings paging, grouping and filters through the URL;
-- `renderWhenFontsReady`.
+- `renderWhenFontsReady`;
+- breadcrumbs (§17.6): append, cut back on a cycle, collapse past 6 entries, the hierarchy fallback without `via`, an unresolvable or malformed entry, and a restricted crumb.
+
+**Playwright (shell and navigation, §17.6):**
+- Gateway → attached route → child route, then each crumb back, landing on the earlier page; the trail survives a reload and a copied URL;
+- a list with filters → object → the list crumb restores the filters;
+- the object header on every core detail page, with no layout shift as data arrives;
+- layouts at 720, 1280, 1600 and 3008 px wide: no horizontal page scroll, two columns from 1600 px, content using the width up to 2400 px.
 
 **kind e2e on 2.3.11 and 2.4.7:**
 - the existing NACK fixture now asserts the status-says-healthy message, the stream count and the command text;
@@ -838,6 +875,7 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 | D-032 | The `health.Check` contract changes, breaking, to `Name`, `Inputs`, `Run(RunContext)`, with an engine-owned Store per check **(user, 2026-10-29)** | §16.2 |
 | D-033 | kgateway 2.5 joins the support matrix at GA, in 3.4; before GA it runs on the 2.4 rule set **(user, 2026-10-29)** | §7.6, §8.6, §23 |
 | D-034 | No Phase 3 check is required; unavailable checks give a reason and never turn the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones **(our call, 2.4 builder check)** | §5.1, §7.1 |
+| D-035 | Path-based breadcrumbs carried in the URL (`via`), a shared object header, and a fluid layout up to 2400 px with two columns on detail pages from 1600 px **(user, 2026-10-29)** | §17.6 |
 
 The "Decisions for this phase" table near the top lists every decision from the builder check and the user's answers, with its marker.
 
@@ -847,7 +885,7 @@ Each sub-phase has its own brief, a cross-model review of its diff, its benchmar
 
 | Sub-phase | Content | Ships |
 |---|---|---|
-| **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap | Same pages; findings have ids and page on the server |
+| **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap. Shell and navigation (§17.6, D-035): `ObjectHeader`, the fluid and two-column layout, path-based breadcrumbs | Same pages, easier to read and navigate; findings have ids and page on the server |
 | **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
 | **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; `docs/findings.md`. Wording pass | The analyzer floor and freshness findings |
 | **3.4 Backends and kgateway 2.5** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. Once 2.5.0 GA ships (D-033): the 2.5 rule set, a 2.5 e2e row, 024, the controller-reported `TargetNotFound` path for 016, `kgateway_build_info` for the controller version, and the 2.5 fixtures if 3.1 did not capture them | Empty backends; kgateway 2.5 supported |
