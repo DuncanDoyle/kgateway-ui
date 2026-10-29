@@ -1,15 +1,28 @@
 # Phase 3 — Health & Diagnostics: Design
 
-**Status:** Draft for cross-model review and user approval. Written without a question round, at the user's request, from the roadmap and from research.
+**Status:** Draft for cross-model review and user approval. Written without a question round, at the user's request, from the roadmap and from research. Revised after a builder check and the user's answers (2026-10-29).
 **Date:** 2026-10-29
 **Base:** `544dcd5`
 **Roadmap:** `docs/roadmap.md`, Phase 3
-**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-031 (§22).
+**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-034 (§22).
 **kgateway refs:** behaviour claims cite `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`), as in Phase 2. Claims about unreleased behaviour cite `main` at `643f50b` (2026-10-28) or tag `v2.5.0-rc.1` (published 2026-10-27). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`.
 
-Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. §25 lists the questions for the user.
+Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. Decisions from the user's answers are marked **(user, 2026-10-29)**; those from the builder check are marked **(our call, 2.4 builder check)**. §25 holds the one open item.
 
-**One home per contract.** Finding identity, groups and ranking: §5. Authorization: §14. Budgets: §16.3. Phase 2's homes still hold: scheduling and timestamps (Phase 2 design §3.1), computed views and their cross-check (`computed-rules.md`).
+**One home per contract.** Finding identity, groups and ranking: §5. The check contract and its state store: §16.2. Check availability and roll-up: §7.1. Authorization: §14. Budgets: §16.3. Phase 2's homes still hold: scheduling and timestamps (Phase 2 design §3.1), computed views and their cross-check (`computed-rules.md`).
+
+## Decisions for this phase
+
+| # | Decision | Marker | Where |
+|---|---|---|---|
+| 1 | kgateway 2.5 joins the support matrix at GA, in 3.4: the 2.5 rule set, an e2e row, KGWUI-024, the controller-reported `TargetNotFound` path for KGWUI-016, and `kgateway_build_info`. Until GA, a 2.5 controller runs on the 2.4 rule set with the "newer than tested" note, and the computed KGWUI-016 rule applies. 2.5 fixtures are captured in 3.1 if cheap, otherwise in 3.4 | (user, 2026-10-29) | §7.6, §8.6, §21, §23 |
+| 2 | Budgets stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median, retained heap 32 MiB. 3.1 does the performance work first (recompute memoization, the KRT spike). Any gate change goes back to the user with numbers. 3.2–3.4 each show they stay within the gates | (user, 2026-10-29) | §16.1, §16.3, §23 |
+| 3 | The `health.Check` contract changes, breaking, to one contract: `Name`, `Inputs`, `Run(RunContext)`. `RunContext` carries an engine-owned `State *Store` that survives recomputes and clears on restart. Every cross-recompute need uses it. All core and example checks migrate, plus `examples/downstream`, with README upgrade notes. Lands in 3.1 | (user, 2026-10-29) | §4, §16.2, §23 |
+| 4 | No Phase 3 check is required, so none turns the install unknown. A watch that is denied, failing or off makes its check "not available", with the reason | (our call, 2.4 builder check) | §7.1, §11, §17.3, §18.1 |
+| 5 | `since`: status-derived findings keep `lastTransitionTime`; UI-derived findings use the UI's first-seen time per finding identity, held in the Store and reset on restart. Ranking and "oldest problem" use each finding's own `since`. KGWUI-001 gains a `since` | (our call, 2.4 builder check) | §5.1, §5.3, §6, §8.3 |
+| 6 | RBAC toggles default on. 022 and 023 are warnings. KGWUI-001 is re-specified, not replaced; specific codes replace KGWUI-002 for their reasons. A route row is never green while its Gateway rejects config | (our call) | §7.1, §8.3, §8.4, §9.4, §11, §18.1 |
+| 7 | The UI reads no logs, not even opt-in. Guided commands cover log-only diagnostics | (our call) | §2, §12 |
+| 8 | Filing the upstream reject-status and scope-endpoint issues stays the user's call. It is the only open item | (our call) | §8.7, §24, §25 |
 
 ## 1. Intent and why
 
@@ -36,7 +49,8 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 5. **Status freshness** as findings an operator can act on (§10).
 6. **Backend readiness:** a Service the controller resolved, but with zero ready endpoints (§11).
 7. **Stable finding identity** (Phase 2 carry-over) and server-side paging of findings (§5, §13).
-8. **The KRT decision**, taken in this phase with a spike first (§16).
+8. **The KRT decision**, taken in this phase with a spike first, and the performance work done before load is added (§16).
+9. **One check contract** with declared inputs and an engine-owned state store, so core and downstream checks share one engine path (§16.2).
 
 **Non-goals**
 - Effective policy and merge winners (Phase 5), the route tester and shadowing (Phase 6), certificate expiry (Phase 7), golden metrics (Phase 8), the Envoy filter chain and a comparison of the controller's snapshot with what Envoy accepted (Phase 9).
@@ -47,7 +61,7 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 **Anti-goals**
 - **False positives that erode trust.** Istio's analyzer and the predecessor project's health check both lost users this way: findings on objects that worked, a sync check that misread healthy proxies, a UI that marked working gateways failed. Every Phase 3 finding rests on evidence the controller or Kubernetes wrote. Where the UI computes something, it is labelled, has a verifier and fires only after persistence (D-020).
 - **Mirroring controller logic without a verifier.** The one new computed rule (policy target lookup on 2.3 and 2.4, §7.6) sits behind the `computed.Rules` seam, is cross-checked against the controller's ancestors, and switches off on versions where the controller reports `TargetNotFound` itself. Everything else reads what the controller or Kubernetes reports.
-- **Reading Secrets, logs or admin ports.** Logs and snapshots can carry secret material: a downstream issue shows an API key inside an Envoy rejection message. The UI prints the command; the operator runs it with their own rights (§12).
+- **Reading Secrets, logs or admin ports.** Logs and snapshots can carry secret material: a downstream issue shows an API key inside an Envoy rejection message. The UI reads no logs, not even opt-in **(our call)**. It prints the command; the operator runs it with their own rights (§12).
 - **Copying one error onto every object.** One cause is one finding group, with the affected objects listed under it (§5.2). The predecessor project copied proxy-level warnings onto every route, and users could not find the culprit.
 
 ## 3. Primary flows
@@ -72,7 +86,7 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
  Published{Model, Source, ConfirmedAt}  →  api: diagnostics, findings, processes, detail blocks
 ```
 
-- **Analyzers are checks.** They implement the existing `health.Check` contract and register through `extension.WithChecks`, so downstreams add their own (the analyzer seam the seam milestone asked for, Phase 1 design §6.3). A check now also declares its **inputs** (kinds, metrics families, process data) so the engine can skip it when its inputs did not change (§16.2).
+- **Analyzers are checks.** They implement the `health.Check` contract and register through `extension.WithChecks`, so downstreams add their own (the analyzer seam the seam milestone asked for, Phase 1 design §6.3). The contract changes, breaking, in 3.1: every check declares its **inputs** and runs with a `RunContext` that carries an engine-owned state store **(user, 2026-10-29)**. Core, example and downstream checks all move to it (§16.2).
 - **Evidence is structured.** A finding keeps today's `message` and `detail` strings, and gains a typed `evidence` object per code (§13.3). The SPA renders evidence; it never parses prose (Phase 2 review finding 8).
 - **New package `pkg/process`** holds the process model and the provider seam (§9.1). **`pkg/diagnose`** holds identity, grouping, ranking and next-step templates. Both are platform neutral; the Kubernetes implementation of `process.Source` lives in one allowlisted file (§19).
 - **`pkg/ctrlmetrics`** keeps every metric name in one place, as today, and now keeps per-replica and per-type samples (§8.2).
@@ -85,7 +99,12 @@ Every finding gets an `id`, stable across recomputes and UI restarts, and unique
 - `id = "f1-" + base32(sha256(installID ‖ code ‖ resource ‖ discriminator))[:26]`, lower case. The `f1` prefix versions the scheme. Fields are joined with a separator byte that cannot occur in them.
 - `resource` is the full identity (group, kind, namespace, name) after defaults. `discriminator` is the code's structured key from the table below, encoded canonically (written refs, as in `computed-rules.md` §7).
 - Message, detail, severity and `since` are **not** part of the identity, so rewording, a severity change inside the grace period or a moved timestamp keep the `id`.
-- The engine's `since` map is keyed by `id` (today it is keyed by code and resource). `since` still restarts when the UI restarts.
+
+**What `since` means (our call, 2.4 builder check).**
+- **Status-derived findings** keep the controller's `lastTransitionTime`, as today.
+- **UI-derived findings** (metrics, processes, computed) use the UI's first-seen time per finding `id`. The time lives in the check's state store (§16.2), so it resets when the UI restarts. `docs/findings.md` and the README say so.
+- KGWUI-001 gains a `since`: the first time the UI saw rejects for that Gateway (§8.3).
+- The engine's existing `seen` map, keyed by (uid, generation), keeps driving grace periods. It does not hold finding `since` values and is unchanged.
 
 | Code | Discriminator |
 |---|---|
@@ -136,7 +155,7 @@ Groups are ordered by these keys, in order **(our call)**:
    3. traffic-affecting configuration: 015, 017, 013, 014, 023, 016, 011, and 003 after grace;
    4. consistency and install hygiene: 012, 018, 022, 007, 009, 002 and everything else.
 3. **Blast radius:** affected objects, descending.
-4. **Age:** the oldest `since` first. A stuck problem outranks a fresh one of the same size.
+4. **Age:** the oldest `since` first, using each member finding's own `since` (§5.1) **(our call, 2.4 builder check)**. A stuck problem outranks a fresh one of the same size.
 5. The group `id`, for a stable order.
 
 Info findings are never shown in "Needs attention"; they stay on the findings page. A KGWUI-008 (signal unavailable) is not ranked: the verdict strip names it, as today (Phase 1 design §5.3).
@@ -147,7 +166,7 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 
 | Section | Content | Source |
 |---|---|---|
-| Verdict strip | unchanged states and wording rules (Phase 1 design §5.3). Unhealthy: "N problems", counts per severity, the oldest problem's age | `diagnostics.verdict` |
+| Verdict strip | unchanged states and wording rules (Phase 1 design §5.3). Unhealthy: "N problems", counts per severity, the oldest problem's age (the oldest finding `since`, §5.1) | `diagnostics.verdict` |
 | Needs attention | up to 10 groups by rank (§5.3). Each row: state (icon, colour, text), title, subject as a link, blast radius ("37 routes"), age, code, and a "Next step" expander with the group's commands (§12). "Show all" opens the findings page grouped | `diagnostics.groups` |
 | Processes | one line for the controller (ready/desired, restarts in 15 min, version) and one for proxies (Gateways with every proxy ready, with a reject, with skew, with restarts). Links to `/i/:id/processes` | `diagnostics.processes` |
 | What was checked | unchanged; collapsed when unhealthy | `checks[]` |
@@ -163,16 +182,16 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 
 Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-024 and re-specifies KGWUI-001 and KGWUI-003 without changing their codes. Codes are never reused.
 
-**Specific codes replace KGWUI-002 for their reasons (our call, D-030).** KGWUI-002 stays the fallback for any current `False` condition without a specific code. A condition yields exactly one finding: either its specific code or 002. Alert rules keyed on 002 for these reasons will see the new codes; the release note says so. API v1 has no release yet.
+**Specific codes replace KGWUI-002 for their reasons (our call, D-030).** KGWUI-001 is re-specified, not replaced by a "status says healthy" code (§8.3) **(our call)**. KGWUI-002 stays the fallback for any current `False` condition without a specific code. A condition yields exactly one finding: either its specific code or 002. Alert rules keyed on 002 for these reasons will see the new codes; the release note says so. API v1 has no release yet.
 
 | Code | Slug | Trigger | Severity | Source | Pending / grace | Sub-phase |
 |---|---|---|---|---|---|---|
-| 001 | xds-rejected | §8 | error | metrics | restart hold (§8.3) | 3.2 |
+| 001 | xds-rejected | §8 | error | metrics | restart hold (§8.3); `since` from the UI's first sight (§5.1) | 3.2 |
 | 003 | route-unattached | unchanged trigger; evidence gains its kind (§10.1) | info in grace, warning after | status | grace 60 s (unchanged) | 3.3 |
 | **013** | ref-unresolved | a current route parent `ResolvedRefs=False` with a reason other than `RefNotPermitted`, or a current listener `ResolvedRefs=False` with reason `InvalidCertificateRef` | error | status, plus explanation from discovery and Services | none: current status only | 3.3, 3.4 |
 | **014** | ref-not-permitted | a current route parent or listener `ResolvedRefs=False` with reason `RefNotPermitted` | error | status, plus the grant shape (§7.3) | none | 3.3 |
 | **015** | rule-replaced | a current `RouteRuleReplaced` or `RouteRuleDropped` reason (on `Accepted` on 2.3, `kgateway.dev/Programmed` on 2.4) | error | status | none | 3.3 |
-| **016** | policy-target-not-found | §7.6 | error when the controller reports it; warning when computed | status (2.5+), computed (2.3, 2.4) | computed: after the policy's grace, then 30 s persistence | 3.3 |
+| **016** | policy-target-not-found | §7.6 | error when the controller reports it; warning when computed | status (2.5 rule set), computed (2.3, 2.4, and 2.5 before its rule set) | computed: after the policy's grace, then 30 s persistence | 3.3; status path 3.4 |
 | **017** | listener-conflicted | a current listener condition `Conflicted=True` on an owned Gateway or ListenerSet | error | status, plus the other side (§7.5) | none | 3.3 |
 | **018** | status-not-progressing | §10.2 | warning | status, plus metrics evidence | matures after 5 min | 3.3 |
 | **019** | process-restarting | §9.3 | warning | process | expires 15 min after the last restart | 3.2 |
@@ -181,6 +200,13 @@ Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-024 an
 | **022** | version-skew | §9.4 | warning | process, CRD metadata | suppressed during a controller rollout and 10 min after it | 3.2 |
 | **023** | backend-no-ready-endpoints | §11 | warning | Services, EndpointSlices | matures after 30 s | 3.4 |
 | **024** | xds-config-withheld | §8.6 (kgateway 2.5 and later) | error or warning | metrics | none | 3.4 |
+
+022 and 023 are warnings, so neither turns an install red on its own **(our call)**.
+
+**Availability and roll-up (our call, 2.4 builder check).** Phase 1 design §5.3 says a required check that is not OK makes the install unknown. No Phase 3 check is required: each sets `Required: false`, so none can turn the install unknown. Existing required checks keep their flag; the re-specified KGWUI-001 keeps the existing `xDS rejects` check's flag, including its restart hold (§8.3). Today's `unavailable` helper (`pkg/health/checks.go:42-46`) always sets `Required: true` and raises KGWUI-008; Phase 3 checks use a variant that does neither.
+- A check whose input is missing returns an unavailable `CheckResult` with its reason: `denied` (RBAC refused the watch), `failing` (the watch or scrape errors), or `off` (its chart toggle is off). "What was checked" shows it as "not available", in the wording it uses for unreachable metrics today.
+- A missing metric family on an older version is `not-on-version`, shown as "not available on this version" (§8.6).
+- A not-available Phase 3 check raises no KGWUI-008 and never turns the verdict unknown. Its findings are simply absent, and "What was checked" says why.
 
 Each code has a short docs entry (cause, evidence, fix) in `docs/findings.md`, written in 3.3; a finding's "Learn more" links to it **(our call)**. Messages and next steps go through the wording pass (§17.5).
 
@@ -226,16 +252,18 @@ Listener `InvalidCertificateRef` quotes the controller. The UI cannot read Secre
 
 | kgateway | Source | Behaviour |
 |---|---|---|
-| 2.5 and later, `main` | controller: ancestor reason `TargetNotFound` (#14709) | error, from status |
-| 2.3, 2.4 | computed: a targetRef or targetSelector resolves to nothing | warning, labelled, verified |
+| 2.5 GA and later, on the 2.5 rule set (3.4) | controller: ancestor reason `TargetNotFound` (#14709) | error, from status |
+| 2.3, 2.4, and a 2.5 controller before the 2.5 rule set ships | computed: a targetRef or targetSelector resolves to nothing | warning, labelled, verified |
+
+Until 2.5.0 GA ships and 3.4 adds its rule set, a 2.5 controller runs on the 2.4 rule set with the existing "newer than tested" note, and the computed rule applies there too **(user, 2026-10-29)**.
 
 **Computed rule (2.3, 2.4).** A new method on the `computed.Rules` seam, specified in a new `computed-rules.md` section, pinned per rule set:
 - A `targetRef` names a target by group, kind and name in the **policy's own namespace** (local refs, GEP-713). It is "not found" when that kind is served and watched, and no such object is in the cache. A `sectionName` that names no listener of the Gateway or ListenerSet, or no rule of the HTTPRoute, is "section not found". Any other target kind is unknown and raises nothing.
 - A `targetSelector` is "matches nothing" when no object of its kind in the policy's namespace carries the labels.
-- **When it fires.** After the policy's grace period (Phase 1 design §5.2), and after the result held for 30 s (`computed-rules.md` §9.3). If every target is missing, 016 replaces the policy's KGWUI-003 "not yet processed" finding. If only some targets are missing, 016 is raised per missing target, and the policy's other findings are unchanged.
+- **When it fires.** After the policy's grace period (Phase 1 design §5.2), and after the result held for 30 s (`computed-rules.md` §9.3; the hold may move onto the check's state store, §16.2). If every target is missing, 016 replaces the policy's KGWUI-003 "not yet processed" finding. If only some targets are missing, 016 is raised per missing target, and the policy's other findings are unchanged.
 - **Verifier.** If the controller writes a current ancestor for a target the rule called missing, the check disagrees and raises KGWUI-012 with check kind `policy-target`.
 - An unknown discovery scope makes the rule unknown, as in D-024.
-- On a rule set whose controller reports `TargetNotFound`, the computed rule is off and the status source wins (D-020 rule 5).
+- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5).
 
 ## 8. xDS rejects per Gateway
 
@@ -256,7 +284,7 @@ Separately, `kgateway_resources_updates_dropped_total` (both tags, `pkg/krtcolle
 ### 8.2 Scraping changes
 
 - Keep samples per controller Pod and per `type_url`, not only the per-Gateway sum (`pkg/ctrlmetrics/parse.go:45-50` sums today).
-- Parse `rejects_total` and `resources_updates_dropped_total` as well. A counter delta is taken per Pod UID, so a restarted replica's reset is not read as a negative.
+- Parse `rejects_total` and `resources_updates_dropped_total` as well. A counter delta is taken per Pod UID, so a restarted replica's reset is not read as a negative. The previous value per Pod UID lives in the check's state store (§16.2).
 - On 2.5 and later, parse the per-client publication families of §8.6 when present. An absent family means "not available on this version", never "unavailable".
 - Metric names stay in `pkg/ctrlmetrics`, the one place a rename is fixed (Phase 1 design §12).
 
@@ -264,17 +292,19 @@ Separately, `kgateway_resources_updates_dropped_total` (both tags, `pkg/krtcolle
 
 KGWUI-001 keeps its code, severity (error) and resource (the Gateway). One finding per Gateway; the types are evidence **(our call)**.
 
-**Evidence.** Per `type_url`: rejecting streams (summed), the controller Pods that report them, the UI's first-seen time, and `rejects_total` growth since first seen. Also the proxy replicas the UI sees for that Gateway (ready / desired), so the row reads "2 of 3 proxies reject RouteConfiguration".
+**`since`.** The first time the UI saw rejects for that Gateway, kept in the check's state store and reset on a UI restart (§5.1) **(our call, 2.4 builder check)**.
+
+**Evidence.** Per `type_url`: rejecting streams (summed), the controller Pods that report them, the UI's first-seen time, and `rejects_total` growth since first seen (from the per-Pod-UID values in the store). Also the proxy replicas the UI sees for that Gateway (ready / desired), so the row reads "2 of 3 proxies reject RouteConfiguration".
 
 **The contradiction with status.** When the Gateway's own status is current and `Programmed=True`, the message says so: "Status says Programmed, but proxies reject its config" (wording pass). Otherwise: "Proxies reject this Gateway's config". The finding's group lists the objects whose current status says `Accepted=True` or `Programmed=True` for this Gateway, so the operator sees which green statuses may be stale (§8.4).
 
-**Restart hold.** A reject that disappears while a controller Pod of the install has a new UID, or a higher restart count, since the previous scrape is held for 60 s, with the `xds rejects` check pending, so the install shows unknown, not healthy. If the proxies reconnect and reject again, the finding continues with its first-seen time. Without this, every controller restart briefly clears a real reject.
+**Restart hold.** A reject that disappears while a controller Pod of the install has a new UID, or a higher restart count, since the previous scrape is held for 60 s, with the `xDS rejects` check pending, so the install shows unknown, not healthy. That check is required today and stays required (§7.1). The previous UIDs, restart counts and the hold deadline live in the check's state store (§16.2). If the proxies reconnect and reject again, the finding continues with its first-seen time. Without this, every controller restart briefly clears a real reject.
 
 **Why one per Gateway.** A finding per type would split one incident into up to five rows. A finding per affected route repeats the predecessor project's mistake of copying one error onto every object (§2).
 
 ### 8.4 Contradicting status is never green
 
-D-006 says the UI never reports green while a contradicting signal is active. Phase 3 applies it to rows and detail pages **(our call)**:
+D-006 says the UI never reports green while a contradicting signal is active. Phase 3 applies it to rows and detail pages: a route row is never green while its Gateway rejects config, and shows at least warning **(our call)**:
 - A route, ListenerSet or policy whose current status is `True` for a Gateway with an active KGWUI-001 carries the flag `gateway-rejecting` and is never shown `healthy`: its state is at least `warning` ("Its Gateway's proxies reject config"), even if its own conditions are all `True`. An error of its own still shows `error`.
 - The flag creates no finding of its own. The row state rule of Phase 2 design §6.3 gains this one input.
 - The route list gains `state=gateway-rejecting` as a filter.
@@ -305,12 +335,12 @@ The copy also says: "Log lines and admin output can contain configuration values
 kgateway `main` and `v2.5.0-rc.1` export per-client publication metrics with labels `gateway` and `namespace` (`main` metrics doc, "Per-client xDS publication metrics"). Where present **(our call)**:
 - `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"} > 0` → KGWUI-024 **error**: "Proxies get no config updates, because referenced clusters are missing". The doc says a withheld client gets no updates at all, certificate rotations included.
 - An increase of `kgateway_xds_snapshot_perclient_bounded_publishes_total{mode=~"flip_release|warm_release|carry_expired"}` in the last 15 min → KGWUI-024 **warning**: "Some routes fail: config was released before every cluster was ready". The doc calls these the modes to alert on.
-- The family's presence decides availability, not the version string. On 2.3 and 2.4 the check reports "not available on this version" in "What was checked" and never turns the install unknown.
-- This depends on the support matrix (§24, Q1). It is designed now so 3.4 can ship it if the user adds 2.5.
+- The family's presence decides availability, not the version string. On 2.3 and 2.4 the check reports "not available on this version" in "What was checked" and never turns the install unknown (the check is not required, §7.1).
+- kgateway 2.5 joins the support matrix at GA, and 024 ships in 3.4 once 2.5.0 GA is out **(user, 2026-10-29)**. The family names and labels are re-checked against the GA tag before 3.4 ships.
 
 ### 8.7 Upstream proposal
 
-A draft issue sits outside the repo, because the repo is public. It asks kgateway to set a Gateway condition when proxies NACK, with the xDS type, the number of rejecting proxies and a bounded, sanitised reason, cleared on ACK, and debounced like status writes. Smaller asks ride along: a connected-proxies gauge per Gateway, and a first-seen time for the reject. It cites #14736, #14911, #14453 and #14264, and Phase 2 design §14.8. Filing stays the user's call. When kgateway writes such a condition, the UI reads it first and keeps the metric as a cross-check (D-020 rule 5).
+A draft issue sits outside the repo, because the repo is public. It asks kgateway to set a Gateway condition when proxies NACK, with the xDS type, the number of rejecting proxies and a bounded, sanitised reason, cleared on ACK, and debounced like status writes. Smaller asks ride along: a connected-proxies gauge per Gateway, and a first-seen time for the reject. It cites #14736, #14911, #14453 and #14264, and Phase 2 design §14.8. Filing stays the user's call **(our call)**; it is the open item in §25. When kgateway writes such a condition, the UI reads it first and keeps the metric as a cross-check (D-020 rule 5).
 
 ## 9. Process health
 
@@ -372,6 +402,7 @@ KGWUI-005 (controller not ready) and 006 (proxy not ready) stay the error findin
 - The evidence carries the restarts in the window, the last termination reason and exit code, and the time.
 - For the controller, exit code 2 adds "A Go panic exits with code 2. The stack trace is in the previous container's log", with `kubectl logs --previous`.
 - One finding per subject: the controller Deployment, or the Gateway for its proxies.
+- Restart growth is read against the restart count per process ID kept in the check's state store (§16.2).
 - A deadline expires it 15 min after the last restart (D-019).
 
 **KGWUI-020 probe-failing (warning).** At least 3 readiness, liveness or startup probe failures on one Pod in the last 15 min, from `Unhealthy` Events. It catches proxies that flap without restarting. Probe output is not served, only the probe type, the count and the time.
@@ -382,15 +413,15 @@ KGWUI-005 (controller not ready) and 006 (proxy not ready) stay the error findin
 ### 9.4 Version skew (022)
 
 **Proxy vs controller.** The proxy image tag is the kgateway version (the envoy-wrapper image is tagged with it). The proxy container is the one running that image.
-- A proxy Pod whose version's major.minor differs from the controller's raises a **warning**: "Proxy 2.3.6, controller 2.4.0. kgateway does not support mixed minor versions" (#14471, #14384).
+- A proxy Pod whose version's major.minor differs from the controller's raises a **warning** **(our call)**: "Proxy 2.3.6, controller 2.4.0. kgateway does not support mixed minor versions" (#14471, #14384).
 - A patch difference is evidence on the Gateway page, not a finding.
-- The skew is suppressed while the controller Deployment rolls out, and for 10 min after, so the deployer can update the proxies.
+- The skew is suppressed while the controller Deployment rolls out, and for 10 min after, so the deployer can update the proxies. The end of the last rollout is kept in the check's state store (§16.2).
 - A tag that does not parse (a digest, a custom tag) gives "version unknown", no finding. A Deployment whose image is pinned in GatewayParameters is named as the likely cause.
 
 **Controller replicas.** Two running versions after a controller rollout settles raises a warning.
 
 **Gateway API CRDs.** The UI reads CRD **metadata only**, through a metadata informer, and keeps the CRDs of the groups `gateway.networking.k8s.io` and `gateway.networking.x-k8s.io` (RBAC cannot filter by group, so the filter is client-side). It reads the annotations `gateway.networking.k8s.io/bundle-version` and `gateway.networking.k8s.io/channel`.
-- The expected bundle version per kgateway minor is a pinned, pluggable table next to the rule sets: 2.3 → v1.5, 2.4 → v1.6, 2.5 → v1.7, from each tag's `go.mod` (`v1.5.1`, `v1.6.1`, `v1.7.0-rc.3`). It is release metadata, not translation. The upstream ask is machine-readable compatibility metadata (#13683; #13940 is closed, and no chart annotation was found up to `v2.5.0-rc.1`).
+- The expected bundle version per kgateway minor is a pinned, pluggable table next to the rule sets: 2.3 → v1.5, 2.4 → v1.6, 2.5 → v1.7, from each tag's `go.mod` (`v1.5.1`, `v1.6.1`, `v1.7.0-rc.3`). The 2.5 entry is re-read from the GA tag in 3.4. It is release metadata, not translation. The upstream ask is machine-readable compatibility metadata (#13683; #13940 is closed, and no chart annotation was found up to `v2.5.0-rc.1`).
 - A warning when an installed CRD's bundle minor differs from the expected one. A warning when the Gateway API CRDs carry different bundle versions or channels.
 - The channel also sharpens Phase 2's ListenerSet hint (Phase 2 design §8.5). Today it is worded as a possibility, because the UI could not tell an unset `allowedListeners` from a CRD that lacks it. A standard-channel Gateway CRD next to a ListenerSet CRD now says which.
 
@@ -410,7 +441,7 @@ The trigger, severity and grace stay as in Phase 1 design §5.2. The evidence ga
 ### 10.2 KGWUI-018 status-not-progressing
 
 One finding per install, on the controller Deployment, when status as a whole stops moving. It groups the many KGWUI-003 warnings that a single cause explains, such as a status patch failing every reconcile, a stuck translation, or a CRD whose schema rejects the status (§5.2).
-- **Trigger:** the controller is ready, at least one owned object has had a KGWUI-003 warning for 5 min, and at least 10 objects, or 10 % of objects with status (minimum 3), are in that state. Matures through a deadline.
+- **Trigger:** the controller is ready, at least one owned object has had a KGWUI-003 warning for 5 min, and at least 10 objects, or 10 % of objects with status (minimum 3), are in that state. Matures through a deadline; the start of the condition is kept in the check's state store (§16.2).
 - **Evidence:** counts per §10.1 kind, the oldest age, and, when the family is present, the increase of `kgateway_status_syncer_status_syncs_total` over the window (2.3 and 2.4, `proxy_syncer/metrics.go:25-27`), quoted as "status syncs in the last 5 min: 0".
 - **Next step:** the controller log command, grepping for `status`.
 - A not-ready controller raises KGWUI-005 instead.
@@ -420,11 +451,11 @@ One finding per install, on the controller Deployment, when status as a whole st
 **Rule.** For each owned route, each rule `backendRef` that names a core `Service`, has weight above 0 (unset counts as 1), and sits on a parent where the route has a current `ResolvedRefs=True` from this install:
 - the Service exists and is not `ExternalName`;
 - the EndpointSlices labelled `kubernetes.io/service-name=<name>` in its namespace have no endpoint with `conditions.ready` true or unset (an unset value counts as ready, as the EndpointSlice API says) for the port the backendRef names;
-- then KGWUI-023 is raised on the Service once the result held for 30 s **(our call)**.
+- then KGWUI-023 is raised on the Service once the result held for 30 s **(our call)**. The hold's start per Service port is kept in the check's state store (§16.2).
 
 **Why this is not mirroring.** The controller already resolved the ref (`ResolvedRefs=True`); the UI reports a Kubernetes fact about the Service it names. Delegation refs, mirror targets, `Backend` kinds, ServiceEntries and Hostname refs are out: their endpoint semantics are controller logic, and Phase 4 owns them.
 
-**Severity: warning.** Scaling to zero can be deliberate, and false positives cost trust. The message says "Requests to this backend get 503". One finding per Service port; the routes are the group's affected list.
+**Severity: warning (our call).** Scaling to zero can be deliberate, and false positives cost trust. The message says "Requests to this backend get 503". One finding per Service port; the routes are the group's affected list.
 
 **Data.** Two new cluster-wide watches with transforms that keep only what the rule needs:
 - Service: namespace, name, type, ports (name, port, target);
@@ -432,11 +463,11 @@ One finding per install, on the controller Deployment, when status as a whole st
 
 At about 200 bytes per kept object this stays small at Large (§16.3). The same Service data feeds 013's explanation (§7.3).
 
-**Capability.** `/meta` reports `endpoints` when both watches run. Without it (chart toggle off, RBAC denied, or a provider without Services), 023 is not available and says so in "What was checked". This keeps D-016's rule that Services and EndpointSlices are optional.
+**Capability.** `/meta` reports `endpoints` when both watches run. Without it, 023 returns an unavailable `CheckResult` with its reason: `off` (chart toggle), `denied` (RBAC), or `failing` (the watch errors, or a provider without Services). It says so in "What was checked" and never turns the install unknown (§7.1). This keeps D-016's rule that Services and EndpointSlices are optional.
 
 ## 12. Checks the UI cannot run
 
-These checks need access a read-only UI does not have, by design. The UI shows what it knows and the command that gets the rest **(our call)**. Commands are filled in with the install's namespace, Deployment and Pod names, and go through `Vocabulary`.
+These checks need access a read-only UI does not have, by design. The UI reads no logs, not even opt-in; guided commands cover every log-only diagnostic **(our call)**. The UI shows what it knows and the command that gets the rest. Commands are filled in with the install's namespace, Deployment and Pod names, and go through `Vocabulary`.
 
 | Question | Where the answer is | Why the UI does not read it | What the UI shows |
 |---|---|---|---|
@@ -547,7 +578,7 @@ Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 | (P3) Spec-edit stream variant | measure it first on Phase 2 code, then gate it (§16.3) | 3.1 |
 | (P4) `Shell` font wait | the shell exports `renderWhenFontsReady(root, element)`, which `web/app/src/main.tsx` uses; the extension docs require it for apps that embed `Shell` **(our call)** | 3.2 |
 | KRT incremental recompute | decided this phase: §16 and D-027 | 3.1 |
-| (P3) Upstream scope-endpoint issue | stays the user's call. Reminder: the draft lives outside the repo; Phase 3 adds a second draft (§8.7). Q6 asks whether to file them together | — |
+| (P3) Upstream scope-endpoint issue | stays the user's call **(our call)**. Reminder: the draft lives outside the repo; Phase 3 adds a second draft (§8.7). §25 asks how to file them | — |
 | (P3) Experimental-kind scope verification; #1 watch CRDs added after start | unchanged; still waiting on the scope endpoint. The CRD metadata watch (§9.4) does not re-watch kinds live | — |
 | (P3) Per-user AuthN/AuthZ | unchanged (roadmap) | — |
 
@@ -559,7 +590,7 @@ The question (roadmap, raised 2026-10-28): move the engine from full recomputes 
 - **For it:** recompute cost grows with analyzers and cluster size, and Phase 2 ended near its CPU budget.
 - **Against it:** a heavy, unversioned dependency; per-request consistency is harder (today each request reads one immutable Model, D-019); and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary.
 
-**Phase 3 takes the decision in sub-phase 3.1, after a spike, before any analyzer lands** **(our call)**.
+**Phase 3 takes the decision in sub-phase 3.1, after a spike, before any analyzer lands** **(our call)**. 3.1 schedules the performance work first: recompute memoization (§16.2) and the KRT spike come before 3.2–3.4 add load **(user, 2026-10-29)**.
 
 The spike:
 - view A rebuilt as KRT collections, on a throwaway branch that is never merged;
@@ -570,18 +601,45 @@ The decision rule is written down before the spike runs:
 
 | Outcome | Decision |
 |---|---|
-| Spec-edit stream CPU at least 40 % lower, retained heap no more than +16 MiB, every request still reads one immutable published value, no `replace` directives, Apache-2.0 compatible licence | **Adopt** KRT for the views and analyzers in a follow-up phase. Phase 3 analyzers are written against an input interface that KRT can feed later |
+| Spec-edit stream CPU at least 40 % lower, retained heap no more than +16 MiB, every request still reads one immutable published value, no `replace` directives, Apache-2.0 compatible licence | **Adopt** KRT for the views and analyzers in a follow-up phase. Phase 3 checks declare their inputs (§16.2), which KRT can feed later |
 | Anything less, or inconclusive | **Keep** the immutable full recompute. Add per-check memoization (§16.2) |
 
 Either way the result is recorded as D-027, with the numbers.
 
-### 16.2 Per-check memoization
+### 16.2 The check contract and per-check memoization
 
-Whatever D-027 says, Phase 3 analyzers declare their inputs (kinds, metric families, process data, other checks' outputs). The engine reuses a check's previous findings when the fingerprints of its inputs are unchanged. The fingerprints are the per-kind hashes D-019 already computes (`Snapshot()` source fingerprint), plus the metrics result identity and a process-data hash. It is the views-memo pattern Phase 2 used for annotation-only edits. Time-driven checks (019, 020, 024, every maturation) also key on their next deadline.
+**One contract, breaking (user, 2026-10-29).** Today a check is `Name()` and `Run(in Input)` (`pkg/health/finding.go:168-171`). In 3.1 every check implements:
+
+```go
+// Check is one health check or analyzer. The engine calls Run on every
+// recompute whose declared inputs changed, and reuses the last result otherwise.
+type Check interface {
+    Name() string
+    // Inputs names what Run reads: kinds, metric families, process data,
+    // other checks' outputs. Undeclared reads are a bug the tests catch.
+    Inputs() InputSet
+    Run(ctx RunContext) ([]Finding, CheckResult)
+}
+
+// RunContext is today's Input plus the check's own state.
+type RunContext struct {
+    Input
+    // State is owned by the engine and keyed by check name. It survives
+    // recomputes and is cleared when the UI restarts.
+    State *Store
+}
+```
+
+- **Why one contract.** It is discoverable, the engine has a single path, and declared inputs let the engine skip or memoise unchanged checks, which also suits KRT (§16.1). The README already says the Go extension API may change until the extension-seam milestone after Phase 2.
+- **Every cross-recompute need uses the Store:** the KGWUI-001 restart hold and first-seen time (§8.3), per-Pod-UID counter values and `rejects_total` growth (§8.2), 019's restart growth (§9.3), 022's rollout suppression (§9.4), 023's hold (§11), 018's maturation (§10.2), and UI-derived `since` values (§5.1). Whether KGWUI-012's persistence windows (`pkg/engine/persist.go`) move onto it is left to the plan, where it simplifies things.
+- A check reads and writes only its own Store. Stored values never reach the API except as the findings and `since` the check returns.
+- **Migration.** All core checks, the example checks and `examples/downstream` move to the new contract in 3.1. The README gains upgrade notes for downstream builds: the new signature, how to declare inputs, and how to move state held in package variables onto the Store.
+
+**Memoization.** The engine reuses a check's previous result when the fingerprints of its declared inputs are unchanged. The fingerprints are the per-kind hashes D-019 already computes (`Snapshot()` source fingerprint), plus the metrics result identity, a process-data hash and the fingerprints of any checks it reads. It is the views-memo pattern Phase 2 used for annotation-only edits. Time-driven checks (019, 020, 024, every maturation and hold) also key on their next deadline, so a skipped run never misses a deadline. A check that writes its Store is still skipped when its inputs and deadline are unchanged.
 
 ### 16.3 Budgets
 
-Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on CI; stream CPU 10–12 % against 15 % (annotation-only, through the views memo); dense peak heap 416 MiB against 432 MiB; retained heap +23 to +25 MiB against 32 MiB. Phase 3 keeps the gates and adds per-stage ones, all **(our call)**:
+Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on CI; stream CPU 10–12 % against 15 % (annotation-only, through the views memo); dense peak heap 416 MiB against 432 MiB; retained heap +23 to +25 MiB against 32 MiB. The gates stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median, retained heap 32 MiB **(user, 2026-10-29)**. 3.2, 3.3 and 3.4 each show, with numbers, that they stay within them. Phase 3 adds per-stage gates **(our call)**:
 
 | Measure | Budget at Large | When |
 |---|---|---|
@@ -589,14 +647,14 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Warm recompute, whole model | ≤ 150 ms, unchanged, consistent and worst case | 3.1–3.4 |
 | Analyzer stage alone (identity, groups, rank, every Phase 3 check) | ≤ 20 ms warm; ≤ 2 ms when memoized inputs are unchanged | 3.2–3.4 |
 | Stream CPU, annotation-only | ≤ 15 % of one core, unchanged | 3.1–3.4 |
-| Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core, or at the baseline + 3 points if the baseline already exceeds 22 % | 3.1–3.4 |
-| Retained heap | ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices) and finding identities | 3.2–3.4 |
+| Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core. If the baseline already exceeds 22 %, the numbers go to the user before a gate is set | 3.1–3.4 |
+| Retained heap | the Phase 2 gate of 32 MiB, unchanged; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), finding identities and check Stores | 3.1–3.4 |
 | Dense memory | median peak heap ≤ 432 MiB, unchanged (D-025) | 3.1–3.4 |
 | OS memory during the stream | ≤ 256 MiB (D-022) | 3.2–3.4 |
 | `GET …/diagnostics`, `GET …/findings` (each filter mix), `GET …/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 3.1–3.4 |
 | Change burst, idle, cold recompute | Phase 2 gates, unchanged | 3.1–3.4 |
 
-If the 3.1 baseline already breaks a gate on CI, the gate is not loosened silently: the plan records it and the user decides (Q7).
+No gate changes without the user. If the 3.1 baseline, or any later sub-phase, breaks a gate, the work stops and the numbers go to the user, who decides **(user, 2026-10-29)**.
 
 **Scale tiers grow** (`internal/testutil/scale`):
 
@@ -635,7 +693,7 @@ The install nav gains Processes. `CorePages` gains optional `DiagnosticsSection`
 Phase 2's state table (Phase 2 design §8.6) applies. Added:
 - "Not available on this version" for a check whose metric family is absent (024);
 - "Not observed" for a process set the provider cannot see;
-- "No access" for a capability whose watch RBAC denies, naming the verb and resource.
+- "Not available" for a check whose watch is denied, failing or off, with the reason; a denial names the verb and resource (§7.1).
 
 ### 17.4 Interaction and accessibility
 
@@ -653,7 +711,7 @@ All new copy goes through the wording pass (Phase 2 design §8.8): titles and me
 
 ### 18.1 ClusterRole delta
 
-All additions are get/list/watch only. Each has a chart toggle under `diagnostics.*`, default on; turning one off drops both the rule and the watch, and the dependent findings report "not available" **(our call)**.
+All additions are get/list/watch only. Each has a chart toggle under `diagnostics.*`, default on **(our call)**. Turning one off drops both the rule and the watch. The dependent checks then report "not available" with reason `off`; a toggle that is on but denied by RBAC or failing reports `denied` or `failing`. None of them turns the install unknown (§7.1).
 
 | Rule added | For | Toggle | Sub-phase |
 |---|---|---|---|
@@ -723,6 +781,18 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - the restart hold, with a new Pod UID and with a higher restart count;
 - `resources_updates_dropped_total > 0` turning KGWUI-007 into KGWUI-008.
 
+**Check contract and Store:**
+- every core, example and `examples/downstream` check runs on the new contract, with unchanged findings on the Phase 2 goldens;
+- a Store value survives a recompute and is cleared on engine restart; checks cannot read each other's Store;
+- a check whose declared inputs did not change is skipped, and one with a due deadline is not;
+- a check that reads an undeclared input fails a test.
+
+**Availability and `since`:**
+- each new check with its watch off, denied and failing gives "not available" with that reason, and the install is not unknown;
+- the existing required checks keep their flag;
+- a status-derived finding carries `lastTransitionTime`; a UI-derived finding keeps its first-seen time across recomputes and resets on restart;
+- the verdict's oldest problem and the age rank use each finding's own `since`.
+
 **Identity, groups and rank:**
 - the same input gives the same ids across recomputes and process restarts;
 - rewording keeps the id;
@@ -732,7 +802,7 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 
 **Authorizer matrix:** every rule in §14 with a deny-some authorizer: restricted groups, filtered affected lists, hidden recently changed objects, next steps without hidden names, process sets without Pod details, and `q` not matching hidden messages. Health and ranks are unchanged.
 
-**Metrics fixtures:** new captures from kgateway 2.3.11 and 2.4.7 with two rejecting types, two controller replicas and one controller restart. A 2.5.0-rc capture for the per-client families.
+**Metrics fixtures:** new captures from kgateway 2.3.11 and 2.4.7 with two rejecting types, two controller replicas and one controller restart. 2.5 captures for the per-client families and `kgateway_build_info`: in 3.1 from the release candidate if cheap, otherwise in 3.4 from 2.5.0 GA. A capture taken before GA is re-checked against GA in 3.4.
 
 **Frontend (Vitest):**
 - the install page with no groups, 10 groups and restricted groups;
@@ -752,7 +822,9 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - a conflicted ListenerSet listener (017);
 - a killed controller Pod (019, and the restart hold on KGWUI-001).
 
-**Benchmarks:** §16.3, in the bench workflow.
+**kind e2e on 2.5.0 (3.4, after GA):** a new matrix row running the suite above on the 2.5 rule set, with 016 from the controller's `TargetNotFound` and a withheld-config case for 024. Before GA, a 2.5 controller on the 2.4 rule set shows the "newer than tested" note and the computed 016 (an API boundary test).
+
+**Benchmarks:** §16.3, in the bench workflow, in every sub-phase.
 
 ## 22. Proposed decisions
 
@@ -763,6 +835,11 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 | D-029 | Process health through `process.Source`; proxy Pods, Events and CRD metadata watched; termination messages and probe output never read | §9, §18 |
 | D-030 | Specific codes replace KGWUI-002 for their reasons; KGWUI-001 re-specified instead of a new "status says healthy" code; a row whose Gateway rejects config is never healthy | §7.1, §8.3, §8.4 |
 | D-031 | Backend readiness from Services and EndpointSlices, limited to Service refs the controller resolved | §11 |
+| D-032 | The `health.Check` contract changes, breaking, to `Name`, `Inputs`, `Run(RunContext)`, with an engine-owned Store per check **(user, 2026-10-29)** | §16.2 |
+| D-033 | kgateway 2.5 joins the support matrix at GA, in 3.4; before GA it runs on the 2.4 rule set **(user, 2026-10-29)** | §7.6, §8.6, §23 |
+| D-034 | No Phase 3 check is required; unavailable checks give a reason and never turn the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones **(our call, 2.4 builder check)** | §5.1, §7.1 |
+
+The "Decisions for this phase" table near the top lists every decision from the builder check and the user's answers, with its marker.
 
 ## 23. Sub-phases
 
@@ -770,12 +847,12 @@ Each sub-phase has its own brief, a cross-model review of its diff, its benchmar
 
 | Sub-phase | Content | Ships |
 |---|---|---|
-| **3.1 Foundations and the KRT decision** | Phase 2 baselines, including the spec-edit stream variant. The KRT spike and D-027. Delegation memory carry-over. Finding `id`, `group` and rank fields; the `since` map keyed by id; per-check memoization. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension | Same pages; findings have ids and page on the server |
-| **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
+| **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap | Same pages; findings have ids and page on the server |
+| **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
 | **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; `docs/findings.md`. Wording pass | The analyzer floor and freshness findings |
-| **3.4 Backends and 2.5 signals** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. If the user adds 2.5 (Q1): 024, the `TargetNotFound` path for 016, `kgateway_build_info` for the controller version | Empty backends; withheld config on 2.5 |
+| **3.4 Backends and kgateway 2.5** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. Once 2.5.0 GA ships (D-033): the 2.5 rule set, a 2.5 e2e row, 024, the controller-reported `TargetNotFound` path for 016, `kgateway_build_info` for the controller version, and the 2.5 fixtures if 3.1 did not capture them | Empty backends; kgateway 2.5 supported |
 
-A stabilization sub-phase follows the phase review, as in Phases 1 and 2. 3.3 and 3.4 depend on 3.1's identity and paging; 3.4's 013 explanation depends on 3.3's 013. The order puts the research's top-ranked signals (rejects, processes) first.
+A stabilization sub-phase follows the phase review, as in Phases 1 and 2. Every sub-phase builds on 3.1's check contract, Store, identity and paging; 3.4's 013 explanation depends on 3.3's 013. Each of 3.2, 3.3 and 3.4 shows its benchmarks within the §16.3 gates before it ships. The order puts the research's top-ranked signals (rejects, processes) first, after the performance work. If 2.5.0 GA is not out when the rest of 3.4 is ready, the 2.5 items wait for it and the rest ships.
 
 ## 24. Upstream asks (draft text outside the repo; not filed)
 
@@ -787,15 +864,8 @@ A stabilization sub-phase follows the phase review, as in Phases 1 and 2. 3.3 an
 | 24.4 | Report unreported listener conflicts, such as duplicate SNI across TLSRoutes | §7.2; #14911 |
 | 24.5 | A "config complete" signal for proxy readiness | §12; #14363 |
 
-The scope-endpoint proposal (D-009 §7) stays the user's to file; 24.2 and 24.3 could join it.
+The scope-endpoint proposal (D-009 §7) stays the user's to file; 24.2 and 24.3 could join it. §25 holds the filing question.
 
-## 25. Questions for the user
+## 25. Open item for the user
 
-1. **kgateway 2.5.** `v2.5.0-rc.1` came out on 2026-10-27. Add 2.5 to the supported matrix in this phase (a rule-set review, e2e, and 3.4's 2.5 signals), or keep 2.3 and 2.4 and only design for 2.5? This draft assumes the second.
-2. **RBAC additions.** Events, CRD metadata, Services and EndpointSlices, read-only, each with a toggle that defaults on (§18.1). Accept, or default some off?
-3. **Severities.** Warning for version skew (022) and for empty backends (023), so neither turns an install red. Agree?
-4. **Codes.** KGWUI-001 is re-specified rather than adding a "status says healthy" code, and specific codes replace KGWUI-002 for their reasons (D-030). Agree?
-5. **Contradicting status.** A route row is never green while its Gateway rejects config; it shows at least warning (§8.4). Agree?
-6. **Upstream.** File the reject-status draft (24.1) on its own, with the scope-endpoint issue, or under the Phase 2 umbrella proposal (Phase 2 design §14.3)? Filing stays your call.
-7. **Budgets.** If the 3.1 baseline already breaks the 150 ms warm gate on CI, or the spec-edit stream is far above 25 %, may the plan raise the gate (to 175 ms, say), or must the KRT/memo work hold it?
-8. **Logs.** The UI never reads logs, not even opt-in, so Envoy's reason is always one command away (§12). Agree?
+1. **Filing upstream.** File the reject-status draft (24.1) on its own, with the scope-endpoint issue, or under the Phase 2 umbrella proposal (Phase 2 design §14.3)? Filing both stays your call **(our call)**. Nothing in Phase 3 waits on it.
