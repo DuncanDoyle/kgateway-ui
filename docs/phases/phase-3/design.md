@@ -689,6 +689,10 @@ Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 | (P3) Upstream scope-endpoint issue | stays the user's call **(our call)**. Reminder: the draft lives outside the repo; Phase 3 adds a second draft (§8.7). §25 asks how to file them | — |
 | (P3) Experimental-kind scope verification; #1 watch CRDs added after start | unchanged; still waiting on the scope endpoint. The CRD metadata watch (§9.4) does not re-watch kinds live | — |
 | (P3) Per-user AuthN/AuthZ | unchanged (roadmap) | — |
+| (P4) Seam: analyzers, API-route registration, per-kind renderers, health cards | covered by §4.1: analyzers are checks; endpoints are gap 1; renderers and cards are contributions (gap 6) | 3.0 |
+| (P4) Seam: finding-code prefix registry | `WithChecks` takes the downstream's code prefix; two registrations of one prefix, or a non-`KGWUI-` check claiming `KGWUI-`, fail at startup **(our call)** | 3.0 |
+| (P4) Downstream detectors cannot report their base kgateway version | `install.Install` gains an optional base kgateway version that a detector may set; experimental classification and rule-set selection use it when present **(our call)** | 3.0 |
+| (P4) Neutral `Install` and `Detector` refactors (Phase 1 design §14.4) | reviewed in the 3.0 plan; done only where a §4.1 seam needs it, otherwise carried on | 3.0 |
 
 ## 16. Engine: the KRT decision and budgets
 

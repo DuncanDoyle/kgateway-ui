@@ -7,8 +7,8 @@ Docs: docs/phases/phase-3/
 Status: designing; Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.md)
 
 ### Queue
-- [ ] Q1 Phase 3 design (`design.md`), incl. the KRT incremental-recompute question in the roadmap and stable finding identity (phase-2 review finding 8) ← CURRENT — draft written 2026-10-29 without a question round (user's request); open questions in design §25
-- [ ] Q2 Phase 3 implementation plan (`implementation-plan.md`)
+- [ ] Q1 Phase 3 design (`design.md`), incl. the KRT incremental-recompute question in the roadmap and stable finding identity (phase-2 review finding 8) — draft written 2026-10-29 without a question round (user's request); revised with user feedback 2026-10-29 to 2026-11-01 (shell and navigation, suggested fixes, proxy Envoy stats and opt-in log signals, extension seams as 3.0); awaiting user approval; open item in design §25
+- [ ] Q2 Phase 3 implementation plan (`implementation-plan.md`) ← CURRENT — drafting 2026-11-01
 - [ ] Q3 Cross-model review of design + plan, triage, user approval
 
 ### Exit gates
@@ -39,6 +39,7 @@ none
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-01: The extension seam milestone runs as sub-phase 3.0, before 3.1 (user). The seam carry-overs below move into 3.0 (design §15). Design review not yet done; no code before the user approves design and plan.
 - 2026-10-29: Phase 3 started at base 544dcd5. Design draft `phases/phase-3/design.md` written from the roadmap and the Phase 3 research (kept outside the repo, because the repo is public). The KRT question is framed as D-027, decided after a spike in 3.1. A second upstream draft (xDS reject status) sits next to the scope-endpoint draft outside the repo; filing both stays the user's call.
 - 2026-10-29: Phase 2 closed. All exit gates held (CI on PR #11 green; merge 8b988e1 has the same tree). No waivers. Record: phases/phase-2/phase-2-complete.md.
 - The first release tag freezes API v1, install IDs and SPA URLs; make the ghcr packages public first (phase-1-complete.md).
