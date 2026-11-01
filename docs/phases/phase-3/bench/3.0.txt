@@ -392,3 +392,16 @@ ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	95.808s
 --- PASS: TestBudgetDenseMemory (7.08s)
 PASS
 ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	7.277s
+
+## Dense gate after the Codex gate review (cold allocation added)
+    budget_test.go:555: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  210 MiB, per warm Compute  168 MiB; peak RSS  470 MiB; peak HeapInuse cold  227 MiB warm  426 MiB; peak HeapAlloc cold  219 MiB warm  416 MiB
+    budget_test.go:555: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  210 MiB, per warm Compute  168 MiB; peak RSS  471 MiB; peak HeapInuse cold  212 MiB warm  421 MiB; peak HeapAlloc cold  206 MiB warm  411 MiB
+    budget_test.go:555: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  210 MiB, per warm Compute  168 MiB; peak RSS  489 MiB; peak HeapInuse cold  225 MiB warm  455 MiB; peak HeapAlloc cold  218 MiB warm  444 MiB
+    budget_test.go:555: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  210 MiB, per warm Compute  168 MiB; peak RSS  475 MiB; peak HeapInuse cold  221 MiB warm  425 MiB; peak HeapAlloc cold  214 MiB warm  415 MiB
+    budget_test.go:555: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  210 MiB, per warm Compute  168 MiB; peak RSS  481 MiB; peak HeapInuse cold  211 MiB warm  418 MiB; peak HeapAlloc cold  204 MiB warm  408 MiB
+    budget_test.go:563: edges  10000: medians over 5 runs: retained heap  160 MiB, allocated cold  210 MiB, per warm Compute  168 MiB, peak HeapInuse  425 MiB (logged only)
+    budget_test.go:555: edges  20000:  20000 rows; retained heap  186 MiB; allocated cold  250 MiB, per warm Compute  208 MiB; peak RSS  584 MiB; peak HeapInuse cold  251 MiB warm  508 MiB; peak HeapAlloc cold  243 MiB warm  496 MiB
+    budget_test.go:555: edges  50000:  50000 rows; retained heap  261 MiB; allocated cold  371 MiB, per warm Compute  322 MiB; peak RSS  823 MiB; peak HeapInuse cold  387 MiB warm  708 MiB; peak HeapAlloc cold  374 MiB warm  693 MiB
+--- PASS: TestBudgetDenseMemory (7.12s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	7.436s
