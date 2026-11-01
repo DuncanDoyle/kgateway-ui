@@ -26,7 +26,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 ## Sub-phase
 Sub-phase: 3.0 Extension seams
 Kind: planned
-Status: active
+Status: implemented; close blocked (see Notes 2026-11-01)
 Base: 3eceda6d315a958d8099d44fc9e5348e7bd2bddc
 Brief: phases/phase-3/phase-3.0-brief.md
 
@@ -47,6 +47,7 @@ Brief: phases/phase-3/phase-3.0-brief.md
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-01: Close blocked (3.0): (1) kind e2e not run — Docker (colima) is not running locally; needs the user's go to start it or to push for CI. (2) `TestBudgetDenseMemory` exceeds 432 MiB intermittently on HEAD and on the base alike (HEAD 447 under load; 10 interleaved rounds HEAD 6/10 and base 9/10 pass; base peaked at 440). Not a 3.0 regression: warm recompute bytes and mallocs equal at both commits, retained heap equal, pprof diff −0.03 %. The gate's margin needs the user's decision. All other gates pass; Codex review `reviews/3.0-codex.md` triaged, 4 findings fixed in b129432. Bench record `phases/phase-3/bench/3.0.txt`.
 - 2026-11-01: The user approved the Phase 3 design and plan, all sub-phases 3.0–3.4, in one approval. D-028 … D-038 appended to `decisions.md`. Sub-phase 3.0 started on branch `duncandoyle/phase3Seams` (stacked on `duncandoyle/phase3Design`).
 - 2026-11-01: The extension seam milestone runs as sub-phase 3.0, before 3.1 (user). The seam carry-overs below move into 3.0 (design §15). Design review not yet done; no code before the user approves design and plan.
 - 2026-10-29: Phase 3 started at base 544dcd5. Design draft `phases/phase-3/design.md` written from the roadmap and the Phase 3 research (kept outside the repo, because the repo is public). The KRT question is framed as D-027, decided after a spike in 3.1. A second upstream draft (xDS reject status) sits next to the scope-endpoint draft outside the repo; filing both stays the user's call.
