@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -57,6 +58,9 @@ type Options struct {
 	ConfirmEvery time.Duration
 	// OnLoop receives the engine's loop transitions. Tests only.
 	OnLoop func(engine.LoopEvent)
+	// Clock drives the engine and stamps snapshots and collected values; nil
+	// means the real clock. Tests only.
+	Clock clock.WithTicker
 }
 
 // Clients are the Kubernetes clients the app uses.
@@ -119,7 +123,11 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
 	}
-	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel, Changes: changes})
+	now := time.Now
+	if o.Clock != nil {
+		now = o.Clock.Now
+	}
+	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel, Changes: changes, Now: now})
 	scraper := c.Scraper
 	switch {
 	case scraper != nil:
@@ -142,7 +150,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
 		RulesFor: reg.RulesFor,
-		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop,
+		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop, Clock: o.Clock,
 		// The other bounds stay zero: the walker gives each its default.
 		DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap},
 		OnCompute: func(m *engine.Model) {
@@ -154,7 +162,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		}}
 	var collected *collect.Store
 	if len(reg.Collectors()) > 0 {
-		collected = collect.New(changes, time.Now)
+		collected = collect.New(changes, now)
 		cfg.Collected = collected.Snapshot
 	}
 	eng := engine.New(cfg)

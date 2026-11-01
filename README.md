@@ -162,6 +162,13 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 
 ## Upgrade notes
 
+### Extension seams (sub-phase 3.0)
+
+For downstream builds:
+
+- `extension.WithChecks` now takes a finding-code prefix first: `WithChecks("ACME-", checks...)`. Calls without one no longer compile.
+- `app.Build` fails on the reserved `KGWUI-` prefix, a repeated prefix or a malformed one.
+
 ### Computed route delegation (sub-phase 2.4)
 
 The UI now computes route delegation, using kgateway 2.3's or 2.4's own rules, and cross-checks the result with the controller's status:

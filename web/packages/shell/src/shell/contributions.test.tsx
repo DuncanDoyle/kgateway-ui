@@ -311,6 +311,13 @@ it("a throwing install panel, finding action or finding renderer leaves the inst
   expect(screen.queryByRole("region", { name: "Bad panel" })).not.toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "Bad applies" })).not.toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "Bad render" })).not.toBeInTheDocument();
+  // Every applicable action threw, so the actions area takes no space.
+  const areas = document.querySelectorAll('[data-slot="finding-actions"]');
+  expect(areas.length).toBeGreaterThan(0);
+  for (const a of areas) {
+    expect(a).toBeEmptyDOMElement();
+    expect(getComputedStyle(a).display).toBe("none");
+  }
   // One warning per contribution, however many rows it failed on.
   expect(warned("install-panel:bad-panel")).toBe(1);
   expect(warned("finding-action:bad-applies")).toBe(1);

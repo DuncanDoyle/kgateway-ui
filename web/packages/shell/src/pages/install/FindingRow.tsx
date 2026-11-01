@@ -70,6 +70,10 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
     flex-wrap: wrap;
     gap: ${(p) => p.theme.space(2)};
     margin-top: ${(p) => p.theme.space(1.5)};
+    /* Every action threw: its Slot rendered nothing, so the area takes no space. */
+    &:empty {
+      display: none;
+    }
   }
   .actions fieldset {
     min-width: 0;

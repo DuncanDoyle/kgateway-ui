@@ -5,11 +5,11 @@
 // # Compatibility
 //
 // API v1 (the /api/v1 paths and their JSON) and the SPA URLs are stable from
-// the first release. This Go API (Registry and its options, and the
-// install.Detector, install.Install and install.ScopeProvider types it
-// carries) may change until the extension-seam milestone after Phase 2. When
-// the provider seam arrives, a Kubernetes Detector keeps working as that
-// provider's adapter (D-016).
+// the first release. This Go API (this package and the types it carries)
+// changes only with a README upgrade note and a release-note entry. The 3.1
+// check-contract change is the last planned break; later additions are
+// optional interfaces, detected by type assertion. When the provider seam
+// arrives, a Kubernetes Detector keeps working as that provider's adapter (D-016).
 package extension
 
 import (

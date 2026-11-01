@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -22,8 +24,10 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
@@ -211,31 +215,81 @@ func (d baseDetector) Detect(dep *appsv1.Deployment) (install.Install, bool) {
 	return in, ok
 }
 
-// A downstream detector's BaseVersion selects the computed rule set the
-// routes list shows; without it the version is unknown.
+// tcpRoute is a TCPRoute attached to the Gateway at p, accepted by controller.
+func tcpRoute(ns, name string, p objects.ParentRef, controller string) *unstructured.Unstructured {
+	u := testutil.HTTPRoute(ns, name, []objects.ParentRef{p}, testutil.AcceptedBy(p, controller))
+	u.SetKind("TCPRoute")
+	u.SetUID(types.UID("TCPRoute/" + ns + "/" + name))
+	return u
+}
+
+// A downstream detector's BaseVersion selects the computed rule set and the
+// TCPRoute experimental classification the routes list shows; without it the
+// version is unknown. A second, upstream install keeps its own classification.
 func TestRuleSetFromBaseVersion(t *testing.T) {
-	for _, tc := range []struct{ name, base, note string }{
-		{"base set", "v2.4.7", ""},
-		{"base unset", "", "Controller version unknown; using the 2.4 rules"},
+	for _, tc := range []struct {
+		name, base, note, upstream string
+		acmeExp, upstreamExp       bool
+	}{
+		{"base set", "v2.4.7", "", "v2.3.4", false, true},
+		{"base unset", "", "Controller version unknown; using the 2.4 rules", "v2.4.7", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := testutil.ControllerDeployment("acme-system", "controller", "example.com/acme/controller:9.9.9", 1, 1)
+			// An unreadable experimental setting makes only an experimental-only TCPRoute unknown.
+			unknownExp := corev1.EnvVar{Name: install.ExperimentalEnv, Value: "maybe"}
+			d := testutil.ControllerDeployment("acme-system", "controller", "example.com/acme/controller:9.9.9", 1, 1, unknownExp)
 			d.Labels = map[string]string{"app": "acme-controller"}
-			gw := testutil.GwRef("infra", "edge")
+			up := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:"+tc.upstream, 1, 1, unknownExp)
+			up.Labels["app.kubernetes.io/version"] = strings.TrimPrefix(tc.upstream, "v")
+			gw, acmeTCP, upTCP := testutil.GwRef("infra", "edge"), testutil.GwRef("infra", "tcp"), testutil.GwRef("kgw-infra", "tcp")
+			tcpListener := []objects.Listener{{Name: "tcp", Port: 9000, Protocol: "TCP"}}
 			_, srv := start(t, []runtime.Object{
-				testutil.Namespace("infra", nil), testutil.Namespace("shop", nil), d, testutil.ControllerPod(d, "controller-0", true),
-				testutil.GatewayClass("acme", acmeController, true), testutil.Gateway("infra", "edge", "acme", nil),
+				testutil.Namespace("infra", nil), testutil.Namespace("shop", nil), testutil.Namespace("kgw-infra", nil),
+				d, testutil.ControllerPod(d, "controller-0", true), up, testutil.ControllerPod(up, "kgateway-0", true),
+				testutil.GatewayClass("acme", acmeController, true), testutil.GatewayClass("kgateway", testutil.Controller, true),
+				testutil.Gateway("infra", "edge", "acme", nil),
 				testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, acmeController)),
+				testutil.GatewayWithListeners("infra", "tcp", "acme", tcpListener, testutil.Listener{Name: "tcp", Attached: 1}),
+				tcpRoute("infra", "t", acmeTCP, acmeController),
+				testutil.GatewayWithListeners("kgw-infra", "tcp", "kgateway", tcpListener, testutil.Listener{Name: "tcp", Attached: 1}),
+				tcpRoute("kgw-infra", "t", upTCP, testutil.Controller),
 			}, nil, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{},
 				extension.WithDetectors(baseDetector{base: tc.base}))
-			var rows api.Page[api.RouteRow]
-			eventually(t, "route never computed", func() bool {
-				rows = api.Page[api.RouteRow]{}
-				return getJSON(t, srv, "/api/v1/installs/acme-system.controller/routes", &rows) == http.StatusOK &&
-					len(rows.Items) == 1 && len(rows.Items[0].Parents) == 1 && rows.Items[0].Parents[0].Computed != nil
-			})
-			if c := rows.Items[0].Parents[0].Computed.Computed; c.Rules != "kgateway-2.4" || c.Note != tc.note {
+			// routes waits until every row of id's routes list has a computed outcome.
+			routes := func(id string, want int) map[string]*api.Attachment {
+				var rows api.Page[api.RouteRow]
+				eventually(t, id+" routes never computed", func() bool {
+					rows = api.Page[api.RouteRow]{}
+					return getJSON(t, srv, "/api/v1/installs/"+id+"/routes", &rows) == http.StatusOK && len(rows.Items) == want &&
+						!slices.ContainsFunc(rows.Items, func(r api.RouteRow) bool { return len(r.Parents) != 1 || r.Parents[0].Computed == nil })
+				})
+				byKind := map[string]*api.Attachment{}
+				for _, r := range rows.Items {
+					byKind[r.Ref.Kind] = r.Parents[0].Computed
+				}
+				return byKind
+			}
+			// experimentalOnly reads the classification from a TCPRoute's computed outcome.
+			experimentalOnly := func(id string, a *api.Attachment) bool {
+				t.Helper()
+				switch {
+				case a.Computed.Reason == string(computed.UnknownSetting) && a.Outcome == "":
+					return true
+				case a.Computed.Reason == "" && a.Outcome == "accepted":
+					return false
+				}
+				t.Fatalf("%s TCPRoute: unexpected outcome %+v", id, a)
+				return false
+			}
+			acme := routes("acme-system.controller", 2)
+			if c := acme["HTTPRoute"].Computed; c.Rules != "kgateway-2.4" || c.Note != tc.note {
 				t.Fatalf("rules %q note %q, want kgateway-2.4 %q", c.Rules, c.Note, tc.note)
+			}
+			if got := experimentalOnly("acme", acme["TCPRoute"]); got != tc.acmeExp {
+				t.Fatalf("acme TCPRoute experimental-only = %v, want %v", got, tc.acmeExp)
+			}
+			if got := experimentalOnly("upstream", routes("kgw.kgateway", 1)["TCPRoute"]); got != tc.upstreamExp {
+				t.Fatalf("upstream TCPRoute experimental-only = %v, want %v", got, tc.upstreamExp)
 			}
 		})
 	}
@@ -1002,4 +1056,194 @@ func TestNoCollectorsLeavesCollectedUnset(t *testing.T) {
 	if a.cfg.Collected != nil || a.collected != nil {
 		t.Fatal("no collectors must leave the engine's Collected unset")
 	}
+}
+
+// probeCollector publishes v1, hands its Deps to the test and runs until
+// stop is closed or the app stops.
+type probeCollector struct {
+	deps chan extension.Deps
+	stop chan struct{}
+}
+
+func (*probeCollector) Name() string { return "probe" }
+func (c *probeCollector) Start(ctx context.Context, d extension.Deps) error {
+	d.Publish("k", "v1", 1, 0)
+	c.deps <- d
+	select {
+	case <-ctx.Done():
+	case <-c.stop:
+	}
+	return nil
+}
+
+// probeCheck reports the probe's value as PROBE-001; a value that is not OK
+// leaves the check failed with its state and reason.
+type probeCheck struct{}
+
+func (probeCheck) Name() string { return "probe" }
+func (probeCheck) Run(in health.Input) ([]health.Finding, health.CheckResult) {
+	v, _ := in.Collected.Get("probe/k")
+	if v.State != collect.OK {
+		return nil, health.CheckResult{Name: "probe", CollectedAt: in.Now, Error: fmt.Sprintf("%s: %s", v.State, v.Reason)}
+	}
+	return []health.Finding{{Code: "PROBE-001", Slug: "probe", Severity: health.SeverityInfo, Install: in.Install.ID(), Message: fmt.Sprint(v.Data)}},
+		health.CheckResult{Name: "probe", OK: true, CollectedAt: v.At}
+}
+
+// probeOf is what /health says about the probe: its finding, or its check's error.
+func probeOf(h api.HealthResponse) string {
+	for _, f := range h.Findings {
+		if f.Code == "PROBE-001" {
+			return "finding " + f.Message
+		}
+	}
+	for _, c := range h.Checks {
+		if c.Name == "probe" {
+			return "error " + c.Error
+		}
+	}
+	return "absent"
+}
+
+// D-019 at the API: while a collector value is newer than the published
+// model, a confirm tick leaves /health's collectedAt as it is and the old
+// findings are served; the recompute then serves the new value's findings.
+func TestCollectedFreshnessAtTheAPI(t *testing.T) {
+	type fixture struct {
+		clk    *clocktesting.FakeClock
+		deps   extension.Deps
+		col    *probeCollector
+		health func() api.HealthResponse
+		await  func(...engine.LoopEventKind) engine.LoopEvent
+		hold   func() (release func())
+	}
+	setup := func(t *testing.T) *fixture {
+		d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+		col := &probeCollector{deps: make(chan extension.Deps, 1), stop: make(chan struct{})}
+		events := make(chan engine.LoopEvent, 4096)
+		// gate, when set, blocks the loop on the next refused tick, so nothing publishes until it is released.
+		var gate atomic.Pointer[chan struct{}]
+		f := &fixture{clk: testutil.FakeClock(), col: col}
+		a, srv := start(t, []runtime.Object{testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true),
+			testutil.GatewayClass("kgateway", testutil.Controller, true)}, nil,
+			Options{PollInterval: time.Hour, MetricsInterval: time.Hour, UI: ui, Clock: f.clk, OnLoop: func(e engine.LoopEvent) {
+				select {
+				case events <- e:
+				default:
+				}
+				if g := gate.Load(); e.Kind == engine.EvConfirmRefused && g != nil && gate.CompareAndSwap(g, nil) {
+					<-*g
+				}
+			}}, &stubScraper{}, extension.WithCollectors(col), extension.WithChecks("PROBE-", probeCheck{}))
+		f.deps = testutil.Recv(t, col.deps, "the probe collector to start")
+		f.health = func() api.HealthResponse {
+			t.Helper()
+			var h api.HealthResponse
+			if c := getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h); c != http.StatusOK {
+				t.Fatalf("GET health: %d", c)
+			}
+			return h
+		}
+		f.await = func(kinds ...engine.LoopEventKind) engine.LoopEvent {
+			t.Helper()
+			for {
+				if e := testutil.Recv(t, events, "loop event"); slices.Contains(kinds, e.Kind) {
+					return e
+				}
+			}
+		}
+		f.hold = func() func() {
+			g := make(chan struct{})
+			gate.Store(&g)
+			var once sync.Once
+			release := func() { once.Do(func() { close(g) }) }
+			t.Cleanup(release)
+			return release
+		}
+		// Settled: two ticks in a row confirm a model with the install, its metrics and v1.
+		ready := func(p *engine.Published) bool {
+			reads := p.Model.MetricsRead
+			return p.Model.Snapshot.Synced && len(p.Model.Installs) == 1 && len(reads) > 0 &&
+				!slices.ContainsFunc(reads, func(r engine.MetricsRead) bool { return !r.Present }) && p.Source.Collected == a.collected.Snapshot().Print
+		}
+		for confirmed := 0; confirmed < 2; {
+			f.await(engine.EvArmed)
+			f.clk.Step(engine.ConfirmEvery)
+			if e := f.await(engine.EvConfirmed, engine.EvConfirmRefused); e.Kind == engine.EvConfirmed && ready(e.Published) {
+				confirmed++
+			} else {
+				confirmed = 0
+			}
+		}
+		if got := probeOf(f.health()); got != "finding v1" {
+			t.Fatalf("settled probe = %q, want finding v1", got)
+		}
+		return f
+	}
+	// changeThenRecompute applies change; the next tick is refused with the old
+	// findings and collectedAt still served, and the recompute then serves want.
+	changeThenRecompute := func(t *testing.T, f *fixture, change func(), want string) api.HealthResponse {
+		t.Helper()
+		before := f.health()
+		change()
+		f.await(engine.EvTriggered)
+		f.await(engine.EvArmed)
+		release := f.hold()
+		f.clk.Step(engine.ConfirmEvery)
+		if e := f.await(engine.EvConfirmRefused, engine.EvConfirmed); e.Kind == engine.EvConfirmed {
+			t.Fatal("a tick over a changed collector value must not confirm")
+		}
+		held := f.health()
+		if probeOf(held) != probeOf(before) || !held.CollectedAt.Equal(before.CollectedAt) {
+			t.Fatalf("a refused tick must change nothing: probe %q at %v, want %q at %v", probeOf(held), held.CollectedAt, probeOf(before), before.CollectedAt)
+		}
+		release()
+		f.await(engine.EvPublished)
+		after := f.health()
+		if probeOf(after) != want || !after.CollectedAt.After(before.CollectedAt) {
+			t.Fatalf("after the recompute: probe %q at %v, want %q after %v", probeOf(after), after.CollectedAt, want, before.CollectedAt)
+		}
+		return after
+	}
+
+	t.Run("newer publication", func(t *testing.T) {
+		f := setup(t)
+		changeThenRecompute(t, f, func() { f.deps.Publish("k", "v2", 2, 0) }, "finding v2")
+	})
+	t.Run("failing value", func(t *testing.T) {
+		f := setup(t)
+		changeThenRecompute(t, f, func() { f.deps.Fail("k", collect.Failing, "probe refused") }, "error failing: probe refused")
+	})
+	t.Run("stopped collector", func(t *testing.T) {
+		f := setup(t)
+		changeThenRecompute(t, f, func() { close(f.col.stop) }, "error unavailable: collector stopped")
+	})
+	t.Run("expired value", func(t *testing.T) {
+		f := setup(t)
+		expires := f.clk.Now().Add(30 * time.Second)
+		changeThenRecompute(t, f, func() { f.deps.Publish("k", "v2", 2, 30*time.Second) }, "finding v2")
+		// Before the expiry a tick still renews collectedAt.
+		f.await(engine.EvArmed)
+		f.clk.Step(expires.Add(-time.Second).Sub(f.clk.Now()))
+		f.await(engine.EvConfirmed)
+		live := f.health()
+		if probeOf(live) != "finding v2" || !live.CollectedAt.Equal(f.clk.Now()) {
+			t.Fatalf("before the expiry: probe %q at %v, want finding v2 at %v", probeOf(live), live.CollectedAt, f.clk.Now())
+		}
+		// At the expiry the tick is refused; the run at the expiry serves the value unavailable.
+		f.await(engine.EvArmed)
+		release := f.hold()
+		f.clk.Step(time.Second)
+		if e := f.await(engine.EvConfirmRefused, engine.EvConfirmed); e.Kind == engine.EvConfirmed {
+			t.Fatal("the tick at the expiry must not confirm")
+		}
+		if held := f.health(); probeOf(held) != "finding v2" || !held.CollectedAt.Equal(live.CollectedAt) {
+			t.Fatalf("at the expiry: probe %q at %v, want finding v2 at %v", probeOf(held), held.CollectedAt, live.CollectedAt)
+		}
+		release()
+		f.await(engine.EvPublished)
+		if after := f.health(); probeOf(after) != "error unavailable: expired" || !after.CollectedAt.Equal(expires) {
+			t.Fatalf("after the expiry run: probe %q at %v, want unavailable at %v", probeOf(after), after.CollectedAt, expires)
+		}
+	})
 }
