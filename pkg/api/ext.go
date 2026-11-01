@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -33,6 +34,10 @@ type handlerConfig struct {
 func WithExtMounts(m ...ExtMount) HandlerOption {
 	return func(c *handlerConfig) { c.ext = append(c.ext, m...) }
 }
+
+// extMethodPattern is an HTTP method token without lower-case letters; the mux
+// matches methods case-sensitively.
+var extMethodPattern = regexp.MustCompile("^[A-Z0-9!#$%&'*+.^_`|~-]+$")
 
 var extNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
@@ -89,7 +94,7 @@ func (x ExtMount) route() (string, error) {
 	if !found {
 		method, path = "", x.Pattern
 	}
-	if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, " \t") || (found && method == "") {
+	if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, " \t") || (found && !extMethodPattern.MatchString(method)) {
 		return "", fmt.Errorf("extension %q pattern %q must be \"[METHOD ]/path\"", x.Name, x.Pattern)
 	}
 	segs := strings.Split(path[1:], "/")
@@ -114,10 +119,10 @@ func WriteError(w http.ResponseWriter, code int, msg string) { writeErr(w, code,
 
 // Visible returns the items whose ref the caller of r may view, in order,
 // and the number hidden, asking a about each ref once (D-013). Under
-// AllowAll, or a nil a, it makes no calls and returns items itself.
+// AllowAll, or a nil a, it makes no calls and returns items, clipped so an append cannot alias it.
 func Visible[T any](r *http.Request, a Authorizer, items []T, ref func(T) objects.Ref) (visible []T, hidden int) {
 	if a == nil || allowsAll(a) {
-		return items, 0
+		return slices.Clip(items), 0
 	}
 	v := &view{a: a, r: r, seen: map[objects.Ref]bool{}}
 	visible = make([]T, 0, len(items))

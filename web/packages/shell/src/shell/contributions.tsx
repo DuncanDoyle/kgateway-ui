@@ -38,7 +38,10 @@ export interface InstallPanelContribution {
   render: (ctx: { installId: string }) => ReactNode;
 }
 
-/** In-page slots; per-kind slots are keyed "group/Kind", e.g. "gateway.networking.k8s.io/Gateway". A slot with nothing renders nothing. */
+/**
+ * In-page slots; per-kind slots are keyed "group/Kind", e.g. "gateway.networking.k8s.io/Gateway", and a core-group kind keys as "/Kind".
+ * Ids must not contain whitespace: they are used in element ids. A slot with nothing renders nothing.
+ */
 export interface Contributions {
   detailTabs?: Record<string, DetailTabContribution[]>;
   sideSections?: Record<string, SideSectionContribution[]>;

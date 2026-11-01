@@ -2,6 +2,7 @@ package extension
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -146,7 +147,13 @@ func (r *Registry) RunCollectors(ctx context.Context, d Deps, s *collect.Store) 
 		cd.Fail = func(key string, st collect.State, reason string) { s.Fail(name+"/"+key, st, reason) }
 		go func() {
 			defer s.Stop(name)
-			if err := c.Start(ctx, cd); err != nil {
+			defer func() {
+				if p := recover(); p != nil {
+					cd.Logger.Error("collector panicked", "panic", p)
+				}
+			}()
+			// A return caused by the cancelled ctx is a normal stop.
+			if err := c.Start(ctx, cd); err != nil && (ctx.Err() == nil || !errors.Is(err, context.Canceled)) {
 				cd.Logger.Error("collector stopped", "err", err)
 			}
 		}()

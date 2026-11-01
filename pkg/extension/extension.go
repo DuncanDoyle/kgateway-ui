@@ -15,6 +15,8 @@ package extension
 import (
 	"errors"
 	"fmt"
+	"regexp"
+
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
@@ -23,7 +25,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
-	"regexp"
 )
 
 // Registry holds everything the backend is built from.
@@ -91,12 +92,9 @@ func WithScopeProvider(p install.ScopeProvider) Option { return func(r *Registry
 // WithScopeVerifier replaces the scope verifier.
 func WithScopeVerifier(v scopeverify.Verifier) Option { return func(r *Registry) { r.Verifier = v } }
 
-// WithChecks adds health checks whose finding codes start with prefix, such as
-// "ACME-". The prefix is a capital letter then capitals or digits, two to
-// sixteen characters before the dash. Each prefix registers once, and KGWUI-
-// is reserved for upstream checks; a rejected registration adds no checks and
-// is reported by Registry.Err. Severities outside error, warning and info are
-// reported as warnings.
+// WithChecks adds health checks whose finding codes, by convention, start with
+// prefix such as "ACME-" (a capital, then capitals or digits, two to sixteen
+// before the dash). A reserved or repeated prefix adds nothing and is reported by Registry.Err.
 func WithChecks(prefix string, c ...health.Check) Option {
 	return func(r *Registry) {
 		switch {
@@ -115,6 +113,7 @@ func WithChecks(prefix string, c ...health.Check) Option {
 // capability that is on is also listed in capabilities. Names must not
 // collide with core, platform or other extension capabilities; app.Build calls
 // each source once to check, so a source must report a stable set of names.
+// Sources run on every /api/v1/meta request: keep them fast and safe for concurrent use.
 func WithCapabilities(f func() []api.Capability) Option {
 	return func(r *Registry) { r.capSources = append(r.capSources, f) }
 }

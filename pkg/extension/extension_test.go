@@ -1,12 +1,19 @@
 package extension
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
@@ -15,6 +22,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
 type otherDetector struct{ install.UpstreamDetector }
@@ -210,5 +218,90 @@ func TestWithCollectorsRejectsBadAndDuplicateNames(t *testing.T) {
 	}
 	if got := r.Collectors(); len(got) != 1 || got[0].Name() != "acme" {
 		t.Fatalf("Collectors = %v", got)
+	}
+}
+
+// syncBuf is a log sink safe for the collector goroutine and the test.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// funcCollector runs f as its Start.
+type funcCollector struct {
+	name string
+	f    func(context.Context, Deps) error
+}
+
+func (c funcCollector) Name() string                            { return c.name }
+func (c funcCollector) Start(ctx context.Context, d Deps) error { return c.f(ctx, d) }
+
+// runOne runs c once, waits for its deferred Stop to notify, and returns the
+// log and the store. c publishes a value first so Stop has something to expire.
+func runOne(t *testing.T, c funcCollector, cancel bool) (string, collect.Snapshot) {
+	t.Helper()
+	sig := trigger.New()
+	store := collect.New(sig, testutil.FakeClock().Now)
+	var log syncBuf
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	published := c.f
+	c.f = func(ctx context.Context, d Deps) error {
+		d.Publish("k", "v", 1, 0)
+		return published(ctx, d)
+	}
+	New(WithCollectors(c)).RunCollectors(ctx, Deps{Logger: slog.New(slog.NewTextHandler(&log, nil))}, store)
+	testutil.Recv(t, sig.C(), "the publish")
+	if cancel {
+		stop()
+	}
+	testutil.Recv(t, sig.C(), "Stop")
+	return log.String(), store.Snapshot()
+}
+
+func TestCollectorCancelledReturnIsNotLogged(t *testing.T) {
+	for name, wrap := range map[string]func(error) error{
+		"bare":    func(err error) error { return err },
+		"wrapped": func(err error) error { return fmt.Errorf("scrape: %w", err) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			log, snap := runOne(t, funcCollector{"acme", func(ctx context.Context, _ Deps) error {
+				<-ctx.Done()
+				return wrap(ctx.Err())
+			}}, true)
+			if strings.Contains(log, "collector stopped") {
+				t.Errorf("a stop after cancellation must not log an error: %s", log)
+			}
+			if v, _ := snap.Get("acme/k"); v.State != collect.Unavailable {
+				t.Errorf("value after Stop: %+v", v)
+			}
+		})
+	}
+	// An error without a cancellation is still logged once.
+	log, _ := runOne(t, funcCollector{"acme", func(context.Context, Deps) error { return errors.New("boom") }}, false)
+	if strings.Count(log, "collector stopped") != 1 || !strings.Contains(log, "boom") {
+		t.Errorf("a real error must log once: %s", log)
+	}
+}
+
+func TestCollectorPanicIsRecovered(t *testing.T) {
+	log, snap := runOne(t, funcCollector{"acme", func(context.Context, Deps) error { panic("kaput") }}, false)
+	if strings.Count(log, "collector panicked") != 1 || !strings.Contains(log, "kaput") {
+		t.Errorf("a panic must log once: %s", log)
+	}
+	if v, _ := snap.Get("acme/k"); v.State != collect.Unavailable {
+		t.Errorf("the deferred Stop must still run: %+v", v)
 	}
 }

@@ -383,6 +383,9 @@ func TestExtraEnvVolumesAndContainers(t *testing.T) {
 	if len(d.Containers) != 2 || d.Containers[0].Name != "kgateway-ui" || d.Containers[1].Name != "addon" {
 		t.Fatalf("containers = %+v", d.Containers)
 	}
+	if len(d.Containers[1].VolumeMounts) != 0 {
+		t.Errorf("the sidecar must get no volumeMounts: %+v", d.Containers[1].VolumeMounts)
+	}
 	ui := d.Containers[0]
 	if !slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "ADDON" && e.Value == "1" }) ||
 		!slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "KGWUI_MEMORY_LIMIT" }) {

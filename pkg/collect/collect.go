@@ -46,6 +46,11 @@ type Value struct {
 // expired reports whether v has expired at now.
 func (v Value) expired(now time.Time) bool { return !v.Expires.IsZero() && !now.Before(v.Expires) }
 
+// earlier reports whether expiry a (zero means never) comes before b.
+func earlier(a, b time.Time) bool {
+	return !a.IsZero() && (b.IsZero() || a.Before(b))
+}
+
 // Store holds the collected values by key, "<collector>/<key>". It is safe
 // for concurrent use.
 type Store struct {
@@ -70,7 +75,8 @@ func collectorOf(key string) string {
 
 // Publish stores data under key with State OK, expiring after ttl (zero
 // means never), and takes ownership of data. It notifies only when the
-// fingerprint changes or the previous value was not current. A stopped
+// fingerprint changes, the previous value was not current or the expiry moves
+// earlier (or appears), so the engine schedules it. A stopped
 // collector's publish is dropped.
 func (s *Store) Publish(key string, data any, fingerprint uint64, ttl time.Duration) {
 	s.mu.Lock()
@@ -85,7 +91,7 @@ func (s *Store) Publish(key string, data any, fingerprint uint64, ttl time.Durat
 	}
 	old, had := s.values[key]
 	s.values[key] = v
-	if !had || old.Fingerprint != fingerprint || old.State != OK || old.expired(now) {
+	if !had || old.Fingerprint != fingerprint || old.State != OK || old.expired(now) || earlier(v.Expires, old.Expires) {
 		s.changes.Notify()
 	}
 }

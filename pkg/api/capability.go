@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"sync"
 )
 
 // CapabilityState is whether a capability works for this caller and install.
@@ -30,7 +31,8 @@ type Capability struct {
 var coreCapabilities = []string{"processes", "events", "crds", "endpoints", "proxyStats", "controllerLogs"}
 
 // WithCapabilitySources adds sources of capability states for /api/v1/meta.
-// Each source runs per request and must report a stable set of names.
+// Each source runs on every /api/v1/meta request, so it must be fast, safe for
+// concurrent use and report a stable set of names.
 func WithCapabilitySources(f ...func() []Capability) HandlerOption {
 	return func(c *handlerConfig) { c.capSources = append(c.capSources, f...) }
 }
@@ -68,6 +70,9 @@ func validState(s CapabilityState) bool {
 	return s == CapOn || s == CapOff || s == CapDenied || s == CapFailing
 }
 
+// warnedDrops holds the names already warned about, so the poll rate does not spam the log.
+var warnedDrops sync.Map
+
 // addCapabilities adds the sources' states to resp, sorted by name. A name
 // that is reserved or already seen is dropped, so a source cannot shadow a core one.
 func addCapabilities(resp *MetaResponse, platformNames []string, sources []func() []Capability) {
@@ -76,7 +81,9 @@ func addCapabilities(resp *MetaResponse, platformNames []string, sources []func(
 	for _, f := range sources {
 		for _, c := range f() {
 			if c.Name == "" || !validState(c.State) || reserved(c.Name, platformNames) || seen[c.Name] {
-				slog.Warn("capability dropped", "name", c.Name, "state", c.State)
+				if _, dup := warnedDrops.LoadOrStore(c.Name, true); !dup {
+					slog.Warn("capability dropped", "name", c.Name, "state", c.State)
+				}
 				continue
 			}
 			seen[c.Name] = true

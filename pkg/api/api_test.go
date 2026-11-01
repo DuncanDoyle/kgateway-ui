@@ -2543,6 +2543,20 @@ func TestMetaListsExtensionCapability(t *testing.T) {
 	}
 }
 
+func TestMetaListsFailingCapabilityReason(t *testing.T) {
+	src := func() []Capability {
+		return []Capability{{Name: "acme-scrape", State: CapFailing, Reason: "target unreachable"}}
+	}
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(src)}}, world()...)
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	if slices.Contains(meta.Capabilities, "acme-scrape") {
+		t.Errorf("a failing capability must not be listed in capabilities: %v", meta.Capabilities)
+	}
+	if want := []Capability{{Name: "acme-scrape", State: CapFailing, Reason: "target unreachable"}}; !slices.Equal(meta.CapabilityStates, want) {
+		t.Errorf("capabilityStates = %+v, want %+v", meta.CapabilityStates, want)
+	}
+}
+
 func TestCapabilityNameCollision(t *testing.T) {
 	plat := []string{platform.Scope, platform.Workloads}
 	ok := func() []Capability { return []Capability{{Name: "acme-widgets", State: CapOn}} }

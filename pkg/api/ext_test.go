@@ -92,6 +92,9 @@ func TestExtCannotShadowCoreOrSPA(t *testing.T) {
 		{Name: "acme", Pattern: "GET /a//b", Handler: ok},
 		{Name: "acme", Pattern: "GET  /x", Handler: ok},
 		{Name: "acme", Pattern: "GET /{x", Handler: ok},
+		{Name: "acme", Pattern: "get /x", Handler: ok},
+		{Name: "acme", Pattern: "Get /x", Handler: ok},
+		{Name: "acme", Pattern: "G(T /x", Handler: ok},
 		{Name: "acme", Pattern: "GET /x", Handler: nil},
 		{Name: "", Pattern: "GET /x", Handler: ok},
 		{Name: "..", Pattern: "GET /v1/meta", Handler: ok},
@@ -168,6 +171,13 @@ func TestVisibleAppliesAuthorizer(t *testing.T) {
 	}
 	if len(claimsAll.asked) != 0 {
 		t.Errorf("AllowAll-like Authorizer asked about %v", claimsAll.asked)
+	}
+	// The result never shares spare capacity with items, so an append cannot overwrite the caller's data.
+	spare := make([]row, 2, 4)
+	vis, _ = Visible(req, AllowAll{}, spare, refOf)
+	_ = append(vis, row{b})
+	if spare[:3][2].ref == b {
+		t.Error("appending to the result wrote into the caller's backing array")
 	}
 }
 

@@ -143,3 +143,29 @@ func TestFailedValueKeepsReason(t *testing.T) {
 		t.Fatalf("a publish recovers a failed key: %+v", v)
 	}
 }
+
+func TestPublishNotifiesWhenTheExpiryMovesEarlier(t *testing.T) {
+	sig := trigger.New()
+	c := testutil.FakeClock()
+	s := New(sig, c.Now)
+	s.Publish("acme/k", "v", 1, 0)
+	notified(sig)
+	s.Publish("acme/k", "v", 1, 30*time.Second)
+	if !notified(sig) {
+		t.Fatal("a first expiry must notify so the engine schedules it")
+	}
+	s.Publish("acme/k", "v", 1, 60*time.Second)
+	if notified(sig) {
+		t.Fatal("a later expiry must stay silent")
+	}
+	s.Publish("acme/k", "v", 1, 10*time.Second)
+	if !notified(sig) {
+		t.Fatal("an earlier expiry must notify")
+	}
+	before := s.Snapshot()
+	c.Step(10*time.Second + time.Second)
+	after := s.Snapshot()
+	if v, _ := after.Get("acme/k"); v.State != Unavailable || after.Print == before.Print {
+		t.Fatalf("past the expiry: %+v, print changed %v", v, after.Print != before.Print)
+	}
+}
