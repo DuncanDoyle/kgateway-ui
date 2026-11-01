@@ -4,7 +4,7 @@
 **Date:** 2026-10-29
 **Base:** `544dcd5`
 **Roadmap:** `docs/roadmap.md`, Phase 3
-**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-037 (§22).
+**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-038 (§22).
 **kgateway refs:** behaviour claims cite `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`), as in Phase 2. Claims about unreleased behaviour cite `main` at `643f50b` (2026-10-28) or tag `v2.5.0-rc.1` (published 2026-10-27). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`.
 
 Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. Decisions from the user's answers are marked **(user, 2026-10-29)**; those from the builder check are marked **(our call, 2.4 builder check)**. §25 holds the one open item.
@@ -25,6 +25,7 @@ Every choice in this draft is **(our call)** unless it repeats an earlier user d
 | 8 | Filing the upstream reject-status and scope-endpoint issues stays the user's call. It is the only open item | (our call) | §8.7, §24, §25 |
 | 9 | Shell and navigation land in 3.1, before the new pages: a prominent object header, a fluid layout that uses wide screens, and **path-based** breadcrumbs carried in the URL (from user testing on a 3008 × 1692 monitor) | (user, 2026-10-29) | §17.6, §21, §23 |
 | 10 | Findings carry a deterministic **suggested fix** (YAML, target, basis) where the evidence leaves exactly one correct change: 014, and 013 for a wrong group or port. No model; the first layer of the roadmap's AI-assisted diagnosis | (user, 2026-10-29) | §7.7, §13.3, §17.2 |
+| 11 | The extension seam milestone runs now, as sub-phase 3.0, before 3.1: endpoints, collectors, open check inputs, capabilities, a published shell package, in-page slots and chart extension values, all generic, proven by `examples/downstream` in CI | (user, 2026-11-01) | §4.1, §16.2, §23 |
 
 ## 1. Intent and why
 
@@ -92,6 +93,26 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 - **Evidence is structured.** A finding keeps today's `message` and `detail` strings, and gains a typed `evidence` object per code (§13.3). The SPA renders evidence; it never parses prose (Phase 2 review finding 8).
 - **New package `pkg/process`** holds the process model and the provider seam (§9.1). **`pkg/diagnose`** holds identity, grouping, ranking and next-step templates. Both are platform neutral; the Kubernetes implementation of `process.Source` lives in one allowlisted file (§19).
 - **`pkg/ctrlmetrics`** keeps every metric name in one place, as today, and now keeps per-replica and per-type samples (§8.2).
+
+### 4.1 Extension seams for downstream features (3.0, user, 2026-11-01)
+
+The roadmap's extension seam milestone (after Phase 2) never ran. It runs now, as sub-phase 3.0, before 3.1 breaks the check contract. A review of the seams found that a downstream distribution can add kinds, detectors, checks, an Authorizer, rule sets, routes, nav entries, finding renderers and whole pages. It cannot add a **feature with its own data, API and UI** without forking. Seven gaps, each closed with a generic seam:
+
+| # | Gap today | Seam added | Where |
+|---|---|---|---|
+| 1 | `app.Run` builds the HTTP mux; a downstream cannot add endpoints without copying `Run` and the unexported `serve` | `extension.WithHandlers(func(r Router, d Deps))`. Paths live under `/api/ext/{name}/…`, so they never collide with API v1. `Deps` gives read access to the published model, the Authorizer and the capabilities; a response helper applies the Authorizer the way core handlers do | `pkg/extension`, `pkg/api` |
+| 2 | Checks run only inside recomputes; there is no place for a long-running collector (a scraper, a prober, a reader) | `extension.WithCollectors(...)`: `Name()`, `Start(ctx, Deps) error`, and `Publish(key, value, fingerprint)` into a collector store. A publish requests a recompute through `pkg/trigger`, like any other change. Named "collector" to stay apart from `process.Source` | `pkg/extension`, `pkg/engine` |
+| 3 | Phase 3's `InputSet` is closed: kinds, metric families, process data, check outputs | `InputSet` gains collector keys; `RunContext` gains `Collected(key)`. Memoization keys on the published fingerprint (§16.2). Lands with the contract in 3.1 | `pkg/health` |
+| 4 | `/meta` capabilities are core-only | `extension.WithCapabilities(...)`: a downstream capability with the same states as core ones (on, `off`, `denied`, `failing`, with a reason) | `pkg/extension`, `pkg/api` |
+| 5 | `@kgateway-ui/shell` is `private: true` with `main: src/index.ts`, so another repo can only vendor it | A built package with type declarations, versioned with the UI, its compatibility stated by `SHELL_API_VERSION`. Each release attaches the `npm pack` tarball; publishing to a public npm registry waits for the project's final home **(our call)** | `web/packages/shell` |
+| 6 | Only whole pages can be replaced; adding one tab to the route page means rewriting it | `ShellExtension.contributions`: detail tabs and side-column sections per kind (the two-column layout of §17.6), finding actions, and install-page panels. A slot with no contribution renders nothing and takes no space. Additive, so `SHELL_API_VERSION` stays 1 | `web/packages/shell` |
+| 7 | The chart has no extension values, so extra RBAC or a sidecar means a forked chart | `rbac.extraRules`, `extraEnv`, `extraVolumes`, `extraVolumeMounts`, `extraContainers`, and a configurable ServiceAccount name for add-on bindings | `deploy/helm/kgateway-ui` |
+
+Rules **(our call)**:
+- Every seam is generic and neutral. Nothing in the public repo names a downstream, and nothing in core hints at features it does not have: no locked buttons, no empty "upgrade" slots (user, 2026-11-01).
+- **The proof stays in CI.** `examples/downstream` grows to use every seam: an extra endpoint, a collector feeding a check through a declared input, a capability, a detail tab, and an `extraRules` chart overlay. Its tests build and run it, so a seam that breaks fails the build. The roadmap asked for a throwaway proof; a kept one is cheaper than proving it twice.
+- **Stability.** After 3.0 the Go extension API (`pkg/extension` and the types it carries) changes only with a README upgrade note and a release-note entry. 3.1's contract change is the last planned break.
+- Collectors and handlers run in the UI process, under its memory limit and the §16.3 gates. A collector's published values count toward retained heap.
 
 ## 5. Finding identity, groups and ranking
 
@@ -703,7 +724,8 @@ Either way the result is recorded as D-027, with the numbers.
 type Check interface {
     Name() string
     // Inputs names what Run reads: kinds, metric families, process data,
-    // other checks' outputs. Undeclared reads are a bug the tests catch.
+    // other checks' outputs and collector keys (§4.1). Undeclared reads are
+    // a bug the tests catch.
     Inputs() InputSet
     Run(ctx RunContext) ([]Finding, CheckResult)
 }
@@ -983,8 +1005,9 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 | D-033 | kgateway 2.5 joins the support matrix at GA, in 3.4; before GA it runs on the 2.4 rule set **(user, 2026-10-29)** | §7.6, §8.6, §23 |
 | D-034 | No Phase 3 check is required; unavailable checks give a reason and never turn the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones **(our call, 2.4 builder check)** | §5.1, §7.1 |
 | D-035 | Path-based breadcrumbs carried in the URL (`via`), a shared object header, and a fluid layout up to 2400 px with two columns on detail pages from 1600 px **(user, 2026-10-29)** | §17.6 |
-| D-037 | Envoy stats read from each proxy's stats listener with no new RBAC; controller logs opt-in, install namespace only, fixed fields kept and text never stored or shown; proxy logs, `/config_dump` and admin ports out until per-user identity (Phase 10) and Phase 9 **(user, 2026-11-01)** | §8.8, §8.9, §12, §18 |
 | D-036 | Deterministic suggested fixes: only where exactly one change follows from the spec, discovery or a watched object; a fragment with its location for existing objects; never applied, never from translation logic **(user, 2026-10-29)** | §7.7 |
+| D-037 | Envoy stats read from each proxy's stats listener with no new RBAC; controller logs opt-in, install namespace only, fixed fields kept and text never stored or shown; proxy logs, `/config_dump` and admin ports out until per-user identity (Phase 10) and Phase 9 **(user, 2026-11-01)** | §8.8, §8.9, §12, §18 |
+| D-038 | Extension seams for downstream features (endpoints, collectors, open check inputs, capabilities, published shell package, in-page slots, chart extension values), run as sub-phase 3.0; the downstream example in CI is the standing proof **(user, 2026-11-01)** | §4.1 |
 
 The "Decisions for this phase" table near the top lists every decision from the builder check and the user's answers, with its marker.
 
@@ -994,12 +1017,13 @@ Each sub-phase has its own brief, a cross-model review of its diff, its benchmar
 
 | Sub-phase | Content | Ships |
 |---|---|---|
+| **3.0 Extension seams** | The seven seams of §4.1: `WithHandlers`, `WithCollectors`, `WithCapabilities`, the built shell package, `ShellExtension.contributions`, the chart extension values; `examples/downstream` extended to use each, with tests; README extension docs. No change for users of the stock UI | A downstream can add a whole feature without forking |
 | **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap. Shell and navigation (§17.6, D-035): `ObjectHeader`, the fluid and two-column layout, path-based breadcrumbs | Same pages, easier to read and navigate; findings have ids and page on the server |
 | **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. Proxy Envoy stats (§8.8), 025 and 026, and the per-Pod 001 evidence. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
 | **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; suggested fixes for 013 and 014 (§7.7); derived controller log signals behind `diagnostics.controllerLogs` (§8.9); `docs/findings.md`. Wording pass | The analyzer floor and freshness findings, with suggested fixes |
 | **3.4 Backends and kgateway 2.5** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. Once 2.5.0 GA ships (D-033): the 2.5 rule set, a 2.5 e2e row, 024, the controller-reported `TargetNotFound` path for 016, `kgateway_build_info` for the controller version, and the 2.5 fixtures if 3.1 did not capture them | Empty backends; kgateway 2.5 supported |
 
-A stabilization sub-phase follows the phase review, as in Phases 1 and 2. Every sub-phase builds on 3.1's check contract, Store, identity and paging; 3.4's 013 explanation depends on 3.3's 013. Each of 3.2, 3.3 and 3.4 shows its benchmarks within the §16.3 gates before it ships. The order puts the research's top-ranked signals (rejects, processes) first, after the performance work. If 2.5.0 GA is not out when the rest of 3.4 is ready, the 2.5 items wait for it and the rest ships.
+A stabilization sub-phase follows the phase review, as in Phases 1 and 2. 3.0 comes first: 3.1's contract adds collector keys to `InputSet`, and 3.1's layout work keeps the slots of §4.1. Every sub-phase builds on 3.1's check contract, Store, identity and paging; 3.4's 013 explanation depends on 3.3's 013. Each of 3.2, 3.3 and 3.4 shows its benchmarks within the §16.3 gates before it ships. The order puts the research's top-ranked signals (rejects, processes) first, after the performance work. If 2.5.0 GA is not out when the rest of 3.4 is ready, the 2.5 items wait for it and the rest ships.
 
 ## 24. Upstream asks (draft text outside the repo; not filed)
 
