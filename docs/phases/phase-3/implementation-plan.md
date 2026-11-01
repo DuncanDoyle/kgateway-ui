@@ -12,15 +12,22 @@
 
 **Tech Stack:** Go 1.26, client-go v0.36 (plus `k8s.io/client-go/metadata` for CRD metadata), React 19, TypeScript, emotion, react-router, SWR, TanStack Table, Vitest, Testing Library, Playwright, kind, Helm.
 
-**Spec:** `docs/phases/phase-3/design.md` (binding). Section numbers below (§5.1, §16.3) refer to it. Phase 2's plan holds the conventions this plan does not repeat (fake clocks, `testutil.Recv`, goldens, the additive test). D-001 … D-026 hold. D-028 … D-038 are appended to `docs/decisions.md` when the user approves design and plan (queue item Q3); D-027 is appended in Task 14, after the spike.
+**Spec:** `docs/phases/phase-3/design.md` (binding). Section numbers below (§5.1, §16.3) refer to it. Phase 2's plan holds the conventions this plan does not repeat (fake clocks, `testutil.Recv`, goldens, the additive test). D-001 … D-026 hold. D-028 … D-038 are appended to `docs/decisions.md` when the user approves design and plan (queue item Q3); D-027 is appended in Task 14, after the spike. The design and plan review is `reviews/design-codex.md`; its triage table is binding.
 
 ## Global Constraints
 
 - **Public repo.** The forbidden terms of the repository secret `FORBIDDEN_TERMS` (product and commercial-edition names of the sponsoring vendor) never appear in code, comments, file names, docs, commits or PR text. Downstreams are "downstream distributions"; examples use `acme`. No customer names, internal links or ticket ids. Before each commit: `git diff --cached | grep -inE "$FORBIDDEN_TERMS" && echo STOP || true`.
 - **Read-only (D-001).** No writes to the cluster. No Secrets, ConfigMaps, `*/proxy` or `pods/portforward` in the chart. `pods/log` only in a Role in the install namespace, and only when `diagnostics.controllerLogs` is on (§8.9, §18.1). Never read Envoy or controller admin ports, termination messages, probe output, proxy logs or Event messages (§18.2; see Task 35 for the probe-type note).
 - **Don't mirror controller logic (principle 4).** Computed rules live behind `computed.Rules` with a verifier (D-020). Log parsers, Envoy name mapping and the Gateway API version table sit on the rule-set seam, pinned per kgateway minor; a shipped rule set is never edited for a new minor.
-- **API v1 additive only.** New paths or optional fields. Existing goldens change only by `id`, `group`, `evidence` and the fields §13.1 lists; `pkg/api/additive_test.go` asserts it.
-- **Import boundary (D-016).** New `k8s.io/api/core/v1`, `apps/v1` or `client-go` use only in files added to `internal/boundary/imports_test.go` with a reason: `pkg/process/kube.go`, `pkg/proxystats/scrape.go`, `pkg/ctrllogs/stream.go`. `pkg/collect`, `pkg/diagnose`, `pkg/extension` and the new `pkg/health` files stay outside the allowlist.
+- **API v1 additive only.** New paths or optional fields. Existing goldens change only by `id`, `group`, `evidence` and the fields §13.1 lists; `pkg/api/additive_test.go` asserts it. **One listed exception (§7.1, D-030):** the pre-release code migration changes the `code` and `slug` values of named findings (002 → 013, 014, 015; 003 → 016). Each owning task (57, 59, 61) adds its findings to `additiveExceptions` in `pkg/api/additive_test.go` by golden file and resource, and moves the matching `test/e2e/api_test.go` expectations in the same commit.
+- **Import boundary (D-016).** The allowlist is per file. New `k8s.io/api/core/v1`, `apps/v1` or `client-go` use only in these files, each added to `internal/boundary/imports_test.go` with its reason by the task that creates it:
+  - `pkg/cache/events.go` — "Warning Events on controller and proxy Pods" (Task 35)
+  - `pkg/cache/crds.go` — "Gateway API CRD metadata through the metadata client" (Task 35)
+  - `pkg/cache/services.go` — "Services and EndpointSlices" (Task 75)
+  - `pkg/process/kube.go` — "process facts from Pods, Deployments and Events" (Task 37)
+  - `pkg/proxystats/kube.go` — "the Kubernetes proxy stats source: proxy Pod targets and transport" (Task 41)
+  - `pkg/ctrllogs/stream.go` — "follows controller Pod logs" (Task 65)
+  `pkg/collect`, `pkg/diagnose`, `pkg/extension`, the rest of `pkg/proxystats` and the new `pkg/health` files stay outside the allowlist.
 - **Availability (D-034).** No Phase 3 check sets `Required: true`. A check whose input is off, denied, failing or absent on this version returns `health.NotAvailable(...)`; it never raises KGWUI-008 and never turns the install unknown. The existing required checks keep their flag, `xDS rejects` included.
 - **Go style.** Go Doc Comments on every exported name. Code comments 1–2 lines, grouped, describing the code as it is (no history). Match the surrounding idiom.
 - **Deterministic tests.** Fake clock and `testutil.Recv`; no `time.Sleep` in new unit tests; holds and maturations are proven by stepping the clock to `deadline − 1 s` and `deadline + 1 s`. Only `bench`-tagged budget tests use a real clock.
@@ -38,10 +45,10 @@
 Five input classes the design's test list (§21) does not cover, most likely to bite users; each has a test in its owning task.
 
 1. **Two installs in one cluster.** Stores, proxy Pods, Events, proxy stats, log events and finding ids must never cross installs. → Task 15 `TestStoresAreIsolatedPerInstall`; Task 37 `TestProxyPodsBelongToOneInstall`; Task 41 `TestProxyStatsPerInstall`.
-2. **Counter resets and Pod churn.** A restarted controller replica or proxy resets `rejects_total` and Envoy counters; a delta must never go negative or read as a new reject, and a Pod UID that disappears must leave no state behind. → Task 21 `TestCounterDeltaPerPodUIDNeverNegative`; Task 42 `TestProxyStatsResetIsNotAReject`.
+2. **Counter resets and Pod churn.** A restarted controller replica or proxy resets `rejects_total` and Envoy counters; a delta must never go negative or read as a new reject, and a Pod UID that disappears must leave no state behind. Proxy stats are evidence of rejects observed since the last scrape, never an active-reject trigger (review finding 4). → Task 21 `TestCounterDeltaPerPodUIDNeverNegative`; Task 42 `TestProxyStatsResetIsNotAReject`.
 3. **Gateway names over 63 characters.** The `gateway-name` label is truncated; proxy Pods, proxy stats and 019–022, 025, 026 must still map to the right Gateway, and two Gateways sharing a truncated prefix must not merge. → Task 37 `TestLongGatewayNameProxyPods`.
 4. **Pre-release, custom and digest image tags.** `v2.5.0-rc.1`, `v2.4.7-acme.1`, `latest`, `@sha256:…`, a controller on 2.4.7 and proxies on an RC. Skew compares parsed major.minor only; anything unparseable is "version unknown" with no finding; rule-set selection keeps the "newer than tested" note. → Task 39 `TestSkewUnparseableAndPrereleaseTags`; Task 61 `TestNewerThanTestedUsesComputed016`.
-5. **Events that race their Pod, and aggregated Events.** An Event can arrive before the informer knows its Pod, and `count` jumps on aggregation and resets when the Event expires. 020 must read "in the last 15 minutes", never a total, and must not double count a series. → Task 35 `TestEventBeforePodIsKeptOnNextUpdate`, `TestAggregatedEventCountIsAWindowNotATotal`.
+5. **Events that race their Pod, and aggregated Events.** An Event can arrive before the informer knows its Pod, and `count` jumps on aggregation and resets when the Event expires. 020 counts observed deltas per Event UID in a 15-minute window; a count present when the UI first sees an Event is "unknown", never counted; a series is counted once (review finding 7). → Task 35 `TestEventBeforePodIsKeptOnNextUpdate`, `TestFirstSeenCountIsUnknown`; Task 38 `TestAggregatedEventCountIsAWindowNotATotal`.
 
 ## Sub-phases
 
@@ -98,22 +105,22 @@ pkg/diagnose/fix.go                 suggested fixes (3.3, 3.4)
 pkg/diagnose/index.go               precomputed rank order and keyset cursors (3.1)
 pkg/process/process.go              Source, Set, Process, Rollout, Termination, ProbeFailures (3.2)
 pkg/process/kube.go                 Kubernetes source (3.2; allowlisted)
-pkg/proxystats/{collector,parse,stats}.go, scrape.go   proxy Envoy stats (3.2; scrape.go allowlisted)
+pkg/proxystats/{source,collector,parse,stats}.go, kube.go   replaceable proxy stats source (3.2; kube.go allowlisted)
 pkg/ctrllogs/{collector,events}.go, stream.go          controller log reader (3.3; stream.go allowlisted)
 pkg/computed/logs.go, envoynames.go LogParser and EnvoyNamer seams (3.2, 3.3)
-pkg/computed/kgw23/, kgw24/         PolicyTargets (3.3); log parsers (3.3)
+pkg/computed/kgw23/, kgw24/         PolicyTargeter and log parsers as optional interfaces (3.3)
 pkg/computed/kgw25/                 copy of kgw24 plus TargetNotFound (3.4)
 pkg/computed/rulesets/gatewayapi.go expected Gateway API bundle per minor (3.2; 2.5 entry 3.4)
-pkg/computed/bound.go               BoundPath (3.1)
+pkg/computed/bound.go               MaxPathBytes, ClipDisplay (3.1)
 pkg/ctrlmetrics/parse.go, scrape.go per Pod and type; rejects_total, updates_dropped (3.1); snapshot_resources (3.2); status_syncs (3.3); per-client and build_info (3.4)
 pkg/scopeverify/verify.go           dropped updates → KGWUI-008 (3.1)
-pkg/cache/cache.go, events.go, crds.go, services.go   proxy Pods, Events, CRD metadata (3.2); Services, EndpointSlices (3.4)
+pkg/cache/cache.go, events.go, crds.go, services.go   proxy Pods, Events, CRD metadata (3.2); Services, EndpointSlices (3.4); new files allowlisted
 pkg/engine/engine.go, memo.go       States per install, memo, Diagnosis in InstallModel (3.1); process data (3.2)
 pkg/explore/rows.go, query.go       gateway-rejecting flag and filter (3.2)
 pkg/kinds/catalog.go                served group/kinds from discovery for 013 (3.3)
 pkg/app/app.go, cmd/kgateway-ui/main.go   seams wiring (3.0); diagnostics toggles and collectors (3.2, 3.3, 3.4)
 internal/testutil/scale/scale.go    Phase 3 tier fields and worst case (3.1)
-internal/boundary/imports_test.go   three allowlist entries (3.2, 3.3)
+internal/boundary/imports_test.go   six allowlist entries (3.2, 3.3, 3.4; Global Constraints)
 examples/downstream/                every seam (3.0); new contract (3.1); web/ and chart/ overlays (3.0)
 deploy/helm/kgateway-ui/            extension values (3.0); diagnostics toggles and rules (3.2, 3.3, 3.4)
 web/packages/shell/package.json, tsconfig.build.json   built package (3.0)
@@ -209,14 +216,16 @@ No change for users of the stock UI: every seam is empty by default, and goldens
 **Files:** Create `pkg/collect/collect.go`, `pkg/collect/collect_test.go`; Modify `pkg/extension/extension.go`, `pkg/engine/engine.go:31-77` (`Config.Collected`), `:338` (`Source.Collected`), `pkg/engine/loop.go:21-35` (Source), `pkg/health/finding.go:104-146` (`Input.Collected`), `pkg/app/app.go:166-180`; Test `pkg/engine/loop_test.go`, `pkg/app/app_test.go`. **⚠ guardrail** (8 files).
 
 **Interfaces:**
-- `package collect`: `type Value struct { Data any; Fingerprint uint64; At time.Time }`; `type Store struct{...}`; `func New(changes *trigger.Signal, now func() time.Time) *Store`; `func (s *Store) Publish(key string, data any, fingerprint uint64)` (notifies only when the fingerprint changes); `type Snapshot struct { Values map[string]Value; Print uint64 }`; `func (s *Store) Snapshot() Snapshot`; `func (s Snapshot) Get(key string) (Value, bool)`.
+- `package collect`: `type State string` (`ok`, `failing`, `off`); `type Value struct { Data any; Fingerprint uint64; At, Expires time.Time; State State; Reason string }`; `type Store struct{...}`; `func New(changes *trigger.Signal, now func() time.Time) *Store`; `func (s *Store) Publish(key string, data any, fingerprint uint64, ttl time.Duration)` (notifies only when the fingerprint changes); `func (s *Store) Fail(key string, st State, reason string)`; `func (s *Store) Stop(collector string)` (expires every value of a stopped collector); `type Snapshot struct { Values map[string]Value; Print uint64 }`; `func (s *Store) Snapshot() Snapshot`; `func (s Snapshot) Get(key string) (Value, bool)` (an expired or non-`ok` value returns its state, never stale data as current).
+- **Ownership (review finding 14):** `Publish` transfers ownership of `data`; the collector never mutates it afterwards, and readers treat it as read-only. The doc comment says so; `Snapshot` copies the map, never the values.
+- `Snapshot.Print` covers each value's fingerprint, state and whether it has expired, so an expiry is a change for the confirm tick; the engine adds the earliest expiry as a deadline.
 - Keys are `<collector name>/<key>`; `Deps.Publish` prefixes the collector's name.
 - `extension.Collector interface { Name() string; Start(ctx context.Context, d Deps) error }`; `func WithCollectors(c ...Collector) Option` (unique names).
 - `engine.Config.Collected func() collect.Snapshot`; `engine.Source.Collected uint64` — the confirm tick refuses to renew `ConfirmedAt` when the live print differs from the published one (D-019).
 - `health.Input.Collected collect.Snapshot` — the read path until Task 16 moves it to `RunContext.Collected` (§4.1 gap 3 lands with the contract in 3.1).
 - `app.Start` starts each collector in its own goroutine after the cache starts; an error return is logged once and the collector is not restarted.
 
-- [ ] **Step 1: Failing tests** `TestPublishNotifiesOnlyOnNewFingerprint`, `TestSnapshotPrintIsOrderIndependent`, `TestConfirmRefusesStaleCollectedValue` (publish after a computation: the confirm tick sees a different print, schedules a run, and the run publishes the new value), `TestCollectorStartsAndStopsWithApp`.
+- [ ] **Step 1: Failing tests** `TestPublishNotifiesOnlyOnNewFingerprint`, `TestSnapshotPrintIsOrderIndependent`, `TestExpiredValueIsUnavailable` (fake clock at `Expires + 1 s`: `Get` returns state unavailable and the print changed), `TestStoppedCollectorValuesExpire`, `TestFailedValueKeepsReason`, `TestConfirmRefusesStaleCollectedValue` (publish after a computation: the confirm tick sees a different print, schedules a run, and the run publishes the new value), `TestCollectorStartsAndStopsWithApp`.
 - [ ] **Step 2: Run** `go test ./pkg/collect ./pkg/engine ./pkg/app -run 'Publish|Collected|Collector'` → FAIL.
 - [ ] **Step 3: Implement. Run, commit** `feat(extension): collectors feeding a store that triggers recomputes`.
 
@@ -402,30 +411,31 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report        // Report gain
 
 ### Task 18: Per-check memoization
 
-**Files:** Create `pkg/engine/memo.go`, `pkg/engine/memo_test.go`; Modify `pkg/health/store.go` (memo entries in `States`), `pkg/health/rollup.go` (skip path), `pkg/engine/engine.go` (Print).
+**Files:** Create `pkg/engine/memo.go`, `pkg/engine/memo_test.go`; Modify `pkg/health/store.go` (memo entries in `States`), `pkg/health/rollup.go` (skip path), `pkg/engine/engine.go` (Print), `pkg/api/memo_test.go`. **⚠ guardrail** (6 files).
 
 **Interfaces:**
-- `func (e *Engine) inputPrint(id string, set health.InputSet, ctx printCtx) uint64` — wrapping sum of: `Source.Cache.Kinds[gvr].Hash` per declared kind (all served kinds and Namespaces for `Owned`); the install's metrics identity (as `encodeMetrics`); a hash of the verifier `Result`; the views memo prints; `kc.String()`; the process hash (3.2); the prints of declared checks' outputs this run; the declared collected values' fingerprints.
+- `func (e *Engine) inputPrint(id string, set health.InputSet, ctx printCtx) uint64` — wrapping sum of: `Snapshot.Synced`; `Source.Cache.Kinds[gvr].Hash` **and** `Source.Cache.Access[gvr]` (OK and error text) per declared kind, so a watch that fails or recovers with unchanged objects changes the print (review finding 2) (all served kinds and Namespaces for `Owned`); the install's metrics identity (as `encodeMetrics`); a hash of the verifier `Result`; the views memo prints; `kc.String()`; the process hash (3.2); the prints of declared checks' outputs this run; the declared collected values' fingerprints.
 - A check is skipped when `Print` equals its memo, `Clock` is false and its memo's wake time is zero or after now. A skipped check's findings, result and wake time are reused, and its wake time is re-added to the engine's deadlines.
 - **KGWUI-012 persistence stays in `pkg/engine/persist.go` (our call):** it runs once over every install's views before health and feeds the index; moving it into a Store would split one step across installs.
 
-- [ ] **Step 1: Failing tests** `TestUnchangedInputsSkipCheck` (counter check: second compute with an annotation-only edit to an undeclared kind → not run), `TestDueDeadlineRunsCheck` (fake clock at `wake + 1 ns` → run), `TestStoreWritingCheckStillSkipped`, `TestMemoNeverOutlivesStaleness` (`xDS rejects` with `Clock`: always runs; a narrow check with `Metrics` and `WakeAt(collected + maxAge)` turns unavailable exactly then), `TestSkippedCheckKeepsGraceDeadline`.
-- [ ] **Step 2: Implement, run** `go test ./pkg/engine ./pkg/health -race` → PASS; `go test -run '^$' -bench BenchmarkCompute -count 5 ./pkg/engine` and record the warm delta in the brief. **Commit** `perf(engine): memoize checks on their declared inputs`.
+- [ ] **Step 1: Failing tests** `TestUnchangedInputsSkipCheck` (counter check: second compute with an annotation-only edit to an undeclared kind → not run), `TestDueDeadlineRunsCheck` (fake clock at `wake + 1 ns` → run), `TestStoreWritingCheckStillSkipped`, `TestMemoNeverOutlivesStaleness` (`xDS rejects` with `Clock`: always runs; a narrow check with `Metrics` and `WakeAt(collected + maxAge)` turns unavailable exactly then), `TestSkippedCheckKeepsGraceDeadline`, `TestAccessFailureAndRecoveryRerunChecks` (objects unchanged, a kind's watch fails: `cluster access` reruns and reports it; it recovers: reruns again).
+- [ ] **Step 1b: API equivalence (review finding 13).** `TestMemoizedResponsesEqualUncached` in `pkg/api/memo_test.go`: two engines over the same scripted sequence, one with `Runtime.Print` nil; after each step, `/health`, `/overview`, `/findings` and later `/diagnostics` bodies are byte-equal. Steps: an access failure and recovery, a collector value expiring, a process change (3.2 extends the script), a deadline passing, an annotation-only edit.
+- [ ] **Step 2: Implement, run** `go test ./pkg/engine ./pkg/health ./pkg/api -race` → PASS; `go test -run '^$' -bench BenchmarkCompute -count 5 ./pkg/engine` and record the warm delta in the brief. **Commit** `perf(engine): memoize checks on their declared inputs`.
 
 ### Task 19: Delegation memory carry-over
 
-**Files:** Create `pkg/computed/bound.go`, `pkg/computed/bound_test.go`; Modify `pkg/computed/kgw23/fit.go:149-166`, `pkg/computed/kgw24/fit.go:149-166` (merge calls `BoundPath`), `pkg/api/details.go:48` and the page-budget accounting; Test `pkg/api/delegation_test.go`.
+**Files:** Create `pkg/computed/bound.go`, `pkg/computed/bound_test.go`; Modify `pkg/computed/kgw23/fit.go:149-166`, `pkg/computed/kgw24/fit.go:149-166` (merge reports `too-large`), `pkg/computed/delegation.go` (reason `too-large` on a context), `pkg/api/details.go:48` and the page-budget accounting, `pkg/api/explain.go` (display clip); Test `pkg/api/delegation_test.go`. **⚠ guardrail** (7 files).
 
-**Interfaces:** `const MaxPathBytes = 4096`; `func BoundPath(p string) (string, bool)` — cut at a UTF-8 boundary below 4 KiB minus the marker, append `…[truncated]`, report the cut. The 100,000-unit response budget charges reason text and JSON-escaped bytes at 1 unit per 32 bytes after escaping.
+**Interfaces (review finding 1):** `const MaxPathBytes = 4096`. A path used in computation is never cut: `merge` returns `ok=false` when the joined path would exceed `MaxPathBytes`, and the traversal marks that context `unknown` with reason `too-large`, which the completeness rules already treat as incomplete, so no negative finding (KGWUI-011, KGWUI-012) follows. `func ClipDisplay(p string) string` cuts only display strings at a UTF-8 boundary with `…[truncated]`. The 100,000-unit response budget charges reason text and JSON-escaped bytes at 1 unit per 32 bytes after escaping.
 
-- [ ] **Step 1: Failing tests** `TestInheritMergeBoundsPath` (an 8-layer inherit chain of 1 KiB segments → ≤ 4 KiB with the marker, both rule sets), `TestPageBudgetChargesReasonAndEscaping` (a page of rows with 2 KiB reasons full of `"` and `<` stops earlier than one with short reasons; the cursor resumes without loss).
-- [ ] **Step 2: Implement, run, commit** `fix(computed): bound inherited path bytes; charge reason text and escaping in the page budget`.
+- [ ] **Step 1: Failing tests** `TestOversizedInheritIsTooLargeNotDropped` (an 8-layer inherit chain of 1 KiB segments: the child's context is `unknown`/`too-large` on both rule sets, never `dropped`; no KGWUI-011 or KGWUI-012 through `/health`), `TestComputedPathsAreNeverClipped` (a 4,095-byte path still fits literally), `TestDisplayClipOnly` (the API shows the clipped string with the marker), `TestPageBudgetChargesReasonAndEscaping` (a page of rows with 2 KiB reasons full of `"` and `<` stops earlier than one with short reasons; the cursor resumes without loss).
+- [ ] **Step 2: Implement, run, commit** `fix(computed): oversized inherited paths are too large to compute; charge reason text and escaping in the page budget`.
 
 ### Task 20: Captures: the NACK fixture, controller metrics, proxy stats; 2.5 if cheap
 
 **Files:** Create `test/e2e/fixtures/nack.yaml`, `pkg/ctrlmetrics/testdata/{v2.3.11,v2.4.7}-rejects-{a,b}.txt`, `…-restart.txt`, `pkg/proxystats/testdata/{v2.3.11,v2.4.7}-stats-{ok,rejecting}.txt`; optional `pkg/ctrlmetrics/testdata/v2.5.0-rc.1-perclient.txt`; Modify `test/e2e/setup.sh` (`NACK=1` applies the fixture), `docs/phases/phase-3/phase-3.1-brief.md`.
 
-No NACK fixture exists in `test/e2e` today (the design says "the existing NACK fixture"); this task creates it.
+No NACK fixture exists in `test/e2e` today; this task creates it (design §21).
 
 - [ ] **Step 1: Find two reliable rejects** on both tags, one per xDS type: candidates are an HTTPRoute `RegularExpression` path above Envoy's regex program-size limit (RouteConfiguration) and a cluster-level value Envoy rejects (Cluster). Keep the first pair that, on both tags, gives `kgateway_envoy_xds_rejects_active > 0` with the Gateway still `Programmed=True`. Record the observation in the brief.
 - [ ] **Step 2: Capture** with the controller scaled to 2 replicas: `/metrics` from each replica (`kubectl --kubeconfig "$E2E_DIR/kubeconfig" --context kind-kgwui-e2e get --raw /api/v1/namespaces/kgw-a/pods/<pod>:9092/proxy/metrics`), then again after `kubectl delete pod` of one replica; proxy `/stats?usedonly` through the stats listener before and during the reject. Strip nothing but timestamps; check every file with the forbidden-terms grep.
@@ -598,18 +608,20 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 
 ### Task 35: Watches: proxy Pods, Events and CRD metadata
 
-**Files:** Create `pkg/cache/events.go`, `pkg/cache/crds.go`, `pkg/cache/events_test.go`; Modify `pkg/cache/cache.go:51-90` (Snapshot, Config), `pkg/app/app.go` (selectors, toggles), `cmd/kgateway-ui/main.go` (flags). **⚠ guardrail** (6 files).
+**Files:** Create `pkg/cache/events.go`, `pkg/cache/crds.go`, `pkg/cache/events_test.go`; Modify `pkg/cache/cache.go:51-90` (Snapshot, Config), `pkg/health/checks.go:49-70` (`cacheCheck` scope), `pkg/app/app.go` (selectors, toggles), `cmd/kgateway-ui/main.go` (flags), `internal/boundary/imports_test.go` (two entries), `pkg/api/api_test.go`. **⚠ guardrail** (9 files).
 
 **Interfaces:**
 - `Config.ProxyPodSelectors []labels.Selector`; `Config.Events bool`; `Config.CRDs bool`; `Config.Metadata metadata.Interface`.
 - `Snapshot.ProxyPods []*corev1.Pod`; `Snapshot.Events []EventFact`; `Snapshot.CRDs []CRDMeta`; Access keys `ProxyPodsGVR` (`pods`, selector-scoped name `pods#proxy`), `EventsGVR`, `CRDsGVR`.
-- `type EventFact struct { PodUID types.UID; Namespace, Reason string; Count int32; Last time.Time; Probe string }` — kept reasons `Unhealthy`, `BackOff`, `Failed`, `FailedScheduling`, `FailedMount`. `Probe` is `readiness`, `liveness`, `startup` or `""`.
+- `type EventFact struct { UID, PodUID types.UID; Namespace, Reason string; Count int32; First, Last time.Time; SeriesCount int32; SeriesLast time.Time }` — kept reasons `Unhealthy`, `BackOff`, `Failed`, `FailedScheduling`, `FailedMount`. No message field.
+- `type EventDeltas` (in `events.go`): per Event UID the last count seen and a bounded list of `(at, delta)` observations within 15 min; an Event first seen with a count above 1 records that count as the baseline, uncounted ("unknown"); a series uses `SeriesCount`, never `Count` and `SeriesCount` together (review finding 7). `Snapshot.EventDeltas map[types.UID][]Observation` keyed by Pod UID, plus `Snapshot.EventHistoryUnknown map[types.UID]bool`.
 - `type CRDMeta struct { Name, Group, BundleVersion, Channel string }` — groups `gateway.networking.k8s.io` and `gateway.networking.x-k8s.io` only, filtered client-side.
 - The Events informer uses field selector `type=Warning,involvedObject.kind=Pod` and a transform that keeps an Event only when its `involvedObject.uid` is a currently known controller or proxy Pod UID (a set the Pod informers maintain); at most 10,000 kept, oldest dropped, and `Snapshot.EventsCapped bool` set.
-- **Probe type (spec conflict, ask the user at task start):** §9.3 serves the probe type, §18.2 forbids reading Event messages, and Kubernetes carries the probe type only in the message. Proposed: the transform reads the message's first word against `Readiness|Liveness|Startup` and discards the message. If the user declines, `Probe` stays `""` and 020 says "probe".
+- **Probe type (ruling A2):** Event messages stay unread. The probe type comes from the Pod spec in `pkg/process/kube.go` (Task 37): exactly one probe type defined on the container → that type; otherwise "a probe".
+- **Required vs optional access (review finding 3):** `cacheCheck` (`cluster access`, required) iterates only the core GVRs: served kinds, `NamespacesGVR`, `PodsGVR` (controller selector) and `DeploymentsGVR`. `ProxyPodsGVR`, `EventsGVR`, `CRDsGVR` (and in 3.4 Services and EndpointSlices) are optional: a denial or failure reaches only the dependent checks' `NotAvailable` (Task 36), never KGWUI-008.
 - `app.Options.Diagnostics struct { NoEvents, NoCRDs, NoProxyStats, NoEndpoints bool; ControllerLogs bool; ControllerLogsNamespaces []string }` (zero value keeps the defaults); flags `--diagnostics-events`, `--diagnostics-crds`, `--diagnostics-proxy-stats`, `--diagnostics-endpoints` (default true), `--diagnostics-controller-logs` (default false).
 
-- [ ] **Step 1: Failing tests** `TestEventsTransformKeepsOnlyInstallPods`, `TestEventBeforePodIsKeptOnNextUpdate` (Review Focus 5: Event before Pod dropped; the Event's next count update after the Pod arrives is kept), `TestEventsCap`, `TestCRDMetadataKeepsGatewayGroups`, `TestToggleOffStartsNoWatch` (fake client records no `events` watch), `TestDeniedWatchReportsAccess`.
+- [ ] **Step 1: Failing tests** `TestEventsTransformKeepsOnlyInstallPods`, `TestEventBeforePodIsKeptOnNextUpdate` (Review Focus 5: Event before Pod dropped; the Event's next update after the Pod arrives is kept as a baseline, and later increments count), `TestFirstSeenCountIsUnknown` (an Event first seen with count 50 contributes 0 and marks history unknown), `TestSeriesCountedOnce`, `TestEventTransformKeepsNoMessage` (a message holding `secret-value` is absent from the cache objects), `TestEventsCap`, `TestCRDMetadataKeepsGatewayGroups`, `TestToggleOffStartsNoWatch` (fake client records no `events` watch), `TestDeniedWatchReportsAccess`, and through the API `TestDeniedOptionalWatchNeverUnknown` (Events and CRDs denied: no KGWUI-008, `cluster access` OK, install state unchanged; after recovery the dependent checks run again).
 - [ ] **Step 2: Implement, run, commit** `feat(cache): proxy Pods, Warning Events and Gateway API CRD metadata`.
 
 ### Task 36: Availability and core capabilities
@@ -621,7 +633,7 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 - `CheckResult.Unavailable Availability \`json:"unavailable,omitempty"\``.
 - `func NotAvailable(name string, why Availability, detail string, at time.Time) CheckResult` — `OK: false`, `Required: false`, no finding.
 - `func CoreCapabilities(snap *cache.Snapshot, d app.Diagnostics, collected collect.Snapshot) []api.Capability` (in `pkg/app`): `processes` (proxy Pods watch), `events`, `crds`, then `proxyStats`, `controllerLogs`, `endpoints` as later tasks add them; `off` from the toggle, `denied` from a 403 in Access, `failing` otherwise.
-- `RollUp` ignores results with `Unavailable` set; "What was checked" shows them as not available with the reason.
+- `RollUp` ignores results with `Unavailable` set; "What was checked" shows them as not available with the reason. With Task 35's `cacheCheck` scope, an optional watch's failure surfaces only here.
 
 - [ ] **Step 1: Failing tests** `TestNotAvailableNeverUnknown` (through `/health`: state stays healthy), `TestRequiredChecksKeepTheirFlag`, `TestMetaCapabilityStatesFromToggles` (off, denied, failing).
 - [ ] **Step 2: Implement, run, commit** `feat(health): not-available checks with a reason; core capability states`.
@@ -631,7 +643,7 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 **Files:** Create `pkg/process/process.go`, `pkg/process/kube.go`, `pkg/process/kube_test.go`; Modify `pkg/install/install.go` (`ProxyPodDetector`), `pkg/install/upstream.go`, `pkg/extension/extension.go` (`WithProcessSource`), `pkg/engine/engine.go` (process data per install, hash), `pkg/health/finding.go` (`Input.Process`), `internal/boundary/imports_test.go` (`pkg/process/kube.go`: "process facts from Pods, Deployments and Events"). **⚠ guardrail** (9 files).
 
 **Interfaces:**
-- `process.Source`, `Set`, `Process` exactly as §9.1, plus `type Rollout struct { Progressing bool; Reason string; NewHash string; SettledAt *time.Time }`, `type Termination struct { Reason string; ExitCode int32; At time.Time }`, `type ProbeFailures struct { Type string; Count int; Last time.Time }` (window 15 min from Events).
+- `process.Source`, `Set`, `Process` exactly as §9.1, plus `type Rollout struct { Progressing bool; Reason string; SettledAt *time.Time }` (no template hash; review finding 8), `type Termination struct { Reason string; ExitCode int32; At time.Time }`, `type ProbeFailures struct { Type string; Count int; Last time.Time; HistoryUnknown bool }` (observed deltas in 15 min from `Snapshot.EventDeltas`; `Type` from the Pod spec: the one defined probe type, else `""` shown as "a probe").
 - `type ProxyPodDetector interface { ProxyPodSelector() labels.Selector }` (optional on a Detector); upstream: `kgateway=kube-gateway,app.kubernetes.io/component=proxy`.
 - `process.Kube{}` reads controller Pods, proxy Pods (a Pod belongs to a proxy Deployment when the Deployment's `spec.selector` matches it in the same namespace), Deployments and `Snapshot.Events`. `Version` from the image tag of the container whose image's last path segment is `envoy-wrapper` (proxies) or the controller container; termination message never read.
 - `health.Input.Process *ProcessData` with `type ProcessData struct { Controller process.Set; Proxies map[objects.Ref]process.Set; Print uint64 }`.
@@ -647,11 +659,11 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 - Codes `CodeProcessRestarting = "KGWUI-019"` (slug `process-restarting`), `CodeProbeFailing = "KGWUI-020"` (`probe-failing`), `CodeRolloutStuck = "KGWUI-021"` (`rollout-stuck`).
 - `type Evidence interface{ EvidenceKind() string }`; `Finding.Facts Evidence \`json:"evidence,omitempty"\`` (the existing `Finding.Evidence []objects.Ref` stays the dependency set of §14 rule 12); `ProcessEvidence{Restarts, Termination, Waiting, Probe}` kind `process`.
 - 019: restart count grew while watched (previous count per process ID in the Store) or last termination finished within 15 min; one per subject (controller Deployment, or the Gateway for proxies); exit code 2 on the controller adds the panic note and `kubectl logs --previous`; `WakeAt(lastRestart + 15 min)`.
-- 020: ≥ 3 probe failures on one Pod in 15 min from `Unhealthy` Events; `WakeAt(last + 15 min)`.
-- 021: `Progressing=False/ProgressDeadlineExceeded`, or a newest-ReplicaSet Pod (by `pod-template-hash` against the current template) waiting with `ImagePullBackOff`, `ErrImagePull`, `InvalidImageName` or `CreateContainerConfigError` for more than 2 min while older Pods serve; `WakeAt(waitingSince + 2 min)`. No ready replica → 005/006 instead.
+- 020: ≥ 3 observed probe failures (deltas of `Unhealthy` Events, Task 35) on one Pod in 15 min; uncounted history adds the note "earlier failures not counted"; `WakeAt(oldest observation + 15 min)`.
+- 021: `Progressing=False/ProgressDeadlineExceeded` only. Waiting reasons of the Deployment's Pods (`ImagePullBackOff`, `ErrImagePull`, `InvalidImageName`, `CreateContainerConfigError`, `CrashLoopBackOff`) are evidence. No template-hash comparison (review finding 8). No ready replica → 005/006 instead.
 - 005/006 detail: "0/2 ready: CrashLoopBackOff, last exit OOMKilled" form.
 
-- [ ] **Step 1: Failing tests** (boundary: Pods, Deployments, Events in → `/health` JSON out): restart in window then expiry at 15 min + 1 s; OOMKilled; exit code 2; CrashLoopBackOff detail; probe failures 2 (none) and 3; aggregated Event counts as a window (`TestAggregatedEventCountIsAWindowNotATotal`, Review Focus 5); `ProgressDeadlineExceeded`; image pull on the new ReplicaSet beside a ready old one at 1 min 59 s (none) and 2 min 1 s; no ready replica gives 005/006 and no 021; events off → 020 not available (`off`), install not unknown.
+- [ ] **Step 1: Failing tests** (boundary: Pods, Deployments, Events in → `/health` JSON out): restart in window then expiry at 15 min + 1 s; OOMKilled; exit code 2; CrashLoopBackOff detail; probe failures 2 (none) and 3 observed; an Event first seen with count 50 (none); aggregated Event counts as a window (`TestAggregatedEventCountIsAWindowNotATotal`, Review Focus 5); the probe type from a one-probe container and "a probe" from a two-probe one; `ProgressDeadlineExceeded`; an image pull failure beside a ready old Pod is evidence only, no 021 without `ProgressDeadlineExceeded`; no ready replica gives 005/006 and no 021; events off → 020 not available (`off`), install not unknown.
 - [ ] **Step 2: Implement, run, commit** `feat(health): process restarts, probe failures and stuck rollouts`.
 
 ### Task 39: KGWUI-022 version skew
@@ -675,6 +687,7 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 **Interfaces:**
 - Check name stays `xDS rejects`, `Required: true`, inputs `Owned`, `Metrics`, `Process`, `Clock`, `Collected: ["proxy-stats/stats"]` (Task 42 fills it).
 - `XDSRejectsEvidence` (kind `xds-rejects`) per §13.3: `types[{typeUrl, streams, reportedBy, firstSeen, totalSinceFirstSeen}]`, `proxies{ready, desired}`, `statusSaysHealthy`, `recentlyChanged` (Task 44), `proxyStats?` (Task 42), `logEvents?` (Task 67).
+- The active state is the controller's `rejects_active` gauge only. With controller metrics unavailable the check is unavailable as today (KGWUI-008, required), whatever proxy stats show (review finding 4).
 - Message: Gateway status current and `Programmed=True` → the status-says-healthy draft; else "Proxies reject this Gateway's config".
 - **Restart hold (algorithm fixed by §8.3):** the Store keeps the previous controller Pod UIDs and restart counts, and the previous set of rejecting Gateways. A Gateway whose rejects disappear while some controller Pod has a new UID or a higher restart count is held until `now + 60 s`: no 001 finding for it, the check result is `Pending` with an error naming the restart, `WakeAt(holdEnd)`, and `Retain(id)` keeps its first-seen time. A reject that returns during the hold continues with that time. The hold clears at its end or when the reject returns.
 - `Finding.Evidence` (deps): controller Pods in `reportedBy`, proxy Pods in `proxyStats`.
@@ -684,17 +697,28 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 
 ### Task 41: Proxy Envoy stats collector
 
-**Files:** Create `pkg/proxystats/collector.go`, `pkg/proxystats/parse.go`, `pkg/proxystats/stats.go`, `pkg/proxystats/scrape.go`, `pkg/proxystats/proxystats_test.go`, `pkg/computed/envoynames.go`; Modify `pkg/app/app.go` (register as a core collector), `internal/boundary/imports_test.go` (`pkg/proxystats/scrape.go`: "scrapes proxy Pods"). **⚠ guardrail** (8 files).
+**Files:** Create `pkg/proxystats/source.go`, `pkg/proxystats/collector.go`, `pkg/proxystats/parse.go`, `pkg/proxystats/stats.go`, `pkg/proxystats/kube.go`, `pkg/proxystats/proxystats_test.go`, `pkg/computed/envoynames.go`; Modify `pkg/extension/extension.go` (`WithProxyStatsSource`), `pkg/app/app.go` (register as a core collector), `internal/boundary/imports_test.go` (`pkg/proxystats/kube.go`), `examples/downstream/acme.go`, `examples/downstream/main_test.go`. **⚠ guardrail** (12 files, likely > 400 lines).
 
 **Interfaces:**
+- **Replaceable source (review finding 12):**
+```go
+// Source finds a Gateway's proxies, fetches their stats and interprets them.
+type Source interface {
+	Targets(in install.Resolved, gw objects.Ref, snap *cache.Snapshot) ([]Target, bool) // false: not observed
+	Fetch(ctx context.Context, t Target) ([]byte, error)                               // bounded by the caller
+	Interpret(t Target, body []byte) (PodStats, error)
+}
+type Target struct { ID, Name string; Gateway objects.Ref; Addr string }
+```
+  `proxystats.Kube` (in `kube.go`) is the default: proxy Pods from `Snapshot.ProxyPods`, Pod IP or `pods/proxy` transport, port 9091, `StatsFilter`, Envoy text format. `extension.WithProxyStatsSource(s proxystats.Source) Option` replaces it. The collector owns the interval, bounds, concurrency and publishing for any Source.
 - `const StatsFilter` — the one regex of the §8.8 table (`control_plane.connected_state`, `cluster_manager.warming_clusters`, `listener_manager.total_listeners_warming`, `listener_manager.lds.update_(rejected|success)`, `cluster_manager.cds.update_(rejected|success)`, `http\..*\.rds\..*\.update_rejected`, `cluster\..*\.update_rejected`, `server.state`, `server.uptime`).
 - Request `GET http://<podIP>:9091/stats?usedonly&filter=<StatsFilter>` in-cluster, `pods/proxy` with the user's rights locally; every metrics interval (10 s); body ≤ 1 MiB (over → `failing`); timeout `min(interval/2, 5 s)`; at most 16 Pods at once per install.
-- `type PodStats struct { UID, Name string; Gateway objects.Ref; Connected *bool; WarmingListeners, WarmingClusters *int64; LDS, CDS Pair; RDS, Clusters map[string]int64 /* update_rejected per Envoy name */; ServerState string; Uptime int64; Err string }`; `type Pair struct{ Rejected, Success int64 }`.
+- `type PodStats struct { UID, Name string; Gateway objects.Ref; Connected *bool; WarmingListeners, WarmingClusters *int64; LDS, CDS Pair; RDS, Clusters map[string]int64 /* update_rejected per Envoy name */; ServerState string; Uptime int64; Err string }`; `type Pair struct{ Rejected, Success int64 }`. Raw counters only; Task 42 turns them into "rejects observed since the last scrape" per Pod UID. No field claims an active reject (review finding 4).
 - Publishes key `proxy-stats/stats` with `map[installID][]PodStats` and a content fingerprint.
 - `computed.EnvoyNamer interface { Object(envoyName string) (objects.Ref, bool) }` on `computed.Selection`; nil means names are shown as Envoy names only. Ship nil in `kgw23`/`kgw24`; Task 53 records the naming observed on both tags, and a verified namer ships only with per-version fixtures.
 
-- [ ] **Step 1: Failing tests** parse the Task 20 captures; a refused listener, a timeout and a 1 MiB + 1 byte body → `failing`; a self-managed Gateway → `not-observed`; at most 16 concurrent scrapes (blocking stub); `TestProxyStatsPerInstall` (Review Focus 1); a stat name outside the filter is ignored.
-- [ ] **Step 2: Implement, run, commit** `feat(proxystats): Envoy stats from each proxy's stats listener (D-037)`.
+- [ ] **Step 1: Failing tests** parse the Task 20 captures; `TestDownstreamProxyStatsSource` in `examples/downstream/main_test.go` (an `acme` Source with its own targets and a JSON stats format feeds 026 through `/health`); a refused listener, a timeout and a 1 MiB + 1 byte body → `failing`; a self-managed Gateway → `not-observed`; at most 16 concurrent scrapes (blocking stub); `TestProxyStatsPerInstall` (Review Focus 1); a stat name outside the filter is ignored.
+- [ ] **Step 2: Implement, run, commit** `feat(proxystats): replaceable proxy stats source; Envoy stats from each proxy's stats listener (D-037)`.
 
 ### Task 42: KGWUI-025, 026 and per-Pod 001 evidence
 
@@ -703,10 +727,10 @@ export function viaParam(trail: Crumb[]): string           // the `via` query va
 **Interfaces:**
 - `CodeProxyConfigWarming = "KGWUI-025"` (`proxy-config-warming`), `CodeProxyDisconnected = "KGWUI-026"` (`proxy-disconnected`), warnings, one per Gateway, Pods as evidence; mature after 60 s of the condition on a Ready proxy (start kept in the Store, `WakeAt(start + 60 s)`).
 - `ProxyStatsEvidence` kind `proxy-stats`.
-- 001 evidence per Pod: a type is active while the last change of its pair was a reject (previous pair per Pod UID in the Store); RDS and cluster names listed. With controller metrics unavailable and a proxy showing an active reject, 001 fires from proxy stats; a disagreement between the two is evidence only.
+- 001 evidence per Pod: `rejectsSinceLastScrape` per type, the delta of `update_rejected` against the previous value per Pod UID in the Store (a new UID or a lower value is a reset, read as 0); RDS and cluster names with a positive delta listed. Proxy stats never raise 001 and never mark it active; a disagreement with the controller gauge is evidence only (review finding 4).
 
-- [ ] **Step 1: Failing tests** 025 and 026 at 59 s (none) and 61 s; a not-Ready proxy (none); an active and a recovered reject per Pod; RDS and cluster names; 001 from proxy stats with metrics unavailable; `TestProxyStatsResetIsNotAReject` (Review Focus 2: a new UID with counters at zero is neither a reject nor a recovery).
-- [ ] **Step 2: Implement, run, commit** `feat(health): proxy config warming, lost controller connection, per-Pod reject evidence`.
+- [ ] **Step 1: Failing tests** 025 and 026 at 59 s (none) and 61 s; a not-Ready proxy (none); rejects observed since the last scrape per Pod (`(3,8)` → `(4,9)` reads as 1 observed reject, never as "rejecting now"); RDS and cluster names; `TestNoRejectFindingFromProxyStatsAlone` (controller metrics unavailable, proxy stats show rejects: no 001, the check unavailable as today); `TestProxyStatsResetIsNotAReject` (Review Focus 2: a new UID with counters at zero is neither a reject nor a recovery).
+- [ ] **Step 2: Implement, run, commit** `feat(health): proxy config warming, lost controller connection, observed rejects per Pod as evidence`.
 
 ### Task 43: `gateway-rejecting`, the data-plane and process groups
 
@@ -742,14 +766,14 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 
 ### Task 45: Diagnostics and processes endpoints
 
-**Files:** Create `pkg/api/diagnostics.go`, `pkg/api/processes.go`, `pkg/api/diagnostics_test.go`; Modify `pkg/api/diag_types.go`, `pkg/api/handlers.go`, `pkg/api/findings.go` (evidence and next steps in detail), `pkg/api/golden_test.go`; goldens `diagnostics.json`, `diagnostics-restricted.json`, `processes.json`, `processes-restricted.json`, `finding-detail-xds-rejects.json`, `…-process.json`, `…-version-skew.json`, `…-proxy-stats.json` (+ restricted). **⚠ guardrail** (≥ 12 files).
+**Files:** Create `pkg/api/diagnostics.go`, `pkg/api/processes.go`, `pkg/api/diagnostics_test.go`; Modify `pkg/api/diag_types.go`, `pkg/api/handlers.go` (incl. `visibleHealth:145`, which clears only message, detail and since today), `pkg/api/findings.go` (evidence and next steps in detail), `pkg/api/golden_test.go`; goldens `diagnostics.json`, `diagnostics-restricted.json`, `processes.json`, `processes-restricted.json`, `finding-detail-xds-rejects.json`, `…-process.json`, `…-version-skew.json`, `…-proxy-stats.json` (+ restricted). **⚠ guardrail** (≥ 12 files).
 
 **Interfaces:**
 - `GET …/diagnostics` → `Diagnostics` (§13.3): verdict (state, problems, `oldestSince`, reason), top 10 groups (`GroupRow` with first 5 affected and `affectedTotal`), `groupTotal`, process summary, data-plane summary, `checks`, `collectedAt`. Precomputed per Model.
 - `GET …/processes` → `{controller: ProcessSetDTO, proxies: Page<GatewayProcesses>}`; filters `health`, `q`, `skew`, `restarts`.
 - Authorizer rules 13 (restricted group rows; visible-only affected and `affectedTotal`; install-wide members), 14 (recently changed each authorized, hidden ones left out without a count), 15 (next steps name only visible objects), 16 (process facts need the Deployment or Gateway; Pod names and per-Pod facts also need the Pod).
 
-- [ ] **Step 1: Failing tests** `TestGroupsAndNextStepsHideHiddenObjects`, `TestDiagnosticsTopTen`, `TestProcessesFilters`, `TestProcessSetCountsOnlyWhenPodHidden`, the evidence dependency table rows for 001, 019–022, 025, 026, goldens and the additive test.
+- [ ] **Step 1: Failing tests** `TestTypedEvidenceRestrictedOnHealthAndOverview` (review finding 13: a restricted finding on `/health` and `/overview` carries no `evidence`, no suggested fix and no next steps; a visible finding with a hidden dependency gets `evidenceRestricted` and no `evidence`), `TestGroupsAndNextStepsHideHiddenObjects`, `TestDiagnosticsTopTen`, `TestProcessesFilters`, `TestProcessSetCountsOnlyWhenPodHidden`, the evidence dependency table rows for 001, 019–022, 025, 026, goldens and the additive test.
 - [ ] **Step 2: Implement, run, commit** `feat(api): diagnostics and processes endpoints`.
 
 ### Task 46: Gateway detail: data plane and proxies
@@ -759,6 +783,7 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 **Interfaces:** `DataPlaneDTO` (§13.3) with `snapshot` labelled as the controller's build, never a finding; `Proxies ProcessSetDTO`. Route rows gain the `gateway-rejecting` flag on the wire.
 
 - [ ] **Step 1: Failing tests** gateway detail with rejects, without, with stats off; restricted Pods. **Step 2: Implement, run, commit** `feat(api): Gateway data plane and proxies sections`.
+- [ ] **Step 3: Interim measurement before the 3.2 pages (review, budgets row).** At Large in the worst case, with the proxy Pod, Event and CRD watches, process data, proxy stats (stub, 2 per Gateway), 001 and 019–022, 025, 026 evidence, the 3.2 groups and every check Store: run `TestBudgetWarmRecompute`, `TestBudgetHeap`, `TestBudgetDenseMemory` (median of 5), `TestBudgetAnalyzerStage` and the spec-edit stream (`-short`). Record in `bench/3.2-interim.txt` with the headroom per gate. Any gate broken, or retained heap within 2 MiB of a gate: **STOP and give the user the numbers** before Task 48.
 
 ### Task 47: RBAC, chart toggles and the README fix
 
@@ -836,29 +861,30 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 
 ### Task 57: KGWUI-013 and 014 from status
 
-**Files:** Create `pkg/health/refs.go`, `pkg/health/refs_test.go`, `pkg/kinds/catalog.go`; Modify `pkg/kinds/monitor.go` (publish the catalog), `pkg/health/checks.go` (002 skips conditions a specific code owns), `pkg/health/finding.go` (codes, `Input.Catalog`). **⚠ guardrail** (6 files).
+**Files:** Create `pkg/health/refs.go`, `pkg/health/refs_test.go`, `pkg/kinds/catalog.go`; Modify `pkg/kinds/monitor.go` (publish the catalog), `pkg/health/checks.go` (002 skips conditions a specific code owns), `pkg/health/finding.go` (codes, `Input.Catalog`), `pkg/api/additive_test.go` (exceptions), `pkg/api/testdata/golden/health.json` and other goldens carrying these conditions, `test/e2e/api_test.go` (002 expectations for these reasons move to 013/014). **⚠ guardrail** (≥ 9 files).
 
 **Interfaces:**
 - `CodeRefUnresolved = "KGWUI-013"` (`ref-unresolved`), `CodeRefNotPermitted = "KGWUI-014"` (`ref-not-permitted`), errors; Key parentRef as written or listener name.
 - `kinds.Catalog` — every served (group, kind) from discovery: `func (c Catalog) Served(group, kind string) bool`, `func (c Catalog) GroupsWithKind(kind string) []string`.
 - 013 explanation, first match wins: (1) group/kind not served; (4) the controller's reason and message, clipped. (2) and (3) arrive in Task 77. Listener `InvalidCertificateRef` quotes the controller.
 - 014: route parent or listener `ResolvedRefs=False/RefNotPermitted`; explanation (1) runs first, so a wrong group is explained as a wrong group.
+- **Attribution (review finding 6):** the condition names a parent or listener, not a ref. Evidence carries `candidates []RefLocation` (`{path: "spec.rules[2].backendRefs[0]", ref}`): for 014 every cross-namespace ref of the failing field on that route or listener; for 013 the refs the UI's own explanation singles out (kind not served, missing Service, missing port), else every ref of the failing field. `attributed bool` is true only with exactly one candidate.
 - One condition, one finding: 013/014 replace 002 for those reasons (D-030).
 
-- [ ] **Step 1: Failing tests** route and listener cases; a typo'd group; a kgateway-specific field (no YAML); `TestSpecificCodeReplacesConditionFalse` (no 002 for those conditions; other `False` conditions still 002).
+- [ ] **Step 1: Failing tests** route and listener cases; a typo'd group; a kgateway-specific field (no YAML); a route with two cross-namespace backendRefs (two candidates, not attributed); `TestSpecificCodeReplacesConditionFalse` (no 002 for those conditions; other `False` conditions still 002); the additive test passes with the listed exceptions only (a new unlisted scalar change still fails).
 - [ ] **Step 2: Implement, run, commit** `feat(health): unresolved and not-permitted references`.
 
 ### Task 58: Suggested fixes for 013 and 014
 
 **Files:** Create `pkg/diagnose/fix.go`, `pkg/diagnose/fix_test.go`; Modify `pkg/health/evidence.go` (`Finding.Fix *SuggestedFix`), `pkg/api/findings.go` (serve and authorize), `pkg/api/findings_test.go`.
 
-**Interfaces:** `type SuggestedFix struct { Title string; Target objects.Ref; Create bool; Path string; YAML string; Basis string; Names []objects.Ref }`. 014: the ReferenceGrant (`from`: group, kind, namespace of the referrer; `to`: group, kind, optional name) as a new object in the target namespace, spec-defined fields only. 013 (1): the ref with the one served group that has that kind, as a fragment at `spec.rules[i].backendRefs[j]`. More than one candidate → no fix. A fix naming a hidden object is dropped (§14 rule 15).
+**Interfaces:** `type SuggestedFix struct { Title string; Target objects.Ref; Create bool; Path string; YAML string; Basis string; Names []objects.Ref }`. A fix is built only for an attributed finding (Task 57, exactly one candidate); otherwise the detail lists the candidates and next steps, with no YAML (review finding 6). 014: the ReferenceGrant (`from`: group, kind, namespace of the referrer; `to`: group, kind, optional name) as a new object in the target namespace, spec-defined fields only. 013 (1): the ref with the one served group that has that kind, as a fragment at `spec.rules[i].backendRefs[j]`. More than one candidate → no fix. A fix naming a hidden object is dropped (§14 rule 15).
 
-- [ ] **Step 1: Failing tests** one group → fix, two → none; grant for backendRef and certificateRef; no fix when the grant names a hidden object; YAML parses and round-trips. **Step 2: Implement, run, commit** `feat(diagnose): deterministic suggested fixes (D-036)`.
+- [ ] **Step 1: Failing tests** one group → fix, two → none; grant for backendRef and certificateRef; `TestNoFixWithoutAttribution` (two cross-namespace refs on the failing parent: candidates listed, no YAML); no fix when the grant names a hidden object; YAML parses and round-trips. **Step 2: Implement, run, commit** `feat(diagnose): deterministic suggested fixes (D-036)`.
 
 ### Task 59: KGWUI-015 rules replaced or dropped
 
-**Files:** Create `pkg/health/rules.go`, `pkg/health/rules_test.go`; Modify `pkg/health/checks.go` (skip those reasons in 002), `pkg/diagnose/group.go` ("Replaced by policy").
+**Files:** Create `pkg/health/rules.go`, `pkg/health/rules_test.go`; Modify `pkg/health/checks.go` (skip those reasons in 002), `pkg/diagnose/group.go` ("Replaced by policy"), `pkg/api/additive_test.go` and affected goldens (exceptions for 002 → 015), `test/e2e/api_test.go` (expectations for replaced-rule routes). **⚠ guardrail** (≥ 6 files).
 
 **Interfaces:** `CodeRuleReplaced = "KGWUI-015"` (`rule-replaced`, error); Key parentRef and match index; `RuleReplacedEvidence{MatchIndex, Reason, Message, Policy *LinkedRef}`; message parse `^(Replaced|Dropped) Rule \((\d+)\): (.*)$`; a `group/Kind/namespace/name` token of a served policy kind links it; after 10 min of replacement, the #14047 hint.
 
@@ -866,19 +892,21 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 
 ### Task 60: Policy targets rule (computed)
 
-**Files:** Create `docs/phases/phase-3/computed-rules.md` (section "Policy targets", pinned per rule set), `pkg/computed/targets.go`, `pkg/computed/kgw23/targets.go`, `pkg/computed/kgw24/targets.go`, `pkg/computed/testdata/kgateway-2.{3,4}/policy-targets.yaml`; Modify `pkg/computed/rules.go` (`Rules.PolicyTargets`), `pkg/computed/golden_test.go`. **⚠ guardrail** (8 files).
+**Files:** Create `docs/phases/phase-3/computed-rules.md` (section "Policy targets", pinned per rule set), `pkg/computed/targets.go`, `pkg/computed/kgw23/targets.go`, `pkg/computed/kgw24/targets.go`, `pkg/computed/testdata/kgateway-2.{3,4}/policy-targets.yaml`, `test/e2e/fixtures/observe/policy-targets.yaml`; Modify `pkg/computed/golden_test.go`, `examples/downstream/acme.go`, `examples/downstream/main_test.go`. `pkg/computed/rules.go` is **not** changed. **⚠ guardrail** (10 files).
 
-**Interfaces:** `type TargetInput struct { Policy objects.Ref; TargetRefs []objects.TargetRef; Selectors []objects.TargetSelector; Lookup func(objects.GroupKind, ns, name string) (*unstructured.Unstructured, bool); Labelled func(objects.GroupKind, ns string, sel map[string]string) bool; Served func(objects.GroupKind) bool; ScopeKnown bool }`; `type TargetResult struct { Index int; Ref objects.TargetRef; Outcome string /* found|not-found|section-not-found|matches-nothing|unknown */ }`; `Rules.PolicyTargets(in TargetInput) []TargetResult`. Local refs in the policy's namespace (GEP-713); unknown kinds raise nothing; scope unknown → every result `unknown` (D-024).
+**Interfaces:** `type TargetInput struct { Policy objects.Ref; TargetRefs []objects.TargetRef; Selectors []objects.TargetSelector; Lookup func(objects.GroupKind, ns, name string) (*unstructured.Unstructured, bool); Labelled func(objects.GroupKind, ns string, sel map[string]string) bool; Served func(objects.GroupKind) bool; ScopeKnown bool }`; `type TargetResult struct { Index int; Ref objects.TargetRef; Outcome string /* found|not-found|section-not-found|matches-nothing|unknown */ }`; `type PolicyTargeter interface { PolicyTargets(in TargetInput) []TargetResult }` — an **optional** interface a rule set implements, detected by type assertion on `computed.Rules`, so `computed.Rules` does not change after 3.1 (review finding 15); a rule set without it raises no computed 016. Local refs in the policy's namespace (GEP-713); unknown kinds raise nothing; scope unknown → every result `unknown` (D-024).
+- **Verification granularity (review finding 9):** `TargetResult.Verifiable bool` — true only for a policy with exactly one target whose expected ancestor is that target (a Gateway) or the target's Gateway (a route). Every other shape is `not-verified`.
 
-- [ ] **Step 1: Fixtures with provenance**, written from the rules, never generated. **Step 2: Failing golden tests; implement; run; commit** `feat(computed): policy target lookup for kgateway 2.3 and 2.4`.
+- [ ] **Step 0: Observe first.** On 2.3.11 and 2.4.7 (kind `kgwui-e2e`), apply `observe/policy-targets.yaml`: a TrafficPolicy targeting one Gateway, one HTTPRoute, a route section, two routes on one Gateway, and a label selector. Record per shape which ancestors the controller writes and whether any ancestor can be tied to one target. Write the result into the `computed-rules.md` section before any code; if it contradicts the verifiable shapes above, STOP and ask the user.
+- [ ] **Step 1: Fixtures with provenance**, written from the rules and the observations, never generated. **Step 2: Failing golden tests** plus `TestRuleSetWithoutPolicyTargeterRaisesNo016` and `TestDownstreamRuleSet` (an `acme` rule set wrapping `kgw24` via `WithComputedRules`, without `PolicyTargeter`, builds and serves). **Implement; run; commit** `feat(computed): policy target lookup for kgateway 2.3 and 2.4 as an optional rule-set interface`.
 
 ### Task 61: KGWUI-016 and its verifier
 
-**Files:** Create `pkg/health/targets.go`, `pkg/health/targets_test.go`; Modify `pkg/computed/check.go` (kind `policy-target`), `pkg/health/checks.go` (016 replaces 003 when every target is missing), `pkg/api/computed_test.go`.
+**Files:** Create `pkg/health/targets.go`, `pkg/health/targets_test.go`; Modify `pkg/computed/check.go` (kind `policy-target`), `pkg/health/checks.go` (016 replaces 003 when every target is missing), `pkg/api/computed_test.go`, `pkg/api/additive_test.go` and affected goldens (exceptions for 003 → 016), `test/e2e/api_test.go:189-195` (`tpMissingTarget` expects 016 on 2.3 and 2.4). **⚠ guardrail** (≥ 7 files).
 
-**Interfaces:** `CodePolicyTargetNotFound = "KGWUI-016"` (`policy-target-not-found`); computed: warning, labelled with rule and rule set, after the policy's grace then 30 s held (Store; `WakeAt`); Key targetRef index and ref as written. Verifier: a current ancestor for a target the rule called missing → KGWUI-012 kind `policy-target`.
+**Interfaces:** `CodePolicyTargetNotFound = "KGWUI-016"` (`policy-target-not-found`); computed: warning, labelled with rule and rule set, after the policy's grace then 30 s held (Store; `WakeAt`); Key targetRef index and ref as written. Verifier, for `Verifiable` results only: a current ancestor for a target the rule called missing → KGWUI-012 kind `policy-target`. Other results show 016 labelled "not verified" and raise no KGWUI-012.
 
-- [ ] **Step 1: Failing tests** missing target, missing section, empty selector, partial targets (016 per missing target, other findings unchanged), all missing (no 003), the verifier raising 012, scope unknown, 29 s (none) and 31 s; `TestNewerThanTestedUsesComputed016` (Review Focus 4: a `v2.5.0-rc.1` controller on the 2.4 rule set shows the note and the computed 016).
+- [ ] **Step 1: Failing tests** missing target, missing section, empty selector, partial targets (016 per missing target, other findings unchanged), all missing (no 003), the verifier raising 012 for a single-target policy, a multi-target policy marked not verified with no 012, scope unknown, 29 s (none) and 31 s; `TestNewerThanTestedUsesComputed016` (Review Focus 4: a `v2.5.0-rc.1` controller on the 2.4 rule set shows the note and the computed 016).
 - [ ] **Step 2: Implement, run, commit** `feat(health): policy target not found, computed and verified`.
 
 ### Task 62: KGWUI-017 listener conflicts
@@ -912,7 +940,7 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 **Interfaces:**
 - One follow stream per controller replica (`sinceSeconds=900`), reconnecting with exponential back-off (1 s to 60 s); after a restart, one read of the previous container capped at 256 KiB. A substring prefilter on `computed.LogParser.Markers()` runs first; a line without a marker is dropped unread and never buffered beyond the line scanner.
 - `type Event struct { Time time.Time; Marker string; Gateway objects.Ref; TypeURL string; Names []string; Class string; Object *objects.Ref }`; at most 1,000 per install, oldest dropped; published as `controller-logs/events`.
-- Name grammar `^[A-Za-z0-9_.~:/-]{1,253}$`; unknown error class → `other`; 10 consecutive parser failures on marked lines → capability `controllerLogs` `failing`, "log format not recognised".
+- Names: a parser's extracted name is kept only if it equals an Envoy resource name in that Gateway's latest proxy stats (`proxy-stats/stats`, a declared input); otherwise only the class is kept. With proxy stats off or failing, no names are kept (review finding 5). Unknown error class → `other`; 10 consecutive parser failures on marked lines → capability `controllerLogs` `failing`, "log format not recognised".
 - Chart: `role-logs.yaml` renders, only with `diagnostics.controllerLogs: true`, one Role with `get` on `pods/log` and a RoleBinding per entry of `diagnostics.controllerLogsNamespaces`. The design names "the install namespace" but the chart cannot discover installs; this value is the plan's answer.
 
 - [ ] **Step 1: Failing tests** prefilter (a 1 MiB unmarked line is never parsed); reconnect with a fake stream; the 256 KiB cap; the event cap; 10 failures; toggle off (no Role, capability `off`); Role missing (`denied`); `TestLogRoleOnlyInListedNamespaces`.
@@ -920,11 +948,11 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 
 ### Task 66: Log parsers pinned per version
 
-**Files:** Create `pkg/computed/logs.go`, `pkg/computed/kgw23/logs.go`, `pkg/computed/kgw24/logs.go`, `pkg/computed/testdata/kgateway-2.{3,4}/logs/*.txt`, `pkg/ctrllogs/leak_test.go`.
+**Files:** Create `pkg/computed/logs.go`, `pkg/computed/kgw23/logs.go`, `pkg/computed/kgw24/logs.go`, `pkg/computed/testdata/kgateway-2.{3,4}/logs/*.txt`, `pkg/ctrllogs/leak_test.go`; Modify `pkg/ctrllogs/collector.go` (name check against proxy stats). The log parsers are optional rule-set interfaces like `PolicyTargeter` (Task 60).
 
 **Interfaces:** `type LogParser interface { Markers() []string; Parse(line []byte) (ctrllogs-neutral fields, ok bool, err error) }` returning only the §8.9 fields: `"xds error"` (time, Gateway, type URL; names only from Envoy's fixed NACK shapes such as `Error adding/updating listener(s) <name>:`; class from a fixed list), the snapshot-deferral line (exact text pinned from `v2.3.11` and `v2.4.7` source in this task and cited `file:line`), a Go panic (class `panic`, top frame function, previous container only), deployer apply errors (time, object kind and name, class).
 
-- [ ] **Step 1: Captured lines** from the NACK fixture on both tags (Task 20 cluster), plus synthetic lines for each class. **Step 2: Failing tests** names and class kept; unknown class → `other`; a name failing the grammar dropped; `TestLogSecretLeavesNoTrace` (Review Focus: a line embedding `AKIAFAKEKEY…`: absent from every API body, from a reflect walk of the published model, and from the UI's own `slog` output captured in the test). **Step 3: Implement, run, commit** `feat(computed): controller log parsers for kgateway 2.3 and 2.4`.
+- [ ] **Step 1: Captured lines** from the NACK fixture on both tags (Task 20 cluster), plus synthetic lines for each class. **Step 2: Failing tests** a name equal to one in the Gateway's proxy stats and the class kept; unknown class → `other`; `TestUnknownNameKeepsOnlyClass` (a well-formed name not in proxy stats is dropped); `TestLogSecretLeavesNoTrace` (review finding 5: the sentinel `AKIAFAKEKEY123456` placed in **every** accepted capture position of every marker — the listener, route and cluster name slots, the Gateway and type fields, the object name of a deployer error, the panic frame — and behind spoofed markers (a marker inside a quoted value, two markers on one line, a marker in a JSON key): absent from every API body, from a reflect walk of the published model, and from the UI's own `slog` output captured in the test). **Step 3: Implement, run, commit** `feat(computed): controller log parsers for kgateway 2.3 and 2.4`.
 
 ### Task 67: Derived log evidence
 
@@ -957,7 +985,7 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 **Files:** Create `test/e2e/fixtures/analyzer.yaml`; Modify `test/e2e/diagnostics_test.go`, `.github/workflows/e2e.yaml` (one row with `UI_EXTRA_ARGS=--diagnostics-controller-logs` and the chart value), `web/e2e/diagnostics.spec.ts`.
 
 - [ ] **Step 1: Fixtures:** a missing ReferenceGrant (014), a wrong Service port (013, controller message), a policy with a missing target (016 computed), a conflicted ListenerSet listener (017).
-- [ ] **Step 2: `TestAnalyzer`** asserts each finding and fix; `TestControllerLogSignals` (logs on): derived names and class on 001, and no response body of any endpoint contains the Envoy message substring. **Step 3: Run** both pairs → PASS; `/ui-loop` on finding detail with a fix. **Commit** `test(e2e): analyzer and log signals on kgateway 2.3 and 2.4`.
+- [ ] **Step 2: `TestAnalyzer`** asserts each finding and fix; `TestControllerLogSignals` (logs on): derived names that match proxy stats and the class on 001, and no response body of any endpoint contains the Envoy message substring. **Step 3: Run** both pairs → PASS; `/ui-loop` on finding detail with a fix. **Commit** `test(e2e): analyzer and log signals on kgateway 2.3 and 2.4`.
 
 ### Task 73: Close sub-phase 3.3
 
@@ -973,11 +1001,11 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 
 ### Task 75: Service and EndpointSlice watches
 
-**Files:** Create `pkg/cache/services.go`, `pkg/cache/services_test.go`; Modify `pkg/cache/cache.go`, `pkg/app/app.go` (toggle, capability `endpoints`), `deploy/helm/kgateway-ui/templates/clusterrole.yaml`, `deploy/helm/chart_test.go`.
+**Files:** Create `pkg/cache/services.go`, `pkg/cache/services_test.go`; Modify `pkg/cache/cache.go` (optional, not in `cluster access`, Task 35), `pkg/app/app.go` (toggle, capability `endpoints`), `deploy/helm/kgateway-ui/templates/clusterrole.yaml`, `deploy/helm/chart_test.go`, `internal/boundary/imports_test.go` (`pkg/cache/services.go`). **⚠ guardrail** (7 files).
 
 **Interfaces:** `type ServiceFact struct { Namespace, Name, Type string; Ports []ServicePort }` (`ServicePort{Name string; Port, Target int32}`); `type SliceFact struct { Namespace, Service string; Ports []SlicePort; Ready map[string]int /* port name → ready endpoints, ready unset counts as ready */ }`; `Snapshot.Services`, `Snapshot.EndpointSlices`; transforms keep only these fields (about 200 bytes each). Capability `endpoints` `on` only when both watches run.
 
-- [ ] **Step 1: Failing tests** transform shape; unset `ready` counts; toggle off (no watch, no rule); denied. **Step 2: Implement, run, commit** `feat(cache): Services and EndpointSlices, cut down at the informer (D-031)`.
+- [ ] **Step 1: Failing tests** transform shape; unset `ready` counts; toggle off (no watch, no rule); denied (no KGWUI-008, install not unknown). **Step 2: Implement, run, commit** `feat(cache): Services and EndpointSlices, cut down at the informer (D-031)`.
 
 ### Task 76: KGWUI-023 and the empty-backend group
 
@@ -1093,3 +1121,4 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 | §19 neutrality | 37, 78 |
 | §21 testing | each code's task; e2e 53, 72, 82, 86 |
 | §22 decisions | D-027 in 14; D-028–D-038 at approval (Q3) |
+| `reviews/design-codex.md` triage | 1 → 19; 2, 13 → 18, 45; 3 → 35; 4 → 40–42; 5 → 65–66; 6 → 57–58; 7, A2 → 35, 37, 38; 8 → 37–38; 9, 15 → 60–61; 10 → 57, 59, 61; 11 → Global Constraints, 35, 41, 75; 12 → 41; 14 → 6; budgets → 46 Step 3; A1 → 20 |

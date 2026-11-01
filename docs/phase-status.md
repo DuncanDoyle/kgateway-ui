@@ -8,8 +8,8 @@ Status: designing; Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.md
 
 ### Queue
 - [ ] Q1 Phase 3 design (`design.md`), incl. the KRT incremental-recompute question in the roadmap and stable finding identity (phase-2 review finding 8) — draft written 2026-10-29 without a question round (user's request); revised with user feedback 2026-10-29 to 2026-11-01 (shell and navigation, suggested fixes, proxy Envoy stats and opt-in log signals, extension seams as 3.0); awaiting user approval; open item in design §25
-- [ ] Q2 Phase 3 implementation plan (`implementation-plan.md`) ← CURRENT — drafting 2026-11-01
-- [ ] Q3 Cross-model review of design + plan, triage, user approval
+- [x] Q2 Phase 3 implementation plan (`implementation-plan.md`) — 87 tasks, sub-phases 3.0–3.4 (2026-11-01)
+- [ ] Q3 Cross-model review of design + plan, triage, user approval ← CURRENT — Codex review and triage done (`reviews/design-codex.md`, 15 findings accepted and applied); waiting for the user's approval and the scope decision (approve 3.0–3.2 now, 3.3 and 3.4 separately?)
 
 ### Exit gates
 - [ ] tests/vet pass (observed)

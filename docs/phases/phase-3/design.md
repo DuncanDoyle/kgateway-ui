@@ -47,7 +47,7 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 **Goals**
 1. **One verdict and a ranked list** on the install page: what is wrong, how much it affects, since when, and the decisive next step (§6).
 2. **An analyzer with stable finding codes** that covers the roadmap floor: unresolved references, missing ReferenceGrant, rules dropped or replaced, policy target not found, conflicting listeners (§7).
-3. **xDS rejects per Gateway that are hard to ignore:** per xDS type, how many proxies reject, the contradiction with status named, and the commands that show Envoy's reason (§8). Each proxy's own Envoy stats add which pod rejects, the rejected Envoy resource, partial config and lost controller connections (§8.8); opt-in controller logs add Envoy's rejected resource and error class without showing log text (§8.9).
+3. **xDS rejects per Gateway that are hard to ignore:** per xDS type, how many proxies reject, the contradiction with status named, and the commands that show Envoy's reason (§8). Each proxy's own Envoy stats add which Pods saw rejects, the rejected Envoy resource, partial config and lost controller connections (§8.8); opt-in controller logs add Envoy's rejected resource and error class without showing log text (§8.9).
 4. **Process health through the provider seam** (D-016): restarts, termination reasons, crash loops, probe failures, stuck rollouts, and version skew between controller, proxies and the Gateway API CRDs (§9).
 5. **Status freshness** as findings an operator can act on (§10).
 6. **Backend readiness:** a Service the controller resolved, but with zero ready endpoints (§11).
@@ -111,8 +111,9 @@ The roadmap's extension seam milestone (after Phase 2) never ran. It runs now, a
 Rules **(our call)**:
 - Every seam is generic and neutral. Nothing in the public repo names a downstream, and nothing in core hints at features it does not have: no locked buttons, no empty "upgrade" slots (user, 2026-11-01).
 - **The proof stays in CI.** `examples/downstream` grows to use every seam: an extra endpoint, a collector feeding a check through a declared input, a capability, a detail tab, and an `extraRules` chart overlay. Its tests build and run it, so a seam that breaks fails the build. The roadmap asked for a throwaway proof; a kept one is cheaper than proving it twice.
-- **Stability.** After 3.0 the Go extension API (`pkg/extension` and the types it carries) changes only with a README upgrade note and a release-note entry. 3.1's contract change is the last planned break.
+- **Stability.** After 3.0 the Go extension API (`pkg/extension` and the types it carries) changes only with a README upgrade note and a release-note entry. 3.1's contract change is the last planned break. A later addition to a seam is an optional interface the core detects by type assertion, so existing implementations keep compiling **(our call, Codex review 2026-11-01)**.
 - Collectors and handlers run in the UI process, under its memory limit and the §16.3 gates. A collector's published values count toward retained heap.
+- **Collector values** **(our call, Codex review 2026-11-01)**. The store owns a published value: the collector hands it over and never mutates it after `Publish`. Each value carries an availability state (`ok`, `failing`, `off`, with a reason) and an expiry. An expired value, or a value of a stopped collector, reads as unavailable, never as current data, and the confirm tick treats its expiry as a change (D-019).
 
 ## 5. Finding identity, groups and ranking
 
@@ -205,7 +206,7 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 
 Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-026 and re-specifies KGWUI-001 and KGWUI-003 without changing their codes. Codes are never reused.
 
-**Specific codes replace KGWUI-002 for their reasons (our call, D-030).** KGWUI-001 is re-specified, not replaced by a "status says healthy" code (§8.3) **(our call)**. KGWUI-002 stays the fallback for any current `False` condition without a specific code. A condition yields exactly one finding: either its specific code or 002. Alert rules keyed on 002 for these reasons will see the new codes; the release note says so. API v1 has no release yet.
+**Specific codes replace KGWUI-002 for their reasons (our call, D-030).** KGWUI-001 is re-specified, not replaced by a "status says healthy" code (§8.3) **(our call)**. KGWUI-002 stays the fallback for any current `False` condition without a specific code. A condition yields exactly one finding: either its specific code or 002. Alert rules keyed on 002 for these reasons will see the new codes; the release note says so. API v1 has no release yet. Existing goldens and e2e expectations for these reasons move to the new codes in the task that adds each code. This is a listed exception to the additive-only golden test: only the `code` and `slug` values of the named findings change **(our call, Codex review 2026-11-01)**.
 
 | Code | Slug | Trigger | Severity | Source | Pending / grace | Sub-phase |
 |---|---|---|---|---|---|---|
@@ -229,6 +230,7 @@ Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-026 an
 022, 023, 025 and 026 are warnings, so none turns an install red on its own **(our call)**. A disconnected proxy keeps serving its last config, and warming can be legitimately slow; both say so in their message.
 
 **Availability and roll-up (our call, 2.4 builder check).** Phase 1 design §5.3 says a required check that is not OK makes the install unknown. No Phase 3 check is required: each sets `Required: false`, so none can turn the install unknown. Existing required checks keep their flag; the re-specified KGWUI-001 keeps the existing `xDS rejects` check's flag, including its restart hold (§8.3). Today's `unavailable` helper (`pkg/health/checks.go:42-46`) always sets `Required: true` and raises KGWUI-008; Phase 3 checks use a variant that does neither.
+- **Required and optional inputs** **(our call, Codex review 2026-11-01)**. The required `cluster access` check covers the core kinds only: served kinds, Namespaces, controller Pods and Deployments. A Phase 3 watch (proxy Pods, Events, CRD metadata, Services, EndpointSlices) that is denied or failing never reaches `cluster access` and never raises KGWUI-008; it reports through its own checks' not-available result.
 - A check whose input is missing returns an unavailable `CheckResult` with its reason: `denied` (RBAC refused the watch), `failing` (the watch or scrape errors), or `off` (its chart toggle is off). "What was checked" shows it as "not available", in the wording it uses for unreachable metrics today.
 - A missing metric family on an older version is `not-on-version`, shown as "not available on this version" (§8.6).
 - A not-available Phase 3 check raises no KGWUI-008 and never turns the verdict unknown. Its findings are simply absent, and "What was checked" says why.
@@ -282,11 +284,14 @@ Listener `InvalidCertificateRef` quotes the controller. The UI cannot read Secre
 
 Until 2.5.0 GA ships and 3.4 adds its rule set, a 2.5 controller runs on the 2.4 rule set with the existing "newer than tested" note, and the computed rule applies there too **(user, 2026-10-29)**.
 
-**Computed rule (2.3, 2.4).** A new method on the `computed.Rules` seam, specified in a new `computed-rules.md` section, pinned per rule set:
+**Computed rule (2.3, 2.4).** An optional interface next to the `computed.Rules` seam, detected by type assertion, so `computed.Rules` itself does not change after 3.1. A rule set without it raises no computed 016 **(our call, Codex review 2026-11-01)**. The rule is specified in a new `computed-rules.md` section, pinned per rule set:
 - A `targetRef` names a target by group, kind and name in the **policy's own namespace** (local refs, GEP-713). It is "not found" when that kind is served and watched, and no such object is in the cache. A `sectionName` that names no listener of the Gateway or ListenerSet, or no rule of the HTTPRoute, is "section not found". Any other target kind is unknown and raises nothing.
 - A `targetSelector` is "matches nothing" when no object of its kind in the policy's namespace carries the labels.
 - **When it fires.** After the policy's grace period (Phase 1 design §5.2), and after the result held for 30 s (`computed-rules.md` §9.3; the hold may move onto the check's state store, §16.2). If every target is missing, 016 replaces the policy's KGWUI-003 "not yet processed" finding. If only some targets are missing, 016 is raised per missing target, and the policy's other findings are unchanged.
-- **Verifier.** If the controller writes a current ancestor for a target the rule called missing, the check disagrees and raises KGWUI-012 with check kind `policy-target`.
+- **Verifier** **(our call, Codex review 2026-11-01)**. A policy ancestor names an ancestor, not the targetRef it came from, so verification is limited to what status can attribute:
+  - A policy with exactly one target, whose current ancestor is that target (a Gateway) or the Gateway of that target (a route), is verifiable. A current ancestor for a target the rule called missing raises KGWUI-012 with check kind `policy-target`.
+  - Every other shape (several targets, selectors, ancestors shared by several targets) is "not verified": the computed 016 is still shown, labelled, and no KGWUI-012 is raised.
+  - What ancestors kgateway writes per target kind is observed on 2.3.11 and 2.4.7 and recorded in the `computed-rules.md` section before the rule is implemented.
 - An unknown discovery scope makes the rule unknown, as in D-024.
 - On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5).
 
@@ -296,12 +301,13 @@ Where the evidence leaves exactly one correct change, the finding carries a **su
 
 | Code | Suggested fix | Basis |
 |---|---|---|
-| 014 | the ReferenceGrant the spec requires, as a new object in the target namespace | Gateway API spec, for the spec-defined fields of §7.3 only |
+| 014 | the ReferenceGrant the spec requires, as a new object in the target namespace, when the condition's owner has exactly one cross-namespace ref of the failing field | Gateway API spec, for the spec-defined fields of §7.3 only |
 | 013, explanation 1 | the ref with the corrected group, when exactly one served group has a kind of that name | API discovery |
 | 013, explanation 3 | the ref with the corrected port, when the Service has exactly one port | the Service object |
 
 Rules **(our call)**:
 - A fix is only suggested when exactly one answer follows from the spec, discovery or a watched object. More than one candidate, or any kgateway-specific behaviour, gives no fix, only next steps. The UI never derives a fix from translation logic (principle 4).
+- **A fix needs one attributable ref** **(our call, Codex review 2026-11-01)**. A `ResolvedRefs` condition names its parent or listener, not the ref that failed. 013's group and port fixes are attributable because the UI's own check finds the one ref with that fault (discovery, Service ports). 014 gets a fix only when the parent or listener has exactly one cross-namespace ref of the failing field (route `backendRefs`, listener `certificateRefs`). Otherwise the finding lists the candidate refs with their locations and gives next steps, with no YAML.
 - The UI never applies a fix (D-001). The user copies the YAML, or downloads it as a file.
 - A fix for an existing object is the changed fragment with its location (`spec.rules[2].backendRefs[0]`), not the whole object, so it cannot overwrite fields the user did not see.
 - A fix names only objects the caller may view (§14 rule 15). If it would need a hidden name, there is no fix.
@@ -393,17 +399,18 @@ A draft issue sits outside the repo, because the repo is public. It asks kgatewa
 - Request: `GET /stats?usedonly&filter=<fixed regex>` per proxy Pod, every metrics interval (10 s). The regex is a constant in one file, so a stat rename is fixed in one place.
 - Bounds: body ≤ 1 MiB (over is an error, never a truncated parse); timeout min(interval / 2, 5 s); at most 16 Pods scraped at once per install.
 - Kept: the numbers below, per Pod UID. Counter deltas use the check's state store (§16.2), as for controller metrics.
+- **Replaceable source** **(our call, Codex review 2026-11-01)**. Targets, transport and stat interpretation sit behind one `proxystats.Source` interface, registered through the extension registry. The default is the Kubernetes source above. A downstream proxy, a standalone install or another stats format supplies its own; `examples/downstream` exercises it.
 
 | Envoy stat | Used for |
 |---|---|
 | `control_plane.connected_state` | **026**: 0 on a Ready proxy for 60 s. "Proxy `infra/edge-…` lost its connection to the controller. It keeps serving its last config" |
 | `cluster_manager.warming_clusters`, `listener_manager.total_listeners_warming` | **025**: above 0 on a Ready proxy for 60 s. "Proxy is Ready but some config is still loading" (#14363) |
-| `listener_manager.lds.update_rejected` / `update_success`, `cluster_manager.cds.update_rejected` / `update_success` | KGWUI-001 evidence: which proxy Pods reject which type, active while the last change of the pair was a reject |
-| `http.<prefix>.rds.<route config>.update_rejected`, `cluster.<name>.update_rejected` | KGWUI-001 evidence: the rejected Envoy route config or cluster, by Envoy name |
+| `listener_manager.lds.update_rejected` / `update_success`, `cluster_manager.cds.update_rejected` / `update_success` | KGWUI-001 evidence: rejects observed per proxy Pod and type since the last scrape. A sampled counter pair cannot tell whether the last update was a reject, so this never claims a Pod rejects now **(our call, Codex review 2026-11-01)** |
+| `http.<prefix>.rds.<route config>.update_rejected`, `cluster.<name>.update_rejected` | KGWUI-001 evidence: Envoy route configs or clusters with rejects observed since the last scrape, by Envoy name |
 | `server.state`, `server.uptime` | process evidence: draining or initializing proxies (§9) |
 | `cluster.<name>.membership_healthy`, `membership_total` | KGWUI-023 evidence: the endpoints the proxy really holds (below) |
 
-**KGWUI-001 keeps the controller metric as its trigger.** Proxy stats are evidence: the Pods that reject, and for RDS and EDS the Envoy resource name. If the controller metric is unavailable and a proxy's stats show an active reject, 001 fires from the proxy stats; both are Envoy's own report. A disagreement between the two is shown as evidence, never as a finding **(our call)**.
+**KGWUI-001 keeps the controller metric as its only trigger** **(our call, Codex review 2026-11-01)**. Its active state is the controller's `rejects_active` gauge. Proxy stats are evidence only: the Pods that saw rejects since the last scrape, and for RDS and CDS the Envoy resource names. When the controller metric is unavailable, 001 is unavailable too; proxy stats never raise it. A disagreement between the two is shown as evidence, never as a finding.
 
 **Envoy names are evidence, not vocabulary** (principle 4). The UI shows an Envoy name as "Envoy cluster `kube_shop_cart_8080`". It maps a name back to a Gateway API object only through a pinned naming function on the rule-set seam, verified per kgateway version like the computed rules. With no verified function, only the Envoy name is shown.
 
@@ -430,14 +437,14 @@ The decisive data for a reject, Envoy's reason, is in the controller log: kgatew
 
 | Marker | Fields kept | Used by |
 |---|---|---|
-| `"xds error"` | time, Gateway, type URL; from Envoy's message, only the resource names in Envoy's fixed NACK shapes (for example `Error adding/updating listener(s) <name>:`) and an error class from a fixed list | KGWUI-001 evidence: the rejected Envoy resource and error class; the earliest event becomes `since`, which survives a UI restart |
+| `"xds error"` | time, Gateway, type URL; from Envoy's message, the resource names in Envoy's fixed NACK shapes (for example `Error adding/updating listener(s) <name>:`) that equal a name known from proxy stats, and an error class from a fixed list | KGWUI-001 evidence: the rejected Envoy resource and error class; the earliest event becomes `since`, which survives a UI restart |
 | the snapshot-deferral line on 2.3 and 2.4 (exact text pinned when the parser is written) | time, Gateway | the "withheld" evidence that 024 gives on 2.5 |
 | a Go panic, previous container only | the class `panic` and the top frame's function name | KGWUI-019 evidence |
 | deployer apply errors | time, the object kind and name, error class | KGWUI-021 and KGWUI-006 evidence |
 
 Rules **(our call)**:
 - Log text is never stored, logged by the UI, sent anywhere or returned by the API. After matching, only the fields above remain.
-- A name is kept only if it matches a strict name grammar (`[A-Za-z0-9_.~:/-]{1,253}`). An error class not on the list becomes `other`.
+- A name is kept only if it equals an Envoy resource name the UI already knows from that Gateway's proxy stats (§8.8). Any other extracted text is discarded and only the error class is kept, because a grammar alone admits a credential that looks like a name **(our call, Codex review 2026-11-01)**. With proxy stats off or failing, no names are kept. An error class not on the list becomes `other`.
 - At most 1,000 derived events per install; the oldest are dropped.
 - When markers match but a parser fails 10 times in a row, the capability turns "not available: log format not recognised", so a format change never yields silent wrong output.
 - Derived events name objects, so the Authorizer rules apply (§14).
@@ -491,9 +498,11 @@ type Process struct {
 ### 9.2 Events
 
 Probe failures, back-off and image pulls appear only as Events.
-- One cluster-wide watch with field selector `type=Warning,involvedObject.kind=Pod`. Events whose involved Pod is not a controller or proxy Pod of an install are dropped at the informer by a transform, which keeps only (Pod UID, reason, count, last time).
+- One cluster-wide watch with field selector `type=Warning,involvedObject.kind=Pod`. Events whose involved Pod is not a controller or proxy Pod of an install are dropped at the informer by a transform, which keeps only (Event UID, Pod UID, reason, count, first time, last time, series count and last observed time).
+- **Counting** **(our call, Codex review 2026-11-01)**. Facts are observed deltas: per Event UID, the count increase the UI saw, with the time it saw it, in a bounded 15-minute window. Counts from before the UI started, or from an Event first seen with a count above 1, are "unknown" and never counted. A series is counted by its series count, never twice.
 - Kept reasons: `Unhealthy` (probe failure), `BackOff`, `Failed`, `FailedScheduling`, `FailedMount`.
 - Events expire after an hour by default and can be aggregated, so event-based facts read "in the last 15 minutes, from Events" and never claim a total.
+- **Probe type** **(our call, Codex review 2026-11-01)**. Event messages stay unread (§18.2). The probe type comes from the Pod spec: when the container defines exactly one probe type, that type; otherwise "a probe".
 - Retained events are capped at 10,000 per UI. Past the cap the oldest go, and the `events` check notes it.
 - RBAC and the chart toggle: §18.
 
@@ -508,10 +517,10 @@ KGWUI-005 (controller not ready) and 006 (proxy not ready) stay the error findin
 - Restart growth is read against the restart count per process ID kept in the check's state store (§16.2).
 - A deadline expires it 15 min after the last restart (D-019).
 
-**KGWUI-020 probe-failing (warning).** At least 3 readiness, liveness or startup probe failures on one Pod in the last 15 min, from `Unhealthy` Events. It catches proxies that flap without restarting. Probe output is not served, only the probe type, the count and the time.
+**KGWUI-020 probe-failing (warning).** At least 3 probe failures observed on one Pod in the last 15 min, counted as observed deltas of `Unhealthy` Events (§9.2) **(our call, Codex review 2026-11-01)**. It catches proxies that flap without restarting. Probe output is not served, only the probe type (from the Pod spec, §9.2), the count and the time.
 
-**KGWUI-021 rollout-stuck (warning).** A controller or proxy Deployment has `Progressing=False` with reason `ProgressDeadlineExceeded`, or a Pod of its newest ReplicaSet waits with `ImagePullBackOff`, `ErrImagePull`, `InvalidImageName` or `CreateContainerConfigError` for more than 2 min while older Pods still serve. When no replica is ready, 005 or 006 already makes it an error.
-- The newest ReplicaSet's Pods are told apart by `pod-template-hash` against the Deployment's current template. ReplicaSets are not watched.
+**KGWUI-021 rollout-stuck (warning).** A controller or proxy Deployment has `Progressing=False` with reason `ProgressDeadlineExceeded` **(our call, Codex review 2026-11-01)**. When no replica is ready, 005 or 006 already makes it an error.
+- Waiting reasons of the Deployment's Pods (`ImagePullBackOff`, `ErrImagePull`, `InvalidImageName`, `CreateContainerConfigError`, `CrashLoopBackOff`) are evidence, not a trigger. Telling the newest ReplicaSet's Pods apart needs ReplicaSet facts, which are not watched, so the UI does not compare template hashes.
 
 ### 9.4 Version skew (022)
 
@@ -619,7 +628,7 @@ FindingDetail  { install, finding: FindingRow, evidence?: Evidence, suggestedFix
 Evidence       // a tagged union on "kind"; one shape per code. Examples:
   { kind: "xds-rejects", types: { typeUrl, streams, reportedBy: string[], firstSeen, totalSinceFirstSeen }[],
     proxies: { ready, desired }, statusSaysHealthy: boolean, recentlyChanged: LinkedRef[],
-    proxyStats?: { pod, types: { typeUrl, active: boolean, envoyResources?: string[] }[] }[],   // §8.8
+    proxyStats?: { pod, types: { typeUrl, rejectsSinceLastScrape, envoyResources?: string[] }[] }[],   // §8.8
     logEvents?: { time, typeUrl, envoyResources: string[], errorClass }[] }                     // §8.9, no text
   { kind: "proxy-stats", pod, connected: boolean, warmingListeners, warmingClusters, serverState }   // 025, 026
   { kind: "ref-unresolved", ref: BackendRefDTO, reason, message, explanation?: string, computed?: Computed }
@@ -682,7 +691,7 @@ Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 | Carry-over | Decision | Where |
 |---|---|---|
 | (P4) Stable finding identity | decided: §5.1 | 3.1 |
-| (P3) Delegation memory: bound generated path bytes in inherit merges; charge failure-reason text and JSON escaping in the page budget | do it. Inherit merges cap a generated path at 4 KiB, cut with a marker; the 100,000-unit response budget charges reason text and escaped bytes at 1 unit per 32 bytes after escaping **(our call)** | 3.1 |
+| (P3) Delegation memory: bound generated path bytes in inherit merges; charge failure-reason text and JSON escaping in the page budget | do it. A path used in computation is never cut: an inherit merge whose path would exceed 4 KiB makes that child "too large to compute" (unknown, `too-large`), which raises no negative finding. Only display strings are clipped, with a marker **(our call, Codex review 2026-11-01)**. The 100,000-unit response budget charges reason text and escaped bytes at 1 unit per 32 bytes after escaping **(our call)** | 3.1 |
 | (P3) Spec-edit stream variant | measure it first on Phase 2 code, then gate it (§16.3) | 3.1 |
 | (P4) `Shell` font wait | the shell exports `renderWhenFontsReady(root, element)`, which `web/app/src/main.tsx` uses; the extension docs require it for apps that embed `Shell` **(our call)** | 3.2 |
 | KRT incremental recompute | decided this phase: §16 and D-027 | 3.1 |
@@ -891,7 +900,7 @@ All additions are get/list/watch only. Each has a chart toggle under `diagnostic
 | Analyzers, identity, groups, rank | `pkg/diagnose` and `pkg/health`: objects through `pkg/objects` only, covered by `internal/boundary/imports_test.go` |
 | Next-step commands | through `Vocabulary`; a platform without kubectl overrides or hides them |
 | Version skew | versions come from `Process.Version`, whatever the provider parses |
-| Proxy stats, derived log signals | behind the `proxyStats` and `controllerLogs` capabilities; the stat list, the log parsers and Envoy name mapping sit on the rule-set seam, so a downstream proxy or log format plugs in its own |
+| Proxy stats, derived log signals | behind the `proxyStats` and `controllerLogs` capabilities. Proxy stats come through the replaceable `proxystats.Source` (targets, transport, interpretation) **(our call, Codex review 2026-11-01)**; the log parsers and Envoy name mapping sit on the rule-set seam, so a downstream proxy or log format plugs in its own |
 
 A test runs the analyzer stage over a snapshot with no Pods, Events, Services or CRDs: process findings are "not observed", 023 is "not available", and every other code behaves the same.
 
@@ -913,12 +922,12 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 
 **API boundary tests (Go), per code, positive and negative:**
 - **013:** each explanation branch (kind not served, Service missing, port missing, controller message), and a certificate ref. Suggested fixes (§7.7): one served group with that kind gives the corrected group, two give none; a one-port Service gives the corrected port, a two-port Service gives none.
-- **014:** the grant as the suggested fix for a backendRef and a certificateRef; no fix when the grant would name an object the caller may not view; a wrong group explained as a wrong group, not a missing grant; a kgateway-specific field with no YAML.
+- **014:** the grant as the suggested fix for a backendRef and a certificateRef; a parent with two cross-namespace refs of the failing field lists both candidates and gives no YAML; no fix when the grant would name an object the caller may not view; a wrong group explained as a wrong group, not a missing grant; a kgateway-specific field with no YAML.
 - **015:** 2.3 `Accepted=False` and 2.4 `kgateway.dev/Programmed=False`; a parsed policy and an unparseable message; the 10-minute hint.
-- **016:** controller-reported; computed missing target, missing section and empty selector; partial targets; the verifier raising KGWUI-012; scope unknown; a rule set with the controller reason, where the computed rule is off.
+- **016:** controller-reported; computed missing target, missing section and empty selector; partial targets; the verifier raising KGWUI-012 for a single-target policy; a multi-target policy marked not verified, with no KGWUI-012; scope unknown; a rule set with the controller reason, where the computed rule is off.
 - **017:** a conflict with both sides named, and a conflict with no other side found.
 - **018:** the threshold edges; maturation by deadline; a controller that is not ready gives 005, not 018.
-- **019–021:** restart in the window, then expiry by deadline; OOMKilled; exit code 2; CrashLoopBackOff; probe failures from Events; `ProgressDeadlineExceeded`; image pull failure on the new ReplicaSet beside a ready old one.
+- **019–021:** restart in the window, then expiry by deadline; OOMKilled; exit code 2; CrashLoopBackOff; probe failures from observed Event deltas, an Event first seen with count 50 counting nothing, and an aggregated series counted once; the probe type from a one-probe container and "a probe" otherwise; `ProgressDeadlineExceeded`; an image pull failure shown as evidence, never as the trigger.
 - **022:** minor skew; patch skew (evidence only); a digest tag; suppression during a rollout; CRD bundle and channel mismatch.
 - **023:** zero ready endpoints; unset `ready`; `ExternalName`; weight 0; `ResolvedRefs=False` (no 023); delegation and mirror refs (no 023); maturation.
 - **024:** each metric case; the family absent on 2.3 and 2.4 gives "not available", with the install not unknown.
@@ -932,12 +941,12 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 
 **Proxy stats (§8.8):**
 - 025 and 026 at 59 s (none) and 61 s; a not-Ready proxy (none);
-- 001 evidence per Pod, an active and a recovered reject, and the RDS and EDS names; 001 from proxy stats when controller metrics are unavailable;
+- 001 evidence per Pod: rejects observed since the last scrape, a counter reset after a Pod restart read as no reject, and the RDS and CDS names; with controller metrics unavailable, 001 is unavailable even when proxy stats show rejects;
 - a refused listener, a timeout and a body over 1 MiB as `failing`; a self-managed Gateway as "not observed";
 - an Envoy name with and without a verified naming function.
 
 **Derived log signals (§8.9):**
-- captured `"xds error"` lines from 2.3.11 and 2.4.7: names and error class kept; a line embedding a fake API key leaves no trace of it in the API, the model or the UI's own log;
+- captured `"xds error"` lines from 2.3.11 and 2.4.7: a name equal to one known from proxy stats and the error class kept; any other name dropped; a fake API key placed in every accepted capture position, and behind spoofed markers, leaves no trace of it in the API, the model or the UI's own log;
 - a name that fails the grammar is dropped; an unknown error class becomes `other`;
 - 10 parse failures turn the capability unavailable; the 1,000-event cap;
 - toggle off (no Role, `off`), Role missing (`denied`).
@@ -946,9 +955,11 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - every core, example and `examples/downstream` check runs on the new contract, with unchanged findings on the Phase 2 goldens;
 - a Store value survives a recompute and is cleared on engine restart; checks cannot read each other's Store;
 - a check whose declared inputs did not change is skipped, and one with a due deadline is not;
-- a check that reads an undeclared input fails a test.
+- a check that reads an undeclared input fails a test;
+- a watch that fails and then recovers with unchanged objects reruns the checks that declare it; memoized and uncached API responses are equal across access failure and recovery, collector expiry, process changes and deadlines.
 
 **Availability and `since`:**
+- a denied or failing Phase 3 watch raises no KGWUI-008 through `cluster access`, and the install is not unknown; recovery restores its checks;
 - each new check with its watch off, denied and failing gives "not available" with that reason, and the install is not unknown;
 - the existing required checks keep their flag;
 - a status-derived finding carries `lastTransitionTime`; a UI-derived finding keeps its first-seen time across recomputes and resets on restart;
@@ -981,9 +992,9 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - layouts at 720, 1280, 1600 and 3008 px wide: no horizontal page scroll, two columns from 1600 px, content using the width up to 2400 px.
 
 **kind e2e on 2.3.11 and 2.4.7:**
-- proxy stats on the existing NACK fixture: the rejecting Pod and the Envoy resource; a proxy with its controller scaled to zero (026);
-- `diagnostics.controllerLogs=true` on the NACK fixture: the derived resource names and class, and no log text in any API response;
-- the existing NACK fixture now asserts the status-says-healthy message, the stream count and the command text;
+- proxy stats on a NACK fixture (`test/e2e/fixtures/nack.yaml`, added in 3.1): the Pods that saw rejects and the Envoy resource; a proxy with its controller scaled to zero (026);
+- `diagnostics.controllerLogs=true` on the NACK fixture: the derived resource names that match proxy stats and the class, and no log text in any API response;
+- the NACK fixture asserts the status-says-healthy message, the stream count and the command text;
 - a proxy with an unpullable image (021) through GatewayParameters;
 - a backend scaled to zero (023);
 - a missing ReferenceGrant (014);
