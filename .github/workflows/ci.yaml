@@ -72,6 +72,13 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # The packed shell carries its built JS and declarations, never src.
+      - name: shell package
+        run: |
+          make -C .. shell-pack
+          contents=$(tar tzf packages/shell/kgateway-ui-shell-*.tgz)
+          grep -q '^package/dist/index.d.ts$' <<<"$contents"
+          ! grep -q '^package/src/' <<<"$contents"
       - uses: actions/upload-artifact@v7
         with:
           name: spa

@@ -6,6 +6,27 @@ it("exports the shell API", () => {
   expect(shell.SHELL_API_VERSION).toBe(1);
 });
 
+// Runs the package build (tsc -p tsconfig.build.json) first, so the check never sees a stale or missing dist.
+it("the built package exports what src exports", async () => {
+  const pkg = decodeURIComponent(new URL("..", import.meta.url).pathname);
+  const config = ts.getParsedCommandLineOfConfigFile(
+    `${pkg}tsconfig.build.json`,
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (d) => {
+        throw new Error(ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+      },
+    },
+  );
+  if (!config) throw new Error("tsconfig.build.json not found");
+  const program = ts.createProgram(config.fileNames, config.options);
+  const diagnostics = [...ts.getPreEmitDiagnostics(program), ...program.emit().diagnostics];
+  expect(diagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"))).toEqual([]);
+  const built = await import(/* @vite-ignore */ `${pkg}dist/index.js`);
+  expect(Object.keys(built).sort()).toEqual(Object.keys(shell).sort());
+}, 60_000);
+
 // The public surface is the extension contract (D-003): any added or removed export shows up here for review.
 it("keeps the public export surface", () => {
   const entry = decodeURIComponent(new URL("./index.ts", import.meta.url).pathname);

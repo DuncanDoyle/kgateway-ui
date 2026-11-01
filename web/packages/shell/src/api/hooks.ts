@@ -17,7 +17,7 @@ export const retryEveryPoll: NonNullable<SWRConfiguration["onErrorRetry"]> = (er
 };
 
 // No keepPreviousData: on an install switch it would show the old install's data under the new URL.
-export const live = { refreshInterval: POLL_MS, onErrorRetry: retryEveryPoll };
+export const live: SWRConfiguration = { refreshInterval: POLL_MS, onErrorRetry: retryEveryPoll };
 
 /** True when data collected at collectedAt is older than two poll intervals; pass useNow() as now. */
 export function isStale(collectedAt: string, now: number): boolean {

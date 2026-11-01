@@ -8,3 +8,4 @@ internal/webui/dist/*
 web/test-results/
 web/playwright-report/
 .e2e/
+web/packages/shell/*.tgz

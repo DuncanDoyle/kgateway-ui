@@ -9,7 +9,7 @@ PORT ?= 18080
 UI_URL ?= http://127.0.0.1:$(PORT)
 ACTIONLINT_VERSION := v1.7.12
 
-.PHONY: help test lint actionlint build web run e2e e2e-down bench bench-stream
+.PHONY: help test lint actionlint build web shell-pack run e2e e2e-down bench bench-stream
 help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
@@ -18,6 +18,7 @@ help:
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
+	@echo "make shell-pack  build the shell package into web/packages/shell/kgateway-ui-shell-<version>.tgz"
 	@echo "make run    run the server from source (placeholder page unless make web ran)"
 	@echo "make e2e    kind cluster with kgateway KGW_VERSION, then the API and Playwright tests (installs web deps and Chromium if needed)"
 	@echo "           CI pairs: KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1, KGW_VERSION=v2.3.11 GWAPI_VERSION=v1.5.1; PORT sets the local port"
@@ -47,6 +48,10 @@ web:
 	cd web && npm ci && npm run build
 	rm -rf internal/webui/dist && cp -r web/app/dist internal/webui/dist && touch internal/webui/dist/.gitkeep
 	find internal/webui/dist -name '*.map' -delete
+shell-pack:
+	cd web && { [ -d node_modules ] || npm ci; }
+	rm -rf web/packages/shell/dist web/packages/shell/*.tgz
+	cd web && npm run build -w @kgateway-ui/shell && npm pack -w @kgateway-ui/shell --pack-destination packages/shell
 build: web
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/kgateway-ui ./cmd/kgateway-ui
 run:

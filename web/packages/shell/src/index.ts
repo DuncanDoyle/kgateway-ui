@@ -1,4 +1,4 @@
-/// <reference path="./theme/emotion.d.ts" />
+import "./theme/emotion";
 
 export { contrastRatio } from "./theme/contrast";
 export { ThemeProvider, useThemeSwitch } from "./theme/ThemeProvider";
