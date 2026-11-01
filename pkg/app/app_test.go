@@ -152,7 +152,7 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 		testutil.GatewayClass("acme", acmeController, true), testutil.Gateway("infra", "edge", "acme", nil),
 		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, acmeController)), widgetPolicy("widget"), widgetPolicy("widget-hidden"),
 	}, []kinds.Descriptor{widgetKind}, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{},
-		extension.WithDetectors(acmeDetector{}), extension.WithKinds(widgetKind, widgetKind), extension.WithChecks(acmeCheck{}), extension.WithAuthorizer(deny))
+		extension.WithDetectors(acmeDetector{}), extension.WithKinds(widgetKind, widgetKind), extension.WithChecks("ACME-", acmeCheck{}), extension.WithAuthorizer(deny))
 
 	var insts []api.InstallSummary
 	eventually(t, "install never appeared", func() bool {
@@ -809,4 +809,14 @@ func TestAppRecomputesOnObjectChange(t *testing.T) {
 // holdsRoute reports whether snap holds ns/name under gvr.
 func holdsRoute(snap *cache.Snapshot, gvr schema.GroupVersionResource, ns, name string) bool {
 	return slices.ContainsFunc(snap.Objects[gvr], func(u *unstructured.Unstructured) bool { return u.GetNamespace() == ns && u.GetName() == name })
+}
+
+// A registration error stops Build before any component is constructed.
+func TestBuildFailsOnRegistryError(t *testing.T) {
+	dyn, kube := testutil.ClientsWith(t, nil)
+	reg := extension.New(extension.WithChecks("KGWUI-", acmeCheck{}))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()}, Options{PollInterval: time.Second, MetricsInterval: time.Second, UI: ui}, reg)
+	if err == nil || !strings.Contains(err.Error(), "KGWUI-") || a != nil {
+		t.Fatalf("Build must return the registry error and no app, got %v, %v", a, err)
+	}
 }

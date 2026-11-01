@@ -13,6 +13,8 @@
 package extension
 
 import (
+	"errors"
+	"fmt"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
@@ -21,6 +23,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"regexp"
 )
 
 // Registry holds everything the backend is built from.
@@ -40,6 +43,25 @@ type Registry struct {
 	// RulesFor selects the computed rule set for a controller's kgateway
 	// version, "" when unknown (D-020).
 	RulesFor func(controllerVersion string) computed.Selection
+
+	// prefixes holds the finding-code prefixes registered so far.
+	prefixes map[string]bool
+	// errs collects registration errors; New does not fail, Err reports them.
+	errs []error
+}
+
+// UpstreamPrefix is the finding-code prefix reserved for upstream checks.
+const UpstreamPrefix = "KGWUI-"
+
+var prefixPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}-$`)
+
+// Err returns the registration errors joined, or nil. app.Build returns it
+// before it starts anything.
+func (r *Registry) Err() error { return errors.Join(r.errs...) }
+
+// fail records a registration error.
+func (r *Registry) fail(format string, args ...any) {
+	r.errs = append(r.errs, fmt.Errorf(format, args...))
 }
 
 // Option modifies a Registry.
@@ -63,11 +85,24 @@ func WithScopeProvider(p install.ScopeProvider) Option { return func(r *Registry
 // WithScopeVerifier replaces the scope verifier.
 func WithScopeVerifier(v scopeverify.Verifier) Option { return func(r *Registry) { r.Verifier = v } }
 
-// WithChecks adds health checks. Finding codes with the KGWUI- prefix are
-// reserved for upstream checks; a downstream uses its own prefix (ACME-001).
-// Severities outside error, warning and info are reported as warnings.
-func WithChecks(c ...health.Check) Option {
-	return func(r *Registry) { r.Checks = append(r.Checks, c...) }
+// WithChecks adds health checks whose finding codes start with prefix, such as
+// "ACME-". The prefix is a capital letter then capitals or digits, two to
+// sixteen characters before the dash. Each prefix registers once, and KGWUI-
+// is reserved for upstream checks; a rejected registration adds no checks and
+// is reported by Registry.Err. Severities outside error, warning and info are
+// reported as warnings.
+func WithChecks(prefix string, c ...health.Check) Option {
+	return func(r *Registry) {
+		switch {
+		case !prefixPattern.MatchString(prefix):
+			r.fail("finding-code prefix %q must match %s", prefix, prefixPattern)
+		case r.prefixes[prefix]:
+			r.fail("finding-code prefix %q is already registered", prefix)
+		default:
+			r.prefixes[prefix] = true
+			r.Checks = append(r.Checks, c...)
+		}
+	}
 }
 
 // WithAuthorizer replaces the default api.AllowAll. Every API response with
@@ -94,6 +129,7 @@ func New(opts ...Option) *Registry {
 		Authorizer: api.AllowAll{},
 		ProxyMode:  proxymode.GatewayParameters{},
 		RulesFor:   rulesets.Select,
+		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}
 	for _, o := range opts {
 		o(r)

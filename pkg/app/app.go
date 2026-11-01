@@ -91,6 +91,9 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.DelegationEdgeCap < 0 {
 		return nil, fmt.Errorf("delegation edge cap %d must not be negative", o.DelegationEdgeCap)
 	}
+	if err := reg.Err(); err != nil {
+		return nil, err
+	}
 	pinned, err := install.ParsePinned(o.Pinned)
 	if err != nil {
 		return nil, err
