@@ -51,7 +51,11 @@ web:
 shell-pack:
 	cd web && { [ -d node_modules ] || npm ci; }
 	rm -rf web/packages/shell/dist web/packages/shell/*.tgz
-	cd web && npm run build -w @kgateway-ui/shell && npm pack -w @kgateway-ui/shell --pack-destination packages/shell
+	cd web && npm run build -w @kgateway-ui/shell
+	@# Packs a staged copy without the @kgateway-ui/source condition: the tarball ships dist only.
+	d=$$(mktemp -d) && cp -r web/packages/shell/dist "$$d/" && \
+	  node -e 'const fs=require("fs"),[src,dst]=process.argv.slice(1),p=JSON.parse(fs.readFileSync(src));delete p.exports["."]["@kgateway-ui/source"];fs.writeFileSync(dst,JSON.stringify(p,null,2)+"\n")' web/packages/shell/package.json "$$d/package.json" && \
+	  (cd "$$d" && npm pack --pack-destination "$(CURDIR)/web/packages/shell") && rm -rf "$$d"
 build: web
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/kgateway-ui ./cmd/kgateway-ui
 run:

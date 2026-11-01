@@ -49,15 +49,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { persist-credentials: false }
-      - run: gh release create "$GITHUB_REF_NAME" --generate-notes
-        env: { GH_TOKEN: "${{ github.token }}" }
       - uses: actions/setup-node@v7
         with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
       # The shell package is attached to the release, not published to a registry (private stays true).
       - name: shell package
-        env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          (cd web && npm ci && npm pkg set version="$v" -w @kgateway-ui/shell)
+          (cd web && npm ci && npm pkg set version="${GITHUB_REF_NAME#v}" -w @kgateway-ui/shell)
           make shell-pack
-          gh release upload "$GITHUB_REF_NAME" "web/packages/shell/kgateway-ui-shell-$v.tgz"
+      # Packed first, so the release is created with the shell package attached.
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes "web/packages/shell/kgateway-ui-shell-${GITHUB_REF_NAME#v}.tgz"
+        env: { GH_TOKEN: "${{ github.token }}" }

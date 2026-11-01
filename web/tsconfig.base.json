@@ -13,6 +13,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "types": ["vitest/globals"],
-    "customConditions": ["source"]
+    "customConditions": ["@kgateway-ui/source"]
   }
 }

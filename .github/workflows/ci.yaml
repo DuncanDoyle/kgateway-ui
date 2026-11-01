@@ -72,13 +72,17 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      # The packed shell carries its built JS and declarations, never src.
+      # The packed shell carries its built JS and declarations, never src or the source condition.
       - name: shell package
         run: |
           make -C .. shell-pack
-          contents=$(tar tzf packages/shell/kgateway-ui-shell-*.tgz)
+          tgz=$(ls packages/shell/kgateway-ui-shell-*.tgz)
+          contents=$(tar tzf "$tgz")
           grep -q '^package/dist/index.d.ts$' <<<"$contents"
-          ! grep -q '^package/src/' <<<"$contents"
+          if grep -q '^package/src/' <<<"$contents"; then echo "::error::packed shell contains src"; exit 1; fi
+          if tar xzOf "$tgz" package/package.json | grep -q 'kgateway-ui/source'; then
+            echo "::error::packed package.json names the source condition"; exit 1
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: spa
