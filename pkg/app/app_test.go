@@ -862,3 +862,36 @@ func TestBuildFailsOnRegistryError(t *testing.T) {
 		t.Fatalf("Build must return the registry error and no app, got %v, %v", a, err)
 	}
 }
+
+// A bad extension pattern or name fails Build, so no App exists to start;
+// a good one is served under /api/ext/{name}/ with Deps wired to the engine.
+func TestBuildRejectsBadExtensionEndpoints(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	o := Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui}
+	with := func(name, pattern string) extension.Option {
+		return extension.WithHandlers(name, func(r extension.Router, _ extension.Deps) { r.Handle(pattern, http.NotFoundHandler()) })
+	}
+	for _, opt := range []extension.Option{with("acme", "GET /../v1/meta"), with("acme", "hello"), with("Acme", "GET /x")} {
+		if a, err := Build(c, o, extension.New(opt)); err == nil || a != nil {
+			t.Errorf("want a Build error and no App, got App %v, err %v", a != nil, err)
+		}
+	}
+
+	var sawNil bool
+	good := extension.WithHandlers("acme", func(r extension.Router, d extension.Deps) {
+		r.Handle("GET /hi", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			sawNil = d.Current() == nil // not started: no publication yet
+			w.WriteHeader(http.StatusNoContent)
+		}))
+	})
+	a, err := Build(c, o, extension.New(good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/ext/acme/hi", nil))
+	if rec.Code != http.StatusNoContent || !sawNil || a.Engine.Current() != nil {
+		t.Fatalf("GET /api/ext/acme/hi: %d, Current nil %v", rec.Code, sawNil)
+	}
+}

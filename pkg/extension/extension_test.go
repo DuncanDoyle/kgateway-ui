@@ -119,3 +119,60 @@ func TestErrJoinsEveryRegistrationError(t *testing.T) {
 		t.Fatalf("every error must be reported, got %v", err)
 	}
 }
+
+func TestWithHandlersRejectsBadAndDuplicateNames(t *testing.T) {
+	noop := func(Router, Deps) {}
+	if err := New(WithHandlers("acme", noop), WithHandlers("acme-2", noop)).Err(); err != nil {
+		t.Fatalf("valid names: %v", err)
+	}
+	err := New(WithHandlers("acme", noop), WithHandlers("acme", noop)).Err()
+	if err == nil || !strings.Contains(err.Error(), `"acme" is already registered`) {
+		t.Fatalf("duplicate name: %v", err)
+	}
+	for _, n := range []string{"", "Acme", "1acme", "acme/x", "..", "a_b", strings.Repeat("a", 64)} {
+		if New(WithHandlers(n, noop)).Err() == nil {
+			t.Errorf("name %q: want a registration error", n)
+		}
+	}
+}
+
+// Mounts runs each extension's function with its own Deps and returns its
+// endpoints; an endpoint that leaves its prefix fails the whole set.
+func TestRegistryMounts(t *testing.T) {
+	got := map[string]Deps{}
+	reg := func(name string, patterns ...string) Option {
+		return WithHandlers(name, func(r Router, d Deps) {
+			got[name] = d
+			for _, p := range patterns {
+				r.Handle(p, http.NotFoundHandler())
+			}
+		})
+	}
+	m, err := New(reg("acme", "GET /a", "POST /b/{id}"), reg("other", "/")).Mounts(Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, x := range m {
+		names = append(names, x.Name+" "+x.Pattern)
+	}
+	if want := []string{"acme GET /a", "acme POST /b/{id}", "other /"}; strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("mounts %v, want %v", names, want)
+	}
+	// Unset Deps fields get the defaults: AllowAll and a logger.
+	if _, ok := got["acme"].Authorizer.(api.AllowAll); !ok || got["acme"].Logger == nil || got["other"].Logger == nil {
+		t.Fatalf("deps defaults: %+v", got["acme"])
+	}
+	deny := api.AuthorizerFunc(func(*http.Request, objects.Ref) bool { return false })
+	if _, err := New(reg("acme", "GET /a")).Mounts(Deps{Authorizer: deny}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["acme"].Authorizer.(api.AuthorizerFunc); !ok {
+		t.Fatalf("the given Authorizer must reach the handlers, got %T", got["acme"].Authorizer)
+	}
+	for _, p := range []string{"GET /../v1/meta", "hello", "GET /a//b"} {
+		if _, err := New(reg("acme", p)).Mounts(Deps{}); err == nil {
+			t.Errorf("pattern %q: want an error", p)
+		}
+	}
+}
