@@ -148,7 +148,11 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 			}
 		}}
 	eng := engine.New(cfg)
-	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer), cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
+	mounts, err := reg.Mounts(extension.Deps{Current: eng.Current, Authorizer: reg.Authorizer, Logger: slog.Default()})
+	if err != nil {
+		return nil, err
+	}
+	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...)), cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
 		discovered: discovered}, nil
 }
 

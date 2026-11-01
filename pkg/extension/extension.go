@@ -44,6 +44,8 @@ type Registry struct {
 	// version, "" when unknown (D-020).
 	RulesFor func(controllerVersion string) computed.Selection
 
+	// handlers are the WithHandlers registrations, in order.
+	handlers []extHandlers
 	// prefixes holds the finding-code prefixes registered so far.
 	prefixes map[string]bool
 	// errs collects registration errors; New does not fail, Err reports them.

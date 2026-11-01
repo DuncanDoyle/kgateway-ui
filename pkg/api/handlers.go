@@ -31,8 +31,12 @@ type ModelSource interface {
 
 // NewHandler returns the HTTP handler for the API, the probes and the SPA in ui.
 // Every response with resources, findings or counts goes through authz; a nil
-// authz means AllowAll (D-013).
-func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
+// authz means AllowAll (D-013). Options add extension endpoints.
+func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOption) http.Handler {
+	var cfg handlerConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	if authz == nil {
 		authz = AllowAll{}
 	}
@@ -52,6 +56,8 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}", h.routeDetail)
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation", h.routeDelegation)
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
+	mountExts(mux, cfg.ext)
+	// Unknown /api/ paths, extension ones included, get a JSON 404, never the SPA.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	mux.Handle("/", spa(ui))
 	return mux
