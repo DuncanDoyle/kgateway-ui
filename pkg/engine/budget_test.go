@@ -502,19 +502,30 @@ func heapChild(t *testing.T, tier scale.Tier) {
 // denseMemChildEnv makes TestBudgetDenseMemory measure one edge cap in this process.
 const denseMemChildEnv = "KGWUI_DENSE_MEM_CHILD"
 
-// denseMemRun is one child's measurement: the peak heap sampled during the
-// cold Compute and during the warm ones, and the view B rows.
+// The dense budgets at the default edge cap (D-039): the 2.4 measurement
+// (160 MiB retained, 168 MiB per warm Compute) plus about 10 %.
+const (
+	denseRetainedBudget = 176 << 20
+	denseAllocBudget    = 185 << 20
+)
+
+// denseMemRun is one child's measurement: the bytes allocated per warm
+// Compute, the heap retained after them, the peak heap sampled during the cold
+// Compute and during the warm ones, and the view B rows.
 type denseMemRun struct {
 	Edges, Rows                  int
+	WarmAllocPerCompute          uint64
+	RetainedHeap                 uint64
 	ColdHeapInuse, WarmHeapInuse uint64
 	ColdHeapAlloc, WarmHeapAlloc uint64
 }
 
 // TestBudgetDenseMemory: DenseSelection(100, 1000) with realistic status, in a
-// fresh process with no GOMEMLIMIT, at the default edge cap: peak heap
-// (HeapInuse) ≤ 432 MiB, as the median of five children since one sample
-// flakes on GC timing. RSS is logged, not gated. Twice the default and 50,000
-// run once and are reported only (D-025).
+// fresh process with no GOMEMLIMIT, at the default edge cap: the heap retained
+// after warm Computes and the bytes allocated per warm Compute stay in budget,
+// as the median of five children (D-039). Peak heap and RSS depend on GC timing,
+// so they are logged, not gated. Twice the default and 50,000 run once and are
+// reported only (D-025).
 func TestBudgetDenseMemory(t *testing.T) {
 	if v := os.Getenv(denseMemChildEnv); v != "" {
 		edges, err := strconv.Atoi(v)
@@ -532,21 +543,27 @@ func TestBudgetDenseMemory(t *testing.T) {
 		if edges == def {
 			runs = gateRuns
 		}
-		heaps := make([]uint64, 0, runs)
+		var retained, perCompute, peaks []uint64
 		for range runs {
 			r, rss := denseMemParent(t, edges)
-			heaps = append(heaps, max(r.ColdHeapInuse, r.WarmHeapInuse))
-			t.Logf("edges %6d: %6d rows; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
-				edges, r.Rows, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
+			retained = append(retained, r.RetainedHeap)
+			perCompute = append(perCompute, r.WarmAllocPerCompute)
+			peaks = append(peaks, max(r.ColdHeapInuse, r.WarmHeapInuse))
+			t.Logf("edges %6d: %6d rows; retained heap %4d MiB; allocated per warm Compute %4d MiB; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
+				edges, r.Rows, r.RetainedHeap/mib, r.WarmAllocPerCompute/mib, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
 		}
 		if edges != def {
 			continue
 		}
-		slices.Sort(heaps)
-		median := heaps[len(heaps)/2]
-		t.Logf("edges %6d: median peak HeapInuse over %d runs %4d MiB", edges, runs, median/mib)
-		if median > 432*mib {
-			t.Errorf("median peak heap %d MiB over %d runs at the default edge cap %d, budget ≤ 432 MiB", median/mib, runs, def)
+		median := func(v []uint64) uint64 { slices.Sort(v); return v[len(v)/2] }
+		ret, per := median(retained), median(perCompute)
+		t.Logf("edges %6d: medians over %d runs: retained heap %4d MiB, allocated per warm Compute %4d MiB, peak HeapInuse %4d MiB (logged only)",
+			edges, runs, ret/mib, per/mib, median(peaks)/mib)
+		if ret > denseRetainedBudget {
+			t.Errorf("median retained heap %d MiB at the default edge cap %d, budget ≤ %d MiB", ret/mib, def, denseRetainedBudget/mib)
+		}
+		if per > denseAllocBudget {
+			t.Errorf("median allocated per warm Compute %d MiB at the default edge cap %d, budget ≤ %d MiB", per/mib, def, denseAllocBudget/mib)
 		}
 	}
 }
@@ -627,12 +644,24 @@ func denseMemChild(t *testing.T, edges int) {
 	var m *Model
 	r := denseMemRun{Edges: edges}
 	r.ColdHeapInuse, r.ColdHeapAlloc = sample(func() { m = e.Compute() })
+	const warm = 5
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	a0 := ms.TotalAlloc
 	r.WarmHeapInuse, r.WarmHeapAlloc = sample(func() {
-		for range 5 {
+		for range warm {
 			e.forgetViews()
 			m = e.Compute()
 		}
 	})
+	runtime.ReadMemStats(&ms)
+	r.WarmAllocPerCompute = (ms.TotalAlloc - a0) / warm
+	// What the engine and the last model keep once the garbage is collected.
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+	r.RetainedHeap = ms.HeapAlloc
+	runtime.KeepAlive(e)
 	if len(m.Installs) != 1 || m.Installs[0].Computed == nil {
 		t.Fatalf("installs %d", len(m.Installs))
 	}

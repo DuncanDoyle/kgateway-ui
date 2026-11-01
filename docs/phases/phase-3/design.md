@@ -16,7 +16,7 @@ Every choice in this draft is **(our call)** unless it repeats an earlier user d
 | # | Decision | Marker | Where |
 |---|---|---|---|
 | 1 | kgateway 2.5 joins the support matrix at GA, in 3.4: the 2.5 rule set, an e2e row, KGWUI-024, the controller-reported `TargetNotFound` path for KGWUI-016, and `kgateway_build_info`. Until GA, a 2.5 controller runs on the 2.4 rule set with the "newer than tested" note, and the computed KGWUI-016 rule applies. 2.5 fixtures are captured in 3.1 if cheap, otherwise in 3.4 | (user, 2026-10-29) | §7.6, §8.6, §21, §23 |
-| 2 | Budgets stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median, retained heap 32 MiB. 3.1 does the performance work first (recompute memoization, the KRT spike). Any gate change goes back to the user with numbers. 3.2–3.4 each show they stay within the gates | (user, 2026-10-29) | §16.1, §16.3, §23 |
+| 2 | Budgets stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median (replaced by D-039), retained heap 32 MiB. 3.1 does the performance work first (recompute memoization, the KRT spike). Any gate change goes back to the user with numbers. 3.2–3.4 each show they stay within the gates | (user, 2026-10-29) | §16.1, §16.3, §23 |
 | 3 | The `health.Check` contract changes, breaking, to one contract: `Name`, `Inputs`, `Run(RunContext)`. `RunContext` carries an engine-owned `State *Store` that survives recomputes and clears on restart. Every cross-recompute need uses it. All core and example checks migrate, plus `examples/downstream`, with README upgrade notes. Lands in 3.1 | (user, 2026-10-29) | §4, §16.2, §23 |
 | 4 | No Phase 3 check is required, so none turns the install unknown. A watch that is denied, failing or off makes its check "not available", with the reason | (our call, 2.4 builder check) | §7.1, §11, §17.3, §18.1 |
 | 5 | `since`: status-derived findings keep `lastTransitionTime`; UI-derived findings use the UI's first-seen time per finding identity, held in the Store and reset on restart. Ranking and "oldest problem" use each finding's own `since`. KGWUI-001 gains a `since` | (our call, 2.4 builder check) | §5.1, §5.3, §6, §8.3 |
@@ -761,7 +761,7 @@ type RunContext struct {
 
 ### 16.3 Budgets
 
-Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on CI; stream CPU 10–12 % against 15 % (annotation-only, through the views memo); dense peak heap 416 MiB against 432 MiB; retained heap +23 to +25 MiB against 32 MiB. The gates stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median, retained heap 32 MiB **(user, 2026-10-29)**. 3.2, 3.3 and 3.4 each show, with numbers, that they stay within them. Phase 3 adds per-stage gates **(our call)**:
+Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on CI; stream CPU 10–12 % against 15 % (annotation-only, through the views memo); dense peak heap 416 MiB against 432 MiB; retained heap +23 to +25 MiB against 32 MiB. The gates stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median, retained heap 32 MiB **(user, 2026-10-29)**. The dense gate became retained heap and bytes per warm recompute in 3.0 **(user, 2026-11-01; D-039)**. 3.2, 3.3 and 3.4 each show, with numbers, that they stay within them. Phase 3 adds per-stage gates **(our call)**:
 
 | Measure | Budget at Large | When |
 |---|---|---|
@@ -771,7 +771,7 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Stream CPU, annotation-only | ≤ 15 % of one core, unchanged | 3.1–3.4 |
 | Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core. If the baseline already exceeds 22 %, the numbers go to the user before a gate is set | 3.1–3.4 |
 | Retained heap | the Phase 2 gate of 32 MiB, unchanged; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
-| Dense memory | median peak heap ≤ 432 MiB, unchanged (D-025) | 3.1–3.4 |
+| Dense memory | median retained heap ≤ 176 MiB and median bytes allocated per warm recompute ≤ 185 MiB at the default edge cap; peak heap and RSS logged, not gated (D-039) | 3.0–3.4 |
 | OS memory during the stream | ≤ 256 MiB (D-022) | 3.2–3.4 |
 | `GET …/diagnostics`, `GET …/findings` (each filter mix), `GET …/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 3.1–3.4 |
 | Change burst, idle, cold recompute | Phase 2 gates, unchanged | 3.1–3.4 |

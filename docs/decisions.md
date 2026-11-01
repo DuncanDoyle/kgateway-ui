@@ -667,3 +667,14 @@ quirk 2 (prefix /q):
 **Decision:** Seven seams: endpoints, collectors, open check inputs, capabilities, a built shell package, in-page slots and chart extension values (design §4.1). They ship as sub-phase 3.0. `examples/downstream` in CI is the standing proof.
 
 **Alternatives:** n/a.
+
+## D-039 — Dense memory gate on retained heap and bytes per recompute (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user)
+
+**Context:** `TestBudgetDenseMemory` gated the median peak heap of five runs at ≤ 432 MiB (D-025). Peak heap depends on when the GC runs: on the same code, medians ranged 427–440 MiB, and the 2.4 code (`3eceda6`) failed it too. The heap retained and the bytes allocated were identical in every run, before and after 3.0.
+
+**Decision:** The gate checks, at the default edge cap, the median heap retained after warm recomputes (≤ 176 MiB) and the median bytes allocated per warm recompute (≤ 185 MiB). Both are the 2.4 measurement (160 and 168 MiB) plus about 10 %. Peak heap and RSS stay logged, not gated. The binary's memory limit (90 % of the pod limit, D-025) keeps the peak inside the pod.
+
+**Consequences:** A regression in what the engine keeps or allocates fails the gate deterministically. A change that only moves GC timing does not.
+
+**Alternatives:** Raise the peak-heap budget; rejected, since the 2.4 code already sits at it and noise stays.
