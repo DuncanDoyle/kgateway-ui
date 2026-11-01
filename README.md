@@ -59,7 +59,7 @@ The UI honours the controller's `discoveryNamespaceSelectors`. It only counts re
 
 ## Extending
 
-Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds:
+Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds and runs; the types it names are in [acme.go](examples/downstream/acme.go):
 
 ```go
 package main
@@ -72,33 +72,23 @@ import (
 	"net/http"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 )
 
 //go:embed all:dist
 var dist embed.FS
-
-// acmeProxyMode reads the self-managed flag from acme's own parameters kind.
-type acmeProxyMode struct{}
-
-func (acmeProxyMode) Resolve(gw *unstructured.Unstructured, snap *cache.Snapshot, served []kinds.Served) proxymode.Mode {
-	return proxymode.Managed
-}
 
 func main() {
 	ui, err := fs.Sub(dist, "dist")
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := app.Run(context.Background(), "", options(ui), extensions()...); err != nil {
+	if err := app.Run(context.Background(), "", options(ui), extensions(clock.RealClock{})...); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -109,27 +99,40 @@ func options(ui fs.FS) app.Options {
 	return app.Options{UI: ui, PollInterval: 30 * time.Second, MetricsInterval: 10 * time.Second}
 }
 
-// extensions are what this build adds to the stock UI.
-func extensions() []extension.Option {
+// extensions are what this build adds to the stock UI. The types are in
+// acme.go; clk drives the collector, so tests can step it.
+func extensions(clk clock.WithTicker) []extension.Option {
 	return []extension.Option{
 		// Watch, count and serve an extra policy kind
-		extension.WithKinds(kinds.Descriptor{
-			Group: "acme.example.com", Kind: "AcmePolicy", Resource: "acmepolicies",
-			Versions: []string{"v1"}, Namespaced: true, Category: kinds.CategoryPolicy, DisplayName: "AcmePolicy",
-		}),
+		extension.WithKinds(acmePolicy),
 		// Decide per request what the caller may see
 		extension.WithAuthorizer(api.AuthorizerFunc(func(r *http.Request, ref objects.Ref) bool {
 			return ref.Namespace != "acme-system"
 		})),
 		// Replace the upstream GatewayParameters resolution
 		extension.WithProxyModeResolver(acmeProxyMode{}),
+		// Publish a value between recomputes, for checks to read
+		extension.WithCollectors(&acmeWidgets{clock: clk}),
+		// Add checks; their finding codes start with ACME-
+		extension.WithChecks("ACME-", acmeWidgetCheck{}),
+		// Serve endpoints under /api/ext/acme/
+		extension.WithHandlers("acme", acmeHandlers),
+		// Report a feature's state in /api/v1/meta
+		extension.WithCapabilities(acmeCapabilities),
 	}
 }
 ```
 
-The other options are `WithDetectors`, `WithChecks`, `WithScopeProvider`, `WithScopeVerifier` and `WithComputedRules`. Kinds added with `WithKinds` need matching rules in the chart's ClusterRole.
+The other options are `WithDetectors`, `WithScopeProvider`, `WithScopeVerifier` and `WithComputedRules`.
 
-The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`:
+- **Checks.** `WithChecks` takes a finding-code prefix, such as `ACME-`. It is a capital letter, then one to fifteen capitals or digits, then a dash. Each prefix registers once, and `KGWUI-` is reserved. A bad or repeated prefix makes `app.Build` fail.
+- **Endpoints.** `WithHandlers("acme", …)` serves its routes under `/api/ext/acme/`, so they never collide with API v1. `Deps.Current` returns the published model. Filter objects with `api.Visible`, and reply with `api.WriteJSON` and `api.WriteError`.
+- **Collectors.** `WithCollectors` starts each collector with the app. It publishes values through `Deps.Publish(key, value, fingerprint, ttl)` or marks them failing with `Deps.Fail`. A check reads them from `health.Input.Collected` as `<collector>/<key>`. A new fingerprint triggers a recompute. An expired value, or one from a stopped collector, reads as unavailable.
+- **Capabilities.** `WithCapabilities` adds entries to `capabilityStates` in `/api/v1/meta`. A state is `on`, `off`, `denied` or `failing`. Names must not clash with core ones.
+
+Kinds added with `WithKinds`, and anything a collector reads, need matching rules in the chart's ClusterRole. Add them with `rbac.extraRules`, as [values-acme.yaml](examples/downstream/chart/values-acme.yaml) does. The chart also takes `extraEnv`, `extraVolumes`, `extraVolumeMounts` and `extraContainers`.
+
+The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
 import { defaultPages, Shell, type ShellExtension } from "@kgateway-ui/shell";
@@ -142,12 +145,20 @@ const acme: ShellExtension = {
   findingRenderers: { "ACME-": (f) => <span>{f.message}</span> },
   // Platform copy; entries left out keep the Kubernetes defaults
   vocabulary: { landingTitle: "acme installs" },
+  // In-page slots, keyed "group/Kind" where they belong to one kind; WidgetsTab is in acme.tsx
+  contributions: {
+    detailTabs: {
+      "gateway.networking.k8s.io/Gateway": [
+        { id: "widgets", label: "Widgets", render: ({ ref }) => <WidgetsTab namespace={ref.namespace} /> },
+      ],
+    },
+  },
 };
 
 createRoot(document.getElementById("root") as HTMLElement).render(<Shell extension={acme} pages={defaultPages} />);
 ```
 
-A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`.
+A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing.
 
 ## Upgrade notes
 

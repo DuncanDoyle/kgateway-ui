@@ -9,7 +9,7 @@ PORT ?= 18080
 UI_URL ?= http://127.0.0.1:$(PORT)
 ACTIONLINT_VERSION := v1.7.12
 
-.PHONY: help test lint actionlint build web shell-pack run e2e e2e-down bench bench-stream
+.PHONY: help test lint actionlint build web shell-pack example-web run e2e e2e-down bench bench-stream
 help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
@@ -19,6 +19,7 @@ help:
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
 	@echo "make shell-pack  build the shell package into web/packages/shell/kgateway-ui-shell-<version>.tgz"
+	@echo "make example-web  typecheck and test examples/downstream/web against the packed shell"
 	@echo "make run    run the server from source (placeholder page unless make web ran)"
 	@echo "make e2e    kind cluster with kgateway KGW_VERSION, then the API and Playwright tests (installs web deps and Chromium if needed)"
 	@echo "           CI pairs: KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1, KGW_VERSION=v2.3.11 GWAPI_VERSION=v1.5.1; PORT sets the local port"
@@ -56,6 +57,11 @@ shell-pack:
 	d=$$(mktemp -d) && cp -r web/packages/shell/dist "$$d/" && \
 	  node -e 'const fs=require("fs"),[src,dst]=process.argv.slice(1),p=JSON.parse(fs.readFileSync(src));delete p.exports["."]["@kgateway-ui/source"];fs.writeFileSync(dst,JSON.stringify(p,null,2)+"\n")' web/packages/shell/package.json "$$d/package.json" && \
 	  (cd "$$d" && npm pack --pack-destination "$(CURDIR)/web/packages/shell") && rm -rf "$$d"
+example-web: shell-pack
+	@# Installs the tarball, not the workspace source; peers are listed in its package.json, so npm need not resolve optional peer chains.
+	rm -rf examples/downstream/web/node_modules/@kgateway-ui
+	npm --prefix examples/downstream/web install --no-save --no-package-lock --legacy-peer-deps $$(ls web/packages/shell/kgateway-ui-shell-*.tgz)
+	cd examples/downstream/web && npx tsc --noEmit && npx vitest run
 build: web
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/kgateway-ui ./cmd/kgateway-ui
 run:

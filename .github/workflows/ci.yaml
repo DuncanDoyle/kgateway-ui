@@ -83,6 +83,8 @@ jobs:
           if tar xzOf "$tgz" package/package.json | grep -q 'kgateway-ui/source'; then
             echo "::error::packed package.json names the source condition"; exit 1
           fi
+      # The downstream example's frontend typechecks and tests against the packed shell.
+      - run: make -C .. example-web
       - uses: actions/upload-artifact@v7
         with:
           name: spa
@@ -117,7 +119,8 @@ jobs:
       - run: make actionlint
       - uses: azure/setup-helm@v5
       - run: helm lint deploy/helm/kgateway-ui
-      - run: REQUIRE_HELM=1 go test ./deploy/...
+      # The example's chart overlay test runs here, where helm is required.
+      - run: REQUIRE_HELM=1 go test ./deploy/... ./examples/...
   image:
     # Multi-arch build check; nothing is pushed.
     runs-on: ubuntu-latest

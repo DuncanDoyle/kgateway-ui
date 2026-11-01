@@ -1,0 +1,30 @@
+{
+  "name": "acme-ui-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@emotion/react": "^11",
+    "@emotion/styled": "^11",
+    "lucide-react": "^1",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-router-dom": "^7",
+    "swr": "^2"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10",
+    "@testing-library/react": "^16",
+    "@testing-library/user-event": "^14",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "jsdom": "^26.1.0",
+    "typescript": "^5",
+    "vite": "^7",
+    "vitest": "^4.1.12"
+  }
+}
