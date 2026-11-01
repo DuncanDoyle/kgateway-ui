@@ -1,6 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
@@ -15,6 +15,7 @@ import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
+import { useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
 import { installPath } from "../../shell/paths";
 import { useUrlParams } from "../../shell/urlParams";
@@ -106,6 +107,8 @@ const TABS = [
   { id: "overview", label: detailCopy.overview },
   { id: "yaml", label: detailCopy.yaml },
 ];
+// Page tab ids are reserved even where a page omits its tab, so a contribution never takes one over.
+const CORE_TAB_IDS = [...TABS.map((t) => t.id), "delegation"];
 
 /** A page's own tab after Overview and YAML, e.g. the route's Delegation tab (`?tab=delegation`). */
 export interface ExtraTab {
@@ -146,10 +149,19 @@ export function DetailFrame({
 }: DetailFrameProps) {
   const vocab = useVocabulary();
   const [params, update] = useUrlParams();
-  const tabs = useMemo(() => [...TABS, ...(extraTabs ?? []).map(({ id, label }) => ({ id, label }))], [extraTabs]);
+  const coreIds = useMemo(() => [...CORE_TAB_IDS, ...(extraTabs ?? []).map((t) => t.id)], [extraTabs]);
+  const contributed = useDetailTabContributions(refValue, coreIds);
+  const sections = useSideSectionContributions(refValue);
+  const tabs = useMemo(
+    () => [...TABS, ...[...(extraTabs ?? []), ...contributed].map(({ id, label }) => ({ id, label }))],
+    [extraTabs, contributed],
+  );
   const asked = params.get("tab");
   const tab = tabs.find((t) => t.id === asked)?.id ?? "overview";
   const extra = extraTabs?.find((t) => t.id === tab);
+  const own = contributed.find((t) => t.id === tab);
+  const ctx = { installId, ref: refValue };
+  const sideId = useId();
   const errorTitle = listCopy.cannotLoad(noun);
   const now = useNow();
   // Stale data or a failed poll turns every state on the page unknown, as on the lists (design §6.3).
@@ -170,7 +182,21 @@ export function DetailFrame({
       />
     );
   const overview = data ? (
-    (extra?.content ?? children)
+    extra ? (
+      extra.content
+    ) : own ? (
+      own.render(ctx)
+    ) : (
+      <>
+        {children}
+        {sections.map((s) => (
+          <Section key={s.id} aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
+            <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>
+            {s.render(ctx)}
+          </Section>
+        ))}
+      </>
+    )
   ) : error?.status === 503 ? (
     <PageState kind="connecting" title={vocab.connecting} message={error.message} />
   ) : error ? (

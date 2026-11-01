@@ -8,6 +8,7 @@ import { HealthBadge } from "../../health/HealthBadge";
 import { severityLabel, severityToState } from "../../health/state";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
+import { useFindingActions } from "../../shell/contributions";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 import { InstallName } from "../../shell/InstallName";
 
@@ -64,6 +65,18 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   .copy {
     grid-area: copy;
   }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: ${(p) => p.theme.space(2)};
+    margin-top: ${(p) => p.theme.space(1.5)};
+  }
+  .actions fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
   @media (max-width: 720px) {
     grid-template-columns: minmax(0, 1fr) 28px;
     grid-template-areas: "sev copy" "res res" "msg msg";
@@ -96,6 +109,7 @@ interface FindingRowProps {
 export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
   const { findingRenderers } = useShellExtension();
   const extra = rendererFor(findingRenderers, f.code);
+  const actions = useFindingActions(f);
   const { data: installs } = useInstalls();
   // A finding without a resource is about the install; it is named, never split from its ID.
   const install = installs?.find((i) => i.id === f.install);
@@ -126,6 +140,15 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
             <div className="msg">{f.message}</div>
             {f.detail ? <div className="muted">{f.detail}</div> : null}
             {extra ? extra(f) : null}
+            {actions.length > 0 ? (
+              <div className="actions" data-slot="finding-actions">
+                {actions.map((a) => (
+                  <fieldset key={a.id} aria-label={a.label}>
+                    {a.render(f)}
+                  </fieldset>
+                ))}
+              </div>
+            ) : null}
           </>
         )}
       </div>

@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import type { Finding } from "../api/types";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
+import type { Contributions } from "./contributions";
 import { kubernetesVocabulary, type Vocabulary } from "./vocabulary";
 
 /** Product identity shown in the header (D-008). */
@@ -45,6 +46,8 @@ export interface ShellExtension {
   findingRenderers?: Record<string, FindingRenderer>;
   /** Platform copy; entries left out keep the Kubernetes defaults (D-016). */
   vocabulary?: Partial<Vocabulary>;
+  /** In-page slots: detail tabs, side sections, finding actions and install panels. */
+  contributions?: Contributions;
 }
 
 /**
@@ -77,6 +80,7 @@ export const ShellExtensionContext = createContext<ResolvedShellExtension>({
   navEntries: [],
   findingRenderers: {},
   vocabulary: kubernetesVocabulary,
+  contributions: {},
 });
 
 /** The extension merged with the upstream defaults. */

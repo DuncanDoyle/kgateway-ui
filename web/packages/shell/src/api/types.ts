@@ -152,6 +152,14 @@ export interface MetaResponse {
   views?: { group: string; kind: string }[];
   /** Filters added after v1, per list (2.3: routes has listener). */
   filters?: Record<string, string[]>;
+  /** Extension capabilities with their state, by name; omitted when there are none. */
+  capabilityStates?: Capability[];
+}
+/** One extension capability; reason says why it is not on. Only "on" ones are also in MetaResponse.capabilities. */
+export interface Capability {
+  name: string;
+  state: "on" | "off" | "denied" | "failing";
+  reason?: string;
 }
 export interface ErrorResponse {
   error: string;

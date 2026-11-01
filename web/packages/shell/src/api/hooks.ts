@@ -1,7 +1,15 @@
 import { useMemo } from "react";
 import useSWR, { type SWRConfiguration } from "swr";
 import { ApiError, apiFetch, apiFetchWithHeaders } from "./client";
-import type { HealthReport, InstallSummary, MetaResponse, OverviewResponse, RawHealthReport, Ref } from "./types";
+import type {
+  Capability,
+  HealthReport,
+  InstallSummary,
+  MetaResponse,
+  OverviewResponse,
+  RawHealthReport,
+  Ref,
+} from "./types";
 
 /** Poll interval for live data (design §6.6). */
 export const POLL_MS = 5000;
@@ -83,6 +91,12 @@ export function useResource(id: string, r: Ref) {
 export function useCapabilities(): ReadonlySet<string> | undefined {
   const { data } = useMeta();
   return useMemo(() => (data ? new Set(data.capabilities ?? []) : undefined), [data]);
+}
+
+/** The named extension capability from /api/v1/meta; undefined until meta loads, or when the server does not list it. */
+export function useCapabilityState(name: string): Capability | undefined {
+  const { data } = useMeta();
+  return data?.capabilityStates?.find((c) => c.name === name);
 }
 
 /** True when /meta advertises the post-v1 filter on list (2.3: routes has listener); false for an older server. */

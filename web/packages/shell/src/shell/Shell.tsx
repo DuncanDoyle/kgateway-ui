@@ -56,6 +56,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       routes: extension.routes ?? [],
       navEntries: extension.navEntries ?? [],
       findingRenderers: extension.findingRenderers ?? {},
+      contributions: extension.contributions ?? {},
       vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },
     };
   }, [extension]);

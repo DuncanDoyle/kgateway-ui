@@ -27,6 +27,7 @@ export {
   POLL_MS,
   supportsFilter,
   useCapabilities,
+  useCapabilityState,
   useHealth,
   useInstalls,
   useListFilter,
@@ -46,6 +47,14 @@ export { defaultPages } from "./pages/defaultPages";
 export { FindingRow, resourcePath } from "./pages/install/FindingRow";
 export { CopyNameButton } from "./resource/CopyNameButton";
 export { ResourceName } from "./resource/ResourceName";
+export type {
+  Contributions,
+  DetailContext,
+  DetailTabContribution,
+  FindingActionContribution,
+  InstallPanelContribution,
+  SideSectionContribution,
+} from "./shell/contributions";
 export type { Brand, CorePages, FindingRenderer, NavEntry, RouteContribution, ShellExtension } from "./shell/extension";
 export { useInstallId, useShellExtension, useVocabulary } from "./shell/extension";
 export { installPath } from "./shell/paths";

@@ -40,6 +40,7 @@ import type {
   BackendRef,
   BackendState,
   Candidate,
+  Capability,
   CheckResult,
   Computed,
   ComputedAttachment,
@@ -248,9 +249,24 @@ const kind = shape<ServedKind>(
   category,
 );
 const groupKind = shape<NonNullable<MetaResponse["views"]>[number]>({ group: "!", kind: "!" });
+const capability = shape<Capability>(
+  { name: "!", state: "!", reason: "?" },
+  {},
+  { state: { on: 1, off: 1, denied: 1, failing: 1 } },
+);
 const metaShape = shape<MetaResponse>(
-  { version: "!", pinned: "?", synced: "!", platform: "!", capabilities: "!", kinds: "!", views: "?", filters: "?" },
-  { kinds: kind, views: groupKind },
+  {
+    version: "!",
+    pinned: "?",
+    synced: "!",
+    platform: "!",
+    capabilities: "!",
+    kinds: "!",
+    views: "?",
+    filters: "?",
+    capabilityStates: "?",
+  },
+  { kinds: kind, views: groupKind, capabilityStates: capability },
 );
 const errorShape = shape<ErrorResponse>({ error: "!" });
 

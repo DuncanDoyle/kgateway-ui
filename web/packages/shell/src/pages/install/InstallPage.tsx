@@ -1,9 +1,11 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import { useId } from "react";
 import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { isStale, useCapabilities, useHealth, useMeta, useOverview } from "../../api/hooks";
 import { plural } from "../../format";
+import { useInstallPanels } from "../../shell/contributions";
 import { useInstallId, useVocabulary } from "../../shell/extension";
 import { installPath } from "../../shell/paths";
 import { PageNotice } from "../../states/PageNotice";
@@ -79,6 +81,8 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const h = useHealth(id);
   const { data: meta } = useMeta();
   const caps = useCapabilities();
+  const panels = useInstallPanels();
+  const panelId = useId();
   const now = useNow();
   const err = ov.error ?? h.error;
   // Render only data that belongs to this route's install, never the previous install's (design §6.6).
@@ -135,6 +139,12 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
         stale={stale}
         signalsMissing={signalsMissing}
       />
+      {panels.map((p) => (
+        <section key={p.id} aria-labelledby={`${panelId}-${p.id}`} data-slot="install-panel">
+          <h2 id={`${panelId}-${p.id}`}>{p.title}</h2>
+          {p.render({ installId: id })}
+        </section>
+      ))}
     </>
   );
   return (

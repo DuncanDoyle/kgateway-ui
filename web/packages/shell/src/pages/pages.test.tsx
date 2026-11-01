@@ -317,6 +317,7 @@ it("the longest matching finding renderer prefix wins", () => {
         routes: [],
         navEntries: [],
         vocabulary: kubernetesVocabulary,
+        contributions: {},
         findingRenderers: {
           KGWUI: () => <span>short</span>,
           "KGWUI-00": () => <span>longest</span>,

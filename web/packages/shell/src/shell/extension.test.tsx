@@ -13,7 +13,7 @@ import { overview, unhealthy } from "../test/fixtures";
 import { stubApi, testSWR } from "../test/render";
 import { reservedPathOf } from "./Shell";
 
-// A downstream with its own brand, theme, page, nav entry and finding renderer, registered through the public shell API only.
+// A downstream with its own brand, theme, page, nav entry, finding renderer and install panel, registered through the public shell API only.
 const acmeTheme: Theme = {
   ...controlRoomDark,
   id: "acme",
@@ -27,7 +27,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("a downstream extension contributes brand, theme, page, nav entry and finding renderer", async () => {
+it("a downstream extension contributes brand, theme, page, nav entry, finding renderer and install panel", async () => {
   const now = Date.now();
   stubApi({
     "/api/v1/installs": [
@@ -72,12 +72,14 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
           routes: [{ path: "widgets", element: <p>widgets page</p>, scope: "install" }],
           navEntries: [{ label: "Widgets", to: "widgets", scope: "install" }],
           findingRenderers: { "ACME-": () => <span>acme detail</span> },
+          contributions: { installPanels: [{ id: "acme", title: "Acme panel", render: () => <p>acme panel</p> }] },
         }}
       />
     </SWRConfig>,
   );
   expect(await screen.findByText("Acme Edge")).toBeInTheDocument();
   expect(await screen.findByText("acme detail")).toBeInTheDocument();
+  expect(screen.getByText("acme panel")).toBeInTheDocument();
   expect(screen.getByTestId("edition")).toHaveTextContent("acme");
   // The contributed tokens apply: colour, font family, type scale, and the pre-React paint record.
   expect(screen.getByTestId("version")).toHaveStyle({ backgroundColor: "#7A1FA2", fontSize: "13px" });

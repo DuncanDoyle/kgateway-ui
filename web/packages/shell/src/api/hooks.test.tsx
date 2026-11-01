@@ -7,6 +7,7 @@ import {
   isStale,
   POLL_MS,
   supportsFilter,
+  useCapabilityState,
   useHealth,
   useInstalls,
   useListFilter,
@@ -255,4 +256,38 @@ it("useListFilter is undefined until /meta loads, then says whether the filter i
   stubApi({ "/api/v1/meta": { kinds: [], capabilities: [] } });
   renderWithTheme(<FilterProbe />);
   await screen.findByText("listener false");
+});
+
+function CapabilityProbe({ name }: { name: string }) {
+  const c = useCapabilityState(name);
+  return <p>{c ? `${c.name} ${c.state} ${c.reason ?? ""}`.trim() : "none"}</p>;
+}
+
+it("useCapabilityState reads capabilityStates", async () => {
+  stubApi({
+    "/api/v1/meta": {
+      kinds: [],
+      capabilities: ["acme-widgets"],
+      capabilityStates: [
+        { name: "acme-audit", state: "denied", reason: "no access" },
+        { name: "acme-widgets", state: "on" },
+      ],
+    },
+  });
+  const r = renderWithTheme(
+    <>
+      <CapabilityProbe name="acme-audit" />
+      <CapabilityProbe name="acme-widgets" />
+      <CapabilityProbe name="acme-absent" />
+    </>,
+  );
+  expect(await screen.findByText("acme-audit denied no access")).toBeInTheDocument();
+  expect(screen.getByText("acme-widgets on")).toBeInTheDocument();
+  expect(screen.getByText("none")).toBeInTheDocument();
+  r.unmount();
+  // A server without extension capabilities omits the field.
+  stubApi({ "/api/v1/meta": { kinds: [], capabilities: [] } });
+  renderWithTheme(<CapabilityProbe name="acme-widgets" />);
+  await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+  expect(screen.getByText("none")).toBeInTheDocument();
 });
