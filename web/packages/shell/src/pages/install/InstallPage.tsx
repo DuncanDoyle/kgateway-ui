@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { isStale, useCapabilities, useHealth, useMeta, useOverview } from "../../api/hooks";
 import { plural } from "../../format";
-import { useInstallPanels } from "../../shell/contributions";
+import { Slot, useInstallPanels } from "../../shell/contributions";
 import { useInstallId, useVocabulary } from "../../shell/extension";
 import { installPath } from "../../shell/paths";
 import { PageNotice } from "../../states/PageNotice";
@@ -140,10 +140,16 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
         signalsMissing={signalsMissing}
       />
       {panels.map((p) => (
-        <section key={p.id} aria-labelledby={`${panelId}-${p.id}`} data-slot="install-panel">
-          <h2 id={`${panelId}-${p.id}`}>{p.title}</h2>
-          {p.render({ installId: id })}
-        </section>
+        <Slot
+          key={p.id}
+          id={`install-panel:${p.id}`}
+          render={() => (
+            <section aria-labelledby={`${panelId}-${p.id}`} data-slot="install-panel">
+              <h2 id={`${panelId}-${p.id}`}>{p.title}</h2>
+              {p.render({ installId: id })}
+            </section>
+          )}
+        />
       ))}
     </>
   );

@@ -14,7 +14,7 @@ import { InstallPage } from "../pages/install/InstallPage";
 import { installSummary, meta, overview, unhealthy } from "../test/fixtures";
 import { renderWithTheme, stubApi } from "../test/render";
 import type { Contributions } from "./contributions";
-import { ShellExtensionContext, useShellExtension } from "./extension";
+import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "./extension";
 
 const ID = "kgw.kgateway";
 const GW = "gateway.networking.k8s.io";
@@ -28,9 +28,23 @@ afterEach(() => {
 });
 
 /** Adds contributions to the default extension, as Shell does for a downstream. */
-function With({ contributions, children }: { contributions: Contributions; children: ReactNode }) {
+function With({
+  contributions,
+  findingRenderers,
+  children,
+}: {
+  contributions: Contributions;
+  findingRenderers?: Record<string, FindingRenderer>;
+  children: ReactNode;
+}) {
   const base = useShellExtension();
-  return <ShellExtensionContext.Provider value={{ ...base, contributions }}>{children}</ShellExtensionContext.Provider>;
+  return (
+    <ShellExtensionContext.Provider
+      value={{ ...base, contributions, findingRenderers: findingRenderers ?? base.findingRenderers }}
+    >
+      {children}
+    </ShellExtensionContext.Provider>
+  );
 }
 
 function Where() {
@@ -223,4 +237,102 @@ it("install panels render below the Gateway table", async () => {
   const panel = screen.getByRole("region", { name: "Acme panel" });
   expect(panel).toHaveTextContent("panel for kgw.kgateway");
   expect(table.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+const boom = (): never => {
+  throw new Error("boom");
+};
+/** Warnings that name id; React's own error log is silenced. */
+function quiet() {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  return (id: string) => warn.mock.calls.filter((c) => String(c[0]).includes(`"${id}"`)).length;
+}
+
+it("a throwing detail tab or side section leaves the Gateway page up and its slot empty", async () => {
+  const warned = quiet();
+  const first = mountGateway(
+    {
+      detailTabs: { [`${GW}/Gateway`]: [{ id: "bad-tab", label: "Bad", render: boom }] },
+      sideSections: { [`${GW}/Gateway`]: [{ id: "bad-side", title: "Bad side", render: boom }] },
+    },
+    `${GW_PATH}?tab=bad-tab`,
+  );
+  await waitFor(() => expect(screen.getByRole("tab", { name: "Bad" })).toHaveAttribute("aria-selected", "true"));
+  await waitFor(() => expect(warned("detail-tab:bad-tab")).toBe(1));
+  expect(screen.getByTestId("detail-header")).toHaveTextContent("edge");
+  expect(screen.getByRole("tabpanel")).toBeEmptyDOMElement();
+  first.unmount();
+  mountGateway({ sideSections: { [`${GW}/Gateway`]: [{ id: "bad-side", title: "Bad side", render: boom }] } });
+  await screen.findByRole("table", { name: "Listeners" });
+  expect(screen.queryByRole("region", { name: "Bad side" })).not.toBeInTheDocument();
+  expect(document.querySelector("[data-slot]")).toBeNull();
+  expect(warned("side-section:bad-side")).toBe(1);
+});
+
+it("a throwing install panel, finding action or finding renderer leaves the install page up and its slot empty", async () => {
+  const warned = quiet();
+  stubApi({
+    "/api/v1/installs": [installSummary()],
+    [`${API}/overview`]: overview(),
+    [`${API}/health`]: unhealthy(),
+    "/api/v1/meta": meta,
+  });
+  renderWithTheme(
+    <With
+      findingRenderers={{ "KGWUI-": boom }}
+      contributions={{
+        installPanels: [{ id: "bad-panel", title: "Bad panel", render: boom }],
+        findingActions: [
+          { id: "bad-applies", label: "Bad applies", applies: boom, render: () => <button type="button">x</button> },
+          { id: "bad-render", label: "Bad render", applies: () => true, render: boom },
+        ],
+      }}
+    >
+      <Routes>
+        <Route path="/i/:id" element={<InstallPage />} />
+      </Routes>
+    </With>,
+    { path: `/i/${ID}` },
+  );
+  await screen.findByRole("table", { name: "Gateways" });
+  const rows = screen.getAllByTestId("finding-row");
+  expect(rows[0]).toHaveTextContent("Configuration rejected by Envoy");
+  expect(screen.queryByRole("region", { name: "Bad panel" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("group", { name: "Bad applies" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("group", { name: "Bad render" })).not.toBeInTheDocument();
+  // One warning per contribution, however many rows it failed on.
+  expect(warned("install-panel:bad-panel")).toBe(1);
+  expect(warned("finding-action:bad-applies")).toBe(1);
+  expect(warned("finding-action:bad-render")).toBe(1);
+  expect(warned("finding-renderer:KGWUI-001")).toBe(1);
+});
+
+it("a repeated contribution id renders once", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const panel = (t: string) => ({ id: "dup-panel", title: t, render: () => <p>{t}</p> });
+  const action = (l: string) => ({ id: "dup-action", label: l, applies: () => true, render: () => <span>{l}</span> });
+  const g = mountGateway({
+    sideSections: {
+      [`${GW}/Gateway`]: [
+        { id: "dup-side", title: "Side one", render: () => null },
+        { id: "dup-side", title: "Side two", render: () => null },
+      ],
+    },
+  });
+  expect(await screen.findByRole("region", { name: "Side one" })).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Side two" })).not.toBeInTheDocument();
+  g.unmount();
+  mountInstall({
+    installPanels: [panel("Panel one"), panel("Panel two")],
+    findingActions: [action("A1"), action("A2")],
+  });
+  await screen.findByRole("table", { name: "Gateways" });
+  expect(screen.getByRole("region", { name: "Panel one" })).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Panel two" })).not.toBeInTheDocument();
+  const rows = screen.getAllByTestId("finding-row");
+  expect(screen.getAllByRole("group", { name: "A1" })).toHaveLength(rows.length);
+  expect(screen.queryByRole("group", { name: "A2" })).not.toBeInTheDocument();
+  for (const id of ["dup-side", "dup-panel", "dup-action"])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"${id}"`));
 });

@@ -15,7 +15,7 @@ import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
-import { useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
+import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
 import { installPath } from "../../shell/paths";
 import { useUrlParams } from "../../shell/urlParams";
@@ -185,15 +185,21 @@ export function DetailFrame({
     extra ? (
       extra.content
     ) : own ? (
-      own.render(ctx)
+      <Slot key={own.id} id={`detail-tab:${own.id}`} render={() => own.render(ctx)} />
     ) : (
       <>
         {children}
         {sections.map((s) => (
-          <Section key={s.id} aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
-            <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>
-            {s.render(ctx)}
-          </Section>
+          <Slot
+            key={s.id}
+            id={`side-section:${s.id}`}
+            render={() => (
+              <Section aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
+                <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>
+                {s.render(ctx)}
+              </Section>
+            )}
+          />
         ))}
       </>
     )

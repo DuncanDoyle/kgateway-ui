@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import { Component, type ReactNode, useMemo } from "react";
 import type { Finding, Ref } from "../api/types";
 import { useShellExtension } from "./extension";
 
@@ -49,6 +49,46 @@ export interface Contributions {
 // region Helpers
 const NONE: never[] = [];
 const kindKey = (r: Ref) => `${r.group}/${r.kind}`;
+const warned = new Set<string>();
+
+/** Warns once per contribution that it failed and is hidden. */
+function warnFailed(id: string, err: unknown) {
+  if (warned.has(id)) return;
+  warned.add(id);
+  console.warn(`kgateway-ui: hiding contribution "${id}": it threw ${String(err)}`);
+}
+
+/** Drops entries whose id repeats an earlier one, with a warning. */
+function unique<T extends { id: string }>(all: T[], slot: string): T[] {
+  const seen = new Set<string>();
+  return all.filter((c) => {
+    if (seen.has(c.id)) {
+      console.warn(`kgateway-ui: ignoring contributed ${slot} "${c.id}": the id is already taken.`);
+      return false;
+    }
+    seen.add(c.id);
+    return true;
+  });
+}
+
+function Call({ render }: { render: () => ReactNode }) {
+  return <>{render()}</>;
+}
+
+// region Component
+/** Renders a contribution; when it throws, renders nothing and warns once per id, so the core page stays up. */
+export class Slot extends Component<{ id: string; render: () => ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    warnFailed(this.props.id, err);
+  }
+  render() {
+    return this.state.failed ? null : <Call render={this.props.render} />;
+  }
+}
 
 // region Hooks
 /** Contributed tabs for ref's kind. An id that names a core tab, or repeats an earlier one, is ignored with a warning. */
@@ -70,16 +110,30 @@ export function useDetailTabContributions(ref: Ref, coreIds: readonly string[]):
 
 /** Contributed sections for ref's kind. */
 export function useSideSectionContributions(ref: Ref): SideSectionContribution[] {
-  return useShellExtension().contributions.sideSections?.[kindKey(ref)] ?? NONE;
+  const all = useShellExtension().contributions.sideSections?.[kindKey(ref)] ?? NONE;
+  return useMemo(() => unique(all, "side section"), [all]);
 }
 
-/** The contributed actions that apply to f. */
+/** The contributed actions that apply to f; an applies() that throws counts as false. */
 export function useFindingActions(f: Finding): FindingActionContribution[] {
   const all = useShellExtension().contributions.findingActions ?? NONE;
-  return useMemo(() => all.filter((a) => a.applies(f)), [all, f]);
+  const actions = useMemo(() => unique(all, "finding action"), [all]);
+  return useMemo(
+    () =>
+      actions.filter((a) => {
+        try {
+          return a.applies(f);
+        } catch (err) {
+          warnFailed(`finding-action:${a.id}`, err);
+          return false;
+        }
+      }),
+    [actions, f],
+  );
 }
 
 /** The contributed install-page panels. */
 export function useInstallPanels(): InstallPanelContribution[] {
-  return useShellExtension().contributions.installPanels ?? NONE;
+  const all = useShellExtension().contributions.installPanels ?? NONE;
+  return useMemo(() => unique(all, "install panel"), [all]);
 }
