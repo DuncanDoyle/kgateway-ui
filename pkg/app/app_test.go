@@ -895,3 +895,30 @@ func TestBuildRejectsBadExtensionEndpoints(t *testing.T) {
 		t.Fatalf("GET /api/ext/acme/hi: %d, Current nil %v", rec.Code, sawNil)
 	}
 }
+
+// A capability that collides with a core one fails Build, and a valid one
+// reaches both /api/v1/meta and the extension's Deps.
+func TestBuildCapabilities(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	o := Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui}
+	clash := func() []api.Capability { return []api.Capability{{Name: "scope", State: api.CapOn}} }
+	if _, err := Build(c, o, extension.New(extension.WithCapabilities(clash))); err == nil || !strings.Contains(err.Error(), "scope") {
+		t.Fatalf("Build with a platform name: %v", err)
+	}
+	good := func() []api.Capability { return []api.Capability{{Name: "acme-widgets", State: api.CapOn}} }
+	var deps extension.Deps
+	a, err := Build(c, o, extension.New(extension.WithCapabilities(good), extension.WithHandlers("acme", func(_ extension.Router, d extension.Deps) { deps = d })))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := deps.Capabilities(); len(got) != 1 || got[0].Name != "acme-widgets" {
+		t.Errorf("Deps.Capabilities = %+v", got)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/meta", nil))
+	var meta api.MetaResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil || !slices.Contains(meta.Capabilities, "acme-widgets") || len(meta.CapabilityStates) != 1 {
+		t.Errorf("meta: %v %+v", err, meta)
+	}
+}

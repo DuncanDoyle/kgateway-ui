@@ -86,6 +86,8 @@ type setup struct {
 	zone *time.Location
 	// rulesFor replaces the engine's rule selection; nil runs the real rule sets.
 	rulesFor func(string) computed.Selection
+	// opts are extra NewHandler options.
+	opts []HandlerOption
 	// disputes marks a world that disagrees with the computed views on purpose;
 	// every other world must agree, so fixture drift fails here (consistentWithViews).
 	disputes bool
@@ -225,7 +227,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if m := e.Compute(); !s.disputes {
 		consistentWithViews(t, m)
 	}
-	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
+	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, s.opts...))
 	t.Cleanup(srv.Close)
 	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, clk: clk}
 }
@@ -2522,5 +2524,52 @@ func TestComputedDisagreementAtTheAPI(t *testing.T) {
 				t.Fatalf("last check %+v", c)
 			}
 		})
+	}
+}
+
+func TestMetaListsExtensionCapability(t *testing.T) {
+	src := func() []Capability {
+		return []Capability{{Name: "acme-widgets", State: CapOn}, {Name: "acme-audit", State: CapDenied, Reason: "needs a role"}, {Name: "acme-beta", State: CapOff}}
+	}
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(src)}}, world()...)
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	// Platform capabilities first, then the "on" extension ones; "off" and "denied" stay out.
+	if want := []string{platform.Scope, platform.Workloads, "acme-widgets"}; !slices.Equal(meta.Capabilities, want) {
+		t.Errorf("capabilities = %v, want %v", meta.Capabilities, want)
+	}
+	want := []Capability{{Name: "acme-audit", State: CapDenied, Reason: "needs a role"}, {Name: "acme-beta", State: CapOff}, {Name: "acme-widgets", State: CapOn}}
+	if !slices.Equal(meta.CapabilityStates, want) {
+		t.Errorf("capabilityStates = %+v, want %+v", meta.CapabilityStates, want)
+	}
+}
+
+func TestCapabilityNameCollision(t *testing.T) {
+	plat := []string{platform.Scope, platform.Workloads}
+	ok := func() []Capability { return []Capability{{Name: "acme-widgets", State: CapOn}} }
+	if err := CheckCapabilities(plat, ok); err != nil {
+		t.Fatalf("a distinct name: %v", err)
+	}
+	for _, name := range []string{"processes", "events", "crds", "endpoints", "proxyStats", "controllerLogs", platform.Scope, platform.Workloads, ""} {
+		src := func() []Capability { return []Capability{{Name: name, State: CapOn}} }
+		if CheckCapabilities(plat, src) == nil {
+			t.Errorf("name %q: want an error", name)
+		}
+	}
+	if CheckCapabilities(plat, ok, ok) == nil {
+		t.Error("two sources with one name: want an error")
+	}
+	dup := func() []Capability { return []Capability{{Name: "a", State: CapOn}, {Name: "a", State: CapOff}} }
+	if CheckCapabilities(plat, dup) == nil {
+		t.Error("one source with a repeated name: want an error")
+	}
+	bad := func() []Capability { return []Capability{{Name: "a", State: "maybe"}} }
+	if CheckCapabilities(plat, bad) == nil {
+		t.Error("an unknown state: want an error")
+	}
+	// A source that starts colliding after Build cannot shadow a core name on the wire.
+	flip := func() []Capability { return []Capability{{Name: "processes", State: CapOn}} }
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(flip)}}, world()...)
+	if meta := get[MetaResponse](t, srv, "/api/v1/meta", 200); slices.Contains(meta.Capabilities, "processes") || len(meta.CapabilityStates) != 0 {
+		t.Errorf("a colliding name must be dropped: %+v", meta)
 	}
 }

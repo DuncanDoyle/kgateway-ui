@@ -176,3 +176,22 @@ func TestRegistryMounts(t *testing.T) {
 		}
 	}
 }
+
+func TestCapabilitiesRegistry(t *testing.T) {
+	one := func() []api.Capability { return []api.Capability{{Name: "acme-widgets", State: api.CapOn}} }
+	two := func() []api.Capability { return []api.Capability{{Name: "acme-audit", State: api.CapOff}} }
+	r := New(WithCapabilities(one), WithCapabilities(two))
+	if got := r.CapabilityStates(); len(got) != 2 || got[0].Name != "acme-widgets" || got[1].Name != "acme-audit" {
+		t.Fatalf("CapabilityStates = %+v, want both sources in order", got)
+	}
+	if err := r.CheckCapabilities([]string{"scope"}); err != nil {
+		t.Fatal(err)
+	}
+	clash := func() []api.Capability { return []api.Capability{{Name: "events", State: api.CapOn}} }
+	if New(WithCapabilities(clash)).CheckCapabilities([]string{"scope"}) == nil {
+		t.Error("a core name: want an error from CheckCapabilities")
+	}
+	if New().CapabilityStates() != nil {
+		t.Error("no source: want nil")
+	}
+}

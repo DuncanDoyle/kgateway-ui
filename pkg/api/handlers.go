@@ -40,7 +40,7 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	if authz == nil {
 		authz = AllowAll{}
 	}
-	h := &handler{src: src, authz: authz}
+	h := &handler{src: src, authz: authz, capSources: cfg.capSources}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -64,8 +64,9 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 }
 
 type handler struct {
-	src   ModelSource
-	authz Authorizer
+	src        ModelSource
+	authz      Authorizer
+	capSources []func() []Capability
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -140,6 +141,7 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 		resp.Views = explore.DetailKinds(m.Served)
 	}
 	resp.Filters = addedFilters
+	addCapabilities(&resp, plat.Capabilities, h.capSources)
 	writeJSON(w, resp)
 }
 

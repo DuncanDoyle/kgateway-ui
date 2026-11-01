@@ -24,7 +24,8 @@ type ExtMount struct {
 type HandlerOption func(*handlerConfig)
 
 type handlerConfig struct {
-	ext []ExtMount
+	ext        []ExtMount
+	capSources []func() []Capability
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

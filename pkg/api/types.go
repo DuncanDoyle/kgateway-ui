@@ -55,6 +55,9 @@ type MetaResponse struct {
 	// Capabilities are what the platform offers (platform.Scope,
 	// platform.Workloads). Clients branch on these, never on Platform.
 	Capabilities []string `json:"capabilities"`
+	// CapabilityStates lists extension capabilities with their state, by name.
+	// Those that are on are also in Capabilities.
+	CapabilityStates []Capability `json:"capabilityStates,omitempty"`
 	// Kinds are the kinds the resource endpoint can serve: the served kinds,
 	// plus apps/Deployment under the workloads capability. The frontend links only these.
 	Kinds []kinds.Served `json:"kinds"`

@@ -46,6 +46,8 @@ type Registry struct {
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
+	// capSources are the WithCapabilities registrations, in order.
+	capSources []func() []api.Capability
 	// prefixes holds the finding-code prefixes registered so far.
 	prefixes map[string]bool
 	// errs collects registration errors; New does not fail, Err reports them.
@@ -105,6 +107,29 @@ func WithChecks(prefix string, c ...health.Check) Option {
 			r.Checks = append(r.Checks, c...)
 		}
 	}
+}
+
+// WithCapabilities adds a source of capability states for /api/v1/meta. A
+// capability that is on is also listed in capabilities. Names must not
+// collide with core, platform or other extension capabilities; app.Build calls
+// each source once to check, so a source must report a stable set of names.
+func WithCapabilities(f func() []api.Capability) Option {
+	return func(r *Registry) { r.capSources = append(r.capSources, f) }
+}
+
+// CapabilityStates returns what every source reports now, in registration order.
+func (r *Registry) CapabilityStates() []api.Capability {
+	var all []api.Capability
+	for _, f := range r.capSources {
+		all = append(all, f()...)
+	}
+	return all
+}
+
+// CheckCapabilities reports a capability name that collides with a core one or
+// the platform's platformNames, or another source.
+func (r *Registry) CheckCapabilities(platformNames []string) error {
+	return api.CheckCapabilities(platformNames, r.capSources...)
 }
 
 // WithAuthorizer replaces the default api.AllowAll. Every API response with

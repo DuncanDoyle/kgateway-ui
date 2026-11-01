@@ -166,3 +166,24 @@ func decode(t *testing.T, s string) any {
 	}
 	return v
 }
+
+// TestMetaUnchangedWithoutCapabilitySource pins design §4.1 gap 4: with no
+// source, or one that reports nothing, meta is the golden body and carries no capabilityStates.
+func TestMetaUnchangedWithoutCapabilitySource(t *testing.T) {
+	base := wire(t, wireCases(t)[0].srv, "/api/v1/meta")
+	if bytes.Contains(base, []byte("capabilityStates")) {
+		t.Fatalf("meta without a source lists capabilityStates:\n%s", base)
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "golden", "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(golden), bytes.TrimSpace(base)) {
+		t.Errorf("meta differs from the golden:\n%s", base)
+	}
+	empty := func() []Capability { return nil }
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(empty)}}, world()...)
+	if got := wire(t, srv, "/api/v1/meta"); bytes.Contains(got, []byte("capabilityStates")) {
+		t.Errorf("meta with an empty source lists capabilityStates:\n%s", got)
+	}
+}

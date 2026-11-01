@@ -16,6 +16,9 @@ type Deps struct {
 	Current func() *engine.Published
 	// Authorizer is the registry's; filter objects with api.Visible.
 	Authorizer api.Authorizer
+	// Capabilities returns the states every WithCapabilities source reports now,
+	// in registration order; /api/v1/meta lists the same.
+	Capabilities func() []api.Capability
 	// Logger carries the extension's name.
 	Logger *slog.Logger
 }
