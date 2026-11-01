@@ -16,19 +16,21 @@ import (
 )
 
 // Source is the source fingerprint of a model (D-019 §2): the cache data it
-// was computed from, the identity of the metrics results it read and the
-// served-kinds change it saw.
+// was computed from, the identity of the metrics results it read, the
+// served-kinds change it saw and the collector values it read.
 type Source struct {
 	Cache cache.Fingerprint
 	// Metrics is encodeMetrics of the results read.
 	Metrics uint64
 	// Kinds is the served-kinds change as kinds.Change.String().
 	Kinds string
+	// Collected is the collector store's print; zero without collectors.
+	Collected uint64
 }
 
 // Equal reports whether s and o describe the same source data.
 func (s Source) Equal(o Source) bool {
-	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Cache.Equal(o.Cache)
+	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
 }
 
 // Published is one publication: a Model, the Source it was computed from and
@@ -157,8 +159,8 @@ func (e *Engine) confirm(prev *Published, now time.Time) bool {
 	return e.cur.CompareAndSwap(prev, &Published{Model: prev.Model, Source: prev.Source, ConfirmedAt: now})
 }
 
-// liveSource is the Source the stores, the metrics and the kinds monitor
-// would give a computation at now, for the installs p read metrics for.
+// liveSource is the Source the stores, the metrics, the kinds monitor and the
+// collector store would give a computation at now, for the installs p read metrics for.
 func (e *Engine) liveSource(p *Published, now time.Time) Source {
 	var src Source
 	if f, ok := e.cfg.Snapshots.(cache.Fingerprinter); ok {
@@ -174,6 +176,9 @@ func (e *Engine) liveSource(p *Published, now time.Time) Source {
 	src.Metrics = encodeMetrics(reads, now, e.cfg.MetricsMaxAge)
 	if e.cfg.KindsChange != nil {
 		src.Kinds = e.cfg.KindsChange().String()
+	}
+	if e.cfg.Collected != nil {
+		src.Collected = e.cfg.Collected().Print
 	}
 	return src
 }

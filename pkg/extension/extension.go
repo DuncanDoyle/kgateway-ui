@@ -46,6 +46,8 @@ type Registry struct {
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
+	// collectors are the WithCollectors registrations, in order.
+	collectors []Collector
 	// capSources are the WithCapabilities registrations, in order.
 	capSources []func() []api.Capability
 	// prefixes holds the finding-code prefixes registered so far.

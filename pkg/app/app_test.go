@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -920,5 +922,84 @@ func TestBuildCapabilities(t *testing.T) {
 	var meta api.MetaResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil || !slices.Contains(meta.Capabilities, "acme-widgets") || len(meta.CapabilityStates) != 1 {
 		t.Errorf("meta: %v %+v", err, meta)
+	}
+}
+
+// fakeCollector publishes one value, then waits for ctx or returns fail.
+type fakeCollector struct {
+	name    string
+	fail    error
+	started chan extension.Deps
+	done    chan struct{}
+}
+
+func (c *fakeCollector) Name() string { return c.name }
+func (c *fakeCollector) Start(ctx context.Context, d extension.Deps) error {
+	defer close(c.done)
+	d.Publish("k", c.name, 1, 0)
+	c.started <- d
+	if c.fail != nil {
+		return c.fail
+	}
+	<-ctx.Done()
+	return nil
+}
+
+// Collectors start with the app and publish into the store the engine reads.
+// One that returns an error has its values expired and is not restarted; the
+// others stop with the app's context.
+func TestCollectorStartsAndStopsWithApp(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	events := make(chan engine.LoopEvent, 4096)
+	ok := &fakeCollector{name: "acme", started: make(chan extension.Deps, 1), done: make(chan struct{})}
+	bad := &fakeCollector{name: "broken", fail: errors.New("boom"), started: make(chan extension.Deps, 2), done: make(chan struct{})}
+	var handlerDeps extension.Deps
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: time.Hour, MetricsInterval: time.Hour, ConfirmEvery: time.Hour, UI: ui, OnLoop: func(e engine.LoopEvent) {
+			select {
+			case events <- e:
+			default:
+			}
+		}}, extension.New(extension.WithCollectors(ok, bad), extension.WithHandlers("acme", func(_ extension.Router, d extension.Deps) { handlerDeps = d })))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handlerDeps.Publish != nil || handlerDeps.Fail != nil {
+		t.Fatal("handlers must not get Publish or Fail")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	if d := testutil.Recv(t, ok.started, "acme to start"); d.Current == nil || d.Logger == nil || d.Fail == nil {
+		t.Fatalf("collector Deps: %+v", d)
+	}
+	testutil.Recv(t, bad.started, "broken to start")
+	testutil.Recv(t, bad.done, "broken to return")
+	for {
+		e := testutil.Recv(t, events, "a run over acme's value and broken's expiry")
+		if e.Kind != engine.EvPublished {
+			continue
+		}
+		snap := a.collected.Snapshot()
+		good, _ := snap.Get("acme/k")
+		gone, _ := snap.Get("broken/k")
+		if good.State == collect.OK && good.Data == "acme" && gone.State == collect.Unavailable && e.Published.Source.Collected == snap.Print {
+			break
+		}
+	}
+	select {
+	case <-bad.started:
+		t.Fatal("a collector that returned an error must not restart")
+	default:
+	}
+	cancel()
+	testutil.Recv(t, ok.done, "acme to stop with the app")
+}
+
+// Without collectors the engine reads no store, so the source print stays zero.
+func TestNoCollectorsLeavesCollectedUnset(t *testing.T) {
+	a := build(t)
+	if a.cfg.Collected != nil || a.collected != nil {
+		t.Fatal("no collectors must leave the engine's Collected unset")
 	}
 }

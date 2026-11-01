@@ -13,6 +13,7 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -73,6 +74,9 @@ type Config struct {
 	ConfirmEvery time.Duration
 	// OnLoop, if set, is called on Run's goroutine after each loop transition (tests).
 	OnLoop func(LoopEvent)
+	// Collected, if set, returns the collector values; checks read them and
+	// the confirm tick compares their print (D-019).
+	Collected func() collect.Snapshot
 }
 
 // InstallModel is everything the API serves about one install.
@@ -271,6 +275,15 @@ func (e *Engine) compute() *Published {
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
+	var col collect.Snapshot
+	if e.cfg.Collected != nil {
+		col = e.cfg.Collected()
+		for _, v := range col.Values {
+			if v.State == collect.OK && !v.Expires.IsZero() {
+				next.add(v.Expires, false) // unavailable once now ≥ Expires
+			}
+		}
+	}
 	firstSeen := e.firstSeen(now)
 	// Only an object health asks about while it is in grace gets a grace deadline.
 	seen := func(u *unstructured.Unstructured) time.Time {
@@ -327,7 +340,7 @@ func (e *Engine) compute() *Published {
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode}, e.cfg.Checks)
+			Computed: views[i], Views: e.decode, Collected: col}, e.cfg.Checks)
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
 			Computed: views[i]})
@@ -335,7 +348,8 @@ func (e *Engine) compute() *Published {
 			Rules: r.sel, Computed: views[i]})
 	}
 	m.Next = next.next
-	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(),
+		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
 	return p
 }
 

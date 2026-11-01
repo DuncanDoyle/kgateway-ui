@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -193,5 +194,21 @@ func TestCapabilitiesRegistry(t *testing.T) {
 	}
 	if New().CapabilityStates() != nil {
 		t.Error("no source: want nil")
+	}
+}
+
+type namedCollector string
+
+func (c namedCollector) Name() string                    { return string(c) }
+func (namedCollector) Start(context.Context, Deps) error { return nil }
+
+func TestWithCollectorsRejectsBadAndDuplicateNames(t *testing.T) {
+	r := New(WithCollectors(namedCollector("acme"), namedCollector("Bad_Name")), WithCollectors(namedCollector("acme")))
+	err := r.Err()
+	if err == nil || !strings.Contains(err.Error(), "Bad_Name") || !strings.Contains(err.Error(), `"acme" is already registered`) {
+		t.Fatalf("Err = %v", err)
+	}
+	if got := r.Collectors(); len(got) != 1 || got[0].Name() != "acme" {
+		t.Fatalf("Collectors = %v", got)
 	}
 }

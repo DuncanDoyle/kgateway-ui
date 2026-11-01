@@ -21,6 +21,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
@@ -78,6 +79,10 @@ type App struct {
 	collector *ctrlmetrics.Collector
 	kinds     *kinds.Monitor
 	opts      Options
+	// reg starts the collectors; collected is their store, nil without collectors.
+	reg       *extension.Registry
+	collected *collect.Store
+	deps      extension.Deps
 	// discovered is closed after the first model with an install over a settled cache.
 	discovered chan struct{}
 }
@@ -147,23 +152,32 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 				once.Do(func() { close(discovered) })
 			}
 		}}
+	var collected *collect.Store
+	if len(reg.Collectors()) > 0 {
+		collected = collect.New(changes, time.Now)
+		cfg.Collected = collected.Snapshot
+	}
 	eng := engine.New(cfg)
 	if err := reg.CheckCapabilities(eng.Platform().Capabilities); err != nil {
 		return nil, err
 	}
-	mounts, err := reg.Mounts(extension.Deps{Current: eng.Current, Authorizer: reg.Authorizer, Capabilities: reg.CapabilityStates, Logger: slog.Default()})
+	deps := extension.Deps{Current: eng.Current, Authorizer: reg.Authorizer, Capabilities: reg.CapabilityStates, Logger: slog.Default()}
+	mounts, err := reg.Mounts(deps)
 	if err != nil {
 		return nil, err
 	}
 	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCapabilitySources(reg.CapabilityStates)), cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
-		discovered: discovered}, nil
+		discovered: discovered, reg: reg, collected: collected, deps: deps}, nil
 }
 
-// Start runs the cache, the model loop, the served-kinds monitor and the
-// metrics collector until ctx is done. PollInterval is the loop's safety timer. The collector starts as soon as the first install is discovered
+// Start runs the cache, the extension collectors, the model loop, the
+// served-kinds monitor and the metrics collector until ctx is done. PollInterval is the loop's safety timer. The collector starts as soon as the first install is discovered
 // over a settled cache, so the first metrics do not wait for a collector tick.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
+	if a.collected != nil {
+		a.reg.RunCollectors(ctx, a.deps, a.collected)
+	}
 	go a.Engine.Run(ctx, a.opts.PollInterval)
 	go a.kinds.Run(ctx, a.opts.KindsInterval)
 	go func() {
