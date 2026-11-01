@@ -156,6 +156,7 @@ func TestExampleUsesEverySeam(t *testing.T) {
 	published("a model with the install", hasInstall)
 
 	// No AcmePolicy: one tick publishes 0 widgets, and one recompute later /health holds ACME-001.
+	testutil.Drain(events)
 	clk.Step(widgetsEvery)
 	var zero uint64
 	published("a run over 0 widgets", func(p *engine.Published) bool {
@@ -167,6 +168,7 @@ func TestExampleUsesEverySeam(t *testing.T) {
 	}
 
 	gvr := acmePolicyGVR
+	testutil.Drain(events)
 	for _, u := range []*unstructured.Unstructured{acmePolicyObject("shop", "discount"), acmePolicyObject("acme-system", "internal")} {
 		if _, err := dyn.Resource(gvr).Namespace(u.GetNamespace()).Create(ctx, u, metav1.CreateOptions{}); err != nil {
 			t.Fatal(err)
@@ -184,8 +186,12 @@ func TestExampleUsesEverySeam(t *testing.T) {
 	}
 
 	// The next tick counts them, and the finding clears.
+	// Only the tick changes the collected print; a run without it reads 0 or zero.
+	testutil.Drain(events)
 	clk.Step(widgetsEvery)
-	published("a run over 2 widgets", func(p *engine.Published) bool { return hasInstall(p) && p.Source.Collected != zero })
+	published("a run over 2 widgets", func(p *engine.Published) bool {
+		return hasInstall(p) && p.Source.Collected != 0 && p.Source.Collected != zero
+	})
 	if healthHas(t, srv, "ACME-001") {
 		t.Fatal("2 widgets must clear ACME-001")
 	}

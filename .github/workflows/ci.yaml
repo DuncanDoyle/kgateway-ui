@@ -119,8 +119,9 @@ jobs:
       - run: make actionlint
       - uses: azure/setup-helm@v5
       - run: helm lint deploy/helm/kgateway-ui
-      # The example's chart overlay test runs here, where helm is required.
-      - run: REQUIRE_HELM=1 go test ./deploy/... ./examples/...
+      - run: REQUIRE_HELM=1 go test ./deploy/...
+      # The example's chart overlay test runs here, where helm is required; the go job runs the rest.
+      - run: REQUIRE_HELM=1 go test -run TestChartOverlayRendersExtraRule ./examples/...
   image:
     # Multi-arch build check; nothing is pushed.
     runs-on: ubuntu-latest
