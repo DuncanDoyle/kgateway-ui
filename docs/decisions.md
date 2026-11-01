@@ -562,3 +562,108 @@ quirk 2 (prefix /q):
 **Consequences:** These are the 2.5 acceptance rows for Q1, Q4 and Q7. Each reuses an existing rule, so no new behaviour is introduced.
 
 **Alternatives:** n/a.
+
+## D-028 — Stable finding identity, groups and ranking (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** Phase 2 findings have no id, so the SPA cannot link, page or track a finding across recomputes (phase-2 review finding 8).
+
+**Decision:** Every finding gets a stable `id` from its code and identity key, and a `group` when it shares a cause with others. Groups are ranked by severity, blast radius and class (design §5).
+
+**Consequences:** `id` and `group` are optional API fields. Findings page on the server by rank.
+
+**Alternatives:** n/a.
+
+## D-029 — Process health through `process.Source` (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** Phase 3 reports controller and proxy process health (D-016) without reading admin ports or Pod output.
+
+**Decision:** Process facts come through `process.Source`, with one allowlisted Kubernetes source. Proxy Pods, Warning Events and Gateway API CRD metadata are watched. Termination messages and probe output are never read (design §9, §18). This reverses D-017 §5 for CRD metadata only, behind a toggle.
+
+**Consequences:** New watches and RBAC rows, each with a capability that degrades to "not available".
+
+**Alternatives:** n/a.
+
+## D-030 — Specific codes replace KGWUI-002 for their reasons (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** KGWUI-002 covers every `False` condition, so its message cannot say what to fix.
+
+**Decision:** Specific codes (013, 014, 015, 016) replace 002 for their reasons; 002 stays the fallback. KGWUI-001 is re-specified rather than adding a "status says healthy" code. A row whose Gateway rejects config is never healthy (design §7.1, §8.3, §8.4).
+
+**Consequences:** A listed exception to the additive golden test: only the `code` and `slug` of the named findings change. API v1 has no release yet.
+
+**Alternatives:** n/a.
+
+## D-031 — Backend readiness from Services and EndpointSlices (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** A route can be accepted while its backend has no ready endpoints.
+
+**Decision:** KGWUI-023 reads Services and EndpointSlices, limited to Service refs the controller resolved (design §11).
+
+**Consequences:** New watches with transforms and an `endpoints` capability, in 3.4.
+
+**Alternatives:** n/a.
+
+## D-032 — The `health.Check` contract changes to `Name`, `Inputs`, `Run(RunContext)` (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Context:** Checks recompute on every change, and downstream checks cannot declare new inputs.
+
+**Decision:** A breaking change to `Name`, `Inputs`, `Run(RunContext)`, with an engine-owned Store per (install, check) and memoization on the declared inputs (design §16.2).
+
+**Consequences:** Every core, example and downstream check migrates in 3.1. README upgrade notes. The last planned break of the Go extension API.
+
+**Alternatives:** n/a.
+
+## D-033 — kgateway 2.5 joins the support matrix at GA (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Decision:** kgateway 2.5 is supported in 3.4, once 2.5.0 GA ships. Before GA it runs on the 2.4 rule set (design §7.6, §8.6, §23).
+
+**Consequences:** If GA is not out at 3.4, its 2.5 tasks wait and the rest ships.
+
+**Alternatives:** n/a.
+
+## D-034 — No Phase 3 check is required (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (our call, approved with the design)
+
+**Decision:** A check whose input is off, denied, failing or absent returns "not available" with a reason. It never raises KGWUI-008 and never turns the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones (design §5.1, §7.1).
+
+**Consequences:** Existing required checks keep their flag.
+
+**Alternatives:** n/a.
+
+## D-035 — Path-based breadcrumbs, a shared object header and a fluid layout (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Decision:** Breadcrumbs follow the path the user took, carried in the URL (`via`). Every detail page has an object header. The layout is fluid up to 2400 px, with two columns on detail pages from 1600 px (design §17.6).
+
+**Alternatives:** n/a.
+
+## D-036 — Deterministic suggested fixes (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Decision:** A fix is suggested only where exactly one change follows from the spec, discovery or a watched object. It is a fragment with its location for existing objects. It is never applied and never derived from translation logic (design §7.7).
+
+**Consequences:** AI-assisted diagnosis is a later phase (roadmap Phase 11).
+
+**Alternatives:** n/a.
+
+## D-037 — Envoy stats from the proxies; controller logs opt-in (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user)
+
+**Decision:** Envoy stats are read from each proxy's stats listener, with no new RBAC. Controller logs are opt-in and limited to the install namespace; only fixed fields are kept, and log text is never stored or shown. Proxy logs, `/config_dump` and admin ports stay out until per-user identity (Phase 10) and Phase 9 (design §8.8, §8.9, §12, §18).
+
+**Alternatives:** n/a.
+
+## D-038 — Extension seams for downstream features, as sub-phase 3.0 (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user)
+
+**Context:** A downstream build could add checks, but not a whole feature, without forking.
+
+**Decision:** Seven seams: endpoints, collectors, open check inputs, capabilities, a built shell package, in-page slots and chart extension values (design §4.1). They ship as sub-phase 3.0. `examples/downstream` in CI is the standing proof.
+
+**Alternatives:** n/a.

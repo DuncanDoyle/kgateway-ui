@@ -4,23 +4,31 @@
 Phase: 3 — Health & Diagnostics
 Base: 544dcd5db3196cffd077267bca364ba8a8cd6d24
 Docs: docs/phases/phase-3/
-Status: designing; Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.md)
+Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.md)
 
 ### Queue
-- [ ] Q1 Phase 3 design (`design.md`), incl. the KRT incremental-recompute question in the roadmap and stable finding identity (phase-2 review finding 8) — draft written 2026-10-29 without a question round (user's request); revised with user feedback 2026-10-29 to 2026-11-01 (shell and navigation, suggested fixes, proxy Envoy stats and opt-in log signals, extension seams as 3.0); awaiting user approval; open item in design §25
+- [x] Q1 Phase 3 design (`design.md`) — approved by the user 2026-11-01
 - [x] Q2 Phase 3 implementation plan (`implementation-plan.md`) — 87 tasks, sub-phases 3.0–3.4 (2026-11-01)
-- [ ] Q3 Cross-model review of design + plan, triage, user approval ← CURRENT — Codex review and triage done (`reviews/design-codex.md`, 15 findings accepted and applied); waiting for the user's approval and the scope decision (approve 3.0–3.2 now, 3.3 and 3.4 separately?)
-
+- [x] Q3 Cross-model review of design + plan, triage, user approval — `reviews/design-codex.md`, 15 findings accepted and applied; user approved all of 3.0–3.4 on 2026-11-01 ("I approve the entire phase 3, so 3.0 to 3.4")
+- [ ] Q4 Sub-phase 3.0 Extension seams (Tasks 1–11) ← CURRENT
+- [ ] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33)
+- [ ] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54)
+- [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73)
+- [ ] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87)
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
-- [ ] design+plan cross-model review + triage: docs/phases/phase-3/reviews/
+- [x] design+plan cross-model review + triage: docs/phases/phase-3/reviews/design-codex.md
 - [ ] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-none
+Sub-phase: 3.0 Extension seams
+Kind: planned
+Status: active
+Base: 3eceda6d315a958d8099d44fc9e5348e7bd2bddc
+Brief: phases/phase-3/phase-3.0-brief.md
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
@@ -39,6 +47,7 @@ none
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-01: The user approved the Phase 3 design and plan, all sub-phases 3.0–3.4, in one approval. D-028 … D-038 appended to `decisions.md`. Sub-phase 3.0 started on branch `duncandoyle/phase3Seams` (stacked on `duncandoyle/phase3Design`).
 - 2026-11-01: The extension seam milestone runs as sub-phase 3.0, before 3.1 (user). The seam carry-overs below move into 3.0 (design §15). Design review not yet done; no code before the user approves design and plan.
 - 2026-10-29: Phase 3 started at base 544dcd5. Design draft `phases/phase-3/design.md` written from the roadmap and the Phase 3 research (kept outside the repo, because the repo is public). The KRT question is framed as D-027, decided after a spike in 3.1. A second upstream draft (xDS reject status) sits next to the scope-endpoint draft outside the repo; filing both stays the user's call.
 - 2026-10-29: Phase 2 closed. All exit gates held (CI on PR #11 green; merge 8b988e1 has the same tree). No waivers. Record: phases/phase-2/phase-2-complete.md.
