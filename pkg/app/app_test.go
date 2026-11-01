@@ -197,6 +197,48 @@ func TestDownstreamExtensionSeam(t *testing.T) {
 	}
 }
 
+// baseDetector is acmeDetector with a BaseVersion.
+type baseDetector struct {
+	acmeDetector
+	base string
+}
+
+func (d baseDetector) Detect(dep *appsv1.Deployment) (install.Install, bool) {
+	in, ok := d.acmeDetector.Detect(dep)
+	in.BaseVersion = d.base
+	return in, ok
+}
+
+// A downstream detector's BaseVersion selects the computed rule set the
+// routes list shows; without it the version is unknown.
+func TestRuleSetFromBaseVersion(t *testing.T) {
+	for _, tc := range []struct{ name, base, note string }{
+		{"base set", "v2.4.7", ""},
+		{"base unset", "", "Controller version unknown; using the 2.4 rules"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := testutil.ControllerDeployment("acme-system", "controller", "example.com/acme/controller:9.9.9", 1, 1)
+			d.Labels = map[string]string{"app": "acme-controller"}
+			gw := testutil.GwRef("infra", "edge")
+			_, srv := start(t, []runtime.Object{
+				testutil.Namespace("infra", nil), testutil.Namespace("shop", nil), d, testutil.ControllerPod(d, "controller-0", true),
+				testutil.GatewayClass("acme", acmeController, true), testutil.Gateway("infra", "edge", "acme", nil),
+				testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, acmeController)),
+			}, nil, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{},
+				extension.WithDetectors(baseDetector{base: tc.base}))
+			var rows api.Page[api.RouteRow]
+			eventually(t, "route never computed", func() bool {
+				rows = api.Page[api.RouteRow]{}
+				return getJSON(t, srv, "/api/v1/installs/acme-system.controller/routes", &rows) == http.StatusOK &&
+					len(rows.Items) == 1 && len(rows.Items[0].Parents) == 1 && rows.Items[0].Parents[0].Computed != nil
+			})
+			if c := rows.Items[0].Parents[0].Computed.Computed; c.Rules != "kgateway-2.4" || c.Note != tc.note {
+				t.Fatalf("rules %q note %q, want kgateway-2.4 %q", c.Rules, c.Note, tc.note)
+			}
+		})
+	}
+}
+
 // D-013: a deny-some Authorizer registered through the
 // extension hides the denied resource (404) and restricts its finding, while
 // the roll-up still covers it.

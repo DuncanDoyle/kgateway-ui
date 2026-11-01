@@ -22,8 +22,11 @@ type Install struct {
 	// It must pass ValidateID, or Discover leaves the install out (D-016).
 	CustomID string
 	// DisplayName names the install in the UI; empty means "namespace/name".
-	DisplayName     string
-	Version         string
+	DisplayName string
+	Version     string
+	// BaseVersion is the kgateway version a downstream build is based on, set by
+	// its detector; empty means unknown. Rule-set selection reads it.
+	BaseVersion     string
 	Edition         string
 	ControllerNames []string
 	// Container is the name of the controller container (the source of the env-based settings).

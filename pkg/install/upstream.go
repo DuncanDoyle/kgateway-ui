@@ -73,10 +73,11 @@ func splitImage(image string) (repo, tag string) {
 }
 
 // KgatewayVersion returns the kgateway version the controller runs, or ""
-// when unknown: other distributions number their own releases (D-018 §3).
+// when unknown. Other distributions number their own releases (D-018 §3), so
+// they report BaseVersion, which their detector may leave empty.
 func (i Install) KgatewayVersion() string {
 	if i.Edition != "kgateway" {
-		return ""
+		return i.BaseVersion
 	}
 	return i.Version
 }

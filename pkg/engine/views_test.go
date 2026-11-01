@@ -3,7 +3,9 @@ package engine
 import (
 	"reflect"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -173,5 +175,42 @@ func TestComputedWithoutPodsOrUIDs(t *testing.T) {
 	}
 	if got := views(withPod, bareObjs, newDecodeCache()); !reflect.DeepEqual(got, known) {
 		t.Fatalf("views without uids differ:\n%+v\n%+v", got, known)
+	}
+}
+
+// acmeDetector detects the upstream Deployment as a downstream distribution
+// whose own version is not a kgateway version; base is its BaseVersion.
+type acmeDetector struct {
+	install.UpstreamDetector
+	base string
+}
+
+func (acmeDetector) Name() string { return "acme" }
+
+func (d acmeDetector) Detect(dep *appsv1.Deployment) (install.Install, bool) {
+	in, ok := d.UpstreamDetector.Detect(dep)
+	in.Edition, in.Version, in.BaseVersion = "acme", "9.9.9", d.base
+	return in, ok
+}
+
+// A downstream install's BaseVersion picks the rule set and the experimental
+// classification; without it the version is unknown.
+func TestRuleSetFromBaseVersion(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	snap := snapshot(t, testutil.HTTPRoute("shop", "web", []objects.ParentRef{gw}), tcpRoute("shop", "tcp", gw))
+	for _, tc := range []struct {
+		base, note string
+		tcpExp     bool
+	}{{"v2.4.7", "", false}, {"", "Controller version unknown; using the 2.4 rules", true}} {
+		cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+		cfg.Detectors = []install.Detector{acmeDetector{base: tc.base}}
+		m := New(cfg).Compute().Installs[0]
+		if m.Resolved.Edition != "acme" || m.Rules.Rules.Version() != "kgateway-2.4" || m.Rules.Note != tc.note {
+			t.Errorf("base %q: got %s %s %q", tc.base, m.Resolved.Edition, m.Rules.Rules.Version(), m.Rules.Note)
+		}
+		in := attachmentInput(m.Resolved, m.Owned, snap, testutil.ServedUpstream(), newDecodeCache())
+		if len(in.Routes) != 2 || in.Routes[1].ExperimentalOnly != tc.tcpExp {
+			t.Errorf("base %q: TCPRoute experimental-only %+v, want %v", tc.base, in.Routes, tc.tcpExp)
+		}
 	}
 }
