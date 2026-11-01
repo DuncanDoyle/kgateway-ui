@@ -101,6 +101,7 @@ func TestGrantsHandlesWildcards(t *testing.T) {
 	}
 }
 
+// Checks the default render only; rbac.extraRules is the operator's choice.
 func TestClusterRoleIsReadOnlyWithoutSecretsOrProxy(t *testing.T) {
 	cr := clusterRole(t)
 	for _, r := range cr.Rules {
@@ -330,5 +331,72 @@ func TestMemoryLimitEnv(t *testing.T) {
 	env = containerEnv(t, "--set", "resources.limits.memory=null")
 	if slices.ContainsFunc(env, named("KGWUI_MEMORY_LIMIT")) {
 		t.Fatalf("KGWUI_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
+	}
+}
+
+// TestExtraRulesAppended: rbac.extraRules is the operator's choice and can
+// widen RBAC; the default render stays read-only (see the read-only test).
+func TestExtraRulesAppended(t *testing.T) {
+	base := len(clusterRole(t).Rules)
+	docs := render(t, "--set-json", `rbac.extraRules=[{"apiGroups":["example.dev"],"resources":["widgets"],"verbs":["get","delete"]}]`)
+	crs := kind(docs, "ClusterRole")
+	if len(crs) != 1 {
+		t.Fatalf("want 1 ClusterRole, got %d", len(crs))
+	}
+	b, _ := yaml.Marshal(crs[0])
+	var cr rbacv1.ClusterRole
+	if err := yaml.Unmarshal(b, &cr); err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Rules) != base+1 {
+		t.Fatalf("rules = %d, want %d", len(cr.Rules), base+1)
+	}
+	last := cr.Rules[len(cr.Rules)-1]
+	if !slices.Equal(last.Resources, []string{"widgets"}) || !slices.Equal(last.Verbs, []string{"get", "delete"}) {
+		t.Errorf("extra rule not appended last: %+v", last)
+	}
+}
+
+func TestExtraEnvVolumesAndContainers(t *testing.T) {
+	deployment := func(args ...string) appsv1.Deployment {
+		ds := kind(render(t, args...), "Deployment")
+		if len(ds) != 1 {
+			t.Fatalf("want 1 Deployment, got %d", len(ds))
+		}
+		b, _ := yaml.Marshal(ds[0])
+		var d appsv1.Deployment
+		if err := yaml.Unmarshal(b, &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	def := deployment().Spec.Template.Spec
+	if len(def.Containers) != 1 || len(def.Volumes) != 0 || len(def.Containers[0].VolumeMounts) != 0 {
+		t.Fatalf("defaults must add no containers, volumes or mounts: %+v", def)
+	}
+	d := deployment(
+		"--set-json", `extraEnv=[{"name":"ADDON","value":"1"}]`,
+		"--set-json", `extraVolumes=[{"name":"data","emptyDir":{}}]`,
+		"--set-json", `extraVolumeMounts=[{"name":"data","mountPath":"/data"}]`,
+		"--set-json", `extraContainers=[{"name":"addon","image":"example/addon:1"}]`,
+	).Spec.Template.Spec
+	if len(d.Containers) != 2 || d.Containers[0].Name != "kgateway-ui" || d.Containers[1].Name != "addon" {
+		t.Fatalf("containers = %+v", d.Containers)
+	}
+	ui := d.Containers[0]
+	if !slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "ADDON" && e.Value == "1" }) ||
+		!slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "KGWUI_MEMORY_LIMIT" }) {
+		t.Errorf("extraEnv must join the memory-limit env: %+v", ui.Env)
+	}
+	if len(ui.VolumeMounts) != 1 || ui.VolumeMounts[0].MountPath != "/data" {
+		t.Errorf("volumeMounts = %+v", ui.VolumeMounts)
+	}
+	if len(d.Volumes) != 1 || d.Volumes[0].Name != "data" {
+		t.Errorf("volumes = %+v", d.Volumes)
+	}
+	// extraEnv alone, without a memory limit, still renders an env list.
+	env := containerEnv(t, "--set", "resources.limits.memory=null", "--set-json", `extraEnv=[{"name":"ADDON","value":"1"}]`)
+	if len(env) != 1 || env[0].Name != "ADDON" {
+		t.Errorf("env = %+v", env)
 	}
 }

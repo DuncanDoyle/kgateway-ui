@@ -13,6 +13,15 @@ delegation:
 # More flags for the UI binary, appended after the chart's own args,
 # e.g. ["--poll-interval=10m"].
 extraArgs: []
+# Add-on hooks. All empty by default. Items are passed through unchanged.
+rbac:
+  # Rules appended to the ClusterRole. The operator's choice: these can widen
+  # RBAC beyond the read-only default.
+  extraRules: []
+extraEnv: []            # env of the UI container
+extraVolumes: []        # pod volumes
+extraVolumeMounts: []   # mounts of the UI container
+extraContainers: []     # sidecars added to the pod
 # Trust model (D-013): the UI has no login. Anyone who reaches it sees everything
 # its ServiceAccount can read (every watched kind, Deployments included, never
 # Secrets), which can be more than their own Kubernetes RBAC allows.
