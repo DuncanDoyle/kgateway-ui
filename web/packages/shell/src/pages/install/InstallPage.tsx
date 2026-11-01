@@ -143,6 +143,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
         <Slot
           key={p.id}
           id={`install-panel:${p.id}`}
+          resetKey={id}
           render={() => (
             <section aria-labelledby={`${panelId}-${p.id}`} data-slot="install-panel">
               <h2 id={`${panelId}-${p.id}`}>{p.title}</h2>

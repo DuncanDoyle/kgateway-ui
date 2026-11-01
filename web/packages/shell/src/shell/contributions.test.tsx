@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { type ReactNode, useState } from "react";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import gatewayGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listenersets.json";
 import metaGolden from "../../../../../pkg/api/testdata/golden/meta.json";
@@ -13,7 +13,7 @@ import { FindingRow } from "../pages/install/FindingRow";
 import { InstallPage } from "../pages/install/InstallPage";
 import { installSummary, meta, overview, unhealthy } from "../test/fixtures";
 import { renderWithTheme, stubApi } from "../test/render";
-import type { Contributions } from "./contributions";
+import { type Contributions, type DetailContext, resetContributionWarnings } from "./contributions";
 import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "./extension";
 
 const ID = "kgw.kgateway";
@@ -23,6 +23,7 @@ const GW_PATH = `/i/${ID}/gateways/infra/edge`;
 const now = () => new Date().toISOString();
 
 afterEach(() => {
+  resetContributionWarnings();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -49,7 +50,15 @@ function With({
 
 function Where() {
   const loc = useLocation();
-  return <output data-testid="location">{loc.pathname + loc.search}</output>;
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="location">{loc.pathname + loc.search}</output>
+      <button type="button" onClick={() => navigate(`/i/${ID}/gateways/infra/other${loc.search}`)}>
+        to other
+      </button>
+    </>
+  );
 }
 const location = () => screen.getByTestId("location").textContent ?? "";
 
@@ -58,6 +67,7 @@ function mountGateway(contributions: Contributions, path = GW_PATH) {
   const byPath: Record<string, unknown> = {
     "/api/v1/meta": metaGolden.body,
     [`${API}/gateways/infra/edge`]: { ...(gatewayGolden.body as GatewayDetail), collectedAt: now() },
+    [`${API}/gateways/infra/other`]: { ...(gatewayGolden.body as GatewayDetail), collectedAt: now() },
     [`${API}/routes`]: { ...(routesGolden.body as RouteList), collectedAt: now() },
     [`${API}/listenersets`]: { ...(listenersetsGolden.body as ListenerSetList), collectedAt: now() },
   };
@@ -335,4 +345,103 @@ it("a repeated contribution id renders once", async () => {
   expect(screen.queryByRole("group", { name: "A2" })).not.toBeInTheDocument();
   for (const id of ["dup-side", "dup-panel", "dup-action"])
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"${id}"`));
+});
+
+it("a contribution that threw for one object renders for the next", async () => {
+  const warned = quiet();
+  const only = (name: string) => (c: DetailContext) => {
+    if (c.ref.name === "edge") throw new Error("boom");
+    return (
+      <p>
+        {name} for {c.ref.name}
+      </p>
+    );
+  };
+  const user = userEvent.setup();
+  mountGateway(
+    {
+      detailTabs: { [`${GW}/Gateway`]: [{ id: "picky-tab", label: "Picky", render: only("tab") }] },
+      sideSections: { [`${GW}/Gateway`]: [{ id: "picky-side", title: "Picky side", render: only("side") }] },
+    },
+    `${GW_PATH}?tab=picky-tab`,
+  );
+  await waitFor(() => expect(warned("detail-tab:picky-tab")).toBe(1));
+  expect(screen.getByRole("tabpanel")).toBeEmptyDOMElement();
+  // The same DetailFrame shows the next Gateway.
+  await user.click(screen.getByRole("button", { name: "to other" }));
+  expect(await screen.findByText("tab for other")).toBeInTheDocument();
+  await user.click(screen.getByRole("tab", { name: "Overview" }));
+  expect(await screen.findByRole("region", { name: "Picky side" })).toHaveTextContent("side for other");
+});
+
+it("a finding renderer or action that threw for one finding renders for the next", async () => {
+  quiet();
+  stubApi({ "/api/v1/installs": [installSummary()] });
+  const picky = (what: string) => (f: Finding) => {
+    if (f.code === "ACME-001") throw new Error("boom");
+    return <span>{`${what} ${f.code}`}</span>;
+  };
+  // One row whose finding changes in place, as on a poll.
+  function Row() {
+    const [code, setCode] = useState("ACME-001");
+    return (
+      <>
+        <FindingRow finding={{ code, slug: "demo", severity: "warning", install: ID, message: code }} installId={ID} />
+        <button type="button" onClick={() => setCode("ACME-002")}>
+          next
+        </button>
+      </>
+    );
+  }
+  renderWithTheme(
+    <With
+      findingRenderers={{ "ACME-": picky("renderer") }}
+      contributions={{
+        findingActions: [{ id: "picky", label: "Picky", applies: () => true, render: picky("action") }],
+      }}
+    >
+      <Row />
+    </With>,
+  );
+  expect(screen.queryByRole("group", { name: "Picky" })).not.toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: "next" }));
+  expect(await screen.findByText("renderer ACME-002")).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Picky" })).toHaveTextContent("action ACME-002");
+});
+
+it("a detail slot retries when the object changes under loaded data", async () => {
+  quiet();
+  stubApi({ "/api/v1/meta": metaGolden.body });
+  const picky = (c: DetailContext) => {
+    if (c.ref.name === "edge") throw new Error("boom");
+    return <p>tab for {c.ref.name}</p>;
+  };
+  // The frame keeps its data while the object changes, so only the reset can bring the slot back.
+  function Frame() {
+    const [name, setName] = useState("edge");
+    return (
+      <>
+        <DetailFrame
+          installId={ID}
+          refValue={{ group: GW, kind: "Gateway", namespace: "infra", name, link: "detail" }}
+          noun="Gateway"
+          data={{ health: "healthy", collectedAt: now() }}
+        >
+          <p>overview</p>
+        </DetailFrame>
+        <button type="button" onClick={() => setName("other")}>
+          next
+        </button>
+      </>
+    );
+  }
+  renderWithTheme(
+    <With contributions={{ detailTabs: { [`${GW}/Gateway`]: [{ id: "picky", label: "Picky", render: picky }] } }}>
+      <Frame />
+    </With>,
+    { path: `${GW_PATH}?tab=picky` },
+  );
+  expect(screen.getByRole("tabpanel")).toBeEmptyDOMElement();
+  await userEvent.setup().click(screen.getByRole("button", { name: "next" }));
+  expect(await screen.findByText("tab for other")).toBeInTheDocument();
 });

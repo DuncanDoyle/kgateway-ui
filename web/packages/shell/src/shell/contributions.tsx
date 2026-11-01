@@ -51,11 +51,20 @@ const NONE: never[] = [];
 const kindKey = (r: Ref) => `${r.group}/${r.kind}`;
 const warned = new Set<string>();
 
-/** Warns once per contribution that it failed and is hidden. */
+/** Logs message once per key for the life of the page. */
+function warnOnce(key: string, message: string) {
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(message);
+}
+
+/** Forgets which warnings were logged; for tests. */
+export function resetContributionWarnings() {
+  warned.clear();
+}
+
 function warnFailed(id: string, err: unknown) {
-  if (warned.has(id)) return;
-  warned.add(id);
-  console.warn(`kgateway-ui: hiding contribution "${id}": it threw ${String(err)}`);
+  warnOnce(`failed:${id}`, `kgateway-ui: hiding contribution "${id}": it threw ${String(err)}`);
 }
 
 /** Drops entries whose id repeats an earlier one, with a warning. */
@@ -63,7 +72,10 @@ function unique<T extends { id: string }>(all: T[], slot: string): T[] {
   const seen = new Set<string>();
   return all.filter((c) => {
     if (seen.has(c.id)) {
-      console.warn(`kgateway-ui: ignoring contributed ${slot} "${c.id}": the id is already taken.`);
+      warnOnce(
+        `taken:${slot}:${c.id}`,
+        `kgateway-ui: ignoring contributed ${slot} "${c.id}": the id is already taken.`,
+      );
       return false;
     }
     seen.add(c.id);
@@ -76,8 +88,15 @@ function Call({ render }: { render: () => ReactNode }) {
 }
 
 // region Component
+interface SlotProps {
+  id: string;
+  /** Names what the contribution renders for, e.g. the object; a change retries a failed render. */
+  resetKey: string;
+  render: () => ReactNode;
+}
+
 /** Renders a contribution; when it throws, renders nothing and warns once per id, so the core page stays up. */
-export class Slot extends Component<{ id: string; render: () => ReactNode }, { failed: boolean }> {
+export class Slot extends Component<SlotProps, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
@@ -85,10 +104,19 @@ export class Slot extends Component<{ id: string; render: () => ReactNode }, { f
   componentDidCatch(err: unknown) {
     warnFailed(this.props.id, err);
   }
+  componentDidUpdate(prev: SlotProps) {
+    if (this.state.failed && prev.resetKey !== this.props.resetKey) this.setState({ failed: false });
+  }
   render() {
     return this.state.failed ? null : <Call render={this.props.render} />;
   }
 }
+
+/** What a finding is about, for a Slot's resetKey. */
+export const findingKey = (f: Finding) => {
+  const r = f.resource;
+  return [f.install, f.code, r ? `${r.group}/${r.kind}/${r.namespace ?? ""}/${r.name}` : ""].join("|");
+};
 
 // region Hooks
 /** Contributed tabs for ref's kind. An id that names a core tab, or repeats an earlier one, is ignored with a warning. */
@@ -99,7 +127,7 @@ export function useDetailTabContributions(ref: Ref, coreIds: readonly string[]):
     const taken = new Set(core.split("\n"));
     return all.filter((t) => {
       if (taken.has(t.id)) {
-        console.warn(`kgateway-ui: ignoring contributed tab "${t.id}": the id is already taken.`);
+        warnOnce(`taken:tab:${t.id}`, `kgateway-ui: ignoring contributed tab "${t.id}": the id is already taken.`);
         return false;
       }
       taken.add(t.id);

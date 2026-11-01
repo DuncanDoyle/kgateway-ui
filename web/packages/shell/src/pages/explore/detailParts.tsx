@@ -162,6 +162,7 @@ export function DetailFrame({
   const own = contributed.find((t) => t.id === tab);
   const ctx = { installId, ref: refValue };
   const sideId = useId();
+  const objectKey = `${installId}|${refParam(refValue)}`;
   const errorTitle = listCopy.cannotLoad(noun);
   const now = useNow();
   // Stale data or a failed poll turns every state on the page unknown, as on the lists (design §6.3).
@@ -185,7 +186,7 @@ export function DetailFrame({
     extra ? (
       extra.content
     ) : own ? (
-      <Slot key={own.id} id={`detail-tab:${own.id}`} render={() => own.render(ctx)} />
+      <Slot key={own.id} id={`detail-tab:${own.id}`} resetKey={objectKey} render={() => own.render(ctx)} />
     ) : (
       <>
         {children}
@@ -193,6 +194,7 @@ export function DetailFrame({
           <Slot
             key={s.id}
             id={`side-section:${s.id}`}
+            resetKey={objectKey}
             render={() => (
               <Section aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
                 <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>

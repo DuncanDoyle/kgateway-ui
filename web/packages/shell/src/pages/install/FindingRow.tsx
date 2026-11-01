@@ -8,7 +8,7 @@ import { HealthBadge } from "../../health/HealthBadge";
 import { severityLabel, severityToState } from "../../health/state";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
-import { Slot, useFindingActions } from "../../shell/contributions";
+import { findingKey, Slot, useFindingActions } from "../../shell/contributions";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 import { InstallName } from "../../shell/InstallName";
 
@@ -110,6 +110,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
   const { findingRenderers } = useShellExtension();
   const extra = rendererFor(findingRenderers, f.code);
   const actions = useFindingActions(f);
+  const fk = findingKey(f);
   const { data: installs } = useInstalls();
   // A finding without a resource is about the install; it is named, never split from its ID.
   const install = installs?.find((i) => i.id === f.install);
@@ -139,13 +140,14 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
           <>
             <div className="msg">{f.message}</div>
             {f.detail ? <div className="muted">{f.detail}</div> : null}
-            {extra ? <Slot id={`finding-renderer:${f.code}`} render={() => extra(f)} /> : null}
+            {extra ? <Slot id={`finding-renderer:${f.code}`} resetKey={fk} render={() => extra(f)} /> : null}
             {actions.length > 0 ? (
               <div className="actions" data-slot="finding-actions">
                 {actions.map((a) => (
                   <Slot
                     key={a.id}
                     id={`finding-action:${a.id}`}
+                    resetKey={fk}
                     render={() => <fieldset aria-label={a.label}>{a.render(f)}</fieldset>}
                   />
                 ))}
