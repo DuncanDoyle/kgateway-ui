@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"slices"
 	"time"
 
@@ -149,7 +150,7 @@ func (r *Registry) RunCollectors(ctx context.Context, d Deps, s *collect.Store) 
 			defer s.Stop(name)
 			defer func() {
 				if p := recover(); p != nil {
-					cd.Logger.Error("collector panicked", "panic", p)
+					cd.Logger.Error("collector panicked", "panic", p, "stack", string(debug.Stack()))
 				}
 			}()
 			// A return caused by the cancelled ctx is a normal stop.

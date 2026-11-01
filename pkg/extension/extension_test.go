@@ -263,11 +263,20 @@ func runOne(t *testing.T, c funcCollector, cancel bool) (string, collect.Snapsho
 		return published(ctx, d)
 	}
 	New(WithCollectors(c)).RunCollectors(ctx, Deps{Logger: slog.New(slog.NewTextHandler(&log, nil))}, store)
-	testutil.Recv(t, sig.C(), "the publish")
+	// Signals coalesce, so wait on the store's state rather than counting them.
+	waitFor := func(what string, ok func(collect.Value, bool) bool) {
+		for {
+			if v, found := store.Snapshot().Get("acme/k"); ok(v, found) {
+				return
+			}
+			testutil.Recv(t, sig.C(), what)
+		}
+	}
+	waitFor("the publish", func(_ collect.Value, found bool) bool { return found })
 	if cancel {
 		stop()
 	}
-	testutil.Recv(t, sig.C(), "Stop")
+	waitFor("Stop", func(v collect.Value, _ bool) bool { return v.State == collect.Unavailable })
 	return log.String(), store.Snapshot()
 }
 

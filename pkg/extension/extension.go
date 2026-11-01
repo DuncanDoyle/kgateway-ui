@@ -92,9 +92,8 @@ func WithScopeProvider(p install.ScopeProvider) Option { return func(r *Registry
 // WithScopeVerifier replaces the scope verifier.
 func WithScopeVerifier(v scopeverify.Verifier) Option { return func(r *Registry) { r.Verifier = v } }
 
-// WithChecks adds health checks whose finding codes, by convention, start with
-// prefix such as "ACME-" (a capital, then capitals or digits, two to sixteen
-// before the dash). A reserved or repeated prefix adds nothing and is reported by Registry.Err.
+// WithChecks adds health checks; by convention their finding codes start with
+// prefix, such as "ACME-". A reserved or repeated prefix adds nothing and Registry.Err reports it.
 func WithChecks(prefix string, c ...health.Check) Option {
 	return func(r *Registry) {
 		switch {
