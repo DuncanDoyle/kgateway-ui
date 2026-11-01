@@ -4,7 +4,7 @@
 **Date:** 2026-10-29
 **Base:** `544dcd5`
 **Roadmap:** `docs/roadmap.md`, Phase 3
-**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-036 (§22).
+**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-037 (§22).
 **kgateway refs:** behaviour claims cite `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`), as in Phase 2. Claims about unreleased behaviour cite `main` at `643f50b` (2026-10-28) or tag `v2.5.0-rc.1` (published 2026-10-27). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`.
 
 Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. Decisions from the user's answers are marked **(user, 2026-10-29)**; those from the builder check are marked **(our call, 2.4 builder check)**. §25 holds the one open item.
@@ -21,7 +21,7 @@ Every choice in this draft is **(our call)** unless it repeats an earlier user d
 | 4 | No Phase 3 check is required, so none turns the install unknown. A watch that is denied, failing or off makes its check "not available", with the reason | (our call, 2.4 builder check) | §7.1, §11, §17.3, §18.1 |
 | 5 | `since`: status-derived findings keep `lastTransitionTime`; UI-derived findings use the UI's first-seen time per finding identity, held in the Store and reset on restart. Ranking and "oldest problem" use each finding's own `since`. KGWUI-001 gains a `since` | (our call, 2.4 builder check) | §5.1, §5.3, §6, §8.3 |
 | 6 | RBAC toggles default on. 022 and 023 are warnings. KGWUI-001 is re-specified, not replaced; specific codes replace KGWUI-002 for their reasons. A route row is never green while its Gateway rejects config | (our call) | §7.1, §8.3, §8.4, §9.4, §11, §18.1 |
-| 7 | The UI reads no logs, not even opt-in. Guided commands cover log-only diagnostics | (our call) | §2, §12 |
+| 7 | The UI reads Envoy stats from each proxy's stats listener (`:9091/stats`, on by default in kgateway) with no new RBAC. Controller logs are opt-in (chart toggle, off by default, `pods/log` in the install namespace only): the backend derives fixed fields and never stores or shows log text. Raw logs and `/config_dump` wait for per-user identity (Phase 10) and Phase 9, so they are only ever shown with the viewer's own rights | (user, 2026-11-01) | §2, §8.8, §8.9, §12, §18 |
 | 8 | Filing the upstream reject-status and scope-endpoint issues stays the user's call. It is the only open item | (our call) | §8.7, §24, §25 |
 | 9 | Shell and navigation land in 3.1, before the new pages: a prominent object header, a fluid layout that uses wide screens, and **path-based** breadcrumbs carried in the URL (from user testing on a 3008 × 1692 monitor) | (user, 2026-10-29) | §17.6, §21, §23 |
 | 10 | Findings carry a deterministic **suggested fix** (YAML, target, basis) where the evidence leaves exactly one correct change: 014, and 013 for a wrong group or port. No model; the first layer of the roadmap's AI-assisted diagnosis | (user, 2026-10-29) | §7.7, §13.3, §17.2 |
@@ -38,7 +38,7 @@ Phase 3 turns the install page into the health overview the roadmap promises: on
 What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_active`, checks controller and proxy readiness, and applies status freshness rules (Phase 1 design §5.2). Phase 2 added explorer pages, delegation, and computed views with a cross-check (D-020). So the gap is not detection. It is:
 1. **Trust.** The reject finding says "rejected" and nothing more: no type, no number of proxies, no hint that the Gateway's status is green. The operator reads the green status and believes it.
 2. **Ranking and grouping.** One missing Service can raise 40 findings. Nothing says which one to fix first.
-3. **Next step.** The Envoy message, the culprit and the process failure live in logs and admin ports the UI must not read. The UI does not say where to look.
+3. **Next step.** The Envoy message, the culprit and the process failure live in logs and admin ports the UI does not read today. The UI does not say where to look.
 4. **Coverage.** Restarts, OOM kills, probe failures, version skew, empty backends and status that stopped progressing raise no finding today.
 
 ## 2. Goals, non-goals and anti-goals
@@ -46,7 +46,7 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 **Goals**
 1. **One verdict and a ranked list** on the install page: what is wrong, how much it affects, since when, and the decisive next step (§6).
 2. **An analyzer with stable finding codes** that covers the roadmap floor: unresolved references, missing ReferenceGrant, rules dropped or replaced, policy target not found, conflicting listeners (§7).
-3. **xDS rejects per Gateway that are hard to ignore:** per xDS type, how many proxies reject, the contradiction with status named, and the commands that show Envoy's reason (§8).
+3. **xDS rejects per Gateway that are hard to ignore:** per xDS type, how many proxies reject, the contradiction with status named, and the commands that show Envoy's reason (§8). Each proxy's own Envoy stats add which pod rejects, the rejected Envoy resource, partial config and lost controller connections (§8.8); opt-in controller logs add Envoy's rejected resource and error class without showing log text (§8.9).
 4. **Process health through the provider seam** (D-016): restarts, termination reasons, crash loops, probe failures, stuck rollouts, and version skew between controller, proxies and the Gateway API CRDs (§9).
 5. **Status freshness** as findings an operator can act on (§10).
 6. **Backend readiness:** a Service the controller resolved, but with zero ready endpoints (§11).
@@ -63,7 +63,7 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 **Anti-goals**
 - **False positives that erode trust.** Istio's analyzer and the predecessor project's health check both lost users this way: findings on objects that worked, a sync check that misread healthy proxies, a UI that marked working gateways failed. Every Phase 3 finding rests on evidence the controller or Kubernetes wrote. Where the UI computes something, it is labelled, has a verifier and fires only after persistence (D-020).
 - **Mirroring controller logic without a verifier.** The one new computed rule (policy target lookup on 2.3 and 2.4, §7.6) sits behind the `computed.Rules` seam, is cross-checked against the controller's ancestors, and switches off on versions where the controller reports `TargetNotFound` itself. Everything else reads what the controller or Kubernetes reports.
-- **Reading Secrets, logs or admin ports.** Logs and snapshots can carry secret material: a downstream issue shows an API key inside an Envoy rejection message. The UI reads no logs, not even opt-in **(our call)**. It prints the command; the operator runs it with their own rights (§12).
+- **Showing log text, config dumps or Secrets.** Logs and config dumps can carry secret material: a downstream issue shows an API key inside an Envoy rejection message. The UI reads Envoy stats, which hold names and numbers only (§8.8). With an opt-in, it reads controller log lines and keeps only fixed fields (§8.9). It never stores or shows log text, never reads `/config_dump` or the Envoy admin port, and never reads Secrets **(user, 2026-11-01)**. Raw logs and config dumps wait for per-user identity, so they are only ever shown with the viewer's own rights (Phase 10; Phase 9 for the config comparison). Until then the UI prints the command; the operator runs it with their own rights (§12).
 - **Copying one error onto every object.** One cause is one finding group, with the affected objects listed under it (§5.2). The predecessor project copied proxy-level warnings onto every route, and users could not find the culprit.
 
 ## 3. Primary flows
@@ -110,7 +110,7 @@ Every finding gets an `id`, stable across recomputes and UI restarts, and unique
 
 | Code | Discriminator |
 |---|---|
-| 001, 005, 006, 009, 010, 018, 019, 020, 021, 024 | none: one per resource |
+| 001, 005, 006, 009, 010, 018, 019, 020, 021, 024, 025, 026 | none: one per resource (025 and 026 are on the Gateway; Pods churn, so they are evidence, not identity) |
 | 002 | the condition's owner (parentRef as written, listener name, or ancestorRef as written, or `self`) and the condition type |
 | 003 | parentRef as written, or `self` |
 | 004 | the targeted parent ref |
@@ -152,7 +152,7 @@ A **group** is one cause with the findings it explains. The home page lists grou
 Groups are ordered by these keys, in order **(our call)**:
 1. **Severity** of the worst member: error, then warning, then info.
 2. **Class:**
-   1. data plane: 001, 024;
+   1. data plane: 001, 024, 026, 025;
    2. processes: 005, 006, 019, 020, 021;
    3. traffic-affecting configuration: 015, 017, 013, 014, 023, 016, 011, and 003 after grace;
    4. consistency and install hygiene: 012, 018, 022, 007, 009, 002 and everything else.
@@ -182,13 +182,13 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 
 ### 7.1 Codes
 
-Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-024 and re-specifies KGWUI-001 and KGWUI-003 without changing their codes. Codes are never reused.
+Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-026 and re-specifies KGWUI-001 and KGWUI-003 without changing their codes. Codes are never reused.
 
 **Specific codes replace KGWUI-002 for their reasons (our call, D-030).** KGWUI-001 is re-specified, not replaced by a "status says healthy" code (§8.3) **(our call)**. KGWUI-002 stays the fallback for any current `False` condition without a specific code. A condition yields exactly one finding: either its specific code or 002. Alert rules keyed on 002 for these reasons will see the new codes; the release note says so. API v1 has no release yet.
 
 | Code | Slug | Trigger | Severity | Source | Pending / grace | Sub-phase |
 |---|---|---|---|---|---|---|
-| 001 | xds-rejected | §8 | error | metrics | restart hold (§8.3); `since` from the UI's first sight (§5.1) | 3.2 |
+| 001 | xds-rejected | §8 | error | controller metrics; per-proxy Envoy stats (§8.8) and derived log signals (§8.9) as evidence | restart hold (§8.3); `since` from the UI's first sight (§5.1), or the earliest derived log event | 3.2 |
 | 003 | route-unattached | unchanged trigger; evidence gains its kind (§10.1) | info in grace, warning after | status | grace 60 s (unchanged) | 3.3 |
 | **013** | ref-unresolved | a current route parent `ResolvedRefs=False` with a reason other than `RefNotPermitted`, or a current listener `ResolvedRefs=False` with reason `InvalidCertificateRef` | error | status, plus explanation from discovery and Services | none: current status only | 3.3, 3.4 |
 | **014** | ref-not-permitted | a current route parent or listener `ResolvedRefs=False` with reason `RefNotPermitted` | error | status, plus the grant shape (§7.3) | none | 3.3 |
@@ -202,8 +202,10 @@ Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-024 an
 | **022** | version-skew | §9.4 | warning | process, CRD metadata | suppressed during a controller rollout and 10 min after it | 3.2 |
 | **023** | backend-no-ready-endpoints | §11 | warning | Services, EndpointSlices | matures after 30 s | 3.4 |
 | **024** | xds-config-withheld | §8.6 (kgateway 2.5 and later) | error or warning | metrics | none | 3.4 |
+| **025** | proxy-config-warming | §8.8: a Ready proxy with warming listeners or clusters | warning | proxy stats | matures after 60 s | 3.2 |
+| **026** | proxy-disconnected | §8.8: a Ready proxy not connected to the controller's xDS server | warning | proxy stats | matures after 60 s | 3.2 |
 
-022 and 023 are warnings, so neither turns an install red on its own **(our call)**.
+022, 023, 025 and 026 are warnings, so none turns an install red on its own **(our call)**. A disconnected proxy keeps serving its last config, and warming can be legitimately slow; both say so in their message.
 
 **Availability and roll-up (our call, 2.4 builder check).** Phase 1 design §5.3 says a required check that is not OK makes the install unknown. No Phase 3 check is required: each sets `Required: false`, so none can turn the install unknown. Existing required checks keep their flag; the re-specified KGWUI-001 keeps the existing `xDS rejects` check's flag, including its restart hold (§8.3). Today's `unavailable` helper (`pkg/health/checks.go:42-46`) always sets `Required: true` and raises KGWUI-008; Phase 3 checks use a variant that does neither.
 - A check whose input is missing returns an unavailable `CheckResult` with its reason: `denied` (RBAC refused the watch), `failing` (the watch or scrape errors), or `off` (its chart toggle is off). "What was checked" shows it as "not available", in the wording it uses for unreachable metrics today.
@@ -221,7 +223,7 @@ Cut, with the reason **(our call)**:
 - **Envoy-rejectable value lint** (regex limits, TLS names, reserved ports, all-zero weights; about 18): predicts Envoy and strict-validation behaviour per version, which is mirroring with a high false-positive risk.
 - **Unreported listener conflicts**, for example two TLSRoutes with one hostname on a passthrough listener (#14911): predicting them mirrors a controller bug. The fix belongs upstream; when it lands, KGWUI-017 shows it.
 - **Controller configuration lint** (env enums, feature flags whose defaults moved): defaults change per version; it belongs in the scope/settings endpoint ask (D-009 §7).
-- **Proxy out of sync on 2.3 and 2.4** (about 40, the most painful class): the evidence is in the admin server and logs only. On 2.5 the per-client metrics make part of it visible (KGWUI-024). Below 2.5 the UI gives guided commands (§12).
+- **Proxy out of sync on 2.3 and 2.4** (about 40, the most painful class): most of the evidence is in the admin server and logs. Each proxy's Envoy stats now show part of it on every version: lost controller connections (026), partial config (025) and per-type update rejects (§8.8). On 2.5 the per-client metrics add more (KGWUI-024). The rest gets guided commands (§12).
 - **`kgateway_xds_snapshot_resources`** as a finding: it exists on 2.3 and 2.4 (`proxy_syncer/metrics.go:65-71`), but it describes the controller's per-client snapshot on one replica, not what a proxy accepted. It is shown as evidence on the Gateway page, never as a finding.
 
 ### 7.3 Unresolved and not-permitted references (013, 014)
@@ -362,6 +364,66 @@ kgateway `main` and `v2.5.0-rc.1` export per-client publication metrics with lab
 
 A draft issue sits outside the repo, because the repo is public. It asks kgateway to set a Gateway condition when proxies NACK, with the xDS type, the number of rejecting proxies and a bounded, sanitised reason, cleared on ACK, and debounced like status writes. Smaller asks ride along: a connected-proxies gauge per Gateway, and a first-seen time for the reject. It cites #14736, #14911, #14453 and #14264, and Phase 2 design §14.8. Filing stays the user's call **(our call)**; it is the open item in §25. When kgateway writes such a condition, the UI reads it first and keeps the metric as a cross-check (D-020 rule 5).
 
+### 8.8 Envoy stats from each proxy (user, 2026-11-01)
+
+**Source.** kgateway gives every proxy a stats listener on `0.0.0.0:9091`. It routes `GET /metrics`, `GET /ready` and `GET /stats` to Envoy's admin server (`pkg/kgateway/helm/envoy/templates/configmap.yaml` at `v2.4.7`). The `/stats` route is on by default: `EnableStatsRoute` is true in the default GatewayParameters of `v2.3.11`, `v2.4.7` and `v2.5.0-rc.1` (`pkg/deployer/gateway_parameters.go`). Envoy's admin server itself stays on `127.0.0.1:19000`, which the UI never reaches.
+
+**How.** Like controller metrics (Phase 1 design §4): in-cluster through the Pod IP, locally through `pods/proxy` with the user's own rights. The chart adds no RBAC.
+- Request: `GET /stats?usedonly&filter=<fixed regex>` per proxy Pod, every metrics interval (10 s). The regex is a constant in one file, so a stat rename is fixed in one place.
+- Bounds: body ≤ 1 MiB (over is an error, never a truncated parse); timeout min(interval / 2, 5 s); at most 16 Pods scraped at once per install.
+- Kept: the numbers below, per Pod UID. Counter deltas use the check's state store (§16.2), as for controller metrics.
+
+| Envoy stat | Used for |
+|---|---|
+| `control_plane.connected_state` | **026**: 0 on a Ready proxy for 60 s. "Proxy `infra/edge-…` lost its connection to the controller. It keeps serving its last config" |
+| `cluster_manager.warming_clusters`, `listener_manager.total_listeners_warming` | **025**: above 0 on a Ready proxy for 60 s. "Proxy is Ready but some config is still loading" (#14363) |
+| `listener_manager.lds.update_rejected` / `update_success`, `cluster_manager.cds.update_rejected` / `update_success` | KGWUI-001 evidence: which proxy Pods reject which type, active while the last change of the pair was a reject |
+| `http.<prefix>.rds.<route config>.update_rejected`, `cluster.<name>.update_rejected` | KGWUI-001 evidence: the rejected Envoy route config or cluster, by Envoy name |
+| `server.state`, `server.uptime` | process evidence: draining or initializing proxies (§9) |
+| `cluster.<name>.membership_healthy`, `membership_total` | KGWUI-023 evidence: the endpoints the proxy really holds (below) |
+
+**KGWUI-001 keeps the controller metric as its trigger.** Proxy stats are evidence: the Pods that reject, and for RDS and EDS the Envoy resource name. If the controller metric is unavailable and a proxy's stats show an active reject, 001 fires from the proxy stats; both are Envoy's own report. A disagreement between the two is shown as evidence, never as a finding **(our call)**.
+
+**Envoy names are evidence, not vocabulary** (principle 4). The UI shows an Envoy name as "Envoy cluster `kube_shop_cart_8080`". It maps a name back to a Gateway API object only through a pinned naming function on the rule-set seam, verified per kgateway version like the computed rules. With no verified function, only the Envoy name is shown.
+
+**Membership on demand.** Per-cluster stats grow with the number of clusters, so they are not scraped every interval. A finding detail or Gateway page that needs them asks one Ready proxy per Gateway, with a regex naming only the clusters it needs, cached for 10 s.
+
+**Availability.** Capability `proxyStats`, chart toggle `diagnostics.proxyStats` (default on). Not available with its reason, per Gateway: `off`; `failing` when the listener refuses or times out (stats turned off in GatewayParameters, a NetworkPolicy, or a non-default port); "not observed" for self-managed Gateways, which have no proxy Pods the UI knows of. Never unknown (§7.1). The chart README says the UI Pod needs to reach proxy Pods on 9091.
+
+**Security.** Stats are names and numbers, never config values. kgateway already exposes them unauthenticated on the Pod network; the UI adds no exposure.
+
+### 8.9 Derived signals from controller logs (opt-in, user, 2026-11-01)
+
+The decisive data for a reject, Envoy's reason, is in the controller log: kgateway logs one structured line per NACK, `"xds error"` with `gateway_name`, `gateway_ns`, `resource` (the type URL) and `error` (Envoy's message) (`pkg/kgateway/setup/envoy_error.go:125` at `v2.4.7`). Envoy's message can embed config values, Secrets included. So the UI may read the log, but keeps only fixed fields and discards the text.
+
+**Opt-in.** Chart toggle `diagnostics.controllerLogs` (default **off**). It adds a Role in the install namespace with `get` on `pods/log`; nothing cluster-wide. The README says what the UI then reads and what it keeps.
+
+**Controller logs only.** Proxy logs are out: they can carry access logs at high volume, and the controller already logs every NACK it receives.
+
+**Reading.**
+- One follow stream per controller replica, starting 15 min back (`sinceSeconds=900`), reconnecting with back-off.
+- After a controller restart (019), one read of the previous container's log, capped at 256 KiB.
+- A substring prefilter on fixed markers runs first. A line without a marker is dropped unparsed and never buffered.
+
+**What is kept.** Each marker has a parser pinned per kgateway version, tested on captured lines (like the rule sets):
+
+| Marker | Fields kept | Used by |
+|---|---|---|
+| `"xds error"` | time, Gateway, type URL; from Envoy's message, only the resource names in Envoy's fixed NACK shapes (for example `Error adding/updating listener(s) <name>:`) and an error class from a fixed list | KGWUI-001 evidence: the rejected Envoy resource and error class; the earliest event becomes `since`, which survives a UI restart |
+| the snapshot-deferral line on 2.3 and 2.4 (exact text pinned when the parser is written) | time, Gateway | the "withheld" evidence that 024 gives on 2.5 |
+| a Go panic, previous container only | the class `panic` and the top frame's function name | KGWUI-019 evidence |
+| deployer apply errors | time, the object kind and name, error class | KGWUI-021 and KGWUI-006 evidence |
+
+Rules **(our call)**:
+- Log text is never stored, logged by the UI, sent anywhere or returned by the API. After matching, only the fields above remain.
+- A name is kept only if it matches a strict name grammar (`[A-Za-z0-9_.~:/-]{1,253}`). An error class not on the list becomes `other`.
+- At most 1,000 derived events per install; the oldest are dropped.
+- When markers match but a parser fails 10 times in a row, the capability turns "not available: log format not recognised", so a format change never yields silent wrong output.
+- Derived events name objects, so the Authorizer rules apply (§14).
+- Availability: capability `controllerLogs`; `off`, `denied` or `failing` as for every Phase 3 input (§7.1).
+
+**Not a mirror, but a bridge.** Parsing reads evidence, not logic. Log formats are not a contract, though, so each parser is pinned and tested per version. The upstream reject-status ask (24.1) would replace the `"xds error"` parser; the UI then reads the condition first (D-020 rule 5).
+
 ## 9. Process health
 
 ### 9.1 The provider seam (D-016)
@@ -487,17 +549,16 @@ At about 200 bytes per kept object this stays small at Large (§16.3). The same 
 
 ## 12. Checks the UI cannot run
 
-These checks need access a read-only UI does not have, by design. The UI reads no logs, not even opt-in; guided commands cover every log-only diagnostic **(our call)**. The UI shows what it knows and the command that gets the rest. Commands are filled in with the install's namespace, Deployment and Pod names, and go through `Vocabulary`.
+These checks need access the UI does not have, by design. Proxy stats (§8.8) and opt-in derived log signals (§8.9) cover part of what used to be here. Raw log text, `/config_dump`, `/clusters` and the controller's admin server stay out until the UI can show them with the viewer's own rights (Phase 10; Phase 9 for the config comparison) **(user, 2026-11-01)**. The UI shows what it knows and the command that gets the rest. Commands are filled in with the install's namespace, Deployment and Pod names, and go through `Vocabulary`.
 
 | Question | Where the answer is | Why the UI does not read it | What the UI shows |
 |---|---|---|---|
-| Envoy's reason for a reject | controller log (`"xds error"`), proxy log | `pods/log`; logs can carry secrets | KGWUI-001 evidence and the commands of §8.5 |
-| Which resource Envoy rejected | proxy admin `:19000` `/config_dump`, `/stats` | `pods/portforward` is write-class (D-001); output can carry secrets | the reject type, the recently changed objects, and the port-forward command |
-| Endpoints a proxy really holds; health-check flags | proxy admin `/clusters`, `/config_dump?include_eds` | as above | KGWUI-023 for the Kubernetes side, plus the command |
-| Proxy is Ready but has partial config | proxy admin stats `cluster_manager.warming_clusters`, `listener_manager.total_listeners_warming` (#14363) | as above | proxy readiness, KGWUI-024 on 2.5, and the command |
-| Deferred or withheld snapshot on 2.3, 2.4 | controller log (`deferring snapshot`), admin `:9095/snapshots/xds` | `:9095` binds to localhost (`v2.3.11 admin/server.go:87`; `v2.4.7` `KGW_ADMIN_BIND_ADDRESS`), so only port-forward reaches it; it also serves `/logging` and pprof (Phase 2 design §3.7) | the command; KGWUI-024 on 2.5 |
-| A controller panic's stack trace | previous container log | `pods/log` | KGWUI-019 with exit code 2 and `kubectl logs --previous` |
-| Deployer errors (proxy Service apply rejected, #14893) | controller log | `pods/log` | KGWUI-006 or 021 when they show on the proxy; the log command |
+| Envoy's full reason for a reject | controller log (`"xds error"`), proxy log | the text can carry secrets; §8.9 keeps only the resource names and an error class | KGWUI-001 evidence, the derived fields when logs are on, and the commands of §8.5 |
+| The rejected resource's full config | proxy admin `:19000` `/config_dump` | localhost only; `pods/portforward` is write-class (D-001); output can carry secrets | the rejected Envoy resource name from stats (§8.8) or logs (§8.9), the recently changed objects, and the port-forward command |
+| Per-endpoint health-check flags and addresses | proxy admin `/clusters`, `/config_dump?include_eds` | as above | healthy and total endpoint counts from stats (§8.8), KGWUI-023, plus the command |
+| The withheld snapshot's content on 2.3, 2.4 | admin `:9095/snapshots/xds` (the deferral itself comes from §8.9 when logs are on) | `:9095` binds to localhost (`v2.3.11 admin/server.go:87`; `v2.4.7` `KGW_ADMIN_BIND_ADDRESS`), so only port-forward reaches it; it also serves `/logging` and pprof (Phase 2 design §3.7) | the command; KGWUI-024 on 2.5 |
+| A controller panic's full stack trace | previous container log | the text can carry values; §8.9 keeps the top frame's function name | KGWUI-019 with exit code 2, the top frame when logs are on, and `kubectl logs --previous` |
+| Deployer errors' full text (proxy Service apply rejected, #14893) | controller log | as above; §8.9 keeps the object and an error class | KGWUI-006 or 021, the derived fields when logs are on; the log command |
 | Controller memory profile | `:9095/debug/pprof` | as above | KGWUI-019 OOMKilled; the command |
 
 Each command carries what it needs from the operator's own RBAC ("needs `pods/log`"). No command writes to the cluster. Port-forward is the one command that opens a connection; the copy says so.
@@ -519,7 +580,7 @@ Existing payloads gain:
 - every finding, everywhere: optional `id`, `group` and `evidence`;
 - `GatewayDetail`: optional `dataPlane` (§8) and `proxies`;
 - route rows: the flag `gateway-rejecting` (§8.4);
-- `/meta` `capabilities`: `processes`, `events`, `crds`, `endpoints`, each present only when its watch runs; and `filters.findings`, listing the findings filters.
+- `/meta` `capabilities`: `processes`, `events`, `crds`, `endpoints`, `proxyStats`, `controllerLogs`, each present only when its input runs; and `filters.findings`, listing the findings filters.
 
 `/health` keeps returning every finding, for compatibility. The SPA moves to the paged endpoint, because a worst-case Large install carries thousands of findings (D-022 measured 3,309 KGWUI-012 and 2,574 KGWUI-002 in one model).
 
@@ -536,7 +597,10 @@ FindingDetail  { install, finding: FindingRow, evidence?: Evidence, suggestedFix
                  nextSteps?: NextStep[], affected: Page<LinkedRef>, collectedAt }
 Evidence       // a tagged union on "kind"; one shape per code. Examples:
   { kind: "xds-rejects", types: { typeUrl, streams, reportedBy: string[], firstSeen, totalSinceFirstSeen }[],
-    proxies: { ready, desired }, statusSaysHealthy: boolean, recentlyChanged: LinkedRef[] }
+    proxies: { ready, desired }, statusSaysHealthy: boolean, recentlyChanged: LinkedRef[],
+    proxyStats?: { pod, types: { typeUrl, active: boolean, envoyResources?: string[] }[] }[],   // §8.8
+    logEvents?: { time, typeUrl, envoyResources: string[], errorClass }[] }                     // §8.9, no text
+  { kind: "proxy-stats", pod, connected: boolean, warmingListeners, warmingClusters, serverState }   // 025, 026
   { kind: "ref-unresolved", ref: BackendRefDTO, reason, message, explanation?: string, computed?: Computed }
   { kind: "ref-not-permitted", ref }                              // the grant is the suggested fix (§7.7)
   { kind: "rule-replaced", matchIndex, reason, message, policy?: LinkedRef }
@@ -572,7 +636,7 @@ Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 
 | Code | Resource | Evidence dependencies |
 |---|---|---|
-| 001 | Gateway | controller Pods named in `reportedBy`; each `recentlyChanged` object is filtered on its own (rule 14) |
+| 001 | Gateway | controller Pods named in `reportedBy`, proxy Pods in `proxyStats`; each `recentlyChanged` object is filtered on its own (rule 14). Envoy resource names from stats and logs are not Kubernetes objects; a name the rule set maps to an object is filtered as that object |
 | 013 | route or Gateway/ListenerSet | the Service, when the explanation quotes its existence or ports |
 | 014 | route or Gateway/ListenerSet | none: the grant is built from the ref as written (rule 8) |
 | 015 | route | the policy, when linked; otherwise none (the message is the route's own status) |
@@ -583,6 +647,7 @@ Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 | 022 | Gateway, controller Deployment, or CRD | the Pods named; CRDs are cluster-scoped refs |
 | 023 | Service | none beyond the Service: slices are read as part of it |
 | 024 | Gateway | none |
+| 025, 026 | Gateway | the proxy Pods named |
 
 13. **Groups and affected lists.** A group row needs its cause to be visible; otherwise it is a restricted row (severity, code, "Restricted: ask the owning team") with no affected list. Affected lists hold visible objects only, and `affectedTotal` counts visible objects only (Phase 2 rule 5). The member count is install-wide, like `deniedInInstall` (rule 2).
 14. **Recently changed objects** (§8.5) are each authorized on their own; hidden ones are left out without a count.
@@ -670,11 +735,12 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Analyzer stage alone (identity, groups, rank, every Phase 3 check) | ≤ 20 ms warm; ≤ 2 ms when memoized inputs are unchanged | 3.2–3.4 |
 | Stream CPU, annotation-only | ≤ 15 % of one core, unchanged | 3.1–3.4 |
 | Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core. If the baseline already exceeds 22 %, the numbers go to the user before a gate is set | 3.1–3.4 |
-| Retained heap | the Phase 2 gate of 32 MiB, unchanged; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), finding identities and check Stores | 3.1–3.4 |
+| Retained heap | the Phase 2 gate of 32 MiB, unchanged; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
 | Dense memory | median peak heap ≤ 432 MiB, unchanged (D-025) | 3.1–3.4 |
 | OS memory during the stream | ≤ 256 MiB (D-022) | 3.2–3.4 |
 | `GET …/diagnostics`, `GET …/findings` (each filter mix), `GET …/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 3.1–3.4 |
 | Change burst, idle, cold recompute | Phase 2 gates, unchanged | 3.1–3.4 |
+| Proxy stats scrape, 2 proxies per Gateway at Large; log reader at 50 matching lines/s | inside the stream CPU and retained-heap gates above, measured with both on | 3.2–3.3 |
 
 No gate changes without the user. If the 3.1 baseline, or any later sub-phase, breaks a gate, the work stops and the numbers go to the user, who decides **(user, 2026-10-29)**.
 
@@ -763,7 +829,7 @@ The "back to install" links in the error and not-found states stay as they are.
 
 ### 18.1 ClusterRole delta
 
-All additions are get/list/watch only. Each has a chart toggle under `diagnostics.*`, default on **(our call)**. Turning one off drops both the rule and the watch. The dependent checks then report "not available" with reason `off`; a toggle that is on but denied by RBAC or failing reports `denied` or `failing`. None of them turns the install unknown (§7.1).
+All additions are get/list/watch only. Each has a chart toggle under `diagnostics.*`, default on **(our call)**, except `diagnostics.controllerLogs`, which is off by default **(user, 2026-11-01)**. Turning one off drops both the rule and the watch. The dependent checks then report "not available" with reason `off`; a toggle that is on but denied by RBAC or failing reports `denied` or `failing`. None of them turns the install unknown (§7.1).
 
 | Rule added | For | Toggle | Sub-phase |
 |---|---|---|---|
@@ -771,16 +837,20 @@ All additions are get/list/watch only. Each has a chart toggle under `diagnostic
 | `apiextensions.k8s.io` `customresourcedefinitions` (read through the metadata client) | CRD bundle version and channel (§9.4) | `diagnostics.crds` | 3.2 |
 | `""` `services` | 013 explanations, 023 | `diagnostics.endpoints` | 3.4 |
 | `discovery.k8s.io` `endpointslices` | 023 | `diagnostics.endpoints` | 3.4 |
+| `""` `pods/log`, `get`, in a Role in the install namespace only | derived controller log signals (§8.9) | `diagnostics.controllerLogs` (default off) | 3.3 |
+| none (Pod IP in-cluster; `pods/proxy` with the user's rights when run locally) | proxy Envoy stats (§8.8) | `diagnostics.proxyStats` | 3.2 |
 
 - `pods` (already granted) gains a second label-selected watch for proxy Pods. No new verb.
-- Still **no Secrets, no ConfigMaps, no `pods/log`, no `*/proxy`, no `pods/portforward`.**
+- Still **no Secrets, no ConfigMaps, no `*/proxy`, no `pods/portforward`**, and no `pods/log` unless `diagnostics.controllerLogs` is on, then only in the install namespace.
 - D-017 §5 dropped CRD reads for least privilege; D-029 reverses that for metadata only, with a reason and a toggle.
 - The README's "Read-only RBAC" line lists CRDs today, while the chart has no CRD rule. 3.2 fixes the README with the real list.
 - The chart README documents each toggle and what it disables.
 
 ### 18.2 Security
 
-- **Never read:** Secrets, logs, admin ports, termination messages, probe output, Event messages. Only Event reasons, counts and times are kept.
+- **Never read:** Secrets, the Envoy and controller admin ports, proxy logs, termination messages, probe output, Event messages. Only Event reasons, counts and times are kept.
+- **Read, never shown:** controller log lines, only when `diagnostics.controllerLogs` is on. Only the fixed fields of §8.9 are kept; the text is discarded.
+- **Read:** Envoy stats from each proxy's stats listener, names and numbers only (§8.8).
 - **Commands are text.** No command is run, sent or stored. Values are shell-quoted. Names come from objects the caller may view (§14 rule 15).
 - **Trust model unchanged** (D-013). The README states the new kinds the ServiceAccount reads.
 - **Raw payloads.** Evidence never echoes a whole status message longer than 1 KiB; it is cut with a marker. This guards against a controller that writes very large status (a lesson from the predecessor project).
@@ -795,6 +865,7 @@ All additions are get/list/watch only. Each has a chart toggle under `diagnostic
 | Analyzers, identity, groups, rank | `pkg/diagnose` and `pkg/health`: objects through `pkg/objects` only, covered by `internal/boundary/imports_test.go` |
 | Next-step commands | through `Vocabulary`; a platform without kubectl overrides or hides them |
 | Version skew | versions come from `Process.Version`, whatever the provider parses |
+| Proxy stats, derived log signals | behind the `proxyStats` and `controllerLogs` capabilities; the stat list, the log parsers and Envoy name mapping sit on the rule-set seam, so a downstream proxy or log format plugs in its own |
 
 A test runs the analyzer stage over a snapshot with no Pods, Events, Services or CRDs: process findings are "not observed", 023 is "not available", and every other code behaves the same.
 
@@ -832,6 +903,18 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - `gateway-rejecting` row flags, and that such a row is never healthy;
 - the restart hold, with a new Pod UID and with a higher restart count;
 - `resources_updates_dropped_total > 0` turning KGWUI-007 into KGWUI-008.
+
+**Proxy stats (§8.8):**
+- 025 and 026 at 59 s (none) and 61 s; a not-Ready proxy (none);
+- 001 evidence per Pod, an active and a recovered reject, and the RDS and EDS names; 001 from proxy stats when controller metrics are unavailable;
+- a refused listener, a timeout and a body over 1 MiB as `failing`; a self-managed Gateway as "not observed";
+- an Envoy name with and without a verified naming function.
+
+**Derived log signals (§8.9):**
+- captured `"xds error"` lines from 2.3.11 and 2.4.7: names and error class kept; a line embedding a fake API key leaves no trace of it in the API, the model or the UI's own log;
+- a name that fails the grammar is dropped; an unknown error class becomes `other`;
+- 10 parse failures turn the capability unavailable; the 1,000-event cap;
+- toggle off (no Role, `off`), Role missing (`denied`).
 
 **Check contract and Store:**
 - every core, example and `examples/downstream` check runs on the new contract, with unchanged findings on the Phase 2 goldens;
@@ -872,6 +955,8 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 - layouts at 720, 1280, 1600 and 3008 px wide: no horizontal page scroll, two columns from 1600 px, content using the width up to 2400 px.
 
 **kind e2e on 2.3.11 and 2.4.7:**
+- proxy stats on the existing NACK fixture: the rejecting Pod and the Envoy resource; a proxy with its controller scaled to zero (026);
+- `diagnostics.controllerLogs=true` on the NACK fixture: the derived resource names and class, and no log text in any API response;
 - the existing NACK fixture now asserts the status-says-healthy message, the stream count and the command text;
 - a proxy with an unpullable image (021) through GatewayParameters;
 - a backend scaled to zero (023);
@@ -898,6 +983,7 @@ The boundary stays **cluster objects in → API JSON out** (Phase 1 design §9).
 | D-033 | kgateway 2.5 joins the support matrix at GA, in 3.4; before GA it runs on the 2.4 rule set **(user, 2026-10-29)** | §7.6, §8.6, §23 |
 | D-034 | No Phase 3 check is required; unavailable checks give a reason and never turn the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones **(our call, 2.4 builder check)** | §5.1, §7.1 |
 | D-035 | Path-based breadcrumbs carried in the URL (`via`), a shared object header, and a fluid layout up to 2400 px with two columns on detail pages from 1600 px **(user, 2026-10-29)** | §17.6 |
+| D-037 | Envoy stats read from each proxy's stats listener with no new RBAC; controller logs opt-in, install namespace only, fixed fields kept and text never stored or shown; proxy logs, `/config_dump` and admin ports out until per-user identity (Phase 10) and Phase 9 **(user, 2026-11-01)** | §8.8, §8.9, §12, §18 |
 | D-036 | Deterministic suggested fixes: only where exactly one change follows from the spec, discovery or a watched object; a fragment with its location for existing objects; never applied, never from translation logic **(user, 2026-10-29)** | §7.7 |
 
 The "Decisions for this phase" table near the top lists every decision from the builder check and the user's answers, with its marker.
@@ -909,8 +995,8 @@ Each sub-phase has its own brief, a cross-model review of its diff, its benchmar
 | Sub-phase | Content | Ships |
 |---|---|---|
 | **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap. Shell and navigation (§17.6, D-035): `ObjectHeader`, the fluid and two-column layout, path-based breadcrumbs | Same pages, easier to read and navigate; findings have ids and page on the server |
-| **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
-| **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; suggested fixes for 013 and 014 (§7.7); `docs/findings.md`. Wording pass | The analyzer floor and freshness findings, with suggested fixes |
+| **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. Proxy Envoy stats (§8.8), 025 and 026, and the per-Pod 001 evidence. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
+| **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; suggested fixes for 013 and 014 (§7.7); derived controller log signals behind `diagnostics.controllerLogs` (§8.9); `docs/findings.md`. Wording pass | The analyzer floor and freshness findings, with suggested fixes |
 | **3.4 Backends and kgateway 2.5** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. Once 2.5.0 GA ships (D-033): the 2.5 rule set, a 2.5 e2e row, 024, the controller-reported `TargetNotFound` path for 016, `kgateway_build_info` for the controller version, and the 2.5 fixtures if 3.1 did not capture them | Empty backends; kgateway 2.5 supported |
 
 A stabilization sub-phase follows the phase review, as in Phases 1 and 2. Every sub-phase builds on 3.1's check contract, Store, identity and paging; 3.4's 013 explanation depends on 3.3's 013. Each of 3.2, 3.3 and 3.4 shows its benchmarks within the §16.3 gates before it ships. The order puts the research's top-ranked signals (rejects, processes) first, after the performance work. If 2.5.0 GA is not out when the rest of 3.4 is ready, the 2.5 items wait for it and the rest ships.
@@ -924,6 +1010,7 @@ A stabilization sub-phase follows the phase review, as in Phases 1 and 2. Every 
 | 24.3 | Machine-readable Gateway API compatibility metadata in the chart or the controller | §9.4; #13683 |
 | 24.4 | Report unreported listener conflicts, such as duplicate SNI across TLSRoutes | §7.2; #14911 |
 | 24.5 | A "config complete" signal for proxy readiness | §12; #14363 |
+| 24.6 | A read-only, redacted config-dump route on the proxy stats listener, next to `/stats`, off by default | §8.8, §12: lets a tool see accepted config without port-forward or admin-port access |
 
 The scope-endpoint proposal (D-009 §7) stays the user's to file; 24.2 and 24.3 could join it. §25 holds the filing question.
 
