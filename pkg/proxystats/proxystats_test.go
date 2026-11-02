@@ -20,12 +20,14 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	clocktesting "k8s.io/utils/clock/testing"
 
@@ -168,11 +170,14 @@ func proxyDeployment(ns, gw string) *appsv1.Deployment {
 	}
 }
 
-// proxyPod is a running proxy Pod of d with ip.
+// proxyPod is a running proxy Pod of d's ReplicaSet with ip.
 func proxyPod(d *appsv1.Deployment, name, ip string) *corev1.Pod {
+	lbls := maps.Clone(d.Spec.Selector.MatchLabels)
+	lbls["pod-template-hash"] = "5d8f7"
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: d.Namespace, Name: name, UID: types.UID("pod/" + d.Namespace + "/" + name), Labels: d.Spec.Selector.MatchLabels},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning, PodIP: ip, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+		ObjectMeta: metav1.ObjectMeta{Namespace: d.Namespace, Name: name, UID: types.UID("pod/" + d.Namespace + "/" + name), Labels: lbls,
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: d.Name + "-5d8f7", Controller: ptr(true)}}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: ip, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}
 }
 
@@ -424,6 +429,11 @@ func (s *scriptSource) Fetch(_ context.Context, t proxystats.Target) ([]byte, er
 	if len(s.script[t.ID]) == 0 {
 		return nil, errors.New("no stats")
 	}
+	// A scripted Err fails this fetch.
+	if e := s.script[t.ID][0].Err; e != "" {
+		s.script[t.ID] = s.script[t.ID][1:]
+		return nil, errors.New(e)
+	}
 	return []byte(t.ID), nil
 }
 
@@ -650,5 +660,179 @@ func TestShippedRuleSetsHaveNoEnvoyNamer(t *testing.T) {
 	}
 	if (computed.Selection{}).EnvoyNamer() != nil {
 		t.Fatal("no rule set, no namer")
+	}
+}
+
+// A 3xx is never followed, in-cluster or through pods/proxy: the redirect
+// target sees no request and the Pod fails with the status.
+func TestRedirectsAreNeverFollowed(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(w, "server.state: 0\n")
+	}))
+	t.Cleanup(target.Close)
+	redirect := httptest.NewServer(http.RedirectHandler(target.URL+"/stats", http.StatusFound))
+	t.Cleanup(redirect.Close)
+	host, port, _ := net.SplitHostPort(redirect.Listener.Addr().String())
+	p, _ := strconv.Atoi(port)
+	tg := proxystats.Target{Name: "edge-1", Gateway: gwRef("infra", "edge"), Addr: net.JoinHostPort(host, port)}
+	pods, err := proxystats.NewPodProxyClient(&rest.Config{Host: redirect.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, k := range map[string]proxystats.Kube{
+		"default client":  {Port: int32(p)},
+		"supplied client": {Client: &http.Client{}, Port: int32(p)},
+		"pods/proxy":      {Kube: pods, Port: int32(p)},
+	} {
+		if _, err := k.Fetch(context.Background(), tg); err == nil || err.Error() != "HTTP 302" {
+			t.Errorf("%s: want HTTP 302, got %v", name, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("the redirect target saw %d requests", n)
+	}
+	if tr, ok := proxystats.NewHTTPClient().Transport.(*http.Transport); !ok || tr.Proxy != nil {
+		t.Fatal("Pod-IP scrapes never go through an environment proxy")
+	}
+}
+
+// A Pod that matches the labels but is not controlled by the Deployment's
+// ReplicaSet is never scraped.
+func TestNotOwnedPodIsNotScraped(t *testing.T) {
+	d := proxyDeployment("infra", "edge")
+	owned := proxyPod(d, "edge-1", "10.0.0.1")
+	stray := proxyPod(d, "stray", "10.0.0.2")
+	stray.OwnerReferences = nil
+	other := proxyPod(d, "other", "10.0.0.3")
+	other.OwnerReferences[0].Name = "imposter-5d8f7"
+	notCtl := proxyPod(d, "not-controller", "10.0.0.4")
+	notCtl.OwnerReferences[0].Controller = nil
+	ts, ok := proxystats.Kube{}.Targets(installOf(t, "kgw"), gwRef("infra", "edge"), snapshot([]*appsv1.Deployment{d}, owned, stray, other, notCtl))
+	if !ok || len(ts) != 1 || ts[0].Name != "edge-1" {
+		t.Fatalf("targets %+v", ts)
+	}
+}
+
+// hangingSource never answers; every fetch ends with its context.
+type hangingSource struct{ targets []proxystats.Target }
+
+func (h hangingSource) Targets(install.Resolved, objects.Ref, *cache.Snapshot) ([]proxystats.Target, bool) {
+	return h.targets, true
+}
+func (hangingSource) Fetch(ctx context.Context, _ proxystats.Target) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (hangingSource) Interpret(proxystats.Target, []byte) (proxystats.PodStats, error) {
+	return proxystats.PodStats{}, nil
+}
+
+// With more than 96 hanging Pods (six waves of 16 past the fetch timeout),
+// the round still ends before the next tick: the Gateway stays observed and
+// every Pod times out.
+func TestRoundEndsBeforeTheNextTick(t *testing.T) {
+	var src hangingSource
+	for i := range 120 {
+		src.targets = append(src.targets, proxystats.Target{ID: fmt.Sprint(i), Name: fmt.Sprintf("p%03d", i), Gateway: gwRef("infra", "edge")})
+	}
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gwRef("infra", "edge")}}
+	// 400 ms: 200 ms per fetch, so 120 Pods alone would take 1.6 s.
+	every := 400 * time.Millisecond
+	c := proxystats.New(proxystats.Config{Source: src, Every: every, Installs: static(snapshot(nil), in)})
+	start := time.Now()
+	st, _, ok := c.Round(context.Background())
+	if el := time.Since(start); !ok || el >= 2*every {
+		t.Fatalf("round took %v, want under the %v interval plus slack", el, every)
+	}
+	g := podsOf(t, st, in.Resolved.ID(), gwRef("infra", "edge"))
+	if !g.Observed || len(g.Pods) != 120 || slices.ContainsFunc(g.Pods, func(p proxystats.Pod) bool { return p.Err != "timed out" }) {
+		t.Fatalf("gateway observed %v, %d Pods, first %+v", g.Observed, len(g.Pods), g.Pods[0])
+	}
+}
+
+// Over the cap of 64 names the grown ones are kept first, and the Pod says
+// names were dropped; a Source's long error is cut on a rune boundary.
+func TestNameCapKeepsGrownNamesAndErrorsStayValid(t *testing.T) {
+	gw := gwRef("infra", "edge")
+	// 61 names, then 71: a60..a69 appear and zz-grown grows. A cap by name alone would drop zz-grown.
+	before, after := map[string]int64{"zz-grown": 1}, map[string]int64{"zz-grown": 3}
+	var want []string
+	for i := range 70 {
+		n := fmt.Sprintf("a%02d", i)
+		if i < 60 {
+			before[n] = 1
+		} else {
+			want = append(want, n)
+		}
+		after[n] = 1
+	}
+	want = append(want, "zz-grown")
+	long := strings.Repeat("é", 100)
+	src := &scriptSource{targets: map[objects.Ref][]proxystats.Target{gw: {{ID: "u1", Name: "edge-1", Gateway: gw}}},
+		script: map[string][]proxystats.PodStats{"u1": {{RDS: before}, {RDS: after}, {Err: long}}}}
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gw}}
+	c := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Clock: testutil.FakeClock(), Installs: static(snapshot(nil), in)})
+	c.Round(context.Background())
+	st, _, _ := c.Round(context.Background())
+	if p := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]; !slices.Equal(p.RDS, want) || !p.NamesTruncated {
+		t.Fatalf("capped names: %+v", p)
+	}
+	st, _, _ = c.Round(context.Background())
+	if e := podsOf(t, st, in.Resolved.ID(), gw).Pods[0].Err; !utf8.ValidString(e) || len(e) > 120 || !strings.HasPrefix(long, e) || e == "" {
+		t.Fatalf("error text %q", e)
+	}
+}
+
+// A failed scrape keeps the counters, so growth across it is still observed.
+func TestGrowthAcrossAFailedScrape(t *testing.T) {
+	gw := gwRef("infra", "edge")
+	src := &scriptSource{targets: map[objects.Ref][]proxystats.Target{gw: {{ID: "u1", Name: "edge-1", Gateway: gw}}},
+		script: map[string][]proxystats.PodStats{"u1": {counters(3, 8, 10, nil), {Err: "refused"}, counters(4, 8, 30, nil)}}}
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gw}}
+	c := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Clock: testutil.FakeClock(), Installs: static(snapshot(nil), in)})
+	c.Round(context.Background())
+	st, _, _ := c.Round(context.Background())
+	if p := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]; p.Err != "refused" || c.Tracked() != 1 {
+		t.Fatalf("failed scrape: %+v, tracked %d", p, c.Tracked())
+	}
+	st, _, _ = c.Round(context.Background())
+	if p := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]; !p.LDS.Seen || p.CDS.Seen {
+		t.Fatalf("growth across the failure: %+v", p)
+	}
+}
+
+// A collector that stops publishing leaves a value that expires after three
+// intervals and then reads Unavailable.
+func TestStatsExpireAfterThreeIntervals(t *testing.T) {
+	clk := tickerClock{FakeClock: testutil.FakeClock(), made: make(chan struct{}, 1)}
+	store := collect.New(nil, clk.Now)
+	d := proxyDeployment("infra", "edge")
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gwRef("infra", "edge")}}
+	src := proxystats.Kube{Client: &http.Client{Transport: hostRT{"10.0.0.1": body("server.state: 0\n")}}}
+	c := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Clock: clk,
+		Installs: static(snapshot([]*appsv1.Deployment{d}, proxyPod(d, "edge-1", "10.0.0.1")), in)})
+	published := make(chan struct{}, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Run(ctx, func(_ string, v any, fp uint64, ttl time.Duration) {
+			store.Publish(proxystats.Key, v, fp, ttl)
+			published <- struct{}{}
+		}, func(_ string, st collect.State, r string) { store.Fail(proxystats.Key, st, r) })
+	}()
+	testutil.Recv(t, published, "the first round")
+	cancel()
+	if err := testutil.Recv(t, done, "Run to return"); err != nil {
+		t.Fatal(err)
+	}
+	clk.Step(30*time.Second - time.Nanosecond)
+	if v, _ := store.Snapshot().Get(proxystats.Key); v.State != collect.OK {
+		t.Fatalf("before the TTL: %s", v.State)
+	}
+	clk.Step(time.Nanosecond)
+	if v, _ := store.Snapshot().Get(proxystats.Key); v.State != collect.Unavailable || v.Data != nil {
+		t.Fatalf("after the TTL: %+v", v)
 	}
 }

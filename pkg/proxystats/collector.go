@@ -4,10 +4,10 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"k8s.io/utils/clock"
 
@@ -32,6 +32,21 @@ const (
 
 // OffReason is the reason published when proxy stats are turned off.
 const OffReason = "proxy stats are turned off"
+
+// errTimedOut is a Pod's error when its fetch or the round ran out of time.
+const errTimedOut = "timed out"
+
+// cut shortens s to at most n bytes on a rune boundary.
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
 
 // Install is one install to scrape and the Gateways it owns.
 type Install struct {
@@ -70,6 +85,8 @@ type podState struct {
 	lds, cds           int64
 	rds, clusters      map[string]int64
 	ldsSince, cdsSince time.Time
+	// truncated is set when names were dropped under maxNames.
+	truncated bool
 }
 
 // New returns a Collector for cfg.
@@ -80,9 +97,8 @@ func New(cfg Config) *Collector {
 	return &Collector{cfg: cfg, pods: map[podKey]*podState{}}
 }
 
-// Run scrapes now and then every interval until ctx is done, publishing each
-// round under ValueKey with a TTL of three intervals. An unchanged round
-// keeps its fingerprint, so the store renews it without a recompute.
+// Run scrapes now and every interval until ctx is done, publishing under
+// ValueKey with a TTL of three intervals; Off publishes collect.Off once.
 func (c *Collector) Run(ctx context.Context, publish func(key string, v any, fp uint64, ttl time.Duration), fail func(key string, st collect.State, reason string)) error {
 	if c.cfg.Off {
 		fail(ValueKey, collect.Off, OffReason)
@@ -142,13 +158,16 @@ func (c *Collector) Round(ctx context.Context) (Stats, uint64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	timeout := min(c.cfg.Every/2, maxFetchTimeout)
+	// The round ends before the next tick, so it always publishes inside the TTL.
+	rctx, cancel := context.WithTimeout(ctx, c.cfg.Every*9/10)
+	defer cancel()
 	all := make([]scrapes, len(ins))
 	var wg sync.WaitGroup
 	for i, in := range ins {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			all[i] = c.scrapeInstall(ctx, in, snap, timeout)
+			all[i] = c.scrapeInstall(rctx, in, snap, timeout)
 		}()
 	}
 	wg.Wait()
@@ -175,7 +194,8 @@ func (c *Collector) Round(ctx context.Context) (Stats, uint64, bool) {
 }
 
 // scrapeInstall resolves in's targets per Gateway, in Ref order, and fetches
-// them, at most maxConcurrent at once. A Pod listed twice is scraped once.
+// them, at most maxConcurrent at once; Pods not reached before ctx ends time
+// out. A Pod listed twice is scraped once.
 func (c *Collector) scrapeInstall(ctx context.Context, in Install, snap *cache.Snapshot, timeout time.Duration) scrapes {
 	gws := slices.Clone(in.Gateways)
 	slices.SortFunc(gws, func(a, b objects.Ref) int {
@@ -199,7 +219,12 @@ func (c *Collector) scrapeInstall(ctx context.Context, in Install, snap *cache.S
 	var wg sync.WaitGroup
 	for gi, ts := range s.targets {
 		for ti, t := range ts {
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				s.results[gi][ti] = scraped{err: errTimedOut}
+				continue
+			}
 			wg.Add(1)
 			go func() {
 				defer func() { <-sem; wg.Done() }()
@@ -219,13 +244,9 @@ func (c *Collector) scrape(ctx context.Context, t Target, timeout time.Duration)
 	b, err := c.cfg.Source.Fetch(fctx, t)
 	switch {
 	case err != nil && errors.Is(fctx.Err(), context.DeadlineExceeded):
-		return scraped{err: fmt.Sprintf("timed out after %v", timeout)}
+		return scraped{err: errTimedOut}
 	case err != nil:
-		e := err.Error()
-		if len(e) > maxErrLen {
-			e = e[:maxErrLen]
-		}
-		return scraped{err: e}
+		return scraped{err: cut(err.Error(), maxErrLen)}
 	case len(b) > MaxBody:
 		return scraped{err: "response over 1 MiB"}
 	}
@@ -252,12 +273,14 @@ func (c *Collector) fold(key podKey, t Target, r scraped, now time.Time) Pod {
 	if reset {
 		prev = &podState{}
 	}
-	cur := &podState{uptime: ps.Uptime, lds: ps.LDS.Rejected, cds: ps.CDS.Rejected, rds: bounded(ps.RDS), clusters: bounded(ps.Clusters)}
+	cur := &podState{uptime: ps.Uptime, lds: ps.LDS.Rejected, cds: ps.CDS.Rejected}
 	p.LDS, cur.ldsSince = observe(reset, prev.lds, cur.lds, prev.ldsSince, now)
 	p.CDS, cur.cdsSince = observe(reset, prev.cds, cur.cds, prev.cdsSince, now)
-	if !reset {
-		p.RDS, p.Clusters = grown(prev.rds, cur.rds), grown(prev.clusters, cur.clusters)
-	}
+	var cutR, cutC bool
+	cur.rds, p.RDS, cutR = names(reset, prev.rds, prev.truncated, ps.RDS)
+	cur.clusters, p.Clusters, cutC = names(reset, prev.clusters, prev.truncated, ps.Clusters)
+	cur.truncated = cutR || cutC
+	p.NamesTruncated = cur.truncated
 	c.pods[key] = cur
 	return p
 }
@@ -274,38 +297,41 @@ func observe(reset bool, old, cur int64, since, now time.Time) (Rejects, time.Ti
 	return Rejects{Seen: true, Since: since}, since
 }
 
-// grown lists the names whose counter in cur exceeds old's, sorted; a name
-// absent from old counted 0.
-func grown(old, cur map[string]int64) []string {
-	var out []string
-	for n, v := range cur {
-		if v > old[n] {
-			out = append(out, n)
+// names keeps at most maxNames valid names of cur, grown ones first, then
+// those already kept, then the rest, and lists the grown ones sorted. A name
+// absent from old counted 0, unless old was truncated and its baseline is unknown.
+func names(reset bool, old map[string]int64, oldCut bool, cur map[string]int64) (kept map[string]int64, grew []string, truncated bool) {
+	rank := func(n string) int {
+		o, had := old[n]
+		switch {
+		case reset:
+			return 2
+		case cur[n] > o && (had || !oldCut):
+			return 0
+		case had:
+			return 1
 		}
+		return 2
 	}
-	slices.Sort(out)
-	return out
-}
-
-// bounded keeps the first maxNames valid names of m in name order.
-func bounded(m map[string]int64) map[string]int64 {
-	ok := len(m) <= maxNames
-	for n := range m {
-		ok = ok && validName(n)
-	}
-	if ok {
-		return m
-	}
-	names := make([]string, 0, len(m))
-	for n := range m {
+	all := make([]string, 0, len(cur))
+	for n := range cur {
 		if validName(n) {
-			names = append(names, n)
+			all = append(all, n)
 		}
 	}
-	slices.Sort(names)
-	out := make(map[string]int64, min(len(names), maxNames))
-	for _, n := range names[:min(len(names), maxNames)] {
-		out[n] = m[n]
+	slices.SortFunc(all, func(a, b string) int { return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(a, b)) })
+	truncated = len(all) > maxNames || len(all) < len(cur)
+	all = all[:min(len(all), maxNames)]
+	if len(all) == 0 {
+		return nil, nil, truncated
 	}
-	return out
+	kept = make(map[string]int64, len(all))
+	for _, n := range all {
+		kept[n] = cur[n]
+		if rank(n) == 0 {
+			grew = append(grew, n)
+		}
+	}
+	slices.Sort(grew)
+	return kept, grew, truncated
 }

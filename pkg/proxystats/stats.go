@@ -17,9 +17,8 @@ const (
 	Key           = CollectorName + "/" + ValueKey
 )
 
-// Stats is the value published under Key: per install ID, its Gateways in
-// Ref order. It holds what checks read, not raw counters, so a proxy that
-// keeps rejecting publishes the same value scrape after scrape (carry-forward b).
+// Stats is the value under Key: per install ID, its Gateways in Ref order.
+// It holds observed rejects, not counters, so steady rejects keep one value.
 type Stats map[string][]Gateway
 
 // Gateway is one Gateway's proxies.
@@ -45,14 +44,14 @@ type Pod struct {
 	// RDS and Clusters are the Envoy names whose update_rejected grew since
 	// the previous scrape, sorted. Names are evidence, never Gateway API objects.
 	RDS, Clusters []string
+	// NamesTruncated is set when names past the cap of 64 were dropped.
+	NamesTruncated bool
 }
 
-// Rejects are a type's rejects observed since the previous scrape. A sampled
-// counter cannot tell whether the last update was rejected, so Seen never
-// means "rejecting now" (review finding 4).
+// Rejects are a type's rejects observed since the previous scrape; never
+// "rejecting now" (review finding 4). Since starts the current run of growth.
 type Rejects struct {
-	Seen bool
-	// Since is the first scrape of the current run of scrapes that each saw growth.
+	Seen  bool
 	Since time.Time
 }
 
@@ -144,4 +143,5 @@ func (w *writer) pod(p Pod) {
 	w.rejects(p.CDS)
 	w.strs(p.RDS)
 	w.strs(p.Clusters)
+	w.bool(p.NamesTruncated)
 }

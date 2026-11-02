@@ -34,9 +34,8 @@ type Target struct {
 	Addr string
 }
 
-// PodStats are one proxy's raw stats as Interpret reads them. Nil and empty
-// fields were not reported. Counters are totals since the proxy started, so no
-// field says a proxy rejects now (review finding 4).
+// PodStats are one proxy's raw counters as Interpret reads them; nil and
+// empty fields were not reported, and no field means "rejecting now".
 type PodStats struct {
 	UID, Name string
 	Gateway   objects.Ref

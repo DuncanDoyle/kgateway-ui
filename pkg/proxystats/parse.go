@@ -16,10 +16,12 @@ const StatsFilter = `^(control_plane\.connected_state|cluster_manager\.warming_c
 
 var statsRe = regexp.MustCompile(StatsFilter)
 
-// Bounds on the Envoy names kept per proxy (design §8.8: names are evidence).
+// Bounds on the Envoy names per proxy: maxNames are kept, maxParsedNames
+// read, so the collector can keep grown ones first (design §8.8).
 const (
-	maxNames   = 64
-	maxNameLen = 200
+	maxNames       = 64
+	maxParsedNames = 4096
+	maxNameLen     = 200
 )
 
 // serverStates are Envoy's server.state values.
@@ -78,9 +80,9 @@ func ParseEnvoy(body []byte) (PodStats, error) {
 }
 
 // addName records name's counter in m when the name is a plausible Envoy name
-// and m is under maxNames.
+// and m is under maxParsedNames.
 func addName(m map[string]int64, name string, v int64) map[string]int64 {
-	if !validName(name) || len(m) >= maxNames {
+	if !validName(name) || len(m) >= maxParsedNames {
 		return m
 	}
 	if m == nil {

@@ -112,7 +112,8 @@ type Collector interface {
 }
 
 // WithCollectors adds collectors that the app starts after the cache. Names
-// are unique among collectors; a rejected one is reported by Registry.Err.
+// are unique among collectors; "proxy-stats" is the core collector's and
+// app.Build rejects it. A rejected name is reported by Registry.Err.
 func WithCollectors(c ...Collector) Option {
 	return func(r *Registry) {
 		for _, col := range c {
