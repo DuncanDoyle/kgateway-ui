@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,10 +25,13 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/healthtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 )
 
@@ -259,4 +264,31 @@ func TestChartOverlayRendersExtraRule(t *testing.T) {
 		t.Fatalf("the ClusterRole lacks %+v: %+v", want, cr.Rules)
 	}
 	t.Fatal("no ClusterRole rendered")
+}
+
+// The example check reads only the collector key it declares.
+func TestAcmeWidgetCheckReadsOnlyDeclaredInputs(t *testing.T) {
+	in := health.Input{Now: testutil.Now}
+	values := map[string]collect.Value{
+		"acme-widgets/other": {State: collect.OK, Data: 7},
+		"other-collector/x":  {State: collect.OK, Data: "x"},
+	}
+	cases := map[string]collect.Value{
+		"no widgets":  {State: collect.OK, Data: 0},
+		"two widgets": {State: collect.OK, Data: 2},
+		"failing":     {State: collect.Failing, Reason: "list failed"},
+		"absent":      {},
+	}
+	for name, v := range cases {
+		for _, seed := range []int64{1, 2, 3, 7, 42} {
+			t.Run(fmt.Sprintf("%s/seed%d", name, seed), func(t *testing.T) {
+				vs := maps.Clone(values)
+				if name != "absent" {
+					vs["acme-widgets/widgets"] = v
+				}
+				rt := health.Runtime{Collected: collect.Snapshot{Values: vs}}
+				healthtest.CheckDeclaredInputs(t, acmeWidgetCheck{}, in, rt, seed)
+			})
+		}
+	}
 }

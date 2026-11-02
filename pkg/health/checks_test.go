@@ -61,7 +61,8 @@ func healthyWorld() *world {
 	}
 }
 
-func (w *world) report(t *testing.T) Report {
+// input builds the install's Input for w.
+func (w *world) input(t *testing.T) Input {
 	t.Helper()
 	snap := &cache.Snapshot{Objects: testutil.ObjectsByGVR(t, w.objs...), Access: map[schema.GroupVersionResource]cache.Access{},
 		Namespaces: w.nss, Deployments: w.deploys, Pods: w.pods, Synced: true, TakenAt: testutil.Now}
@@ -88,7 +89,12 @@ func (w *world) report(t *testing.T) Report {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
 	hi.FirstSeen, hi.Computed = w.firstSeen, w.computed
-	return Evaluate(hi, Upstream(), Runtime{})
+	return hi
+}
+
+func (w *world) report(t *testing.T) Report {
+	t.Helper()
+	return Evaluate(w.input(t), Upstream(), Runtime{})
 }
 
 // has reports whether r has a finding with code on res; an empty sev or res matches any.
