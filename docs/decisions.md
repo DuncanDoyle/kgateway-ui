@@ -673,7 +673,7 @@ quirk 2 (prefix /q):
 
 **Context:** `TestBudgetDenseMemory` gated the median peak heap of five runs at ≤ 432 MiB (D-025). Peak heap depends on when the GC runs: on the same code, medians ranged 427–440 MiB, and the 2.4 code (`3eceda6`) failed it too. The heap retained and the bytes allocated were identical in every run, before and after 3.0.
 
-**Decision:** The gate checks three medians at the default edge cap: the heap retained after warm recomputes (≤ 176 MiB), the bytes allocated by the cold recompute (≤ 231 MiB) and per warm recompute (≤ 185 MiB). Each is the 2.4 measurement (160, 210 and 168 MiB) plus about 10 %. Peak heap and RSS stay logged, not gated. The binary's soft memory limit (90 % of the pod limit, D-025) makes the GC work harder near the limit; it does not guarantee the pod stays under it.
+**Decision:** The gate checks three medians at the default edge cap: the heap retained after warm recomputes (≤ 176 MiB), the bytes allocated by the cold recompute (≤ 246 MiB) and per warm recompute (≤ 185 MiB). Each is the 2.4 measurement (160, 210 and 168 MiB; the cold allocation is 224 MiB on the linux/amd64 CI runner) plus about 10 % of the larger value. The cold budget went from 231 to 246 MiB on 2026-11-02 so CI keeps the same headroom (user). Peak heap and RSS stay logged, not gated. The binary's soft memory limit (90 % of the pod limit, D-025) makes the GC work harder near the limit; it does not guarantee the pod stays under it.
 
 **Consequences:** A regression in what the engine keeps or allocates fails the gate deterministically. A change that only moves GC timing does not. A change that holds more memory at once without allocating more is not gated; peak heap is logged for it (tracked in `phase-status.md`).
 

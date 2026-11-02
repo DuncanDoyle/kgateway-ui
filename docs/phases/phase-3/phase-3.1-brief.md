@@ -87,7 +87,7 @@ Budgets (§16.3; dense gate per D-039):
 | Stream CPU, annotation-only | ≤ 15 % of one core |
 | Stream CPU, spec-edit | reported; gated from 3.2 at ≤ 25 %; above 22 % on the baseline, the numbers go to the user first |
 | Retained heap | ≤ 32 MiB, and ≤ +24 MiB above `3.1-baseline.txt` |
-| Dense memory, medians of 5 at the default edge cap | retained heap ≤ 176 MiB; cold-recompute allocation ≤ 231 MiB; per warm recompute ≤ 185 MiB; peak heap and RSS logged, not gated |
+| Dense memory, medians of 5 at the default edge cap | retained heap ≤ 176 MiB; cold-recompute allocation ≤ 246 MiB; per warm recompute ≤ 185 MiB; peak heap and RSS logged, not gated |
 | `GET …/findings`, each filter mix | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 clients |
 | Analyzer stage | reported (`BenchmarkAnalyzerStage`); gated from 3.2 |
 | Change burst, idle, cold recompute | Phase 2 gates, unchanged |
@@ -100,12 +100,12 @@ No gate changes without the user. A broken gate stops the work, and the numbers 
 |---|---|---|---|---|
 | Warm recompute median, consistent / contradicting | 40.6 / 46.7 ms | 38.9 / 44.1 ms | 99.3 / 118.1 ms | ≤ 150 ms |
 | Retained heap over 2.1, consistent / contradicting | +23.2 / +24.4 MiB | +23.1 / +24.3 MiB | +23.0 / +24.8 MiB | ≤ 32 MiB |
-| Dense: retained / cold / per warm | 160 / 210 / 168 MiB | 160 / 210 / 168 MiB | 160 / 224 / 168 MiB | 176 / 231 / 185 MiB |
+| Dense: retained / cold / per warm | 160 / 210 / 168 MiB | 160 / 210 / 168 MiB | 160 / 224 / 168 MiB | 176 / 246 / 185 MiB |
 | Stream CPU, annotation-only, consistent / contradicting (60 s) | 6.6 / 7.5 % | 6.6 / 7.3 % | 9.4 / 11.4 % | ≤ 15 % |
 | Stream CPU, spec-edit, 60 s | 8.4 % | 8.4 % | 14.0 % | reported |
 | Stream CPU, spec-edit, 10 min | 11.0 % (1.31 recomputes/s) | 11.0 % (1.30/s) | not run | reported; ≤ 25 % from 3.2 |
 
-The 10-minute spec-edit run recomputes 1.3 times a second, more than the annotation stream's 1/s; it is reported, not gated. The CI cold allocation (224 MiB, linux/amd64) sits 3 % under its budget, which was set from the local arm64 measurement (raised with the user).
+The 10-minute spec-edit run recomputes 1.3 times a second, more than the annotation stream's 1/s; it is reported, not gated. The CI cold allocation is 224 MiB on linux/amd64; its budget is 246 MiB (user, 2026-11-02; D-039).
 
 **Memoization.** The warm-recompute delta of `BenchmarkCompute` is recorded here by Task 18.
 

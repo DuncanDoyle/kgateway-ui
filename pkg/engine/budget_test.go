@@ -503,11 +503,12 @@ func heapChild(t *testing.T, tier scale.Tier) {
 const denseMemChildEnv = "KGWUI_DENSE_MEM_CHILD"
 
 // The dense budgets at the default edge cap (D-039): the 2.4 measurement
-// (160 MiB retained, 210 MiB cold, 168 MiB per warm Compute) plus about 10 %.
+// (160 MiB retained, 210 MiB cold, 224 on linux/amd64, 168 MiB per warm Compute)
+// plus about 10 % of the larger value.
 const (
 	denseRetainedBudget  = 176 << 20
 	denseAllocBudget     = 185 << 20
-	denseColdAllocBudget = 231 << 20
+	denseColdAllocBudget = 246 << 20
 )
 
 // denseMemRun is one child's measurement: the bytes allocated by the cold
