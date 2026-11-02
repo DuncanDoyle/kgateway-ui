@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -47,7 +48,8 @@ func unavailable(in Input, name, why string) ([]Finding, CheckResult) {
 }
 
 // cacheCheck: the snapshot is synced and every served kind, plus Namespaces,
-// Pods and Deployments, is currently readable.
+// Pods and Deployments, is currently readable. The optional watches (proxy
+// Pods, Events, CRD metadata) are left to the checks that read them.
 type cacheCheck struct{}
 
 // Name implements Check.
@@ -67,7 +69,7 @@ func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	var fs []Finding
 	for gvr, a := range in.Snapshot.Access {
-		if !a.OK {
+		if !a.OK && !cache.Optional(gvr) {
 			fs = append(fs, Finding{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
 				Message: "No access to " + resourceName(gvr), Detail: a.Err, Key: []string{c.Name(), resourceName(gvr)}})
 		}

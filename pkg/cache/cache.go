@@ -24,9 +24,11 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	toolscache "k8s.io/client-go/tools/cache"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
@@ -45,19 +47,45 @@ var (
 	NamespacesGVR  = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
 	PodsGVR        = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 	DeploymentsGVR = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	// ProxyPodsGVR keys the proxy Pod watch, apart from the controller Pods' PodsGVR.
+	ProxyPodsGVR = schema.GroupVersionResource{Version: "v1", Resource: "pods#proxy"}
 )
+
+// ProxyPodsKind is the kind a check declares in its InputSet to read Snapshot.ProxyPods.
+var ProxyPodsKind = objects.GroupKind{Kind: "Pod#proxy"}
+
+// Optional reports whether gvr is an optional watch: proxy Pods, Events or
+// CRD metadata. Their failures reach only the checks that read them.
+func Optional(gvr schema.GroupVersionResource) bool {
+	return gvr == ProxyPodsGVR || gvr == EventsGVR || gvr == CRDsGVR
+}
 
 // Snapshot is an immutable view of the cache at TakenAt. Callers must not mutate it.
 type Snapshot struct {
 	// Objects lists each kind sorted by "namespace/name", so readers may
 	// binary-search it (pkg/api does).
 	Objects map[schema.GroupVersionResource][]*unstructured.Unstructured
-	// Access holds every served kind plus NamespacesGVR, PodsGVR and DeploymentsGVR.
+	// Access holds every served kind plus NamespacesGVR, PodsGVR and
+	// DeploymentsGVR, and the key of each optional watch that runs.
 	Access      map[schema.GroupVersionResource]Access
 	Namespaces  []*corev1.Namespace
 	Pods        []*corev1.Pod
 	Deployments []*appsv1.Deployment
-	// Synced is true once every informer has synced or failed with an error.
+	// ProxyPods are the Pods the proxy Pod selectors match.
+	ProxyPods []*corev1.Pod
+	// Events are the kept Warning Events of controller and proxy Pods, by UID.
+	Events []EventFact
+	// EventDeltas are the observed Event count increases of the last
+	// EventWindow per Pod UID, oldest first.
+	EventDeltas map[types.UID][]Observation
+	// EventHistoryUnknown marks Pods with an Event whose earlier count was not observed.
+	EventHistoryUnknown map[types.UID]bool
+	// EventsCapped is true when MaxEvents made the cache drop Events.
+	EventsCapped bool
+	// CRDs are the Gateway API CRDs, by name.
+	CRDs []CRDMeta
+	// Synced is true once every core informer (served kinds, Namespaces,
+	// Pods and Deployments) has synced or failed. Optional watches never hold it back.
 	Synced  bool
 	TakenAt time.Time
 	// Source is the fingerprint of exactly the objects and access states copied.
@@ -75,6 +103,13 @@ type Config struct {
 	Served              []kinds.Served
 	PodSelectors        []labels.Selector
 	DeploymentSelectors []labels.Selector
+	// ProxyPodSelectors select gateway proxy Pods, watched apart from controller Pods.
+	ProxyPodSelectors []labels.Selector
+	// Events watches Warning Events on controller and proxy Pods.
+	Events bool
+	// CRDs watches Gateway API CRD metadata through Metadata; a nil Metadata means no watch.
+	CRDs     bool
+	Metadata metadata.Interface
 	// Now stamps snapshots; nil means time.Now.
 	Now func() time.Time
 	// Changes is notified on every informer event (initial-list adds
@@ -212,6 +247,12 @@ type Cache struct {
 	ns      tracked
 	pods    []tracked
 	deploys []tracked
+	// Optional watches; nil or empty when off.
+	proxyPods    []tracked
+	events, crds *tracked
+	evf          *eventFilter
+	uids         *podSet
+	uidRegs      []toolscache.ResourceEventHandlerRegistration
 	// settled is set once every informer has settled, after the settle notify.
 	settled atomic.Bool
 	// handlerHook, if set, runs in each event handler before it notifies (tests).
@@ -259,8 +300,8 @@ func New(cfg Config) *Cache {
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return nss.List(ctx, o) },
 		func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return nss.Watch(ctx, o) })
 	pods, deploys := cfg.Kube.CoreV1().Pods(""), cfg.Kube.AppsV1().Deployments("")
-	for _, sel := range cfg.PodSelectors {
-		c.pods = append(c.pods, c.informer(cfg.Kube, &corev1.Pod{},
+	podInformer := func(sel labels.Selector) tracked {
+		return c.informer(cfg.Kube, &corev1.Pod{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
 				o.LabelSelector = sel.String()
 				return pods.List(ctx, o)
@@ -268,7 +309,13 @@ func New(cfg Config) *Cache {
 			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) {
 				o.LabelSelector = sel.String()
 				return pods.Watch(ctx, o)
-			}))
+			})
+	}
+	for _, sel := range cfg.PodSelectors {
+		c.pods = append(c.pods, podInformer(sel))
+	}
+	for _, sel := range cfg.ProxyPodSelectors {
+		c.proxyPods = append(c.proxyPods, podInformer(sel))
 	}
 	for _, sel := range cfg.DeploymentSelectors {
 		c.deploys = append(c.deploys, c.informer(cfg.Kube, &appsv1.Deployment{},
@@ -281,9 +328,24 @@ func New(cfg Config) *Cache {
 				return deploys.Watch(ctx, o)
 			}))
 	}
+	if cfg.Events {
+		c.uids = &podSet{n: map[types.UID]int{}}
+		for _, t := range append(slices.Clone(c.pods), c.proxyPods...) {
+			reg, _ := t.inf.AddEventHandler(c.uids.handler()) // fails only on a stopped informer
+			c.uidRegs = append(c.uidRegs, reg)
+		}
+		c.evf = newEventFilter(c.uids, c.now)
+		t := c.eventInformer(cfg.Kube, c.evf)
+		c.events = &t
+	}
+	if cfg.CRDs && cfg.Metadata != nil {
+		t := c.crdInformer(cfg.Metadata)
+		c.crds = &t
+	}
 	return c
 }
 
+// all returns the core informers: Namespaces, served kinds, Pods and Deployments.
 func (c *Cache) all() []tracked {
 	out := []tracked{c.ns}
 	for _, t := range c.dyn {
@@ -304,6 +366,15 @@ func (c *Cache) Start(ctx context.Context) {
 	for _, t := range all {
 		go t.inf.RunWithContext(ctx)
 	}
+	for _, t := range c.proxyPods {
+		go t.inf.RunWithContext(ctx)
+	}
+	if c.crds != nil {
+		go c.crds.inf.RunWithContext(ctx)
+	}
+	if c.events != nil {
+		go c.runEvents(ctx)
+	}
 	go func() {
 		settled := func(context.Context) (bool, error) {
 			for _, t := range all {
@@ -318,6 +389,27 @@ func (c *Cache) Start(ctx context.Context) {
 			c.settled.Store(true)
 		}
 	}()
+}
+
+// runEvents starts the Events informer once every Pod informer has handed
+// its Pods to the UID set or failed, so listed Events find their Pods.
+func (c *Cache) runEvents(ctx context.Context) {
+	pods := append(slices.Clone(c.pods), c.proxyPods...)
+	ready := func(context.Context) (bool, error) {
+		for i, t := range pods {
+			synced := t.inf.HasSynced()
+			if reg := c.uidRegs[i]; reg != nil {
+				synced = reg.HasSynced()
+			}
+			if !synced && access(t).Err == "" {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	if wait.PollUntilContextCancel(ctx, syncPoll, true, ready) == nil {
+		c.events.inf.RunWithContext(ctx)
+	}
 }
 
 // Settled reports whether every informer has settled since Start and, with
@@ -355,7 +447,7 @@ func accessAll(ts []tracked) Access {
 // informers. It returns every kind's access and whether every informer has
 // synced or failed. Snapshot and Fingerprint share it so they always agree.
 func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[schema.GroupVersionResource]Access, bool) {
-	acc := make(map[schema.GroupVersionResource]Access, len(c.dyn)+3)
+	acc := make(map[schema.GroupVersionResource]Access, len(c.dyn)+6)
 	synced := true
 	settled := func(a Access) bool { return a.OK || a.Err != "" }
 	for gvr, t := range c.dyn {
@@ -388,7 +480,33 @@ func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[sc
 			}
 		}
 	}
+	c.walkOptional(acc, visit)
 	return acc, synced
+}
+
+// walkOptional adds each running optional watch's access and objects.
+func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit func(gvr schema.GroupVersionResource, o any)) {
+	if len(c.proxyPods) > 0 {
+		acc[ProxyPodsGVR] = accessAll(c.proxyPods)
+		seen := map[types.UID]bool{}
+		for _, t := range c.proxyPods {
+			for _, o := range t.inf.GetStore().List() {
+				if uid := o.(metav1.Object).GetUID(); !seen[uid] {
+					seen[uid] = true
+					visit(ProxyPodsGVR, o)
+				}
+			}
+		}
+	}
+	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds} {
+		if t == nil {
+			continue
+		}
+		acc[gvr] = access(*t)
+		for _, o := range t.inf.GetStore().List() {
+			visit(gvr, o)
+		}
+	}
 }
 
 // Snapshot copies the current cache contents and fingerprints, in the same
@@ -398,6 +516,10 @@ func (c *Cache) Snapshot() *Snapshot {
 	var p printer
 	s.Access, s.Synced = c.walk(func(gvr schema.GroupVersionResource, o any) {
 		p.add(gvr, o.(metav1.Object))
+		if gvr == ProxyPodsGVR {
+			s.ProxyPods = append(s.ProxyPods, o.(*corev1.Pod))
+			return
+		}
 		switch v := o.(type) {
 		case *unstructured.Unstructured:
 			s.Objects[gvr] = append(s.Objects[gvr], v)
@@ -407,10 +529,19 @@ func (c *Cache) Snapshot() *Snapshot {
 			s.Pods = append(s.Pods, v)
 		case *appsv1.Deployment:
 			s.Deployments = append(s.Deployments, v)
+		case *corev1.Event:
+			s.Events = append(s.Events, eventFact(v))
+		case *metav1.PartialObjectMetadata:
+			s.CRDs = append(s.CRDs, crdMeta(v))
 		}
 	})
 	for _, objs := range s.Objects {
 		sortByKey(objs)
+	}
+	slices.SortFunc(s.Events, func(a, b EventFact) int { return strings.Compare(string(a.UID), string(b.UID)) })
+	slices.SortFunc(s.CRDs, func(a, b CRDMeta) int { return strings.Compare(a.Name, b.Name) })
+	if c.evf != nil {
+		s.EventDeltas, s.EventHistoryUnknown, s.EventsCapped = c.evf.view(s.TakenAt)
 	}
 	s.Source = p.finish(s.Access)
 	return s

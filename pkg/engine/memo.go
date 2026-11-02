@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"hash"
 	"hash/fnv"
+	"maps"
 	"math"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,8 +28,9 @@ type kindKey struct {
 	key string
 }
 
-// kindKeys maps each served kind and Namespace, Pod and Deployment to its
-// kindKey, and lists the kinds Owned covers: every served kind and Namespaces.
+// kindKeys maps each served kind, Namespace, Pod, Deployment and the optional
+// watches' kinds to its kindKey, and lists the kinds Owned covers: every
+// served kind and Namespaces.
 func kindKeys(served []kinds.Served) (map[objects.GroupKind]kindKey, []kindKey) {
 	byGK := map[objects.GroupKind]kindKey{}
 	owned := make([]kindKey, 0, len(served)+1)
@@ -38,6 +41,7 @@ func kindKeys(served []kinds.Served) (map[objects.GroupKind]kindKey, []kindKey) 
 	}
 	for gk, gvr := range map[objects.GroupKind]schema.GroupVersionResource{
 		{Kind: "Namespace"}: cache.NamespacesGVR, {Kind: "Pod"}: cache.PodsGVR, {Group: "apps", Kind: "Deployment"}: cache.DeploymentsGVR,
+		cache.ProxyPodsKind: cache.ProxyPodsGVR, cache.EventsKind: cache.EventsGVR, cache.CRDsKind: cache.CRDsGVR,
 	} {
 		byGK[gk] = kindKey{gvr, gvr.String()}
 	}
@@ -159,9 +163,13 @@ func strPrint(s string) uint64 {
 	return p.h.Sum64()
 }
 
-// kindPrint is k's Source print and access state in snap.
+// kindPrint is k's Source print and access state in snap; for Events also
+// the deltas, the unknown histories and the cap, which the Source does not cover.
 func kindPrint(snap *cache.Snapshot, k kindKey) uint64 {
 	p := newPrinter()
+	if k.gvr == cache.EventsGVR {
+		eventsPrint(p, snap)
+	}
 	kp, ok := snap.Source.Kinds[k.key]
 	p.flag(ok)
 	p.u64(uint64(kp.Count)) //nolint:gosec // hashed bits; the sign does not matter
@@ -171,6 +179,29 @@ func kindPrint(snap *cache.Snapshot, k kindKey) uint64 {
 	p.flag(a.OK)
 	p.str(a.Err)
 	return p.h.Sum64()
+}
+
+// eventsPrint writes snap's Event deltas, unknown histories and cap to p, Pods in UID order.
+func eventsPrint(p *printer, snap *cache.Snapshot) {
+	pods := slices.Sorted(maps.Keys(snap.EventDeltas))
+	p.u64(uint64(len(pods)))
+	for _, uid := range pods {
+		p.str(string(uid))
+		obs := snap.EventDeltas[uid]
+		p.u64(uint64(len(obs)))
+		for _, o := range obs {
+			p.time(o.At)
+			p.str(o.Reason)
+			p.u64(uint64(o.Delta)) //nolint:gosec // hashed bits; the sign does not matter
+		}
+	}
+	unknown := slices.Sorted(maps.Keys(snap.EventHistoryUnknown))
+	p.u64(uint64(len(unknown)))
+	for _, uid := range unknown {
+		p.str(string(uid))
+		p.flag(snap.EventHistoryUnknown[uid])
+	}
+	p.flag(snap.EventsCapped)
 }
 
 // installPrint covers what a check reads of r: its identity, controller

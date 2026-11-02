@@ -14,6 +14,9 @@ import (
 	"testing/fstest"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
@@ -313,6 +316,17 @@ func memoProbes(runs map[string]int) []health.Check {
 			return ctx.Computed.RuleSet
 		}),
 		probe("probe kinds", health.InputSet{KindsChange: true}, func(ctx health.RunContext) string { return ctx.KindsChange.String() }),
+		probe("probe events", health.InputSet{Kinds: []objects.GroupKind{cache.EventsKind}}, func(ctx health.RunContext) string {
+			s := ctx.Snapshot
+			return fmt.Sprint(s.Access[cache.EventsGVR], s.Events, s.EventDeltas, s.EventHistoryUnknown, s.EventsCapped)
+		}),
+		probe("probe proxy Pods", health.InputSet{Kinds: []objects.GroupKind{cache.ProxyPodsKind}}, func(ctx health.RunContext) string {
+			rvs := []string{fmt.Sprint(ctx.Snapshot.Access[cache.ProxyPodsGVR])}
+			for _, p := range ctx.Snapshot.ProxyPods {
+				rvs = append(rvs, p.Name+"@"+p.ResourceVersion)
+			}
+			return fmt.Sprint(rvs)
+		}),
 	}
 }
 
@@ -405,6 +419,28 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 			k := ctrlmetrics.TypeKey{Gateway: ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}, TypeURL: "envoy.config.cluster.v3.Cluster"}
 			r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u1", Name: "kgateway-0", Dropped: 1, DroppedPresent: true, Total: map[ctrlmetrics.TypeKey]float64{k: 4}}}
 			metrics["kgw.kgateway"] = r
+		}},
+		{"Event delta observed", func() {
+			s := *src.s
+			s.EventDeltas = map[types.UID][]cache.Observation{"pod/infra/edge-0": {{At: testutil.Now, Reason: "Unhealthy", Delta: 1}}}
+			s.EventHistoryUnknown = map[types.UID]bool{"pod/infra/edge-0": true}
+			src.s = &s
+		}},
+		{"Events capped", func() {
+			s := *src.s
+			s.EventsCapped = true
+			src.s = &s
+		}},
+		{"proxy Pod update", func() {
+			s := *src.s
+			s.Source.Kinds = maps.Clone(s.Source.Kinds)
+			pod := testutil.ProxyPod("infra", "edge", 0, "abc", 1)
+			pod.ResourceVersion = "2"
+			s.ProxyPods = []*corev1.Pod{pod}
+			k := s.Source.Kinds[cache.ProxyPodsGVR.String()]
+			k.Count, k.Hash = 1, k.Hash+7
+			s.Source.Kinds[cache.ProxyPodsGVR.String()] = k
+			src.s = &s
 		}},
 		{"verifier mismatch", func() {
 			verify.Mismatches = []scopeverify.Mismatch{{Namespace: "shop", Resource: "HTTPRoute", UI: 2, Controller: 1}}

@@ -13,6 +13,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
@@ -31,13 +32,15 @@ var (
 	deploymentKind = objects.GroupKind{Group: "apps", Kind: "Deployment"}
 )
 
-// PerturbUndeclared returns in with every input set does not declare changed.
+// PerturbUndeclared returns in with every input set does not declare changed;
+// an undeclared optional watch gets other data and a failing access.
 // Install, Platform, ProxyMode, Synced and TakenAt stay; ShiftNow moves Now.
 func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.Input {
 	rng := rand.New(rand.NewSource(seed)) // nolint:gosec // seeded test data, not security
 	out := in
 	if in.Snapshot != nil {
 		out.Snapshot = dropUndeclaredKinds(in, set)
+		perturbOptional(out.Snapshot, in.Snapshot, set, seed)
 	}
 	if !set.Owned {
 		out.Owned = nil
@@ -84,6 +87,12 @@ func dropUndeclaredKinds(in health.Input, set health.InputSet) *cache.Snapshot {
 			return declared(podKind)
 		case cache.DeploymentsGVR:
 			return declared(deploymentKind)
+		case cache.ProxyPodsGVR:
+			return declared(cache.ProxyPodsKind)
+		case cache.EventsGVR:
+			return declared(cache.EventsKind)
+		case cache.CRDsGVR:
+			return declared(cache.CRDsKind)
 		}
 		gk, served := gks[gvr]
 		return set.Owned || (served && declared(gk))
@@ -110,6 +119,31 @@ func dropUndeclaredKinds(in health.Input, set health.InputSet) *cache.Snapshot {
 		s.Deployments = nil
 	}
 	return &s
+}
+
+// perturbOptional replaces what out holds of each optional watch set does not
+// declare: its data changes and its access reads as failing.
+func perturbOptional(out, in *cache.Snapshot, set health.InputSet, seed int64) {
+	why := cache.Access{Err: fmt.Sprintf("perturbed %d", seed)}
+	uid := types.UID(fmt.Sprintf("perturbed-%d", seed))
+	if !slices.Contains(set.Kinds, cache.ProxyPodsKind) {
+		out.Access[cache.ProxyPodsGVR] = why
+		out.ProxyPods = nil
+		if len(in.ProxyPods) == 0 {
+			out.ProxyPods = in.Pods
+		}
+	}
+	if !slices.Contains(set.Kinds, cache.EventsKind) {
+		out.Access[cache.EventsGVR] = why
+		out.Events = []cache.EventFact{{UID: uid, PodUID: uid, Reason: "Unhealthy", Count: int32(seed%1000) + 1}} //nolint:gosec // bounded seed
+		out.EventDeltas = map[types.UID][]cache.Observation{uid: {{At: time.Unix(seed, 0), Reason: "Unhealthy", Delta: 3}}}
+		out.EventHistoryUnknown = map[types.UID]bool{uid: true}
+		out.EventsCapped = !in.EventsCapped
+	}
+	if !slices.Contains(set.Kinds, cache.CRDsKind) {
+		out.Access[cache.CRDsGVR] = why
+		out.CRDs = []cache.CRDMeta{{Name: fmt.Sprintf("perturbed%d.gateway.networking.k8s.io", seed), Group: "gateway.networking.k8s.io", BundleVersion: "v0.0.1"}}
+	}
 }
 
 // ShiftNow moves Now by a seeded amount in [0, next-Now), or [0, 10m) when next is zero.

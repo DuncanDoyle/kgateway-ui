@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/clock"
@@ -62,13 +63,30 @@ type Options struct {
 	// Clock drives the engine and stamps snapshots and collected values; nil
 	// means the real clock. Tests only.
 	Clock clock.WithTicker
+	// Diagnostics toggles the optional inputs; the zero value keeps the defaults.
+	Diagnostics Diagnostics
 }
+
+// Diagnostics toggles the optional diagnostic inputs (design §18.1). Each
+// No* field turns off an input that is on by default; ControllerLogs turns
+// on one that is off by default.
+type Diagnostics struct {
+	NoEvents, NoCRDs, NoProxyStats, NoEndpoints bool
+	ControllerLogs                              bool
+	// ControllerLogsNamespaces are the install namespaces whose controller logs are read.
+	ControllerLogsNamespaces []string
+}
+
+// proxyPodDetector is a detector that names its proxy Pods' selector.
+type proxyPodDetector interface{ ProxyPodSelector() labels.Selector }
 
 // Clients are the Kubernetes clients the app uses.
 type Clients struct {
 	Dynamic   dynamic.Interface
 	Kube      kubernetes.Interface
 	Discovery kinds.DiscoveryClient
+	// Metadata reads CRD metadata; nil means no CRD watch.
+	Metadata metadata.Interface
 	// InCluster selects direct pod-IP metric scraping; otherwise pods/proxy is used.
 	InCluster bool
 	// Scraper overrides the metrics scraper InCluster selects; nil keeps it.
@@ -122,16 +140,20 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	changes := trigger.New()
 	mon := kinds.NewMonitor(c.Discovery, reg.Kinds, served)
 	mon.OnChange = changes
-	var podSel, depSel []labels.Selector
+	var podSel, depSel, proxySel []labels.Selector
 	for _, d := range reg.Detectors {
 		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
+		if pd, ok := d.(proxyPodDetector); ok {
+			proxySel = append(proxySel, pd.ProxyPodSelector())
+		}
 	}
 	now := time.Now
 	if o.Clock != nil {
 		now = o.Clock.Now
 	}
-	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel, Changes: changes, Now: now})
+	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel,
+		ProxyPodSelectors: proxySel, Events: !o.Diagnostics.NoEvents, CRDs: !o.Diagnostics.NoCRDs, Metadata: c.Metadata, Changes: changes, Now: now})
 	scraper := c.Scraper
 	switch {
 	case scraper != nil:
@@ -226,7 +248,11 @@ func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Op
 	if err != nil {
 		return err
 	}
-	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), InCluster: inCluster}, o, extension.New(opts...))
+	md, err := metadata.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: md, InCluster: inCluster}, o, extension.New(opts...))
 	if err != nil {
 		return err
 	}

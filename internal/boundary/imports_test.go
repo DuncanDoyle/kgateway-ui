@@ -29,6 +29,8 @@ var allowed = map[string]string{
 	"pkg/api/handlers.go":           "serves Deployments that findings reference",
 	"pkg/app/app.go":                "builds the Kubernetes clients and resolves served kinds",
 	"pkg/cache/cache.go":            "the Kubernetes informers",
+	"pkg/cache/crds.go":             "Gateway API CRD metadata through the metadata client",
+	"pkg/cache/events.go":           "Warning Events on controller and proxy Pods",
 	"pkg/ctrlmetrics/scrape.go":     "scrapes controller Pods",
 	"pkg/health/checks.go":          "controller and proxy Deployment readiness",
 	"pkg/install/assign.go":         "Namespace objects for scope",

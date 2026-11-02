@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	metadatafake "k8s.io/client-go/metadata/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
@@ -93,6 +94,12 @@ type setup struct {
 	disputes bool
 	// bounds caps views B and C; zero is computed.DefaultBounds.
 	bounds computed.Bounds
+	// optional turns on the Events and CRD watches, CRDs over a fake metadata
+	// client that prepareMeta, when set, prepares before the cache starts.
+	optional    bool
+	prepareMeta func(*metadatafake.FakeMetadataClient)
+	// checks run after the upstream checks.
+	checks []health.Check
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -148,6 +155,7 @@ type harness struct {
 	srv   *httptest.Server
 	dyn   *dynamicfake.FakeDynamicClient
 	kube  *kubefake.Clientset
+	meta  *metadatafake.FakeMetadataClient
 	clk   *clock
 }
 
@@ -205,12 +213,21 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		return clk.now()
 	}
 	// The cache stamps snapshots on the same clock, so snapshot times are pinned too.
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, Now: now})
+	scheme := metadatafake.NewTestScheme()
+	if err := metav1.AddMetaToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	meta := metadatafake.NewSimpleMetadataClient(scheme)
+	if s.prepareMeta != nil {
+		s.prepareMeta(meta)
+	}
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, Now: now,
+		Events: s.optional, CRDs: s.optional, Metadata: meta})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
-		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
+		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
 		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
 		DelegationBounds: s.bounds})
 	deadline := time.Now().Add(5 * time.Second)
@@ -229,7 +246,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	}
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, s.opts...))
 	t.Cleanup(srv.Close)
-	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, clk: clk}
+	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, meta: meta, clk: clk}
 }
 
 // createAndWait creates u through the fake dynamic client and waits until the cache holds it.
@@ -400,6 +417,80 @@ func count(o OverviewResponse, kind string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// Events and CRDs denied, then allowed: no KGWUI-008, cluster access stays
+// OK and the install state matches a run without them; the checks that read
+// them run again after recovery.
+func TestDeniedOptionalWatchNeverUnknown(t *testing.T) {
+	var denied atomic.Bool
+	denied.Store(true)
+	deny := func(gr schema.GroupResource) clienttesting.ReactionFunc {
+		return func(clienttesting.Action) (bool, runtime.Object, error) {
+			if denied.Load() {
+				return true, nil, apierrors.NewForbidden(gr, "", nil)
+			}
+			return false, nil, nil
+		}
+	}
+	var runs atomic.Int32
+	probe := scriptCheck{"probe optional", health.InputSet{Kinds: []objects.GroupKind{cache.EventsKind, cache.CRDsKind}}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		runs.Add(1)
+		ev, crd := ctx.Snapshot.Access[cache.EventsGVR], ctx.Snapshot.Access[cache.CRDsGVR]
+		return nil, health.CheckResult{Name: "probe optional", OK: true, CollectedAt: ctx.Now, Detail: fmt.Sprintf("events %v, crds %v", ev.OK, crd.OK)}
+	}}
+	h := newHarness(t, setup{optional: true, checks: []health.Check{probe},
+		prepare:     func(_ *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) { kube.PrependReactor("list", "events", deny(schema.GroupResource{Resource: "events"})) },
+		prepareMeta: func(m *metadatafake.FakeMetadataClient) { m.PrependReactor("list", "customresourcedefinitions", deny(cache.CRDsGVR.GroupResource())) },
+	}, world()...)
+	want := get[HealthResponse](t, startHarnessSrv(t), "/api/v1/installs/kgw.kgateway/health", 200).State
+	await := func(what string, ok bool) {
+		t.Helper()
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			s := h.cache.Snapshot()
+			ev, crd := s.Access[cache.EventsGVR], s.Access[cache.CRDsGVR]
+			if ok && ev.OK && crd.OK || !ok && ev.Err != "" && crd.Err != "" {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: events %+v, crds %+v", what, ev, crd)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	verify := func(phase, detail string) {
+		t.Helper()
+		h.e.Compute()
+		r := get[HealthResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/health", 200)
+		if hasFinding(r, health.CodeSignalUnavailable, "") {
+			t.Fatalf("%s: KGWUI-008 raised: %+v", phase, r.Findings)
+		}
+		if r.State != want {
+			t.Fatalf("%s: install state %s, want %s as without the watches", phase, r.State, want)
+		}
+		for _, c := range r.Checks {
+			if c.Name == "cluster access" && !c.OK || c.Name == "probe optional" && c.Detail != detail {
+				t.Fatalf("%s: check %+v", phase, c)
+			}
+		}
+	}
+	await("the denial", false)
+	verify("denied", "events false, crds false")
+	n := runs.Load()
+	denied.Store(false)
+	await("the recovery", true)
+	verify("recovered", "events true, crds true")
+	if runs.Load() == n {
+		t.Fatal("the probe did not run again after recovery")
+	}
+}
+
+// startHarnessSrv is the server of a harness over world() without the optional watches.
+func startHarnessSrv(t *testing.T) *httptest.Server {
+	t.Helper()
+	_, srv, _ := startWith(t, setup{}, world()...)
+	return srv
 }
 
 func hasFinding(h HealthResponse, code, res string) bool {
