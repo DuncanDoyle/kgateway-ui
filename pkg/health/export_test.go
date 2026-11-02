@@ -84,6 +84,18 @@ func processWorlds(t *testing.T) map[string]Input {
 			}
 		},
 		"rollout stuck": func(*world) func(Input) Input { return stuck },
+		"version skew": func(w *world) func(Input) Input {
+			w.access = map[schema.GroupVersionResource]cache.Access{cache.CRDsGVR: {OK: true}}
+			return func(in Input) Input {
+				in.Snapshot.CRDs = []cache.CRDMeta{{Name: "gateways.gateway.networking.k8s.io", BundleVersion: "v1.5.1", Channel: "standard"},
+					{Name: "httproutes.gateway.networking.k8s.io", BundleVersion: "v1.6.1", Channel: "experimental"}}
+				in.GatewayAPI = func(string) (string, bool) { return "v1.6", true }
+				in.Process.Controller.Processes = []process.Process{{ID: "p", Name: "p", Ready: &yes, Version: "2.4.7"}, {ID: "q", Name: "q", Ready: &yes, Version: "2.3.1"}}
+				edge := objects.RefOf(in.Owned.Gateways[0])
+				in.Process.Proxies[edge] = process.Set{Observed: true, Processes: []process.Process{{ID: "e0", Name: "edge-0", Ready: &yes, Version: "2.3.6"}}}
+				return in
+			}
+		},
 		"proxy not ready with facts": func(w *world) func(Input) Input {
 			w.deploys[1] = testutil.ProxyDeployment("infra", "edge", 2, 0)
 			return stuck

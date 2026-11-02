@@ -11,7 +11,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -275,6 +277,25 @@ func servedListenerSet(m *engine.Model, group, kind string) (kinds.Served, bool)
 	return kinds.Served{}, false
 }
 
+// gatewayCRDField fills a's CRD fields from the watched Gateway CRD's channel
+// and bundle, when they tell whether it defines allowedListeners (§9.4).
+func gatewayCRDField(a *AllowedListenersDTO, snap *cache.Snapshot) {
+	if snap == nil || !snap.Access[cache.CRDsGVR].OK {
+		return
+	}
+	for _, c := range snap.CRDs {
+		if c.Name != "gateways."+objects.GatewayAPIGroup {
+			continue
+		}
+		if has, known := rulesets.GatewayCRDHasAllowedListeners(c.Channel, c.BundleVersion); known {
+			a.CRDField, a.CRDChannel, a.CRDBundleVersion = "missing", c.Channel, c.BundleVersion
+			if has {
+				a.CRDField = "defined"
+			}
+		}
+	}
+}
+
 // experimentalHint is D-018's hint as a sentence, for a ListenerSet with no
 // status whose kind the controller watches only with experimental features.
 func experimentalHint(k kinds.Served) string {
@@ -326,6 +347,9 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 			al = objects.DecodeGateway(pu).AllowedListeners
 		}
 		out.ParentAllowedListeners = &AllowedListenersDTO{Set: al != nil, Value: al, CRDHint: al == nil}
+		if al == nil {
+			gatewayCRDField(out.ParentAllowedListeners, d.p.Model.Snapshot)
+		}
 	}
 	writeJSON(w, out)
 }

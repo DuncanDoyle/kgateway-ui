@@ -305,12 +305,16 @@ type GatewayDetail struct {
 }
 
 // AllowedListenersDTO is the parent Gateway's spec.allowedListeners as
-// written. CRDHint is set whenever the field is absent: the UI reads no
-// CRDs, so it cannot tell an unset field from one the CRD lacks (design §8.5).
+// written. CRDHint is set whenever the field is absent (design §8.5). When
+// the Gateway CRD's channel and bundle are known, CRDField says whether that
+// CRD defines the field: "defined" or "missing" (Phase 3 design §9.4).
 type AllowedListenersDTO struct {
-	Set     bool           `json:"set"`
-	Value   map[string]any `json:"value,omitempty"`
-	CRDHint bool           `json:"crdHint"`
+	Set              bool           `json:"set"`
+	Value            map[string]any `json:"value,omitempty"`
+	CRDHint          bool           `json:"crdHint"`
+	CRDField         string         `json:"crdField,omitempty"`
+	CRDChannel       string         `json:"crdChannel,omitempty"`
+	CRDBundleVersion string         `json:"crdBundleVersion,omitempty"`
 }
 
 // ListenerSetDetail is GET …/listenersets/{group}/{kind}/{ns}/{name}.

@@ -57,6 +57,7 @@ const (
 	CodeProcessRestarting    = "KGWUI-019"
 	CodeProbeFailing         = "KGWUI-020"
 	CodeRolloutStuck         = "KGWUI-021"
+	CodeVersionSkew          = "KGWUI-022"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -150,6 +151,8 @@ type Input struct {
 	Views objects.Decoder
 	// Process is the install's process data; a check declares InputSet.Process to read it.
 	Process *ProcessData
+	// GatewayAPI is the rule-set selection's Gateway API table (design §9.4); nil means none.
+	GatewayAPI func(kgatewayMinor string) (bundle string, ok bool)
 }
 
 // ProcessData is one install's controller and per-Gateway proxy processes

@@ -57,7 +57,12 @@ function AllowedListenersBlock({ a }: { a: AllowedListeners }) {
       ) : (
         <p>{listenerSetCopy.allowedUnset}</p>
       )}
-      {a.crdHint ? (
+      {a.crdField === "missing" ? (
+        <p data-testid="crd-missing">
+          {listenerSetCopy.crdMissingBefore(a.crdChannel ?? "", a.crdBundleVersion ?? "")}{" "}
+          <code>{listenerSetCopy.allowedField}</code> {listenerSetCopy.crdMissingAfter}
+        </p>
+      ) : a.crdHint && a.crdField !== "defined" ? (
         <p>
           {listenerSetCopy.crdHintBefore} <code>{listenerSetCopy.allowedField}</code> {listenerSetCopy.crdHintAfter}
         </p>

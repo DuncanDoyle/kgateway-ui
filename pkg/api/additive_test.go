@@ -20,7 +20,7 @@ var appended = map[string]struct {
 	Key    string
 	Values []string
 }{
-	"body.checks": {"name", []string{"backend status", "process restarts", "probe failures", "stuck rollouts", "computed views"}},
+	"body.checks": {"name", []string{"backend status", "process restarts", "probe failures", "stuck rollouts", "version skew", "computed views"}},
 	"body.counts": {"kind", []string{"Backend"}},
 	"body.kinds":  {"kind", []string{"Backend"}},
 }

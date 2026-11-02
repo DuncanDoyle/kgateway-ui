@@ -369,7 +369,7 @@ func (e *Engine) compute() *Published {
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode, Process: proc}, e.cfg.Checks, rt)
+			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel)}, e.cfg.Checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}
@@ -384,6 +384,14 @@ func (e *Engine) compute() *Published {
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(),
 		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
 	return p
+}
+
+// gatewayAPI is sel's Gateway API table, else the upstream one.
+func gatewayAPI(sel computed.Selection) func(string) (string, bool) {
+	if sel.GatewayAPI != nil {
+		return sel.GatewayAPI
+	}
+	return rulesets.ExpectedGatewayAPI
 }
 
 // processes asks the process source for res's controller and the proxies

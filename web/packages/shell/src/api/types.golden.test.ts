@@ -449,7 +449,11 @@ const gatewayDetail = shape<GatewayDetail>(
   { health: healthState },
 );
 // value is the Gateway's field as written, so its keys are not checked.
-const allowedListeners = shape<AllowedListeners>({ set: "!", value: "?", crdHint: "!" });
+const allowedListeners = shape<AllowedListeners>(
+  { set: "!", value: "?", crdHint: "!", crdField: "?", crdChannel: "?", crdBundleVersion: "?" },
+  {},
+  { crdField: { defined: 1, missing: 1 } },
+);
 const listenerSetDetail = shape<ListenerSetDetail>(
   {
     install: "!",

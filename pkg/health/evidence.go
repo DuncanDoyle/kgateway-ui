@@ -53,6 +53,47 @@ func (e *ProcessEvidence) MarshalJSON() ([]byte, error) {
 	}{EvidenceProcess, (*plain)(e)})
 }
 
+// EvidenceVersionSkew is the kind of VersionSkewEvidence.
+const EvidenceVersionSkew = "version-skew"
+
+// VersionSkewEvidence is the versions behind KGWUI-022: the controller's,
+// and the proxies', controller replicas' or CRDs' that differ.
+type VersionSkewEvidence struct {
+	Controller string        `json:"controller,omitempty"`
+	Proxies    []VersionPods `json:"proxies,omitempty"`
+	Replicas   []VersionPods `json:"replicas,omitempty"`
+	CRDs       []CRDVersion  `json:"crds,omitempty"`
+	// Expected is the Gateway API bundle minor the controller is built against.
+	Expected string `json:"expected,omitempty"`
+}
+
+// VersionPods are the Pods running one version, empty when the tag is not one.
+// Pods holds the first few names; Total counts them all.
+type VersionPods struct {
+	Version string   `json:"version"`
+	Pods    []string `json:"pods"`
+	Total   int      `json:"total"`
+}
+
+// CRDVersion is a Gateway API CRD's bundle annotations.
+type CRDVersion struct {
+	Name          string `json:"name"`
+	BundleVersion string `json:"bundleVersion,omitempty"`
+	Channel       string `json:"channel,omitempty"`
+}
+
+// EvidenceKind implements Evidence.
+func (*VersionSkewEvidence) EvidenceKind() string { return EvidenceVersionSkew }
+
+// MarshalJSON adds the kind tag.
+func (e *VersionSkewEvidence) MarshalJSON() ([]byte, error) {
+	type plain VersionSkewEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{EvidenceVersionSkew, (*plain)(e)})
+}
+
 // RawEvidence is evidence of a kind this build does not know, kept as sent.
 type RawEvidence struct {
 	Kind string
@@ -79,6 +120,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 	switch tag.Kind {
 	case EvidenceProcess:
 		e := &ProcessEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceVersionSkew:
+		e := &VersionSkewEvidence{}
 		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil

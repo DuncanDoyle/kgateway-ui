@@ -11,7 +11,14 @@ import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
 import routesByListenerGolden from "../../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import { POLL_MS } from "../../api/hooks";
-import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList, RouteRow } from "../../api/types";
+import type {
+  AllowedListeners,
+  GatewayDetail,
+  ListenerSetDetail,
+  ListenerSetList,
+  RouteList,
+  RouteRow,
+} from "../../api/types";
 import { breadcrumbsCopy } from "../../copy/navigation";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
@@ -372,6 +379,26 @@ it("NotAllowed shows the parent's allowedListeners as written, or Not set with t
   expect(set.querySelector("pre")).toHaveTextContent("namespaces: from: Same");
   expect(set).not.toHaveTextContent("Not set");
   expect(set).not.toHaveTextContent("CRD");
+});
+
+it("the Gateway CRD's channel and bundle replace the possibility with which one it is", async () => {
+  const withField = (a: Partial<AllowedListeners>) => ({
+    ...ls(lsGolden),
+    parentAllowedListeners: { set: false, crdHint: true, ...a },
+  });
+  serve(api({ ls: withField({ crdField: "missing", crdChannel: "standard", crdBundleVersion: "v1.4.1" }) }));
+  const first = mount(LS_PATH("na"));
+  const missing = await screen.findByTestId("allowed-listeners");
+  expect(missing).toHaveTextContent(
+    "The Gateway CRD in this cluster is from the standard channel, v1.4.1, and has no allowedListeners field.",
+  );
+  expect(missing).not.toHaveTextContent("may not have");
+  first.unmount();
+  serve(api({ ls: withField({ crdField: "defined", crdChannel: "standard", crdBundleVersion: "v1.5.1" }) }));
+  mount(LS_PATH("na"));
+  const defined = await screen.findByTestId("allowed-listeners");
+  expect(defined).toHaveTextContent("Not set: the Gateway allows no ListenerSets.");
+  expect(defined).not.toHaveTextContent("CRD");
 });
 
 it("an accepted ListenerSet shows no allowed-listeners block", async () => {

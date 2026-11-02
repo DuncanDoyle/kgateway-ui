@@ -93,6 +93,14 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
+        "detail": "Proxy Pods are not watched; proxies were not checked; Gateway API CRDs are not watched; CRD versions were not checked",
+        "name": "version skew",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "computed views",
         "ok": true,
         "required": false

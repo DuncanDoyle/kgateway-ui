@@ -174,6 +174,11 @@ export const listenerSetCopy = {
   crdHintBefore: "If you set",
   crdHintAfter:
     "and it is missing here, the Gateway CRD in this cluster may not have the field. The API server drops fields its CRD does not define. If so, install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD.",
+  // The field name sits between the two parts; placeholder until the wording pass.
+  crdMissingBefore: (channel: string, version: string) =>
+    `The Gateway CRD in this cluster is from the ${channel} channel, ${version}, and has no`,
+  crdMissingAfter:
+    "field. The API server drops fields its CRD does not define. Install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD.",
 };
 
 // region HTTPRoute page

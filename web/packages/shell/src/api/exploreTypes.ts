@@ -204,11 +204,17 @@ export interface GatewayDetail {
   routeCounts: RouteCounts;
   collectedAt: string;
 }
-/** The parent Gateway's spec.allowedListeners as written; crdHint is set whenever the field is absent. */
+/**
+ * The parent Gateway's spec.allowedListeners as written; crdHint is set whenever the field is absent.
+ * crdField says whether the watched Gateway CRD defines the field, when its channel and bundle tell.
+ */
 export interface AllowedListeners {
   set: boolean;
   value?: Record<string, unknown>;
   crdHint: boolean;
+  crdField?: "defined" | "missing";
+  crdChannel?: string;
+  crdBundleVersion?: string;
 }
 export interface ListenerSetDetail {
   install: string;
