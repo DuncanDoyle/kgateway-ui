@@ -47,12 +47,13 @@ function shot(page: Page, name: string) {
   return page.screenshot({ path: `${test.info().project.outputDir}/explorer-${name}.png`, fullPage: true });
 }
 
+// Links carry the trail in ?via= (D-035), so path checks allow a query string.
 test("Gateway, failed route, its parent and back up the chain", async ({ page }) => {
   await page.goto(install);
   await page.getByRole("navigation", { name: navCopy.label }).getByRole("link", { name: navCopy.gateways }).click();
   await expect(page).toHaveURL(new RegExp(`${install}/gateways$`));
   await page.getByRole("table", { name: listCopy.gateways.title }).getByRole("link", { name: "infra/edge" }).click();
-  await expect(page).toHaveURL(new RegExp(`${install}/gateways/infra/edge$`));
+  await expect(page).toHaveURL(new RegExp(`${install}/gateways/infra/edge(\\?|$)`));
 
   // A route the Gateway rejected shows the controller's reason in the failed table and on its page.
   const rejected = await failing(page, "closed/not-allowed", "infra/edge");
@@ -60,18 +61,18 @@ test("Gateway, failed route, its parent and back up the chain", async ({ page })
   const row = (await dataRows(failed)).filter({ has: page.getByRole("link", { name: "closed/not-allowed" }) });
   await expect(row).toContainText(rejected.reason);
   await row.getByRole("link", { name: "closed/not-allowed" }).click();
-  await expect(page).toHaveURL(/\/routes\/gateway\.networking\.k8s\.io\/HTTPRoute\/closed\/not-allowed$/);
+  await expect(page).toHaveURL(/\/routes\/gateway\.networking\.k8s\.io\/HTTPRoute\/closed\/not-allowed(\?|$)/);
   await expect(page.getByRole("article", { name: routeCopy.parentCard("infra/edge") })).toContainText(rejected.reason);
   await page.goBack();
 
   // An attached delegating parent, then a child the controller did not accept.
   const attached = page.getByRole("table", { name: gatewayCopy.attachedRoutes });
   await (await dataRows(attached)).getByRole("link", { name: "shop/store" }).click();
-  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/store$/);
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/store(\?|$)/);
   await page.getByRole("button", { name: routeCopy.toggleChildren(false) }).click();
   const children = page.getByRole("table", { name: routeCopy.childRoutes });
   await (await dataRows(children)).getByRole("link", { name: "shop/c-host" }).click();
-  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/c-host$/);
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/c-host(\?|$)/);
   const childFailure = await failing(page, "shop/c-host", "shop/store");
   await expect(page.getByRole("article", { name: routeCopy.parentCard("shop/store") })).toContainText(
     childFailure.reason,
@@ -86,14 +87,14 @@ test("Gateway, failed route, its parent and back up the chain", async ({ page })
   );
   await shot(page, "implicit-child");
   await page.goBack();
-  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/c-host$/);
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/c-host(\?|$)/);
 
   // Up the chain: the child's parent, then the parent's Gateway.
   const chain = page.getByRole("navigation", { name: routeCopy.upChain });
   await chain.getByRole("link", { name: "shop/store" }).click();
-  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/store$/);
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/store(\?|$)/);
   await page.getByRole("navigation", { name: routeCopy.upChain }).getByRole("link", { name: "infra/edge" }).click();
-  await expect(page).toHaveURL(new RegExp(`${install}/gateways/infra/edge$`));
+  await expect(page).toHaveURL(new RegExp(`${install}/gateways/infra/edge(\\?|$)`));
 });
 
 test("Gateway listener https lists its computed routes with effective hostnames", async ({ page }) => {
@@ -193,7 +194,7 @@ test("Delegation tab: a partly attached row, its paths, then the child's effecti
 
   // The child's page shows its rules under each of the parent's matches.
   await row.getByRole("link", { name: "shop/t-partial" }).click();
-  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/t-partial$/);
+  await expect(page).toHaveURL(/\/HTTPRoute\/shop\/t-partial(\?|$)/);
   const d: RouteDetail = await (
     await page.request.get(`${api}/routes/gateway.networking.k8s.io/HTTPRoute/shop/t-partial`)
   ).json();
@@ -350,8 +351,8 @@ async function holdDetail(page: Page): Promise<() => void> {
   return release;
 }
 
-type Head = { header: Box; tabs: Box; first: Box; banner: Box | null };
-/** Header, tabs, the first element of the Overview panel and the candidate banner, in page coordinates. */
+type Head = { trail: Box; header: Box; tabs: Box; first: Box; banner: Box | null };
+/** Trail, header, tabs, the first element of the Overview panel and the candidate banner, in page coordinates. */
 function measureHead(page: Page): Promise<Head> {
   return page.evaluate(() => {
     const box = (el: Element | null) => {
@@ -361,6 +362,7 @@ function measureHead(page: Page): Promise<Head> {
     };
     const q = (sel: string) => document.querySelector(sel);
     return {
+      trail: box(q("nav[data-trail]")),
       header: box(q('[data-testid="detail-header"]')),
       tabs: box(q('[data-testid="detail-tabs"]')),
       first: box(q('[role="tabpanel"] > *')),
@@ -381,16 +383,17 @@ async function expectStableHead(page: Page, path: string, detailApi: string) {
   await expect(page.getByTestId("detail-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("detail-header").getByTestId(/^health-icon-/)).toBeVisible();
   const after = await measureHead(page);
-  // Design §8.6: the candidate banner is the one allowed shift; it takes the header's old place.
+  // Design §8.6: the candidate banner is the one allowed shift; it takes the place of the trail above the header.
   let dy = 0;
   if (body.candidate) {
     expect(after.banner, "a candidate shows its banner").not.toBeNull();
-    expect.soft(after.banner?.y, "the banner starts where the header was").toBe(before.header.y);
+    expect.soft(after.banner?.y, "the banner starts where the trail was").toBe(before.trail.y);
     dy = after.header.y - before.header.y;
   } else {
     expect(after.banner, "no banner for an owned object").toBeNull();
   }
   const moved = (b: Box) => ({ ...b, y: b.y - dy });
+  expect.soft(moved(after.trail), "trail").toEqual(before.trail);
   expect.soft(moved(after.header), "header").toEqual(before.header);
   expect.soft(moved(after.tabs), "tabs").toEqual(before.tabs);
   // The panel's first child is the skeleton, then the first section: same start and width.
