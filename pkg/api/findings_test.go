@@ -474,3 +474,45 @@ func TestFindingsCursorVanishedAnchor(t *testing.T) {
 		t.Errorf("since cursor on the code sort: %v", err)
 	}
 }
+
+// q compares lower-cased runes, so a match may change length when lowered.
+func TestFindingsQueryFoldsRunes(t *testing.T) {
+	for _, tc := range []struct {
+		s, q string
+		want bool
+	}{{"\u212Aelvin route", "kelvin", true}, {"ÉCOLE", "école", true}, {"Straße", "strasse", false}, {"shop/cart", "cart", true}} {
+		if got := containsLower(tc.s, strings.ToLower(tc.q)); got != tc.want {
+			t.Errorf("containsLower(%q, %q) = %v, want %v", tc.s, tc.q, got, tc.want)
+		}
+	}
+}
+
+// Descending since and code keep ties in rank order, and a nil since sorts last both ways.
+func TestFindingsDescendingTies(t *testing.T) {
+	at := func(m int) *time.Time { s := testutil.Now.Add(time.Duration(m) * time.Minute); return &s }
+	// Rank order a..f; c and e share since 1 and code 002; f has no since.
+	fs := []health.Finding{
+		{ID: "f1-a", Code: "KGWUI-001", Since: at(2)}, {ID: "f1-b", Code: "KGWUI-003", Since: at(0)},
+		{ID: "f1-c", Code: "KGWUI-002", Since: at(1)}, {ID: "f1-d", Code: "KGWUI-003"},
+		{ID: "f1-e", Code: "KGWUI-002", Since: at(1)}, {ID: "f1-f", Code: "KGWUI-001"},
+	}
+	ix := diagnose.NewIndex(fs, []int{0, 1, 2, 3, 4, 5})
+	for _, tc := range []struct {
+		s    diagnose.Sort
+		want string
+	}{
+		{diagnose.Sort{Key: diagnose.SortSince}, "b c e a d f"},
+		{diagnose.Sort{Key: diagnose.SortSince, Desc: true}, "a c e b d f"},
+		{diagnose.Sort{Key: diagnose.SortCode}, "a f c e b d"},
+		{diagnose.Sort{Key: diagnose.SortCode, Desc: true}, "b d c e a f"},
+	} {
+		p, err := ix.Page(fs, tc.s, 10, "", nil)
+		var got []string
+		for _, k := range p.Items {
+			got = append(got, strings.TrimPrefix(fs[k].ID, "f1-"))
+		}
+		if err != nil || strings.Join(got, " ") != tc.want {
+			t.Errorf("%+v: %v %v, want %s", tc.s, got, err, tc.want)
+		}
+	}
+}

@@ -7,10 +7,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 )
 
-// FindingRow is one finding of GET …/findings (design §13.3). A restricted
-// row keeps its id, code, slug, severity, resource and group only (design
-// §14 rule 11); EvidenceRestricted marks a detail replaced because it quotes
-// an object the caller may not view (rule 12).
+// FindingRow is one finding of GET …/findings (design §13.3); restricted rows
+// keep identity only (§14 rule 11), EvidenceRestricted hides the detail (rule 12).
 type FindingRow struct {
 	ID                 string          `json:"id"`
 	Code               string          `json:"code"`

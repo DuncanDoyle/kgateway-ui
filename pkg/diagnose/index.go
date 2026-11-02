@@ -30,13 +30,13 @@ const maxCursor = 1024
 // Index holds an install's findings in each list order (design §13.1), as
 // indexes into the report's findings. Build makes one per model; it is read-only.
 type Index struct {
-	rank, since, code []int32
+	rank, since, sinceDesc, code, codeDesc []int32
 	// byID is every finding index, sorted by finding ID.
 	byID []int32
 }
 
 // NewIndex returns the index of fs, whose rank order is rank. Since and code
-// orders break ties by rank.
+// orders, either direction, break ties by rank; a nil since sorts last.
 func NewIndex(fs []health.Finding, rank []int) *Index {
 	ix := &Index{rank: make([]int32, len(rank))}
 	pos := make([]int32, len(fs))
@@ -45,10 +45,20 @@ func NewIndex(fs []health.Finding, rank []int) *Index {
 		pos[i] = int32(k)     // #nosec G115 -- as above
 	}
 	byRank := func(a, b int32) int { return cmp.Compare(pos[a], pos[b]) }
-	ix.since = slices.Clone(ix.rank)
-	slices.SortStableFunc(ix.since, func(a, b int32) int { return compareSince(fs[a].Since, fs[b].Since) })
-	ix.code = slices.Clone(ix.rank)
-	slices.SortStableFunc(ix.code, func(a, b int32) int { return cmp.Or(strings.Compare(fs[a].Code, fs[b].Code), byRank(a, b)) })
+	sorted := func(c func(a, b int32) int) []int32 {
+		o := slices.Clone(ix.rank)
+		slices.SortFunc(o, func(a, b int32) int { return cmp.Or(c(a, b), byRank(a, b)) })
+		return o
+	}
+	ix.since = sorted(func(a, b int32) int { return compareSince(fs[a].Since, fs[b].Since) })
+	ix.sinceDesc = sorted(func(a, b int32) int {
+		if sa, sb := fs[a].Since, fs[b].Since; sa != nil && sb != nil {
+			return sb.Compare(*sa)
+		}
+		return compareSince(fs[a].Since, fs[b].Since) // nil last
+	})
+	ix.code = sorted(func(a, b int32) int { return strings.Compare(fs[a].Code, fs[b].Code) })
+	ix.codeDesc = sorted(func(a, b int32) int { return strings.Compare(fs[b].Code, fs[a].Code) })
 	ix.byID = slices.Clone(ix.rank)
 	slices.SortFunc(ix.byID, func(a, b int32) int { return strings.Compare(fs[a].ID, fs[b].ID) })
 	return ix
@@ -86,17 +96,21 @@ func (ix *Index) order(s Sort) ([]int32, bool) {
 	case SortRank:
 		return ix.rank, !s.Desc
 	case SortSince:
+		if s.Desc {
+			return ix.sinceDesc, true
+		}
 		return ix.since, true
 	case SortCode:
+		if s.Desc {
+			return ix.codeDesc, true
+		}
 		return ix.code, true
 	}
 	return nil, false
 }
 
-// wireCursor is the JSON inside a findings cursor, in the explorer's shape
-// (design §3.6 of Phase 2): T is the anchor's finding ID and V its position
-// in the order, used only when that finding is gone. Neither reveals data a
-// restricted row hides.
+// wireCursor is a findings cursor in the explorer's shape: T is the anchor's
+// ID, V its position, used when it is gone; neither reveals hidden data.
 type wireCursor struct {
 	S string   `json:"s"`
 	D string   `json:"d"`
@@ -142,10 +156,8 @@ func decodeCursor(c string, s Sort) (wireCursor, error) {
 	return w, nil
 }
 
-// Page returns the findings of fs that match, in s's order, limit at most,
-// after or before cursor. match sees every finding, restricted ones too, so
-// ranks and totals cover them (design §14 rules 17, 18). An unknown sort is
-// explore.ErrBadQuery; a cursor that does not decode for s is explore.ErrBadCursor.
+// Page returns up to limit findings of fs that match, in s's order, after or before cursor.
+// Bad sorts are explore.ErrBadQuery, bad cursors explore.ErrBadCursor (design §14 rules 17, 18).
 func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, match func(i int) bool) (Page, error) {
 	order, ok := ix.order(s)
 	if !ok {
@@ -155,12 +167,7 @@ func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, mat
 		return Page{}, fmt.Errorf("%w: limit %d", explore.ErrBadQuery, limit)
 	}
 	n := len(order)
-	at := func(k int) int32 { // the finding at position k of s
-		if s.Desc {
-			return order[n-1-k]
-		}
-		return order[k]
-	}
+	at := func(k int) int32 { return order[k] } // the finding at position k of s
 	// ms are the positions of the matching findings, ascending.
 	ms := make([]int, 0, n)
 	for k := range n {

@@ -48,9 +48,8 @@ type findingsQuery struct {
 	cursor     string
 }
 
-// parseFindingsQuery parses r's query. Unknown parameters, repeated single
-// ones and malformed or unknown values are explore.ErrBadQuery; the index
-// checks cursors.
+// parseFindingsQuery parses r's query; any bad parameter or value is
+// explore.ErrBadQuery. The index checks cursors.
 func parseFindingsQuery(r *http.Request) (findingsQuery, error) {
 	q := findingsQuery{sort: diagnose.Sort{Key: diagnose.SortRank}, limit: explore.DefaultLimit}
 	vals, err := url.ParseQuery(r.URL.RawQuery)
@@ -117,9 +116,8 @@ func parseFindingsQuery(r *http.Request) (findingsQuery, error) {
 	return q, nil
 }
 
-// match reports whether f passes q's filters for the caller of v. q sees
-// only what f's row shows: a restricted finding's resource identity, and no
-// detail whose evidence is hidden (design §14 rule 17).
+// match reports whether f passes q's filters for the caller of v; q sees only
+// what f's row shows (design §14 rule 17).
 func (q *findingsQuery) match(v *view, f *health.Finding) bool {
 	if len(q.severities) > 0 && !slices.Contains(q.severities, f.Severity) ||
 		len(q.codes) > 0 && !slices.Contains(q.codes, f.Code) ||
@@ -142,19 +140,11 @@ func (q *findingsQuery) match(v *view, f *health.Finding) bool {
 	return containsLower(f.Message, q.q) || v.allOf(f.Evidence) && containsLower(f.Detail, q.q)
 }
 
-// containsLower reports whether s contains sub, ignoring case; sub is lower case.
-func containsLower(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if strings.EqualFold(s[i:i+len(sub)], sub) {
-			return true
-		}
-	}
-	return false
-}
+// containsLower reports whether lower-cased s contains sub, which is lower case.
+func containsLower(s, sub string) bool { return strings.Contains(strings.ToLower(s), sub) }
 
-// findingRow is f on the wire for the caller of v: restricted when its
-// resource is hidden (D-013), evidence-restricted when its detail quotes a
-// hidden object (design §14 rules 11, 12). Times are UTC.
+// findingRow is f on the wire for the caller of v, restricted per D-013 and
+// design §14 rules 11 and 12. Times are UTC.
 func findingRow(v *view, l linker, f *health.Finding) FindingRow {
 	row := FindingRow{ID: f.ID, Code: f.Code, Slug: f.Slug, Severity: f.Severity, Group: f.Group}
 	if f.Resource != nil {
@@ -321,10 +311,11 @@ func pageAffected(refs []objects.Ref, c string) (affectedPage, error) {
 			end, _ = slices.BinarySearchFunc(refs, a, compareAffected)
 			start = max(0, end-affectedLimit)
 		} else {
-			start = len(refs)
-			if k := slices.IndexFunc(refs, func(r objects.Ref) bool { return compareAffected(r, a) > 0 }); k >= 0 {
-				start = k
+			k, found := slices.BinarySearchFunc(refs, a, compareAffected)
+			if found {
+				k++
 			}
+			start = k
 			end = min(len(refs), start+affectedLimit)
 		}
 	}

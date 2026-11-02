@@ -5,6 +5,21 @@
     "items": [
       {
         "code": "KGWUI-002",
+        "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
+        "id": "f1-rc7j3pfjikwleiwgqmwrxao6oy",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "broken",
+          "namespace": "shop"
+        },
+        "restricted": true,
+        "severity": "error",
+        "slug": "condition-false"
+      },
+      {
+        "code": "KGWUI-002",
         "detail": "ResolvedRefs=False, reason RefNotPermitted (parent Gateway infra/edge)",
         "group": "f1-mvg6d2emebndncdtexypelvglv",
         "id": "f1-3cse5bxnvkqhgyfsdetkz57k6d",
@@ -18,21 +33,6 @@
         },
         "severity": "error",
         "since": "2026-10-17T11:00:00Z",
-        "slug": "condition-false"
-      },
-      {
-        "code": "KGWUI-002",
-        "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
-        "id": "f1-rc7j3pfjikwleiwgqmwrxao6oy",
-        "resource": {
-          "group": "gateway.networking.k8s.io",
-          "kind": "HTTPRoute",
-          "link": "none",
-          "name": "broken",
-          "namespace": "shop"
-        },
-        "restricted": true,
-        "severity": "error",
         "slug": "condition-false"
       }
     ],
