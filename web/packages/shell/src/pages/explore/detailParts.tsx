@@ -16,6 +16,7 @@ import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
 import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
+import { DetailColumns, layout } from "../../shell/layout";
 import { OBJECT_HEADER_H, ObjectHeader } from "../../shell/ObjectHeader";
 import { installPath } from "../../shell/paths";
 import { useUrlParams } from "../../shell/urlParams";
@@ -31,7 +32,7 @@ import { useShownPage } from "./listParts";
 export const HEADER_H = OBJECT_HEADER_H;
 
 const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
   ${(p) => p.stylesOverride}
@@ -101,8 +102,10 @@ interface DetailFrameProps {
   noun: string;
   data?: { health: HealthState; candidate?: Candidate; collectedAt: string };
   error?: ApiError;
-  /** The Overview tab; rendered only once data has loaded. */
+  /** The Overview tab's main column; rendered only once data has loaded. */
   children: ReactNode;
+  /** The Overview tab's side column: conditions, findings and related objects. Contributed sections follow it. */
+  side?: ReactNode;
   /** Tabs after YAML; a ?tab= naming none of them shows Overview. */
   extraTabs?: ExtraTab[];
   stylesOverride?: SerializedStyles;
@@ -116,6 +119,7 @@ export function DetailFrame({
   data,
   error,
   children,
+  side,
   extraTabs,
   stylesOverride,
 }: DetailFrameProps) {
@@ -160,22 +164,29 @@ export function DetailFrame({
     ) : own ? (
       <Slot key={own.id} id={`detail-tab:${own.id}`} resetKey={objectKey} render={() => own.render(ctx)} />
     ) : (
-      <>
-        {children}
-        {sections.map((s) => (
-          <Slot
-            key={s.id}
-            id={`side-section:${s.id}`}
-            resetKey={objectKey}
-            render={() => (
-              <Section aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
-                <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>
-                {s.render(ctx)}
-              </Section>
-            )}
-          />
-        ))}
-      </>
+      <DetailColumns
+        main={children}
+        side={
+          side || sections.length ? (
+            <>
+              {side}
+              {sections.map((s) => (
+                <Slot
+                  key={s.id}
+                  id={`side-section:${s.id}`}
+                  resetKey={objectKey}
+                  render={() => (
+                    <Section aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
+                      <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>
+                      {s.render(ctx)}
+                    </Section>
+                  )}
+                />
+              ))}
+            </>
+          ) : null
+        }
+      />
     )
   ) : error?.status === 503 ? (
     <PageState kind="connecting" title={vocab.connecting} message={error.message} />

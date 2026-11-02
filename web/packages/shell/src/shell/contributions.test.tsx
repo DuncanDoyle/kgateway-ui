@@ -149,6 +149,8 @@ it("side sections render after the core content, on the Overview tab only", asyn
   });
   const section = await screen.findByRole("region", { name: "Notes" });
   expect(section).toHaveTextContent("notes for edge");
+  // Contributed sections sit in the side column.
+  expect(section.closest("[data-testid=detail-side]")).not.toBeNull();
   const listeners = screen.getByRole("table", { name: "Listeners" });
   expect(listeners.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await userEvent.setup().click(screen.getByRole("tab", { name: "YAML" }));

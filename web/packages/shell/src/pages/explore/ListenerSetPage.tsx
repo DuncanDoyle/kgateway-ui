@@ -85,36 +85,42 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
       data={data}
       error={error}
       stylesOverride={stylesOverride}
+      side={
+        data ? (
+          <>
+            <Section aria-labelledby="ls-conditions">
+              <h2 id="ls-conditions">{detailCopy.conditions}</h2>
+              <ConditionList
+                conditions={data.conditions}
+                generation={data.generation}
+                empty={data.experimentalHint}
+                extra={(c) =>
+                  data.parentFound && allowed && isNotAllowed(c) ? <AllowedListenersBlock a={allowed} /> : null
+                }
+              />
+            </Section>
+            <Section aria-label={listenerSetCopy.parent}>
+              <Facts>
+                <dt>{listenerSetCopy.parentGateway}</dt>
+                <dd>
+                  {/* parentFound is false for a hidden parent too, so the page never says it does not exist (D-013). */}
+                  {data.parentFound ? (
+                    <LinkedName refValue={data.parent} installId={id} />
+                  ) : (
+                    <>
+                      <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
+                      <Muted>{listenerSetCopy.notAvailable}</Muted>
+                    </>
+                  )}
+                </dd>
+              </Facts>
+            </Section>
+          </>
+        ) : null
+      }
     >
       {data ? (
         <>
-          <Section aria-label={listenerSetCopy.parent}>
-            <Facts>
-              <dt>{listenerSetCopy.parentGateway}</dt>
-              <dd>
-                {/* parentFound is false for a hidden parent too, so the page never says it does not exist (D-013). */}
-                {data.parentFound ? (
-                  <LinkedName refValue={data.parent} installId={id} />
-                ) : (
-                  <>
-                    <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
-                    <Muted>{listenerSetCopy.notAvailable}</Muted>
-                  </>
-                )}
-              </dd>
-            </Facts>
-          </Section>
-          <Section aria-labelledby="ls-conditions">
-            <h2 id="ls-conditions">{detailCopy.conditions}</h2>
-            <ConditionList
-              conditions={data.conditions}
-              generation={data.generation}
-              empty={data.experimentalHint}
-              extra={(c) =>
-                data.parentFound && allowed && isNotAllowed(c) ? <AllowedListenersBlock a={allowed} /> : null
-              }
-            />
-          </Section>
           <Section aria-labelledby="ls-listeners">
             <h2 id="ls-listeners">
               {gatewayCopy.listeners} <span className="note">{data.listeners.length}</span>

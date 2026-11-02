@@ -6,6 +6,7 @@ import type { ApiError } from "../api/client";
 import { listCopy } from "../copy/explorer";
 import { DataAge } from "../pages/DataAge";
 import { useVocabulary } from "../shell/extension";
+import { layout } from "../shell/layout";
 import { installPath } from "../shell/paths";
 import { BackLink, QuietButton, SearchBox } from "../states/controls";
 import { PageNotice } from "../states/PageNotice";
@@ -14,7 +15,7 @@ import { count } from "./ObjectTable";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
   .title {

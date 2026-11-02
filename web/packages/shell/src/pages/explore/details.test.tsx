@@ -241,7 +241,7 @@ it("a sub-table name is one truncated line with the full name in a keyboard tool
   const style = getComputedStyle(name);
   expect([style.whiteSpace, style.overflow, style.textOverflow]).toEqual(["nowrap", "hidden", "ellipsis"]);
   const link = name.closest("a") as HTMLElement;
-  for (let i = 0; i < 80 && document.activeElement !== link; i++) await userEvent.tab();
+  for (let i = 0; i < 200 && document.activeElement !== link; i++) await userEvent.tab();
   expect(link).toHaveFocus();
   expect(screen.getByRole("tooltip")).toHaveTextContent(name.getAttribute("aria-label") ?? "");
 });

@@ -67,13 +67,46 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
       ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
       : undefined;
   return (
-    <DetailFrame installId={id} refValue={ref} noun="Gateway" data={data} error={error} stylesOverride={stylesOverride}>
+    <DetailFrame
+      installId={id}
+      refValue={ref}
+      noun="Gateway"
+      data={data}
+      error={error}
+      stylesOverride={stylesOverride}
+      side={
+        data ? (
+          <>
+            <Section aria-labelledby="gw-conditions">
+              <h2 id="gw-conditions">{detailCopy.conditions}</h2>
+              <ConditionList conditions={data.conditions} generation={data.generation} />
+            </Section>
+            <Section aria-labelledby="gw-listenersets">
+              <h2 id="gw-listenersets">
+                {gatewayCopy.listenerSets}
+                {data.attachedListenerSets !== undefined ? (
+                  <span className="note">{gatewayCopy.attachedListenerSets(data.attachedListenerSets)}</span>
+                ) : null}
+              </h2>
+              <SubList
+                installId={id}
+                label={gatewayCopy.listenerSets}
+                noun={LS_NOUN}
+                useList={useListenerSets}
+                query={lsQuery}
+                columns={lsCols}
+                rowRef={lsRef}
+                emptyTitle={gatewayCopy.noListenerSets}
+                // The list's own total for this caller; an older body falls back to the status count.
+                skeletonRows={expectedRows(data.listenerSets ?? data.attachedListenerSets ?? 1)}
+              />
+            </Section>
+          </>
+        ) : null
+      }
+    >
       {data ? (
         <>
-          <Section aria-labelledby="gw-conditions">
-            <h2 id="gw-conditions">{detailCopy.conditions}</h2>
-            <ConditionList conditions={data.conditions} generation={data.generation} />
-          </Section>
           <Section aria-label={detailCopy.summary}>
             <Facts>
               <dt>{columnCopy.class}</dt>
@@ -87,26 +120,6 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
               {gatewayCopy.listeners} <span className="note">{data.listeners.length}</span>
             </h2>
             <ListenerTable listeners={data.listeners} generation={data.generation} />
-          </Section>
-          <Section aria-labelledby="gw-listenersets">
-            <h2 id="gw-listenersets">
-              {gatewayCopy.listenerSets}
-              {data.attachedListenerSets !== undefined ? (
-                <span className="note">{gatewayCopy.attachedListenerSets(data.attachedListenerSets)}</span>
-              ) : null}
-            </h2>
-            <SubList
-              installId={id}
-              label={gatewayCopy.listenerSets}
-              noun={LS_NOUN}
-              useList={useListenerSets}
-              query={lsQuery}
-              columns={lsCols}
-              rowRef={lsRef}
-              emptyTitle={gatewayCopy.noListenerSets}
-              // The list's own total for this caller; an older body falls back to the status count.
-              skeletonRows={expectedRows(data.listenerSets ?? data.attachedListenerSets ?? 1)}
-            />
           </Section>
           <RouteSections installId={id} parent={ref} counts={data.routeCounts} pick={pick} />
         </>

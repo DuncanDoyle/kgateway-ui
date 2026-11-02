@@ -7,6 +7,7 @@ import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
 import { LastAppliedToggle, useYaml, YamlBlock } from "../resource/ResourceYaml";
 import { useInstallId, useVocabulary } from "../shell/extension";
+import { layout } from "../shell/layout";
 import { ObjectHeader } from "../shell/ObjectHeader";
 import { installPath } from "../shell/paths";
 import { BackLink, InlineLink } from "../states/controls";
@@ -16,7 +17,7 @@ import { backendParam } from "./explore/route/refs";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
   .tools {

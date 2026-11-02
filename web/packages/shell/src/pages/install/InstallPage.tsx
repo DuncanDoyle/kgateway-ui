@@ -7,6 +7,7 @@ import { isStale, useCapabilities, useHealth, useMeta, useOverview } from "../..
 import { plural } from "../../format";
 import { Slot, useInstallPanels } from "../../shell/contributions";
 import { useInstallId, useVocabulary } from "../../shell/extension";
+import { layout } from "../../shell/layout";
 import { installPath } from "../../shell/paths";
 import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
@@ -20,7 +21,7 @@ import { TopFindings } from "./TopFindings";
 
 // region Styles
 const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
   h2 {

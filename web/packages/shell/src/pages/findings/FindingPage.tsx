@@ -13,6 +13,7 @@ import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { StaleView } from "../../health/staleView";
 import { IconButton } from "../../resource/CopyNameButton";
 import { useInstallId, useVocabulary } from "../../shell/extension";
+import { layout } from "../../shell/layout";
 import { installPath } from "../../shell/paths";
 import { Tooltip } from "../../shell/Tooltip";
 import { BackLink } from "../../states/controls";
@@ -30,7 +31,7 @@ import { findingsCopy, SeverityBadge } from "./FindingsPage";
 const TITLE_H = 32;
 
 const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
   header {
@@ -47,7 +48,7 @@ const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
     font-weight: ${(p) => p.theme.font.weight.semibold};
     overflow-wrap: anywhere;
     /* Prose keeps a readable line length on wide screens (design §17.6). */
-    max-width: 80ch;
+    max-width: ${layout.proseMax};
   }
   .meta {
     display: flex;
@@ -66,7 +67,7 @@ const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
     flex: 1;
   }
   .prose {
-    max-width: 80ch;
+    max-width: ${layout.proseMax};
   }
   ${(p) => p.stylesOverride}
 `;

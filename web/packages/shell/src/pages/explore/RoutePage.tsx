@@ -95,10 +95,49 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
       error={error}
       extraTabs={extraTabs}
       stylesOverride={stylesOverride}
+      side={
+        data ? (
+          <>
+            <UpChain installId={id} self={ref} paths={data.ancestors} truncated={data.ancestorsTruncated} />
+            <Section aria-labelledby="route-parents">
+              <h2 id="route-parents">
+                {routeCopy.parents} <span className="note">{data.parentRefs.length + unlisted.length}</span>
+              </h2>
+              {data.parentRefs.length || unlisted.length ? (
+                <Cards>
+                  {data.parentRefs.map((p, i) => (
+                    <ParentCard
+                      key={refKey(p)}
+                      installId={id}
+                      parentRef={p}
+                      entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
+                      generation={data.generation}
+                      hasDelegation={hasDelegation}
+                      attachment={data.attachments?.find((a) => a.index === i)?.result}
+                    />
+                  ))}
+                  {unlisted.map((p) => (
+                    <ParentCard
+                      key={`status/${refKey(p)}`}
+                      installId={id}
+                      parentRef={p}
+                      entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
+                      generation={data.generation}
+                      hasDelegation={hasDelegation}
+                      origin={data.parentRefs.length ? "unlisted" : "implicit"}
+                    />
+                  ))}
+                </Cards>
+              ) : (
+                <Muted>{routeCopy.noParentRefs}</Muted>
+              )}
+            </Section>
+          </>
+        ) : null
+      }
     >
       {data ? (
         <>
-          <UpChain installId={id} self={ref} paths={data.ancestors} truncated={data.ancestorsTruncated} />
           <Section aria-label={detailCopy.summary}>
             <Facts>
               <dt>{routeCopy.hostnames}</dt>
@@ -106,39 +145,6 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
               <dt>{routeCopy.parentRoutes}</dt>
               <dd>{permissionText(data)}</dd>
             </Facts>
-          </Section>
-          <Section aria-labelledby="route-parents">
-            <h2 id="route-parents">
-              {routeCopy.parents} <span className="note">{data.parentRefs.length + unlisted.length}</span>
-            </h2>
-            {data.parentRefs.length || unlisted.length ? (
-              <Cards>
-                {data.parentRefs.map((p, i) => (
-                  <ParentCard
-                    key={refKey(p)}
-                    installId={id}
-                    parentRef={p}
-                    entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
-                    generation={data.generation}
-                    hasDelegation={hasDelegation}
-                    attachment={data.attachments?.find((a) => a.index === i)?.result}
-                  />
-                ))}
-                {unlisted.map((p) => (
-                  <ParentCard
-                    key={`status/${refKey(p)}`}
-                    installId={id}
-                    parentRef={p}
-                    entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
-                    generation={data.generation}
-                    hasDelegation={hasDelegation}
-                    origin={data.parentRefs.length ? "unlisted" : "implicit"}
-                  />
-                ))}
-              </Cards>
-            ) : (
-              <Muted>{routeCopy.noParentRefs}</Muted>
-            )}
           </Section>
           <Section aria-labelledby="route-rules">
             <h2 id="route-rules">
