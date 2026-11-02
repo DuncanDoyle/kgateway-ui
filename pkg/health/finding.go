@@ -14,6 +14,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
@@ -141,6 +142,18 @@ type Input struct {
 	// Views decodes Gateways, ListenerSets and routes; nil means objects.Direct.
 	// Its views are shared and read-only.
 	Views objects.Decoder
+	// Process is the install's process data; a check declares InputSet.Process to read it.
+	Process *ProcessData
+}
+
+// ProcessData is one install's processes (design §9.1): its controller, and
+// the proxies of each Gateway it owns, by Gateway. Print hashes both. The
+// controller Pods are in the install's namespace and a Gateway's proxy Pods
+// in the Gateway's, so process.PodRef gives each Pod's ref for §14 rule 16.
+type ProcessData struct {
+	Controller process.Set
+	Proxies    map[objects.Ref]process.Set
+	Print      uint64
 }
 
 // views returns in.Views, or objects.Direct when it is unset.

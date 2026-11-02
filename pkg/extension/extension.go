@@ -23,6 +23,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
@@ -44,6 +45,8 @@ type Registry struct {
 	// RulesFor selects the computed rule set for a controller's kgateway
 	// version, "" when unknown (D-020).
 	RulesFor func(controllerVersion string) computed.Selection
+	// Process reports each install's controller and proxy processes (D-016).
+	Process process.Source
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
@@ -146,6 +149,10 @@ func WithComputedRules(f func(controllerVersion string) computed.Selection) Opti
 	return func(r *Registry) { r.RulesFor = f }
 }
 
+// WithProcessSource replaces process.Kube, for example to add extension Pods
+// or to report processes that do not run in Pods.
+func WithProcessSource(s process.Source) Option { return func(r *Registry) { r.Process = s } }
+
 // New returns the upstream registry with opts applied.
 func New(opts ...Option) *Registry {
 	r := &Registry{
@@ -156,6 +163,7 @@ func New(opts ...Option) *Registry {
 		Authorizer: api.AllowAll{},
 		ProxyMode:  proxymode.GatewayParameters{},
 		RulesFor:   rulesets.Select,
+		Process:    process.Kube{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}
 	for _, o := range opts {

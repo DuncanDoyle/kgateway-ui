@@ -22,6 +22,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -61,10 +62,32 @@ func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.
 			out.Computed = &computed.Views{RuleSet: fmt.Sprintf("perturbed %d", seed)}
 		}
 	}
+	if !set.Process {
+		out.Process = perturbedProcess(in.Process, seed)
+	}
 	if !set.KindsChange {
 		out.KindsChange = kinds.Change{Added: []string{fmt.Sprintf("perturbed%d", seed)}}
 		if !in.KindsChange.Empty() {
 			out.KindsChange = kinds.Change{}
+		}
+	}
+	return out
+}
+
+// perturbedProcess is other process data than d: d's Gateways and the
+// controller, each observed with one restarted, failing process.
+func perturbedProcess(d *health.ProcessData, seed int64) *health.ProcessData {
+	n, ready := int32(seed%1000)+5, false //nolint:gosec // bounded seed
+	set := func(name string) process.Set {
+		return process.Set{Observed: true, Desired: &n, Rollout: &process.Rollout{Reason: "ProgressDeadlineExceeded"},
+			Processes: []process.Process{{ID: name, Name: name, Ready: &ready, Restarts: &n, Waiting: "CrashLoopBackOff", Version: "0.0.1",
+				Termination: &process.Termination{Reason: "OOMKilled", ExitCode: 2, At: time.Unix(seed, 0)},
+				Probe:       &process.ProbeFailures{Count: int(n), First: time.Unix(seed, 0), Last: time.Unix(seed, 0), HistoryUnknown: true}}}}
+	}
+	out := &health.ProcessData{Controller: set(fmt.Sprintf("perturbed-%d", seed)), Proxies: map[objects.Ref]process.Set{}, Print: uint64(seed)} //nolint:gosec // seeded test data
+	if d != nil {
+		for r := range d.Proxies {
+			out.Proxies[r] = set(fmt.Sprintf("perturbed-%d-%s", seed, r.Name))
 		}
 	}
 	return out

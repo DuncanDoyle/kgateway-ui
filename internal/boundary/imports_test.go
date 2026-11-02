@@ -37,6 +37,7 @@ var allowed = map[string]string{
 	"pkg/install/install.go":        "Install carries the controller Deployment and Pods",
 	"pkg/install/scope.go":          "scope from Pod env and Namespace labels",
 	"pkg/install/upstream.go":       "detects controller Deployments",
+	"pkg/process/kube.go":           "process facts from Pods, Deployments and Events",
 	"pkg/scopeverify/verify.go":     "Namespace objects for scope",
 }
 

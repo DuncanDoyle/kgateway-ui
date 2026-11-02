@@ -77,6 +77,13 @@ type Detector interface {
 	Detect(d *appsv1.Deployment) (Install, bool)
 }
 
+// ProxyPodDetector is a Detector that names the labels of its gateway proxy
+// Pods. The cache watches proxy Pods only through these selectors; a detector
+// without the method has no proxy Pod watch.
+type ProxyPodDetector interface {
+	ProxyPodSelector() labels.Selector
+}
+
 // Discover returns one Install per controller Deployment in snap, sorted by ID.
 // An install whose ID fails ValidateID is left out and reported in errs.
 func Discover(snap *cache.Snapshot, detectors []Detector) (out []Install, errs []error) {

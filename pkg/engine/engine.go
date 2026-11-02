@@ -25,6 +25,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -51,6 +52,8 @@ type Config struct {
 	Platform platform.Info
 	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
 	ProxyMode proxymode.Resolver
+	// Process reports each install's processes; nil means process.Kube{}.
+	Process process.Source
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
 	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
@@ -97,6 +100,8 @@ type InstallModel struct {
 	Rules computed.Selection
 	// Computed are the install's computed views with their check states.
 	Computed *computed.Views
+	// Process is the install's controller and proxy processes.
+	Process *health.ProcessData
 }
 
 // Model is one consistent computation over a snapshot.
@@ -174,6 +179,9 @@ func New(cfg Config) *Engine {
 	}
 	if cfg.RulesFor == nil {
 		cfg.RulesFor = rulesets.Select
+	}
+	if cfg.Process == nil {
+		cfg.Process = process.Kube{}
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
@@ -352,15 +360,16 @@ func (e *Engine) compute() *Published {
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
+		proc := e.processes(res, owned, snap)
 		rt := health.Runtime{States: states[res.ID()], Collected: col}
 		if !e.cfg.NoMemo {
 			pc := &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
-				ver: &ver, views: views[i], kc: kc, col: col}
+				ver: &ver, views: views[i], kc: kc, col: col, proc: proc}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode}, e.cfg.Checks, rt)
+			Computed: views[i], Views: e.decode, Process: proc}, e.cfg.Checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}
@@ -369,12 +378,27 @@ func (e *Engine) compute() *Published {
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
 			Computed: views[i]})
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Diagnosis: diag, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
-			Rules: r.sel, Computed: views[i]})
+			Rules: r.sel, Computed: views[i], Process: proc})
 	}
 	m.Next = next.next
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(),
 		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
 	return p
+}
+
+// processes asks the process source for res's controller and the proxies
+// of each Gateway it owns, and prints the result.
+func (e *Engine) processes(res install.Resolved, owned *install.Owned, snap *cache.Snapshot) *health.ProcessData {
+	d := &health.ProcessData{Controller: e.cfg.Process.Controller(res, snap)}
+	if owned != nil && len(owned.Gateways) > 0 {
+		d.Proxies = make(map[objects.Ref]process.Set, len(owned.Gateways))
+		for _, gw := range owned.Gateways {
+			ref := objects.RefOf(gw)
+			d.Proxies[ref] = e.cfg.Process.Proxies(res, ref, snap)
+		}
+	}
+	d.Print = processPrint(d)
+	return d
 }
 
 // deadlines collects the earliest deadline not yet due at now.

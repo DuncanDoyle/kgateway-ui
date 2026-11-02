@@ -1328,13 +1328,13 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 			t.Cleanup(srv.Close)
 			var meta api.MetaResponse
 			states := map[string]api.Capability{}
-			eventually(t, fmt.Sprintf("events and crds %s", tc.want), func() bool {
+			eventually(t, fmt.Sprintf("events and crds %s, processes on", tc.want), func() bool {
 				meta, states = api.MetaResponse{}, map[string]api.Capability{}
 				getJSON(t, srv, "/api/v1/meta", &meta)
 				for _, c := range meta.CapabilityStates {
 					states[c.Name] = c
 				}
-				return states["events"].State == tc.want && states["crds"].State == tc.want
+				return states["events"].State == tc.want && states["crds"].State == tc.want && states["processes"].State == api.CapOn
 			})
 			for _, name := range []string{"events", "crds"} {
 				c := states[name]
@@ -1345,9 +1345,9 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 					t.Errorf("%s listed in capabilities %v: %v", name, meta.Capabilities, !tc.listedOn)
 				}
 			}
-			// No detector selects proxy Pods yet, so processes has no watch to report.
-			if _, ok := states["processes"]; ok {
-				t.Errorf("processes reported without a proxy Pod watch: %+v", states["processes"])
+			// The upstream detector selects proxy Pods; that watch is neither denied nor failing here.
+			if c := states["processes"]; c.State != api.CapOn || !slices.Contains(meta.Capabilities, "processes") {
+				t.Errorf("processes: want on and listed, got %+v in %v", c, meta.Capabilities)
 			}
 		})
 	}

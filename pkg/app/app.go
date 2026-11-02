@@ -118,9 +118,6 @@ const (
 	reasonFailing = "The watch is failing"
 )
 
-// proxyPodDetector is a detector that names its proxy Pods' selector.
-type proxyPodDetector interface{ ProxyPodSelector() labels.Selector }
-
 // Clients are the Kubernetes clients the app uses.
 type Clients struct {
 	Dynamic   dynamic.Interface
@@ -185,7 +182,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	for _, d := range reg.Detectors {
 		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
-		if pd, ok := d.(proxyPodDetector); ok {
+		if pd, ok := d.(install.ProxyPodDetector); ok {
 			proxySel = append(proxySel, pd.ProxyPodSelector())
 		}
 	}
@@ -216,7 +213,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	var once sync.Once
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
-		RulesFor: reg.RulesFor,
+		RulesFor: reg.RulesFor, Process: reg.Process,
 		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop, Clock: o.Clock,
 		// The other bounds stay zero: the walker gives each its default.
 		DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap},

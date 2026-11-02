@@ -19,6 +19,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -61,6 +62,7 @@ type printCtx struct {
 	views  *computed.Views
 	kc     kinds.Change
 	col    collect.Snapshot
+	proc   *health.ProcessData
 
 	owned, metrics, verify, computed, change *uint64
 }
@@ -107,6 +109,9 @@ func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
 	}
 	if set.KindsChange {
 		p = mix(p, lazy(&ctx.change, func() uint64 { return strPrint(ctx.kc.String()) }))
+	}
+	if set.Process {
+		p = mix(p, mix(1, processPrintOf(ctx.proc)))
 	}
 	for _, k := range set.Collected {
 		p = mix(p, collectedPrint(ctx.col, k))
@@ -233,6 +238,76 @@ func installPrint(r install.Resolved) uint64 {
 	p.str(r.Scope.Source)
 	p.str(fmt.Sprintf("%+v|%+v", r.Scope.Selectors, r.Settings))
 	return p.h.Sum64()
+}
+
+// processPrintOf is d's Print, 0 when there is no process data.
+func processPrintOf(d *health.ProcessData) uint64 {
+	if d == nil {
+		return 0
+	}
+	return d.Print
+}
+
+// processPrint covers every field of d's sets, the proxies in Gateway order.
+func processPrint(d *health.ProcessData) uint64 {
+	p := newPrinter()
+	setPrint(p, d.Controller)
+	refs := slices.SortedFunc(maps.Keys(d.Proxies), objects.Ref.Compare)
+	p.u64(uint64(len(refs)))
+	for _, r := range refs {
+		p.str(r.Group)
+		p.str(r.Kind)
+		p.str(r.Namespace)
+		p.str(r.Name)
+		setPrint(p, d.Proxies[r])
+	}
+	return p.h.Sum64()
+}
+
+// setPrint writes every field of s to p; a nil pointer and a zero value differ.
+func setPrint(p *printer, s process.Set) {
+	p.flag(s.Observed)
+	if p.flag(s.Desired != nil); s.Desired != nil {
+		p.u64(uint64(*s.Desired)) //nolint:gosec // hashed bits; the sign does not matter
+	}
+	if p.flag(s.Rollout != nil); s.Rollout != nil {
+		p.flag(s.Rollout.Progressing)
+		p.str(s.Rollout.Reason)
+		timePtr(p, s.Rollout.SettledAt)
+	}
+	p.u64(uint64(len(s.Processes)))
+	for _, pr := range s.Processes {
+		p.str(pr.ID)
+		p.str(pr.Name)
+		if p.flag(pr.Ready != nil); pr.Ready != nil {
+			p.flag(*pr.Ready)
+		}
+		if p.flag(pr.Restarts != nil); pr.Restarts != nil {
+			p.u64(uint64(*pr.Restarts)) //nolint:gosec // hashed bits; the sign does not matter
+		}
+		timePtr(p, pr.LastStart)
+		if p.flag(pr.Termination != nil); pr.Termination != nil {
+			p.str(pr.Termination.Reason)
+			p.u64(uint64(pr.Termination.ExitCode)) //nolint:gosec // hashed bits; the sign does not matter
+			p.time(pr.Termination.At)
+		}
+		p.str(pr.Waiting)
+		p.str(pr.Version)
+		if p.flag(pr.Probe != nil); pr.Probe != nil {
+			p.str(pr.Probe.Type)
+			p.u64(uint64(pr.Probe.Count)) //nolint:gosec // hashed bits; the sign does not matter
+			p.time(pr.Probe.First)
+			p.time(pr.Probe.Last)
+			p.flag(pr.Probe.HistoryUnknown)
+		}
+	}
+}
+
+// timePtr writes whether t is set, and t when it is.
+func timePtr(p *printer, t *time.Time) {
+	if p.flag(t != nil); t != nil {
+		p.time(*t)
+	}
 }
 
 // verifyPrint covers every field of v.
