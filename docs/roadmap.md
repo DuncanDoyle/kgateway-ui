@@ -60,7 +60,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - Lists are indexed, filtered and paginated on the server.
 
 ### Phase 3 — Health & Diagnostics
-**Status:** Not started
+**Status:** In progress — 3.0 Extension seams complete (2026-11-02; `docs/phases/phase-3/phase-3.0-complete.md`)
 **Docs:** `docs/phases/phase-3/`
 
 "At a glance": the home page becomes the health overview, ranked by severity. Each finding links to the resource it concerns. Sources:
