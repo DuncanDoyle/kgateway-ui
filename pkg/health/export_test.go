@@ -27,6 +27,14 @@ func GuardWorlds(t *testing.T) map[string]Input {
 		"xds rejected": func(w *world) {
 			w.metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
 		},
+		"xds rejected per type": func(w *world) {
+			k := ctrlmetrics.TypeKey{Gateway: ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}, TypeURL: "envoy.config.cluster.v3.Cluster"}
+			w.metrics.Metrics.Rejects[k.Gateway] = 2
+			for _, p := range []string{"p", "q"} {
+				w.metrics.Metrics.PerPod = append(w.metrics.Metrics.PerPod, ctrlmetrics.PodMetrics{UID: "pod/kgw/" + p, Name: p,
+					Active: map[ctrlmetrics.TypeKey]float64{k: 1}, Total: map[ctrlmetrics.TypeKey]float64{k: 4}})
+			}
+		},
 		"route not processed":   func(w *world) { w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}) },
 		"namespace not watched": func(w *world) { w.scope = `[{"matchLabels":{"team":"a"}}]` },
 		"scope unknown":         func(w *world) { w.scope = "[{" },

@@ -94,6 +94,46 @@ func (e *VersionSkewEvidence) MarshalJSON() ([]byte, error) {
 	}{EvidenceVersionSkew, (*plain)(e)})
 }
 
+// EvidenceXDSRejects is the kind of XDSRejectsEvidence.
+const EvidenceXDSRejects = "xds-rejects"
+
+// XDSRejectsEvidence is what KGWUI-001 quotes: the rejected types, the
+// Gateway's proxies, and whether its status contradicts the rejects (§8.3).
+type XDSRejectsEvidence struct {
+	Types []XDSTypeRejects `json:"types"`
+	// Proxies is nil when the Gateway has no proxy Deployment.
+	Proxies           *ProxyCount `json:"proxies,omitempty"`
+	StatusSaysHealthy bool        `json:"statusSaysHealthy"`
+}
+
+// XDSTypeRejects is one rejected xDS type: rejecting streams summed over the
+// controller Pods that report them, and rejects_total growth since FirstSeen.
+type XDSTypeRejects struct {
+	TypeURL             string    `json:"typeUrl"`
+	Streams             int       `json:"streams"`
+	ReportedBy          []string  `json:"reportedBy"`
+	FirstSeen           time.Time `json:"firstSeen"`
+	TotalSinceFirstSeen int       `json:"totalSinceFirstSeen"`
+}
+
+// ProxyCount is a Gateway's ready and desired proxy replicas.
+type ProxyCount struct {
+	Ready   int32 `json:"ready"`
+	Desired int32 `json:"desired"`
+}
+
+// EvidenceKind implements Evidence.
+func (*XDSRejectsEvidence) EvidenceKind() string { return EvidenceXDSRejects }
+
+// MarshalJSON adds the kind tag.
+func (e *XDSRejectsEvidence) MarshalJSON() ([]byte, error) {
+	type plain XDSRejectsEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{EvidenceXDSRejects, (*plain)(e)})
+}
+
 // RawEvidence is evidence of a kind this build does not know, kept as sent.
 type RawEvidence struct {
 	Kind string
@@ -123,6 +163,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 		return e, json.Unmarshal(b, e)
 	case EvidenceVersionSkew:
 		e := &VersionSkewEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceXDSRejects:
+		e := &XDSRejectsEvidence{}
 		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil

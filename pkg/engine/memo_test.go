@@ -235,8 +235,8 @@ func TestStoreWritingCheckStillSkipped(t *testing.T) {
 	}
 }
 
-// xDS rejects (Clock) runs every time; a narrow metrics check waking at the
-// staleness deadline turns unavailable exactly then.
+// xDS rejects declares no Clock, so with unchanged inputs it runs once; a narrow
+// metrics check waking at the staleness deadline turns unavailable exactly then.
 func TestMemoNeverOutlivesStaleness(t *testing.T) {
 	var xdsRuns, narrowRuns int
 	var xds health.Check
@@ -267,8 +267,8 @@ func TestMemoNeverOutlivesStaleness(t *testing.T) {
 	if d := detail(report(t, e.Compute())); d != "unavailable" || narrowRuns != 2 {
 		t.Fatalf("at staleness: %q after %d runs; want unavailable from a second run", d, narrowRuns)
 	}
-	if xdsRuns != 3 {
-		t.Fatalf("xDS rejects ran %d times in 3 computes", xdsRuns)
+	if xdsRuns != 1 {
+		t.Fatalf("xDS rejects ran %d times in 3 computes; want 1", xdsRuns)
 	}
 }
 

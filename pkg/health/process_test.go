@@ -18,10 +18,11 @@ import (
 )
 
 // processInput is w's Input, with proxyPods watched, and the process data
-// process.Kube reads from its snapshot.
+// process.Kube reads from its snapshot. Metrics never go stale, so Next is the checks' own.
 func processInput(t *testing.T, w *world, proxyPods ...*corev1.Pod) Input {
 	t.Helper()
 	in := w.input(t)
+	in.MetricsMaxAge = 0
 	in.Snapshot.ProxyPods, in.Snapshot.Access[cache.ProxyPodsGVR] = proxyPods, cache.Access{OK: true}
 	d := &ProcessData{Controller: process.Kube{}.Controller(in.Install, in.Snapshot), Proxies: map[objects.Ref]process.Set{}}
 	for _, gw := range in.Owned.Gateways {
