@@ -17,13 +17,6 @@ var minorRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.+-]|$)`)
 // Select returns the rule set for a kgateway controller version. An unknown,
 // newer or older version gets the nearest set, labelled in Note.
 func Select(controllerVersion string) computed.Selection {
-	s := sel(controllerVersion)
-	s.GatewayAPI = ExpectedGatewayAPI
-	return s
-}
-
-// sel picks the rule set and its note.
-func sel(controllerVersion string) computed.Selection {
 	m := minorRE.FindStringSubmatch(controllerVersion)
 	if m == nil {
 		return computed.Selection{Rules: kgw24.New(), Note: "Controller version unknown; using the 2.4 rules"}

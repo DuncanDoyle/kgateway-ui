@@ -177,6 +177,56 @@ func TestSkewRolloutSuppression(t *testing.T) {
 	}
 }
 
+// I1: a stuck controller rollout never settles; once it recovers, versions
+// are compared from its settle time + 10 min.
+func TestSkewStuckRollout(t *testing.T) {
+	w := healthyWorld()
+	st := NewStates()
+	pod := skewPod("edge-0", wrapper+":v2.3.6")
+	w.ctrl.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
+	in := skewInput(t, w, []cache.CRDMeta{}, pod)
+	in.Now = testutil.Now.Add(SkewSettle + time.Second)
+	r := Evaluate(in, Upstream(), Runtime{States: st})
+	if fs := skewFindings(r); len(fs) != 0 || !strings.Contains(skewResult(t, r).Detail, skewStuckDetail) {
+		t.Fatalf("stuck rollout: %+v, %+v", fs, skewResult(t, r))
+	}
+	done := in.Now.Add(time.Minute)
+	settledAt(w.ctrl, done)
+	for _, tc := range []struct {
+		d    time.Duration
+		want bool
+	}{{9*time.Minute + 59*time.Second, false}, {10*time.Minute + time.Second, true}} {
+		in := skewInput(t, w, []cache.CRDMeta{}, pod)
+		in.Now = done.Add(tc.d)
+		if got := len(skewFindings(Evaluate(in, Upstream(), Runtime{States: st}))) == 1; got != tc.want {
+			t.Fatalf("at recovered + %s: 022 %v, want %v", tc.d, got, tc.want)
+		}
+	}
+}
+
+// An unknown controller version and a minor without a table row give
+// different notes, and no CRD finding.
+func TestSkewExpectedNotes(t *testing.T) {
+	crds := []cache.CRDMeta{{Name: gatewayCRD, Group: objects.GatewayAPIGroup, BundleVersion: "v1.5.1", Channel: "standard"}}
+	for _, tc := range []struct {
+		name, label, image, note string
+	}{
+		{"unknown", "", "cr.kgateway.dev/kgateway-dev/kgateway@sha256:0123", skewCtrlUnknown},
+		{"no row", "2.6.0", "cr.kgateway.dev/kgateway-dev/kgateway:v2.6.0", "No Gateway API version on record for kgateway 2.6"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := healthyWorld()
+			w.ctrl.Labels["app.kubernetes.io/version"] = tc.label
+			w.ctrl.Spec.Template.Spec.Containers[0].Image = tc.image
+			w.pods[0] = testutil.ControllerPod(w.ctrl, "p", true)
+			r := Evaluate(skewInput(t, w, crds), Upstream(), Runtime{States: NewStates()})
+			if fs := skewFindings(r); len(fs) != 0 || !strings.Contains(skewResult(t, r).Detail, tc.note) {
+				t.Fatalf("findings %+v, result %+v", fs, skewResult(t, r))
+			}
+		})
+	}
+}
+
 // A rollout that ends without a condition time settles when the check first sees it end.
 func TestSkewRolloutEndWithoutTime(t *testing.T) {
 	w := healthyWorld()

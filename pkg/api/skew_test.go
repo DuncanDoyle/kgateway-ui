@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -8,12 +9,15 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	metadatafake "k8s.io/client-go/metadata/fake"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -134,3 +138,89 @@ func TestListenerSetHintNamesTheChannel(t *testing.T) {
 	}
 }
 
+
+// proxyAt is kgateway's proxy Deployment for ns/edge with one Pod on tag.
+func proxyAt(ns, tag string) (*appsv1.Deployment, *corev1.Pod) {
+	d := testutil.ProxyDeployment(ns, "edge", 1, 1)
+	sel := map[string]string{"app.kubernetes.io/name": "edge", "gateway.networking.k8s.io/gateway-name": "edge"}
+	d.Spec.Selector = &metav1.LabelSelector{MatchLabels: sel}
+	d.Spec.Template.Labels = map[string]string{"app.kubernetes.io/name": "edge", "gateway.networking.k8s.io/gateway-name": "edge",
+		"kgateway": "kube-gateway", "app.kubernetes.io/component": "proxy"}
+	p := edgePod(d, "edge-0", true, corev1.ContainerStatus{State: runningSince(testutil.Old.Time)})
+	p.Spec.Containers[0].Image = "cr.kgateway.dev/kgateway-dev/envoy-wrapper:" + tag
+	p.UID = types.UID("pod/" + ns + "/edge-0")
+	return d, p
+}
+
+// I2: on shared v1.5.1 CRDs, only the 2.4 install gets the CRD 022; install
+// B's proxy skew stays on B.
+func TestVersionSkewPerInstall(t *testing.T) {
+	const imgB = "cr.kgateway.dev/kgateway-dev/kgateway:v2.3.11"
+	dB := testutil.ControllerDeployment("kgw2", "kgateway2", imgB, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}}]`))
+	dB.Labels["app.kubernetes.io/version"] = "2.3.11"
+	proxyA, podA := proxyAt("infra", "v2.4.7")
+	proxyB, podB := proxyAt("infra-b", "v2.4.7")
+	objs := procWorld(nil, proxyA, podA)
+	objs = append(objs, testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}), dB,
+		testutil.ControllerPod(dB, "kgateway2-0", true), edgeIn("infra-b", 0), proxyB, podB)
+	crds := []*metav1.PartialObjectMetadata{testutil.CRDMetadata("gateways.gateway.networking.k8s.io", "v1.5.1", "standard"),
+		testutil.CRDMetadata("httproutes.gateway.networking.k8s.io", "v1.5.1", "standard")}
+	h := newHarness(t, setup{optional: true, proxyPods: true, prepareMeta: withCRDs(t, crds...), metrics: okMetrics("kgw.kgateway", "kgw2.kgateway2")}, objs...)
+	h.awaitCache(t, "CRDs", func(s *cache.Snapshot) bool { return len(s.CRDs) == 2 })
+	h.clk.set(testutil.Now)
+	h.e.Compute()
+	a := get[HealthResponse](t, h.srv, healthPath, 200)
+	b := get[HealthResponse](t, h.srv, "/api/v1/installs/kgw2.kgateway2/health", 200)
+	skews := func(r HealthResponse) []string {
+		var out []string
+		for _, f := range r.Findings {
+			if f.Code == health.CodeVersionSkew {
+				out = append(out, f.Resource.Kind+" "+f.Resource.String())
+			}
+		}
+		return out
+	}
+	if got := strings.Join(skews(a), ","); got != "CustomResourceDefinition gateways.gateway.networking.k8s.io" {
+		t.Fatalf("install A 022: %s", got)
+	}
+	if got := strings.Join(skews(b), ","); got != "Gateway infra-b/edge" {
+		t.Fatalf("install B 022: %s", got)
+	}
+}
+
+// §14 rule 16: a caller who cannot view the pinning GatewayParameters gets the
+// restricted detail and no evidence, so the GatewayParameters name never shows.
+func TestPinnedParamsRestrictedAtTheAPI(t *testing.T) {
+	gp := testutil.GatewayParameters("infra", "pinned", false)
+	gp.Object["spec"] = map[string]any{"kube": map[string]any{"envoyContainer": map[string]any{"image": map[string]any{"tag": "v2.3.6"}}}}
+	objs := skewWorld("v2.3.6", testutil.Old.Time)
+	for _, o := range objs {
+		if u, ok := o.(*unstructured.Unstructured); ok && u.GetKind() == "Gateway" && u.GetName() == "edge" {
+			testutil.SetGatewayParameters(u, gp.GroupVersionKind().Group, "GatewayParameters", "pinned")
+		}
+	}
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "GatewayParameters" })
+	h := newHarness(t, setup{proxyPods: true, authz: hide}, append(objs, gp)...)
+	f := findingOf(h.at(t, testutil.Now), health.CodeVersionSkew)
+	if f == nil || !f.EvidenceRestricted || f.Facts != nil || strings.Contains(f.Detail, "pinned") {
+		t.Fatalf("finding %+v", f)
+	}
+	if body := string(wire(t, h.srv, healthPath)); strings.Contains(body, "pinned") {
+		t.Fatalf("the GatewayParameters name leaked: %s", body)
+	}
+	all := newHarness(t, setup{proxyPods: true}, append(skewWorldPinned(gp), gp)...)
+	if f := findingOf(all.at(t, testutil.Now), health.CodeVersionSkew); f == nil || !strings.Contains(f.Detail, "GatewayParameters infra/pinned") {
+		t.Fatalf("visible pin: %+v", f)
+	}
+}
+
+// skewWorldPinned is skewWorld with edge pointing at gp.
+func skewWorldPinned(gp *unstructured.Unstructured) []runtime.Object {
+	objs := skewWorld("v2.3.6", testutil.Old.Time)
+	for _, o := range objs {
+		if u, ok := o.(*unstructured.Unstructured); ok && u.GetKind() == "Gateway" && u.GetName() == "edge" {
+			testutil.SetGatewayParameters(u, gp.GroupVersionKind().Group, "GatewayParameters", gp.GetName())
+		}
+	}
+	return objs
+}

@@ -30,13 +30,12 @@ func TestExpectedGatewayAPI(t *testing.T) {
 }
 
 // Review Focus 4: a pre-release controller keeps the "not yet verified" note,
-// and the selection carries the Gateway API table.
-func TestSelectCarriesGatewayAPI(t *testing.T) {
-	s := Select("v2.5.0-rc.1")
-	if s.Note != "Rules not yet verified for 2.5" || s.GatewayAPI == nil {
+// and its minor still has a Gateway API row.
+func TestPrereleaseKeepsNoteAndGatewayAPI(t *testing.T) {
+	if s := Select("v2.5.0-rc.1"); s.Note != "Rules not yet verified for 2.5" {
 		t.Fatalf("selection %+v", s)
 	}
-	if b, ok := s.GatewayAPI("2.5"); !ok || b != "v1.7" {
+	if b, ok := ExpectedGatewayAPI("2.5"); !ok || b != "v1.7" {
 		t.Fatalf("2.5: %q %v", b, ok)
 	}
 }

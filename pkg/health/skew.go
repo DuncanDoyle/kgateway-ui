@@ -41,7 +41,9 @@ const (
 	skewMixedDetail      = "%s is %s; most Gateway API CRDs are %s."
 	skewSuppressedDetail = "A controller rollout is running or ended less than 10 minutes ago; versions were not compared"
 	skewUnknownDetail    = "Some images have no version tag; those Pods were not compared"
-	skewNoExpected       = "No Gateway API version on record for this controller; CRDs were not compared with it"
+	skewNoExpected       = "No Gateway API version on record for kgateway %s; CRDs were not compared with it"
+	skewCtrlUnknown      = "Controller version unknown; CRDs were not compared with the Gateway API version it expects"
+	skewStuckDetail      = "The controller rollout is stuck (KGWUI-021); versions were not compared"
 	skewCRDsOffDetail    = "Gateway API CRDs are not watched; CRD versions were not checked"
 	skewCRDsSyncDetail   = "the CRD watch has not synced yet"
 )
@@ -65,9 +67,8 @@ type skewCheck struct{}
 // Name implements Check.
 func (skewCheck) Name() string { return skewCheckName }
 
-// Inputs implements Check: process data, CRD metadata, proxy Pods access for
-// the gap note, and the Gateway, class and GatewayParameters that may pin the
-// proxy image. The settle window ends through WakeAt.
+// Inputs implements Check: processes, CRDs, proxy Pods access, and the objects
+// that may pin the proxy image; the settle window ends through WakeAt.
 func (skewCheck) Inputs() InputSet {
 	return InputSet{Process: true, Kinds: []objects.GroupKind{cache.CRDsKind, cache.ProxyPodsKind,
 		{Group: objects.GatewayAPIGroup, Kind: "Gateway"}, {Group: objects.GatewayAPIGroup, Kind: "GatewayClass"},
@@ -97,9 +98,13 @@ func (c skewCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			res.Unavailable = crdWhy
 		}
 	}
-	if until, quiet := c.settle(ctx); quiet {
+	if until, quiet, stuck := c.settle(ctx); quiet {
 		ctx.WakeAt(until)
-		res.Detail = strings.Join(append(notes, skewSuppressedDetail), "; ")
+		note := skewSuppressedDetail
+		if stuck {
+			note = skewStuckDetail
+		}
+		res.Detail = strings.Join(append(notes, note), "; ")
 		return nil, res
 	}
 	var fs []Finding
@@ -120,9 +125,9 @@ func (c skewCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		notes = append(notes, skewUnknownDetail)
 	}
 	if crds != nil {
-		cf, expected := crdSkew(in, crds, ctrl)
-		if !expected {
-			notes = append(notes, skewNoExpected)
+		cf, note := crdSkew(in, crds, ctrl)
+		if note != "" {
+			notes = append(notes, note)
 		}
 		fs = append(fs, cf...)
 	}
@@ -131,8 +136,8 @@ func (c skewCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 }
 
 // settle tracks the controller's rollout in the Store and reports until when
-// skew is suppressed; quiet is false once it may be compared.
-func (skewCheck) settle(ctx RunContext) (time.Time, bool) {
+// skew is suppressed; a stuck rollout never settles.
+func (skewCheck) settle(ctx RunContext) (until time.Time, quiet, stuck bool) {
 	in := ctx.Input
 	old, _ := Load[*skewState](ctx.State, skewKey)
 	if old == nil {
@@ -145,7 +150,7 @@ func (skewCheck) settle(ctx RunContext) (time.Time, bool) {
 	cur := &skewState{settled: old.settled}
 	switch {
 	case r == nil:
-	case r.Progressing:
+	case r.Progressing, r.Reason == "ProgressDeadlineExceeded":
 		cur.rolling = true
 	case r.SettledAt != nil:
 		cur.settled = *r.SettledAt
@@ -154,10 +159,10 @@ func (skewCheck) settle(ctx RunContext) (time.Time, bool) {
 	}
 	ctx.State.Set(skewKey, cur)
 	if cur.rolling {
-		return time.Time{}, true
+		return time.Time{}, true, !r.Progressing
 	}
-	until := cur.settled.Add(SkewSettle)
-	return until, !cur.settled.IsZero() && in.Now.Before(until)
+	until = cur.settled.Add(SkewSettle)
+	return until, !cur.settled.IsZero() && in.Now.Before(until), false
 }
 
 // controllerVersion is the version the controller's running Pods share, else
@@ -179,8 +184,8 @@ func controllerVersion(in Input) (v string, unknown bool) {
 	if len(vs) == 1 {
 		return vs[0], unknown
 	}
-	if versionMinor(in.Install.Version) != "" {
-		return in.Install.Version, unknown
+	if v := strings.TrimPrefix(in.Install.Version, "v"); versionMinor(v) != "" {
+		return v, unknown
 	}
 	return "", unknown
 }
@@ -328,10 +333,9 @@ func skewCRDs(in Input) ([]cache.CRDMeta, string, Availability) {
 // crdLabel is a CRD's bundle and channel, as the details quote them.
 func crdLabel(c cache.CRDMeta) string { return strings.TrimSpace(c.BundleVersion + " " + c.Channel) }
 
-// crdSkew raises 022 on the representative CRD when the common bundle is not the
-// one the controller expects, and on every CRD off the common bundle or channel.
-// expected is false when the controller has no expected bundle.
-func crdSkew(in Input, crds []cache.CRDMeta, ctrl string) ([]Finding, bool) {
+// crdSkew raises 022 when the common bundle is not the expected one, and on each
+// CRD off it; note says why no expected bundle was compared.
+func crdSkew(in Input, crds []cache.CRDMeta, ctrl string) (fs []Finding, note string) {
 	var annotated []cache.CRDMeta
 	count := map[string]int{}
 	for _, c := range crds {
@@ -342,11 +346,17 @@ func crdSkew(in Input, crds []cache.CRDMeta, ctrl string) ([]Finding, bool) {
 	}
 	kgw := versionMinor(in.Install.KgatewayVersion())
 	var want string
-	if in.GatewayAPI != nil && kgw != "" {
+	switch {
+	case kgw == "":
+		note = skewCtrlUnknown
+	case in.GatewayAPI != nil:
 		want, _ = in.GatewayAPI(kgw)
 	}
+	if want == "" && note == "" {
+		note = fmt.Sprintf(skewNoExpected, kgw)
+	}
 	if len(annotated) == 0 {
-		return nil, want != ""
+		return nil, note
 	}
 	// The common label is the most frequent one; a tie goes to the Gateway CRD's, else the first by name.
 	rep := annotated[0]
@@ -361,7 +371,6 @@ func crdSkew(in Input, crds []cache.CRDMeta, ctrl string) ([]Finding, bool) {
 			rep = c
 		}
 	}
-	var fs []Finding
 	ver := func(c cache.CRDMeta) CRDVersion {
 		return CRDVersion{Name: c.Name, BundleVersion: c.BundleVersion, Channel: c.Channel}
 	}
@@ -377,7 +386,7 @@ func crdSkew(in Input, crds []cache.CRDMeta, ctrl string) ([]Finding, bool) {
 		fs = append(fs, crdFinding(in, c, skewMixedMessage, fmt.Sprintf(skewMixedDetail, c.Name, crdLabel(c), crdLabel(rep)), []objects.Ref{ref},
 			&VersionSkewEvidence{Controller: ctrl, CRDs: []CRDVersion{ver(c), ver(rep)}, Expected: want}))
 	}
-	return fs, want != ""
+	return fs, note
 }
 
 // crdRef is the cluster-scoped ref of the CRD named name.

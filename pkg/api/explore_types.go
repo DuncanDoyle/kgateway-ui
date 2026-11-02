@@ -304,10 +304,8 @@ type GatewayDetail struct {
 	CollectedAt          time.Time     `json:"collectedAt"`
 }
 
-// AllowedListenersDTO is the parent Gateway's spec.allowedListeners as
-// written. CRDHint is set whenever the field is absent (design §8.5). When
-// the Gateway CRD's channel and bundle are known, CRDField says whether that
-// CRD defines the field: "defined" or "missing" (Phase 3 design §9.4).
+// AllowedListenersDTO is the parent Gateway's spec.allowedListeners as written; CRDHint is set
+// whenever it is absent, and CRDField says whether the Gateway CRD defines it ("defined", "missing").
 type AllowedListenersDTO struct {
 	Set              bool           `json:"set"`
 	Value            map[string]any `json:"value,omitempty"`
