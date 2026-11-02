@@ -110,9 +110,11 @@ type kidEval struct {
 	n       int // matcher steps charged per evaluation
 	rules   []computed.EffectiveRule
 	outcome computed.RowOutcome
-	key     [1]computed.ReportKey
-	frames  []frame
-	built   bool
+	// tooLarge: an inherit merge passed computed.MaxPathBytes, so the child is not computed.
+	tooLarge bool
+	key      [1]computed.ReportKey
+	frames   []frame
+	built    bool
 }
 
 // newFrame is a frame for refs [lo, hi) under match m, extending path.
@@ -563,6 +565,11 @@ func (w *walker) children(pi int, rs *refSel, kids []int32, f *frame, partial bo
 			w.add(pi, rs, ki, f, computed.Context{Outcome: computed.OutcomeUnknown, Unknown: computed.UnknownTooLarge})
 			continue
 		}
+		if e.tooLarge {
+			cut = true
+			w.add(pi, rs, ki, f, computed.Context{Outcome: computed.OutcomeUnknown, Unknown: computed.UnknownTooLarge})
+			continue
+		}
 		c := computed.Context{Outcome: e.outcome, Rules: e.rules}
 		if e.outcome == computed.OutcomeDropped {
 			c.Reason = firstReason(e.rules)
@@ -585,7 +592,7 @@ func (w *walker) evalKid(ki int32, n int, f *frame) *kidEval {
 	kid := &w.routes[ki]
 	e := &kidEval{n: n, outcome: computed.OutcomeAttached}
 	var kept bool
-	e.rules, kept = viewC(kid.View, f.match)
+	e.rules, kept, e.tooLarge = viewC(kid.View, f.match)
 	switch {
 	case !kept:
 		e.outcome = computed.OutcomeDropped

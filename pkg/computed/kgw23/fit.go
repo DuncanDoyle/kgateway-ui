@@ -16,8 +16,9 @@ func defaultMatch() objects.Match {
 
 // viewC computes the effective rules of child under one parent match (rules
 // §6; filterDelegatedChildren). It returns every rule, kept or dropped, and
-// whether any rule was kept, which keeps the child.
-func viewC(child *objects.HTTPRouteView, parent objects.Match) (rules []computed.EffectiveRule, kept bool) {
+// whether any rule was kept, which keeps the child. tooLarge is set when an
+// inherit merge would pass computed.MaxPathBytes: nothing is computed then.
+func viewC(child *objects.HTTPRouteView, parent objects.Match) (rules []computed.EffectiveRule, kept, tooLarge bool) {
 	inherit := child.InheritParentMatcher
 	for _, r := range child.Rules {
 		eff := computed.EffectiveRule{Index: r.Index}
@@ -34,7 +35,11 @@ func viewC(child *objects.HTTPRouteView, parent objects.Match) (rules []computed
 		failed := false
 		for i, m := range ms {
 			if inherit {
-				eff.Matches = append(eff.Matches, merge(parent, m))
+				mm, ok := merge(parent, m)
+				if !ok {
+					return nil, false, true
+				}
+				eff.Matches = append(eff.Matches, mm)
 				continue
 			}
 			ok, clause, pv, cv := fit(parent, m)
@@ -61,7 +66,7 @@ func viewC(child *objects.HTTPRouteView, parent objects.Match) (rules []computed
 		}
 		rules = append(rules, eff)
 	}
-	return rules, kept
+	return rules, kept, false
 }
 
 // fits reports whether child is a valid delegatee match under parent in
@@ -143,21 +148,32 @@ func pathValue(m objects.Match) string {
 }
 
 // merge merges parent into child in inherit mode (rules §6;
-// mergeParentChildRouteMatch). The parent's path type is not checked.
-func merge(parent, child objects.Match) objects.Match {
-	out := cloneMatch(child)
+// mergeParentChildRouteMatch). The parent's path type is not checked. It
+// reports false, and builds nothing, when the joined path passes
+// computed.MaxPathBytes.
+func merge(parent, child objects.Match) (objects.Match, bool) {
 	// A nil child path counts as Prefix "".
+	cv := pathValue(child)
+	// Cleaning may shorten the join, but never enough to be worth building a huge one.
+	if len(pathValue(parent))+len(cv) > 2*computed.MaxPathBytes {
+		return objects.Match{}, false
+	}
+	// kgateway dereferences the parent path unchecked; a nil one is never decoded.
+	joined := path.Join(pathValue(parent), cv)
+	if len(joined) > computed.MaxPathBytes {
+		return objects.Match{}, false
+	}
+	out := cloneMatch(child)
 	if out.Path == nil {
 		out.Path = &objects.PathMatch{Type: "PathPrefix"}
 	}
-	// kgateway dereferences the parent path unchecked; a nil one is never decoded.
-	out.Path.Value = path.Join(pathValue(parent), out.Path.Value)
+	out.Path.Value = joined
 	out.Headers = mergeKeys(parent.Headers, child.Headers)
 	out.QueryParams = mergeKeys(parent.QueryParams, child.QueryParams)
 	if parent.Method != "" {
 		out.Method = parent.Method
 	}
-	return out
+	return out, true
 }
 
 // mergeKeys is the union by name with the parent winning, sorted by name

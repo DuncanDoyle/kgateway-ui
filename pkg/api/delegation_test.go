@@ -1195,3 +1195,141 @@ func TestEffectiveTruncatedServed(t *testing.T) {
 		t.Fatalf("default bound: effective %d truncated %v", len(d.Effective), d.EffectiveTruncated)
 	}
 }
+
+// oversizedChain is edge → shop/api → shop/k0 → … → shop/k<n-1>, each k an
+// inherit-mode child whose path is the given segment, delegating to the next.
+func oversizedChain(n int, seg func(i int) string) []runtime.Object {
+	parent := shopAPI
+	objs := []runtime.Object{testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "k0")))}
+	for i := range n {
+		k := testutil.HTTPRoute("shop", fmt.Sprintf("k%d", i), nil, testutil.AcceptedBy(parent, testutil.Controller))
+		k.SetAnnotations(map[string]string{objects.InheritParentMatcherAnnotation: "true"})
+		if i+1 < n {
+			testutil.WithRules(k, delegRule([]string{seg(i)}, testutil.DelegateTo("shop", fmt.Sprintf("k%d", i+1))))
+		} else {
+			testutil.WithRules(k, testutil.Rule(matchPath(seg(i))))
+		}
+		objs = append(objs, k)
+		parent = testutil.HTTPRouteRef("shop", fmt.Sprintf("k%d", i))
+	}
+	return isolated(objs...)
+}
+
+// versions are one controller version per rule set.
+var versions = []string{"2.3.11", "2.4.7"}
+
+// Review finding 1: a merged path past computed.MaxPathBytes is too large to
+// compute, never cut and never a drop, so no negative finding follows.
+func TestOversizedInheritIsTooLargeNotDropped(t *testing.T) {
+	seg := func(i int) string { return "/" + strings.Repeat(string(rune('a'+i)), 1023) }
+	for _, v := range versions {
+		t.Run(v, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{disputes: true}, withControllerVersion(v, oversizedChain(8, seg))...)
+			// api is 4 bytes and each segment 1,024: k3's merged path is 4,100.
+			rows := get[Page[DelegationRow]](t, srv, delegURL("shop", "k2", ""), 200).Items
+			if len(rows) != 1 || rows[0].Outcome != "unknown" || rows[0].Computed.Reason != string(computed.UnknownTooLarge) {
+				t.Fatalf("k2 → k3 row: %+v", rows)
+			}
+			if c := rows[0].Contexts; len(c) != 0 {
+				t.Errorf("a too-large context is retained: %+v", c)
+			}
+			if r := get[Page[DelegationRow]](t, srv, delegURL("shop", "k1", ""), 200).Items; len(r) != 1 || r[0].Outcome != "attached" {
+				t.Errorf("k1 → k2 row (3,076 bytes): %+v", r)
+			}
+			h := get[HealthResponse](t, srv, base+"/health", 200)
+			for _, code := range []string{"KGWUI-011", "KGWUI-012"} {
+				if hasFinding(h, code, "") {
+					t.Errorf("%s raised: %+v", code, h.Findings)
+				}
+			}
+		})
+	}
+}
+
+// A path that fits MaxPathBytes is computed literally.
+func TestComputedPathsAreNeverClipped(t *testing.T) {
+	// "/api" is 4 bytes, so a 4,091-byte child path merges to 4,095.
+	child := "/" + strings.Repeat("c", 4090)
+	for _, v := range versions {
+		t.Run(v, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{disputes: true}, withControllerVersion(v, oversizedChain(1, func(int) string { return child }))...)
+			e := get[RouteDetail](t, srv, routeDetail+"shop/k0", 200).Effective
+			if len(e) != 1 || len(e[0].Contexts) != 1 {
+				t.Fatalf("effective %+v", e)
+			}
+			got := e[0].Contexts[0].Rules[0].Matches[0].Path.Value
+			if got != "/api"+child || len(got) != 4095 {
+				t.Errorf("path %d bytes, want the literal 4,095", len(got))
+			}
+		})
+	}
+}
+
+// Display strings are clipped with a marker; the rule that is shown is not.
+func TestDisplayClipOnly(t *testing.T) {
+	long := "/" + strings.Repeat("x", 1000)
+	api := testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "k0")))
+	_, srv, _ := startWith(t, setup{disputes: true}, isolated(api, leaf("shop", "k0", nil, long, testutil.AcceptedBy(shopAPI, testutil.Controller)))...)
+	rows := get[Page[DelegationRow]](t, srv, delegURL("shop", "api", ""), 200).Items
+	if len(rows) != 1 || rows[0].Outcome != "dropped" {
+		t.Fatalf("rows %+v", rows)
+	}
+	for _, reason := range []string{rows[0].Reason, rows[0].Contexts[0].Reason} {
+		if !strings.Contains(reason, "…[truncated]") || strings.Contains(reason, long) || len(reason) > 600 {
+			t.Errorf("reason %d bytes, not clipped with the marker: %.120q", len(reason), reason)
+		}
+	}
+	// Computed data is never clipped: the child's own path is still whole.
+	k := get[RouteDetail](t, srv, routeDetail+"shop/k0", 200)
+	if got := k.Rules[0].Matches[0].Path.Value; got != long {
+		t.Errorf("rule path clipped to %d bytes", len(got))
+	}
+}
+
+// The page budget charges reason text after JSON escaping, and a stopped page
+// loses no row when paged on.
+func TestPageBudgetChargesReasonAndEscaping(t *testing.T) {
+	defer func(n int) { maxPageUnits = n }(maxPageUnits)
+	world := func(childPath string) []runtime.Object {
+		rules := make([]map[string]any, 0, 10)
+		objs := []runtime.Object{}
+		for i := range 10 {
+			rules = append(rules, delegRule([]string{"/api"}, testutil.DelegateTo("shop", fmt.Sprintf("k%d", i))))
+			objs = append(objs, leaf("shop", fmt.Sprintf("k%d", i), nil, childPath, testutil.AcceptedBy(shopAPI, testutil.Controller)))
+		}
+		return isolated(append(objs, testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)), rules...))...)
+	}
+	maxPageUnits = 200
+	shown := func(childPath string) (contexts int, srv *httptest.Server) {
+		_, srv, _ = startWith(t, setup{disputes: true}, world(childPath)...)
+		p := get[Page[DelegationRow]](t, srv, delegURL("shop", "api", ""), 200)
+		if len(p.Items) != 10 {
+			t.Fatalf("%d rows", len(p.Items))
+		}
+		for _, r := range p.Items {
+			contexts += len(r.Contexts)
+		}
+		return contexts, srv
+	}
+	// 2 KiB reasons of characters that JSON escapes to six bytes.
+	short, _ := shown("/z")
+	long, srv := shown("/" + strings.Repeat(`"<`, 1024))
+	if short != 10 || long >= short {
+		t.Fatalf("contexts shown: short reasons %d, escaped long reasons %d", short, long)
+	}
+	// Paging past the stop returns every row once, in order.
+	var keys []string
+	for q := "?limit=3"; ; {
+		p := get[Page[DelegationRow]](t, srv, delegURL("shop", "api", q), 200)
+		keys = append(keys, rowKeys(p)...)
+		if p.Next == "" {
+			break
+		}
+		q = "?limit=3&cursor=" + p.Next
+	}
+	if len(keys) != 10 || !slices.IsSorted(keys) {
+		t.Errorf("paged rows %v", keys)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -44,24 +45,29 @@ type detail struct {
 
 // maxPageUnits bounds the contexts one response materializes (design §7.3).
 // A unit is about 32 bytes of JSON: contexts and path steps cost 4, header
-// and query matches 1, and their text 1 per 32 bytes.
+// and query matches 1, and their text and reasons 1 per 32 bytes, counted
+// after JSON escaping.
 var maxPageUnits = 100_000
 
 // charge adds to the response the cost of a context with parent match pm,
-// path and the effective rules shown with it. It reports false, and charges
-// no further, once the response is past maxPageUnits.
-func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.EffectiveRule) bool {
+// path, the effective rules shown with it and the reason texts it carries.
+// It reports false, and charges no further, once the response is past
+// maxPageUnits.
+func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.EffectiveRule, reasons ...string) bool {
 	if d.units > maxPageUnits {
 		return false
 	}
 	n, text := 4, 0
+	for _, r := range reasons {
+		text += escapedLen(r)
+	}
 	add := func(m objects.Match) {
 		k, b := matchSize(m)
 		n, text = n+k, text+b
 	}
 	add(pm)
 	for s := range path.All() {
-		n, text = n+4, text+len(s.Route.Namespace)+len(s.Route.Name)
+		n, text = n+4, text+escapedLen(s.Route.Namespace)+escapedLen(s.Route.Name)
 		if add(s.Match); d.units+n+text/32 > maxPageUnits {
 			d.units = maxPageUnits + 1
 			return false
@@ -78,16 +84,34 @@ func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.
 
 // matchSize is m's header and query matches and the bytes of its text.
 func matchSize(m objects.Match) (keys, text int) {
-	text = len(m.Method)
+	text = escapedLen(m.Method)
 	if m.Path != nil {
-		text += len(m.Path.Type) + len(m.Path.Value)
+		text += escapedLen(m.Path.Type) + escapedLen(m.Path.Value)
 	}
 	for _, ks := range [...][]objects.KeyMatch{m.Headers, m.QueryParams} {
 		for _, k := range ks {
-			text += len(k.Type) + len(k.Name) + len(k.Value)
+			text += escapedLen(k.Type) + escapedLen(k.Name) + escapedLen(k.Value)
 		}
 	}
 	return len(m.Headers) + len(m.QueryParams), text
+}
+
+// escapedLen is the bytes s takes inside a JSON string as writeJSON encodes
+// it: quotes, backslashes and control characters take two to six bytes, and
+// <, >, &, U+2028, U+2029 and invalid bytes six.
+func escapedLen(s string) int {
+	n := 0
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t':
+			n += 2
+		case r < 0x20 || r == '<' || r == '>' || r == '&' || r == '\u2028' || r == '\u2029' || r == utf8.RuneError:
+			n += 6
+		default:
+			n += utf8.RuneLen(r)
+		}
+	}
+	return n
 }
 
 // startDetail finds the install, or writes 503 or 404.
@@ -673,14 +697,16 @@ func (d *detail) effective(route objects.Ref, inherit bool) ([]EffectiveDTO, boo
 				continue
 			}
 			c := &ed.Contexts[x]
-			if !d.charge(c.ParentMatch, nil, c.Rules) {
-				dto.ContextsTruncated = true
-				break
-			}
 			pm := matchDTO(c.ParentMatch)
 			ec := EffectiveContext{ParentMatch: &pm, Rules: make([]EffectiveRuleDTO, 0, len(c.Rules))}
+			reasons := make([]string, 0, len(c.Rules))
 			for _, er := range c.Rules {
-				ec.Rules = append(ec.Rules, EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: explainFit(er.Reason)})
+				rd := EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: explainFit(er.Reason)}
+				ec.Rules, reasons = append(ec.Rules, rd), append(reasons, rd.Reason)
+			}
+			if !d.charge(c.ParentMatch, nil, c.Rules, reasons...) {
+				dto.ContextsTruncated = true
+				break
 			}
 			dto.Contexts = append(dto.Contexts, ec)
 		}
@@ -788,11 +814,12 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 		if !d.v.allowDeps(d.ix, r.ContextDeps[j]) {
 			continue
 		}
-		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil) {
+		dc := d.delegationContext(r, j)
+		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil, dc.Reason) {
 			out.ContextsTruncated = true
 			break
 		}
-		out.Contexts = append(out.Contexts, d.delegationContext(r, j))
+		out.Contexts = append(out.Contexts, dc)
 	}
 	if !shown {
 		out.Contexts, out.ContextsTruncated = append(out.Contexts, DelegationContext{Restricted: true}), false
