@@ -69,10 +69,10 @@ func ParseEnvoy(body []byte) (PodStats, error) {
 			rest := strings.TrimSuffix(name, ".update_rejected")
 			if r, ok := strings.CutPrefix(rest, "http."); ok {
 				if _, rc, ok := strings.Cut(r, ".rds."); ok {
-					p.RDS = addName(p.RDS, rc, v)
+					p.RDS, p.RDSTruncated = addName(p.RDS, rc, v, p.RDSTruncated)
 				}
 			} else if c, ok := strings.CutPrefix(rest, "cluster."); ok {
-				p.Clusters = addName(p.Clusters, c, v)
+				p.Clusters, p.ClustersTruncated = addName(p.Clusters, c, v, p.ClustersTruncated)
 			}
 		}
 	}
@@ -80,16 +80,19 @@ func ParseEnvoy(body []byte) (PodStats, error) {
 }
 
 // addName records name's counter in m when the name is a plausible Envoy name
-// and m is under maxParsedNames.
-func addName(m map[string]int64, name string, v int64) map[string]int64 {
-	if !validName(name) || len(m) >= maxParsedNames {
-		return m
+// and m is under maxParsedNames; a name over the cap sets cut.
+func addName(m map[string]int64, name string, v int64, cut bool) (map[string]int64, bool) {
+	if !validName(name) {
+		return m, cut
+	}
+	if len(m) >= maxParsedNames {
+		return m, true
 	}
 	if m == nil {
 		m = map[string]int64{}
 	}
 	m[name] = v
-	return m
+	return m, cut
 }
 
 // validName accepts 1 to maxNameLen printable ASCII characters without spaces.

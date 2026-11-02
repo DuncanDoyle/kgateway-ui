@@ -46,6 +46,8 @@ type PodStats struct {
 	LDS, CDS                          Pair
 	// RDS and Clusters are update_rejected per Envoy route config and cluster name.
 	RDS, Clusters map[string]int64
+	// RDSTruncated and ClustersTruncated are set when the source dropped names.
+	RDSTruncated, ClustersTruncated bool
 	// ServerState is "live", "draining", "pre-initializing" or "initializing".
 	ServerState string
 	// Uptime is server.uptime in seconds; zero when not reported.

@@ -44,8 +44,8 @@ type Pod struct {
 	// RDS and Clusters are the Envoy names whose update_rejected grew since
 	// the previous scrape, sorted. Names are evidence, never Gateway API objects.
 	RDS, Clusters []string
-	// NamesTruncated is set when names past the cap of 64 were dropped.
-	NamesTruncated bool
+	// RDSTruncated and ClustersTruncated are set when names were dropped from that list.
+	RDSTruncated, ClustersTruncated bool
 }
 
 // Rejects are a type's rejects observed since the previous scrape; never
@@ -143,5 +143,6 @@ func (w *writer) pod(p Pod) {
 	w.rejects(p.CDS)
 	w.strs(p.RDS)
 	w.strs(p.Clusters)
-	w.bool(p.NamesTruncated)
+	w.bool(p.RDSTruncated)
+	w.bool(p.ClustersTruncated)
 }

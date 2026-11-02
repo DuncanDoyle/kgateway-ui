@@ -33,11 +33,11 @@ const StatsPort = 9091
 // Kube is the Kubernetes Source: the running Pods of each Gateway's proxy
 // Deployment, their stats listener's /stats, and Envoy's text format.
 type Kube struct {
-	// Client fetches over the Pod IP, in-cluster; nil means NewHTTPClient().
-	// Redirects are never followed, whatever its own policy.
+	// Client fetches over the Pod IP, in-cluster; nil means NewHTTPClient(). It never
+	// follows redirects, but a supplied client keeps its transport: set Proxy: nil yourself.
 	Client *http.Client
 	// Kube, when set, fetches through pods/proxy with the user's own rights
-	// instead; build it with NewPodProxyClient so redirects are not followed.
+	// instead, over its REST client's HTTP client without redirects or retries.
 	Kube kubernetes.Interface
 	// Port is the stats listener port; zero means StatsPort.
 	Port int32
@@ -97,16 +97,13 @@ func (k Kube) Fetch(ctx context.Context, t Target) ([]byte, error) {
 	var body io.ReadCloser
 	var err error
 	if k.Kube != nil {
-		// The Pod is in the Gateway's namespace (process.ProxyDeployment).
-		rw := k.Kube.CoreV1().Pods(t.Gateway.Namespace).ProxyGet("http", t.Name, strconv.Itoa(int(k.port())), "/stats",
-			map[string]string{"usedonly": "", "filter": StatsFilter})
-		// A fake clientset without a proxy reactor returns no wrapper.
-		if rw == nil {
-			return nil, errors.New("pods/proxy unavailable")
-		}
-		body, err = rw.Stream(ctx)
+		body, err = k.podProxy(ctx, t)
 	} else {
-		body, err = k.get(ctx, "http://"+t.Addr+"/stats?"+statsQuery)
+		c := defaultClient
+		if k.Client != nil {
+			c = withoutRedirects(k.Client)
+		}
+		body, err = get(ctx, c, "http://"+t.Addr+"/stats?"+statsQuery)
 	}
 	if err != nil {
 		return nil, classify(ctx, err)
@@ -119,17 +116,33 @@ func (k Kube) Fetch(ctx context.Context, t Target) ([]byte, error) {
 	return b, nil
 }
 
-// get issues one GET; a status other than 200 is an error with the code only.
-func (k Kube) get(ctx context.Context, u string) (io.ReadCloser, error) {
+// podProxy GETs the Pod's /stats through pods/proxy. Request.Stream is not
+// used: it reads error bodies unbounded and retries on Retry-After.
+func (k Kube) podProxy(ctx context.Context, t Target) (io.ReadCloser, error) {
+	rc, ok := k.Kube.CoreV1().RESTClient().(*rest.RESTClient)
+	// A fake clientset has no REST client.
+	if !ok || rc == nil || rc.Client == nil {
+		return nil, errors.New("pods/proxy unavailable")
+	}
+	// The Pod is in the Gateway's namespace (process.ProxyDeployment).
+	u := rc.Get().Namespace(t.Gateway.Namespace).Resource("pods").Name("http:"+t.Name+":"+strconv.Itoa(int(k.port()))).
+		SubResource("proxy").Suffix("stats").Param("usedonly", "").Param("filter", StatsFilter).URL()
+	return get(ctx, withoutRedirects(rc.Client), u.String())
+}
+
+// withoutRedirects is a copy of c that never follows a redirect.
+func withoutRedirects(c *http.Client) *http.Client {
+	cp := *c
+	cp.CheckRedirect = noRedirect
+	return &cp
+}
+
+// get issues one GET with no retries; a status other than 200 is closed
+// unread and fails with the code only.
+func get(ctx context.Context, c *http.Client, u string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
-	}
-	c := defaultClient
-	if k.Client != nil {
-		cp := *k.Client
-		cp.CheckRedirect = noRedirect
-		c = &cp
 	}
 	resp, err := c.Do(req)
 	if err != nil {
@@ -153,17 +166,6 @@ func NewHTTPClient() *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
 	return &http.Client{Transport: t, CheckRedirect: noRedirect}
-}
-
-// NewPodProxyClient is a clientset over cfg whose requests never follow a
-// redirect, for Kube.Kube; a 3xx through pods/proxy fails as a status error.
-func NewPodProxyClient(cfg *rest.Config) (kubernetes.Interface, error) {
-	hc, err := rest.HTTPClientFor(cfg)
-	if err != nil {
-		return nil, err
-	}
-	hc.CheckRedirect = noRedirect
-	return kubernetes.NewForConfigAndClient(cfg, hc)
 }
 
 type statusError int

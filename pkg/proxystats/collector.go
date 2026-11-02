@@ -85,8 +85,8 @@ type podState struct {
 	lds, cds           int64
 	rds, clusters      map[string]int64
 	ldsSince, cdsSince time.Time
-	// truncated is set when names were dropped under maxNames.
-	truncated bool
+	// rdsCut and clustersCut are set when names were dropped from that list.
+	rdsCut, clustersCut bool
 }
 
 // New returns a Collector for cfg.
@@ -276,11 +276,10 @@ func (c *Collector) fold(key podKey, t Target, r scraped, now time.Time) Pod {
 	cur := &podState{uptime: ps.Uptime, lds: ps.LDS.Rejected, cds: ps.CDS.Rejected}
 	p.LDS, cur.ldsSince = observe(reset, prev.lds, cur.lds, prev.ldsSince, now)
 	p.CDS, cur.cdsSince = observe(reset, prev.cds, cur.cds, prev.cdsSince, now)
-	var cutR, cutC bool
-	cur.rds, p.RDS, cutR = names(reset, prev.rds, prev.truncated, ps.RDS)
-	cur.clusters, p.Clusters, cutC = names(reset, prev.clusters, prev.truncated, ps.Clusters)
-	cur.truncated = cutR || cutC
-	p.NamesTruncated = cur.truncated
+	cur.rds, p.RDS, cur.rdsCut = names(reset, prev.rds, prev.rdsCut, ps.RDS)
+	cur.clusters, p.Clusters, cur.clustersCut = names(reset, prev.clusters, prev.clustersCut, ps.Clusters)
+	cur.rdsCut, cur.clustersCut = cur.rdsCut || ps.RDSTruncated, cur.clustersCut || ps.ClustersTruncated
+	p.RDSTruncated, p.ClustersTruncated = cur.rdsCut, cur.clustersCut
 	c.pods[key] = cur
 	return p
 }

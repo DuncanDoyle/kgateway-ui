@@ -147,9 +147,6 @@ type Clients struct {
 	InCluster bool
 	// Scraper overrides the metrics scraper InCluster selects; nil keeps it.
 	Scraper ctrlmetrics.Scraper
-	// ProxyStats reads proxy stats through pods/proxy locally and never follows
-	// redirects (proxystats.NewPodProxyClient); nil falls back to Kube, for fakes.
-	ProxyStats kubernetes.Interface
 }
 
 // App is a built, not yet started, backend.
@@ -280,10 +277,7 @@ func proxyStatsCollector(c Clients, o Options, reg *extension.Registry, eng *eng
 	if src == nil {
 		k := proxystats.Kube{Client: proxystats.NewHTTPClient()}
 		if !c.InCluster {
-			k.Kube = c.ProxyStats
-			if k.Kube == nil {
-				k.Kube = c.Kube
-			}
+			k.Kube = c.Kube
 		}
 		src = k
 	}
@@ -368,11 +362,7 @@ func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Op
 	if err != nil {
 		return err
 	}
-	stats, err := proxystats.NewPodProxyClient(cfg)
-	if err != nil {
-		return err
-	}
-	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: md, InCluster: inCluster, ProxyStats: stats}, o, extension.New(opts...))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: md, InCluster: inCluster}, o, extension.New(opts...))
 	if err != nil {
 		return err
 	}

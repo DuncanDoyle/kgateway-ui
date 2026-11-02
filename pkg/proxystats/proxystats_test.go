@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	clocktesting "k8s.io/utils/clock/testing"
@@ -677,7 +678,7 @@ func TestRedirectsAreNeverFollowed(t *testing.T) {
 	host, port, _ := net.SplitHostPort(redirect.Listener.Addr().String())
 	p, _ := strconv.Atoi(port)
 	tg := proxystats.Target{Name: "edge-1", Gateway: gwRef("infra", "edge"), Addr: net.JoinHostPort(host, port)}
-	pods, err := proxystats.NewPodProxyClient(&rest.Config{Host: redirect.URL})
+	pods, err := kubernetes.NewForConfig(&rest.Config{Host: redirect.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +777,7 @@ func TestNameCapKeepsGrownNamesAndErrorsStayValid(t *testing.T) {
 	c := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Clock: testutil.FakeClock(), Installs: static(snapshot(nil), in)})
 	c.Round(context.Background())
 	st, _, _ := c.Round(context.Background())
-	if p := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]; !slices.Equal(p.RDS, want) || !p.NamesTruncated {
+	if p := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]; !slices.Equal(p.RDS, want) || !p.RDSTruncated || p.ClustersTruncated {
 		t.Fatalf("capped names: %+v", p)
 	}
 	st, _, _ = c.Round(context.Background())
@@ -834,5 +835,71 @@ func TestStatsExpireAfterThreeIntervals(t *testing.T) {
 	clk.Step(time.Nanosecond)
 	if v, _ := store.Snapshot().Get(proxystats.Key); v.State != collect.Unavailable || v.Data != nil {
 		t.Fatalf("after the TTL: %+v", v)
+	}
+}
+
+// pods/proxy errors are closed unread and never retried: a 500 with an
+// oversized body and a 429 with Retry-After each fail the Pod once, with the code.
+func TestPodProxyErrorsAreBoundedAndNotRetried(t *testing.T) {
+	for _, tc := range []struct {
+		code int
+		hdr  string
+	}{{http.StatusInternalServerError, ""}, {http.StatusTooManyRequests, "1"}} {
+		t.Run(strconv.Itoa(tc.code), func(t *testing.T) {
+			var hits atomic.Int32
+			var path string
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				path = r.URL.Path + "?" + r.URL.RawQuery
+				if tc.hdr != "" {
+					w.Header().Set("Retry-After", tc.hdr)
+				}
+				w.WriteHeader(tc.code)
+				// Far over MaxBody; the client must not read it.
+				chunk := []byte(strings.Repeat("secret ", 1<<14))
+				for range 64 {
+					if _, err := w.Write(chunk); err != nil {
+						return
+					}
+				}
+			}))
+			t.Cleanup(api.Close)
+			kc, err := kubernetes.NewForConfig(&rest.Config{Host: api.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = proxystats.Kube{Kube: kc}.Fetch(context.Background(), proxystats.Target{Name: "edge-1", Gateway: gwRef("infra", "edge")})
+			if err == nil || err.Error() != "HTTP "+strconv.Itoa(tc.code) {
+				t.Fatalf("want HTTP %d, got %v", tc.code, err)
+			}
+			if n := hits.Load(); n != 1 {
+				t.Fatalf("%d requests, want 1 (no retry)", n)
+			}
+			want := "/api/v1/namespaces/infra/pods/http:edge-1:9091/proxy/stats?filter=" + url.QueryEscape(proxystats.StatsFilter) + "&usedonly="
+			if path != want {
+				t.Fatalf("path %s\nwant %s", path, want)
+			}
+		})
+	}
+}
+
+// ParseEnvoy's own cap marks the list truncated, and only that list.
+func TestParseCapMarksTheList(t *testing.T) {
+	var b strings.Builder
+	for i := range 4100 {
+		fmt.Fprintf(&b, "http.http.rds.rc%04d.update_rejected: 1\n", i)
+	}
+	b.WriteString("cluster.c1.update_rejected: 1\n")
+	p, err := proxystats.ParseEnvoy([]byte(b.String()))
+	if err != nil || len(p.RDS) != 4096 || !p.RDSTruncated || p.ClustersTruncated || len(p.Clusters) != 1 {
+		t.Fatalf("%v: %d RDS names, truncated %v/%v", err, len(p.RDS), p.RDSTruncated, p.ClustersTruncated)
+	}
+	gw := gwRef("infra", "edge")
+	src := &scriptSource{targets: map[objects.Ref][]proxystats.Target{gw: {{ID: "u1", Name: "edge-1", Gateway: gw}}},
+		script: map[string][]proxystats.PodStats{"u1": {{Clusters: map[string]int64{"c": 1}, ClustersTruncated: true}}}}
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gw}}
+	st, _, _ := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Installs: static(snapshot(nil), in)}).Round(context.Background())
+	if q := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]; !q.ClustersTruncated || q.RDSTruncated {
+		t.Fatalf("source truncation: %+v", q)
 	}
 }
