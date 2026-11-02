@@ -88,11 +88,87 @@ func Load[T any](s *Store, key string) (T, bool) {
 	return t, ok
 }
 
-// States holds one install's check Stores, keyed by check name.
-type States struct{ stores map[string]*Store }
+// States holds one install's check Stores and memos, keyed by check name.
+type States struct {
+	stores map[string]*Store
+	memos  map[string]*memo
+}
 
 // NewStates returns States with no Stores.
-func NewStates() *States { return &States{stores: map[string]*Store{}} }
+func NewStates() *States { return &States{stores: map[string]*Store{}, memos: map[string]*memo{}} }
+
+// memo is a check's last run, reused while its input print holds and its
+// wake time is not due (design §16.2). Findings are shared and read-only.
+type memo struct {
+	print    uint64
+	findings []Finding
+	result   CheckResult
+	wake     time.Time
+	stamp    stamp
+	// out is the output print, set when a later check reads this one.
+	out uint64
+}
+
+// stamp records which reference times a CheckResult.CollectedAt equalled:
+// a reused result is restamped with the time a fresh run would stamp.
+type stamp uint8
+
+const (
+	stampNow stamp = 1 << iota
+	stampTakenAt
+	stampMetrics
+)
+
+// refTimes returns the reference times of in for a check declaring set,
+// each with the bit naming it; metrics count only when set declares them.
+func refTimes(in Input, set InputSet) (times [3]time.Time, bits [3]stamp, n int) {
+	times[n], bits[n], n = in.Now, stampNow, n+1
+	if in.Snapshot != nil {
+		times[n], bits[n], n = in.Snapshot.TakenAt, stampTakenAt, n+1
+	}
+	if set.Metrics && in.HasMetrics {
+		times[n], bits[n], n = in.Metrics.CollectedAt, stampMetrics, n+1
+	}
+	return times, bits, n
+}
+
+// sameTime reports whether a and b are the same instant in the same location,
+// so they serialise alike.
+func sameTime(a, b time.Time) bool { return a.Equal(b) && a.Location() == b.Location() }
+
+// stampOf returns the reference times of in that at equals.
+func stampOf(in Input, set InputSet, at time.Time) stamp {
+	times, bits, n := refTimes(in, set)
+	var s stamp
+	for i := range n {
+		if sameTime(times[i], at) {
+			s |= bits[i]
+		}
+	}
+	return s
+}
+
+// restamp returns the CollectedAt a fresh run over in would stamp: old when
+// s is empty. It is false when a reference time is missing or the times s
+// names now differ, so which one the check stamps is unknown.
+func (s stamp) restamp(in Input, set InputSet, old time.Time) (time.Time, bool) {
+	if s == 0 {
+		return old, true
+	}
+	times, bits, n := refTimes(in, set)
+	var at time.Time
+	var seen stamp
+	for i := range n {
+		if s&bits[i] == 0 {
+			continue
+		}
+		if seen != 0 && !sameTime(times[i], at) {
+			return time.Time{}, false
+		}
+		at, seen = times[i], seen|bits[i]
+	}
+	return at, seen == s
+}
 
 // store returns check's Store, creating it on first use.
 func (s *States) store(check string) *Store {
@@ -105,11 +181,13 @@ func (s *States) store(check string) *Store {
 }
 
 // Runtime is what Evaluate keeps across recomputes. Nil States gives each run
-// fresh Stores (tests); nil Print turns memoization off. Collected holds the
-// collector values; a check sees only the keys it declares.
+// fresh Stores (tests). Print returns the print of the inputs a check
+// declares, earlier checks' outputs aside, or false when they have none; nil
+// Print or nil States turns memoization off. Collected holds the collector
+// values; a check sees only the keys it declares.
 type Runtime struct {
 	States    *States
-	Print     func(InputSet) uint64
+	Print     func(InputSet) (uint64, bool)
 	Collected collect.Snapshot
 }
 

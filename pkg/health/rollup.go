@@ -2,7 +2,9 @@ package health
 
 import (
 	"cmp"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"slices"
 	"strings"
 	"time"
@@ -49,29 +51,44 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // check can neither hide a problem from the roll-up nor invent a severity.
 // Checks run in order, each with its Store from rt.States; a grace read
 // inside the grace period wakes the report at the grace end (Report.Next).
+// A check that does not declare Clock is skipped while the print of its
+// inputs equals its memo's and the memo's wake time is not due; its last
+// findings, result and wake time are reused (design §16.2).
 func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
+	memoize := rt.Print != nil && rt.States != nil
 	var outputs map[string]CheckOutput
+	var outPrints map[string]uint64 // output prints of the checks a later check reads
 	inputs := make([]InputSet, len(checks))
 	for i, c := range checks {
 		if inputs[i] = c.Inputs(); len(inputs[i].Checks) > 0 && outputs == nil {
 			outputs = make(map[string]CheckOutput, len(checks))
+		}
+		if memoize && len(inputs[i].Checks) > 0 {
+			if outPrints == nil {
+				outPrints = map[string]uint64{}
+			}
+			for _, dep := range inputs[i].Checks {
+				outPrints[dep] = 0
+			}
 		}
 	}
 	// Run every check first so the findings are allocated once.
 	runs := make([][]Finding, len(checks))
 	n := 0
 	for i, c := range checks {
-		ctx := runContext(in, c, inputs[i], rt, outputs)
-		fs, cr := c.Run(ctx)
+		fs, cr, wake, out := evaluateOne(in, c, inputs[i], rt, memoize, outputs, outPrints)
 		runs[i] = fs
 		n += len(fs)
 		r.Checks = append(r.Checks, cr)
 		if outputs != nil {
 			outputs[c.Name()] = CheckOutput{Findings: fs, Result: cr}
 		}
-		if w := ctx.sink.wake; !w.IsZero() && (r.Next.IsZero() || w.Before(r.Next)) {
-			r.Next = w
+		if _, read := outPrints[c.Name()]; read {
+			outPrints[c.Name()] = out
+		}
+		if !wake.IsZero() && (r.Next.IsZero() || wake.Before(r.Next)) {
+			r.Next = wake
 		}
 	}
 	r.Findings = make([]Finding, 0, n)
@@ -91,6 +108,44 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	}
 	r.State = RollUp(r.Findings, r.Checks)
 	return r
+}
+
+// evaluateOne runs c, or reuses its memo, and returns its findings, result,
+// wake time and, when a later check reads it (outPrints has its name), its
+// output print.
+func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outputs map[string]CheckOutput,
+	outPrints map[string]uint64,
+) (fs []Finding, cr CheckResult, wake time.Time, out uint64) {
+	var key uint64
+	keyed := false
+	if memoize && !set.Clock {
+		if key, keyed = rt.Print(set); keyed {
+			for _, dep := range set.Checks {
+				key = mix(key, outPrints[dep])
+			}
+		}
+	}
+	if keyed {
+		if m := rt.States.memos[c.Name()]; m != nil && m.print == key && (m.wake.IsZero() || m.wake.After(in.Now)) {
+			if at, fresh := m.stamp.restamp(in, set, m.result.CollectedAt); fresh {
+				cr = m.result
+				cr.CollectedAt = at
+				return m.findings, cr, m.wake, m.out
+			}
+		}
+	}
+	ctx := runContext(in, c, set, rt, outputs)
+	fs, cr = c.Run(ctx)
+	wake = ctx.sink.wake
+	if _, read := outPrints[c.Name()]; read {
+		out = outputPrint(fs, cr)
+	}
+	if keyed {
+		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, cr.CollectedAt), out: out}
+	} else if memoize {
+		delete(rt.States.memos, c.Name())
+	}
+	return fs, cr, wake, out
 }
 
 // runContext returns c's RunContext: its Store, a fresh sink, and in with
@@ -181,4 +236,72 @@ func compareParents(pa, pb *objects.ParentRef) int {
 		b = *pb
 	}
 	return cmp.Or(compareRefs(a.Ref(), b.Ref()), cmp.Compare(a.SectionName, b.SectionName), cmp.Compare(a.Port, b.Port))
+}
+
+// mix folds v into h: an FNV-1a step, then the splitmix64 finaliser.
+func mix(h, v uint64) uint64 {
+	x := (h^v)*1099511628211 + 0x9e3779b97f4a7c15
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+	return x ^ (x >> 31)
+}
+
+// outputPrint is FNV-64a over every field of fs and of cr but CollectedAt,
+// a timestamp a reused result is restamped with.
+func outputPrint(fs []Finding, cr CheckResult) uint64 {
+	h := fnv.New64a()
+	var b [8]byte
+	u64 := func(v uint64) {
+		binary.LittleEndian.PutUint64(b[:], v)
+		_, _ = h.Write(b[:])
+	}
+	str := func(s string) {
+		u64(uint64(len(s))) // length prefix keeps adjacent strings apart
+		_, _ = h.Write([]byte(s))
+	}
+	flag := func(v bool) {
+		if v {
+			u64(1)
+		} else {
+			u64(0)
+		}
+	}
+	ref := func(r objects.Ref) { str(r.Group); str(r.Kind); str(r.Namespace); str(r.Name) }
+	at := func(t *time.Time) {
+		if flag(t != nil); t != nil {
+			u64(uint64(t.UnixNano()))
+			str(t.Location().String())
+		}
+	}
+	u64(uint64(len(fs)))
+	for _, f := range fs {
+		str(f.Code)
+		str(f.Slug)
+		str(string(f.Severity))
+		str(f.Install)
+		if flag(f.Resource != nil); f.Resource != nil {
+			ref(*f.Resource)
+		}
+		str(f.Message)
+		str(f.Detail)
+		at(f.Since)
+		flag(f.Restricted)
+		u64(uint64(len(f.Evidence)))
+		for _, e := range f.Evidence {
+			ref(e)
+		}
+		at(f.ResourceSince)
+		if flag(f.parent != nil); f.parent != nil {
+			ref(f.parent.Ref())
+			str(f.parent.SectionName)
+			u64(uint64(f.parent.Port)) //nolint:gosec // hashed bits; the sign does not matter
+		}
+	}
+	str(cr.Name)
+	flag(cr.OK)
+	flag(cr.Required)
+	str(cr.Error)
+	str(cr.Detail)
+	flag(cr.Pending)
+	return h.Sum64()
 }

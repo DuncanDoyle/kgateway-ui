@@ -107,7 +107,7 @@ No gate changes without the user. A broken gate stops the work, and the numbers 
 
 The 10-minute spec-edit run recomputes 1.3 times a second, more than the annotation stream's 1/s; it is reported, not gated. The CI cold allocation is 224 MiB on linux/amd64; its budget is 246 MiB (user, 2026-11-02; D-039).
 
-**Memoization.** The warm-recompute delta of `BenchmarkCompute` is recorded here by Task 18.
+**Memoization** (Task 18, 2026-11-02, local, `286e7ea` against Task 18, run back-to-back). `BenchmarkCompute` large median 33.5–34.1 → 32.9–33.0 ms, large-hit 19.9–20.0 → 20.3–20.8 ms, +40 allocs per compute; `TestBudgetWarmRecompute` consistent / contradicting 33.0 / 39.1 → 33.8 / 39.4 ms. The delta is noise: every Phase 1 and 2 check that reads objects declares `Clock` through `AllInputs`, so only cluster access, served kinds and controller scope are memoized.
 
 **Captures.** The NACK observation and the 2.5 timebox outcome are recorded here by Task 20.
 

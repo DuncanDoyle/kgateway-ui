@@ -77,6 +77,9 @@ type Config struct {
 	// Collected, if set, returns the collector values; checks read them and
 	// the confirm tick compares their print (D-019).
 	Collected func() collect.Snapshot
+	// NoMemo turns per-check memoization off, so every check runs on every
+	// recompute (tests compare against it).
+	NoMemo bool
 }
 
 // InstallModel is everything the API serves about one install.
@@ -136,6 +139,9 @@ type Engine struct {
 	views map[string]*viewsMemo
 	// states holds each install's check Stores, keyed by install ID; only touched under computeMu.
 	states map[string]*health.States
+	// kindKeys and ownedKeys name the kinds input prints read; see kindKeys.
+	kindKeys  map[objects.GroupKind]kindKey
+	ownedKeys []kindKey
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -169,8 +175,10 @@ func New(cfg Config) *Engine {
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
+	e := &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
 		decode: newDecodeCache(), persist: newPersistence()}
+	e.kindKeys, e.ownedKeys = kindKeys(cfg.Served)
+	return e
 }
 
 // Platform returns the platform the engine computes models for.
@@ -341,9 +349,15 @@ func (e *Engine) compute() *Published {
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
+		rt := health.Runtime{States: states[res.ID()], Collected: col}
+		if !e.cfg.NoMemo {
+			pc := &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
+				ver: &ver, views: views[i], kc: kc, col: col}
+			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
+		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode}, e.cfg.Checks, health.Runtime{States: states[res.ID()], Collected: col})
+			Computed: views[i], Views: e.decode}, e.cfg.Checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}

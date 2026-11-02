@@ -168,6 +168,7 @@ For downstream builds:
 
 - A check is now `Name()`, `Inputs()` and `Run(ctx health.RunContext)`. `Run` no longer takes a `health.Input`. `RunContext` embeds `Input`, so `ctx.Now` and `ctx.Install` still work.
 - `Inputs()` returns a `health.InputSet` naming what `Run` reads. Declare everything `Run` reads. `health.AllInputs()` declares everything except collector keys and earlier checks' output.
+- The engine reruns a check only when a declared input changes or its wake time passes, so an undeclared read can serve a stale result.
 - Collector values moved out of `health.Input.Collected`. Declare the key in `Inputs().Collected` and read it with `ctx.Collected("<collector>/<key>")`. It returns false for a key you did not declare.
 - Keep state between recomputes in `ctx.State`, a per-check `*health.Store`. Replace package-level variables with it. The engine owns the Store, and it is empty after a restart.
 - Call `ctx.WakeAt(t)` to be recomputed at a later time. Call `ctx.Output(name)` to read an earlier check's output, and declare that check in `Inputs().Checks`.

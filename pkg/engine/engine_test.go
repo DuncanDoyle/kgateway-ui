@@ -302,11 +302,11 @@ func TestComputeSelectsRulesPerInstall(t *testing.T) {
 }
 
 // storeCheck counts its runs in its Store and marks each install that writes
-// to it; its finding reports both.
+// to it; its finding reports both. It declares Clock, so it runs on every recompute.
 type storeCheck struct{}
 
 func (storeCheck) Name() string            { return "store probe" }
-func (storeCheck) Inputs() health.InputSet { return health.InputSet{} }
+func (storeCheck) Inputs() health.InputSet { return health.InputSet{Clock: true} }
 func (storeCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
 	n, _ := health.Load[int](ctx.State, "runs")
 	ctx.State.Set("runs", n+1)
