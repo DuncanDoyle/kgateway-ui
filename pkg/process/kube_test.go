@@ -36,9 +36,8 @@ import (
 
 const proxyImage = "cr.kgateway.dev/kgateway-dev/envoy-wrapper:v2.4.7"
 
-// proxyDeployment is the proxy Deployment kgateway v2.3/v2.4 renders for
-// Gateway ns/gw: name and gateway-name label from the truncated name, and a
-// Pod template with the chart's Pod labels. owned adds the Gateway owner.
+// proxyDeployment is kgateway v2.3/v2.4's proxy Deployment for ns/gw, named and
+// labelled by the safe name; owned adds the Gateway owner.
 func proxyDeployment(ns, gw string, replicas int32, owned bool) *appsv1.Deployment {
 	safe := process.SafeGatewayLabelValue(gw)
 	sel := map[string]string{"app.kubernetes.io/name": safe, "app.kubernetes.io/instance": safe, "gateway.networking.k8s.io/gateway-name": safe}
@@ -73,8 +72,7 @@ func podOf(d *appsv1.Deployment, name string) *corev1.Pod {
 	}
 }
 
-// acmeDetector is a second distribution: its own controller name, class and
-// controller labels, and the same proxy Deployment labels as upstream.
+// acmeDetector is a second distribution with upstream's proxy labels.
 type acmeDetector struct{}
 
 func (acmeDetector) Name() string { return "acme" }
@@ -112,9 +110,8 @@ type noMetrics struct{}
 
 func (noMetrics) Get(string) (ctrlmetrics.Result, bool) { return ctrlmetrics.Result{}, false }
 
-// world is a synced snapshot: the upstream controller kgw/kgateway, the
-// kgateway class, objs, and the Deployments and proxy Pods given. Pods,
-// Deployments and proxy Pods are watched; events adds a running Events watch.
+// world is a synced snapshot of kgw/kgateway, its class, objs, deps and Pods;
+// events adds a running Events watch.
 func world(t *testing.T, objs []*unstructured.Unstructured, deps []*appsv1.Deployment, ctrlPods, proxyPods []*corev1.Pod, events bool) *cache.Snapshot {
 	t.Helper()
 	ctrl := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
@@ -170,8 +167,7 @@ func names(s process.Set) []string {
 	return out
 }
 
-// Review Focus 1: two installs' proxies in one namespace. Each install's
-// process data holds only its own Gateways, their Pods and its controller.
+// Review Focus 1: two installs' proxies in one namespace never cross.
 func TestProxyPodsBelongToOneInstall(t *testing.T) {
 	gwA, gwB := testutil.Gateway("infra", "a", "kgateway", nil), testutil.Gateway("infra", "b", "acme", nil)
 	acmeClass := testutil.GatewayClass("acme", "acme.example/gateway", true)
@@ -212,8 +208,7 @@ func resolved() install.Resolved {
 	return install.Resolved{Install: in}
 }
 
-// Review Focus 3: Gateway names over 63 characters. Their gateway-name label
-// is truncated with a hash; Gateways sharing a truncated prefix never merge.
+// Review Focus 3: long Gateway names sharing a truncated prefix never merge.
 func TestLongGatewayNameProxyPods(t *testing.T) {
 	t.Run("scale worst world", func(t *testing.T) {
 		// Task 25's long-named Gateways and their proxy Pods, with label-only Deployments.
@@ -272,8 +267,8 @@ func TestLongGatewayNameProxyPods(t *testing.T) {
 	})
 }
 
-// D-016 R3: a self-managed Gateway's proxies are not observed, never failing.
-func TestSelfManagedIsNotObserved(t *testing.T) {
+// D-016 R3: a Gateway without a proxy Deployment (here self-managed) is not observed.
+func TestNoDeploymentIsNotObserved(t *testing.T) {
 	gw := testutil.Gateway("infra", "edge", "kgateway", nil)
 	testutil.SetGatewayParameters(gw, kinds.KgatewayGroup, "GatewayParameters", "sm")
 	snap := world(t, []*unstructured.Unstructured{gw, testutil.GatewayParameters("infra", "sm", true)}, nil, nil, nil, true)
@@ -290,8 +285,7 @@ func TestSelfManagedIsNotObserved(t *testing.T) {
 	}
 }
 
-// §9.1: the termination message can hold a log tail; it never reaches the
-// process model or any API body.
+// §9.1: the termination message never reaches the model or an API body.
 func TestTerminationMessageNeverRead(t *testing.T) {
 	const secret = "secret-value"
 	finished := metav1.NewTime(testutil.Now.Add(-5 * time.Minute))
@@ -456,8 +450,7 @@ func (c processCheck) Run(ctx health.RunContext) ([]health.Finding, health.Check
 	return fs, health.CheckResult{Name: "process probe", OK: true}
 }
 
-// Process data keys a declaring check's memo: unchanged data skips the run,
-// a restart runs it again.
+// Process data keys a declaring check's memo: a restart reruns it.
 func TestProcessDataKeysTheMemo(t *testing.T) {
 	gw := testutil.Gateway("infra", "edge", "kgateway", nil)
 	d := proxyDeployment("infra", "edge", 1, true)
@@ -520,3 +513,49 @@ func TestUndeclaredProcessIsCaught(t *testing.T) {
 
 // gwRef is the ref of Gateway infra/name.
 func gwRef(name string) objects.Ref { return testutil.GwRef("infra", name).Ref() }
+
+// Pod order in the snapshot never changes the process data or its print.
+func TestProcessOrderIsDeterministic(t *testing.T) {
+	gw := testutil.Gateway("infra", "edge", "kgateway", nil)
+	d := proxyDeployment("infra", "edge", 2, true)
+	ctrl := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 2, 2)
+	c1, c2 := testutil.ControllerPod(ctrl, "kgateway-a", true), testutil.ControllerPod(ctrl, "kgateway-b", true)
+	p1, p2 := podOf(d, "edge-a"), podOf(d, "edge-b")
+	fwd := world(t, []*unstructured.Unstructured{gw}, []*appsv1.Deployment{d}, []*corev1.Pod{c1, c2}, []*corev1.Pod{p1, p2}, false)
+	rev := *fwd
+	rev.Pods, rev.ProxyPods = []*corev1.Pod{c2, c1}, []*corev1.Pod{p2, p1}
+	runs := 0
+	src := &staticSnapPtr{s: fwd}
+	e := engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: noMetrics{},
+		Checks: []health.Check{processCheck{declare: true, runs: &runs}}, Now: func() time.Time { return testutil.Now }})
+	a := modelOf(t, e.Compute(), "kgw.kgateway").Process
+	src.s = &rev
+	b := modelOf(t, e.Compute(), "kgw.kgateway").Process
+	if a.Print != b.Print || runs != 1 {
+		t.Fatalf("reordered Pods: prints %x and %x, %d runs", a.Print, b.Print, runs)
+	}
+	if got := names(b.Controller); !slices.Equal(got, []string{"kgateway-a", "kgateway-b"}) || b.Controller.Processes[0].Name != "kgateway-a" {
+		t.Fatalf("controller processes out of order: %v", b.Controller.Processes)
+	}
+}
+
+// Owner references need the Gateway API group; several label matches give none.
+func TestProxyDeploymentMatching(t *testing.T) {
+	sel := install.UpstreamDetector{}.ProxySelector()
+	gw := gwRef("edge")
+	other := proxyDeployment("infra", "edge", 1, true)
+	other.OwnerReferences[0].APIVersion = "example.com/v1"
+	other.Labels["gateway.networking.k8s.io/gateway-name"] = "unrelated"
+	if got := process.ProxyDeployment(gw, []*appsv1.Deployment{other}, sel); got != nil {
+		t.Fatalf("an owner of another group matched: %s", got.Name)
+	}
+	a, b := proxyDeployment("infra", "edge", 1, false), proxyDeployment("infra", "edge", 1, false)
+	b.Name = "edge-copy"
+	if got := process.ProxyDeployment(gw, []*appsv1.Deployment{a}, sel); got != a {
+		t.Fatalf("one label match: want it, got %v", got)
+	}
+	if got := process.ProxyDeployment(gw, []*appsv1.Deployment{a, b}, sel); got != nil {
+		t.Fatalf("two label matches: want none, got %s", got.Name)
+	}
+}

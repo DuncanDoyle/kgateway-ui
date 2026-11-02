@@ -146,10 +146,8 @@ type Input struct {
 	Process *ProcessData
 }
 
-// ProcessData is one install's processes (design §9.1): its controller, and
-// the proxies of each Gateway it owns, by Gateway. Print hashes both. The
-// controller Pods are in the install's namespace and a Gateway's proxy Pods
-// in the Gateway's, so process.PodRef gives each Pod's ref for §14 rule 16.
+// ProcessData is one install's controller and per-Gateway proxy processes
+// (§9.1); Print hashes both, and process.PodRef gives each Pod's ref.
 type ProcessData struct {
 	Controller process.Set
 	Proxies    map[objects.Ref]process.Set

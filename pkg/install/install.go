@@ -77,9 +77,8 @@ type Detector interface {
 	Detect(d *appsv1.Deployment) (Install, bool)
 }
 
-// ProxyPodDetector is a Detector that names the labels of its gateway proxy
-// Pods. The cache watches proxy Pods only through these selectors; a detector
-// without the method has no proxy Pod watch.
+// ProxyPodDetector is a Detector that selects its proxy Pods; without it the
+// cache starts no proxy Pod watch for that distribution.
 type ProxyPodDetector interface {
 	ProxyPodSelector() labels.Selector
 }

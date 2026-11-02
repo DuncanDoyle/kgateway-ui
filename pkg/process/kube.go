@@ -14,9 +14,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// Kube is the Kubernetes Source. It reads the install's controller Pods, the
-// proxy Pods of each Gateway's proxy Deployment, the Deployments and the
-// Event deltas of the snapshot. It never reads a termination message.
+// Kube is the Kubernetes Source: Pods, Deployments and Event deltas of the
+// snapshot. It never reads a termination message.
 type Kube struct{}
 
 // proxyImage is the last path segment of the kgateway proxy image.
@@ -38,12 +37,13 @@ func (Kube) Controller(in install.Resolved, snap *cache.Snapshot) Set {
 	for _, p := range in.Pods {
 		s.Processes = append(s.Processes, fromPod(p, container(p, func(c corev1.Container) bool { return c.Name == in.Container }), snap, probes))
 	}
+	slices.SortFunc(s.Processes, func(a, b Process) int { return strings.Compare(a.Name, b.Name) })
 	return s
 }
 
-// Proxies implements Source: the Pods that gw's proxy Deployment selects in
-// its namespace. Without that Deployment (a self-managed proxy, or none yet),
-// or without a running proxy Pod watch, the processes are not observed.
+// Proxies implements Source: the Pods gw's proxy Deployment selects. Without the
+// Deployment or the proxy Pod watch they are not observed; a consumer tells a
+// self-managed proxy apart by joining ProxyMode and Snapshot.Synced.
 func (Kube) Proxies(in install.Resolved, gw objects.Ref, snap *cache.Snapshot) Set {
 	d := ProxyDeployment(gw, snap.Deployments, in.ProxySelector)
 	if d == nil {
@@ -66,29 +66,32 @@ func (Kube) Proxies(in install.Resolved, gw objects.Ref, snap *cache.Snapshot) S
 	return s
 }
 
-// ProxyDeployment returns gw's proxy Deployment among ds: one in gw's
-// namespace that sel matches, owned by gw, else one whose gateway-name label
-// is SafeGatewayLabelValue of gw's name. A nil sel matches none.
+// ProxyDeployment is gw's proxy Deployment among those sel matches: owned by gw,
+// else the only one labelled SafeGatewayLabelValue(gw.Name). A nil sel matches none.
 func ProxyDeployment(gw objects.Ref, ds []*appsv1.Deployment, sel labels.Selector) *appsv1.Deployment {
 	if sel == nil {
 		return nil
 	}
 	label := SafeGatewayLabelValue(gw.Name)
-	var byLabel *appsv1.Deployment
+	var byLabel []*appsv1.Deployment
 	for _, d := range ds {
 		if d.Namespace != gw.Namespace || !sel.Matches(labels.Set(d.Labels)) {
 			continue
 		}
 		for _, o := range d.OwnerReferences {
-			if o.Kind == "Gateway" && o.Name == gw.Name {
+			if o.Kind == "Gateway" && o.Name == gw.Name && strings.HasPrefix(o.APIVersion, objects.GatewayAPIGroup+"/") {
 				return d
 			}
 		}
-		if byLabel == nil && d.Labels["gateway.networking.k8s.io/gateway-name"] == label {
-			byLabel = d
+		if d.Labels["gateway.networking.k8s.io/gateway-name"] == label {
+			byLabel = append(byLabel, d)
 		}
 	}
-	return byLabel
+	// Several label matches cannot be told apart.
+	if len(byLabel) != 1 {
+		return nil
+	}
+	return byLabel[0]
 }
 
 // desired is d's replica count; the API server defaults an unset one to 1.
@@ -100,9 +103,8 @@ func desired(d *appsv1.Deployment) *int32 {
 	return &n
 }
 
-// rollout reads d's Progressing condition. A rollout runs while a new
-// generation is unobserved or the condition is True with a reason other than
-// NewReplicaSetAvailable; ProgressDeadlineExceeded is stuck, not progressing.
+// rollout reads d's Progressing condition: running while a generation is unobserved or the
+// reason is not NewReplicaSetAvailable; ProgressDeadlineExceeded is stuck, not progressing.
 func rollout(d *appsv1.Deployment) *Rollout {
 	r := &Rollout{}
 	var cond *appsv1.DeploymentCondition

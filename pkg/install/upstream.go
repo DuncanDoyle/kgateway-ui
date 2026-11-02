@@ -35,9 +35,8 @@ func (UpstreamDetector) ProxySelector() labels.Selector {
 	return labels.SelectorFromSet(labels.Set{"app.kubernetes.io/managed-by": "kgateway", "app.kubernetes.io/component": "proxy"})
 }
 
-// ProxyPodSelector implements ProxyPodDetector. The proxy Pod template sets
-// kgateway=kube-gateway and the proxy component label; the Deployment's
-// managed-by label is not on the Pods.
+// ProxyPodSelector implements ProxyPodDetector with the proxy Pod template's
+// labels; the Deployment's managed-by label is not on the Pods.
 func (UpstreamDetector) ProxyPodSelector() labels.Selector {
 	return labels.SelectorFromSet(labels.Set{"kgateway": "kube-gateway", "app.kubernetes.io/component": "proxy"})
 }
