@@ -949,7 +949,8 @@ func TestScopeUnknownKeepsStatusTrigger(t *testing.T) {
 	s := newDStepper(t, func(c *Config) { c.Scope = unknownScope{} })
 	w.step(s, 0)
 	fs := findingsOn(w.step(s, health.Grace+time.Second), health.CodeDelegatedNotAttached, "shop/c")
-	if len(fs) != 1 || fs[0].Severity != health.SeverityWarning || fs[0].Detail != "No status entry for parent HTTPRoute shop/api" || fs[0].Since != nil {
+	// Its since is the UI's first-seen time (step 0), not a computed window start.
+	if len(fs) != 1 || fs[0].Severity != health.SeverityWarning || fs[0].Detail != "No status entry for parent HTTPRoute shop/api" || fs[0].Since == nil || !fs[0].Since.Equal(testutil.Now) {
 		t.Fatalf("want the status trigger alone: %+v", fs)
 	}
 }

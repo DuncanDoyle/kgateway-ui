@@ -330,7 +330,10 @@ func TestEvidenceRestrictedFinding(t *testing.T) {
 	e, some, _ := startWith(t, setup{authz: hideAPI}, objs...)
 	_, all, _ := startWith(t, setup{}, objs...)
 	f, full := finding(get[HealthResponse](t, some, base+"/health", 200)), finding(get[HealthResponse](t, all, base+"/health", 200))
-	if !f.EvidenceRestricted || f.Restricted || f.Detail != restrictedEvidence || f.Message != full.Message || f.Severity != full.Severity || f.Since != nil || full.Since != nil {
+	// The status trigger first appeared with the child, so both sinces are its first compute.
+	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
+	if !f.EvidenceRestricted || f.Restricted || f.Detail != restrictedEvidence || f.Message != full.Message || f.Severity != full.Severity ||
+		f.ID != full.ID || full.Since == nil || !full.Since.Equal(childSeen) || f.Since == nil || !f.Since.Equal(childSeen) {
 		t.Fatalf("restricted %+v, all %+v", f, full)
 	}
 
@@ -341,7 +344,6 @@ func TestEvidenceRestrictedFinding(t *testing.T) {
 	if f := finding(get[HealthResponse](t, open, base+"/health", 200)); f.Since == nil || !f.Since.Equal(parentSeen) {
 		t.Fatalf("allow-all since %v, want %v", f.Since, parentSeen)
 	}
-	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
 	if f := finding(get[HealthResponse](t, srv, base+"/health", 200)); f.Since == nil || !f.Since.Equal(childSeen) || f.Since.Location() != time.UTC {
 		t.Fatalf("restricted since %v, want the child's first-seen %v", f.Since, childSeen)
 	}

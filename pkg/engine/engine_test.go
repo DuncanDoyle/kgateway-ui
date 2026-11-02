@@ -311,7 +311,9 @@ func (storeCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResu
 	n, _ := health.Load[int](ctx.State, "runs")
 	ctx.State.Set("runs", n+1)
 	ctx.State.Set("install/"+ctx.Install.ID(), true)
-	return []health.Finding{{Code: "ACME-001", Severity: health.SeverityInfo, Install: ctx.Install.ID(), Message: "store",
+	// A since of its own keeps the engine's first-seen entry out of the Store.
+	now := ctx.Now
+	return []health.Finding{{Code: "ACME-001", Severity: health.SeverityInfo, Install: ctx.Install.ID(), Message: "store", Since: &now,
 		Detail: fmt.Sprintf("runs=%d keys=%d", n+1, ctx.State.Len())}}, health.CheckResult{Name: "store probe", OK: true, CollectedAt: ctx.Now}
 }
 

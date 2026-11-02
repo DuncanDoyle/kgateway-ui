@@ -147,6 +147,10 @@ func CheckDeclaredInputs(t *testing.T, c health.Check, in health.Input, rt healt
 	t.Helper()
 	set := c.Inputs()
 	checks := []health.Check{c}
+	// One States for every run: the engine's first-seen since is not a check input.
+	if rt.States == nil {
+		rt.States = health.NewStates()
+	}
 	base := health.Evaluate(in, checks, rt)
 	want := normalise(base)
 

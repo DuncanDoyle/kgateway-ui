@@ -52,6 +52,7 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // Checks run in order, each with its Store from rt.States; a grace read
 // inside the grace period wakes the report at the grace end (Report.Next).
 // A check without Clock reuses its memo while its input print holds and its wake time is not due (§16.2).
+// Every finding gets its ID; one without Since gets its first-seen time from its check's Store (design §5.1).
 func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
 	memoize := rt.Print != nil && rt.States != nil
@@ -128,6 +129,8 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 			if at, fresh := m.stamp.restamp(in, set, rt.Collected, m.result.CollectedAt); fresh {
 				cr = m.result
 				cr.CollectedAt = at
+				// Run did not execute, so the memo's kept IDs stand in for its Retain calls.
+				pruneSince(rt.States.stores[c.Name()], m.keep)
 				return m.findings, cr, m.wake, m.out
 			}
 		}
@@ -135,11 +138,13 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	ctx := runContext(in, c, set, rt, outputs)
 	fs, cr = c.Run(ctx)
 	wake = ctx.sink.wake
+	keep := identify(in.Install.ID(), in.Now, fs, ctx.State, ctx.sink.retained)
+	pruneSince(ctx.State, keep)
 	if _, read := outPrints[c.Name()]; read {
 		out = outputPrint(fs, cr)
 	}
 	if keyed {
-		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: out}
+		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: out, keep: keep}
 	} else if memoize {
 		delete(rt.States.memos, c.Name())
 	}
@@ -273,6 +278,8 @@ func outputPrint(fs []Finding, cr CheckResult) uint64 {
 	}
 	u64(uint64(len(fs)))
 	for _, f := range fs {
+		str(f.ID)
+		str(f.Group)
 		str(f.Code)
 		str(f.Slug)
 		str(string(f.Severity))

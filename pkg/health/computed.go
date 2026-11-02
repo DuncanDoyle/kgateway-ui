@@ -48,7 +48,8 @@ func (c computedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			on, since := ch.On, ch.Since
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet, v.Delegation.Rows),
-				Since: &since, Evidence: evidence(ch, v.Delegation.Rows)}
+				Since: &since, Evidence: evidence(ch, v.Delegation.Rows),
+				Key: []string{string(ch.ID.Kind), ch.ID.Subject, ch.Key.Group, ch.Key.Kind, ch.Key.Namespace, ch.Key.Name, ch.Key.SectionName}}
 			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rules 7, 9).
 			u := ownedObject(in.Owned, owned, on)
 			if u == nil {

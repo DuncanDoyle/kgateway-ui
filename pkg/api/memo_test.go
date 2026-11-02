@@ -435,6 +435,10 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 			if !bytes.Equal(got, want) {
 				t.Errorf("%s: GET %s differs with memoization:\n got %s\nwant %s", st.name, p, got, want)
 			}
+			// The probes' findings carry an id and a first-seen since, so both are compared.
+			if p == paths[0] && (!bytes.Contains(got, []byte(`"id":"f1-`)) || !bytes.Contains(got, []byte(`"since":`))) {
+				t.Errorf("%s: GET %s has no finding id or since:\n%s", st.name, p, got)
+			}
 		}
 	}
 	// Each probe was skipped at least once, and the republish was served from the memo.

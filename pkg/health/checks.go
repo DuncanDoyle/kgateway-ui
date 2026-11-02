@@ -41,7 +41,7 @@ func ok(name string, required bool, at time.Time) CheckResult {
 
 func unavailable(in Input, name, why string) ([]Finding, CheckResult) {
 	return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-			Message: "Could not check " + name, Detail: why}},
+			Message: "Could not check " + name, Detail: why, Key: []string{name}}},
 		CheckResult{Name: name, Required: true, CollectedAt: in.Now, Error: why}
 }
 
@@ -68,7 +68,7 @@ func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	for gvr, a := range in.Snapshot.Access {
 		if !a.OK {
 			fs = append(fs, Finding{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-				Message: "No access to " + resourceName(gvr), Detail: a.Err})
+				Message: "No access to " + resourceName(gvr), Detail: a.Err, Key: []string{c.Name(), resourceName(gvr)}})
 		}
 	}
 	if len(fs) > 0 {
@@ -106,7 +106,7 @@ func (c kindsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	why := "served kinds changed: " + in.KindsChange.String()
 	return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-			Message: "Served kinds changed; restart the UI to watch them", Detail: in.KindsChange.String()}},
+			Message: "Served kinds changed; restart the UI to watch them", Detail: in.KindsChange.String(), Key: []string{c.Name()}}},
 		CheckResult{Name: c.Name(), Required: true, CollectedAt: in.Now, Error: why}
 }
 
@@ -214,9 +214,10 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	var fs []Finding
 	id := in.Install.ID()
-	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string) {
+	// owner is the condition's discriminator owner: self, a listener, a parent or an ancestor.
+	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string, owner []string) {
 		f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
-			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)}
+			Message: message(cond), Detail: detail(cond, extra), Since: since(cond), Key: append(slices.Clip(owner), cond.Type)}
 		delegationCondition(&f, u, cond)
 		fs = append(fs, f)
 	}
@@ -242,8 +243,12 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			sev, msg = SeverityInfo, "Being processed by the controller"
 			inGrace[r] = true
 		}
+		key := []string{ownerSelf}
+		if parent != (objects.ParentRef{}) {
+			key = in.parentKey(u, parent)
+		}
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
-			Message: msg, Detail: why, parent: &parent})
+			Message: msg, Detail: why, Key: key, parent: &parent})
 	}
 	// pendingFor reports a block of u that is not processed; parent is set for
 	// route parents. An experimental-only kind gets a hint (D-018 §2).
@@ -263,18 +268,19 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	// evaluate reports every present condition of a current block that is False;
 	// current() has already turned a required Unknown into "not processed".
-	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) {
+	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string, owner []string) {
 		if !current(u, parent, cs, required, optional, extra) {
 			return
 		}
 		for _, t := range append(slices.Clone(required), optional...) {
 			if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
-				add(u, SeverityError, *cond, extra)
+				add(u, SeverityError, *cond, extra, owner)
 			}
 		}
 	}
+	self := []string{ownerSelf}
 	for _, gc := range in.Owned.GatewayClasses {
-		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "")
+		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "", self)
 	}
 	// listeners evaluates the listener status of a Gateway or ListenerSet; both
 	// share the listener status shape. With all, every configured listener
@@ -292,9 +298,10 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				}
 				continue
 			}
-			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
+			owner := []string{ownerListener, l.Name}
+			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name, owner)
 			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(u, *cf) {
-				add(u, SeverityError, *cf, "listener "+l.Name)
+				add(u, SeverityError, *cf, "listener "+l.Name, owner)
 			}
 		}
 	}
@@ -311,13 +318,13 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
 			continue
 		}
-		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "")
+		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "", self)
 		listeners(ls, v.ListenerStatus, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
 		v := in.views().Gateway(gw)
-		evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "")
+		evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "", self)
 		listeners(gw, v.ListenerStatus, true)
 	}
 	// Routes: one status block per current parentRef of this install, and per
@@ -340,7 +347,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				pendingFor(r.Obj, p, "no status from the controller for "+extra)
 				continue
 			}
-			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra)
+			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, in.parentKey(r.Obj, p))
 		}
 	}
 	// Routes whose parent does not exist. A parent of a kind the cache cannot
@@ -387,6 +394,8 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		for _, a := range mine {
 			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Ref().String()
+			owner := append([]string{ownerAncestor}, refKey(a.AncestorRef.Ref())...)
+			owner = append(owner, a.AncestorRef.SectionName)
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
@@ -394,7 +403,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			for _, t := range append(slices.Clone(policyRequired), policyOptional...) {
 				if cond := objects.FindCondition(a.Conditions, t); cond != nil {
 					if sev, report := policySeverity(*cond); report {
-						add(p.Obj, sev, *cond, extra)
+						add(p.Obj, sev, *cond, extra, owner)
 					}
 				}
 			}
@@ -693,7 +702,8 @@ func (c unwatchedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		r := u.Route
 		fs = append(fs, Finding{Code: CodeNamespaceNotWatched, Slug: "namespace-not-watched", Severity: SeverityWarning, Install: u.Install,
-			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets " + u.Gateway.Kind + " " + u.Gateway.String()})
+			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets " + u.Gateway.Kind + " " + u.Gateway.String(),
+			Key: refKey(u.Gateway)})
 	}
 	return fs, ok(c.Name(), false, in.Now)
 }
@@ -736,13 +746,13 @@ func (c verifyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	if !in.Verify.Available {
 		return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-			Message: "Could not verify scope against the controller", Detail: in.Verify.Reason}}, CheckResult{Name: c.Name(), CollectedAt: in.Now, Error: in.Verify.Reason}
+			Message: "Could not verify scope against the controller", Detail: in.Verify.Reason, Key: []string{c.Name()}}}, CheckResult{Name: c.Name(), CollectedAt: in.Now, Error: in.Verify.Reason}
 	}
 	var fs []Finding
 	for _, m := range in.Verify.Mismatches {
 		s := m.Since
 		fs = append(fs, Finding{Code: CodeScopeMismatch, Slug: "scope-mismatch", Severity: SeverityWarning, Install: in.Install.ID(),
-			Message: "UI scope differs from the controller", Since: &s,
+			Message: "UI scope differs from the controller", Since: &s, Key: []string{m.Namespace, m.Resource},
 			Detail: fmt.Sprintf("namespace %s, %s: UI counts %.0f, controller counts %.0f", m.Namespace, m.Resource, m.UI, m.Controller)})
 	}
 	return fs, ok(c.Name(), false, in.Now)

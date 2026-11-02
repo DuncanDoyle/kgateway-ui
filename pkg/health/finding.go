@@ -61,6 +61,9 @@ const Grace = 60 * time.Second
 
 // Finding is one problem or notable fact about an install.
 type Finding struct {
+	// ID is stable across recomputes and restarts and unique within the
+	// install; Evaluate sets it from Code, Resource and Key (design §5.1).
+	ID       string       `json:"id,omitempty"`
 	Code     string       `json:"code"`
 	Slug     string       `json:"slug"`
 	Severity Severity     `json:"severity"`
@@ -68,7 +71,14 @@ type Finding struct {
 	Resource *objects.Ref `json:"resource,omitempty"`
 	Message  string       `json:"message"`
 	Detail   string       `json:"detail,omitempty"`
-	Since    *time.Time   `json:"since,omitempty"`
+	// Since is when the problem started: a condition's lastTransitionTime, or
+	// for a finding returned without one, when the UI first saw its ID.
+	Since *time.Time `json:"since,omitempty"`
+	// Group is the ID of the group whose cause explains the finding (design §5.2).
+	Group string `json:"group,omitempty"`
+	// Key is the code's discriminator among findings on one resource (design
+	// §5.1); parentRefs are written as computed-rules §7 keys them. Never serialised.
+	Key []string `json:"-"`
 	// Restricted marks a finding on a resource the caller may not view. The
 	// API keeps its code, severity and resource and empties Message, Detail
 	// and Since (D-013). Checks never set it.

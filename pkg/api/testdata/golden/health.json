@@ -85,6 +85,7 @@
     "findings": [
       {
         "code": "KGWUI-002",
+        "id": "f1-rc7j3pfjikwleiwgqmwrxao6oy",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -101,6 +102,7 @@
       {
         "code": "KGWUI-002",
         "detail": "ResolvedRefs=False, reason RefNotPermitted (parent Gateway infra/edge)",
+        "id": "f1-3cse5bxnvkqhgyfsdetkz57k6d",
         "install": "kgw.kgateway",
         "message": "Reference not permitted (missing ReferenceGrant)",
         "resource": {
@@ -117,6 +119,7 @@
       {
         "code": "KGWUI-004",
         "detail": "targets Gateway infra/edge",
+        "id": "f1-sr3nt34mw3yema4cgo2evzaj7v",
         "install": "kgw.kgateway",
         "message": "Namespace not watched by the controller",
         "resource": {
@@ -127,11 +130,13 @@
           "namespace": "blog"
         },
         "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
         "slug": "namespace-not-watched"
       },
       {
         "code": "KGWUI-003",
         "detail": "no status from the controller for parent Gateway infra/edge",
+        "id": "f1-25xcevxfbsh3ekqknmbjwgacwg",
         "install": "kgw.kgateway",
         "message": "Being processed by the controller",
         "resource": {
@@ -142,6 +147,7 @@
           "namespace": "shop"
         },
         "severity": "info",
+        "since": "2026-10-17T12:00:00Z",
         "slug": "route-unattached"
       }
     ],

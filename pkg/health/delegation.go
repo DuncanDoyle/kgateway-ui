@@ -42,7 +42,7 @@ func declaredFinding(in Input, d install.DeclaredCandidate) Finding {
 	own := in.firstSeen(d.Route.Obj)
 	return Finding{Code: CodeDelegatedNotAttached, Slug: "delegated-route-not-attached", Severity: sev, Install: in.Install.ID(),
 		Resource: ref(d.Route.Obj), Message: DelegatedNotAttachedMessage, Detail: fmt.Sprintf(DelegatedNotAttachedDetail, parent.String()),
-		Evidence: []objects.Ref{parent}, ResourceSince: &own, parent: &d.Parent}
+		Evidence: []objects.Ref{parent}, ResourceSince: &own, Key: refKey(parent), parent: &d.Parent}
 }
 
 // computedTriggerFindings is KGWUI-011's computed and orphan triggers (design
@@ -80,10 +80,10 @@ func computedTriggerFindings(in Input) []Finding {
 			if !ok {
 				continue
 			}
-			f.Detail = computedReason(parent, c.Expected)
+			f.Detail, f.Key = computedReason(parent, c.Expected), refKey(parent)
 			f.parent = &objects.ParentRef{Group: parent.Group, Kind: parent.Kind, Namespace: parent.Namespace, Name: parent.Name}
 		case computed.KindOrphan:
-			f.Detail = OrphanDetail
+			f.Detail, f.Key = OrphanDetail, []string{"orphan"}
 		default:
 			continue
 		}

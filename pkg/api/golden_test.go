@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -533,7 +534,8 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 })
 
 // D-032: the check contract change leaves every Phase 2 golden byte-identical.
-// It never rewrites a golden, even under -update.
+// Finding ids and first-seen sinces are the only additions to their Phase 2
+// bytes (D-028). It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
 	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
@@ -554,5 +556,43 @@ func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 		if !compared[f.Name()] {
 			t.Errorf("golden %s was not compared", f.Name())
 		}
+	}
+}
+
+// D-028: every finding in every golden has a well-formed id, unique in its response.
+func TestGoldenFindingIDs(t *testing.T) {
+	format := regexp.MustCompile(`^f1-[a-z2-7]{26}$`)
+	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, f := range files {
+		seen := map[string]bool{}
+		var walk func(v any)
+		walk = func(v any) {
+			switch x := v.(type) {
+			case map[string]any:
+				if _, ok := x["slug"]; ok && x["code"] != nil {
+					id, _ := x["id"].(string)
+					if !format.MatchString(id) || seen[id] {
+						t.Errorf("%s: finding %v %v has id %q (malformed or repeated)", f.Name(), x["code"], x["resource"], id)
+					}
+					seen[id] = true
+					total++
+				}
+				for _, e := range x {
+					walk(e)
+				}
+			case []any:
+				for _, e := range x {
+					walk(e)
+				}
+			}
+		}
+		walk(readGolden(t, "golden", strings.TrimSuffix(f.Name(), ".json")))
+	}
+	if total == 0 {
+		t.Fatal("no findings in any golden")
 	}
 }

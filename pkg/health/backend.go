@@ -61,7 +61,7 @@ func (c backendCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				continue
 			}
 			f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Install: in.Install.ID(), Resource: ref(b),
-				Message: message(*cond), Since: since(*cond)}
+				Message: message(*cond), Since: since(*cond), Key: []string{ownerSelf, cond.Type}}
 			if current {
 				f.Severity, f.Detail = SeverityError, detail(*cond, "")
 			} else if cond.ObservedGeneration == 0 {

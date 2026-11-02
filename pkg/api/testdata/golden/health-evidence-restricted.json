@@ -82,6 +82,7 @@
     "findings": [
       {
         "code": "KGWUI-002",
+        "id": "f1-vro76ty6ct6f6qzggk3tbklmzh",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -98,6 +99,7 @@
       {
         "code": "KGWUI-002",
         "detail": "A delegating rule selects no child route the controller accepted; ResolvedRefs=False, reason BackendNotFound (parent Gateway infra/edge section sel)",
+        "id": "f1-ynauzn5r5afqzy7efao3b4aq24",
         "install": "kgw.kgateway",
         "message": "A delegating rule has no accepted child route",
         "resource": {
@@ -114,6 +116,7 @@
       {
         "code": "KGWUI-004",
         "detail": "targets Gateway infra/edge",
+        "id": "f1-sr3nt34mw3yema4cgo2evzaj7v",
         "install": "kgw.kgateway",
         "message": "Namespace not watched by the controller",
         "resource": {
@@ -124,12 +127,14 @@
           "namespace": "blog"
         },
         "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
         "slug": "namespace-not-watched"
       },
       {
         "code": "KGWUI-011",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
+        "id": "f1-v72xhbecohorniqbkawlntgwb2",
         "install": "kgw.kgateway",
         "message": "No status for the named parent route",
         "resource": {
@@ -146,6 +151,7 @@
       {
         "code": "KGWUI-012",
         "detail": "Status entry for parent HTTPRoute `shop/hp` at `PathPrefix /rb/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
+        "id": "f1-5ou42dygyupzmy4dnqylc7qaz6",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {
@@ -163,6 +169,7 @@
         "code": "KGWUI-012",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
+        "id": "f1-nbxeo2pjmwreaatmiithkrrlb4",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {

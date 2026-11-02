@@ -111,6 +111,8 @@ type memo struct {
 	stamp    stamp
 	// out is the output print, set when a later check reads this one.
 	out uint64
+	// keep are the finding IDs the run returned or retained; their since entries survive a skip.
+	keep map[string]bool
 }
 
 // stamp is the set of reference times (eachRef order) a CollectedAt equalled,
