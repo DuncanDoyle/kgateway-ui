@@ -135,7 +135,7 @@ type memo struct {
 	result   CheckResult
 	wake     time.Time
 	stamp    stamp
-	// out is the output print, set when a later check reads this one.
+	// out is the output print without CollectedAt, set when a later check reads this one.
 	out uint64
 	// keep are the finding IDs the run returned or retained; their since entries survive a skip.
 	keep map[string]bool

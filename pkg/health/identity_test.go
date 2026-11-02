@@ -1,6 +1,7 @@
 package health
 
 import (
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
@@ -325,4 +326,27 @@ func TestStatusFindingKeepsLastTransitionTime(t *testing.T) {
 		return
 	}
 	t.Fatalf("no KGWUI-002: %+v", rep.Findings)
+}
+
+// A dependent check reading an earlier check's CollectedAt sees the restamp
+// of a memo hit: memoized and uncached evaluation give the same findings.
+func TestMemoizedDependentSeesRestampedCollectedAt(t *testing.T) {
+	earlier := funcCheck{name: "earlier", run: func(ctx RunContext) ([]Finding, CheckResult) {
+		return nil, CheckResult{Name: "earlier", OK: true, CollectedAt: ctx.Now}
+	}}
+	dependent := funcCheck{name: "dependent", inputs: InputSet{Checks: []string{"earlier"}}, run: func(ctx RunContext) ([]Finding, CheckResult) {
+		out, _ := ctx.Output("earlier")
+		return []Finding{{Code: "ACME-001", Severity: SeverityInfo, Message: "m", Detail: out.Result.CollectedAt.String()}},
+			CheckResult{Name: "dependent", OK: true}
+	}}
+	checks := []Check{earlier, dependent}
+	memo := Runtime{States: NewStates(), Print: func(InputSet) (uint64, bool) { return 1, true }}
+	plain := Runtime{States: NewStates()}
+	for i := range 3 {
+		in := Input{Now: testutil.Now.Add(time.Duration(i) * time.Minute)}
+		got, want := Evaluate(in, checks, memo), Evaluate(in, checks, plain)
+		if !reflect.DeepEqual(got.Findings, want.Findings) {
+			t.Fatalf("compute %d: memoized findings %+v, uncached %+v", i, got.Findings, want.Findings)
+		}
+	}
 }

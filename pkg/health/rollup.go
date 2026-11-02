@@ -131,7 +131,10 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 				cr.CollectedAt = at
 				// Run did not execute, so the memo's kept IDs stand in for its Retain calls.
 				pruneSince(rt.States.stores[c.Name()], m.keep)
-				return m.findings, cr, m.wake, m.out
+				if _, read := outPrints[c.Name()]; read {
+					out = stampPrint(m.out, at)
+				}
+				return m.findings, cr, m.wake, out
 			}
 		}
 	}
@@ -145,11 +148,13 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 		keep = keepOf(fs, ctx.sink.retained)
 		pruneSince(ctx.State, keep)
 	}
+	var base uint64
 	if _, read := outPrints[c.Name()]; read {
-		out = outputPrint(fs, cr)
+		base = outputPrint(fs, cr)
+		out = stampPrint(base, cr.CollectedAt)
 	}
 	if keyed {
-		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: out, keep: keep}
+		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: base, keep: keep}
 	} else if memoize {
 		delete(rt.States.memos, c.Name())
 	}
@@ -254,8 +259,20 @@ func mix(h, v uint64) uint64 {
 	return x ^ (x >> 31)
 }
 
+// stampPrint folds CollectedAt into an output print, so a restamp reruns the checks that read it.
+func stampPrint(base uint64, at time.Time) uint64 {
+	return mix(mix(base, uint64(at.UnixNano())), fnvString(at.Location().String())) //nolint:gosec // hashed bits
+}
+
+// fnvString is FNV-64a of s.
+func fnvString(s string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
+}
+
 // outputPrint is FNV-64a over every field of fs and of cr but CollectedAt,
-// a timestamp a reused result is restamped with.
+// which stampPrint adds so a memo can restamp it.
 func outputPrint(fs []Finding, cr CheckResult) uint64 {
 	h := fnv.New64a()
 	var b [8]byte
