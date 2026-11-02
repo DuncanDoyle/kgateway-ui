@@ -8,7 +8,7 @@ import { HealthBadge } from "../health/HealthBadge";
 import { DataAge } from "../pages/DataAge";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { HealthState } from "../theme/tokens";
-import { Breadcrumbs } from "./Breadcrumbs";
+import { Breadcrumbs, type CurrentState } from "./Breadcrumbs";
 
 // region Styles
 /** Height of the object header, fixed from the first render: state and age fill reserved space. */
@@ -116,6 +116,8 @@ export interface ObjectHeaderProps {
   actions?: ReactNode;
   /** Refs the page's data holds, which decide the trail's links (see {@link Breadcrumbs}). */
   trailRefs?: readonly LinkedRef[];
+  /** Whether the page's detail has confirmed the object, for the trail's current crumb. */
+  current?: CurrentState;
   stylesOverride?: SerializedStyles;
 }
 
@@ -131,11 +133,12 @@ export function ObjectHeader({
   collectedAt,
   actions,
   trailRefs,
+  current,
   stylesOverride,
 }: ObjectHeaderProps) {
   return (
     <>
-      <Breadcrumbs refs={trailRefs} />
+      <Breadcrumbs refs={trailRefs} current={current} />
       <Header data-testid="detail-header" data-object-header="" stylesOverride={stylesOverride}>
         {/* The heading reads "Kind namespace/name"; the visible kind and namespace repeat it, so they are hidden from readers. */}
         <span className="kind" aria-hidden="true">

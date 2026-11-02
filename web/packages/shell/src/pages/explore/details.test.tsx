@@ -1096,6 +1096,36 @@ it("on a ListenerSet page the parent's link decides its crumb", async () => {
   expect(trail().queryByText(/edge/)).toBeNull();
 });
 
+it("the current crumb holds a placeholder until the page's own detail loads", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  const reply = api();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const u = new URL(url, "http://ui");
+      if (u.pathname === `${API}/gateways/infra/edge`) await held;
+      const r = reply(u);
+      return new Response(JSON.stringify(r ?? { error: "not found" }), { status: r === undefined ? 404 : 200 });
+    }),
+  );
+  // Every text the trail ever shows, so a name that flashes once is caught.
+  const seen: string[] = [];
+  const watch = new MutationObserver(() => seen.push(screen.queryByRole("navigation")?.textContent ?? ""));
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  mount(GW_PATH);
+  seen.push(trail().getByRole("link", { name: "Gateways" }).closest("nav")?.textContent ?? "");
+  const nav = screen.getByRole("navigation", { name: breadcrumbsCopy.label });
+  expect(nav.querySelector('[data-part="current"] [data-pending]')).not.toBeNull();
+  await act(async () => {});
+  expect(seen.some((s) => s.includes("edge"))).toBe(false);
+  release();
+  expect(await trail().findByText("Gateway infra/edge")).toHaveAttribute("aria-current", "page");
+  watch.disconnect();
+});
+
 /** Stubs matchMedia so only the two-column query (from 1600 px) matches when wide. */
 function viewport(wide: boolean) {
   vi.stubGlobal("matchMedia", (q: string) => ({

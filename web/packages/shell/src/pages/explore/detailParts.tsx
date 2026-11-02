@@ -231,6 +231,7 @@ export function DetailFrame({
             state={data?.health}
             collectedAt={data?.collectedAt}
             trailRefs={pageRefs}
+            current={data ? "shown" : "pending"}
             actions={
               <>
                 <CopyNameButton resource={refValue} />

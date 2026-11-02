@@ -328,14 +328,19 @@ function trailAt(pathname: string, search: string) {
 export interface BreadcrumbsProps {
   /** Refs the page's data holds; a crumb naming one follows its link, and a "none" link shows the restricted label. */
   refs?: readonly LinkedRef[];
+  /** The page's own object: pending until its detail loads, shown once the server returned it. */
+  current?: CurrentState;
   stylesOverride?: SerializedStyles;
 }
+
+/** What the page knows of its own object, for the current crumb. */
+export type CurrentState = "pending" | "shown";
 
 /**
  * The path the user took to this object page, from the URL's `via` (D-035, design §17.6). Without `via` it shows
  * install › kind list › object. Renders nothing outside an install's object pages.
  */
-export function Breadcrumbs({ refs = [], stylesOverride }: BreadcrumbsProps) {
+export function Breadcrumbs({ refs = [], current = "pending", stylesOverride }: BreadcrumbsProps) {
   const { pathname, search } = useLocation();
   const { data: installs } = useInstalls();
   const t = trailAt(pathname, search);
@@ -356,7 +361,7 @@ export function Breadcrumbs({ refs = [], stylesOverride }: BreadcrumbsProps) {
   return (
     <Nav
       aria-label={breadcrumbsCopy.label}
-      aria-busy={resolved.some((r) => r.pending) || undefined}
+      aria-busy={current === "pending" || resolved.some((r) => r.pending) || undefined}
       data-trail=""
       data-testid="trail"
       stylesOverride={stylesOverride}
@@ -384,7 +389,8 @@ export function Breadcrumbs({ refs = [], stylesOverride }: BreadcrumbsProps) {
         ))}
         <li data-part="current">
           <Sep />
-          <CrumbItem r={{ label: crumbLabel(crumb) }} current />
+          {/* The URL's name shows only once the page's own detail confirms the object (design §17.6). */}
+          <CrumbItem r={current === "shown" ? { label: crumbLabel(crumb) } : { label: "", pending: true }} current />
         </li>
       </ol>
     </Nav>

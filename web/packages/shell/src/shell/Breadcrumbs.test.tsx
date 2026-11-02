@@ -56,7 +56,7 @@ function trail() {
 }
 
 test("hierarchy without via", () => {
-  renderWithTheme(<Breadcrumbs />, { path: ROUTE });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: ROUTE });
   const t = trail();
   expect(t.getByRole("link", { name: ID })).toHaveAttribute("href", `/i/${ID}`);
   expect(t.getByRole("link", { name: "Routes" })).toHaveAttribute("href", `/i/${ID}/routes`);
@@ -67,7 +67,7 @@ test("hierarchy without via", () => {
 });
 
 test("a route reached from a Gateway shows the path taken", async () => {
-  renderWithTheme(<Breadcrumbs />, { path: at([gateway]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway]) });
   const t = trail();
   // The Gateway crumb links back to its page with its own (empty) trail, once the server confirms it.
   expect(await t.findByRole("link", { name: "Gateway infra/edge" })).toHaveAttribute(
@@ -84,7 +84,7 @@ test("a list crumb returns to the list with its filters", async () => {
     path: "routes",
     search: "state=error&q=shop",
   };
-  renderWithTheme(<Breadcrumbs />, { path: at([list, gateway]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([list, gateway]) });
   const t = trail();
   expect(t.getByRole("link", { name: "Routes" })).toHaveAttribute("href", `/i/${ID}/routes?state=error&q=shop`);
   const back = (await t.findByRole("link", { name: "Gateway infra/edge" })).getAttribute("href") ?? "";
@@ -94,7 +94,7 @@ test("a list crumb returns to the list with its filters", async () => {
 test("collapse past 6 into an ellipsis menu", async () => {
   const user = userEvent.setup();
   const seven = [1, 2, 3, 4, 5, 6, 7].map(nth);
-  renderWithTheme(<Breadcrumbs />, { path: at(seven) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at(seven) });
   const t = trail();
   // Five crumbs stay visible after the "…" crumb, which holds the two oldest.
   expect(t.queryByRole("link", { name: "HTTPRoute shop/r1" })).toBeNull();
@@ -136,7 +136,7 @@ test("collapse past 6 into an ellipsis menu", async () => {
 test("a menu item without a page is inert: no pointer and no hover or press tint", async () => {
   const user = userEvent.setup();
   const trail = ["not-an-entry", ...[1, 2, 3, 4, 5, 6].map((i) => viaParam([nth(i)], ID))].join(",");
-  renderWithTheme(<Breadcrumbs />, { path: at(trail) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at(trail) });
   await user.click(screen.getByRole("button", { name: breadcrumbsCopy.more(2) }));
   const inert = within(screen.getByRole("menu")).getByText("not-an-entry");
   expect(inert).toHaveAttribute("aria-disabled", "true");
@@ -176,7 +176,7 @@ test("malformed or unresolvable entry is text and the page loads", async () => {
 
 test("a via entry for another install is dropped", async () => {
   const raw = `${viaParam([nth(1)], "other")},${viaParam([gateway], ID)}`;
-  renderWithTheme(<Breadcrumbs />, { path: at(raw) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at(raw) });
   const t = trail();
   expect(await t.findByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
   expect(t.queryByText("HTTPRoute shop/r1")).toBeNull();
@@ -190,7 +190,7 @@ test("a crumb for a hidden object shows the restricted label", async () => {
     name: "edge",
     link: "none",
   };
-  renderWithTheme(<Breadcrumbs refs={[hidden]} />, {
+  renderWithTheme(<Breadcrumbs current="shown" refs={[hidden]} />, {
     path: at([gateway, nth(1)]),
   });
   const t = trail();
@@ -204,7 +204,7 @@ test("a crumb for a hidden object shows the restricted label", async () => {
 test("a 4 KiB via is cut to the last 6 valid entries", async () => {
   const entries: string[] = [];
   for (let i = 0; i < 300; i++) entries.push(viaParam([nth(i)], ID), "junk");
-  renderWithTheme(<Breadcrumbs />, { path: at(entries.join(",")) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at(entries.join(",")) });
   const t = trail();
   await t.findByRole("link", { name: "HTTPRoute shop/r299" });
   expect(t.queryByText("junk")).toBeNull();
@@ -224,7 +224,7 @@ test("a hidden crumb never shows its name, before or after the lookup", async ()
   const seen: string[] = [];
   const watch = new MutationObserver(() => seen.push(document.body.textContent ?? ""));
   watch.observe(document.body, { childList: true, subtree: true, characterData: true });
-  renderWithTheme(<Breadcrumbs />, { path: at([gateway, nth(1)]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway, nth(1)]) });
   const t = trail();
   seen.push(document.body.textContent ?? "");
   // Until the server answers, both crumbs hold a neutral placeholder: no name, no link.
@@ -242,14 +242,14 @@ test("a hidden crumb never shows its name, before or after the lookup", async ()
 
 test("a deleted object's crumb is not a link", async () => {
   serveRefs(["shop/r1"]);
-  renderWithTheme(<Breadcrumbs />, { path: at([gateway, nth(1)]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway, nth(1)]) });
   const t = trail();
   expect(await t.findByText(breadcrumbsCopy.hidden)).not.toHaveAttribute("href");
   expect(t.queryByText("HTTPRoute shop/r1")).toBeNull();
 });
 
 test("a placeholder keeps its width and the trail its height until the lookup returns", async () => {
-  renderWithTheme(<Breadcrumbs />, { path: at([gateway]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway]) });
   const t = trail();
   const ph = screen.getByRole("navigation", { name: breadcrumbsCopy.label }).querySelector("[data-pending]");
   expect(ph).not.toBeNull();
@@ -261,7 +261,7 @@ test("a placeholder keeps its width and the trail its height until the lookup re
 
 test("a rejected lookup shows the restricted label, never the URL name", async () => {
   serveRefs([], 400);
-  renderWithTheme(<Breadcrumbs />, { path: at([gateway]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway]) });
   const t = trail();
   expect(await t.findByText(breadcrumbsCopy.hidden)).toBeInTheDocument();
   expect(t.queryByText(/edge/)).toBeNull();
@@ -270,7 +270,7 @@ test("a rejected lookup shows the restricted label, never the URL name", async (
 test("no lookup when the page holds every crumb's ref", async () => {
   const f = serveRefs();
   const held: LinkedRef = { group: GW, kind: "Gateway", namespace: "infra", name: "edge", link: "detail" };
-  renderWithTheme(<Breadcrumbs refs={[held]} />, { path: at([gateway]) });
+  renderWithTheme(<Breadcrumbs current="shown" refs={[held]} />, { path: at([gateway]) });
   expect(trail().getByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
   await act(async () => {});
   expect(refCalls(f)).toHaveLength(0);
@@ -283,7 +283,7 @@ test("page refs that arrive after the lookup do not send another", async () => {
   function Page() {
     const [refs, setRefs] = useState<LinkedRef[]>([]);
     hold = setRefs;
-    return <Breadcrumbs refs={refs} />;
+    return <Breadcrumbs current="shown" refs={refs} />;
   }
   renderWithTheme(<Page />, { path: at([gateway, nth(1)]) });
   await trail().findByRole("link", { name: "HTTPRoute shop/r1" });
@@ -296,7 +296,7 @@ test("a trail of more objects than one lookup takes resolves every crumb", async
   const user = userEvent.setup();
   const f = serveRefs();
   const nine = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(nth);
-  renderWithTheme(<Breadcrumbs />, { path: at(nine) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at(nine) });
   const t = trail();
   for (const i of [5, 6, 7, 8, 9])
     expect(await t.findByRole("link", { name: `HTTPRoute shop/r${i}` })).toBeInTheDocument();
@@ -325,7 +325,7 @@ test("a lookup that cannot reach the server retries, and holds placeholders mean
   vi.useFakeTimers({ shouldAdvanceTime: true });
   try {
     const f = flakyRefs(2);
-    renderWithTheme(<Breadcrumbs />, { path: at([gateway, nth(1)]) });
+    renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway, nth(1)]) });
     const t = trail();
     await waitFor(() => expect(refCalls(f).length).toBeGreaterThan(0));
     await act(async () => {});
@@ -341,7 +341,7 @@ test("a lookup that cannot reach the server retries, and holds placeholders mean
 
 test("a lookup that failed on a lost connection runs again on reconnect", async () => {
   const f = flakyRefs(1);
-  renderWithTheme(<Breadcrumbs />, { path: at([gateway]) });
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway]) });
   await waitFor(() => expect(refCalls(f)).toHaveLength(1));
   await act(async () => {});
   expect(trail().queryByText(breadcrumbsCopy.hidden)).toBeNull();

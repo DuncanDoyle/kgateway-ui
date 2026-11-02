@@ -85,6 +85,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
         name={rname}
         namespace={ref.namespace}
         collectedAt={data ? collectedAt : undefined}
+        current={data ? "shown" : "pending"}
         actions={
           <>
             <CopyNameButton resource={ref} />
