@@ -9,6 +9,11 @@ export type Link = "detail" | "yaml" | "none";
 export interface LinkedRef extends Ref {
   link: Link;
 }
+/** GET …/refs: the trail's objects with their links, in request order (design §17.6). */
+export interface TrailRefs {
+  install: string;
+  refs: LinkedRef[];
+}
 /** A group and kind, as in allowedRoutes.kinds or supportedKinds. */
 export interface GroupKind {
   group: string;

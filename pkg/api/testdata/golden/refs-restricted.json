@@ -1,0 +1,40 @@
+{
+  "body": {
+    "install": "kgw.kgateway",
+    "refs": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "detail",
+        "name": "uses-be",
+        "namespace": "shop"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "none",
+        "name": "secret",
+        "namespace": "shop"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "none",
+        "name": "ghost",
+        "namespace": "shop"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "none",
+        "name": "edge",
+        "namespace": "infra"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

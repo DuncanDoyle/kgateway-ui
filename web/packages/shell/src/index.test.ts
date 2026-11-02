@@ -208,6 +208,7 @@ it("keeps the public export surface", () => {
         "StatusTokens",
         "SuggestedFix",
         "Theme",
+        "TrailRefs",
         "Vocabulary",
       ],
     }

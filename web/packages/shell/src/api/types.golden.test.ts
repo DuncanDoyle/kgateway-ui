@@ -19,6 +19,8 @@ import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listeners
 import meta from "../../../../../pkg/api/testdata/golden/meta.json";
 import notFound from "../../../../../pkg/api/testdata/golden/not-found.json";
 import overview from "../../../../../pkg/api/testdata/golden/overview.json";
+import refsGolden from "../../../../../pkg/api/testdata/golden/refs.json";
+import refsRestrictedGolden from "../../../../../pkg/api/testdata/golden/refs-restricted.json";
 import routeDelegationGolden from "../../../../../pkg/api/testdata/golden/route-delegation.json";
 import routeDelegationCutGolden from "../../../../../pkg/api/testdata/golden/route-delegation-cut.json";
 import routeDelegationRestrictedGolden from "../../../../../pkg/api/testdata/golden/route-delegation-restricted.json";
@@ -101,6 +103,7 @@ import type {
   ServedKind,
   SpecParentRef,
   SuggestedFix,
+  TrailRefs,
 } from "./types";
 
 // Checks the backend's golden wire format (pkg/api golden_test.go) against these types.
@@ -157,6 +160,7 @@ const delegationRefEnums = {
 
 const ref = shape<Ref>({ group: "!", kind: "!", namespace: "?", name: "!" });
 const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "!" }, {}, link);
+const trailRefs = shape<TrailRefs>({ install: "!", refs: "!" }, { refs: linkedRef });
 const finding = shape<Finding>(
   {
     id: "?",
@@ -729,6 +733,8 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["findings-restricted", findingsRestrictedGolden.body satisfies Wide<Page<FindingItem>>, page(findingItem)],
     ["finding-detail-other", findingDetailOtherGolden.body satisfies Wide<FindingDetail>, findingDetail],
     ["finding-detail-restricted", findingDetailRestrictedGolden.body satisfies Wide<FindingDetail>, findingDetail],
+    ["refs", refsGolden.body satisfies Wide<TrailRefs>, trailRefs],
+    ["refs-restricted", refsRestrictedGolden.body satisfies Wide<TrailRefs>, trailRefs],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });
@@ -891,5 +897,12 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(findingDetailRestrictedGolden.body.finding.restricted).toBe(true);
     expect(health.body.findings.every((f) => "id" in f && f.id)).toBe(true);
     expect(meta.body.filters?.findings).toEqual(["severity", "code", "kind", "namespace", "group", "q"]);
+  });
+
+  // The trail lookup: a hidden ref and an absent one both read as none, with only the requested identity.
+  it("covers 3.1 trail refs: hidden and absent both none", () => {
+    const none = refsRestrictedGolden.body.refs.filter((r) => r.link === "none").map((r) => r.name);
+    expect(none).toEqual(["secret", "ghost", "edge"]);
+    expect(refsGolden.body.refs.map((r) => r.link)).toEqual(["detail", "detail", "detail", "yaml", "none"]);
   });
 });

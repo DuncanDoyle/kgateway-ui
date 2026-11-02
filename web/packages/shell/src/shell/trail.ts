@@ -212,17 +212,6 @@ export function useLinkVia(installId: string): string | undefined {
   return useMemo(() => leavingVia(pathname, search, installId), [pathname, search, installId]);
 }
 
-/** The page a crumb's object opens when no ref on the page gives its link: the page that wrote the entry. */
-export function crumbPagePath(r: Ref): string {
-  const ns = encodeURIComponent(r.namespace ?? "");
-  const name = encodeURIComponent(r.name);
-  if (r.group === GW && r.kind === "Gateway") return `gateways/${ns}/${name}`;
-  const page =
-    r.group === GW && r.kind === "HTTPRoute" ? "routes" : r.kind.endsWith("ListenerSet") ? "listenersets" : "";
-  if (page) return `${page}/${encodeURIComponent(r.group)}/${encodeURIComponent(r.kind)}/${ns}/${name}`;
-  return `r/${r.group || "-"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
-}
-
 /** The list page of an object's kind, for the trail without `via`; undefined for a kind without one. */
 export function kindList(r: Ref): Crumb | undefined {
   if (r.group === GW && r.kind === "Gateway") return { kind: "list", path: "gateways", search: "" };

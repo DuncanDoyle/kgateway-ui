@@ -202,7 +202,7 @@ func partialLS() *unstructured.Unstructured {
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
 		if !ok { // meta and installs: no install segment, and no links
 			continue
@@ -232,7 +232,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 322
+	const want = 331
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -254,7 +254,7 @@ func detailPath(r objects.Ref) (string, bool) {
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
 func TestGoldenFilesHaveCases(t *testing.T) {
 	cased := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t)) {
 		cased[tc.golden+".json"] = true
 	}
 	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
@@ -562,7 +562,7 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 // are the only additions to the Phase 2 bytes. It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t)) {
 		want, err := os.ReadFile(filepath.Join("testdata", "golden", tc.golden+".json"))
 		if err != nil {
 			t.Fatal(err)

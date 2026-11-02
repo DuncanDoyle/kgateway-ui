@@ -13,6 +13,7 @@ import type {
   Ref,
   RouteDetail,
   RouteRow,
+  TrailRefs,
 } from "./types";
 
 // region Helpers
@@ -102,4 +103,24 @@ export function useRouteDetail(id: string, r: Ref) {
 /** GET …/routes/{group}/{kind}/{ns}/{name}/delegation: view B's rows of one parent route, paged (rule, ref, outcome, cursor). */
 export function useDelegation(id: string, r: Ref, query: URLSearchParams) {
   return useList<DelegationRow>(id, `routes/${refPath(r)}/delegation`, query);
+}
+
+/** A trail ref parameter: "core" for the empty group, "-" for no namespace (GET …/refs). */
+const trailParam = (r: Ref) => `${r.group || "core"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
+
+/**
+ * GET …/refs for the breadcrumb trail's objects: once per page view, never polled. The key is the sorted refs, so
+ * the same trail is one request; no refs means no request. A 4xx is final; a 5xx retries.
+ */
+export function useTrailLinks(id: string, refs: readonly Ref[]) {
+  const params = [...new Set(refs.map(trailParam))].sort();
+  const key = params.length
+    ? withQuery(`${installApi(id)}/refs`, new URLSearchParams(params.map((p) => ["ref", p])))
+    : null;
+  const { data, error } = useSWR<TrailRefs, ApiError>(key, apiFetch, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    shouldRetryOnError: (e) => e.status >= 500,
+  });
+  return { data: forInstall(data, id), error };
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -278,6 +279,9 @@ func TestBudgetListRequests(t *testing.T) {
 					t.Errorf("%s p95 %v, budget < 50 ms", dt.name, p)
 				}
 			}
+			// A full breadcrumb trail: one GET …/refs per page view.
+			trail := url.Values{"ref": {refParam(gw), refParam(ls), refParam(parent), refParam(deepest), refParam(deleg), refParam(lk.Resource)}}
+			requestBudget(t, h, "refs-full-trail", base+"/refs?"+trail.Encode(), false)
 		})
 	}
 }

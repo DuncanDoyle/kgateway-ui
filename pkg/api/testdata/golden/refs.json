@@ -1,0 +1,46 @@
+{
+  "body": {
+    "install": "kgw.kgateway",
+    "refs": [
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "detail",
+        "name": "edge",
+        "namespace": "infra"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "detail",
+        "name": "api",
+        "namespace": "shop"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "ListenerSet",
+        "link": "detail",
+        "name": "ls1",
+        "namespace": "infra"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "GatewayClass",
+        "link": "yaml",
+        "name": "kgateway"
+      },
+      {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "none",
+        "name": "ghost",
+        "namespace": "shop"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

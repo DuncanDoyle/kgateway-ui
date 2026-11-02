@@ -605,6 +605,7 @@ All additions are new paths or new optional fields. No existing path, body or in
 | `GET /api/v1/installs/{id}/diagnostics` | `Diagnostics`: the verdict, the top 10 groups, the process summary, the data-plane summary, `checks`, `collectedAt` | 3.2 |
 | `GET /api/v1/installs/{id}/findings` | `Page<FindingRow>`; filters `severity`, `code`, `kind`, `namespace`, `group`, `q`; sort `rank` (default), `since`, `code`; Phase 2 cursors (§3.6 there) | 3.1 |
 | `GET /api/v1/installs/{id}/findings/{findingId}` | `FindingDetail`: the finding, typed evidence, next steps, and the first 50 affected objects with a cursor (`?affectedCursor=`) | 3.1 (evidence grows per sub-phase) |
+| `GET /api/v1/installs/{id}/refs?ref=…` | `{install, refs: LinkedRef[]}`: 1–6 `ref=group/Kind/namespace/name` (`core` for the empty group, `-` for no namespace), each labelled as every LinkedRef is; resolves the breadcrumb trail (§17.6) | 3.1 |
 | `GET /api/v1/installs/{id}/processes` | `{controller: ProcessSetDTO, proxies: Page<GatewayProcesses>}`; filters `health`, `q`, `skew`, `restarts` | 3.2 |
 
 Existing payloads gain:
@@ -857,6 +858,7 @@ Extension pages for downstream kinds use the same component, exported from the s
 - A page with no `via` (typed URL, a link from outside, a list page) shows the plain hierarchy instead: `<install> › <kind list> › <object>`.
 - A `via` entry that no longer resolves (deleted object, malformed value) is shown as plain text, not a link, and the page itself still loads. A `via` entry is never trusted for content: each crumb shows only what its own path says.
 - Authorization (§14): a crumb for an object the caller may not view shows the restricted label, never its name. The current Authorizer rule for names applies unchanged.
+- The shell resolves the trail's object crumbs with one `GET …/refs` per page view (§13.1, Codex 3.1 review). Until the answer arrives a crumb shows a neutral placeholder, never its URL name. A `none` link shows the restricted label, since hidden and absent read the same (D-013).
 - The first entry may be a list page (an object list or the findings page) with its filters, which already live in the URL (Phase 2 design §8.7). Its crumb returns to that list with those filters. Every later entry is an object page.
 
 The "back to install" links in the error and not-found states stay as they are.

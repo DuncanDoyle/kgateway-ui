@@ -12,8 +12,9 @@ import {
   useState,
 } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useTrailLinks } from "../api/exploreHooks";
 import { useInstalls } from "../api/hooks";
-import type { LinkedRef } from "../api/types";
+import type { LinkedRef, Ref } from "../api/types";
 import { breadcrumbsCopy } from "../copy/navigation";
 import { objectPath } from "../explore/objectPath";
 import { installLabel } from "./InstallName";
@@ -24,9 +25,9 @@ import {
   type Crumb,
   collapse,
   crumbLabel,
-  crumbPagePath,
   crumbRef,
   kindList,
+  objectCrumb,
   pageOf,
   parseVia,
   viaParam,
@@ -79,6 +80,13 @@ const Nav = styled.nav<{ stylesOverride?: SerializedStyles }>`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Holds a crumb's place, at a fixed width, until the server says where it opens. */
+  [data-part="crumb"][data-pending] {
+    width: 16ch;
+    height: 8px;
+    border-radius: ${(p) => p.theme.radius.sm};
+    background: color-mix(in srgb, ${(p) => p.theme.color.textMuted} 28%, transparent);
   }
   a[data-part="crumb"] {
     color: inherit;
@@ -153,14 +161,23 @@ const TrailMenu = styled(Menu)`
 `;
 
 // region Helpers
-// key is the crumb's place in the trail, which entries may repeat.
-type Resolved = { to?: string; label: string; key?: string };
+// key is the crumb's place in the trail, which entries may repeat; pending waits for the server's link.
+type Resolved = { to?: string; label: string; key?: string; pending?: boolean };
 
-const sameRef = (a: LinkedRef, r: { group: string; kind: string; namespace?: string; name: string }) =>
+const sameRef = (a: LinkedRef, r: Ref) =>
   a.group === r.group && a.kind === r.kind && (a.namespace ?? "") === (r.namespace ?? "") && a.name === r.name;
 
-/** Where crumb i of trail opens, with the trail before it, and what it shows. Never reads text from the URL into a link. */
-function resolve(installId: string, trail: Crumb[], i: number, refs: readonly LinkedRef[]): Resolved {
+/** The server's answers for a trail: links from GET …/refs, or failed when it gave none. */
+interface Lookup {
+  refs?: readonly LinkedRef[];
+  failed: boolean;
+}
+
+/**
+ * Where crumb i of trail opens, with the trail before it, and what it shows. An object crumb takes its link and name
+ * from a server LinkedRef only (design §17.6): the page's own, else GET …/refs; a "none" link may mean hidden (D-013).
+ */
+function resolve(installId: string, trail: Crumb[], i: number, refs: readonly LinkedRef[], lookup: Lookup): Resolved {
   const c = trail[i] as Crumb;
   if (c.kind === "list") {
     // Re-serialized, so the list gets its filters back as query parameters and nothing else.
@@ -174,18 +191,19 @@ function resolve(installId: string, trail: Crumb[], i: number, refs: readonly Li
   }
   const r = crumbRef(c);
   if (!r) return { label: crumbLabel(c) };
-  // A ref the page holds decides the link, as LinkedRef does everywhere; a "none" link may mean hidden (D-013).
-  const known = refs.find((k) => sameRef(k, r));
-  if (known?.link === "none") return { label: breadcrumbsCopy.hidden };
-  const base = known ? objectPath(installId, known) : installPath(installId, crumbPagePath(r));
+  const known = refs.find((k) => sameRef(k, r)) ?? lookup.refs?.find((k) => sameRef(k, r));
+  if (!known) return lookup.failed ? { label: breadcrumbsCopy.hidden } : { label: "", pending: true };
+  const base = objectPath(installId, known);
+  if (!base) return { label: breadcrumbsCopy.hidden };
   const via = viaParam(trail.slice(0, i), installId);
   return {
     to: via ? `${base}?${new URLSearchParams({ via })}` : base,
-    label: crumbLabel(c),
+    label: crumbLabel(objectCrumb(known)),
   };
 }
 
 function CrumbItem({ r, current }: { r: Resolved; current?: boolean }) {
+  if (r.pending) return <span data-part="crumb" data-pending="" aria-hidden="true" />;
   if (current)
     return (
       <span data-part="crumb" aria-current="page" title={r.label}>
@@ -238,7 +256,7 @@ function More({ items }: { items: Resolved[] }) {
               </Link>
             ) : (
               <span key={r.key} role="menuitem" tabIndex={-1} aria-disabled="true">
-                {r.label}
+                {r.pending ? <span data-part="crumb" data-pending="" aria-hidden="true" /> : r.label}
               </span>
             ),
           )}
@@ -291,6 +309,20 @@ export function useTrailRefsCollector(own: readonly LinkedRef[]): [readonly Link
   return [all, report];
 }
 
+/** The object page at a URL and the crumbs before it: its `via`, or its kind's list without one. */
+function trailAt(pathname: string, search: string) {
+  const page = pageOf(pathname, search);
+  if (page?.crumb?.kind !== "object") return undefined;
+  const { installId, crumb } = page;
+  let earlier = appendVia(parseVia(search, installId), crumb).slice(0, -1);
+  if (earlier.length === 0) {
+    const ref = crumbRef(crumb);
+    const list = ref ? kindList(ref) : undefined;
+    earlier = list ? [list] : [];
+  }
+  return { installId, crumb, earlier };
+}
+
 // region Component
 /** Props of {@link Breadcrumbs}. */
 export interface BreadcrumbsProps {
@@ -306,21 +338,30 @@ export interface BreadcrumbsProps {
 export function Breadcrumbs({ refs = [], stylesOverride }: BreadcrumbsProps) {
   const { pathname, search } = useLocation();
   const { data: installs } = useInstalls();
-  const page = pageOf(pathname, search);
-  if (page?.crumb?.kind !== "object") return null;
-  const { installId, crumb } = page;
-  const full = appendVia(parseVia(search, installId), crumb);
-  let earlier = full.slice(0, -1);
-  const ref = crumbRef(crumb);
-  if (earlier.length === 0) {
-    const list = ref ? kindList(ref) : undefined;
-    earlier = list ? [list] : [];
-  }
+  const t = trailAt(pathname, search);
+  const objects = t?.earlier.flatMap((c) => crumbRef(c) ?? []) ?? [];
+  // One lookup per trail, keyed by all its objects, so page refs arriving later never change the key.
+  const lookup = useTrailLinks(
+    t?.installId ?? "",
+    objects.every((r) => refs.some((k) => sameRef(k, r))) ? [] : objects,
+  );
+  if (!t) return null;
+  const { installId, crumb, earlier } = t;
   const { hidden } = collapse(earlier);
-  const resolved = earlier.map((_, i) => ({ ...resolve(installId, earlier, i, refs), key: String(i) }));
+  const failed = lookup.error !== undefined && lookup.error.status < 500;
+  const resolved = earlier.map((_, i) => ({
+    ...resolve(installId, earlier, i, refs, { refs: lookup.data?.refs, failed }),
+    key: String(i),
+  }));
   const install = installs?.find((x) => x.id === installId);
   return (
-    <Nav aria-label={breadcrumbsCopy.label} data-trail="" data-testid="trail" stylesOverride={stylesOverride}>
+    <Nav
+      aria-label={breadcrumbsCopy.label}
+      aria-busy={resolved.some((r) => r.pending) || undefined}
+      data-trail=""
+      data-testid="trail"
+      stylesOverride={stylesOverride}
+    >
       <ol>
         <li data-part="install">
           <CrumbItem

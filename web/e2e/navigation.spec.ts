@@ -128,6 +128,23 @@ test("a trail of 7 earlier pages collapses into a menu and keeps the last 5", as
   await expect(crumbs(page)).toHaveText([/kgw-a/, "HTTPRoute shop/store", "HTTPRoute shop/c-host"]);
 });
 
+test("a crumb for an object that is gone is the restricted label, one lookup per page", async ({ page }) => {
+  const lookups: string[] = [];
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === `${api}/refs`) lookups.push(r.url());
+  });
+  const via = ["store", "no-such-route"].map((n) => `${id}/${encodeURIComponent(GW)}/HTTPRoute/shop/${n}`).join(",");
+  await page.goto(`${routePage("shop", "quirk")}?${new URLSearchParams({ via })}`);
+  await expect(crumbs(page)).toHaveText([
+    /kgw-a/,
+    "HTTPRoute shop/store",
+    breadcrumbsCopy.hidden,
+    "HTTPRoute shop/quirk",
+  ]);
+  await expect(trailNav(page).getByText(breadcrumbsCopy.hidden)).not.toHaveAttribute("href");
+  expect(lookups).toHaveLength(1);
+});
+
 // Object header (Task 27): each core detail page renders it from the URL, so data arriving moves nothing.
 type Box = { x: number; y: number; width: number; height: number };
 const CORE_PAGES = [
