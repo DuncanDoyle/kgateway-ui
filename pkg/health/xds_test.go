@@ -177,8 +177,13 @@ func TestXDSTotalGrowthSinceFirstSeen(t *testing.T) {
 	}
 	b.PerPod[0].Total[k] = 2 // grows by 1 from the reset
 	w.metrics = resultAt(testutil.Now, a, b)
-	if g := growth(xdsAt(t, w, st, testutil.Now.Add(30*time.Second))); g != 6 {
+	r := xdsAt(t, w, st, testutil.Now.Add(30*time.Second))
+	if g := growth(r); g != 6 {
 		t.Fatalf("growth after an Err result %d, want 6", g)
+	}
+	// The failed scrape does not restart the reject's age.
+	if f := xdsOn(r, "infra/nack"); f.Since == nil || !f.Since.Equal(testutil.Now) || !xdsFacts(t, f).Types[0].FirstSeen.Equal(*f.Since) {
+		t.Fatalf("since %v, types %+v; want since %v", f.Since, xdsFacts(t, f).Types, testutil.Now)
 	}
 	c := capture(t, "v2.4.7-restart", "pod/kgw/ctrl-c", "ctrl-c") // a new UID sets a baseline
 	w.metrics = resultAt(testutil.Now, a, b, c)

@@ -22,11 +22,11 @@ const (
 	RestartHold = 60 * time.Second
 	// xdsKey holds the xdsState in the xDS rejects check's Store.
 	xdsKey = "xds"
-	// proxyStatsKey is the proxy stats collector value (Task 42).
+	// proxyStatsKey is the proxy stats collector value.
 	proxyStatsKey = "proxy-stats/stats"
 )
 
-// Wording of KGWUI-001 (design §8.3); Task 51 runs the wording pass.
+// Wording of KGWUI-001 (design §8.3).
 const (
 	xdsStatusHealthyMessage = "Status says Programmed, but proxies reject its config"
 	xdsRejectMessage        = "Proxies reject this Gateway's config"
@@ -50,9 +50,8 @@ func (xdsCheck) Inputs() InputSet {
 		Collected: []string{proxyStatsKey}}
 }
 
-// xdsState is the check's Store value: the controller Pods and when one last
-// changed, the rejects_total of tracked types per Pod UID, and the Gateways
-// that reject or are held.
+// xdsState is the check's Store value: controller Pods and their last change,
+// tracked rejects_total per Pod UID, and the rejecting or held Gateways.
 type xdsState struct {
 	pods      map[string]int32
 	changedAt time.Time
@@ -60,11 +59,10 @@ type xdsState struct {
 	gateways  map[ctrlmetrics.GatewayKey]*xdsGateway
 }
 
-// xdsGateway is one Gateway's rejects: lastSeen is the CollectedAt of the last
-// scrape that showed them; holdEnd is set while they are held.
+// xdsGateway is one Gateway's rejects; holdEnd is set while they are held.
 type xdsGateway struct {
-	lastSeen, holdEnd time.Time
-	types             map[string]xdsType
+	holdEnd time.Time
+	types   map[string]xdsType
 }
 
 // xdsType is one rejected type's first-seen time and rejects_total growth since.
@@ -84,15 +82,19 @@ type xdsStreams struct {
 // leave the Store as it is, so a failed scrape adds no rejects_total growth.
 func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	old, _ := Load[*xdsState](ctx.State, xdsKey)
+	if old == nil {
+		old = &xdsState{}
+	}
 	if !in.HasMetrics {
-		return unavailable(in, c.Name(), "controller metrics not collected yet")
+		return old.unavailable(ctx, c.Name(), "controller metrics not collected yet")
 	}
 	if in.Metrics.Err != "" {
-		return unavailable(in, c.Name(), in.Metrics.Err)
+		return old.unavailable(ctx, c.Name(), in.Metrics.Err)
 	}
 	// Recomputing the model must not make an old zero-reject result look fresh.
 	if in.Metrics.Stale(in.Now, in.MetricsMaxAge) {
-		return unavailable(in, c.Name(), fmt.Sprintf(xdsStaleError, in.Metrics.CollectedAt.UTC().Format(time.RFC3339)))
+		return old.unavailable(ctx, c.Name(), fmt.Sprintf(xdsStaleError, in.Metrics.CollectedAt.UTC().Format(time.RFC3339)))
 	}
 	if in.MetricsMaxAge > 0 {
 		ctx.WakeAt(in.Metrics.CollectedAt.Add(in.MetricsMaxAge + time.Nanosecond))
@@ -101,12 +103,8 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// family the endpoint or metric names are wrong, and zero rejects proves nothing.
 	m := &in.Metrics.Metrics
 	if n := len(in.Owned.Gateways); n > 0 && !m.ManagedPresent {
-		return unavailable(in, c.Name(), fmt.Sprintf("%s missing from controller metrics although the install owns %d Gateway(s); check the metrics endpoint",
+		return old.unavailable(ctx, c.Name(), fmt.Sprintf("%s missing from controller metrics although the install owns %d Gateway(s); check the metrics endpoint",
 			ctrlmetrics.ResourcesManaged, n))
-	}
-	old, _ := Load[*xdsState](ctx.State, xdsKey)
-	if old == nil {
-		old = &xdsState{}
 	}
 	cur := &xdsState{pods: controllerPods(in), changedAt: old.changedAt}
 	if old.pods != nil && podsChanged(old.pods, cur.pods) {
@@ -121,7 +119,7 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		key := ctrlmetrics.GatewayKey{Namespace: gw.GetNamespace(), Name: gw.GetName()}
 		prev := old.gateways[key]
 		if m.Rejects[key] > 0 {
-			g := &xdsGateway{lastSeen: in.Metrics.CollectedAt}
+			g := &xdsGateway{}
 			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth))
 			cur.keep(key, g)
 			continue
@@ -129,15 +127,15 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		if prev == nil {
 			continue
 		}
-		// A reject gone after a controller Pod change since the scrape that showed it is held.
+		// A reject gone within RestartHold of a controller Pod change is held.
 		end := prev.holdEnd
-		if end.IsZero() && !cur.changedAt.IsZero() && !cur.changedAt.Before(prev.lastSeen) {
+		if end.IsZero() && !cur.changedAt.IsZero() && in.Now.Sub(cur.changedAt) < RestartHold {
 			end = in.Now.Add(RestartHold)
 		}
 		if !in.Now.Before(end) {
 			continue
 		}
-		g := &xdsGateway{lastSeen: prev.lastSeen, holdEnd: end, types: make(map[string]xdsType, len(prev.types))}
+		g := &xdsGateway{holdEnd: end, types: make(map[string]xdsType, len(prev.types))}
 		for t, ty := range prev.types {
 			ty.growth += growth[ctrlmetrics.TypeKey{Gateway: key, TypeURL: t}]
 			g.types[t] = ty
@@ -152,6 +150,17 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Metrics.CollectedAt, Error: xdsHoldError}
 	}
 	return fs, ok(c.Name(), true, in.Metrics.CollectedAt)
+}
+
+// unavailable is KGWUI-008 for the check; the stored Gateways keep their since
+// entries, so a failed scrape never restarts a reject's age.
+func (s *xdsState) unavailable(ctx RunContext, name, why string) ([]Finding, CheckResult) {
+	for _, gw := range ctx.Owned.Gateways {
+		if s.gateways[ctrlmetrics.GatewayKey{Namespace: gw.GetNamespace(), Name: gw.GetName()}] != nil {
+			ctx.Retain(FindingID(ctx.Install.ID(), CodeXDSRejected, ref(gw), nil))
+		}
+	}
+	return unavailable(ctx.Input, name, why)
 }
 
 func (s *xdsState) keep(k ctrlmetrics.GatewayKey, g *xdsGateway) {
