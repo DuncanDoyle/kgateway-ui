@@ -404,7 +404,7 @@ func findingsCases(t *testing.T) []goldenCase {
 	}
 	return []goldenCase{
 		{"findings", all, findingsBase},
-		{"findings-restricted", some, findingsBase + "?severity=error&sort=-since"},
+		{"findings-restricted", some, findingsBase + "?severity=error&sort=since.desc"},
 		{"finding-detail-other", all, findingsBase + "/" + id("denied")},
 		{"finding-detail-restricted", some, findingsBase + "/" + id("broken")},
 	}

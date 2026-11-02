@@ -120,7 +120,7 @@ func TestFindingsPaging(t *testing.T) {
 	if len(want) < 3000 {
 		t.Fatalf("%d KGWUI-012 at Large, want the worst case of more than 3,000", len(want))
 	}
-	for _, sort := range []string{"", "rank", "since", "-since", "code", "-code"} {
+	for _, sort := range []string{"", "rank", "rank.asc", "since", "since.asc", "since.desc", "code", "code.desc"} {
 		t.Run("sort="+sort, func(t *testing.T) {
 			q := "code=" + health.CodeComputedDisagrees + "&limit=200"
 			if sort != "" {
@@ -133,7 +133,7 @@ func TestFindingsPaging(t *testing.T) {
 			if !slices.Equal(slices.Sorted(slices.Values(fwd)), slices.Sorted(slices.Values(want))) {
 				t.Fatalf("forward: %d ids, want the %d KGWUI-012 once each", len(fwd), len(want))
 			}
-			if sort == "" || sort == "rank" {
+			if sort == "" || strings.HasPrefix(sort, "rank") {
 				if !slices.Equal(fwd, want) {
 					t.Fatal("rank pages are not in diagnosis rank order")
 				}
@@ -216,7 +216,7 @@ func TestFindingsFilters(t *testing.T) {
 		})
 	}
 	for _, q := range []string{"severity=fatal", "code=nope", "code=", "kind=HTTPRoute", "kind=a/b/c", "group=g1", "group=f1-x", "namespace=",
-		"sort=-rank", "sort=name", "sort=since.desc", "limit=0", "limit=201", "q=a&q=b", "group=" + denied.Group + "&group=" + denied.Group,
+		"sort=rank.desc", "sort=-since", "sort=-rank", "sort=name", "sort=since.down", "sort=.desc", "sort=since.desc.asc", "limit=0", "limit=201", "q=a&q=b", "group=" + denied.Group + "&group=" + denied.Group,
 		"bogus=1", "cursor=nope", "health=error"} {
 		get[ErrorResponse](t, srv, findingsBase+"?"+q, http.StatusBadRequest)
 	}
@@ -227,7 +227,7 @@ func TestFindingsFilters(t *testing.T) {
 		t.Fatal("no cursors to reuse")
 	}
 	get[ErrorResponse](t, srv, findingsBase+"?cursor="+url.QueryEscape(routes.Next), http.StatusBadRequest)
-	get[ErrorResponse](t, srv, findingsBase+"?sort=-since&cursor="+url.QueryEscape(since.Next), http.StatusBadRequest)
+	get[ErrorResponse](t, srv, findingsBase+"?sort=since.desc&cursor="+url.QueryEscape(since.Next), http.StatusBadRequest)
 	get[ErrorResponse](t, srv, "/api/v1/installs/kgw.kgateway/routes?cursor="+url.QueryEscape(since.Next), http.StatusBadRequest)
 	get[ErrorResponse](t, srv, "/api/v1/installs/nope/findings", http.StatusNotFound)
 }
@@ -254,7 +254,7 @@ func TestFindingsFiltersRevealNothingHidden(t *testing.T) {
 		}
 	}
 	for _, q := range []string{"", "severity=error", "code=KGWUI-002", "kind=gateway.networking.k8s.io/HTTPRoute", "namespace=shop",
-		"group=" + broken.Group, "q=broken", "q=shop/broken", "sort=since", "sort=-code"} {
+		"group=" + broken.Group, "q=broken", "q=shop/broken", "sort=since", "sort=code.desc"} {
 		if a, s := total(all, q), total(some, q); a != s || a == 0 {
 			t.Errorf("%q: allow-all total %d, restricted %d", q, a, s)
 		}

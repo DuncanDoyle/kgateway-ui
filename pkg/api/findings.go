@@ -106,9 +106,11 @@ func parseFindingsQuery(r *http.Request) (findingsQuery, error) {
 	}
 	if vals.Has("sort") {
 		v := vals.Get("sort")
-		key, desc := strings.CutPrefix(v, "-")
-		if key != diagnose.SortRank && key != diagnose.SortSince && key != diagnose.SortCode || desc && key == diagnose.SortRank {
-			return q, badParam("sort %q: want rank, since, -since, code or -code", v)
+		// Phase 2 syntax: a key with an optional .asc or .desc; rank has one direction.
+		key, dir, _ := strings.Cut(v, ".")
+		desc := dir == "desc"
+		if key != diagnose.SortRank && key != diagnose.SortSince && key != diagnose.SortCode || dir != "" && dir != "asc" && !desc || desc && key == diagnose.SortRank {
+			return q, badParam("sort %q: want rank, since or code, with .asc or .desc (rank: .asc only)", v)
 		}
 		q.sort = diagnose.Sort{Key: key, Desc: desc}
 	}
