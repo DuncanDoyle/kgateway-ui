@@ -12,7 +12,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q3 Cross-model review of design + plan, triage, user approval — `reviews/design-codex.md`, 15 findings accepted and applied; user approved all of 3.0–3.4 on 2026-11-01 ("I approve the entire phase 3, so 3.0 to 3.4")
 - [x] Q4 Sub-phase 3.0 Extension seams (Tasks 1–11) — closed 2026-11-02, phases/phase-3/phase-3.0-complete.md
 - [x] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33) — closed 2026-11-02, phases/phase-3/phase-3.1-complete.md
-- [ ] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) ← NEXT
+- [ ] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) ← CURRENT
 - [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73)
 - [ ] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87)
 ### Exit gates
@@ -24,7 +24,11 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: n/a (3.1 closed 2026-11-02; 3.2 not started)
+Sub-phase: 3.2 Data plane, processes and the overview
+Kind: planned
+Status: implementing
+Base: 8bc1bae82607a427dae805928717b482a3ceeb7a
+Brief: phases/phase-3/phase-3.2-brief.md
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
@@ -46,6 +50,7 @@ Sub-phase: n/a (3.1 closed 2026-11-02; 3.2 not started)
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-02: Sub-phase 3.2 started (user). Brief phases/phase-3/phase-3.2-brief.md. Two gates are tight at the start: the memoized analyzer stage fails today (R20), and the CI warm worst case is 25 ms against 20; retained heap headroom is 4.2 MiB (local) in the contradicting world.
 - 2026-11-02: Sub-phase 3.1 closed (phases/phase-3/phase-3.1-complete.md). D-027 keeps the full recompute. Three Codex rounds triaged; the user decided D-040 (finding ids), D-041 (breadcrumbs through `/refs`) and D-042 (side column from 1600 px), replacing R24, R31 and R30. Gates pass locally; kind e2e passed on all three rows at 205e164.
 - 2026-11-02: Sub-phase 3.1 started. Baseline recorded (bench/3.1-baseline.txt, -ci.txt): every gate passes on 544dcd5 and 3.0; spec-edit 11.0 % local (10 min), 14.0 % CI (60 s). Throwaway branch `duncandoyle/baseline3` pushed for the CI run (user go), never merged. The user raised the D-039 cold-allocation budget to 246 MiB (CI measures 224) and approved Task 15 after seeing D-027.
 - 2026-11-02: Sub-phase 3.0 closed (phases/phase-3/phase-3.0-complete.md). Both blocked gates cleared: kind e2e passed on all three e2e.yaml rows locally; the dense gate changed per D-039. 3.1 Task 12 needs the user's go for a throwaway CI push.
