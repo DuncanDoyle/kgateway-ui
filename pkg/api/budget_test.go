@@ -352,9 +352,8 @@ func TestBudgetSustainedStream(t *testing.T) {
 	})
 }
 
-// TestBudgetSpecEditStream is the sustained stream at Large with one HTTPRoute
-// path value toggled per 100 ms instead of an annotation change. It reports
-// CPU, recomputes per s, GC share and OS memory, and gates nothing (design §16.3).
+// TestBudgetSpecEditStream is the sustained stream at Large with route spec
+// edits instead of annotations; it reports and gates nothing (design §16.3).
 func TestBudgetSpecEditStream(t *testing.T) {
 	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large}, func(t *testing.T, tier scale.Tier) {
 		sustainedStream(t, tier, specEditStream)
@@ -415,13 +414,11 @@ var annotationStream = streamVariant{gated: true, edit: func(u *unstructured.Uns
 	return nil
 }}
 
-// specEditStream changes a route's spec and bumps its generation per update, as
-// the API server does; status stays, as no controller acknowledges the edit.
+// specEditStream edits spec and generation, as the API server does; status stays stale.
 var specEditStream = streamVariant{name: "spec-edit ", edit: togglePath}
 
-// togglePath appends "-x" to u's first path match value on even passes and
-// leaves the seeded spec on odd ones, so every update changes the spec. Each
-// pass updates a route once, so its generation is the seeded one plus pass+1.
+// togglePath appends "-x" to u's first path value on even passes and restores
+// it on odd ones; a pass edits each route once, so generation rises by one.
 func togglePath(u *unstructured.Unstructured, _, pass int) error {
 	u.SetGeneration(u.GetGeneration() + int64(pass) + 1)
 	rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "rules")

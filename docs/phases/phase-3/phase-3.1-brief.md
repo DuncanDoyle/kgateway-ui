@@ -11,7 +11,7 @@ Phase 2 ended near its CPU and memory budgets, and every later sub-phase adds lo
 
 | Input / action | Expected |
 |---|---|
-| `TestBudgetSpecEditStream` at Large: one HTTPRoute path value toggled every 100 ms for 10 min (`-short`: 60 s), 20 clients polling `/routes` every 5 s | Reports process CPU % of one core, recomputes/s, GC share and OS memory; gates nothing in 3.1 (Task 12) |
+| `TestBudgetSpecEditStream` at Large: one HTTPRoute path value toggled every 100 ms for 10 min (`-short`: 60 s), 20 clients polling `/routes` every 5 s. Each edit cycles to the next route, bumps its generation and leaves status stale, so KGWUI-003 findings accumulate and the KGWUI-012 cross-check has no candidates | Reports process CPU % of one core, recomputes/s, GC share and OS memory; gates nothing in 3.1 (Task 12) |
 | Phase 2 baseline on `544dcd5` and on the 3.0 HEAD, locally and on CI | Recorded in `docs/phases/phase-3/bench/3.1-baseline.txt` and `bench/3.1-baseline-ci.txt`; an existing gate broken on either commit, or spec-edit CPU above 22 %, stops the work and the numbers go to the user (Task 12, §16.3) |
 | The KRT spike (view A as KRT collections, throwaway branch) | Measured at Large against the current engine: warm recompute, spec-edit stream CPU, retained heap, dense memory; plus module graph, binary size, Go floor and licences. The decision rule below picks Adopt or Keep; D-027 records the numbers and the outcome; the user sees them before Task 15 (Tasks 13, 14) |
 | A check implements `Name`, `Inputs`, `Run(RunContext)` and writes its Store | The value survives recomputes, is cleared on engine restart, is invisible to other checks and to other installs (Task 15) |
