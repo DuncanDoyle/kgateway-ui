@@ -693,16 +693,19 @@ func (d *detail) effective(route objects.Ref, inherit bool) ([]EffectiveDTO, boo
 				continue
 			}
 			c := &ed.Contexts[x]
-			pm := matchDTO(c.ParentMatch)
-			ec := EffectiveContext{ParentMatch: &pm, Rules: make([]EffectiveRuleDTO, 0, len(c.Rules))}
+			// Charge before building: a refused context must not materialize its matches.
 			reasons := make([]string, 0, len(c.Rules))
 			for _, er := range c.Rules {
-				rd := EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: explainFit(er.Reason)}
-				ec.Rules, reasons = append(ec.Rules, rd), append(reasons, rd.Reason)
+				reasons = append(reasons, explainFit(er.Reason))
 			}
 			if !d.charge(c.ParentMatch, nil, c.Rules, reasons...) {
 				dto.ContextsTruncated = true
 				break
+			}
+			pm := matchDTO(c.ParentMatch)
+			ec := EffectiveContext{ParentMatch: &pm, Rules: make([]EffectiveRuleDTO, 0, len(c.Rules))}
+			for k, er := range c.Rules {
+				ec.Rules = append(ec.Rules, EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: reasons[k]})
 			}
 			dto.Contexts = append(dto.Contexts, ec)
 		}
@@ -811,12 +814,12 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 		if !d.v.allowDeps(d.ix, r.ContextDeps[j]) {
 			continue
 		}
-		dc := d.delegationContext(r, j)
-		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil, dc.Reason) {
+		// Charge before building: a refused context must not materialize its path.
+		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil, contextReason(r, j)) {
 			out.ContextsTruncated = true
 			break
 		}
-		out.Contexts = append(out.Contexts, dc)
+		out.Contexts = append(out.Contexts, d.delegationContext(r, j))
 	}
 	if !shown {
 		out.Contexts, out.ContextsTruncated = append(out.Contexts, DelegationContext{Restricted: true}), false
@@ -838,24 +841,32 @@ func (d *detail) selectionRow(r *explore.DelegRow) DelegationRow {
 // none for a hidden one, and never restrict it (design §7.4 rule 4b, D-024).
 func (d *detail) delegationContext(r *explore.DelegRow, j int) DelegationContext {
 	c := &r.Contexts[j]
-	o := c.Outcome
-	if o == "" {
-		o = computed.OutcomeUnknown // an empty outcome counts as unknown
-	}
 	pm := matchDTO(c.ParentMatch)
-	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, c.Path.Len()), Outcome: string(o)}
-	// An unknown context's reason is its unknown code, as Computed.Reason is.
-	if o == computed.OutcomeUnknown {
-		out.Reason = string(c.Unknown)
-	} else {
-		out.Reason = explainRow(o, c.Reason, r.Unresolved)
-	}
+	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, c.Path.Len()), Outcome: string(contextOutcome(c)), Reason: contextReason(r, j)}
 	i := len(out.Path)
 	for s := range c.Path.All() { // last step first
 		i--
 		out.Path[i] = PathStepDTO{Ref: d.cachedLink(s.Route), Match: matchDTO(s.Match)}
 	}
 	return out
+}
+
+// contextOutcome is c's outcome; an empty one counts as unknown.
+func contextOutcome(c *computed.Context) computed.RowOutcome {
+	if c.Outcome == "" {
+		return computed.OutcomeUnknown
+	}
+	return c.Outcome
+}
+
+// contextReason is the reason text of context j of r. An unknown context's
+// reason is its unknown code, as Computed.Reason is.
+func contextReason(r *explore.DelegRow, j int) string {
+	c := &r.Contexts[j]
+	if o := contextOutcome(c); o != computed.OutcomeUnknown {
+		return explainRow(o, c.Reason, r.Unresolved)
+	}
+	return string(c.Unknown)
 }
 
 // cachedLink is d.l.linked memoised per request.

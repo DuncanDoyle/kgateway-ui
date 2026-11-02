@@ -19,6 +19,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -1336,5 +1337,36 @@ func TestPageBudgetChargesReasonAndEscaping(t *testing.T) {
 	}
 	if len(keys) != 10 || !slices.IsSorted(keys) {
 		t.Errorf("paged rows %v", keys)
+	}
+}
+
+// A context past the page budget is refused before its path is built, so a
+// refused row allocates about as much as the same row with no contexts.
+func TestRefusedContextIsNotBuilt(t *testing.T) {
+	e, _, _ := startWith(t, setup{disputes: true}, ancestorWorld("/api/s", "")...)
+	req := httptest.NewRequest(http.MethodGet, delegURL("shop", "leaf", ""), nil)
+	req.SetPathValue("id", "kgw.kgateway")
+	d := (&handler{src: e, authz: AllowAll{}}).startDetail(httptest.NewRecorder(), req)
+	if d == nil {
+		t.Fatal("no install")
+	}
+	var row *explore.DelegRow
+	for i := range d.ix.DelegRows {
+		if r := &d.ix.DelegRows[i]; len(r.Contexts) > 0 && r.Contexts[0].Path.Len() >= 3 {
+			row = r
+		}
+	}
+	if row == nil {
+		t.Fatal("no row with a 3-step path")
+	}
+	pu, pv := d.routeView(objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "leaf"})
+	bare := *row
+	bare.Contexts, bare.ContextDeps = nil, nil
+	d.units = maxPageUnits + 1
+	refused := testing.AllocsPerRun(20, func() { d.delegationRow(row, pu, pv) })
+	none := testing.AllocsPerRun(20, func() { d.delegationRow(&bare, pu, pv) })
+	t.Logf("allocs: refused %v, no contexts %v", refused, none)
+	if refused > none+1 {
+		t.Errorf("a refused context allocates %v times, want at most %v", refused, none+1)
 	}
 }
