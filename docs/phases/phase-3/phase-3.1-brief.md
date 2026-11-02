@@ -94,7 +94,18 @@ Budgets (§16.3; dense gate per D-039):
 
 No gate changes without the user. A broken gate stops the work, and the numbers go to the user.
 
-**Baseline.** The Phase 2 baseline numbers (on `544dcd5` and the 3.0 HEAD, local and CI) are recorded here by Task 12 Step 5.
+**Baseline** (Task 12 Step 5, 2026-11-02). No gate broken on either commit; spec-edit CPU below 22 %, so the work goes on.
+
+| Measure (Large) | `544dcd5` local | 3.0 local | `544dcd5` CI | Budget |
+|---|---|---|---|---|
+| Warm recompute median, consistent / contradicting | 40.6 / 46.7 ms | 38.9 / 44.1 ms | 99.3 / 118.1 ms | ≤ 150 ms |
+| Retained heap over 2.1, consistent / contradicting | +23.2 / +24.4 MiB | +23.1 / +24.3 MiB | +23.0 / +24.8 MiB | ≤ 32 MiB |
+| Dense: retained / cold / per warm | 160 / 210 / 168 MiB | 160 / 210 / 168 MiB | 160 / 224 / 168 MiB | 176 / 231 / 185 MiB |
+| Stream CPU, annotation-only, consistent / contradicting (60 s) | 6.6 / 7.5 % | 6.6 / 7.3 % | 9.4 / 11.4 % | ≤ 15 % |
+| Stream CPU, spec-edit, 60 s | 8.4 % | 8.4 % | 14.0 % | reported |
+| Stream CPU, spec-edit, 10 min | 11.0 % (1.31 recomputes/s) | 11.0 % (1.30/s) | not run | reported; ≤ 25 % from 3.2 |
+
+The 10-minute spec-edit run recomputes 1.3 times a second, more than the annotation stream's 1/s; it is reported, not gated. The CI cold allocation (224 MiB, linux/amd64) sits 3 % under its budget, which was set from the local arm64 measurement (raised with the user).
 
 **Memoization.** The warm-recompute delta of `BenchmarkCompute` is recorded here by Task 18.
 
