@@ -214,7 +214,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	switch {
 	case scraper != nil:
 	case c.InCluster:
-		scraper = ctrlmetrics.HTTPScraper{Client: &http.Client{Timeout: 5 * time.Second}}
+		scraper = ctrlmetrics.HTTPScraper{Client: ctrlmetrics.NewHTTPClient()}
 	default:
 		scraper = ctrlmetrics.PodProxyScraper{Kube: c.Kube}
 	}
