@@ -73,7 +73,7 @@ func lazy(p **uint64, f func() uint64) uint64 {
 // inputPrint keys a check's memo on what set declares (§16.2); earlier checks'
 // outputs are mixed in by health.Evaluate. False means the check always runs.
 func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
-	if (set.Owned || len(set.Kinds) > 0) && ctx.snap.Source.Kinds == nil {
+	if (set.Owned || len(set.Kinds) > 0) && ctx.snap.Source.Kinds == nil || len(set.Collected) > health.MaxStampedCollected {
 		return 0, false
 	}
 	p := installPrint(ctx.res)

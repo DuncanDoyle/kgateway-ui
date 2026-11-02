@@ -46,6 +46,10 @@ func AllInputs() InputSet {
 // find nothing; Set on a nil Store panics.
 type Store struct{ m map[string]any }
 
+// MaxStampedCollected is how many declared collector keys can be restamp
+// references; the engine never memoizes a check that declares more.
+const MaxStampedCollected = 61
+
 // NewStore returns an empty Store.
 func NewStore() *Store { return &Store{m: map[string]any{}} }
 
@@ -123,7 +127,7 @@ func eachRef(in Input, set InputSet, col collect.Snapshot, f func(bit stamp, t t
 	if set.Metrics && in.HasMetrics {
 		f(1<<2, in.Metrics.CollectedAt)
 	}
-	for i, k := range set.Collected[:min(len(set.Collected), 61)] {
+	for i, k := range set.Collected[:min(len(set.Collected), MaxStampedCollected)] {
 		if v, ok := col.Get(k); ok {
 			f(1<<(3+i), v.At)
 		}
