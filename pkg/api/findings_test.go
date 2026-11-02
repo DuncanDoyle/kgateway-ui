@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -433,45 +432,152 @@ func TestHealthFindingsGainIDAndGroup(t *testing.T) {
 	}
 }
 
-// A cursor whose anchor finding is gone resumes at the anchor's old
-// position, and a restricted anchor's cursor carries only its id and position.
-func TestFindingsCursorVanishedAnchor(t *testing.T) {
-	at := func(m int) *time.Time { s := testutil.Now.Add(time.Duration(m) * time.Minute); return &s }
-	mk := func(names ...string) ([]health.Finding, *diagnose.Index) {
-		var fs []health.Finding
-		for k, n := range names {
-			fs = append(fs, health.Finding{ID: "f1-" + n, Code: "KGWUI-00" + strconv.Itoa(k%3), Since: at(k)})
+// pagedFinding is a finding of a paging test: its own resource, so its group's rank keys are its own.
+type pagedFinding struct {
+	name, code string
+	sev        health.Severity
+	since      int // minutes after testutil.Now; negative is none
+}
+
+// pagedIndex returns fs and their index, grouped and ranked as the engine does.
+func pagedIndex(ps []pagedFinding) ([]health.Finding, *diagnose.Index) {
+	fs := make([]health.Finding, 0, len(ps))
+	for _, p := range ps {
+		r := route("shop", p.name)
+		f := health.Finding{ID: "f1-" + p.name, Code: p.code, Severity: p.sev, Resource: &r}
+		if p.since >= 0 {
+			at := testutil.Now.Add(time.Duration(p.since) * time.Minute)
+			f.Since = &at
 		}
-		rank := make([]int, len(fs))
-		for k := range rank {
-			rank[k] = k
-		}
-		return fs, diagnose.NewIndex(fs, rank)
+		fs = append(fs, f)
 	}
-	ids := func(fs []health.Finding, p diagnose.Page) []string {
-		var out []string
-		for _, k := range p.Items {
-			out = append(out, fs[k].ID)
-		}
-		return out
+	rep := &health.Report{Findings: fs}
+	return rep.Findings, diagnose.Build(rep, diagnose.Input{}, diagnose.Families()).Index
+}
+
+// pageIDs returns the IDs of p's findings.
+func pageIDs(fs []health.Finding, p diagnose.Page) []string {
+	out := make([]string, 0, len(p.Items))
+	for _, k := range p.Items {
+		out = append(out, fs[k].ID)
 	}
-	fs, ix := mk("a", "b", "c", "d", "e")
-	first, err := ix.Page(fs, diagnose.Sort{Key: diagnose.SortSince}, 2, "", nil)
-	if err != nil || !slices.Equal(ids(fs, first), []string{"f1-a", "f1-b"}) {
-		t.Fatalf("first page %v %v", ids(fs, first), err)
+	return out
+}
+
+// Cursors keep keyset semantics (design §13.1): after findings before the
+// anchor vanish, new ones arrive and since values change, every unchanged
+// finding appears exactly once across the pages, forward and back.
+func TestFindingsCursorSurvivesChanges(t *testing.T) {
+	base := []pagedFinding{
+		{"a", "KGWUI-004", health.SeverityWarning, 0}, {"b", "KGWUI-002", health.SeverityError, 1},
+		{"c", "KGWUI-003", health.SeverityWarning, 2}, {"d", "KGWUI-002", health.SeverityWarning, 3},
+		{"e", "KGWUI-001", health.SeverityWarning, -1}, {"f", "KGWUI-003", health.SeverityInfo, 5},
+		{"g", "KGWUI-004", health.SeverityError, 6},
+	}
+	// Each change maps the findings shown before it to the new findings and the names it changed.
+	changes := map[string]func(shown []string) ([]pagedFinding, []string){
+		"shown and earlier ones vanish": func(shown []string) ([]pagedFinding, []string) {
+			return without(base, shown), nil
+		},
+		"new ones arrive around the vanished anchor": func(shown []string) ([]pagedFinding, []string) {
+			fresh := []pagedFinding{{"x", "KGWUI-000", health.SeverityError, 0}, {"y", "KGWUI-009", health.SeverityInfo, 9}, {"z", "KGWUI-002", health.SeverityWarning, 1}}
+			return append(without(base, shown[len(shown)-1:]), fresh...), []string{"x", "y", "z"}
+		},
+		"since values change": func(shown []string) ([]pagedFinding, []string) {
+			ps := slices.Clone(base)
+			var moved []string
+			for k := range ps {
+				if slices.Contains(shown, "f1-"+ps[k].name) || ps[k].name == "g" {
+					ps[k].since = 10 + k
+					moved = append(moved, ps[k].name)
+				}
+			}
+			return ps, moved
+		},
+	}
+	for _, sort := range []diagnose.Sort{{Key: diagnose.SortRank}, {Key: diagnose.SortSince}, {Key: diagnose.SortSince, Desc: true},
+		{Key: diagnose.SortCode}, {Key: diagnose.SortCode, Desc: true}} {
+		for name, change := range changes {
+			for _, back := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s.%v/%s/back=%v", sort.Key, sort.Desc, name, back), func(t *testing.T) {
+					fs, ix := pagedIndex(base)
+					// The page the client holds: the first one, or the last one when paging back.
+					held, err := ix.Page(fs, sort, 2, "", nil)
+					for back && err == nil && held.Next != "" {
+						held, err = ix.Page(fs, sort, 2, held.Next, nil)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					shown := pageIDs(fs, held)
+					next, changed := change(shown)
+					fs2, ix2 := pagedIndex(next)
+					seen := map[string]int{}
+					for _, id := range shown {
+						seen[id]++
+					}
+					c := held.Next
+					if back {
+						c = held.Prev
+					}
+					for n := 0; c != ""; n++ {
+						if n > len(fs2) {
+							t.Fatal("no last page")
+						}
+						p, err := ix2.Page(fs2, sort, 2, c, nil)
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, id := range pageIDs(fs2, p) {
+							seen[id]++
+						}
+						if c = p.Next; back {
+							c = p.Prev
+						}
+					}
+					for _, p := range next {
+						if id := "f1-" + p.name; !slices.Contains(changed, p.name) && seen[id] != 1 {
+							t.Errorf("unchanged %s seen %d times (held %v): %v", id, seen[id], shown, seen)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+// without returns ps but the findings with the given IDs.
+func without(ps []pagedFinding, ids []string) []pagedFinding {
+	return slices.DeleteFunc(slices.Clone(ps), func(p pagedFinding) bool { return slices.Contains(ids, "f1-"+p.name) })
+}
+
+// A cursor is opaque: it names no finding, and a cursor altered, from
+// another sort or from another list is a bad cursor (design §14 rules 17, 18).
+func TestFindingsCursorSealed(t *testing.T) {
+	fs, ix := pagedIndex([]pagedFinding{{"a", "KGWUI-002", health.SeverityError, 0}, {"b", "KGWUI-002", health.SeverityError, 1}, {"c", "KGWUI-003", health.SeverityWarning, 2}})
+	first, err := ix.Page(fs, diagnose.Sort{Key: diagnose.SortSince}, 1, "", nil)
+	if err != nil || first.Next == "" {
+		t.Fatalf("first page %+v %v", first, err)
 	}
 	raw, _ := base64.RawURLEncoding.DecodeString(first.Next)
-	if string(raw) != `{"s":"findings.since","d":"asc","b":false,"v":1,"t":["f1-b"]}` {
-		t.Errorf("cursor %s", raw)
+	for _, s := range []string{"f1-a", "KGWUI-002", "since", "findings"} {
+		if strings.Contains(string(raw), s) {
+			t.Errorf("cursor reveals %q", s)
+		}
 	}
-	// b is gone: the next page starts at its old position, so c is not skipped.
-	fs2, ix2 := mk("a", "c", "d", "e")
-	next, err := ix2.Page(fs2, diagnose.Sort{Key: diagnose.SortSince}, 2, first.Next, nil)
-	if err != nil || !slices.Equal(ids(fs2, next), []string{"f1-c", "f1-d"}) || next.Next == "" || next.Prev == "" {
-		t.Errorf("after a vanished anchor: %v next %q prev %q %v", ids(fs2, next), next.Next, next.Prev, err)
-	}
-	if _, err := ix.Page(fs, diagnose.Sort{Key: diagnose.SortCode}, 2, first.Next, nil); !errors.Is(err, explore.ErrBadCursor) {
-		t.Errorf("since cursor on the code sort: %v", err)
+	flipped := []byte(first.Next)
+	flipped[len(flipped)/2] ^= 1
+	explorer := base64.RawURLEncoding.EncodeToString([]byte(`{"s":"name","d":"asc","b":false,"t":["shop","a"]}`))
+	for name, tc := range map[string]struct {
+		s diagnose.Sort
+		c string
+	}{
+		"altered": {diagnose.Sort{Key: diagnose.SortSince}, string(flipped)}, "another sort": {diagnose.Sort{Key: diagnose.SortCode}, first.Next},
+		"another direction": {diagnose.Sort{Key: diagnose.SortSince, Desc: true}, first.Next}, "another list": {diagnose.Sort{Key: diagnose.SortSince}, explorer},
+	} {
+		if _, err := ix.Page(fs, tc.s, 1, tc.c, nil); !errors.Is(err, explore.ErrBadCursor) {
+			t.Errorf("%s: %v, want a bad cursor", name, err)
+		}
 	}
 }
 
@@ -490,13 +596,13 @@ func TestFindingsQueryFoldsRunes(t *testing.T) {
 // Descending since and code keep ties in rank order, and a nil since sorts last both ways.
 func TestFindingsDescendingTies(t *testing.T) {
 	at := func(m int) *time.Time { s := testutil.Now.Add(time.Duration(m) * time.Minute); return &s }
-	// Rank order a..f; c and e share since 1 and code 002; f has no since.
-	fs := []health.Finding{
-		{ID: "f1-a", Code: "KGWUI-001", Since: at(2)}, {ID: "f1-b", Code: "KGWUI-003", Since: at(0)},
-		{ID: "f1-c", Code: "KGWUI-002", Since: at(1)}, {ID: "f1-d", Code: "KGWUI-003"},
-		{ID: "f1-e", Code: "KGWUI-002", Since: at(1)}, {ID: "f1-f", Code: "KGWUI-001"},
-	}
-	ix := diagnose.NewIndex(fs, []int{0, 1, 2, 3, 4, 5})
+	// Rank order a..f (severity, then since); c and e share since 1 and code 002; d and f have no since.
+	rep := &health.Report{Findings: []health.Finding{
+		{ID: "f1-a", Code: "KGWUI-001", Severity: health.SeverityError, Since: at(2)}, {ID: "f1-b", Code: "KGWUI-003", Severity: health.SeverityWarning, Since: at(0)},
+		{ID: "f1-c", Code: "KGWUI-002", Severity: health.SeverityWarning, Since: at(1)}, {ID: "f1-d", Code: "KGWUI-003", Severity: health.SeverityWarning},
+		{ID: "f1-e", Code: "KGWUI-002", Severity: health.SeverityInfo, Since: at(1)}, {ID: "f1-f", Code: "KGWUI-001", Severity: health.SeverityInfo},
+	}}
+	fs, ix := rep.Findings, diagnose.Build(rep, diagnose.Input{}, diagnose.Families()).Index
 	for _, tc := range []struct {
 		s    diagnose.Sort
 		want string

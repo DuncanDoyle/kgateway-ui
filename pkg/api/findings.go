@@ -170,7 +170,7 @@ func findingRow(v *view, l linker, f *health.Finding) FindingRow {
 // diagnosis returns i's diagnosis, or an empty one.
 func diagnosis(i *engine.InstallModel) *diagnose.Diagnosis {
 	if i.Diagnosis == nil || i.Diagnosis.Index == nil {
-		return &diagnose.Diagnosis{Index: diagnose.NewIndex(nil, nil)}
+		return &diagnose.Diagnosis{Index: diagnose.NewIndex(nil, nil, nil)}
 	}
 	return i.Diagnosis
 }

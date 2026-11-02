@@ -163,7 +163,7 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 		g.Affected = meta[k].fam.Affected(g.Cause, meta[k].key, buf, in)
 	}
 	d := rank(rep.Findings, groups)
-	d.Index = NewIndex(rep.Findings, d.Rank)
+	d.Index = NewIndex(rep.Findings, d.Groups, d.Rank)
 	return d
 }
 

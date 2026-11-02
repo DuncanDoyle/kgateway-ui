@@ -3,6 +3,11 @@ package diagnose
 import (
 	"bytes"
 	"cmp"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -26,6 +31,9 @@ const (
 // cursorPrefix keeps findings cursors apart from the explorer's sort keys.
 const cursorPrefix = "findings."
 
+// cursorAD binds a sealed cursor to the findings list.
+var cursorAD = []byte("findings")
+
 // maxCursor is the longest cursor accepted, encoded.
 const maxCursor = 1024
 
@@ -33,7 +41,11 @@ const maxCursor = 1024
 // indexes into the report's findings. Build makes one per model; it is read-only
 // but for the orders other than rank and the search text, each built on first use.
 type Index struct {
-	rank []int32
+	rank   []int32
+	groups []Group
+	// group is each finding's index in groups, built on first cursor use.
+	groupOnce sync.Once
+	group     []int32
 	// orders builds since, code and byID; a recompute need not pay for them.
 	orders                           sync.Once
 	since, sinceDesc, code, codeDesc []int32
@@ -66,10 +78,11 @@ func (ix *Index) Text(fs []health.Finding) []Text {
 	return ix.text
 }
 
-// NewIndex returns the index of fs, whose rank order is rank. Since and code
-// orders, either direction, break ties by rank; a nil since sorts last.
-func NewIndex(fs []health.Finding, rank []int) *Index {
-	ix := &Index{rank: make([]int32, len(rank))}
+// NewIndex returns the index of fs grouped into groups, whose rank order is
+// rank, as Build makes them. Since and code orders, either direction, break
+// ties by rank; a nil since sorts last.
+func NewIndex(fs []health.Finding, groups []Group, rank []int) *Index {
+	ix := &Index{rank: make([]int32, len(rank)), groups: groups}
 	for k, i := range rank {
 		ix.rank[k] = int32(i) // #nosec G115 -- a finding count fits in int32
 	}
@@ -186,14 +199,98 @@ func (ix *Index) order(fs []health.Finding, s Sort) ([]int32, bool) {
 	return nil, false
 }
 
-// wireCursor is a findings cursor in the explorer's shape: T is the anchor's
-// ID, V its position, used when it is gone; neither reveals hidden data.
+// rankKey is a finding's rank order tuple: its group's keys (compareGroups),
+// then its severity, since and ID. A nil since is HasSince false.
+type rankKey struct {
+	Unranked      bool   `json:"u,omitempty"`
+	GroupSev      int    `json:"gs"`
+	Class         Class  `json:"gc"`
+	Affected      int    `json:"ga"`
+	GroupSince    int64  `json:"gt"`
+	HasGroupSince bool   `json:"gh,omitempty"`
+	Group         string `json:"g"`
+	Sev           int    `json:"fs"`
+	Since         int64  `json:"ft"`
+	HasSince      bool   `json:"fh,omitempty"`
+	ID            string `json:"f"`
+}
+
+// keyOf returns finding i's rank key and code.
+func (ix *Index) keyOf(fs []health.Finding, i int32) (rankKey, string) {
+	ix.groupOnce.Do(func() {
+		ix.group = make([]int32, len(fs))
+		for g := range ix.groups {
+			for _, m := range ix.groups[g].Members {
+				ix.group[m] = int32(g) // #nosec G115 -- a group count fits in int32
+			}
+		}
+	})
+	f, g := &fs[i], &ix.groups[ix.group[i]]
+	k := rankKey{Unranked: !g.Ranked, GroupSev: sevRank(g.Severity), Class: g.Class, Affected: len(g.Affected), Group: g.ID,
+		Sev: sevRank(f.Severity), ID: f.ID}
+	if g.Since != nil {
+		k.GroupSince, k.HasGroupSince = g.Since.UnixNano(), true
+	}
+	if f.Since != nil {
+		k.Since, k.HasSince = f.Since.UnixNano(), true
+	}
+	return k, f.Code
+}
+
+// compareNanos orders the oldest time first and a missing one last, as compareSince does.
+func compareNanos(a int64, hasA bool, b int64, hasB bool) int {
+	if hasA && hasB {
+		return cmp.Compare(a, b)
+	}
+	return cmp.Compare(boolInt(!hasA), boolInt(!hasB))
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// compareRank orders rank keys as rank does: compareGroups, then severity, since and ID.
+func compareRank(a, b rankKey) int {
+	return cmp.Or(
+		cmp.Compare(boolInt(a.Unranked), boolInt(b.Unranked)),
+		cmp.Compare(a.GroupSev, b.GroupSev),
+		cmp.Compare(a.Class, b.Class),
+		cmp.Compare(b.Affected, a.Affected),
+		compareNanos(a.GroupSince, a.HasGroupSince, b.GroupSince, b.HasGroupSince),
+		cmp.Compare(a.Group, b.Group),
+		cmp.Compare(a.Sev, b.Sev),
+		compareNanos(a.Since, a.HasSince, b.Since, b.HasSince),
+		cmp.Compare(a.ID, b.ID),
+	)
+}
+
+// compareIn orders (k, code) against (w, wcode) in s's order, as build sorts.
+func compareIn(s Sort, k rankKey, code string, w rankKey, wcode string) int {
+	var c int
+	switch {
+	case s.Key == SortSince && s.Desc && k.HasSince && w.HasSince:
+		c = cmp.Compare(w.Since, k.Since)
+	case s.Key == SortSince:
+		c = compareNanos(k.Since, k.HasSince, w.Since, w.HasSince)
+	case s.Key == SortCode && s.Desc:
+		c = cmp.Compare(wcode, code)
+	case s.Key == SortCode:
+		c = cmp.Compare(code, wcode)
+	}
+	return cmp.Or(c, compareRank(k, w))
+}
+
+// wireCursor is a findings cursor: the sort, the direction and the anchor's
+// ordering tuple. It is sealed, as the tuple can hold a hidden finding's since.
 type wireCursor struct {
-	S string   `json:"s"`
-	D string   `json:"d"`
-	B bool     `json:"b"`
-	V int      `json:"v"`
-	T []string `json:"t"`
+	S    string  `json:"s"`
+	D    string  `json:"d"`
+	B    bool    `json:"b"`
+	Code string  `json:"c"`
+	K    rankKey `json:"k"`
 }
 
 func direction(desc bool) string {
@@ -203,9 +300,28 @@ func direction(desc bool) string {
 	return "asc"
 }
 
-func encodeCursor(s Sort, before bool, id string, at int) string {
-	b, _ := json.Marshal(wireCursor{S: cursorPrefix + s.Key, D: direction(s.Desc), B: before, V: at, T: []string{id}}) // strings and ints cannot fail
-	return base64.RawURLEncoding.EncodeToString(b)
+// cursorAEAD seals cursors; cursorNonceKey derives each nonce from the plaintext, so an anchor has one cursor.
+// Both are random per process: a restart invalidates every cursor.
+var cursorAEAD, cursorNonceKey = func() (cipher.AEAD, []byte) {
+	key := make([]byte, 64)
+	_, _ = rand.Read(key) // never fails (crypto/rand)
+	block, err := aes.NewCipher(key[:32])
+	if err != nil {
+		panic(err)
+	}
+	a, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err)
+	}
+	return a, key[32:]
+}()
+
+func encodeCursor(s Sort, before bool, k rankKey, code string) string {
+	b, _ := json.Marshal(wireCursor{S: cursorPrefix + s.Key, D: direction(s.Desc), B: before, Code: code, K: k}) // plain fields cannot fail
+	mac := hmac.New(sha256.New, cursorNonceKey)
+	_, _ = mac.Write(b)
+	nonce := mac.Sum(make([]byte, 0, sha256.Size+len(b)+cursorAEAD.Overhead()))[:cursorAEAD.NonceSize()]
+	return base64.RawURLEncoding.EncodeToString(cursorAEAD.Seal(nonce, nonce, b, cursorAD))
 }
 
 func badCursor(why string) error { return fmt.Errorf("%w: %s", explore.ErrBadCursor, why) }
@@ -215,9 +331,17 @@ func decodeCursor(c string, s Sort) (wireCursor, error) {
 	if len(c) > maxCursor {
 		return w, badCursor("too long")
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(c)
+	sealed, err := base64.RawURLEncoding.DecodeString(c)
 	if err != nil {
 		return w, badCursor("not base64url")
+	}
+	ns := cursorAEAD.NonceSize()
+	if len(sealed) < ns {
+		return w, badCursor("not a cursor")
+	}
+	raw, err := cursorAEAD.Open(nil, sealed[:ns], sealed[ns:], cursorAD)
+	if err != nil {
+		return w, badCursor("not a cursor of this server")
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -227,13 +351,14 @@ func decodeCursor(c string, s Sort) (wireCursor, error) {
 	if w.S != cursorPrefix+s.Key || w.D != direction(s.Desc) {
 		return w, badCursor("from another sort")
 	}
-	if len(w.T) != 1 || w.T[0] == "" || w.V < 0 {
+	if w.K.ID == "" {
 		return w, badCursor("bad anchor")
 	}
 	return w, nil
 }
 
 // Page returns up to limit findings of fs that match, in s's order, after or before cursor.
+// A cursor resumes at its anchor's ordering tuple, so a vanished anchor skips nothing.
 // Bad sorts are explore.ErrBadQuery, bad cursors explore.ErrBadCursor (design §14 rules 17, 18).
 func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, match func(i int) bool) (Page, error) {
 	order, ok := ix.order(fs, s)
@@ -260,16 +385,11 @@ func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, mat
 			return Page{}, err
 		}
 		cur = &w
-		// The anchor's current position; a vanished anchor keeps its old one.
-		a, found := w.V, false
-		if i, ok := ix.Find(fs, w.T[0]); ok {
-			for k := range n {
-				if int(at(k)) == i {
-					a, found = k, true
-					break
-				}
-			}
-		}
+		// a is the anchor's insertion point: the first position not before it.
+		a, found := sort.Find(n, func(k int) int {
+			key, code := ix.keyOf(fs, at(k))
+			return compareIn(s, w.K, w.Code, key, code)
+		})
 		if w.B {
 			end = sort.SearchInts(ms, a)
 			start = max(0, end-limit)
@@ -285,19 +405,23 @@ func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, mat
 	for _, k := range ms[start:end] {
 		p.Items = append(p.Items, int(at(k)))
 	}
+	anchor := func(before bool, k int) string {
+		key, code := ix.keyOf(fs, at(k))
+		return encodeCursor(s, before, key, code)
+	}
 	switch {
 	case end > start:
 		if end < len(ms) {
-			p.Next = encodeCursor(s, false, fs[at(ms[end-1])].ID, ms[end-1])
+			p.Next = anchor(false, ms[end-1])
 		}
 		if start > 0 {
-			p.Prev = encodeCursor(s, true, fs[at(ms[start])].ID, ms[start])
+			p.Prev = anchor(true, ms[start])
 		}
 	// An empty page past rows that still exist turns back from the client's own anchor.
 	case cur != nil && !cur.B && start > 0:
-		p.Prev = encodeCursor(s, true, cur.T[0], cur.V)
+		p.Prev = encodeCursor(s, true, cur.K, cur.Code)
 	case cur != nil && cur.B && end < len(ms):
-		p.Next = encodeCursor(s, false, cur.T[0], cur.V)
+		p.Next = encodeCursor(s, false, cur.K, cur.Code)
 	}
 	return p, nil
 }
