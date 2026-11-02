@@ -109,65 +109,60 @@ type memo struct {
 	out uint64
 }
 
-// stamp records which reference times a CheckResult.CollectedAt equalled:
-// a reused result is restamped with the time a fresh run would stamp.
-type stamp uint8
+// stamp is the set of reference times (eachRef order) a CollectedAt equalled,
+// so a reused result is restamped as a fresh run would stamp it.
+type stamp uint64
 
-const (
-	stampNow stamp = 1 << iota
-	stampTakenAt
-	stampMetrics
-)
-
-// refTimes returns the reference times of in for a check declaring set,
-// each with the bit naming it; metrics count only when set declares them.
-func refTimes(in Input, set InputSet) (times [3]time.Time, bits [3]stamp, n int) {
-	times[n], bits[n], n = in.Now, stampNow, n+1
+// eachRef calls f with each reference time a check declaring set may stamp:
+// Now, TakenAt, the metrics' and each declared collected value's time.
+func eachRef(in Input, set InputSet, col collect.Snapshot, f func(bit stamp, t time.Time)) {
+	f(1, in.Now)
 	if in.Snapshot != nil {
-		times[n], bits[n], n = in.Snapshot.TakenAt, stampTakenAt, n+1
+		f(1<<1, in.Snapshot.TakenAt)
 	}
 	if set.Metrics && in.HasMetrics {
-		times[n], bits[n], n = in.Metrics.CollectedAt, stampMetrics, n+1
+		f(1<<2, in.Metrics.CollectedAt)
 	}
-	return times, bits, n
-}
-
-// sameTime reports whether a and b are the same instant in the same location,
-// so they serialise alike.
-func sameTime(a, b time.Time) bool { return a.Equal(b) && a.Location() == b.Location() }
-
-// stampOf returns the reference times of in that at equals.
-func stampOf(in Input, set InputSet, at time.Time) stamp {
-	times, bits, n := refTimes(in, set)
-	var s stamp
-	for i := range n {
-		if sameTime(times[i], at) {
-			s |= bits[i]
+	for i, k := range set.Collected[:min(len(set.Collected), 61)] {
+		if v, ok := col.Get(k); ok {
+			f(1<<(3+i), v.At)
 		}
 	}
+}
+
+// sameTime reports whether a and b are one instant in one location, so they serialise alike.
+func sameTime(a, b time.Time) bool { return a.Equal(b) && a.Location() == b.Location() }
+
+// stampOf returns the reference times that at equals.
+func stampOf(in Input, set InputSet, col collect.Snapshot, at time.Time) stamp {
+	var s stamp
+	eachRef(in, set, col, func(bit stamp, t time.Time) {
+		if sameTime(t, at) {
+			s |= bit
+		}
+	})
 	return s
 }
 
-// restamp returns the CollectedAt a fresh run over in would stamp: old when
-// s is empty. It is false when a reference time is missing or the times s
-// names now differ, so which one the check stamps is unknown.
-func (s stamp) restamp(in Input, set InputSet, old time.Time) (time.Time, bool) {
+// restamp returns the CollectedAt a fresh run would stamp, or old for an
+// empty s; false when s's times are missing or now differ.
+func (s stamp) restamp(in Input, set InputSet, col collect.Snapshot, old time.Time) (time.Time, bool) {
 	if s == 0 {
 		return old, true
 	}
-	times, bits, n := refTimes(in, set)
 	var at time.Time
 	var seen stamp
-	for i := range n {
-		if s&bits[i] == 0 {
-			continue
+	same := true
+	eachRef(in, set, col, func(bit stamp, t time.Time) {
+		if s&bit == 0 {
+			return
 		}
-		if seen != 0 && !sameTime(times[i], at) {
-			return time.Time{}, false
+		if seen != 0 && !sameTime(t, at) {
+			same = false
 		}
-		at, seen = times[i], seen|bits[i]
-	}
-	return at, seen == s
+		at, seen = t, seen|bit
+	})
+	return at, same && seen == s
 }
 
 // store returns check's Store, creating it on first use.
@@ -180,11 +175,8 @@ func (s *States) store(check string) *Store {
 	return st
 }
 
-// Runtime is what Evaluate keeps across recomputes. Nil States gives each run
-// fresh Stores (tests). Print returns the print of the inputs a check
-// declares, earlier checks' outputs aside, or false when they have none; nil
-// Print or nil States turns memoization off. Collected holds the collector
-// values; a check sees only the keys it declares.
+// Runtime is what Evaluate keeps across recomputes; nil States gives fresh Stores.
+// Print keys a check's memo (false: always run); nil Print turns memoization off.
 type Runtime struct {
 	States    *States
 	Print     func(InputSet) (uint64, bool)

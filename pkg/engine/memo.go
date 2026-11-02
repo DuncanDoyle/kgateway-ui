@@ -70,14 +70,8 @@ func lazy(p **uint64, f func() uint64) uint64 {
 	return **p
 }
 
-// inputPrint is the print of what a check declaring set reads in ctx (design
-// §16.2): always Snapshot.Synced and the install; per declared kind its
-// Source print and access state (for Owned every served kind, Namespaces and
-// every install, as assignment reads them all); the metrics identity as
-// encodeMetrics; the verifier result; the computed views and their states;
-// the served-kinds change; the declared collected values. Earlier checks'
-// outputs are mixed in by health.Evaluate. It is false when set reads kinds
-// and the snapshot has no source fingerprint.
+// inputPrint keys a check's memo on what set declares (§16.2); earlier checks'
+// outputs are mixed in by health.Evaluate. False means the check always runs.
 func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
 	if (set.Owned || len(set.Kinds) > 0) && ctx.snap.Source.Kinds == nil {
 		return 0, false
@@ -90,7 +84,11 @@ func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
 		p = mix(p, lazy(&ctx.owned, func() uint64 { return e.ownedPrint(ctx) }))
 	}
 	for _, gk := range set.Kinds {
-		p = mix(p, kindPrint(ctx.snap, e.kindKeys[gk]))
+		k, known := e.kindKeys[gk]
+		if !known {
+			return 0, false // not watched: no print can follow it
+		}
+		p = mix(p, kindPrint(ctx.snap, k))
 	}
 	if set.Metrics {
 		p = mix(p, lazy(&ctx.metrics, func() uint64 { return encodeMetrics([]MetricsRead{ctx.read}, ctx.now, ctx.maxAge) }))

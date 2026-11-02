@@ -235,9 +235,8 @@ func TestStoreWritingCheckStillSkipped(t *testing.T) {
 	}
 }
 
-// Staleness is never served from the memo: xDS rejects declares Clock and
-// runs every time, and a narrow metrics check that wakes at the staleness
-// deadline turns unavailable exactly then.
+// xDS rejects (Clock) runs every time; a narrow metrics check waking at the
+// staleness deadline turns unavailable exactly then.
 func TestMemoNeverOutlivesStaleness(t *testing.T) {
 	var xdsRuns, narrowRuns int
 	var xds health.Check
@@ -339,5 +338,18 @@ func TestAccessFailureAndRecoveryRerunChecks(t *testing.T) {
 	src.setAccess(hr, cache.Access{OK: true})
 	if rep := report(t, e.Compute()); runs != 3 || noAccess(rep) {
 		t.Fatalf("recovered watch: %d runs, findings %+v; want a rerun without it", runs, rep.Findings)
+	}
+}
+
+// A check declaring a kind the engine does not watch has no print, so it runs every time.
+func TestUnwatchedKindAlwaysRuns(t *testing.T) {
+	var runs int
+	widgets := objects.GroupKind{Group: "acme.example.com", Kind: "Widget"}
+	c := counted{probe{"widgets", health.InputSet{Kinds: []objects.GroupKind{widgets}}, okRun("widgets", "")}, &runs}
+	e, _, _ := memoEngine(t, c)
+	e.Compute()
+	e.Compute()
+	if runs != 2 {
+		t.Fatalf("a check on an unwatched kind ran %d times in 2 computes", runs)
 	}
 }

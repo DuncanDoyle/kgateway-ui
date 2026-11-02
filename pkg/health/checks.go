@@ -1,6 +1,7 @@
 package health
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"time"
@@ -71,6 +72,9 @@ func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 	}
 	if len(fs) > 0 {
+		slices.SortFunc(fs, func(a, b Finding) int {
+			return cmp.Or(cmp.Compare(a.Message, b.Message), cmp.Compare(a.Detail, b.Detail))
+		})
 		return fs, CheckResult{Name: c.Name(), Required: true, CollectedAt: in.Snapshot.TakenAt, Error: fmt.Sprintf("%d kinds not readable", len(fs))}
 	}
 	return nil, ok(c.Name(), true, in.Snapshot.TakenAt)

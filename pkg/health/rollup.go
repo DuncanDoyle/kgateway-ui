@@ -51,9 +51,7 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // check can neither hide a problem from the roll-up nor invent a severity.
 // Checks run in order, each with its Store from rt.States; a grace read
 // inside the grace period wakes the report at the grace end (Report.Next).
-// A check that does not declare Clock is skipped while the print of its
-// inputs equals its memo's and the memo's wake time is not due; its last
-// findings, result and wake time are reused (design §16.2).
+// A check without Clock reuses its memo while its input print holds and its wake time is not due (§16.2).
 func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
 	memoize := rt.Print != nil && rt.States != nil
@@ -127,7 +125,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	}
 	if keyed {
 		if m := rt.States.memos[c.Name()]; m != nil && m.print == key && (m.wake.IsZero() || m.wake.After(in.Now)) {
-			if at, fresh := m.stamp.restamp(in, set, m.result.CollectedAt); fresh {
+			if at, fresh := m.stamp.restamp(in, set, rt.Collected, m.result.CollectedAt); fresh {
 				cr = m.result
 				cr.CollectedAt = at
 				return m.findings, cr, m.wake, m.out
@@ -141,7 +139,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 		out = outputPrint(fs, cr)
 	}
 	if keyed {
-		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, cr.CollectedAt), out: out}
+		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: out}
 	} else if memoize {
 		delete(rt.States.memos, c.Name())
 	}

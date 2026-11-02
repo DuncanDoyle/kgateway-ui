@@ -16,6 +16,9 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -245,22 +248,33 @@ func (m *scriptSnaps) Snapshot() *cache.Snapshot {
 	return &s
 }
 
-// memoProbes are memoizable checks that read a collector value, a wake time,
-// another check's output and the routes; each run counts in runs.
-func memoProbes(runs *int) []health.Check {
+// scriptVerifier returns *r; both engines of a script read it.
+type scriptVerifier struct{ r *scopeverify.Result }
+
+func (scriptVerifier) Name() string                                  { return "script" }
+func (v scriptVerifier) Verify(scopeverify.Input) scopeverify.Result { return *v.r }
+
+// memoProbes are memoizable checks, one per kind of input; each run counts in runs by name.
+func memoProbes(runs map[string]int) []health.Check {
 	routes := objects.GroupKind{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}
 	probe := func(name string, in health.InputSet, detail func(ctx health.RunContext) string) health.Check {
 		return scriptCheck{name, in, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
-			*runs++
+			runs[name]++
 			return []health.Finding{{Code: "ACME-001", Slug: "probe", Severity: health.SeverityInfo, Install: ctx.Install.ID(), Message: name, Detail: detail(ctx)}},
 				health.CheckResult{Name: name, OK: true, CollectedAt: ctx.Now}
 		}}
 	}
+	at := scriptCheck{"probe stamped", health.InputSet{Collected: []string{"probe/at"}}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		runs["probe stamped"]++
+		v, _ := ctx.Collected("probe/at")
+		return nil, health.CheckResult{Name: "probe stamped", OK: true, CollectedAt: v.At}
+	}}
 	return []health.Check{
 		probe("probe collected", health.InputSet{Collected: []string{"probe/value"}}, func(ctx health.RunContext) string {
 			v, _ := ctx.Collected("probe/value")
 			return fmt.Sprintf("%s %v", v.State, v.Data)
 		}),
+		at,
 		probe("probe waker", health.InputSet{}, func(ctx health.RunContext) string {
 			start, ok := health.Load[time.Time](ctx.State, "start")
 			if !ok {
@@ -285,6 +299,19 @@ func memoProbes(runs *int) []health.Check {
 			}
 			return fmt.Sprint(rvs)
 		}),
+		probe("probe metrics", health.InputSet{Metrics: true}, func(ctx health.RunContext) string {
+			return fmt.Sprint(ctx.HasMetrics, ctx.Metrics.Metrics.Rejects)
+		}),
+		probe("probe verify", health.InputSet{Verify: true}, func(ctx health.RunContext) string {
+			return fmt.Sprint(ctx.Verify.Available, len(ctx.Verify.Mismatches))
+		}),
+		probe("probe computed", health.InputSet{Computed: true}, func(ctx health.RunContext) string {
+			if ctx.Computed == nil {
+				return "none"
+			}
+			return ctx.Computed.RuleSet
+		}),
+		probe("probe kinds", health.InputSet{KindsChange: true}, func(ctx health.RunContext) string { return ctx.KindsChange.String() }),
 	}
 }
 
@@ -305,22 +332,28 @@ func (c scriptCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckR
 // scripted sequence serve byte-equal bodies after every step.
 func TestMemoizedResponsesEqualUncached(t *testing.T) {
 	h := newHarness(t, setup{}, world()...)
-	first := h.cache.Snapshot()
 	now := testutil.Now
-	src := &scriptSnaps{s: first, now: &now}
+	src := &scriptSnaps{s: h.cache.Snapshot(), now: &now}
 	col := collect.New(nil, func() time.Time { return now })
 	col.Publish("probe/value", "v1", 1, 20*time.Second)
+	now = testutil.Now.Add(-time.Second) // apart from Now, so the stamp is the value's time alone
+	col.Publish("probe/at", "same", 7, 0)
+	now = testutil.Now
+	metrics := okMetrics("kgw.kgateway")
+	verify := &scopeverify.Result{Available: true}
+	ruleVersion, change := "v2.4.7", kinds.Change{}
 	type side struct {
 		e    *engine.Engine
 		srv  *httptest.Server
-		runs int
+		runs map[string]int
 	}
 	newSide := func(noMemo bool) *side {
-		s := &side{}
+		s := &side{runs: map[string]int{}}
 		s.e = engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-			Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
-			Checks: append(health.Upstream(), memoProbes(&s.runs)...), MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return now },
-			Collected: col.Snapshot, NoMemo: noMemo})
+			Scope: install.NamespaceSelectorScope{}, Verifier: scriptVerifier{verify}, Metrics: metrics,
+			Checks: append(health.Upstream(), memoProbes(s.runs)...), MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return now },
+			Collected: col.Snapshot, NoMemo: noMemo, RulesFor: func(string) computed.Selection { return rulesets.Select(ruleVersion) },
+			KindsChange: func() kinds.Change { return change }})
 		s.srv = httptest.NewServer(NewHandler(s.e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, nil))
 		t.Cleanup(s.srv.Close)
 		return s
@@ -356,6 +389,21 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 		}},
 		{"access failure", func() { withAccess(cache.Access{Err: "watch failed"}) }},
 		{"access recovery", func() { withAccess(cache.Access{OK: true}) }},
+		{"metrics reject", func() {
+			r := metrics["kgw.kgateway"]
+			r.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
+			metrics["kgw.kgateway"] = r
+		}},
+		{"verifier mismatch", func() {
+			verify.Mismatches = []scopeverify.Mismatch{{Namespace: "shop", Resource: "HTTPRoute", UI: 2, Controller: 1}}
+		}},
+		{"rule-set change", func() { ruleVersion = "v2.3.0" }},
+		{"served-kinds diff", func() { change = kinds.Change{Removed: []string{"TCPRoute"}} }},
+		{"collector republished with the same fingerprint", func() {
+			now = testutil.Now.Add(2 * time.Second)
+			col.Publish("probe/at", "same", 7, 0)
+			now = testutil.Now.Add(3 * time.Second)
+		}},
 		{"collector value expires", func() { now = now.Add(21 * time.Second) }},
 		{"deadline passes", func() { now = testutil.Now.Add(health.Grace + time.Second) }},
 	}
@@ -378,7 +426,13 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 			}
 		}
 	}
-	if memo.runs >= plain.runs {
-		t.Fatalf("the memoizing engine ran the probes %d times, the plain one %d: nothing was memoized", memo.runs, plain.runs)
+	// Each probe was skipped at least once, and the republish was served from the memo.
+	for name, n := range plain.runs {
+		if memo.runs[name] >= n {
+			t.Errorf("%s ran %d times memoized, %d plain: never skipped", name, memo.runs[name], n)
+		}
+	}
+	if n := memo.runs["probe stamped"]; n != 1 {
+		t.Errorf("probe stamped ran %d times memoized, want once", n)
 	}
 }
