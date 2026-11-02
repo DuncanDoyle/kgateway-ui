@@ -6,10 +6,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -393,5 +397,135 @@ func TestDenseSelection(t *testing.T) {
 		if len(ps) != 32 || ps[0].ParentRef.Name != "p-000" || ps[31].ParentRef.Name != "p-031" {
 			t.Fatalf("child %s has %d status entries", o.GetName(), len(ps))
 		}
+	}
+}
+
+// phase3Counts are the Phase 3 columns of the design's tier table, in the
+// order services, referenced, slices, pods per Gateway, events, CRDs.
+var phase3Counts = map[string][6]int{
+	"typical": {600, 300, 700, 2, 50, 10},
+	"large":   {5000, 2000, 6000, 2, 1000, 10},
+	"extreme": {25000, 10000, 30000, 3, 10000, 10},
+}
+
+func TestTierPhase3Counts(t *testing.T) {
+	for _, tier := range Tiers {
+		w := phase3Counts[tier.Name]
+		got := [6]int{tier.Services, tier.ReferencedServices, tier.EndpointSlices, tier.ProxyPodsPerGateway, tier.WarningEvents, tier.GatewayAPICRDs}
+		if got != w {
+			t.Errorf("%s: %v, want %v", tier.Name, got, w)
+		}
+	}
+}
+
+// restarts is the total container restart count of pods.
+func restarts(pods []*corev1.Pod) (n int) {
+	for _, p := range pods {
+		for _, cs := range p.Status.ContainerStatuses {
+			n += int(cs.RestartCount)
+		}
+	}
+	return n
+}
+
+// unready counts referenced Services whose every EndpointSlice endpoint is not ready.
+func unready(t *testing.T, tier Tier, svcs []*corev1.Service, slices []*discoveryv1.EndpointSlice) (n int) {
+	t.Helper()
+	ready := map[string]bool{}
+	for _, es := range slices {
+		k := es.Namespace + "/" + es.Labels[discoveryv1.LabelServiceName]
+		for _, e := range es.Endpoints {
+			if e.Conditions.Ready != nil && *e.Conditions.Ready {
+				ready[k] = true
+			}
+		}
+	}
+	for _, s := range svcs {
+		if s.Labels[testutil.ScaleReferencedLabel] == "true" && !ready[s.Namespace+"/"+s.Name] {
+			n++
+		}
+	}
+	return n
+}
+
+func TestPhase3Shapes(t *testing.T) {
+	for _, tier := range Tiers {
+		if tier.Name == "extreme" && testing.Short() {
+			continue
+		}
+		t.Run(tier.Name, func(t *testing.T) {
+			pods, events := testutil.ScaleProxyPods(tier.Shape(), 1), testutil.ScaleEvents(tier.Shape(), 1)
+			svcs, slices := testutil.ScaleServices(tier.Shape(), 1), testutil.ScaleEndpointSlices(tier.Shape(), 1)
+			if len(pods) != tier.Gateways*tier.ProxyPodsPerGateway || len(events) != tier.WarningEvents ||
+				len(svcs) != tier.Services || len(slices) != tier.EndpointSlices || len(testutil.ScaleCRDs(tier.Shape())) != tier.GatewayAPICRDs {
+				t.Fatalf("pods %d events %d services %d slices %d", len(pods), len(events), len(svcs), len(slices))
+			}
+			ref := 0
+			for _, s := range svcs {
+				if s.Labels[testutil.ScaleReferencedLabel] == "true" {
+					ref++
+				}
+			}
+			if ref != tier.ReferencedServices {
+				t.Fatalf("referenced %d", ref)
+			}
+			for _, e := range events {
+				if e.Type != corev1.EventTypeWarning {
+					t.Fatalf("event type %s", e.Type)
+				}
+			}
+			if restarts(pods) != 0 || unready(t, tier, svcs, slices) != 0 {
+				t.Fatal("base tier has restarts or unready services")
+			}
+			if !reflect.DeepEqual(pods, testutil.ScaleProxyPods(tier.Shape(), 1)) || !reflect.DeepEqual(events, testutil.ScaleEvents(tier.Shape(), 1)) ||
+				!reflect.DeepEqual(slices, testutil.ScaleEndpointSlices(tier.Shape(), 1)) || !reflect.DeepEqual(testutil.ScaleMetrics(tier.Shape(), 1), testutil.ScaleMetrics(tier.Shape(), 1)) {
+				t.Fatal("not deterministic")
+			}
+			if reflect.DeepEqual(events, testutil.ScaleEvents(tier.Shape(), 2)) && len(events) > 1 {
+				t.Fatal("seed ignored")
+			}
+		})
+	}
+}
+
+func TestWorstCase(t *testing.T) {
+	for _, base := range Tiers {
+		if base.Name == "extreme" && testing.Short() {
+			continue
+		}
+		t.Run(base.Name, func(t *testing.T) {
+			tier := base.Worst()
+			if !tier.IsWorst || base.IsWorst || tier.Name != base.Name+"-worst" {
+				t.Fatalf("%+v", tier)
+			}
+			if got := restarts(testutil.ScaleProxyPods(tier.Shape(), 1)); got != tier.Gateways*tier.ProxyPodsPerGateway {
+				t.Errorf("restarts %d", got)
+			}
+			if got, want := unready(t, tier, testutil.ScaleServices(tier.Shape(), 1), testutil.ScaleEndpointSlices(tier.Shape(), 1)), tier.ReferencedServices/testutil.ScaleNoReadyEvery; got != want {
+				t.Errorf("unready referenced %d, want %d (5%%)", got, want)
+			}
+			m, err := ctrlmetrics.Parse(strings.NewReader(string(testutil.ScaleMetrics(tier.Shape(), 1))))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(m.Rejects) != tier.Gateways {
+				t.Fatalf("rejecting Gateways %d, want %d", len(m.Rejects), tier.Gateways)
+			}
+			for gw, v := range m.Rejects {
+				if v < 1 {
+					t.Errorf("%v not rejecting", gw)
+				}
+			}
+		})
+	}
+}
+
+func TestLivePhase3Seeds(t *testing.T) {
+	w := LivePhase3(t, Typical, func() time.Time { return testutil.Now })
+	if len(w.CRDs) != Typical.GatewayAPICRDs || len(w.Metrics) == 0 {
+		t.Fatalf("crds %d metrics %d", len(w.CRDs), len(w.Metrics))
+	}
+	if Live(t, Typical, func() time.Time { return testutil.Now }).Metrics != nil {
+		t.Fatal("Live seeds Phase 3")
 	}
 }

@@ -29,12 +29,28 @@ type LiveWorld struct {
 	RouteGVR schema.GroupVersionResource
 	// Update writes u to the fake dynamic client.
 	Update func(ctx context.Context, u *unstructured.Unstructured) error
+	// CRDs and Metrics are the tier's Gateway API CRD metadata and controller
+	// metrics capture; LivePhase3 sets them.
+	CRDs    []*metav1.PartialObjectMetadata
+	Metrics []byte
 }
 
 // Live seeds fake clients with tier's world, one kgateway controller and a
 // proxy per Gateway (as Snapshot), starts a cache stamped by now until tb
 // ends and waits until it has settled.
 func Live(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
+	tb.Helper()
+	return live(tb, tier, now, false)
+}
+
+// LivePhase3 is Live with the tier's proxy Pods, Warning Events, Services and
+// EndpointSlices seeded on the fake typed client, and its CRDs and Metrics set.
+func LivePhase3(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
+	tb.Helper()
+	return live(tb, tier, now, true)
+}
+
+func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorld {
 	tb.Helper()
 	served := testutil.ServedUpstream()
 	w := &LiveWorld{Signal: trigger.New()}
@@ -59,6 +75,21 @@ func Live(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
 	objs = append(objs, d, testutil.ControllerPod(d, "kgateway-0", true))
 	for i := range tier.Gateways {
 		objs = append(objs, testutil.ProxyDeployment(testutil.ScaleNamespace(i%tier.Namespaces), gwName(i), 1, 1))
+	}
+	if phase3 {
+		for _, p := range testutil.ScaleProxyPods(tier.Shape(), 1) {
+			objs = append(objs, p)
+		}
+		for _, e := range testutil.ScaleEvents(tier.Shape(), 1) {
+			objs = append(objs, e)
+		}
+		for _, sv := range testutil.ScaleServices(tier.Shape(), 1) {
+			objs = append(objs, sv)
+		}
+		for _, es := range testutil.ScaleEndpointSlices(tier.Shape(), 1) {
+			objs = append(objs, es)
+		}
+		w.CRDs, w.Metrics = testutil.ScaleCRDs(tier.Shape()), testutil.ScaleMetrics(tier.Shape(), 1)
 	}
 	dyn, kube := testutil.ScaleClients(tb, objs...)
 	w.Update = func(ctx context.Context, u *unstructured.Unstructured) error {

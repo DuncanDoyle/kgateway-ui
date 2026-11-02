@@ -1,6 +1,7 @@
 // Package scale builds deterministic worlds of the scale tiers of design §9.6
-// for benchmarks and scale tests. It returns unstructured objects only; typed
-// Namespaces and Deployments come from package testutil.
+// for benchmarks and scale tests. World returns unstructured objects only;
+// typed Namespaces and Deployments come from package testutil. The Scale*
+// functions return the typed Phase 3 shapes.
 package scale
 
 import (
@@ -45,6 +46,35 @@ type Tier struct {
 	// child entry and makes delegating parents ResolvedRefs=False, so view B's
 	// checks contradict too (PF2).
 	Contradict bool
+
+	// Phase 3 shapes. World ignores them; the Scale* functions use them.
+	// Services is the total and ReferencedServices those a Backend or route
+	// names; every Service has at least one EndpointSlice.
+	Services, ReferencedServices, EndpointSlices int
+	// ProxyPodsPerGateway is the proxy Pod count of each Gateway.
+	ProxyPodsPerGateway int
+	// WarningEvents is the number of Warning Events on proxy Pods.
+	WarningEvents int
+	// GatewayAPICRDs is the number of Gateway API CRDs with metadata.
+	GatewayAPICRDs int
+	// IsWorst makes every Gateway reject, every testutil.ScaleNoReadyEvery-th referenced
+	// Service lack a ready endpoint and every proxy Pod restart once.
+	IsWorst bool
+}
+
+// Shape is the part of t the typed Phase 3 generators in package testutil need.
+func (t Tier) Shape() testutil.ScaleShape {
+	return testutil.ScaleShape{Gateways: t.Gateways, Namespaces: t.Namespaces, Services: t.Services, ReferencedServices: t.ReferencedServices,
+		EndpointSlices: t.EndpointSlices, ProxyPodsPerGateway: t.ProxyPodsPerGateway, WarningEvents: t.WarningEvents,
+		GatewayAPICRDs: t.GatewayAPICRDs, Worst: t.IsWorst}
+}
+
+// Worst is t with every Gateway rejecting, 5 % of referenced Services without
+// a ready endpoint and every proxy Pod restarted once.
+func (t Tier) Worst() Tier {
+	t.Name += "-worst"
+	t.IsWorst = true
+	return t
 }
 
 // Contradicting is t with every view A check contradicting its status.
@@ -57,11 +87,14 @@ func (t Tier) Contradicting() Tier {
 // The tiers of design §9.6, at their benchmark sizes.
 var (
 	Typical = Tier{Name: "typical", Gateways: 30, ListenersPerGateway: 3, HTTPRoutes: 500, ParentRefsMean: 1.2, ListenerSets: 10,
-		DelegatedPct: 10, MaxDepth: 2, MaxFanOut: 10, ParentMatches: 1, Namespaces: 20, Backends: 50}
+		DelegatedPct: 10, MaxDepth: 2, MaxFanOut: 10, ParentMatches: 1, Namespaces: 20, Backends: 50,
+		Services: 600, ReferencedServices: 300, EndpointSlices: 700, ProxyPodsPerGateway: 2, WarningEvents: 50, GatewayAPICRDs: 10}
 	Large = Tier{Name: "large", Gateways: 100, ListenersPerGateway: 4, HTTPRoutes: 2000, ParentRefsMean: 1.3, ListenerSets: 200,
-		DelegatedPct: 10, MaxDepth: 3, MaxFanOut: 50, ParentMatches: 2, Namespaces: 100, Backends: 200}
+		DelegatedPct: 10, MaxDepth: 3, MaxFanOut: 50, ParentMatches: 2, Namespaces: 100, Backends: 200,
+		Services: 5000, ReferencedServices: 2000, EndpointSlices: 6000, ProxyPodsPerGateway: 2, WarningEvents: 1000, GatewayAPICRDs: 10}
 	Extreme = Tier{Name: "extreme", Gateways: 500, ListenersPerGateway: 4, HTTPRoutes: 5000, ParentRefsMean: 1.5, ListenerSets: 2000,
-		DelegatedPct: 10, MaxDepth: 4, MaxFanOut: 100, ParentMatches: 4, Namespaces: 500, Backends: 1000, LatticeDepth: 8}
+		DelegatedPct: 10, MaxDepth: 4, MaxFanOut: 100, ParentMatches: 4, Namespaces: 500, Backends: 1000, LatticeDepth: 8,
+		Services: 25000, ReferencedServices: 10000, EndpointSlices: 30000, ProxyPodsPerGateway: 3, WarningEvents: 10000, GatewayAPICRDs: 10}
 )
 
 // Tiers lists Typical, Large and Extreme.
@@ -117,7 +150,7 @@ type world struct {
 	paths    map[*route][]string
 }
 
-func gwName(i int) string { return fmt.Sprintf("gw-%03d", i) }
+func gwName(i int) string { return testutil.ScaleGateway(i) }
 func lsName(i int) string { return fmt.Sprintf("ls-%04d", i) }
 func beName(i int) string { return fmt.Sprintf("be-%04d", i) }
 
