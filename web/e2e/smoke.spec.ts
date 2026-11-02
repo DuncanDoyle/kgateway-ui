@@ -36,19 +36,24 @@ for (const theme of themes) {
     await expectInstallPage(page);
     await page.getByRole("link", { name: /Show all/ }).click();
     await expect(page).toHaveURL(/\/i\/kgw-a\.kgateway\/findings$/);
-    // The list is virtualised and the explorer fixture adds many findings: filter to each one checked here.
-    const filter = page.getByRole("textbox", { name: "Filter findings" });
-    await filter.fill("KGWUI-004");
-    await expect(page.getByText("Namespace not watched by the controller")).toBeVisible();
-    await filter.fill("KGWUI-010");
-    await expect(page.getByText("Self-managed proxy: the UI cannot see its readiness")).toBeVisible();
-    await filter.fill("shop/broken");
+    // Server search matches name, message and detail, not codes (design rule 17): codes go through the code filter.
+    for (const [code, message] of [
+      ["KGWUI-004", "Namespace not watched by the controller"],
+      ["KGWUI-010", "Self-managed proxy: the UI cannot see its readiness"],
+    ] as const) {
+      await page.goto(`/i/kgw-a.kgateway/findings?code=${code}`);
+      await expect(page.getByRole("button", { name: new RegExp(`Code: ${code}`) })).toBeVisible();
+      await expect(page.getByText(message)).toBeVisible();
+    }
+    await page.goto("/i/kgw-a.kgateway/findings");
+    await page.getByRole("searchbox", { name: "Filter findings" }).fill("shop/broken");
     await page
-      .getByRole("link", { name: /broken/ })
+      .getByRole("table", { name: "Findings" })
+      .getByRole("link", { name: "shop/broken", exact: true })
       .first()
       .click();
     // A route finding opens the route's detail page; its YAML tab shows the status as written.
-    await expect(page).toHaveURL(/\/routes\/gateway\.networking\.k8s\.io\/HTTPRoute\/[^/]+\/broken$/);
+    await expect(page).toHaveURL(/\/routes\/gateway\.networking\.k8s\.io\/HTTPRoute\/[^/]+\/broken(\?|$)/);
     await page.getByRole("tab", { name: "YAML" }).click();
     await expect(page.getByTestId("yaml")).toContainText("BackendNotFound");
     // outputDir is resolved from the config, so the path does not depend on the cwd.
