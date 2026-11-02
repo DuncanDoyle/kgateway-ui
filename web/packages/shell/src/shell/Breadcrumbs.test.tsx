@@ -28,12 +28,14 @@ const nth = (i: number) =>
 const at = (trail: Crumb[] | string) =>
   `${ROUTE}?${new URLSearchParams({ via: typeof trail === "string" ? trail : viaParam(trail, ID) })}`;
 
-/** Answers GET …/refs as the server does: each ref echoed, with none for the hidden ones. */
+/** Answers GET …/refs as the server does: each ref echoed, with none for the hidden ones, and 400 past 6 refs. */
 function serveRefs(hidden: string[] = [], status = 200) {
   const fetch = vi.fn(async (url: string) => {
     const u = new URL(url, "http://ui");
     if (!u.pathname.endsWith("/refs")) return new Response("{}", { status: 404 });
     if (status !== 200) return new Response(JSON.stringify({ error: "bad" }), { status });
+    if (u.searchParams.getAll("ref").length > 6)
+      return new Response(JSON.stringify({ error: "ref: want 1–6" }), { status: 400 });
     const refs = u.searchParams.getAll("ref").map((p) => {
       const [group = "", kind = "", ns = "", name = ""] = p.split("/");
       const ref = { group: group === "core" ? "" : group, kind, name, ...(ns === "-" ? {} : { namespace: ns }) };
@@ -288,4 +290,21 @@ test("page refs that arrive after the lookup do not send another", async () => {
   act(() => hold([held]));
   await waitFor(() => expect(trail().getByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument());
   expect(refCalls(f)).toHaveLength(1);
+});
+
+test("a trail of more objects than one lookup takes resolves every crumb", async () => {
+  const user = userEvent.setup();
+  const f = serveRefs();
+  const nine = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(nth);
+  renderWithTheme(<Breadcrumbs />, { path: at(nine) });
+  const t = trail();
+  for (const i of [5, 6, 7, 8, 9])
+    expect(await t.findByRole("link", { name: `HTTPRoute shop/r${i}` })).toBeInTheDocument();
+  await user.click(t.getByRole("button", { name: breadcrumbsCopy.more(4) }));
+  const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+  expect(items.map((i) => [i.textContent, i.tagName])).toEqual([1, 2, 3, 4].map((i) => [`HTTPRoute shop/r${i}`, "A"]));
+  expect(screen.queryByText(breadcrumbsCopy.hidden)).toBeNull();
+  // Each request stays within the server's bound.
+  for (const [u] of refCalls(f))
+    expect(new URL(String(u), "http://ui").searchParams.getAll("ref").length).toBeLessThanOrEqual(6);
 });

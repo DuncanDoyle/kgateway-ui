@@ -13,6 +13,9 @@ import (
 // maxTrailRefs is the most refs one GET …/refs resolves: the breadcrumb trail's limit (design §17.6).
 const maxTrailRefs = 6
 
+// maxRefsQuery bounds GET …/refs's raw query, checked before parsing: six encoded refs of the longest valid parts fit.
+const maxRefsQuery = 4096
+
 // The parts of a ref parameter, as the SPA's trail validates them.
 var (
 	trailGroup     = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
@@ -30,6 +33,9 @@ type TrailRefs struct {
 // parseTrailRefs reads 1–maxTrailRefs repeated ref=group/Kind/namespace/name
 // parameters, "core" for the empty group and "-" for no namespace, of kinds served.
 func parseTrailRefs(r *http.Request, served func(objects.GroupKind) bool) ([]objects.Ref, error) {
+	if len(r.URL.RawQuery) > maxRefsQuery {
+		return nil, badParam("query too long: want at most %d bytes", maxRefsQuery)
+	}
 	vals, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		return nil, badParam("malformed query: %v", err)

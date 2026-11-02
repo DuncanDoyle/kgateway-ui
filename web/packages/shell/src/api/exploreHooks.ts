@@ -108,16 +108,29 @@ export function useDelegation(id: string, r: Ref, query: URLSearchParams) {
 /** A trail ref parameter: "core" for the empty group, "-" for no namespace (GET …/refs). */
 const trailParam = (r: Ref) => `${r.group || "core"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
 
+/** The most refs one GET …/refs takes: the server's bound. */
+export const REFS_BATCH = 6;
+
+/** GET …/refs for every param, in requests of at most {@link REFS_BATCH}, as one answer. */
+async function fetchTrailLinks([path, ...params]: readonly string[]): Promise<TrailRefs> {
+  const batches: string[][] = [];
+  for (let i = 0; i < params.length; i += REFS_BATCH) batches.push(params.slice(i, i + REFS_BATCH));
+  const pages = await Promise.all(
+    batches.map((b) => apiFetch<TrailRefs>(withQuery(path as string, new URLSearchParams(b.map((p) => ["ref", p]))))),
+  );
+  // An answer split across installs (a switch mid-flight) matches none, so forInstall drops it.
+  const install = pages.every((p) => p.install === pages[0]?.install) ? (pages[0]?.install ?? "") : "";
+  return { install, refs: pages.flatMap((p) => p.refs) };
+}
+
 /**
- * GET …/refs for the breadcrumb trail's objects: once per page view, never polled. The key is the sorted refs, so
- * the same trail is one request; no refs means no request. A 4xx is final; a 5xx retries.
+ * GET …/refs for the breadcrumb trail's objects: once per page view, never polled, batched within the server's bound.
+ * The key is the sorted refs, so the same trail is one lookup; no refs means no request. A 4xx is final; a 5xx retries.
  */
 export function useTrailLinks(id: string, refs: readonly Ref[]) {
   const params = [...new Set(refs.map(trailParam))].sort();
-  const key = params.length
-    ? withQuery(`${installApi(id)}/refs`, new URLSearchParams(params.map((p) => ["ref", p])))
-    : null;
-  const { data, error } = useSWR<TrailRefs, ApiError>(key, apiFetch, {
+  const key = params.length ? [`${installApi(id)}/refs`, ...params] : null;
+  const { data, error } = useSWR<TrailRefs, ApiError>(key, fetchTrailLinks, {
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
     shouldRetryOnError: (e) => e.status >= 500,

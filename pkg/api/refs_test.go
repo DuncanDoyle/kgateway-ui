@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -86,5 +87,22 @@ func TestRefsRejectsBadInput(t *testing.T) {
 	get[ErrorResponse](t, srv, "/api/v1/installs/nope/refs?ref="+ok, http.StatusNotFound)
 	if got := get[TrailRefs](t, srv, refsQuery(ok, ok, ok, ok, ok, ok), http.StatusOK); len(got.Refs) != 6 {
 		t.Errorf("six refs: got %d", len(got.Refs))
+	}
+	// A long query is refused before it is parsed.
+	resp, err := http.Get(srv.URL + refsBase + strings.Repeat("ref=%zz&", maxRefsQuery/8+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var e ErrorResponse
+	_ = json.NewDecoder(resp.Body).Decode(&e)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(e.Error, "too long") {
+		t.Errorf("long query: %d %q, want 400 too long", resp.StatusCode, e.Error)
+	}
+	// Six refs of the longest valid parts, percent-encoded, fit under the cap.
+	long := "a." + strings.Repeat("b", 250) + "/K" + strings.Repeat("k", 62) + "/" + strings.Repeat("n", 63) + "/" + strings.Repeat("m", 253)
+	q := url.Values{"ref": {long, long, long, long, long, long}}.Encode()
+	if len(q) > maxRefsQuery {
+		t.Errorf("six longest refs take %d bytes, cap %d", len(q), maxRefsQuery)
 	}
 }
