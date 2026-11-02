@@ -67,9 +67,8 @@ type Options struct {
 	Diagnostics Diagnostics
 }
 
-// Diagnostics toggles the optional diagnostic inputs (design §18.1). Each
-// No* field turns off an input that is on by default; ControllerLogs turns
-// on one that is off by default.
+// Diagnostics toggles the optional inputs (design §18.1): No* turns off a
+// default-on input, ControllerLogs turns on a default-off one.
 type Diagnostics struct {
 	NoEvents, NoCRDs, NoProxyStats, NoEndpoints bool
 	ControllerLogs                              bool

@@ -62,20 +62,19 @@ type Observation struct {
 	Delta  int32
 }
 
-// EventDeltas turns Event counts into observed increases. Per Event UID it
-// keeps the last count seen and the increases of the last EventWindow. An
-// Event first seen with a count above 1 sets a baseline whose history is
-// unknown. A series counts by its series count only. Not safe for concurrent use.
+// EventDeltas turns Event counts into observed increases over EventWindow.
+// Not safe for concurrent use.
 type EventDeltas struct {
 	byEvent map[types.UID]*eventHistory
+	// unknown is, per Pod UID, when its uncounted history leaves the window.
+	unknown map[types.UID]time.Time
 }
 
 type eventHistory struct {
-	pod     types.UID
-	reason  string
-	last    int32
-	unknown time.Time // until then the Pod's earlier history is not counted; zero when counted
-	obs     []Observation
+	pod    types.UID
+	reason string
+	last   int32
+	obs    []Observation
 }
 
 // counter is the Event's count: the series count for a series, else Count.
@@ -101,7 +100,8 @@ func latest(ev *corev1.Event) time.Time {
 	return t
 }
 
-// observe records ev's count, seen at now.
+// observe records ev's count, seen at now. A first count above 1 is a
+// baseline: it adds nothing and marks the Pod's history unknown for a window.
 func (d *EventDeltas) observe(ev *corev1.Event, now time.Time) {
 	n, at := counter(ev), latest(ev)
 	if at.IsZero() || at.After(now) {
@@ -112,7 +112,7 @@ func (d *EventDeltas) observe(ev *corev1.Event, now time.Time) {
 		h = &eventHistory{pod: ev.InvolvedObject.UID, reason: ev.Reason, last: n}
 		d.byEvent[ev.UID] = h
 		if n > 1 {
-			h.unknown = now.Add(EventWindow)
+			d.unknown[h.pod] = latestOf(d.unknown[h.pod], now.Add(EventWindow))
 		} else {
 			h.obs = []Observation{{At: at, Reason: ev.Reason, Delta: 1}}
 		}
@@ -127,25 +127,41 @@ func (d *EventDeltas) observe(ev *corev1.Event, now time.Time) {
 	h.last = n
 }
 
-// view drops observations older than EventWindow and returns the rest per
-// Pod UID, oldest first, with the Pods whose history is not fully counted.
-func (d *EventDeltas) view(now time.Time) (map[types.UID][]Observation, map[types.UID]bool) {
+func latestOf(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+// forgetPod drops every history and unknown mark of a Pod that is gone.
+func (d *EventDeltas) forgetPod(pod types.UID) {
+	maps.DeleteFunc(d.byEvent, func(_ types.UID, h *eventHistory) bool { return h.pod == pod })
+	delete(d.unknown, pod)
+}
+
+// view drops what left the window and returns the rest per known Pod UID,
+// oldest first, with the known Pods whose history is not fully counted.
+func (d *EventDeltas) view(now time.Time, known func(types.UID) bool) (map[types.UID][]Observation, map[types.UID]bool) {
 	var obs map[types.UID][]Observation
 	var unknown map[types.UID]bool
 	from := now.Add(-EventWindow)
 	for _, h := range d.byEvent {
 		h.obs = slices.DeleteFunc(h.obs, func(o Observation) bool { return o.At.Before(from) })
-		if len(h.obs) > 0 {
+		if len(h.obs) > 0 && known(h.pod) {
 			if obs == nil {
 				obs = map[types.UID][]Observation{}
 			}
 			obs[h.pod] = append(obs[h.pod], h.obs...)
 		}
-		if now.Before(h.unknown) {
+	}
+	maps.DeleteFunc(d.unknown, func(_ types.UID, until time.Time) bool { return !now.Before(until) })
+	for pod := range d.unknown {
+		if known(pod) {
 			if unknown == nil {
 				unknown = map[types.UID]bool{}
 			}
-			unknown[h.pod] = true
+			unknown[pod] = true
 		}
 	}
 	for _, os := range obs {
@@ -163,6 +179,8 @@ func (d *EventDeltas) view(now time.Time) (map[types.UID][]Observation, map[type
 type podSet struct {
 	mu sync.RWMutex
 	n  map[types.UID]int
+	// gone, if set, runs when a UID's count reaches 0, outside the lock.
+	gone func(types.UID)
 }
 
 func uidOf(o any) (types.UID, bool) {
@@ -177,12 +195,19 @@ func uidOf(o any) (types.UID, bool) {
 }
 
 func (s *podSet) add(o any, by int) {
-	if uid, ok := uidOf(o); ok {
-		s.mu.Lock()
-		if s.n[uid] += by; s.n[uid] <= 0 {
-			delete(s.n, uid)
-		}
-		s.mu.Unlock()
+	uid, ok := uidOf(o)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.n[uid] += by
+	gone := s.n[uid] <= 0
+	if gone {
+		delete(s.n, uid)
+	}
+	s.mu.Unlock()
+	if gone && s.gone != nil {
+		s.gone(uid)
 	}
 }
 
@@ -199,24 +224,22 @@ func (s *podSet) handler() toolscache.ResourceEventHandlerFuncs {
 			// A relist can replace a Pod by a new one of the same name.
 			a, _ := uidOf(prev)
 			if b, _ := uidOf(cur); a != b {
-				s.add(prev, -1)
 				s.add(cur, 1)
+				s.add(prev, -1)
 			}
 		},
 		DeleteFunc: func(o any) { s.add(o, -1) },
 	}
 }
 
-// keptEvent is a store key's Event UID and latest time.
+// keptEvent is a store key's Event and Pod UIDs and the Event's latest time.
 type keptEvent struct {
-	uid types.UID
-	at  time.Time
+	uid, pod types.UID
+	at       time.Time
 }
 
-// eventFilter decides, ahead of the store, which Events the informer keeps:
-// Warning Events with a kept reason on a currently known Pod, at most max of
-// them. Events it drops never reach the store; a kept Event that stops
-// qualifying is sent as deleted. It also feeds the deltas.
+// eventFilter decides ahead of the store which Events the informer keeps
+// (qualifying, at most max) and feeds the deltas.
 type eventFilter struct {
 	pods *podSet
 	now  func() time.Time
@@ -226,10 +249,26 @@ type eventFilter struct {
 	kept   map[string]keptEvent // by store key
 	capped bool
 	deltas EventDeltas
+	// streaming is set from a watch-list open until its initial-events-end
+	// bookmark; streamed and streamCapped collect what that stream resent.
+	streaming    bool
+	streamed     map[types.UID]bool
+	streamCapped bool
 }
 
 func newEventFilter(pods *podSet, now func() time.Time) *eventFilter {
-	return &eventFilter{pods: pods, now: now, max: MaxEvents, kept: map[string]keptEvent{}, deltas: EventDeltas{byEvent: map[types.UID]*eventHistory{}}}
+	f := &eventFilter{pods: pods, now: now, max: MaxEvents, kept: map[string]keptEvent{},
+		deltas: EventDeltas{byEvent: map[types.UID]*eventHistory{}, unknown: map[types.UID]time.Time{}}}
+	pods.gone = f.podGone
+	return f
+}
+
+// podGone drops a vanished Pod's histories. Its stored Events stay until they
+// change or are evicted first; snapshots leave them out.
+func (f *eventFilter) podGone(pod types.UID) {
+	f.mu.Lock()
+	f.deltas.forgetPod(pod)
+	f.mu.Unlock()
 }
 
 // keep reports whether ev qualifies; the server-side selector is checked again,
@@ -240,7 +279,12 @@ func (f *eventFilter) keep(ev *corev1.Event) bool {
 
 func storeKey(ev *corev1.Event) string { return ev.Namespace + "/" + ev.Name }
 
-// list keeps the newest qualifying Events of l in place and resets the kept set to them.
+func kept(ev *corev1.Event) keptEvent {
+	return keptEvent{uid: ev.UID, pod: ev.InvolvedObject.UID, at: latest(ev)}
+}
+
+// list keeps the newest qualifying Events of the complete list l in place and
+// resets the kept set and histories to them.
 func (f *eventFilter) list(l *corev1.EventList) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -255,24 +299,42 @@ func (f *eventFilter) list(l *corev1.EventList) {
 	now := f.now()
 	for i := range l.Items {
 		ev := &l.Items[i]
-		f.kept[storeKey(ev)] = keptEvent{ev.UID, latest(ev)}
+		f.kept[storeKey(ev)] = kept(ev)
 		uids[ev.UID] = true
 		f.deltas.observe(ev, now)
 	}
 	maps.DeleteFunc(f.deltas.byEvent, func(uid types.UID, _ *eventHistory) bool { return !uids[uid] })
+	f.streaming = false
 }
 
-// reset forgets the kept set for a watch-list stream, which resends every Event.
+// reset starts a watch-list stream, which resends every Event before its
+// initial-events-end bookmark.
 func (f *eventFilter) reset() {
 	f.mu.Lock()
 	f.kept = map[string]keptEvent{}
+	f.streaming, f.streamed, f.streamCapped = true, map[types.UID]bool{}, false
 	f.mu.Unlock()
+}
+
+// endStream ends a watch-list stream: histories of Events it did not resend
+// go, and the cap reads what the stream dropped.
+func (f *eventFilter) endStream() {
+	if !f.streaming {
+		return
+	}
+	maps.DeleteFunc(f.deltas.byEvent, func(uid types.UID, _ *eventHistory) bool { return !f.streamed[uid] })
+	f.capped, f.streaming, f.streamed = f.streamCapped, false, nil
 }
 
 // event maps one watch event to what the store receives: nothing, the event,
 // or a deletion of the oldest kept Event before it when the cap is reached.
 func (f *eventFilter) event(e watch.Event) []watch.Event {
 	ev, ok := e.Object.(*corev1.Event)
+	if ok && e.Type == watch.Bookmark && ev.Annotations[metav1.InitialEventsAnnotationKey] == "true" {
+		f.mu.Lock()
+		f.endStream()
+		f.mu.Unlock()
+	}
 	if !ok || (e.Type != watch.Added && e.Type != watch.Modified && e.Type != watch.Deleted) {
 		return []watch.Event{e}
 	}
@@ -292,11 +354,11 @@ func (f *eventFilter) event(e watch.Event) []watch.Event {
 		return nil
 	}
 	var out []watch.Event
-	at := latest(ev)
+	k := kept(ev)
 	if !had && len(f.kept) >= f.max {
-		f.capped = true
+		f.capped, f.streamCapped = true, true
 		oldKey, old := f.oldest()
-		if at.Before(old.at) {
+		if f.pods.has(old.pod) && k.at.Before(old.at) {
 			return nil
 		}
 		delete(f.kept, oldKey)
@@ -305,28 +367,36 @@ func (f *eventFilter) event(e watch.Event) []watch.Event {
 		out = append(out, watch.Event{Type: watch.Deleted, Object: &corev1.Event{
 			ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, ResourceVersion: ev.ResourceVersion}}})
 	}
-	f.kept[key] = keptEvent{ev.UID, at}
+	f.kept[key] = k
+	if f.streaming {
+		f.streamed[ev.UID] = true
+	}
 	f.deltas.observe(ev, f.now())
 	return append(out, e)
 }
 
-// oldest returns the kept Event with the earliest time.
+// oldest returns the kept Event to evict: one of a vanished Pod first, else the earliest.
 func (f *eventFilter) oldest() (string, keptEvent) {
 	var key string
 	var old keptEvent
+	oldLive := true
 	for k, v := range f.kept {
-		if key == "" || v.at.Before(old.at) || (v.at.Equal(old.at) && k < key) {
-			key, old = k, v
+		live := f.pods.has(v.pod)
+		better := key == "" || (!live && oldLive) ||
+			(live == oldLive && (v.at.Before(old.at) || v.at.Equal(old.at) && k < key))
+		if better {
+			key, old, oldLive = k, v, live
 		}
 	}
 	return key, old
 }
 
-// view is the deltas at now, the Pods with uncounted history and whether the cap dropped Events.
+// view is the deltas of known Pods at now, the known Pods with uncounted
+// history and whether the cap dropped Events.
 func (f *eventFilter) view(now time.Time) (map[types.UID][]Observation, map[types.UID]bool, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	obs, unknown := f.deltas.view(now)
+	obs, unknown := f.deltas.view(now, f.pods.has)
 	return obs, unknown, f.capped
 }
 
@@ -367,7 +437,8 @@ func (c *Cache) eventInformer(kube kubernetes.Interface, f *eventFilter) tracked
 	evs := kube.CoreV1().Events("")
 	t := c.informer(kube, &corev1.Event{},
 		func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) {
-			o.FieldSelector = eventSelector
+			// One unpaged list: list replaces the kept set and histories with it.
+			o.FieldSelector, o.Limit, o.Continue = eventSelector, 0, ""
 			l, err := evs.List(ctx, o)
 			if err != nil {
 				return nil, err

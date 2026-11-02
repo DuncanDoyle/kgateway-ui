@@ -54,12 +54,6 @@ var (
 // ProxyPodsKind is the kind a check declares in its InputSet to read Snapshot.ProxyPods.
 var ProxyPodsKind = objects.GroupKind{Kind: "Pod#proxy"}
 
-// Optional reports whether gvr is an optional watch: proxy Pods, Events or
-// CRD metadata. Their failures reach only the checks that read them.
-func Optional(gvr schema.GroupVersionResource) bool {
-	return gvr == ProxyPodsGVR || gvr == EventsGVR || gvr == CRDsGVR
-}
-
 // Snapshot is an immutable view of the cache at TakenAt. Callers must not mutate it.
 type Snapshot struct {
 	// Objects lists each kind sorted by "namespace/name", so readers may
@@ -504,6 +498,10 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 		}
 		acc[gvr] = access(*t)
 		for _, o := range t.inf.GetStore().List() {
+			// A vanished Pod's Events stay stored until they change; snapshots leave them out.
+			if ev, ok := o.(*corev1.Event); ok && !c.uids.has(ev.InvolvedObject.UID) {
+				continue
+			}
 			visit(gvr, o)
 		}
 	}

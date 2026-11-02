@@ -16,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
 	clienttesting "k8s.io/client-go/testing"
@@ -347,5 +349,131 @@ func TestDeniedWatchReportsAccess(t *testing.T) {
 	}
 	if s.Source.Access[EventsGVR.String()] != s.Access[EventsGVR] {
 		t.Fatal("the fingerprint does not carry the Events access")
+	}
+}
+
+// I1: the reflector pages its lists, but the Events list asks for one page,
+// so the kept set, histories and cap come from the whole list.
+func TestEventsListIsNotPaged(t *testing.T) {
+	ctrl := ctrlPod()
+	typed := []runtime.Object{ctrl}
+	for i := range 3 {
+		typed = append(typed, testutil.WarningEvent(ctrl, fmt.Sprintf("e%d", i), "Unhealthy", testutil.Now.Add(time.Duration(i-3)*time.Minute)))
+	}
+	var limits []int64
+	w := newOptWorld(t, true, false, typed, nil, func(w *optWorld) {
+		w.c.evf.max = 2
+		w.kube.PrependReactor("list", "events", func(a clienttesting.Action) (bool, runtime.Object, error) {
+			o := a.(clienttesting.ListActionImpl).ListOptions
+			limits = append(limits, o.Limit)
+			if o.Limit == 0 {
+				return false, nil, nil
+			}
+			// A paging server: one Event per page.
+			all, err := w.kube.Tracker().List(corev1.SchemeGroupVersion.WithResource("events"), corev1.SchemeGroupVersion.WithKind("Event"), "")
+			if err != nil {
+				return true, nil, err
+			}
+			l := all.(*corev1.EventList)
+			i := 0
+			if o.Continue != "" {
+				if _, err := fmt.Sscan(o.Continue, &i); err != nil {
+					return true, nil, err
+				}
+			}
+			page := &corev1.EventList{Items: l.Items[i : i+1]}
+			if i+1 < len(l.Items) {
+				page.Continue = fmt.Sprint(i + 1)
+			}
+			return true, page, nil
+		})
+	})
+	s := w.c.Snapshot()
+	if got, want := eventNames(s), []string{"e1", "e2"}; !slices.Equal(got, want) || !s.EventsCapped {
+		t.Fatalf("listed %v capped %v, want %v capped", got, s.EventsCapped, want)
+	}
+	if n := len(s.EventDeltas[ctrl.UID]); n != 2 {
+		t.Fatalf("%d observations, want one per kept Event", n)
+	}
+	if len(limits) == 0 || slices.ContainsFunc(limits, func(l int64) bool { return l != 0 }) {
+		t.Fatalf("list limits %v, want only 0", limits)
+	}
+}
+
+// Review Focus 2: a deleted Pod's Events and deltas leave the snapshot at once,
+// and its stored Events are evicted before any live Pod's.
+func TestVanishedPodLeavesNoEvents(t *testing.T) {
+	ctrl, proxy := ctrlPod(), proxyPod()
+	busy := testutil.WarningEvent(proxy, "busy", "Unhealthy", testutil.Now.Add(-time.Second))
+	busy.Count = 9
+	w := newOptWorld(t, true, false, []runtime.Object{ctrl, proxy, busy,
+		testutil.WarningEvent(proxy, "probe", "Unhealthy", testutil.Now.Add(-time.Second)),
+		testutil.WarningEvent(ctrl, "old", "BackOff", testutil.Now.Add(-10*time.Minute))}, nil, func(w *optWorld) { w.c.evf.max = 3 })
+	s := w.c.Snapshot()
+	if len(s.Events) != 3 || len(s.EventDeltas[proxy.UID]) != 1 || !s.EventHistoryUnknown[proxy.UID] {
+		t.Fatalf("before: events %v, deltas %+v, unknown %v", eventNames(s), s.EventDeltas, s.EventHistoryUnknown)
+	}
+	if err := w.kube.CoreV1().Pods(proxy.Namespace).Delete(context.Background(), proxy.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the Pod to vanish", func() bool { return !w.c.uids.has(proxy.UID) })
+	s = w.c.Snapshot()
+	if got := eventNames(s); !slices.Equal(got, []string{"old"}) || len(s.EventDeltas) != 1 || s.EventDeltas[proxy.UID] != nil || len(s.EventHistoryUnknown) != 0 {
+		t.Fatalf("after: events %v, deltas %+v, unknown %v; want only the live Pod's", got, s.EventDeltas, s.EventHistoryUnknown)
+	}
+	if !s.Source.Equal(w.c.Fingerprint()) {
+		t.Fatal("the fingerprint counts the hidden Events")
+	}
+	w.create(t, testutil.WarningEvent(ctrl, "new", "BackOff", testutil.Now))
+	waitFor(t, "the new Event", func() bool { return slices.Contains(eventNames(w.c.Snapshot()), "new") })
+	if got := eventNames(w.c.Snapshot()); !slices.Equal(got, []string{"new", "old"}) {
+		t.Fatalf("events %v, want the live Pod's old one kept over the vanished Pod's", got)
+	}
+}
+
+// M5: a Pod's unknown history stays for its window after the Event goes.
+func TestUnknownHistoryOutlivesTheEvent(t *testing.T) {
+	ctrl := ctrlPod()
+	ev := testutil.WarningEvent(ctrl, "probe", "Unhealthy", testutil.Now)
+	ev.Count = 50
+	w := newOptWorld(t, true, false, []runtime.Object{ctrl, ev}, nil, nil)
+	if err := w.kube.CoreV1().Events(ev.Namespace).Delete(context.Background(), ev.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the deletion", func() bool { return len(w.c.Snapshot().Events) == 0 })
+	if !w.c.Snapshot().EventHistoryUnknown[ctrl.UID] {
+		t.Fatal("unknown history dropped with the Event")
+	}
+	w.clk.Step(EventWindow)
+	if w.c.Snapshot().EventHistoryUnknown[ctrl.UID] {
+		t.Fatal("unknown history outlived its window")
+	}
+}
+
+// M1: a watch-list stream resends every Event; at its initial-events-end
+// bookmark, histories of Events it did not resend go and the cap is re-read.
+// The fakes do not stream, so this drives the filter directly.
+func TestWatchListStreamPrunesAtBookmark(t *testing.T) {
+	ctrl := ctrlPod()
+	pods := &podSet{n: map[types.UID]int{ctrl.UID: 1}}
+	f := newEventFilter(pods, func() time.Time { return testutil.Now })
+	f.max = 2
+	evs := make([]*corev1.Event, 3)
+	for i := range evs {
+		evs[i] = testutil.WarningEvent(ctrl, fmt.Sprintf("e%d", i), "Unhealthy", testutil.Now.Add(time.Duration(i-3)*time.Minute))
+	}
+	l := &corev1.EventList{Items: []corev1.Event{*evs[0], *evs[1], *evs[2]}}
+	f.list(l)
+	if !f.capped || len(f.deltas.byEvent) != 2 {
+		t.Fatalf("after the list: capped %v, %d histories", f.capped, len(f.deltas.byEvent))
+	}
+	f.reset()
+	f.event(watch.Event{Type: watch.Added, Object: evs[2]})
+	bookmark := &corev1.Event{ObjectMeta: metav1.ObjectMeta{ResourceVersion: "9", Annotations: map[string]string{metav1.InitialEventsAnnotationKey: "true"}}}
+	if out := f.event(watch.Event{Type: watch.Bookmark, Object: bookmark}); len(out) != 1 {
+		t.Fatalf("bookmark not passed on: %v", out)
+	}
+	if f.capped || len(f.deltas.byEvent) != 1 || f.deltas.byEvent[evs[2].UID] == nil {
+		t.Fatalf("after the stream: capped %v, histories %v; want only e2, not capped", f.capped, f.deltas.byEvent)
 	}
 }

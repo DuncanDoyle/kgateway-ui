@@ -440,8 +440,12 @@ func TestDeniedOptionalWatchNeverUnknown(t *testing.T) {
 		return nil, health.CheckResult{Name: "probe optional", OK: true, CollectedAt: ctx.Now, Detail: fmt.Sprintf("events %v, crds %v", ev.OK, crd.OK)}
 	}}
 	h := newHarness(t, setup{optional: true, checks: []health.Check{probe},
-		prepare:     func(_ *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) { kube.PrependReactor("list", "events", deny(schema.GroupResource{Resource: "events"})) },
-		prepareMeta: func(m *metadatafake.FakeMetadataClient) { m.PrependReactor("list", "customresourcedefinitions", deny(cache.CRDsGVR.GroupResource())) },
+		prepare: func(_ *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
+			kube.PrependReactor("list", "events", deny(schema.GroupResource{Resource: "events"}))
+		},
+		prepareMeta: func(m *metadatafake.FakeMetadataClient) {
+			m.PrependReactor("list", "customresourcedefinitions", deny(cache.CRDsGVR.GroupResource()))
+		},
 	}, world()...)
 	want := get[HealthResponse](t, startHarnessSrv(t), "/api/v1/installs/kgw.kgateway/health", 200).State
 	await := func(what string, ok bool) {

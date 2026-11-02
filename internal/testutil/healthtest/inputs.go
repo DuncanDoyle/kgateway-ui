@@ -126,6 +126,8 @@ func dropUndeclaredKinds(in health.Input, set health.InputSet) *cache.Snapshot {
 func perturbOptional(out, in *cache.Snapshot, set health.InputSet, seed int64) {
 	why := cache.Access{Err: fmt.Sprintf("perturbed %d", seed)}
 	uid := types.UID(fmt.Sprintf("perturbed-%d", seed))
+	// A failing kind no check declares, as a later optional watch would add.
+	out.Access[schema.GroupVersionResource{Group: "perturbed.example", Version: "v1", Resource: fmt.Sprintf("widgets%d", seed)}] = why
 	if !slices.Contains(set.Kinds, cache.ProxyPodsKind) {
 		out.Access[cache.ProxyPodsGVR] = why
 		out.ProxyPods = nil

@@ -47,16 +47,14 @@ func unavailable(in Input, name, why string) ([]Finding, CheckResult) {
 		CheckResult{Name: name, Required: true, CollectedAt: in.Now, Error: why}
 }
 
-// cacheCheck: the snapshot is synced and every served kind, plus Namespaces,
-// Pods and Deployments, is currently readable. The optional watches (proxy
-// Pods, Events, CRD metadata) are left to the checks that read them.
+// cacheCheck: the snapshot is synced and the core kinds are readable; optional
+// watches are left to the checks that read them.
 type cacheCheck struct{}
 
 // Name implements Check.
 func (cacheCheck) Name() string { return "cluster access" }
 
-// Inputs implements Check: every watched kind's access, the served kinds and
-// Namespaces through Owned, plus Pods and Deployments.
+// Inputs implements Check: the served kinds and Namespaces through Owned, plus Pods and Deployments.
 func (cacheCheck) Inputs() InputSet {
 	return InputSet{Owned: true, Kinds: []objects.GroupKind{{Kind: "Pod"}, {Group: "apps", Kind: "Deployment"}}}
 }
@@ -68,8 +66,12 @@ func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		return unavailable(in, c.Name(), "cache not synced")
 	}
 	var fs []Finding
-	for gvr, a := range in.Snapshot.Access {
-		if !a.OK && !cache.Optional(gvr) {
+	core := []schema.GroupVersionResource{cache.NamespacesGVR, cache.PodsGVR, cache.DeploymentsGVR}
+	for _, s := range in.Served {
+		core = append(core, s.GVR())
+	}
+	for _, gvr := range core {
+		if a, known := in.Snapshot.Access[gvr]; known && !a.OK {
 			fs = append(fs, Finding{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
 				Message: "No access to " + resourceName(gvr), Detail: a.Err, Key: []string{c.Name(), resourceName(gvr)}})
 		}
