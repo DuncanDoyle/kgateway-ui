@@ -1107,9 +1107,9 @@ func (c *probeCollector) Start(ctx context.Context, d extension.Deps) error {
 type probeCheck struct{}
 
 func (probeCheck) Name() string            { return "probe" }
-func (probeCheck) Inputs() health.InputSet { return health.AllInputs() }
+func (probeCheck) Inputs() health.InputSet { return health.InputSet{Collected: []string{"probe/k"}} }
 func (probeCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
-	v, _ := ctx.Collected.Get("probe/k")
+	v, _ := ctx.Collected("probe/k")
 	if v.State != collect.OK {
 		return nil, health.CheckResult{Name: "probe", CollectedAt: ctx.Now, Error: fmt.Sprintf("%s: %s", v.State, v.Reason)}
 	}

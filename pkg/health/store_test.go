@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 )
 
 // funcCheck is a check whose Run and Inputs are funcs.
@@ -161,4 +163,28 @@ func TestZeroRunContextIsSafe(t *testing.T) {
 		}
 	}()
 	c.State.Set("k", 1)
+}
+
+// A check reads a collector value only through a key its Inputs declares.
+func TestCollectedOnlyForDeclaredKeys(t *testing.T) {
+	snap := collect.Snapshot{Values: map[string]collect.Value{
+		"acme/a": {State: collect.OK, Data: 1}, "acme/b": {State: collect.OK, Data: 2}}}
+	var gotA, gotB, gotNone bool
+	var dataA any
+	c := funcCheck{name: "reads", inputs: InputSet{Collected: []string{"acme/a"}}, run: func(ctx RunContext) ([]Finding, CheckResult) {
+		var v collect.Value
+		v, gotA = ctx.Collected("acme/a")
+		dataA = v.Data
+		_, gotB = ctx.Collected("acme/b") // present in the snapshot, not declared
+		_, gotNone = ctx.Collected("acme/none")
+		return nil, CheckResult{Name: "reads", OK: true}
+	}}
+	Evaluate(Input{}, []Check{c}, Runtime{Collected: snap})
+	if !gotA || dataA != 1 || gotB || gotNone {
+		t.Fatalf("declared found=%v data=%v, undeclared found=%v, absent found=%v", gotA, dataA, gotB, gotNone)
+	}
+	// A RunContext built without Evaluate finds nothing.
+	if _, ok := (RunContext{}).Collected("acme/a"); ok {
+		t.Fatal("a zero RunContext has no collector values")
+	}
 }

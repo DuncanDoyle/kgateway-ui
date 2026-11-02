@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -130,8 +129,6 @@ type Input struct {
 	// Views decodes Gateways, ListenerSets and routes; nil means objects.Direct.
 	// Its views are shared and read-only.
 	Views objects.Decoder
-	// Collected are the collector values this computation read; their data is read-only.
-	Collected collect.Snapshot
 }
 
 // views returns in.Views, or objects.Direct when it is unset.

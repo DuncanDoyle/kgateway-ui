@@ -65,12 +65,14 @@ type acmeWidgetCheck struct{}
 
 func (acmeWidgetCheck) Name() string { return "acme widgets" }
 
-// Inputs declares every input; the check reads only its collector key.
-func (acmeWidgetCheck) Inputs() health.InputSet { return health.AllInputs() }
+// Inputs declares the one collector key Run reads.
+func (acmeWidgetCheck) Inputs() health.InputSet {
+	return health.InputSet{Collected: []string{"acme-widgets/widgets"}}
+}
 
 func (c acmeWidgetCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
 	res := health.CheckResult{Name: c.Name(), CollectedAt: ctx.Now}
-	v, ok := ctx.Collected.Get("acme-widgets/widgets")
+	v, ok := ctx.Collected("acme-widgets/widgets")
 	if !ok || v.State != collect.OK {
 		// Not required, so a missing count never turns the install unknown.
 		res.Error = "widget count not available"

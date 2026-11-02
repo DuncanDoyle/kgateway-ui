@@ -127,7 +127,7 @@ The other options are `WithDetectors`, `WithScopeProvider`, `WithScopeVerifier` 
 
 - **Checks.** `WithChecks` takes a finding-code prefix, such as `ACME-`. It is a capital letter, then one to fifteen capitals or digits, then a dash. Each prefix registers once, and `KGWUI-` is reserved. A bad or repeated prefix makes `app.Build` fail.
 - **Endpoints.** `WithHandlers("acme", …)` serves its routes under `/api/ext/acme/`, so they never collide with API v1. `Deps.Current` returns the published model. Filter objects with `api.Visible`, and reply with `api.WriteJSON` and `api.WriteError`.
-- **Collectors.** `WithCollectors` starts each collector with the app. It publishes values through `Deps.Publish(key, value, fingerprint, ttl)` or marks them failing with `Deps.Fail`. A check reads them from `health.Input.Collected` as `<collector>/<key>`. A new fingerprint triggers a recompute. An expired value, or one from a stopped collector, reads as unavailable.
+- **Collectors.** `WithCollectors` starts each collector with the app. It publishes values through `Deps.Publish(key, value, fingerprint, ttl)` or marks them failing with `Deps.Fail`. A check declares the keys it reads as `<collector>/<key>` in `Inputs().Collected` and reads them with `ctx.Collected(key)`. A new fingerprint triggers a recompute. An expired value, or one from a stopped collector, reads as unavailable.
 - **Capabilities.** `WithCapabilities` adds entries to `capabilityStates` in `/api/v1/meta`. A state is `on`, `off`, `denied` or `failing`. Names must not clash with core ones.
 
 Kinds added with `WithKinds`, and anything a collector reads, need matching rules in the chart's ClusterRole. Add them with `rbac.extraRules`, as [values-acme.yaml](examples/downstream/chart/values-acme.yaml) does. The chart also takes `extraEnv`, `extraVolumes`, `extraVolumeMounts` and `extraContainers`.
@@ -161,6 +161,30 @@ createRoot(document.getElementById("root") as HTMLElement).render(<Shell extensi
 A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing.
 
 ## Upgrade notes
+
+### Check contract (sub-phase 3.1)
+
+For downstream builds:
+
+- A check is now `Name()`, `Inputs()` and `Run(ctx health.RunContext)`. `Run` no longer takes a `health.Input`. `RunContext` embeds `Input`, so `ctx.Now` and `ctx.Install` still work.
+- `Inputs()` returns a `health.InputSet` naming what `Run` reads. The engine tracks exactly those inputs, so an input you read but did not declare can serve a stale result. `health.AllInputs()` declares everything except collector keys and earlier checks' output.
+- Collector values moved out of `health.Input.Collected`. Declare the key in `Inputs().Collected` and read it with `ctx.Collected("<collector>/<key>")`. It returns false for a key you did not declare.
+- Keep state between recomputes in `ctx.State`, a per-check `*health.Store`. Replace package-level variables with it. The engine owns the Store, and it is empty after a restart.
+- Call `ctx.WakeAt(t)` to be recomputed at a later time. Call `ctx.Output(name)` to read an earlier check's output, and declare that check in `Inputs().Checks`.
+- The prefix argument of `WithChecks` is unchanged from 3.0.
+
+```go
+func (acmeWidgetCheck) Inputs() health.InputSet {
+	// Declare exactly what Run reads
+	return health.InputSet{Collected: []string{"acme-widgets/widgets"}}
+}
+
+func (c acmeWidgetCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	// Undeclared keys read as missing
+	v, ok := ctx.Collected("acme-widgets/widgets")
+	// ...
+}
+```
 
 ### Extension seams (sub-phase 3.0)
 

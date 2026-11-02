@@ -113,6 +113,11 @@ func TestExampleUsesEverySeam(t *testing.T) {
 		testutil.Namespace("acme-system", nil), d, testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true))
 	clients := app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}}
 
+	// The check declares its collector key; its finding in /health below proves the read works.
+	if got := (acmeWidgetCheck{}).Inputs().Collected; !slices.Equal(got, []string{"acme-widgets/widgets"}) {
+		t.Fatalf("acme widgets declares collected keys %v", got)
+	}
+
 	// The prefix argument registers once: a second ACME- registration fails Build.
 	twice := append(extensions(clock.RealClock{}), extension.WithChecks("ACME-", acmeWidgetCheck{}))
 	if a, err := app.Build(clients, options(ui), extension.New(twice...)); err == nil || a != nil || !strings.Contains(err.Error(), "ACME-") {

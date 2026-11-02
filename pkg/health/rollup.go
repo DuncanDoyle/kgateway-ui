@@ -102,7 +102,7 @@ func runContext(in Input, c Check, inputs InputSet, rt Runtime, outputs map[stri
 	} else {
 		st = NewStore()
 	}
-	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: inputs, outputs: outputs}
+	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: inputs, outputs: outputs, collected: rt.Collected}
 	sink, base := ctx.sink, in
 	ctx.FirstSeen = func(u *unstructured.Unstructured) time.Time {
 		t := base.firstSeen(u)

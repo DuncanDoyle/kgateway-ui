@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -34,7 +35,7 @@ type InputSet struct {
 }
 
 // AllInputs declares every input a Phase 1 or 2 check may read: Owned,
-// Metrics, Verify, Computed, KindsChange and Clock.
+// Metrics, Verify, Computed, KindsChange and Clock. It names no collector keys.
 func AllInputs() InputSet {
 	return InputSet{Owned: true, Metrics: true, Verify: true, Computed: true, KindsChange: true, Clock: true}
 }
@@ -104,10 +105,12 @@ func (s *States) store(check string) *Store {
 }
 
 // Runtime is what Evaluate keeps across recomputes. Nil States gives each run
-// fresh Stores (tests); nil Print turns memoization off.
+// fresh Stores (tests); nil Print turns memoization off. Collected holds the
+// collector values; a check sees only the keys it declares.
 type Runtime struct {
-	States *States
-	Print  func(InputSet) uint64
+	States    *States
+	Print     func(InputSet) uint64
+	Collected collect.Snapshot
 }
 
 // CheckOutput is what a check returned in this evaluation; its data is read-only.
@@ -123,9 +126,10 @@ type RunContext struct {
 	// is cleared on restart.
 	State *Store
 
-	sink    *runSink
-	inputs  InputSet
-	outputs map[string]CheckOutput
+	sink      *runSink
+	inputs    InputSet
+	outputs   map[string]CheckOutput
+	collected collect.Snapshot
 }
 
 // runSink collects what one Run reports besides its findings.
@@ -164,6 +168,16 @@ func (c RunContext) Output(check string) (CheckOutput, bool) {
 	}
 	o, ok := c.outputs[check]
 	return o, ok
+}
+
+// Collected returns the collector value under key, "<collector>/<key>". It is
+// false unless Inputs().Collected declares key and the collector has published it.
+// The value's Data is read-only.
+func (c RunContext) Collected(key string) (collect.Value, bool) {
+	if !slices.Contains(c.inputs.Collected, key) {
+		return collect.Value{}, false
+	}
+	return c.collected.Get(key)
 }
 
 // ValidateOrder reports a check whose Inputs().Checks names a check not
