@@ -30,6 +30,13 @@ type Capability struct {
 // coreCapabilities are the names the upstream UI reserves, besides the platform's.
 var coreCapabilities = []string{"processes", "events", "crds", "endpoints", "proxyStats", "controllerLogs"}
 
+// WithCoreCapabilities sets the source of the core capabilities' states for
+// /api/v1/meta (design §13). It may report only the names the core reserves;
+// it runs on every request, so it must be fast and safe for concurrent use.
+func WithCoreCapabilities(f func() []Capability) HandlerOption {
+	return func(c *handlerConfig) { c.coreSource = f }
+}
+
 // WithCapabilitySources adds sources of capability states for /api/v1/meta.
 // Each source runs on every /api/v1/meta request, so it must be fast, safe for
 // concurrent use and report a stable set of names.
@@ -73,11 +80,20 @@ func validState(s CapabilityState) bool {
 // warnedDrops holds the names already warned about, so the poll rate does not spam the log.
 var warnedDrops sync.Map
 
-// addCapabilities adds the sources' states to resp, sorted by name. A name
-// that is reserved or already seen is dropped, so a source cannot shadow a core one.
-func addCapabilities(resp *MetaResponse, platformNames []string, sources []func() []Capability) {
+// addCapabilities adds the core and extension sources' states to resp, sorted
+// by name. The core source may report only core names; an extension name that
+// is reserved or already seen is dropped, so a source cannot shadow a core one.
+func addCapabilities(resp *MetaResponse, platformNames []string, core func() []Capability, sources []func() []Capability) {
 	seen := map[string]bool{}
 	var states []Capability
+	if core != nil {
+		for _, c := range core() {
+			if slices.Contains(coreCapabilities, c.Name) && validState(c.State) && !seen[c.Name] {
+				seen[c.Name] = true
+				states = append(states, c)
+			}
+		}
+	}
 	for _, f := range sources {
 		for _, c := range f() {
 			if c.Name == "" || !validState(c.State) || reserved(c.Name, platformNames) || seen[c.Name] {

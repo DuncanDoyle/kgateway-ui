@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/metadata"
@@ -74,6 +75,45 @@ type Diagnostics struct {
 	ControllerLogs                              bool
 	// ControllerLogsNamespaces are the install namespaces whose controller logs are read.
 	ControllerLogsNamespaces []string
+}
+
+// CoreCapabilities returns the states of the core inputs for /api/v1/meta
+// (design §13): processes (the proxy Pod watch), events and crds. A toggle that
+// is off reads off; a watch refused by RBAC reads denied and one with any other
+// error failing, with its error as the reason. A watch that is still syncing,
+// or not started without a toggle, has no state, and neither has any input
+// before the first snapshot. collected feeds inputs that later tasks add.
+func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Snapshot) []api.Capability {
+	inputs := []struct {
+		name string
+		off  bool
+		gvr  schema.GroupVersionResource
+	}{
+		{"processes", false, cache.ProxyPodsGVR},
+		{"events", d.NoEvents, cache.EventsGVR},
+		{"crds", d.NoCRDs, cache.CRDsGVR},
+	}
+	var out []api.Capability
+	for _, in := range inputs {
+		if in.off {
+			out = append(out, api.Capability{Name: in.name, State: api.CapOff})
+			continue
+		}
+		if snap == nil {
+			continue
+		}
+		a, running := snap.Access[in.gvr]
+		switch why := health.AccessAvailability(a); {
+		case !running:
+		case a.OK:
+			out = append(out, api.Capability{Name: in.name, State: api.CapOn})
+		case why == health.AvailDenied:
+			out = append(out, api.Capability{Name: in.name, State: api.CapDenied, Reason: a.Err})
+		case why == health.AvailFailing:
+			out = append(out, api.Capability{Name: in.name, State: api.CapFailing, Reason: a.Err})
+		}
+	}
+	return out
 }
 
 // proxyPodDetector is a detector that names its proxy Pods' selector.
@@ -199,7 +239,19 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{Engine: eng, Handler: api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCapabilitySources(reg.CapabilityStates)), cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
+	core := func() []api.Capability {
+		var snap *cache.Snapshot
+		if p := eng.Current(); p != nil && p.Model != nil {
+			snap = p.Model.Snapshot
+		}
+		var cs collect.Snapshot
+		if collected != nil {
+			cs = collected.Snapshot()
+		}
+		return CoreCapabilities(snap, o.Diagnostics, cs)
+	}
+	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates))
+	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
 		discovered: discovered, reg: reg, collected: collected, deps: deps}, nil
 }
 

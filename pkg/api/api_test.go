@@ -490,6 +490,57 @@ func TestDeniedOptionalWatchNeverUnknown(t *testing.T) {
 	}
 }
 
+// D-034: a not-available check never turns the install unknown, raises no
+// KGWUI-008, and "What was checked" carries its reason.
+func TestNotAvailableNeverUnknown(t *testing.T) {
+	base := get[HealthResponse](t, startHarnessSrv(t), "/api/v1/installs/kgw.kgateway/health", 200)
+	if base.State == health.StateUnknown {
+		t.Fatalf("world() state %s", base.State)
+	}
+	for _, why := range []health.Availability{health.AvailOff, health.AvailDenied, health.AvailFailing, health.AvailNotOnVersion, health.AvailNotObserved} {
+		for _, required := range []bool{false, true} {
+			probe := scriptCheck{"probe events", health.InputSet{}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+				r := health.NotAvailable("probe events", why, "reason "+string(why), ctx.Now)
+				r.Required = required // a check that also claims Required is still ignored
+				return nil, r
+			}}
+			_, srv, _ := startWith(t, setup{checks: []health.Check{probe}}, world()...)
+			rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if rep.State != base.State || hasFinding(rep, health.CodeSignalUnavailable, "") || len(rep.Findings) != len(base.Findings) {
+				t.Fatalf("%s (required %v): state %s, findings %+v", why, required, rep.State, rep.Findings)
+			}
+			c := rep.Checks[len(rep.Checks)-1]
+			if c.Name != "probe events" || c.OK || c.Unavailable != why || c.Error != "reason "+string(why) {
+				t.Fatalf("%s: check %+v", why, c)
+			}
+		}
+	}
+}
+
+// D-034: the core required checks keep Required: true, xDS rejects included,
+// beside a not-available check.
+func TestRequiredChecksKeepTheirFlag(t *testing.T) {
+	probe := scriptCheck{"probe crds", health.InputSet{}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		return nil, health.NotAvailable("probe crds", health.AvailOff, "", ctx.Now)
+	}}
+	_, srv, _ := startWith(t, setup{checks: []health.Check{probe}}, world()...)
+	rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	required := map[string]bool{"cluster access": true, "served kinds": true, "controller scope": true, "controller pods": true,
+		"resource status": true, "gateway proxies": true, "xDS rejects": true}
+	seen := 0
+	for _, c := range rep.Checks {
+		if c.Required != required[c.Name] {
+			t.Errorf("check %q required %v, want %v", c.Name, c.Required, required[c.Name])
+		}
+		if required[c.Name] {
+			seen++
+		}
+	}
+	if seen != len(required) {
+		t.Fatalf("saw %d of %d required checks: %+v", seen, len(required), rep.Checks)
+	}
+}
+
 // startHarnessSrv is the server of a harness over world() without the optional watches.
 func startHarnessSrv(t *testing.T) *httptest.Server {
 	t.Helper()

@@ -19,6 +19,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -27,6 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	metadatafake "k8s.io/client-go/metadata/fake"
+	clienttesting "k8s.io/client-go/testing"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
@@ -1273,4 +1276,92 @@ func TestCollectedFreshnessAtTheAPI(t *testing.T) {
 			t.Fatalf("after the expiry run: probe %q at %v, want unavailable at %v", probeOf(after), after.CollectedAt, expires)
 		}
 	})
+}
+
+// D-034, design §13: /meta reports the core inputs' states. A toggle that is
+// off reads off, a refused watch denied, and any other watch error failing.
+func TestMetaCapabilityStatesFromToggles(t *testing.T) {
+	refuse := func(gr schema.GroupResource) clienttesting.ReactionFunc {
+		return func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(gr, "", errors.New("no role"))
+		}
+	}
+	broken := func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
+	}
+	crdGR := cache.CRDsGVR.GroupResource()
+	cases := []struct {
+		name     string
+		d        Diagnostics
+		events   clienttesting.ReactionFunc
+		crds     clienttesting.ReactionFunc
+		want     api.CapabilityState
+		reason   string
+		listedOn bool
+	}{
+		{name: "on", want: api.CapOn, listedOn: true},
+		{name: "off", d: Diagnostics{NoEvents: true, NoCRDs: true}, want: api.CapOff},
+		{name: "denied", events: refuse(schema.GroupResource{Resource: "events"}), crds: refuse(crdGR), want: api.CapDenied, reason: "forbidden"},
+		{name: "failing", events: broken, crds: broken, want: api.CapFailing, reason: "etcd timeout"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dyn, kube := testutil.Clients(t)
+			scheme := metadatafake.NewTestScheme()
+			if err := metav1.AddMetaToScheme(scheme); err != nil {
+				t.Fatal(err)
+			}
+			md := metadatafake.NewSimpleMetadataClient(scheme)
+			if tc.events != nil {
+				kube.PrependReactor("list", "events", tc.events)
+				md.PrependReactor("list", "customresourcedefinitions", tc.crds)
+			}
+			o := Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui, Diagnostics: tc.d}
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: md, Scraper: &stubScraper{}}, o, extension.New())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			var meta api.MetaResponse
+			states := map[string]api.Capability{}
+			eventually(t, fmt.Sprintf("events and crds %s", tc.want), func() bool {
+				meta, states = api.MetaResponse{}, map[string]api.Capability{}
+				getJSON(t, srv, "/api/v1/meta", &meta)
+				for _, c := range meta.CapabilityStates {
+					states[c.Name] = c
+				}
+				return states["events"].State == tc.want && states["crds"].State == tc.want
+			})
+			for _, name := range []string{"events", "crds"} {
+				c := states[name]
+				if !strings.Contains(c.Reason, tc.reason) || (tc.reason == "") != (c.Reason == "") {
+					t.Errorf("%s reason %q, want it to contain %q", name, c.Reason, tc.reason)
+				}
+				if slices.Contains(meta.Capabilities, name) != tc.listedOn {
+					t.Errorf("%s listed in capabilities %v: %v", name, meta.Capabilities, !tc.listedOn)
+				}
+			}
+			// No detector selects proxy Pods yet, so processes has no watch to report.
+			if _, ok := states["processes"]; ok {
+				t.Errorf("processes reported without a proxy Pod watch: %+v", states["processes"])
+			}
+		})
+	}
+}
+
+// A syncing watch, one that never started and every input before the first
+// snapshot have no state; a toggle that is off always reads off.
+func TestCoreCapabilitiesPendingAndMissing(t *testing.T) {
+	d := Diagnostics{NoCRDs: true}
+	if got := CoreCapabilities(nil, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}}) {
+		t.Errorf("before the first snapshot: %+v", got)
+	}
+	snap := &cache.Snapshot{Access: map[schema.GroupVersionResource]cache.Access{cache.EventsGVR: {}, cache.CRDsGVR: {Err: "x is forbidden: y"}}}
+	if got := CoreCapabilities(snap, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}}) {
+		t.Errorf("syncing events, no proxy Pod watch, crds off: %+v", got)
+	}
 }

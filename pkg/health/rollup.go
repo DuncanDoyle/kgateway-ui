@@ -25,6 +25,7 @@ func rank(s Severity) int {
 }
 
 // RollUp computes the state: error > unknown > warning > healthy (design §5.3).
+// A not-available check result never makes the state unknown.
 func RollUp(fs []Finding, cs []CheckResult) State {
 	for _, f := range fs {
 		if f.Severity == SeverityError {
@@ -32,7 +33,7 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 		}
 	}
 	for _, c := range cs {
-		if c.Required && !c.OK {
+		if c.Required && !c.OK && c.Unavailable == "" {
 			return StateUnknown
 		}
 	}
@@ -330,5 +331,6 @@ func outputPrint(fs []Finding, cr CheckResult) uint64 {
 	str(cr.Error)
 	str(cr.Detail)
 	flag(cr.Pending)
+	str(string(cr.Unavailable))
 	return h.Sum64()
 }

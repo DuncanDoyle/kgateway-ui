@@ -96,7 +96,7 @@ type Finding struct {
 }
 
 // CheckResult records whether a check could collect current input. A Required
-// check that is not OK forces the state to unknown.
+// check that is not OK forces the state to unknown, unless Unavailable is set.
 type CheckResult struct {
 	Name        string    `json:"name"`
 	OK          bool      `json:"ok"`
@@ -108,6 +108,9 @@ type CheckResult struct {
 	// Pending marks a check that is not OK only because resources are still
 	// being processed inside the grace period.
 	Pending bool `json:"pending,omitempty"`
+	// Unavailable says why a check whose optional input is missing did not
+	// run; Error holds the detail. The roll-up ignores such a result (D-034).
+	Unavailable Availability `json:"unavailable,omitempty"`
 }
 
 // Input is everything a check may look at for one install.
