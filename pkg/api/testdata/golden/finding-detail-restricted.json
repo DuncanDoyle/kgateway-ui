@@ -1,0 +1,32 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "finding": {
+      "code": "KGWUI-002",
+      "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
+      "id": "f1-rc7j3pfjikwleiwgqmwrxao6oy",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "none",
+        "name": "broken",
+        "namespace": "shop"
+      },
+      "restricted": true,
+      "severity": "error",
+      "slug": "condition-false"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

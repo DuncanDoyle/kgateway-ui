@@ -1,0 +1,347 @@
+package api
+
+import (
+	"bytes"
+	"cmp"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+// Findings list parameters (design §13.1); findingsSingle may appear once.
+var (
+	findingsFilters = []string{"severity", "code", "kind", "namespace", "group", "q"}
+	findingsParams  = append(slices.Clone(findingsFilters), "sort", "limit", "cursor")
+	findingsSingle  = []string{"group", "q", "sort", "limit", "cursor"}
+)
+
+// affectedLimit is the finding detail's affected page size (design §13.1).
+const affectedLimit = 50
+
+var (
+	codeFormat    = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]{3}$`)
+	groupIDFormat = regexp.MustCompile(`^f1-[a-z2-7]{26}$`)
+)
+
+// findingsQuery is a parsed GET …/findings query.
+type findingsQuery struct {
+	severities []health.Severity
+	codes      []string
+	kinds      []objects.GroupKind
+	namespaces []string
+	group, q   string // q is lower-cased
+	sort       diagnose.Sort
+	limit      int
+	cursor     string
+}
+
+// parseFindingsQuery parses r's query. Unknown parameters, repeated single
+// ones and malformed or unknown values are explore.ErrBadQuery; the index
+// checks cursors.
+func parseFindingsQuery(r *http.Request) (findingsQuery, error) {
+	q := findingsQuery{sort: diagnose.Sort{Key: diagnose.SortRank}, limit: explore.DefaultLimit}
+	vals, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return q, badParam("malformed query: %v", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(vals)) {
+		if !slices.Contains(findingsParams, name) {
+			return q, badParam("unknown parameter %q", name)
+		}
+		if len(vals[name]) > 1 && slices.Contains(findingsSingle, name) {
+			return q, badParam("parameter %q given more than once", name)
+		}
+	}
+	for _, v := range vals["severity"] {
+		s := health.Severity(v)
+		if s != health.SeverityError && s != health.SeverityWarning && s != health.SeverityInfo {
+			return q, badParam("severity %q: want error, warning or info", v)
+		}
+		q.severities = append(q.severities, s)
+	}
+	for _, v := range vals["code"] {
+		if !codeFormat.MatchString(v) {
+			return q, badParam("code %q: want a finding code such as KGWUI-002", v)
+		}
+		q.codes = append(q.codes, v)
+	}
+	for _, v := range vals["kind"] {
+		s, err := segments(v, 2, "kind")
+		if err != nil {
+			return q, err
+		}
+		q.kinds = append(q.kinds, objects.GroupKind{Group: s[0], Kind: s[1]})
+	}
+	for _, v := range vals["namespace"] {
+		if v == "" {
+			return q, badParam("namespace: want a namespace name")
+		}
+		q.namespaces = append(q.namespaces, v)
+	}
+	if vals.Has("group") {
+		if q.group = vals.Get("group"); !groupIDFormat.MatchString(q.group) {
+			return q, badParam("group %q: want a group id", q.group)
+		}
+	}
+	q.q, q.cursor = strings.ToLower(vals.Get("q")), vals.Get("cursor")
+	if v := vals.Get("limit"); vals.Has("limit") {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > explore.MaxLimit {
+			return q, badParam("limit %q: want 1–%d", v, explore.MaxLimit)
+		}
+		q.limit = n
+	}
+	if vals.Has("sort") {
+		v := vals.Get("sort")
+		key, desc := strings.CutPrefix(v, "-")
+		if key != diagnose.SortRank && key != diagnose.SortSince && key != diagnose.SortCode || desc && key == diagnose.SortRank {
+			return q, badParam("sort %q: want rank, since, -since, code or -code", v)
+		}
+		q.sort = diagnose.Sort{Key: key, Desc: desc}
+	}
+	return q, nil
+}
+
+// match reports whether f passes q's filters for the caller of v. q sees
+// only what f's row shows: a restricted finding's resource identity, and no
+// detail whose evidence is hidden (design §14 rule 17).
+func (q *findingsQuery) match(v *view, f *health.Finding) bool {
+	if len(q.severities) > 0 && !slices.Contains(q.severities, f.Severity) ||
+		len(q.codes) > 0 && !slices.Contains(q.codes, f.Code) ||
+		q.group != "" && f.Group != q.group {
+		return false
+	}
+	if len(q.kinds) > 0 && (f.Resource == nil || !slices.Contains(q.kinds, objects.GroupKind{Group: f.Resource.Group, Kind: f.Resource.Kind})) ||
+		len(q.namespaces) > 0 && (f.Resource == nil || !slices.Contains(q.namespaces, f.Resource.Namespace)) {
+		return false
+	}
+	if q.q == "" {
+		return true
+	}
+	if f.Resource != nil && containsLower(f.Resource.Namespace+"/"+f.Resource.Name, q.q) {
+		return true
+	}
+	if f.Resource != nil && !v.can(*f.Resource) {
+		return false
+	}
+	return containsLower(f.Message, q.q) || v.allOf(f.Evidence) && containsLower(f.Detail, q.q)
+}
+
+// containsLower reports whether s contains sub, ignoring case; sub is lower case.
+func containsLower(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(sub)], sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// findingRow is f on the wire for the caller of v: restricted when its
+// resource is hidden (D-013), evidence-restricted when its detail quotes a
+// hidden object (design §14 rules 11, 12). Times are UTC.
+func findingRow(v *view, l linker, f *health.Finding) FindingRow {
+	row := FindingRow{ID: f.ID, Code: f.Code, Slug: f.Slug, Severity: f.Severity, Group: f.Group}
+	if f.Resource != nil {
+		lr := l.linked(*f.Resource)
+		row.Resource = &lr
+		if !v.can(*f.Resource) {
+			row.Restricted = true
+			return row
+		}
+	}
+	row.Message, row.Detail, row.Since = f.Message, f.Detail, f.Since
+	if !v.allOf(f.Evidence) {
+		row.Detail, row.EvidenceRestricted, row.Since = restrictedEvidence, true, f.ResourceSince
+	}
+	if row.Since != nil {
+		at := wireTime(*row.Since)
+		row.Since = &at
+	}
+	return row
+}
+
+// diagnosis returns i's diagnosis, or an empty one.
+func diagnosis(i *engine.InstallModel) *diagnose.Diagnosis {
+	if i.Diagnosis == nil || i.Diagnosis.Index == nil {
+		return &diagnose.Diagnosis{Index: diagnose.NewIndex(nil, nil)}
+	}
+	return i.Diagnosis
+}
+
+func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
+	p, i := h.find(w, r)
+	if i == nil {
+		return
+	}
+	q, err := parseFindingsQuery(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	v, fs := h.view(r), i.Health.Findings
+	pg, err := diagnosis(i).Index.Page(fs, q.sort, q.limit, q.cursor, func(k int) bool { return q.match(v, &fs[k]) })
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	l := linkerFor(v, p.Model, i)
+	items := make([]FindingRow, 0, len(pg.Items))
+	for _, k := range pg.Items {
+		items = append(items, findingRow(v, l, &fs[k]))
+	}
+	writeJSON(w, Page[FindingRow]{Install: i.Resolved.ID(), Items: items, Total: pg.Total, Next: pg.Next, Prev: pg.Prev,
+		CollectedAt: wireTime(p.ConfirmedAt)})
+}
+
+func (h *handler) findingDetail(w http.ResponseWriter, r *http.Request) {
+	p, i := h.find(w, r)
+	if i == nil {
+		return
+	}
+	vals, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, badParam("malformed query: %v", err).Error())
+		return
+	}
+	for name, vs := range vals {
+		if name != "affectedCursor" || len(vs) > 1 {
+			writeErr(w, http.StatusBadRequest, badParam("parameter %q unknown or given more than once", name).Error())
+			return
+		}
+	}
+	d, fs := diagnosis(i), i.Health.Findings
+	k, ok := d.Index.Find(fs, r.PathValue("findingId"))
+	if !ok {
+		writeErr(w, http.StatusNotFound, "finding "+r.PathValue("findingId")+" not found")
+		return
+	}
+	v := h.view(r)
+	l := linkerFor(v, p.Model, i)
+	f := &fs[k]
+	row := findingRow(v, l, f)
+	var refs []objects.Ref
+	if !row.Restricted {
+		refs = affectedOf(v, d, f.Group)
+	}
+	affected, err := pageAffected(refs, vals.Get("affectedCursor"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	items := make([]LinkedRef, 0, len(affected.refs))
+	for _, ref := range affected.refs {
+		items = append(items, l.linked(ref))
+	}
+	at := wireTime(p.ConfirmedAt)
+	writeJSON(w, FindingDetail{Install: i.Resolved.ID(), Finding: row, CollectedAt: at,
+		Affected: Page[LinkedRef]{Install: i.Resolved.ID(), Items: items, Total: len(refs), Next: affected.next, Prev: affected.prev, CollectedAt: at}})
+}
+
+// affectedOf returns the visible affected objects of group, sorted; none
+// when the group's cause is hidden (design §14 rule 13).
+func affectedOf(v *view, d *diagnose.Diagnosis, group string) []objects.Ref {
+	j := slices.IndexFunc(d.Groups, func(g diagnose.Group) bool { return g.ID == group })
+	if j < 0 || len(d.Groups[j].Affected) == 0 {
+		return nil
+	}
+	g := &d.Groups[j]
+	if g.Cause != nil && !v.can(*g.Cause) {
+		return nil
+	}
+	out := make([]objects.Ref, 0, len(g.Affected))
+	for _, ref := range g.Affected {
+		if v.can(ref) {
+			out = append(out, ref)
+		}
+	}
+	slices.SortFunc(out, compareAffected)
+	return slices.CompactFunc(out, func(a, b objects.Ref) bool { return a == b })
+}
+
+// compareAffected orders affected objects by namespace, name, group and kind.
+func compareAffected(a, b objects.Ref) int {
+	return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Group, b.Group), cmp.Compare(a.Kind, b.Kind))
+}
+
+// affectedCursor is the JSON inside an affected cursor, in the explorer's
+// shape: T is the anchor's (namespace, name, group, kind).
+type affectedCursor struct {
+	S string   `json:"s"`
+	D string   `json:"d"`
+	B bool     `json:"b"`
+	T []string `json:"t"`
+}
+
+// sortAffected keeps affected cursors apart from every list's.
+const sortAffected = "affected"
+
+func encodeAffected(before bool, r objects.Ref) string {
+	b, _ := json.Marshal(affectedCursor{S: sortAffected, D: "asc", B: before, T: []string{r.Namespace, r.Name, r.Group, r.Kind}}) // strings cannot fail
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// affectedPage is one page of affected objects with its cursors.
+type affectedPage struct {
+	refs       []objects.Ref
+	next, prev string
+}
+
+// pageAffected returns the page of sorted refs after or before c. A cursor
+// that does not decode is explore.ErrBadCursor.
+func pageAffected(refs []objects.Ref, c string) (affectedPage, error) {
+	start, end := 0, min(len(refs), affectedLimit)
+	var anchor *affectedCursor
+	if c != "" {
+		var w affectedCursor
+		raw, err := base64.RawURLEncoding.DecodeString(c)
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if len(c) > 1024 || err != nil || dec.Decode(&w) != nil || dec.More() || w.S != sortAffected || w.D != "asc" || len(w.T) != 4 || w.T[1] == "" || w.T[3] == "" {
+			return affectedPage{}, badCursorErr("not an affected cursor")
+		}
+		anchor = &w
+		a := objects.Ref{Namespace: w.T[0], Name: w.T[1], Group: w.T[2], Kind: w.T[3]}
+		if w.B {
+			end, _ = slices.BinarySearchFunc(refs, a, compareAffected)
+			start = max(0, end-affectedLimit)
+		} else {
+			start = len(refs)
+			if k := slices.IndexFunc(refs, func(r objects.Ref) bool { return compareAffected(r, a) > 0 }); k >= 0 {
+				start = k
+			}
+			end = min(len(refs), start+affectedLimit)
+		}
+	}
+	p := affectedPage{refs: refs[start:end]}
+	switch {
+	case end > start:
+		if end < len(refs) {
+			p.next = encodeAffected(false, refs[end-1])
+		}
+		if start > 0 {
+			p.prev = encodeAffected(true, refs[start])
+		}
+	case anchor != nil && !anchor.B && start > 0:
+		p.prev = encodeAffected(true, objects.Ref{Namespace: anchor.T[0], Name: anchor.T[1], Group: anchor.T[2], Kind: anchor.T[3]})
+	case anchor != nil && anchor.B && end < len(refs):
+		p.next = encodeAffected(false, objects.Ref{Namespace: anchor.T[0], Name: anchor.T[1], Group: anchor.T[2], Kind: anchor.T[3]})
+	}
+	return p, nil
+}
+
+// badCursorErr is explore.ErrBadCursor with why.
+func badCursorErr(why string) error { return fmt.Errorf("%w: %s", explore.ErrBadCursor, why) }

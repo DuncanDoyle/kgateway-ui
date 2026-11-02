@@ -94,6 +94,8 @@ type Diagnosis struct {
 	Groups []Group
 	// Rank are the report's finding indexes in rank order.
 	Rank []int
+	// Index serves the findings list in each order (design §13.1).
+	Index *Index
 }
 
 // Build sets each finding's Group, trying families in order (first claim wins,
@@ -151,7 +153,9 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 		}
 		g.Affected = fams[k].Affected(g.Cause, keys[k], buf, in)
 	}
-	return rank(rep.Findings, groups)
+	d := rank(rep.Findings, groups)
+	d.Index = NewIndex(rep.Findings, d.Rank)
+	return d
 }
 
 // claim returns the family claiming f first and f's cause in it, falling

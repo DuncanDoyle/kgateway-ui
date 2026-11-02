@@ -202,7 +202,7 @@ func partialLS() *unstructured.Unstructured {
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
 		if !ok { // meta and installs: no install segment, and no links
 			continue
@@ -232,7 +232,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 314
+	const want = 322
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -254,7 +254,7 @@ func detailPath(r objects.Ref) (string, bool) {
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
 func TestGoldenFilesHaveCases(t *testing.T) {
 	cased := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t)) {
 		cased[tc.golden+".json"] = true
 	}
 	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
@@ -383,6 +383,31 @@ func wire(t *testing.T, srv *httptest.Server, path string) []byte {
 		t.Fatal(err)
 	}
 	return out.Bytes()
+}
+
+// TestGoldenFindings pins the findings list and detail bodies (Phase 3
+// design §13.3) over the Phase 1 golden world, for every caller and for one
+// who may not view shop/broken.
+func TestGoldenFindings(t *testing.T) { runGolden(t, findingsCases(t)) }
+
+func findingsCases(t *testing.T) []goldenCase {
+	e, all := findingsWorld(t, nil)
+	_, some := findingsWorld(t, hideBroken)
+	id := func(name string) string {
+		for _, f := range e.Current().Model.Installs[0].Health.Findings {
+			if f.Resource != nil && f.Resource.Name == name {
+				return f.ID
+			}
+		}
+		t.Fatalf("no finding on %s", name)
+		return ""
+	}
+	return []goldenCase{
+		{"findings", all, findingsBase},
+		{"findings-restricted", some, findingsBase + "?severity=error&sort=-since"},
+		{"finding-detail-other", all, findingsBase + "/" + id("denied")},
+		{"finding-detail-restricted", some, findingsBase + "/" + id("broken")},
+	}
 }
 
 // TestGoldenDelegation pins the 2.4 bodies (design §7.6): the delegation
@@ -537,7 +562,7 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 // are the only additions to the Phase 2 bytes. It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t)) {
 		want, err := os.ReadFile(filepath.Join("testdata", "golden", tc.golden+".json"))
 		if err != nil {
 			t.Fatal(err)

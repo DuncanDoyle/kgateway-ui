@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,6 +35,46 @@ func TestGoldenChangesAreAdditive(t *testing.T) {
 	for _, name := range []string{"meta", "installs", "overview", "health", "resource", "not-found", "bare-meta", "bare-installs", "bare-overview"} {
 		additive(t, readGolden(t, "golden-v1", name), readGolden(t, "golden", name), name)
 	}
+}
+
+// findingKeys are the keys a v1 finding may gain: the resource link (Phase
+// 2), a first-seen since (D-028), and id, group and evidence (Phase 3 design §13.1).
+var findingKeys = []string{".resource.link", ".since", ".id", ".group", ".evidence"}
+
+// TestHealthOverviewFindingsGainOnlyIdentity checks that /health and
+// /overview findings differ from v1 only by findingKeys.
+func TestHealthOverviewFindingsGainOnlyIdentity(t *testing.T) {
+	for _, name := range []string{"health", "overview", "bare-overview"} {
+		for _, k := range addedKeys(readGolden(t, "golden-v1", name), readGolden(t, "golden", name), "") {
+			_, rest, ok := strings.Cut(k, "findings[")
+			if _, key, _ := strings.Cut(rest, "]"); ok && !slices.Contains(findingKeys, key) {
+				t.Errorf("%s: finding gained %s", name, k)
+			}
+		}
+	}
+}
+
+// addedKeys returns the paths of the object keys in cur that old lacks, in
+// elements both have.
+func addedKeys(old, cur any, p string) []string {
+	var out []string
+	switch o := old.(type) {
+	case map[string]any:
+		c, _ := cur.(map[string]any)
+		for _, k := range slices.Sorted(maps.Keys(c)) {
+			if v, ok := o[k]; ok {
+				out = append(out, addedKeys(v, c[k], p+"."+k)...)
+			} else {
+				out = append(out, p+"."+k)
+			}
+		}
+	case []any:
+		c, _ := cur.([]any)
+		for i := range min(len(o), len(c)) {
+			out = append(out, addedKeys(o[i], c[i], fmt.Sprintf("%s[%d]", p, i))...)
+		}
+	}
+	return out
 }
 
 func TestAdditiveHelper(t *testing.T) {

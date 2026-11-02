@@ -48,6 +48,8 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	mux.HandleFunc("GET /api/v1/installs", h.installs)
 	mux.HandleFunc("GET /api/v1/installs/{id}/overview", h.overview)
 	mux.HandleFunc("GET /api/v1/installs/{id}/health", h.health)
+	mux.HandleFunc("GET /api/v1/installs/{id}/findings", h.findings)
+	mux.HandleFunc("GET /api/v1/installs/{id}/findings/{findingId}", h.findingDetail)
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes", h.routes)
 	mux.HandleFunc("GET /api/v1/installs/{id}/gateways", h.gateways)
 	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets", h.listenerSets)
