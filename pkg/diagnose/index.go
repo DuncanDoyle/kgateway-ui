@@ -206,14 +206,25 @@ type rankKey struct {
 	GroupSev      int    `json:"gs"`
 	Class         Class  `json:"gc"`
 	Affected      int    `json:"ga"`
-	GroupSince    int64  `json:"gt"`
+	GroupSince    stamp  `json:"gt"`
 	HasGroupSince bool   `json:"gh,omitempty"`
 	Group         string `json:"g"`
 	Sev           int    `json:"fs"`
-	Since         int64  `json:"ft"`
+	Since         stamp  `json:"ft"`
 	HasSince      bool   `json:"fh,omitempty"`
 	ID            string `json:"f"`
 }
+
+// stamp is a time as Unix seconds and nanoseconds: lossless over time.Time's
+// whole range, where UnixNano is not, and ordered as time.Time.Compare orders.
+type stamp struct {
+	S int64 `json:"s"`
+	N int32 `json:"n,omitempty"`
+}
+
+func stampOf(t time.Time) stamp { return stamp{S: t.Unix(), N: int32(t.Nanosecond())} } // #nosec G115 -- below 1e9
+
+func (a stamp) compare(b stamp) int { return cmp.Or(cmp.Compare(a.S, b.S), cmp.Compare(a.N, b.N)) }
 
 // keyOf returns finding i's rank key and code.
 func (ix *Index) keyOf(fs []health.Finding, i int32) (rankKey, string) {
@@ -229,18 +240,18 @@ func (ix *Index) keyOf(fs []health.Finding, i int32) (rankKey, string) {
 	k := rankKey{Unranked: !g.Ranked, GroupSev: sevRank(g.Severity), Class: g.Class, Affected: len(g.Affected), Group: g.ID,
 		Sev: sevRank(f.Severity), ID: f.ID}
 	if g.Since != nil {
-		k.GroupSince, k.HasGroupSince = g.Since.UnixNano(), true
+		k.GroupSince, k.HasGroupSince = stampOf(*g.Since), true
 	}
 	if f.Since != nil {
-		k.Since, k.HasSince = f.Since.UnixNano(), true
+		k.Since, k.HasSince = stampOf(*f.Since), true
 	}
 	return k, f.Code
 }
 
-// compareNanos orders the oldest time first and a missing one last, as compareSince does.
-func compareNanos(a int64, hasA bool, b int64, hasB bool) int {
+// compareStamps orders the oldest time first and a missing one last, as compareSince does.
+func compareStamps(a stamp, hasA bool, b stamp, hasB bool) int {
 	if hasA && hasB {
-		return cmp.Compare(a, b)
+		return a.compare(b)
 	}
 	return cmp.Compare(boolInt(!hasA), boolInt(!hasB))
 }
@@ -259,10 +270,10 @@ func compareRank(a, b rankKey) int {
 		cmp.Compare(a.GroupSev, b.GroupSev),
 		cmp.Compare(a.Class, b.Class),
 		cmp.Compare(b.Affected, a.Affected),
-		compareNanos(a.GroupSince, a.HasGroupSince, b.GroupSince, b.HasGroupSince),
+		compareStamps(a.GroupSince, a.HasGroupSince, b.GroupSince, b.HasGroupSince),
 		cmp.Compare(a.Group, b.Group),
 		cmp.Compare(a.Sev, b.Sev),
-		compareNanos(a.Since, a.HasSince, b.Since, b.HasSince),
+		compareStamps(a.Since, a.HasSince, b.Since, b.HasSince),
 		cmp.Compare(a.ID, b.ID),
 	)
 }
@@ -272,9 +283,9 @@ func compareIn(s Sort, k rankKey, code string, w rankKey, wcode string) int {
 	var c int
 	switch {
 	case s.Key == SortSince && s.Desc && k.HasSince && w.HasSince:
-		c = cmp.Compare(w.Since, k.Since)
+		c = w.Since.compare(k.Since)
 	case s.Key == SortSince:
-		c = compareNanos(k.Since, k.HasSince, w.Since, w.HasSince)
+		c = compareStamps(k.Since, k.HasSince, w.Since, w.HasSince)
 	case s.Key == SortCode && s.Desc:
 		c = cmp.Compare(wcode, code)
 	case s.Key == SortCode:

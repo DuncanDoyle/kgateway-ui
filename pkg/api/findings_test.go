@@ -648,3 +648,39 @@ func TestFindingsCursorBoundToInstall(t *testing.T) {
 		get[map[string]any](t, srv, "/api/v1/installs/kgw2.kgateway2"+q+"&cursor="+url.QueryEscape(a.Next), http.StatusBadRequest)
 	}
 }
+
+// Cursors order times as the index does, also outside the int64 nanosecond range (1678–2262).
+func TestFindingsCursorFarTimes(t *testing.T) {
+	var fs []health.Finding
+	for k, year := range []int{2301, 1600, 2026, 2300} {
+		at := time.Date(year, 1, 1, 0, 0, 0, k, time.UTC)
+		r := route("shop", fmt.Sprint(year))
+		fs = append(fs, health.Finding{ID: fmt.Sprintf("f1-%d", year), Code: "KGWUI-002", Severity: health.SeverityWarning, Resource: &r, Since: &at})
+	}
+	rep := &health.Report{Findings: fs}
+	fs, ix := rep.Findings, diagnose.Build(rep, diagnose.Input{}, diagnose.Families()).Index
+	for _, s := range []diagnose.Sort{{Key: diagnose.SortRank}, {Key: diagnose.SortSince}, {Key: diagnose.SortSince, Desc: true}, {Key: diagnose.SortCode}} {
+		all, err := ix.Page(fs, "kgw.kgateway", s, 10, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := pageIDs(fs, all)
+		// Page one at a time forward, then back from the last page.
+		p, err := ix.Page(fs, "kgw.kgateway", s, 1, "", nil)
+		fwd := pageIDs(fs, p)
+		for err == nil && p.Next != "" && len(fwd) <= len(fs) {
+			if p, err = ix.Page(fs, "kgw.kgateway", s, 1, p.Next, nil); err == nil {
+				fwd = append(fwd, pageIDs(fs, p)...)
+			}
+		}
+		back := pageIDs(fs, p)
+		for err == nil && p.Prev != "" && len(back) <= len(fs) {
+			if p, err = ix.Page(fs, "kgw.kgateway", s, 1, p.Prev, nil); err == nil {
+				back = append(pageIDs(fs, p), back...)
+			}
+		}
+		if err != nil || !slices.Equal(fwd, want) || !slices.Equal(back, want) {
+			t.Errorf("%+v: forward %v, back %v, want %v (%v)", s, fwd, back, want, err)
+		}
+	}
+}
