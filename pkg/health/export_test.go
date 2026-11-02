@@ -36,8 +36,8 @@ func GuardWorlds(t *testing.T) map[string]Input {
 		"namespaces unreadable": func(w *world) {
 			w.access = map[schema.GroupVersionResource]cache.Access{cache.NamespacesGVR: {Err: "connection refused"}}
 		},
-		"inside grace":      func(w *world) { w.firstSeen = young },
-		"computed findings": func(w *world) { w.computed = &computed.Views{RuleSet: "kgateway-2.4"} },
+		"inside grace":     func(w *world) { w.firstSeen = young },
+		"computed present": func(w *world) { w.computed = &computed.Views{RuleSet: "kgateway-2.4"} },
 	}
 	out := make(map[string]Input, len(mutations)+1)
 	for name, mutate := range mutations {

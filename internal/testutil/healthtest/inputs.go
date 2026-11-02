@@ -1,6 +1,5 @@
 // Package healthtest has test helpers for the health check contract. It is
-// apart from testutil because it imports pkg/health, which testutil's callers
-// (pkg/cache among them) are imported by.
+// apart from testutil, whose callers pkg/health imports.
 package healthtest
 
 import (
@@ -25,17 +24,15 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
-// Kinds that are declared only by name in InputSet.Kinds.
+// Kinds declared only by name in InputSet.Kinds.
 var (
 	namespaceKind  = objects.GroupKind{Kind: "Namespace"}
 	podKind        = objects.GroupKind{Kind: "Pod"}
 	deploymentKind = objects.GroupKind{Group: "apps", Kind: "Deployment"}
 )
 
-// PerturbUndeclared returns a copy of in with every input that set does not
-// declare changed, so a check that reads one produces different output. It
-// never changes Install, Platform, ProxyMode, Snapshot.Synced, Snapshot.TakenAt or
-// Now (see ShiftNow). The same in, set and seed give the same result.
+// PerturbUndeclared returns in with every input set does not declare changed.
+// Install, Platform, ProxyMode, Synced and TakenAt stay; ShiftNow moves Now.
 func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.Input {
 	rng := rand.New(rand.NewSource(seed)) // nolint:gosec // seeded test data, not security
 	out := in
@@ -70,8 +67,8 @@ func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.
 	return out
 }
 
-// dropUndeclaredKinds copies in.Snapshot without the kinds set does not declare:
-// served kinds and Namespaces need Owned or a Kinds entry; Pods and Deployments need a Kinds entry.
+// dropUndeclaredKinds copies in.Snapshot without the kinds set does not declare.
+// Pods and Deployments need a Kinds entry; other kinds also pass with Owned.
 func dropUndeclaredKinds(in health.Input, set health.InputSet) *cache.Snapshot {
 	s := *in.Snapshot
 	declared := func(gk objects.GroupKind) bool { return slices.Contains(set.Kinds, gk) }
@@ -115,8 +112,7 @@ func dropUndeclaredKinds(in health.Input, set health.InputSet) *cache.Snapshot {
 	return &s
 }
 
-// ShiftNow returns in with Now moved by a seeded amount in [0, next-Now), or
-// in [0, 10m) when next is zero. It is for a check that does not declare Clock.
+// ShiftNow moves Now by a seeded amount in [0, next-Now), or [0, 10m) when next is zero.
 func ShiftNow(in health.Input, next time.Time, seed int64) health.Input {
 	window := 10 * time.Minute
 	if !next.IsZero() {
@@ -128,8 +124,7 @@ func ShiftNow(in health.Input, next time.Time, seed int64) health.Input {
 	return in
 }
 
-// PerturbCollected returns a copy of s in which every collector key that set
-// does not declare is replaced and one more key is added.
+// PerturbCollected replaces every collector key set does not declare and adds one.
 func PerturbCollected(s collect.Snapshot, set health.InputSet, seed int64) collect.Snapshot {
 	out := collect.Snapshot{Values: map[string]collect.Value{}}
 	for k, v := range s.Values {
