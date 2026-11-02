@@ -191,6 +191,21 @@ it("a restricted finding shows its identity only, and an unknown one says so", a
   expect(screen.getByRole("link", { name: "All findings" })).toHaveAttribute("href", `/i/${ID}/findings`);
 });
 
+it("a finding that goes away while open reads as not found, not as a load failure", async () => {
+  let gone = false;
+  serve((u) => (u.pathname.endsWith(`/findings/${FINDING}`) && !gone ? detail() : undefined));
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  mount(`/i/${ID}/findings/${FINDING}`);
+  await screen.findByRole("table", { name: "Affected objects" });
+  gone = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5100);
+  });
+  expect(await screen.findByText("Finding not found")).toBeInTheDocument();
+  expect(screen.queryByTestId("page-notice")).toBeNull();
+  expect(screen.getByRole("link", { name: "All findings" })).toHaveAttribute("href", `/i/${ID}/findings`);
+});
+
 it("stale data turns every state unknown", async () => {
   const old = "2020-01-01T00:00:00Z";
   serve((u) => {

@@ -43,7 +43,8 @@ function DetailProbe({ id, findingId, cursor }: { id: string; findingId: string;
   const names = data?.affected.items.map((r) => r.name).join(",");
   return (
     <p>
-      {cursorRejected ? "cursor rejected" : error ? `error ${error.status}` : data ? `affected ${names}` : "loading"}
+      {cursorRejected ? "cursor rejected, " : error ? `error ${error.status}, ` : ""}
+      {data ? `affected ${names}` : "loading"}
       {isLaggy ? " busy" : ""}
     </p>
   );
@@ -128,7 +129,24 @@ it("loads a finding with an encoded id and pages its affected objects", async ()
 it("reports a 400 on an affected cursor as rejected", async () => {
   stubApi({ "/api/v1/installs/a.one/findings/f1-a?affectedCursor=bad": [400, { error: "bad cursor" }] });
   renderWithTheme(<DetailProbe id="a.one" findingId="f1-a" cursor="bad" />);
-  expect(await screen.findByText("cursor rejected")).toBeInTheDocument();
+  expect(await screen.findByText("cursor rejected, loading")).toBeInTheDocument();
+});
+
+it("keeps the previous affected page when the next cursor is rejected", async () => {
+  stubApi({
+    "/api/v1/installs/a.one/findings/f1-a": detail("a.one", "f1-a", "one"),
+    "/api/v1/installs/a.one/findings/f1-a?affectedCursor=bad": [400, { error: "bad cursor" }],
+  });
+  renderWithTheme(
+    <Switch<string | undefined>
+      from={undefined}
+      to="bad"
+      render={(c) => <DetailProbe id="a.one" findingId="f1-a" cursor={c} />}
+    />,
+  );
+  expect(await screen.findByText("affected one")).toBeInTheDocument();
+  flip();
+  expect(await screen.findByText("cursor rejected, affected one busy")).toBeInTheDocument();
 });
 
 it("never shows another install's or another finding's detail", async () => {

@@ -191,7 +191,8 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
   const now = useNow();
   const back = <BackLink to={installPath(id, "findings")}>{findingsCopy.allFindings}</BackLink>;
   const errorTitle = listCopy.cannotLoad("finding");
-  if (error?.status === 404 && !data) return <PageState kind="empty" title={findingsCopy.notFound} message={back} />;
+  // A finding resolved while open 404s: it reads as gone, not as a load failure, even with data cached.
+  if (error?.status === 404) return <PageState kind="empty" title={findingsCopy.notFound} message={back} />;
   const f = data?.finding;
   // Stale data or a failed poll turns every state on the page unknown (design §6.3).
   const stale = !!data && (!!error || isStale(data.collectedAt, now));

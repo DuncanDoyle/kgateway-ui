@@ -1,6 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { useContext, useMemo } from "react";
+import { type ReactNode, useContext, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { useFindings } from "../../api/diagHooks";
@@ -113,6 +113,13 @@ function NoValue() {
   return <Muted aria-label={findingsCopy.noValue}>—</Muted>;
 }
 
+/** Provides StaleView from data age; owns the clock, so its children keep identity and do not re-render each second. */
+function StaleWhen({ collectedAt, failed, children }: { collectedAt?: string; failed: boolean; children: ReactNode }) {
+  const now = useNow();
+  const stale = !!collectedAt && (failed || isStale(collectedAt, now));
+  return <StaleView.Provider value={stale}>{children}</StaleView.Provider>;
+}
+
 /** "5m ago" from since; owns the clock, so the table does not re-render each second. */
 function SinceCell({ since }: { since?: string }) {
   const now = useNow();
@@ -187,9 +194,6 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
   const l = useListPage("findings", useFindings, skip);
   const cols = useMemo(() => columns(l.id), [l.id]);
   const rowPath = useMemo(() => (f: FindingItem) => findingPath(l.id, f), [l.id]);
-  const now = useNow();
-  // Stale data or a failed poll turns every severity unknown, as on the other lists.
-  const stale = !!l.data && (!!l.error || isStale(l.data.collectedAt, now));
   return (
     <ListFrame
       title={findingsCopy.title}
@@ -227,7 +231,8 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
       onClearFilters={l.filtered ? l.clearFilters : undefined}
       stylesOverride={stylesOverride}
     >
-      <StaleView.Provider value={stale}>
+      {/* Stale data or a failed poll turns every severity unknown, as on the other lists. */}
+      <StaleWhen collectedAt={l.data?.collectedAt} failed={!!l.error}>
         <ObjectTable
           label={findingsCopy.title}
           installId={l.id}
@@ -246,7 +251,7 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
           onSort={(k) => (k === "rank" ? l.setFilter({ sort: null }) : l.setSort(k))}
           onPage={l.setCursor}
         />
-      </StaleView.Provider>
+      </StaleWhen>
     </ListFrame>
   );
 }

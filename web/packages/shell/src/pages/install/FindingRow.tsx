@@ -11,7 +11,7 @@ import { ResourceName } from "../../resource/ResourceName";
 import { findingKey, Slot, useFindingActions } from "../../shell/contributions";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 import { InstallName } from "../../shell/InstallName";
-import { findingPath } from "../findings/FindingsPage";
+import { findingPath, findingsCopy } from "../findings/FindingsPage";
 
 // region Styles
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -150,7 +150,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
       </div>
       <div className="text">
         {f.restricted ? (
-          <div className="muted">Restricted: ask the owning team</div>
+          <div className="muted">{findingsCopy.restricted}</div>
         ) : (
           <>
             {page ? (

@@ -23,12 +23,14 @@ export function useFindingDetail(id: string, findingId: string, affectedCursor?:
   // Kept data shows only for the same install and finding, and only while the new key loads (as useList).
   const own = cache.get(key)?.data !== undefined;
   const same = r.data?.finding.id === findingId ? forInstall(r.data, id) : undefined;
-  const data = own || !r.error ? same : undefined;
+  const cursorRejected = !!affectedCursor && r.error?.status === 400;
+  // A rejected cursor keeps the previous page on screen while page one loads, so the skeleton never flashes.
+  const data = own || !r.error || cursorRejected ? same : undefined;
   return {
     data,
     error: r.error,
     mutate: r.mutate,
-    cursorRejected: !!affectedCursor && r.error?.status === 400,
+    cursorRejected,
     isLaggy: !own && data !== undefined,
   };
 }

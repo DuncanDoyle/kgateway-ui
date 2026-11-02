@@ -13,11 +13,8 @@ export interface Brand {
 }
 
 /**
- * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:id/. The core owns "/" at the top and "", "findings", "findings/..." and "r/..." under /i/:id/, and wins on
- * its own URLs.
- * "gateways", "listenersets" and "routes" are reserved under /i/:id/: a contribution at or below them is ignored with
- * a console warning; replace those pages through their CorePages slots instead.
+ * A page contributed by an extension, at a relative path (install-scoped ones under /i/:id/). Core paths win; one at or
+ * below "gateways", "listenersets" or "routes" is ignored with a warning: use the CorePages slots.
  */
 export interface RouteContribution {
   path: string;
