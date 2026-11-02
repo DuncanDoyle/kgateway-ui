@@ -481,7 +481,8 @@ func TestPhase3Shapes(t *testing.T) {
 				!reflect.DeepEqual(slices, testutil.ScaleEndpointSlices(tier.Shape(), 1)) || !reflect.DeepEqual(testutil.ScaleMetrics(tier.Shape(), 1), testutil.ScaleMetrics(tier.Shape(), 1)) {
 				t.Fatal("not deterministic")
 			}
-			if reflect.DeepEqual(events, testutil.ScaleEvents(tier.Shape(), 2)) && len(events) > 1 {
+			if reflect.DeepEqual(events, testutil.ScaleEvents(tier.Shape(), 2)) || reflect.DeepEqual(pods, testutil.ScaleProxyPods(tier.Shape(), 2)) ||
+				reflect.DeepEqual(testutil.ScaleMetrics(tier.Shape(), 1), testutil.ScaleMetrics(tier.Shape(), 2)) {
 				t.Fatal("seed ignored")
 			}
 		})
@@ -498,7 +499,7 @@ func TestWorstCase(t *testing.T) {
 			if !tier.IsWorst || base.IsWorst || tier.Name != base.Name+"-worst" {
 				t.Fatalf("%+v", tier)
 			}
-			if got := restarts(testutil.ScaleProxyPods(tier.Shape(), 1)); got != tier.Gateways*tier.ProxyPodsPerGateway {
+			if got, want := restarts(testutil.ScaleProxyPods(tier.Shape(), 1)), (tier.Gateways+3)*tier.ProxyPodsPerGateway; got != want {
 				t.Errorf("restarts %d", got)
 			}
 			if got, want := unready(t, tier, testutil.ScaleServices(tier.Shape(), 1), testutil.ScaleEndpointSlices(tier.Shape(), 1)), tier.ReferencedServices/testutil.ScaleNoReadyEvery; got != want {
@@ -508,8 +509,8 @@ func TestWorstCase(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(m.Rejects) != tier.Gateways {
-				t.Fatalf("rejecting Gateways %d, want %d", len(m.Rejects), tier.Gateways)
+			if len(m.Rejects) != tier.Gateways+3 {
+				t.Fatalf("rejecting Gateways %d, want %d", len(m.Rejects), tier.Gateways+3)
 			}
 			for gw, v := range m.Rejects {
 				if v < 1 {
@@ -525,7 +526,101 @@ func TestLivePhase3Seeds(t *testing.T) {
 	if len(w.CRDs) != Typical.GatewayAPICRDs || len(w.Metrics) == 0 {
 		t.Fatalf("crds %d metrics %d", len(w.CRDs), len(w.Metrics))
 	}
+	if got, want := serviceRefs(w.Routes), referencedSet(Typical); !reflect.DeepEqual(got, want) {
+		t.Fatalf("named %d Services, referenced %d", len(got), len(want))
+	}
 	if Live(t, Typical, func() time.Time { return testutil.Now }).Metrics != nil {
 		t.Fatal("Live seeds Phase 3")
+	}
+}
+
+// serviceRefs is the set of Service names the routes' backendRefs name, by namespace/name.
+func serviceRefs(routes []*unstructured.Unstructured) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range routes {
+		rules, _, _ := unstructured.NestedSlice(r.Object, "spec", "rules")
+		for _, rule := range rules {
+			refs, _ := rule.(map[string]any)["backendRefs"].([]any)
+			for _, ref := range refs {
+				if m := ref.(map[string]any); m["kind"] == "Service" {
+					if m["namespace"] != r.GetNamespace() || m["port"] == nil {
+						panic("service ref outside the route namespace or without a port")
+					}
+					out[r.GetNamespace()+"/"+m["name"].(string)] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+func referencedSet(tier Tier) map[string]bool {
+	out := map[string]bool{}
+	for _, s := range testutil.ScaleServices(tier.Shape(), 1) {
+		if s.Labels[testutil.ScaleReferencedLabel] == "true" {
+			out[s.Namespace+"/"+s.Name] = true
+		}
+	}
+	return out
+}
+
+// Every referenced Service is named by a route backendRef and no other is.
+func TestReferenceServicesMatchesReferenced(t *testing.T) {
+	for _, tier := range Tiers {
+		if tier.Name == "extreme" && testing.Short() {
+			continue
+		}
+		t.Run(tier.Name, func(t *testing.T) {
+			var routes []*unstructured.Unstructured
+			for _, o := range World(tier, 1) {
+				if o.GetKind() == "HTTPRoute" {
+					routes = append(routes, o)
+				}
+			}
+			if len(serviceRefs(routes)) != 0 {
+				t.Fatal("World names Services")
+			}
+			referenceServices(tier, routes)
+			if got, want := serviceRefs(routes), referencedSet(tier); !reflect.DeepEqual(got, want) {
+				t.Fatalf("named %d Services, referenced %d", len(got), len(want))
+			}
+		})
+	}
+}
+
+// The worst case adds Gateways over 63 characters, two sharing a 50-character prefix.
+func TestWorstLongGateways(t *testing.T) {
+	if len(testutil.ScaleLongGatewayObjects(Typical.Shape())) != 0 {
+		t.Fatal("base tier has long Gateways")
+	}
+	tier := Typical.Worst()
+	gws := testutil.ScaleLongGatewayObjects(tier.Shape())
+	if len(gws) != 3 {
+		t.Fatalf("%d long Gateways", len(gws))
+	}
+	labels := map[string]bool{}
+	for _, g := range gws {
+		if len(g.GetName()) <= 63 {
+			t.Fatalf("%s is not over 63", g.GetName())
+		}
+		labels[testutil.SafeGatewayLabelValue(g.GetName())] = true
+	}
+	if gws[0].GetName()[:50] != gws[1].GetName()[:50] || len(labels) != 3 {
+		t.Fatal("two Gateways must share a prefix and still have distinct label values")
+	}
+	found := map[string]int{}
+	for _, p := range testutil.ScaleProxyPods(tier.Shape(), 1) {
+		l := p.Labels["gateway.networking.k8s.io/gateway-name"]
+		if len(l) > 63 {
+			t.Fatalf("label %q over 63", l)
+		}
+		if labels[l] {
+			found[l]++
+		}
+	}
+	for l := range labels {
+		if found[l] != tier.ProxyPodsPerGateway {
+			t.Errorf("label %q has %d pods", l, found[l])
+		}
 	}
 }

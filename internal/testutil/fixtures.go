@@ -2,6 +2,8 @@
 package testutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"math/rand/v2"
@@ -458,6 +460,17 @@ func Backend(ns, name string, cs []metav1.Condition) *unstructured.Unstructured 
 	return u
 }
 
+// SafeGatewayLabelValue is the gateway-name label value kgateway writes: the
+// name, or for one over 63 characters its first 50 (trailing "-" trimmed), "-"
+// and the first 12 hex digits of its SHA-256.
+func SafeGatewayLabelValue(name string) string {
+	if len(name) <= 63 {
+		return name
+	}
+	h := sha256.Sum256([]byte(name))
+	return strings.TrimSuffix(name[:50], "-") + "-" + hex.EncodeToString(h[:])[:12]
+}
+
 // ProxyPod builds Pod number i of the proxy Deployment of a Gateway, Ready,
 // with restarts container restarts.
 func ProxyPod(gwNS, gwName string, i int, suffix string, restarts int32) *corev1.Pod {
@@ -465,7 +478,7 @@ func ProxyPod(gwNS, gwName string, i int, suffix string, restarts int32) *corev1
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Namespace: gwNS, Name: name, UID: types.UID("pod/" + gwNS + "/" + name), CreationTimestamp: Old,
 			Labels: map[string]string{"app.kubernetes.io/managed-by": "kgateway", "app.kubernetes.io/component": "proxy",
-				"gateway.networking.k8s.io/gateway-name": gwName},
+				"gateway.networking.k8s.io/gateway-name": SafeGatewayLabelValue(gwName)},
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: gwName + "-" + suffix}}},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "envoy", Image: "cr.kgateway.dev/kgateway-dev/envoy-wrapper:v2.4.7"}}},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.2.0.1",
@@ -521,8 +534,8 @@ type ScaleShape struct {
 	Services, ReferencedServices        int
 	EndpointSlices, ProxyPodsPerGateway int
 	WarningEvents, GatewayAPICRDs       int
-	// Worst makes every Gateway reject, 5 % of referenced Services lack a ready
-	// endpoint and every proxy Pod restart once.
+	// Worst adds ScaleLongGateways and makes every Gateway reject, 5 % of
+	// referenced Services lack a ready endpoint and every proxy Pod restart.
 	Worst bool
 }
 
@@ -548,19 +561,56 @@ func scaleRand(seed int64, stream uint64) *rand.Rand {
 func scalePodHash(r *rand.Rand) string { return fmt.Sprintf("%010x", r.Uint64()&0xffffffffff) }
 
 // ScaleProxyPods returns ProxyPodsPerGateway Ready proxy Pods for each
-// Gateway, in the Gateway's namespace. Under Worst each restarted once.
+// Gateway, long-named ones included. Under Worst each restarted once.
 func ScaleProxyPods(t ScaleShape, seed int64) []*corev1.Pod {
 	r := scaleRand(seed, 0x90d5)
 	var restarts int32
 	if t.Worst {
 		restarts = 1
 	}
-	out := make([]*corev1.Pod, 0, t.Gateways*t.ProxyPodsPerGateway)
-	for g := range t.Gateways {
+	out := make([]*corev1.Pod, 0, len(scaleGateways(t))*t.ProxyPodsPerGateway)
+	for _, gw := range scaleGateways(t) {
 		hash := scalePodHash(r)
 		for i := range t.ProxyPodsPerGateway {
-			out = append(out, ProxyPod(ScaleNamespace(g%t.Namespaces), ScaleGateway(g), i, hash, restarts))
+			out = append(out, ProxyPod(gw.ns, gw.name, i, hash, restarts))
 		}
+	}
+	return out
+}
+
+// scaleGW names a scale Gateway and its namespace.
+type scaleGW struct{ ns, name string }
+
+// ScaleLongGateways are the names, over 63 characters, of the extra Gateways
+// of a worst-case shape. The first two share their first 50 characters, so
+// their label values differ only by hash; the third is unrelated.
+func ScaleLongGateways() []string {
+	p := strings.Repeat("shared-prefix-", 4) // 56 characters
+	return []string{p + "alpha-edge", p + "beta-edge", "a-single-gateway-with-a-name-that-is-longer-than-sixty-three-chars"}
+}
+
+// scaleGateways lists the Gateways of t: the regular ones, then under Worst the long-named ones in namespace 0.
+func scaleGateways(t ScaleShape) []scaleGW {
+	out := make([]scaleGW, 0, t.Gateways+3)
+	for g := range t.Gateways {
+		out = append(out, scaleGW{ScaleNamespace(g % t.Namespaces), ScaleGateway(g)})
+	}
+	if t.Worst {
+		for _, n := range ScaleLongGateways() {
+			out = append(out, scaleGW{ScaleNamespace(0), n})
+		}
+	}
+	return out
+}
+
+// ScaleLongGatewayObjects returns the Gateways whose proxy Pods ScaleProxyPods
+// adds under Worst; it is empty otherwise.
+func ScaleLongGatewayObjects(t ScaleShape) []*unstructured.Unstructured {
+	var out []*unstructured.Unstructured
+	for _, gw := range scaleGateways(t)[t.Gateways:] {
+		u := Gateway(gw.ns, gw.name, "kgateway", nil)
+		u.SetUID(types.UID("Gateway/" + gw.ns + "/" + gw.name))
+		out = append(out, u)
 	}
 	return out
 }
@@ -580,8 +630,8 @@ func ScaleEvents(t ScaleShape, seed int64) []*corev1.Event {
 	return out
 }
 
-// svcName names Service i: the first ReferencedServices are "ref-", the rest "svc-".
-func scaleSvcName(t ScaleShape, i int) string {
+// ScaleServiceName names Service i: "ref-" for the referenced ones, else "svc-".
+func ScaleServiceName(t ScaleShape, i int) string {
 	if i < t.ReferencedServices {
 		return fmt.Sprintf("ref-%05d", i)
 	}
@@ -599,14 +649,13 @@ func ScaleServices(t ScaleShape, _ int64) []*corev1.Service {
 		if i < t.ReferencedServices {
 			lbls = map[string]string{ScaleReferencedLabel: "true"}
 		}
-		out = append(out, Service(scaleSvcNS(t, i), scaleSvcName(t, i), lbls))
+		out = append(out, Service(scaleSvcNS(t, i), ScaleServiceName(t, i), lbls))
 	}
 	return out
 }
 
-// ScaleEndpointSlices returns EndpointSlices slices: one per Service, the
-// surplus a second slice of referenced Services in turn. Endpoints are Ready,
-// except those of every ScaleNoReadyEvery-th referenced Service under Worst.
+// ScaleEndpointSlices returns one slice per Service plus second slices of
+// referenced ones. Under Worst every ScaleNoReadyEvery-th referenced Service has no ready endpoint.
 func ScaleEndpointSlices(t ScaleShape, seed int64) []*discoveryv1.EndpointSlice {
 	r := scaleRand(seed, 0x511ce)
 	out := make([]*discoveryv1.EndpointSlice, 0, t.EndpointSlices)
@@ -621,7 +670,7 @@ func ScaleEndpointSlices(t ScaleShape, seed int64) []*discoveryv1.EndpointSlice 
 		for j := range rs {
 			rs[j] = ready
 		}
-		out = append(out, EndpointSlice(scaleSvcNS(t, i), fmt.Sprintf("%s-%d", scaleSvcName(t, i), k), scaleSvcName(t, i), rs...))
+		out = append(out, EndpointSlice(scaleSvcNS(t, i), fmt.Sprintf("%s-%d", ScaleServiceName(t, i), k), ScaleServiceName(t, i), rs...))
 	}
 	return out
 }
@@ -642,17 +691,16 @@ func ScaleCRDs(t ScaleShape) []*metav1.PartialObjectMetadata {
 	return out
 }
 
-// ScaleMetrics returns a controller /metrics capture in the shape of the
-// rejects captures of package ctrlmetrics: a managed-resource gauge per
-// Gateway and xDS reject series for the rejecting ones. Under Worst every
-// Gateway rejects; otherwise a seeded 1 in ScaleRejectEvery does.
+// ScaleMetrics returns a /metrics capture shaped like the ctrlmetrics rejects
+// captures. Under Worst every Gateway rejects; otherwise a seeded 1 in ScaleRejectEvery does.
 func ScaleMetrics(t ScaleShape, seed int64) []byte {
 	r := scaleRand(seed, 0x4e7c5)
 	const cluster, route = "envoy.config.cluster.v3.Cluster", "envoy.config.route.v3.RouteConfiguration"
 	var b strings.Builder
 	b.WriteString("# HELP kgateway_envoy_xds_rejects_active Active xDS rejects.\n# TYPE kgateway_envoy_xds_rejects_active gauge\n")
 	var rej []int
-	for g := range t.Gateways {
+	gws := scaleGateways(t)
+	for g := range gws {
 		if t.Worst || r.IntN(ScaleRejectEvery) == 0 {
 			rej = append(rej, g)
 		}
@@ -667,7 +715,7 @@ func ScaleMetrics(t ScaleShape, seed int64) []byte {
 	series := func(name string, val func(int) int) {
 		for _, g := range rej {
 			for _, u := range types[g] {
-				fmt.Fprintf(&b, "%s{gateway_name=%q,gateway_namespace=%q,type_url=%q} %d\n", name, ScaleGateway(g), ScaleNamespace(g%t.Namespaces), u, val(g))
+				fmt.Fprintf(&b, "%s{gateway_name=%q,gateway_namespace=%q,type_url=%q} %d\n", name, gws[g].name, gws[g].ns, u, val(g))
 			}
 		}
 	}
@@ -675,8 +723,8 @@ func ScaleMetrics(t ScaleShape, seed int64) []byte {
 	b.WriteString("# HELP kgateway_envoy_xds_rejects_total Total xDS rejects.\n# TYPE kgateway_envoy_xds_rejects_total counter\n")
 	series("kgateway_envoy_xds_rejects_total", func(int) int { return 2 + r.IntN(3) })
 	b.WriteString("# HELP kgateway_resources_managed Managed resources.\n# TYPE kgateway_resources_managed gauge\n")
-	for g := range t.Gateways {
-		fmt.Fprintf(&b, "kgateway_resources_managed{namespace=%q,parent=%q,resource=\"Gateway\"} 1\n", ScaleNamespace(g%t.Namespaces), ScaleGateway(g))
+	for _, gw := range gws {
+		fmt.Fprintf(&b, "kgateway_resources_managed{namespace=%q,parent=%q,resource=\"Gateway\"} 1\n", gw.ns, gw.name)
 	}
 	return []byte(b.String())
 }

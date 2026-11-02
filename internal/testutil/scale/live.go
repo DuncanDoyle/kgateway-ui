@@ -77,6 +77,11 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 		objs = append(objs, testutil.ProxyDeployment(testutil.ScaleNamespace(i%tier.Namespaces), gwName(i), 1, 1))
 	}
 	if phase3 {
+		referenceServices(tier, w.Routes)
+		for _, gw := range testutil.ScaleLongGatewayObjects(tier.Shape()) {
+			gw.SetResourceVersion("1")
+			objs = append(objs, gw)
+		}
 		for _, p := range testutil.ScaleProxyPods(tier.Shape(), 1) {
 			objs = append(objs, p)
 		}
@@ -112,4 +117,30 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 	}
 	testutil.Drain(w.Signal.C()) // the settle notify precedes Settled
 	return w
+}
+
+// referenceServices adds Service backendRefs, in each route's own namespace,
+// until every referenced Service is named by a leaf HTTPRoute.
+func referenceServices(tier Tier, routes []*unstructured.Unstructured) {
+	var leaves = map[string][]*unstructured.Unstructured{}
+	for _, r := range routes {
+		if rules, _, _ := unstructured.NestedSlice(r.Object, "spec", "rules"); len(rules) == 1 {
+			if refs, _ := rules[0].(map[string]any)["backendRefs"].([]any); len(refs) == 1 && refs[0].(map[string]any)["kind"] == "Backend" {
+				leaves[r.GetNamespace()] = append(leaves[r.GetNamespace()], r)
+			}
+		}
+	}
+	next := map[string]int{}
+	for i := range tier.ReferencedServices {
+		ns := testutil.ScaleNamespace(i % tier.Namespaces)
+		if len(leaves[ns]) == 0 {
+			panic("scale: no leaf HTTPRoute in " + ns)
+		}
+		r := leaves[ns][next[ns]%len(leaves[ns])]
+		next[ns]++
+		rules, _, _ := unstructured.NestedSlice(r.Object, "spec", "rules")
+		rule := rules[0].(map[string]any)
+		rule["backendRefs"] = append(rule["backendRefs"].([]any), map[string]any{"group": "", "kind": "Service", "name": testutil.ScaleServiceName(tier.Shape(), i), "namespace": ns, "port": int64(80)})
+		_ = unstructured.SetNestedSlice(r.Object, rules, "spec", "rules")
+	}
 }

@@ -48,8 +48,8 @@ type Tier struct {
 	Contradict bool
 
 	// Phase 3 shapes. World ignores them; the Scale* functions use them.
-	// Services is the total and ReferencedServices those a Backend or route
-	// names; every Service has at least one EndpointSlice.
+	// Services is the total and ReferencedServices those LivePhase3's routes name
+	// in backendRefs; every Service has at least one EndpointSlice.
 	Services, ReferencedServices, EndpointSlices int
 	// ProxyPodsPerGateway is the proxy Pod count of each Gateway.
 	ProxyPodsPerGateway int
@@ -57,8 +57,8 @@ type Tier struct {
 	WarningEvents int
 	// GatewayAPICRDs is the number of Gateway API CRDs with metadata.
 	GatewayAPICRDs int
-	// IsWorst makes every Gateway reject, every testutil.ScaleNoReadyEvery-th referenced
-	// Service lack a ready endpoint and every proxy Pod restart once.
+	// IsWorst adds long-named Gateways, makes every Gateway reject, 5 % of
+	// referenced Services lack a ready endpoint and every proxy Pod restart.
 	IsWorst bool
 }
 
@@ -70,7 +70,7 @@ func (t Tier) Shape() testutil.ScaleShape {
 }
 
 // Worst is t with every Gateway rejecting, 5 % of referenced Services without
-// a ready endpoint and every proxy Pod restarted once.
+// a ready endpoint and every proxy Pod restarted once, plus long-named Gateways.
 func (t Tier) Worst() Tier {
 	t.Name += "-worst"
 	t.IsWorst = true
