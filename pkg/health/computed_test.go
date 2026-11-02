@@ -48,7 +48,7 @@ func runComputedRows(t *testing.T, rows []computed.Row, cs ...computed.CheckResu
 	if check == nil {
 		t.Fatal("no computed views check registered")
 	}
-	return health.Evaluate(in, []health.Check{check})
+	return health.Evaluate(in, []health.Check{check}, health.Runtime{})
 }
 
 // KGWUI-012 is a warning on the disagreeing object, never an error.
@@ -118,7 +118,7 @@ func TestKGWUI012ResourceSince(t *testing.T) {
 		Owned: &install.Owned{Gateways: []*unstructured.Unstructured{gw}}, Snapshot: &cache.Snapshot{Synced: true}, Now: testutil.Now,
 		FirstSeen: func(*unstructured.Unstructured) time.Time { return seen },
 		Computed:  &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{countCheck(computed.StateDisagrees, computed.ClassContradicting)}}}
-	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:])
+	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:], health.Runtime{})
 	if len(rep.Findings) != 1 || rep.Findings[0].ResourceSince == nil || !rep.Findings[0].ResourceSince.Equal(seen) || !rep.Findings[0].Since.Equal(testutil.Now) {
 		t.Fatalf("findings %+v", rep.Findings)
 	}
@@ -153,7 +153,7 @@ func TestKGWUI012SubjectsResourceSince(t *testing.T) {
 		Snapshot: &cache.Snapshot{Synced: true}, Now: testutil.Now,
 		FirstSeen: func(u *unstructured.Unstructured) time.Time { return seen[objects.RefOf(u)] },
 		Computed:  &computed.Views{RuleSet: "kgateway-2.4", Checks: checks}}
-	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:])
+	rep := health.Evaluate(in, health.Upstream()[len(health.Upstream())-1:], health.Runtime{})
 	if len(rep.Findings) != len(checks) {
 		t.Fatalf("findings %+v", rep.Findings)
 	}

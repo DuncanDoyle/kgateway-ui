@@ -27,6 +27,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
@@ -101,6 +102,9 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		return nil, fmt.Errorf("delegation edge cap %d must not be negative", o.DelegationEdgeCap)
 	}
 	if err := reg.Err(); err != nil {
+		return nil, err
+	}
+	if err := health.ValidateOrder(reg.Checks); err != nil {
 		return nil, err
 	}
 	pinned, err := install.ParsePinned(o.Pinned)

@@ -531,3 +531,28 @@ func evidenceWorld() []runtime.Object {
 var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 	return (ref.Kind != "Namespace" || ref.Name != "zoned") && ref != route("shop", "hp")
 })
+
+// D-032: the check contract change leaves every Phase 2 golden byte-identical.
+// It never rewrites a golden, even under -update.
+func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
+	compared := map[string]bool{}
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
+		want, err := os.ReadFile(filepath.Join("testdata", "golden", tc.golden+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := wire(t, tc.srv, tc.path); !bytes.Equal(got, want) {
+			t.Errorf("GET %s differs from golden %s", tc.path, tc.golden)
+		}
+		compared[tc.golden+".json"] = true
+	}
+	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if !compared[f.Name()] {
+			t.Errorf("golden %s was not compared", f.Name())
+		}
+	}
+}

@@ -167,10 +167,14 @@ func (in Input) proxyMode(gw *unstructured.Unstructured) proxymode.Mode {
 	return r.Resolve(gw, in.Snapshot, in.Served)
 }
 
-// Check produces findings for one concern.
+// Check produces findings for one concern. Evaluate runs checks in
+// registration order.
 type Check interface {
+	// Name identifies the check and its Store; it is unique among the registered checks.
 	Name() string
-	Run(in Input) ([]Finding, CheckResult)
+	// Inputs names what Run reads. Reading an undeclared input is a bug.
+	Inputs() InputSet
+	Run(ctx RunContext) ([]Finding, CheckResult)
 }
 
 // Report is the evaluated health of one install.
@@ -182,4 +186,7 @@ type Report struct {
 	Checks      []CheckResult    `json:"checks"`
 	Counts      map[Severity]int `json:"counts"`
 	CollectedAt time.Time        `json:"collectedAt"`
+	// Next is the earliest time after CollectedAt at which a check's output
+	// may change; zero means none.
+	Next time.Time `json:"-"`
 }

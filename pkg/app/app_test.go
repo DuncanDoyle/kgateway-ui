@@ -127,10 +127,11 @@ func (acmeDetector) Detect(d *appsv1.Deployment) (install.Install, bool) {
 
 type acmeCheck struct{}
 
-func (acmeCheck) Name() string { return "acme demo" }
-func (acmeCheck) Run(in health.Input) ([]health.Finding, health.CheckResult) {
-	return []health.Finding{{Code: "ACME-001", Slug: "demo", Severity: health.SeverityInfo, Install: in.Install.ID(), Message: "Downstream check ran"}},
-		health.CheckResult{Name: "acme demo", OK: true, CollectedAt: in.Now}
+func (acmeCheck) Name() string            { return "acme demo" }
+func (acmeCheck) Inputs() health.InputSet { return health.InputSet{} }
+func (acmeCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	return []health.Finding{{Code: "ACME-001", Slug: "demo", Severity: health.SeverityInfo, Install: ctx.Install.ID(), Message: "Downstream check ran"}},
+		health.CheckResult{Name: "acme demo", OK: true, CollectedAt: ctx.Now}
 }
 
 var widgetKind = kinds.Descriptor{Group: "widgets.acme.example.com", Kind: "WidgetPolicy", Resource: "widgetpolicies", Versions: []string{"v1"},
@@ -919,6 +920,31 @@ func TestBuildFailsOnRegistryError(t *testing.T) {
 	}
 }
 
+// readsLater declares an input check that is not registered before it.
+type readsLater struct{}
+
+func (readsLater) Name() string { return "reads later" }
+func (readsLater) Inputs() health.InputSet {
+	return health.InputSet{Checks: []string{"acme demo"}}
+}
+func (readsLater) Run(health.RunContext) ([]health.Finding, health.CheckResult) {
+	return nil, health.CheckResult{Name: "reads later", OK: true}
+}
+
+// D-032: a check that reads a check registered after it fails Build.
+func TestBuildRejectsCheckReadingLaterCheck(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	o := Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui}
+	a, err := Build(c, o, extension.New(extension.WithChecks("ACME-", readsLater{}, acmeCheck{})))
+	if err == nil || a != nil || !strings.Contains(err.Error(), `"acme demo"`) {
+		t.Fatalf("want a Build error naming the check and no App, got App %v, err %v", a != nil, err)
+	}
+	if _, err := Build(c, o, extension.New(extension.WithChecks("ACME-", acmeCheck{}, readsLater{}))); err != nil {
+		t.Fatalf("an earlier declared check is valid: %v", err)
+	}
+}
+
 // A bad extension pattern or name fails Build, so no App exists to start;
 // a good one is served under /api/ext/{name}/ with Deps wired to the engine.
 func TestBuildRejectsBadExtensionEndpoints(t *testing.T) {
@@ -1080,13 +1106,14 @@ func (c *probeCollector) Start(ctx context.Context, d extension.Deps) error {
 // leaves the check failed with its state and reason.
 type probeCheck struct{}
 
-func (probeCheck) Name() string { return "probe" }
-func (probeCheck) Run(in health.Input) ([]health.Finding, health.CheckResult) {
-	v, _ := in.Collected.Get("probe/k")
+func (probeCheck) Name() string            { return "probe" }
+func (probeCheck) Inputs() health.InputSet { return health.AllInputs() }
+func (probeCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	v, _ := ctx.Collected.Get("probe/k")
 	if v.State != collect.OK {
-		return nil, health.CheckResult{Name: "probe", CollectedAt: in.Now, Error: fmt.Sprintf("%s: %s", v.State, v.Reason)}
+		return nil, health.CheckResult{Name: "probe", CollectedAt: ctx.Now, Error: fmt.Sprintf("%s: %s", v.State, v.Reason)}
 	}
-	return []health.Finding{{Code: "PROBE-001", Slug: "probe", Severity: health.SeverityInfo, Install: in.Install.ID(), Message: fmt.Sprint(v.Data)}},
+	return []health.Finding{{Code: "PROBE-001", Slug: "probe", Severity: health.SeverityInfo, Install: ctx.Install.ID(), Message: fmt.Sprint(v.Data)}},
 		health.CheckResult{Name: "probe", OK: true, CollectedAt: v.At}
 }
 

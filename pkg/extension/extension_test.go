@@ -83,8 +83,9 @@ func TestWithComputedRulesReachesTheEngine(t *testing.T) {
 
 type stubCheck struct{}
 
-func (stubCheck) Name() string { return "stub" }
-func (stubCheck) Run(health.Input) ([]health.Finding, health.CheckResult) {
+func (stubCheck) Name() string            { return "stub" }
+func (stubCheck) Inputs() health.InputSet { return health.InputSet{} }
+func (stubCheck) Run(health.RunContext) ([]health.Finding, health.CheckResult) {
 	return nil, health.CheckResult{Name: "stub", OK: true}
 }
 

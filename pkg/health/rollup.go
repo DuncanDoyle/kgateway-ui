@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -44,16 +47,29 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // does not reorder between polls. A finding with a severity outside error,
 // warning and info becomes a warning whose detail names the original, so a
 // check can neither hide a problem from the roll-up nor invent a severity.
-func Evaluate(in Input, checks []Check) Report {
+// Checks run in order, each with its Store from rt.States; a grace read
+// inside the grace period wakes the report at the grace end (Report.Next).
+func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
+	var outputs map[string]CheckOutput
+	if slices.ContainsFunc(checks, func(c Check) bool { return len(c.Inputs().Checks) > 0 }) {
+		outputs = make(map[string]CheckOutput, len(checks))
+	}
 	// Run every check first so the findings are allocated once.
 	runs := make([][]Finding, len(checks))
 	n := 0
 	for i, c := range checks {
-		fs, cr := c.Run(in)
+		ctx := runContext(in, c, rt, outputs)
+		fs, cr := c.Run(ctx)
 		runs[i] = fs
 		n += len(fs)
 		r.Checks = append(r.Checks, cr)
+		if outputs != nil {
+			outputs[c.Name()] = CheckOutput{Findings: fs, Result: cr}
+		}
+		if w := ctx.sink.wake; !w.IsZero() && (r.Next.IsZero() || w.Before(r.Next)) {
+			r.Next = w
+		}
 	}
 	r.Findings = make([]Finding, 0, n)
 	for _, fs := range runs {
@@ -72,6 +88,29 @@ func Evaluate(in Input, checks []Check) Report {
 	}
 	r.State = RollUp(r.Findings, r.Checks)
 	return r
+}
+
+// runContext returns c's RunContext: its Store, a fresh sink, and in with
+// FirstSeen wrapped so a read inside the grace period wakes at its end.
+func runContext(in Input, c Check, rt Runtime, outputs map[string]CheckOutput) RunContext {
+	var st *Store
+	if rt.States != nil {
+		st = rt.States.store(c.Name())
+	} else {
+		st = NewStore()
+	}
+	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: c.Inputs(), outputs: outputs}
+	sink, base := ctx.sink, in
+	ctx.FirstSeen = func(u *unstructured.Unstructured) time.Time {
+		t := base.firstSeen(u)
+		if end := t.Add(Grace); in.Now.Before(end) { // in grace while now − t < Grace
+			if sink.wake.IsZero() || end.Before(sink.wake) {
+				sink.wake = end
+			}
+		}
+		return t
+	}
+	return ctx
 }
 
 // sortFindings returns fs sorted stably by compareFindings. It sorts

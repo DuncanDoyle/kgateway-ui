@@ -1134,9 +1134,10 @@ func TestDeclaredCandidateMaturesAtItsGraceInstant(t *testing.T) {
 // collectedCheck records the value of acme/k each run reads.
 type collectedCheck struct{ seen *atomic.Value }
 
-func (collectedCheck) Name() string { return "collected" }
-func (c collectedCheck) Run(in health.Input) ([]health.Finding, health.CheckResult) {
-	v, _ := in.Collected.Get("acme/k")
+func (collectedCheck) Name() string            { return "collected" }
+func (collectedCheck) Inputs() health.InputSet { return health.AllInputs() }
+func (c collectedCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	v, _ := ctx.Collected.Get("acme/k")
 	c.seen.Store(v)
 	return nil, health.CheckResult{Name: "collected", OK: true}
 }

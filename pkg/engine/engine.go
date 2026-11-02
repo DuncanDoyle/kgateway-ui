@@ -134,6 +134,8 @@ type Engine struct {
 	persist persistence
 	// views holds each install's last view inputs and results; only touched under computeMu.
 	views map[string]*viewsMemo
+	// states holds each install's check Stores, keyed by install ID; only touched under computeMu.
+	states map[string]*health.States
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -285,14 +287,6 @@ func (e *Engine) compute() *Published {
 		}
 	}
 	firstSeen := e.firstSeen(now)
-	// Only an object health asks about while it is in grace gets a grace deadline.
-	seen := func(u *unstructured.Unstructured) time.Time {
-		t := firstSeen(u)
-		if now.Sub(t) < health.Grace {
-			next.add(t.Add(health.Grace), false) // in grace while now-firstSeen < Grace
-		}
-		return t
-	}
 	// Views first: one persistence step over every install's checks precedes health.
 	type run struct {
 		res   install.Resolved
@@ -322,6 +316,15 @@ func (e *Engine) compute() *Published {
 		}
 	}
 	e.views = memos // a vanished install's memo is dropped
+	states := make(map[string]*health.States, len(runs))
+	for _, r := range runs {
+		st := e.states[r.res.ID()]
+		if st == nil {
+			st = health.NewStates()
+		}
+		states[r.res.ID()] = st
+	}
+	e.states = states // a vanished install's Stores are dropped
 	if at := e.persist.persist(now, views, e.graceEnd(snap, served, firstSeen)); !at.IsZero() {
 		next.add(at, false) // mature once now − since ≥ Window, or at a missing entry's grace end
 	}
@@ -339,8 +342,11 @@ func (e *Engine) compute() *Published {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
-			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode, Collected: col}, e.cfg.Checks)
+			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
+			Computed: views[i], Views: e.decode, Collected: col}, e.cfg.Checks, health.Runtime{States: states[res.ID()]})
+		if !rep.Next.IsZero() {
+			next.add(rep.Next, false) // a grace end or a check's WakeAt
+		}
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
 			Computed: views[i]})

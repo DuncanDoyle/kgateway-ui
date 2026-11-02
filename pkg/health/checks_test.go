@@ -88,7 +88,7 @@ func (w *world) report(t *testing.T) Report {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
 	hi.FirstSeen, hi.Computed = w.firstSeen, w.computed
-	return Evaluate(hi, Upstream())
+	return Evaluate(hi, Upstream(), Runtime{})
 }
 
 // has reports whether r has a finding with code on res; an empty sev or res matches any.
@@ -513,7 +513,7 @@ func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
 		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
 			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}}
-		r := Evaluate(hi, Upstream())
+		r := Evaluate(hi, Upstream(), Runtime{})
 		if r.State != StateHealthy || len(r.Findings) != 0 {
 			t.Fatalf("%s: state=%s findings=%+v", res.ID(), r.State, r.Findings)
 		}

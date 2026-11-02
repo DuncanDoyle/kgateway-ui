@@ -21,8 +21,12 @@ type computedCheck struct{}
 // Name implements Check.
 func (computedCheck) Name() string { return "computed views" }
 
+// Inputs implements Check.
+func (computedCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c computedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	if v := in.Computed; v != nil {
 		n := 0

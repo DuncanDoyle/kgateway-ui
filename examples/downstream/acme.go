@@ -65,9 +65,12 @@ type acmeWidgetCheck struct{}
 
 func (acmeWidgetCheck) Name() string { return "acme widgets" }
 
-func (c acmeWidgetCheck) Run(in health.Input) ([]health.Finding, health.CheckResult) {
-	res := health.CheckResult{Name: c.Name(), CollectedAt: in.Now}
-	v, ok := in.Collected.Get("acme-widgets/widgets")
+// Inputs declares every input; the check reads only its collector key.
+func (acmeWidgetCheck) Inputs() health.InputSet { return health.AllInputs() }
+
+func (c acmeWidgetCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	res := health.CheckResult{Name: c.Name(), CollectedAt: ctx.Now}
+	v, ok := ctx.Collected.Get("acme-widgets/widgets")
 	if !ok || v.State != collect.OK {
 		// Not required, so a missing count never turns the install unknown.
 		res.Error = "widget count not available"
@@ -80,7 +83,7 @@ func (c acmeWidgetCheck) Run(in health.Input) ([]health.Finding, health.CheckRes
 	if n, _ := v.Data.(int); n > 0 {
 		return nil, res
 	}
-	return []health.Finding{{Code: "ACME-001", Slug: "no-widgets", Severity: health.SeverityWarning, Install: in.Install.ID(),
+	return []health.Finding{{Code: "ACME-001", Slug: "no-widgets", Severity: health.SeverityWarning, Install: ctx.Install.ID(),
 		Message: "No acme widgets found", Detail: "Create an AcmePolicy to add a widget."}}, res
 }
 

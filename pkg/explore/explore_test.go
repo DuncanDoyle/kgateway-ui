@@ -88,7 +88,7 @@ func (w *world) input(t *testing.T) Input {
 	owned := a.PerInstall[res.ID()]
 	rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 		Metrics:    ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}},
-		HasMetrics: true, MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, FirstSeen: w.firstSeen}, health.Upstream())
+		HasMetrics: true, MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, FirstSeen: w.firstSeen}, health.Upstream(), health.Runtime{})
 	return Input{Install: res, Owned: owned, Assignment: a, Snapshot: snap, Served: served, Health: rep}
 }
 

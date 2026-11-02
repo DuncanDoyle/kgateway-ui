@@ -51,8 +51,15 @@ type cacheCheck struct{}
 // Name implements Check.
 func (cacheCheck) Name() string { return "cluster access" }
 
+// Inputs implements Check: every watched kind's access, the served kinds and
+// Namespaces through Owned, plus Pods and Deployments.
+func (cacheCheck) Inputs() InputSet {
+	return InputSet{Owned: true, Kinds: []objects.GroupKind{{Kind: "Pod"}, {Group: "apps", Kind: "Deployment"}}}
+}
+
 // Run implements Check: one KGWUI-008 per kind that cannot be read.
-func (c cacheCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if !in.Snapshot.Synced {
 		return unavailable(in, c.Name(), "cache not synced")
 	}
@@ -83,9 +90,13 @@ type kindsCheck struct{}
 // Name implements Check.
 func (kindsCheck) Name() string { return "served kinds" }
 
+// Inputs implements Check.
+func (kindsCheck) Inputs() InputSet { return InputSet{KindsChange: true} }
+
 // Run implements Check: a served-kinds change is KGWUI-008 until the UI restarts
 // or the served set matches again, since the cache does not re-watch.
-func (c kindsCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c kindsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if in.KindsChange.Empty() {
 		return nil, ok(c.Name(), true, in.Now)
 	}
@@ -101,9 +112,13 @@ type scopeCheck struct{}
 // Name implements Check.
 func (scopeCheck) Name() string { return "controller scope" }
 
+// Inputs implements Check: none beyond Install, which is always an input.
+func (scopeCheck) Inputs() InputSet { return InputSet{} }
+
 // Run implements Check: an unknown scope (for example a selector env set
 // through valueFrom) is KGWUI-008 with the scope's error as detail.
-func (c scopeCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c scopeCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if in.Install.Scope.Mode == install.ScopeUnknown {
 		return unavailable(in, c.Name(), in.Install.Scope.Err)
 	}
@@ -120,8 +135,12 @@ type controllerCheck struct{}
 // Name implements Check.
 func (controllerCheck) Name() string { return "controller pods" }
 
+// Inputs implements Check.
+func (controllerCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c controllerCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c controllerCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	d := in.Install.Deployment
 	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
@@ -183,8 +202,12 @@ type conditionsCheck struct{}
 // Name implements Check.
 func (conditionsCheck) Name() string { return "resource status" }
 
+// Inputs implements Check.
+func (conditionsCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	id := in.Install.ID()
 	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string) {
@@ -529,12 +552,16 @@ type proxyCheck struct{}
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
+// Inputs implements Check.
+func (proxyCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check. A missing proxy is reported after the grace period;
 // inside it the check is pending, so the install is unknown (D-017 §3). A
 // self-managed Gateway is the exception: KGWUI-010 (info) says the UI cannot
 // see that proxy's readiness, so it never drives the roll-up (D-016). A proxy
 // Deployment that exists is judged the same either way.
-func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	inGrace := 0
 	for _, gw := range in.Owned.Gateways {
@@ -606,9 +633,13 @@ type xdsCheck struct{}
 // Name implements Check.
 func (xdsCheck) Name() string { return "xDS rejects" }
 
+// Inputs implements Check.
+func (xdsCheck) Inputs() InputSet { return InputSet{Owned: true, Metrics: true, Clock: true} }
+
 // Run implements Check. Missing, failed or stale metrics, or a scrape without
 // the resources_managed family while Gateways are owned, are KGWUI-008.
-func (c xdsCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if !in.HasMetrics {
 		return unavailable(in, c.Name(), "controller metrics not collected yet")
 	}
@@ -641,8 +672,12 @@ type unwatchedCheck struct{}
 // Name implements Check.
 func (unwatchedCheck) Name() string { return "watched namespaces" }
 
+// Inputs implements Check.
+func (unwatchedCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c unwatchedCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c unwatchedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	for _, u := range in.Assignment.Unwatched {
 		if u.Install != in.Install.ID() {
@@ -661,8 +696,12 @@ type ambiguityCheck struct{}
 // Name implements Check.
 func (ambiguityCheck) Name() string { return "gateway ownership" }
 
+// Inputs implements Check.
+func (ambiguityCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c ambiguityCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c ambiguityCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	for _, a := range in.Assignment.Ambiguous {
 		if !slices.Contains(a.Installs, in.Install.ID()) {
@@ -681,8 +720,12 @@ type verifyCheck struct{}
 // Name implements Check.
 func (verifyCheck) Name() string { return "scope matches controller" }
 
+// Inputs implements Check.
+func (verifyCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check. It is optional: verification never decides health on its own.
-func (c verifyCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c verifyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if !in.Verify.Available {
 		return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
 			Message: "Could not verify scope against the controller", Detail: in.Verify.Reason}}, CheckResult{Name: c.Name(), CollectedAt: in.Now, Error: in.Verify.Reason}

@@ -47,8 +47,12 @@ type backendCheck struct{}
 // Name implements Check.
 func (backendCheck) Name() string { return "backend status" }
 
+// Inputs implements Check.
+func (backendCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c backendCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c backendCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	if in.Owned != nil {
 		for _, b := range in.Owned.Backends {
