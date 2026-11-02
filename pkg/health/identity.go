@@ -16,13 +16,10 @@ import (
 // sincePrefix keys a finding's first-seen time, by ID, in its check's Store.
 const sincePrefix = "\x00since/"
 
-var idEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
+var idEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
-// FindingID returns a finding's stable ID (design §5.1): "f1-" and the first
-// 26 lower-case base32 characters of the SHA-256 of installID, code, the
-// resource's group, kind, namespace and name, and each key field, joined by
-// NUL bytes. A nil resource gives four empty fields. Message, detail,
-// severity and since are not part of it. Clients compare IDs, never parse them.
+// FindingID returns "f1-" and 26 base32 characters of the SHA-256 of installID, code,
+// the resource (four empty fields when nil) and key, NUL-joined (design §5.1).
 func FindingID(installID, code string, resource *objects.Ref, key []string) string {
 	var r objects.Ref
 	if resource != nil {
@@ -44,7 +41,7 @@ func FindingID(installID, code string, resource *objects.Ref, key []string) stri
 	}
 	sum := sha256.Sum256(b)
 	// 20 bytes encode to 32 characters, whose first 26 equal the full hash's.
-	return "f1-" + strings.ToLower(idEncoding.EncodeToString(sum[:20]))[:26]
+	return "f1-" + idEncoding.EncodeToString(sum[:20])[:26]
 }
 
 // GroupID returns the ID of the group of family whose cause is cause and
@@ -96,8 +93,8 @@ func (in Input) parentKey(u *unstructured.Unstructured, p objects.ParentRef) []s
 	return append([]string{ownerParent}, writtenKey(w)...)
 }
 
-// identify sets each finding's ID and gives one returned without Since its
-// first-seen time from st. It returns the IDs to keep: those returned and retained.
+// identify sets each finding's ID, then drops its Key, and gives one returned without
+// Since its first-seen time from st. It returns the IDs returned and retained.
 func identify(install string, now time.Time, fs []Finding, st *Store, retained map[string]bool) map[string]bool {
 	keep := make(map[string]bool, len(fs)+len(retained))
 	for id := range retained {
@@ -105,7 +102,7 @@ func identify(install string, now time.Time, fs []Finding, st *Store, retained m
 	}
 	for i := range fs {
 		f := &fs[i]
-		f.ID = FindingID(install, f.Code, f.Resource, f.Key)
+		f.ID, f.Key = FindingID(install, f.Code, f.Resource, f.Key), nil
 		keep[f.ID] = true
 		if f.Since != nil || st == nil {
 			continue

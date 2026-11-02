@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -395,7 +396,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		for _, a := range mine {
 			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Ref().String()
 			owner := append([]string{ownerAncestor}, refKey(a.AncestorRef.Ref())...)
-			owner = append(owner, a.AncestorRef.SectionName)
+			owner = append(owner, a.AncestorRef.SectionName, strconv.Itoa(int(a.AncestorRef.Port)))
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}

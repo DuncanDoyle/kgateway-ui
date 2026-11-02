@@ -77,7 +77,7 @@ type Finding struct {
 	// Group is the ID of the group whose cause explains the finding (design §5.2).
 	Group string `json:"group,omitempty"`
 	// Key is the code's discriminator among findings on one resource (design
-	// §5.1); parentRefs are written as computed-rules §7 keys them. Never serialised.
+	// §5.1); Evaluate hashes it into ID and clears it. Never serialised.
 	Key []string `json:"-"`
 	// Restricted marks a finding on a resource the caller may not view. The
 	// API keeps its code, severity and resource and empties Message, Detail

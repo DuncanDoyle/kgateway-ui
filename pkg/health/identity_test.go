@@ -12,6 +12,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
@@ -37,7 +38,8 @@ func busyWorld(t *testing.T) Input {
 			testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}}),
 		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
 			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}}),
-		testutil.TrafficPolicy("shop", "lonely"))
+		testutil.TrafficPolicy("shop", "lonely"),
+		testutil.TrafficPolicy("shop", "ports", portAncestor(gw, 80), portAncestor(gw, 443)))
 	w.metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
 	w.deploys[1] = testutil.ProxyDeployment("infra", "edge", 2, 1)
 	w.access = map[schema.GroupVersionResource]cache.Access{cache.PodsGVR: {Err: "denied"}, cache.DeploymentsGVR: {Err: "denied"}}
@@ -47,6 +49,12 @@ func busyWorld(t *testing.T) Input {
 	in.Verify = scopeverify.Result{Available: true, Mismatches: []scopeverify.Mismatch{
 		{Namespace: "shop", Resource: "HTTPRoute", UI: 2, Controller: 1}, {Namespace: "shop", Resource: "GRPCRoute", UI: 2, Controller: 1}}}
 	return in
+}
+
+// portAncestor is a rejecting ancestor entry for gw at port.
+func portAncestor(gw objects.ParentRef, port int32) testutil.PolicyAncestor {
+	gw.Port = port
+	return testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}}
 }
 
 // disagreeing is a mature KGWUI-012 cross-check on infra/edge.
@@ -131,24 +139,40 @@ func TestRewordingKeepsID(t *testing.T) {
 	}
 }
 
-// Two KGWUI-012 checks and two KGWUI-002 conditions on one resource get
-// distinct ids from their discriminators.
+// Discriminators separate findings of one code on one resource: two KGWUI-012
+// checks and two conditions on a Gateway, two policy ancestors differing by port,
+// and two KGWUI-011 parentRefs to one route differing by section.
 func TestDiscriminatorSeparates(t *testing.T) {
-	rep := Evaluate(busyWorld(t), Upstream(), Runtime{States: NewStates()})
-	byCode := map[string]map[string]bool{}
+	in := busyWorld(t)
+	rep := Evaluate(in, Upstream(), Runtime{States: NewStates()})
+	ids := map[string]map[string]bool{} // code and resource to ids
 	for _, f := range rep.Findings {
-		if f.Resource == nil || f.Resource.String() != "infra/edge" || f.Resource.Kind != "Gateway" {
+		if f.Resource == nil {
 			continue
 		}
-		if byCode[f.Code] == nil {
-			byCode[f.Code] = map[string]bool{}
+		k := f.Code + " " + f.Resource.Kind + " " + f.Resource.String()
+		if ids[k] == nil {
+			ids[k] = map[string]bool{}
 		}
-		byCode[f.Code][f.ID] = true
+		ids[k][f.ID] = true
 	}
-	for _, code := range []string{CodeComputedDisagrees, CodeConditionFalse} {
-		if len(byCode[code]) != 2 {
-			t.Errorf("%s on infra/edge: %d distinct ids, want 2", code, len(byCode[code]))
+	for _, k := range []string{CodeComputedDisagrees + " Gateway infra/edge", CodeConditionFalse + " Gateway infra/edge", CodeConditionFalse + " TrafficPolicy shop/ports"} {
+		if len(ids[k]) != 2 {
+			t.Errorf("%s: %d distinct ids, want 2", k, len(ids[k]))
 		}
+	}
+	// Assign declares one candidate per parent route, so the section case is built directly.
+	api := testutil.HTTPRouteRef("shop", "api")
+	a, b := api, api
+	a.SectionName, b.SectionName = "a", "b"
+	child := testutil.HTTPRoute("shop", "c", []objects.ParentRef{a, b})
+	declared := make(map[string]bool)
+	for _, w := range objects.DecodeHTTPRoute(child).ParentRefs {
+		f := declaredFinding(in, install.DeclaredCandidate{Route: install.OwnedObject{Obj: child}, Parent: w})
+		declared[FindingID(in.Install.ID(), f.Code, f.Resource, f.Key)] = true
+	}
+	if len(declared) != 2 {
+		t.Errorf("KGWUI-011 on two sections of one parent route: %d distinct ids, want 2", len(declared))
 	}
 	if FindingID("i", "c", nil, []string{"a"}) == FindingID("i", "c", nil, []string{"b"}) {
 		t.Error("different keys must give different ids")
@@ -174,9 +198,8 @@ func TestIDUniqueWithinInstall(t *testing.T) {
 	}
 }
 
-// A UI-derived finding's since is its first-seen time: kept across
-// recomputes, pruned once the finding is neither returned nor retained, and
-// reset by a restart.
+// A UI-derived since survives recomputes, is pruned when neither returned nor
+// retained, and resets on restart.
 func TestUIDerivedSinceSurvivesRecomputeAndResetsOnRestart(t *testing.T) {
 	w := healthyWorld()
 	w.metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1

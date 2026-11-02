@@ -134,7 +134,7 @@
         "code": "KGWUI-011",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
-        "id": "f1-v72xhbecohorniqbkawlntgwb2",
+        "id": "f1-rm2ieyble2gqlpkezyf3tl3bc6",
         "install": "kgw.kgateway",
         "message": "No status for the named parent route",
         "resource": {
