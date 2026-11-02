@@ -5,9 +5,8 @@ import (
 	"unicode/utf8"
 )
 
-// MaxPathBytes bounds a path generated in computation, such as a delegation
-// inherit merge. A path over it is never cut: the merge fails and the context
-// is unknown, too-large (rules §5.7).
+// MaxPathBytes bounds a generated path. A longer one is never cut: the
+// context is unknown, too-large.
 const MaxPathBytes = 4096
 
 // MaxDisplayBytes bounds one value inside a display string such as a reason.
@@ -17,8 +16,7 @@ const MaxDisplayBytes = 256
 const truncatedMarker = "…[truncated]"
 
 // ClipDisplay cuts a display string to MaxDisplayBytes at a UTF-8 boundary
-// and ends it with a marker. Only display text is clipped; a computed path is
-// never passed through it.
+// and adds a marker. Computed paths never pass through it.
 func ClipDisplay(p string) string {
 	if len(p) <= MaxDisplayBytes {
 		return p

@@ -49,10 +49,8 @@ type detail struct {
 // after JSON escaping.
 var maxPageUnits = 100_000
 
-// charge adds to the response the cost of a context with parent match pm,
-// path, the effective rules shown with it and the reason texts it carries.
-// It reports false, and charges no further, once the response is past
-// maxPageUnits.
+// charge adds a context's cost: its parent match, path, rules and reasons.
+// It reports false once the response is past maxPageUnits.
 func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.EffectiveRule, reasons ...string) bool {
 	if d.units > maxPageUnits {
 		return false
@@ -96,9 +94,7 @@ func matchSize(m objects.Match) (keys, text int) {
 	return len(m.Headers) + len(m.QueryParams), text
 }
 
-// escapedLen is the bytes s takes inside a JSON string as writeJSON encodes
-// it: quotes, backslashes and control characters take two to six bytes, and
-// <, >, &, U+2028, U+2029 and invalid bytes six.
+// escapedLen is the bytes s takes in a JSON string as writeJSON encodes it.
 func escapedLen(s string) int {
 	n := 0
 	for _, r := range s {
@@ -803,6 +799,7 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 	shown := out.Computed.State != string(computed.StateRestricted)
 	if shown {
 		out.Outcome, out.Reason = string(r.Outcome), explainRow(r.Outcome, r.Reason, r.Unresolved)
+		d.units += escapedLen(out.Reason) / 32
 		out.Observed.ParentCondition = d.parentCondition(pu, pv, r.Reporters)
 	}
 	if child := r.Key.Child; child != (objects.Ref{}) {

@@ -1198,12 +1198,16 @@ func TestEffectiveTruncatedServed(t *testing.T) {
 
 // oversizedChain is edge → shop/api → shop/k0 → … → shop/k<n-1>, each k an
 // inherit-mode child whose path is the given segment, delegating to the next.
-func oversizedChain(n int, seg func(i int) string) []runtime.Object {
+// A route in bare has no status entry, as the controller leaves one it did not attach.
+func oversizedChain(n int, seg func(i int) string, bare ...int) []runtime.Object {
 	parent := shopAPI
 	objs := []runtime.Object{testutil.WithRules(testutil.HTTPRoute("shop", "api", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
 		delegRule([]string{"/api"}, testutil.DelegateTo("shop", "k0")))}
 	for i := range n {
 		k := testutil.HTTPRoute("shop", fmt.Sprintf("k%d", i), nil, testutil.AcceptedBy(parent, testutil.Controller))
+		if slices.Contains(bare, i) {
+			k = testutil.HTTPRoute("shop", fmt.Sprintf("k%d", i), nil)
+		}
 		k.SetAnnotations(map[string]string{objects.InheritParentMatcherAnnotation: "true"})
 		if i+1 < n {
 			testutil.WithRules(k, delegRule([]string{seg(i)}, testutil.DelegateTo("shop", fmt.Sprintf("k%d", i+1))))
@@ -1225,7 +1229,14 @@ func TestOversizedInheritIsTooLargeNotDropped(t *testing.T) {
 	seg := func(i int) string { return "/" + strings.Repeat(string(rune('a'+i)), 1023) }
 	for _, v := range versions {
 		t.Run(v, func(t *testing.T) {
-			_, srv, _ := startWith(t, setup{disputes: true}, withControllerVersion(v, oversizedChain(8, seg))...)
+			_, srv, _ := startWith(t, setup{disputes: true}, withControllerVersion(v, oversizedChain(8, seg, 3))...)
+			// k3 has no status: only too-large keeps its computed state from reading as a negative.
+			h := get[HealthResponse](t, srv, base+"/health", 200)
+			for _, code := range []string{"KGWUI-011", "KGWUI-012"} {
+				if hasFinding(h, code, "") {
+					t.Errorf("%s raised: %+v", code, h.Findings)
+				}
+			}
 			// api is 4 bytes and each segment 1,024: k3's merged path is 4,100.
 			rows := get[Page[DelegationRow]](t, srv, delegURL("shop", "k2", ""), 200).Items
 			if len(rows) != 1 || rows[0].Outcome != "unknown" || rows[0].Computed.Reason != string(computed.UnknownTooLarge) {
@@ -1236,12 +1247,6 @@ func TestOversizedInheritIsTooLargeNotDropped(t *testing.T) {
 			}
 			if r := get[Page[DelegationRow]](t, srv, delegURL("shop", "k1", ""), 200).Items; len(r) != 1 || r[0].Outcome != "attached" {
 				t.Errorf("k1 → k2 row (3,076 bytes): %+v", r)
-			}
-			h := get[HealthResponse](t, srv, base+"/health", 200)
-			for _, code := range []string{"KGWUI-011", "KGWUI-012"} {
-				if hasFinding(h, code, "") {
-					t.Errorf("%s raised: %+v", code, h.Findings)
-				}
 			}
 		})
 	}

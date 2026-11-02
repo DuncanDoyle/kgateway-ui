@@ -151,8 +151,7 @@ func pathValue(m objects.Match) string {
 
 // merge merges parent into child in inherit mode (rules §6;
 // mergeParentChildRouteMatch). The parent's path type is not checked. It
-// reports false, and builds nothing, when the joined path passes
-// computed.MaxPathBytes.
+// reports false when the joined path passes computed.MaxPathBytes.
 func merge(parent, child objects.Match) (objects.Match, bool) {
 	// A nil child path counts as Prefix "".
 	cv := pathValue(child)
