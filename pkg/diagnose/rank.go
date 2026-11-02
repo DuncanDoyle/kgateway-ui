@@ -66,7 +66,7 @@ func rank(fs []health.Finding, groups []Group) *Diagnosis {
 	for _, g := range groups {
 		start := len(d.Rank)
 		d.Rank = append(d.Rank, g.Members...)
-		slices.SortFunc(d.Rank[start:], func(i, j int) int {
+		slices.SortStableFunc(d.Rank[start:], func(i, j int) int {
 			a, b := &fs[i], &fs[j]
 			if c := cmp.Compare(sevRank(a.Severity), sevRank(b.Severity)); c != 0 {
 				return c

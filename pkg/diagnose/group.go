@@ -3,6 +3,7 @@
 package diagnose
 
 import (
+	"slices"
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -32,9 +33,8 @@ var classes = map[string]Class{
 	"KGWUI-017": ClassTraffic, "KGWUI-023": ClassTraffic, health.CodeDelegatedNotAttached: ClassTraffic,
 }
 
-// ClassOf returns f's class (design §5.3). A KGWUI-003 is traffic-affecting
-// once its grace period is over (a warning) and hygiene before; an unlisted
-// code is hygiene.
+// ClassOf returns f's class (design §5.3): KGWUI-003 is traffic once a
+// warning (after grace), else hygiene; an unlisted code is hygiene.
 func ClassOf(f health.Finding) Class {
 	if f.Code == health.CodeRouteUnattached {
 		if f.Severity == health.SeverityWarning {
@@ -96,15 +96,16 @@ type Diagnosis struct {
 	Rank []int
 }
 
-// Build groups rep's findings, setting each finding's Group, and ranks them.
-// Families are tried in order and the first claim wins; an unclaimed finding
-// joins the "Other" group on its own resource. Build keeps the findings' order.
+// Build sets each finding's Group, trying families in order (first claim wins,
+// else "Other" on its resource), and ranks the groups; findings keep their order.
 func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	id := in.Install.ID()
 	groups := make([]Group, 0, len(rep.Findings))
-	var fams []Family      // per group
-	var keys [][]string    // per group, the cause key
-	at := map[string]int{} // group ID to index
+	var fams []Family                    // per group
+	var keys [][]string                  // per group, the cause key
+	at := map[string]int{}               // group ID to index
+	of := make([]int, len(rep.Findings)) // finding to group index
+	var counts []int                     // per group, its member count
 	for i := range rep.Findings {
 		f := &rep.Findings[i]
 		fam, cause, key := claim(*f, in, families)
@@ -114,10 +115,11 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 			k = len(groups)
 			at[gid] = k
 			groups = append(groups, Group{ID: gid, Family: fam.Name(), Cause: cause, Severity: f.Severity, Class: ClassOf(*f)})
-			fams, keys = append(fams, fam), append(keys, key)
+			fams, keys, counts = append(fams, fam), append(keys, key), append(counts, 0)
 		}
+		of[i] = k
+		counts[k]++
 		g := &groups[k]
-		g.Members = append(g.Members, i)
 		if sevRank(f.Severity) < sevRank(g.Severity) {
 			g.Severity = f.Severity
 		}
@@ -127,6 +129,15 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 		}
 		g.Ranked = g.Ranked || f.Code != health.CodeSignalUnavailable
 		f.Group = gid
+	}
+	groups = slices.Clip(groups)
+	// Every group's Members is a clipped window of one backing array, filled in report order.
+	backing, off := make([]int, len(rep.Findings)), 0
+	for k, n := range counts {
+		groups[k].Members, off = backing[off:off:off+n], off+n
+	}
+	for i, k := range of {
+		groups[k].Members = append(groups[k].Members, i)
 	}
 	var buf []health.Finding
 	for k := range groups {

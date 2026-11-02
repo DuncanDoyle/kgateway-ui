@@ -212,10 +212,14 @@ func TestSignalUnavailableNotRanked(t *testing.T) {
 		finding("scope", health.CodeScopeMismatch, health.SeverityInfo, nil, nil),
 		finding("info", health.CodeConditionFalse, health.SeverityInfo, ref("HTTPRoute", "i"), nil),
 	}}
+	// The two info groups tie on every key but the group id; KGWUI-008 comes last.
+	want := []string{"scope", "info", "signal"}
+	if health.GroupID(in.Install.ID(), "Other", nil, nil) > health.GroupID(in.Install.ID(), "Other", ref("HTTPRoute", "i"), nil) {
+		want[0], want[1] = want[1], want[0]
+	}
 	d := diagnose.Build(rep, in, diagnose.Families())
-	if got, want := groupNames(rep, d), []string{"scope", "info", "signal"}; !slices.Equal(got, want) &&
-		!slices.Equal(got, []string{"info", "scope", "signal"}) {
-		t.Fatalf("groups %v, want KGWUI-008 last and on its own", got)
+	if got := groupNames(rep, d); !slices.Equal(got, want) {
+		t.Fatalf("groups %v, want %v", got, want)
 	}
 	last := d.Groups[len(d.Groups)-1]
 	if last.Ranked || !d.Groups[0].Ranked || !d.Groups[1].Ranked {
