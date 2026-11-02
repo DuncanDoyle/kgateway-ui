@@ -117,8 +117,8 @@ func parseFindingsQuery(r *http.Request) (findingsQuery, error) {
 }
 
 // match reports whether f passes q's filters for the caller of v; q sees only
-// what f's row shows (design §14 rule 17).
-func (q *findingsQuery) match(v *view, f *health.Finding) bool {
+// what f's row shows (design §14 rule 17). t is f's lowered text, nil without q.
+func (q *findingsQuery) match(v *view, f *health.Finding, t *diagnose.Text) bool {
 	if len(q.severities) > 0 && !slices.Contains(q.severities, f.Severity) ||
 		len(q.codes) > 0 && !slices.Contains(q.codes, f.Code) ||
 		q.group != "" && f.Group != q.group {
@@ -131,16 +131,17 @@ func (q *findingsQuery) match(v *view, f *health.Finding) bool {
 	if q.q == "" {
 		return true
 	}
-	if f.Resource != nil && containsLower(f.Resource.Namespace+"/"+f.Resource.Name, q.q) {
+	if f.Resource != nil && strings.Contains(t.Identity, q.q) {
 		return true
 	}
 	if f.Resource != nil && !v.can(*f.Resource) {
 		return false
 	}
-	return containsLower(f.Message, q.q) || v.allOf(f.Evidence) && containsLower(f.Detail, q.q)
+	return strings.Contains(t.Message, q.q) || v.allOf(f.Evidence) && strings.Contains(t.Detail, q.q)
 }
 
-// containsLower reports whether lower-cased s contains sub, which is lower case.
+// containsLower reports whether lower-cased s contains sub, which is lower case:
+// match's test on s, whose diagnose.Text field is strings.ToLower(s).
 func containsLower(s, sub string) bool { return strings.Contains(strings.ToLower(s), sub) }
 
 // findingRow is f on the wire for the caller of v, restricted per D-013 and
@@ -184,8 +185,16 @@ func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	v, fs := h.view(r), i.Health.Findings
-	pg, err := diagnosis(i).Index.Page(fs, q.sort, q.limit, q.cursor, func(k int) bool { return q.match(v, &fs[k]) })
+	v, fs, ix := h.view(r), i.Health.Findings, diagnosis(i).Index
+	match := func(k int) bool { return q.match(v, &fs[k], nil) }
+	if q.q != "" {
+		// q asks about every hidden-identity row, like a route list.
+		v.borrow()
+		defer v.release()
+		ts := ix.Text(fs)
+		match = func(k int) bool { return q.match(v, &fs[k], &ts[k]) }
+	}
+	pg, err := ix.Page(fs, q.sort, q.limit, q.cursor, match)
 	if err != nil {
 		fail(w, err)
 		return

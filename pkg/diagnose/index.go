@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -28,11 +29,37 @@ const cursorPrefix = "findings."
 const maxCursor = 1024
 
 // Index holds an install's findings in each list order (design §13.1), as
-// indexes into the report's findings. Build makes one per model; it is read-only.
+// indexes into the report's findings. Build makes one per model; it is read-only
+// but for the search text, lowered once on the first search.
 type Index struct {
 	rank, since, sinceDesc, code, codeDesc []int32
 	// byID is every finding index, sorted by finding ID.
 	byID []int32
+	// text is each finding's search text, lowered on the first search.
+	textOnce sync.Once
+	text     []Text
+}
+
+// Text is a finding's search fields, lower-cased. Identity is the resource's
+// namespace/name, empty without one; callers decide which fields a caller may match.
+type Text struct {
+	Identity, Message, Detail string
+}
+
+// Text returns the search text of fs, the findings ix was built from, by finding index.
+func (ix *Index) Text(fs []health.Finding) []Text {
+	ix.textOnce.Do(func() {
+		ix.text = make([]Text, len(fs))
+		for i := range fs {
+			f := &fs[i]
+			t := &ix.text[i]
+			if f.Resource != nil {
+				t.Identity = strings.ToLower(f.Resource.Namespace + "/" + f.Resource.Name)
+			}
+			t.Message, t.Detail = strings.ToLower(f.Message), strings.ToLower(f.Detail)
+		}
+	})
+	return ix.text
 }
 
 // NewIndex returns the index of fs, whose rank order is rank. Since and code
