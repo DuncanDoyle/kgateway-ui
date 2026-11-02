@@ -308,3 +308,45 @@ test("a trail of more objects than one lookup takes resolves every crumb", async
   for (const [u] of refCalls(f))
     expect(new URL(String(u), "http://ui").searchParams.getAll("ref").length).toBeLessThanOrEqual(6);
 });
+
+/** serveRefs, with the first `failures` lookups failing as a lost connection does. */
+function flakyRefs(failures: number) {
+  const ok = serveRefs();
+  let left = failures;
+  const f = vi.fn(async (url: string) => {
+    if (String(url).includes("/refs") && left-- > 0) throw new TypeError("Failed to fetch");
+    return ok(url);
+  });
+  vi.stubGlobal("fetch", f);
+  return f;
+}
+
+test("a lookup that cannot reach the server retries, and holds placeholders meanwhile", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const f = flakyRefs(2);
+    renderWithTheme(<Breadcrumbs />, { path: at([gateway, nth(1)]) });
+    const t = trail();
+    await waitFor(() => expect(refCalls(f).length).toBeGreaterThan(0));
+    await act(async () => {});
+    expect(t.queryByText(breadcrumbsCopy.hidden)).toBeNull();
+    expect(screen.getByRole("navigation", { name: breadcrumbsCopy.label })).toHaveAttribute("aria-busy", "true");
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(await t.findByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
+    expect(t.getByRole("link", { name: "HTTPRoute shop/r1" })).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a lookup that failed on a lost connection runs again on reconnect", async () => {
+  const f = flakyRefs(1);
+  renderWithTheme(<Breadcrumbs />, { path: at([gateway]) });
+  await waitFor(() => expect(refCalls(f)).toHaveLength(1));
+  await act(async () => {});
+  expect(trail().queryByText(breadcrumbsCopy.hidden)).toBeNull();
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+  expect(await trail().findByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
+});

@@ -348,9 +348,8 @@ export function Breadcrumbs({ refs = [], stylesOverride }: BreadcrumbsProps) {
   if (!t) return null;
   const { installId, crumb, earlier } = t;
   const { hidden } = collapse(earlier);
-  const failed = lookup.error !== undefined && lookup.error.status < 500;
   const resolved = earlier.map((_, i) => ({
-    ...resolve(installId, earlier, i, refs, { refs: lookup.data?.refs, failed }),
+    ...resolve(installId, earlier, i, refs, { refs: lookup.data?.refs, failed: lookup.failed }),
     key: String(i),
   }));
   const install = installs?.find((x) => x.id === installId);

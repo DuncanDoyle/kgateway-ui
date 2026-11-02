@@ -123,17 +123,24 @@ async function fetchTrailLinks([path, ...params]: readonly string[]): Promise<Tr
   return { install, refs: pages.flatMap((p) => p.refs) };
 }
 
+/** A lost connection (status 0) or a server error may pass; a 4xx is the server's final answer. */
+const transient = (e: ApiError) => e.status === 0 || e.status >= 500;
+
 /**
  * GET …/refs for the breadcrumb trail's objects: once per page view, never polled, batched within the server's bound.
- * The key is the sorted refs, so the same trail is one lookup; no refs means no request. A 4xx is final; a 5xx retries.
+ * The key is the sorted refs, so the same trail is one lookup; no refs means no request. Only a 4xx is final (failed);
+ * a lost connection or a 5xx retries with backoff, and again on reconnect.
  */
 export function useTrailLinks(id: string, refs: readonly Ref[]) {
   const params = [...new Set(refs.map(trailParam))].sort();
   const key = params.length ? [`${installApi(id)}/refs`, ...params] : null;
   const { data, error } = useSWR<TrailRefs, ApiError>(key, fetchTrailLinks, {
     revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    shouldRetryOnError: (e) => e.status >= 500,
+    revalidateOnReconnect: true,
+    onErrorRetry: (e, _key, _config, revalidate, { retryCount }) => {
+      if (!transient(e)) return;
+      setTimeout(() => revalidate({ retryCount }), Math.min(1000 * 2 ** (retryCount - 1), 30_000));
+    },
   });
-  return { data: forInstall(data, id), error };
+  return { data: forInstall(data, id), error, failed: error !== undefined && !transient(error) };
 }
