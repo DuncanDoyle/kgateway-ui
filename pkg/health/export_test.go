@@ -13,6 +13,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
 
 // GuardWorlds returns the fixture worlds for the declared-input guard, which
@@ -48,5 +49,53 @@ func GuardWorlds(t *testing.T) map[string]Input {
 	in := healthyWorld().input(t)
 	in.KindsChange = kinds.Change{Removed: []string{"TCPRoute"}}
 	out["kinds changed"] = in
+	for name, in := range processWorlds(t) {
+		out[name] = in
+	}
+	return out
+}
+
+// processWorlds have process data: a recent restart with exit code 2,
+// probe failures with Events on, a stuck proxy rollout, and a not-ready proxy.
+func processWorlds(t *testing.T) map[string]Input {
+	t.Helper()
+	at, no, yes := testutil.Now.Add(-time.Minute), false, true
+	three := int32(3)
+	stuck := func(in Input) Input {
+		edge := objects.RefOf(in.Owned.Gateways[0])
+		in.Process.Proxies[edge] = process.Set{Observed: true, Rollout: &process.Rollout{Reason: "ProgressDeadlineExceeded"},
+			Processes: []process.Process{{ID: "e1", Name: "edge-1", Ready: &no, Waiting: "ImagePullBackOff"}, {ID: "e0", Name: "edge-0", Ready: &yes}}}
+		return in
+	}
+	worlds := map[string]func(w *world) func(Input) Input{
+		"process restarted": func(*world) func(Input) Input {
+			return func(in Input) Input {
+				in.Process.Controller.Processes = []process.Process{{ID: "p", Name: "p", Ready: &yes, Restarts: &three, LastStart: &at,
+					Termination: &process.Termination{Reason: "Error", ExitCode: 2, At: at}}}
+				return in
+			}
+		},
+		"probe failing": func(w *world) func(Input) Input {
+			w.access = map[schema.GroupVersionResource]cache.Access{cache.EventsGVR: {OK: true}}
+			return func(in Input) Input {
+				in.Process.Controller.Processes = []process.Process{{ID: "p", Name: "p", Ready: &yes,
+					Probe: &process.ProbeFailures{Type: "readiness", Count: 4, First: at, Last: at, HistoryUnknown: true}}}
+				return in
+			}
+		},
+		"rollout stuck": func(*world) func(Input) Input { return stuck },
+		"proxy not ready with facts": func(w *world) func(Input) Input {
+			w.deploys[1] = testutil.ProxyDeployment("infra", "edge", 2, 0)
+			return stuck
+		},
+	}
+	out := make(map[string]Input, len(worlds))
+	for name, mutate := range worlds {
+		w := healthyWorld()
+		add := mutate(w)
+		in := w.input(t)
+		in.Process = &ProcessData{Controller: process.Set{Observed: true}, Proxies: map[objects.Ref]process.Set{objects.RefOf(in.Owned.Gateways[0]): {}}, Print: 1}
+		out[name] = add(in)
+	}
 	return out
 }

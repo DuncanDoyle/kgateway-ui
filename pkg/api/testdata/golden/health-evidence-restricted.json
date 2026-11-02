@@ -69,6 +69,26 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "process restarts",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Events are turned off",
+        "name": "probe failures",
+        "ok": false,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "stuck rollouts",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "computed views",
         "ok": true,
         "required": false

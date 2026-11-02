@@ -49,6 +49,8 @@ export interface CheckResult {
   error?: string;
   detail?: string;
   pending?: boolean;
+  /** Why an optional input is missing; such a check never makes the install unknown (D-034). */
+  unavailable?: "off" | "denied" | "failing" | "not-on-version" | "not-observed";
 }
 /** Health as sent on the wire: checks is null when no check ran. */
 export type RawHealthReport = Omit<HealthReport, "checks"> & { checks: CheckResult[] | null };

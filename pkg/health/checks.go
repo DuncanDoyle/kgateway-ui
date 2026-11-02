@@ -10,7 +10,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -19,12 +18,14 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 )
 
-// Upstream returns the Phase 1 checks (design §5.2).
+// Upstream returns the upstream checks (design §5.2, Phase 3 §9.3).
 func Upstream() []Check {
-	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{}, computedCheck{}}
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{},
+		restartsCheck{}, probesCheck{}, rolloutsCheck{}, computedCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
@@ -144,8 +145,12 @@ type controllerCheck struct{}
 // Name implements Check.
 func (controllerCheck) Name() string { return "controller pods" }
 
-// Inputs implements Check.
-func (controllerCheck) Inputs() InputSet { return AllInputs() }
+// Inputs implements Check: AllInputs plus the process data its detail quotes.
+func (controllerCheck) Inputs() InputSet {
+	in := AllInputs()
+	in.Process = true
+	return in
+}
 
 // Run implements Check.
 func (c controllerCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
@@ -153,6 +158,9 @@ func (c controllerCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	d := in.Install.Deployment
 	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
+		if in.Process != nil {
+			addNotReadyFacts(&f, &in.Process.Controller, d.Namespace, d.Status.ReadyReplicas, Desired(d))
+		}
 		return []Finding{f}, ok(c.Name(), true, in.Now)
 	}
 	return nil, ok(c.Name(), true, in.Now)
@@ -581,17 +589,19 @@ func policySeverity(c metav1.Condition) (Severity, bool) {
 }
 
 // proxyCheck: KGWUI-006. Proxies are Deployments in the Gateway's namespace
-// that match the install's ProxySelector, found by ownerReference first, then
-// by the gateway-name label, which is truncated for names over 63 characters.
+// that match the install's ProxySelector, found by process.ProxyDeployment:
+// by ownerReference first, then by the safe gateway-name label value.
 type proxyCheck struct{}
 
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
-// Inputs implements Check: AllInputs plus the apps Deployments the proxies are found in.
+// Inputs implements Check: AllInputs plus the apps Deployments the proxies are
+// found in and the process data its detail quotes.
 func (proxyCheck) Inputs() InputSet {
 	in := AllInputs()
 	in.Kinds = []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}
+	in.Process = true
 	return in
 }
 
@@ -605,7 +615,8 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	var fs []Finding
 	inGrace := 0
 	for _, gw := range in.Owned.Gateways {
-		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
+		gwRef := objects.RefOf(gw)
+		d := process.ProxyDeployment(gwRef, in.Snapshot.Deployments, in.Install.ProxySelector)
 		if d == nil {
 			if in.proxyMode(gw) == proxymode.SelfManaged {
 				fs = append(fs, Finding{Code: CodeSelfManagedProxy, Slug: "self-managed-proxy", Severity: SeverityInfo, Install: in.Install.ID(),
@@ -621,7 +632,12 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
-			f.Resource = ref(gw)
+			f.Resource = &gwRef
+			if in.Process != nil {
+				if set, known := in.Process.Proxies[gwRef]; known {
+					addNotReadyFacts(&f, &set, gwRef.Namespace, d.Status.ReadyReplicas, Desired(d))
+				}
+			}
 			// A proxy scaled to zero may be deliberate (D-017 §1).
 			if Desired(d) == 0 {
 				f.Severity = SeverityWarning
@@ -640,31 +656,6 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt, Error: msg}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
-}
-
-// gatewayNameLabel is the standard Gateway API label on generated proxy resources.
-const gatewayNameLabel = "gateway.networking.k8s.io/gateway-name"
-
-// proxyFor returns gw's proxy Deployment among ds; a nil sel matches none.
-func proxyFor(gw *unstructured.Unstructured, ds []*appsv1.Deployment, sel labels.Selector) *appsv1.Deployment {
-	if sel == nil {
-		return nil
-	}
-	var byLabel *appsv1.Deployment
-	for _, d := range ds {
-		if d.Namespace != gw.GetNamespace() || !sel.Matches(labels.Set(d.Labels)) {
-			continue
-		}
-		for _, o := range d.OwnerReferences {
-			if o.Kind == "Gateway" && o.Name == gw.GetName() {
-				return d
-			}
-		}
-		if byLabel == nil && d.Labels[gatewayNameLabel] == gw.GetName() {
-			byLabel = d
-		}
-	}
-	return byLabel
 }
 
 // xdsCheck: KGWUI-001.

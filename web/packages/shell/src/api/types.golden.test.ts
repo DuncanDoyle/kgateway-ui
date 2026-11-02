@@ -179,15 +179,20 @@ const finding = shape<Finding>(
   { resource: linkedRef },
   { severity: { error: 1, warning: 1, info: 1 } },
 );
-const check = shape<CheckResult>({
-  name: "!",
-  ok: "!",
-  required: "!",
-  collectedAt: "!",
-  error: "?",
-  detail: "?",
-  pending: "?",
-});
+const check = shape<CheckResult>(
+  {
+    name: "!",
+    ok: "!",
+    required: "!",
+    collectedAt: "!",
+    error: "?",
+    detail: "?",
+    pending: "?",
+    unavailable: "?",
+  },
+  {},
+  { unavailable: { off: 1, denied: 1, failing: 1, "not-on-version": 1, "not-observed": 1 } },
+);
 const healthReport = shape<HealthReport>(
   { install: "!", state: "!", findings: "!", checks: "!", counts: "!", collectedAt: "!" },
   { findings: finding, checks: check },

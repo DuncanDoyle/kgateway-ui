@@ -54,6 +54,9 @@ const (
 	CodeSelfManagedProxy     = "KGWUI-010"
 	CodeDelegatedNotAttached = "KGWUI-011"
 	CodeComputedDisagrees    = "KGWUI-012"
+	CodeProcessRestarting    = "KGWUI-019"
+	CodeProbeFailing         = "KGWUI-020"
+	CodeRolloutStuck         = "KGWUI-021"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -84,9 +87,12 @@ type Finding struct {
 	// API keeps its code, severity and resource and empties Message, Detail
 	// and Since (D-013). Checks never set it.
 	Restricted bool `json:"restricted,omitempty"`
-	// Evidence are the objects, other than Resource, whose data Detail quotes
-	// (KGWUI-011: the parent route). Never serialised.
+	// Evidence are the objects, other than Resource, whose data Detail or
+	// Facts quote (KGWUI-011: the parent route). Never serialised.
 	Evidence []objects.Ref `json:"-"`
+	// Facts are the typed evidence; the API drops them for a caller who may
+	// not view Resource and all of Evidence (design §14 rule 12).
+	Facts Evidence `json:"evidence,omitempty"`
 	// ResourceSince is when the engine first saw Resource's current
 	// generation. It replaces Since for a caller who may not view all of
 	// Evidence, so Since tells that caller nothing about it. Never serialised.

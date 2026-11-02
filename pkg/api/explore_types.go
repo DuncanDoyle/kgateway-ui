@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,6 +42,27 @@ type FindingDTO struct {
 	health.Finding
 	Resource           *LinkedRef `json:"resource,omitempty"`
 	EvidenceRestricted bool       `json:"evidenceRestricted,omitempty"`
+}
+
+// UnmarshalJSON decodes the typed evidence by its kind, which encoding/json
+// cannot do for the Evidence interface; Go clients decode /health with it.
+func (d *FindingDTO) UnmarshalJSON(b []byte) error {
+	var w struct {
+		health.Finding
+		Resource           *LinkedRef      `json:"resource"`
+		EvidenceRestricted bool            `json:"evidenceRestricted"`
+		Facts              json.RawMessage `json:"evidence"`
+	}
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	facts, err := health.DecodeEvidence(w.Facts)
+	if err != nil {
+		return err
+	}
+	*d = FindingDTO{Finding: w.Finding, Resource: w.Resource, EvidenceRestricted: w.EvidenceRestricted}
+	d.Facts = facts
+	return nil
 }
 
 // HealthResponse is GET …/health. It carries the install ID. Findings

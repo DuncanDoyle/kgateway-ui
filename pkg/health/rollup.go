@@ -3,6 +3,7 @@ package health
 import (
 	"cmp"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"slices"
@@ -319,6 +320,10 @@ func outputPrint(fs []Finding, cr CheckResult) uint64 {
 			ref(e)
 		}
 		at(f.ResourceSince)
+		if flag(f.Facts != nil); f.Facts != nil {
+			js, _ := json.Marshal(f.Facts) // evidence types marshal without error
+			str(string(js))
+		}
 		if flag(f.parent != nil); f.parent != nil {
 			ref(f.parent.Ref())
 			str(f.parent.SectionName)

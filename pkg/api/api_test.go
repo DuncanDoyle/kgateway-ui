@@ -100,6 +100,8 @@ type setup struct {
 	prepareMeta func(*metadatafake.FakeMetadataClient)
 	// checks run after the upstream checks.
 	checks []health.Check
+	// proxyPods watches the detectors' proxy Pods.
+	proxyPods bool
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -199,10 +201,13 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if dets == nil {
 		dets = []install.Detector{install.UpstreamDetector{}}
 	}
-	var podSel, depSel []labels.Selector
+	var podSel, depSel, proxySel []labels.Selector
 	for _, d := range dets {
 		podSel = append(podSel, d.ControllerPodSelector())
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
+		if pd, ok := d.(install.ProxyPodDetector); ok && s.proxyPods {
+			proxySel = append(proxySel, pd.ProxyPodSelector())
+		}
 	}
 	clk := &clock{}
 	clk.set(testutil.Now.Add(-health.Grace - time.Second))
@@ -221,7 +226,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if s.prepareMeta != nil {
 		s.prepareMeta(meta)
 	}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, Now: now,
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
 		Events: s.optional, CRDs: s.optional, Metadata: meta})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

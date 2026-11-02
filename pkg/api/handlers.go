@@ -151,7 +151,7 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 
 // visibleHealth returns the install's report as the caller of v may see it
 // (D-013). A finding on a denied resource keeps its code, severity and ref but
-// is restricted: message, detail and since are emptied. State and counts still
+// is restricted: message, detail, since and evidence are emptied. State and counts still
 // cover every finding, so partial visibility never makes an install look
 // healthier, and the findings keep the order health returned.
 func visibleHealth(v *view, i *engine.InstallModel) health.Report {
@@ -162,7 +162,7 @@ func visibleHealth(v *view, i *engine.InstallModel) health.Report {
 	rep.Findings = make([]health.Finding, 0, len(i.Health.Findings))
 	for _, f := range i.Health.Findings {
 		if f.Resource != nil && !v.can(*f.Resource) {
-			f.Message, f.Detail, f.Since, f.Restricted = "", "", nil, true
+			f.Message, f.Detail, f.Since, f.Facts, f.Restricted = "", "", nil, nil, true
 		}
 		rep.Findings = append(rep.Findings, f)
 	}
@@ -282,8 +282,9 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 
 // healthResponse is the caller's report in wire form: each finding's resource
 // carries its link. A visible finding whose evidence the caller may not view
-// all of has its detail replaced, and a since it has is replaced by the
-// resource's own (design §7.4 rule 7). State, counts and severities stay.
+// all of has its detail replaced and no typed evidence, and a since it has is
+// replaced by the resource's own (design §7.4 rule 7, Phase 3 §14 rule 12).
+// State, counts and severities stay.
 func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
 	rep := wireHealth(visibleHealth(v, i), confirmedAt)
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
@@ -296,7 +297,7 @@ func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedA
 			d.Resource = &lr
 		}
 		if !f.Restricted && !v.allOf(f.Evidence) {
-			d.Detail, d.EvidenceRestricted = restrictedEvidence, true
+			d.Detail, d.Facts, d.EvidenceRestricted = restrictedEvidence, nil, true
 			if f.Since != nil {
 				d.Since = nil
 				if f.ResourceSince != nil {
