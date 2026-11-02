@@ -300,7 +300,8 @@ export function SubList<T extends { health: HealthState }>({
     if (l.cursorRejected) setCursor(undefined);
   }, [l.cursorRejected]);
   const page = useShownPage(l.data, !!l.error);
-  useReportTrailRefs(useMemo(() => page?.items.map(rowRef), [page, rowRef]));
+  // Rows from the previous query are not this page's refs while it reloads.
+  useReportTrailRefs(useMemo(() => (l.isLaggy ? undefined : page?.items.map(rowRef)), [l.isLaggy, page, rowRef]));
   return (
     <>
       {l.error ? <PageNotice error={l.error} title={listCopy.cannotLoad(noun[1])} /> : null}
