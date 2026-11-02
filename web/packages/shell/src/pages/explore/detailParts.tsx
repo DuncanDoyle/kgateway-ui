@@ -70,7 +70,8 @@ export const Facts = styled.dl`
     overflow-wrap: anywhere;
   }
 `;
-const Skeleton = styled.div`
+const Skeleton = styled.div``;
+const Stack = styled.div`
   display: grid;
   gap: ${(p) => p.theme.space(3)};
 `;
@@ -194,9 +195,19 @@ export function DetailFrame({
     <PageState kind="error" title={errorTitle} message={error.message} copyText={error.message} />
   ) : (
     <Skeleton aria-busy="true" data-testid="detail-skeleton">
-      <Shimmer h={20} />
-      <Shimmer h={120} />
-      <Shimmer h={200} />
+      <DetailColumns
+        main={
+          <Stack>
+            <Shimmer h={20} />
+            <Shimmer h={200} />
+          </Stack>
+        }
+        side={
+          <Stack>
+            <Shimmer h={120} />
+          </Stack>
+        }
+      />
     </Skeleton>
   );
   return (

@@ -512,8 +512,13 @@ it("the header and tabs keep their size from loading to loaded", async () => {
   const tabs = () => getComputedStyle(screen.getByTestId("detail-tabs")).height;
   expect(header()).toBe(`${HEADER_H}px`);
   expect(tabs()).toBe(`${TABS_H}px`);
+  // The skeleton uses the loaded page's column split, so the 1600 px layout does not shift on load.
+  const columns = () => screen.getByTestId("detail-columns");
+  const split = columns().className;
+  expect(within(screen.getByTestId("detail-skeleton")).getByTestId("detail-side")).toBeInTheDocument();
   await act(async () => release?.());
   await screen.findByRole("table", { name: "Listeners" });
+  expect(columns().className).toBe(split);
   expect(header()).toBe(`${HEADER_H}px`);
   expect(tabs()).toBe(`${TABS_H}px`);
 });

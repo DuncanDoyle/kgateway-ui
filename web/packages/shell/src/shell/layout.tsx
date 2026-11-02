@@ -12,7 +12,7 @@ const Columns = styled.div`
   gap: ${(p) => p.theme.space(5)};
   align-items: start;
   @media (min-width: ${layout.twoColumnFrom}px) {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 30rem);
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
   }
 `;
 
