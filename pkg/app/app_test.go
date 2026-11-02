@@ -1301,8 +1301,8 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 	}{
 		{name: "on", want: api.CapOn, listedOn: true},
 		{name: "off", d: Diagnostics{NoEvents: true, NoCRDs: true}, want: api.CapOff},
-		{name: "denied", events: refuse(schema.GroupResource{Resource: "events"}), crds: refuse(crdGR), want: api.CapDenied, reason: "forbidden"},
-		{name: "failing", events: broken, crds: broken, want: api.CapFailing, reason: "etcd timeout"},
+		{name: "denied", events: refuse(schema.GroupResource{Resource: "events"}), crds: refuse(crdGR), want: api.CapDenied, reason: reasonDenied},
+		{name: "failing", events: broken, crds: broken, want: api.CapFailing, reason: reasonFailing},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1338,8 +1338,8 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 			})
 			for _, name := range []string{"events", "crds"} {
 				c := states[name]
-				if !strings.Contains(c.Reason, tc.reason) || (tc.reason == "") != (c.Reason == "") {
-					t.Errorf("%s reason %q, want it to contain %q", name, c.Reason, tc.reason)
+				if c.Reason != tc.reason || strings.Contains(c.Reason, "no role") || strings.Contains(c.Reason, "etcd") {
+					t.Errorf("%s reason %q, want %q and never the raw error", name, c.Reason, tc.reason)
 				}
 				if slices.Contains(meta.Capabilities, name) != tc.listedOn {
 					t.Errorf("%s listed in capabilities %v: %v", name, meta.Capabilities, !tc.listedOn)

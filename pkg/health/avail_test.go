@@ -39,11 +39,21 @@ func TestAccessAvailability(t *testing.T) {
 		{cache.Access{OK: true}, ""},
 		{cache.Access{}, ""}, // still syncing: pending, not failing
 		{cache.Access{Err: `events is forbidden: User "ui" cannot list resource "events"`}, AvailDenied},
+		{cache.Access{Err: "access refused by policy", Denied: true}, AvailDenied}, // a 403 without the usual message
 		{cache.Access{Err: "connection refused"}, AvailFailing},
 	}
 	for _, c := range cases {
 		if got := AccessAvailability(c.a); got != c.want {
 			t.Errorf("%+v: %q, want %q", c.a, got, c.want)
 		}
+	}
+}
+
+// The output print covers Unavailable, so a memoized reader sees a reason change.
+func TestOutputPrintCoversUnavailable(t *testing.T) {
+	off := NotAvailable("events", AvailOff, "", time.Time{})
+	denied := NotAvailable("events", AvailDenied, "", time.Time{})
+	if outputPrint(nil, off) == outputPrint(nil, denied) {
+		t.Fatal("outputPrint ignores Unavailable")
 	}
 }

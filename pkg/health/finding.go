@@ -108,8 +108,7 @@ type CheckResult struct {
 	// Pending marks a check that is not OK only because resources are still
 	// being processed inside the grace period.
 	Pending bool `json:"pending,omitempty"`
-	// Unavailable says why a check whose optional input is missing did not
-	// run; Error holds the detail. The roll-up ignores such a result (D-034).
+	// Unavailable says why the check's optional input is missing; RollUp ignores it.
 	Unavailable Availability `json:"unavailable,omitempty"`
 }
 

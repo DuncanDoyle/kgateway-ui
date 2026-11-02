@@ -30,9 +30,8 @@ type Capability struct {
 // coreCapabilities are the names the upstream UI reserves, besides the platform's.
 var coreCapabilities = []string{"processes", "events", "crds", "endpoints", "proxyStats", "controllerLogs"}
 
-// WithCoreCapabilities sets the source of the core capabilities' states for
-// /api/v1/meta (design §13). It may report only the names the core reserves;
-// it runs on every request, so it must be fast and safe for concurrent use.
+// WithCoreCapabilities sets the source of the core names' states; it runs on
+// every /api/v1/meta request, and any other name it reports is dropped.
 func WithCoreCapabilities(f func() []Capability) HandlerOption {
 	return func(c *handlerConfig) { c.coreSource = f }
 }

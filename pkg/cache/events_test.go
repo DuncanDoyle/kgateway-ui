@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -349,6 +350,25 @@ func TestDeniedWatchReportsAccess(t *testing.T) {
 	}
 	if s.Source.Access[EventsGVR.String()] != s.Access[EventsGVR] {
 		t.Fatal("the fingerprint does not carry the Events access")
+	}
+}
+
+// A 403 marks Access.Denied whatever its message says; another error does not.
+func TestDeniedAccessFromStatusCode(t *testing.T) {
+	refused := &apierrors.StatusError{ErrStatus: metav1.Status{Status: metav1.StatusFailure, Code: 403,
+		Reason: metav1.StatusReasonForbidden, Message: "access refused by policy"}}
+	w := newOptWorld(t, true, true, []runtime.Object{ctrlPod()}, nil, func(w *optWorld) {
+		w.kube.PrependReactor("list", "events", func(clienttesting.Action) (bool, runtime.Object, error) { return true, nil, refused })
+		w.meta.PrependReactor("list", "customresourcedefinitions", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
+		})
+	})
+	s := w.c.Snapshot()
+	if a := s.Access[EventsGVR]; !a.Denied || a.Err != "access refused by policy" {
+		t.Errorf("events access %+v, want denied", a)
+	}
+	if a := s.Access[CRDsGVR]; a.Denied || a.Err == "" {
+		t.Errorf("crds access %+v, want failing, not denied", a)
 	}
 }
 

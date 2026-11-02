@@ -36,6 +36,8 @@ import (
 type Access struct {
 	OK  bool   `json:"ok"`
 	Err string `json:"error,omitempty"`
+	// Denied marks an Err the API server returned as 403 Forbidden.
+	Denied bool `json:"denied,omitempty"`
 }
 
 // ListTimeout bounds every List call an informer makes, so a hung list ends
@@ -124,6 +126,7 @@ type Config struct {
 type progress struct {
 	mu       sync.Mutex
 	err      string // failure not yet recovered from; "" when none
+	denied   bool   // err is a 403
 	failures uint64 // failures so far; a watch-list stream remembers the count it was opened at
 	onChange func() // called when err turns empty or non-empty; may be nil
 }
@@ -132,6 +135,7 @@ func (p *progress) failure(err error) {
 	p.mu.Lock()
 	changed := p.err == ""
 	p.err = err.Error()
+	p.denied = apierrors.IsForbidden(err)
 	p.failures++
 	p.mu.Unlock()
 	p.changed(changed)
@@ -143,7 +147,7 @@ func (p *progress) recover(openedAt uint64) {
 	changed := false
 	if p.failures == openedAt {
 		changed = p.err != ""
-		p.err = ""
+		p.err, p.denied = "", false
 	}
 	p.mu.Unlock()
 	p.changed(changed)
@@ -183,7 +187,7 @@ func (p *progress) access(synced bool) Access {
 	defer p.mu.Unlock()
 	switch {
 	case p.err != "":
-		return Access{Err: p.err}
+		return Access{Err: p.err, Denied: p.denied}
 	case !synced:
 		return Access{}
 	}

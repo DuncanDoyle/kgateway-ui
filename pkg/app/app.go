@@ -77,12 +77,8 @@ type Diagnostics struct {
 	ControllerLogsNamespaces []string
 }
 
-// CoreCapabilities returns the states of the core inputs for /api/v1/meta
-// (design §13): processes (the proxy Pod watch), events and crds. A toggle that
-// is off reads off; a watch refused by RBAC reads denied and one with any other
-// error failing, with its error as the reason. A watch that is still syncing,
-// or not started without a toggle, has no state, and neither has any input
-// before the first snapshot. collected feeds inputs that later tasks add.
+// CoreCapabilities returns the core inputs' states for /api/v1/meta; a syncing
+// or unstarted watch has none. collected is for inputs later tasks add.
 func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Snapshot) []api.Capability {
 	inputs := []struct {
 		name string
@@ -108,13 +104,19 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 		case a.OK:
 			out = append(out, api.Capability{Name: in.name, State: api.CapOn})
 		case why == health.AvailDenied:
-			out = append(out, api.Capability{Name: in.name, State: api.CapDenied, Reason: a.Err})
+			out = append(out, api.Capability{Name: in.name, State: api.CapDenied, Reason: reasonDenied})
 		case why == health.AvailFailing:
-			out = append(out, api.Capability{Name: in.name, State: api.CapFailing, Reason: a.Err})
+			out = append(out, api.Capability{Name: in.name, State: api.CapFailing, Reason: reasonFailing})
 		}
 	}
 	return out
 }
+
+// /api/v1/meta is not gated, so its reasons are fixed text; the raw error stays in check results.
+const (
+	reasonDenied  = "Access to this resource is denied"
+	reasonFailing = "The watch is failing"
+)
 
 // proxyPodDetector is a detector that names its proxy Pods' selector.
 type proxyPodDetector interface{ ProxyPodSelector() labels.Selector }
@@ -244,11 +246,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		if p := eng.Current(); p != nil && p.Model != nil {
 			snap = p.Model.Snapshot
 		}
-		var cs collect.Snapshot
-		if collected != nil {
-			cs = collected.Snapshot()
-		}
-		return CoreCapabilities(snap, o.Diagnostics, cs)
+		// No core capability reads collected values yet, so none are copied per request.
+		return CoreCapabilities(snap, o.Diagnostics, collect.Snapshot{})
 	}
 	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates))
 	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
