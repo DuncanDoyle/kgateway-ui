@@ -290,13 +290,17 @@ func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
 
 // TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 150 ms
 // with views B and C (design §9.6, 2.4)
-// and the median of 5 cold ones ≤ 1 s, for the consistent world and the worst
-// case. Allocation per warm Compute and the persistence step are reported (D-022).
+// and the median of 5 cold ones ≤ 1 s, for the consistent world, the
+// contradicting one and the Phase 3 worst case, whose snapshot comes from a
+// settled cache. Allocation per warm Compute and the persistence step are reported (D-022).
 func TestBudgetWarmRecompute(t *testing.T) {
 	const mib = 1 << 20
-	for _, tier := range largeCases {
+	for _, tier := range append(slices.Clone(largeCases), scale.Large.Contradicting().Worst()) {
 		t.Run(tier.Name, func(t *testing.T) {
 			snap := scale.Snapshot(tier, 1)
+			if tier.IsWorst {
+				snap = liveSnapshot(t, tier)
+			}
 			cold := make([]time.Duration, 5)
 			for i := range cold {
 				// The first Compute of a fresh engine, before any window matures.

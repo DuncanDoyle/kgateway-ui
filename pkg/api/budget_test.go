@@ -3,6 +3,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -277,6 +279,82 @@ func TestBudgetListRequests(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBudgetFindingsRequests: per findings filter mix, 10,000 sequential
+// requests give p95 < 50 ms and p99 < 100 ms, and 10,000 from 20 goroutines
+// p95 < 100 ms; so does the detail of a finding in the largest group. Run in
+// the worst case (every check matured) under AllowAll and a restricting Authorizer.
+func TestBudgetFindingsRequests(t *testing.T) {
+	for _, a := range []struct {
+		name  string
+		authz Authorizer
+	}{{"allow-all", nil}, {"restricted", restricting}} {
+		t.Run(a.name, func(t *testing.T) {
+			h, m := tierHandler(t, scale.Large.Contradicting(), a.authz)
+			in := m.Installs[0]
+			if f, c := matured(m); f != c || c == 0 {
+				t.Fatalf("worst case: %d KGWUI-012 of %d checks", f, c)
+			}
+			// The group with the most members, for the group mix and the detail.
+			d := in.Diagnosis
+			big := slices.MaxFunc(d.Groups, func(x, y diagnose.Group) int { return cmp.Compare(len(x.Members), len(y.Members)) })
+			member := in.Health.Findings[big.Members[0]]
+			if member.ID == "" {
+				t.Fatal("the largest group's first finding has no id")
+			}
+			codes := map[string]int{}
+			for _, f := range in.Health.Findings {
+				codes[f.Code+"/"+string(f.Severity)]++
+			}
+			t.Logf("%d findings by code and severity %v; %d groups, largest %s (%s, %d members)", len(in.Health.Findings), codes, len(d.Groups), big.ID, big.Family, len(big.Members))
+			base := "/api/v1/installs/" + in.Resolved.ID()
+			mixes := []struct{ name, path string }{
+				{"none", base + "/findings"},
+				{"severity=error", base + "/findings?severity=error"},
+				{"code=KGWUI-012", base + "/findings?code=" + health.CodeComputedDisagrees},
+				{"q", base + "/findings?q=r-01"},
+				{"group", base + "/findings?group=" + big.ID},
+				{"sort=since", base + "/findings?sort=since.desc"},
+			}
+			for _, mx := range mixes {
+				items, total := listRows(t, h, mx.path)
+				t.Logf("%-25s %d rows on the page, total %d", mx.name, items, total)
+				if items == 0 {
+					t.Fatalf("%s: GET %s returned no rows; it would measure nothing", mx.name, mx.path)
+				}
+				requestBudget(t, h, mx.name, mx.path, true)
+			}
+			requestBudget(t, h, "detail-largest-group", base+"/findings/"+member.ID, false)
+		})
+	}
+}
+
+// requestBudget gates path's sequential p95 < 50 ms and, for a list, its
+// p99 < 100 ms and 20-client p95 < 100 ms.
+func requestBudget(t *testing.T, h http.Handler, name, path string, list bool) {
+	t.Helper()
+	seq := latencies(t, h, path, requestsPerMix, 1)
+	if !list {
+		t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)))
+		if p := percentile(seq, 95); p >= 50*time.Millisecond {
+			t.Errorf("%s p95 %v, budget < 50 ms", name, p)
+		}
+		return
+	}
+	conc := latencies(t, h, path, requestsPerMix, 20)
+	t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 %v p95 %v p99 %v (budget p95 < 100 ms)",
+		name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)),
+		rd(percentile(conc, 50)), rd(percentile(conc, 95)), rd(percentile(conc, 99)))
+	if p := percentile(seq, 95); p >= 50*time.Millisecond {
+		t.Errorf("%s: sequential p95 %v, budget < 50 ms", name, p)
+	}
+	if p := percentile(seq, 99); p >= 100*time.Millisecond {
+		t.Errorf("%s: sequential p99 %v, budget < 100 ms", name, p)
+	}
+	if p := percentile(conc, 95); p >= 100*time.Millisecond {
+		t.Errorf("%s: 20-client p95 %v, budget < 100 ms", name, p)
 	}
 }
 
