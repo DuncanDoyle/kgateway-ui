@@ -14,13 +14,13 @@ import {
 import { Link, useLocation } from "react-router-dom";
 import { useInstalls } from "../api/hooks";
 import type { LinkedRef } from "../api/types";
+import { breadcrumbsCopy } from "../copy/navigation";
 import { objectPath } from "../explore/objectPath";
 import { installLabel } from "./InstallName";
 import { Anchor, Menu, useMenu } from "./menu";
 import { installPath } from "./paths";
 import {
   appendVia,
-  breadcrumbsCopy,
   type Crumb,
   collapse,
   crumbLabel,

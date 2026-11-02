@@ -6,7 +6,7 @@ import { useNow } from "../../api/clock";
 import { useFindings } from "../../api/diagHooks";
 import { isStale, useListFilter } from "../../api/hooks";
 import type { FindingItem, LinkedRef, Severity } from "../../api/types";
-import { columnCopy, listCopy } from "../../copy/explorer";
+import { columnCopy, findingsCopy, listCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -52,31 +52,6 @@ const Code = styled.span`
 `;
 
 // region Helpers
-/** Copy of the findings pages; the wording pass (Task 31) replaces the drafts. */
-export const findingsCopy = {
-  title: "Findings",
-  search: "Filter findings",
-  placeholder: "Filter by name or message",
-  severity: "Severity",
-  code: "Code",
-  finding: "Finding",
-  object: "Object",
-  since: "Since",
-  install: "The install",
-  noValue: "No value",
-  restricted: "Restricted: ask the owning team",
-  tags: { code: "Code", kind: "Kind", namespace: "Namespace", group: "Group" } as Record<string, string>,
-  allFindings: "All findings",
-  notFound: "Finding not found",
-  detail: "Detail",
-  firstSeen: "Since",
-  affected: "Affected objects",
-  noAffected: "No affected objects you can view.",
-  suggestedFix: "Suggested fix",
-  nextSteps: "Next steps",
-  needs: (perms: string[]) => `Needs ${perms.join(", ")}`,
-  copy: "Copy",
-};
 const NOUN = ["finding", "findings"] as const;
 const SEVERITIES: Severity[] = ["error", "warning", "info"];
 const severityOptions: FilterOption[] = SEVERITIES.map((s) => ({

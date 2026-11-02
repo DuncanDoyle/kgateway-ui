@@ -12,9 +12,9 @@ import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json"
 import routesByListenerGolden from "../../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import { POLL_MS } from "../../api/hooks";
 import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList, RouteRow } from "../../api/types";
+import { breadcrumbsCopy } from "../../copy/navigation";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
-import { breadcrumbsCopy } from "../../shell/trail";
 import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { HEADER_H } from "./detailParts";

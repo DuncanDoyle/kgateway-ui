@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
 import { useInstalls } from "../../api/hooks";
 import type { Finding } from "../../api/types";
+import { findingsCopy } from "../../copy/explorer";
 import { objectPath, resourcePath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
 import { severityLabel, severityToState } from "../../health/state";
@@ -11,7 +12,7 @@ import { ResourceName } from "../../resource/ResourceName";
 import { findingKey, Slot, useFindingActions } from "../../shell/contributions";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 import { InstallName } from "../../shell/InstallName";
-import { findingPath, findingsCopy } from "../findings/FindingsPage";
+import { findingPath } from "../findings/FindingsPage";
 
 // region Styles
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`

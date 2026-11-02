@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { Box, Layers, Network, Route, Server } from "lucide-react";
 import type { ReactNode } from "react";
 import type { LinkedRef } from "../api/types";
+import { objectHeaderCopy } from "../copy/navigation";
 import { HealthBadge } from "../health/HealthBadge";
 import { DataAge } from "../pages/DataAge";
 import { VisuallyHidden } from "../states/VisuallyHidden";
@@ -81,11 +82,6 @@ const Header = styled.header<{ stylesOverride?: SerializedStyles }>`
 `;
 
 // region Helpers
-/** Header copy, kept together for the wording pass. */
-export const objectHeaderCopy = {
-  namespace: "namespace",
-};
-
 const KGW = "gateway.kgateway.dev";
 const GW = "gateway.networking.k8s.io";
 

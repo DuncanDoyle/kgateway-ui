@@ -7,7 +7,7 @@ import { useNow } from "../../api/clock";
 import { useFindingDetail } from "../../api/diagHooks";
 import { isStale } from "../../api/hooks";
 import type { LinkedRef, NextStep, SuggestedFix } from "../../api/types";
-import { columnCopy, listCopy } from "../../copy/explorer";
+import { columnCopy, findingsCopy, listCopy } from "../../copy/explorer";
 import { LinkedName } from "../../explore/LinkedName";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { StaleView } from "../../health/staleView";
@@ -24,7 +24,7 @@ import { DataAge } from "../DataAge";
 import { expectedRows, Facts, Section } from "../explore/detailParts";
 import { NameCell } from "../explore/listParts";
 import { ago } from "../install/HealthStrip";
-import { findingsCopy, SeverityBadge } from "./FindingsPage";
+import { SeverityBadge } from "./FindingsPage";
 
 // region Styles
 /** Height of the title row, fixed from the first render so the message arriving moves nothing. */
@@ -127,7 +127,7 @@ function CopyBlock({ text, label }: { text: string; label: string }) {
       <Tooltip label={findingsCopy.copy} placement="end">
         <IconButton
           type="button"
-          aria-label={`${findingsCopy.copy}: ${label}`}
+          aria-label={findingsCopy.copyLabel(label)}
           onClick={() => void navigator.clipboard?.writeText(text).catch(() => {})}
         >
           <Copy size={14} aria-hidden="true" />

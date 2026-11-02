@@ -2,10 +2,11 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import type { LinkedRef } from "../api/types";
+import { breadcrumbsCopy } from "../copy/navigation";
 import { pseudoRules, renderWithTheme } from "../test/render";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { ObjectHeader } from "./ObjectHeader";
-import { breadcrumbsCopy, type Crumb, objectCrumb, viaParam } from "./trail";
+import { type Crumb, objectCrumb, viaParam } from "./trail";
 
 const ID = "kgw.kgateway";
 const GW = "gateway.networking.k8s.io";

@@ -1,7 +1,7 @@
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import type { FindingList } from "../packages/shell/src/api/diagTypes";
 import { gatewayCopy, listCopy, navCopy, routeCopy, routeStateCopy } from "../packages/shell/src/copy/explorer";
-import { breadcrumbsCopy } from "../packages/shell/src/shell/trail";
+import { breadcrumbsCopy } from "../packages/shell/src/copy/navigation";
 
 // The shell's navigation over test/e2e/fixtures/explorer.yaml: the `via` trail (D-035), the object header and the
 // fluid layout (design §17.6, §21).

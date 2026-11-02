@@ -8,14 +8,6 @@ import { navCopy } from "../copy/explorer";
 export type Crumb = { kind: "list"; path: string; search: string } | { kind: "object"; path: string };
 
 // region Helpers
-/** Trail copy, kept together for the wording pass. */
-export const breadcrumbsCopy = {
-  label: "Breadcrumb",
-  more: (n: number) => `Show ${n} earlier pages`,
-  menu: "Earlier pages",
-  hidden: "A page you cannot open",
-};
-
 /** The longest `via` value read or written; a longer one keeps its last {@link TRAIL_MAX} valid entries. */
 export const VIA_MAX = 4096;
 /** The most crumbs shown between the install and the current page; older ones collapse into a menu. */

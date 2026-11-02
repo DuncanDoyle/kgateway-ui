@@ -7,6 +7,7 @@ import findingsGolden from "../../../../../../pkg/api/testdata/golden/findings.j
 import findingsRestrictedGolden from "../../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import meta from "../../../../../../pkg/api/testdata/golden/meta.json";
 import type { FindingDetail, FindingList, LinkedRef } from "../../api/types";
+import { findingsCopy } from "../../copy/explorer";
 import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
 import { FindingRow } from "../install/FindingRow";
@@ -174,7 +175,7 @@ it("finding detail pages the affected objects", async () => {
   // The affected cursor is local: the page URL stays short.
   expect(location()).toBe(`/i/${ID}/findings/${FINDING}`);
   // A link back to the list.
-  expect(screen.getByRole("link", { name: "All findings" })).toHaveAttribute("href", `/i/${ID}/findings`);
+  expect(screen.getByRole("link", { name: findingsCopy.allFindings })).toHaveAttribute("href", `/i/${ID}/findings`);
 });
 
 it("a restricted finding shows its identity only, and an unknown one says so", async () => {
@@ -191,7 +192,7 @@ it("a restricted finding shows its identity only, and an unknown one says so", a
   unmount();
   mount(`/i/${ID}/findings/f1-unknownunknownunknownunkn`);
   expect(await screen.findByText("Finding not found")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "All findings" })).toHaveAttribute("href", `/i/${ID}/findings`);
+  expect(screen.getByRole("link", { name: findingsCopy.allFindings })).toHaveAttribute("href", `/i/${ID}/findings`);
 });
 
 it("a finding that goes away while open reads as not found, not as a load failure", async () => {
@@ -206,7 +207,7 @@ it("a finding that goes away while open reads as not found, not as a load failur
   });
   expect(await screen.findByText("Finding not found")).toBeInTheDocument();
   expect(screen.queryByTestId("page-notice")).toBeNull();
-  expect(screen.getByRole("link", { name: "All findings" })).toHaveAttribute("href", `/i/${ID}/findings`);
+  expect(screen.getByRole("link", { name: findingsCopy.allFindings })).toHaveAttribute("href", `/i/${ID}/findings`);
 });
 
 it("stale data turns every state unknown", async () => {

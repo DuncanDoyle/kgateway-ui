@@ -372,3 +372,30 @@ export const effectiveCopy = {
   dropped: "Does not fit", // S229
   moreParents: "More parent routes not shown.", // S230
 };
+
+// region Findings (Phase 3.1, ids in docs/phases/phase-3/phase-3.1-wording.md)
+export const findingsCopy = {
+  title: "Findings", // S265
+  search: "Filter findings", // S266
+  placeholder: "Filter by object, message or detail", // S267
+  severity: "Severity", // S268
+  code: "Code", // S269
+  finding: "Message", // S270: header of the message column
+  object: "Object", // S271
+  since: "Since", // S272
+  install: "The install", // S273: a finding about the install itself
+  noValue: "No value", // S281: accessible name of the muted dash
+  restricted: "Restricted: ask the owning team", // S280
+  tags: { code: "Code", kind: "Kind", namespace: "Namespace", group: "Group" } as Record<string, string>, // S269, S274, S275
+  allFindings: "Back to findings", // S283
+  notFound: "Finding not found", // S284
+  detail: "Detail", // S286
+  firstSeen: "Since", // S287
+  affected: "Affected objects", // S288
+  noAffected: "No affected objects you can view.", // S289
+  suggestedFix: "Suggested fix", // S290
+  nextSteps: "Next steps", // S291
+  needs: (perms: string[]) => `Needs ${perms.join(", ")}`, // S292
+  copy: "Copy", // S293
+  copyLabel: (title: string) => `Copy ${title}`, // S293
+};
