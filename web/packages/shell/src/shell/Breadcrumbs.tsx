@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useTrailLinks } from "../api/exploreHooks";
+import { REFS_BATCH, useTrailLinks } from "../api/exploreHooks";
 import { useInstalls } from "../api/hooks";
 import type { LinkedRef, Ref } from "../api/types";
 import { breadcrumbsCopy } from "../copy/navigation";
@@ -161,6 +161,9 @@ const TrailMenu = styled(Menu)`
 `;
 
 // region Helpers
+/** The most object crumbs a trail looks up: two GET …/refs requests. */
+const LOOKUP_MAX = 2 * REFS_BATCH;
+
 // key is the crumb's place in the trail, which entries may repeat; pending waits for the server's link.
 type Resolved = { to?: string; label: string; key?: string; pending?: boolean };
 
@@ -344,8 +347,11 @@ export function Breadcrumbs({ refs = [], current = "pending", stylesOverride }: 
   const { pathname, search } = useLocation();
   const { data: installs } = useInstalls();
   const t = trailAt(pathname, search);
-  const objects = t?.earlier.flatMap((c) => crumbRef(c) ?? []) ?? [];
-  // One lookup per trail, keyed by all its objects, so page refs arriving later never change the key.
+  // Only the last LOOKUP_MAX object crumbs are looked up; older ones get the restricted label, unlinked.
+  const at = (t?.earlier ?? []).flatMap((c, i) => (crumbRef(c) ? [i] : []));
+  const from = at.length > LOOKUP_MAX ? (at[at.length - LOOKUP_MAX] ?? 0) : 0;
+  const objects = t?.earlier.slice(from).flatMap((c) => crumbRef(c) ?? []) ?? [];
+  // One lookup per trail, keyed by its looked-up objects, so page refs arriving later never change the key.
   const lookup = useTrailLinks(
     t?.installId ?? "",
     objects.every((r) => refs.some((k) => sameRef(k, r))) ? [] : objects,
@@ -353,8 +359,10 @@ export function Breadcrumbs({ refs = [], current = "pending", stylesOverride }: 
   if (!t) return null;
   const { installId, crumb, earlier } = t;
   const { hidden } = collapse(earlier);
-  const resolved = earlier.map((_, i) => ({
-    ...resolve(installId, earlier, i, refs, { refs: lookup.data?.refs, failed: lookup.failed }),
+  const resolved = earlier.map((c, i) => ({
+    ...(i < from && crumbRef(c)
+      ? { label: breadcrumbsCopy.hidden }
+      : resolve(installId, earlier, i, refs, { refs: lookup.data?.refs, failed: lookup.failed })),
     key: String(i),
   }));
   const install = installs?.find((x) => x.id === installId);

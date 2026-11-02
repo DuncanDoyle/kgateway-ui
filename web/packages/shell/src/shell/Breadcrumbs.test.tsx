@@ -348,5 +348,40 @@ test("a lookup that failed on a lost connection runs again on reconnect", async 
   act(() => {
     window.dispatchEvent(new Event("online"));
   });
+  // Sent by the reconnect, well before the first backoff retry.
+  await act(() => new Promise((r) => setTimeout(r, 0)));
+  expect(refCalls(f)).toHaveLength(2);
   expect(await trail().findByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
+});
+
+test("a long trail looks up only its last 12 objects; older crumbs get the restricted label", async () => {
+  const user = userEvent.setup();
+  const f = serveRefs();
+  const thirty = Array.from({ length: 30 }, (_, i) => nth(i + 1));
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at(thirty) });
+  const t = trail();
+  expect(await t.findByRole("link", { name: "HTTPRoute shop/r30" })).toBeInTheDocument();
+  await act(async () => {});
+  expect(refCalls(f).length).toBeLessThanOrEqual(2);
+  await user.click(t.getByRole("button", { name: breadcrumbsCopy.more(25) }));
+  const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+  // r1–r18 are past the bound: no link and no name; r19–r25 resolve.
+  expect(items.slice(0, 18).map((i) => [i.textContent, i.tagName])).toEqual(
+    Array.from({ length: 18 }, () => [breadcrumbsCopy.hidden, "SPAN"]),
+  );
+  expect(items.slice(18).map((i) => i.textContent)).toEqual(
+    [19, 20, 21, 22, 23, 24, 25].map((i) => `HTTPRoute shop/r${i}`),
+  );
+  expect(screen.queryByText(/shop\/r(1[0-8]|[1-9])$/)).toBeNull();
+});
+
+test("a lookup that succeeded is not sent again on reconnect", async () => {
+  const f = serveRefs();
+  renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway]) });
+  await trail().findByRole("link", { name: "Gateway infra/edge" });
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+  await act(() => new Promise((r) => setTimeout(r, 0)));
+  expect(refCalls(f)).toHaveLength(1);
 });

@@ -129,15 +129,19 @@ const transient = (e: ApiError) => e.status === 0 || e.status >= 500;
 /**
  * GET …/refs for the breadcrumb trail's objects: once per page view, never polled, batched within the server's bound.
  * The key is the sorted refs, so the same trail is one lookup; no refs means no request. Only a 4xx is final (failed);
- * a lost connection or a 5xx retries with backoff, and again on reconnect.
+ * a lost connection or a 5xx retries with backoff, and again on reconnect while it is still failing.
  */
 export function useTrailLinks(id: string, refs: readonly Ref[]) {
   const params = [...new Set(refs.map(trailParam))].sort();
   const key = params.length ? [`${installApi(id)}/refs`, ...params] : null;
+  const [failing, setFailing] = useState(false);
   const { data, error } = useSWR<TrailRefs, ApiError>(key, fetchTrailLinks, {
+    onSuccess: () => setFailing(false),
     revalidateOnFocus: false,
-    revalidateOnReconnect: true,
+    // Config is read when the event fires, so a settled lookup never refetches on reconnect.
+    revalidateOnReconnect: failing,
     onErrorRetry: (e, _key, _config, revalidate, { retryCount }) => {
+      setFailing(transient(e));
       if (!transient(e)) return;
       setTimeout(() => revalidate({ retryCount }), Math.min(1000 * 2 ** (retryCount - 1), 30_000));
     },
