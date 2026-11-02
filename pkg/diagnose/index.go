@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -30,9 +31,12 @@ const maxCursor = 1024
 
 // Index holds an install's findings in each list order (design §13.1), as
 // indexes into the report's findings. Build makes one per model; it is read-only
-// but for the search text, lowered once on the first search.
+// but for the orders other than rank and the search text, each built on first use.
 type Index struct {
-	rank, since, sinceDesc, code, codeDesc []int32
+	rank []int32
+	// orders builds since, code and byID; a recompute need not pay for them.
+	orders                           sync.Once
+	since, sinceDesc, code, codeDesc []int32
 	// byID is every finding index, sorted by finding ID.
 	byID []int32
 	// text is each finding's search text, lowered on the first search.
@@ -66,29 +70,71 @@ func (ix *Index) Text(fs []health.Finding) []Text {
 // orders, either direction, break ties by rank; a nil since sorts last.
 func NewIndex(fs []health.Finding, rank []int) *Index {
 	ix := &Index{rank: make([]int32, len(rank))}
-	pos := make([]int32, len(fs))
 	for k, i := range rank {
 		ix.rank[k] = int32(i) // #nosec G115 -- a finding count fits in int32
-		pos[i] = int32(k)     // #nosec G115 -- as above
 	}
-	byRank := func(a, b int32) int { return cmp.Compare(pos[a], pos[b]) }
-	sorted := func(c func(a, b int32) int) []int32 {
-		o := slices.Clone(ix.rank)
-		slices.SortFunc(o, func(a, b int32) int { return cmp.Or(c(a, b), byRank(a, b)) })
-		return o
-	}
-	ix.since = sorted(func(a, b int32) int { return compareSince(fs[a].Since, fs[b].Since) })
-	ix.sinceDesc = sorted(func(a, b int32) int {
-		if sa, sb := fs[a].Since, fs[b].Since; sa != nil && sb != nil {
-			return sb.Compare(*sa)
-		}
-		return compareSince(fs[a].Since, fs[b].Since) // nil last
-	})
-	ix.code = sorted(func(a, b int32) int { return strings.Compare(fs[a].Code, fs[b].Code) })
-	ix.codeDesc = sorted(func(a, b int32) int { return strings.Compare(fs[b].Code, fs[a].Code) })
-	ix.byID = slices.Clone(ix.rank)
-	slices.SortFunc(ix.byID, func(a, b int32) int { return strings.Compare(fs[a].ID, fs[b].ID) })
 	return ix
+}
+
+// build makes the orders other than rank, over fs, the findings ix was built from.
+func (ix *Index) build(fs []health.Finding) {
+	ix.orders.Do(func() {
+		pos := make([]int32, len(fs))
+		for k, i := range ix.rank {
+			pos[i] = int32(k) // #nosec G115 -- a finding count fits in int32
+		}
+		// Dense keys: the comparators below would otherwise chase each finding.
+		since := make([]*time.Time, len(fs))
+		ids := make([]string, len(fs))
+		for i := range fs {
+			since[i], ids[i] = fs[i].Since, fs[i].ID
+		}
+		byRank := func(a, b int32) int { return cmp.Compare(pos[a], pos[b]) }
+		sorted := func(c func(a, b int32) int) []int32 {
+			o := slices.Clone(ix.rank)
+			slices.SortFunc(o, func(a, b int32) int { return cmp.Or(c(a, b), byRank(a, b)) })
+			return o
+		}
+		ix.since = sorted(func(a, b int32) int { return compareSince(since[a], since[b]) })
+		ix.sinceDesc = sorted(func(a, b int32) int {
+			if sa, sb := since[a], since[b]; sa != nil && sb != nil {
+				return sb.Compare(*sa)
+			}
+			return compareSince(since[a], since[b]) // nil last
+		})
+		ix.code, ix.codeDesc = byCode(fs, ix.rank)
+		ix.byID = slices.Clone(ix.rank)
+		slices.SortFunc(ix.byID, func(a, b int32) int { return strings.Compare(ids[a], ids[b]) })
+	})
+}
+
+// byCode returns rank ordered by code, ascending and descending, ties in rank order.
+func byCode(fs []health.Finding, rank []int32) (asc, desc []int32) {
+	at := map[string]int{}
+	var codes []string
+	var buckets [][]int32
+	for _, i := range rank {
+		k, ok := at[fs[i].Code]
+		if !ok {
+			k = len(codes)
+			at[fs[i].Code] = k
+			codes, buckets = append(codes, fs[i].Code), append(buckets, nil)
+		}
+		buckets[k] = append(buckets[k], i)
+	}
+	order := make([]int, len(codes))
+	for k := range order {
+		order[k] = k
+	}
+	slices.SortFunc(order, func(a, b int) int { return strings.Compare(codes[a], codes[b]) })
+	asc, desc = make([]int32, 0, len(rank)), make([]int32, 0, len(rank))
+	for _, k := range order {
+		asc = append(asc, buckets[k]...)
+	}
+	for _, k := range slices.Backward(order) {
+		desc = append(desc, buckets[k]...)
+	}
+	return asc, desc
 }
 
 // Find returns the index in fs of the finding with id.
@@ -96,6 +142,7 @@ func (ix *Index) Find(fs []health.Finding, id string) (int, bool) {
 	if ix == nil {
 		return 0, false
 	}
+	ix.build(fs)
 	k, ok := slices.BinarySearchFunc(ix.byID, id, func(i int32, id string) int { return strings.Compare(fs[i].ID, id) })
 	if !ok {
 		return 0, false
@@ -118,7 +165,10 @@ type Page struct {
 }
 
 // order returns s's order, or false for an unknown key or a descending rank.
-func (ix *Index) order(s Sort) ([]int32, bool) {
+func (ix *Index) order(fs []health.Finding, s Sort) ([]int32, bool) {
+	if s.Key != SortRank {
+		ix.build(fs)
+	}
 	switch s.Key {
 	case SortRank:
 		return ix.rank, !s.Desc
@@ -186,7 +236,7 @@ func decodeCursor(c string, s Sort) (wireCursor, error) {
 // Page returns up to limit findings of fs that match, in s's order, after or before cursor.
 // Bad sorts are explore.ErrBadQuery, bad cursors explore.ErrBadCursor (design §14 rules 17, 18).
 func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, match func(i int) bool) (Page, error) {
-	order, ok := ix.order(s)
+	order, ok := ix.order(fs, s)
 	if !ok {
 		return Page{}, fmt.Errorf("%w: sort %q", explore.ErrBadQuery, s.Key)
 	}

@@ -55,6 +55,8 @@ type Input struct {
 	Snapshot *cache.Snapshot
 	Served   []kinds.Served
 	Views    objects.Decoder
+	// IDs, if set, memoises group IDs across recomputes.
+	IDs *health.IDs
 }
 
 // Family is one kind of shared cause, a row of the design §5.2 table.
@@ -103,39 +105,46 @@ type Diagnosis struct {
 func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	id := in.Install.ID()
 	groups := make([]Group, 0, len(rep.Findings))
-	var fams []Family                    // per group
-	var keys [][]string                  // per group, the cause key
-	at := map[string]int{}               // group ID to index
-	of := make([]int, len(rep.Findings)) // finding to group index
-	var counts []int                     // per group, its member count
+	// meta is per group: its family, cause key and member count.
+	type groupMeta struct {
+		fam   Family
+		key   []string
+		count int
+	}
+	meta := make([]groupMeta, 0, len(rep.Findings))
+	at := make(map[string]int, len(rep.Findings)) // group ID to index
+	of := make([]int, len(rep.Findings))          // finding to group index
 	for i := range rep.Findings {
 		f := &rep.Findings[i]
 		fam, cause, key := claim(*f, in, families)
-		gid := health.GroupID(id, fam.Name(), cause, key)
+		gid := in.IDs.GroupID(id, fam.Name(), cause, key)
+		class := ClassOf(*f)
 		k, ok := at[gid]
 		if !ok {
 			k = len(groups)
 			at[gid] = k
-			groups = append(groups, Group{ID: gid, Family: fam.Name(), Cause: cause, Severity: f.Severity, Class: ClassOf(*f)})
-			fams, keys, counts = append(fams, fam), append(keys, key), append(counts, 0)
+			groups = append(groups, Group{ID: gid, Family: fam.Name(), Cause: cause, Severity: f.Severity, Class: class})
+			meta = append(meta, groupMeta{fam: fam, key: key})
 		}
 		of[i] = k
-		counts[k]++
+		meta[k].count++
 		g := &groups[k]
 		if sevRank(f.Severity) < sevRank(g.Severity) {
 			g.Severity = f.Severity
 		}
-		g.Class = min(g.Class, ClassOf(*f))
+		g.Class = min(g.Class, class)
 		if f.Since != nil && (g.Since == nil || f.Since.Before(*g.Since)) {
 			g.Since = f.Since
 		}
 		g.Ranked = g.Ranked || f.Code != health.CodeSignalUnavailable
 		f.Group = gid
 	}
+	in.IDs.Sweep()
 	groups = slices.Clip(groups)
 	// Every group's Members is a clipped window of one backing array, filled in report order.
 	backing, off := make([]int, len(rep.Findings)), 0
-	for k, n := range counts {
+	for k := range meta {
+		n := meta[k].count
 		groups[k].Members, off = backing[off:off:off+n], off+n
 	}
 	for i, k := range of {
@@ -144,14 +153,14 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	var buf []health.Finding
 	for k := range groups {
 		g := &groups[k]
-		if _, ok := fams[k].(other); ok {
+		if _, ok := meta[k].fam.(other); ok {
 			continue // affects nothing beyond its members
 		}
 		buf = buf[:0]
 		for _, m := range g.Members {
 			buf = append(buf, rep.Findings[m])
 		}
-		g.Affected = fams[k].Affected(g.Cause, keys[k], buf, in)
+		g.Affected = meta[k].fam.Affected(g.Cause, meta[k].key, buf, in)
 	}
 	d := rank(rep.Findings, groups)
 	d.Index = NewIndex(rep.Findings, d.Rank)

@@ -61,11 +61,32 @@ func compareGroups(a, b *Group) int {
 // rank sorts groups into rank order and ranks fs: by group, then severity,
 // since and ID.
 func rank(fs []health.Finding, groups []Group) *Diagnosis {
-	slices.SortFunc(groups, func(a, b Group) int { return compareGroups(&a, &b) })
+	// Sort indexes, not Groups: compareGroups ends on the unique ID, so the order is the same.
+	perm := make([]int32, len(groups))
+	for k := range perm {
+		perm[k] = int32(k) // #nosec G115 -- a group count fits in int32
+	}
+	slices.SortFunc(perm, func(a, b int32) int { return compareGroups(&groups[a], &groups[b]) })
+	// Apply perm in place, one cycle at a time: groups[k] takes groups[perm[k]].
+	for k := range perm {
+		if perm[k] < 0 {
+			continue
+		}
+		tmp, j := groups[k], k
+		for int(perm[j]) != k {
+			next := int(perm[j])
+			groups[j], perm[j] = groups[next], -1
+			j = next
+		}
+		groups[j], perm[j] = tmp, -1
+	}
 	d := &Diagnosis{Groups: groups, Rank: make([]int, 0, len(fs))}
 	for _, g := range groups {
 		start := len(d.Rank)
 		d.Rank = append(d.Rank, g.Members...)
+		if len(g.Members) < 2 {
+			continue
+		}
 		slices.SortStableFunc(d.Rank[start:], func(i, j int) int {
 			a, b := &fs[i], &fs[j]
 			if c := cmp.Compare(sevRank(a.Severity), sevRank(b.Severity)); c != 0 {
