@@ -22,18 +22,18 @@ var idEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadd
 // the resource (four empty fields when nil) and key, NUL-joined (design §5.1).
 func FindingID(installID, code string, resource *objects.Ref, key []string) string {
 	var buf [256]byte
-	return hashID(identity(buf[:0], installID, code, resource, "", key))
+	return hashID(identity(buf[:0], installID, code, resource, false, "", key))
 }
 
 // GroupID returns the ID of the group of family whose cause is cause and
 // causeKey: FindingID with code "G" and the family before the cause key (design §5.2).
 func GroupID(installID, family string, cause *objects.Ref, causeKey []string) string {
 	var buf [256]byte
-	return hashID(identity(buf[:0], installID, "G", cause, family, causeKey))
+	return hashID(identity(buf[:0], installID, "G", cause, true, family, causeKey))
 }
 
-// identity appends FindingID's NUL-joined input to b; a non-empty first is a key element before key.
-func identity(b []byte, installID, code string, resource *objects.Ref, first string, key []string) []byte {
+// identity appends FindingID's NUL-joined input to b; for a group, family is a key element before key, even when empty.
+func identity(b []byte, installID, code string, resource *objects.Ref, group bool, family string, key []string) []byte {
 	var r objects.Ref
 	if resource != nil {
 		r = *resource
@@ -44,8 +44,8 @@ func identity(b []byte, installID, code string, resource *objects.Ref, first str
 		}
 		b = append(b, s...)
 	}
-	if first != "" {
-		b = append(append(b, 0), first...)
+	if group {
+		b = append(append(b, 0), family...)
 	}
 	for _, k := range key {
 		b = append(append(b, 0), k...)
@@ -83,7 +83,7 @@ func (x *IDs) FindingID(installID, code string, resource *objects.Ref, key []str
 	if x == nil {
 		return FindingID(installID, code, resource, key)
 	}
-	return x.get(identity(x.buf[:0], installID, code, resource, "", key))
+	return x.get(identity(x.buf[:0], installID, code, resource, false, "", key))
 }
 
 // GroupID is GroupID, memoised.
@@ -91,7 +91,7 @@ func (x *IDs) GroupID(installID, family string, cause *objects.Ref, causeKey []s
 	if x == nil {
 		return GroupID(installID, family, cause, causeKey)
 	}
-	return x.get(identity(x.buf[:0], installID, "G", cause, family, causeKey))
+	return x.get(identity(x.buf[:0], installID, "G", cause, true, family, causeKey))
 }
 
 func (x *IDs) get(b []byte) string {
@@ -166,7 +166,7 @@ func (in Input) parentKey(u *unstructured.Unstructured, p objects.ParentRef) []s
 	} else if j := slices.IndexFunc(status, func(s objects.RouteParentStatus) bool { return s.ParentRef == p }); j >= 0 {
 		w = status[j].Written
 	}
-	return appendWrittenKey(append(make([]string, 0, 8), ownerParent), w) // room for a condition type
+	return appendWrittenKey([]string{ownerParent}, w)
 }
 
 // identify sets each finding's ID, then drops its Key, and gives one returned without

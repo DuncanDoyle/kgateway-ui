@@ -288,11 +288,8 @@ func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
 	return e, now
 }
 
-// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 150 ms
-// with views B and C (design §9.6, 2.4)
-// and the median of 5 cold ones ≤ 1 s, for the consistent world, the
-// contradicting one and the Phase 3 worst case, whose snapshot comes from a
-// settled cache. Allocation per warm Compute and the persistence step are reported (D-022).
+// TestBudgetWarmRecompute: at Large, consistent, contradicting and worst case, warm median ≤ 150 ms
+// with views B and C and cold median ≤ 1 s (design §9.6); allocation and persistence reported (D-022).
 func TestBudgetWarmRecompute(t *testing.T) {
 	const mib = 1 << 20
 	for _, tier := range append(slices.Clone(largeCases), scale.Large.Contradicting().Worst()) {

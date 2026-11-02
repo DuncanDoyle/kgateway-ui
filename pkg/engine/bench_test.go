@@ -12,10 +12,12 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -72,9 +74,8 @@ func BenchmarkCompute(b *testing.B) {
 	})
 }
 
-// liveSnapshot is a snapshot of tier's world from a settled cache, so its
-// Source has the kind prints that check memos key on. LivePhase3 seeds the
-// worst case's Phase 3 objects.
+// liveSnapshot is tier's world from a settled cache, whose Source has the kind
+// prints check memos key on; the worst case comes from LivePhase3.
 func liveSnapshot(tb testing.TB, tier scale.Tier) *cache.Snapshot {
 	tb.Helper()
 	if tier.IsWorst {
@@ -83,10 +84,8 @@ func liveSnapshot(tb testing.TB, tier scale.Tier) *cache.Snapshot {
 	return scale.Live(tb, tier, nil).Cache.Snapshot()
 }
 
-// analyzerStage returns e's analyzer stage for its only install, built as
-// compute builds it after one Compute: every check, then groups, rank and the
-// finding index. With memo, checks key their memos on input prints as in
-// compute; without, every check runs. The stage's findings must match the model's.
+// analyzerStage returns e's analyzer stage (checks, groups, rank, index) for its only
+// install, with inputs built as compute builds them; memo sets the input prints.
 func analyzerStage(tb testing.TB, e *Engine, memo bool) func() *diagnose.Diagnosis {
 	tb.Helper()
 	m := e.Compute()
@@ -98,21 +97,29 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool) func() *diagnose.Diagnos
 		tb.Fatalf("installs %d, metrics reads %d", len(m.Installs), len(m.MetricsRead))
 	}
 	im, read := m.Installs[0], m.MetricsRead[0]
+	var kc kinds.Change
+	if e.cfg.KindsChange != nil {
+		kc = e.cfg.KindsChange()
+	}
+	var col collect.Snapshot
+	if e.cfg.Collected != nil {
+		col = e.cfg.Collected()
+	}
 	res := im.Resolved
 	ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: read.Result, HasMetrics: read.Present,
 		MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now, Views: e.decode})
-	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, Metrics: read.Result,
+	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: read.Result,
 		HasMetrics: read.Present, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
 		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode}
-	din := diagnose.Input{Install: res, Owned: im.Owned, Snapshot: snap, Served: served, Views: e.decode}
 	run := func() *diagnose.Diagnosis {
-		rt := health.Runtime{States: e.states[res.ID()]}
+		rt := health.Runtime{States: e.states[res.ID()], Collected: col}
 		if memo {
-			pc := &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: e.cfg.MetricsMaxAge, ver: &ver, views: im.Computed}
+			pc := &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: e.cfg.MetricsMaxAge, ver: &ver, views: im.Computed, kc: kc, col: col}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
 		rep := health.Evaluate(in, e.cfg.Checks, rt)
-		d := diagnose.Build(&rep, din, diagnose.Families())
+		d := diagnose.Build(&rep, diagnose.Input{Install: res, Owned: im.Owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()},
+			diagnose.Families())
 		if len(rep.Findings) != len(im.Health.Findings) || len(d.Groups) != len(im.Diagnosis.Groups) {
 			tb.Fatalf("the stage gave %d findings in %d groups, the model %d in %d", len(rep.Findings), len(d.Groups), len(im.Health.Findings), len(im.Diagnosis.Groups))
 		}
@@ -122,9 +129,8 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool) func() *diagnose.Diagnos
 	return run
 }
 
-// BenchmarkAnalyzerStage measures the analyzer stage at Large, consistent and
-// in the worst case (every check matured): warm runs every check, memoized
-// reuses the memo of every check whose inputs are unchanged (design §16.3).
+// BenchmarkAnalyzerStage measures the analyzer stage at Large, consistent and matured
+// worst case: warm runs every check, memoized reuses unchanged checks (design §16.3).
 func BenchmarkAnalyzerStage(b *testing.B) {
 	for _, mode := range []struct {
 		name string

@@ -282,17 +282,16 @@ func TestBudgetListRequests(t *testing.T) {
 	}
 }
 
-// TestBudgetFindingsRequests: per findings filter mix, 10,000 sequential
-// requests give p95 < 50 ms and p99 < 100 ms, and 10,000 from 20 goroutines
-// p95 < 100 ms; so does the detail of a finding in the largest group. Run in
-// the worst case (every check matured) under AllowAll and a restricting Authorizer.
+// TestBudgetFindingsRequests: per findings mix and a finding detail, the list budgets
+// of TestBudgetListRequests, in the matured worst case from a settled cache, allowed and restricted.
 func TestBudgetFindingsRequests(t *testing.T) {
 	for _, a := range []struct {
 		name  string
 		authz Authorizer
 	}{{"allow-all", nil}, {"restricted", restricting}} {
 		t.Run(a.name, func(t *testing.T) {
-			h, m := tierHandler(t, scale.Large.Contradicting(), a.authz)
+			tier := scale.Large.Contradicting().Worst()
+			h, m := snapshotHandler(scale.LivePhase3(t, tier, nil).Cache.Snapshot(), tier, a.authz)
 			in := m.Installs[0]
 			if f, c := matured(m); f != c || c == 0 {
 				t.Fatalf("worst case: %d KGWUI-012 of %d checks", f, c)

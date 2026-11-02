@@ -83,8 +83,10 @@ func TestIDFormat(t *testing.T) {
 		}
 	}
 	// A group id is a finding id with code G and the family first in the key.
-	if GroupID("i", "rejects", &r, []string{"k"}) != FindingID("i", "G", &r, []string{"rejects", "k"}) {
-		t.Error("GroupID must be FindingID with code G and the family prepended to the cause key")
+	for _, fam := range []string{"rejects", ""} {
+		if GroupID("i", fam, &r, []string{"k"}) != FindingID("i", "G", &r, []string{fam, "k"}) {
+			t.Errorf("family %q: GroupID must be FindingID with code G and the family prepended to the cause key", fam)
+		}
 	}
 }
 
