@@ -157,6 +157,13 @@ it("side sections render after the core content, on the Overview tab only", asyn
   expect(screen.queryByRole("region", { name: "Notes" })).not.toBeInTheDocument();
 });
 
+it("the skeleton holds the side column's place only where sections are contributed", async () => {
+  mountGateway({ sideSections: { [`${GW}/Gateway`]: [{ id: "notes", title: "Notes", render: () => <p>n</p> }] } });
+  expect(within(screen.getByTestId("detail-skeleton")).getByTestId("detail-side")).toBeInTheDocument();
+  expect(await screen.findByRole("region", { name: "Notes" })).toBeInTheDocument();
+  expect(screen.getByTestId("detail-side")).toBeInTheDocument();
+});
+
 it("a slot with no contribution renders nothing and takes no space", async () => {
   const empty: Contributions = {
     detailTabs: { [`${GW}/Gateway`]: [] },

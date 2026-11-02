@@ -241,7 +241,7 @@ it("a sub-table name is one truncated line with the full name in a keyboard tool
   const style = getComputedStyle(name);
   expect([style.whiteSpace, style.overflow, style.textOverflow]).toEqual(["nowrap", "hidden", "ellipsis"]);
   const link = name.closest("a") as HTMLElement;
-  for (let i = 0; i < 200 && document.activeElement !== link; i++) await userEvent.tab();
+  for (let i = 0; i < 80 && document.activeElement !== link; i++) await userEvent.tab();
   expect(link).toHaveFocus();
   expect(screen.getByRole("tooltip")).toHaveTextContent(name.getAttribute("aria-label") ?? "");
 });
@@ -512,13 +512,14 @@ it("the header and tabs keep their size from loading to loaded", async () => {
   const tabs = () => getComputedStyle(screen.getByTestId("detail-tabs")).height;
   expect(header()).toBe(`${HEADER_H}px`);
   expect(tabs()).toBe(`${TABS_H}px`);
-  // The skeleton uses the loaded page's column split, so the 1600 px layout does not shift on load.
+  // No contributed sections: the skeleton and the loaded page are both one column.
   const columns = () => screen.getByTestId("detail-columns");
   const split = columns().className;
-  expect(within(screen.getByTestId("detail-skeleton")).getByTestId("detail-side")).toBeInTheDocument();
+  expect(screen.queryByTestId("detail-side")).not.toBeInTheDocument();
   await act(async () => release?.());
   await screen.findByRole("table", { name: "Listeners" });
   expect(columns().className).toBe(split);
+  expect(screen.queryByTestId("detail-side")).not.toBeInTheDocument();
   expect(header()).toBe(`${HEADER_H}px`);
   expect(tabs()).toBe(`${TABS_H}px`);
 });

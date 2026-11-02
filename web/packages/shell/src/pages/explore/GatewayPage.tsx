@@ -67,24 +67,13 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
       ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
       : undefined;
   return (
-    <DetailFrame
-      installId={id}
-      refValue={ref}
-      noun="Gateway"
-      data={data}
-      error={error}
-      stylesOverride={stylesOverride}
-      side={
-        data ? (
+    <DetailFrame installId={id} refValue={ref} noun="Gateway" data={data} error={error} stylesOverride={stylesOverride}>
+      {data ? (
+        <>
           <Section aria-labelledby="gw-conditions">
             <h2 id="gw-conditions">{detailCopy.conditions}</h2>
             <ConditionList conditions={data.conditions} generation={data.generation} />
           </Section>
-        ) : null
-      }
-    >
-      {data ? (
-        <>
           <Section aria-label={detailCopy.summary}>
             <Facts>
               <dt>{columnCopy.class}</dt>

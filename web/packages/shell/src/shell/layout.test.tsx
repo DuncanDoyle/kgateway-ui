@@ -46,6 +46,13 @@ it("no 1400px cap remains", () => {
   expect(hits.map(([f]) => f)).toEqual([]);
 });
 
+it("one column at every width when there is no side", () => {
+  renderWithTheme(<DetailColumns main={<p>main</p>} side={null} />);
+  const cls = [...screen.getByTestId("detail-columns").classList].find((c) => c.startsWith("css-")) ?? "";
+  expect(css()).not.toMatch(new RegExp(`min-width: ${layout.twoColumnFrom}px\\)\\{\\.${cls}[{ ]`));
+  expect(css()).not.toContain(`.${cls}{display:grid;grid-template-columns:minmax(0, 1fr) `);
+});
+
 it("renders without a side column when there is no side", () => {
   renderWithTheme(<DetailColumns main={<p>main</p>} side={null} />);
   expect(screen.queryByTestId("detail-side")).not.toBeInTheDocument();

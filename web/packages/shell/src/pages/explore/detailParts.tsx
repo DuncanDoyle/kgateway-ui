@@ -70,7 +70,6 @@ export const Facts = styled.dl`
     overflow-wrap: anywhere;
   }
 `;
-const Skeleton = styled.div``;
 const Stack = styled.div`
   display: grid;
   gap: ${(p) => p.theme.space(3)};
@@ -105,7 +104,7 @@ interface DetailFrameProps {
   error?: ApiError;
   /** The Overview tab's main column; rendered only once data has loaded. */
   children: ReactNode;
-  /** The Overview tab's side column: conditions, findings and related objects. Contributed sections follow it. */
+  /** The Overview tab's side column, for longer auxiliary content. Contributed sections follow it; with neither, one column. */
   side?: ReactNode;
   /** Tabs after YAML; a ?tab= naming none of them shows Overview. */
   extraTabs?: ExtraTab[];
@@ -194,7 +193,7 @@ export function DetailFrame({
   ) : error ? (
     <PageState kind="error" title={errorTitle} message={error.message} copyText={error.message} />
   ) : (
-    <Skeleton aria-busy="true" data-testid="detail-skeleton">
+    <div aria-busy="true" data-testid="detail-skeleton">
       <DetailColumns
         main={
           <Stack>
@@ -202,13 +201,10 @@ export function DetailFrame({
             <Shimmer h={200} />
           </Stack>
         }
-        side={
-          <Stack>
-            <Shimmer h={120} />
-          </Stack>
-        }
+        // Only a page with contributed sections has a side column to hold a place for.
+        side={sections.length && tab === "overview" ? <Shimmer h={120} /> : null}
       />
-    </Skeleton>
+    </div>
   );
   return (
     <StaleView.Provider value={stale}>
