@@ -10,13 +10,13 @@ import { CandidateBanner } from "../../explore/CandidateBanner";
 import { CopyCommandButton } from "../../explore/CopyCommandButton";
 import { DetailTabs } from "../../explore/DetailTabs";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
-import { HealthBadge } from "../../health/HealthBadge";
 import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
 import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
+import { OBJECT_HEADER_H, ObjectHeader } from "../../shell/ObjectHeader";
 import { installPath } from "../../shell/paths";
 import { useUrlParams } from "../../shell/urlParams";
 import { BackLink } from "../../states/controls";
@@ -24,44 +24,16 @@ import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import type { HealthState } from "../../theme/tokens";
-import { DataAge } from "../DataAge";
 import { useShownPage } from "./listParts";
 
 // region Styles
-/** Height of the header row, fixed from the first render: the name comes from the URL, the rest fills in. */
-export const HEADER_H = 40;
+/** Height of the detail header, fixed from the first render: the name comes from the URL, the rest fills in. */
+export const HEADER_H = OBJECT_HEADER_H;
 
 const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
   max-width: 1400px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
-  header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: ${(p) => p.theme.space(2)};
-    min-height: ${HEADER_H}px;
-    margin-bottom: ${(p) => p.theme.space(2)};
-  }
-  h1 {
-    display: inline-flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: ${(p) => p.theme.space(2)};
-    min-width: 0;
-    margin: 0;
-    font-size: ${(p) => p.theme.font.size.lg};
-    font-weight: ${(p) => p.theme.font.weight.semibold};
-    overflow-wrap: anywhere;
-  }
-  .kind {
-    color: ${(p) => p.theme.color.textMuted};
-    font-size: ${(p) => p.theme.font.size.base};
-    font-weight: ${(p) => p.theme.font.weight.regular};
-  }
-  .spacer {
-    flex: 1;
-  }
   ${(p) => p.stylesOverride}
 `;
 export const Section = styled.section`
@@ -221,17 +193,19 @@ export function DetailFrame({
       <Frame stylesOverride={stylesOverride}>
         {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
         {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
-        <header data-testid="detail-header">
-          <h1>
-            <span className="kind">{refValue.kind}</span>
-            <ResourceName namespace={refValue.namespace} name={refValue.name} />
-          </h1>
-          <CopyNameButton resource={refValue} />
-          <CopyCommandButton refValue={refValue} />
-          {data ? <HealthBadge state={data.health} /> : null}
-          <span className="spacer" />
-          {data ? <DataAge collectedAt={data.collectedAt} /> : null}
-        </header>
+        <ObjectHeader
+          kind={{ group: refValue.group, kind: refValue.kind, label: refValue.kind }}
+          name={refValue.name}
+          namespace={refValue.namespace}
+          state={data?.health}
+          collectedAt={data?.collectedAt}
+          actions={
+            <>
+              <CopyNameButton resource={refValue} />
+              <CopyCommandButton refValue={refValue} />
+            </>
+          }
+        />
         <DetailTabs
           label={detailCopy.views(refValue.kind)}
           tabs={tabs}

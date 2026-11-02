@@ -58,6 +58,8 @@ export type {
 } from "./shell/contributions";
 export type { Brand, CorePages, FindingRenderer, NavEntry, RouteContribution, ShellExtension } from "./shell/extension";
 export { useInstallId, useShellExtension, useVocabulary } from "./shell/extension";
+export type { ObjectHeaderProps } from "./shell/ObjectHeader";
+export { ObjectHeader } from "./shell/ObjectHeader";
 export { installPath } from "./shell/paths";
 export { Shell } from "./shell/Shell";
 export { Tooltip } from "./shell/Tooltip";
