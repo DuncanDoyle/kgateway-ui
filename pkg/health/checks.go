@@ -552,8 +552,12 @@ type proxyCheck struct{}
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
 
-// Inputs implements Check.
-func (proxyCheck) Inputs() InputSet { return AllInputs() }
+// Inputs implements Check: AllInputs plus the apps Deployments the proxies are found in.
+func (proxyCheck) Inputs() InputSet {
+	in := AllInputs()
+	in.Kinds = []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}
+	return in
+}
 
 // Run implements Check. A missing proxy is reported after the grace period;
 // inside it the check is pending, so the install is unknown (D-017 §3). A
