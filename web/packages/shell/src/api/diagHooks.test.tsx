@@ -3,7 +3,7 @@ import { useState } from "react";
 import { renderWithTheme, stubApi } from "../test/render";
 import { useFindingDetail, useFindings } from "./diagHooks";
 import { POLL_MS } from "./hooks";
-import type { FindingDetail, FindingList, FindingRow, LinkedRef } from "./types";
+import type { FindingDetail, FindingItem, FindingList, LinkedRef } from "./types";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 const gw = "gateway.networking.k8s.io";
-const row = (id: string): FindingRow => ({ id, code: "KGWUI-002", slug: "condition-false", severity: "error" });
+const row = (id: string): FindingItem => ({ id, code: "KGWUI-002", slug: "condition-false", severity: "error" });
 const list = (install: string, ...ids: string[]): FindingList => ({
   install,
   items: ids.map(row),

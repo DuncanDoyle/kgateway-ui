@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { useFindings } from "../../api/diagHooks";
 import { isStale, useListFilter } from "../../api/hooks";
-import type { FindingRow, LinkedRef, Severity } from "../../api/types";
+import type { FindingItem, LinkedRef, Severity } from "../../api/types";
 import { columnCopy, listCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
@@ -61,6 +61,7 @@ export const findingsCopy = {
   object: "Object",
   since: "Since",
   install: "The install",
+  noValue: "No value",
   restricted: "Restricted: ask the owning team",
   tags: { code: "Code", kind: "Kind", namespace: "Namespace", group: "Group" } as Record<string, string>,
   allFindings: "All findings",
@@ -93,8 +94,8 @@ export const findingPath = (installId: string, f: { id?: string; restricted?: bo
   f.id && !f.restricted ? installPath(installId, `findings/${encodeURIComponent(f.id)}`) : undefined;
 
 /** The ref ObjectTable names a row by (expand label); a finding about the install has none of its own. */
-const rowRef = (f: FindingRow): LinkedRef => f.resource ?? { group: "", kind: "", name: f.code, link: "none" };
-const rowKey = (f: FindingRow) => f.id;
+const rowRef = (f: FindingItem): LinkedRef => f.resource ?? { group: "", kind: "", name: f.code, link: "none" };
+const rowKey = (f: FindingItem) => f.id;
 
 // region Component
 /** A finding's severity: icon, colour and text; unknown under a stale view, like every state (design §6.3). */
@@ -107,13 +108,18 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
   );
 }
 
+/** A value the row does not have, e.g. the age of a restricted finding: a muted dash, read as "No value". */
+function NoValue() {
+  return <Muted aria-label={findingsCopy.noValue}>—</Muted>;
+}
+
 /** "5m ago" from since; owns the clock, so the table does not re-render each second. */
 function SinceCell({ since }: { since?: string }) {
   const now = useNow();
-  return since ? <OneLine text={since}>{ago(since, now)}</OneLine> : <Muted>{columnCopy.none}</Muted>;
+  return since ? <OneLine text={since}>{ago(since, now)}</OneLine> : <NoValue />;
 }
 
-function columns(installId: string): ObjectColumn<FindingRow>[] {
+function columns(installId: string): ObjectColumn<FindingItem>[] {
   return [
     {
       id: "severity",
@@ -150,7 +156,7 @@ function columns(installId: string): ObjectColumn<FindingRow>[] {
       header: columnCopy.kind,
       width: "140px",
       secondary: true,
-      cell: (f) => (f.resource ? <OneLine text={f.resource.kind} /> : <Muted>{columnCopy.none}</Muted>),
+      cell: (f) => (f.resource ? <OneLine text={f.resource.kind} /> : <NoValue />),
     },
     {
       id: "since",
@@ -180,7 +186,7 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
   const skip = OPTIONAL.filter((k) => support[k] === false);
   const l = useListPage("findings", useFindings, skip);
   const cols = useMemo(() => columns(l.id), [l.id]);
-  const rowPath = useMemo(() => (f: FindingRow) => findingPath(l.id, f), [l.id]);
+  const rowPath = useMemo(() => (f: FindingItem) => findingPath(l.id, f), [l.id]);
   const now = useNow();
   // Stale data or a failed poll turns every severity unknown, as on the other lists.
   const stale = !!l.data && (!!l.error || isStale(l.data.collectedAt, now));

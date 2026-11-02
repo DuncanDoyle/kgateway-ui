@@ -10,6 +10,7 @@ import type { FindingDetail, FindingList, LinkedRef } from "../../api/types";
 import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
 import { FindingRow } from "../install/FindingRow";
+import { ago } from "../install/HealthStrip";
 import { FindingPage } from "./FindingPage";
 import { FindingsPage } from "./FindingsPage";
 
@@ -260,4 +261,23 @@ it("a finding row elsewhere opens the finding's page when it has an id, never wh
   const restrictedRow = screen.getAllByTestId("finding-row")[1] as HTMLElement;
   expect(restrictedRow).toHaveTextContent("Restricted: ask the owning team");
   expect(within(restrictedRow).queryByRole("link")).toBeNull();
+});
+
+it.each([
+  [59, "59s ago"],
+  [600, "10m ago"],
+  [5 * 3600, "5h ago"],
+  [16 * 86400, "16d ago"],
+])("ages read in the house style: %ss is %s", (secs, text) => {
+  const now = Date.parse("2026-11-02T12:00:00Z");
+  expect(ago(new Date(now - secs * 1000).toISOString(), now)).toBe(text);
+});
+
+it("a finding without an age shows a dash, never the word None", async () => {
+  serve((u) => (u.pathname.endsWith("/findings") ? restricted() : undefined));
+  mount(`/i/${ID}/findings`);
+  await screen.findByText("Restricted: ask the owning team");
+  const row = rowOf("Restricted: ask the owning team");
+  expect(within(row).getByLabelText("No value")).toHaveTextContent("—");
+  expect(row).not.toHaveTextContent("None");
 });

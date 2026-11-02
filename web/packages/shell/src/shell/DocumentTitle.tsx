@@ -1,12 +1,26 @@
 import { useEffect } from "react";
 import { matchPath, useLocation } from "react-router-dom";
 import { useInstalls } from "../api/hooks";
+import { navCopy } from "../copy/explorer";
 import { useShellExtension } from "./extension";
 import { installLabel } from "./InstallName";
 import { decodeInstallId } from "./paths";
 
 // region Helpers
 const CORE_INSTALL = "/i/:id";
+const dec = (v = "") => decodeInstallId(v);
+
+/** Core install pages and their title, before ": <install>"; params arrive still encoded. */
+const PAGES: [string, (p: Record<string, string | undefined>) => string][] = [
+  ["findings", () => navCopy.findings],
+  ["findings/:findingId", () => "Finding"],
+  ["gateways", () => navCopy.gateways],
+  ["routes", () => navCopy.routes],
+  ["listenersets", () => navCopy.listenerSets],
+  ["gateways/:ns/:name", (p) => `Gateway ${dec(p.ns)}/${dec(p.name)}`],
+  ["routes/:group/:kind/:ns/:name", (p) => `${dec(p.kind)} ${dec(p.ns)}/${dec(p.name)}`],
+  ["listenersets/:group/:kind/:ns/:name", (p) => `${dec(p.kind)} ${dec(p.ns)}/${dec(p.name)}`],
+];
 
 /** The page part of the title for pathname, or undefined for the bare product name; label names an install by its ID. */
 function pageTitle(
@@ -22,8 +36,10 @@ function pageTitle(
     const { kind, rns, rname } = r.params;
     return `${kind} ${rns === "-" ? "" : `${rns}/`}${rname}: ${install(r.params)}`;
   }
-  const f = matchPath(`${CORE_INSTALL}/findings`, pathname);
-  if (f) return `Findings: ${install(f.params)}`;
+  for (const [path, title] of PAGES) {
+    const m = matchPath(`${CORE_INSTALL}/${path}`, pathname);
+    if (m) return `${title(m.params)}: ${install(m.params)}`;
+  }
   const i = matchPath(CORE_INSTALL, pathname);
   if (i) return install(i.params);
   // An extension page takes the label of the nav entry that links to it.

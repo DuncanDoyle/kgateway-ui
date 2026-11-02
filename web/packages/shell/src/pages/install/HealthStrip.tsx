@@ -34,12 +34,13 @@ const Strip = styled.div<{ $state: HealthState; stylesOverride?: SerializedStyle
 `;
 
 // region Helpers
-/** Relative time, e.g. "5s ago". */
+/** Relative time, e.g. "5s ago", "3h ago", "16d ago". */
 export function ago(iso: string, now: number): string {
   const s = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  return `${Math.round(s / 3600)}h ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
 }
 
 function sentence(s: string): string {

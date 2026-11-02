@@ -140,6 +140,7 @@ it("keeps the public export surface", () => {
         "Finding",
         "FindingActionContribution",
         "FindingDetail",
+        "FindingItem",
         "FindingList",
         "FindingRenderer",
         "FontSizes",

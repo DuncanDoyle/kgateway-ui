@@ -60,7 +60,7 @@ import type {
   Filter,
   Finding,
   FindingDetail,
-  FindingRow,
+  FindingItem,
   Fraction,
   GatewayDetail,
   GatewayListRow,
@@ -618,7 +618,7 @@ const routeDetail = shape<RouteDetail>(
 
 // Findings (sub-phase 3.1).
 const severity = { severity: { error: 1, warning: 1, info: 1 } } as const;
-const findingRow = shape<FindingRow>(
+const findingItem = shape<FindingItem>(
   {
     id: "!",
     code: "!",
@@ -642,7 +642,7 @@ const suggestedFix = shape<SuggestedFix>(
 );
 const findingDetail = shape<FindingDetail>(
   { install: "!", finding: "!", suggestedFix: "?", nextSteps: "?", affected: "!", collectedAt: "!" },
-  { finding: findingRow, suggestedFix, nextSteps: nextStep, affected: page(linkedRef) },
+  { finding: findingItem, suggestedFix, nextSteps: nextStep, affected: page(linkedRef) },
 );
 
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
@@ -725,8 +725,8 @@ describe("types.ts matches the golden v1 wire format", () => {
       routeDetail,
     ],
     ["health-evidence-restricted", healthEvidenceRestrictedGolden.body satisfies Wide<HealthReport>, healthReport],
-    ["findings", findingsGolden.body satisfies Wide<Page<FindingRow>>, page(findingRow)],
-    ["findings-restricted", findingsRestrictedGolden.body satisfies Wide<Page<FindingRow>>, page(findingRow)],
+    ["findings", findingsGolden.body satisfies Wide<Page<FindingItem>>, page(findingItem)],
+    ["findings-restricted", findingsRestrictedGolden.body satisfies Wide<Page<FindingItem>>, page(findingItem)],
     ["finding-detail-other", findingDetailOtherGolden.body satisfies Wide<FindingDetail>, findingDetail],
     ["finding-detail-restricted", findingDetailRestrictedGolden.body satisfies Wide<FindingDetail>, findingDetail],
   ] as const)("%s", (_, body, s) => {

@@ -3,11 +3,11 @@ import type { ApiError } from "./client";
 import { apiFetch } from "./client";
 import { forInstall, seg, useList, withQuery } from "./exploreHooks";
 import { installApi, live } from "./hooks";
-import type { FindingDetail, FindingRow } from "./types";
+import type { FindingDetail, FindingItem } from "./types";
 
 /** GET …/findings with the page's query string (filters, sort, cursor); a 400 on a cursor loads page one. */
 export function useFindings(id: string, query: URLSearchParams) {
-  return useList<FindingRow>(id, "findings", query);
+  return useList<FindingItem>(id, "findings", query);
 }
 
 /**
