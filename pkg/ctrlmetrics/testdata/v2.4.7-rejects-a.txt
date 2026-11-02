@@ -1,0 +1,712 @@
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 1.7166e-05
+go_gc_duration_seconds{quantile="0.25"} 4.6709e-05
+go_gc_duration_seconds{quantile="0.5"} 8.254e-05
+go_gc_duration_seconds{quantile="0.75"} 0.000103208
+go_gc_duration_seconds{quantile="1"} 0.002588788
+go_gc_duration_seconds_sum 0.011084276
+go_gc_duration_seconds_count 37
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 8.308350976e+09
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 759
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.26.9"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 2.7181984e+07
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 7.325794e+08
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 1.558093e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 1.0521185e+07
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 4.973824e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 2.7181984e+07
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 3.0031872e+07
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 3.7699584e+07
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 119453
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 7.225344e+06
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 6.7731456e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.793616654314338e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 1.0640638e+07
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 9184
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 16072
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 509280
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 897600
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 5.5624138e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 1.002691e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 3.571712e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 3.571712e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 7.9751448e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 4
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 10
+# HELP kgateway_controller_reconcile_duration_seconds Reconcile duration for controller
+# TYPE kgateway_controller_reconcile_duration_seconds histogram
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.01"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.025"} 5
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.05"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.1"} 7
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.25"} 8
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="0.5"} 8
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="1"} 8
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="2.5"} 8
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="5"} 8
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="edge",namespace="infra",le="+Inf"} 8
+kgateway_controller_reconcile_duration_seconds_sum{controller="gateway",name="edge",namespace="infra"} 0.23230114600000001
+kgateway_controller_reconcile_duration_seconds_count{controller="gateway",name="edge",namespace="infra"} 8
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.01"} 4
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.025"} 16
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.05"} 17
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.1"} 18
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.25"} 19
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="0.5"} 19
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="1"} 19
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="2.5"} 19
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="5"} 19
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="nack",namespace="infra",le="+Inf"} 19
+kgateway_controller_reconcile_duration_seconds_sum{controller="gateway",name="nack",namespace="infra"} 0.381060761
+kgateway_controller_reconcile_duration_seconds_count{controller="gateway",name="nack",namespace="infra"} 19
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.01"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.05"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.1"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.25"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="0.5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="1"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="2.5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gateway",name="self",namespace="infra",le="+Inf"} 1
+kgateway_controller_reconcile_duration_seconds_sum{controller="gateway",name="self",namespace="infra"} 0.099454487
+kgateway_controller_reconcile_duration_seconds_count{controller="gateway",name="self",namespace="infra"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.01"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.025"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.05"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.1"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.25"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="0.5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="1"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="2.5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="5"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="",namespace="",le="+Inf"} 1
+kgateway_controller_reconcile_duration_seconds_sum{controller="gatewayclass",name="",namespace=""} 0.007905861
+kgateway_controller_reconcile_duration_seconds_count{controller="gatewayclass",name="",namespace=""} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.0005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.001"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.0025"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.005"} 0
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.01"} 1
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.025"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.05"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.1"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.25"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="0.5"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="1"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="2.5"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="5"} 2
+kgateway_controller_reconcile_duration_seconds_bucket{controller="gatewayclass",name="kgateway",namespace="",le="+Inf"} 2
+kgateway_controller_reconcile_duration_seconds_sum{controller="gatewayclass",name="kgateway",namespace=""} 0.02205221
+kgateway_controller_reconcile_duration_seconds_count{controller="gatewayclass",name="kgateway",namespace=""} 2
+# HELP kgateway_controller_reconciliations_running Number of reconciliations currently running
+# TYPE kgateway_controller_reconciliations_running gauge
+kgateway_controller_reconciliations_running{controller="gateway",name="edge",namespace="infra"} 0
+kgateway_controller_reconciliations_running{controller="gateway",name="nack",namespace="infra"} 0
+kgateway_controller_reconciliations_running{controller="gateway",name="self",namespace="infra"} 0
+kgateway_controller_reconciliations_running{controller="gatewayclass",name="",namespace=""} 0
+kgateway_controller_reconciliations_running{controller="gatewayclass",name="kgateway",namespace=""} 0
+# HELP kgateway_controller_reconciliations_total Total number of controller reconciliations
+# TYPE kgateway_controller_reconciliations_total counter
+kgateway_controller_reconciliations_total{controller="gateway",name="edge",namespace="infra",result="success"} 8
+kgateway_controller_reconciliations_total{controller="gateway",name="nack",namespace="infra",result="success"} 19
+kgateway_controller_reconciliations_total{controller="gateway",name="self",namespace="infra",result="success"} 1
+kgateway_controller_reconciliations_total{controller="gatewayclass",name="",namespace="",result="success"} 1
+kgateway_controller_reconciliations_total{controller="gatewayclass",name="kgateway",namespace="",result="error"} 1
+kgateway_controller_reconciliations_total{controller="gatewayclass",name="kgateway",namespace="",result="success"} 1
+# HELP kgateway_envoy_xds_rejects_active Number of xDS responses currently rejected by envoy proxy
+# TYPE kgateway_envoy_xds_rejects_active gauge
+kgateway_envoy_xds_rejects_active{gateway_name="edge",gateway_namespace="infra",type_url="envoy.config.cluster.v3.Cluster"} 1
+kgateway_envoy_xds_rejects_active{gateway_name="nack",gateway_namespace="infra",type_url="envoy.config.cluster.v3.Cluster"} 1
+kgateway_envoy_xds_rejects_active{gateway_name="nack",gateway_namespace="infra",type_url="envoy.config.route.v3.RouteConfiguration"} 1
+# HELP kgateway_envoy_xds_rejects_total Total number of xDS responses rejected by envoy proxy
+# TYPE kgateway_envoy_xds_rejects_total counter
+kgateway_envoy_xds_rejects_total{gateway_name="edge",gateway_namespace="infra",type_url="envoy.config.cluster.v3.Cluster"} 2
+kgateway_envoy_xds_rejects_total{gateway_name="nack",gateway_namespace="infra",type_url="envoy.config.cluster.v3.Cluster"} 3
+kgateway_envoy_xds_rejects_total{gateway_name="nack",gateway_namespace="infra",type_url="envoy.config.route.v3.RouteConfiguration"} 3
+# HELP kgateway_resources_managed Current number of resources managed
+# TYPE kgateway_resources_managed gauge
+kgateway_resources_managed{namespace="infra",parent="edge",resource="Gateway"} 1
+kgateway_resources_managed{namespace="infra",parent="nack",resource="Gateway"} 1
+kgateway_resources_managed{namespace="infra",parent="self",resource="Gateway"} 1
+kgateway_resources_managed{namespace="shop",parent="",resource="BackendConfigPolicy"} 1
+kgateway_resources_managed{namespace="shop",parent="",resource="TrafficPolicy"} 1
+kgateway_resources_managed{namespace="shop",parent="edge",resource="HTTPRoute"} 2
+kgateway_resources_managed{namespace="shop",parent="nack",resource="HTTPRoute"} 2
+# HELP kgateway_resources_status_sync_duration_seconds Duration of time for a resource update to receive a status report
+# TYPE kgateway_resources_status_sync_duration_seconds histogram
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="0.1"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="0.5"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="1"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="2.5"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="5"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="10"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="30"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="60"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="120"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="300"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="600"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="1200"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="1800"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="",namespace="shop",resource="BackendConfigPolicy",le="+Inf"} 3
+kgateway_resources_status_sync_duration_seconds_sum{gateway="",namespace="shop",resource="BackendConfigPolicy"} 0.00372041
+kgateway_resources_status_sync_duration_seconds_count{gateway="",namespace="shop",resource="BackendConfigPolicy"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="0.1"} 0
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="0.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="2.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="10"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="30"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="60"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="120"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="300"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="600"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="1200"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="1800"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="infra",resource="Gateway",le="+Inf"} 2
+kgateway_resources_status_sync_duration_seconds_sum{gateway="edge",namespace="infra",resource="Gateway"} 68.457244604
+kgateway_resources_status_sync_duration_seconds_count{gateway="edge",namespace="infra",resource="Gateway"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="0.1"} 0
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="0.5"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="1"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="2.5"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="5"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="10"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="30"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="60"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="120"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="300"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="600"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="1200"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="1800"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="edge",namespace="shop",resource="HTTPRoute",le="+Inf"} 2
+kgateway_resources_status_sync_duration_seconds_sum{gateway="edge",namespace="shop",resource="HTTPRoute"} 0.567590354
+kgateway_resources_status_sync_duration_seconds_count{gateway="edge",namespace="shop",resource="HTTPRoute"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="0.1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="0.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="2.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="10"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="30"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="60"} 2
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="120"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="300"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="600"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="1200"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="1800"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="infra",resource="Gateway",le="+Inf"} 3
+kgateway_resources_status_sync_duration_seconds_sum{gateway="nack",namespace="infra",resource="Gateway"} 95.181850212
+kgateway_resources_status_sync_duration_seconds_count{gateway="nack",namespace="infra",resource="Gateway"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="0.1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="0.5"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="1"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="2.5"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="5"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="10"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="30"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="60"} 3
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="120"} 5
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="300"} 5
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="600"} 5
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="1200"} 5
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="1800"} 5
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="nack",namespace="shop",resource="HTTPRoute",le="+Inf"} 5
+kgateway_resources_status_sync_duration_seconds_sum{gateway="nack",namespace="shop",resource="HTTPRoute"} 136.63025201400004
+kgateway_resources_status_sync_duration_seconds_count{gateway="nack",namespace="shop",resource="HTTPRoute"} 5
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="0.1"} 0
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="0.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="1"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="2.5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="5"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="10"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="30"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="60"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="120"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="300"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="600"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="1200"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="1800"} 1
+kgateway_resources_status_sync_duration_seconds_bucket{gateway="self",namespace="infra",resource="Gateway",le="+Inf"} 1
+kgateway_resources_status_sync_duration_seconds_sum{gateway="self",namespace="infra",resource="Gateway"} 0.2037368
+kgateway_resources_status_sync_duration_seconds_count{gateway="self",namespace="infra",resource="Gateway"} 1
+# HELP kgateway_resources_status_syncs_completed_total Total number of status syncs completed for resources
+# TYPE kgateway_resources_status_syncs_completed_total counter
+kgateway_resources_status_syncs_completed_total{gateway="",namespace="shop",resource="BackendConfigPolicy"} 3
+kgateway_resources_status_syncs_completed_total{gateway="edge",namespace="infra",resource="Gateway"} 2
+kgateway_resources_status_syncs_completed_total{gateway="edge",namespace="shop",resource="HTTPRoute"} 2
+kgateway_resources_status_syncs_completed_total{gateway="nack",namespace="infra",resource="Gateway"} 3
+kgateway_resources_status_syncs_completed_total{gateway="nack",namespace="shop",resource="HTTPRoute"} 5
+kgateway_resources_status_syncs_completed_total{gateway="self",namespace="infra",resource="Gateway"} 1
+# HELP kgateway_resources_status_syncs_started_total Total number of status syncs started
+# TYPE kgateway_resources_status_syncs_started_total counter
+kgateway_resources_status_syncs_started_total{gateway="",namespace="shop",resource="BackendConfigPolicy"} 3
+kgateway_resources_status_syncs_started_total{gateway="",namespace="shop",resource="TrafficPolicy"} 1
+kgateway_resources_status_syncs_started_total{gateway="edge",namespace="infra",resource="Gateway"} 2
+kgateway_resources_status_syncs_started_total{gateway="edge",namespace="shop",resource="HTTPRoute"} 2
+kgateway_resources_status_syncs_started_total{gateway="nack",namespace="infra",resource="Gateway"} 4
+kgateway_resources_status_syncs_started_total{gateway="nack",namespace="shop",resource="HTTPRoute"} 6
+kgateway_resources_status_syncs_started_total{gateway="self",namespace="infra",resource="Gateway"} 1
+# HELP kgateway_resources_updates_dropped_total Total number of resources metrics updates dropped. If this metric is ever greater than 0, all resources subsystem metrics should be considered invalid until process restart
+# TYPE kgateway_resources_updates_dropped_total counter
+kgateway_resources_updates_dropped_total 0
+# HELP kgateway_routing_domains Number of domains per listener
+# TYPE kgateway_routing_domains gauge
+kgateway_routing_domains{gateway="edge",namespace="infra",port="8080"} 1
+kgateway_routing_domains{gateway="nack",namespace="infra",port="8080"} 1
+kgateway_routing_domains{gateway="self",namespace="infra",port="8080"} 0
+# HELP kgateway_status_syncer_status_sync_duration_seconds Status sync duration
+# TYPE kgateway_status_syncer_status_sync_duration_seconds histogram
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.0005"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.001"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.0025"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.005"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.01"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.025"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.05"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.1"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.25"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="0.5"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="1"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="2.5"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="5"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer",le="+Inf"} 2
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer"} 0.00357591
+kgateway_status_syncer_status_sync_duration_seconds_count{name="BackendConfigPolicy",namespace="shop",syncer="PolicyStatusSyncer"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.0005"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.001"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.0025"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.005"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.01"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.025"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.05"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.1"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.25"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="0.5"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="1"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="2.5"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="5"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="infra",syncer="GatewayStatusSyncer",le="+Inf"} 4
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="edge",namespace="infra",syncer="GatewayStatusSyncer"} 0.21026432999999997
+kgateway_status_syncer_status_sync_duration_seconds_count{name="edge",namespace="infra",syncer="GatewayStatusSyncer"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.0005"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.001"} 4
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.0025"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.005"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.01"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.025"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.05"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.1"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.25"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="0.5"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="1"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="2.5"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="5"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="edge",namespace="shop",syncer="RouteStatusSyncer",le="+Inf"} 6
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="edge",namespace="shop",syncer="RouteStatusSyncer"} 0.004451240999999999
+kgateway_status_syncer_status_sync_duration_seconds_count{name="edge",namespace="shop",syncer="RouteStatusSyncer"} 6
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.0005"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.001"} 0
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.0025"} 1
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.005"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.01"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.025"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.05"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.1"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.25"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="0.5"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="1"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="2.5"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="5"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="infra",syncer="GatewayStatusSyncer",le="+Inf"} 3
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="nack",namespace="infra",syncer="GatewayStatusSyncer"} 0.009471025000000001
+kgateway_status_syncer_status_sync_duration_seconds_count{name="nack",namespace="infra",syncer="GatewayStatusSyncer"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.0005"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.001"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.0025"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.005"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.01"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.025"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.05"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.1"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.25"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="0.5"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="1"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="2.5"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="5"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="nack",namespace="shop",syncer="RouteStatusSyncer",le="+Inf"} 5
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="nack",namespace="shop",syncer="RouteStatusSyncer"} 0.006005949
+kgateway_status_syncer_status_sync_duration_seconds_count{name="nack",namespace="shop",syncer="RouteStatusSyncer"} 5
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.0005"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.001"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.0025"} 2
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.005"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.01"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.025"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.05"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.1"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.25"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="0.5"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="1"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="2.5"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="5"} 3
+kgateway_status_syncer_status_sync_duration_seconds_bucket{name="self",namespace="infra",syncer="GatewayStatusSyncer",le="+Inf"} 3
+kgateway_status_syncer_status_sync_duration_seconds_sum{name="self",namespace="infra",syncer="GatewayStatusSyncer"} 0.0028869959999999997
+kgateway_status_syncer_status_sync_duration_seconds_count{name="self",namespace="infra",syncer="GatewayStatusSyncer"} 3
+# HELP kgateway_status_syncer_status_syncs_total Total number of status syncs
+# TYPE kgateway_status_syncer_status_syncs_total counter
+kgateway_status_syncer_status_syncs_total{name="BackendConfigPolicy",namespace="shop",result="success",syncer="PolicyStatusSyncer"} 2
+kgateway_status_syncer_status_syncs_total{name="edge",namespace="infra",result="success",syncer="GatewayStatusSyncer"} 4
+kgateway_status_syncer_status_syncs_total{name="edge",namespace="shop",result="success",syncer="RouteStatusSyncer"} 6
+kgateway_status_syncer_status_syncs_total{name="nack",namespace="infra",result="success",syncer="GatewayStatusSyncer"} 3
+kgateway_status_syncer_status_syncs_total{name="nack",namespace="shop",result="success",syncer="RouteStatusSyncer"} 5
+kgateway_status_syncer_status_syncs_total{name="self",namespace="infra",result="success",syncer="GatewayStatusSyncer"} 3
+# HELP kgateway_translator_translation_duration_seconds Translation duration
+# TYPE kgateway_translator_translation_duration_seconds histogram
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.0001"} 2
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.00025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.0005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.0025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.01"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.05"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.25"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="0.5"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateGateway",le="+Inf"} 3
+kgateway_translator_translation_duration_seconds_sum{name="edge",namespace="infra",translator="TranslateGateway"} 0.000177293
+kgateway_translator_translation_duration_seconds_count{name="edge",namespace="infra",translator="TranslateGateway"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.0001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.00025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.0005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.0025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.01"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.05"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.25"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="0.5"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="infra",translator="TranslateListeners",le="+Inf"} 3
+kgateway_translator_translation_duration_seconds_sum{name="edge",namespace="infra",translator="TranslateListeners"} 6.4e-05
+kgateway_translator_translation_duration_seconds_count{name="edge",namespace="infra",translator="TranslateListeners"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.0001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.00025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.0005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.001"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.0025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.005"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.01"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.025"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.05"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.25"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="0.5"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="1"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="edge",namespace="shop",translator="TranslateHTTPRoute",le="+Inf"} 3
+kgateway_translator_translation_duration_seconds_sum{name="edge",namespace="shop",translator="TranslateHTTPRoute"} 1.2917000000000002e-05
+kgateway_translator_translation_duration_seconds_count{name="edge",namespace="shop",translator="TranslateHTTPRoute"} 3
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.0001"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.00025"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.0005"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.001"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.0025"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.005"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.01"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.025"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.05"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.1"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.25"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="0.5"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="1"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateGateway",le="+Inf"} 8
+kgateway_translator_translation_duration_seconds_sum{name="nack",namespace="infra",translator="TranslateGateway"} 0.000250875
+kgateway_translator_translation_duration_seconds_count{name="nack",namespace="infra",translator="TranslateGateway"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.0001"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.00025"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.0005"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.001"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.0025"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.005"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.01"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.025"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.05"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.1"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.25"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="0.5"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="1"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="infra",translator="TranslateListeners",le="+Inf"} 8
+kgateway_translator_translation_duration_seconds_sum{name="nack",namespace="infra",translator="TranslateListeners"} 0.00012883399999999998
+kgateway_translator_translation_duration_seconds_count{name="nack",namespace="infra",translator="TranslateListeners"} 8
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.0001"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.00025"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.0005"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.001"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.0025"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.005"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.01"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.025"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.05"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.1"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.25"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="0.5"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="1"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="nack",namespace="shop",translator="TranslateHTTPRoute",le="+Inf"} 11
+kgateway_translator_translation_duration_seconds_sum{name="nack",namespace="shop",translator="TranslateHTTPRoute"} 1.6959e-05
+kgateway_translator_translation_duration_seconds_count{name="nack",namespace="shop",translator="TranslateHTTPRoute"} 11
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.0001"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.00025"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.0005"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.001"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.0025"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.005"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.01"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.025"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.05"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.1"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.25"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="0.5"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="1"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateGateway",le="+Inf"} 1
+kgateway_translator_translation_duration_seconds_sum{name="self",namespace="infra",translator="TranslateGateway"} 2.4916e-05
+kgateway_translator_translation_duration_seconds_count{name="self",namespace="infra",translator="TranslateGateway"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.0001"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.00025"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.0005"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.001"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.0025"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.005"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.01"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.025"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.05"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.1"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.25"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="0.5"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="1"} 1
+kgateway_translator_translation_duration_seconds_bucket{name="self",namespace="infra",translator="TranslateListeners",le="+Inf"} 1
+kgateway_translator_translation_duration_seconds_sum{name="self",namespace="infra",translator="TranslateListeners"} 9.917e-06
+kgateway_translator_translation_duration_seconds_count{name="self",namespace="infra",translator="TranslateListeners"} 1
+# HELP kgateway_translator_translations_running Current number of translations running
+# TYPE kgateway_translator_translations_running gauge
+kgateway_translator_translations_running{name="edge",namespace="infra",translator="TranslateGateway"} 0
+kgateway_translator_translations_running{name="edge",namespace="infra",translator="TranslateListeners"} 0
+kgateway_translator_translations_running{name="edge",namespace="shop",translator="TranslateHTTPRoute"} 0
+kgateway_translator_translations_running{name="nack",namespace="infra",translator="TranslateGateway"} 0
+kgateway_translator_translations_running{name="nack",namespace="infra",translator="TranslateListeners"} 0
+kgateway_translator_translations_running{name="nack",namespace="shop",translator="TranslateHTTPRoute"} 0
+kgateway_translator_translations_running{name="self",namespace="infra",translator="TranslateGateway"} 0
+kgateway_translator_translations_running{name="self",namespace="infra",translator="TranslateListeners"} 0
+# HELP kgateway_translator_translations_total Total number of translations
+# TYPE kgateway_translator_translations_total counter
+kgateway_translator_translations_total{name="edge",namespace="infra",result="success",translator="TranslateGateway"} 3
+kgateway_translator_translations_total{name="edge",namespace="infra",result="success",translator="TranslateListeners"} 3
+kgateway_translator_translations_total{name="edge",namespace="shop",result="success",translator="TranslateHTTPRoute"} 3
+kgateway_translator_translations_total{name="nack",namespace="infra",result="success",translator="TranslateGateway"} 8
+kgateway_translator_translations_total{name="nack",namespace="infra",result="success",translator="TranslateListeners"} 8
+kgateway_translator_translations_total{name="nack",namespace="shop",result="success",translator="TranslateHTTPRoute"} 11
+kgateway_translator_translations_total{name="self",namespace="infra",result="success",translator="TranslateGateway"} 1
+kgateway_translator_translations_total{name="self",namespace="infra",result="success",translator="TranslateListeners"} 1
+# HELP kgateway_validation_mode Configured validation mode. The active mode series has value 1.
+# TYPE kgateway_validation_mode gauge
+kgateway_validation_mode{mode="STANDARD",validator_mode="CACHE"} 1
+# HELP kgateway_xds_auth_rq_success_total Total number of successful xDS auth requests
+# TYPE kgateway_xds_auth_rq_success_total counter
+kgateway_xds_auth_rq_success_total 5
+# HELP kgateway_xds_auth_rq_total Total number of xDS auth requests
+# TYPE kgateway_xds_auth_rq_total counter
+kgateway_xds_auth_rq_total 5
+# HELP kgateway_xds_snapshot_resources Current number of resources in XDS snapshot
+# TYPE kgateway_xds_snapshot_resources gauge
+kgateway_xds_snapshot_resources{gateway="edge",namespace="infra",resource="Cluster"} 4
+kgateway_xds_snapshot_resources{gateway="edge",namespace="infra",resource="Endpoint"} 5
+kgateway_xds_snapshot_resources{gateway="edge",namespace="infra",resource="Listener"} 1
+kgateway_xds_snapshot_resources{gateway="edge",namespace="infra",resource="Route"} 1
+kgateway_xds_snapshot_resources{gateway="edge",namespace="infra",resource="Secret"} 0
+kgateway_xds_snapshot_resources{gateway="nack",namespace="infra",resource="Cluster"} 4
+kgateway_xds_snapshot_resources{gateway="nack",namespace="infra",resource="Endpoint"} 5
+kgateway_xds_snapshot_resources{gateway="nack",namespace="infra",resource="Listener"} 1
+kgateway_xds_snapshot_resources{gateway="nack",namespace="infra",resource="Route"} 1
+kgateway_xds_snapshot_resources{gateway="nack",namespace="infra",resource="Secret"} 0
+# HELP kgateway_xds_snapshot_sync_duration_seconds Duration of time for a gateway resource update to be synced in an XDS snapshot
+# TYPE kgateway_xds_snapshot_sync_duration_seconds histogram
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.1"} 0
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.5"} 0
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="1"} 0
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="2.5"} 0
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="5"} 0
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="10"} 0
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="30"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="60"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="120"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="300"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="600"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="1200"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="1800"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="edge",namespace="infra",le="+Inf"} 1
+kgateway_xds_snapshot_sync_duration_seconds_sum{gateway="edge",namespace="infra"} 11.290830689
+kgateway_xds_snapshot_sync_duration_seconds_count{gateway="edge",namespace="infra"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.1"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.5"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="1"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="2.5"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="5"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="10"} 1
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="30"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="60"} 2
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="120"} 3
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="300"} 3
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="600"} 3
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="1200"} 3
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="1800"} 3
+kgateway_xds_snapshot_sync_duration_seconds_bucket{gateway="nack",namespace="infra",le="+Inf"} 3
+kgateway_xds_snapshot_sync_duration_seconds_sum{gateway="nack",namespace="infra"} 118.09853541000001
+kgateway_xds_snapshot_sync_duration_seconds_count{gateway="nack",namespace="infra"} 3
+# HELP kgateway_xds_snapshot_syncs_total Total number of XDS snapshot syncs
+# TYPE kgateway_xds_snapshot_syncs_total counter
+kgateway_xds_snapshot_syncs_total{gateway="edge",namespace="infra"} 1
+kgateway_xds_snapshot_syncs_total{gateway="nack",namespace="infra"} 3
+# HELP kgateway_xds_snapshot_transform_duration_seconds XDS snapshot transform duration
+# TYPE kgateway_xds_snapshot_transform_duration_seconds histogram
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.0005"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.001"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.0025"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.005"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.01"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.025"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.05"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.1"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.25"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="0.5"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="1"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="2.5"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="5"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="edge",namespace="infra",le="+Inf"} 31
+kgateway_xds_snapshot_transform_duration_seconds_sum{gateway="edge",namespace="infra"} 0.00036108200000000015
+kgateway_xds_snapshot_transform_duration_seconds_count{gateway="edge",namespace="infra"} 31
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.0005"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.001"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.0025"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.005"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.01"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.025"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.05"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.1"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.25"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="0.5"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="1"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="2.5"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="5"} 24
+kgateway_xds_snapshot_transform_duration_seconds_bucket{gateway="nack",namespace="infra",le="+Inf"} 24
+kgateway_xds_snapshot_transform_duration_seconds_sum{gateway="nack",namespace="infra"} 0.00021820800000000004
+kgateway_xds_snapshot_transform_duration_seconds_count{gateway="nack",namespace="infra"} 24
+# HELP kgateway_xds_snapshot_transforms_total Total number of XDS snapshot transforms
+# TYPE kgateway_xds_snapshot_transforms_total counter
+kgateway_xds_snapshot_transforms_total{gateway="edge",namespace="infra",result="success"} 31
+kgateway_xds_snapshot_transforms_total{gateway="nack",namespace="infra",result="success"} 24
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 3.84
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.073741816e+09
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 2.26290704e+08
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 3.938155e+06
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 16
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 1.50458368e+08
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.79361641293e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.4999552e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19

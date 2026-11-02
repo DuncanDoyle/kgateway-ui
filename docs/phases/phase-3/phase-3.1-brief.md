@@ -109,7 +109,18 @@ The 10-minute spec-edit run recomputes 1.3 times a second, more than the annotat
 
 **Memoization** (Task 18, 2026-11-02, local, `286e7ea` against Task 18, run back-to-back). `BenchmarkCompute` large median 33.5–34.1 → 32.9–33.0 ms, large-hit 19.9–20.0 → 20.3–20.8 ms, +40 allocs per compute; `TestBudgetWarmRecompute` consistent / contradicting 33.0 / 39.1 → 33.8 / 39.4 ms. The delta is noise: every Phase 1 and 2 check that reads objects declares `Clock` through `AllInputs`, so only cluster access, served kinds and controller scope are memoized.
 
-**Captures.** The NACK observation and the 2.5 timebox outcome are recorded here by Task 20.
+**Captures** (Task 20, 2026-11-02, kind, `NACK=1`). `test/e2e/fixtures/nack.yaml` adds Gateway `infra/nack` with two proxy replicas and two rejects:
+1. RouteConfiguration: an HTTPRoute `RegularExpression` path `/nack/[a-z0-9]{200}`; Envoy: "RE2 program size of 410 > max program size of 100".
+2. Cluster: a BackendConfigPolicy with cipher suite `NOT-A-CIPHER` on Service `shop/httpbin-nack`; Envoy: "Failed to initialize cipher suites". Clusters reach every proxy, so `edge` rejects the Cluster too.
+
+| Tag | One controller | Two controllers, per replica | After deleting one replica (survivor) | Gateways `Programmed` |
+|---|---|---|---|---|
+| v2.3.11 | `nack` active 2 per type, `edge` Cluster 1 | a: `nack` 1 + 1, `edge` 1; b: `nack` 1 + 1 | `nack` 2 per type, `edge` 1; totals 4, 4, 2 | True |
+| v2.4.7 | same | a: `nack` 1 + 1, `edge` 1; b: `nack` 1 + 1 (no `edge` series) | `nack` 2 per type, `edge` 1; totals 4, 4, 1 | True |
+
+Proxy stats on a rejecting `nack` Pod: `cluster_manager.cds.update_rejected` and `http.http.rds.listener~8080.update_rejected` climb to several hundred within two minutes on both tags. The replacement controller Pod reports no reject series. Envoy names: route config `listener~8080`, cluster `kube_shop_httpbin-nack_8000`.
+
+2.5 timebox: `v2.5.0-rc.1` with Gateway API `v1.7.0-rc.3` set up and rejected the same way. `v2.5.0-rc.1-perclient.txt` has `kgateway_build_info`, `perclient_defers_total`, `perclient_reclaimed_total` and `deferred_clients`. `perclient_withheld_clients` and `perclient_bounded_publishes_total` have no series without a withheld client, so those captures land in 3.4. `rejects_total` counts episodes on 2.5, and `nack_resends_suppressed_total` is new.
 
 Reminders for the user (not blocking): the open item in design §25 (filing the reject-status draft), and the upstream scope-endpoint issue (carry-over P3). Filing both stays the user's call.
 
