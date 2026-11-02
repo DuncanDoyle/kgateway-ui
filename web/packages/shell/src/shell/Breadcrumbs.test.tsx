@@ -385,3 +385,25 @@ test("a lookup that succeeded is not sent again on reconnect", async () => {
   await act(() => new Promise((r) => setTimeout(r, 0)));
   expect(refCalls(f)).toHaveLength(1);
 });
+
+test("a retry scheduled before a reconnect recovered the lookup never runs", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const f = flakyRefs(2);
+    renderWithTheme(<Breadcrumbs current="shown" />, { path: at([gateway]) });
+    await waitFor(() => expect(refCalls(f)).toHaveLength(1));
+    // The first retry fails too and schedules a second one.
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    await waitFor(() => expect(refCalls(f)).toHaveLength(2));
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(await trail().findByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
+    const settled = refCalls(f).length;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(refCalls(f)).toHaveLength(settled);
+    expect(trail().getByRole("link", { name: "Gateway infra/edge" })).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
+});

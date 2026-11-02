@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type { ApiError } from "./client";
 import { apiFetch } from "./client";
@@ -135,15 +135,25 @@ export function useTrailLinks(id: string, refs: readonly Ref[]) {
   const params = [...new Set(refs.map(trailParam))].sort();
   const key = params.length ? [`${installApi(id)}/refs`, ...params] : null;
   const [failing, setFailing] = useState(false);
+  // The pending retry; a success, a new key or unmount cancels it, so it never replaces a good answer.
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const cancel = () => clearTimeout(retry.current);
+  const keyId = key?.join(",") ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyId is the trigger; cancel reads only the ref.
+  useEffect(() => cancel, [keyId]);
   const { data, error } = useSWR<TrailRefs, ApiError>(key, fetchTrailLinks, {
-    onSuccess: () => setFailing(false),
+    onSuccess: () => {
+      cancel();
+      setFailing(false);
+    },
     revalidateOnFocus: false,
     // Config is read when the event fires, so a settled lookup never refetches on reconnect.
     revalidateOnReconnect: failing,
-    onErrorRetry: (e, _key, _config, revalidate, { retryCount }) => {
+    onErrorRetry: (e, _key, _config, revalidate, opts) => {
       setFailing(transient(e));
+      cancel();
       if (!transient(e)) return;
-      setTimeout(() => revalidate({ retryCount }), Math.min(1000 * 2 ** (retryCount - 1), 30_000));
+      retry.current = setTimeout(() => revalidate(opts), Math.min(1000 * 2 ** (opts.retryCount - 1), 30_000));
     },
   });
   return { data: forInstall(data, id), error, failed: error !== undefined && !transient(error) };
