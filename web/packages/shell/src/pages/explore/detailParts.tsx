@@ -108,6 +108,8 @@ interface DetailFrameProps {
   side?: ReactNode;
   /** Tabs after YAML; a ?tab= naming none of them shows Overview. */
   extraTabs?: ExtraTab[];
+  /** Refs the page's data links, for the trail above the header. */
+  trailRefs?: readonly LinkedRef[];
   stylesOverride?: SerializedStyles;
 }
 
@@ -121,6 +123,7 @@ export function DetailFrame({
   children,
   side,
   extraTabs,
+  trailRefs,
   stylesOverride,
 }: DetailFrameProps) {
   const vocab = useVocabulary();
@@ -217,6 +220,7 @@ export function DetailFrame({
           namespace={refValue.namespace}
           state={data?.health}
           collectedAt={data?.collectedAt}
+          trailRefs={trailRefs}
           actions={
             <>
               <CopyNameButton resource={refValue} />

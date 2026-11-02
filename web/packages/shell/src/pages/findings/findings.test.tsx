@@ -108,9 +108,12 @@ it("filters, sort and cursor round-trip through the URL", async () => {
   await userEvent.type(screen.getByRole("searchbox", { name: "Filter findings" }), "shop/");
   await waitFor(() => expect(listCalls().at(-1)?.searchParams.get("q")).toBe("shop/"));
   expect(search().get("q")).toBe("shop/");
-  // A finding opens its own page.
+  // A finding opens its own page, carrying the list and its filters as the start of the trail (D-035).
   await userEvent.click(screen.getByRole("link", { name: "Backend not found" }));
-  await waitFor(() => expect(location()).toBe(`/i/${ID}/findings/${findingsGolden.body.items[0]?.id}`));
+  await waitFor(() => expect(location().split("?")[0]).toBe(`/i/${ID}/findings/${findingsGolden.body.items[0]?.id}`));
+  const via = new URLSearchParams(location().split("?")[1]).get("via") ?? "";
+  expect(via.startsWith(`${ID}/findings?`)).toBe(true);
+  expect(new URLSearchParams(via.split("?")[1]).get("q")).toBe("shop/");
 });
 
 it("a 400 on a cursor drops it and loads page one", async () => {

@@ -14,12 +14,13 @@ import { type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useMe
 import { useNavigate } from "react-router-dom";
 import type { LinkedRef, Page } from "../api/types";
 import { listCopy } from "../copy/explorer";
+import { useLinkVia } from "../shell/trail";
 import { useMedia } from "../shell/useMedia";
 import { QuietButton } from "../states/controls";
 import { Shimmer } from "../states/Shimmer";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { SortState } from "./listQuery";
-import { objectPath } from "./objectPath";
+import { objectPath, withVia } from "./objectPath";
 import { Pager } from "./Pager";
 
 // region Styles
@@ -273,7 +274,11 @@ export function ObjectTable<T>({
   const secondary = columns.filter((c) => c.secondary);
   const collapse = narrow && secondary.length > 0;
   const keyOf = useCallback((r: T) => (rowKey ? rowKey(r) : refKey(rowRef(r))), [rowKey, rowRef]);
-  const pathOf = (r: T) => (rowPath ? rowPath(r) : objectPath(installId, rowRef(r)));
+  const via = useLinkVia(installId);
+  const pathOf = (r: T) => {
+    const to = rowPath ? rowPath(r) : objectPath(installId, rowRef(r));
+    return to ? withVia(to, via) : undefined;
+  };
   const toggle = useCallback(
     (k: string) =>
       setExpanded((prev) => {

@@ -12,7 +12,8 @@ import { listenerCopy, routeCopy, viewACopy } from "../../../copy/explorer";
 import { ComputedBadge, ComputedChip, computedTooltip } from "../../../explore/ComputedBadge";
 import { ConditionList } from "../../../explore/ConditionList";
 import { LinkedName } from "../../../explore/LinkedName";
-import { objectPath } from "../../../explore/objectPath";
+import { linkTarget } from "../../../explore/objectPath";
+import { useLinkVia } from "../../../shell/trail";
 import { InlineLink, TextButton } from "../../../states/controls";
 import { asText } from "./refs";
 
@@ -92,13 +93,15 @@ const Toggle = styled(TextButton)`
 /** One listener the parentRef attaches to, on one line: name, effective hostnames, a short state (design §8.4). */
 function ListenerItem({ installId, l }: { installId: string; l: ListenerAttachment }) {
   // A Gateway listener opens the Gateway page with it selected (design §8.1).
-  const to = l.resource.kind === "Gateway" ? objectPath(installId, l.resource) : undefined;
+  const via = useLinkVia(installId);
+  const to =
+    l.resource.kind === "Gateway" ? linkTarget(installId, l.resource, via, { listener: l.listener }) : undefined;
   // Hostnames are sent only when checked or disagrees; there an absent or empty list means any hostname.
   const known = l.computed.state === "checked" || l.computed.state === "disagrees";
   const hosts = l.effectiveHostnames?.length ? l.effectiveHostnames.join(", ") : listenerCopy.anyHostname;
   return (
     <li data-testid={`computed-listener-${l.listener}`} className="line">
-      {to ? <InlineLink to={`${to}?listener=${encodeURIComponent(l.listener)}`}>{l.listener}</InlineLink> : l.listener}
+      {to ? <InlineLink to={to}>{l.listener}</InlineLink> : l.listener}
       {known ? <span>{hosts}</span> : null}
       {/* The block's chip marks it computed; coverage and the unchecked hostnames are in the state's tooltip. */}
       <ComputedBadge

@@ -22,7 +22,7 @@ import {
   routeCopy,
   routeStateDelegationCopy,
 } from "../../copy/explorer";
-import { pseudoRules, renderWithTheme } from "../../test/render";
+import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { RoutePage } from "./RoutePage";
 import { RoutesPage } from "./RoutesPage";
@@ -611,7 +611,7 @@ it("a selected route's candidate banner names its parent", async () => {
   );
   mount(page("kids/s"));
   const banner = await screen.findByTestId("candidate-banner");
-  expect(within(banner).getByRole("link", { name: /shop\/w/ })).toHaveAttribute("href", page("shop/w"));
+  expect(hrefPath(within(banner).getByRole("link", { name: /shop\/w/ }))).toBe(page("shop/w"));
   expect(banner).toHaveTextContent(detailCopy.bannerSelected);
 });
 

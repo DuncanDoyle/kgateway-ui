@@ -14,7 +14,7 @@ import { POLL_MS } from "../../api/hooks";
 import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList, RouteRow } from "../../api/types";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
-import { pseudoRules, renderWithTheme } from "../../test/render";
+import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { HEADER_H } from "./detailParts";
 import { GatewayPage } from "./GatewayPage";
@@ -324,8 +324,7 @@ it("ListenerSets are paged through the list endpoint", async () => {
   await waitFor(() => expect(listCalls("listenersets").at(-1)?.searchParams.get("cursor")).toBe("p2"));
   // The page URL does not carry a sub-table's cursor.
   expect(location()).toBe(GW_PATH);
-  expect(within(rowOf(t, "partial")).getByRole("link", { name: "infra/partial" })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(rowOf(t, "partial")).getByRole("link", { name: "infra/partial" }))).toBe(
     `/i/${ID}/listenersets/${GW}/ListenerSet/infra/partial`,
   );
 });
@@ -351,10 +350,7 @@ it("ListenerSet page says when the parent Gateway is missing", async () => {
 it("a found parent Gateway links to its page", async () => {
   serve(api({ ls: ls(lsInvalidGolden) }));
   mount(LS_PATH("partial"));
-  expect(await screen.findByRole("link", { name: "infra/edge" })).toHaveAttribute(
-    "href",
-    `/i/${ID}/gateways/infra/edge`,
-  );
+  expect(hrefPath(await screen.findByRole("link", { name: "infra/edge" }))).toBe(`/i/${ID}/gateways/infra/edge`);
   expect(screen.queryByText("Not available")).toBeNull();
 });
 
@@ -413,8 +409,7 @@ it("candidate banner above the header", async () => {
   mount(GW_PATH);
   const banner = await screen.findByTestId("candidate-banner");
   expect(banner).toHaveTextContent("Not part of this install. Shown because HTTPRoute shop/mid refers to it.");
-  expect(within(banner).getByRole("link", { name: "shop/mid" })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(banner).getByRole("link", { name: "shop/mid" }))).toBe(
     `/i/${ID}/routes/${GW}/HTTPRoute/shop/mid`,
   );
   const header = screen.getByTestId("detail-header");
@@ -528,7 +523,7 @@ it("a detail 404 says the object is out of scope", async () => {
   serve((u) => (u.pathname === "/api/v1/meta" ? metaGolden.body : undefined));
   mount(GW_PATH);
   expect(await screen.findByText("Not in this install's scope")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Back to install" })).toHaveAttribute("href", `/i/${ID}`);
+  expect(hrefPath(screen.getByRole("link", { name: "Back to install" }))).toBe(`/i/${ID}`);
 });
 
 it("the header offers copy buttons", async () => {
@@ -866,8 +861,7 @@ it("an unknown-count listener shows the unknown state and its reason, never an e
   const box = await screen.findByTestId("listener-routes-unknown");
   expect(box).toHaveTextContent("Unknown: the UI cannot read a controller setting");
   expect(screen.queryByRole("table", { name: "Computed routes on listener tcp" })).toBeNull();
-  expect(within(box).getByRole("link", { name: /All routes of this Gateway/ })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(box).getByRole("link", { name: /All routes of this Gateway/ }))).toBe(
     `/i/${ID}/routes?parent=${encodeURIComponent(EDGE)}`,
   );
   // No member query for a listener whose count is unknown.

@@ -57,6 +57,15 @@ interface RoutePageProps {
   stylesOverride?: SerializedStyles;
 }
 
+/** The refs a route's data links: spec and status parents, and up-chain steps. */
+function linkedRefs(d: RouteDetail): LinkedRef[] {
+  const out: LinkedRef[] = [];
+  for (const p of d.parentRefs) if (p.target) out.push(p.target);
+  for (const p of d.parents) out.push(p.target);
+  for (const a of d.ancestors) for (const s of a.steps) if (s.ref) out.push(s.ref);
+  return out;
+}
+
 /** One HTTPRoute: up-chain, parents, rules as written and its child routes (design §8.5). */
 export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
   const id = useInstallId();
@@ -65,6 +74,8 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
   const { data, error } = useRouteDetail(id, ref);
   const hasDelegation = !!data?.rules.some((r) => r.backendRefs.some((b) => b.delegation));
   const unlisted = useMemo(() => (data ? unlistedRefs(data) : []), [data]);
+  // The parents and up-chain this page links decide the links of the same objects in the trail.
+  const trailRefs = useMemo(() => (data ? linkedRefs(data) : undefined), [data]);
   // View B's tab, only for a parent route on a server that serves …/delegation (/meta filters.delegation, PF8).
   const viewB = useListFilter("delegation", "outcome");
   const rules = data?.rules;
@@ -94,6 +105,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
       data={data}
       error={error}
       extraTabs={extraTabs}
+      trailRefs={trailRefs}
       stylesOverride={stylesOverride}
     >
       {data ? (

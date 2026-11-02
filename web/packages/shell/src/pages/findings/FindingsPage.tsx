@@ -10,6 +10,7 @@ import { columnCopy, listCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
+import { withVia } from "../../explore/objectPath";
 import { type FilterOption, FilterTag, StateFilter } from "../../explore/StateFilter";
 import { HealthBadge } from "../../health/HealthBadge";
 import { HealthIcon } from "../../health/HealthIcon";
@@ -17,6 +18,7 @@ import { StaleView } from "../../health/staleView";
 import { severityLabel, severityToState } from "../../health/state";
 import { installPath } from "../../shell/paths";
 import { Tooltip } from "../../shell/Tooltip";
+import { useLinkVia } from "../../shell/trail";
 import { Muted, NameCell, nameTip, OneLine } from "../explore/listParts";
 import { ago } from "../install/HealthStrip";
 
@@ -126,7 +128,7 @@ function SinceCell({ since }: { since?: string }) {
   return since ? <OneLine text={since}>{ago(since, now)}</OneLine> : <NoValue />;
 }
 
-function columns(installId: string): ObjectColumn<FindingItem>[] {
+function columns(installId: string, via?: string): ObjectColumn<FindingItem>[] {
   return [
     {
       id: "severity",
@@ -141,7 +143,8 @@ function columns(installId: string): ObjectColumn<FindingItem>[] {
       id: "finding",
       header: findingsCopy.finding,
       cell: (f) => {
-        const to = findingPath(installId, f);
+        const page = findingPath(installId, f);
+        const to = page ? withVia(page, via) : undefined;
         if (!to) return <Muted>{findingsCopy.restricted}</Muted>;
         const text = f.message ?? "";
         return (
@@ -192,7 +195,8 @@ export function FindingsPage({ stylesOverride }: FindingsPageProps = {}) {
   } as Record<string, boolean | undefined>;
   const skip = OPTIONAL.filter((k) => support[k] === false);
   const l = useListPage("findings", useFindings, skip);
-  const cols = useMemo(() => columns(l.id), [l.id]);
+  const via = useLinkVia(l.id);
+  const cols = useMemo(() => columns(l.id, via), [l.id, via]);
   const rowPath = useMemo(() => (f: FindingItem) => findingPath(l.id, f), [l.id]);
   return (
     <ListFrame

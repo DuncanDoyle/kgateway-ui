@@ -2,10 +2,12 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Box, Layers, Network, Route, Server } from "lucide-react";
 import type { ReactNode } from "react";
+import type { LinkedRef } from "../api/types";
 import { HealthBadge } from "../health/HealthBadge";
 import { DataAge } from "../pages/DataAge";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { HealthState } from "../theme/tokens";
+import { Breadcrumbs } from "./Breadcrumbs";
 
 // region Styles
 /** Height of the object header, fixed from the first render: state and age fill reserved space. */
@@ -116,10 +118,15 @@ export interface ObjectHeaderProps {
   collectedAt?: string;
   /** Buttons and links for the object, e.g. copy buttons. */
   actions?: ReactNode;
+  /** Refs the page's data holds, which decide the trail's links (see {@link Breadcrumbs}). */
+  trailRefs?: readonly LinkedRef[];
   stylesOverride?: SerializedStyles;
 }
 
-/** The identity of a detail page: kind, name in the page's largest type, namespace, state and data age (design §17.6). */
+/**
+ * The identity of a detail page: kind, name in the page's largest type, namespace, state and data age, with the
+ * trail above it on an install's object pages (design §17.6).
+ */
 export function ObjectHeader({
   kind,
   name,
@@ -127,29 +134,33 @@ export function ObjectHeader({
   state,
   collectedAt,
   actions,
+  trailRefs,
   stylesOverride,
 }: ObjectHeaderProps) {
   return (
-    <Header data-testid="detail-header" data-object-header="" stylesOverride={stylesOverride}>
-      {/* The heading reads "Kind namespace/name"; the visible kind and namespace repeat it, so they are hidden from readers. */}
-      <span className="kind" aria-hidden="true">
-        {kind.icon ?? defaultIcon(kind)}
-        {kind.label}
-      </span>
-      <span className="state">{state ? <HealthBadge state={state} /> : null}</span>
-      <div className="title">
-        <h1 title={namespace ? `${namespace}/${name}` : name}>
-          <VisuallyHidden>{namespace ? `${kind.label} ${namespace}/` : `${kind.label} `}</VisuallyHidden>
-          {name}
-        </h1>
-        {namespace ? (
-          <span className="ns" aria-hidden="true">
-            {objectHeaderCopy.namespace} <code>{namespace}</code>
-          </span>
-        ) : null}
-        {actions ? <span className="actions">{actions}</span> : null}
-      </div>
-      <span className="age">{collectedAt ? <DataAge collectedAt={collectedAt} /> : null}</span>
-    </Header>
+    <>
+      <Breadcrumbs refs={trailRefs} />
+      <Header data-testid="detail-header" data-object-header="" stylesOverride={stylesOverride}>
+        {/* The heading reads "Kind namespace/name"; the visible kind and namespace repeat it, so they are hidden from readers. */}
+        <span className="kind" aria-hidden="true">
+          {kind.icon ?? defaultIcon(kind)}
+          {kind.label}
+        </span>
+        <span className="state">{state ? <HealthBadge state={state} /> : null}</span>
+        <div className="title">
+          <h1 title={namespace ? `${namespace}/${name}` : name}>
+            <VisuallyHidden>{namespace ? `${kind.label} ${namespace}/` : `${kind.label} `}</VisuallyHidden>
+            {name}
+          </h1>
+          {namespace ? (
+            <span className="ns" aria-hidden="true">
+              {objectHeaderCopy.namespace} <code>{namespace}</code>
+            </span>
+          ) : null}
+          {actions ? <span className="actions">{actions}</span> : null}
+        </div>
+        <span className="age">{collectedAt ? <DataAge collectedAt={collectedAt} /> : null}</span>
+      </Header>
+    </>
   );
 }
