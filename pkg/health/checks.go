@@ -616,7 +616,12 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	inGrace := 0
 	for _, gw := range in.Owned.Gateways {
 		gwRef := objects.RefOf(gw)
-		d := process.ProxyDeployment(gwRef, in.Snapshot.Deployments, in.Install.ProxySelector)
+		d, ambiguous := process.LookupProxyDeployment(gwRef, in.Snapshot.Deployments, in.Install.ProxySelector)
+		if ambiguous {
+			fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
+				Resource: ref(gw), Message: proxyAmbiguousMessage})
+			continue
+		}
 		if d == nil {
 			if in.proxyMode(gw) == proxymode.SelfManaged {
 				fs = append(fs, Finding{Code: CodeSelfManagedProxy, Slug: "self-managed-proxy", Severity: SeverityInfo, Install: in.Install.ID(),
@@ -657,6 +662,9 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
+
+// proxyAmbiguousMessage is 006's message when several Deployments carry the Gateway's label.
+const proxyAmbiguousMessage = "More than one proxy deployment matches this Gateway"
 
 // xdsCheck: KGWUI-001.
 type xdsCheck struct{}

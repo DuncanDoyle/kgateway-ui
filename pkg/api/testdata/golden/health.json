@@ -71,9 +71,11 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
+        "detail": "Proxy Pods are not watched; proxies were not checked",
         "name": "process restarts",
         "ok": true,
-        "required": false
+        "required": false,
+        "unavailable": "off"
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",

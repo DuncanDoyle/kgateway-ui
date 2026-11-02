@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// Evidence is a finding's typed evidence (design §13.3), a tagged union on
-// its JSON "kind". The objects it quotes are in Finding.Evidence, so a caller
-// who may not view one of them gets no Evidence (§14 rule 12).
+// Evidence is a finding's typed evidence (design §13.3), tagged by its JSON
+// "kind"; the objects it quotes are in Finding.Evidence (§14 rule 12).
 type Evidence interface {
 	EvidenceKind() string
 }
@@ -15,8 +14,7 @@ type Evidence interface {
 // EvidenceProcess is the kind of ProcessEvidence.
 const EvidenceProcess = "process"
 
-// ProcessEvidence is one process's facts behind KGWUI-005, 006 and 019–021.
-// Pod names the process; its ref is in Finding.Evidence (§14 rule 16).
+// ProcessEvidence is one Pod's facts behind KGWUI-005, 006 and 019–021.
 type ProcessEvidence struct {
 	Pod string `json:"pod"`
 	// Restarts are the restarts observed in the window; nil when none was observed.

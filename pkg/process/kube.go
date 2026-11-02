@@ -35,6 +35,9 @@ func (Kube) Controller(in install.Resolved, snap *cache.Snapshot) Set {
 	s.Observed = true
 	probes := snap.Access[cache.EventsGVR].OK
 	for _, p := range in.Pods {
+		if p.DeletionTimestamp != nil {
+			continue // a terminating Pod's ended container is not a restart
+		}
 		s.Processes = append(s.Processes, fromPod(p, container(p, func(c corev1.Container) bool { return c.Name == in.Container }), snap, probes))
 	}
 	slices.SortFunc(s.Processes, func(a, b Process) int { return strings.Compare(a.Name, b.Name) })
@@ -58,7 +61,7 @@ func (Kube) Proxies(in install.Resolved, gw objects.Ref, snap *cache.Snapshot) S
 	s.Observed = true
 	probes := snap.Access[cache.EventsGVR].OK
 	for _, p := range snap.ProxyPods {
-		if p.Namespace == d.Namespace && sel.Matches(labels.Set(p.Labels)) {
+		if p.Namespace == d.Namespace && p.DeletionTimestamp == nil && sel.Matches(labels.Set(p.Labels)) {
 			s.Processes = append(s.Processes, fromPod(p, container(p, func(c corev1.Container) bool { return lastSegment(c.Image) == proxyImage }), snap, probes))
 		}
 	}
@@ -69,8 +72,15 @@ func (Kube) Proxies(in install.Resolved, gw objects.Ref, snap *cache.Snapshot) S
 // ProxyDeployment is gw's proxy Deployment among those sel matches: owned by gw,
 // else the only one labelled SafeGatewayLabelValue(gw.Name). A nil sel matches none.
 func ProxyDeployment(gw objects.Ref, ds []*appsv1.Deployment, sel labels.Selector) *appsv1.Deployment {
+	d, _ := LookupProxyDeployment(gw, ds, sel)
+	return d
+}
+
+// LookupProxyDeployment is ProxyDeployment that also reports whether several
+// label matches left none.
+func LookupProxyDeployment(gw objects.Ref, ds []*appsv1.Deployment, sel labels.Selector) (*appsv1.Deployment, bool) {
 	if sel == nil {
-		return nil
+		return nil, false
 	}
 	label := SafeGatewayLabelValue(gw.Name)
 	var byLabel []*appsv1.Deployment
@@ -80,7 +90,7 @@ func ProxyDeployment(gw objects.Ref, ds []*appsv1.Deployment, sel labels.Selecto
 		}
 		for _, o := range d.OwnerReferences {
 			if o.Kind == "Gateway" && o.Name == gw.Name && strings.HasPrefix(o.APIVersion, objects.GatewayAPIGroup+"/") {
-				return d
+				return d, false
 			}
 		}
 		if d.Labels["gateway.networking.k8s.io/gateway-name"] == label {
@@ -89,9 +99,9 @@ func ProxyDeployment(gw objects.Ref, ds []*appsv1.Deployment, sel labels.Selecto
 	}
 	// Several label matches cannot be told apart.
 	if len(byLabel) != 1 {
-		return nil
+		return nil, len(byLabel) > 1
 	}
-	return byLabel[0]
+	return byLabel[0], false
 }
 
 // desired is d's replica count; the API server defaults an unset one to 1.

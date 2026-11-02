@@ -15,17 +15,23 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
+
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 const healthPath = "/api/v1/installs/kgw.kgateway/health"
 
-// procWorld is world() with the controller Pod and the edge proxy replaced:
-// ctrl gets controller Pod kgateway-0's container status (nil keeps the
-// fixture's), and proxy, when set, replaces the edge proxy Deployment and adds pods.
+// procWorld is world() with ctrl applied to the controller Pod and, when set,
+// proxy replacing the edge proxy Deployment, plus pods.
 func procWorld(ctrl func(*corev1.Pod), proxy *appsv1.Deployment, pods ...*corev1.Pod) []runtime.Object {
 	objs := world()
 	for i, o := range objs {
@@ -446,5 +452,46 @@ func TestProcessEvidenceRestrictedAtTheAPI(t *testing.T) {
 		if tc.name == "deployment hidden" && (!f.Restricted || f.Message != "" || f.Detail != "") {
 			t.Fatalf("deployment hidden: %+v", f)
 		}
+	}
+}
+
+// R42: with the proxy Pod watch off or denied, the restart and probe results
+// name the gap and its reason; the controller's 019 still shows.
+func TestProxyPodsUnwatchedGapAtTheAPI(t *testing.T) {
+	restart := testutil.Now.Add(-time.Minute)
+	objs := func() []runtime.Object {
+		return procWorld(container(corev1.ContainerStatus{RestartCount: 1, State: runningSince(restart), LastTerminationState: exitedAt("Error", 1, restart)}), edgeProxy(1, 1))
+	}
+	proxySel := install.UpstreamDetector{}.ProxyPodSelector().String()
+	denyProxyPods := func(_ *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
+		kube.PrependReactor("list", "pods", func(a clienttesting.Action) (bool, runtime.Object, error) {
+			if l, ok := a.(clienttesting.ListAction); ok && l.GetListRestrictions().Labels.String() == proxySel {
+				return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", nil)
+			}
+			return false, nil, nil
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		s    setup
+		why  health.Availability
+	}{{"off", setup{optional: true}, health.AvailOff}, {"denied", setup{optional: true, proxyPods: true, prepare: denyProxyPods}, health.AvailDenied}} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, tc.s, objs()...)
+			h.awaitCache(t, "Events synced", func(s *cache.Snapshot) bool { return s.Access[cache.EventsGVR].OK })
+			if tc.why == health.AvailDenied {
+				h.awaitCache(t, "denied proxy Pods", func(s *cache.Snapshot) bool { return s.Access[cache.ProxyPodsGVR].Err != "" })
+			}
+			r := h.at(t, testutil.Now)
+			for _, name := range []string{"process restarts", "probe failures"} {
+				c := checkOf(r, name)
+				if c == nil || !c.OK || c.Detail != "Proxy Pods are not watched; proxies were not checked" || c.Unavailable != tc.why {
+					t.Fatalf("%s: %+v", name, c)
+				}
+			}
+			if f := findingOf(r, health.CodeProcessRestarting); f == nil || f.Resource.Kind != "Deployment" || r.State == health.StateUnknown {
+				t.Fatalf("controller 019 %+v, state %s", f, r.State)
+			}
+		})
 	}
 }

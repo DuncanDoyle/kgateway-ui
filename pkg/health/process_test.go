@@ -297,3 +297,74 @@ func resultOf(r Report, name string) CheckResult {
 	}
 	return CheckResult{}
 }
+
+// R43: with 1 of 2 replicas ready, 006 and 021 both show; 021 needs 0 ready to yield.
+func TestRolloutStuckBesideOneReady(t *testing.T) {
+	w := healthyWorld()
+	d := withProxy(w, 2, 1)
+	d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
+	r := Evaluate(processInput(t, w, proxyPod("edge-new", false, corev1.ContainerStatus{State: corev1.ContainerState{
+		Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}}), proxyPod("edge-old", true, corev1.ContainerStatus{State: running(testutil.Old.Time)})), Upstream(), Runtime{})
+	if find(r, CodeRolloutStuck) == nil || find(r, CodeProxyNotReady) == nil {
+		t.Fatalf("want 006 and 021, got %+v", r.Findings)
+	}
+}
+
+// R44: a terminating Pod with restarts and a fresh termination is no process, so no 019.
+func TestTerminatingPodIsNotARestart(t *testing.T) {
+	w := healthyWorld()
+	now := metav1.NewTime(testutil.Now)
+	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 2, State: exited("Error", 143, testutil.Now.Add(-5*time.Second))})
+	w.pods[0].DeletionTimestamp = &now
+	if r := Evaluate(processInput(t, w), Upstream(), Runtime{}); find(r, CodeProcessRestarting) != nil {
+		t.Fatalf("a terminating Pod raised 019: %+v", r.Findings)
+	}
+}
+
+// M4: several label-only Deployments for one Gateway get their own 006 message.
+func TestAmbiguousProxyDeployment(t *testing.T) {
+	w := healthyWorld()
+	a, b := testutil.ProxyDeployment("infra", "edge", 1, 1), testutil.ProxyDeployment("infra", "edge", 1, 1)
+	a.OwnerReferences, b.OwnerReferences, b.Name = nil, nil, "edge-copy"
+	w.deploys = []*appsv1.Deployment{w.ctrl, a, b}
+	f := find(Evaluate(processInput(t, w), Upstream(), Runtime{}), CodeProxyNotReady)
+	if f == nil || f.Message != "More than one proxy deployment matches this Gateway" || f.Severity != SeverityWarning {
+		t.Fatalf("006 %+v", f)
+	}
+}
+
+// R42: without the proxy Pod watch the restart and probe results name the gap
+// and its reason, and the controller findings still show.
+func TestProxyGapInResult(t *testing.T) {
+	w := healthyWorld()
+	at := testutil.Now.Add(-time.Minute)
+	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 1, State: running(at), LastTerminationState: exited("Error", 1, at)})
+	withProxy(w, 1, 1)
+	for _, tc := range []struct {
+		name string
+		acc  *cache.Access
+		why  Availability
+	}{{"off", nil, AvailOff}, {"denied", &cache.Access{Err: "forbidden: no", Denied: true}, AvailDenied}, {"watched", &cache.Access{OK: true}, ""}} {
+		in := w.input(t)
+		in.Snapshot.Access[cache.EventsGVR] = cache.Access{OK: true}
+		if tc.acc != nil {
+			in.Snapshot.Access[cache.ProxyPodsGVR] = *tc.acc
+		}
+		in.Process = &ProcessData{Controller: process.Kube{}.Controller(in.Install, in.Snapshot), Proxies: map[objects.Ref]process.Set{}}
+		edge := objects.RefOf(in.Owned.Gateways[0])
+		in.Process.Proxies[edge] = process.Kube{}.Proxies(in.Install, edge, in.Snapshot)
+		r := Evaluate(in, Upstream(), Runtime{})
+		for _, name := range []string{restartsCheckName, probesCheckName} {
+			c, wantDetail := resultOf(r, name), ""
+			if tc.why != "" {
+				wantDetail = "Proxy Pods are not watched; proxies were not checked"
+			}
+			if !c.OK || c.Detail != wantDetail || c.Unavailable != tc.why || r.State == StateUnknown {
+				t.Fatalf("%s %s: %+v", tc.name, name, c)
+			}
+		}
+		if find(r, CodeProcessRestarting) == nil {
+			t.Fatalf("%s: controller 019 missing", tc.name)
+		}
+	}
+}

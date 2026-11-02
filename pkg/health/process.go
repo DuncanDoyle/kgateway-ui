@@ -47,6 +47,7 @@ const (
 	eventsOffDetail    = "Events are turned off"
 	eventsSyncDetail   = "the Events watch has not synced yet"
 	eventsCappedDetail = "More than 10,000 Events; the oldest were dropped"
+	proxiesUnchecked   = "Proxy Pods are not watched; proxies were not checked"
 )
 
 // stuckWaiting are the waiting reasons KGWUI-021 quotes as evidence.
@@ -86,6 +87,36 @@ func processFinding(in Input, s subject, code, slug, msg, detail string, ev *Pro
 		Message: fmt.Sprintf(msg, s.what), Detail: detail, Evidence: []objects.Ref{process.PodRef(s.podNS, *p)}, Facts: ev}
 }
 
+// proxyGap is the result detail and reason when proxy Pods are not watched
+// although a Gateway has a proxy Deployment; "" when every proxy was checked.
+func proxyGap(in Input) (string, Availability) {
+	if in.Process == nil {
+		return "", ""
+	}
+	a, running := in.Snapshot.Access[cache.ProxyPodsGVR]
+	if running && a.OK {
+		return "", ""
+	}
+	for _, s := range in.Process.Proxies {
+		if s.Desired != nil && !s.Observed {
+			why := AvailOff
+			if running {
+				why = AccessAvailability(a) // "" while syncing
+			}
+			return proxiesUnchecked, why
+		}
+	}
+	return "", ""
+}
+
+// gapResult is ok(name) with the proxy gap as Detail and Unavailable; the
+// controller findings stand beside it.
+func gapResult(in Input, name string) CheckResult {
+	res := ok(name, false, takenAt(in))
+	res.Detail, res.Unavailable = proxyGap(in)
+	return res
+}
+
 // takenAt is the time of in's process data.
 func takenAt(in Input) time.Time {
 	if in.Snapshot != nil {
@@ -116,8 +147,11 @@ type restartsCheck struct{}
 // Name implements Check.
 func (restartsCheck) Name() string { return restartsCheckName }
 
-// Inputs implements Check: process data only; the window ends through WakeAt.
-func (restartsCheck) Inputs() InputSet { return InputSet{Process: true} }
+// Inputs implements Check: process data, and proxy Pods access for the gap
+// note; the window ends through WakeAt.
+func (restartsCheck) Inputs() InputSet {
+	return InputSet{Process: true, Kinds: []objects.GroupKind{cache.ProxyPodsKind}}
+}
 
 // restartState is the restarts check's Store value: the last restart count
 // per process ID, and the restarts seen in the window.
@@ -136,7 +170,7 @@ type restartSeen struct {
 // Processes that are gone leave no state behind (Review Focus 2).
 func (c restartsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
-	res := ok(c.Name(), false, takenAt(in))
+	res := gapResult(in, c.Name())
 	old, _ := Load[*restartState](ctx.State, restartsKey)
 	if old == nil {
 		old = &restartState{}
@@ -253,9 +287,10 @@ type probesCheck struct{}
 // Name implements Check.
 func (probesCheck) Name() string { return probesCheckName }
 
-// Inputs implements Check: process data, and Events for their availability.
+// Inputs implements Check: process data, Events for their availability, and
+// proxy Pods access for the gap note.
 func (probesCheck) Inputs() InputSet {
-	return InputSet{Process: true, Kinds: []objects.GroupKind{cache.EventsKind}}
+	return InputSet{Process: true, Kinds: []objects.GroupKind{cache.EventsKind, cache.ProxyPodsKind}}
 }
 
 // Run implements Check: one finding per subject, on its Pod with the most
@@ -273,9 +308,9 @@ func (c probesCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		}
 		return nil, NotAvailable(c.Name(), why, detail, at)
 	}
-	res := ok(c.Name(), false, at)
+	res := gapResult(in, c.Name())
 	if in.Snapshot.EventsCapped {
-		res.Detail = eventsCappedDetail
+		res.Detail = strings.TrimPrefix(res.Detail+"; "+eventsCappedDetail, "; ")
 	}
 	var fs []Finding
 	for _, s := range subjects(in) {
@@ -311,36 +346,26 @@ func probeFinding(in Input, s subject, p *process.Process) Finding {
 	return processFinding(in, s, CodeProbeFailing, "probe-failing", probeMessage, detail, ev, p)
 }
 
-// rolloutsCheck: KGWUI-021. A controller or proxy Deployment is past its
-// progress deadline. A subject with KGWUI-005 or 006, which no ready replica
-// raises, is an error already and gets no 021 (design §9.3).
+// rolloutsCheck: KGWUI-021, a Deployment past its progress deadline. With no
+// ready replica 005 or 006 covers it instead (design §9.3).
 type rolloutsCheck struct{}
 
 // Name implements Check.
 func (rolloutsCheck) Name() string { return rolloutsCheckName }
 
-// Inputs implements Check: process data, and the readiness checks' findings.
+// Inputs implements Check: process data, and Deployments for ready replicas.
 func (rolloutsCheck) Inputs() InputSet {
-	return InputSet{Process: true, Checks: []string{controllerCheck{}.Name(), proxyCheck{}.Name()}}
+	return InputSet{Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}}
 }
 
-// Run implements Check. The waiting reason of one of the Deployment's Pods
-// is evidence; template hashes are not compared (review finding 8).
+// Run implements Check. A Pod's waiting reason is evidence; template hashes
+// are not compared (review finding 8).
 func (c rolloutsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
-	notReady := map[objects.Ref]bool{}
-	for _, name := range ctx.inputs.Checks {
-		out, _ := ctx.Output(name)
-		for _, f := range out.Findings {
-			if f.Resource != nil && (f.Code == CodeControllerNotReady || f.Code == CodeProxyNotReady) {
-				notReady[*f.Resource] = true
-			}
-		}
-	}
 	var fs []Finding
 	for _, s := range subjects(in) {
 		r := s.set.Rollout
-		if r == nil || r.Progressing || r.Reason != "ProgressDeadlineExceeded" || notReady[s.ref] {
+		if r == nil || r.Progressing || r.Reason != "ProgressDeadlineExceeded" || readyReplicas(in, s) == 0 {
 			continue
 		}
 		ref := s.ref
@@ -356,9 +381,20 @@ func (c rolloutsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), false, takenAt(in))
 }
 
-// addNotReadyFacts gives a 005 or 006 finding the waiting reason and last
-// exit of the first not-ready process of set that has one, with that Pod as
-// its evidence (§14 rule 16): "0/2 ready: CrashLoopBackOff, last exit OOMKilled".
+// readyReplicas is the ready count of s's Deployment; 0 when it is not found.
+func readyReplicas(in Input, s subject) int32 {
+	d := in.Install.Deployment
+	if !s.controller {
+		d = process.ProxyDeployment(s.ref, in.Snapshot.Deployments, in.Install.ProxySelector)
+	}
+	if d == nil {
+		return 0
+	}
+	return d.Status.ReadyReplicas
+}
+
+// addNotReadyFacts sets 005/006's detail from the first not-ready process with
+// a waiting reason or exit; that Pod becomes its evidence (§14 rule 16).
 func addNotReadyFacts(f *Finding, set *process.Set, podNS string, ready, want int32) {
 	if set == nil || want == 0 {
 		return
