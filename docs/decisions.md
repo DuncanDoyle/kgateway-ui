@@ -678,3 +678,24 @@ quirk 2 (prefix /q):
 **Consequences:** A regression in what the engine keeps or allocates fails the gate deterministically. A change that only moves GC timing does not. A change that holds more memory at once without allocating more is not gated; peak heap is logged for it (tracked in `phase-status.md`).
 
 **Alternatives:** Raise the peak-heap budget; rejected, since the 2.4 code already sits at it and noise stays.
+
+## D-027 — Keep the immutable full recompute; no KRT (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (decision rule of design §16.1, written before the spike)
+
+**Context:** Recompute cost grows with analyzers and cluster size, and Phase 2 ended near its CPU budget. Istio's KRT collections recompute incrementally. Sub-phase 3.1 rebuilt view A on KRT in a throwaway spike and measured it at Large against the current engine (`bench/3.1-krt-spike.txt`).
+
+**Decision:** Keep the immutable full recompute. Add per-check memoization (design §16.2). The spike failed two of five criteria:
+
+| Criterion | Measured | Pass |
+|---|---|---|
+| Spec-edit stream CPU at least 40 % lower | 14.2 % against 10.9 % of one core: 30 % higher | no |
+| Retained heap no more than +16 MiB | +16.5 to +19.4 MiB | no |
+| One immutable published value per request | yes, only through a hand-built three-step barrier (KRT has no flush call) | yes |
+| No `replace` directives | none | yes |
+| Apache-2.0 compatible licences | Apache-2.0, MIT, BSD, MPL-2.0 | yes |
+
+Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 1.27.1, a forced Kubernetes client upgrade, and `istio.io/istio` has only pseudo-versions.
+
+**Consequences:** Phase 3 continues with declared check inputs and memoization (Task 18), which an incremental engine could feed later. The spike rebuilt view A only, which is 3.6 % of recompute CPU, so it could not show a 40 % gain on its own. A future proposal would have to move all views and checks, at the dependency costs above.
+
+**Alternatives:** Adopt KRT for views and analyzers in a follow-up phase; rejected by the rule.

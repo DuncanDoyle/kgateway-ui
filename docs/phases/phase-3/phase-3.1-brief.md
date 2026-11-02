@@ -77,7 +77,7 @@ In: `pkg/api/budget_test.go` and `Makefile` (spec-edit variant), `docs/decisions
 Out: KRT in production code (a follow-up phase, on Adopt); new analyzers and families (3.2–3.4); `…/diagnostics` and `…/processes` (3.2); evidence kinds beyond those of the findings endpoints; moving KGWUI-012 persistence onto the Store (stays in `pkg/engine/persist.go`); gate changes of any kind.
 
 ## Plan / design impact
-None so far. Task 14 appends D-027; on Adopt, `docs/roadmap.md` gains "Incremental recompute with KRT for views and analyzers". Task 33 changes `design.md` only where the code deviates. Approval of the plan covers the ⚠ guardrail tasks 15, 18, 19, 22, 24, 26, 27 and 28, whose file lists the plan names (ruling 2026-11-01, user approved the entire phase).
+D-027 (2026-11-02): **Keep** the immutable full recompute; the KRT spike failed the CPU and retained-heap criteria (`bench/3.1-krt-spike.txt`). Task 14 appended D-027; on Adopt, `docs/roadmap.md` gains "Incremental recompute with KRT for views and analyzers". Task 33 changes `design.md` only where the code deviates. Approval of the plan covers the ⚠ guardrail tasks 15, 18, 19, 22, 24, 26, 27 and 28, whose file lists the plan names (ruling 2026-11-01, user approved the entire phase).
 
 Budgets (§16.3; dense gate per D-039):
 
@@ -116,6 +116,6 @@ Reminders for the user (not blocking): the open item in design §25 (filing the 
 ## Definition of done
 - [ ] acceptance tests fail before, pass after (report both)
 - [ ] standard gates pass; the 3.1 budgets above hold (`docs/phases/phase-3/bench/3.1.txt`, `3.1-ci.txt`)
-- [ ] D-027 recorded with the spike numbers and shown to the user before Task 15
+- [x] D-027 recorded with the spike numbers and shown to the user before Task 15
 - [ ] Codex review of `git diff 7f129a6..HEAD` + triage (`reviews/3.1-codex.md`)
 - [ ] phase-3.1-complete.md written (benchmark table: baseline `544dcd5`, 3.0, 3.1, spike); phase-status.md and roadmap.md updated; README upgrade notes (check contract, finding `id` and UI-derived `since` that resets on restart, server-paged findings page)
