@@ -3,6 +3,7 @@
 package scopeverify
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -94,6 +95,9 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 		return unavailable("controller metrics are stale")
 	case in.Install.Scope.Mode == install.ScopeUnknown:
 		return unavailable("controller scope unknown")
+	case slices.ContainsFunc(in.Metrics.Metrics.PerPod, func(p ctrlmetrics.PodMetrics) bool { return p.Dropped > 0 }):
+		// Once updates were dropped, resources_managed is invalid until a restart (design §8.1).
+		return unavailable("scope verification unavailable: the controller dropped metric updates")
 	}
 	ui, skip := uiCounts(in)
 	// An absent family means 0 (D-012); it is unavailable only when the UI expects more.

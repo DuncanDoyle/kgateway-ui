@@ -1,6 +1,7 @@
 package ctrlmetrics
 
 import (
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -123,5 +124,112 @@ func TestCapturedFixturesHonourTheContract(t *testing.T) {
 		if !strings.Contains(string(b), `type_url="envoy.config.cluster.v3.Cluster"`) {
 			t.Errorf("%s: the cipher-suite reject is a CDS NACK; type_url must be envoy.config.cluster.v3.Cluster without the type.googleapis.com/ prefix", f)
 		}
+	}
+}
+
+func parseFile(t *testing.T, f string) Metrics {
+	t.Helper()
+	b, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Parse(strings.NewReader(string(b)))
+	if err != nil {
+		t.Fatalf("%s: %v", f, err)
+	}
+	return m
+}
+
+func TestParsePerTypeAndPod(t *testing.T) {
+	cds, rds := "envoy.config.cluster.v3.Cluster", "envoy.config.route.v3.RouteConfiguration"
+	nack, edge := GatewayKey{"infra", "nack"}, GatewayKey{"infra", "edge"}
+	for _, tag := range []string{"v2.3.11", "v2.4.7"} {
+		a := parseFile(t, "testdata/"+tag+"-rejects-a.txt")
+		b := parseFile(t, "testdata/"+tag+"-rejects-b.txt")
+		if len(a.PerPod) != 1 || len(b.PerPod) != 1 {
+			t.Fatalf("%s: Parse yields one PodMetrics per scrape: %d, %d", tag, len(a.PerPod), len(b.PerPod))
+		}
+		pa := a.PerPod[0]
+		if pa.Active[TypeKey{nack, cds}] != 1 || pa.Active[TypeKey{nack, rds}] != 1 || pa.Active[TypeKey{edge, cds}] != 1 {
+			t.Errorf("%s: active per type: %+v", tag, pa.Active)
+		}
+		if pa.Total[TypeKey{nack, cds}] < 2 || pa.Total[TypeKey{nack, rds}] < 2 {
+			t.Errorf("%s: total per type: %+v", tag, pa.Total)
+		}
+		if !pa.DroppedPresent || pa.Dropped != 0 {
+			t.Errorf("%s: dropped_total is present and 0 in the capture: %+v", tag, pa)
+		}
+		// Summed over types, the per-Pod active streams equal Rejects per Gateway.
+		sum := map[GatewayKey]float64{}
+		for _, p := range a.PerPod {
+			for k, v := range p.Active {
+				sum[k.Gateway] += v
+			}
+		}
+		if !maps.Equal(sum, a.Rejects) {
+			t.Errorf("%s: summed PerPod active %v != Rejects %v", tag, sum, a.Rejects)
+		}
+		agg := Aggregate([]Metrics{a, b})
+		if len(agg.PerPod) != 2 || agg.Rejects[nack] != 4 {
+			t.Errorf("%s: aggregate keeps both Pods and sums Rejects: %+v", tag, agg)
+		}
+	}
+}
+
+func TestDroppedAbsentIsNotPresent(t *testing.T) {
+	m, err := Parse(strings.NewReader(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.PerPod) != 1 || m.PerPod[0].DroppedPresent || m.PerPod[0].Dropped != 0 {
+		t.Fatalf("an absent family is not present: %+v", m.PerPod)
+	}
+	d, _ := Parse(strings.NewReader("# TYPE kgateway_resources_updates_dropped_total counter\nkgateway_resources_updates_dropped_total 3\n"))
+	if !d.PerPod[0].DroppedPresent || d.PerPod[0].Dropped != 3 {
+		t.Fatalf("dropped: %+v", d.PerPod)
+	}
+}
+
+func TestAggregateSortsPodsByName(t *testing.T) {
+	mk := func(n string) Metrics { return Metrics{PerPod: []PodMetrics{{UID: "u-" + n, Name: n}}} }
+	got := Aggregate([]Metrics{mk("c"), mk("a"), mk("b")})
+	if got.PerPod[0].Name != "a" || got.PerPod[1].Name != "b" || got.PerPod[2].Name != "c" {
+		t.Fatalf("not sorted: %+v", got.PerPod)
+	}
+}
+
+func TestCounterDeltaPerPodUIDNeverNegative(t *testing.T) {
+	nack := TypeKey{GatewayKey{"infra", "nack"}, "envoy.config.cluster.v3.Cluster"}
+	edge := TypeKey{GatewayKey{"infra", "edge"}, "envoy.config.cluster.v3.Cluster"}
+	pod := func(uid, f string) PodMetrics {
+		p := parseFile(t, f).PerPod[0]
+		p.UID, p.Name = uid, "ctl-"+uid
+		return p
+	}
+	a, b := pod("uid-a", "testdata/v2.4.7-rejects-a.txt"), pod("uid-b", "testdata/v2.4.7-rejects-b.txt")
+	g, prev := TotalGrowth(nil, []PodMetrics{a, b})
+	if len(g) != 0 {
+		t.Fatalf("first sight of a Pod is a baseline, not growth: %v", g)
+	}
+	// Replica a is deleted and restarts as uid-c with a reset counter (edge 2 -> 1).
+	c := pod("uid-c", "testdata/v2.4.7-restart.txt")
+	g, prev = TotalGrowth(prev, []PodMetrics{b, c})
+	for k, v := range g {
+		if v < 0 {
+			t.Errorf("negative growth %v for %+v", v, k)
+		}
+	}
+	if g[edge] != 0 {
+		t.Errorf("reset read as growth: %v", g)
+	}
+	if _, ok := prev["uid-a"]; ok {
+		t.Errorf("a vanished UID's value must be forgotten: %v", prev)
+	}
+	// The same UID grows: only the delta counts; a lower value is a reset, never negative.
+	c2 := c
+	c2.Total = map[TypeKey]float64{nack: c.Total[nack] + 5, edge: 0}
+	g, _ = TotalGrowth(prev, []PodMetrics{b, c2})
+	if g[nack] != 5 || g[edge] != 0 {
+		t.Errorf("growth: %v", g)
 	}
 }

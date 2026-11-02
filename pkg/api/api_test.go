@@ -2587,3 +2587,48 @@ func TestCapabilityNameCollision(t *testing.T) {
 		t.Errorf("a colliding name must be dropped: %+v", meta)
 	}
 }
+
+// Design §8.1: once the controller dropped metric updates, resources_managed is
+// invalid, so scope verification is unavailable instead of comparing counts.
+func TestDroppedUpdatesTurnScopeCheckUnavailable(t *testing.T) {
+	// The UI sees 2 Gateways in infra; the gauge says 9, a mismatch when it is valid.
+	managed := func(pods ...ctrlmetrics.PodMetrics) fakeMetrics {
+		return fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+			Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true, PerPod: pods,
+			Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 9, {Namespace: "shop", Resource: "HTTPRoute"}: 1}}}}
+	}
+	const text = "scope verification unavailable: the controller dropped metric updates"
+	cases := []struct {
+		name    string
+		metrics fakeMetrics
+		dropped bool
+	}{
+		{"one of two Pods dropped updates", managed(
+			ctrlmetrics.PodMetrics{UID: "a", Name: "a", Dropped: 0, DroppedPresent: true},
+			ctrlmetrics.PodMetrics{UID: "b", Name: "b", Dropped: 2, DroppedPresent: true}), true},
+		{"no Pod dropped updates", managed(ctrlmetrics.PodMetrics{UID: "a", Name: "a", DroppedPresent: true}), false},
+		{"family absent", managed(ctrlmetrics.PodMetrics{UID: "a", Name: "a"}), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, srv, _ := startWith(t, setup{metrics: tc.metrics, immediate: true}, isolated()...)
+			e.Compute()
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			var mismatch, unavailable []FindingDTO
+			for _, f := range h.Findings {
+				switch f.Code {
+				case health.CodeScopeMismatch:
+					mismatch = append(mismatch, f)
+				case health.CodeSignalUnavailable:
+					unavailable = append(unavailable, f)
+				}
+			}
+			if tc.dropped && (len(mismatch) != 0 || len(unavailable) != 1 || unavailable[0].Detail != text) {
+				t.Fatalf("want no KGWUI-007 and one KGWUI-008 %q: %+v", text, h.Findings)
+			}
+			if !tc.dropped && (len(mismatch) == 0 || len(unavailable) != 0) {
+				t.Fatalf("want KGWUI-007 and no KGWUI-008: %+v", h.Findings)
+			}
+		})
+	}
+}

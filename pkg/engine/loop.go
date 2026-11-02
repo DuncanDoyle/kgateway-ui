@@ -72,7 +72,8 @@ type LoopEvent struct {
 // encodeMetrics is the identity of the metrics results reads: FNV-64a over,
 // per read in order, the ID and Present and, for a present result, whether it
 // is fresh at now under maxAge (strict age > maxAge), Err, ManagedPresent and
-// every Rejects and Managed entry in key order. CollectedAt itself is left
+// every Rejects and Managed entry in key order, then every PerPod entry (Pods
+// in their given order, which Aggregate sorts; series in key order). CollectedAt itself is left
 // out, as in ctrlmetrics.Result.SameContent: a renewed scrape is not a change,
 // and the strict staleness deadline in Model.Next makes the next run read it.
 // Freshness is in, so a stale model is never confirmed once metrics recover.
@@ -121,6 +122,25 @@ func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uin
 			str(k.Namespace)
 			str(k.Resource)
 			u64(math.Float64bits(res.Metrics.Managed[k]))
+		}
+		u64(uint64(len(res.Metrics.PerPod)))
+		for _, p := range res.Metrics.PerPod {
+			str(p.UID)
+			str(p.Name)
+			flag(p.DroppedPresent)
+			u64(math.Float64bits(p.Dropped))
+			for _, series := range []map[ctrlmetrics.TypeKey]float64{p.Active, p.Total} {
+				keys := sortedKeys(series, func(a, b ctrlmetrics.TypeKey) int {
+					return cmp.Or(cmp.Compare(a.Gateway.Namespace, b.Gateway.Namespace), cmp.Compare(a.Gateway.Name, b.Gateway.Name), cmp.Compare(a.TypeURL, b.TypeURL))
+				})
+				u64(uint64(len(keys)))
+				for _, k := range keys {
+					str(k.Gateway.Namespace)
+					str(k.Gateway.Name)
+					str(k.TypeURL)
+					u64(math.Float64bits(series[k]))
+				}
+			}
 		}
 	}
 	return h.Sum64()

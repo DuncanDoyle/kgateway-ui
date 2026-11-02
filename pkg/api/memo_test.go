@@ -300,7 +300,7 @@ func memoProbes(runs map[string]int) []health.Check {
 			return fmt.Sprint(rvs)
 		}),
 		probe("probe metrics", health.InputSet{Metrics: true}, func(ctx health.RunContext) string {
-			return fmt.Sprint(ctx.HasMetrics, ctx.Metrics.Metrics.Rejects)
+			return fmt.Sprint(ctx.HasMetrics, ctx.Metrics.Metrics.Rejects, ctx.Metrics.Metrics.PerPod)
 		}),
 		probe("probe verify", health.InputSet{Verify: true}, func(ctx health.RunContext) string {
 			return fmt.Sprint(ctx.Verify.Available, len(ctx.Verify.Mismatches))
@@ -392,6 +392,17 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 		{"metrics reject", func() {
 			r := metrics["kgw.kgateway"]
 			r.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
+			metrics["kgw.kgateway"] = r
+		}},
+		{"per-Pod dropped updates", func() {
+			r := metrics["kgw.kgateway"]
+			r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u1", Name: "kgateway-0", Dropped: 1, DroppedPresent: true}}
+			metrics["kgw.kgateway"] = r
+		}},
+		{"per-Pod rejects by type", func() {
+			r := metrics["kgw.kgateway"]
+			k := ctrlmetrics.TypeKey{Gateway: ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}, TypeURL: "envoy.config.cluster.v3.Cluster"}
+			r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u1", Name: "kgateway-0", Dropped: 1, DroppedPresent: true, Total: map[ctrlmetrics.TypeKey]float64{k: 4}}}
 			metrics["kgw.kgateway"] = r
 		}},
 		{"verifier mismatch", func() {

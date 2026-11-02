@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -95,7 +96,14 @@ func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
 // CollectedAt is not content: freshness is a deadline, not a change (D-019).
 func (r Result) SameContent(o Result) bool {
 	return r.Err == o.Err && r.Metrics.ManagedPresent == o.Metrics.ManagedPresent &&
-		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits)
+		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits) &&
+		slices.EqualFunc(r.Metrics.PerPod, o.Metrics.PerPod, samePod)
+}
+
+// samePod compares two Pods' samples by bit pattern.
+func samePod(a, b PodMetrics) bool {
+	return a.UID == b.UID && a.Name == b.Name && a.DroppedPresent == b.DroppedPresent && sameBits(a.Dropped, b.Dropped) &&
+		maps.EqualFunc(a.Active, b.Active, sameBits) && maps.EqualFunc(a.Total, b.Total, sameBits)
 }
 
 // sameBits compares samples by bit pattern, so NaN equals NaN, as the engine's
@@ -163,6 +171,10 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		m, err := c.scrapePod(ctx, p, in.MetricsPort)
 		if err != nil {
 			return Result{CollectedAt: c.clock.Now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
+		}
+		// Parse yields one unnamed Pod; name it for the per-Pod view.
+		for i := range m.PerPod {
+			m.PerPod[i].UID, m.PerPod[i].Name = string(p.UID), p.Name
 		}
 		per = append(per, m)
 	}
