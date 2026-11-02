@@ -347,14 +347,30 @@ func gcCPU() (gc, used float64) {
 // so earlier tests' heap and CPU do not count; the worst case starts once
 // every check has matured.
 func TestBudgetSustainedStream(t *testing.T) {
-	tiers := []scale.Tier{scale.Large, scale.Large.Contradicting()}
+	inChild(t, "TestBudgetSustainedStream", []scale.Tier{scale.Large, scale.Large.Contradicting()}, func(t *testing.T, tier scale.Tier) {
+		sustainedStream(t, tier, annotationStream)
+	})
+}
+
+// TestBudgetSpecEditStream is the sustained stream at Large with one HTTPRoute
+// path value toggled per 100 ms instead of an annotation change. It reports
+// CPU, recomputes per s, GC share and OS memory, and gates nothing (design §16.3).
+func TestBudgetSpecEditStream(t *testing.T) {
+	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large}, func(t *testing.T, tier scale.Tier) {
+		sustainedStream(t, tier, specEditStream)
+	})
+}
+
+// inChild runs run once per tier, each in a fresh process that runs only
+// test, and logs the child's report lines.
+func inChild(t *testing.T, test string, tiers []scale.Tier, run func(*testing.T, scale.Tier)) {
 	if name := os.Getenv(streamChildEnv); name != "" {
-		sustainedStream(t, tiers[slices.IndexFunc(tiers, func(x scale.Tier) bool { return x.Name == name })])
+		run(t, tiers[slices.IndexFunc(tiers, func(x scale.Tier) bool { return x.Name == name })])
 		return
 	}
 	for _, tier := range tiers {
 		t.Run(tier.Name, func(t *testing.T) {
-			args := []string{"-test.run=^TestBudgetSustainedStream$", "-test.count=1", "-test.v"}
+			args := []string{"-test.run=^" + test + "$", "-test.count=1", "-test.v"}
 			if testing.Short() {
 				args = append(args, "-test.short")
 			}
@@ -374,8 +390,54 @@ func TestBudgetSustainedStream(t *testing.T) {
 	}
 }
 
-// streamChildEnv makes TestBudgetSustainedStream run one world in this process.
+// streamChildEnv makes a stream test run one world in this process.
 const streamChildEnv = "KGWUI_STREAM_CHILD"
+
+// streamVariant is what each stream update changes, and whether the budgets gate it.
+type streamVariant struct {
+	name  string // log prefix
+	gated bool
+	// edit changes u, a copy of a seeded route, for update n in pass over the routes.
+	edit func(u *unstructured.Unstructured, n, pass int) error
+}
+
+// budget is note when v is gated, else empty.
+func (v streamVariant) budget(note string) string {
+	if v.gated {
+		return note
+	}
+	return ""
+}
+
+// annotationStream changes one annotation per update; the views memo absorbs it.
+var annotationStream = streamVariant{gated: true, edit: func(u *unstructured.Unstructured, n, _ int) error {
+	u.SetAnnotations(map[string]string{"stream": strconv.Itoa(n)})
+	return nil
+}}
+
+// specEditStream changes a route's spec per update: generation and status stay, as the cost measured is the recompute.
+var specEditStream = streamVariant{name: "spec-edit ", edit: togglePath}
+
+// togglePath appends "-x" to u's first path match value on even passes and
+// leaves the seeded spec on odd ones, so every update changes the spec.
+func togglePath(u *unstructured.Unstructured, _, pass int) error {
+	rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "rules")
+	for _, r := range rules {
+		ms, _ := r.(map[string]any)["matches"].([]any)
+		for _, m := range ms {
+			p, ok := m.(map[string]any)["path"].(map[string]any)
+			v, isStr := p["value"].(string)
+			if !ok || !isStr {
+				continue
+			}
+			if pass%2 == 0 {
+				p["value"] = v + "-x"
+			}
+			return unstructured.SetNestedSlice(u.Object, rules, "spec", "rules")
+		}
+	}
+	return fmt.Errorf("HTTPRoute %s/%s has no path match", u.GetNamespace(), u.GetName())
+}
 
 // liveHeap is HeapAlloc after a full GC.
 func liveHeap() uint64 {
@@ -405,7 +467,7 @@ func matured(m *engine.Model) (findings, checks int) {
 	return findings, checks
 }
 
-func sustainedStream(t *testing.T, tier scale.Tier) {
+func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	const mib = 1 << 20
 	dur := 10 * time.Minute
 	if testing.Short() {
@@ -524,7 +586,9 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 		u := w.Routes[updates%len(w.Routes)].DeepCopy()
 		updates++
 		u.SetResourceVersion(strconv.Itoa(1_000_000 + updates))
-		u.SetAnnotations(map[string]string{"stream": strconv.Itoa(updates)})
+		if err := v.edit(u, updates, (updates-1)/len(w.Routes)); err != nil {
+			t.Fatal(err)
+		}
 		if err := w.Update(context.Background(), u); err != nil {
 			t.Fatal(err)
 		}
@@ -544,8 +608,8 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	slices.Sort(polls)
 	rate := float64(runs) / wall.Seconds()
 	share := cpu.Seconds() / wall.Seconds()
-	t.Logf("stream %v: %d updates, %d recomputes (%.2f/s, budget ≤ 1/s), %d publications; process CPU %v = %.1f %% of one core (budget ≤ 15 %%); recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
-		wall.Round(time.Millisecond), updates, runs, rate, pubs, cpu.Round(time.Millisecond), 100*share, busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
+	t.Logf("%sstream %v: %d updates, %d recomputes (%.2f/s%s), %d publications; process CPU %v = %.1f %% of one core%s; recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
+		v.name, wall.Round(time.Millisecond), updates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, v.budget(" (budget ≤ 15 %)"), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
 	t.Logf("polls: %d, p50 %v p95 %v max %v", len(polls), rd(percentile(polls, 50)), rd(percentile(polls, 95)), rd(polls[len(polls)-1]))
 	heapEnd := liveHeap()
 	if heap60 == 0 {
@@ -556,8 +620,11 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	f, c := matured(e.Current().Model)
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)",
-		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib)
+	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB%s",
+		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib, v.budget(" (budget ≤ 256 MiB, half the 512 MiB pod limit)"))
+	if !v.gated {
+		return
+	}
 	if tier.Contradict && f != c {
 		t.Errorf("worst case: %d KGWUI-012 of %d checks at the end", f, c)
 	}

@@ -15,6 +15,7 @@ help:
 	@echo "make lint   run go vet and golangci-lint"
 	@echo "make bench  run the scale benchmarks and budget tests, after the Go version, machine and host load"
 	@echo "make bench-stream  run the 10-minute sustained-stream budget (make bench runs the 60 s -short one)"
+	@echo "make bench-specedit  run the 10-minute spec-edit stream, reported and not gated (make bench runs the 60 s -short one)"
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
@@ -40,6 +41,9 @@ bench:
 	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/api
 bench-stream:
 	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 30m ./pkg/api
+.PHONY: bench-specedit
+bench-specedit:
+	go test -tags bench -v -run 'TestBudgetSpecEditStream' -count 1 -timeout 20m ./pkg/api
 lint:
 	go vet ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...
