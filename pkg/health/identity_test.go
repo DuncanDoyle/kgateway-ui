@@ -184,8 +184,9 @@ func TestDiscriminatorSeparates(t *testing.T) {
 }
 
 // A restricted row shows install, code and resource, so its id is computable from
-// them and the owner: worlds differing only in which condition failed, which check
-// kind disagrees or which undeclared parent drops a route give one id (design §14 rule 11).
+// them and a spec owner: worlds differing only in which condition, policy ancestor or
+// status-only parent failed, which check kind disagrees or which undeclared parent
+// drops a route give one id (design §14 rule 11).
 func TestRestrictedIDFromVisibleData(t *testing.T) {
 	cases := []struct {
 		name, code, res string
@@ -199,6 +200,14 @@ func TestRestrictedIDFromVisibleData(t *testing.T) {
 		{"check kind", CodeComputedDisagrees, "infra/edge", []string{"#1"}, []func() *world{
 			func() *world { return disagreeingWorld(computed.KindListenerCount, "edge http") },
 			func() *world { return disagreeingWorld(computed.KindRouteAccepted, "edge cart") },
+		}},
+		{"policy ancestor", CodeConditionFalse, "shop/tp", []string{"ancestor#1", "#1"}, []func() *world{
+			func() *world { return failingAncestor("edge", "edge2") },
+			func() *world { return failingAncestor("edge2", "edge") },
+		}},
+		{"status-only parent", CodeConditionFalse, "shop/c", []string{"parent#1", "#1"}, []func() *world{
+			func() *world { return reportedUnder("api", "api2") },
+			func() *world { return reportedUnder("api2", "api") },
 		}},
 		{"computed parent", CodeDelegatedNotAttached, "shop/c", []string{computedOwner, "#1"}, []func() *world{
 			func() *world { return droppedBy("api") },
@@ -232,6 +241,34 @@ func failingGateway(bad, good string) *world {
 func disagreeingWorld(kind computed.CheckKind, subject string) *world {
 	w := healthyWorld()
 	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{disagreeing(kind, subject)}}
+	return w
+}
+
+// failingAncestor has policy shop/tp rejected by Gateway infra/<bad> and accepted by infra/<good>.
+func failingAncestor(bad, good string) *world {
+	w := healthyWorld()
+	w.objs = append(w.objs, testutil.Gateway("infra", "edge2", "kgateway", nil), testutil.TrafficPolicy("shop", "tp",
+		testutil.PolicyAncestor{Ref: testutil.GwRef("infra", bad), Controller: testutil.Controller,
+			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}},
+		testutil.PolicyAncestor{Ref: testutil.GwRef("infra", good), Controller: testutil.Controller,
+			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}}))
+	return w
+}
+
+// reportedUnder has shop/c, which declares no parent, delegated by shop/api and shop/api2
+// and rejected only in its status entry under shop/<bad>.
+func reportedUnder(bad, good string) *world {
+	w := delegationWorld(testutil.HTTPRoute("shop", "api2", []objects.ParentRef{testutil.GwRef("infra", "edge")},
+		testutil.AcceptedBy(testutil.GwRef("infra", "edge"), testutil.Controller)))
+	for _, u := range w.objs {
+		if u.GetName() == "api" || u.GetName() == "api2" {
+			testutil.WithRules(u, map[string]any{"backendRefs": []any{testutil.DelegateTo("shop", "c")}})
+		}
+	}
+	w.objs = append(w.objs, testutil.HTTPRoute("shop", "c", nil,
+		testutil.RouteParent{Ref: testutil.HTTPRouteRef("shop", bad), Controller: testutil.Controller, Conds: []metav1.Condition{
+			testutil.Cond("Accepted", metav1.ConditionFalse, "UnsupportedValue"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}},
+		testutil.AcceptedBy(testutil.HTTPRouteRef("shop", good), testutil.Controller)))
 	return w
 }
 

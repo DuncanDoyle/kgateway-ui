@@ -133,8 +133,8 @@ Every finding gets an `id`, stable across recomputes and UI restarts, and unique
 | Code | Discriminator |
 |---|---|
 | 001, 005, 006, 009, 010, 018, 019, 020, 021, 024, 025, 026 | none: one per resource (025 and 026 are on the Gateway; Pods churn, so they are evidence, not identity) |
-| 002 | the condition's owner (parentRef as written, listener name, or ancestorRef as written, or `self`) and `#n`, the condition's rank by type among that owner's failing conditions |
-| 003 | parentRef as written, or `self` |
+| 002 | the condition's owner and `#n`, the condition's rank by type among that owner's failing conditions. The owner is `self`, the listener name, the spec parentRef as written, or for status-only owners `ancestor#n` or `parent#n`, the rank by ref among the resource's failing ancestors or status-reported parents |
+| 003 | the spec parentRef as written, `parent#n` for a status-reported parent (ranked as for 002), or `self` |
 | 004 | the targeted parent ref |
 | 007 | (namespace, resource label) |
 | 008 | check name and cause key |

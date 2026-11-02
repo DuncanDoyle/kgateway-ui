@@ -133,6 +133,8 @@ const (
 	ownerParent   = "parent"
 	ownerListener = "listener"
 	ownerAncestor = "ancestor"
+	// ownerStatusParent tags a parent found only in status; rankOwners replaces it.
+	ownerStatusParent = "status-parent"
 	// computedOwner leads a computed KGWUI-011's key, apart from declared and orphan ones.
 	computedOwner = "computed"
 )
@@ -150,8 +152,8 @@ func appendWrittenKey(k []string, w objects.WrittenRef) []string {
 	return append(k, w.Group, w.Kind, w.Namespace, w.Name, w.SectionName, port)
 }
 
-// parentKey is the discriminator owner of route u's parentRef p: p as
-// written in u's spec, else in u's status entry for p, else p itself.
+// parentKey is the discriminator owner of route u's parentRef p: p as written
+// in u's spec, else a status-only owner from u's status entry for p, else p itself.
 func (in Input) parentKey(u *unstructured.Unstructured, p objects.ParentRef) []string {
 	var spec []objects.ParentRef
 	var written []objects.WrittenRef
@@ -163,13 +165,56 @@ func (in Input) parentKey(u *unstructured.Unstructured, p objects.ParentRef) []s
 		v := in.views().Route(u)
 		spec, written, status = v.ParentRefs, v.WrittenRefs, v.Parents
 	}
-	w := objects.WrittenRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name, SectionName: p.SectionName, Port: p.Port, PortSet: p.Port != 0}
 	if i := slices.Index(spec, p); i >= 0 && i < len(written) {
-		w = written[i]
-	} else if j := slices.IndexFunc(status, func(s objects.RouteParentStatus) bool { return s.ParentRef == p }); j >= 0 {
+		return appendWrittenKey([]string{ownerParent}, written[i])
+	}
+	w := objects.WrittenRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name, SectionName: p.SectionName, Port: p.Port, PortSet: p.Port != 0}
+	if j := slices.IndexFunc(status, func(s objects.RouteParentStatus) bool { return s.ParentRef == p }); j >= 0 {
 		w = status[j].Written
 	}
-	return appendWrittenKey([]string{ownerParent}, w)
+	return appendWrittenKey([]string{ownerStatusParent}, w)
+}
+
+// ownerLen is the length of an ancestor or status-only parent owner: its tag and six ref fields.
+const ownerLen = 7
+
+// rankOwners replaces each status-only owner of fs, a key's first ownerLen elements
+// led by tag, with label and "#k": its rank by ref among the distinct such owners of
+// one code on one resource. Status is hidden from a restricted row (design §14 rule 11).
+func rankOwners(fs []Finding, tag, label string) {
+	var is []int
+	for i := range fs {
+		if k := fs[i].Key; len(k) >= ownerLen && k[0] == tag {
+			is = append(is, i)
+		}
+	}
+	if len(is) == 0 {
+		return
+	}
+	same := func(a, b *Finding) int {
+		return cmp.Or(cmp.Compare(a.Code, b.Code), compareOptRefs(a.Resource, b.Resource))
+	}
+	slices.SortFunc(is, func(a, b int) int {
+		return cmp.Or(same(&fs[a], &fs[b]), slices.Compare(fs[a].Key[:ownerLen], fs[b].Key[:ownerLen]))
+	})
+	rank := make([]int, len(is))
+	for j := range is {
+		rank[j] = 1
+		if j > 0 {
+			p, f := &fs[is[j-1]], &fs[is[j]]
+			if same(p, f) == 0 {
+				rank[j] = rank[j-1]
+				if !slices.Equal(p.Key[:ownerLen], f.Key[:ownerLen]) {
+					rank[j]++
+				}
+			}
+		}
+	}
+	// Keys are rewritten only after every comparison.
+	for j, i := range is {
+		f := &fs[i]
+		f.Key = append([]string{label + ordinal(rank[j])}, f.Key[ownerLen:]...)
+	}
 }
 
 // ordinals are the "#n" key elements; ordinal builds the rare ones past them.

@@ -416,7 +416,9 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 		}
 	}
-	// 002 keeps its owner and ranks the condition type; a computed 011 ranks its parent.
+	// Status-only owners become ranks; 002 then ranks the condition type and a computed 011 its parent.
+	rankOwners(fs, ownerAncestor, ownerAncestor)
+	rankOwners(fs, ownerStatusParent, ownerParent)
 	ordinalKeys(fs, func(f *Finding) (int, bool) {
 		switch {
 		case f.Code == CodeConditionFalse:
