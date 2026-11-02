@@ -17,6 +17,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -88,6 +89,8 @@ type InstallModel struct {
 	Owned    *install.Owned
 	Overview overview.Overview
 	Health   health.Report
+	// Diagnosis groups and ranks Health's findings; Build set each finding's Group.
+	Diagnosis *diagnose.Diagnosis
 	// Index is the explorer's immutable index; handlers never decode objects.
 	Index *explore.Index
 	// Rules is the computed rule set selected for this install's controller (D-020).
@@ -361,10 +364,11 @@ func (e *Engine) compute() *Published {
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}
+		diag := diagnose.Build(&rep, diagnose.Input{Install: res, Owned: owned, Snapshot: snap, Served: served, Views: e.decode}, diagnose.Families())
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
 			Computed: views[i]})
-		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
+		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Diagnosis: diag, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
 			Rules: r.sel, Computed: views[i]})
 	}
 	m.Next = next.next

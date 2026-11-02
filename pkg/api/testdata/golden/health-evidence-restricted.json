@@ -82,6 +82,7 @@
     "findings": [
       {
         "code": "KGWUI-002",
+        "group": "f1-vptc6qogpx6j2mni6gfndp6a4b",
         "id": "f1-vro76ty6ct6f6qzggk3tbklmzh",
         "install": "kgw.kgateway",
         "message": "",
@@ -99,6 +100,7 @@
       {
         "code": "KGWUI-002",
         "detail": "A delegating rule selects no child route the controller accepted; ResolvedRefs=False, reason BackendNotFound (parent Gateway infra/edge section sel)",
+        "group": "f1-dishx3pq7yu2lksxzjnafj4hc7",
         "id": "f1-ynauzn5r5afqzy7efao3b4aq24",
         "install": "kgw.kgateway",
         "message": "A delegating rule has no accepted child route",
@@ -116,6 +118,7 @@
       {
         "code": "KGWUI-004",
         "detail": "targets Gateway infra/edge",
+        "group": "f1-b6uspryyolqs7xmxt2y4fu4q3f",
         "id": "f1-sr3nt34mw3yema4cgo2evzaj7v",
         "install": "kgw.kgateway",
         "message": "Namespace not watched by the controller",
@@ -134,6 +137,7 @@
         "code": "KGWUI-011",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
+        "group": "f1-zrzz3vn2pfghzohe5qdcrdniet",
         "id": "f1-rm2ieyble2gqlpkezyf3tl3bc6",
         "install": "kgw.kgateway",
         "message": "No status for the named parent route",
@@ -151,6 +155,7 @@
       {
         "code": "KGWUI-012",
         "detail": "Status entry for parent HTTPRoute `shop/hp` at `PathPrefix /rb/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
+        "group": "f1-ma35s3qjr4piqgb3btgsbbkwye",
         "id": "f1-5ou42dygyupzmy4dnqylc7qaz6",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
@@ -169,6 +174,7 @@
         "code": "KGWUI-012",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
+        "group": "f1-jws2ihkyqb7xq6lpg6yo4pfx4g",
         "id": "f1-nbxeo2pjmwreaatmiithkrrlb4",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",

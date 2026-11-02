@@ -533,8 +533,8 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 	return (ref.Kind != "Namespace" || ref.Name != "zoned") && ref != route("shop", "hp")
 })
 
-// D-032, D-028: goldens match the wire byte for byte; ids and first-seen sinces are the
-// only additions to the Phase 2 bytes. It never rewrites a golden, even under -update.
+// D-032, D-028: goldens match the wire byte for byte; ids, first-seen sinces and groups
+// are the only additions to the Phase 2 bytes. It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
 	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {

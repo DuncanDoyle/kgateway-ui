@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -423,6 +424,10 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 		st.do()
 		memo.e.Compute()
 		plain.e.Compute()
+		// Group ids, membership and rank order match too.
+		if got, want := memo.e.Current().Model.Installs[0].Diagnosis, plain.e.Current().Model.Installs[0].Diagnosis; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: diagnosis differs with memoization:\n got %+v\nwant %+v", st.name, got, want)
+		}
 		for _, p := range paths {
 			_, want, err := ask(plain.srv, "", p)
 			if err != nil {
@@ -435,9 +440,10 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 			if !bytes.Equal(got, want) {
 				t.Errorf("%s: GET %s differs with memoization:\n got %s\nwant %s", st.name, p, got, want)
 			}
-			// The probes' findings carry an id and a first-seen since, so both are compared.
-			if p == paths[0] && (!bytes.Contains(got, []byte(`"id":"f1-`)) || !bytes.Contains(got, []byte(`"since":`))) {
-				t.Errorf("%s: GET %s has no finding id or since:\n%s", st.name, p, got)
+			// The probes' findings carry an id, a first-seen since and a group, so all three are compared.
+			if p == paths[0] && (!bytes.Contains(got, []byte(`"id":"f1-`)) || !bytes.Contains(got, []byte(`"since":`)) ||
+				!bytes.Contains(got, []byte(`"group":"f1-`))) {
+				t.Errorf("%s: GET %s has no finding id, since or group:\n%s", st.name, p, got)
 			}
 		}
 	}
