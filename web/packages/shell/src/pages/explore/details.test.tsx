@@ -1095,3 +1095,76 @@ it("on a ListenerSet page the parent's link decides its crumb", async () => {
   await waitFor(() => expect(trail().getByText(breadcrumbsCopy.hidden)).toBeInTheDocument());
   expect(trail().queryByText(/edge/)).toBeNull();
 });
+
+/** Stubs matchMedia so only the two-column query (from 1600 px) matches when wide. */
+function viewport(wide: boolean) {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: wide && q === "(min-width: 1600px)",
+    media: q,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}
+const before = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+it("from 1600 px a Gateway's conditions render in the side column, after the structure in DOM order", async () => {
+  viewport(true);
+  serve(api());
+  mount(GW_PATH);
+  await screen.findByRole("table", { name: "Listeners" });
+  const side = screen.getByTestId("detail-side");
+  const main = screen.getByTestId("detail-main");
+  expect(within(side).getByRole("region", { name: "Conditions" })).toBeInTheDocument();
+  expect(within(main).queryByRole("region", { name: "Conditions" })).toBeNull();
+  expect(within(main).getByRole("table", { name: "Listeners" })).toBeInTheDocument();
+  // DOM order is visual order: tab order reaches the structure first, then the side.
+  expect(before(main, side)).toBe(true);
+});
+
+it("below 1600 px a Gateway's conditions stay at the top of the one column", async () => {
+  viewport(false);
+  serve(api());
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  expect(screen.queryByTestId("detail-side")).toBeNull();
+  const conditions = within(screen.getByTestId("detail-main")).getByRole("region", { name: "Conditions" });
+  expect(before(conditions, listeners)).toBe(true);
+});
+
+it("the skeleton holds a side column from 1600 px only, as the loaded page does", async () => {
+  for (const wide of [true, false]) {
+    viewport(wide);
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const reply = api();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = new URL(url, "http://ui");
+        if (u.pathname === `${API}/gateways/infra/edge`) await gate;
+        const r = reply(u);
+        return new Response(JSON.stringify(r ?? { error: "not found" }), { status: r === undefined ? 404 : 200 });
+      }),
+    );
+    const view = mount(GW_PATH);
+    const skeleton = await screen.findByTestId("detail-skeleton");
+    expect(within(skeleton).queryByTestId("detail-side") !== null).toBe(wide);
+    act(() => release());
+    await screen.findByRole("table", { name: "Listeners" });
+    expect(screen.queryByTestId("detail-side") !== null).toBe(wide);
+    view.unmount();
+  }
+});
+
+it("from 1600 px a ListenerSet's parent and conditions render in the side column", async () => {
+  viewport(true);
+  serve(api());
+  mount(LS_PATH("partial"));
+  await screen.findByRole("table", { name: "Listeners" });
+  const side = screen.getByTestId("detail-side");
+  expect(within(side).getByRole("region", { name: "Conditions" })).toBeInTheDocument();
+  expect(within(side).getByText("Parent Gateway")).toBeInTheDocument();
+  expect(within(screen.getByTestId("detail-main")).getByRole("table", { name: "Listeners" })).toBeInTheDocument();
+});

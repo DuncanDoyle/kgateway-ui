@@ -191,8 +191,8 @@ for (const p of CORE_PAGES) {
   });
 }
 
-// Layout (design §8.7, ruling R30): fluid up to 2400 px, no page scroll, and one column on core pages, which
-// contribute no side section; the e2e build has no extension, so no page here has a second column.
+// Layout (design §8.7, §17.6, D-035): fluid up to 2400 px and no page scroll. Core detail pages are two columns
+// from 1600 px (conditions and related objects beside the structure) and one column below.
 const WIDTHS = [720, 1280, 1600, 3008];
 
 /** The page frame's width, the width its parent gives it, and whether the page scrolls sideways. */
@@ -230,19 +230,39 @@ for (const width of WIDTHS) {
 
     // The resource page has no Overview columns, so only the three explorer detail pages.
     for (const p of CORE_PAGES.slice(0, 3)) {
-      test(`${p.name} page is one column and fills the width up to 2400 px`, async ({ page }) => {
+      const two = width >= 1600;
+      test(`${p.name} page is ${two ? "two columns" : "one column"} and fills the width up to 2400 px`, async ({
+        page,
+      }) => {
         await page.goto(p.url);
         await expect(page.getByTestId("detail-skeleton")).toHaveCount(0);
         await expect(page.getByTestId("detail-columns")).toBeVisible();
-        await expect(page.getByTestId("detail-side")).toHaveCount(0);
-        const [cols, main] = await Promise.all([
+        await expect(page.getByTestId("detail-side")).toHaveCount(two ? 1 : 0);
+        const [cols, main, side] = await Promise.all([
           page.getByTestId("detail-columns").boundingBox(),
           page.getByTestId("detail-main").boundingBox(),
+          two ? page.getByTestId("detail-side").boundingBox() : Promise.resolve(null),
         ]);
-        expect(
-          Math.abs((main?.width ?? 0) - (cols?.width ?? -2)),
-          "the main column takes the whole row",
-        ).toBeLessThanOrEqual(1);
+        if (two) {
+          // The side sits to the right of the main column, 320-400 px wide, so short identifiers never truncate.
+          expect(side && main && side.x >= main.x + main.width, "the side is beside the main").toBe(true);
+          expect(side?.width ?? 0).toBeGreaterThanOrEqual(320);
+          expect(side?.width ?? 0).toBeLessThanOrEqual(400);
+          if (p.name === "Gateway") {
+            // Beside a side column the Listeners table keeps its short identifiers whole: name, port, protocol.
+            const cut = await page
+              .getByRole("table", { name: gatewayCopy.listeners })
+              .locator(
+                "tr[data-row] > td:is(:nth-child(3), :nth-child(4), :nth-child(5)), tr[data-row] > td:is(:nth-child(3), :nth-child(5)) *",
+              )
+              .evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent));
+            expect(cut).toEqual([]);
+          }
+        } else
+          expect(
+            Math.abs((main?.width ?? 0) - (cols?.width ?? -2)),
+            "the main column takes the whole row",
+          ).toBeLessThanOrEqual(1);
         expectFluid(await frame(page));
       });
     }

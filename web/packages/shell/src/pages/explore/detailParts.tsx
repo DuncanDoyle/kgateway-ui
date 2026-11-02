@@ -17,7 +17,7 @@ import { ResourceYaml } from "../../resource/ResourceYaml";
 import { TrailRefsProvider, useReportTrailRefs, useTrailRefsCollector } from "../../shell/Breadcrumbs";
 import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
-import { DetailColumns, layout } from "../../shell/layout";
+import { DetailColumns, layout, useTwoColumns } from "../../shell/layout";
 import { OBJECT_HEADER_H, ObjectHeader } from "../../shell/ObjectHeader";
 import { installPath } from "../../shell/paths";
 import { useUrlParams } from "../../shell/urlParams";
@@ -105,8 +105,10 @@ interface DetailFrameProps {
   error?: ApiError;
   /** The Overview tab's main column; rendered only once data has loaded. */
   children: ReactNode;
-  /** The Overview tab's side column, for longer auxiliary content. Contributed sections follow it; with neither, one column. */
+  /** The Overview tab's side column, e.g. conditions and related objects from 1600 px. Contributed sections follow it. */
   side?: ReactNode;
+  /** The page fills the side column from 1600 px ({@link useTwoColumns}), so the skeleton holds a place for it there. */
+  sideWhenWide?: boolean;
   /** Tabs after YAML; a ?tab= naming none of them shows Overview. */
   extraTabs?: ExtraTab[];
   /** Refs the page's data links, for the trail above the header. */
@@ -123,10 +125,12 @@ export function DetailFrame({
   error,
   children,
   side,
+  sideWhenWide,
   extraTabs,
   trailRefs,
   stylesOverride,
 }: DetailFrameProps) {
+  const wide = useTwoColumns();
   const vocab = useVocabulary();
   const [params, update] = useUrlParams();
   const coreIds = useMemo(() => [...CORE_TAB_IDS, ...(extraTabs ?? []).map((t) => t.id)], [extraTabs]);
@@ -209,8 +213,8 @@ export function DetailFrame({
             <Shimmer h={200} />
           </Stack>
         }
-        // Only a page with contributed sections has a side column to hold a place for.
-        side={sections.length && tab === "overview" ? <Shimmer h={120} /> : null}
+        // The same split as the loaded page, so nothing moves when data arrives.
+        side={(sections.length || (wide && sideWhenWide)) && tab === "overview" ? <Shimmer h={120} /> : null}
       />
     </div>
   );

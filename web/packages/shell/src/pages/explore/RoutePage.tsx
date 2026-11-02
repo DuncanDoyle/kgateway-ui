@@ -7,6 +7,7 @@ import { useListFilter } from "../../api/hooks";
 import type { LinkedRef, ParentRef, RouteDetail } from "../../api/types";
 import { delegationCopy, detailCopy, routeCopy } from "../../copy/explorer";
 import { useInstallId } from "../../shell/extension";
+import { useTwoColumns } from "../../shell/layout";
 import { Shimmer } from "../../states/Shimmer";
 import { DetailFrame, type ExtraTab, Facts, Section } from "./detailParts";
 import { Muted } from "./listParts";
@@ -97,11 +98,60 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
         : undefined,
     [show, viewB, rules, id, ref],
   );
+  // From 1600 px the up-chain and parents sit beside the structure; below, where they always were.
+  const wide = useTwoColumns();
+  const upChain = data ? (
+    <UpChain installId={id} self={ref} paths={data.ancestors} truncated={data.ancestorsTruncated} />
+  ) : null;
+  const parentsBlock = data ? (
+    <Section aria-labelledby="route-parents">
+      <h2 id="route-parents">
+        {routeCopy.parents} <span className="note">{data.parentRefs.length + unlisted.length}</span>
+      </h2>
+      {data.parentRefs.length || unlisted.length ? (
+        <Cards>
+          {data.parentRefs.map((p, i) => (
+            <ParentCard
+              key={refKey(p)}
+              installId={id}
+              parentRef={p}
+              entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
+              generation={data.generation}
+              hasDelegation={hasDelegation}
+              attachment={data.attachments?.find((a) => a.index === i)?.result}
+            />
+          ))}
+          {unlisted.map((p) => (
+            <ParentCard
+              key={`status/${refKey(p)}`}
+              installId={id}
+              parentRef={p}
+              entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
+              generation={data.generation}
+              hasDelegation={hasDelegation}
+              origin={data.parentRefs.length ? "unlisted" : "implicit"}
+            />
+          ))}
+        </Cards>
+      ) : (
+        <Muted>{routeCopy.noParentRefs}</Muted>
+      )}
+    </Section>
+  ) : null;
   return (
     <DetailFrame
       installId={id}
       refValue={ref}
       noun="HTTPRoute"
+      side={
+        wide ? (
+          <>
+            {upChain}
+            {parentsBlock}
+          </>
+        ) : null
+      }
+      sideWhenWide
       data={data}
       error={error}
       extraTabs={extraTabs}
@@ -110,7 +160,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
     >
       {data ? (
         <>
-          <UpChain installId={id} self={ref} paths={data.ancestors} truncated={data.ancestorsTruncated} />
+          {wide ? null : upChain}
           <Section aria-label={detailCopy.summary}>
             <Facts>
               <dt>{routeCopy.hostnames}</dt>
@@ -119,39 +169,7 @@ export function RoutePage({ stylesOverride }: RoutePageProps = {}) {
               <dd>{permissionText(data)}</dd>
             </Facts>
           </Section>
-          <Section aria-labelledby="route-parents">
-            <h2 id="route-parents">
-              {routeCopy.parents} <span className="note">{data.parentRefs.length + unlisted.length}</span>
-            </h2>
-            {data.parentRefs.length || unlisted.length ? (
-              <Cards>
-                {data.parentRefs.map((p, i) => (
-                  <ParentCard
-                    key={refKey(p)}
-                    installId={id}
-                    parentRef={p}
-                    entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
-                    generation={data.generation}
-                    hasDelegation={hasDelegation}
-                    attachment={data.attachments?.find((a) => a.index === i)?.result}
-                  />
-                ))}
-                {unlisted.map((p) => (
-                  <ParentCard
-                    key={`status/${refKey(p)}`}
-                    installId={id}
-                    parentRef={p}
-                    entries={data.parents.filter((s) => sameParentRef(s.parentRef, p))}
-                    generation={data.generation}
-                    hasDelegation={hasDelegation}
-                    origin={data.parentRefs.length ? "unlisted" : "implicit"}
-                  />
-                ))}
-              </Cards>
-            ) : (
-              <Muted>{routeCopy.noParentRefs}</Muted>
-            )}
-          </Section>
+          {wide ? null : parentsBlock}
           <Section aria-labelledby="route-rules">
             <h2 id="route-rules">
               {routeCopy.rules} <span className="note">{data.rules.length}</span>

@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import { ConditionList } from "../explore/ConditionList";
 import { renderWithTheme } from "../test/render";
-import { DetailColumns, layout } from "./layout";
+import { DetailColumns, layout, useTwoColumns } from "./layout";
 
 const css = () => [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("");
 // Every component source as text, through Vite, so the test needs no Node typings.
@@ -56,4 +56,22 @@ it("one column at every width when there is no side", () => {
 it("renders without a side column when there is no side", () => {
   renderWithTheme(<DetailColumns main={<p>main</p>} side={null} />);
   expect(screen.queryByTestId("detail-side")).not.toBeInTheDocument();
+});
+
+it("the render switch asks the columns' own query, and is one column before matchMedia answers", () => {
+  const asked: string[] = [];
+  function Probe() {
+    return <p>{useTwoColumns() ? "two" : "one"}</p>;
+  }
+  // jsdom has no matchMedia: the default is the one-column layout.
+  renderWithTheme(<Probe />);
+  expect(screen.getByText("one")).toBeInTheDocument();
+  vi.stubGlobal("matchMedia", (q: string) => {
+    asked.push(q);
+    return { matches: true, media: q, addEventListener: () => {}, removeEventListener: () => {} };
+  });
+  renderWithTheme(<Probe />);
+  expect(screen.getByText("two")).toBeInTheDocument();
+  expect(new Set(asked)).toEqual(new Set([`(min-width: ${layout.twoColumnFrom}px)`]));
+  vi.unstubAllGlobals();
 });

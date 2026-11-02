@@ -847,7 +847,7 @@ Extension pages for downstream kinds use the same component, exported from the s
 **Layout on wide screens.**
 - Lists and tables are fluid: they fill the viewport minus the gutters, up to 2400 px, instead of stopping at 1400 px.
 - Prose (messages, descriptions, next steps) keeps a readable line length of about 80 characters wherever it sits.
-- At 1600 px and wider, detail pages use two columns. The main column holds the object's structure (listeners, rules, attached routes). The side column holds conditions, findings and related objects. Below 1600 px the side column stacks under the main one, in the same order.
+- At 1600 px and wider, detail pages use two columns. The main column holds the object's structure (listeners, rules, attached routes). The side column holds conditions, findings and related objects. Below 1600 px conditions and related objects sit at the top of the one column, and contributed side sections follow the main content (user, Codex 3.1 review). Each width renders its blocks in their visual order, never reordered by CSS, so tab order follows what is visible.
 - Type sizes do not grow with the viewport; browser zoom stays the way to enlarge text **(our call)**.
 - The Phase 2 widths stay correct: 720 px, 1280 px and the narrow-table breakpoint keep their layouts.
 

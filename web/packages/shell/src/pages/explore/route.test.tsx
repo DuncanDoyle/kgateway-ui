@@ -633,3 +633,34 @@ it("a failed parentRef shows its computed explanation", async () => {
   expect(outcome).toHaveTextContent("listener https has *.example.org, route has shop.example.com");
   expect(within(outcome).getByTestId("computed-badge")).toHaveTextContent("Consistent with the status");
 });
+
+/** Stubs matchMedia so only the two-column query (from 1600 px) matches when wide. */
+function viewport(wide: boolean) {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: wide && q === "(min-width: 1600px)",
+    media: q,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}
+
+it("from 1600 px the up-chain and parents render in the side column; below, at the top of the main", async () => {
+  for (const wide of [true, false]) {
+    viewport(wide);
+    serve(api());
+    const view = mount(MID);
+    const upChain = await loaded();
+    const parents = screen.getByRole("region", { name: /^Parents/ });
+    const rules = screen.getByRole("region", { name: /^Rules/ });
+    const column = screen.getByTestId(wide ? "detail-side" : "detail-main");
+    expect(column).toContainElement(upChain);
+    expect(column).toContainElement(parents);
+    expect(screen.getByTestId("detail-main")).toContainElement(rules);
+    // DOM order is visual order at each width, so tab order follows what is visible.
+    const order = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(order(rules, parents)).toBe(wide);
+    expect(order(upChain, parents)).toBe(true);
+    view.unmount();
+    vi.unstubAllGlobals();
+  }
+});

@@ -9,6 +9,7 @@ import { ConditionList } from "../../explore/ConditionList";
 import type { ObjectColumn } from "../../explore/ObjectTable";
 import { HealthBadge } from "../../health/HealthBadge";
 import { useInstallId } from "../../shell/extension";
+import { useTwoColumns } from "../../shell/layout";
 import { DetailFrame, expectedRows, Facts, refParam, Section, SubList } from "./detailParts";
 import { ListenerTable } from "./gateway/ListenerTable";
 import { Muted, NameCell } from "./listParts";
@@ -66,14 +67,28 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
     supported !== false && data
       ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
       : undefined;
+  // From 1600 px the conditions sit beside the structure; below, above it.
+  const wide = useTwoColumns();
+  const conditions = data ? (
+    <Section aria-labelledby="gw-conditions">
+      <h2 id="gw-conditions">{detailCopy.conditions}</h2>
+      <ConditionList conditions={data.conditions} generation={data.generation} />
+    </Section>
+  ) : null;
   return (
-    <DetailFrame installId={id} refValue={ref} noun="Gateway" data={data} error={error} stylesOverride={stylesOverride}>
+    <DetailFrame
+      installId={id}
+      refValue={ref}
+      noun="Gateway"
+      data={data}
+      error={error}
+      side={wide ? conditions : null}
+      sideWhenWide
+      stylesOverride={stylesOverride}
+    >
       {data ? (
         <>
-          <Section aria-labelledby="gw-conditions">
-            <h2 id="gw-conditions">{detailCopy.conditions}</h2>
-            <ConditionList conditions={data.conditions} generation={data.generation} />
-          </Section>
+          {wide ? null : conditions}
           <Section aria-label={detailCopy.summary}>
             <Facts>
               <dt>{columnCopy.class}</dt>
