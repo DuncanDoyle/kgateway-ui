@@ -68,7 +68,7 @@ it("H1: an opaque ID survives the redirect, a reload and a deep link, and is nev
   await waitFor(() => expect(document.title).toBe("Findings: Edge one"));
   const installCalls = fetched().filter((u) => u.startsWith("/api/v1/installs/"));
   expect(installCalls.length).toBeGreaterThan(0);
-  for (const u of installCalls) expect(u).toMatch(/^\/api\/v1\/installs\/acme~edge_1\/(overview|health)$/);
+  for (const u of installCalls) expect(u).toMatch(/^\/api\/v1\/installs\/acme~edge_1\/(overview|health|findings)$/);
 });
 
 it("H1: a Kubernetes ID with a dot resolves, and the old two-segment URL is not an install", async () => {

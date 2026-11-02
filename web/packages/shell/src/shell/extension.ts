@@ -14,7 +14,8 @@ export interface Brand {
 
 /**
  * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:id/. The core owns "/" at the top and "", "findings" and "r/..." under /i/:id/, and wins on its own URLs.
+ * under /i/:id/. The core owns "/" at the top and "", "findings", "findings/..." and "r/..." under /i/:id/, and wins on
+ * its own URLs.
  * "gateways", "listenersets" and "routes" are reserved under /i/:id/: a contribution at or below them is ignored with
  * a console warning; replace those pages through their CorePages slots instead.
  */
@@ -65,6 +66,8 @@ export interface CorePages {
   ListenerSetPage?: ComponentType;
   RoutesPage?: ComponentType;
   RoutePage?: ComponentType;
+  /** The finding detail page at findings/:findingId (sub-phase 3.1). */
+  FindingPage?: ComponentType;
 }
 
 export const defaultBrand: Brand = { productName: "kgateway", logo: null };

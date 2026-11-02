@@ -6,7 +6,8 @@ import { ListenerSetPage } from "./explore/ListenerSetPage";
 import { ListenerSetsPage } from "./explore/ListenerSetsPage";
 import { RoutePage } from "./explore/RoutePage";
 import { RoutesPage } from "./explore/RoutesPage";
-import { FindingsPage } from "./FindingsPage";
+import { FindingPage } from "./findings/FindingPage";
+import { FindingsPage } from "./findings/FindingsPage";
 import { InstallPage } from "./install/InstallPage";
 import { ResourcePage } from "./ResourcePage";
 
@@ -15,6 +16,7 @@ export const defaultPages: Required<CorePages> = {
   ClusterLanding,
   InstallPage,
   FindingsPage,
+  FindingPage,
   ResourcePage,
   GatewaysPage,
   GatewayPage,

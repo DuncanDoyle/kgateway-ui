@@ -1,6 +1,7 @@
 import type { HealthState } from "../theme/tokens";
 import type { Link, LinkedRef } from "./exploreTypes";
 
+export * from "./diagTypes";
 export * from "./exploreTypes";
 
 /** Mirrors pkg/api, pkg/overview, pkg/health JSON as built (sub-phase 1.1). */
@@ -23,8 +24,11 @@ export interface Ref {
 /**
  * restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013).
  * evidenceRestricted: the detail was replaced because it quotes an object the caller may not view.
+ * id opens the finding's page; group is its cause's group (both from sub-phase 3.1).
  */
 export interface Finding {
+  id?: string;
+  group?: string;
   code: string;
   slug: string;
   severity: Severity;

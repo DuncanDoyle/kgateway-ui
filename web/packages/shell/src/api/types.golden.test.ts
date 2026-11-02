@@ -2,6 +2,10 @@ import badRequestGolden from "../../../../../pkg/api/testdata/golden/bad-request
 import bareInstalls from "../../../../../pkg/api/testdata/golden/bare-installs.json";
 import bareMeta from "../../../../../pkg/api/testdata/golden/bare-meta.json";
 import bareOverview from "../../../../../pkg/api/testdata/golden/bare-overview.json";
+import findingDetailOtherGolden from "../../../../../pkg/api/testdata/golden/finding-detail-other.json";
+import findingDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-restricted.json";
+import findingsGolden from "../../../../../pkg/api/testdata/golden/findings.json";
+import findingsRestrictedGolden from "../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import gatewayDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-restricted.json";
 import gatewaysGolden from "../../../../../pkg/api/testdata/golden/gateways.json";
@@ -55,6 +59,8 @@ import type {
   ErrorResponse,
   Filter,
   Finding,
+  FindingDetail,
+  FindingRow,
   Fraction,
   GatewayDetail,
   GatewayListRow,
@@ -76,6 +82,7 @@ import type {
   Match,
   MetaResponse,
   Mirror,
+  NextStep,
   OverviewResponse,
   Page,
   ParentRef,
@@ -93,6 +100,7 @@ import type {
   ScopeSummary,
   ServedKind,
   SpecParentRef,
+  SuggestedFix,
 } from "./types";
 
 // Checks the backend's golden wire format (pkg/api golden_test.go) against these types.
@@ -151,6 +159,8 @@ const ref = shape<Ref>({ group: "!", kind: "!", namespace: "?", name: "!" });
 const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "!" }, {}, link);
 const finding = shape<Finding>(
   {
+    id: "?",
+    group: "?",
     code: "!",
     slug: "!",
     severity: "!",
@@ -606,6 +616,35 @@ const routeDetail = shape<RouteDetail>(
   { health: healthState },
 );
 
+// Findings (sub-phase 3.1).
+const severity = { severity: { error: 1, warning: 1, info: 1 } } as const;
+const findingRow = shape<FindingRow>(
+  {
+    id: "!",
+    code: "!",
+    slug: "!",
+    severity: "!",
+    resource: "?",
+    message: "?",
+    detail: "?",
+    since: "?",
+    group: "?",
+    restricted: "?",
+    evidenceRestricted: "?",
+  },
+  { resource: linkedRef },
+  severity,
+);
+const nextStep = shape<NextStep>({ title: "!", command: "!", needs: "?", note: "?" });
+const suggestedFix = shape<SuggestedFix>(
+  { title: "!", target: "!", create: "!", path: "?", yaml: "!", basis: "!" },
+  { target: linkedRef },
+);
+const findingDetail = shape<FindingDetail>(
+  { install: "!", finding: "!", suggestedFix: "?", nextSteps: "?", affected: "!", collectedAt: "!" },
+  { finding: findingRow, suggestedFix, nextSteps: nextStep, affected: page(linkedRef) },
+);
+
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
 function problems(s: Shape, v: unknown, path: string): string[] {
   if (Array.isArray(v)) return v.flatMap((e, i) => problems(s, e, `${path}[${i}]`));
@@ -686,6 +725,10 @@ describe("types.ts matches the golden v1 wire format", () => {
       routeDetail,
     ],
     ["health-evidence-restricted", healthEvidenceRestrictedGolden.body satisfies Wide<HealthReport>, healthReport],
+    ["findings", findingsGolden.body satisfies Wide<Page<FindingRow>>, page(findingRow)],
+    ["findings-restricted", findingsRestrictedGolden.body satisfies Wide<Page<FindingRow>>, page(findingRow)],
+    ["finding-detail-other", findingDetailOtherGolden.body satisfies Wide<FindingDetail>, findingDetail],
+    ["finding-detail-restricted", findingDetailRestrictedGolden.body satisfies Wide<FindingDetail>, findingDetail],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });
@@ -838,5 +881,15 @@ describe("types.ts matches the golden v1 wire format", () => {
       findings.some((f) => f.code === "KGWUI-012" && !("evidenceRestricted" in f) && f.detail?.includes("shop/hp")),
     ).toBe(true);
     expect(meta.body.filters?.delegation).toEqual(["rule", "ref", "outcome"]);
+  });
+
+  // Findings: restricted rows carry identity only; every row has an id and the meta lists the findings filters.
+  it("covers 3.1 findings: ids, restricted rows without a message, and the findings filters", () => {
+    expect(findingsGolden.body.items.every((f) => f.id && f.group)).toBe(true);
+    const hidden = findingsRestrictedGolden.body.items.find((f) => "restricted" in f && f.restricted);
+    expect(hidden && !("message" in hidden) && hidden.resource.link === "none").toBe(true);
+    expect(findingDetailRestrictedGolden.body.finding.restricted).toBe(true);
+    expect(health.body.findings.every((f) => "id" in f && f.id)).toBe(true);
+    expect(meta.body.filters?.findings).toEqual(["severity", "code", "kind", "namespace", "group", "q"]);
   });
 });

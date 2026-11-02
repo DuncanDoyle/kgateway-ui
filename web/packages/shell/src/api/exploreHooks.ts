@@ -16,21 +16,21 @@ import type {
 } from "./types";
 
 // region Helpers
-const seg = encodeURIComponent;
-const withQuery = (path: string, q: URLSearchParams) => {
+export const seg = encodeURIComponent;
+export const withQuery = (path: string, q: URLSearchParams) => {
   const s = q.toString();
   return s ? `${path}?${s}` : path;
 };
 
 /** A response is shown only for the install in the URL, so a switch never shows the previous install's data. */
-const forInstall = <T extends { install: string }>(data: T | undefined, id: string) =>
+export const forInstall = <T extends { install: string }>(data: T | undefined, id: string) =>
   data?.install === id ? data : undefined;
 
 /**
  * One list page, polled. A 400 on a request with a cursor sets cursorRejected and loads page one instead (design §8.6);
  * the page should then drop the cursor from its URL. isLaggy marks rows of the previous query while a new one loads.
  */
-function useList<T>(id: string, list: string, query: URLSearchParams) {
+export function useList<T>(id: string, list: string, query: URLSearchParams) {
   const { cache } = useSWRConfig();
   const path = `${installApi(id)}/${list}`;
   const hasCursor = query.has("cursor");

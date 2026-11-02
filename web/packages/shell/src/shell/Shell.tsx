@@ -81,6 +81,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
   const ListenerSetPage = pages.ListenerSetPage ?? defaultPages.ListenerSetPage;
   const RoutesPage = pages.RoutesPage ?? defaultPages.RoutesPage;
   const RoutePage = pages.RoutePage ?? defaultPages.RoutePage;
+  const FindingPage = pages.FindingPage ?? defaultPages.FindingPage;
   // Core pages under /i/:id/; the install nav shows an entry only when its path is listed here.
   const installRoutes: [string, ComponentType][] = [
     ["", InstallPage],
@@ -91,6 +92,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     ["listenersets/:group/:kind/:ns/:name", ListenerSetPage],
     ["routes/:group/:kind/:ns/:name", RoutePage],
     ["findings", FindingsPage],
+    ["findings/:findingId", FindingPage],
     ["r/:group/:kind/:rns/:rname", ResourcePage],
   ];
   return (

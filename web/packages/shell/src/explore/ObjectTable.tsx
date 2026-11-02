@@ -220,6 +220,10 @@ interface ObjectTableProps<T> {
   noun: readonly [string, string];
   columns: ObjectColumn<T>[];
   rowRef: (row: T) => LinkedRef;
+  /** A row's identity when its ref is not unique, e.g. several findings on one object; defaults to the ref. */
+  rowKey?: (row: T) => string;
+  /** Where a row opens; defaults to its ref's objectPath. */
+  rowPath?: (row: T) => string | undefined;
   page?: Page<T>;
   loading: boolean;
   /** The rows shown belong to the previous query while a new one loads: busy and dimmed, never moved. */
@@ -247,6 +251,8 @@ export function ObjectTable<T>({
   noun,
   columns,
   rowRef,
+  rowKey,
+  rowPath,
   page,
   loading,
   busy = false,
@@ -266,6 +272,8 @@ export function ObjectTable<T>({
   const rowEls = useRef<(HTMLTableRowElement | null)[]>([]);
   const secondary = columns.filter((c) => c.secondary);
   const collapse = narrow && secondary.length > 0;
+  const keyOf = useCallback((r: T) => (rowKey ? rowKey(r) : refKey(rowRef(r))), [rowKey, rowRef]);
+  const pathOf = (r: T) => (rowPath ? rowPath(r) : objectPath(installId, rowRef(r)));
   const toggle = useCallback(
     (k: string) =>
       setExpanded((prev) => {
@@ -281,15 +289,16 @@ export function ObjectTable<T>({
       id: "expand",
       cell: (c) => {
         const r = rowRef(c.row.original);
+        const k = keyOf(c.row.original);
         // Read through meta, so expanding changes no column def and the button keeps its focus.
-        const open = (c.table.options.meta as { expanded: ReadonlySet<string> }).expanded.has(refKey(r));
+        const open = (c.table.options.meta as { expanded: ReadonlySet<string> }).expanded.has(k);
         return (
           <button
             type="button"
             className="expand"
             aria-expanded={open}
             aria-label={listCopy.toggleDetails(open, nameOf(r))}
-            onClick={() => toggle(refKey(r))}
+            onClick={() => toggle(k)}
           >
             {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
           </button>
@@ -300,7 +309,7 @@ export function ObjectTable<T>({
       ...(collapse ? [expand] : []),
       ...columns.map((col) => h.display({ id: col.id, header: col.header, cell: (c) => col.cell(c.row.original) })),
     ];
-  }, [columns, collapse, rowRef, toggle]);
+  }, [columns, collapse, rowRef, keyOf, toggle]);
   const visibility = useMemo<VisibilityState>(
     () => Object.fromEntries(secondary.map((c) => [c.id, !collapse])),
     [secondary, collapse],
@@ -315,7 +324,7 @@ export function ObjectTable<T>({
     columns: defs,
     state: { sorting, columnVisibility: visibility },
     meta: { expanded },
-    getRowId: (r) => refKey(rowRef(r)),
+    getRowId: keyOf,
     manualSorting: true,
     manualPagination: true,
     autoResetAll: false,
@@ -326,7 +335,7 @@ export function ObjectTable<T>({
   const shown = table.getVisibleLeafColumns();
   const rows = table.getRowModel().rows;
   const open = (r: T) => {
-    const to = objectPath(installId, rowRef(r));
+    const to = pathOf(r);
     if (to) navigate(to);
   };
   const onRowClick = (e: MouseEvent, r: T) => {
@@ -403,7 +412,7 @@ export function ObjectTable<T>({
           ) : null}
           {rows.map((r, i) => {
             const k = r.id;
-            const linked = !!objectPath(installId, rowRef(r.original));
+            const linked = !!pathOf(r.original);
             return [
               <tr
                 key={k}
