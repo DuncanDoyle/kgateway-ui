@@ -209,7 +209,7 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
   );
   return (
     <StaleView.Provider value={stale}>
-      <Frame stylesOverride={stylesOverride}>
+      <Frame data-testid="page-frame" stylesOverride={stylesOverride}>
         {data && error && !cursorRejected ? <PageNotice error={error} title={errorTitle} /> : null}
         <header data-testid="detail-header">
           <span className="back">{back}</span>

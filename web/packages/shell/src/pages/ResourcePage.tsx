@@ -78,7 +78,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
     <PageState kind="loading" title="Loading resource…" />
   );
   return (
-    <Page stylesOverride={stylesOverride}>
+    <Page data-testid="page-frame" stylesOverride={stylesOverride}>
       {data && error ? <PageNotice error={error} title="Cannot load resource" /> : null}
       <ObjectHeader
         kind={{ group: ref.group, kind, label: kind }}

@@ -95,7 +95,7 @@ export function ListFrame({
   // A query that failed before loading keeps its title and filters, so its filters can still be changed or cleared.
   const failed = !loaded && error;
   return (
-    <Page stylesOverride={stylesOverride}>
+    <Page data-testid="page-frame" stylesOverride={stylesOverride}>
       {error && !failed ? <PageNotice error={error} title={errorTitle} /> : null}
       <div className="title">
         <h1>{title}</h1>

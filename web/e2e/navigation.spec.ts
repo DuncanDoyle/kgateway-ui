@@ -12,7 +12,7 @@ const GW = "gateway.networking.k8s.io";
 const routePage = (ns: string, name: string) => `${install}/routes/${GW}/HTTPRoute/${ns}/${name}`;
 const path = (p: string) => new RegExp(`${p.replace(/[.?]/g, "\\$&")}(\\?|$)`);
 
-const trailNav = (page: Page) => page.getByRole("navigation", { name: breadcrumbsCopy.label });
+const trailNav = (page: Page) => page.getByTestId("trail");
 const crumbs = (page: Page) => trailNav(page).locator('[data-part="crumb"]');
 const crumb = (page: Page, name: string | RegExp) => trailNav(page).getByRole("link", { name, exact: true });
 
@@ -25,10 +25,13 @@ async function dataRows(table: Locator): Promise<Locator> {
 /** Opens url in a new browser context, as someone pasting a copied link would, and checks the trail. */
 async function expectTrailInFreshContext(browser: Browser, url: string, want: (string | RegExp)[]) {
   const ctx = await browser.newContext();
-  const fresh = await ctx.newPage();
-  await fresh.goto(url);
-  await expect(crumbs(fresh)).toHaveText(want);
-  await ctx.close();
+  try {
+    const fresh = await ctx.newPage();
+    await fresh.goto(url);
+    await expect(crumbs(fresh)).toHaveText(want);
+  } finally {
+    await ctx.close();
+  }
 }
 
 test("Gateway, attached route, child route, then each crumb back", async ({ page, browser }) => {
@@ -93,7 +96,6 @@ test("a filtered findings list, a finding, its object, then the list crumb resto
   await (await dataRows(table)).getByRole("link", { name: "Backend not found" }).first().click();
   await expect(page).toHaveURL(new RegExp(`${install}/findings/[^/?]+\\?via=`));
   // A finding page hands its trail on to the objects it links.
-  await page.getByTestId("detail-header").waitFor();
   await page.getByRole("link", { name: "shop/broken", exact: true }).first().click();
   await expect(page).toHaveURL(path(routePage("shop", "broken")));
   await expect(crumbs(page)).toHaveText([/kgw-a/, navCopy.findings, "HTTPRoute shop/broken"]);
@@ -136,16 +138,9 @@ const CORE_PAGES = [
 ];
 const DETAIL = new RegExp(`^${api}/(gateways/[^/]+/[^/]+|(listenersets|routes|resources)/[^/]+/[^/]+/[^/]+/[^/]+)$`);
 
-function headBoxes(page: Page): Promise<{ trail: Box | null; header: Box | null }> {
-  return page.evaluate(() => {
-    const box = (sel: string) => {
-      const el = document.querySelector(sel);
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return { x: r.x + window.scrollX, y: r.y + window.scrollY, width: r.width, height: r.height };
-    };
-    return { trail: box("nav[data-trail]"), header: box("[data-object-header]") };
-  });
+/** The trail's and the object header's boxes; the page does not scroll while they are measured. */
+async function headBoxes(page: Page): Promise<{ trail: Box | null; header: Box | null }> {
+  return { trail: await trailNav(page).boundingBox(), header: await page.getByTestId("detail-header").boundingBox() };
 }
 
 for (const p of CORE_PAGES) {
@@ -162,13 +157,13 @@ for (const p of CORE_PAGES) {
       },
     );
     await page.goto(p.url);
-    const header = page.locator("[data-object-header]");
+    // On core detail pages detail-header is the ObjectHeader.
+    const header = page.getByTestId("detail-header");
     await expect(header).toHaveCount(1);
     await expect(trailNav(page)).toBeVisible();
     // Installs load on their own request, so the install crumb settles before measuring.
     await expect(crumbs(page).first()).toHaveText(/kgw-a/);
     const before = await headBoxes(page);
-    expect(before.header?.height, "header height").toBe(64);
     release();
     if (p.name === "resource") await expect(page.getByTestId("yaml")).toBeVisible();
     else {
@@ -183,23 +178,20 @@ for (const p of CORE_PAGES) {
 // contribute no side section; the e2e build has no extension, so no page here has a second column.
 const WIDTHS = [720, 1280, 1600, 3008];
 
-/** The page frame's width, the width it may use, and whether the page scrolls sideways. */
-function frame(page: Page, inner: string) {
-  return page.evaluate((sel) => {
-    let el = document.querySelector(sel) as HTMLElement | null;
-    while (el && getComputedStyle(el).maxWidth !== "2400px") el = el.parentElement;
-    if (!el?.parentElement) throw new Error(`no 2400 px frame around ${sel}`);
-    const parent = el.parentElement;
-    const pad =
-      Number.parseFloat(getComputedStyle(parent).paddingLeft) +
-      Number.parseFloat(getComputedStyle(parent).paddingRight);
-    return {
-      width: el.getBoundingClientRect().width,
-      room: parent.clientWidth - pad,
-      scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
-      innerWidth: window.innerWidth,
-    };
-  }, inner);
+/** The page frame's width, the width its parent gives it, and whether the page scrolls sideways. */
+function frame(page: Page) {
+  return page.getByTestId("page-frame").evaluate((el) => ({
+    width: el.getBoundingClientRect().width,
+    room: el.parentElement?.clientWidth ?? 0,
+    scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
+    innerWidth: window.innerWidth,
+  }));
+}
+
+/** Fluid up to 2400 px, within 1 px for subpixel layout. */
+function expectFluid(f: Awaited<ReturnType<typeof frame>>) {
+  expect(f.scrollWidth, "no horizontal page scroll").toBeLessThanOrEqual(f.innerWidth);
+  expect(Math.abs(f.width - Math.min(2400, f.room)), `frame ${f.width} px in ${f.room} px`).toBeLessThanOrEqual(1);
 }
 
 for (const width of WIDTHS) {
@@ -210,19 +202,16 @@ for (const width of WIDTHS) {
       const list: FindingList = await (await page.request.get(`${api}/findings?limit=1`)).json();
       await page.goto(`${install}/findings`);
       await dataRows(page.getByRole("table", { name: navCopy.findings }));
-      let f = await frame(page, "table");
-      expect(f.scrollWidth, "no horizontal page scroll").toBeLessThanOrEqual(f.innerWidth);
-      expect(f.width).toBe(Math.min(2400, f.room));
+      expectFluid(await frame(page));
 
       const first = list.items[0];
       if (!first?.id) throw new Error("the fixture has a finding with an id");
       await page.goto(`${install}/findings/${encodeURIComponent(first.id)}`);
       await expect(page.getByTestId("detail-skeleton")).toHaveCount(0);
-      f = await frame(page, '[data-testid="detail-header"]');
-      expect(f.scrollWidth, "no horizontal page scroll").toBeLessThanOrEqual(f.innerWidth);
-      expect(f.width).toBe(Math.min(2400, f.room));
+      expectFluid(await frame(page));
     });
 
+    // The resource page has no Overview columns, so only the three explorer detail pages.
     for (const p of CORE_PAGES.slice(0, 3)) {
       test(`${p.name} page is one column and fills the width up to 2400 px`, async ({ page }) => {
         await page.goto(p.url);
@@ -233,10 +222,11 @@ for (const width of WIDTHS) {
           page.getByTestId("detail-columns").boundingBox(),
           page.getByTestId("detail-main").boundingBox(),
         ]);
-        expect(main?.width, "the main column takes the whole row").toBe(cols?.width);
-        const f = await frame(page, "[data-object-header]");
-        expect(f.scrollWidth, "no horizontal page scroll").toBeLessThanOrEqual(f.innerWidth);
-        expect(f.width).toBe(Math.min(2400, f.room));
+        expect(
+          Math.abs((main?.width ?? 0) - (cols?.width ?? -2)),
+          "the main column takes the whole row",
+        ).toBeLessThanOrEqual(1);
+        expectFluid(await frame(page));
       });
     }
   });

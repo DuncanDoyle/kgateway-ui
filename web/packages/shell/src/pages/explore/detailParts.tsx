@@ -217,7 +217,7 @@ export function DetailFrame({
   return (
     <StaleView.Provider value={stale}>
       <TrailRefsProvider value={reportRefs}>
-        <Frame stylesOverride={stylesOverride}>
+        <Frame data-testid="page-frame" stylesOverride={stylesOverride}>
           {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
           {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
           <ObjectHeader

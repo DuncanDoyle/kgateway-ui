@@ -320,7 +320,7 @@ export function Breadcrumbs({ refs = [], stylesOverride }: BreadcrumbsProps) {
   const resolved = earlier.map((_, i) => ({ ...resolve(installId, earlier, i, refs), key: String(i) }));
   const install = installs?.find((x) => x.id === installId);
   return (
-    <Nav aria-label={breadcrumbsCopy.label} data-trail="" stylesOverride={stylesOverride}>
+    <Nav aria-label={breadcrumbsCopy.label} data-trail="" data-testid="trail" stylesOverride={stylesOverride}>
       <ol>
         <li data-part="install">
           <CrumbItem
