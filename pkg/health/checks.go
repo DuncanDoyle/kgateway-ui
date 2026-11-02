@@ -269,13 +269,19 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	// evaluate reports every present condition of a current block that is False;
 	// current() has already turned a required Unknown into "not processed".
+	// A nil owner is a route parent's, resolved on its first finding.
 	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string, owner []string) {
 		if !current(u, parent, cs, required, optional, extra) {
 			return
 		}
-		for _, t := range append(slices.Clone(required), optional...) {
-			if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
-				add(u, SeverityError, *cond, extra, owner)
+		for _, ts := range [2][]string{required, optional} {
+			for _, t := range ts {
+				if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
+					if owner == nil {
+						owner = in.parentKey(u, parent)
+					}
+					add(u, SeverityError, *cond, extra, owner)
+				}
 			}
 		}
 	}
@@ -348,7 +354,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				pendingFor(r.Obj, p, "no status from the controller for "+extra)
 				continue
 			}
-			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, in.parentKey(r.Obj, p))
+			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, nil)
 		}
 	}
 	// Routes whose parent does not exist. A parent of a kind the cache cannot

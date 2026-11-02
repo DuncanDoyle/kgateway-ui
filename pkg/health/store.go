@@ -96,10 +96,36 @@ func Load[T any](s *Store, key string) (T, bool) {
 type States struct {
 	stores map[string]*Store
 	memos  map[string]*memo
+	// ids memoise each check's finding IDs; groups the install's group IDs.
+	ids    map[string]*IDs
+	groups *IDs
 }
 
 // NewStates returns States with no Stores.
-func NewStates() *States { return &States{stores: map[string]*Store{}, memos: map[string]*memo{}} }
+func NewStates() *States {
+	return &States{stores: map[string]*Store{}, memos: map[string]*memo{}, ids: map[string]*IDs{}, groups: newIDs()}
+}
+
+// GroupIDs returns the install's memoised group IDs; nil for nil s.
+func (s *States) GroupIDs() *IDs {
+	if s == nil {
+		return nil
+	}
+	return s.groups
+}
+
+// checkIDs returns check's memoised finding IDs, creating them on first use; nil for nil s.
+func (s *States) checkIDs(check string) *IDs {
+	if s == nil {
+		return nil
+	}
+	x := s.ids[check]
+	if x == nil {
+		x = newIDs()
+		s.ids[check] = x
+	}
+	return x
+}
 
 // memo is a check's last run, reused while its input print holds and its
 // wake time is not due (design §16.2). Findings are shared and read-only.

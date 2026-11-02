@@ -21,33 +21,109 @@ var idEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadd
 // FindingID returns "f1-" and 26 base32 characters of the SHA-256 of installID, code,
 // the resource (four empty fields when nil) and key, NUL-joined (design §5.1).
 func FindingID(installID, code string, resource *objects.Ref, key []string) string {
+	var buf [256]byte
+	return hashID(identity(buf[:0], installID, code, resource, "", key))
+}
+
+// GroupID returns the ID of the group of family whose cause is cause and
+// causeKey: FindingID with code "G" and the family before the cause key (design §5.2).
+func GroupID(installID, family string, cause *objects.Ref, causeKey []string) string {
+	var buf [256]byte
+	return hashID(identity(buf[:0], installID, "G", cause, family, causeKey))
+}
+
+// identity appends FindingID's NUL-joined input to b; a non-empty first is a key element before key.
+func identity(b []byte, installID, code string, resource *objects.Ref, first string, key []string) []byte {
 	var r objects.Ref
 	if resource != nil {
 		r = *resource
 	}
-	n := len(installID) + len(code) + len(r.Group) + len(r.Kind) + len(r.Namespace) + len(r.Name) + 6
-	for _, k := range key {
-		n += len(k) + 1
-	}
-	b := make([]byte, 0, n)
 	for i, s := range [...]string{installID, code, r.Group, r.Kind, r.Namespace, r.Name} {
 		if i > 0 {
 			b = append(b, 0)
 		}
 		b = append(b, s...)
 	}
+	if first != "" {
+		b = append(append(b, 0), first...)
+	}
 	for _, k := range key {
 		b = append(append(b, 0), k...)
 	}
-	sum := sha256.Sum256(b)
-	// 20 bytes encode to 32 characters, whose first 26 equal the full hash's.
-	return "f1-" + idEncoding.EncodeToString(sum[:20])[:26]
+	return b
 }
 
-// GroupID returns the ID of the group of family whose cause is cause and
-// causeKey: FindingID with code "G" and the family before the cause key (design §5.2).
-func GroupID(installID, family string, cause *objects.Ref, causeKey []string) string {
-	return FindingID(installID, "G", cause, append([]string{family}, causeKey...))
+// hashID is the ID of identity bytes b.
+func hashID(b []byte) string {
+	sum := sha256.Sum256(b)
+	// 20 bytes encode to 32 characters, whose first 26 equal the full hash's.
+	var out [3 + 32]byte
+	copy(out[:], "f1-")
+	idEncoding.Encode(out[3:], sum[:20])
+	return string(out[:3+26])
+}
+
+// IDs memoises IDs by their identity bytes across recomputes, so an unchanged
+// finding or group is not hashed again. A nil *IDs computes every ID.
+type IDs struct {
+	m   map[string]*idEntry
+	gen uint32
+	buf []byte
+}
+
+type idEntry struct {
+	id  string
+	gen uint32
+}
+
+func newIDs() *IDs { return &IDs{m: map[string]*idEntry{}} }
+
+// FindingID is FindingID, memoised.
+func (x *IDs) FindingID(installID, code string, resource *objects.Ref, key []string) string {
+	if x == nil {
+		return FindingID(installID, code, resource, key)
+	}
+	return x.get(identity(x.buf[:0], installID, code, resource, "", key))
+}
+
+// GroupID is GroupID, memoised.
+func (x *IDs) GroupID(installID, family string, cause *objects.Ref, causeKey []string) string {
+	if x == nil {
+		return GroupID(installID, family, cause, causeKey)
+	}
+	return x.get(identity(x.buf[:0], installID, "G", cause, family, causeKey))
+}
+
+func (x *IDs) get(b []byte) string {
+	x.buf = b
+	e := x.m[string(b)]
+	if e == nil {
+		e = &idEntry{id: hashID(b)}
+		x.m[string(b)] = e
+	}
+	e.gen = x.gen
+	return e.id
+}
+
+// Sweep ends a recompute: once unused entries outnumber used ones, it drops them.
+func (x *IDs) Sweep() {
+	if x == nil {
+		return
+	}
+	used := 0
+	for _, e := range x.m {
+		if e.gen == x.gen {
+			used++
+		}
+	}
+	if len(x.m)-used > used+64 {
+		for k, e := range x.m {
+			if e.gen != x.gen {
+				delete(x.m, k)
+			}
+		}
+	}
+	x.gen++
 }
 
 // Discriminator owners of KGWUI-002 and KGWUI-003 (design §5.1).
@@ -61,14 +137,14 @@ const (
 // refKey is r's group, kind, namespace and name.
 func refKey(r objects.Ref) []string { return []string{r.Group, r.Kind, r.Namespace, r.Name} }
 
-// writtenKey is a parentRef as written, keyed as computed-rules §7 keys a
-// report, plus the written port, so refs differing only by port stay apart.
-func writtenKey(w objects.WrittenRef) []string {
+// appendWrittenKey appends a parentRef as written to k, keyed as computed-rules §7 keys
+// a report, plus the written port, so refs differing only by port stay apart.
+func appendWrittenKey(k []string, w objects.WrittenRef) []string {
 	port := ""
 	if w.PortSet {
 		port = strconv.Itoa(int(w.Port))
 	}
-	return []string{w.Group, w.Kind, w.Namespace, w.Name, w.SectionName, port}
+	return append(k, w.Group, w.Kind, w.Namespace, w.Name, w.SectionName, port)
 }
 
 // parentKey is the discriminator owner of route u's parentRef p: p as
@@ -90,31 +166,59 @@ func (in Input) parentKey(u *unstructured.Unstructured, p objects.ParentRef) []s
 	} else if j := slices.IndexFunc(status, func(s objects.RouteParentStatus) bool { return s.ParentRef == p }); j >= 0 {
 		w = status[j].Written
 	}
-	return append([]string{ownerParent}, writtenKey(w)...)
+	return appendWrittenKey(append(make([]string, 0, 8), ownerParent), w) // room for a condition type
 }
 
 // identify sets each finding's ID, then drops its Key, and gives one returned without
-// Since its first-seen time from st. It returns the IDs returned and retained.
-func identify(install string, now time.Time, fs []Finding, st *Store, retained map[string]bool) map[string]bool {
+// Since its first-seen time from st. It returns how many since entries it read or set.
+func identify(install string, now time.Time, fs []Finding, st *Store, ids *IDs) int {
+	var key []byte     // sincePrefix + ID, reused so a lookup does not allocate
+	var at []time.Time // one backing array for the Since this run gives
+	for i := range fs {
+		f := &fs[i]
+		f.ID, f.Key = ids.FindingID(install, f.Code, f.Resource, f.Key), nil
+		if f.Since != nil || st == nil {
+			continue
+		}
+		if at == nil {
+			at = make([]time.Time, 0, len(fs)-i)
+		}
+		key = append(append(key[:0], sincePrefix...), f.ID...)
+		t, ok := st.m[string(key)].(time.Time)
+		if !ok {
+			t = now
+			st.Set(string(key), t)
+		}
+		at = append(at, t)
+		f.Since = &at[len(at)-1]
+	}
+	ids.Sweep()
+	return len(at)
+}
+
+// keepOf returns the IDs of fs and retained.
+func keepOf(fs []Finding, retained map[string]bool) map[string]bool {
 	keep := make(map[string]bool, len(fs)+len(retained))
 	for id := range retained {
 		keep[id] = true
 	}
 	for i := range fs {
-		f := &fs[i]
-		f.ID, f.Key = FindingID(install, f.Code, f.Resource, f.Key), nil
-		keep[f.ID] = true
-		if f.Since != nil || st == nil {
-			continue
-		}
-		at, ok := Load[time.Time](st, sincePrefix+f.ID)
-		if !ok {
-			at = now
-			st.Set(sincePrefix+f.ID, at)
-		}
-		f.Since = &at
+		keep[fs[i].ID] = true
 	}
 	return keep
+}
+
+// sinceEntries counts the since entries in st.
+func sinceEntries(st *Store) int {
+	n := 0
+	if st != nil {
+		for k := range st.m {
+			if strings.HasPrefix(k, sincePrefix) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // pruneSince deletes the since entries in st whose ID is not in keep.

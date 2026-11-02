@@ -138,8 +138,13 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	ctx := runContext(in, c, set, rt, outputs)
 	fs, cr = c.Run(ctx)
 	wake = ctx.sink.wake
-	keep := identify(in.Install.ID(), in.Now, fs, ctx.State, ctx.sink.retained)
-	pruneSince(ctx.State, keep)
+	sinces := identify(in.Install.ID(), in.Now, fs, ctx.State, rt.States.checkIDs(c.Name()))
+	var keep map[string]bool
+	// When every since entry was just read and none is retained, none is stale.
+	if keyed || len(ctx.sink.retained) > 0 || sinceEntries(ctx.State) != sinces {
+		keep = keepOf(fs, ctx.sink.retained)
+		pruneSince(ctx.State, keep)
+	}
 	if _, read := outPrints[c.Name()]; read {
 		out = outputPrint(fs, cr)
 	}
