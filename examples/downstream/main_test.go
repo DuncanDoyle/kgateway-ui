@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // The README's extension example is this program, so the build compiles it.
@@ -166,12 +168,11 @@ func TestExampleUsesEverySeam(t *testing.T) {
 	published("a model with the install", hasInstall)
 
 	// No AcmePolicy: one tick publishes 0 widgets, and one recompute later /health holds ACME-001.
+	// The core proxy stats collector also publishes, so runs are told apart by the acme check's own result.
 	testutil.Drain(events)
 	clk.Step(widgetsEvery)
-	var zero uint64
 	published("a run over 0 widgets", func(p *engine.Published) bool {
-		zero = p.Source.Collected
-		return hasInstall(p) && zero != 0
+		return hasInstall(p) && acmeOK(p) && modelHas(p, "ACME-001")
 	})
 	if !healthHas(t, srv, "ACME-001") {
 		t.Fatal("0 widgets must raise ACME-001")
@@ -196,11 +197,10 @@ func TestExampleUsesEverySeam(t *testing.T) {
 	}
 
 	// The next tick counts them, and the finding clears.
-	// Only the tick changes the collected print; a run without it reads 0 or zero.
 	testutil.Drain(events)
 	clk.Step(widgetsEvery)
 	published("a run over 2 widgets", func(p *engine.Published) bool {
-		return hasInstall(p) && p.Source.Collected != 0 && p.Source.Collected != zero
+		return hasInstall(p) && acmeOK(p) && !modelHas(p, "ACME-001")
 	})
 	if healthHas(t, srv, "ACME-001") {
 		t.Fatal("2 widgets must clear ACME-001")
@@ -210,6 +210,16 @@ func TestExampleUsesEverySeam(t *testing.T) {
 	if code := getJSON(t, srv, "/api/v1/meta", &meta); code != http.StatusOK || !slices.Contains(meta.Capabilities, "acme-widgets") {
 		t.Fatalf("meta: %d %+v", code, meta)
 	}
+}
+
+// modelHas reports whether p's first install has a finding with code.
+func modelHas(p *engine.Published, code string) bool {
+	return slices.ContainsFunc(p.Model.Installs[0].Health.Findings, func(f health.Finding) bool { return f.Code == code })
+}
+
+// acmeOK reports whether p's acme widgets check read a widget count.
+func acmeOK(p *engine.Published) bool {
+	return slices.ContainsFunc(p.Model.Installs[0].Health.Checks, func(c health.CheckResult) bool { return c.Name == "acme widgets" && c.OK })
 }
 
 // healthHas reports whether the install's /health lists a finding with code.
@@ -290,5 +300,89 @@ func TestAcmeWidgetCheckReadsOnlyDeclaredInputs(t *testing.T) {
 				healthtest.CheckDeclaredInputs(t, acmeWidgetCheck{}, in, rt, seed)
 			})
 		}
+	}
+}
+
+// disconnectedCheck stands in for KGWUI-026 until it lands: one finding per
+// proxy that reports no controller connection, read from the core key.
+type disconnectedCheck struct{}
+
+func (disconnectedCheck) Name() string { return "acme disconnected proxies" }
+func (disconnectedCheck) Inputs() health.InputSet {
+	return health.InputSet{Collected: []string{proxystats.Key}}
+}
+func (c disconnectedCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	v, _ := ctx.Collected(proxystats.Key)
+	st, ok := v.Data.(proxystats.Stats)
+	if v.State != collect.OK || !ok {
+		return nil, health.CheckResult{Name: c.Name(), CollectedAt: ctx.Now, Error: "proxy stats not available"}
+	}
+	var fs []health.Finding
+	for _, g := range st[ctx.Install.ID()] {
+		for _, p := range g.Pods {
+			if p.Connected != nil && !*p.Connected {
+				fs = append(fs, health.Finding{Code: "PSTEST-026", Slug: "proxy-disconnected", Severity: health.SeverityWarning, Install: ctx.Install.ID(),
+					Resource: &g.Gateway, Message: "Proxy " + p.Name + " lost its connection to the controller"})
+			}
+		}
+	}
+	return fs, health.CheckResult{Name: c.Name(), OK: true, CollectedAt: v.At}
+}
+
+// A downstream Source with its own targets and a JSON stats format feeds a
+// check through /health; the core collector owns the interval and publishing.
+func TestDownstreamProxyStatsSource(t *testing.T) {
+	ui, err := fs.Sub(dist, "dist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	gw := testutil.Gateway("shop", "edge", "kgateway", []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")})
+	dyn, kube := testutil.ClientsWith(t, []kinds.Descriptor{acmePolicy}, testutil.Namespace("kgw", nil), testutil.Namespace("shop", nil),
+		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true), gw)
+	var connected atomic.Bool
+	var fetched atomic.Value
+	src := acmeProxyStats{fetch: func(_ context.Context, addr string) ([]byte, error) {
+		fetched.Store(addr)
+		return json.Marshal(acmeStats{Connected: connected.Load()})
+	}}
+	events := make(chan engine.LoopEvent, 4096)
+	o := options(ui)
+	o.MetricsInterval = 50 * time.Millisecond
+	o.OnLoop = func(e engine.LoopEvent) {
+		select {
+		case events <- e:
+		default:
+		}
+	}
+	opts := append(extensions(clock.RealClock{}), extension.WithProxyStatsSource(src), extension.WithChecks("PSTEST-", disconnectedCheck{}))
+	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}}, o, extension.New(opts...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	waitFor := func(what string, ok func(*engine.Published) bool) {
+		t.Helper()
+		for {
+			if e := testutil.Recv(t, events, what); e.Kind == engine.EvPublished && len(e.Published.Model.Installs) == 1 && ok(e.Published) {
+				return
+			}
+		}
+	}
+	waitFor("the disconnected proxy's finding", func(p *engine.Published) bool { return modelHas(p, "PSTEST-026") })
+	var h api.HealthResponse
+	getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h)
+	i := slices.IndexFunc(h.Findings, func(f api.FindingDTO) bool { return f.Code == "PSTEST-026" })
+	if i < 0 || h.Findings[i].Message != "Proxy edge-node lost its connection to the controller" || fetched.Load() != "edge.shop.acme.internal:7000" {
+		t.Fatalf("health %+v, fetched %v", h.Findings, fetched.Load())
+	}
+	connected.Store(true)
+	waitFor("the reconnected proxy", func(p *engine.Published) bool { return !modelHas(p, "PSTEST-026") })
+	if healthHas(t, srv, "PSTEST-026") {
+		t.Fatal("a reconnected proxy clears the finding")
 	}
 }

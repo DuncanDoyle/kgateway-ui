@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -14,9 +15,11 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // acmePolicy is acme's own policy kind. Its objects are the widgets.
@@ -122,4 +125,33 @@ func acmeHandlers(r extension.Router, d extension.Deps) {
 // acmeCapabilities reports the widgets feature in /api/v1/meta.
 func acmeCapabilities() []api.Capability {
 	return []api.Capability{{Name: "acme-widgets", State: api.CapOn}}
+}
+
+// acmeProxyStats is a proxy stats source for acme's proxies, which run one
+// per Gateway outside Pods and report JSON. fetch reads one proxy's stats.
+type acmeProxyStats struct {
+	fetch func(ctx context.Context, addr string) ([]byte, error)
+}
+
+// acmeStats is the JSON an acme proxy reports.
+type acmeStats struct {
+	Connected       bool  `json:"connected"`
+	ListenerRejects int64 `json:"listenerRejects"`
+}
+
+func (acmeProxyStats) Targets(_ install.Resolved, gw objects.Ref, _ *cache.Snapshot) ([]proxystats.Target, bool) {
+	return []proxystats.Target{{ID: "acme/" + gw.Namespace + "/" + gw.Name, Name: gw.Name + "-node", Gateway: gw,
+		Addr: gw.Name + "." + gw.Namespace + ".acme.internal:7000"}}, true
+}
+
+func (s acmeProxyStats) Fetch(ctx context.Context, t proxystats.Target) ([]byte, error) {
+	return s.fetch(ctx, t.Addr)
+}
+
+func (acmeProxyStats) Interpret(t proxystats.Target, body []byte) (proxystats.PodStats, error) {
+	var j acmeStats
+	if err := json.Unmarshal(body, &j); err != nil {
+		return proxystats.PodStats{}, err
+	}
+	return proxystats.PodStats{UID: t.ID, Name: t.Name, Gateway: t.Gateway, Connected: &j.Connected, LDS: proxystats.Pair{Rejected: j.ListenerRejects}}, nil
 }

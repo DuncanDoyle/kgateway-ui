@@ -46,6 +46,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -1080,10 +1081,54 @@ func TestCollectorStartsAndStopsWithApp(t *testing.T) {
 }
 
 // Without collectors the engine reads no store, so the source print stays zero.
-func TestNoCollectorsLeavesCollectedUnset(t *testing.T) {
-	a := build(t)
-	if a.cfg.Collected != nil || a.collected != nil {
-		t.Fatal("no collectors must leave the engine's Collected unset")
+// The proxy stats collector is core: the engine always reads the store, its
+// name is reserved, and /api/v1/meta reports proxyStats on, or off by toggle.
+func TestCoreProxyStatsCollector(t *testing.T) {
+	if a := build(t); a.cfg.Collected == nil || a.collected == nil {
+		t.Fatal("the core collector needs the engine's Collected")
+	}
+	dyn, kube := testutil.Clients(t)
+	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
+	clash := &fakeCollector{name: proxystats.CollectorName}
+	if _, err := Build(c, Options{PollInterval: time.Second, MetricsInterval: time.Second, UI: ui}, extension.New(extension.WithCollectors(clash))); err == nil ||
+		!strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("a downstream collector named %q: %v", proxystats.CollectorName, err)
+	}
+	for _, tc := range []struct {
+		name string
+		d    Diagnostics
+		want api.CapabilityState
+		st   collect.State
+	}{{"on", Diagnostics{}, api.CapOn, collect.OK}, {"off", Diagnostics{NoProxyStats: true}, api.CapOff, collect.Off}} {
+		t.Run(tc.name, func(t *testing.T) {
+			dyn, kube := testutil.Clients(t)
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: 10 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, Diagnostics: tc.d}, extension.New())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			eventually(t, "proxyStats "+string(tc.want), func() bool {
+				v, _ := a.collected.Snapshot().Get(proxystats.Key)
+				var meta api.MetaResponse
+				getJSON(t, srv, "/api/v1/meta", &meta)
+				return v.State == tc.st && slices.Contains(meta.CapabilityStates, api.Capability{Name: "proxyStats", State: tc.want}) &&
+					slices.Contains(meta.Capabilities, "proxyStats") == (tc.want == api.CapOn)
+			})
+		})
+	}
+	// A stuck collector's expired value reads failing, with fixed text.
+	now := testutil.Now
+	store := collect.New(nil, func() time.Time { return now })
+	store.Publish(proxystats.Key, proxystats.Stats{}, 1, time.Second)
+	now = now.Add(time.Second)
+	got := CoreCapabilities(nil, Diagnostics{}, store.Snapshot())
+	if !slices.Equal(got, []api.Capability{{Name: "proxyStats", State: api.CapFailing, Reason: reasonStatsFailing}}) {
+		t.Fatalf("expired proxy stats: %+v", got)
 	}
 }
 

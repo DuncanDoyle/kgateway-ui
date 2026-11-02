@@ -38,6 +38,7 @@ var allowed = map[string]string{
 	"pkg/install/scope.go":          "scope from Pod env and Namespace labels",
 	"pkg/install/upstream.go":       "detects controller Deployments",
 	"pkg/process/kube.go":           "process facts from Pods, Deployments and Events",
+	"pkg/proxystats/kube.go":        "the Kubernetes proxy stats source: proxy Pod targets and transport",
 	"pkg/scopeverify/verify.go":     "Namespace objects for scope",
 }
 

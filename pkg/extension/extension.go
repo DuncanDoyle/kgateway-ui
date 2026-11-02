@@ -25,6 +25,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -47,6 +48,9 @@ type Registry struct {
 	RulesFor func(controllerVersion string) computed.Selection
 	// Process reports each install's controller and proxy processes (D-016).
 	Process process.Source
+	// ProxyStats finds proxies and reads their stats (design §8.8); nil means
+	// proxystats.Kube over the app's clients.
+	ProxyStats proxystats.Source
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
@@ -152,6 +156,11 @@ func WithComputedRules(f func(controllerVersion string) computed.Selection) Opti
 // WithProcessSource replaces process.Kube, for example to add extension Pods
 // or to report processes that do not run in Pods.
 func WithProcessSource(s process.Source) Option { return func(r *Registry) { r.Process = s } }
+
+// WithProxyStatsSource replaces proxystats.Kube, for example for proxies that
+// do not run in Pods or another stats format. The core collector keeps the
+// interval, bounds, concurrency and publishing.
+func WithProxyStatsSource(s proxystats.Source) Option { return func(r *Registry) { r.ProxyStats = s } }
 
 // New returns the upstream registry with opts applied.
 func New(opts ...Option) *Registry {
