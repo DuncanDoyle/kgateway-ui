@@ -77,8 +77,11 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
   const ref = useMemo<LinkedRef>(() => ({ group, kind, namespace: ns, name, link: "detail" }), [group, kind, ns, name]);
   const { data, error } = useListenerSetDetail(id, ref);
   const allowed = data?.parentAllowedListeners;
+  // The parent's server link decides its crumb in the trail.
+  const parentRef = useMemo(() => (data ? [data.parent] : undefined), [data]);
   return (
     <DetailFrame
+      trailRefs={parentRef}
       installId={id}
       refValue={ref}
       noun="ListenerSet"

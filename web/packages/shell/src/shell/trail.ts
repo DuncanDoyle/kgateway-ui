@@ -13,7 +13,7 @@ export const breadcrumbsCopy = {
   label: "Breadcrumb",
   more: (n: number) => `Show ${n} earlier pages`,
   menu: "Earlier pages",
-  hidden: "A page you cannot view",
+  hidden: "A page you cannot open",
 };
 
 /** The longest `via` value read or written; a longer one keeps its last {@link TRAIL_MAX} valid entries. */
@@ -116,7 +116,10 @@ export function parseVia(search: string, installId: string): Crumb[] {
   let raw = new URLSearchParams(search).get("via") ?? "";
   const cut = raw.length > VIA_MAX;
   // Over the limit: keep the tail, without the entry the cut split.
-  if (cut) raw = raw.slice(raw.indexOf(",", raw.length - VIA_MAX) + 1);
+  if (cut) {
+    const at = raw.indexOf(",", raw.length - VIA_MAX);
+    raw = at < 0 ? "" : raw.slice(at + 1);
+  }
   const out: Crumb[] = [];
   for (const e of raw.split(",")) {
     const c = parseEntry(e, installId, out.length === 0 && !cut);
@@ -139,13 +142,15 @@ export function collapse(trail: Crumb[], max = TRAIL_MAX): { hidden: Crumb[]; sh
   return { hidden: trail.slice(0, cut), shown: trail.slice(cut) };
 }
 
-/** The `via` value of a trail, at most {@link VIA_MAX} long: the oldest entries go first. */
+/** The `via` value of a trail, at most {@link VIA_MAX} long: the oldest entries go first. Text crumbs are never written. */
 export function viaParam(trail: Crumb[], installId: string): string {
   const id = encodeURIComponent(installId);
-  const entries = trail.map((c) =>
-    // A query string never holds a raw ",", the entry separator; one written by hand is escaped.
-    c.kind === "list" ? `${id}/${c.path}${c.search ? `?${c.search.replaceAll(",", "%2C")}` : ""}` : `${id}/${c.path}`,
-  );
+  const entries = trail
+    .filter((c) => c.kind === "list" || crumbRef(c))
+    .map((c) =>
+      // A query string never holds a raw ",", the entry separator; one written by hand is escaped.
+      c.kind === "list" ? `${id}/${c.path}${c.search ? `?${c.search.replaceAll(",", "%2C")}` : ""}` : `${id}/${c.path}`,
+    );
   let size = 0;
   let from = entries.length;
   while (from > 0) {

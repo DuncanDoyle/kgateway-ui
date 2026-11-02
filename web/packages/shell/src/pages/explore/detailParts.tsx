@@ -14,6 +14,7 @@ import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
+import { TrailRefsProvider, useReportTrailRefs, useTrailRefsCollector } from "../../shell/Breadcrumbs";
 import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
 import { DetailColumns, layout } from "../../shell/layout";
@@ -146,6 +147,10 @@ export function DetailFrame({
   const now = useNow();
   // Stale data or a failed poll turns every state on the page unknown, as on the lists (design §6.3).
   const stale = !!data && (!!error || isStale(data.collectedAt, now));
+  // The trail resolves crumbs through refs the page holds and refs its sub-tables report.
+  const by = data?.candidate?.by;
+  const heldRefs = useMemo(() => [...(trailRefs ?? []), ...(by ? [by] : [])], [trailRefs, by]);
+  const [pageRefs, reportRefs] = useTrailRefsCollector(heldRefs);
   // A hidden object 404s as an absent one does (D-013).
   if (error?.status === 404 && !data)
     return (
@@ -211,32 +216,34 @@ export function DetailFrame({
   );
   return (
     <StaleView.Provider value={stale}>
-      <Frame stylesOverride={stylesOverride}>
-        {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
-        {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
-        <ObjectHeader
-          kind={{ group: refValue.group, kind: refValue.kind, label: refValue.kind }}
-          name={refValue.name}
-          namespace={refValue.namespace}
-          state={data?.health}
-          collectedAt={data?.collectedAt}
-          trailRefs={trailRefs}
-          actions={
-            <>
-              <CopyNameButton resource={refValue} />
-              <CopyCommandButton refValue={refValue} />
-            </>
-          }
-        />
-        <DetailTabs
-          label={detailCopy.views(refValue.kind)}
-          tabs={tabs}
-          selected={tab}
-          onSelect={(t) => update({ tab: t === "overview" ? null : t })}
-        >
-          {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
-        </DetailTabs>
-      </Frame>
+      <TrailRefsProvider value={reportRefs}>
+        <Frame stylesOverride={stylesOverride}>
+          {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
+          {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
+          <ObjectHeader
+            kind={{ group: refValue.group, kind: refValue.kind, label: refValue.kind }}
+            name={refValue.name}
+            namespace={refValue.namespace}
+            state={data?.health}
+            collectedAt={data?.collectedAt}
+            trailRefs={pageRefs}
+            actions={
+              <>
+                <CopyNameButton resource={refValue} />
+                <CopyCommandButton refValue={refValue} />
+              </>
+            }
+          />
+          <DetailTabs
+            label={detailCopy.views(refValue.kind)}
+            tabs={tabs}
+            selected={tab}
+            onSelect={(t) => update({ tab: t === "overview" ? null : t })}
+          >
+            {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
+          </DetailTabs>
+        </Frame>
+      </TrailRefsProvider>
     </StaleView.Provider>
   );
 }
@@ -293,6 +300,7 @@ export function SubList<T extends { health: HealthState }>({
     if (l.cursorRejected) setCursor(undefined);
   }, [l.cursorRejected]);
   const page = useShownPage(l.data, !!l.error);
+  useReportTrailRefs(useMemo(() => page?.items.map(rowRef), [page, rowRef]));
   return (
     <>
       {l.error ? <PageNotice error={l.error} title={listCopy.cannotLoad(noun[1])} /> : null}

@@ -100,6 +100,27 @@ test("collapse past 6 into an ellipsis menu", async () => {
   expect(more).toHaveFocus();
   await user.keyboard(" ");
   expect(screen.getByRole("menu")).toBeInTheDocument();
+  // Space on a link item follows it, as Enter does.
+  const first = within(screen.getByRole("menu")).getAllByRole("menuitem")[0] as HTMLElement;
+  let clicked = false;
+  first.addEventListener("click", (e) => {
+    clicked = true;
+    e.preventDefault();
+  });
+  await user.keyboard(" ");
+  expect(clicked).toBe(true);
+});
+
+test("a menu item without a page is inert: no pointer and no hover or press tint", async () => {
+  const user = userEvent.setup();
+  const trail = ["not-an-entry", ...[1, 2, 3, 4, 5, 6].map((i) => viaParam([nth(i)], ID))].join(",");
+  renderWithTheme(<Breadcrumbs />, { path: at(trail) });
+  await user.click(screen.getByRole("button", { name: breadcrumbsCopy.more(2) }));
+  const inert = within(screen.getByRole("menu")).getByText("not-an-entry");
+  expect(inert).toHaveAttribute("aria-disabled", "true");
+  const css = [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("");
+  expect(css).toMatch(/\[role="menuitem"\]\[aria-disabled="true"\]\{cursor:default;\}/);
+  expect(css).toMatch(/\[aria-disabled="true"\]:active\{background:transparent;\}/);
 });
 
 test("malformed or unresolvable entry is text and the page loads", () => {

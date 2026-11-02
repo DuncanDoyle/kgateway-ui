@@ -1,5 +1,16 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import {
+  createContext,
+  type KeyboardEvent,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useInstalls } from "../api/hooks";
 import type { LinkedRef } from "../api/types";
@@ -132,6 +143,13 @@ const TrailMenu = styled(Menu)`
     text-decoration: none;
     overflow-wrap: anywhere;
   }
+  [role="menuitem"][aria-disabled="true"] {
+    cursor: default;
+  }
+  [role="menuitem"][aria-disabled="true"]:hover,
+  [role="menuitem"][aria-disabled="true"]:active {
+    background: transparent;
+  }
 `;
 
 // region Helpers
@@ -205,7 +223,13 @@ function More({ items }: { items: Resolved[] }) {
           aria-label={breadcrumbsCopy.menu}
           $align="start"
           ref={menu.menuRef}
-          onKeyDown={menu.onMenuKeyDown}
+          onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+            // Space activates a link item as Enter does.
+            if (e.key === " " && e.target instanceof HTMLAnchorElement) {
+              e.preventDefault();
+              e.target.click();
+            } else menu.onMenuKeyDown(e);
+          }}
         >
           {items.map((r) =>
             r.to ? (
@@ -229,6 +253,43 @@ const Sep = () => (
     ›
   </span>
 );
+
+type Report = (key: string, refs: readonly LinkedRef[], sig: string) => void;
+const TrailRefsContext = createContext<Report | undefined>(undefined);
+
+/** Lets sub-tables inside an object page report the refs they show to the page's trail. */
+export const TrailRefsProvider = TrailRefsContext.Provider;
+
+/** Reports refs shown inside a {@link TrailRefsProvider}, e.g. a sub-table's rows; withdrawn on unmount. */
+export function useReportTrailRefs(refs: readonly LinkedRef[] | undefined) {
+  const report = useContext(TrailRefsContext);
+  const key = useId();
+  const latest = useRef(refs);
+  latest.current = refs;
+  const sig = (refs ?? []).map((r) => `${r.group}/${r.kind}/${r.namespace ?? ""}/${r.name}/${r.link}`).join("|");
+  useEffect(() => report?.(key, latest.current ?? [], sig), [report, key, sig]);
+  useEffect(() => () => report?.(key, [], ""), [report, key]);
+}
+
+/** Collects reported refs for an object page: own refs first, then what its sub-tables report. */
+export function useTrailRefsCollector(own: readonly LinkedRef[]): [readonly LinkedRef[], Report] {
+  const [reported, setReported] = useState<ReadonlyMap<string, { sig: string; refs: readonly LinkedRef[] }>>(
+    () => new Map(),
+  );
+  const report = useCallback<Report>(
+    (key, refs, sig) =>
+      setReported((prev) => {
+        if ((prev.get(key)?.sig ?? "") === sig) return prev;
+        const next = new Map(prev);
+        if (sig) next.set(key, { sig, refs });
+        else next.delete(key);
+        return next;
+      }),
+    [],
+  );
+  const all = useMemo(() => [...own, ...[...reported.values()].flatMap((v) => v.refs)], [own, reported]);
+  return [all, report];
+}
 
 // region Component
 /** Props of {@link Breadcrumbs}. */

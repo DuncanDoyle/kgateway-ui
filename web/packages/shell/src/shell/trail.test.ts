@@ -95,6 +95,15 @@ test("malformed or unresolvable entry is text and the page loads", () => {
   expect(odd[0]).toEqual(gateway);
   expect(odd.filter((c) => c.kind === "list")).toEqual([]);
   expect(odd.slice(1).every((c) => crumbRef(c) === undefined)).toBe(true);
+  // Leaving the page never writes text crumbs back: an encoded comma stays one dropped entry, not junk.
+  const comma = [viaParam([gateway], ID), `${encodeURIComponent(ID)}/${GW}/Gateway/infra/a%2Cb`, "not-an-entry"].join(
+    ",",
+  );
+  const out = leavingVia(`/i/${ID}/routes/${GW}/HTTPRoute/shop/store`, `?${new URLSearchParams({ via: comma })}`, ID);
+  expect(out).toBe(viaParam([gateway, route], ID));
+  expect(out).not.toContain("?");
+  expect(parseVia(`?${new URLSearchParams({ via: out ?? "" })}`, ID)).toEqual([gateway, route]);
+  expect(viaParam([gateway, { kind: "object", path: "?text" }], ID)).toBe(viaParam([gateway], ID));
 });
 
 test("a 4 KiB via is cut to the last 6 valid entries", () => {
@@ -103,6 +112,8 @@ test("a 4 KiB via is cut to the last 6 valid entries", () => {
   const raw = entries.join(",");
   expect(raw.length).toBeGreaterThan(4096);
   expect(parseVia(`?${new URLSearchParams({ via: raw })}`, ID)).toEqual([294, 295, 296, 297, 298, 299].map(nth));
+  // Over the limit with no separator in the kept tail: nothing is kept.
+  expect(parseVia(`?${new URLSearchParams({ via: `${viaParam([nth(1)], ID)}${"x".repeat(5000)}` })}`, ID)).toEqual([]);
   // Writing never produces more than 4 KiB: the oldest entries go first.
   const long = Array.from({ length: 300 }, (_, i) => nth(i));
   const written = viaParam(long, ID);

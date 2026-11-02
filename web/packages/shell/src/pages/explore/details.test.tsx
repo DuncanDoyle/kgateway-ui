@@ -14,6 +14,7 @@ import { POLL_MS } from "../../api/hooks";
 import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList, RouteRow } from "../../api/types";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
+import { breadcrumbsCopy } from "../../shell/trail";
 import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { HEADER_H } from "./detailParts";
@@ -1064,4 +1065,33 @@ it("a ?listener= name the Gateway does not have says so and sends no request", a
   const box = await screen.findByTestId("listener-routes-unknown");
   expect(box).toHaveTextContent("This Gateway has no listener named nope.");
   expect(listCalls("routes").some((u) => u.searchParams.get("listener") === "nope")).toBe(false);
+});
+
+// region Trail (D-035)
+const viaOf = (...entries: string[]) => `?${new URLSearchParams({ via: entries.map((e) => `${ID}/${e}`).join(",") })}`;
+const trail = () => within(screen.getByRole("navigation", { name: breadcrumbsCopy.label }));
+
+it("on a Gateway page a crumb for a route its tables show as hidden gets the restricted label", async () => {
+  const hidden = (): RouteList => {
+    const r = routes();
+    return {
+      ...r,
+      items: r.items.map((x) => (x.ref.name === "posts" ? { ...x, ref: { ...x.ref, link: "none" } } : x)),
+    };
+  };
+  serve((u) => (u.pathname === `${API}/routes` ? hidden() : api()(u)));
+  mount(GW_PATH + viaOf(`${GW}/HTTPRoute/blog/posts`, `${GW}/HTTPRoute/shop/api`));
+  // Before the tables load the crumb links by its own path; their server links then decide it.
+  await waitFor(() => expect(trail().getByText(breadcrumbsCopy.hidden)).toBeInTheDocument());
+  expect(trail().queryByText(/posts/)).toBeNull();
+  expect(trail().getByText(breadcrumbsCopy.hidden).closest("a")).toBeNull();
+  expect(trail().getByRole("link", { name: "HTTPRoute shop/api" })).toBeInTheDocument();
+});
+
+it("on a ListenerSet page the parent's link decides its crumb", async () => {
+  const body = ls(lsGolden);
+  serve(api({ ls: { ...body, parent: { ...body.parent, link: "none" } } }));
+  mount(LS_PATH("na") + viaOf(`${GW}/Gateway/infra/edge`));
+  await waitFor(() => expect(trail().getByText(breadcrumbsCopy.hidden)).toBeInTheDocument());
+  expect(trail().queryByText(/edge/)).toBeNull();
 });
