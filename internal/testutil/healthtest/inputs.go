@@ -143,14 +143,25 @@ func PerturbCollected(s collect.Snapshot, set health.InputSet, seed int64) colle
 
 // CheckDeclaredInputs fails t when c's output changes under a perturbation of
 // the inputs it does not declare. It names the check and the input.
-func CheckDeclaredInputs(t *testing.T, c health.Check, in health.Input, rt health.Runtime, seed int64) {
+// Each run starts from fresh States seeded with the same first-seen times; rt.States is unused.
+func CheckDeclaredInputs(t testing.TB, c health.Check, in health.Input, rt health.Runtime, seed int64) {
 	t.Helper()
 	set := c.Inputs()
 	checks := []health.Check{c}
-	// One States for every run: the engine's first-seen since is not a check input.
-	if rt.States == nil {
-		rt.States = health.NewStates()
+	rt.States = health.NewStates()
+	seen := in.Now.Add(-time.Hour)
+	var ids []string
+	for _, f := range health.Evaluate(in, checks, rt).Findings {
+		ids = append(ids, f.ID)
 	}
+	fresh := func() *health.States {
+		st := health.NewStates()
+		for _, id := range ids {
+			st.SeedSince(c.Name(), id, seen)
+		}
+		return st
+	}
+	rt.States = fresh()
 	base := health.Evaluate(in, checks, rt)
 	want := normalise(base)
 
@@ -160,6 +171,7 @@ func CheckDeclaredInputs(t *testing.T, c health.Check, in health.Input, rt healt
 	}
 	for what, p := range perturbed {
 		prt := rt
+		prt.States = fresh()
 		prt.Collected = PerturbCollected(rt.Collected, set, seed)
 		got := evaluateRecovering(t, c, p, prt)
 		if !reflect.DeepEqual(got, want) {
@@ -169,7 +181,7 @@ func CheckDeclaredInputs(t *testing.T, c health.Check, in health.Input, rt healt
 }
 
 // evaluateRecovering evaluates c and reports a panic as a failure naming c.
-func evaluateRecovering(t *testing.T, c health.Check, in health.Input, rt health.Runtime) (out guardOutput) {
+func evaluateRecovering(t testing.TB, c health.Check, in health.Input, rt health.Runtime) (out guardOutput) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r != nil {

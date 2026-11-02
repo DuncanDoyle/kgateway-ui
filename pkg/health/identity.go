@@ -208,6 +208,11 @@ func keepOf(fs []Finding, retained map[string]bool) map[string]bool {
 	return keep
 }
 
+// SeedSince sets finding id's first-seen time in check's Store, as if it were first seen at at.
+func (s *States) SeedSince(check, id string, at time.Time) {
+	s.store(check).Set(sincePrefix+id, at)
+}
+
 // sinceEntries counts the since entries in st.
 func sinceEntries(st *Store) int {
 	n := 0
