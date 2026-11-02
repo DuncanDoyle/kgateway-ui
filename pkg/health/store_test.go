@@ -148,4 +148,17 @@ func TestZeroRunContextIsSafe(t *testing.T) {
 	if _, ok := c.Output("x"); ok {
 		t.Fatal("a zero RunContext has no outputs")
 	}
+	if _, ok := c.State.Get("k"); ok || c.State.Len() != 0 {
+		t.Fatal("a nil Store finds nothing")
+	}
+	if _, ok := Load[int](c.State, "k"); ok {
+		t.Fatal("Load on a nil Store finds nothing")
+	}
+	c.State.Delete("k")
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(r.(string), "nil Store") {
+			t.Fatalf("Set on a nil Store must panic naming it, got %v", r)
+		}
+	}()
+	c.State.Set("k", 1)
 }

@@ -52,14 +52,17 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
 	var outputs map[string]CheckOutput
-	if slices.ContainsFunc(checks, func(c Check) bool { return len(c.Inputs().Checks) > 0 }) {
-		outputs = make(map[string]CheckOutput, len(checks))
+	inputs := make([]InputSet, len(checks))
+	for i, c := range checks {
+		if inputs[i] = c.Inputs(); len(inputs[i].Checks) > 0 && outputs == nil {
+			outputs = make(map[string]CheckOutput, len(checks))
+		}
 	}
 	// Run every check first so the findings are allocated once.
 	runs := make([][]Finding, len(checks))
 	n := 0
 	for i, c := range checks {
-		ctx := runContext(in, c, rt, outputs)
+		ctx := runContext(in, c, inputs[i], rt, outputs)
 		fs, cr := c.Run(ctx)
 		runs[i] = fs
 		n += len(fs)
@@ -92,14 +95,14 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 
 // runContext returns c's RunContext: its Store, a fresh sink, and in with
 // FirstSeen wrapped so a read inside the grace period wakes at its end.
-func runContext(in Input, c Check, rt Runtime, outputs map[string]CheckOutput) RunContext {
+func runContext(in Input, c Check, inputs InputSet, rt Runtime, outputs map[string]CheckOutput) RunContext {
 	var st *Store
 	if rt.States != nil {
 		st = rt.States.store(c.Name())
 	} else {
 		st = NewStore()
 	}
-	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: c.Inputs(), outputs: outputs}
+	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: inputs, outputs: outputs}
 	sink, base := ctx.sink, in
 	ctx.FirstSeen = func(u *unstructured.Unstructured) time.Time {
 		t := base.firstSeen(u)

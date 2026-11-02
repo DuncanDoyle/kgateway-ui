@@ -41,7 +41,8 @@ func AllInputs() InputSet {
 
 // Store is a check's state across recomputes for one install. The engine owns
 // it: it survives recomputes and is empty after a restart. It is not safe for
-// concurrent use; the engine runs one check at a time.
+// concurrent use; the engine runs one check at a time. Reads of a nil Store
+// find nothing; Set on a nil Store panics.
 type Store struct{ m map[string]any }
 
 // NewStore returns an empty Store.
@@ -49,23 +50,41 @@ func NewStore() *Store { return &Store{m: map[string]any{}} }
 
 // Get returns the value under key.
 func (s *Store) Get(key string) (any, bool) {
+	if s == nil {
+		return nil, false
+	}
 	v, ok := s.m[key]
 	return v, ok
 }
 
 // Set stores v under key.
-func (s *Store) Set(key string, v any) { s.m[key] = v }
+func (s *Store) Set(key string, v any) {
+	if s == nil {
+		panic("health: Set on a nil Store; run checks through Evaluate or set RunContext.State")
+	}
+	s.m[key] = v
+}
 
 // Delete removes key.
-func (s *Store) Delete(key string) { delete(s.m, key) }
+func (s *Store) Delete(key string) {
+	if s != nil {
+		delete(s.m, key)
+	}
+}
 
 // Len returns the number of keys.
-func (s *Store) Len() int { return len(s.m) }
+func (s *Store) Len() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.m)
+}
 
 // Load returns the value under key as a T; false when it is absent or not a T.
 func Load[T any](s *Store, key string) (T, bool) {
-	v, ok := s.m[key].(T)
-	return v, ok
+	v, _ := s.Get(key)
+	t, ok := v.(T)
+	return t, ok
 }
 
 // States holds one install's check Stores, keyed by check name.
