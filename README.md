@@ -162,6 +162,17 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 
 ## Upgrade notes
 
+### Findings (sub-phase 3.1)
+
+- Every finding now has an `id`, such as `f1-…`, and a `group`. Both appear in every response, `/health` included, and on restricted rows. Treat the `id` as opaque: compare it, never parse it.
+- An `id` survives rewording, a severity change and a UI restart. It can change when another finding of the same code on the same object appears or clears.
+- A finding with no status timestamp now has a `since`: when the UI first saw it. That time resets when the UI restarts. Findings from status keep the controller's `lastTransitionTime`. When an `id` changes, its `since` starts again.
+- The findings page now pages on the server. Its filters, sort and cursor live in the URL. Old `?sev=` links are ignored.
+- New endpoints:
+  - `GET /api/v1/installs/{id}/findings`: one page of findings. Filters `severity`, `code`, `kind`, `namespace`, `group` and `q`; sort `rank`, `since` or `code` with `.asc` or `.desc`; `limit` up to 200; `cursor`. A cursor works only for the install and sort it came from, and only until the UI restarts; a rejected cursor returns 400.
+  - `GET /api/v1/installs/{id}/findings/{findingId}`: one finding with 50 affected objects per page (`?affectedCursor=`). An unknown id returns 404.
+  - `GET /api/v1/installs/{id}/refs?ref=group/Kind/namespace/name`: up to 6 refs, each returned as a link or `none`. The breadcrumbs use it, so a crumb never shows a name you may not see.
+
 ### Check contract (sub-phase 3.1)
 
 For downstream builds:
@@ -172,6 +183,7 @@ For downstream builds:
 - Collector values moved out of `health.Input.Collected`. Declare the key in `Inputs().Collected` and read it with `ctx.Collected("<collector>/<key>")`. It returns false for a key you did not declare.
 - Keep state between recomputes in `ctx.State`, a per-check `*health.Store`. Replace package-level variables with it. The engine owns the Store, and it is empty after a restart.
 - Call `ctx.WakeAt(t)` to be recomputed at a later time. Call `ctx.Output(name)` to read an earlier check's output, and declare that check in `Inputs().Checks`.
+- `app.Build` fails when a check declares a check that runs later or not at all, or when two checks share a name.
 - Keep passing the finding-code prefix to `WithChecks`, as in 3.0: `WithChecks("ACME-", acmeWidgetCheck{})`.
 
 ```go

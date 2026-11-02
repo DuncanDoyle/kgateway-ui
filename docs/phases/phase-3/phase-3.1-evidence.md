@@ -15,7 +15,7 @@ Recorded on 2026-11-02 against the kind e2e cluster (`make e2e KGW_VERSION=v2.4.
 | At 720, 1280, 1600 and 3008 px: no horizontal page scroll; the frame is `min(2400, available)` wide; core detail pages are one column | `navigation.spec.ts` |
 | The candidate banner takes the trail's place; nothing else moves | `explorer.spec.ts` |
 
-**Two columns.** Core detail pages contribute no side section (ruling R30), and the e2e build has no extension, so no page in this cluster has a second column. The e2e asserts one column at every width. The two-column grid from 1600 px is covered by the unit tests in `web/packages/shell/src/shell/layout.test.tsx`; a browser check needs a build with a contributed side section and is out of scope here.
+**Two columns.** Superseded by D-042: core detail pages now have a side column from 1600 px, and the e2e asserts it; the clips below were recorded before that change. Core detail pages contribute no side section (ruling R30), and the e2e build has no extension, so no page in this cluster has a second column. The e2e asserts one column at every width. The two-column grid from 1600 px is covered by the unit tests in `web/packages/shell/src/shell/layout.test.tsx`; a browser check needs a build with a contributed side section and is out of scope here.
 
 ## Clips
 

@@ -147,7 +147,7 @@ Every finding gets an `id`, stable across recomputes and UI restarts, and unique
 | 022 | `proxy`, `controller`, or the CRD name |
 | 023 | the Service port (number or name, as the backendRef wrote it) |
 
-- A rank keeps hidden data out of an `id` shown on a restricted row (§14 rule 11), so an `id` can change when a sibling finding on the same owner appears or clears.
+- A rank keeps hidden data out of an `id` shown on a restricted row (§14 rule 11), so an `id` can change when a sibling finding on the same owner appears or clears (D-040).
 - The `id` is opaque: clients compare it, never parse it. A downstream code's discriminator is the downstream's choice; it must be stable.
 - API v1 is not yet frozen (no release tag exists), so `id` is an optional field added to every finding in every response, including `/health` (§13).
 
@@ -164,7 +164,7 @@ A **group** is one cause with the findings it explains. The home page lists grou
 | Status not progressing | the controller Deployment | KGWUI-018 and the KGWUI-003 warnings it explains | those objects |
 | Empty backend | the Service | its KGWUI-023 | routes that reference it |
 | Process | the controller Deployment, or the Gateway for proxies | KGWUI-005/006 and 019–021 on that subject | — |
-| Other | the finding's own resource | that finding | — |
+| Other | the finding's own resource | every finding on that resource that no row above claims; KGWUI-008 findings form a group of their own (ruling R25) | — |
 
 - A finding belongs to exactly one group; the table is checked top-down.
 - The group `id` follows §5.1 with the code `G` plus the family name and the cause identity.
@@ -603,9 +603,9 @@ All additions are new paths or new optional fields. No existing path, body or in
 | Endpoint | Returns | Sub-phase |
 |---|---|---|
 | `GET /api/v1/installs/{id}/diagnostics` | `Diagnostics`: the verdict, the top 10 groups, the process summary, the data-plane summary, `checks`, `collectedAt` | 3.2 |
-| `GET /api/v1/installs/{id}/findings` | `Page<FindingRow>`; filters `severity`, `code`, `kind`, `namespace`, `group`, `q`; sort `rank` (default), `since`, `code`; Phase 2 cursors (§3.6 there) | 3.1 |
+| `GET /api/v1/installs/{id}/findings` | `Page<FindingRow>`; filters `severity`, `code`, `kind`, `namespace`, `group`, `q`; sort `rank` (default), `since`, `code`, each with Phase 2's `.asc` or `.desc` suffix (`rank`: `.asc` only; ruling R26); Phase 2 cursors (§3.6 there), bound to the install | 3.1 |
 | `GET /api/v1/installs/{id}/findings/{findingId}` | `FindingDetail`: the finding, typed evidence, next steps, and the first 50 affected objects with a cursor (`?affectedCursor=`) | 3.1 (evidence grows per sub-phase) |
-| `GET /api/v1/installs/{id}/refs?ref=…` | `{install, refs: LinkedRef[]}`: 1–6 `ref=group/Kind/namespace/name` (`core` for the empty group, `-` for no namespace), each labelled as every LinkedRef is; resolves the breadcrumb trail (§17.6) | 3.1 |
+| `GET /api/v1/installs/{id}/refs?ref=…` | `{install, refs: LinkedRef[]}`: 1–6 `ref=group/Kind/namespace/name` (`core` for the empty group, `-` for no namespace), each labelled as every LinkedRef is; resolves the breadcrumb trail (§17.6, D-041) | 3.1 |
 | `GET /api/v1/installs/{id}/processes` | `{controller: ProcessSetDTO, proxies: Page<GatewayProcesses>}`; filters `health`, `q`, `skew`, `restarts` | 3.2 |
 
 Existing payloads gain:
@@ -663,7 +663,7 @@ DataPlaneDTO   { rejects: { typeUrl, streams, firstSeen }[], statusSaysHealthy, 
 
 Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 
-11. **Finding identity.** `id` and `group` are shown on restricted findings too. They are hashes of data a restricted finding already shows (code, resource identity, D-013) or of spec fields of that resource, and reveal nothing else.
+11. **Finding identity.** `id` and `group` are shown on restricted findings too. They hash only data a restricted finding already shows (code, resource identity, D-013) or spec fields of that resource. Status and computed values become ordinals (§5.1), so an `id` reveals nothing else; it can shift when a sibling finding on the same owner appears or clears (D-040).
 12. **Evidence dependencies.** Every finding carries its evidence's dependency set in `Finding.Evidence` (it exists, `pkg/health/finding.go:76-78`). A caller who may view the resource but not every dependency gets `evidenceRestricted: true` and no evidence (Phase 2 rule 7). Dependencies per code:
 
 | Code | Resource | Evidence dependencies |
@@ -847,7 +847,7 @@ Extension pages for downstream kinds use the same component, exported from the s
 **Layout on wide screens.**
 - Lists and tables are fluid: they fill the viewport minus the gutters, up to 2400 px, instead of stopping at 1400 px.
 - Prose (messages, descriptions, next steps) keeps a readable line length of about 80 characters wherever it sits.
-- At 1600 px and wider, detail pages use two columns. The main column holds the object's structure (listeners, rules, attached routes). The side column holds conditions, findings and related objects. Below 1600 px conditions and related objects sit at the top of the one column, and contributed side sections follow the main content (user, Codex 3.1 review). Each width renders its blocks in their visual order, never reordered by CSS, so tab order follows what is visible.
+- At 1600 px and wider, detail pages use two columns. The main column holds the object's structure (listeners, rules, attached routes). The side column holds conditions, findings and related objects. Below 1600 px conditions and related objects sit at the top of the one column, and contributed side sections follow the main content (D-042). Each width renders its blocks in their visual order, never reordered by CSS, so tab order follows what is visible.
 - Type sizes do not grow with the viewport; browser zoom stays the way to enlarge text **(our call)**.
 - The Phase 2 widths stay correct: 720 px, 1280 px and the narrow-table breakpoint keep their layouts.
 
@@ -856,9 +856,9 @@ Extension pages for downstream kinds use the same component, exported from the s
 - Following an in-app link from an object page appends the current page to the trail. Linking to a page already in the trail cuts the trail back to that entry, so cycles (delegation, route ↔ Gateway) never grow it.
 - The trail keeps at most 6 entries. When it would grow past that, the oldest entries collapse into a "…" crumb that opens a short menu of them.
 - A page with no `via` (typed URL, a link from outside, a list page) shows the plain hierarchy instead: `<install> › <kind list> › <object>`.
-- A `via` entry that no longer resolves (deleted object, malformed value) is shown as plain text, not a link, and the page itself still loads. A `via` entry is never trusted for content: each crumb shows only what its own path says.
+- A malformed `via` entry is shown as plain text, not a link. A deleted object reads like a hidden one: the restricted label, no link (D-041). The page itself still loads. A `via` entry is never trusted for content: each object crumb shows only what the server returns for its path.
 - Authorization (§14): a crumb for an object the caller may not view shows the restricted label, never its name. The current Authorizer rule for names applies unchanged.
-- The shell resolves the trail's object crumbs with one `GET …/refs` per page view (§13.1, Codex 3.1 review). Until the answer arrives a crumb shows a neutral placeholder, never its URL name. A `none` link shows the restricted label, since hidden and absent read the same (D-013).
+- The shell resolves the last 12 object crumbs through `GET …/refs`, in at most two requests of 6 (§13.1, D-041, ruling R34); older crumbs show the restricted label without a link. Until the answer arrives a crumb, the current one included, shows a neutral placeholder, never its URL name. A `none` link shows the restricted label, since hidden and absent read the same (D-013). A network failure retries; only a final answer restricts a crumb.
 - The first entry may be a list page (an object list or the findings page) with its filters, which already live in the URL (Phase 2 design §8.7). Its crumb returns to that list with those filters. Every later entry is an object page.
 
 The "back to install" links in the error and not-found states stay as they are.

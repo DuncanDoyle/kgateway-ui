@@ -60,7 +60,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - Lists are indexed, filtered and paginated on the server.
 
 ### Phase 3 — Health & Diagnostics
-**Status:** In progress — 3.0 Extension seams complete (2026-11-02; `docs/phases/phase-3/phase-3.0-complete.md`)
+**Status:** In progress — 3.0 and 3.1 complete (2026-11-02; `docs/phases/phase-3/phase-3.0-complete.md`, `docs/phases/phase-3/phase-3.1-complete.md`)
 **Docs:** `docs/phases/phase-3/`
 
 "At a glance": the home page becomes the health overview, ranked by severity. Each finding links to the resource it concerns. Sources:
@@ -70,7 +70,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 - "Pod health" is "process health": restarts and readiness come from the provider (D-016).
 - A deterministic **suggested fix** where the evidence leaves exactly one correct change, such as the missing ReferenceGrant as YAML. No model: this is the first layer of AI-assisted diagnosis (Phase 11).
 
-Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier.
+Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier. Decided in 3.1 (2026-11-02): keep the immutable full recompute, with per-check memoization (D-027).
 
 ### Phase 4 — Traffic Flow & Backends
 **Status:** Not started

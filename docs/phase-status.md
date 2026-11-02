@@ -11,8 +11,8 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q2 Phase 3 implementation plan (`implementation-plan.md`) — 87 tasks, sub-phases 3.0–3.4 (2026-11-01)
 - [x] Q3 Cross-model review of design + plan, triage, user approval — `reviews/design-codex.md`, 15 findings accepted and applied; user approved all of 3.0–3.4 on 2026-11-01 ("I approve the entire phase 3, so 3.0 to 3.4")
 - [x] Q4 Sub-phase 3.0 Extension seams (Tasks 1–11) — closed 2026-11-02, phases/phase-3/phase-3.0-complete.md
-- [ ] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33) ← CURRENT
-- [ ] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54)
+- [x] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33) — closed 2026-11-02, phases/phase-3/phase-3.1-complete.md
+- [ ] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) ← NEXT
 - [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73)
 - [ ] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87)
 ### Exit gates
@@ -24,20 +24,16 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 3.1 Foundations, performance and the KRT decision
-Kind: planned
-Status: implementing (Task 12 done: brief, spec-edit variant, baseline 6b0c99a)
-Base: 7f129a69f059980879339f3cd491fdb24c64bc23
-Brief: phases/phase-3/phase-3.1-brief.md
+Sub-phase: n/a (3.1 closed 2026-11-02; 3.2 not started)
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
-- (P3) Delegation memory: bound generated path bytes in inherit merges and charge failure-reason text and JSON escaping in the page budget — src: phases/phase-2/reviews/2.4-codex.md (final round) — planned for 3.1 (design §15)
-- (P3) Stream CPU gate measures the views-memo hit path (annotation-only edits); add a reported spec-edit stream variant — src: phases/phase-2/phase-2.4-complete.md — planned for 3.1 (design §16.3)
+- (P3) Delegation memory: bound generated path bytes in inherit merges and charge failure-reason text and JSON escaping in the page budget — src: phases/phase-2/reviews/2.4-codex.md (final round) — done in 3.1 (phases/phase-3/phase-3.1-complete.md)
+- (P3) Stream CPU gate measures the views-memo hit path (annotation-only edits); add a reported spec-edit stream variant — src: phases/phase-2/phase-2.4-complete.md — done in 3.1 (phases/phase-3/phase-3.1-complete.md)
 - (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: phases/phase-1/reviews/phase-codex.md#5
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
 - (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md
-- (P4) Stable finding identity for Phase 3 diagnostics — src: phases/phase-2/reviews/phase-codex.md#8 — decided in the Phase 3 design draft §5.1 (sub-phase 3.1), pending approval
+- (P4) Stable finding identity for Phase 3 diagnostics — src: phases/phase-2/reviews/phase-codex.md#8 — done in 3.1 (D-028, D-040)
 - (P4) Apps that embed `Shell` must wait for fonts before rendering, as `web/app/src/main.tsx` does, or long names shift the layout on load — src: phases/phase-2/phase-2.4-complete.md — planned for 3.2 (design §15)
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
 - (P4) Extension seam: finding-code prefix registry (Phase 1 uses a documented convention) — for the seam milestone after Phase 2 — src: phases/phase-1/phase-1.1-complete.md
@@ -45,9 +41,12 @@ Brief: phases/phase-3/phase-3.1-brief.md
 - (P4) Refactors of design §14.4, triggered by the standalone PoC; neutral `Install` and `Detector` before the seam milestone
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039); a regression that holds more at once without allocating more passes. Candidate: a child with the production soft limit, gating peak RSS against the pod limit — src: phases/phase-3/reviews/3.0-gate-codex.md#2
+- (P3) The 3.2 memoized analyzer gate (≤ 2 ms) needs narrower inputs: memoized runs 8.1 ms at the worst case, because Phase 1–2 checks declare `Clock` (ruling R20) — src: phases/phase-3/phase-3.1-complete.md — for 3.2
+- (P3) Retained heap headroom is 4.2 MiB in the contradicting world (+27.8 of 32 MiB); 3.2 watches add to it — src: phases/phase-3/phase-3.1-complete.md — for 3.2
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-02: Sub-phase 3.1 closed (phases/phase-3/phase-3.1-complete.md). D-027 keeps the full recompute. Three Codex rounds triaged; the user decided D-040 (finding ids), D-041 (breadcrumbs through `/refs`) and D-042 (side column from 1600 px), replacing R24, R31 and R30. Gates pass locally; kind e2e passed on all three rows at 205e164.
 - 2026-11-02: Sub-phase 3.1 started. Baseline recorded (bench/3.1-baseline.txt, -ci.txt): every gate passes on 544dcd5 and 3.0; spec-edit 11.0 % local (10 min), 14.0 % CI (60 s). Throwaway branch `duncandoyle/baseline3` pushed for the CI run (user go), never merged. The user raised the D-039 cold-allocation budget to 246 MiB (CI measures 224) and approved Task 15 after seeing D-027.
 - 2026-11-02: Sub-phase 3.0 closed (phases/phase-3/phase-3.0-complete.md). Both blocked gates cleared: kind e2e passed on all three e2e.yaml rows locally; the dense gate changed per D-039. 3.1 Task 12 needs the user's go for a throwaway CI push.
 - 2026-11-01: Close blocked (3.0): (1) kind e2e not run — Docker (colima) is not running locally; needs the user's go to start it or to push for CI. (2) `TestBudgetDenseMemory` exceeds 432 MiB intermittently on HEAD and on the base alike (HEAD 447 under load; 10 interleaved rounds HEAD 6/10 and base 9/10 pass; base peaked at 440). Not a 3.0 regression: warm recompute bytes and mallocs equal at both commits, retained heap equal, pprof diff −0.03 %. The gate's margin needs the user's decision.

@@ -699,3 +699,36 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Consequences:** Phase 3 continues with declared check inputs and memoization (Task 18), which an incremental engine could feed later. The spike rebuilt view A only, which is 3.6 % of recompute CPU, so it could not show a 40 % gain on its own. A future proposal would have to move all views and checks, at the dependency costs above.
 
 **Alternatives:** Adopt KRT for views and analyzers in a follow-up phase; rejected by the rule.
+
+## D-040 — Finding ids hash only data a restricted row shows (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (user, Codex 3.1 review #3); replaces ruling R24
+
+**Context:** A restricted row shows a finding's `id`, code and resource. The hash scheme is public. KGWUI-002 hashed the condition type into its id, so a caller could hash `Accepted` and `Programmed` and learn which hidden condition failed. A low-entropy value is not hidden by hashing it.
+
+**Decision:** An id hashes only the install, the code, the resource and data the resource's spec shows. Hidden parts of the discriminator become ordinals (`#n`): a rank in a stable order among the resource's findings of that code. This covers KGWUI-002 condition types, KGWUI-011 computed parents, KGWUI-012 subjects and status-only owners (policy ancestors, status-reported route parents; ruling R33). Design §5.1 lists the discriminators; §14 rule 11 states the rule.
+
+**Consequences:** A restricted id reveals nothing a restricted row does not. An id can shift when a sibling finding on the same owner appears or clears, and the UI-derived `since` moves with it. Clients compare ids and never parse them.
+
+**Alternatives:** Hash the hidden values (R24); rejected, since a guessed value can be confirmed.
+
+## D-041 — Breadcrumbs resolve through the Authorizer (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (user, Codex 3.1 review #4); replaces ruling R31
+
+**Context:** The breadcrumb trail lives in the URL (`via`, D-035). A crumb the page did not hold showed its URL name and linked to it, so a deleted object stayed clickable and a hidden object's name showed.
+
+**Decision:** `GET /api/v1/installs/{id}/refs` takes 1–6 `ref` values and returns each as a `LinkedRef`, through the Authorizer. The shell resolves the last 12 object crumbs, in at most two requests (ruling R34); older crumbs get the restricted label without a link. Until the answer arrives, a crumb, the current one included, shows a neutral placeholder, never its URL name. A `none` link shows the restricted label, since hidden and absent read the same (D-013). A network failure retries; only a final answer restricts a crumb.
+
+**Consequences:** No crumb shows a name the caller may not see. A page view costs up to two extra small requests. Very long trails lose links on their oldest crumbs.
+
+**Alternatives:** Trust names held by the page and let the target say "not in scope" (R31); rejected, since the trail then shows names it never checked.
+
+## D-042 — Side column from 1600 px on detail pages (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (user, Codex 3.1 review #5); replaces ruling R30
+
+**Context:** D-035 asks for two columns on detail pages at wide widths. Under R30, core pages stayed one column, because only contributed sections went to the side.
+
+**Decision:** From 1600 px, conditions and related objects (Gateway conditions, a ListenerSet's parent and conditions, a route's ancestry and parent conditions) sit in a side column beside the structure. Below 1600 px they sit at the top of the main column. The page switches what it renders at the breakpoint, not the CSS order, so tab order follows what is visible. The first render reads the media query, and the skeleton reserves the same split (design §17.6).
+
+**Consequences:** Wide screens show conditions and related objects beside the structure. The browser tests check the column split at 720, 1280, 1600 and 3008 px.
+
+**Alternatives:** CSS `order` or grid placement; rejected, since tab order would then differ from the visual order.
