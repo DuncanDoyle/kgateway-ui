@@ -194,7 +194,7 @@ func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
 		ts := ix.Text(fs)
 		match = func(k int) bool { return q.match(v, &fs[k], &ts[k]) }
 	}
-	pg, err := ix.Page(fs, q.sort, q.limit, q.cursor, match)
+	pg, err := ix.Page(fs, i.Resolved.ID(), q.sort, q.limit, q.cursor, match)
 	if err != nil {
 		fail(w, err)
 		return

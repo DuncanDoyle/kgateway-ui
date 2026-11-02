@@ -31,8 +31,8 @@ const (
 // cursorPrefix keeps findings cursors apart from the explorer's sort keys.
 const cursorPrefix = "findings."
 
-// cursorAD binds a sealed cursor to the findings list.
-var cursorAD = []byte("findings")
+// cursorAD binds a sealed cursor to the findings list of install.
+func cursorAD(install string) []byte { return []byte("findings\x00" + install) }
 
 // maxCursor is the longest cursor accepted, encoded.
 const maxCursor = 1024
@@ -316,17 +316,18 @@ var cursorAEAD, cursorNonceKey = func() (cipher.AEAD, []byte) {
 	return a, key[32:]
 }()
 
-func encodeCursor(s Sort, before bool, k rankKey, code string) string {
+func encodeCursor(install string, s Sort, before bool, k rankKey, code string) string {
 	b, _ := json.Marshal(wireCursor{S: cursorPrefix + s.Key, D: direction(s.Desc), B: before, Code: code, K: k}) // plain fields cannot fail
 	mac := hmac.New(sha256.New, cursorNonceKey)
+	_, _ = mac.Write(cursorAD(install))
 	_, _ = mac.Write(b)
 	nonce := mac.Sum(make([]byte, 0, sha256.Size+len(b)+cursorAEAD.Overhead()))[:cursorAEAD.NonceSize()]
-	return base64.RawURLEncoding.EncodeToString(cursorAEAD.Seal(nonce, nonce, b, cursorAD))
+	return base64.RawURLEncoding.EncodeToString(cursorAEAD.Seal(nonce, nonce, b, cursorAD(install)))
 }
 
 func badCursor(why string) error { return fmt.Errorf("%w: %s", explore.ErrBadCursor, why) }
 
-func decodeCursor(c string, s Sort) (wireCursor, error) {
+func decodeCursor(install, c string, s Sort) (wireCursor, error) {
 	var w wireCursor
 	if len(c) > maxCursor {
 		return w, badCursor("too long")
@@ -339,7 +340,7 @@ func decodeCursor(c string, s Sort) (wireCursor, error) {
 	if len(sealed) < ns {
 		return w, badCursor("not a cursor")
 	}
-	raw, err := cursorAEAD.Open(nil, sealed[:ns], sealed[ns:], cursorAD)
+	raw, err := cursorAEAD.Open(nil, sealed[:ns], sealed[ns:], cursorAD(install))
 	if err != nil {
 		return w, badCursor("not a cursor of this server")
 	}
@@ -358,9 +359,10 @@ func decodeCursor(c string, s Sort) (wireCursor, error) {
 }
 
 // Page returns up to limit findings of fs that match, in s's order, after or before cursor.
+// A cursor opens only for the install it was minted for.
 // A cursor resumes at its anchor's ordering tuple, so a vanished anchor skips nothing.
 // Bad sorts are explore.ErrBadQuery, bad cursors explore.ErrBadCursor (design §14 rules 17, 18).
-func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, match func(i int) bool) (Page, error) {
+func (ix *Index) Page(fs []health.Finding, install string, s Sort, limit int, cursor string, match func(i int) bool) (Page, error) {
 	order, ok := ix.order(fs, s)
 	if !ok {
 		return Page{}, fmt.Errorf("%w: sort %q", explore.ErrBadQuery, s.Key)
@@ -380,7 +382,7 @@ func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, mat
 	start, end := 0, min(len(ms), limit)
 	var cur *wireCursor
 	if cursor != "" {
-		w, err := decodeCursor(cursor, s)
+		w, err := decodeCursor(install, cursor, s)
 		if err != nil {
 			return Page{}, err
 		}
@@ -407,7 +409,7 @@ func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, mat
 	}
 	anchor := func(before bool, k int) string {
 		key, code := ix.keyOf(fs, at(k))
-		return encodeCursor(s, before, key, code)
+		return encodeCursor(install, s, before, key, code)
 	}
 	switch {
 	case end > start:
@@ -419,9 +421,9 @@ func (ix *Index) Page(fs []health.Finding, s Sort, limit int, cursor string, mat
 		}
 	// An empty page past rows that still exist turns back from the client's own anchor.
 	case cur != nil && !cur.B && start > 0:
-		p.Prev = encodeCursor(s, true, cur.K, cur.Code)
+		p.Prev = encodeCursor(install, s, true, cur.K, cur.Code)
 	case cur != nil && cur.B && end < len(ms):
-		p.Next = encodeCursor(s, false, cur.K, cur.Code)
+		p.Next = encodeCursor(install, s, false, cur.K, cur.Code)
 	}
 	return p, nil
 }

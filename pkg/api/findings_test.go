@@ -15,6 +15,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
@@ -502,9 +503,9 @@ func TestFindingsCursorSurvivesChanges(t *testing.T) {
 				t.Run(fmt.Sprintf("%s.%v/%s/back=%v", sort.Key, sort.Desc, name, back), func(t *testing.T) {
 					fs, ix := pagedIndex(base)
 					// The page the client holds: the first one, or the last one when paging back.
-					held, err := ix.Page(fs, sort, 2, "", nil)
+					held, err := ix.Page(fs, "kgw.kgateway", sort, 2, "", nil)
 					for back && err == nil && held.Next != "" {
-						held, err = ix.Page(fs, sort, 2, held.Next, nil)
+						held, err = ix.Page(fs, "kgw.kgateway", sort, 2, held.Next, nil)
 					}
 					if err != nil {
 						t.Fatal(err)
@@ -524,7 +525,7 @@ func TestFindingsCursorSurvivesChanges(t *testing.T) {
 						if n > len(fs2) {
 							t.Fatal("no last page")
 						}
-						p, err := ix2.Page(fs2, sort, 2, c, nil)
+						p, err := ix2.Page(fs2, "kgw.kgateway", sort, 2, c, nil)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -555,7 +556,7 @@ func without(ps []pagedFinding, ids []string) []pagedFinding {
 // another sort or from another list is a bad cursor (design §14 rules 17, 18).
 func TestFindingsCursorSealed(t *testing.T) {
 	fs, ix := pagedIndex([]pagedFinding{{"a", "KGWUI-002", health.SeverityError, 0}, {"b", "KGWUI-002", health.SeverityError, 1}, {"c", "KGWUI-003", health.SeverityWarning, 2}})
-	first, err := ix.Page(fs, diagnose.Sort{Key: diagnose.SortSince}, 1, "", nil)
+	first, err := ix.Page(fs, "kgw.kgateway", diagnose.Sort{Key: diagnose.SortSince}, 1, "", nil)
 	if err != nil || first.Next == "" {
 		t.Fatalf("first page %+v %v", first, err)
 	}
@@ -575,7 +576,7 @@ func TestFindingsCursorSealed(t *testing.T) {
 		"altered": {diagnose.Sort{Key: diagnose.SortSince}, string(flipped)}, "another sort": {diagnose.Sort{Key: diagnose.SortCode}, first.Next},
 		"another direction": {diagnose.Sort{Key: diagnose.SortSince, Desc: true}, first.Next}, "another list": {diagnose.Sort{Key: diagnose.SortSince}, explorer},
 	} {
-		if _, err := ix.Page(fs, tc.s, 1, tc.c, nil); !errors.Is(err, explore.ErrBadCursor) {
+		if _, err := ix.Page(fs, "kgw.kgateway", tc.s, 1, tc.c, nil); !errors.Is(err, explore.ErrBadCursor) {
 			t.Errorf("%s: %v, want a bad cursor", name, err)
 		}
 	}
@@ -612,7 +613,7 @@ func TestFindingsDescendingTies(t *testing.T) {
 		{diagnose.Sort{Key: diagnose.SortCode}, "a f c e b d"},
 		{diagnose.Sort{Key: diagnose.SortCode, Desc: true}, "b d c e a f"},
 	} {
-		p, err := ix.Page(fs, tc.s, 10, "", nil)
+		p, err := ix.Page(fs, "kgw.kgateway", tc.s, 10, "", nil)
 		var got []string
 		for _, k := range p.Items {
 			got = append(got, strings.TrimPrefix(fs[k].ID, "f1-"))
@@ -620,5 +621,30 @@ func TestFindingsDescendingTies(t *testing.T) {
 		if err != nil || strings.Join(got, " ") != tc.want {
 			t.Errorf("%+v: %v %v, want %s", tc.s, got, err, tc.want)
 		}
+	}
+}
+
+// A cursor names the install it was minted for: replayed against another install it is a bad cursor.
+func TestFindingsCursorBoundToInstall(t *testing.T) {
+	// kgw2 watches team=b; each install has two failing routes on its own Gateway.
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}}]`))
+	failing := func(ns, name string, gw objects.ParentRef) runtime.Object {
+		return testutil.HTTPRoute(ns, name, []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
+	}
+	gw, gwB := testutil.GwRef("infra", "edge"), testutil.GwRef("infra-b", "edge")
+	objs := isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}), testutil.Namespace("shop-b", map[string]string{"team": "b"}),
+		d2, testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 2), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		failing("shop", "broken", gw), failing("shop", "lost", gw), failing("shop-b", "broken", gwB), failing("shop-b", "lost", gwB))
+	_, srv, _ := start(t, testutil.ServedUpstream(), "", okMetrics("kgw.kgateway", "kgw2.kgateway2"), objs...)
+	for _, sort := range []string{"rank", "since.asc", "code.desc"} {
+		q := "/findings?limit=1&sort=" + sort
+		a := get[Page[FindingRow]](t, srv, "/api/v1/installs/kgw.kgateway"+q, http.StatusOK)
+		b := get[Page[FindingRow]](t, srv, "/api/v1/installs/kgw2.kgateway2"+q, http.StatusOK)
+		if a.Next == "" || b.Next == "" {
+			t.Fatalf("%s: want two findings in each install, got %d and %d", sort, a.Total, b.Total)
+		}
+		get[Page[FindingRow]](t, srv, "/api/v1/installs/kgw.kgateway"+q+"&cursor="+url.QueryEscape(a.Next), http.StatusOK)
+		get[map[string]any](t, srv, "/api/v1/installs/kgw2.kgateway2"+q+"&cursor="+url.QueryEscape(a.Next), http.StatusBadRequest)
 	}
 }
