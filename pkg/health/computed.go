@@ -61,6 +61,8 @@ func (c computedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 			fs = append(fs, f)
 		}
+		// The check kind and key are hidden from a restricted row: rank them per resource.
+		ordinalKeys(fs, func(*Finding) (int, bool) { return 0, true })
 	}
 	return fs, ok(c.Name(), false, in.Now)
 }

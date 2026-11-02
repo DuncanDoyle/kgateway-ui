@@ -416,6 +416,16 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 		}
 	}
+	// 002 keeps its owner and ranks the condition type; a computed 011 ranks its parent.
+	ordinalKeys(fs, func(f *Finding) (int, bool) {
+		switch {
+		case f.Code == CodeConditionFalse:
+			return len(f.Key) - 1, true
+		case f.Code == CodeDelegatedNotAttached && len(f.Key) > 0 && f.Key[0] == computedOwner:
+			return 1, true
+		}
+		return 0, false
+	})
 	if n := len(inGrace); n > 0 {
 		noun := "resources are"
 		if n == 1 {

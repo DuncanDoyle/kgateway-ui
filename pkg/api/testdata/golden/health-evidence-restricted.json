@@ -83,7 +83,7 @@
       {
         "code": "KGWUI-002",
         "group": "f1-vptc6qogpx6j2mni6gfndp6a4b",
-        "id": "f1-vro76ty6ct6f6qzggk3tbklmzh",
+        "id": "f1-is3vpua75gteadbp46kcjrcmu7",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -101,7 +101,7 @@
         "code": "KGWUI-002",
         "detail": "A delegating rule selects no child route the controller accepted; ResolvedRefs=False, reason BackendNotFound (parent Gateway infra/edge section sel)",
         "group": "f1-dishx3pq7yu2lksxzjnafj4hc7",
-        "id": "f1-ynauzn5r5afqzy7efao3b4aq24",
+        "id": "f1-egajxha6wm77fqgb62jrp22oor",
         "install": "kgw.kgateway",
         "message": "A delegating rule has no accepted child route",
         "resource": {
@@ -156,7 +156,7 @@
         "code": "KGWUI-012",
         "detail": "Status entry for parent HTTPRoute `shop/hp` at `PathPrefix /rb/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
         "group": "f1-ma35s3qjr4piqgb3btgsbbkwye",
-        "id": "f1-5ou42dygyupzmy4dnqylc7qaz6",
+        "id": "f1-nev7q7iqjivmzq73xkj4dsc3iw",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {
@@ -175,7 +175,7 @@
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
         "group": "f1-jws2ihkyqb7xq6lpg6yo4pfx4g",
-        "id": "f1-nbxeo2pjmwreaatmiithkrrlb4",
+        "id": "f1-alp7udx5ayjskmykowcko6qp2r",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {

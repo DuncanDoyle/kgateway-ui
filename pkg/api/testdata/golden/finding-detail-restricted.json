@@ -10,7 +10,7 @@
     "finding": {
       "code": "KGWUI-002",
       "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
-      "id": "f1-rc7j3pfjikwleiwgqmwrxao6oy",
+      "id": "f1-qrj7dmlw4tyjgwdiej2mypflzd",
       "resource": {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",

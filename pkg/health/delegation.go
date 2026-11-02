@@ -80,7 +80,7 @@ func computedTriggerFindings(in Input) []Finding {
 			if !ok {
 				continue
 			}
-			f.Detail, f.Key = computedReason(parent, c.Expected), refKey(parent)
+			f.Detail, f.Key = computedReason(parent, c.Expected), append([]string{computedOwner}, refKey(parent)...)
 			f.parent = &objects.ParentRef{Group: parent.Group, Kind: parent.Kind, Namespace: parent.Namespace, Name: parent.Name}
 		case computed.KindOrphan:
 			f.Detail, f.Key = OrphanDetail, []string{"orphan"}

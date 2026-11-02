@@ -86,7 +86,7 @@
       {
         "code": "KGWUI-002",
         "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
-        "id": "f1-rc7j3pfjikwleiwgqmwrxao6oy",
+        "id": "f1-qrj7dmlw4tyjgwdiej2mypflzd",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -104,7 +104,7 @@
         "code": "KGWUI-002",
         "detail": "ResolvedRefs=False, reason RefNotPermitted (parent Gateway infra/edge)",
         "group": "f1-mvg6d2emebndncdtexypelvglv",
-        "id": "f1-3cse5bxnvkqhgyfsdetkz57k6d",
+        "id": "f1-gd6cifsogaenmoeo4trbwkjw6v",
         "install": "kgw.kgateway",
         "message": "Reference not permitted (missing ReferenceGrant)",
         "resource": {

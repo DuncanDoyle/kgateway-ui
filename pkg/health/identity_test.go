@@ -143,7 +143,7 @@ func TestRewordingKeepsID(t *testing.T) {
 }
 
 // Discriminators separate findings of one code on one resource: two KGWUI-012
-// checks and two conditions on a Gateway, two policy ancestors differing by port,
+// checks and two conditions on a Gateway, two conditions under one route parent, two policy ancestors differing by port,
 // and two KGWUI-011 parentRefs to one route differing by section.
 func TestDiscriminatorSeparates(t *testing.T) {
 	in := busyWorld(t)
@@ -159,7 +159,8 @@ func TestDiscriminatorSeparates(t *testing.T) {
 		}
 		ids[k][f.ID] = true
 	}
-	for _, k := range []string{CodeComputedDisagrees + " Gateway infra/edge", CodeConditionFalse + " Gateway infra/edge", CodeConditionFalse + " TrafficPolicy shop/ports"} {
+	for _, k := range []string{CodeComputedDisagrees + " Gateway infra/edge", CodeConditionFalse + " Gateway infra/edge",
+		CodeConditionFalse + " HTTPRoute shop/api", CodeConditionFalse + " TrafficPolicy shop/ports"} {
 		if len(ids[k]) != 2 {
 			t.Errorf("%s: %d distinct ids, want 2", k, len(ids[k]))
 		}
@@ -180,6 +181,67 @@ func TestDiscriminatorSeparates(t *testing.T) {
 	if FindingID("i", "c", nil, []string{"a"}) == FindingID("i", "c", nil, []string{"b"}) {
 		t.Error("different keys must give different ids")
 	}
+}
+
+// A restricted row shows install, code and resource, so its id is computable from
+// them and the owner: worlds differing only in which condition failed, which check
+// kind disagrees or which undeclared parent drops a route give one id (design §14 rule 11).
+func TestRestrictedIDFromVisibleData(t *testing.T) {
+	cases := []struct {
+		name, code, res string
+		key             []string
+		worlds          []func() *world
+	}{
+		{"condition type", CodeConditionFalse, "infra/edge", []string{ownerSelf, "#1"}, []func() *world{
+			func() *world { return failingGateway("Accepted", "Programmed") },
+			func() *world { return failingGateway("Programmed", "Accepted") },
+		}},
+		{"check kind", CodeComputedDisagrees, "infra/edge", []string{"#1"}, []func() *world{
+			func() *world { return disagreeingWorld(computed.KindListenerCount, "edge http") },
+			func() *world { return disagreeingWorld(computed.KindRouteAccepted, "edge cart") },
+		}},
+		{"computed parent", CodeDelegatedNotAttached, "shop/c", []string{computedOwner, "#1"}, []func() *world{
+			func() *world { return droppedBy("api") },
+			func() *world { return droppedBy("other") },
+		}},
+	}
+	for _, tc := range cases {
+		for i, build := range tc.worlds {
+			w := build()
+			in := w.input(t)
+			fs := findingsFor(Evaluate(in, Upstream(), Runtime{States: NewStates()}), tc.code, tc.res)
+			if len(fs) != 1 {
+				t.Fatalf("%s world %d: %d %s findings on %s, want 1", tc.name, i, len(fs), tc.code, tc.res)
+			}
+			if want := FindingID(in.Install.ID(), tc.code, fs[0].Resource, tc.key); fs[0].ID != want {
+				t.Errorf("%s world %d: id %s, want %s from the row's install, code, resource and %v", tc.name, i, fs[0].ID, want, tc.key)
+			}
+		}
+	}
+}
+
+// failingGateway is the healthy world with infra/edge's bad condition False and good one True.
+func failingGateway(bad, good string) *world {
+	w := healthyWorld()
+	w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{
+		testutil.Cond(bad, metav1.ConditionFalse, "Invalid"), testutil.Cond(good, metav1.ConditionTrue, good)})
+	return w
+}
+
+// disagreeingWorld is the healthy world with one mature KGWUI-012 check on infra/edge.
+func disagreeingWorld(kind computed.CheckKind, subject string) *world {
+	w := healthyWorld()
+	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{disagreeing(kind, subject)}}
+	return w
+}
+
+// droppedBy has shop/c, which declares no parent, dropped by parent route shop/<parent>.
+func droppedBy(parent string) *world {
+	w := delegationWorld(testutil.HTTPRoute("shop", "c", nil))
+	c := trigger(testutil.Now)
+	c.ID.Subject = computed.Subject(objects.GatewayAPIGroup, "HTTPRoute", "shop", "c", objects.GatewayAPIGroup, "HTTPRoute", "shop", parent)
+	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{c}}
+	return w
 }
 
 // No two findings of one install share an id, in any fixture world.

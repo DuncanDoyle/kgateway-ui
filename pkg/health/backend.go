@@ -60,8 +60,9 @@ func (c backendCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			if cond == nil || cond.Status != metav1.ConditionFalse {
 				continue
 			}
+			// Keyed as conditionsCheck keys KGWUI-002: the owner and a rank, never the type.
 			f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Install: in.Install.ID(), Resource: ref(b),
-				Message: message(*cond), Since: since(*cond), Key: []string{ownerSelf, cond.Type}}
+				Message: message(*cond), Since: since(*cond), Key: []string{ownerSelf, ordinal(1)}}
 			if current {
 				f.Severity, f.Detail = SeverityError, detail(*cond, "")
 			} else if cond.ObservedGeneration == 0 {

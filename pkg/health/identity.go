@@ -1,6 +1,7 @@
 package health
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base32"
 	"slices"
@@ -126,12 +127,14 @@ func (x *IDs) Sweep() {
 	x.gen++
 }
 
-// Discriminator owners of KGWUI-002 and KGWUI-003 (design §5.1).
+// Discriminator owners of KGWUI-002, KGWUI-003 and KGWUI-011 (design §5.1).
 const (
 	ownerSelf     = "self"
 	ownerParent   = "parent"
 	ownerListener = "listener"
 	ownerAncestor = "ancestor"
+	// computedOwner leads a computed KGWUI-011's key, apart from declared and orphan ones.
+	computedOwner = "computed"
 )
 
 // refKey is r's group, kind, namespace and name.
@@ -167,6 +170,58 @@ func (in Input) parentKey(u *unstructured.Unstructured, p objects.ParentRef) []s
 		w = status[j].Written
 	}
 	return appendWrittenKey([]string{ownerParent}, w)
+}
+
+// ordinals are the "#n" key elements; ordinal builds the rare ones past them.
+var ordinals = func() (o [32]string) {
+	for i := range o {
+		o[i] = "#" + strconv.Itoa(i+1)
+	}
+	return o
+}()
+
+func ordinal(n int) string {
+	if n <= len(ordinals) {
+		return ordinals[n-1]
+	}
+	return "#" + strconv.Itoa(n)
+}
+
+// ordinalKeys rekeys the findings of fs for which visible returns ok: the first n
+// key elements stay and the rest become "#k", the finding's rank by them among
+// those sharing resource and kept prefix. A restricted row's id then hashes only
+// what it shows (design §14 rule 11); it can shift when a sibling appears or clears.
+func ordinalKeys(fs []Finding, visible func(f *Finding) (n int, ok bool)) {
+	type entry struct{ i, n int }
+	var es []entry
+	for i := range fs {
+		if n, ok := visible(&fs[i]); ok {
+			es = append(es, entry{i, n})
+		}
+	}
+	if len(es) == 0 {
+		return
+	}
+	// same compares resource and kept prefix; the sort adds the rest of the key.
+	same := func(a, b entry) int {
+		fa, fb := &fs[a.i], &fs[b.i]
+		return cmp.Or(compareOptRefs(fa.Resource, fb.Resource), slices.Compare(fa.Key[:a.n], fb.Key[:b.n]))
+	}
+	slices.SortFunc(es, func(a, b entry) int {
+		return cmp.Or(same(a, b), slices.Compare(fs[a.i].Key[a.n:], fs[b.i].Key[b.n:]))
+	})
+	rank := make([]int, len(es))
+	for j := range es {
+		rank[j] = 1
+		if j > 0 && same(es[j-1], es[j]) == 0 {
+			rank[j] = rank[j-1] + 1
+		}
+	}
+	// Keys are rewritten only after every comparison; each key's array is its finding's own.
+	for j, e := range es {
+		f := &fs[e.i]
+		f.Key = append(f.Key[:e.n], ordinal(rank[j]))
+	}
 }
 
 // identify sets each finding's ID, then drops its Key, and gives one returned without

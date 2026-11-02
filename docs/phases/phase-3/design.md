@@ -133,13 +133,13 @@ Every finding gets an `id`, stable across recomputes and UI restarts, and unique
 | Code | Discriminator |
 |---|---|
 | 001, 005, 006, 009, 010, 018, 019, 020, 021, 024, 025, 026 | none: one per resource (025 and 026 are on the Gateway; Pods churn, so they are evidence, not identity) |
-| 002 | the condition's owner (parentRef as written, listener name, or ancestorRef as written, or `self`) and the condition type |
+| 002 | the condition's owner (parentRef as written, listener name, or ancestorRef as written, or `self`) and `#n`, the condition's rank by type among that owner's failing conditions |
 | 003 | parentRef as written, or `self` |
 | 004 | the targeted parent ref |
 | 007 | (namespace, resource label) |
 | 008 | check name and cause key |
-| 011 | the parent route ref, or `orphan` |
-| 012 | the check key of `computed-rules.md` §8 (kind, subject, key) |
+| 011 | the parentRef as written for the status trigger; `computed` and `#n`, the rank by parent route among the route's computed triggers; or `orphan` |
+| 012 | `#n`, the check's rank by its check key of `computed-rules.md` §8 (kind, subject, key) among the resource's KGWUI-012 |
 | 013, 014 | parentRef as written, or listener name |
 | 015 | parentRef as written and the match index |
 | 016 | targetRef index and the ref as written, or ancestorRef as written for the controller-reported form |
@@ -147,6 +147,7 @@ Every finding gets an `id`, stable across recomputes and UI restarts, and unique
 | 022 | `proxy`, `controller`, or the CRD name |
 | 023 | the Service port (number or name, as the backendRef wrote it) |
 
+- A rank keeps hidden data out of an `id` shown on a restricted row (§14 rule 11), so an `id` can change when a sibling finding on the same owner appears or clears.
 - The `id` is opaque: clients compare it, never parse it. A downstream code's discriminator is the downstream's choice; it must be stable.
 - API v1 is not yet frozen (no release tag exists), so `id` is an optional field added to every finding in every response, including `/health` (§13).
 
