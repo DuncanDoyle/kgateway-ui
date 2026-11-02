@@ -5,6 +5,7 @@ package ctrlmetrics
 import (
 	"cmp"
 	"io"
+	"maps"
 	"slices"
 
 	dto "github.com/prometheus/client_model/go"
@@ -137,12 +138,13 @@ type PodTotals map[string]map[TypeKey]float64
 // type, and the totals to pass next time. Growth is taken per Pod UID: a Pod
 // seen for the first time sets a baseline, a counter that went down is a reset,
 // and neither counts as growth, so a restarted replica is never negative. A UID
-// absent from cur is forgotten.
+// absent from cur is forgotten, so callers skip Err results (an empty cur
+// forgets every UID). A series new under a seen UID counts its full value.
 func TotalGrowth(prev PodTotals, cur []PodMetrics) (growth map[TypeKey]float64, next PodTotals) {
 	growth, next = map[TypeKey]float64{}, PodTotals{}
 	for _, p := range cur {
 		last, seen := prev[p.UID]
-		next[p.UID] = p.Total
+		next[p.UID] = maps.Clone(p.Total)
 		if !seen {
 			continue
 		}

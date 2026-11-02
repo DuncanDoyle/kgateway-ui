@@ -69,14 +69,10 @@ type LoopEvent struct {
 	Published *Published
 }
 
-// encodeMetrics is the identity of the metrics results reads: FNV-64a over,
-// per read in order, the ID and Present and, for a present result, whether it
-// is fresh at now under maxAge (strict age > maxAge), Err, ManagedPresent and
-// every Rejects and Managed entry in key order, then every PerPod entry (Pods
-// in their given order, which Aggregate sorts; series in key order). CollectedAt itself is left
-// out, as in ctrlmetrics.Result.SameContent: a renewed scrape is not a change,
-// and the strict staleness deadline in Model.Next makes the next run read it.
-// Freshness is in, so a stale model is never confirmed once metrics recover.
+// encodeMetrics is the identity of the metrics results reads: FNV-64a over each
+// read's ID, Present and, if present, freshness at now, Err and every Metrics
+// entry (including PerPod) in key order. CollectedAt is left out, as in
+// ctrlmetrics.Result.SameContent; Model.Next's staleness deadline covers it.
 func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uint64 {
 	h := fnv.New64a()
 	var b [8]byte

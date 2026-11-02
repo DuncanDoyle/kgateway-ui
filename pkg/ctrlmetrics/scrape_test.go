@@ -313,3 +313,12 @@ func TestSameContentIgnoresCollectedAt(t *testing.T) {
 		t.Fatal("a NaN sample must equal itself")
 	}
 }
+
+func TestSameContentSeesPerPodChange(t *testing.T) {
+	mk := func(d float64) Result {
+		return Result{Metrics: Metrics{PerPod: []PodMetrics{{UID: "u", Name: "p", Dropped: d, DroppedPresent: true}}}}
+	}
+	if !mk(0).SameContent(mk(0)) || mk(0).SameContent(mk(1)) {
+		t.Fatal("a changed per-Pod value is a content change")
+	}
+}

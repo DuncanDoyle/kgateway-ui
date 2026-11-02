@@ -232,4 +232,11 @@ func TestCounterDeltaPerPodUIDNeverNegative(t *testing.T) {
 	if g[nack] != 5 || g[edge] != 0 {
 		t.Errorf("growth: %v", g)
 	}
+	rds := TypeKey{nack.Gateway, "envoy.config.route.v3.RouteConfiguration"}
+	c3 := c2
+	c3.Total = map[TypeKey]float64{nack: c2.Total[nack], rds: 7}
+	_, p2 := TotalGrowth(prev, []PodMetrics{b, c2})
+	if g, _ = TotalGrowth(p2, []PodMetrics{b, c3}); g[rds] != 7 {
+		t.Errorf("a series new under a seen UID counts in full: %v", g)
+	}
 }
