@@ -415,12 +415,15 @@ var annotationStream = streamVariant{gated: true, edit: func(u *unstructured.Uns
 	return nil
 }}
 
-// specEditStream changes a route's spec per update: generation and status stay, as the cost measured is the recompute.
+// specEditStream changes a route's spec and bumps its generation per update, as
+// the API server does; status stays, as no controller acknowledges the edit.
 var specEditStream = streamVariant{name: "spec-edit ", edit: togglePath}
 
 // togglePath appends "-x" to u's first path match value on even passes and
-// leaves the seeded spec on odd ones, so every update changes the spec.
+// leaves the seeded spec on odd ones, so every update changes the spec. Each
+// pass updates a route once, so its generation is the seeded one plus pass+1.
 func togglePath(u *unstructured.Unstructured, _, pass int) error {
+	u.SetGeneration(u.GetGeneration() + int64(pass) + 1)
 	rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "rules")
 	for _, r := range rules {
 		ms, _ := r.(map[string]any)["matches"].([]any)
@@ -623,6 +626,11 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB%s",
 		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib, v.budget(" (budget ≤ 256 MiB, half the 512 MiB pod limit)"))
 	if !v.gated {
+		codes := map[string]int{}
+		for _, x := range e.Current().Model.Installs[0].Health.Findings {
+			codes[x.Code]++
+		}
+		t.Logf("%s: findings by code at the end %v", tier.Name, codes)
 		return
 	}
 	if tier.Contradict && f != c {
