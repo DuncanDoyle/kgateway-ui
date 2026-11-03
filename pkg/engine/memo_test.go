@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -479,4 +480,79 @@ func installOf(t *testing.T, m *Model) InstallModel {
 	}
 	t.Fatal("no kgw.kgateway")
 	return InstallModel{}
+}
+
+// scrapedAt serves reject-free metrics collected at *at, as a collector scraping unchanged content.
+type scrapedAt struct{ at *time.Time }
+
+func (m scrapedAt) Get(id string) (ctrlmetrics.Result, bool) { return metricsAt(*m.at).Get(id) }
+
+// scrapeEngine is the upstream engine over snapshot(t) with metrics collected at *col and a 45 s max age.
+func scrapeEngine(t *testing.T) (e *Engine, now, col *time.Time) {
+	t.Helper()
+	n, c := testutil.Now, testutil.Now
+	cfg := config(nil, scrapedAt{&c}, func() time.Time { return n })
+	cfg.Snapshots, cfg.MetricsMaxAge = &memoSource{base: snapshot(t), now: &n}, 45*time.Second
+	return New(cfg), &n, &c
+}
+
+// xdsResult is the xDS rejects check's result in m.
+func xdsResult(t *testing.T, m *Model) health.CheckResult {
+	t.Helper()
+	for _, c := range report(t, m).Checks {
+		if c.Name == "xDS rejects" {
+			return c
+		}
+	}
+	t.Fatal("no xDS rejects result")
+	return health.CheckResult{}
+}
+
+// Fresh scrapes of unchanged content leave the staleness deadline at the latest
+// scrape: a memoized check adds no earlier deadline, so an idle install recomputes
+// only on the safety timer.
+func TestIdleFreshScrapesAddNoDeadline(t *testing.T) {
+	e, now, col := scrapeEngine(t)
+	const maxAge = 45 * time.Second
+	for i := 0; i <= 20; i++ {
+		// A scrape every 10 s and a safety recompute every 30 s, 1 s after a scrape.
+		*now = testutil.Now.Add(time.Duration(i)*30*time.Second + time.Second)
+		*col = now.Add(-time.Second)
+		m := e.Compute()
+		if i < 3 {
+			continue // the grace period's deadlines
+		}
+		if want := col.Add(maxAge); m.Next.At.Before(want) {
+			t.Fatalf("at +%s: next deadline %+v, before the staleness deadline %v of the scrape at %v", now.Sub(testutil.Now), m.Next, want, *col)
+		}
+	}
+}
+
+// When scrapes stop, xDS rejects stays OK through C+max age and turns
+// stale on the first recompute after it, which the model's deadline schedules.
+func TestStoppedScrapesTurnXDSStaleOnTime(t *testing.T) {
+	e, now, col := scrapeEngine(t)
+	const maxAge = 45 * time.Second
+	var m *Model
+	for i := 0; i < 4; i++ { // fresh scrapes, all within the first run's max age, so the memo is reused
+		*now = testutil.Now.Add(time.Duration(i)*10*time.Second + time.Second)
+		*col = now.Add(-time.Second)
+		m = e.Compute()
+	}
+	last := *col
+	if want := (Deadline{At: last.Add(maxAge), Strict: true}); m.Next != want {
+		t.Fatalf("after the last scrape: next %+v, want its staleness deadline %+v", m.Next, want)
+	}
+	*now = last.Add(maxAge)
+	m = e.Compute()
+	if r := xdsResult(t, m); !r.OK {
+		t.Fatalf("at C+max age: %+v; want OK", r)
+	}
+	if want := (Deadline{At: last.Add(maxAge), Strict: true}); m.Next != want {
+		t.Fatalf("at C+max age: next %+v, want %+v", m.Next, want)
+	}
+	*now = last.Add(maxAge + time.Nanosecond)
+	if r := xdsResult(t, e.Compute()); r.OK || !strings.Contains(r.Error, "stale") {
+		t.Fatalf("just after C+max age: %+v; want the stale error", r)
+	}
 }

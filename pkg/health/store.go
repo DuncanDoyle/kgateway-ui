@@ -146,6 +146,9 @@ type memo struct {
 	out uint64
 	// keep are the finding IDs the run returned or retained; their since entries survive a skip.
 	keep map[string]bool
+	// times prints the metrics' and collected values' times, which the input print leaves out;
+	// a wake may derive from them, so a memo with a wake is reused only while they hold.
+	times uint64
 }
 
 // stamp is the set of reference times (eachRef order) a CollectedAt equalled,
@@ -167,6 +170,17 @@ func eachRef(in Input, set InputSet, col collect.Snapshot, f func(bit stamp, t t
 			f(1<<(3+i), v.At)
 		}
 	}
+}
+
+// timesPrint prints the metrics' and declared collected values' times.
+func timesPrint(in Input, set InputSet, col collect.Snapshot) uint64 {
+	var h uint64
+	eachRef(in, set, col, func(bit stamp, t time.Time) {
+		if bit > 1<<1 {
+			h = mix(mix(h, uint64(bit)), uint64(t.UnixNano())) //nolint:gosec // hashed bits
+		}
+	})
+	return h
 }
 
 // sameTime reports whether a and b are one instant in one location, so they serialise alike.

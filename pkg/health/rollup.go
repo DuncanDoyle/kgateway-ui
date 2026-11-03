@@ -150,7 +150,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 		}
 	}
 	if keyed {
-		if m := rt.States.memos[c.Name()]; m != nil && m.print == key && (m.wake.IsZero() || m.wake.After(in.Now)) {
+		if m := rt.States.memos[c.Name()]; m != nil && m.print == key && (m.wake.IsZero() || m.wake.After(in.Now) && m.times == timesPrint(in, set, rt.Collected)) {
 			if at, fresh := m.stamp.restamp(in, set, rt.Collected, m.result.CollectedAt); fresh {
 				cr = m.result
 				cr.CollectedAt = at
@@ -179,7 +179,11 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 		out = stampPrint(base, cr.CollectedAt)
 	}
 	if keyed {
-		rt.States.memos[c.Name()] = &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: base, keep: keep}
+		m := &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: base, keep: keep}
+		if !wake.IsZero() {
+			m.times = timesPrint(in, set, rt.Collected)
+		}
+		rt.States.memos[c.Name()] = m
 	} else if memoize {
 		delete(rt.States.memos, c.Name())
 	}
