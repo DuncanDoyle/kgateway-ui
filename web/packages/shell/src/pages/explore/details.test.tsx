@@ -1138,9 +1138,11 @@ it("the current crumb holds a placeholder until the page's own detail loads", as
       return new Response(JSON.stringify(r ?? { error: "not found" }), { status: r === undefined ? 404 : 200 });
     }),
   );
-  // Every text the trail ever shows, so a name that flashes once is caught.
+  // Every text the trail ever shows, so a name that flashes once is caught; the page has other navigation landmarks.
   const seen: string[] = [];
-  const watch = new MutationObserver(() => seen.push(screen.queryByRole("navigation")?.textContent ?? ""));
+  const watch = new MutationObserver(() =>
+    seen.push(screen.queryByRole("navigation", { name: breadcrumbsCopy.label })?.textContent ?? ""),
+  );
   watch.observe(document.body, { childList: true, subtree: true, characterData: true });
   mount(GW_PATH);
   seen.push(trail().getByRole("link", { name: "Gateways" }).closest("nav")?.textContent ?? "");
