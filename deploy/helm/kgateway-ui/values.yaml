@@ -35,9 +35,9 @@ httpRoute:
 serviceAccount:
   create: true
   name: ""
-# The Go soft memory limit, rendered as GOMEMLIMIT (for example 300MiB). Empty uses the
-# binary's default: 224 MiB, or 90 % of limits.memory when that is lower (D-043).
+# Opt-in Go soft memory limit, rendered as GOMEMLIMIT (for example 300MiB). Empty sets none.
 memoryLimit: ""
+# With limits.memory the binary uses 90 % of it as its Go memory target.
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { memory: 512Mi }

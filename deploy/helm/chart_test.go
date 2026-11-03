@@ -312,7 +312,7 @@ func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
 }
 
 // The container's memory limit reaches the binary as KGWUI_MEMORY_LIMIT, and
-// the chart sets GOMEMLIMIT only from memoryLimit (D-025, D-043).
+// the chart sets GOMEMLIMIT only from the opt-in memoryLimit (D-025, D-043).
 func TestMemoryLimitEnv(t *testing.T) {
 	named := func(n string) func(corev1.EnvVar) bool { return func(e corev1.EnvVar) bool { return e.Name == n } }
 	env := containerEnv(t)

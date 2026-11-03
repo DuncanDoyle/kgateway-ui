@@ -47,8 +47,8 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `extraVolumes` | `[]` | Extra pod volumes. |
 | `extraVolumeMounts` | `[]` | Extra volume mounts for the UI container. |
 | `extraContainers` | `[]` | Extra containers (sidecars) in the pod. Bind add-ons to the UI's identity through `serviceAccount.name`. |
-| `memoryLimit` | `""` | Go soft memory limit, set as `GOMEMLIMIT` (for example `300MiB`). Empty uses the binary's default: 224 MiB, or 90 % of the pod's memory limit when lower. |
-| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. The binary keeps its Go memory limit at or below 90 % of the pod's memory limit unless `GOMEMLIMIT` is set. |
+| `memoryLimit` | `""` | Opt-in Go soft memory limit, set as `GOMEMLIMIT` (for example `300MiB`). Empty sets none, so the binary uses 90 % of the pod's memory limit. |
+| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. The chart sets `GOMEMLIMIT` only from `memoryLimit`: the binary uses 90 % of the pod's memory limit unless `GOMEMLIMIT` is set. |
 | `podSecurityContext` | `runAsNonRoot`, `RuntimeDefault` seccomp | Pod security context. |
 | `securityContext` | no privilege escalation, read-only root FS, all capabilities dropped | Container security context. |
 
