@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -55,8 +56,9 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // inside the grace period wakes the report at the grace end (Report.Next).
 // A check without Clock reuses its memo while its input print holds and its wake time is not due (§16.2).
 // Every finding gets its ID; one without Since gets its first-seen time from its check's Store (design §5.1).
-// When every check reuses the same memos as the last Evaluate, the findings are that
-// report's slice, shared and with the Group values diagnose.Build set on it.
+// When every check returns the same findings slice as in the last Evaluate (a memo hit,
+// or a rerun with equal findings), the findings are that report's slice, shared and
+// with the Group values diagnose.Build set on it.
 func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
 	memoize := rt.Print != nil && rt.States != nil
@@ -78,17 +80,13 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	}
 	// Run every check first so the findings are allocated once.
 	runs := make([][]Finding, len(checks))
-	var used []*memo // each check's memo after this evaluation; nil when it has none
-	reused := memoize
-	if memoize {
-		used = make([]*memo, len(checks))
-	}
+	held := memoize // every run is its check's memo findings, read-only and kept by the memo
 	n := 0
 	for i, c := range checks {
-		fs, cr, wake, out, hit := evaluateOne(in, c, inputs[i], rt, memoize, outputs, outPrints)
-		if memoize {
-			used[i] = rt.States.memos[c.Name()]
-			reused = reused && hit
+		fs, cr, wake, out := evaluateOne(in, c, inputs[i], rt, memoize, outputs, outPrints)
+		if held {
+			m := rt.States.memos[c.Name()]
+			held = m != nil && sameSlice(m.findings, fs)
 		}
 		runs[i] = fs
 		n += len(fs)
@@ -103,12 +101,15 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 			r.Next = wake
 		}
 	}
-	if reused && slices.Equal(used, rt.States.merged.memos) {
+	if held && sameRuns(runs, rt.States.merged.runs) {
 		r.Findings = rt.States.merged.findings
 	} else {
 		r.Findings = merge(runs, n)
 		if memoize {
-			rt.States.merged = merged{memos: used, findings: r.Findings}
+			rt.States.merged = merged{findings: r.Findings}
+			if held { // runs are memos' findings, held anyway; a Clock check's slice is never kept alive
+				rt.States.merged.runs = runs
+			}
 		}
 	}
 	for _, f := range r.Findings {
@@ -116,6 +117,25 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	}
 	r.State = RollUp(r.Findings, r.Checks)
 	return r
+}
+
+// sameRuns reports whether every run is the same slice as in last: memo findings are
+// read-only, so the same slice means the same findings. An empty run matches an empty one.
+func sameRuns(runs, last [][]Finding) bool {
+	if len(runs) != len(last) {
+		return false
+	}
+	for i, fs := range runs {
+		if !sameSlice(fs, last[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameSlice reports whether a and b are the same slice; two empty ones are.
+func sameSlice(a, b []Finding) bool {
+	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
 }
 
 // merge returns runs' n findings in one sorted slice, an unknown severity made a warning.
@@ -134,12 +154,12 @@ func merge(runs [][]Finding, n int) []Finding {
 	return sortFindings(all)
 }
 
-// evaluateOne runs c, or reuses its memo (hit), and returns its findings, result,
+// evaluateOne runs c, or reuses its memo, and returns its findings, result,
 // wake time and, when a later check reads it (outPrints has its name), its
-// output print.
+// output print. A rerun whose findings equal its memo's returns the memo's slice.
 func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outputs map[string]CheckOutput,
 	outPrints map[string]uint64,
-) (fs []Finding, cr CheckResult, wake time.Time, out uint64, hit bool) {
+) (fs []Finding, cr CheckResult, wake time.Time, out uint64) {
 	var key uint64
 	keyed := false
 	if memoize && !set.Clock {
@@ -159,7 +179,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 				if _, read := outPrints[c.Name()]; read {
 					out = stampPrint(m.out, at)
 				}
-				return m.findings, cr, m.wake, out, true
+				return m.findings, cr, m.wake, out
 			}
 		}
 	}
@@ -172,6 +192,11 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	if keyed || len(ctx.sink.retained) > 0 || sinceEntries(ctx.State) != sinces {
 		keep = keepOf(fs, ctx.sink.retained)
 		pruneSince(ctx.State, keep)
+	}
+	if keyed {
+		if m := rt.States.memos[c.Name()]; m != nil && len(m.findings) == len(fs) && reflect.DeepEqual(m.findings, fs) {
+			fs = m.findings // equal findings keep their slice, so the merged report and diagnosis stay reused
+		}
 	}
 	var base uint64
 	if _, read := outPrints[c.Name()]; read {
@@ -187,7 +212,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	} else if memoize {
 		delete(rt.States.memos, c.Name())
 	}
-	return fs, cr, wake, out, false
+	return fs, cr, wake, out
 }
 
 // runContext returns c's RunContext: its Store, a fresh sink, and in with

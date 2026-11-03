@@ -388,6 +388,11 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 	}{
 		{"first compute", func() {}},
 		{"unchanged", func() {}},
+		{"new scrape, same content", func() {
+			r := metrics["kgw.kgateway"]
+			r.CollectedAt = testutil.Now.Add(-time.Second)
+			metrics["kgw.kgateway"] = r
+		}},
 		{"annotation-only edit", func() {
 			s := *src.s
 			s.Objects, s.Source.Kinds = maps.Clone(s.Objects), maps.Clone(s.Source.Kinds)

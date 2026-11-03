@@ -426,11 +426,15 @@ func TestRecentlyChangedThroughTheMemo(t *testing.T) {
 	}
 }
 
-// §16.2: when every check reuses its memo, the report reuses the last findings and,
-// while Owned is unchanged, the last diagnosis; each step equals an uncached compute.
+// §16.2: when every check returns its memo's findings (a hit, or a rerun with equal
+// findings), the report reuses the last findings and, while Owned is unchanged, the
+// last diagnosis; each step equals an uncached compute.
 func TestUnchangedChecksReuseReportAndDiagnosis(t *testing.T) {
 	pods := health.InputSet{Kinds: []objects.GroupKind{{Kind: "Pod"}}}
-	checks := []health.Check{probe{"pods probe", pods, okRun("pods probe", "")}, probe{"second probe", pods, okRun("second probe", "x")}}
+	podLabel := func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		return okRun("labelled probe", ctx.Snapshot.Pods[0].Labels["probe"])(ctx)
+	}
+	checks := []health.Check{probe{"pods probe", pods, okRun("pods probe", "")}, probe{"labelled probe", pods, podLabel}}
 	e, src, _ := memoEngine(t, checks...)
 	plainCfg := e.cfg
 	plainCfg.NoMemo = true
@@ -460,13 +464,62 @@ func TestUnchangedChecksReuseReportAndDiagnosis(t *testing.T) {
 	if !same(second, third) || second.diag == third.diag {
 		t.Fatal("an Owned edit no check declares: want the findings reused and the diagnosis rebuilt")
 	}
-	pod := src.base.Pods[0].DeepCopy()
-	pod.ResourceVersion = "2"
-	s := *src.base
-	s.Pods = []*corev1.Pod{pod}
-	src.base = &s
-	if fourth := compute(); same(third, fourth) {
-		t.Fatal("a declared edit reran the checks: want new findings")
+	setPod := func(rv, label string) {
+		pod := src.base.Pods[0].DeepCopy()
+		pod.ResourceVersion = rv
+		pod.Labels = map[string]string{"probe": label}
+		s := *src.base
+		s.Pods = []*corev1.Pod{pod}
+		src.base = &s
+	}
+	setPod("2", "")
+	fourth := compute()
+	if !same(third, fourth) {
+		t.Fatal("a declared edit reran the checks with equal findings: want the findings reused")
+	}
+	setPod("3", "changed")
+	if fifth := compute(); same(fourth, fifth) || fourth.diag == fifth.diag {
+		t.Fatal("a rerun with a changed finding: want new findings and a new diagnosis")
+	}
+}
+
+// A check that wakes on the scrape time reruns after every new scrape of unchanged
+// content (R70). Its equal findings keep the report's findings and the diagnosis,
+// and each step equals an uncached compute.
+func TestRerunWithEqualFindingsReusesDiagnosis(t *testing.T) {
+	scraper := probe{"scrape probe", health.InputSet{Metrics: true}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		ctx.WakeAt(ctx.Metrics.CollectedAt.Add(time.Minute))
+		return okRun("scrape probe", "")(ctx)
+	}}
+	var runs int
+	engine := func(noMemo bool) (*Engine, *time.Time, *time.Time) {
+		n, c := testutil.Now, testutil.Now
+		cfg := config(nil, scrapedAt{&c}, func() time.Time { return n })
+		cfg.Snapshots, cfg.Checks, cfg.NoMemo = &memoSource{base: snapshot(t), now: &n}, []health.Check{counted{scraper, &runs}}, noMemo
+		return New(cfg), &n, &c
+	}
+	e, now, col := engine(false)
+	plain, pnow, pcol := engine(true)
+	var last InstallModel
+	for i := range 4 {
+		*now = testutil.Now.Add(time.Duration(i)*10*time.Second + time.Second)
+		*col = now.Add(-time.Second)
+		*pnow, *pcol = *now, *col
+		before := runs
+		got, want := installOf(t, e.Compute()), installOf(t, plain.Compute())
+		if !reflect.DeepEqual(got.Health, want.Health) || !reflect.DeepEqual(got.Diagnosis.Groups, want.Diagnosis.Groups) ||
+			!reflect.DeepEqual(got.Diagnosis.Rank, want.Diagnosis.Rank) {
+			t.Fatalf("scrape %d: memoized and uncached differ:\n%+v\n%+v", i, got.Health, want.Health)
+		}
+		if i > 0 {
+			if runs-before != 2 { // the memoized engine's rerun and the uncached one's run
+				t.Fatalf("scrape %d: %d runs, want the check rerun on each engine", i, runs-before)
+			}
+			if first(got.Health.Findings) != first(last.Health.Findings) || got.Diagnosis != last.Diagnosis {
+				t.Fatalf("scrape %d: equal findings from a rerun must reuse the findings and diagnosis", i)
+			}
+		}
+		last = got
 	}
 }
 

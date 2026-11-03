@@ -102,9 +102,9 @@ type States struct {
 	merged merged
 }
 
-// merged is the last Evaluate's findings and the memo each check had after it.
+// merged is the last Evaluate's findings and each check's findings it was merged from.
 type merged struct {
-	memos    []*memo
+	runs     [][]Finding
 	findings []Finding
 }
 
