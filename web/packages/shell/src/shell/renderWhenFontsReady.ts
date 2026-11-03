@@ -20,8 +20,9 @@ export async function renderWhenFontsReady(
     const cap = new Promise<void>((r) => {
       timer = setTimeout(r, FONT_WAIT_MS);
     });
-    const loads = Promise.all([...new Set(fonts)].map((f) => set.load(`1em ${f}`)));
-    await Promise.race([loads.catch(() => undefined), cap]);
+    // allSettled: a failed font must not cut the wait for the others.
+    const loads = Promise.allSettled([...new Set(fonts)].map((f) => set.load(`1em ${f}`)));
+    await Promise.race([loads, cap]);
     clearTimeout(timer);
   }
   createRoot(root).render(element);

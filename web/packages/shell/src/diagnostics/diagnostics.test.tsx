@@ -344,29 +344,58 @@ describe("hooks", () => {
 });
 
 describe("renderWhenFontsReady", () => {
+  /** Stubs document.fonts; each load stays pending until settled by index. */
+  function stubFonts() {
+    const pending: { resolve: () => void; reject: () => void }[] = [];
+    const load = vi.fn(
+      () =>
+        new Promise<FontFace[]>((resolve, reject) => {
+          pending.push({ resolve: () => resolve([]), reject: () => reject(new Error("font")) });
+        }),
+    );
+    Object.defineProperty(document, "fonts", { value: { load }, configurable: true });
+    return { load, pending };
+  }
+  async function start(text: string) {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const done = renderWhenFontsReady(root, <p>{text}</p>, ["Figtree", "Mono"]);
+    await act(async () => {});
+    return { root, done };
+  }
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(document, "fonts");
+    document.body.replaceChildren();
+  });
+
   it("renderWhenFontsReady renders after fonts load and after a font failure", async () => {
-    for (const outcome of ["load", "fail"] as const) {
-      let settle: () => void = () => {};
-      const load = vi.fn(
-        () =>
-          new Promise<FontFace[]>((resolve, reject) => {
-            settle = () => (outcome === "load" ? resolve([]) : reject(new Error("font")));
-          }),
-      );
-      Object.defineProperty(document, "fonts", { value: { load }, configurable: true });
-      const root = document.createElement("div");
-      document.body.append(root);
-      const done = renderWhenFontsReady(root, <p>app {outcome}</p>);
-      await act(async () => {});
-      expect(load).toHaveBeenCalled();
+    for (const fail of [false, true]) {
+      const { load, pending } = stubFonts();
+      const { root, done } = await start(`app ${fail}`);
+      expect(load).toHaveBeenCalledTimes(2);
+      // The first font settling is not enough: the render waits for every font, failed or loaded.
+      await act(async () => (fail ? pending[0]?.reject() : pending[0]?.resolve()));
       expect(root.textContent).toBe("");
       await act(async () => {
-        settle();
+        pending[1]?.resolve();
         await done;
       });
-      expect(root.textContent).toBe(`app ${outcome}`);
-      root.remove();
+      expect(root.textContent).toBe(`app ${fail}`);
     }
-    Reflect.deleteProperty(document, "fonts");
+  });
+
+  it("renders at the cap when a font never settles", async () => {
+    stubFonts();
+    const { root, done } = await start("app");
+    await act(async () => vi.advanceTimersByTime(2999));
+    expect(root.textContent).toBe("");
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await done;
+    });
+    expect(root.textContent).toBe("app");
   });
 });
