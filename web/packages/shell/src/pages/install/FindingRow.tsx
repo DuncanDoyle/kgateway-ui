@@ -112,29 +112,22 @@ export function rendererFor(renderers: Record<string, FindingRenderer>, code: st
 }
 
 // region Component
-/** A finding's contributed renderer and actions, each in its own Slot; a restricted finding gets neither. */
+/** A finding's contributed actions, each in its own Slot; a restricted finding gets none. Renderers belong to EvidenceView. */
 export function FindingContributions({ finding: f }: { finding: Finding }) {
-  const { findingRenderers } = useShellExtension();
-  const extra = rendererFor(findingRenderers, f.code);
   const actions = useFindingActions(f);
   const fk = findingKey(f);
-  if (f.restricted) return null;
+  if (f.restricted || actions.length === 0) return null;
   return (
-    <>
-      {extra ? <Slot id={`finding-renderer:${f.code}`} resetKey={fk} render={() => extra(f)} /> : null}
-      {actions.length > 0 ? (
-        <Actions data-slot="finding-actions">
-          {actions.map((a) => (
-            <Slot
-              key={a.id}
-              id={`finding-action:${a.id}`}
-              resetKey={fk}
-              render={() => <fieldset aria-label={a.label}>{a.render(f)}</fieldset>}
-            />
-          ))}
-        </Actions>
-      ) : null}
-    </>
+    <Actions data-slot="finding-actions">
+      {actions.map((a) => (
+        <Slot
+          key={a.id}
+          id={`finding-action:${a.id}`}
+          resetKey={fk}
+          render={() => <fieldset aria-label={a.label}>{a.render(f)}</fieldset>}
+        />
+      ))}
+    </Actions>
   );
 }
 
@@ -149,6 +142,8 @@ interface FindingRowProps {
  * the message opens the finding's page when the finding has an id.
  */
 export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
+  const { findingRenderers } = useShellExtension();
+  const extra = rendererFor(findingRenderers, f.code);
   const { data: installs } = useInstalls();
   // A finding without a resource is about the install; it is named, never split from its ID.
   const install = installs?.find((i) => i.id === f.install);
@@ -185,6 +180,8 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
               <div className="msg">{f.message}</div>
             )}
             {f.detail ? <div className="muted">{f.detail}</div> : null}
+            {/* The row is not on the finding page, so its renderer never doubles EvidenceView's. */}
+            {extra ? <Slot id={`finding-renderer:${f.code}`} resetKey={findingKey(f)} render={() => extra(f)} /> : null}
             <FindingContributions finding={f} />
           </>
         )}

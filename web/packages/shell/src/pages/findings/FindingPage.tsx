@@ -8,6 +8,7 @@ import { useFindingDetail } from "../../api/diagHooks";
 import { isStale } from "../../api/hooks";
 import type { LinkedRef, NextStep, SuggestedFix } from "../../api/types";
 import { columnCopy, findingsCopy, listCopy } from "../../copy/explorer";
+import { EvidenceView } from "../../diagnostics/EvidenceView";
 import { NextSteps } from "../../diagnostics/NextSteps";
 import { LinkedName } from "../../explore/LinkedName";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -174,6 +175,8 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
   // A finding resolved while open 404s: it reads as gone, not as a load failure, even with data cached.
   if (error?.status === 404) return <PageState kind="empty" title={findingsCopy.notFound} message={back} />;
   const f = data?.finding;
+  // The wire finding as a Finding, for the renderers and actions a downstream registers.
+  const finding = f && data ? { ...f, install: id, message: f.message ?? "", evidence: data.evidence } : undefined;
   // Stale data or a failed poll turns every state on the page unknown (design §6.3).
   const stale = !!data && (!!error || isStale(data.collectedAt, now));
   const body = data ? null : error?.status === 503 ? (
@@ -226,10 +229,9 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
                   </>
                 ) : null}
               </Facts>
-              {/* Contributed finding renderers and actions (design §4.1 gap 6). */}
-              <FindingContributions
-                finding={{ ...f, install: id, message: f.message ?? "", evidence: data.evidence }}
-              />
+              {/* EvidenceView owns the finding renderers (unknown kinds); actions follow (design §4.1 gap 6). */}
+              {data.evidence && finding ? <EvidenceView evidence={data.evidence} finding={finding} /> : null}
+              {finding ? <FindingContributions finding={finding} /> : null}
             </Section>
             {data.suggestedFix ? <FixSection fix={data.suggestedFix} installId={id} /> : null}
             {data.nextSteps?.length ? <StepsSection steps={data.nextSteps} /> : null}

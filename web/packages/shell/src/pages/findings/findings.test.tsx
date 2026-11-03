@@ -1,14 +1,17 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import detailGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-other.json";
 import detailRestrictedGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-restricted.json";
+import xdsGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects.json";
 import findingsGolden from "../../../../../../pkg/api/testdata/golden/findings.json";
 import findingsRestrictedGolden from "../../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import meta from "../../../../../../pkg/api/testdata/golden/meta.json";
-import type { FindingDetail, FindingList, LinkedRef } from "../../api/types";
+import type { Finding, FindingDetail, FindingList, LinkedRef } from "../../api/types";
 import { diagnosticsCopy, findingsCopy } from "../../copy/explorer";
 import { ROW_H } from "../../explore/ObjectTable";
+import { ShellExtensionContext, useShellExtension } from "../../shell/extension";
 import { pseudoRules, renderWithTheme } from "../../test/render";
 import { FindingRow } from "../install/FindingRow";
 import { ago } from "../install/HealthStrip";
@@ -319,4 +322,45 @@ it("copying a next step on the finding page announces it", async () => {
   await waitFor(() =>
     expect(screen.getAllByRole("status").some((s) => s.textContent === diagnosticsCopy.copied)).toBe(true),
   );
+});
+
+it("the finding page renders a downstream renderer for an unknown evidence kind exactly once", async () => {
+  const render = vi.fn((f: Finding) => <span>acme widgets for {f.code}</span>);
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${FINDING}`)
+      ? {
+          ...detail(),
+          finding: { ...detail().finding, code: "ACME-001" },
+          evidence: { kind: "acme-widgets", widgets: 3 },
+        }
+      : undefined,
+  );
+  function WithRenderer({ children }: { children: ReactNode }) {
+    const base = useShellExtension();
+    return (
+      <ShellExtensionContext.Provider value={{ ...base, findingRenderers: { "ACME-": render } }}>
+        {children}
+      </ShellExtensionContext.Provider>
+    );
+  }
+  renderWithTheme(
+    <WithRenderer>
+      <Routes>
+        <Route path="/i/:id/findings/:findingId" element={<FindingPage />} />
+      </Routes>
+    </WithRenderer>,
+    { path: `/i/${ID}/findings/${FINDING}` },
+  );
+  expect(await screen.findAllByText("acme widgets for ACME-001")).toHaveLength(1);
+  // The renderer gets the evidence of its own kind.
+  expect(render.mock.calls.at(-1)?.[0].evidence).toEqual({ kind: "acme-widgets", widgets: 3 });
+});
+
+it("the finding page shows built-in evidence", async () => {
+  const xds = xdsGolden.body.finding.id;
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${xds}`) ? { ...(xdsGolden.body as FindingDetail), collectedAt: now() } : undefined,
+  );
+  mount(`/i/${ID}/findings/${xds}`);
+  expect(await screen.findByRole("table", { name: diagnosticsCopy.rejectedTypes })).toBeInTheDocument();
 });
