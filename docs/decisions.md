@@ -732,3 +732,20 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Consequences:** Wide screens show conditions and related objects beside the structure. The browser tests check the column split at 720, 1280, 1600 and 3008 px.
 
 **Alternatives:** CSS `order` or grid placement; rejected, since tab order would then differ from the visual order.
+
+## D-043 — Default soft memory limit; median-of-five OS-memory gate (2026-11-03, phase 3)
+**Status:** accepted 2026-11-03 (user, Task 46 interim measurement)
+
+**Context:**
+- The 3.2 measurement world broke the OS-memory gate (≤ 256 MiB, D-022). Five stream runs gave 252–285 MiB. Memory from the OS follows the GC goal, and a GC during a maturation compute marks about 115 MB live, so the goal reaches about 230 MB.
+- One run per world is noisy: runs on the same code differed by up to 45 MiB.
+- Retained heap broke by 0.5 MiB. The world's routes carried a Service backendRef per referenced Service, seeded for 3.4, which no 3.2 check reads; they cost 1.6 MB.
+
+**Decision:**
+1. With `GOMEMLIMIT` unset, the binary sets a soft memory limit of 224 MiB, or 90 % of the pod's memory limit when that is lower (`internal/memlimit`, `app.ApplyMemoryLimit`). `GOMEMLIMIT` still wins. The chart's `memoryLimit` renders `GOMEMLIMIT`; empty keeps the default.
+2. The stream OS-memory gate reads the median of five runs per world, like the heap and dense gates. CPU stays gated in every run.
+3. The Service backendRefs leave the 3.2 measurement world. 3.4 seeds them again with the Services and EndpointSlices.
+
+**Consequences:** GC runs more often near the limit, at some CPU cost inside the stream budgets. A stream test takes five times as long.
+
+**Alternatives:** A lower GOGC (rejected: it costs CPU at every heap size, not only near the limit); cutting per-recompute garbage, mostly Phase 2 views and the explorer index (deferred: a larger refactor).
