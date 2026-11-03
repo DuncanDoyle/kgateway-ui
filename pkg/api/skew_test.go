@@ -138,7 +138,6 @@ func TestListenerSetHintNamesTheChannel(t *testing.T) {
 	}
 }
 
-
 // proxyAt is kgateway's proxy Deployment for ns/edge with one Pod on tag.
 func proxyAt(ns, tag string) (*appsv1.Deployment, *corev1.Pod) {
 	d := testutil.ProxyDeployment(ns, "edge", 1, 1)
