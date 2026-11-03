@@ -72,11 +72,23 @@ type HealthResponse struct {
 	Findings []FindingDTO `json:"findings"`
 }
 
-// OverviewGatewayRow is an overview Gateway row with its link.
+// OverviewGatewayRow is an overview Gateway row with its link and its Data
+// plane column (design §6).
 type OverviewGatewayRow struct {
 	overview.GatewayRow
-	Link Link `json:"link,omitempty"`
+	Link      Link   `json:"link,omitempty"`
+	DataPlane string `json:"dataPlane,omitempty"`
 }
+
+// The values of OverviewGatewayRow.DataPlane.
+const (
+	// DataPlaneOK: the xDS rejects check ran and found no reject for the Gateway.
+	DataPlaneOK = "ok"
+	// DataPlaneRejects: the Gateway has a KGWUI-001.
+	DataPlaneRejects = "rejects"
+	// DataPlaneUnknown: no reject, but the xDS rejects check is not OK or did not run.
+	DataPlaneUnknown = "unknown"
+)
 
 // Page is one page of a list (design §7.3). Total counts the visible rows
 // that match; DeniedInInstall is the unfiltered number of the install's rows

@@ -150,6 +150,7 @@
         ],
         "attachedRoutes": 0,
         "class": "kgateway",
+        "dataPlane": "ok",
         "link": "detail",
         "listeners": 1,
         "ref": {

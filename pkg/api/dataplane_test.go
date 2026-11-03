@@ -133,3 +133,32 @@ func TestGatewayDetailRestrictedPods(t *testing.T) {
 		t.Fatalf("hidden proxy Pod name in %s", body)
 	}
 }
+
+// overviewDataPlane is the Data plane column of h's overview rows, by Gateway name.
+func overviewDataPlane(t *testing.T, h *harness) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, r := range get[OverviewResponse](t, h.srv, base+"/overview", 200).Gateways {
+		out[r.Ref.Name] = r.DataPlane
+	}
+	return out
+}
+
+// The overview's Data plane column (design §6): rejects while the Gateway has
+// a KGWUI-001, unknown while the xDS rejects check is not OK, otherwise ok.
+func TestOverviewRowDataPlane(t *testing.T) {
+	if got := overviewDataPlane(t, diagGoldenWorld(t)); got["edge"] != DataPlaneRejects || got["nack"] != DataPlaneRejects {
+		t.Fatalf("rejecting world %v", got)
+	}
+	if got := overviewDataPlane(t, procsWorld(t, setup{})); len(got) != 3 || got["edge"] != DataPlaneOK || got["calm"] != DataPlaneOK || got["lone"] != DataPlaneOK {
+		t.Fatalf("clean world %v", got)
+	}
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", cleanMetrics("pod/kgw/kgateway-0", "kgateway-0"))
+	lm.fail("kgw.kgateway", "scrape kgateway-1: connection refused")
+	u := xdsHarness(t, setup{}, lm, nackWorld()...)
+	u.at(t, testutil.Now)
+	if got := overviewDataPlane(t, u); got["edge"] != DataPlaneUnknown || got["nack"] != DataPlaneUnknown {
+		t.Fatalf("xDS rejects unavailable %v", got)
+	}
+}

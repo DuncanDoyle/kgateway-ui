@@ -132,6 +132,8 @@ export interface GatewayRow {
   attachedRoutes: number;
   addresses: string[];
   link?: Link;
+  /** The Data plane column, from the server: unknown while the xDS rejects check is not OK (design §6). */
+  dataPlane?: "ok" | "rejects" | "unknown";
 }
 export interface OverviewResponse {
   header: InstallHeader;

@@ -385,9 +385,9 @@ const count = shape<Count>(
   category,
 );
 const row = shape<GatewayRow>(
-  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?" },
+  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?", dataPlane: "?" },
   { ref },
-  { state: healthState, ...link },
+  { state: healthState, ...link, dataPlane: { ok: 1, rejects: 1, unknown: 1 } },
 );
 const overviewShape = shape<OverviewResponse>(
   { header: "!", counts: "!", gateways: "!", collectedAt: "!" },

@@ -251,8 +251,17 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 		v := h.view(r)
 		ov := h.visibleOverview(v, p.Model, i, visibleHealth(v, i))
 		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), linkerFor(v, p.Model, i)
+		rejecting := rejectingGateways(i)
+		checked := slices.ContainsFunc(i.Health.Checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName && c.OK })
 		for _, g := range ov.Gateways {
-			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref)})
+			// A reject shows even while the check is not OK; without one, only an OK check proves "ok".
+			dp := DataPlaneUnknown
+			if rejecting[g.Ref] {
+				dp = DataPlaneRejects
+			} else if checked {
+				dp = DataPlaneOK
+			}
+			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref), DataPlane: dp})
 		}
 		writeJSON(w, OverviewResponse{Overview: ov, Gateways: rows, CollectedAt: wireTime(p.ConfirmedAt)})
 	}

@@ -254,12 +254,7 @@ func (h *handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 // counts only when its restricted 001 row already names it.
 func dataPlane(v *view, i *engine.InstallModel) DataPlaneSummary {
 	var out DataPlaneSummary
-	rejecting := map[objects.Ref]bool{}
-	for k := range i.Health.Findings {
-		if f := &i.Health.Findings[k]; f.Code == health.CodeXDSRejected && f.Resource != nil {
-			rejecting[*f.Resource] = true
-		}
-	}
+	rejecting := rejectingGateways(i)
 	out.Rejecting = len(rejecting)
 	if i.Owned != nil {
 		for _, u := range i.Owned.Gateways {
@@ -269,6 +264,17 @@ func dataPlane(v *view, i *engine.InstallModel) DataPlaneSummary {
 		}
 	}
 	out.Unavailable = xdsUnavailable(i.Health.Checks)
+	return out
+}
+
+// rejectingGateways is the set of i's Gateways with a KGWUI-001.
+func rejectingGateways(i *engine.InstallModel) map[objects.Ref]bool {
+	out := map[objects.Ref]bool{}
+	for k := range i.Health.Findings {
+		if f := &i.Health.Findings[k]; f.Code == health.CodeXDSRejected && f.Resource != nil {
+			out[*f.Resource] = true
+		}
+	}
 	return out
 }
 
