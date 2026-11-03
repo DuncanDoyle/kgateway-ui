@@ -28,13 +28,17 @@ spec:
             {{- range .Values.extraArgs }}
             - {{ . | quote }}
             {{- end }}
-          {{- if or (dig "limits" "memory" "" .Values.resources) .Values.extraEnv }}
+          {{- if or (dig "limits" "memory" "" .Values.resources) .Values.memoryLimit .Values.extraEnv }}
           env:
             {{- if dig "limits" "memory" "" .Values.resources }}
-            # The container's memory limit in bytes; the binary sets the Go memory target to 90 % of it (D-025).
+            # The container's memory limit in bytes; the binary's Go memory limit stays at or below 90 % of it (D-025, D-043).
             - name: KGWUI_MEMORY_LIMIT
               valueFrom:
                 resourceFieldRef: { containerName: kgateway-ui, resource: limits.memory, divisor: "1" }
+            {{- end }}
+            {{- with .Values.memoryLimit }}
+            - name: GOMEMLIMIT
+              value: {{ . | quote }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

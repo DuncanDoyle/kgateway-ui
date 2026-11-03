@@ -5,22 +5,25 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"testing"
+
+	"github.com/DuncanDoyle/kgateway-ui/internal/memlimit"
 )
 
 func TestApplyMemoryLimit(t *testing.T) {
-	const gi = 1 << 30
+	def := memlimit.Default
 	for _, tc := range []struct {
 		name string
 		env  map[string]string
 		want int64
 	}{
-		{"90 percent of the limit", map[string]string{MemoryLimitEnv: "536870912"}, 536870912 / 10 * 9},
+		{"default under a 512Mi pod", map[string]string{MemoryLimitEnv: "536870912"}, def},
+		{"90 percent of a small pod", map[string]string{MemoryLimitEnv: "134217728"}, 134217728 / 10 * 9},
 		{"explicit GOMEMLIMIT wins", map[string]string{MemoryLimitEnv: "536870912", "GOMEMLIMIT": "1GiB"}, 0},
-		{"missing", map[string]string{}, 0},
-		{"zero", map[string]string{MemoryLimitEnv: "0"}, 0},
-		{"negative", map[string]string{MemoryLimitEnv: "-5"}, 0},
-		{"unparsable", map[string]string{MemoryLimitEnv: "512Mi"}, 0},
-		{"large", map[string]string{MemoryLimitEnv: "8589934592"}, 8 * gi / 10 * 9},
+		{"missing", map[string]string{}, def},
+		{"zero", map[string]string{MemoryLimitEnv: "0"}, def},
+		{"negative", map[string]string{MemoryLimitEnv: "-5"}, def},
+		{"unparsable", map[string]string{MemoryLimitEnv: "512Mi"}, def},
+		{"large", map[string]string{MemoryLimitEnv: "8589934592"}, def},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var set int64
@@ -39,7 +42,7 @@ func TestRunAppliesMemoryLimit(t *testing.T) {
 	t.Setenv("GOMEMLIMIT", "")
 	t.Setenv(MemoryLimitEnv, "536870912")
 	_ = Run(context.Background(), filepath.Join(t.TempDir(), "missing"), Options{})
-	if got, want := debug.SetMemoryLimit(-1), int64(536870912/10*9); got != want {
+	if got, want := debug.SetMemoryLimit(-1), memlimit.Default; got != want {
 		t.Errorf("memory limit %d, want %d", got, want)
 	}
 }

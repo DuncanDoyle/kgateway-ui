@@ -312,7 +312,7 @@ func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
 }
 
 // The container's memory limit reaches the binary as KGWUI_MEMORY_LIMIT, and
-// the chart sets no GOMEMLIMIT of its own (D-025).
+// the chart sets GOMEMLIMIT only from memoryLimit (D-025, D-043).
 func TestMemoryLimitEnv(t *testing.T) {
 	named := func(n string) func(corev1.EnvVar) bool { return func(e corev1.EnvVar) bool { return e.Name == n } }
 	env := containerEnv(t)
@@ -331,6 +331,12 @@ func TestMemoryLimitEnv(t *testing.T) {
 	env = containerEnv(t, "--set", "resources.limits.memory=null")
 	if slices.ContainsFunc(env, named("KGWUI_MEMORY_LIMIT")) {
 		t.Fatalf("KGWUI_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
+	}
+	for _, args := range [][]string{{"--set", "memoryLimit=300MiB"}, {"--set", "memoryLimit=300MiB", "--set", "resources.limits.memory=null"}} {
+		env = containerEnv(t, args...)
+		if i := slices.IndexFunc(env, named("GOMEMLIMIT")); i < 0 || env[i].Value != "300MiB" {
+			t.Fatalf("%v: want GOMEMLIMIT=300MiB: %+v", args, env)
+		}
 	}
 }
 
