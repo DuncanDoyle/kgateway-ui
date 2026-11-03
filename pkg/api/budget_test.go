@@ -29,6 +29,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
@@ -37,6 +38,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -457,10 +459,11 @@ func TestBudgetSustainedStream(t *testing.T) {
 	})
 }
 
-// TestBudgetSpecEditStream is the sustained stream at Large with route spec
-// edits instead of annotations; it reports and gates nothing (design §16.3).
+// TestBudgetSpecEditStream is the sustained stream at Large and in the 3.2
+// measurement world with route spec edits instead of annotations; it reports
+// and gates nothing (design §16.3).
 func TestBudgetSpecEditStream(t *testing.T) {
-	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large}, func(t *testing.T, tier scale.Tier) {
+	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large, scale.Large.Contradicting().Worst()}, func(t *testing.T, tier scale.Tier) {
 		sustainedStream(t, tier, specEditStream)
 	})
 }
@@ -544,6 +547,37 @@ func togglePath(u *unstructured.Unstructured, _, pass int) error {
 	return fmt.Errorf("HTTPRoute %s/%s has no path match", u.GetNamespace(), u.GetName())
 }
 
+// measuredCodes are the Phase 3 codes the measurement world raises once matured.
+var measuredCodes = []string{health.CodeXDSRejected, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck,
+	health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
+
+// hasCodes reports whether m's install raises every code of codes.
+func hasCodes(m *engine.Model, codes []string) bool {
+	seen := map[string]bool{}
+	for _, f := range m.Installs[0].Health.Findings {
+		seen[f.Code] = true
+	}
+	return !slices.ContainsFunc(codes, func(c string) bool { return !seen[c] })
+}
+
+// statsInstalls are m's installs and Gateways, as the app feeds the proxy stats collector.
+func statsInstalls(m *engine.Model) ([]proxystats.Install, *cache.Snapshot) {
+	if m == nil || !m.Snapshot.Synced {
+		return nil, nil
+	}
+	out := make([]proxystats.Install, 0, len(m.Installs))
+	for _, im := range m.Installs {
+		in := proxystats.Install{Resolved: im.Resolved}
+		if im.Owned != nil {
+			for _, g := range im.Owned.Gateways {
+				in.Gateways = append(in.Gateways, objects.RefOf(g))
+			}
+		}
+		out = append(out, in)
+	}
+	return out, m.Snapshot
+}
+
 // liveHeap is HeapAlloc after a full GC.
 func liveHeap() uint64 {
 	runtime.GC()
@@ -578,9 +612,8 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	if testing.Short() {
 		dur = time.Minute
 	}
-	w := scale.Live(t, tier, nil)
 	ev := make(chan engine.LoopEvent, 1<<16)
-	e := engine.New(engine.Config{Snapshots: w.Cache, Triggers: w.Signal, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
+	cfg := engine.Config{Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
 		// Static metrics never go stale here, as a scraped cluster's do not.
 		Checks: health.Upstream(), MetricsMaxAge: 0,
@@ -590,7 +623,19 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 			default:
 				t.Errorf("loop event buffer full")
 			}
-		}})
+		}}
+	var w *scale.LiveWorld
+	var mw *measure.World
+	if tier.IsWorst {
+		// The 3.2 measurement world on the real clock moved to its fixtures' time, its stats scraped every 10 s.
+		clk := measure.ShiftedTo(testutil.Now)
+		mw = measure.New(t, tier, clk)
+		w, cfg.Metrics, cfg.Collected, cfg.Clock = mw.Live, mw.Metrics, mw.Store.Snapshot, clk
+	} else {
+		w = scale.Live(t, tier, nil)
+	}
+	cfg.Snapshots, cfg.Triggers = w.Cache, w.Signal
+	e := engine.New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
@@ -603,10 +648,14 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	})
 	for testutil.Recv(t, ev, "loop event").Kind != engine.EvPublished { // the start-up publication
 	}
+	if mw != nil {
+		mw.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(e.Current().Model) })
+		go mw.Run(ctx)
+	}
 	if tier.Contradict {
-		// Windows mature on the real clock 30 s after start-up, missing child entries at 60 s.
-		for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
-			if f, c := matured(e.Current().Model); f == c && c > 0 {
+		// Windows mature on the real clock 30 s after start-up, missing child entries and proxy conditions at 60 s.
+		for deadline := time.Now().Add(3 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
+			if f, c := matured(e.Current().Model); f == c && c > 0 && (mw == nil || hasCodes(e.Current().Model, measuredCodes)) {
 				break
 			}
 			if time.Now().After(deadline) {

@@ -471,15 +471,24 @@ func SafeGatewayLabelValue(name string) string {
 	return strings.TrimSuffix(name[:50], "-") + "-" + hex.EncodeToString(h[:])[:12]
 }
 
-// ProxyPod builds Pod number i of the proxy Deployment of a Gateway, Ready,
-// with restarts container restarts.
+// proxyPodLabels are the labels kgateway puts on a Gateway's proxy Pod template.
+func proxyPodLabels(gwName string) map[string]string {
+	v := SafeGatewayLabelValue(gwName)
+	return map[string]string{"kgateway": "kube-gateway", "app.kubernetes.io/component": "proxy", "app.kubernetes.io/name": v,
+		"gateway.networking.k8s.io/gateway-name": v}
+}
+
+// ProxyPod builds Pod number i of a Gateway's proxy Deployment, Ready, with
+// restarts container restarts: kgateway's Pod labels, owned by the ReplicaSet
+// "<gwName>-<suffix>" whose pod-template-hash is suffix.
 func ProxyPod(gwNS, gwName string, i int, suffix string, restarts int32) *corev1.Pod {
 	name := fmt.Sprintf("%s-%s-%d", gwName, suffix, i)
+	lbls := proxyPodLabels(gwName)
+	lbls[appsv1.DefaultDeploymentUniqueLabelKey] = suffix
+	yes := true
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: gwNS, Name: name, UID: types.UID("pod/" + gwNS + "/" + name), CreationTimestamp: Old,
-			Labels: map[string]string{"app.kubernetes.io/managed-by": "kgateway", "app.kubernetes.io/component": "proxy",
-				"gateway.networking.k8s.io/gateway-name": SafeGatewayLabelValue(gwName)},
-			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: gwName + "-" + suffix}}},
+		ObjectMeta: metav1.ObjectMeta{Namespace: gwNS, Name: name, UID: types.UID("pod/" + gwNS + "/" + name), CreationTimestamp: Old, Labels: lbls,
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: gwName + "-" + suffix, Controller: &yes}}},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "envoy", Image: "cr.kgateway.dev/kgateway-dev/envoy-wrapper:v2.4.7"}}},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.2.0.1",
 			Conditions:        []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
@@ -487,12 +496,12 @@ func ProxyPod(gwNS, gwName string, i int, suffix string, restarts int32) *corev1
 	}
 }
 
-// WarningEvent builds a Warning Event about a Pod, last seen at at.
+// WarningEvent builds a Warning Event about a Pod, first and last seen at at.
 func WarningEvent(pod *corev1.Pod, name, reason string, at time.Time) *corev1.Event {
 	return &corev1.Event{
 		ObjectMeta:     metav1.ObjectMeta{Namespace: pod.Namespace, Name: name, UID: types.UID("event/" + pod.Namespace + "/" + name)},
 		InvolvedObject: corev1.ObjectReference{Kind: "Pod", Namespace: pod.Namespace, Name: pod.Name, UID: pod.UID},
-		Type:           corev1.EventTypeWarning, Reason: reason, Count: 1, LastTimestamp: metav1.NewTime(at),
+		Type:           corev1.EventTypeWarning, Reason: reason, Count: 1, FirstTimestamp: metav1.NewTime(at), LastTimestamp: metav1.NewTime(at),
 	}
 }
 
@@ -560,8 +569,13 @@ func scaleRand(seed int64, stream uint64) *rand.Rand {
 
 func scalePodHash(r *rand.Rand) string { return fmt.Sprintf("%010x", r.Uint64()&0xffffffffff) }
 
+// ScaleSkewedProxyTag is the proxy image tag of a worst-case shape: a minor
+// behind the controller, so every Gateway's proxies skew (KGWUI-022).
+const ScaleSkewedProxyTag = "v2.3.11"
+
 // ScaleProxyPods returns ProxyPodsPerGateway Ready proxy Pods for each
-// Gateway, long-named ones included. Under Worst each restarted once.
+// Gateway, long-named ones included, each with its own Pod IP. Under Worst
+// each restarted once a minute before Now and runs ScaleSkewedProxyTag.
 func ScaleProxyPods(t ScaleShape, seed int64) []*corev1.Pod {
 	r := scaleRand(seed, 0x90d5)
 	var restarts int32
@@ -572,8 +586,40 @@ func ScaleProxyPods(t ScaleShape, seed int64) []*corev1.Pod {
 	for _, gw := range scaleGateways(t) {
 		hash := scalePodHash(r)
 		for i := range t.ProxyPodsPerGateway {
-			out = append(out, ProxyPod(gw.ns, gw.name, i, hash, restarts))
+			p := ProxyPod(gw.ns, gw.name, i, hash, restarts)
+			n := len(out) + 1
+			p.Status.PodIP = fmt.Sprintf("10.2.%d.%d", n/250, n%250+1)
+			if t.Worst {
+				at := metav1.NewTime(Now.Add(-time.Minute))
+				p.Spec.Containers[0].Image = "cr.kgateway.dev/kgateway-dev/envoy-wrapper:" + ScaleSkewedProxyTag
+				p.Status.ContainerStatuses[0].State = corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: at}}
+				p.Status.ContainerStatuses[0].LastTerminationState = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					Reason: "Error", ExitCode: 1, FinishedAt: at}}
+			}
+			out = append(out, p)
 		}
+	}
+	return out
+}
+
+// ScaleProxyDeployments returns each Gateway's proxy Deployment, long-named
+// ones included, selecting its ScaleProxyPods. Under Worst each is past its
+// progress deadline with every replica ready (KGWUI-021).
+func ScaleProxyDeployments(t ScaleShape) []*appsv1.Deployment {
+	out := make([]*appsv1.Deployment, 0, len(scaleGateways(t)))
+	n := int32(t.ProxyPodsPerGateway) // #nosec G115 -- a small replica count
+	for _, gw := range scaleGateways(t) {
+		d := ProxyDeployment(gw.ns, gw.name, n, n)
+		lbls := proxyPodLabels(gw.name)
+		d.Labels["gateway.networking.k8s.io/gateway-name"] = lbls["gateway.networking.k8s.io/gateway-name"]
+		d.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"app.kubernetes.io/name": lbls["app.kubernetes.io/name"],
+			"gateway.networking.k8s.io/gateway-name": lbls["gateway.networking.k8s.io/gateway-name"]}}
+		d.Spec.Template.Labels = lbls
+		if t.Worst {
+			d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse,
+				Reason: "ProgressDeadlineExceeded", LastUpdateTime: Old}}
+		}
+		out = append(out, d)
 	}
 	return out
 }
@@ -725,6 +771,12 @@ func ScaleMetrics(t ScaleShape, seed int64) []byte {
 	b.WriteString("# HELP kgateway_resources_managed Managed resources.\n# TYPE kgateway_resources_managed gauge\n")
 	for _, gw := range gws {
 		fmt.Fprintf(&b, "kgateway_resources_managed{namespace=%q,parent=%q,resource=\"Gateway\"} 1\n", gw.ns, gw.name)
+	}
+	b.WriteString("# HELP kgateway_xds_snapshot_resources Current number of resources in XDS snapshot\n# TYPE kgateway_xds_snapshot_resources gauge\n")
+	for _, gw := range gws {
+		for _, res := range []string{"Cluster", "Endpoint", "Listener", "Route", "Secret"} {
+			fmt.Fprintf(&b, "kgateway_xds_snapshot_resources{gateway=%q,namespace=%q,resource=%q} %d\n", gw.name, gw.ns, res, 1+r.IntN(20))
+		}
 	}
 	return []byte(b.String())
 }

@@ -33,6 +33,9 @@ type LiveWorld struct {
 	// metrics capture; LivePhase3 sets them.
 	CRDs    []*metav1.PartialObjectMetadata
 	Metrics []byte
+	// Kube is the fake typed client; Stop stops the cache before tb ends.
+	Kube *testutil.FakeKube
+	Stop func()
 }
 
 // Live seeds fake clients with tier's world, one kgateway controller and a
@@ -43,8 +46,9 @@ func Live(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
 	return live(tb, tier, now, false)
 }
 
-// LivePhase3 is Live with the tier's proxy Pods, Warning Events, Services and
-// EndpointSlices seeded on the fake typed client, and its CRDs and Metrics set.
+// LivePhase3 is Live with the tier's proxy Deployments, proxy Pods, Warning Events,
+// Services and EndpointSlices seeded on the fake typed client, its CRDs on a fake
+// metadata client and its Metrics set. The proxy Pod, Event and CRD watches run.
 func LivePhase3(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
 	tb.Helper()
 	return live(tb, tier, now, true)
@@ -73,10 +77,15 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 	}
 	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
 	objs = append(objs, d, testutil.ControllerPod(d, "kgateway-0", true))
-	for i := range tier.Gateways {
-		objs = append(objs, testutil.ProxyDeployment(testutil.ScaleNamespace(i%tier.Namespaces), gwName(i), 1, 1))
+	if !phase3 {
+		for i := range tier.Gateways {
+			objs = append(objs, testutil.ProxyDeployment(testutil.ScaleNamespace(i%tier.Namespaces), gwName(i), 1, 1))
+		}
 	}
 	if phase3 {
+		for _, d := range testutil.ScaleProxyDeployments(tier.Shape()) {
+			objs = append(objs, d)
+		}
 		referenceServices(tier, w.Routes)
 		for _, gw := range testutil.ScaleLongGatewayObjects(tier.Shape()) {
 			gw.SetResourceVersion("1")
@@ -97,6 +106,7 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 		w.CRDs, w.Metrics = testutil.ScaleCRDs(tier.Shape()), testutil.ScaleMetrics(tier.Shape(), 1)
 	}
 	dyn, kube := testutil.ScaleClients(tb, objs...)
+	w.Kube = kube
 	w.Update = func(ctx context.Context, u *unstructured.Unstructured) error {
 		_, err := dyn.Resource(w.RouteGVR).Namespace(u.GetNamespace()).Update(ctx, u, metav1.UpdateOptions{})
 		// The fakes keep a copy of every action forever; long streams would measure that log, not the UI.
@@ -105,18 +115,42 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 		return err
 	}
 	det := install.UpstreamDetector{}
-	w.Cache = cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: served, Now: now, Changes: w.Signal,
-		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}})
+	cfg := cache.Config{Dynamic: dyn, Kube: kube, Served: served, Now: now, Changes: w.Signal,
+		PodSelectors: []labels.Selector{det.ControllerPodSelector()}, DeploymentSelectors: []labels.Selector{det.ControllerSelector(), det.ProxySelector()}}
+	if phase3 {
+		cfg.ProxyPodSelectors, cfg.Events, cfg.CRDs = []labels.Selector{det.ProxyPodSelector()}, true, true
+		cfg.Metadata = testutil.ScaleMetadata(tb, w.CRDs...)
+	}
+	w.Cache = cache.New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	tb.Cleanup(cancel)
+	w.Stop = cancel
 	w.Cache.Start(ctx)
 	for deadline := time.Now().Add(time.Minute); !w.Cache.Settled(); time.Sleep(10 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			tb.Fatal("cache did not settle")
 		}
 	}
+	if phase3 {
+		// The optional watches settle on their own; each must be running.
+		for deadline := time.Now().Add(time.Minute); !optionalSynced(w.Cache.Snapshot()); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				tb.Fatal("the proxy Pod, Event and CRD watches did not settle")
+			}
+		}
+	}
 	testutil.Drain(w.Signal.C()) // the settle notify precedes Settled
 	return w
+}
+
+// optionalSynced reports whether the proxy Pod, Event and CRD watches all run.
+func optionalSynced(s *cache.Snapshot) bool {
+	for _, g := range []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.EventsGVR, cache.CRDsGVR} {
+		if !s.Access[g].OK {
+			return false
+		}
+	}
+	return true
 }
 
 // referenceServices adds Service backendRefs, in each route's own namespace,

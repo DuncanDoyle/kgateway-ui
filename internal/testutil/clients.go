@@ -11,6 +11,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/metadata"
+	metadatafake "k8s.io/client-go/metadata/fake"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 )
@@ -55,6 +57,23 @@ func ClientsWith(t *testing.T, extra []kinds.Descriptor, objs ...runtime.Object)
 func ScaleClients(tb testing.TB, objs ...runtime.Object) (*dynamicfake.FakeDynamicClient, *kubefake.Clientset) {
 	tb.Helper()
 	return clients(tb, ServedUpstream(), objs)
+}
+
+// FakeKube is the fake typed client, named so scale code needs no client-go import.
+type FakeKube = kubefake.Clientset
+
+// ScaleMetadata is a fake metadata client serving crds.
+func ScaleMetadata(tb testing.TB, crds ...*metav1.PartialObjectMetadata) metadata.Interface {
+	tb.Helper()
+	scheme := metadatafake.NewTestScheme()
+	if err := metav1.AddMetaToScheme(scheme); err != nil {
+		tb.Fatal(err)
+	}
+	objs := make([]runtime.Object, 0, len(crds))
+	for _, c := range crds {
+		objs = append(objs, c)
+	}
+	return metadatafake.NewSimpleMetadataClient(scheme, objs...)
 }
 
 // clients builds the fakes for served: discovery, list kinds and tracker GVRs.

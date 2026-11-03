@@ -14,7 +14,10 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 func countKinds(objs []*unstructured.Unstructured) map[string]int {
@@ -621,6 +624,46 @@ func TestWorstLongGateways(t *testing.T) {
 	for l := range labels {
 		if found[l] != tier.ProxyPodsPerGateway {
 			t.Errorf("label %q has %d pods", l, found[l])
+		}
+	}
+}
+
+// LivePhase3 runs the proxy Pod, Event and CRD watches, and the process and
+// proxy stats sources select every Gateway's Pods, long-named ones included,
+// each on its own Pod IP; Events carry their first and last times.
+func TestLivePhase3ProxiesSelected(t *testing.T) {
+	tier := Typical.Worst()
+	w := LivePhase3(t, tier, func() time.Time { return testutil.Now })
+	snap := w.Cache.Snapshot()
+	if len(snap.ProxyPods) != (tier.Gateways+3)*tier.ProxyPodsPerGateway || len(snap.CRDs) != tier.GatewayAPICRDs {
+		t.Fatalf("proxy Pods %d, CRDs %d", len(snap.ProxyPods), len(snap.CRDs))
+	}
+	in, _ := install.UpstreamDetector{}.Detect(testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1))
+	res := install.Resolved{Install: in}
+	ips := map[string]bool{}
+	gws := append(testutil.ScaleLongGatewayObjects(tier.Shape()), World(tier, 1)...)
+	n := 0
+	for _, gw := range gws {
+		if gw.GetKind() != "Gateway" {
+			continue
+		}
+		n++
+		ref := objects.RefOf(gw)
+		set := process.Kube{}.Proxies(res, ref, snap)
+		targets, ok := proxystats.Kube{}.Targets(res, ref, snap)
+		if !set.Observed || len(set.Processes) != tier.ProxyPodsPerGateway || !ok || len(targets) != tier.ProxyPodsPerGateway {
+			t.Fatalf("%v: processes %+v, targets %v", ref, set, targets)
+		}
+		for _, tg := range targets {
+			ips[tg.Addr] = true
+		}
+	}
+	if n != tier.Gateways+3 || len(ips) != n*tier.ProxyPodsPerGateway {
+		t.Fatalf("%d Gateways, %d distinct Pod IPs", n, len(ips))
+	}
+	for _, e := range testutil.ScaleEvents(tier.Shape(), 1) {
+		if e.FirstTimestamp.IsZero() || e.LastTimestamp.IsZero() {
+			t.Fatalf("event %s without its times", e.Name)
 		}
 	}
 }

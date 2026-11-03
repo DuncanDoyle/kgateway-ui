@@ -27,7 +27,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 )
 
-var proxySel = labels.SelectorFromSet(labels.Set{"app.kubernetes.io/managed-by": "kgateway", "app.kubernetes.io/component": "proxy"})
+var proxySel = labels.SelectorFromSet(labels.Set{"kgateway": "kube-gateway", "app.kubernetes.io/component": "proxy"})
 
 // optWorld is a cache with every optional watch over fake clients.
 type optWorld struct {
