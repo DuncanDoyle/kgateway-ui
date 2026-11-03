@@ -1,9 +1,11 @@
 package health
 
 import (
+	"bytes"
 	"cmp"
 	"crypto/sha256"
 	"encoding/base32"
+	"encoding/binary"
 	"slices"
 	"strconv"
 	"strings"
@@ -66,10 +68,16 @@ func hashID(b []byte) string {
 
 // IDs memoises IDs by their identity bytes across recomputes, so an unchanged
 // finding or group is not hashed again. A nil *IDs computes every ID.
+// A key is the identity with its first four fields (install, code, group, kind)
+// replaced by their index in prefixes, so the many keys sharing them stay short.
 type IDs struct {
-	m   map[string]*idEntry
-	gen uint32
-	buf []byte
+	m        map[string]*idEntry
+	gen      uint32
+	buf, key []byte
+	prefixes map[string]uint64
+	// last is the last prefix and lastIdx its index, which the next ID likely repeats; lastIdx 0 means none.
+	last    []byte
+	lastIdx uint64
 }
 
 type idEntry struct {
@@ -77,7 +85,7 @@ type idEntry struct {
 	gen uint32
 }
 
-func newIDs() *IDs { return &IDs{m: map[string]*idEntry{}} }
+func newIDs() *IDs { return &IDs{m: map[string]*idEntry{}, prefixes: map[string]uint64{}} }
 
 // FindingID is FindingID, memoised.
 func (x *IDs) FindingID(installID, code string, resource *objects.Ref, key []string) string {
@@ -97,13 +105,34 @@ func (x *IDs) GroupID(installID, family string, cause *objects.Ref, causeKey []s
 
 func (x *IDs) get(b []byte) string {
 	x.buf = b
-	e := x.m[string(b)]
+	x.key = x.keyOf(b)
+	e := x.m[string(x.key)]
 	if e == nil {
 		e = &idEntry{id: hashID(b)}
-		x.m[string(b)] = e
+		x.m[string(x.key)] = e
 	}
 	e.gen = x.gen
 	return e.id
+}
+
+// keyOf returns b's key: the index of b up to its fourth NUL, then the rest of b.
+func (x *IDs) keyOf(b []byte) []byte {
+	p, nul := 0, 0
+	for p < len(b) && nul < 4 {
+		if b[p] == 0 {
+			nul++
+		}
+		p++
+	}
+	if x.lastIdx == 0 || !bytes.Equal(b[:p], x.last) {
+		i, ok := x.prefixes[string(b[:p])]
+		if !ok {
+			i = uint64(len(x.prefixes)) + 1
+			x.prefixes[string(b[:p])] = i
+		}
+		x.last, x.lastIdx = append(x.last[:0], b[:p]...), i
+	}
+	return append(binary.AppendUvarint(x.key[:0], x.lastIdx), b[p:]...)
 }
 
 // Sweep ends a recompute: once unused entries outnumber used ones, it drops them.
