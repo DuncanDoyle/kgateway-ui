@@ -17,6 +17,24 @@ rules:
   - apiGroups: [""]
     resources: [namespaces, pods]
     verbs: [get, list, watch]
+  {{- if .Values.diagnostics.events }}
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch]
+  {{- end }}
+  {{- if .Values.diagnostics.crds }}
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch]
+  {{- end }}
+  {{- if .Values.diagnostics.endpoints }}
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  {{- end }}
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [get, list, watch]

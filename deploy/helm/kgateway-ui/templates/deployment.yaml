@@ -25,6 +25,21 @@ spec:
             {{- with .Values.delegation.edgeCap }}
             - --delegation-edge-cap={{ . }}
             {{- end }}
+            {{- if not .Values.diagnostics.events }}
+            - --diagnostics-events=false
+            {{- end }}
+            {{- if not .Values.diagnostics.crds }}
+            - --diagnostics-crds=false
+            {{- end }}
+            {{- if not .Values.diagnostics.proxyStats }}
+            - --diagnostics-proxy-stats=false
+            {{- end }}
+            {{- if not .Values.diagnostics.endpoints }}
+            - --diagnostics-endpoints=false
+            {{- end }}
+            {{- if .Values.diagnostics.controllerLogs }}
+            - --diagnostics-controller-logs=true
+            {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . | quote }}
             {{- end }}

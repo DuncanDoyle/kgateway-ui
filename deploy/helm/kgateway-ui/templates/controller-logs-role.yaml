@@ -1,0 +1,26 @@
+{{- if .Values.diagnostics.controllerLogs }}
+# Opt-in, namespaced: pods/log only where the controller runs (design §18.1).
+{{- range .Values.diagnostics.controllerLogsNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kgateway-ui.fullname" $ }}-logs
+  namespace: {{ . }}
+  labels: {{- include "kgateway-ui.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kgateway-ui.fullname" $ }}-logs
+  namespace: {{ . }}
+  labels: {{- include "kgateway-ui.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "kgateway-ui.fullname" $ }}-logs }
+subjects:
+  - { kind: ServiceAccount, name: {{ include "kgateway-ui.sa" $ }}, namespace: {{ $.Release.Namespace }} }
+{{- end }}
+{{- end }}

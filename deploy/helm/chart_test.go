@@ -52,9 +52,9 @@ func kind(docs []map[string]any, k string) []map[string]any {
 	return out
 }
 
-func clusterRole(t *testing.T) rbacv1.ClusterRole {
+func clusterRole(t *testing.T, args ...string) rbacv1.ClusterRole {
 	t.Helper()
-	crs := kind(render(t), "ClusterRole")
+	crs := kind(render(t, args...), "ClusterRole")
 	if len(crs) != 1 {
 		t.Fatalf("want 1 ClusterRole, got %d", len(crs))
 	}
@@ -161,19 +161,99 @@ func TestClusterRoleCoversBackends(t *testing.T) {
 	}
 }
 
-// TestClusterRoleOmitsUnreadKinds guards D-017 §5: nothing reads ReferenceGrants
-// or CRDs, and discovery needs neither.
+// TestClusterRoleOmitsUnreadKinds: nothing reads ReferenceGrants (D-017 §5).
 func TestClusterRoleOmitsUnreadKinds(t *testing.T) {
 	cr := clusterRole(t)
-	for _, c := range []struct{ group, resource string }{
-		{"gateway.networking.k8s.io", "referencegrants"},
-		{"apiextensions.k8s.io", "customresourcedefinitions"},
-	} {
-		for _, v := range []string{"get", "list", "watch"} {
-			if grants(cr.Rules, c.group, c.resource, v) {
-				t.Errorf("ClusterRole must not grant %s on %s (group %q)", v, c.resource, c.group)
-			}
+	for _, v := range []string{"get", "list", "watch"} {
+		if grants(cr.Rules, "gateway.networking.k8s.io", "referencegrants", v) {
+			t.Errorf("ClusterRole must not grant %s on referencegrants", v)
 		}
+	}
+}
+
+// grantsAll reports whether the rules allow get, list and watch on group/resource.
+func grantsAll(rules []rbacv1.PolicyRule, group, resource string) bool {
+	for _, v := range []string{"get", "list", "watch"} {
+		if !grants(rules, group, resource, v) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestEventsRuleFollowsToggle(t *testing.T) {
+	if !grantsAll(clusterRole(t).Rules, "", "events") {
+		t.Error("events must be readable by default")
+	}
+	if grants(clusterRole(t, "--set", "diagnostics.events=false").Rules, "", "events", "get") {
+		t.Error("diagnostics.events=false must drop the events rule")
+	}
+}
+
+func TestCRDRuleFollowsToggle(t *testing.T) {
+	if !grantsAll(clusterRole(t).Rules, "apiextensions.k8s.io", "customresourcedefinitions") {
+		t.Error("CRDs must be readable by default")
+	}
+	if grants(clusterRole(t, "--set", "diagnostics.crds=false").Rules, "apiextensions.k8s.io", "customresourcedefinitions", "get") {
+		t.Error("diagnostics.crds=false must drop the CRD rule")
+	}
+}
+
+func TestEndpointsRulesFollowToggle(t *testing.T) {
+	on := clusterRole(t).Rules
+	if !grantsAll(on, "", "services") || !grantsAll(on, "discovery.k8s.io", "endpointslices") {
+		t.Error("services and endpointslices must be readable by default")
+	}
+	off := clusterRole(t, "--set", "diagnostics.endpoints=false").Rules
+	if grants(off, "", "services", "get") || grants(off, "discovery.k8s.io", "endpointslices", "get") {
+		t.Error("diagnostics.endpoints=false must drop both rules")
+	}
+}
+
+// Defaults match the binary's, so only a non-default toggle becomes a flag.
+func TestTogglesPassedAsFlags(t *testing.T) {
+	if got, want := containerArgs(t), []string{"--listen=:8080"}; !slices.Equal(got, want) {
+		t.Errorf("default args = %v, want %v", got, want)
+	}
+	got := containerArgs(t,
+		"--set", "diagnostics.events=false", "--set", "diagnostics.crds=false",
+		"--set", "diagnostics.proxyStats=false", "--set", "diagnostics.endpoints=false",
+		"--set", "diagnostics.controllerLogs=true")
+	want := []string{"--listen=:8080", "--diagnostics-events=false", "--diagnostics-crds=false",
+		"--diagnostics-proxy-stats=false", "--diagnostics-endpoints=false", "--diagnostics-controller-logs=true"}
+	if !slices.Equal(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+// pods/log is never in the ClusterRole; controllerLogs adds a Role per listed namespace.
+func TestControllerLogsRoleIsOptInAndNamespaced(t *testing.T) {
+	if r := kind(render(t), "Role"); len(r) != 0 {
+		t.Errorf("no Role by default, got %d", len(r))
+	}
+	args := []string{"--set", "diagnostics.controllerLogs=true", "--set", "diagnostics.controllerLogsNamespaces={kgateway-system,other}"}
+	docs := render(t, args...)
+	if grants(clusterRole(t, args...).Rules, "", "pods/log", "get") {
+		t.Error("pods/log must not be in the ClusterRole")
+	}
+	var seen []string
+	for _, d := range kind(docs, "Role") {
+		b, _ := yaml.Marshal(d)
+		var r rbacv1.Role
+		if err := yaml.Unmarshal(b, &r); err != nil {
+			t.Fatal(err)
+		}
+		if len(r.Rules) != 1 || !slices.Equal(r.Rules[0].Resources, []string{"pods/log"}) || !slices.Equal(r.Rules[0].Verbs, []string{"get"}) {
+			t.Errorf("Role %s/%s must grant only get on pods/log: %+v", r.Namespace, r.Name, r.Rules)
+		}
+		seen = append(seen, r.Namespace)
+	}
+	slices.Sort(seen)
+	if !slices.Equal(seen, []string{"kgateway-system", "other"}) {
+		t.Errorf("Role namespaces = %v", seen)
+	}
+	if n := len(kind(docs, "RoleBinding")); n != 2 {
+		t.Errorf("want 2 RoleBindings, got %d", n)
 	}
 }
 
