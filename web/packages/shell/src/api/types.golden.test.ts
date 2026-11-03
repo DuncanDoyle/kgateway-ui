@@ -17,6 +17,10 @@ import findingDetailXdsRejectsRestrictedGolden from "../../../../../pkg/api/test
 import findingsGolden from "../../../../../pkg/api/testdata/golden/findings.json";
 import findingsRestrictedGolden from "../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
+import gatewayDetailDataPlaneGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-data-plane.json";
+import gatewayDetailDataPlaneRestrictedGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-data-plane-restricted.json";
+import gatewayDetailProxiesGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-proxies.json";
+import gatewayDetailProxiesRestrictedGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-proxies-restricted.json";
 import gatewayDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-restricted.json";
 import gatewaysGolden from "../../../../../pkg/api/testdata/golden/gateways.json";
 import health from "../../../../../pkg/api/testdata/golden/health.json";
@@ -64,6 +68,7 @@ import type {
   ComputedAttachment,
   Condition,
   Count,
+  DataPlane,
   DelegationContext,
   DelegationRef,
   DelegationRow,
@@ -563,26 +568,6 @@ const candidate = shape<Candidate>(
   { by: linkedRef },
   { reason: { finding: 1, referenced: 1, selected: 1 } },
 );
-const gatewayDetail = shape<GatewayDetail>(
-  {
-    install: "!",
-    ref: "!",
-    generation: "!",
-    class: "!",
-    health: "!",
-    candidate: "?",
-    ruleSet: "?",
-    conditions: "!",
-    addresses: "!",
-    listeners: "!",
-    attachedListenerSets: "?",
-    listenerSets: "?",
-    routeCounts: "!",
-    collectedAt: "!",
-  },
-  { ref: linkedRef, candidate, conditions: condition, listeners: listener, routeCounts },
-  { health: healthState },
-);
 // value is the Gateway's field as written, so its keys are not checked.
 const allowedListeners = shape<AllowedListeners>(
   { set: "!", value: "?", crdHint: "!", crdField: "?", crdChannel: "?", crdBundleVersion: "?" },
@@ -916,6 +901,64 @@ const processes = shape<ProcessesResponse>(
   },
 );
 
+const dataPlane = shape<DataPlane>(
+  {
+    rejecting: "!",
+    rejects: "!",
+    statusSaysHealthy: "!",
+    snapshot: "?",
+    nextSteps: "!",
+    recentlyChanged: "!",
+    evidenceRestricted: "?",
+    unavailable: "?",
+    proxyStats: "!",
+  },
+  {
+    rejects: shape<DataPlane["rejects"][number]>({ typeUrl: "!", streams: "!", firstSeen: "!" }),
+    snapshot: shape<NonNullable<DataPlane["snapshot"]>>(
+      { by: "!", listeners: "!", routes: "!", clusters: "!", endpoints: "!", secrets: "!" },
+      {},
+      { by: { controller: 1 } },
+    ),
+    nextSteps: nextStep,
+    recentlyChanged: linkedRef,
+    proxyStats: shape<DataPlane["proxyStats"]>(
+      { available: "!", unavailable: "?", reason: "?" },
+      {},
+      { unavailable: { off: 1, denied: 1, failing: 1, "not-on-version": 1, "not-observed": 1 } },
+    ),
+  },
+);
+const gatewayDetail = shape<GatewayDetail>(
+  {
+    install: "!",
+    ref: "!",
+    generation: "!",
+    class: "!",
+    health: "!",
+    candidate: "?",
+    ruleSet: "?",
+    conditions: "!",
+    addresses: "!",
+    listeners: "!",
+    attachedListenerSets: "?",
+    listenerSets: "?",
+    routeCounts: "!",
+    dataPlane: "?",
+    proxies: "?",
+    collectedAt: "!",
+  },
+  {
+    ref: linkedRef,
+    candidate,
+    conditions: condition,
+    listeners: listener,
+    routeCounts,
+    dataPlane,
+    proxies: processSet,
+  },
+  { health: healthState },
+);
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
 function problems(s: Shape, v: unknown, path: string): string[] {
   if (Array.isArray(v)) return v.flatMap((e, i) => problems(s, e, `${path}[${i}]`));
@@ -971,6 +1014,18 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["bad-request", badRequestGolden.body satisfies Wide<ErrorResponse>, errorShape],
     ["gateway-detail", gatewayDetailGolden.body satisfies Wide<GatewayDetail>, gatewayDetail],
     ["gateway-detail-restricted", gatewayDetailRestrictedGolden.body satisfies Wide<GatewayDetail>, gatewayDetail],
+    ["gateway-detail-data-plane", gatewayDetailDataPlaneGolden.body satisfies Wide<GatewayDetail>, gatewayDetail],
+    [
+      "gateway-detail-data-plane-restricted",
+      gatewayDetailDataPlaneRestrictedGolden.body satisfies Wide<GatewayDetail>,
+      gatewayDetail,
+    ],
+    ["gateway-detail-proxies", gatewayDetailProxiesGolden.body satisfies Wide<GatewayDetail>, gatewayDetail],
+    [
+      "gateway-detail-proxies-restricted",
+      gatewayDetailProxiesRestrictedGolden.body satisfies Wide<GatewayDetail>,
+      gatewayDetail,
+    ],
     ["listenerset-detail", listenersetDetailGolden.body satisfies Wide<ListenerSetDetail>, listenerSetDetail],
     [
       "listenerset-detail-allowed",

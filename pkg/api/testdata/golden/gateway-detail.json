@@ -26,6 +26,18 @@
         "type": "Programmed"
       }
     ],
+    "dataPlane": {
+      "nextSteps": [],
+      "proxyStats": {
+        "available": false,
+        "reason": "proxy stats not collected yet",
+        "unavailable": "failing"
+      },
+      "recentlyChanged": [],
+      "rejecting": false,
+      "rejects": [],
+      "statusSaysHealthy": false
+    },
     "generation": 1,
     "health": "warning",
     "install": "kgw.kgateway",
@@ -202,6 +214,14 @@
         }
       }
     ],
+    "proxies": {
+      "desired": 1,
+      "observed": false,
+      "processes": [],
+      "rollout": {
+        "progressing": false
+      }
+    },
     "ref": {
       "group": "gateway.networking.k8s.io",
       "kind": "Gateway",

@@ -180,3 +180,43 @@ type GatewayProcesses struct {
 	Rejects *int          `json:"rejects,omitempty"`
 	Skew    bool          `json:"skew,omitempty"`
 }
+
+// DataPlaneDTO is a Gateway's data plane (design §13.3). Rejecting says a KGWUI-001 is active;
+// its Rejects and RecentlyChanged need every evidence dependency (§14 rule 12), else EvidenceRestricted.
+type DataPlaneDTO struct {
+	Rejecting          bool             `json:"rejecting"`
+	Rejects            []DataPlaneTypes `json:"rejects"`
+	StatusSaysHealthy  bool             `json:"statusSaysHealthy"`
+	Snapshot           *SnapshotDTO     `json:"snapshot,omitempty"`
+	NextSteps          []NextStep       `json:"nextSteps"`
+	RecentlyChanged    []LinkedRef      `json:"recentlyChanged"`
+	EvidenceRestricted bool             `json:"evidenceRestricted,omitempty"`
+	// Unavailable is set while the xDS rejects check is not OK: Rejecting false then means unknown.
+	Unavailable bool          `json:"unavailable,omitempty"`
+	ProxyStats  ProxyStatsDTO `json:"proxyStats"`
+}
+
+// DataPlaneTypes is one rejected xDS type: the rejecting streams and when the UI first saw them.
+type DataPlaneTypes struct {
+	TypeURL   string    `json:"typeUrl"`
+	Streams   int       `json:"streams"`
+	FirstSeen time.Time `json:"firstSeen"`
+}
+
+// SnapshotDTO is kgateway_xds_snapshot_resources for one Gateway. By is always
+// "controller": what it built, not what proxies accepted; never a finding.
+type SnapshotDTO struct {
+	By        string `json:"by"`
+	Listeners int    `json:"listeners"`
+	Routes    int    `json:"routes"`
+	Clusters  int    `json:"clusters"`
+	Endpoints int    `json:"endpoints"`
+	Secrets   int    `json:"secrets"`
+}
+
+// ProxyStatsDTO says whether proxy stats feed a Gateway; Unavailable and Reason say why not (D-034).
+type ProxyStatsDTO struct {
+	Available   bool                `json:"available"`
+	Unavailable health.Availability `json:"unavailable,omitempty"`
+	Reason      string              `json:"reason,omitempty"`
+}

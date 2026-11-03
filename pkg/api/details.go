@@ -14,12 +14,15 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
 
 // Detail 404 messages. A denied, absent or unadmitted object gets the same
@@ -246,10 +249,94 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 	} else {
 		v, st = objects.DecodeGateway(u), explore.RowState(ref, d.i.Health)
 	}
-	writeJSON(w, GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
+	out := GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
 		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
 		Listeners: d.listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
-		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)})
+		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
+	if cand == nil {
+		out.DataPlane, out.Proxies = d.dataPlane(ref)
+	}
+	writeJSON(w, out)
+}
+
+// proxyStatsCheckName is a proxy stats check; its result says whether the stats run.
+const proxyStatsCheckName = "proxy connection"
+
+// dataPlane is owned Gateway gw's data plane and proxies for the caller (design §13.3).
+func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
+	ps, set := newProcSummary(d.v, d.i), &process.Set{}
+	if d.i.Process != nil {
+		if s, ok := d.i.Process.Proxies[gw]; ok {
+			set = &s
+		}
+	}
+	proxies := ps.set(set, gw.Namespace, ps.facts[gw], true)
+	fs := d.i.Health.Findings
+	on := func(code string) int {
+		return slices.IndexFunc(fs, func(f health.Finding) bool { return f.Code == code && f.Resource != nil && *f.Resource == gw })
+	}
+	dp := &DataPlaneDTO{Rejects: []DataPlaneTypes{}, NextSteps: []NextStep{}, RecentlyChanged: []LinkedRef{}, Snapshot: d.snapshot(gw),
+		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, on(health.CodeSelfManagedProxy) >= 0)}
+	k := on(health.CodeXDSRejected)
+	if k < 0 {
+		return dp, &proxies
+	}
+	f := &fs[k]
+	dp.Rejecting = true
+	dp.NextSteps = append(dp.NextSteps, nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(d.p.Model, d.i), d.h.commands, d.v.visible()))...)
+	ev, ok := f.Facts.(*health.XDSRejectsEvidence)
+	if !ok {
+		return dp, &proxies
+	}
+	dp.StatusSaysHealthy = ev.StatusSaysHealthy
+	if !d.v.allOf(f.Evidence) {
+		dp.EvidenceRestricted = true
+		return dp, &proxies
+	}
+	for _, t := range ev.Types {
+		dp.Rejects = append(dp.Rejects, DataPlaneTypes{TypeURL: t.TypeURL, Streams: t.Streams, FirstSeen: wireTime(t.FirstSeen)})
+	}
+	slices.SortFunc(dp.Rejects, func(a, b DataPlaneTypes) int { return strings.Compare(a.TypeURL, b.TypeURL) })
+	// Each recently changed object is authorized on its own and left out without a count (§14 rule 14).
+	for _, r := range ev.RecentlyChanged {
+		if d.v.can(r) {
+			dp.RecentlyChanged = append(dp.RecentlyChanged, d.l.linked(r))
+		}
+	}
+	return dp, &proxies
+}
+
+// snapshot is gw's xDS snapshot from the install's last complete metrics read; nil without one.
+func (d *detail) snapshot(gw objects.Ref) *SnapshotDTO {
+	for _, r := range d.p.Model.MetricsRead {
+		if r.ID != d.i.Resolved.ID() || !r.Present || r.Result.Err != "" {
+			continue
+		}
+		if s, ok := r.Result.Metrics.Snapshot[ctrlmetrics.GatewayKey{Namespace: gw.Namespace, Name: gw.Name}]; ok {
+			return &SnapshotDTO{By: "controller", Listeners: s.Listeners, Routes: s.Routes, Clusters: s.Clusters, Endpoints: s.Endpoints, Secrets: s.Secrets}
+		}
+	}
+	return nil
+}
+
+// proxyStats says whether proxy stats feed a Gateway: off or denied first, then
+// not observed for a self-managed one (KGWUI-010), then a failing collector.
+func proxyStats(checks []health.CheckResult, selfManaged bool) ProxyStatsDTO {
+	var c health.CheckResult
+	if j := slices.IndexFunc(checks, func(c health.CheckResult) bool { return c.Name == proxyStatsCheckName }); j >= 0 {
+		c = checks[j]
+	} else {
+		c.Unavailable = health.AvailFailing
+	}
+	switch {
+	case c.Unavailable == health.AvailOff || c.Unavailable == health.AvailDenied:
+		return ProxyStatsDTO{Unavailable: c.Unavailable, Reason: c.Error}
+	case selfManaged:
+		return ProxyStatsDTO{Unavailable: health.AvailNotObserved}
+	case c.Unavailable != "":
+		return ProxyStatsDTO{Unavailable: c.Unavailable, Reason: c.Error}
+	}
+	return ProxyStatsDTO{Available: true}
 }
 
 // listenerSetCount is the total of the ListenerSets list for parent gw:

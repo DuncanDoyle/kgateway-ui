@@ -301,7 +301,10 @@ type GatewayDetail struct {
 	AttachedListenerSets *int32        `json:"attachedListenerSets,omitempty"`
 	ListenerSets         int           `json:"listenerSets"`
 	RouteCounts          RouteCounts   `json:"routeCounts"`
-	CollectedAt          time.Time     `json:"collectedAt"`
+	// DataPlane and Proxies are sent for a Gateway the install owns (design §13.1).
+	DataPlane   *DataPlaneDTO  `json:"dataPlane,omitempty"`
+	Proxies     *ProcessSetDTO `json:"proxies,omitempty"`
+	CollectedAt time.Time      `json:"collectedAt"`
 }
 
 // AllowedListenersDTO is the parent Gateway's spec.allowedListeners as written; CRDHint is set

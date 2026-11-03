@@ -1,4 +1,5 @@
 import type { HealthState } from "../theme/tokens";
+import type { DataPlane, ProcessSet } from "./diagTypes";
 import type { LabelSelector, Ref } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
@@ -202,6 +203,9 @@ export interface GatewayDetail {
   /** The ListenerSets list's total for this caller; sizes the sub-table skeleton. */
   listenerSets?: number;
   routeCounts: RouteCounts;
+  /** Sent for a Gateway the install owns, not for a candidate. */
+  dataPlane?: DataPlane;
+  proxies?: ProcessSet;
   collectedAt: string;
 }
 /**

@@ -135,7 +135,7 @@ func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
 func (r Result) SameContent(o Result) bool {
 	return r.Err == o.Err && r.Metrics.ManagedPresent == o.Metrics.ManagedPresent &&
 		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits) &&
-		slices.EqualFunc(r.Metrics.PerPod, o.Metrics.PerPod, samePod)
+		slices.EqualFunc(r.Metrics.PerPod, o.Metrics.PerPod, samePod) && maps.Equal(r.Metrics.Snapshot, o.Metrics.Snapshot)
 }
 
 // samePod compares two Pods' samples by bit pattern.

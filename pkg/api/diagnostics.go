@@ -268,9 +268,14 @@ func dataPlane(v *view, i *engine.InstallModel) DataPlaneSummary {
 			}
 		}
 	}
-	j := slices.IndexFunc(i.Health.Checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName })
-	out.Unavailable = j >= 0 && !i.Health.Checks[j].OK
+	out.Unavailable = xdsUnavailable(i.Health.Checks)
 	return out
+}
+
+// xdsUnavailable reports an xDS rejects check that is not OK, pending included.
+func xdsUnavailable(checks []health.CheckResult) bool {
+	j := slices.IndexFunc(checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName })
+	return j >= 0 && !checks[j].OK
 }
 
 // wireChecks is cs with UTC times, never nil.

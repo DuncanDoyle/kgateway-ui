@@ -234,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 353
+	const want = 358
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -659,5 +659,9 @@ func diagCases(t *testing.T) []goldenCase {
 		{"finding-detail-version-skew-restricted", authzSrv(t, skewed, deny(podRef("infra", "edge-0"))), detail(skewed, health.CodeVersionSkew, "")},
 		{"finding-detail-proxy-stats", stats.srv, detail(stats, health.CodeProxyDisconnected, "")},
 		{"finding-detail-proxy-stats-restricted", authzSrv(t, stats, deny(podRef("infra", "edge-0"))), detail(stats, health.CodeProxyDisconnected, "")},
+		{"gateway-detail-data-plane", rej.srv, nackDetail},
+		{"gateway-detail-data-plane-restricted", authzSrv(t, rej, deny(podRef("kgw", "kgateway-0"), route("shop", "fresh-n"))), nackDetail},
+		{"gateway-detail-proxies", procs.srv, gwDetail},
+		{"gateway-detail-proxies-restricted", authzSrv(t, procs, deny(podRef("infra", "edge-0"))), gwDetail},
 	}
 }

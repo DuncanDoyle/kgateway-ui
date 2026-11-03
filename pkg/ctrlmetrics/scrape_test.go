@@ -400,3 +400,12 @@ func TestPodProxyScrapeErrorsAreBoundedAndNotRetried(t *testing.T) {
 		})
 	}
 }
+
+func TestSameContentSeesSnapshotChange(t *testing.T) {
+	mk := func(n int) Result {
+		return Result{Metrics: Metrics{Snapshot: map[GatewayKey]SnapshotResources{{"infra", "edge"}: {Routes: n}}}}
+	}
+	if !mk(1).SameContent(mk(1)) || mk(1).SameContent(mk(2)) {
+		t.Fatal("a changed snapshot is a content change")
+	}
+}

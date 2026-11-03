@@ -240,3 +240,23 @@ func TestCounterDeltaPerPodUIDNeverNegative(t *testing.T) {
 		t.Errorf("a series new under a seen UID counts in full: %v", g)
 	}
 }
+
+// The snapshot per Gateway is the controller's build, from every captured version;
+// replicas are maxed, since each builds the snapshots of the proxies it serves.
+func TestParseSnapshotResources(t *testing.T) {
+	for f, want := range map[string]SnapshotResources{
+		"testdata/v2.3.11.txt": {Listeners: 1, Routes: 1, Clusters: 2, Endpoints: 2},
+		"testdata/v2.4.7.txt":  {Listeners: 1, Routes: 1, Clusters: 2, Endpoints: 3},
+	} {
+		if got := parseFile(t, f).Snapshot[GatewayKey{"app-a", "gw"}]; got != want {
+			t.Errorf("%s: snapshot %+v, want %+v", f, got, want)
+		}
+	}
+	a, b := parseFile(t, "testdata/v2.4.7-rejects-a.txt"), parseFile(t, "testdata/v2.4.7-rejects-b.txt")
+	if got := Aggregate([]Metrics{a, b}).Snapshot[GatewayKey{"infra", "edge"}]; got != (SnapshotResources{Listeners: 1, Routes: 1, Clusters: 4, Endpoints: 5}) {
+		t.Errorf("aggregate maxes each resource: %+v", got)
+	}
+	if m, _ := Parse(strings.NewReader(sample)); len(m.Snapshot) != 0 {
+		t.Errorf("an absent family is no snapshot: %+v", m.Snapshot)
+	}
+}

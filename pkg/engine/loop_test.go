@@ -597,6 +597,11 @@ func TestMetricsIdentityCoversContent(t *testing.T) {
 	if enc(errRes, true) == enc(res(0), true) {
 		t.Fatal("Err must be part of the identity")
 	}
+	snap := res(0)
+	snap.Metrics.Snapshot = map[ctrlmetrics.GatewayKey]ctrlmetrics.SnapshotResources{{Namespace: "infra", Name: "edge"}: {Routes: 1}}
+	if enc(snap, true) == enc(res(0), true) {
+		t.Fatal("the snapshot must be part of the identity")
+	}
 }
 
 func TestMetricsFingerprintIsEvidenceRead(t *testing.T) {

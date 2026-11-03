@@ -222,3 +222,26 @@ export interface ProcessesResponse {
   proxies: Page<GatewayProcesses>;
   collectedAt: string;
 }
+/**
+ * A Gateway's data plane. rejects and recentlyChanged need every evidence dependency, else evidenceRestricted.
+ * unavailable: the xDS rejects check is not OK, so rejecting false means unknown.
+ */
+export interface DataPlane {
+  rejecting: boolean;
+  rejects: { typeUrl: string; streams: number; firstSeen: string }[];
+  statusSaysHealthy: boolean;
+  /** The controller's xDS snapshot: what it built, not what proxies accepted; never a finding. */
+  snapshot?: {
+    by: "controller";
+    listeners: number;
+    routes: number;
+    clusters: number;
+    endpoints: number;
+    secrets: number;
+  };
+  nextSteps: NextStep[];
+  recentlyChanged: LinkedRef[];
+  evidenceRestricted?: boolean;
+  unavailable?: boolean;
+  proxyStats: { available: boolean; unavailable?: CheckResult["unavailable"]; reason?: string };
+}

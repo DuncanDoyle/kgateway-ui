@@ -23,6 +23,9 @@ const (
 	// UpdatesDropped counts dropped resources-metric updates. Above zero, the
 	// kgateway_resources_* gauges are invalid until the controller restarts.
 	UpdatesDropped = "kgateway_resources_updates_dropped_total"
+	// XDSSnapshotResources is the controller's xDS snapshot per Gateway and
+	// resource type: what it built, not what proxies accepted.
+	XDSSnapshotResources = "kgateway_xds_snapshot_resources"
 )
 
 // GatewayKey identifies a Gateway in metric labels.
@@ -30,6 +33,11 @@ type GatewayKey struct{ Namespace, Name string }
 
 // ManagedKey identifies a resources_managed series after summing over "parent".
 type ManagedKey struct{ Namespace, Resource string }
+
+// SnapshotResources counts the resources of one Gateway's xDS snapshot.
+type SnapshotResources struct {
+	Listeners, Routes, Clusters, Endpoints, Secrets int
+}
 
 // TypeKey identifies an xDS reject series: one Gateway and one resource type.
 type TypeKey struct {
@@ -60,6 +68,8 @@ type Metrics struct {
 	ManagedPresent bool
 	// PerPod holds each controller Pod's samples, sorted by Pod name.
 	PerPod []PodMetrics
+	// Snapshot is XDSSnapshotResources per Gateway; never a finding.
+	Snapshot map[GatewayKey]SnapshotResources
 }
 
 // Parse interprets a text-format /metrics payload. A gauge that has never been
@@ -93,6 +103,18 @@ func Parse(r io.Reader) (Metrics, error) {
 		}
 	}
 	m.PerPod = []PodMetrics{pod}
+	if f, ok := fams[XDSSnapshotResources]; ok {
+		m.Snapshot = map[GatewayKey]SnapshotResources{}
+		for _, s := range f.GetMetric() {
+			l := lbls(s)
+			gw := GatewayKey{l["namespace"], l["gateway"]}
+			r := m.Snapshot[gw]
+			if n := r.field(l["resource"]); n != nil {
+				*n = int(s.GetGauge().GetValue())
+			}
+			m.Snapshot[gw] = r
+		}
+	}
 	if f, ok := fams[ResourcesManaged]; ok {
 		m.ManagedPresent = true
 		for _, s := range f.GetMetric() {
@@ -101,6 +123,23 @@ func Parse(r io.Reader) (Metrics, error) {
 		}
 	}
 	return m, nil
+}
+
+// field is r's count for a snapshot resource label value; nil for another value.
+func (r *SnapshotResources) field(resource string) *int {
+	switch resource {
+	case "Listener":
+		return &r.Listeners
+	case "Route":
+		return &r.Routes
+	case "Cluster":
+		return &r.Clusters
+	case "Endpoint":
+		return &r.Endpoints
+	case "Secret":
+		return &r.Secrets
+	}
+	return nil
 }
 
 func lbls(s *dto.Metric) map[string]string {
@@ -113,8 +152,8 @@ func lbls(s *dto.Metric) map[string]string {
 
 // Aggregate combines per-replica scrapes. Rejects are summed, because each
 // proxy's xDS stream is served by one replica. Managed counts are maxed,
-// because every replica computes the full set (D-012). PerPod is concatenated
-// and sorted by Pod name, then UID.
+// because every replica computes the full set (D-012), and so is each
+// snapshot count. PerPod is concatenated and sorted by Pod name, then UID.
 func Aggregate(replicas []Metrics) Metrics {
 	out := Metrics{Rejects: map[GatewayKey]float64{}, Managed: map[ManagedKey]float64{}}
 	for _, r := range replicas {
@@ -125,6 +164,14 @@ func Aggregate(replicas []Metrics) Metrics {
 			out.Managed[k] = max(out.Managed[k], v)
 		}
 		out.ManagedPresent = out.ManagedPresent || r.ManagedPresent
+		for k, v := range r.Snapshot {
+			if out.Snapshot == nil {
+				out.Snapshot = map[GatewayKey]SnapshotResources{}
+			}
+			o := out.Snapshot[k]
+			out.Snapshot[k] = SnapshotResources{Listeners: max(o.Listeners, v.Listeners), Routes: max(o.Routes, v.Routes),
+				Clusters: max(o.Clusters, v.Clusters), Endpoints: max(o.Endpoints, v.Endpoints), Secrets: max(o.Secrets, v.Secrets)}
+		}
 		out.PerPod = append(out.PerPod, r.PerPod...)
 	}
 	slices.SortStableFunc(out.PerPod, func(a, b PodMetrics) int { return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.UID, b.UID)) })

@@ -71,7 +71,7 @@ type LoopEvent struct {
 
 // encodeMetrics is the identity of the metrics results reads: FNV-64a over each
 // read's ID, Present and, if present, freshness at now, Err and every Metrics
-// entry (including PerPod) in key order. CollectedAt is left out, as in
+// entry (including Snapshot and PerPod) in key order. CollectedAt is left out, as in
 // ctrlmetrics.Result.SameContent; Model.Next's staleness deadline covers it.
 func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uint64 {
 	h := fnv.New64a()
@@ -118,6 +118,18 @@ func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uin
 			str(k.Namespace)
 			str(k.Resource)
 			u64(math.Float64bits(res.Metrics.Managed[k]))
+		}
+		snapshot := sortedKeys(res.Metrics.Snapshot, func(a, b ctrlmetrics.GatewayKey) int {
+			return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+		})
+		u64(uint64(len(snapshot)))
+		for _, k := range snapshot {
+			str(k.Namespace)
+			str(k.Name)
+			v := res.Metrics.Snapshot[k]
+			for _, n := range []int{v.Listeners, v.Routes, v.Clusters, v.Endpoints, v.Secrets} {
+				u64(uint64(n)) //nolint:gosec // a count; only its bits matter
+			}
 		}
 		u64(uint64(len(res.Metrics.PerPod)))
 		for _, p := range res.Metrics.PerPod {
