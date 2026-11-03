@@ -135,8 +135,7 @@ Kinds added with `WithKinds`, and anything a collector reads, need matching rule
 The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
-import { defaultPages, Shell, type ShellExtension } from "@kgateway-ui/shell";
-import { createRoot } from "react-dom/client";
+import { defaultPages, renderWhenFontsReady, Shell, type ShellExtension } from "@kgateway-ui/shell";
 
 const acme: ShellExtension = {
   // Product identity in the header
@@ -155,10 +154,13 @@ const acme: ShellExtension = {
   },
 };
 
-createRoot(document.getElementById("root") as HTMLElement).render(<Shell extension={acme} pages={defaultPages} />);
+// Waits for the theme fonts, so a late font swap cannot shift the layout
+void renderWhenFontsReady(document.getElementById("root") as HTMLElement, <Shell extension={acme} pages={defaultPages} />);
 ```
 
-A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing.
+An app that embeds `Shell` must render it with `renderWhenFontsReady(root, element)`. If its themes use other fonts, pass them as the third argument.
+
+A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing. `CorePages.DiagnosticsSection` replaces the install page's Needs attention and Processes block; it gets the install ID, the diagnostics and whether they are stale.
 
 ## Upgrade notes
 
