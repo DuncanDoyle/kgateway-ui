@@ -7,6 +7,7 @@ package measure
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -106,42 +107,55 @@ func (w *World) Run(ctx context.Context) {
 }
 
 // failProbes adds three probe failures, seen at at, to every Unhealthy Event,
-// and waits until the cache has observed them.
+// and waits until the cache has observed them. Updates go in batches the
+// cache observes before the next, as the fake watch panics once 100 events queue.
 func (w *World) failProbes(tb testing.TB, at time.Time) {
 	tb.Helper()
+	const batch = 50
 	ctx := context.Background()
-	pods := map[string]bool{}
-	for _, e := range testutil.ScaleEvents(w.Tier.Shape(), 1) {
-		if e.Reason != process.ProbeReason {
-			continue
-		}
-		e.Count += 3
-		e.LastTimestamp = metav1.NewTime(at)
-		e.ResourceVersion = ""
-		if _, err := w.Live.Kube.CoreV1().Events(e.Namespace).Update(ctx, e, metav1.UpdateOptions{}); err != nil {
-			tb.Fatal(err)
-		}
-		pods[string(e.InvolvedObject.UID)] = true
-	}
-	for deadline := time.Now().Add(time.Minute); ; time.Sleep(10 * time.Millisecond) {
-		seen := 0
-		for uid, obs := range w.Live.Cache.Snapshot().EventDeltas {
-			for _, o := range obs {
-				if pods[string(uid)] && o.Delta == 3 {
-					seen++
-					break
-				}
+	want := map[string]int{} // per Pod UID, the probe failure increases updated so far
+	for chunk := range slices.Chunk(testutil.ScaleEvents(w.Tier.Shape(), 1), batch) {
+		for _, e := range chunk {
+			if e.Reason != process.ProbeReason {
+				continue
 			}
+			e.Count += 3
+			e.LastTimestamp = metav1.NewTime(at)
+			e.ResourceVersion = ""
+			if _, err := w.Live.Kube.CoreV1().Events(e.Namespace).Update(ctx, e, metav1.UpdateOptions{}); err != nil {
+				tb.Fatal(err)
+			}
+			want[string(e.InvolvedObject.UID)]++
 		}
-		if seen == len(pods) {
-			break
-		}
-		if time.Now().After(deadline) {
-			tb.Fatalf("the cache observed probe failures on %d of %d Pods", seen, len(pods))
-		}
+		w.awaitProbes(tb, want)
 	}
 	w.Live.Kube.ClearActions()
 	testutil.Drain(w.Live.Signal.C())
+}
+
+// awaitProbes waits until the cache has observed want[uid] increases by three on every Pod.
+func (w *World) awaitProbes(tb testing.TB, want map[string]int) {
+	tb.Helper()
+	for deadline := time.Now().Add(time.Minute); ; time.Sleep(10 * time.Millisecond) {
+		seen := 0
+		for uid, obs := range w.Live.Cache.Snapshot().EventDeltas {
+			n := 0
+			for _, o := range obs {
+				if o.Delta == 3 {
+					n++
+				}
+			}
+			if want[string(uid)] > 0 && n >= want[string(uid)] {
+				seen++
+			}
+		}
+		if seen == len(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			tb.Fatalf("the cache observed probe failures on %d of %d Pods", seen, len(want))
+		}
+	}
 }
 
 // static serves one metrics result for every install.
