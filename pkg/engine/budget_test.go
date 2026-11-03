@@ -564,10 +564,11 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("index: Gateway rows", func() { ix.Gateways = nil })
 	drop("index: ListenerSet rows", func() { ix.ListenerSets = nil })
 	drop("index: lookups", func() { m.Installs[0].Index = nil })
+	// The engine keeps the last diagnosis, and the check Stores the last findings, so both go with them.
 	drop("health: findings", func() { m.Installs[0].Health.Findings = nil })
-	drop("diagnosis: groups and rank", func() { m.Installs[0].Diagnosis = nil })
+	drop("diagnosis: groups and rank", func() { m.Installs[0].Diagnosis, e.diags = nil, nil })
 	drop("process data", func() { m.Installs[0].Process = nil })
-	drop("check Stores", func() { e.states = nil })
+	drop("check Stores and findings", func() { e.states = nil })
 	drop("proxy stats and collector", func() { e.cfg.Collected, w = nil, nil })
 	drop("computed: checks", func() { m.Installs[0].Computed.Checks = nil })
 	drop("computed: delegation", func() { m.Installs[0].Computed.Delegation = computed.DelegationResult{} })
