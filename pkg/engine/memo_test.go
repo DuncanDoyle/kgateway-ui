@@ -16,6 +16,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -351,5 +352,74 @@ func TestUnwatchedKindAlwaysRuns(t *testing.T) {
 	e.Compute()
 	if runs != 2 {
 		t.Fatalf("a check on an unwatched kind ran %d times in 2 computes", runs)
+	}
+}
+
+// rejectsAt are metrics collected at t with edge rejecting Clusters on Pod p when on.
+type rejectsAt struct {
+	at time.Time
+	on *bool
+}
+
+func (m rejectsAt) Get(string) (ctrlmetrics.Result, bool) {
+	r := metricsAt(m.at)
+	res, _ := r.Get("")
+	if *m.on {
+		k := ctrlmetrics.TypeKey{Gateway: ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}, TypeURL: "envoy.config.cluster.v3.Cluster"}
+		res.Metrics.Rejects[k.Gateway] = 1
+		res.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "pod/kgw/p", Name: "p", Active: map[ctrlmetrics.TypeKey]float64{k: 1}, Total: map[ctrlmetrics.TypeKey]float64{}}}
+	}
+	return res, true
+}
+
+// A spec edit before the first reject lists the route as recently changed; the
+// memoized xDS check skips unchanged inputs and reruns on a later edit, which is not listed.
+func TestRecentlyChangedThroughTheMemo(t *testing.T) {
+	var runs int
+	var xds health.Check
+	for _, c := range health.Upstream() {
+		if c.Name() == "xDS rejects" {
+			xds = counted{c, &runs}
+		}
+	}
+	edge := testutil.GwRef("infra", "edge")
+	r, s := testutil.HTTPRoute("shop", "r", []objects.ParentRef{edge}), testutil.HTTPRoute("shop", "s", []objects.ParentRef{edge})
+	now := testutil.Now
+	on := false
+	src := &memoSource{base: snapshot(t, r, s), now: &now}
+	cfg := config(nil, rejectsAt{testutil.Now, &on}, func() time.Time { return now })
+	cfg.Snapshots, cfg.MetricsMaxAge, cfg.Checks = src, 0, []health.Check{xds}
+	e := New(cfg)
+	bump := func(u *unstructured.Unstructured, rv string) {
+		c := u.DeepCopy()
+		c.SetGeneration(2)
+		c.SetResourceVersion(rv)
+		src.edit(t, gvr(t, "HTTPRoute"), c)
+	}
+	recent := func() []objects.Ref {
+		for _, f := range report(t, e.Compute()).Findings {
+			if f.Code == health.CodeXDSRejected {
+				return f.Facts.(*health.XDSRejectsEvidence).RecentlyChanged
+			}
+		}
+		t.Fatal("no 001")
+		return nil
+	}
+	e.Compute() // the check's first run; r and s are seen now
+	now = now.Add(time.Minute)
+	bump(r, "r2")
+	e.Compute()
+	now, on = now.Add(time.Minute), true
+	want := []objects.Ref{objects.RefOf(r)}
+	if got := recent(); !reflect.DeepEqual(got, want) || runs != 3 {
+		t.Fatalf("after the reject: %v in %d runs, want %v in 3", got, runs, want)
+	}
+	now = now.Add(time.Minute)
+	if got := recent(); !reflect.DeepEqual(got, want) || runs != 3 {
+		t.Fatalf("unchanged inputs: %v in %d runs, want %v from the memo", got, runs, want)
+	}
+	bump(s, "s2")
+	if got := recent(); !reflect.DeepEqual(got, want) || runs != 4 {
+		t.Fatalf("edit after the reject: %v in %d runs, want %v in 4", got, runs, want)
 	}
 }

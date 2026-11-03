@@ -33,14 +33,22 @@ func (Kubectl) ControllerLog(pod objects.Ref, since time.Duration, grep ...strin
 	var b strings.Builder
 	fmt.Fprintf(&b, "kubectl logs -n %s %s --since=%s", Quote(pod.Namespace), Quote(target(pod)), duration(since))
 	for _, g := range grep {
-		b.WriteString(" | grep " + Quote(g))
+		b.WriteString(" | grep " + pattern(g))
 	}
 	return b.String()
 }
 
 // ProxyLog implements Commands.
 func (Kubectl) ProxyLog(proxy objects.Ref, since time.Duration, grep string) string {
-	return fmt.Sprintf("kubectl logs -n %s %s --since=%s | grep -i %s", Quote(proxy.Namespace), Quote(target(proxy)), duration(since), Quote(grep))
+	return fmt.Sprintf("kubectl logs -n %s %s --since=%s | grep -i %s", Quote(proxy.Namespace), Quote(target(proxy)), duration(since), pattern(grep))
+}
+
+// pattern is grep's pattern argument; one starting with "-" goes after -e so grep never reads it as a flag.
+func pattern(p string) string {
+	if strings.HasPrefix(p, "-") {
+		return "-e " + Quote(p)
+	}
+	return Quote(p)
 }
 
 // ProxyCounters implements Commands.
@@ -78,9 +86,9 @@ func duration(d time.Duration) string {
 }
 
 // Quote returns s as one POSIX shell word: unchanged when every byte is in
-// [A-Za-z0-9_./:=-], else in single quotes with each quote escaped.
+// [A-Za-z0-9_./:=-] and s does not start with "-", else in single quotes with each quote escaped.
 func Quote(s string) string {
-	safe := s != ""
+	safe := s != "" && s[0] != '-'
 	for i := 0; safe && i < len(s); i++ {
 		c := s[i]
 		safe = c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("_./:=-", c) >= 0
@@ -118,20 +126,22 @@ const (
 	needsPortForward = "pods/portforward"
 )
 
-// Steps returns g's next steps in order, built from its members in findings.
-// Data plane: the controller log of the first replica that reported a reject,
-// then the proxy log and counters. Process: the previous log of a controller
-// Pod that last exited with code 2. A command c returns "" for is left out.
-func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep {
+// Steps returns g's next steps, naming only objects can allows (nil allows all;
+// design §14 rule 15). A step whose command c returns "" is left out.
+func Steps(g Group, findings []health.Finding, in Input, c Commands, can func(objects.Ref) bool) []NextStep {
+	if can == nil {
+		can = func(objects.Ref) bool { return true }
+	}
 	var out []NextStep
 	add := func(title, cmd, needs string, refs ...objects.Ref) {
-		if cmd != "" {
+		if cmd != "" && !slices.ContainsFunc(refs, func(r objects.Ref) bool { return !can(r) }) {
 			out = append(out, NextStep{Title: title, Command: cmd, Needs: []string{needs}, Note: StepShareNote, Refs: refs})
 		}
 	}
 	for _, i := range g.Members {
 		f := &findings[i]
-		if f.Resource == nil {
+		// A restricted finding gets no steps.
+		if f.Resource == nil || !can(*f.Resource) {
 			continue
 		}
 		switch ev := f.Facts.(type) {
@@ -140,7 +150,7 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep 
 				continue
 			}
 			gw := *f.Resource
-			if pod, ok := reporter(ev, in.Install.Namespace); ok {
+			if pod, ok := reporter(ev, in.Install.Namespace, can); ok {
 				add(StepEnvoyReason, c.ControllerLog(pod, stepsSince, "xds error", gw.Name), needsLog, pod, gw)
 			}
 			if in.Snapshot == nil {
@@ -163,26 +173,15 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep 
 	return out
 }
 
-// reporter is the first controller Pod, by name, that reports one of ev's rejects.
-func reporter(ev *health.XDSRejectsEvidence, ns string) (objects.Ref, bool) {
-	var names []string
+// reporter is the first visible controller Pod, by name, that reports one of ev's rejects.
+func reporter(ev *health.XDSRejectsEvidence, ns string, can func(objects.Ref) bool) (objects.Ref, bool) {
+	var first objects.Ref
 	for _, t := range ev.Types {
-		names = append(names, t.ReportedBy...)
-	}
-	if len(names) == 0 {
-		return objects.Ref{}, false
-	}
-	return process.PodRef(ns, process.Process{Name: slices.Min(names)}), true
-}
-
-// VisibleSteps returns the steps whose every named object can is true for, in
-// order (design §14 rule 15). It never changes steps.
-func VisibleSteps(steps []NextStep, can func(objects.Ref) bool) []NextStep {
-	out := make([]NextStep, 0, len(steps))
-	for _, s := range steps {
-		if !slices.ContainsFunc(s.Refs, func(r objects.Ref) bool { return !can(r) }) {
-			out = append(out, s)
+		for _, n := range t.ReportedBy {
+			if p := process.PodRef(ns, process.Process{Name: n}); can(p) && (first.Name == "" || n < first.Name) {
+				first = p
+			}
 		}
 	}
-	return out
+	return first, first.Name != ""
 }

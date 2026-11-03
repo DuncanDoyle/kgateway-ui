@@ -286,8 +286,7 @@ func changedWorld(t *testing.T, seen map[string]time.Duration) *world {
 	return w
 }
 
-// recentAt runs w once at Now − 30 min without rejects, so the check has seen
-// the objects before, then at Now with them, and returns nack's recently changed names.
+// recentAt runs w without rejects at Now − 30 min, then with them at Now, and returns nack's recently changed.
 func recentAt(t *testing.T, w *world) []string {
 	t.Helper()
 	st := NewStates()
@@ -302,9 +301,8 @@ func recentAt(t *testing.T, w *world) []string {
 	return names
 }
 
-// Routes, ListenerSets and policies on the rejecting Gateway whose generation
-// was first seen in the 10 min before the first reject, newest first: 9:59
-// before is in, 10:01 before is out, and 12 changes keep the 10 newest.
+// Objects on the Gateway changed in the 10 min before the first reject, newest
+// first: 9:59 before is in, 10:01 out, and 12 changes keep the 10 newest.
 func TestRecentlyChangedWindowAndCap(t *testing.T) {
 	nack := testutil.GwRef("infra", "nack")
 	w := changedWorld(t, map[string]time.Duration{"in": 9*time.Minute + 59*time.Second, "out": 10*time.Minute + time.Second,
