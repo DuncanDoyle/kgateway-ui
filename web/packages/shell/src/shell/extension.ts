@@ -1,6 +1,6 @@
 import { type ComponentType, createContext, type ReactNode, useContext } from "react";
 import { useParams } from "react-router-dom";
-import type { Finding } from "../api/types";
+import type { Diagnostics, Finding } from "../api/types";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
 import type { Contributions } from "./contributions";
@@ -65,7 +65,19 @@ export interface CorePages {
   RoutePage?: ComponentType;
   /** The finding detail page at findings/:findingId (sub-phase 3.1). */
   FindingPage?: ComponentType;
+  /** Replaces the install page's Needs attention and Processes block (sub-phase 3.2). */
+  DiagnosticsSection?: ComponentType<DiagnosticsSectionProps>;
 }
+
+/** What the install page hands its diagnostics block; stale data must show every state as unknown (D-006). */
+export interface DiagnosticsSectionProps {
+  installId: string;
+  diagnostics: Diagnostics;
+  stale: boolean;
+}
+
+/** The CorePages the Shell was given, for slots that sit inside a page rather than at a route. */
+export const CorePagesContext = createContext<Partial<CorePages>>({});
 
 export const defaultBrand: Brand = { productName: "kgateway", logo: null };
 

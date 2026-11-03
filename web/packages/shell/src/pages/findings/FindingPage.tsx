@@ -24,6 +24,7 @@ import { Shimmer } from "../../states/Shimmer";
 import { DataAge } from "../DataAge";
 import { expectedRows, Facts, Section } from "../explore/detailParts";
 import { NameCell } from "../explore/listParts";
+import { FindingContributions } from "../install/FindingRow";
 import { ago } from "../install/HealthStrip";
 import { SeverityBadge } from "./FindingsPage";
 
@@ -225,6 +226,10 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
                   </>
                 ) : null}
               </Facts>
+              {/* Contributed finding renderers and actions (design §4.1 gap 6). */}
+              <FindingContributions
+                finding={{ ...f, install: id, message: f.message ?? "", evidence: data.evidence }}
+              />
             </Section>
             {data.suggestedFix ? <FixSection fix={data.suggestedFix} installId={id} /> : null}
             {data.nextSteps?.length ? <StepsSection steps={data.nextSteps} /> : null}

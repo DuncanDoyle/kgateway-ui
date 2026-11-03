@@ -11,7 +11,8 @@ import {
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { type MouseEvent, memo, useDeferredValue, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { Finding, GatewayRow, Ref } from "../../api/types";
+import type { GatewayRow } from "../../api/types";
+import { diagnosticsCopy } from "../../copy/explorer";
 import { objectPath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
@@ -136,7 +137,6 @@ const Empty = styled.p`
 // region Helpers
 const col = createColumnHelper<GatewayRow>();
 const rank = { error: 0, unknown: 1, warning: 2, healthy: 3 } as const;
-const noFindings: Finding[] = [];
 const gatewayKey = (r: GatewayRow) => `${r.ref.namespace ?? ""}/${r.ref.name}`;
 /** Where a row opens, from its server-computed link only; an older backend sends none, so the row is text. */
 const rowPath = (installId: string, r: GatewayRow) => objectPath(installId, { ...r.ref, link: r.link ?? "none" });
@@ -148,36 +148,23 @@ function filterRows(rows: GatewayRow[], q: string): GatewayRow[] {
   return rows.filter((r) => [r.ref.name, r.ref.namespace ?? "", r.class].some((v) => v.toLowerCase().includes(needle)));
 }
 
-const refKey = (r: Pick<Ref, "group" | "kind" | "namespace" | "name">) =>
-  [r.group, r.kind, r.namespace ?? "", r.name].join("|");
-
-/** The worst error or warning per resource among the current health findings; info does not change a row. */
-function findingStates(findings: Finding[]): Map<string, HealthState> {
-  const worst = new Map<string, HealthState>();
-  for (const f of findings) {
-    if (!f.resource || f.severity === "info") continue;
-    const k = refKey(f.resource);
-    const prev = worst.get(k);
-    if (!prev || rank[f.severity] < rank[prev]) worst.set(k, f.severity);
-  }
-  return worst;
+/**
+ * The state a row shows: the server's, unknown on stale data or a missing required signal (unless it is an error),
+ * as the backend's rowState (D-006).
+ */
+function shownState(r: GatewayRow, stale: boolean, signalsMissing: boolean): HealthState {
+  if (stale) return "unknown";
+  return signalsMissing && r.state !== "error" ? "unknown" : r.state;
 }
 
-/**
- * The state a row shows: the worse of its overview state and its current health findings, so the table agrees
- * with the findings above it. Unknown on stale data or a missing required signal (unless it has an error), as
- * the backend's rowState (D-006).
- */
-function shownState(
-  r: GatewayRow,
-  found: Map<string, HealthState>,
-  stale: boolean,
-  signalsMissing: boolean,
-): HealthState {
-  if (stale) return "unknown";
-  const f = found.get(refKey(r.ref));
-  const state = f && rank[f] < rank[r.state] ? f : r.state;
-  return signalsMissing && state !== "error" ? "unknown" : state;
+type DataPlane = NonNullable<GatewayRow["dataPlane"]>;
+const dataPlaneRank: Record<DataPlane, number> = { rejects: 0, unknown: 1, ok: 2 };
+
+/** The Data plane cell: the server's value, unknown when stale or absent (an older server); never a tick on old data. */
+function DataPlaneBadge({ value }: { value: DataPlane }) {
+  if (value === "ok") return <HealthBadge state="healthy" label={diagnosticsCopy.noRejects} />;
+  if (value === "rejects") return <HealthBadge state="error" label={diagnosticsCopy.rejects} />;
+  return <HealthBadge state="unknown" />;
 }
 
 function columns(installId: string) {
@@ -197,6 +184,13 @@ function columns(installId: string) {
         return to ? <Link to={to}>{name}</Link> : name;
       },
     }),
+    col.accessor((r) => r.dataPlane ?? "unknown", {
+      id: "dataPlane",
+      header: diagnosticsCopy.dataPlane,
+      cell: (c) => <DataPlaneBadge value={c.getValue()} />,
+      sortingFn: (a, b) =>
+        dataPlaneRank[a.original.dataPlane ?? "unknown"] - dataPlaneRank[b.original.dataPlane ?? "unknown"],
+    }),
     col.accessor("class", { header: "Class" }),
     col.accessor("listeners", { header: "Listeners" }),
     col.accessor("attachedRoutes", { id: "routes", header: "Routes" }),
@@ -212,8 +206,6 @@ function columns(installId: string) {
 // region Component
 interface GatewayTableProps {
   rows: GatewayRow[];
-  /** The install's current health findings; a Gateway's errors and warnings fold into its row. */
-  findings?: Finding[];
   installId: string;
   stale: boolean;
   /** A required check is not OK: non-error rows show unknown. */
@@ -224,7 +216,6 @@ interface GatewayTableProps {
 /** Gateways of the install; the text filter and the sort are kept in the URL (?q=edge&sort=routes.desc). Memoised so the page's 1 s clock tick does not re-render it. */
 export const GatewayTable = memo(function GatewayTable({
   rows,
-  findings = noFindings,
   installId,
   stale,
   signalsMissing,
@@ -234,11 +225,15 @@ export const GatewayTable = memo(function GatewayTable({
   const navigate = useNavigate();
   const [text, setText] = useUrlText(params, update, "q");
   const q = useDeferredValue(text);
-  // The shown state goes into the row data: TanStack caches cell values per row, so a closure would not refresh them.
-  const found = useMemo(() => findingStates(findings), [findings]);
+  // Shown values go into the row data: TanStack caches cell values per row, so a closure would not refresh them.
   const visible = useMemo(
-    () => filterRows(rows, q).map((r) => ({ ...r, state: shownState(r, found, stale, signalsMissing) })),
-    [rows, q, found, stale, signalsMissing],
+    () =>
+      filterRows(rows, q).map((r) => ({
+        ...r,
+        state: shownState(r, stale, signalsMissing),
+        dataPlane: stale ? ("unknown" as const) : r.dataPlane,
+      })),
+    [rows, q, stale, signalsMissing],
   );
   const sort = params.get("sort") ?? "state.asc";
   // A new sorting array on every render re-runs the table's auto-resets, which re-render it forever.

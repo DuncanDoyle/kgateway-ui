@@ -9,9 +9,10 @@ import routesGolden from "../../../../../pkg/api/testdata/golden/routes.json";
 import type { Finding, GatewayDetail, ListenerSetList, RouteList } from "../api/types";
 import { DetailFrame } from "../pages/explore/detailParts";
 import { GatewayPage } from "../pages/explore/GatewayPage";
+import { FindingPage } from "../pages/findings/FindingPage";
 import { FindingRow } from "../pages/install/FindingRow";
 import { InstallPage } from "../pages/install/InstallPage";
-import { installSummary, meta, overview, unhealthy } from "../test/fixtures";
+import { diagnostics, installSummary, meta, overview, unhealthy } from "../test/fixtures";
 import { renderWithTheme, stubApi } from "../test/render";
 import { type Contributions, type DetailContext, resetContributionWarnings } from "./contributions";
 import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "./extension";
@@ -95,7 +96,7 @@ function mountInstall(contributions: Contributions) {
   stubApi({
     "/api/v1/installs": [installSummary()],
     [`${API}/overview`]: overview(),
-    [`${API}/health`]: unhealthy(),
+    [`${API}/diagnostics`]: diagnostics(unhealthy()),
     "/api/v1/meta": meta,
   });
   return renderWithTheme(
@@ -178,7 +179,7 @@ it("a slot with no contribution renders nothing and takes no space", async () =>
   g.unmount();
   mountInstall(empty);
   await screen.findByRole("table", { name: "Gateways" });
-  expect(screen.getAllByTestId("finding-row").length).toBeGreaterThan(0);
+  expect(screen.getAllByTestId("group-row").length).toBeGreaterThan(0);
   expect(document.querySelector("[data-slot]")).toBeNull();
 });
 
@@ -289,19 +290,31 @@ it("a throwing detail tab or side section leaves the Gateway page up and its slo
   expect(warned("side-section:bad-side")).toBe(1);
 });
 
-it("a throwing install panel, finding action or finding renderer leaves the install page up and its slot empty", async () => {
+it("a throwing install panel leaves the install page up and its slot empty", async () => {
+  const warned = quiet();
+  mountInstall({ installPanels: [{ id: "bad-panel", title: "Bad panel", render: boom }] });
+  await screen.findByRole("table", { name: "Gateways" });
+  expect(screen.getAllByTestId("group-row").length).toBeGreaterThan(0);
+  expect(screen.queryByRole("region", { name: "Bad panel" })).not.toBeInTheDocument();
+  expect(warned("install-panel:bad-panel")).toBe(1);
+});
+
+it("a throwing finding action or finding renderer leaves the finding page up and its slot empty", async () => {
   const warned = quiet();
   stubApi({
     "/api/v1/installs": [installSummary()],
-    [`${API}/overview`]: overview(),
-    [`${API}/health`]: unhealthy(),
+    [`${API}/findings/f1-edge`]: {
+      install: ID,
+      finding: { id: "f1-edge", code: "KGWUI-001", slug: "xds-rejected", severity: "error", message: "Rejected" },
+      affected: { install: ID, items: [], total: 0, collectedAt: now() },
+      collectedAt: now(),
+    },
     "/api/v1/meta": meta,
   });
   renderWithTheme(
     <With
       findingRenderers={{ "KGWUI-": boom }}
       contributions={{
-        installPanels: [{ id: "bad-panel", title: "Bad panel", render: boom }],
         findingActions: [
           { id: "bad-applies", label: "Bad applies", applies: boom, render: () => <button type="button">x</button> },
           { id: "bad-render", label: "Bad render", applies: () => true, render: boom },
@@ -309,26 +322,19 @@ it("a throwing install panel, finding action or finding renderer leaves the inst
       }}
     >
       <Routes>
-        <Route path="/i/:id" element={<InstallPage />} />
+        <Route path="/i/:id/findings/:findingId" element={<FindingPage />} />
       </Routes>
     </With>,
-    { path: `/i/${ID}` },
+    { path: `/i/${ID}/findings/f1-edge` },
   );
-  await screen.findByRole("table", { name: "Gateways" });
-  const rows = screen.getAllByTestId("finding-row");
-  expect(rows[0]).toHaveTextContent("Configuration rejected by Envoy");
-  expect(screen.queryByRole("region", { name: "Bad panel" })).not.toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Rejected");
   expect(screen.queryByRole("group", { name: "Bad applies" })).not.toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "Bad render" })).not.toBeInTheDocument();
   // Every applicable action threw, so the actions area takes no space.
-  const areas = document.querySelectorAll('[data-slot="finding-actions"]');
-  expect(areas.length).toBeGreaterThan(0);
-  for (const a of areas) {
-    expect(a).toBeEmptyDOMElement();
-    expect(getComputedStyle(a).display).toBe("none");
-  }
-  // One warning per contribution, however many rows it failed on.
-  expect(warned("install-panel:bad-panel")).toBe(1);
+  const area = document.querySelector('[data-slot="finding-actions"]') as HTMLElement;
+  expect(area).toBeEmptyDOMElement();
+  expect(getComputedStyle(area).display).toBe("none");
+  // One warning per contribution, however often it renders.
   expect(warned("finding-action:bad-applies")).toBe(1);
   expect(warned("finding-action:bad-render")).toBe(1);
   expect(warned("finding-renderer:KGWUI-001")).toBe(1);
@@ -349,15 +355,20 @@ it("a repeated contribution id renders once", async () => {
   expect(await screen.findByRole("region", { name: "Side one" })).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Side two" })).not.toBeInTheDocument();
   g.unmount();
-  mountInstall({
-    installPanels: [panel("Panel one"), panel("Panel two")],
-    findingActions: [action("A1"), action("A2")],
-  });
+  const install = mountInstall({ installPanels: [panel("Panel one"), panel("Panel two")] });
   await screen.findByRole("table", { name: "Gateways" });
   expect(screen.getByRole("region", { name: "Panel one" })).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Panel two" })).not.toBeInTheDocument();
-  const rows = screen.getAllByTestId("finding-row");
-  expect(screen.getAllByRole("group", { name: "A1" })).toHaveLength(rows.length);
+  install.unmount();
+  renderWithTheme(
+    <With contributions={{ findingActions: [action("A1"), action("A2")] }}>
+      <FindingRow
+        finding={{ code: "KGWUI-002", slug: "demo", severity: "warning", install: ID, message: "m" }}
+        installId={ID}
+      />
+    </With>,
+  );
+  expect(screen.getAllByRole("group", { name: "A1" })).toHaveLength(1);
   expect(screen.queryByRole("group", { name: "A2" })).not.toBeInTheDocument();
   for (const id of ["dup-side", "dup-panel", "dup-action"])
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"${id}"`));

@@ -9,6 +9,7 @@ import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import { DocumentTitle } from "./DocumentTitle";
 import {
   type CorePages,
+  CorePagesContext,
   defaultBrand,
   type ResolvedShellExtension,
   type RouteContribution,
@@ -97,31 +98,33 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
   ];
   return (
     <ShellExtensionContext.Provider value={ext}>
-      {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}
-      <ThemeProvider themes={ext.themes} defaultThemeId={ext.defaultThemeId}>
-        <BrowserRouter>
-          <Root data-testid="shell-root" stylesOverride={stylesOverride}>
-            <DocumentTitle />
-            <Header installPaths={installRoutes.map(([path]) => path)} />
-            <main>
-              <Routes>
-                <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
-                {installRoutes.map(([path, Page]) => (
-                  <Route key={path} path={path ? `/i/:id/${path}` : "/i/:id"} element={<Page />} />
-                ))}
-                {contributed.map((r) => (
-                  <Route
-                    key={`${r.scope}:${r.path}`}
-                    path={r.scope === "install" ? `/i/:id/${r.path}` : `/${r.path}`}
-                    element={r.element}
-                  />
-                ))}
-                <Route path="*" element={<PageState kind="empty" title="Page not found" />} />
-              </Routes>
-            </main>
-          </Root>
-        </BrowserRouter>
-      </ThemeProvider>
+      <CorePagesContext.Provider value={pages}>
+        {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}
+        <ThemeProvider themes={ext.themes} defaultThemeId={ext.defaultThemeId}>
+          <BrowserRouter>
+            <Root data-testid="shell-root" stylesOverride={stylesOverride}>
+              <DocumentTitle />
+              <Header installPaths={installRoutes.map(([path]) => path)} />
+              <main>
+                <Routes>
+                  <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
+                  {installRoutes.map(([path, Page]) => (
+                    <Route key={path} path={path ? `/i/:id/${path}` : "/i/:id"} element={<Page />} />
+                  ))}
+                  {contributed.map((r) => (
+                    <Route
+                      key={`${r.scope}:${r.path}`}
+                      path={r.scope === "install" ? `/i/:id/${r.path}` : `/${r.path}`}
+                      element={r.element}
+                    />
+                  ))}
+                  <Route path="*" element={<PageState kind="empty" title="Page not found" />} />
+                </Routes>
+              </main>
+            </Root>
+          </BrowserRouter>
+        </ThemeProvider>
+      </CorePagesContext.Provider>
     </ShellExtensionContext.Provider>
   );
 }

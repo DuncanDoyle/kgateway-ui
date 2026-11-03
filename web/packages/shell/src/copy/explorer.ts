@@ -471,4 +471,23 @@ export const diagnosticsCopy = {
   lastStart: "Last start",
   rolloutStuck: (reason: string) => `Rollout stuck: ${reason}`,
   noProcesses: "No processes you can view.",
+  // Install page (Task 49)
+  needsAttention: "Needs attention",
+  showAllGroups: (n: number) => `Show all groups (${n})`,
+  processesTitle: "Processes",
+  viewProcesses: "View processes",
+  whatWasChecked: "What was checked",
+  notAvailable: "Not available",
+  unavailableReason: {
+    off: "Turned off",
+    denied: "No permission to read its input",
+    failing: "Its input is failing",
+    "not-on-version": "Not available on this version",
+    "not-observed": "Not observed",
+  } as Record<string, string>,
+  dataPlane: "Data plane",
+  noRejects: "No rejects",
+  rejects: "Rejects",
+  problems: (n: number) => plural(n, ["problem", "problems"]),
+  oldestProblem: (ago: string) => `Oldest problem ${ago}`,
 };

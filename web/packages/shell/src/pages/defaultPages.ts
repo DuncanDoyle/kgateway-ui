@@ -8,7 +8,7 @@ import { RoutePage } from "./explore/RoutePage";
 import { RoutesPage } from "./explore/RoutesPage";
 import { FindingPage } from "./findings/FindingPage";
 import { FindingsPage } from "./findings/FindingsPage";
-import { InstallPage } from "./install/InstallPage";
+import { DiagnosticsSection, InstallPage } from "./install/InstallPage";
 import { ResourcePage } from "./ResourcePage";
 
 /** The upstream page implementations. */
@@ -24,4 +24,5 @@ export const defaultPages: Required<CorePages> = {
   ListenerSetPage,
   RoutesPage,
   RoutePage,
+  DiagnosticsSection,
 };

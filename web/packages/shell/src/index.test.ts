@@ -153,6 +153,7 @@ it("keeps the public export surface", () => {
         "DetailContext",
         "DetailTabContribution",
         "Diagnostics",
+        "DiagnosticsSectionProps",
         "EffectiveContext",
         "EffectiveEdge",
         "EffectiveRule",

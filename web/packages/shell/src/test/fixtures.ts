@@ -1,4 +1,13 @@
-import type { Category, HealthReport, InstallSummary, MetaResponse, OverviewResponse, ServedKind } from "../api/types";
+import type {
+  Category,
+  Diagnostics,
+  GroupRow,
+  HealthReport,
+  InstallSummary,
+  MetaResponse,
+  OverviewResponse,
+  ServedKind,
+} from "../api/types";
 
 // Builders take the collection time, so timestamps follow the test clock and are never fixed at import time.
 
@@ -82,6 +91,7 @@ export function overview(at = Date.now()): OverviewResponse {
         listeners: 2,
         attachedRoutes: 98,
         addresses: ["34.12.8.1"],
+        dataPlane: "rejects",
       },
       {
         ref: { group: gw, kind: "Gateway", namespace: "prod", name: "internal" },
@@ -91,6 +101,7 @@ export function overview(at = Date.now()): OverviewResponse {
         listeners: 1,
         attachedRoutes: 40,
         addresses: ["10.0.4.7"],
+        dataPlane: "ok",
       },
     ],
     collectedAt: new Date(at).toISOString(),
@@ -242,5 +253,54 @@ export function installSummary(
     health: { state: "error", counts: { error: 1, warning: 6 } },
     computedAt: times.computedAt ?? new Date(at).toISOString(),
     ...(times.confirmedAt ? { confirmedAt: times.confirmedAt } : {}),
+  };
+}
+
+/** A ranked group on a route; i names it and orders it. */
+export function groupRow(i: number, extra: Partial<GroupRow> = {}): GroupRow {
+  return {
+    id: `g-${i}`,
+    title: `Problem ${i}`,
+    code: "KGWUI-013",
+    severity: "warning",
+    class: 3,
+    cause: { group: gw, kind: "HTTPRoute", namespace: "shop", name: `route-${i}`, link: "detail" },
+    members: 1,
+    affected: [],
+    affectedTotal: 0,
+    ...extra,
+  };
+}
+
+/**
+ * The diagnostics that match a health fixture: its verdict and checks, with one group per error or warning
+ * finding unless groups are given. The processes read healthy.
+ */
+export function diagnostics(h: HealthReport, groups?: GroupRow[]): Diagnostics {
+  const gs =
+    groups ??
+    h.findings
+      .filter((x) => x.severity !== "info")
+      .map((x, i) =>
+        groupRow(i, {
+          title: x.message,
+          code: x.code,
+          severity: x.severity,
+          cause: x.resource,
+          restricted: x.restricted,
+        }),
+      );
+  return {
+    install: h.install,
+    verdict: { state: h.state, counts: h.counts, problems: (h.counts.error ?? 0) + (h.counts.warning ?? 0) },
+    groups: gs,
+    groupTotal: gs.length,
+    processes: {
+      controller: { state: "healthy", observed: true, ready: 2, desired: 2, version: "2.4.7" },
+      proxies: { state: "healthy", gateways: 2, ready: 2, rejecting: 0, skew: 0, restarting: 0, notObserved: 0 },
+    },
+    dataPlane: { gateways: 2, rejecting: 0 },
+    checks: h.checks,
+    collectedAt: h.collectedAt,
   };
 }

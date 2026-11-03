@@ -35,7 +35,7 @@ for (const theme of themes) {
     await pickTheme(page, theme);
     await expectInstallPage(page);
     await page.getByRole("link", { name: /Show all/ }).click();
-    await expect(page).toHaveURL(/\/i\/kgw-a\.kgateway\/findings$/);
+    await expect(page).toHaveURL(/\/i\/kgw-a\.kgateway\/findings\?view=groups$/);
     // Server search matches name, message and detail, not codes (design rule 17): codes go through the code filter.
     for (const [code, message] of [
       ["KGWUI-004", "Namespace not watched by the controller"],

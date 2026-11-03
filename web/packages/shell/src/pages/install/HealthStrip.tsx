@@ -1,6 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import type { HealthReport } from "../../api/types";
+import type { CheckResult, Verdict } from "../../api/types";
+import { diagnosticsCopy } from "../../copy/explorer";
 import { countsText, plural } from "../../format";
 import { HealthIcon } from "../../health/HealthIcon";
 import { stateLabel } from "../../health/state";
@@ -48,45 +49,55 @@ function sentence(s: string): string {
 }
 
 /** The strip's text. Unknown leads with "Health unknown" and its reasons, then any warnings; it never claims "No known problems". */
-function headline(h: HealthReport): string {
-  if (h.state === "healthy") return "All healthy";
-  if (h.state === "unknown") {
-    const failing = h.checks.filter((c) => c.required && !c.ok);
+function headline(v: Verdict, checks: CheckResult[]): string {
+  if (v.state === "healthy") return "All healthy";
+  if (v.state === "unknown") {
+    const failing = checks.filter((c) => c.required && !c.ok);
     const missing = failing.filter((c) => !c.pending).map((c) => c.name);
     // A pending check was collected; its error says how many resources are being processed.
     const parts = failing.filter((c) => c.pending).map((c) => sentence(c.error ?? `Still reading ${c.name}`));
     if (missing.length) parts.unshift(`Cannot check ${missing.join(", ")}`);
     if (!parts.length) parts.push("Some checks did not finish");
-    if (h.counts.warning) parts.push(plural(h.counts.warning, "warning"));
+    if (v.counts.warning) parts.push(plural(v.counts.warning, "warning"));
     return `Health unknown: ${parts.join(". ")}`;
   }
   // Counts can be empty when findings are restricted or absent; never leave the strip blank.
-  return countsText(h.counts) || stateLabel(h.state);
+  const counts = countsText(v.counts);
+  if (!counts) return stateLabel(v.state);
+  return v.problems ? `${diagnosticsCopy.problems(v.problems)}: ${counts}` : counts;
 }
 
 // region Component
 interface HealthStripProps {
-  health: HealthReport;
+  /** The server's verdict over every finding (design §6); the strip never derives a state. */
+  verdict: Verdict;
+  checks: CheckResult[];
+  collectedAt: string;
   stale: boolean;
   now: number;
-  /** When the page's data was collected, if older than health.collectedAt (e.g. a stale overview). */
+  /** When the page's data was collected, if older than collectedAt (e.g. a stale overview). */
   checkedAt?: string;
   stylesOverride?: SerializedStyles;
 }
 
 /** Full-width health strip; stale data is shown as unknown (D-006). InstallPage decides staleness for the whole page. */
-export function HealthStrip({ health, stale, now, checkedAt, stylesOverride }: HealthStripProps) {
-  const state: HealthState = stale ? "unknown" : health.state;
-  const at = checkedAt ?? health.collectedAt;
+export function HealthStrip({ verdict, checks, collectedAt, stale, now, checkedAt, stylesOverride }: HealthStripProps) {
+  const state: HealthState = stale ? "unknown" : verdict.state;
+  const at = checkedAt ?? collectedAt;
+  const oldest = !stale && verdict.oldestSince && verdict.problems ? verdict.oldestSince : undefined;
   return (
     <Strip $state={state} data-testid="health-strip" stylesOverride={stylesOverride}>
       <HealthIcon state={state} size={18} />
-      {/* One live region, updated in place; the age ticks every second and stays outside it. */}
+      {/* One live region, updated in place; the ages tick every second and stay outside it. */}
       <b>
-        <span role="status">{stale ? "Data is stale" : headline(health)}</span>
+        <span role="status">{stale ? "Data is stale" : headline(verdict, checks)}</span>
         {stale ? `. Last checked ${ago(at, now)}` : null}
       </b>
-      {stale ? null : <span className="when">Last checked {ago(at, now)}</span>}
+      {stale ? null : (
+        <span className="when">
+          {oldest ? `${diagnosticsCopy.oldestProblem(ago(oldest, now))} · ` : null}Last checked {ago(at, now)}
+        </span>
+      )}
     </Strip>
   );
 }

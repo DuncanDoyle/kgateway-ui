@@ -73,28 +73,29 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   .copy {
     grid-area: copy;
   }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: ${(p) => p.theme.space(2)};
-    margin-top: ${(p) => p.theme.space(1.5)};
-    /* Every action threw: its Slot rendered nothing, so the area takes no space. */
-    &:empty {
-      display: none;
-    }
-  }
-  .actions fieldset {
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-  }
   @media (max-width: 720px) {
     grid-template-columns: minmax(0, 1fr) 28px;
     grid-template-areas: "sev copy" "res res" "msg msg";
     row-gap: ${(p) => p.theme.space(1.5)};
   }
   ${(p) => p.stylesOverride}
+`;
+
+const Actions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${(p) => p.theme.space(2)};
+  margin-top: ${(p) => p.theme.space(1.5)};
+  /* Every action threw: its Slot rendered nothing, so the area takes no space. */
+  &:empty {
+    display: none;
+  }
+  fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
 `;
 
 // region Helpers
@@ -111,6 +112,32 @@ export function rendererFor(renderers: Record<string, FindingRenderer>, code: st
 }
 
 // region Component
+/** A finding's contributed renderer and actions, each in its own Slot; a restricted finding gets neither. */
+export function FindingContributions({ finding: f }: { finding: Finding }) {
+  const { findingRenderers } = useShellExtension();
+  const extra = rendererFor(findingRenderers, f.code);
+  const actions = useFindingActions(f);
+  const fk = findingKey(f);
+  if (f.restricted) return null;
+  return (
+    <>
+      {extra ? <Slot id={`finding-renderer:${f.code}`} resetKey={fk} render={() => extra(f)} /> : null}
+      {actions.length > 0 ? (
+        <Actions data-slot="finding-actions">
+          {actions.map((a) => (
+            <Slot
+              key={a.id}
+              id={`finding-action:${a.id}`}
+              resetKey={fk}
+              render={() => <fieldset aria-label={a.label}>{a.render(f)}</fieldset>}
+            />
+          ))}
+        </Actions>
+      ) : null}
+    </>
+  );
+}
+
 interface FindingRowProps {
   finding: Finding;
   installId: string;
@@ -122,10 +149,6 @@ interface FindingRowProps {
  * the message opens the finding's page when the finding has an id.
  */
 export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
-  const { findingRenderers } = useShellExtension();
-  const extra = rendererFor(findingRenderers, f.code);
-  const actions = useFindingActions(f);
-  const fk = findingKey(f);
   const { data: installs } = useInstalls();
   // A finding without a resource is about the install; it is named, never split from its ID.
   const install = installs?.find((i) => i.id === f.install);
@@ -162,19 +185,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
               <div className="msg">{f.message}</div>
             )}
             {f.detail ? <div className="muted">{f.detail}</div> : null}
-            {extra ? <Slot id={`finding-renderer:${f.code}`} resetKey={fk} render={() => extra(f)} /> : null}
-            {actions.length > 0 ? (
-              <div className="actions" data-slot="finding-actions">
-                {actions.map((a) => (
-                  <Slot
-                    key={a.id}
-                    id={`finding-action:${a.id}`}
-                    resetKey={fk}
-                    render={() => <fieldset aria-label={a.label}>{a.render(f)}</fieldset>}
-                  />
-                ))}
-              </div>
-            ) : null}
+            <FindingContributions finding={f} />
           </>
         )}
       </div>

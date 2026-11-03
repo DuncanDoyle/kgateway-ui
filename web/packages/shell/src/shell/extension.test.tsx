@@ -9,7 +9,7 @@ import {
   THEME_PAINT_KEY,
   type Theme,
 } from "../index";
-import { overview, unhealthy } from "../test/fixtures";
+import { diagnostics, overview, unhealthy } from "../test/fixtures";
 import { stubApi, testSWR } from "../test/render";
 import { reservedPathOf } from "./Shell";
 
@@ -53,11 +53,12 @@ it("a downstream extension contributes brand, theme, page, nav entry, finding re
       kinds: [],
     },
     "/api/v1/installs/kgw.kgateway/overview": overview(now),
-    "/api/v1/installs/kgw.kgateway/health": {
-      ...unhealthy(now),
-      findings: [
-        { code: "ACME-001", slug: "demo", severity: "error", install: "kgw.kgateway", message: "Downstream finding" },
-      ],
+    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(unhealthy(now)),
+    "/api/v1/installs/kgw.kgateway/findings/f1-acme": {
+      install: "kgw.kgateway",
+      finding: { id: "f1-acme", code: "ACME-001", slug: "demo", severity: "error", message: "Downstream finding" },
+      affected: { install: "kgw.kgateway", items: [], total: 0, collectedAt: new Date(now).toISOString() },
+      collectedAt: new Date(now).toISOString(),
     },
   });
   window.history.pushState({}, "", "/i/kgw.kgateway");
@@ -78,8 +79,7 @@ it("a downstream extension contributes brand, theme, page, nav entry, finding re
     </SWRConfig>,
   );
   expect(await screen.findByText("Acme Edge")).toBeInTheDocument();
-  expect(await screen.findByText("acme detail")).toBeInTheDocument();
-  expect(screen.getByText("acme panel")).toBeInTheDocument();
+  expect(await screen.findByText("acme panel")).toBeInTheDocument();
   expect(screen.getByTestId("edition")).toHaveTextContent("acme");
   // The contributed tokens apply: colour, font family, type scale, and the pre-React paint record.
   expect(screen.getByTestId("version")).toHaveStyle({ backgroundColor: "#7A1FA2", fontSize: "13px" });
@@ -90,6 +90,10 @@ it("a downstream extension contributes brand, theme, page, nav entry, finding re
   window.history.pushState({}, "", "/i/kgw.kgateway/widgets");
   window.dispatchEvent(new PopStateEvent("popstate"));
   await waitFor(() => expect(screen.getByText("widgets page")).toBeInTheDocument());
+  // The finding renderer shows on the finding's page.
+  window.history.pushState({}, "", "/i/kgw.kgateway/findings/f1-acme");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  expect(await screen.findByText("acme detail")).toBeInTheDocument();
 });
 
 // A build that predates the explorer slots: only the four Phase 1 pages.
