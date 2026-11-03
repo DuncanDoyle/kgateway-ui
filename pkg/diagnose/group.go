@@ -111,6 +111,8 @@ type Diagnosis struct {
 
 // Build sets each finding's Group, trying families in order (first claim wins,
 // else "Other" on its resource), and ranks the groups; findings keep their order.
+// It reads only rep's findings and in's Install, Owned, Views and IDs: the engine reuses
+// a diagnosis on exactly those, so a family must not read Snapshot or Served (Steps may).
 func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	id := in.Install.ID()
 	groups := make([]Group, 0, len(rep.Findings))

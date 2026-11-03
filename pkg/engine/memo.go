@@ -371,17 +371,20 @@ type diagMemo struct {
 // diagnosis groups and ranks rep. While rep's findings are the slice the last
 // diagnosis was built on (health.Evaluate reused them) and the install and Owned
 // are unchanged, it returns that diagnosis; with pc nil it always builds.
+// Build sees only the findings and what the key covers: the install, Owned and the
+// views of Owned's objects. Next steps read the snapshot per request (diagnose.Steps).
 func (e *Engine) diagnosis(rep *health.Report, in diagnose.Input, pc *printCtx) *diagnose.Diagnosis {
+	keyed := diagnose.Input{Install: in.Install, Owned: in.Owned, Views: in.Views, IDs: in.IDs}
 	id := in.Install.ID()
 	if pc == nil || pc.snap.Source.Kinds == nil {
 		delete(e.diags, id)
-		return diagnose.Build(rep, in, diagnose.Families())
+		return diagnose.Build(rep, keyed, diagnose.Families())
 	}
 	key := mix(installPrint(in.Install), lazy(&pc.owned, func() uint64 { return e.ownedPrint(pc) }))
 	if m := e.diags[id]; m != nil && m.key == key && m.n == len(rep.Findings) && m.findings == first(rep.Findings) {
 		return m.diag
 	}
-	d := diagnose.Build(rep, in, diagnose.Families())
+	d := diagnose.Build(rep, keyed, diagnose.Families())
 	e.diags[id] = &diagMemo{findings: first(rep.Findings), n: len(rep.Findings), key: key, diag: d}
 	return d
 }

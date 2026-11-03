@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -414,6 +417,19 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 			r.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
 			metrics["kgw.kgateway"] = r
 		}},
+		{"proxy Deployment replaced, same counts", func() {
+			s := *src.s
+			s.Source.Kinds = maps.Clone(s.Source.Kinds)
+			s.Deployments = slices.Clone(s.Deployments)
+			i := slices.IndexFunc(s.Deployments, func(d *appsv1.Deployment) bool { return d.Namespace == "infra" && d.Name == "edge" })
+			d := s.Deployments[i].DeepCopy()
+			d.Name, d.UID, d.ResourceVersion = "edge-renamed", "proxy/infra/edge-renamed", "2"
+			s.Deployments[i] = d
+			k := s.Source.Kinds[cache.DeploymentsGVR.String()]
+			k.Hash += 11
+			s.Source.Kinds[cache.DeploymentsGVR.String()] = k
+			src.s = &s
+		}},
 		{"per-Pod dropped updates", func() {
 			r := metrics["kgw.kgateway"]
 			r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u1", Name: "kgateway-0", Dropped: 1, DroppedPresent: true}}
@@ -483,6 +499,9 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 			if !bytes.Equal(got, want) {
 				t.Errorf("%s: GET %s differs with memoization:\n got %s\nwant %s", st.name, p, got, want)
 			}
+			if st.name == "proxy Deployment replaced, same counts" && strings.Contains(p, "diagnostics") && !bytes.Contains(got, []byte("edge-renamed")) {
+				t.Errorf("%s: GET %s does not name the new proxy Deployment:\n%s", st.name, p, got)
+			}
 			// The probes' findings carry an id, a first-seen since and a group, so all three are compared.
 			if p == paths[0] && (!bytes.Contains(got, []byte(`"id":"f1-`)) || !bytes.Contains(got, []byte(`"since":`)) ||
 				!bytes.Contains(got, []byte(`"group":"f1-`))) {
@@ -498,5 +517,70 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 	}
 	if n := memo.runs["probe stamped"]; n != 1 {
 		t.Errorf("probe stamped ran %d times memoized, want once", n)
+	}
+}
+
+// A reused diagnosis still serves next steps from the current snapshot: after the
+// proxy Deployment is replaced with the same counts, xDS rejects reruns with equal
+// findings, the diagnosis is reused, and the steps name the new Deployment (review I1).
+func TestReusedDiagnosisNamesCurrentProxyDeployment(t *testing.T) {
+	h := newHarness(t, setup{}, world()...)
+	now := testutil.Now
+	src := &scriptSnaps{s: h.cache.Snapshot(), now: &now}
+	metrics := okMetrics("kgw.kgateway")
+	r := metrics["kgw.kgateway"]
+	r.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
+	metrics["kgw.kgateway"] = r
+	var xds []health.Check
+	for _, c := range health.Upstream() {
+		if c.Name() == "xDS rejects" {
+			xds = append(xds, c)
+		}
+	}
+	side := func(noMemo bool) (*engine.Engine, *httptest.Server) {
+		e := engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
+			Scope: install.NamespaceSelectorScope{}, Verifier: scriptVerifier{&scopeverify.Result{Available: true}}, Metrics: metrics,
+			Checks: xds, Now: func() time.Time { return now }, NoMemo: noMemo})
+		srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, nil))
+		t.Cleanup(srv.Close)
+		return e, srv
+	}
+	memo, memoSrv := side(false)
+	plain, plainSrv := side(true)
+	const path = "/api/v1/installs/kgw.kgateway/diagnostics"
+	compute := func() *diagnose.Diagnosis {
+		memo.Compute()
+		plain.Compute()
+		_, want, err := ask(plainSrv, "", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, got, err := ask(memoSrv, "", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("GET %s differs with memoization:\n got %s\nwant %s", path, got, want)
+		}
+		return memo.Current().Model.Installs[0].Diagnosis
+	}
+	compute()
+	before := compute()
+	s := *src.s
+	s.Source.Kinds = maps.Clone(s.Source.Kinds)
+	s.Deployments = slices.Clone(s.Deployments)
+	i := slices.IndexFunc(s.Deployments, func(d *appsv1.Deployment) bool { return d.Namespace == "infra" && d.Name == "edge" })
+	d := s.Deployments[i].DeepCopy()
+	d.Name, d.UID, d.ResourceVersion = "edge-renamed", "proxy/infra/edge-renamed", "2"
+	s.Deployments[i] = d
+	k := s.Source.Kinds[cache.DeploymentsGVR.String()]
+	k.Hash += 11
+	s.Source.Kinds[cache.DeploymentsGVR.String()] = k
+	src.s = &s
+	if after := compute(); after != before {
+		t.Fatal("equal xDS findings after the replacement: want the diagnosis reused, so the case is exercised")
+	}
+	if _, got, _ := ask(memoSrv, "", path); !bytes.Contains(got, []byte("edge-renamed")) {
+		t.Fatalf("the next steps do not name the new proxy Deployment:\n%s", got)
 	}
 }
