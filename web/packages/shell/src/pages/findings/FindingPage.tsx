@@ -8,6 +8,7 @@ import { useFindingDetail } from "../../api/diagHooks";
 import { isStale } from "../../api/hooks";
 import type { LinkedRef, NextStep, SuggestedFix } from "../../api/types";
 import { columnCopy, findingsCopy, listCopy } from "../../copy/explorer";
+import { NextSteps } from "../../diagnostics/NextSteps";
 import { LinkedName } from "../../explore/LinkedName";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { StaleView } from "../../health/staleView";
@@ -90,20 +91,6 @@ const Block = styled.div`
     border-radius: ${(p) => p.theme.radius.sm};
   }
 `;
-const Steps = styled.ol`
-  display: grid;
-  gap: ${(p) => p.theme.space(3)};
-  margin: 0;
-  padding-left: ${(p) => p.theme.space(5)};
-  .title {
-    margin-bottom: ${(p) => p.theme.space(1)};
-  }
-  .note {
-    margin-top: ${(p) => p.theme.space(1)};
-    color: ${(p) => p.theme.color.textMuted};
-    font-size: ${(p) => p.theme.font.size.sm};
-  }
-`;
 const Skeleton = styled.div`
   display: grid;
   gap: ${(p) => p.theme.space(3)};
@@ -159,16 +146,7 @@ function StepsSection({ steps }: { steps: NextStep[] }) {
   return (
     <Section aria-labelledby="finding-steps">
       <h2 id="finding-steps">{findingsCopy.nextSteps}</h2>
-      <Steps>
-        {steps.map((s) => (
-          <li key={`${s.title}|${s.command}`}>
-            <div className="title">{s.title}</div>
-            <CopyBlock text={s.command} label={s.title} />
-            {s.needs?.length ? <div className="note">{findingsCopy.needs(s.needs)}</div> : null}
-            {s.note ? <div className="note">{s.note}</div> : null}
-          </li>
-        ))}
-      </Steps>
+      <NextSteps steps={steps} />
     </Section>
   );
 }

@@ -7,7 +7,7 @@ import findingsGolden from "../../../../../../pkg/api/testdata/golden/findings.j
 import findingsRestrictedGolden from "../../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import meta from "../../../../../../pkg/api/testdata/golden/meta.json";
 import type { FindingDetail, FindingList, LinkedRef } from "../../api/types";
-import { findingsCopy } from "../../copy/explorer";
+import { diagnosticsCopy, findingsCopy } from "../../copy/explorer";
 import { ROW_H } from "../../explore/ObjectTable";
 import { pseudoRules, renderWithTheme } from "../../test/render";
 import { FindingRow } from "../install/FindingRow";
@@ -299,4 +299,24 @@ it("a finding without an age shows a dash, never the word None", async () => {
   const row = rowOf("Restricted: ask the owning team");
   expect(within(row).getByLabelText("No value")).toHaveTextContent("—");
   expect(row).not.toHaveTextContent("None");
+});
+
+it("copying a next step on the finding page announces it", async () => {
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${FINDING}`)
+      ? {
+          ...detail(),
+          nextSteps: [{ title: "See the controller log", command: "kubectl logs -n kgw deploy/kgateway" }],
+        }
+      : undefined,
+  );
+  mount(`/i/${ID}/findings/${FINDING}`);
+  const copy = await screen.findByRole("button", { name: findingsCopy.copyLabel("See the controller log") });
+  await userEvent.click(copy);
+  expect(writeText).toHaveBeenCalledWith("kubectl logs -n kgw deploy/kgateway");
+  await waitFor(() =>
+    expect(screen.getAllByRole("status").some((s) => s.textContent === diagnosticsCopy.copied)).toBe(true),
+  );
 });
