@@ -297,3 +297,31 @@ func TestDataPlaneAndProcessFamilies(t *testing.T) {
 		t.Errorf("first group %+v", g)
 	}
 }
+
+// A report reused across recomputes is served by the published model: when a
+// group ID changes, Build writes a copy, never the served slice (R56).
+func TestBuildNeverWritesAServedReport(t *testing.T) {
+	served := []health.Finding{finding("a", "KGWUI-002", health.SeverityError, ref("HTTPRoute", "a"), nil),
+		finding("b", "KGWUI-002", health.SeverityError, ref("HTTPRoute", "b"), nil)}
+	first := health.Report{Findings: served}
+	diagnose.Build(&first, in, diagnose.Families())
+	gid := served[1].Group
+	served[1].Group = "stale" // as if an earlier Build had claimed it elsewhere
+	want := slices.Clone(served)
+	done := make(chan struct{})
+	go func() { // a handler reading the served model meanwhile
+		defer close(done)
+		for range 1000 {
+			_ = served[1].Group
+		}
+	}()
+	rep := health.Report{Findings: served}
+	d := diagnose.Build(&rep, in, diagnose.Families())
+	<-done
+	if !reflect.DeepEqual(served, want) {
+		t.Fatalf("Build wrote the served slice: %+v", served)
+	}
+	if &rep.Findings[0] == &served[0] || rep.Findings[1].Group != gid || len(d.Groups) != 2 {
+		t.Fatalf("want the report regrouped in its own slice: %+v", rep.Findings)
+	}
+}

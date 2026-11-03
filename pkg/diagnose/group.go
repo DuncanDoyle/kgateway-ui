@@ -123,6 +123,7 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	meta := make([]groupMeta, 0, len(rep.Findings))
 	at := make(map[string]int, len(rep.Findings)) // group ID to index
 	of := make([]int, len(rep.Findings))          // finding to group index
+	copied := false
 	for i := range rep.Findings {
 		f := &rep.Findings[i]
 		fam, cause, key := claim(*f, in, families)
@@ -150,8 +151,13 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 			g.Since = f.Since
 		}
 		g.Ranked = g.Ranked || f.Code != health.CodeSignalUnavailable
-		// A report reused by health.Evaluate is shared with a published model and already carries gid.
+		// A grouped finding belongs to a report a published model may serve (health.Evaluate
+		// reuses it): the first changed group copies the findings, so that slice is never written.
 		if f.Group != gid {
+			if f.Group != "" && !copied {
+				rep.Findings, copied = slices.Clone(rep.Findings), true
+				f = &rep.Findings[i]
+			}
 			f.Group = gid
 		}
 	}
