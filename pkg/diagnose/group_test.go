@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -45,10 +47,12 @@ func (f fake) Claim(x health.Finding, _ diagnose.Input) (*objects.Ref, []string,
 	return ref("Gateway", c), nil, true
 }
 
-func (f fake) Affected(cause *objects.Ref, _ []string, _ []health.Finding, _ diagnose.Input) []objects.Ref {
-	var out []objects.Ref
-	for i := range f.affected[cause.Name] {
-		out = append(out, *ref("HTTPRoute", "a"+string(rune('0'+i))))
+func (f fake) Affected(gs []diagnose.Claimed, _ []health.Finding, _ diagnose.Input) [][]objects.Ref {
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		for i := range f.affected[g.Cause.Name] {
+			out[k] = append(out[k], *ref("HTTPRoute", "a"+string(rune('0'+i))))
+		}
 	}
 	return out
 }
@@ -230,5 +234,66 @@ func TestSignalUnavailableNotRanked(t *testing.T) {
 	}
 	if got := names(rep.Findings, d.Rank); got[len(got)-1] != "signal" {
 		t.Errorf("finding rank %v, want KGWUI-008 last", got)
+	}
+}
+
+// The Data plane family groups a Gateway's 001 with the objects whose current
+// status is True for it; the Process family groups 005, 006 and 019–021 on
+// their own resource, so a group id hashes only what a restricted row shows (D-040).
+func TestDataPlaneAndProcessFamilies(t *testing.T) {
+	edge, calm := testutil.GwRef("infra", "edge"), testutil.GwRef("infra", "calm")
+	route := func(name string, p objects.ParentRef) install.OwnedObject {
+		return install.OwnedObject{Obj: testutil.HTTPRoute("shop", name, []objects.ParentRef{p}, testutil.AcceptedBy(p, testutil.Controller)), Parents: []objects.ParentRef{p}}
+	}
+	fin := install.Install{Namespace: "kgw", Name: "kgateway", ControllerNames: []string{testutil.Controller}}
+	din := diagnose.Input{Install: install.Resolved{Install: fin}, Owned: &install.Owned{
+		Gateways: []*unstructured.Unstructured{testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra", "calm", "kgateway", nil)},
+		Routes:   []install.OwnedObject{route("on-calm", calm), route("cart", edge), route("api", edge)}}}
+	gw, deploy := edge.Ref(), &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	id := din.Install.ID()
+	f := func(name, code string, sev health.Severity, res *objects.Ref) health.Finding {
+		return health.Finding{ID: health.FindingID(id, code, res, []string{name}), Code: code, Severity: sev, Install: id, Resource: res, Message: name}
+	}
+	rep := &health.Report{Findings: []health.Finding{
+		f("rejects", health.CodeXDSRejected, health.SeverityError, &gw),
+		f("proxy", health.CodeProxyNotReady, health.SeverityWarning, &gw),
+		f("probe", health.CodeProbeFailing, health.SeverityWarning, &gw),
+		f("gw-other", health.CodeConditionFalse, health.SeverityWarning, &gw),
+		f("ctrl", health.CodeControllerNotReady, health.SeverityError, deploy),
+		f("restart", health.CodeProcessRestarting, health.SeverityWarning, deploy),
+		f("rollout", health.CodeRolloutStuck, health.SeverityWarning, deploy),
+		f("skew", health.CodeVersionSkew, health.SeverityWarning, deploy),
+	}}
+	d := diagnose.Build(rep, din, diagnose.Families())
+	type want struct {
+		family  string
+		cause   objects.Ref
+		members string
+		affect  []objects.Ref
+	}
+	got := map[string]want{}
+	for _, g := range d.Groups {
+		if g.Cause == nil {
+			t.Fatalf("group without a cause %+v", g)
+		}
+		w := want{g.Family, *g.Cause, groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0], g.Affected}
+		got[w.members] = w
+		if g.ID != health.GroupID(id, g.Family, g.Cause, nil) {
+			t.Errorf("%s: id %s hashes more than family and cause", w.members, g.ID)
+		}
+	}
+	exp := map[string]want{
+		"rejects":              {"Data plane rejects", gw, "rejects", []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "cart")}},
+		"proxy+probe":          {"Process", gw, "proxy+probe", nil},
+		"gw-other":             {"Other", gw, "gw-other", nil},
+		"ctrl+restart+rollout": {"Process", *deploy, "ctrl+restart+rollout", nil},
+		"skew":                 {"Other", *deploy, "skew", nil},
+	}
+	if !reflect.DeepEqual(got, exp) {
+		t.Fatalf("groups\n got %+v\nwant %+v", got, exp)
+	}
+	// The data plane group ranks first and its blast radius counts the affected objects.
+	if g := d.Groups[0]; g.Family != "Data plane rejects" || len(g.Affected) != 2 {
+		t.Errorf("first group %+v", g)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -65,9 +66,18 @@ type Family interface {
 	Name() string
 	// Claim returns the cause of f in this family, or ok false.
 	Claim(f health.Finding, in Input) (cause *objects.Ref, causeKey []string, ok bool)
-	// Affected returns the objects the cause affects. members is valid only
-	// during the call; the result must not alias it.
-	Affected(cause *objects.Ref, causeKey []string, members []health.Finding, in Input) []objects.Ref
+	// Affected returns, index-aligned with gs, the objects each group's cause
+	// affects, nil for none. It runs once per Build with every group the family
+	// claimed; fs are the report's findings, which Members index. gs is valid
+	// only during the call.
+	Affected(gs []Claimed, fs []health.Finding, in Input) [][]objects.Ref
+}
+
+// Claimed is one group of a family: its cause, cause key and member indexes.
+type Claimed struct {
+	Cause   *objects.Ref
+	Key     []string
+	Members []int
 }
 
 // Group is one cause with the findings it explains.
@@ -105,9 +115,9 @@ type Diagnosis struct {
 func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	id := in.Install.ID()
 	groups := make([]Group, 0, len(rep.Findings))
-	// meta is per group: its family, cause key and member count.
+	// meta is per group: its family's index in families (len for "Other"), cause key and member count.
 	type groupMeta struct {
-		fam   Family
+		fam   int
 		key   []string
 		count int
 	}
@@ -117,13 +127,17 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	for i := range rep.Findings {
 		f := &rep.Findings[i]
 		fam, cause, key := claim(*f, in, families)
-		gid := in.IDs.GroupID(id, fam.Name(), cause, key)
+		name := "Other"
+		if fam < len(families) {
+			name = families[fam].Name()
+		}
+		gid := in.IDs.GroupID(id, name, cause, key)
 		class := ClassOf(*f)
 		k, ok := at[gid]
 		if !ok {
 			k = len(groups)
 			at[gid] = k
-			groups = append(groups, Group{ID: gid, Family: fam.Name(), Cause: cause, Severity: f.Severity, Class: class})
+			groups = append(groups, Group{ID: gid, Family: name, Cause: cause, Severity: f.Severity, Class: class})
 			meta = append(meta, groupMeta{fam: fam, key: key})
 		}
 		of[i] = k
@@ -150,37 +164,87 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	for i, k := range of {
 		groups[k].Members = append(groups[k].Members, i)
 	}
-	var buf []health.Finding
-	for k := range groups {
-		g := &groups[k]
-		if _, ok := meta[k].fam.(other); ok {
-			continue // affects nothing beyond its members
+	// One Affected call per family that claimed a group; "Other" affects nothing beyond its members.
+	var cs []Claimed
+	var idx []int
+	for j, fam := range families {
+		if _, ok := fam.(other); ok {
+			continue
 		}
-		buf = buf[:0]
-		for _, m := range g.Members {
-			buf = append(buf, rep.Findings[m])
+		cs, idx = cs[:0], idx[:0]
+		for k := range groups {
+			if meta[k].fam == j {
+				cs, idx = append(cs, Claimed{Cause: groups[k].Cause, Key: meta[k].key, Members: groups[k].Members}), append(idx, k)
+			}
 		}
-		g.Affected = meta[k].fam.Affected(g.Cause, meta[k].key, buf, in)
+		if len(cs) == 0 {
+			continue
+		}
+		for n, a := range fam.Affected(cs, rep.Findings, in) {
+			groups[idx[n]].Affected = a
+		}
 	}
 	d := rank(rep.Findings, groups)
 	d.Index = NewIndex(rep.Findings, d.Groups, d.Rank)
 	return d
 }
 
-// claim returns the family claiming f first and f's cause in it, falling
-// back to the "Other" family.
-func claim(f health.Finding, in Input, families []Family) (Family, *objects.Ref, []string) {
-	for _, fam := range families {
+// claim returns the index in families of the family claiming f first and f's
+// cause in it; len(families) is the "Other" family.
+func claim(f health.Finding, in Input, families []Family) (int, *objects.Ref, []string) {
+	for j, fam := range families {
 		if cause, key, ok := fam.Claim(f, in); ok {
-			return fam, cause, key
+			return j, cause, key
 		}
 	}
 	cause, key, _ := other{}.Claim(f, in)
-	return other{}, cause, key
+	return len(families), cause, key
 }
 
 // Families returns the families in design §5.2 table order; "Other" is last.
-func Families() []Family { return []Family{other{}} }
+func Families() []Family { return []Family{dataPlane{}, processFamily{}, other{}} }
+
+// dataPlane groups a Gateway's KGWUI-001. Its affected objects have a current
+// Accepted=True or Programmed=True status for the Gateway (design §8.4).
+type dataPlane struct{}
+
+func (dataPlane) Name() string { return "Data plane rejects" }
+
+func (dataPlane) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	return f.Resource, nil, f.Code == health.CodeXDSRejected && f.Resource != nil
+}
+
+func (dataPlane) Affected(gs []Claimed, _ []health.Finding, in Input) [][]objects.Ref {
+	gws := make(map[objects.Ref]bool, len(gs))
+	for _, g := range gs {
+		gws[*g.Cause] = true
+	}
+	byGW := explore.StatusTrueFor(in.Install, in.Owned, in.Views, gws)
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		out[k] = byGW[*g.Cause]
+	}
+	return out
+}
+
+// processFamily groups KGWUI-005, 006 and 019–021 on their subject: the
+// controller Deployment, or the Gateway for proxies. The cause is the
+// finding's own resource, so a group id hashes only what its row shows (D-040).
+type processFamily struct{}
+
+func (processFamily) Name() string { return "Process" }
+
+func (processFamily) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	switch f.Code {
+	case health.CodeControllerNotReady, health.CodeProxyNotReady, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck:
+		return f.Resource, nil, f.Resource != nil
+	}
+	return nil, nil, false
+}
+
+func (processFamily) Affected(gs []Claimed, _ []health.Finding, _ Input) [][]objects.Ref {
+	return make([][]objects.Ref, len(gs))
+}
 
 // other is the catch-all family: a cause is the finding's own resource.
 // KGWUI-008 findings form groups of their own, so they never mix with ranked ones.
@@ -195,4 +259,6 @@ func (other) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
 	return f.Resource, nil, true
 }
 
-func (other) Affected(*objects.Ref, []string, []health.Finding, Input) []objects.Ref { return nil }
+func (other) Affected(gs []Claimed, _ []health.Finding, _ Input) [][]objects.Ref {
+	return make([][]objects.Ref, len(gs))
+}

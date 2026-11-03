@@ -19,7 +19,10 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -478,5 +481,109 @@ func TestHiddenListenerSetHidesVia(t *testing.T) {
 	_, gwHidden, _ := startWith(t, setup{authz: hideGW}, explorerWorld()...)
 	if p := routeByName(t, get[Page[RouteRow]](t, gwHidden, listBase+"/routes?limit=200", 200), "shop/via-ls").Parents[0]; p.Via != nil || !p.ViaRestricted || p.Ref.Link != LinkDetail {
 		t.Errorf("via-ls parent with a hidden Gateway %+v", p)
+	}
+}
+
+// edgeRejects is the controller metrics of nackWorld, where infra/edge and infra/nack reject.
+func edgeRejects(t *testing.T) *liveMetrics {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.4.7-rejects-a", "kgw", "kgateway-0"), ctrlCapture(t, "v2.4.7-rejects-b", "kgw", "kgateway-1"))
+	return lm
+}
+
+// A route accepted by a Gateway whose proxies reject config is flagged and
+// warning, and state=gateway-rejecting lists exactly it. The 001 heads the
+// Data plane group of edge, whose affected objects are the route and the
+// policy with a current True status for edge, visible ones only.
+func TestGatewayRejectingAtTheAPI(t *testing.T) {
+	tp := testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: edgeRef, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}})
+	h := xdsHarness(t, setup{}, edgeRejects(t), nackWorld(tp)...)
+	f := xdsFinding(h.at(t, testutil.Now), "infra", "edge")
+	if f == nil {
+		t.Fatal("no 001 on edge")
+	}
+	cart := routeByName(t, get[Page[RouteRow]](t, h.srv, listBase+"/routes", 200), "shop/cart")
+	if !slices.Contains(cart.Flags, "gateway-rejecting") || cart.Health != health.StateWarning {
+		t.Errorf("cart flags %v health %s, want gateway-rejecting and warning", cart.Flags, cart.Health)
+	}
+	if p := get[Page[RouteRow]](t, h.srv, listBase+"/routes?state=gateway-rejecting", 200); !slices.Equal(routeNames(p), []string{"shop/cart"}) || p.Total != 1 {
+		t.Errorf("state=gateway-rejecting: %v (total %d)", routeNames(p), p.Total)
+	}
+	edge := edgeRef.Ref()
+	if want := health.GroupID("kgw.kgateway", "Data plane rejects", &edge, nil); f.Group != want {
+		t.Errorf("001 group %s, want the Data plane group %s", f.Group, want)
+	}
+	affected := func(srv *httptest.Server) []string {
+		d := get[FindingDetail](t, srv, listBase+"/findings/"+f.ID, 200)
+		var out []string
+		for _, r := range d.Affected.Items {
+			out = append(out, r.Kind+" "+r.Namespace+"/"+r.Name)
+		}
+		if d.Affected.Total != len(out) {
+			t.Errorf("affected total %d, items %v", d.Affected.Total, out)
+		}
+		return out
+	}
+	if got := affected(h.srv); !slices.Equal(got, []string{"HTTPRoute shop/cart", "TrafficPolicy shop/tp"}) {
+		t.Errorf("affected %v", got)
+	}
+	noPolicy := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Kind != "TrafficPolicy" })
+	h2 := xdsHarness(t, setup{authz: noPolicy}, edgeRejects(t), nackWorld(tp)...)
+	h2.at(t, testutil.Now)
+	if got := affected(h2.srv); !slices.Equal(got, []string{"HTTPRoute shop/cart"}) {
+		t.Errorf("affected without the policy %v", got)
+	}
+}
+
+// A route accepted by a rejecting Gateway of the second install is not
+// flagged on the first, whose own Gateway does not reject.
+func TestGatewayRejectingPerInstall(t *testing.T) {
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}}]`))
+	edgeB := testutil.GwRef("infra-b", "edge")
+	both := testutil.HTTPRoute("shop", "both", []objects.ParentRef{edgeRef, edgeB}, testutil.AcceptedBy(edgeRef, testutil.Controller), testutil.AcceptedBy(edgeB, testutil.Controller))
+	objs := isolated(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}), d2,
+		testutil.ControllerPod(d2, "kgateway2-0", true), edgeIn("infra-b", 1), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		testutil.HTTPRoute("infra-b", "local", []objects.ParentRef{edgeB}, testutil.AcceptedBy(edgeB, testutil.Controller)), both)
+	k := ctrlmetrics.GatewayKey{Namespace: "infra-b", Name: "edge"}
+	tk := ctrlmetrics.TypeKey{Gateway: k, TypeURL: "envoy.config.cluster.v3.Cluster"}
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true,
+		PerPod: []ctrlmetrics.PodMetrics{{UID: "pod/kgw/kgateway-0", Name: "kgateway-0", Active: map[ctrlmetrics.TypeKey]float64{}, Total: map[ctrlmetrics.TypeKey]float64{}}}})
+	lm.set("kgw2.kgateway2", ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{k: 1}, Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true,
+		PerPod: []ctrlmetrics.PodMetrics{{UID: "pod/kgw2/kgateway2-0", Name: "kgateway2-0", Active: map[ctrlmetrics.TypeKey]float64{tk: 1}, Total: map[ctrlmetrics.TypeKey]float64{tk: 1}}}})
+	h := xdsHarness(t, setup{}, lm, objs...)
+	h.at(t, testutil.Now)
+	if r := get[HealthResponse](t, h.srv, "/api/v1/installs/kgw2.kgateway2/health", 200); xdsFinding(r, "infra-b", "edge") == nil {
+		t.Fatalf("second install: no 001 on infra-b/edge: %+v", r.Findings)
+	}
+	local := routeByName(t, get[Page[RouteRow]](t, h.srv, "/api/v1/installs/kgw2.kgateway2/routes", 200), "infra-b/local")
+	if !slices.Contains(local.Flags, "gateway-rejecting") {
+		t.Errorf("second install's route flags %v, want gateway-rejecting", local.Flags)
+	}
+	for _, r := range get[Page[RouteRow]](t, h.srv, listBase+"/routes", 200).Items {
+		if slices.Contains(r.Flags, "gateway-rejecting") {
+			t.Errorf("first install's %s/%s flagged by another install's Gateway: %v", r.Ref.Namespace, r.Ref.Name, r.Flags)
+		}
+	}
+	if p := get[Page[RouteRow]](t, h.srv, listBase+"/routes?state=gateway-rejecting", 200); p.Total != 0 {
+		t.Errorf("first install state=gateway-rejecting: %v", routeNames(p))
+	}
+}
+
+// 005 and 006 head the Process groups of the controller Deployment and the Gateway.
+func TestProcessGroupsAtTheAPI(t *testing.T) {
+	r := get[HealthResponse](t, newHarness(t, setup{}, replicaWorld(2, 0, 2, 0)...).srv, healthPath, 200)
+	for code, cause := range map[string]objects.Ref{
+		health.CodeControllerNotReady: {Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"},
+		health.CodeProxyNotReady:      edgeRef.Ref(),
+	} {
+		f := findingOf(r, code)
+		if f == nil {
+			t.Fatalf("no %s: %+v", code, r.Findings)
+		}
+		if want := health.GroupID("kgw.kgateway", "Process", &cause, nil); f.Group != want {
+			t.Errorf("%s group %s, want the Process group of %s", code, f.Group, cause)
+		}
 	}
 }

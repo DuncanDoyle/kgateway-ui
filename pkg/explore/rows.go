@@ -57,6 +57,8 @@ type builder struct {
 	// disagrees are the objects with KGWUI-012; disagreements counts disagreeing checks per object.
 	disagrees     map[objects.Ref]bool
 	disagreements map[objects.Ref]int
+	// rejecting are the Gateways with an active KGWUI-001; nil when none.
+	rejecting map[objects.Ref]bool
 }
 
 // Build builds the index of one install. It is pure: the same input gives
@@ -108,6 +110,12 @@ func (b *builder) findings() {
 			continue
 		}
 		b.worst[*f.Resource] = b.worst[*f.Resource].add(f)
+		if f.Code == health.CodeXDSRejected {
+			if b.rejecting == nil {
+				b.rejecting = map[objects.Ref]bool{}
+			}
+			b.rejecting[*f.Resource] = true
+		}
 		if f.Code == health.CodeComputedDisagrees {
 			if b.disagrees == nil {
 				b.disagrees = map[objects.Ref]bool{}
@@ -119,6 +127,14 @@ func (b *builder) findings() {
 }
 
 func (b *builder) state(ref objects.Ref) health.State { return b.worst[ref].state(b.unknown) }
+
+// lifted is st raised to warning when the row's Gateway rejects config (design §8.4).
+func lifted(st health.State, rejecting bool) health.State {
+	if rejecting && st == health.StateHealthy {
+		return health.StateWarning
+	}
+	return st
+}
 
 // rowFor returns the index of u's row, creating it on first use. Rows are
 // addressed by index because the slice may still grow.
@@ -296,8 +312,13 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 	if c := objects.FindCondition(cs, "ResolvedRefs"); c.Status == metav1.ConditionFalse {
 		r.Flags |= FlagRefsUnresolved
 	}
-	if c := objects.FindCondition(cs, programmedType); c != nil && c.Status == metav1.ConditionFalse {
+	prog := objects.FindCondition(cs, programmedType)
+	if prog != nil && prog.Status == metav1.ConditionFalse {
 		r.Flags |= FlagNotProgrammed
+	}
+	if b.rejecting != nil && (b.rejecting[l.Target] || l.Via != nil && b.rejecting[*l.Via]) &&
+		(acc.Status == metav1.ConditionTrue || prog != nil && prog.Status == metav1.ConditionTrue) {
+		r.Flags |= FlagGatewayRejecting
 	}
 	for _, t := range []string{"Accepted", "ResolvedRefs", programmedType} {
 		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse {
@@ -327,6 +348,94 @@ func compareParentRefs(a, b objects.ParentRef) int {
 	return cmp.Or(compareRefs(a.Ref(), b.Ref()), cmp.Compare(a.SectionName, b.SectionName), cmp.Compare(a.Port, b.Port))
 }
 
+// The condition types a current ListenerSet or policy status block carries.
+var (
+	gatewayTypes = []string{"Accepted", "Programmed"}
+	policyTypes  = []string{"Accepted"}
+)
+
+// blockTrue reports whether status block cs of u is current (each required type
+// present, not Unknown, Pending or stale) and says Accepted or programmed True.
+func blockTrue(u *unstructured.Unstructured, cs []metav1.Condition, required []string, programmed string) bool {
+	for _, t := range required {
+		c := objects.FindCondition(cs, t)
+		if c == nil || c.Status == metav1.ConditionUnknown || c.Reason == "Pending" || objects.IsStale(u, *c) {
+			return false
+		}
+	}
+	if objects.FindCondition(cs, "Accepted").Status == metav1.ConditionTrue {
+		return true
+	}
+	c := objects.FindCondition(cs, programmed)
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+// StatusTrueFor returns, per Gateway in gws, the owned routes, ListenerSets
+// and policies whose current status says Accepted=True or Programmed=True for
+// it, directly or through its ListenerSet (design §8.4), sorted and once each.
+// It is the set the gateway-rejecting flag marks, in one pass over o.
+func StatusTrueFor(res install.Resolved, o *install.Owned, dec objects.Decoder, gws map[objects.Ref]bool) map[objects.Ref][]objects.Ref {
+	if o == nil || len(gws) == 0 {
+		return nil
+	}
+	if dec == nil {
+		dec = objects.Direct{}
+	}
+	out := make(map[objects.Ref][]objects.Ref, len(gws))
+	lsGW := make(map[objects.Ref]objects.Ref, len(o.ListenerSets)) // owned ListenerSet → its Gateway
+	for _, u := range o.ListenerSets {
+		v := dec.ListenerSet(u)
+		g := v.Parent.Ref()
+		lsGW[objects.RefOf(u)] = g
+		if gws[g] && blockTrue(u, v.Conditions, gatewayTypes, "Programmed") {
+			out[g] = append(out[g], objects.RefOf(u))
+		}
+	}
+	// gateway is the rejecting Gateway that target is or belongs to.
+	gateway := func(target objects.Ref) (objects.Ref, bool) {
+		if g, ok := lsGW[target]; ok {
+			target = g
+		}
+		return target, gws[target]
+	}
+	for _, r := range o.Routes {
+		var status []objects.RouteParentStatus
+		if isHTTPRoute(r.Kind.Group, r.Kind.Kind) {
+			status = dec.HTTPRoute(r.Obj).Parents
+		} else {
+			status = dec.Route(r.Obj).Parents
+		}
+		for _, p := range r.Parents {
+			g, ok := gateway(p.Ref())
+			if !ok {
+				continue
+			}
+			for j := range status {
+				st := &status[j]
+				if st.ParentRef != p || !slices.Contains(res.ControllerNames, st.ControllerName) {
+					continue
+				}
+				if health.RoutePending(r.Obj, st.Conditions) == "" && blockTrue(r.Obj, st.Conditions, nil, programmedType) {
+					out[g] = append(out[g], objects.RefOf(r.Obj))
+				}
+				break
+			}
+		}
+	}
+	for _, p := range o.Policies {
+		for _, a := range objects.PolicyAncestors(p.Obj) {
+			if g, ok := gateway(a.AncestorRef.Ref()); ok && slices.Contains(res.ControllerNames, a.ControllerName) && blockTrue(p.Obj, a.Conditions, policyTypes, "") {
+				out[g] = append(out[g], objects.RefOf(p.Obj))
+			}
+		}
+	}
+	for g, refs := range out {
+		slices.SortFunc(refs, compareRefs)
+		out[g] = slices.Compact(refs)
+	}
+	return out
+}
+
 // sort puts the rows in (namespace, name, group, kind) order in place, with
 // their aux. Parents follow spec order, then parentRef order; reported
 // parent routes are sorted.
@@ -345,7 +454,7 @@ func (b *builder) sort() {
 		})
 		slices.SortFunc(a.edges, compareRefs)
 		r.ParentRoutes = a.edges
-		r.State = b.state(r.Ref)
+		r.State = lifted(b.state(r.Ref), r.Flags&FlagGatewayRejecting != 0)
 		r.search = search(r.Ref, r.Hostnames)
 	}
 }
@@ -472,8 +581,9 @@ func (b *builder) gateways(ix *Index, lsViews []*objects.ListenerSetView) {
 	for i, j := range order {
 		u, v := o.ListenerSets[j], lsViews[j]
 		ref := objects.RefOf(u)
-		l := ListenerSetRow{Ref: ref, Obj: u, View: v, Parent: v.Parent.Ref(), State: b.state(ref), Routes: ix.ByParent[ref],
+		l := ListenerSetRow{Ref: ref, Obj: u, View: v, Parent: v.Parent.Ref(), Routes: ix.ByParent[ref],
 			Members: ix.members(ref, v.Listeners), Disagreements: b.disagreements[ref]}
+		l.State = lifted(b.state(ref), b.rejecting[l.Parent] && blockTrue(u, v.Conditions, gatewayTypes, "Programmed"))
 		if c := objects.FindCondition(v.Conditions, "Accepted"); c != nil && c.Status != metav1.ConditionTrue {
 			l.AcceptedReason = c.Reason
 		}
