@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import type { ProcessSummary, ProxySummary } from "../api/types";
 import { diagnosticsCopy, findingsCopy } from "../copy/explorer";
 import { HealthBadge } from "../health/HealthBadge";
-import type { HealthState } from "../theme/tokens";
 
 // region Styles
 /** Height of one line, fixed from the first render so polled counts shift nothing. */
@@ -33,20 +32,6 @@ const Line = styled.div<{ stylesOverride?: SerializedStyles }>`
   ${(p) => p.stylesOverride}
 `;
 
-// region Helpers
-function controllerState(s: ProcessSummary): HealthState {
-  if (!s.observed || s.ready === undefined || s.desired === undefined) return "unknown";
-  if (s.desired > 0 && s.ready === 0) return "error";
-  return s.ready >= s.desired ? "healthy" : "warning";
-}
-
-function proxiesState(s: ProxySummary): HealthState {
-  if (s.gateways === 0 || s.notObserved === s.gateways) return "unknown";
-  if (s.rejecting > 0) return "error";
-  if (s.skew > 0 || s.restarting > 0 || s.ready < s.gateways - s.notObserved) return "warning";
-  return "healthy";
-}
-
 // region Component
 type ProcessLineProps = (
   | { kind: "controller"; summary: ProcessSummary }
@@ -56,11 +41,11 @@ type ProcessLineProps = (
 /** One line of the overview's Processes section: the controller or the Gateways' proxies (design §6). */
 export function ProcessLine(props: ProcessLineProps) {
   const { stylesOverride } = props;
-  let state: HealthState;
+  // The state is the server's; the SPA never derives health (ruling R62).
+  const state = props.summary.state;
   let facts: ReactNode;
   if (props.kind === "controller") {
     const s = props.summary;
-    state = controllerState(s);
     facts = !s.observed ? (
       <span className="muted">{diagnosticsCopy.notObserved}</span>
     ) : (
@@ -77,7 +62,6 @@ export function ProcessLine(props: ProcessLineProps) {
     );
   } else {
     const s = props.summary;
-    state = proxiesState(s);
     facts =
       s.gateways === 0 ? (
         <span className="muted">{diagnosticsCopy.noGateways}</span>

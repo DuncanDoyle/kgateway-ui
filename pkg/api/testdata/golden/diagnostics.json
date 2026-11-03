@@ -255,6 +255,7 @@
         "desired": 2,
         "observed": true,
         "ready": 2,
+        "state": "healthy",
         "version": "2.4.7"
       },
       "proxies": {
@@ -263,7 +264,8 @@
         "ready": 0,
         "rejecting": 2,
         "restarting": 0,
-        "skew": 0
+        "skew": 0,
+        "state": "error"
       }
     },
     "verdict": {

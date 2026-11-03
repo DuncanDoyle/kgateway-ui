@@ -831,21 +831,16 @@ const diagnostics = shape<Diagnostics>(
     processes: shape<Diagnostics["processes"]>(
       { controller: "!", proxies: "!" },
       {
-        controller: shape<Diagnostics["processes"]["controller"]>({
-          observed: "!",
-          ready: "?",
-          desired: "?",
-          version: "?",
-          restricted: "?",
-        }),
-        proxies: shape<Diagnostics["processes"]["proxies"]>({
-          gateways: "!",
-          ready: "!",
-          rejecting: "!",
-          skew: "!",
-          restarting: "!",
-          notObserved: "!",
-        }),
+        controller: shape<Diagnostics["processes"]["controller"]>(
+          { state: "!", observed: "!", ready: "?", desired: "?", version: "?", restricted: "?" },
+          {},
+          { state: healthState },
+        ),
+        proxies: shape<Diagnostics["processes"]["proxies"]>(
+          { state: "!", gateways: "!", ready: "!", rejecting: "!", skew: "!", restarting: "!", notObserved: "!" },
+          {},
+          { state: healthState },
+        ),
       },
     ),
     dataPlane: shape<Diagnostics["dataPlane"]>({

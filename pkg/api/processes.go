@@ -153,10 +153,14 @@ func processDTO(p process.Process, sf *subjectFacts) ProcessDTO {
 	return out
 }
 
-// controllerSummary is the controller line for the caller.
+// controllerSummary is the controller line for the caller. Its state is the worst controller finding,
+// which a restricted caller already sees as a restricted row's severity (D-013).
 func (ps *procSummary) controllerSummary() ProcessSummary {
 	s := ps.controllerSet()
-	out := ProcessSummary{Observed: s.Observed, Ready: s.Ready, Desired: s.Desired, Restricted: s.Restricted}
+	out := ProcessSummary{State: health.StateUnknown, Observed: s.Observed, Ready: s.Ready, Desired: s.Desired, Restricted: s.Restricted}
+	if d := ps.i.Resolved.Deployment; d != nil {
+		out.State = subjectState(ps.facts[objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}], s.Observed)
+	}
 	if s.Restricted || !s.Observed {
 		return out
 	}
@@ -197,18 +201,22 @@ func (ps *procSummary) gateways() []gatewayProc {
 	return out
 }
 
-// health is the worst of g's findings; unknown when its proxies are not observed.
-func (g *gatewayProc) health() health.State {
+// subjectState is the worst of a subject's process and data-plane findings (KGWUI-005 among them);
+// unknown when its processes are not observed and no finding says otherwise.
+func subjectState(sf *subjectFacts, observed bool) health.State {
 	switch {
-	case g.facts != nil && g.facts.worst == health.SeverityError:
+	case sf != nil && sf.worst == health.SeverityError:
 		return health.StateError
-	case g.facts != nil && g.facts.worst == health.SeverityWarning:
+	case sf != nil && sf.worst == health.SeverityWarning:
 		return health.StateWarning
-	case !g.set.Observed:
+	case !observed:
 		return health.StateUnknown
 	}
 	return health.StateHealthy
 }
+
+// health is the worst of g's findings; unknown when its proxies are not observed.
+func (g *gatewayProc) health() health.State { return subjectState(g.facts, g.set.Observed) }
 
 func (g *gatewayProc) restarting() bool { return g.facts != nil && g.facts.restarting }
 
@@ -238,12 +246,18 @@ func allReady(s *process.Set) bool {
 	return s.Desired == nil || int32(len(s.Processes)) >= *s.Desired // #nosec G115 -- a replica count fits in int32
 }
 
-// proxySummary counts the visible Gateways' proxies.
+// proxySummary counts the visible Gateways' proxies. State is the worst health of those
+// with a known one; unknown when none has (not observed is never failing).
 func (ps *procSummary) proxySummary() ProxySummary {
-	var out ProxySummary
+	out := ProxySummary{State: health.StateUnknown}
 	for _, g := range ps.gateways() {
 		if !ps.v.can(g.ref) {
 			continue
+		}
+		switch st := g.health(); {
+		case st == health.StateError, st == health.StateWarning && out.State != health.StateError,
+			st == health.StateHealthy && out.State == health.StateUnknown:
+			out.State = st
 		}
 		out.Gateways++
 		if allReady(g.set) {

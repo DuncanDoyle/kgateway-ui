@@ -102,11 +102,13 @@ type ProcessSummaries struct {
 	Proxies    ProxySummary   `json:"proxies"`
 }
 
-// ProcessSummary is the controller line. Restricted keeps the counts only (§14 rule 16).
+// ProcessSummary is the controller line. State is the worst controller finding, unknown when not
+// observed and none fired; Restricted keeps the counts and state only (§14 rule 16).
 type ProcessSummary struct {
-	Observed bool   `json:"observed"`
-	Ready    *int32 `json:"ready,omitempty"`
-	Desired  *int32 `json:"desired,omitempty"`
+	State    health.State `json:"state"`
+	Observed bool         `json:"observed"`
+	Ready    *int32       `json:"ready,omitempty"`
+	Desired  *int32       `json:"desired,omitempty"`
 	// Version is the version every visible replica runs; empty when they differ.
 	Version    string `json:"version,omitempty"`
 	Restricted bool   `json:"restricted,omitempty"`
@@ -114,13 +116,15 @@ type ProcessSummary struct {
 
 // ProxySummary counts the visible Gateways: those with every proxy ready, with
 // a reject, with version skew, with a restart, and whose proxies are not observed.
+// State is the worst known health of those Gateways; unknown when none is known.
 type ProxySummary struct {
-	Gateways    int `json:"gateways"`
-	Ready       int `json:"ready"`
-	Rejecting   int `json:"rejecting"`
-	Skew        int `json:"skew"`
-	Restarting  int `json:"restarting"`
-	NotObserved int `json:"notObserved"`
+	State       health.State `json:"state"`
+	Gateways    int          `json:"gateways"`
+	Ready       int          `json:"ready"`
+	Rejecting   int          `json:"rejecting"`
+	Skew        int          `json:"skew"`
+	Restarting  int          `json:"restarting"`
+	NotObserved int          `json:"notObserved"`
 }
 
 // DataPlaneSummary counts Gateways with a KGWUI-001 over every finding, beside the visible Gateways

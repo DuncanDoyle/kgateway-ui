@@ -454,7 +454,7 @@ func TestProcessSetCountsOnlyWhenPodHidden(t *testing.T) {
 		t.Fatalf("hidden controller summary %+v", c)
 	}
 	d := get[Diagnostics](t, h.srv, diagPath, 200).Processes
-	if d.Proxies != (ProxySummary{Gateways: 3, Ready: 2, Skew: 1, Restarting: 1, NotObserved: 1}) || d.Controller.Version != "2.4.7" {
+	if d.Proxies != (ProxySummary{State: health.StateWarning, Gateways: 3, Ready: 2, Skew: 1, Restarting: 1, NotObserved: 1}) || d.Controller.Version != "2.4.7" {
 		t.Fatalf("summaries %+v", d)
 	}
 }
@@ -622,5 +622,36 @@ func TestGroupTitleNeedsTheMember(t *testing.T) {
 	l := linkerFor(v, &engine.Model{}, &engine.InstallModel{})
 	if row := h.groupRow(v, l, g, fs, 0, diagnose.Input{}); row.Restricted || row.Title != hiddenTitle {
 		t.Fatalf("row %+v", row)
+	}
+}
+
+// The process summaries carry the server's state: a controller at 0/0 desired is KGWUI-005's
+// error, never healthy; a restricted caller keeps that state with the counts.
+func TestProcessSummaryState(t *testing.T) {
+	zero := newHarness(t, setup{}, replicaWorld(0, 0, 1, 1)...)
+	zero.at(t, testutil.Now)
+	c := get[Diagnostics](t, zero.srv, diagPath, 200).Processes.Controller
+	if c.State != health.StateError || c.Desired == nil || *c.Desired != 0 {
+		b, _ := json.Marshal(c)
+		t.Fatalf("controller at 0/0: %s", b)
+	}
+	if c := get[Diagnostics](t, authzSrv(t, zero, deny(ctrlDeployment)), diagPath, 200).Processes.Controller; !c.Restricted || c.State != health.StateError {
+		t.Fatalf("hidden controller at 0/0: %+v", c)
+	}
+
+	ok := newHarness(t, setup{}, world()...)
+	ok.at(t, testutil.Now)
+	if p := get[Diagnostics](t, ok.srv, diagPath, 200).Processes; p.Controller.State != health.StateHealthy {
+		t.Fatalf("ready controller %+v", p.Controller)
+	}
+
+	// Proxies: the worst known Gateway health; a hidden Gateway counts for nothing, so none visible is unknown.
+	h := procsWorld(t, setup{})
+	if p := get[Diagnostics](t, h.srv, diagPath, 200).Processes.Proxies; p.State != health.StateWarning {
+		t.Fatalf("proxies %+v", p)
+	}
+	hidden := authzSrv(t, h, deny(testutil.GwRef("infra", "edge").Ref(), testutil.GwRef("infra", "calm").Ref(), testutil.GwRef("infra", "lone").Ref()))
+	if p := get[Diagnostics](t, hidden, diagPath, 200).Processes.Proxies; p.State != health.StateUnknown || p.Gateways != 0 {
+		t.Fatalf("every Gateway hidden %+v", p)
 	}
 }

@@ -158,8 +158,9 @@ export interface Verdict {
   oldestSince?: string;
   reason?: string;
 }
-/** The controller line; restricted keeps the counts only. */
+/** The controller line; state is the server's (its worst controller finding). restricted keeps the counts and state only. */
 export interface ProcessSummary {
+  state: HealthState;
   observed: boolean;
   ready?: number;
   desired?: number;
@@ -168,6 +169,8 @@ export interface ProcessSummary {
 }
 /** Visible Gateways: with every proxy ready, rejecting, with skew, restarting, and not observed. */
 export interface ProxySummary {
+  /** The worst known health of these Gateways, from the server; unknown when none is known. */
+  state: HealthState;
   gateways: number;
   ready: number;
   rejecting: number;

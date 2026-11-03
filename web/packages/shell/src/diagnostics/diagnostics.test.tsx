@@ -243,7 +243,10 @@ describe("GroupRow", () => {
 describe("ProcessLine", () => {
   it("the controller line shows ready over desired and the version", () => {
     renderWithTheme(
-      <ProcessLine kind="controller" summary={{ observed: true, ready: 2, desired: 2, version: "2.4.7" }} />,
+      <ProcessLine
+        kind="controller"
+        summary={{ state: "healthy", observed: true, ready: 2, desired: 2, version: "2.4.7" }}
+      />,
     );
     expect(screen.getByText(diagnosticsCopy.controller)).toBeInTheDocument();
     expect(screen.getByText(diagnosticsCopy.readyOf(2, 2))).toBeInTheDocument();
@@ -251,15 +254,35 @@ describe("ProcessLine", () => {
     expect(screen.getByText("Healthy")).toBeInTheDocument();
   });
 
+  it("shows the state the server sends, never one of its own", () => {
+    const { unmount } = renderWithTheme(
+      <ProcessLine kind="controller" summary={{ state: "error", observed: true, ready: 0, desired: 0 }} />,
+    );
+    // 0/0 desired is KGWUI-005's error on the server: the line says so, never Healthy.
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.queryByText("Healthy")).toBeNull();
+    unmount();
+    renderWithTheme(
+      <ProcessLine
+        kind="proxies"
+        summary={{ state: "warning", gateways: 2, ready: 0, rejecting: 2, skew: 0, restarting: 0, notObserved: 0 }}
+      />,
+    );
+    expect(screen.getByText("Warning")).toBeInTheDocument();
+  });
+
   it("an unobserved controller reads Not observed, never failing", () => {
-    renderWithTheme(<ProcessLine kind="controller" summary={{ observed: false }} />);
+    renderWithTheme(<ProcessLine kind="controller" summary={{ state: "unknown", observed: false }} />);
     expect(screen.getByText(diagnosticsCopy.notObserved)).toBeInTheDocument();
     expect(screen.queryByText("Error")).toBeNull();
   });
 
   it("a restricted controller keeps its counts only", () => {
     renderWithTheme(
-      <ProcessLine kind="controller" summary={{ observed: true, ready: 1, desired: 2, restricted: true }} />,
+      <ProcessLine
+        kind="controller"
+        summary={{ state: "error", observed: true, ready: 1, desired: 2, restricted: true }}
+      />,
     );
     expect(screen.getByText(diagnosticsCopy.readyOf(1, 2))).toBeInTheDocument();
     expect(screen.getByText(findingsCopy.restricted)).toBeInTheDocument();
@@ -269,7 +292,7 @@ describe("ProcessLine", () => {
     renderWithTheme(
       <ProcessLine
         kind="proxies"
-        summary={{ gateways: 5, ready: 2, rejecting: 1, skew: 1, restarting: 1, notObserved: 1 }}
+        summary={{ state: "error", gateways: 5, ready: 2, rejecting: 1, skew: 1, restarting: 1, notObserved: 1 }}
       />,
     );
     expect(screen.getByText(diagnosticsCopy.gatewaysReady(2, 5))).toBeInTheDocument();
