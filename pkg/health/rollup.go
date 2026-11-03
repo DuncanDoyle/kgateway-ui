@@ -209,19 +209,28 @@ func runContext(in Input, c Check, inputs InputSet, rt Runtime, outputs map[stri
 	return ctx
 }
 
-// sortFindings returns fs sorted stably by compareFindings. It sorts
-// pointers, as moving a whole Finding per swap dominated a large report's sort.
+// sortFindings sorts fs stably by compareFindings, in place. It sorts indexes
+// and then moves each Finding once, as moving whole Findings per swap dominated a large report's sort.
 func sortFindings(fs []Finding) []Finding {
-	ps := make([]*Finding, len(fs))
-	for i := range fs {
-		ps[i] = &fs[i]
+	perm := make([]int32, len(fs))
+	for i := range perm {
+		perm[i] = int32(i) // #nosec G115 -- a finding count fits in int32
 	}
-	slices.SortStableFunc(ps, func(a, b *Finding) int { return compareFindings(*a, *b) })
-	sorted := make([]Finding, len(fs))
-	for i, p := range ps {
-		sorted[i] = *p
+	slices.SortStableFunc(perm, func(a, b int32) int { return compareFindings(fs[a], fs[b]) })
+	// Apply perm one cycle at a time: fs[k] takes fs[perm[k]].
+	for k := range perm {
+		if perm[k] < 0 {
+			continue
+		}
+		tmp, j := fs[k], k
+		for int(perm[j]) != k {
+			next := int(perm[j])
+			fs[j], perm[j] = fs[next], -1
+			j = next
+		}
+		fs[j], perm[j] = tmp, -1
 	}
-	return sorted
+	return fs
 }
 
 // compareFindings orders by severity, code, resource, parentRef, message and
