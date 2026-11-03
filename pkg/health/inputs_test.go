@@ -32,9 +32,8 @@ func TestChecksReadOnlyDeclaredInputs(t *testing.T) {
 	}
 }
 
-// TestChecksReadOnlyDeclaredInputsAfterAMinute is the guard over the proxy
-// stats worlds with a Store that saw the same inputs 61 s earlier, so
-// conditions that mature in the Store show in the output.
+// TestChecksReadOnlyDeclaredInputsAfterAMinute runs the guard on a Store that
+// saw the same inputs 61 s earlier, so matured conditions show.
 func TestChecksReadOnlyDeclaredInputsAfterAMinute(t *testing.T) {
 	for _, c := range health.Upstream() {
 		set := c.Inputs()

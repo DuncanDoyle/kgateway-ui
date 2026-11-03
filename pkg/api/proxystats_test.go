@@ -164,9 +164,8 @@ func findingCode(h HealthResponse, code string) *FindingDTO {
 	return nil
 }
 
-// A Ready proxy that reports connected_state 0, or warming listeners, gives
-// 026 or 025 at 61 s and nothing at 59 s; the not-Ready edge-1, which reports
-// the same, is not named. A caller who may not view the Pods gets no evidence.
+// A Ready proxy disconnected or warming gives 026 or 025 at 61 s, none at 59 s;
+// the not-Ready edge-1 is not named, and hidden Pods hide the evidence.
 func TestProxyConditionsAtTheAPI(t *testing.T) {
 	cases := []struct {
 		code, slug, check string
@@ -190,7 +189,8 @@ func TestProxyConditionsAtTheAPI(t *testing.T) {
 			}
 			r = sh.at(t, testutil.Now.Add(61*time.Second))
 			f := findingCode(r, c.code)
-			if f == nil || f.Slug != c.slug || f.Severity != health.SeverityWarning || f.Resource == nil || f.Resource.Ref != gwRef("infra", "edge") {
+			if f == nil || f.Slug != c.slug || f.Severity != health.SeverityWarning || f.Resource == nil || f.Resource.Ref != gwRef("infra", "edge") ||
+				f.Since == nil || !f.Since.Equal(testutil.Now) {
 				t.Fatalf("at 61 s: %s %+v", r.State, r.Findings)
 			}
 			ev, ok := f.Facts.(*health.ProxyStatsEvidence)
@@ -214,9 +214,8 @@ func TestProxyConditionsAtTheAPI(t *testing.T) {
 	}
 }
 
-// One proxy failing its scrape while another succeeds: the Gateway's stats
-// stay available and the check names the failing proxy. Stats turned off: not
-// available, off, and the install is not unknown.
+// One proxy failing beside a scraped one keeps the Gateway available and is
+// counted; stats off are not available, and the install is not unknown.
 func TestProxyStatsGapsAtTheAPI(t *testing.T) {
 	lm := newLiveMetrics()
 	lm.set("kgw.kgateway", cleanMetrics("pod/kgw/kgateway-0", "kgateway-0"))
@@ -260,9 +259,8 @@ func proxyTypes(t *testing.T, f *FindingDTO, pod string) map[string]health.Proxy
 	return nil
 }
 
-// LDS (3,8) → (4,9) reads as rejects observed since the last scrape on that
-// Pod, with the grown RDS and cluster names; the next scrape without growth
-// reads as none. The 001 keeps its id and since throughout: never a new episode.
+// LDS (3,8) → (4,9) reads as rejects observed since the last scrape, with the
+// grown names; no growth reads as none, and 001 keeps its id and since.
 func TestXDSProxyStatsEvidenceAtTheAPI(t *testing.T) {
 	lm := newLiveMetrics()
 	lm.set("kgw.kgateway", ctrlCapture(t, "v2.4.7-rejects-a", "kgw", "kgateway-0"), ctrlCapture(t, "v2.4.7-rejects-b", "kgw", "kgateway-1"))
@@ -312,9 +310,8 @@ func TestXDSProxyStatsEvidenceAtTheAPI(t *testing.T) {
 	}
 }
 
-// Controller metrics unavailable while proxy stats show rejects: no 001, and
-// xDS rejects is unavailable as without proxy stats (KGWUI-008, required).
-// With metrics showing no rejects, proxy stats raise nothing either.
+// Proxy stats with rejects never raise 001: with controller metrics failing
+// xDS rejects stays unavailable (KGWUI-008), with clean metrics it is OK.
 func TestNoRejectFindingFromProxyStatsAlone(t *testing.T) {
 	for _, failing := range []bool{true, false} {
 		lm := newLiveMetrics()
@@ -341,9 +338,8 @@ func TestNoRejectFindingFromProxyStatsAlone(t *testing.T) {
 	}
 }
 
-// A replaced proxy Pod, a new UID with counters at zero, is neither a reject
-// nor a recovery: its types read as no rejects, and the controller's 001
-// keeps its id and since.
+// A new UID, even with non-zero first counters, is neither a reject nor a
+// recovery: no rejects read, and 001 keeps its id and since.
 func TestProxyStatsResetIsNotAReject(t *testing.T) {
 	lm := newLiveMetrics()
 	lm.set("kgw.kgateway", ctrlCapture(t, "v2.4.7-rejects-a", "kgw", "kgateway-0"), ctrlCapture(t, "v2.4.7-rejects-b", "kgw", "kgateway-1"))
@@ -356,7 +352,7 @@ func TestProxyStatsResetIsNotAReject(t *testing.T) {
 		t.Fatalf("nack-a grew: %+v", ty)
 	}
 	for _, step := range []time.Duration{20 * time.Second, 30 * time.Second} {
-		sh.src.set(nack, pod("nack-b", rejectsCounters(proxystats.Pair{}, 0, 0)))
+		sh.src.set(nack, pod("nack-b", rejectsCounters(proxystats.Pair{Rejected: 6, Success: 2}, 9, 3)))
 		f := xdsFinding(sh.at(t, testutil.Now.Add(step)), "infra", "nack")
 		ty := proxyTypes(t, f, "nack-b")
 		for url, x := range ty {

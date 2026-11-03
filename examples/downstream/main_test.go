@@ -371,26 +371,27 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 			t.Fatal("the acme proxy was never scraped")
 		}
 	}
-	statsRead := func(p *engine.Published) bool {
-		return p != nil && len(p.Model.Installs) == 1 && slices.ContainsFunc(p.Model.Installs[0].Health.Checks, func(c health.CheckResult) bool { return c.Name == "proxy connection" && c.OK })
+	// until steps the clock past the debounce each time the engine waits, until ok holds.
+	until := func(what string, ok func(*engine.Published) bool) {
+		t.Helper()
+		for {
+			if e := testutil.Recv(t, events, what); e.Kind != engine.EvArmed {
+				continue
+			}
+			if p := a.Engine.Current(); p != nil && len(p.Model.Installs) == 1 && ok(p) {
+				return
+			}
+			clk.Step(engine.MaxDelay)
+		}
 	}
-	for armed := false; !armed; {
-		e := testutil.Recv(t, events, "a run over the acme stats, then its timer")
-		armed = e.Kind == engine.EvArmed && statsRead(a.Engine.Current())
-	}
+	until("a run over the acme stats", func(p *engine.Published) bool {
+		return slices.ContainsFunc(p.Model.Installs[0].Health.Checks, func(c health.CheckResult) bool { return c.Name == "proxy connection" && c.OK })
+	})
 	if healthHas(t, srv, health.CodeProxyDisconnected) {
 		t.Fatal("a disconnect younger than 60 s raised 026")
 	}
-	waitFor := func(what string, ok func(*engine.Published) bool) {
-		t.Helper()
-		for {
-			if e := testutil.Recv(t, events, what); e.Kind == engine.EvPublished && len(e.Published.Model.Installs) == 1 && ok(e.Published) {
-				return
-			}
-		}
-	}
 	clk.Step(61 * time.Second)
-	waitFor("the disconnected proxy's finding", func(p *engine.Published) bool { return modelHas(p, health.CodeProxyDisconnected) })
+	until("the disconnected proxy's finding", func(p *engine.Published) bool { return modelHas(p, health.CodeProxyDisconnected) })
 	var h api.HealthResponse
 	getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h)
 	i := slices.IndexFunc(h.Findings, func(f api.FindingDTO) bool { return f.Code == health.CodeProxyDisconnected })
@@ -399,7 +400,7 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 	}
 	connected.Store(true)
 	clk.Step(time.Minute)
-	waitFor("the reconnected proxy", func(p *engine.Published) bool { return !modelHas(p, health.CodeProxyDisconnected) })
+	until("the reconnected proxy", func(p *engine.Published) bool { return !modelHas(p, health.CodeProxyDisconnected) })
 	if healthHas(t, srv, health.CodeProxyDisconnected) {
 		t.Fatal("a reconnected proxy clears the finding")
 	}

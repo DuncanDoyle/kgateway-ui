@@ -74,9 +74,8 @@ func checkNamed(r Report, name string) *CheckResult {
 	return nil
 }
 
-// 026 and 025 mature after 60 s of the condition on a Ready proxy: none at
-// 59 s, one per Gateway at 61 s with the Ready Pods as evidence. The wake is
-// the maturity time; the not-Ready edge-1 is never named.
+// 026 and 025 on a Ready proxy: none at 59 s, one per Gateway at 61 s with
+// since at the onset; the not-Ready edge-1 is never named.
 func TestProxyConditionsMatureAfter60s(t *testing.T) {
 	cases := []struct {
 		code, check, message string
@@ -102,7 +101,8 @@ func TestProxyConditionsMatureAfter60s(t *testing.T) {
 			}
 			r = run(testutil.Now.Add(61 * time.Second))
 			f := findingOn(r, c.code)
-			if f == nil || f.Severity != SeverityWarning || f.Resource.String() != "infra/edge" || f.Message != c.message || r.State != StateWarning {
+			if f == nil || f.Severity != SeverityWarning || f.Resource.String() != "infra/edge" || f.Message != c.message || r.State != StateWarning ||
+				f.Since == nil || !f.Since.Equal(testutil.Now) {
 				t.Fatalf("at 61 s: %s %+v", r.State, r.Findings)
 			}
 			ev, ok := f.Facts.(*ProxyStatsEvidence)
@@ -195,9 +195,8 @@ func TestProxyScrapeErrorKeepsTheStart(t *testing.T) {
 	}
 }
 
-// 001 quotes, per scraped proxy Pod, the types with rejects observed since the
-// previous scrape and the grown Envoy names; the Pods join its dependencies.
-// Proxy stats alone never raise 001.
+// 001 quotes each scraped Pod's observed rejects and grown Envoy names, with
+// the Pods as dependencies; proxy stats alone never raise 001.
 func TestXDSEvidenceFromProxyStats(t *testing.T) {
 	since := testutil.Now.Add(-10 * time.Second)
 	rejecting := func(p *proxystats.Pod) {
@@ -251,5 +250,23 @@ func TestProxyStatsStayInTheirInstall(t *testing.T) {
 		if f := findingOn(r, CodeProxyDisconnected); f != nil {
 			t.Fatalf("other install's proxy: %+v", f)
 		}
+	}
+}
+
+// Stats off or failing clear the starts: after the outage the condition needs 60 s again.
+func TestProxyStatsOutageRestartsTheAge(t *testing.T) {
+	st := NewStates()
+	stats := collected(testutil.Now, edgeStats(statsPod("edge-0", disconnected)))
+	off := collect.Snapshot{Values: map[string]collect.Value{proxystats.Key: {State: collect.Failing, Reason: "collector stopped"}}}
+	run := func(at time.Duration, col collect.Snapshot) *Finding {
+		return findingOn(Evaluate(statsInput(t, testutil.Now.Add(at)), Upstream(), Runtime{States: st, Collected: col}), CodeProxyDisconnected)
+	}
+	run(0, stats)
+	run(30*time.Second, off)
+	if f := run(61*time.Second, stats); f != nil {
+		t.Fatalf("the age survived the outage: %+v", f)
+	}
+	if f := run(122*time.Second, stats); f == nil || !f.Since.Equal(testutil.Now.Add(61*time.Second)) {
+		t.Fatalf("61 s after the outage: %+v", f)
 	}
 }

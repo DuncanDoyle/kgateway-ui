@@ -72,6 +72,8 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	st, res, ok := proxyStatsOf(ctx, c.Name())
 	if !ok {
+		// After an outage a condition must be seen for the full age again.
+		ctx.State.Set(proxyStartsKey, nil)
 		return nil, res
 	}
 	old, _ := Load[map[string]time.Time](ctx.State, proxyStartsKey)
@@ -85,6 +87,7 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		var matured []proxystats.Pod
+		var onset time.Time
 		scraped, errs := 0, 0
 		for _, p := range g.Pods {
 			if p.Err != "" {
@@ -105,6 +108,9 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			starts[p.UID] = t
 			if in.Now.Sub(t) >= ProxyConditionAge {
 				matured = append(matured, p)
+				if onset.IsZero() || t.Before(onset) {
+					onset = t
+				}
 			} else {
 				ctx.WakeAt(t.Add(ProxyConditionAge))
 			}
@@ -116,7 +122,9 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			failing += errs
 		}
 		if len(matured) > 0 {
-			fs = append(fs, c.finding(in, g.Gateway, matured))
+			f := c.finding(in, g.Gateway, matured)
+			f.Since = &onset
+			fs = append(fs, f)
 		}
 	}
 	ctx.State.Set(proxyStartsKey, starts)

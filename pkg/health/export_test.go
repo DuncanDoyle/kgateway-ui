@@ -128,9 +128,8 @@ type GuardWorld struct {
 	RT Runtime
 }
 
-// GuardCollectedWorlds have proxy stats: rejects observed on a 001 Gateway,
-// Ready and not-Ready proxies in both conditions, a failing Pod, an
-// unobserved Gateway, and the value off, failing and absent.
+// GuardCollectedWorlds have proxy stats (rejects, both conditions, Ready and
+// not, a failing Pod), an unobserved Gateway, and the value off, failing, absent.
 func GuardCollectedWorlds(t *testing.T) map[string]GuardWorld {
 	t.Helper()
 	since := testutil.Now.Add(-time.Minute)

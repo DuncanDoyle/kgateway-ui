@@ -44,9 +44,8 @@ type xdsCheck struct{}
 // Name implements Check.
 func (xdsCheck) Name() string { return "xDS rejects" }
 
-// Inputs implements Check: no Clock, as the restart hold and metrics
-// staleness end through WakeAt; Deployments give the proxy counts, proxy
-// stats the per-Pod evidence.
+// Inputs implements Check: no Clock, as holds and staleness end through
+// WakeAt; Deployments give proxy counts, proxy stats per-Pod evidence.
 func (xdsCheck) Inputs() InputSet {
 	return InputSet{Owned: true, Metrics: true, Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}},
 		Collected: []string{proxyStatsKey}}
