@@ -14,8 +14,8 @@ help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
 	@echo "make bench  run the scale benchmarks and budget tests, after the Go version, machine and host load"
-	@echo "make bench-stream  run the 10-minute sustained-stream budget (make bench runs the 60 s -short one)"
-	@echo "make bench-specedit  run the 10-minute spec-edit stream, reported and not gated (make bench runs the 60 s -short one)"
+	@echo "make bench-stream  run the 10-minute sustained-stream budget, 5 runs per world, about 105 min (make bench runs the 60 s -short one)"
+	@echo "make bench-specedit  run the 10-minute spec-edit stream, 5 runs per world, about 105 min (make bench runs the 60 s -short one)"
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
@@ -36,14 +36,14 @@ bench:
 	@# The budget tests run once; the benchmarks five times.
 	go test -tags bench -v -short -run 'Budget' -count 1 ./pkg/engine ./pkg/cache
 	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/engine ./pkg/cache
-	@# The API budgets take 10,000 samples per case, so they run once; -short keeps the stream at 60 s.
-	go test -tags bench -v -short -run 'Budget' -count 1 -timeout 20m ./pkg/api
+	@# The API budgets take 10,000 samples per case, so they run once; -short keeps each of the 5 stream runs per world at 60 s.
+	go test -tags bench -v -short -run 'Budget' -count 1 -timeout 75m ./pkg/api
 	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/api
 bench-stream:
-	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 30m ./pkg/api
+	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 150m ./pkg/api
 .PHONY: bench-specedit
 bench-specedit:
-	go test -tags bench -v -run 'TestBudgetSpecEditStream' -count 1 -timeout 20m ./pkg/api
+	go test -tags bench -v -run 'TestBudgetSpecEditStream' -count 1 -timeout 150m ./pkg/api
 lint:
 	go vet ./...
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --build-tags e2e ./...

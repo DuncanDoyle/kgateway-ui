@@ -338,28 +338,60 @@ func TestBudgetFindingsRequests(t *testing.T) {
 	}
 }
 
-// TestBudgetDiagnosticsRequests: …/diagnostics and …/processes (with a filter)
-// hold the list budgets in the matured worst case, allowed and restricted.
+// TestBudgetDiagnosticsRequests: …/diagnostics and …/processes (with filters)
+// hold the list budgets in the matured 3.2 measurement world, allowed and restricted.
 func TestBudgetDiagnosticsRequests(t *testing.T) {
 	for _, a := range []struct {
 		name  string
 		authz Authorizer
 	}{{"allow-all", nil}, {"restricted", restricting}} {
 		t.Run(a.name, func(t *testing.T) {
-			tier := scale.Large.Contradicting().Worst()
-			h, m := snapshotHandler(scale.LivePhase3(t, tier, nil).Cache.Snapshot(), tier, a.authz)
+			h, m := measuredHandler(t, a.authz)
 			in := m.Installs[0]
 			base := "/api/v1/installs/" + in.Resolved.ID()
-			t.Logf("%d findings, %d groups, %d Gateways", len(in.Health.Findings), len(in.Diagnosis.Groups), len(in.Owned.Gateways))
+			proxies := 0
+			for _, ps := range in.Process.Proxies {
+				proxies += len(ps.Processes)
+			}
+			t.Logf("%d findings, %d groups, %d Gateways, %d proxy Pods", len(in.Health.Findings), len(in.Diagnosis.Groups), len(in.Owned.Gateways), proxies)
 			for _, mx := range []struct{ name, path string }{
 				{"diagnostics", base + "/diagnostics"},
 				{"processes", base + "/processes"},
 				{"processes?q", base + "/processes?q=g-01&health=healthy&health=unknown"},
+				{"processes?restarts", base + "/processes?health=error&health=warning&restarts=true"},
 			} {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, mx.path, nil))
+				t.Logf("%-25s %d B", mx.name, w.Body.Len())
 				requestBudget(t, h, mx.name, mx.path, true)
 			}
 		})
 	}
+}
+
+// measuredHandler is the handler over the matured 3.2 measurement world under
+// authz: rejects on every Gateway, process data and stub proxy stats, as the engine's gates use it.
+func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Model) {
+	tier := scale.Large.Contradicting().Worst()
+	fc := testutil.FakeClock()
+	w := measure.New(t, tier, fc)
+	e := engine.New(engine.Config{Snapshots: staticSnap{w.Live.Cache.Snapshot()}, Served: testutil.ServedUpstream(),
+		Detectors: []install.Detector{install.UpstreamDetector{}}, Scope: install.NamespaceSelectorScope{},
+		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: w.Metrics, Collected: w.Store.Snapshot,
+		Checks: health.Upstream(), Now: fc.Now})
+	var m *engine.Model
+	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(m) })
+	// Two scrapes around testutil.Now and past every window, so windows, holds and proxy conditions mature.
+	m = e.Compute()
+	w.Scrape(t)
+	m = e.Compute()
+	fc.SetTime(testutil.Now.Add(max(engine.Window, health.Grace) + time.Second))
+	w.Scrape(t)
+	m = e.Compute()
+	if f, c := matured(m); f != c || c == 0 || !hasCodes(m, measuredCodes) {
+		t.Fatalf("measurement world did not mature: %d KGWUI-012 of %d checks", f, c)
+	}
+	return NewHandler(e, fstest.MapFS{}, authz), m
 }
 
 // requestBudget gates path's sequential p95 < 50 ms and, for a list, its

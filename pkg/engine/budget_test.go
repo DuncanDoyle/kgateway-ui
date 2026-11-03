@@ -386,8 +386,8 @@ const (
 
 // TestBudgetAnalyzerStage: at Large and in the 3.2 measurement world, design
 // §16.3's stage (identity, groups, rank and the Phase 3 checks; ruling R35)
-// has a median ≤ 20 ms warm and ≤ 2 ms memoized. The whole stage, Phase 1–2
-// checks included, is reported.
+// has a median ≤ 20 ms warm and ≤ 2 ms memoized, also when each run reads a new
+// scrape at the binary's max age (R70). The whole stage, Phase 1–2 checks included, is reported.
 func TestBudgetAnalyzerStage(t *testing.T) {
 	for _, tier := range []scale.Tier{scale.Large, measuredTier} {
 		t.Run(tier.Name, func(t *testing.T) {
@@ -396,9 +396,11 @@ func TestBudgetAnalyzerStage(t *testing.T) {
 				name         string
 				memo, scoped bool
 				budget       time.Duration
-			}{{"warm, §16.3 scope", false, true, analyzerWarmBudget}, {"memoized, §16.3 scope", true, true, analyzerMemoizedBudget},
-				{"warm, whole stage", false, false, 0}, {"memoized, whole stage", true, false, 0}} {
-				run := analyzerStage(t, e, mode.memo, mode.scoped)
+				scrape       time.Duration
+			}{{"warm, §16.3 scope", false, true, analyzerWarmBudget, 0}, {"memoized, §16.3 scope", true, true, analyzerMemoizedBudget, 0},
+				{"memoized, §16.3 scope, new scrape each run", true, true, analyzerMemoizedBudget, prodMaxAge},
+				{"warm, whole stage", false, false, 0, 0}, {"memoized, whole stage", true, false, 0, 0}} {
+				run := analyzerStage(t, e, mode.memo, mode.scoped, mode.scrape)
 				d := make([]time.Duration, 31)
 				for i := range d {
 					t0 := time.Now()

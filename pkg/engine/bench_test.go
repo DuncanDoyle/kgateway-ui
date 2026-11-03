@@ -91,7 +91,8 @@ func liveSnapshot(tb testing.TB, tier scale.Tier) *cache.Snapshot {
 // analyzerStage returns e's analyzer stage (checks, groups, rank, index) for its only
 // install, with inputs built as compute builds them; memo sets the input prints.
 // Scoped replays the Phase 1–2 checks' results, so it times design §16.3's scope.
-func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool) func() *diagnose.Diagnosis {
+// With scrape > 0 as the metrics max age, each run reads a new scrape of unchanged content.
+func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Duration) func() *diagnose.Diagnosis {
 	tb.Helper()
 	m := e.Compute()
 	snap, now, served := m.Snapshot, e.cfg.Now(), e.cfg.Served
@@ -111,10 +112,15 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool) func() *diagnose
 		col = e.cfg.Collected()
 	}
 	res := im.Resolved
+	maxAge, scrapes := e.cfg.MetricsMaxAge, 0
+	if scrape > 0 {
+		maxAge = scrape
+		read.Result.CollectedAt = now.Add(-time.Second) // fresh under maxAge
+	}
 	ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: read.Result, HasMetrics: read.Present,
-		MetricsMaxAge: e.cfg.MetricsMaxAge, Now: now, Views: e.decode})
+		MetricsMaxAge: maxAge, Now: now, Views: e.decode})
 	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: read.Result,
-		HasMetrics: read.Present, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
+		HasMetrics: read.Present, MetricsMaxAge: maxAge, FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
 		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode}
 	in.Process, in.GatewayAPI = im.Process, gatewayAPI(im.Rules)
 	checks := e.cfg.Checks
@@ -122,10 +128,16 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool) func() *diagnose
 		checks = scopedChecks(tb, e, in, col)
 	}
 	run := func() *diagnose.Diagnosis {
+		if scrape > 0 {
+			// A new scrape, 1 or 2 s old, so each run's CollectedAt differs from the last.
+			scrapes++
+			read.Result.CollectedAt = now.Add(-time.Duration(scrapes%2+1) * time.Second)
+			in.Metrics = read.Result
+		}
 		rt := health.Runtime{States: e.states[res.ID()], Collected: col}
 		var pc *printCtx
 		if memo {
-			pc = &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: e.cfg.MetricsMaxAge, ver: &ver, views: im.Computed, kc: kc, col: col,
+			pc = &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: maxAge, ver: &ver, views: im.Computed, kc: kc, col: col,
 				proc: im.Process}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
@@ -199,11 +211,13 @@ func BenchmarkAnalyzerStage(b *testing.B) {
 	for _, mode := range []struct {
 		name         string
 		memo, scoped bool
-	}{{"warm", false, false}, {"memoized", true, false}, {"warm-scope", false, true}, {"memoized-scope", true, true}} {
+		scrape       time.Duration
+	}{{"warm", false, false, 0}, {"memoized", true, false, 0}, {"warm-scope", false, true, 0}, {"memoized-scope", true, true, 0},
+		{"memoized-scope-scrape", true, true, prodMaxAge}} {
 		b.Run(mode.name, func(b *testing.B) {
 			for _, tier := range []scale.Tier{scale.Large, measuredTier} {
 				b.Run(tier.Name, func(b *testing.B) {
-					run := analyzerStage(b, analyzerEngine(b, tier), mode.memo, mode.scoped)
+					run := analyzerStage(b, analyzerEngine(b, tier), mode.memo, mode.scoped, mode.scrape)
 					b.ReportAllocs()
 					b.ResetTimer()
 					for b.Loop() {
@@ -218,6 +232,9 @@ func BenchmarkAnalyzerStage(b *testing.B) {
 // matureAt is a time past every window opened at testutil.Now, and past a
 // missing child entry's grace end.
 var matureAt = testutil.Now.Add(max(Window, health.Grace) + time.Second)
+
+// prodMaxAge is the binary's metrics max age: 3 × the default 10 s interval (R70).
+const prodMaxAge = 30 * time.Second
 
 // measuredTier is the tier of the 3.2 measurement world (Task 46).
 var measuredTier = scale.Large.Contradicting().Worst()
