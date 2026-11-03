@@ -1,6 +1,7 @@
 package health
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"math"
@@ -25,6 +26,11 @@ const (
 	xdsKey = "xds"
 	// proxyStatsKey is the proxy stats collector value.
 	proxyStatsKey = "proxy-stats/stats"
+	// RecentWindow is how long before a Gateway's first reject a change to an
+	// object on it counts as recent (design §8.5).
+	RecentWindow = 10 * time.Minute
+	// MaxRecentlyChanged is how many recently changed objects 001 lists.
+	MaxRecentlyChanged = 10
 )
 
 // Wording of KGWUI-001 (design §8.3).
@@ -54,6 +60,8 @@ func (xdsCheck) Inputs() InputSet {
 // xdsState is the check's Store value: controller Pods and their last change,
 // tracked rejects_total per Pod UID, and the rejecting or held Gateways.
 type xdsState struct {
+	// start is the check's first successful run: objects first seen by then have no known change time.
+	start     time.Time
 	pods      map[string]int32
 	changedAt time.Time
 	totals    ctrlmetrics.PodTotals
@@ -107,7 +115,10 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		return old.unavailable(ctx, c.Name(), fmt.Sprintf("%s missing from controller metrics although the install owns %d Gateway(s); check the metrics endpoint",
 			ctrlmetrics.ResourcesManaged, n))
 	}
-	cur := &xdsState{pods: controllerPods(in), changedAt: old.changedAt}
+	cur := &xdsState{start: old.start, pods: controllerPods(in), changedAt: old.changedAt}
+	if cur.start.IsZero() {
+		cur.start = in.Now
+	}
 	if old.pods != nil && podsChanged(old.pods, cur.pods) {
 		cur.changedAt = in.Now
 	}
@@ -115,8 +126,10 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	growth, cur.totals = ctrlmetrics.TotalGrowth(old.totals, trackedTotals(old, m.PerPod))
 	streams := rejectStreams(m.PerPod)
 	var proxies map[objects.Ref]*proxystats.Gateway
+	var changes map[objects.Ref][]change
 	if len(m.Rejects) > 0 {
 		proxies = proxyGateways(ctx)
+		changes = changesOn(in, m.Rejects, cur.start)
 	}
 	var fs []Finding
 	held := false
@@ -125,7 +138,7 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		prev := old.gateways[key]
 		if m.Rejects[key] > 0 {
 			g := &xdsGateway{}
-			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth, proxies))
+			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth, proxies, changes[*ref(gw)]))
 			cur.keep(key, g)
 			continue
 		}
@@ -178,7 +191,7 @@ func (s *xdsState) keep(k ctrlmetrics.GatewayKey, g *xdsGateway) {
 // xdsFinding is 001 on gw. A Gateway first seen now takes its since entry as
 // first seen, so types and the finding's since agree (design §5.1).
 func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.GatewayKey, prev, g *xdsGateway,
-	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64, proxies map[objects.Ref]*proxystats.Gateway,
+	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64, proxies map[objects.Ref]*proxystats.Gateway, changes []change,
 ) Finding {
 	in := ctx.Input
 	r := ref(gw)
@@ -234,7 +247,80 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 	var proxyPods []objects.Ref
 	ev.ProxyStats, proxyPods = proxyRejects(proxies[*r])
 	f.Evidence = append(f.Evidence, proxyPods...)
+	onset := first
+	for _, t := range ev.Types {
+		if t.FirstSeen.Before(onset) {
+			onset = t.FirstSeen
+		}
+	}
+	ev.RecentlyChanged = recentlyChanged(changes, onset)
 	return f
+}
+
+// change is an object on a rejecting Gateway and when its generation was first seen.
+type change struct {
+	ref  objects.Ref
+	seen time.Time
+}
+
+// changesOn returns, per Gateway in gws, the owned routes, ListenerSets and
+// policies on it (spec parents, a ListenerSet's Gateway, policy ancestors)
+// whose current generation was first seen after start.
+func changesOn(in Input, gws map[ctrlmetrics.GatewayKey]float64, start time.Time) map[objects.Ref][]change {
+	out := map[objects.Ref][]change{}
+	add := func(g objects.Ref, u *unstructured.Unstructured) {
+		if g.Group != objects.GatewayAPIGroup || g.Kind != "Gateway" || gws[ctrlmetrics.GatewayKey{Namespace: g.Namespace, Name: g.Name}] <= 0 {
+			return
+		}
+		if t := in.firstSeen(u); t.After(start) {
+			out[g] = append(out[g], change{ref: objects.RefOf(u), seen: t})
+		}
+	}
+	lsGW := make(map[objects.Ref]objects.Ref, len(in.Owned.ListenerSets))
+	for _, u := range in.Owned.ListenerSets {
+		g := in.views().ListenerSet(u).Parent.Ref()
+		lsGW[objects.RefOf(u)] = g
+		add(g, u)
+	}
+	gateway := func(r objects.Ref) objects.Ref {
+		if g, ok := lsGW[r]; ok {
+			return g
+		}
+		return r
+	}
+	for _, r := range in.Owned.Routes {
+		for _, p := range r.Parents {
+			add(gateway(p.Ref()), r.Obj)
+		}
+	}
+	for _, p := range in.Owned.Policies {
+		for _, a := range objects.PolicyAncestors(p.Obj) {
+			add(gateway(a.AncestorRef.Ref()), p.Obj)
+		}
+	}
+	return out
+}
+
+// recentlyChanged is cs first seen in the RecentWindow up to onset, newest
+// first, ties by ref, at most MaxRecentlyChanged.
+func recentlyChanged(cs []change, onset time.Time) []objects.Ref {
+	from := onset.Add(-RecentWindow)
+	in := make([]change, 0, len(cs))
+	for _, c := range cs {
+		if !c.seen.Before(from) && !c.seen.After(onset) {
+			in = append(in, c)
+		}
+	}
+	if len(in) == 0 {
+		return nil
+	}
+	slices.SortFunc(in, func(a, b change) int { return cmp.Or(b.seen.Compare(a.seen), compareRefs(a.ref, b.ref)) })
+	in = slices.CompactFunc(in, func(a, b change) bool { return a.ref == b.ref })
+	out := make([]objects.Ref, 0, min(len(in), MaxRecentlyChanged))
+	for _, c := range in[:min(len(in), MaxRecentlyChanged)] {
+		out = append(out, c.ref)
+	}
+	return out
 }
 
 // statusSaysHealthy reports whether gw's status is current and Programmed=True.

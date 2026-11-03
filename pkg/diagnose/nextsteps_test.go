@@ -1,0 +1,180 @@
+package diagnose_test
+
+import (
+	"reflect"
+	"testing"
+	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+// stepsInput is an install in kgw with the upstream proxy selector and the
+// infra/edge proxy Deployment.
+func stepsInput() diagnose.Input {
+	res := install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway", Container: "kgateway",
+		ProxySelector: install.UpstreamDetector{}.ProxySelector()}}
+	return diagnose.Input{Install: res, Snapshot: &cache.Snapshot{Deployments: []*appsv1.Deployment{testutil.ProxyDeployment("infra", "edge", 2, 2)}}}
+}
+
+var edgeGW = objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}
+
+// rejecting is 001 on infra/edge, reported by ctrl-b for one type and ctrl-a for another.
+func rejecting() health.Finding {
+	return health.Finding{Code: health.CodeXDSRejected, Severity: health.SeverityError, Resource: &edgeGW, Facts: &health.XDSRejectsEvidence{
+		Types: []health.XDSTypeRejects{{TypeURL: "envoy.config.route.v3.RouteConfiguration", ReportedBy: []string{"ctrl-b"}},
+			{TypeURL: "envoy.config.cluster.v3.Cluster", ReportedBy: []string{"ctrl-b", "ctrl-a"}}}}}
+}
+
+// restarted is 019 on subject with Pod pod's last exit code.
+func restarted(subject objects.Ref, pod string, code int32) health.Finding {
+	ns := subject.Namespace
+	return health.Finding{Code: health.CodeProcessRestarting, Severity: health.SeverityWarning, Resource: &subject,
+		Evidence: []objects.Ref{{Kind: "Pod", Namespace: ns, Name: pod}},
+		Facts:    &health.ProcessEvidence{Pod: pod, Termination: &health.TerminationFacts{Reason: "Error", ExitCode: code}}}
+}
+
+// steps groups fs with the upstream families and returns each group's steps.
+func steps(t *testing.T, in diagnose.Input, c diagnose.Commands, fs ...health.Finding) [][]diagnose.NextStep {
+	t.Helper()
+	rep := &health.Report{Findings: fs}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	out := make([][]diagnose.NextStep, len(d.Groups))
+	for i, g := range d.Groups {
+		out[i] = diagnose.Steps(g, rep.Findings, in, c)
+	}
+	return out
+}
+
+// Values outside the safe set are single-quoted, quotes escaped; the §8.5
+// commands are filled in and name the first replica that reported a reject.
+func TestCommandsQuoteValues(t *testing.T) {
+	for in, want := range map[string]string{
+		"edge": "edge", "kgw/ctrl-a.1:x=y_z": "kgw/ctrl-a.1:x=y_z", "": "''", "xds error": "'xds error'",
+		"it's": `'it'\''s'`, "$(rm -rf /)": "'$(rm -rf /)'", "a;b|c": "'a;b|c'", "*": "'*'",
+	} {
+		if got := diagnose.Quote(in); got != want {
+			t.Errorf("Quote(%q) = %s, want %s", in, got, want)
+		}
+	}
+	k := diagnose.Kubectl{}
+	odd := objects.Ref{Kind: "Pod", Namespace: "kgw", Name: "ctrl a"}
+	if got, want := k.ControllerLog(odd, time.Hour, "xds error", "edge"), `kubectl logs -n kgw 'ctrl a' --since=1h | grep 'xds error' | grep edge`; got != want {
+		t.Errorf("ControllerLog = %s, want %s", got, want)
+	}
+	proxy := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "in fra", Name: "edge"}
+	if got, want := k.ProxyLog(proxy, 90*time.Minute, "rejected"), `kubectl logs -n 'in fra' deploy/edge --since=90m | grep -i rejected`; got != want {
+		t.Errorf("ProxyLog = %s, want %s", got, want)
+	}
+	if got, want := k.ProxyCounters(proxy), "kubectl port-forward -n 'in fra' deploy/edge 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'"; got != want {
+		t.Errorf("ProxyCounters = %s, want %s", got, want)
+	}
+	if got, want := k.PreviousLog(odd, "kgateway"), `kubectl logs --previous -n kgw 'ctrl a' -c kgateway`; got != want {
+		t.Errorf("PreviousLog = %s, want %s", got, want)
+	}
+
+	gs := steps(t, stepsInput(), k, rejecting())
+	if len(gs) != 1 || len(gs[0]) != 3 {
+		t.Fatalf("want three data plane steps, got %+v", gs)
+	}
+	ctrlA := objects.Ref{Kind: "Pod", Namespace: "kgw", Name: "ctrl-a"}
+	edgeDeploy := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "infra", Name: "edge"}
+	want := []diagnose.NextStep{
+		{Title: diagnose.StepEnvoyReason, Command: "kubectl logs -n kgw ctrl-a --since=1h | grep 'xds error' | grep edge",
+			Needs: []string{"pods/log"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{ctrlA, edgeGW}},
+		{Title: diagnose.StepProxyLog, Command: "kubectl logs -n infra deploy/edge --since=1h | grep -i rejected",
+			Needs: []string{"pods/log"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{edgeDeploy, edgeGW}},
+		{Title: diagnose.StepProxyCounters, Command: k.ProxyCounters(edgeDeploy),
+			Needs: []string{"pods/portforward"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{edgeDeploy, edgeGW}},
+	}
+	if !reflect.DeepEqual(gs[0], want) {
+		t.Fatalf("steps\n%+v\nwant\n%+v", gs[0], want)
+	}
+	// Same inputs, same steps.
+	if again := steps(t, stepsInput(), k, rejecting()); !reflect.DeepEqual(again, gs) {
+		t.Fatalf("steps differ between runs: %+v", again)
+	}
+}
+
+// hide is Kubectl with ProxyLog returning "" and, optionally, PreviousLog too.
+type hide struct {
+	diagnose.Kubectl
+	previous bool
+}
+
+func (hide) ProxyLog(objects.Ref, time.Duration, string) string { return "" }
+
+func (h hide) PreviousLog(p objects.Ref, c string) string {
+	if h.previous {
+		return ""
+	}
+	return h.Kubectl.PreviousLog(p, c)
+}
+
+// A command that returns "" hides its step; the others keep their order.
+// 019 on the controller with exit code 2 gets the previous log, other exits
+// and proxy restarts none.
+func TestStepsHiddenWhenCommandEmpty(t *testing.T) {
+	gs := steps(t, stepsInput(), hide{}, rejecting())
+	if len(gs) != 1 || len(gs[0]) != 2 || gs[0][0].Title != diagnose.StepEnvoyReason || gs[0][1].Title != diagnose.StepProxyCounters {
+		t.Fatalf("want the reason and counter steps, got %+v", gs)
+	}
+
+	ctrl := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	gs = steps(t, stepsInput(), diagnose.Kubectl{}, restarted(ctrl, "kgateway-0", 2))
+	want := []diagnose.NextStep{{Title: diagnose.StepPanicTrace, Command: "kubectl logs --previous -n kgw kgateway-0 -c kgateway",
+		Needs: []string{"pods/log"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{{Kind: "Pod", Namespace: "kgw", Name: "kgateway-0"}}}}
+	if len(gs) != 1 || !reflect.DeepEqual(gs[0], want) {
+		t.Fatalf("exit code 2 steps %+v, want %+v", gs, want)
+	}
+	if gs := steps(t, stepsInput(), hide{previous: true}, restarted(ctrl, "kgateway-0", 2)); len(gs) != 1 || len(gs[0]) != 0 {
+		t.Fatalf("hidden previous log: %+v", gs)
+	}
+	if gs := steps(t, stepsInput(), diagnose.Kubectl{}, restarted(ctrl, "kgateway-0", 137)); len(gs) != 1 || len(gs[0]) != 0 {
+		t.Fatalf("exit code 137 steps %+v", gs)
+	}
+	if gs := steps(t, stepsInput(), diagnose.Kubectl{}, restarted(edgeGW, "edge-0", 2)); len(gs) != 1 || len(gs[0]) != 0 {
+		t.Fatalf("proxy restart steps %+v", gs)
+	}
+	// A self-managed Gateway has no proxy Deployment: only the controller step.
+	in := stepsInput()
+	in.Snapshot = &cache.Snapshot{}
+	if gs := steps(t, in, diagnose.Kubectl{}, rejecting()); len(gs) != 1 || len(gs[0]) != 1 || gs[0][0].Title != diagnose.StepEnvoyReason {
+		t.Fatalf("no proxy Deployment: %+v", gs)
+	}
+}
+
+// A step naming a hidden object is left out (design §14 rule 15); a caller
+// who cannot view the Gateway gets none.
+func TestStepsNameOnlyVisibleObjects(t *testing.T) {
+	all := steps(t, stepsInput(), diagnose.Kubectl{}, rejecting())[0]
+	hidden := func(rs ...objects.Ref) func(objects.Ref) bool {
+		return func(r objects.Ref) bool {
+			for _, h := range rs {
+				if r == h {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	ctrlA := objects.Ref{Kind: "Pod", Namespace: "kgw", Name: "ctrl-a"}
+	if got := diagnose.VisibleSteps(all, hidden(ctrlA)); len(got) != 2 || got[0].Title != diagnose.StepProxyLog {
+		t.Fatalf("hidden replica: %+v", got)
+	}
+	if got := diagnose.VisibleSteps(all, hidden(objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "infra", Name: "edge"})); len(got) != 1 || got[0].Title != diagnose.StepEnvoyReason {
+		t.Fatalf("hidden proxy Deployment: %+v", got)
+	}
+	if got := diagnose.VisibleSteps(all, hidden(edgeGW)); len(got) != 0 {
+		t.Fatalf("hidden Gateway: %+v", got)
+	}
+	if got := diagnose.VisibleSteps(all, hidden()); !reflect.DeepEqual(got, all) {
+		t.Fatalf("all visible: %+v", got)
+	}
+}

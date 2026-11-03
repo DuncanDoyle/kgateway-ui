@@ -20,6 +20,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -51,6 +52,8 @@ type Registry struct {
 	// ProxyStats finds proxies and reads their stats (design §8.8); nil means
 	// proxystats.Kube over the app's clients.
 	ProxyStats proxystats.Source
+	// Commands fills in the next-step commands (design §8.5).
+	Commands diagnose.Commands
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
@@ -162,6 +165,10 @@ func WithProcessSource(s process.Source) Option { return func(r *Registry) { r.P
 // interval, bounds, concurrency and publishing.
 func WithProxyStatsSource(s proxystats.Source) Option { return func(r *Registry) { r.ProxyStats = s } }
 
+// WithCommands replaces diagnose.Kubectl, for a platform without kubectl or
+// with its own commands. A method that returns "" hides that step.
+func WithCommands(c diagnose.Commands) Option { return func(r *Registry) { r.Commands = c } }
+
 // New returns the upstream registry with opts applied.
 func New(opts ...Option) *Registry {
 	r := &Registry{
@@ -173,6 +180,7 @@ func New(opts ...Option) *Registry {
 		ProxyMode:  proxymode.GatewayParameters{},
 		RulesFor:   rulesets.Select,
 		Process:    process.Kube{},
+		Commands:   diagnose.Kubectl{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}
 	for _, o := range opts {

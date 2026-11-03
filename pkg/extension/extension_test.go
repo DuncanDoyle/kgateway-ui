@@ -17,6 +17,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -26,6 +27,11 @@ import (
 )
 
 type otherDetector struct{ install.UpstreamDetector }
+
+// noKubectl hides the previous-log step and keeps the other commands.
+type noKubectl struct{ diagnose.Kubectl }
+
+func (noKubectl) PreviousLog(objects.Ref, string) string { return "" }
 
 func (otherDetector) Name() string { return "other" }
 
@@ -50,6 +56,12 @@ func TestNewAppliesOptionsOnTopOfUpstream(t *testing.T) {
 	deny := api.AuthorizerFunc(func(*http.Request, objects.Ref) bool { return false })
 	if _, ok := New(WithAuthorizer(deny)).Authorizer.(api.AuthorizerFunc); !ok {
 		t.Fatal("WithAuthorizer must replace the default")
+	}
+	if _, ok := r.Commands.(diagnose.Kubectl); !ok {
+		t.Fatalf("the default commands must be diagnose.Kubectl, got %T", r.Commands)
+	}
+	if c := (noKubectl{}); New(WithCommands(c)).Commands != c {
+		t.Fatal("WithCommands must replace the default")
 	}
 	v := scopeverify.NewManagedCountVerifier(1)
 	if New(WithScopeVerifier(v)).Verifier != v {

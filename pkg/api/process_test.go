@@ -217,7 +217,7 @@ func TestRestartWindowAtTheAPI(t *testing.T) {
 				ev.Termination.ExitCode != tc.code || !ev.Termination.At.Equal(restart) {
 				t.Fatalf("evidence %+v", ev)
 			}
-			if got := strings.Contains(f.Detail, "A Go panic exits with code 2.") && strings.Contains(f.Detail, "kubectl logs --previous -n kgw kgateway-0 -c kgateway"); got != tc.panic {
+			if got := strings.Contains(f.Detail, "A Go panic exits with code 2.") && !strings.Contains(f.Detail, "kubectl"); got != tc.panic {
 				t.Fatalf("panic note %v, want %v: %q", got, tc.panic, f.Detail)
 			}
 			body := string(wire(t, h.srv, healthPath))

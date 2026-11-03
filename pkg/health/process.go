@@ -36,7 +36,7 @@ const (
 	restartedOnce      = "Pod %s restarted in the last 15 minutes."
 	lastExitReason     = " Last exit: %s (exit code %d)."
 	lastExitCode       = " Last exit code %d."
-	panicNote          = " A Go panic exits with code 2. The stack trace is in the previous container's log: kubectl logs --previous -n %s %s"
+	panicNote          = " A Go panic exits with code 2. The stack trace is in the previous container's log."
 	probeMessage       = "%s probes failing"
 	probeDetail        = "Pod %s failed %s %d times in the last 15 minutes, from Events."
 	probeUncounted     = " Earlier failures not counted."
@@ -263,10 +263,7 @@ func restartFinding(in Input, s subject, p *process.Process, n int32) Finding {
 	if t := p.Termination; t != nil {
 		detail += lastExit(t)
 		if s.controller && t.ExitCode == 2 {
-			detail += fmt.Sprintf(panicNote, s.podNS, p.Name)
-			if in.Install.Container != "" {
-				detail += " -c " + in.Install.Container
-			}
+			detail += panicNote // the command is a next step (diagnose.Steps)
 		}
 	}
 	return processFinding(in, s, CodeProcessRestarting, "process-restarting", restartedMessage, detail, ev, p)

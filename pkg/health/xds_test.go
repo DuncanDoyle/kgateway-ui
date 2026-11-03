@@ -1,6 +1,7 @@
 package health
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
@@ -267,5 +269,87 @@ func TestRestartHoldNeedsAPodChange(t *testing.T) {
 	w.metrics = resultAt(testutil.Now, cleared(rejecting.Metrics))
 	if r := xdsAt(t, w, st, testutil.Now.Add(10*time.Second)); r.State != StateUnknown || !resultOf(r, "xDS rejects").Pending {
 		t.Fatalf("a Pod change before the scrape must hold: %s %+v", r.State, resultOf(r, "xDS rejects"))
+	}
+}
+
+// changedWorld is xdsWorld whose objects' current generations were first seen
+// at seen[name]; any other object counts as seen long before.
+func changedWorld(t *testing.T, seen map[string]time.Duration) *world {
+	t.Helper()
+	w := xdsWorld(t)
+	w.firstSeen = func(u *unstructured.Unstructured) time.Time {
+		if d, ok := seen[u.GetName()]; ok {
+			return testutil.Now.Add(-d)
+		}
+		return testutil.Old.Time
+	}
+	return w
+}
+
+// recentAt runs w once at Now − 30 min without rejects, so the check has seen
+// the objects before, then at Now with them, and returns nack's recently changed names.
+func recentAt(t *testing.T, w *world) []string {
+	t.Helper()
+	st := NewStates()
+	rejects := w.metrics
+	w.metrics = resultAt(testutil.Now, cleared(rejects.Metrics))
+	xdsAt(t, w, st, testutil.Now.Add(-30*time.Minute))
+	w.metrics = rejects
+	var names []string
+	for _, r := range xdsFacts(t, xdsOn(xdsAt(t, w, st, testutil.Now), "infra/nack")).RecentlyChanged {
+		names = append(names, r.Kind+"/"+r.Name)
+	}
+	return names
+}
+
+// Routes, ListenerSets and policies on the rejecting Gateway whose generation
+// was first seen in the 10 min before the first reject, newest first: 9:59
+// before is in, 10:01 before is out, and 12 changes keep the 10 newest.
+func TestRecentlyChangedWindowAndCap(t *testing.T) {
+	nack := testutil.GwRef("infra", "nack")
+	w := changedWorld(t, map[string]time.Duration{"in": 9*time.Minute + 59*time.Second, "out": 10*time.Minute + time.Second,
+		"ls": 2 * time.Minute, "tp": time.Minute, "elsewhere": time.Minute, "via-ls": 3 * time.Minute})
+	lsRef := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}
+	w.objs = append(w.objs,
+		testutil.HTTPRoute("shop", "in", []objects.ParentRef{nack}), testutil.HTTPRoute("shop", "out", []objects.ParentRef{nack}),
+		testutil.ListenerSet("infra", "ls", nack, nil), testutil.HTTPRoute("shop", "via-ls", []objects.ParentRef{lsRef}),
+		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: nack, Controller: testutil.Controller}),
+		testutil.HTTPRoute("shop", "elsewhere", []objects.ParentRef{testutil.GwRef("infra", "edge")}))
+	if got, want := recentAt(t, w), []string{"TrafficPolicy/tp", "ListenerSet/ls", "HTTPRoute/via-ls", "HTTPRoute/in"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("recently changed %v, want %v", got, want)
+	}
+
+	seen := map[string]time.Duration{}
+	w = changedWorld(t, seen)
+	for i := range 12 {
+		name := fmt.Sprintf("r%02d", i)
+		seen[name] = time.Duration(i+1) * 30 * time.Second
+		w.objs = append(w.objs, testutil.HTTPRoute("shop", name, []objects.ParentRef{nack}))
+	}
+	got := recentAt(t, w)
+	if len(got) != 10 || got[0] != "HTTPRoute/r00" || got[9] != "HTTPRoute/r09" {
+		t.Fatalf("want the 10 newest, got %v", got)
+	}
+	// The list is evidence only: the finding id and its Pod dependencies stay as they are.
+	r := xdsAt(t, changedWorld(t, nil), NewStates(), testutil.Now)
+	if f := xdsOn(r, "infra/nack"); f.ID != FindingID(r.Install, CodeXDSRejected, f.Resource, nil) || len(f.Evidence) != 2 {
+		t.Fatalf("id %s evidence %+v", f.ID, f.Evidence)
+	}
+}
+
+// Objects the check first saw at or before its first run have no known change
+// time, so a UI restart lists nothing as recently changed.
+func TestRecentlyChangedSkipsObjectsSeenAtStart(t *testing.T) {
+	w := changedWorld(t, map[string]time.Duration{"at-start": 5 * time.Minute, "after": 4 * time.Minute})
+	nack := testutil.GwRef("infra", "nack")
+	w.objs = append(w.objs, testutil.HTTPRoute("shop", "at-start", []objects.ParentRef{nack}), testutil.HTTPRoute("shop", "after", []objects.ParentRef{nack}))
+	st := NewStates()
+	rejects := w.metrics
+	w.metrics = resultAt(testutil.Now, cleared(rejects.Metrics))
+	xdsAt(t, w, st, testutil.Now.Add(-5*time.Minute))
+	w.metrics = rejects
+	ev := xdsFacts(t, xdsOn(xdsAt(t, w, st, testutil.Now), "infra/nack"))
+	if len(ev.RecentlyChanged) != 1 || ev.RecentlyChanged[0].Name != "after" {
+		t.Fatalf("recently changed %+v, want only after", ev.RecentlyChanged)
 	}
 }

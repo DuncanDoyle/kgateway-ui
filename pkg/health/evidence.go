@@ -3,6 +3,8 @@ package health
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 // Evidence is a finding's typed evidence (design §13.3), tagged by its JSON
@@ -107,6 +109,9 @@ type XDSRejectsEvidence struct {
 	// ProxyStats are the Gateway's scraped proxy Pods: rejects observed since
 	// their previous scrape, never "rejecting now" (design §8.8).
 	ProxyStats []ProxyRejects `json:"proxyStats,omitempty"`
+	// RecentlyChanged are objects on the Gateway changed shortly before the first
+	// reject, newest first. Not in Finding.Evidence: each is authorized on its own (§14 rule 14).
+	RecentlyChanged []objects.Ref `json:"recentlyChanged,omitempty"`
 }
 
 // ProxyRejects is one proxy Pod's rejects observed per xDS type.

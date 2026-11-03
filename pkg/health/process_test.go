@@ -165,13 +165,13 @@ func TestReplacedControllerPodIsNotARestart(t *testing.T) {
 	}
 }
 
-// Exit code 2 on the controller adds the Go panic note and the previous log command.
+// Exit code 2 on the controller adds the Go panic note; the command is a next step.
 func TestControllerPanicNote(t *testing.T) {
 	w := healthyWorld()
 	at := testutil.Now.Add(-30 * time.Second)
 	w.pods[0] = ctrlStatus(w.pods[0], corev1.ContainerStatus{RestartCount: 1, State: running(at), LastTerminationState: exited("Error", 2, at)})
 	f := find(Evaluate(processInput(t, w), Upstream(), Runtime{}), CodeProcessRestarting)
-	if f == nil || !strings.Contains(f.Detail, "A Go panic exits with code 2.") || !strings.Contains(f.Detail, "kubectl logs --previous -n kgw p -c kgateway") {
+	if f == nil || !strings.Contains(f.Detail, "A Go panic exits with code 2.") || strings.Contains(f.Detail, "kubectl") {
 		t.Fatalf("want the panic note, got %+v", f)
 	}
 }
