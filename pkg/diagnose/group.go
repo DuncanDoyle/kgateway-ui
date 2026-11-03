@@ -66,10 +66,8 @@ type Family interface {
 	Name() string
 	// Claim returns the cause of f in this family, or ok false.
 	Claim(f health.Finding, in Input) (cause *objects.Ref, causeKey []string, ok bool)
-	// Affected returns, index-aligned with gs, the objects each group's cause
-	// affects, nil for none. It runs once per Build with every group the family
-	// claimed; fs are the report's findings, which Members index. gs is valid
-	// only during the call.
+	// Affected returns, index-aligned with gs, each group's affected objects; it runs once
+	// per Build with the family's groups (valid only during the call), Members indexing fs.
 	Affected(gs []Claimed, fs []health.Finding, in Input) [][]objects.Ref
 }
 

@@ -1352,3 +1352,15 @@ func TestGatewayRejectingFilter(t *testing.T) {
 		t.Errorf("state=gateway-rejecting: %v (total %d)", got, p.Total)
 	}
 }
+
+// A policy whose Attached condition describes an older generation is not current, so not in StatusTrueFor.
+func TestStatusTrueForSkipsStalePolicy(t *testing.T) {
+	stale := testutil.Cond("Attached", metav1.ConditionTrue, "Attached")
+	stale.ObservedGeneration = 0
+	w := newWorld(testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), stale}}))
+	in := w.input(t)
+	if got := StatusTrueFor(in.Install, in.Owned, nil, map[objects.Ref]bool{gwObj: true})[gwObj]; len(got) != 0 {
+		t.Errorf("stale policy listed: %v", got)
+	}
+}

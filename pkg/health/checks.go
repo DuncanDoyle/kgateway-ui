@@ -485,6 +485,16 @@ func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 	return pendingReason(u, cs, routeRequired, routeOptional)
 }
 
+// GatewayPending is RoutePending for a Gateway or ListenerSet status block.
+func GatewayPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	return pendingReason(u, cs, gatewayRequired, nil)
+}
+
+// PolicyPending is RoutePending for one status.ancestors entry of policy u.
+func PolicyPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	return pendingReason(u, cs, policyRequired, policyOptional)
+}
+
 // experimentalKind returns u's served kind when kgateway watches it, at its
 // served version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
 func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bool) {
