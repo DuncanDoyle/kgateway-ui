@@ -37,6 +37,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
@@ -102,6 +103,8 @@ type setup struct {
 	checks []health.Check
 	// proxyPods watches the detectors' proxy Pods.
 	proxyPods bool
+	// collected returns the collector values checks read; nil means none.
+	collected func() collect.Snapshot
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -234,7 +237,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
 		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
-		DelegationBounds: s.bounds})
+		DelegationBounds: s.bounds, Collected: s.collected})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {

@@ -58,6 +58,8 @@ const (
 	CodeProbeFailing         = "KGWUI-020"
 	CodeRolloutStuck         = "KGWUI-021"
 	CodeVersionSkew          = "KGWUI-022"
+	CodeProxyConfigWarming   = "KGWUI-025"
+	CodeProxyDisconnected    = "KGWUI-026"
 )
 
 // Grace is how long a resource may lack current status before it is reported

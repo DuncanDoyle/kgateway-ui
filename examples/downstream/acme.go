@@ -135,8 +135,9 @@ type acmeProxyStats struct {
 
 // acmeStats is the JSON an acme proxy reports.
 type acmeStats struct {
-	Connected       bool  `json:"connected"`
-	ListenerRejects int64 `json:"listenerRejects"`
+	Connected       bool   `json:"connected"`
+	ListenerRejects int64  `json:"listenerRejects"`
+	State           string `json:"state"`
 }
 
 func (acmeProxyStats) Targets(_ install.Resolved, gw objects.Ref, _ *cache.Snapshot) ([]proxystats.Target, bool) {
@@ -153,5 +154,6 @@ func (acmeProxyStats) Interpret(t proxystats.Target, body []byte) (proxystats.Po
 	if err := json.Unmarshal(body, &j); err != nil {
 		return proxystats.PodStats{}, err
 	}
-	return proxystats.PodStats{UID: t.ID, Name: t.Name, Gateway: t.Gateway, Connected: &j.Connected, LDS: proxystats.Pair{Rejected: j.ListenerRejects}}, nil
+	return proxystats.PodStats{UID: t.ID, Name: t.Name, Gateway: t.Gateway, Connected: &j.Connected, ServerState: j.State,
+		LDS: proxystats.Pair{Rejected: j.ListenerRejects}}, nil
 }

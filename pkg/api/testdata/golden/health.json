@@ -101,6 +101,22 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "proxy stats not collected yet",
+        "name": "proxy config warming",
+        "ok": false,
+        "required": false,
+        "unavailable": "failing"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "proxy stats not collected yet",
+        "name": "proxy connection",
+        "ok": false,
+        "required": false,
+        "unavailable": "failing"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "computed views",
         "ok": true,
         "required": false

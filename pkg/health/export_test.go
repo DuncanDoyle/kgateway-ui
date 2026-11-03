@@ -9,11 +9,13 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // GuardWorlds returns the fixture worlds for the declared-input guard, which
@@ -116,6 +118,55 @@ func processWorlds(t *testing.T) map[string]Input {
 		in := w.input(t)
 		in.Process = &ProcessData{Controller: process.Set{Observed: true}, Proxies: map[objects.Ref]process.Set{objects.RefOf(in.Owned.Gateways[0]): {}}, Print: 1}
 		out[name] = add(in)
+	}
+	return out
+}
+
+// GuardWorld is a guard world with collected values.
+type GuardWorld struct {
+	In Input
+	RT Runtime
+}
+
+// GuardCollectedWorlds have proxy stats: rejects observed on a 001 Gateway,
+// Ready and not-Ready proxies in both conditions, a failing Pod, an
+// unobserved Gateway, and the value off, failing and absent.
+func GuardCollectedWorlds(t *testing.T) map[string]GuardWorld {
+	t.Helper()
+	since := testutil.Now.Add(-time.Minute)
+	no, two := false, int64(2)
+	pods := []proxystats.Pod{
+		{UID: "pod/infra/edge-0", Name: "edge-0", Connected: &no, WarmingClusters: &two, ServerState: "live",
+			LDS: proxystats.Rejects{Seen: true, Since: since}, RDS: []string{"listener~8080"}, Clusters: []string{"kube_shop_cart_8080"}},
+		{UID: "pod/infra/edge-1", Name: "edge-1", Connected: &no, WarmingListeners: &two, ServerState: "live"},
+		{UID: "pod/infra/edge-2", Name: "edge-2", Err: "timed out"},
+	}
+	value := func(gws ...proxystats.Gateway) collect.Snapshot {
+		st := proxystats.Stats{"kgw.kgateway": gws}
+		return collect.Snapshot{Values: map[string]collect.Value{proxystats.Key: {State: collect.OK, Data: st, Fingerprint: 3, At: testutil.Now}}}
+	}
+	edge := testutil.GwRef("infra", "edge").Ref()
+	worlds := map[string]collect.Snapshot{
+		"stats":         value(proxystats.Gateway{Gateway: edge, Observed: true, Pods: pods}),
+		"not observed":  value(proxystats.Gateway{Gateway: edge}),
+		"stats off":     {Values: map[string]collect.Value{proxystats.Key: {State: collect.Off, Reason: proxystats.OffReason, At: testutil.Now}}},
+		"stats failing": {Values: map[string]collect.Value{proxystats.Key: {State: collect.Failing, Reason: "collector stopped", At: testutil.Now}}},
+		"stats absent":  {},
+	}
+	yes := true
+	out := map[string]GuardWorld{}
+	for name, col := range worlds {
+		for _, rejecting := range []bool{false, true} {
+			w := healthyWorld()
+			if rejecting {
+				w.metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
+				name += " with 001"
+			}
+			in := w.input(t)
+			in.Process = &ProcessData{Controller: process.Set{Observed: true}, Proxies: map[objects.Ref]process.Set{edge: {Observed: true,
+				Processes: []process.Process{{ID: "pod/infra/edge-0", Name: "edge-0", Ready: &yes}, {ID: "pod/infra/edge-1", Name: "edge-1", Ready: &no}}}}, Print: 2}
+			out[name] = GuardWorld{In: in, RT: Runtime{Collected: col}}
+		}
 	}
 	return out
 }

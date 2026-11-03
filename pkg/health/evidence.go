@@ -104,6 +104,26 @@ type XDSRejectsEvidence struct {
 	// Proxies is nil when the Gateway has no proxy Deployment.
 	Proxies           *ProxyCount `json:"proxies,omitempty"`
 	StatusSaysHealthy bool        `json:"statusSaysHealthy"`
+	// ProxyStats are the Gateway's scraped proxy Pods: rejects observed since
+	// their previous scrape, never "rejecting now" (design §8.8).
+	ProxyStats []ProxyRejects `json:"proxyStats,omitempty"`
+}
+
+// ProxyRejects is one proxy Pod's rejects observed per xDS type.
+type ProxyRejects struct {
+	Pod   string             `json:"pod"`
+	Types []ProxyTypeRejects `json:"types"`
+}
+
+// ProxyTypeRejects says whether a type's update_rejected grew since the Pod's
+// previous scrape, since when, and the Envoy names whose counter grew.
+type ProxyTypeRejects struct {
+	TypeURL        string     `json:"typeUrl"`
+	Rejecting      bool       `json:"rejecting"`
+	RejectingSince *time.Time `json:"rejectingSince,omitempty"`
+	// EnvoyResources are Envoy names, never Gateway API objects.
+	EnvoyResources          []string `json:"envoyResources,omitempty"`
+	EnvoyResourcesTruncated bool     `json:"envoyResourcesTruncated,omitempty"`
 }
 
 // XDSTypeRejects is one rejected xDS type: rejecting streams summed over the
@@ -132,6 +152,35 @@ func (e *XDSRejectsEvidence) MarshalJSON() ([]byte, error) {
 		Kind string `json:"kind"`
 		*plain
 	}{EvidenceXDSRejects, (*plain)(e)})
+}
+
+// EvidenceProxyStats is the kind of ProxyStatsEvidence.
+const EvidenceProxyStats = "proxy-stats"
+
+// ProxyStatsEvidence is the Ready proxy Pods behind KGWUI-025 or 026.
+type ProxyStatsEvidence struct {
+	Pods []ProxyPodStats `json:"pods"`
+}
+
+// ProxyPodStats is one proxy's Envoy stats; nil fields were not reported.
+type ProxyPodStats struct {
+	Pod              string `json:"pod"`
+	Connected        *bool  `json:"connected,omitempty"`
+	WarmingListeners *int64 `json:"warmingListeners,omitempty"`
+	WarmingClusters  *int64 `json:"warmingClusters,omitempty"`
+	ServerState      string `json:"serverState,omitempty"`
+}
+
+// EvidenceKind implements Evidence.
+func (*ProxyStatsEvidence) EvidenceKind() string { return EvidenceProxyStats }
+
+// MarshalJSON adds the kind tag.
+func (e *ProxyStatsEvidence) MarshalJSON() ([]byte, error) {
+	type plain ProxyStatsEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{EvidenceProxyStats, (*plain)(e)})
 }
 
 // RawEvidence is evidence of a kind this build does not know, kept as sent.
@@ -166,6 +215,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 		return e, json.Unmarshal(b, e)
 	case EvidenceXDSRejects:
 		e := &XDSRejectsEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceProxyStats:
+		e := &ProxyStatsEvidence{}
 		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil

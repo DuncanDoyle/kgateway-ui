@@ -14,6 +14,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 const (
@@ -44,7 +45,8 @@ type xdsCheck struct{}
 func (xdsCheck) Name() string { return "xDS rejects" }
 
 // Inputs implements Check: no Clock, as the restart hold and metrics
-// staleness end through WakeAt; Deployments give the proxy counts.
+// staleness end through WakeAt; Deployments give the proxy counts, proxy
+// stats the per-Pod evidence.
 func (xdsCheck) Inputs() InputSet {
 	return InputSet{Owned: true, Metrics: true, Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}},
 		Collected: []string{proxyStatsKey}}
@@ -113,6 +115,10 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	var growth map[ctrlmetrics.TypeKey]float64
 	growth, cur.totals = ctrlmetrics.TotalGrowth(old.totals, trackedTotals(old, m.PerPod))
 	streams := rejectStreams(m.PerPod)
+	var proxies map[objects.Ref]*proxystats.Gateway
+	if len(m.Rejects) > 0 {
+		proxies = proxyGateways(ctx)
+	}
 	var fs []Finding
 	held := false
 	for _, gw := range in.Owned.Gateways {
@@ -120,7 +126,7 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		prev := old.gateways[key]
 		if m.Rejects[key] > 0 {
 			g := &xdsGateway{}
-			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth))
+			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth, proxies))
 			cur.keep(key, g)
 			continue
 		}
@@ -173,7 +179,7 @@ func (s *xdsState) keep(k ctrlmetrics.GatewayKey, g *xdsGateway) {
 // xdsFinding is 001 on gw. A Gateway first seen now takes its since entry as
 // first seen, so types and the finding's since agree (design §5.1).
 func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.GatewayKey, prev, g *xdsGateway,
-	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64,
+	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64, proxies map[objects.Ref]*proxystats.Gateway,
 ) Finding {
 	in := ctx.Input
 	r := ref(gw)
@@ -226,6 +232,9 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 	for _, p := range slices.Compact(pods) {
 		f.Evidence = append(f.Evidence, process.PodRef(in.Install.Namespace, process.Process{Name: p}))
 	}
+	var proxyPods []objects.Ref
+	ev.ProxyStats, proxyPods = proxyRejects(proxies[*r])
+	f.Evidence = append(f.Evidence, proxyPods...)
 	return f
 }
 

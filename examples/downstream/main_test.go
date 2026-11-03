@@ -34,7 +34,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // The README's extension example is this program, so the build compiles it.
@@ -303,34 +302,24 @@ func TestAcmeWidgetCheckReadsOnlyDeclaredInputs(t *testing.T) {
 	}
 }
 
-// disconnectedCheck stands in for KGWUI-026 until it lands: one finding per
-// proxy that reports no controller connection, read from the core key.
-type disconnectedCheck struct{}
-
-func (disconnectedCheck) Name() string { return "acme disconnected proxies" }
-func (disconnectedCheck) Inputs() health.InputSet {
-	return health.InputSet{Collected: []string{proxystats.Key}}
-}
-func (c disconnectedCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
-	v, _ := ctx.Collected(proxystats.Key)
-	st, ok := v.Data.(proxystats.Stats)
-	if v.State != collect.OK || !ok {
-		return nil, health.CheckResult{Name: c.Name(), CollectedAt: ctx.Now, Error: "proxy stats not available"}
-	}
-	var fs []health.Finding
-	for _, g := range st[ctx.Install.ID()] {
-		for _, p := range g.Pods {
-			if p.Connected != nil && !*p.Connected {
-				fs = append(fs, health.Finding{Code: "PSTEST-026", Slug: "proxy-disconnected", Severity: health.SeverityWarning, Install: ctx.Install.ID(),
-					Resource: &g.Gateway, Message: "Proxy " + p.Name + " lost its connection to the controller"})
-			}
-		}
-	}
-	return fs, health.CheckResult{Name: c.Name(), OK: true, CollectedAt: v.At}
+// afterClock is a fake clock that reports each After, so a test steps the
+// proxy stats collector's first-round retry only once it waits.
+type afterClock struct {
+	*clocktesting.FakeClock
+	afters chan struct{}
 }
 
-// A downstream Source with its own targets and a JSON stats format feeds a
-// check through /health; the core collector owns the interval and publishing.
+func (c afterClock) After(d time.Duration) <-chan time.Time {
+	ch := c.FakeClock.After(d)
+	select {
+	case c.afters <- struct{}{}:
+	default:
+	}
+	return ch
+}
+
+// A downstream Source with its own targets and a JSON stats format feeds
+// KGWUI-026 through /health; the core collector owns the interval and publishing.
 func TestDownstreamProxyStatsSource(t *testing.T) {
 	ui, err := fs.Sub(dist, "dist")
 	if err != nil {
@@ -342,20 +331,26 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true), gw)
 	var connected atomic.Bool
 	var fetched atomic.Value
+	fetches := make(chan struct{}, 64)
 	src := acmeProxyStats{fetch: func(_ context.Context, addr string) ([]byte, error) {
 		fetched.Store(addr)
-		return json.Marshal(acmeStats{Connected: connected.Load()})
+		select {
+		case fetches <- struct{}{}:
+		default:
+		}
+		return json.Marshal(acmeStats{Connected: connected.Load(), State: "live"})
 	}}
+	clk := afterClock{FakeClock: testutil.FakeClock(), afters: make(chan struct{}, 64)}
 	events := make(chan engine.LoopEvent, 4096)
 	o := options(ui)
-	o.MetricsInterval = 50 * time.Millisecond
+	o.Clock, o.MetricsInterval = clk, time.Minute
 	o.OnLoop = func(e engine.LoopEvent) {
 		select {
 		case events <- e:
 		default:
 		}
 	}
-	opts := append(extensions(clock.RealClock{}), extension.WithProxyStatsSource(src), extension.WithChecks("PSTEST-", disconnectedCheck{}))
+	opts := append(extensions(clk), extension.WithProxyStatsSource(src))
 	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}}, o, extension.New(opts...))
 	if err != nil {
 		t.Fatal(err)
@@ -365,6 +360,27 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 	a.Start(ctx)
 	srv := httptest.NewServer(a.Handler)
 	t.Cleanup(srv.Close)
+	// The first rounds find no synced model and retry after a second.
+	for scraped := false; !scraped; {
+		select {
+		case <-fetches:
+			scraped = true
+		case <-clk.afters:
+			clk.Step(time.Second)
+		case <-time.After(10 * time.Second):
+			t.Fatal("the acme proxy was never scraped")
+		}
+	}
+	statsRead := func(p *engine.Published) bool {
+		return p != nil && len(p.Model.Installs) == 1 && slices.ContainsFunc(p.Model.Installs[0].Health.Checks, func(c health.CheckResult) bool { return c.Name == "proxy connection" && c.OK })
+	}
+	for armed := false; !armed; {
+		e := testutil.Recv(t, events, "a run over the acme stats, then its timer")
+		armed = e.Kind == engine.EvArmed && statsRead(a.Engine.Current())
+	}
+	if healthHas(t, srv, health.CodeProxyDisconnected) {
+		t.Fatal("a disconnect younger than 60 s raised 026")
+	}
 	waitFor := func(what string, ok func(*engine.Published) bool) {
 		t.Helper()
 		for {
@@ -373,16 +389,18 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 			}
 		}
 	}
-	waitFor("the disconnected proxy's finding", func(p *engine.Published) bool { return modelHas(p, "PSTEST-026") })
+	clk.Step(61 * time.Second)
+	waitFor("the disconnected proxy's finding", func(p *engine.Published) bool { return modelHas(p, health.CodeProxyDisconnected) })
 	var h api.HealthResponse
 	getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h)
-	i := slices.IndexFunc(h.Findings, func(f api.FindingDTO) bool { return f.Code == "PSTEST-026" })
-	if i < 0 || h.Findings[i].Message != "Proxy edge-node lost its connection to the controller" || fetched.Load() != "edge.shop.acme.internal:7000" {
+	i := slices.IndexFunc(h.Findings, func(f api.FindingDTO) bool { return f.Code == health.CodeProxyDisconnected })
+	if i < 0 || !strings.Contains(h.Findings[i].Detail, "edge-node") || fetched.Load() != "edge.shop.acme.internal:7000" {
 		t.Fatalf("health %+v, fetched %v", h.Findings, fetched.Load())
 	}
 	connected.Store(true)
-	waitFor("the reconnected proxy", func(p *engine.Published) bool { return !modelHas(p, "PSTEST-026") })
-	if healthHas(t, srv, "PSTEST-026") {
+	clk.Step(time.Minute)
+	waitFor("the reconnected proxy", func(p *engine.Published) bool { return !modelHas(p, health.CodeProxyDisconnected) })
+	if healthHas(t, srv, health.CodeProxyDisconnected) {
 		t.Fatal("a reconnected proxy clears the finding")
 	}
 }
