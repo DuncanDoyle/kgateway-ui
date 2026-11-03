@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1408,5 +1410,55 @@ func TestCoreCapabilitiesPendingAndMissing(t *testing.T) {
 	snap := &cache.Snapshot{Access: map[schema.GroupVersionResource]cache.Access{cache.EventsGVR: {}, cache.CRDsGVR: {Err: "x is forbidden: y"}}}
 	if got := CoreCapabilities(snap, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}}) {
 		t.Errorf("syncing events, no proxy Pod watch, crds off: %+v", got)
+	}
+}
+
+// captureScraper serves a controller metrics capture with rejects on infra/edge.
+type captureScraper struct{ body []byte }
+
+func (s captureScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader(string(s.body))), nil
+}
+
+// acmeCommands names its own tool in the controller log step and hides the others.
+type acmeCommands struct{}
+
+func (acmeCommands) ControllerLog(pod objects.Ref, _ time.Duration, _ ...string) string {
+	return "acme logs " + pod.Name
+}
+func (acmeCommands) ProxyLog(objects.Ref, time.Duration, string) string { return "" }
+func (acmeCommands) ProxyCounters(objects.Ref) string                   { return "" }
+func (acmeCommands) PreviousLog(objects.Ref, string) string             { return "" }
+
+// Commands registered with extension.WithCommands reach the next steps of /diagnostics.
+func TestCommandsSeamReachesTheAPI(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "ctrlmetrics", "testdata", "v2.4.7-rejects-a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	gw := testutil.GwRef("infra", "edge")
+	dyn, kube := testutil.ClientsWith(t, nil,
+		testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), testutil.Namespace("shop", nil),
+		d, testutil.ControllerPod(d, "kgateway-0", true), testutil.ProxyDeployment("infra", "edge", 1, 1),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("infra", "edge", "kgateway", nil),
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: captureScraper{body}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, extension.New(extension.WithCommands(acmeCommands{})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var dg api.Diagnostics
+	eventually(t, "no data plane group", func() bool {
+		dg = api.Diagnostics{}
+		return getJSON(t, srv, "/api/v1/installs/kgw.kgateway/diagnostics", &dg) == http.StatusOK && len(dg.Groups) > 0 && dg.Groups[0].Code == health.CodeXDSRejected
+	})
+	if s := dg.Groups[0].NextSteps; len(s) != 1 || s[0].Command != "acme logs kgateway-0" {
+		t.Fatalf("steps %+v", s)
 	}
 }

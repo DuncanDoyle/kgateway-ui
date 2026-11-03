@@ -24,9 +24,11 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // Regenerate with: go test ./pkg/api -run Golden -update (never in CI).
@@ -202,7 +204,7 @@ func partialLS() *unstructured.Unstructured {
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
 		if !ok { // meta and installs: no install segment, and no links
 			continue
@@ -232,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 331
+	const want = 353
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -254,7 +256,7 @@ func detailPath(r objects.Ref) (string, bool) {
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
 func TestGoldenFilesHaveCases(t *testing.T) {
 	cased := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
 		cased[tc.golden+".json"] = true
 	}
 	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
@@ -562,7 +564,7 @@ var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 // are the only additions to the Phase 2 bytes. It never rewrites a golden, even under -update.
 func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
 	compared := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
 		want, err := os.ReadFile(filepath.Join("testdata", "golden", tc.golden+".json"))
 		if err != nil {
 			t.Fatal(err)
@@ -618,5 +620,44 @@ func TestGoldenFindingIDs(t *testing.T) {
 	}
 	if total == 0 {
 		t.Fatal("no findings in any golden")
+	}
+}
+
+// TestGoldenDiagnostics pins the 3.2 bodies (design §13.3): diagnostics,
+// processes and one finding detail per evidence kind, each with a restricted variant.
+func TestGoldenDiagnostics(t *testing.T) { runGolden(t, diagCases(t)) }
+
+func diagCases(t *testing.T) []goldenCase {
+	rej := diagGoldenWorld(t)
+	procs := procsWorld(t, setup{})
+	restarted := restartedWorld(t)
+	skewed := newHarness(t, setup{proxyPods: true}, skewWorld("v2.3.6", testutil.Old.Time)...)
+	skewed.at(t, testutil.Now)
+	no := false
+	stats := proxyStatsWorld(t, func(p *proxystats.PodStats) { p.Connected = &no })
+	nack, edge := testutil.GwRef("infra", "nack").Ref(), edgeRef.Ref()
+	id := func(h *harness, code, name string) string {
+		for _, f := range h.e.Current().Model.Installs[0].Health.Findings {
+			if f.Code == code && f.Resource != nil && (name == "" || f.Resource.Name == name) {
+				return f.ID
+			}
+		}
+		t.Fatalf("no %s on %q", code, name)
+		return ""
+	}
+	detail := func(h *harness, code, name string) string { return findingsBase + "/" + id(h, code, name) }
+	return []goldenCase{
+		{"diagnostics", rej.srv, diagPath},
+		{"diagnostics-restricted", authzSrv(t, rej, deny(edge, podRef("kgw", "kgateway-0"), route("shop", "fresh"))), diagPath},
+		{"processes", procs.srv, procsPath},
+		{"processes-restricted", authzSrv(t, procs, deny(podRef("infra", "edge-0"), testutil.GwRef("infra", "calm").Ref(), ctrlDeployment)), procsPath},
+		{"finding-detail-xds-rejects", rej.srv, detail(rej, health.CodeXDSRejected, nack.Name)},
+		{"finding-detail-xds-rejects-restricted", authzSrv(t, rej, deny(podRef("infra", "nack-0"))), detail(rej, health.CodeXDSRejected, nack.Name)},
+		{"finding-detail-process", restarted.srv, detail(restarted, health.CodeProcessRestarting, "")},
+		{"finding-detail-process-restricted", authzSrv(t, restarted, deny(podRef("kgw", "kgateway-0"))), detail(restarted, health.CodeProcessRestarting, "")},
+		{"finding-detail-version-skew", skewed.srv, detail(skewed, health.CodeVersionSkew, "")},
+		{"finding-detail-version-skew-restricted", authzSrv(t, skewed, deny(podRef("infra", "edge-0"))), detail(skewed, health.CodeVersionSkew, "")},
+		{"finding-detail-proxy-stats", stats.srv, detail(stats, health.CodeProxyDisconnected, "")},
+		{"finding-detail-proxy-stats-restricted", authzSrv(t, stats, deny(podRef("infra", "edge-0"))), detail(stats, health.CodeProxyDisconnected, "")},
 	}
 }

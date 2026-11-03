@@ -79,6 +79,7 @@ var endpoints = []string{
 	base + "/gateways", base + "/gateways?sort=routes.desc", base + "/listenersets",
 	gwDetail, lsDetail + "infra/ls1", routeDetail + "shop/api", routeDetail + "shop/backends", routeDetail + "shop/secret",
 	base + "/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart",
+	base + "/diagnostics", base + "/processes", base + "/processes?q=edge&skew=false",
 }
 
 // Rule 10: an Authorizer that admits everything is never called, and the

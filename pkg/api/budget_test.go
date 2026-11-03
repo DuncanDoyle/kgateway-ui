@@ -334,6 +334,30 @@ func TestBudgetFindingsRequests(t *testing.T) {
 	}
 }
 
+// TestBudgetDiagnosticsRequests: …/diagnostics and …/processes (with a filter)
+// hold the list budgets in the matured worst case, allowed and restricted.
+func TestBudgetDiagnosticsRequests(t *testing.T) {
+	for _, a := range []struct {
+		name  string
+		authz Authorizer
+	}{{"allow-all", nil}, {"restricted", restricting}} {
+		t.Run(a.name, func(t *testing.T) {
+			tier := scale.Large.Contradicting().Worst()
+			h, m := snapshotHandler(scale.LivePhase3(t, tier, nil).Cache.Snapshot(), tier, a.authz)
+			in := m.Installs[0]
+			base := "/api/v1/installs/" + in.Resolved.ID()
+			t.Logf("%d findings, %d groups, %d Gateways", len(in.Health.Findings), len(in.Diagnosis.Groups), len(in.Owned.Gateways))
+			for _, mx := range []struct{ name, path string }{
+				{"diagnostics", base + "/diagnostics"},
+				{"processes", base + "/processes"},
+				{"processes?q", base + "/processes?q=g-01&health=healthy&health=unknown"},
+			} {
+				requestBudget(t, h, mx.name, mx.path, true)
+			}
+		})
+	}
+}
+
 // requestBudget gates path's sequential p95 < 50 ms and, for a list, its
 // p99 < 100 ms and 20-client p95 < 100 ms.
 func requestBudget(t *testing.T, h http.Handler, name, path string, list bool) {

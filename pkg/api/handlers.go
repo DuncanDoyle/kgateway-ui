@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -40,7 +41,10 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	if authz == nil {
 		authz = AllowAll{}
 	}
-	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource}
+	if cfg.commands == nil {
+		cfg.commands = diagnose.Kubectl{}
+	}
+	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -50,6 +54,8 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	mux.HandleFunc("GET /api/v1/installs/{id}/health", h.health)
 	mux.HandleFunc("GET /api/v1/installs/{id}/findings", h.findings)
 	mux.HandleFunc("GET /api/v1/installs/{id}/findings/{findingId}", h.findingDetail)
+	mux.HandleFunc("GET /api/v1/installs/{id}/diagnostics", h.diagnostics)
+	mux.HandleFunc("GET /api/v1/installs/{id}/processes", h.processes)
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes", h.routes)
 	mux.HandleFunc("GET /api/v1/installs/{id}/gateways", h.gateways)
 	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets", h.listenerSets)
@@ -71,6 +77,7 @@ type handler struct {
 	authz      Authorizer
 	capSources []func() []Capability
 	coreSource func() []Capability
+	commands   diagnose.Commands
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -267,9 +274,8 @@ func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
 			rep.Findings[i].Since = &at
 		}
 	}
-	rep.Checks = slices.Clone(rep.Checks)
-	for i := range rep.Checks {
-		rep.Checks[i].CollectedAt = wireTime(rep.Checks[i].CollectedAt)
+	if rep.Checks != nil {
+		rep.Checks = wireChecks(rep.Checks)
 	}
 	return rep
 }
@@ -284,7 +290,7 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 // carries its link. A visible finding whose evidence the caller may not view
 // all of has its detail replaced and no typed evidence, and a since it has is
 // replaced by the resource's own (design §7.4 rule 7, Phase 3 §14 rule 12).
-// State, counts and severities stay.
+// Typed evidence is in wire form (§14 rule 14). State, counts and severities stay.
 func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
 	rep := wireHealth(visibleHealth(v, i), confirmedAt)
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
@@ -305,6 +311,9 @@ func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedA
 					d.Since = &at
 				}
 			}
+		}
+		if d.Facts != nil {
+			d.Facts = wireEvidence(v, l, d.Facts)
 		}
 		out.Findings = append(out.Findings, d)
 	}

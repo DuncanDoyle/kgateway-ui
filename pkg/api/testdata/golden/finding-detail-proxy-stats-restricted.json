@@ -1,0 +1,34 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:01:01Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:01:01Z",
+    "finding": {
+      "code": "KGWUI-026",
+      "detail": "Details depend on objects you cannot view",
+      "evidenceRestricted": true,
+      "group": "f1-lq7dgtmebriqqlfwkepjs6upro",
+      "id": "f1-exk6t5crda4pyesobrrvy7ixgm",
+      "message": "Proxy lost its connection to the controller",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "detail",
+        "name": "edge",
+        "namespace": "infra"
+      },
+      "severity": "warning",
+      "slug": "proxy-disconnected"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

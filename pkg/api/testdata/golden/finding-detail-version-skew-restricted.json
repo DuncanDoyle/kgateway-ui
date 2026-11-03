@@ -1,0 +1,34 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "finding": {
+      "code": "KGWUI-022",
+      "detail": "Details depend on objects you cannot view",
+      "evidenceRestricted": true,
+      "group": "f1-lq7dgtmebriqqlfwkepjs6upro",
+      "id": "f1-rpmgfxmhpqaeensbfoaa6sigwa",
+      "message": "Proxy version differs from the controller",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "detail",
+        "name": "edge",
+        "namespace": "infra"
+      },
+      "severity": "warning",
+      "slug": "version-skew"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

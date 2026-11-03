@@ -248,19 +248,31 @@ func (h *handler) findingDetail(w http.ResponseWriter, r *http.Request) {
 		items = append(items, l.linked(ref))
 	}
 	at := wireTime(p.ConfirmedAt)
-	writeJSON(w, FindingDetail{Install: i.Resolved.ID(), Finding: row, CollectedAt: at,
-		Affected: Page[LinkedRef]{Install: i.Resolved.ID(), Items: items, Total: len(refs), Next: affected.next, Prev: affected.prev, CollectedAt: at}})
+	out := FindingDetail{Install: i.Resolved.ID(), Finding: row, CollectedAt: at}
+	if !row.Restricted {
+		if !row.EvidenceRestricted && f.Facts != nil {
+			out.Evidence = wireEvidence(v, l, f.Facts)
+		}
+		out.NextSteps = nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(p.Model, i), h.commands, v.visible()))
+	}
+	out.Affected = Page[LinkedRef]{Install: i.Resolved.ID(), Items: items, Total: len(refs), Next: affected.next, Prev: affected.prev, CollectedAt: at}
+	writeJSON(w, out)
 }
 
 // affectedOf returns the visible affected objects of group, sorted; none
 // when the group's cause is hidden (design §14 rule 13).
 func affectedOf(v *view, d *diagnose.Diagnosis, group string) []objects.Ref {
 	j := slices.IndexFunc(d.Groups, func(g diagnose.Group) bool { return g.ID == group })
-	if j < 0 || len(d.Groups[j].Affected) == 0 {
+	if j < 0 {
 		return nil
 	}
-	g := &d.Groups[j]
-	if g.Cause != nil && !v.can(*g.Cause) {
+	return visibleAffected(v, &d.Groups[j])
+}
+
+// visibleAffected returns g's affected objects the caller of v may view,
+// sorted and deduplicated; none when g's cause is hidden.
+func visibleAffected(v *view, g *diagnose.Group) []objects.Ref {
+	if len(g.Affected) == 0 || g.Cause != nil && !v.can(*g.Cause) {
 		return nil
 	}
 	out := make([]objects.Ref, 0, len(g.Affected))
@@ -290,8 +302,9 @@ type affectedCursor struct {
 // sortAffected keeps affected cursors apart from every list's.
 const sortAffected = "affected"
 
-func encodeAffected(before bool, r objects.Ref) string {
-	b, _ := json.Marshal(affectedCursor{S: sortAffected, D: "asc", B: before, T: []string{r.Namespace, r.Name, r.Group, r.Kind}}) // strings cannot fail
+// encodeRefCursor is the cursor of list tag before or after r.
+func encodeRefCursor(tag string, before bool, r objects.Ref) string {
+	b, _ := json.Marshal(affectedCursor{S: tag, D: "asc", B: before, T: []string{r.Namespace, r.Name, r.Group, r.Kind}}) // strings cannot fail
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -301,46 +314,51 @@ type affectedPage struct {
 	next, prev string
 }
 
-// pageAffected returns the page of sorted refs after or before c. A cursor
-// that does not decode is explore.ErrBadCursor.
+// pageAffected returns the page of sorted affected refs after or before c.
 func pageAffected(refs []objects.Ref, c string) (affectedPage, error) {
-	start, end := 0, min(len(refs), affectedLimit)
+	return pageRefs(refs, c, affectedLimit, sortAffected)
+}
+
+// pageRefs returns the limit refs of sorted refs after or before c, a cursor
+// of list tag. A cursor that does not decode is explore.ErrBadCursor.
+func pageRefs(refs []objects.Ref, c string, limit int, tag string) (affectedPage, error) {
+	start, end := 0, min(len(refs), limit)
 	var anchor *affectedCursor
 	if c != "" {
 		var w affectedCursor
 		raw, err := base64.RawURLEncoding.DecodeString(c)
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
-		if len(c) > 1024 || err != nil || dec.Decode(&w) != nil || dec.More() || w.S != sortAffected || w.D != "asc" || len(w.T) != 4 || w.T[1] == "" || w.T[3] == "" {
-			return affectedPage{}, badCursorErr("not an affected cursor")
+		if len(c) > 1024 || err != nil || dec.Decode(&w) != nil || dec.More() || w.S != tag || w.D != "asc" || len(w.T) != 4 || w.T[1] == "" || w.T[3] == "" {
+			return affectedPage{}, badCursorErr("not a cursor of the " + tag + " list")
 		}
 		anchor = &w
 		a := objects.Ref{Namespace: w.T[0], Name: w.T[1], Group: w.T[2], Kind: w.T[3]}
 		if w.B {
 			end, _ = slices.BinarySearchFunc(refs, a, compareAffected)
-			start = max(0, end-affectedLimit)
+			start = max(0, end-limit)
 		} else {
 			k, found := slices.BinarySearchFunc(refs, a, compareAffected)
 			if found {
 				k++
 			}
 			start = k
-			end = min(len(refs), start+affectedLimit)
+			end = min(len(refs), start+limit)
 		}
 	}
 	p := affectedPage{refs: refs[start:end]}
 	switch {
 	case end > start:
 		if end < len(refs) {
-			p.next = encodeAffected(false, refs[end-1])
+			p.next = encodeRefCursor(tag, false, refs[end-1])
 		}
 		if start > 0 {
-			p.prev = encodeAffected(true, refs[start])
+			p.prev = encodeRefCursor(tag, true, refs[start])
 		}
 	case anchor != nil && !anchor.B && start > 0:
-		p.prev = encodeAffected(true, objects.Ref{Namespace: anchor.T[0], Name: anchor.T[1], Group: anchor.T[2], Kind: anchor.T[3]})
+		p.prev = encodeRefCursor(tag, true, objects.Ref{Namespace: anchor.T[0], Name: anchor.T[1], Group: anchor.T[2], Kind: anchor.T[3]})
 	case anchor != nil && anchor.B && end < len(refs):
-		p.next = encodeAffected(false, objects.Ref{Namespace: anchor.T[0], Name: anchor.T[1], Group: anchor.T[2], Kind: anchor.T[3]})
+		p.next = encodeRefCursor(tag, false, objects.Ref{Namespace: anchor.T[0], Name: anchor.T[1], Group: anchor.T[2], Kind: anchor.T[3]})
 	}
 	return p, nil
 }

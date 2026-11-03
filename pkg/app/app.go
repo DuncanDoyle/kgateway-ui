@@ -265,7 +265,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		}
 		return CoreCapabilities(snap, o.Diagnostics, collected.Snapshot())
 	}
-	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates))
+	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates), api.WithCommands(reg.Commands))
 	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
 		discovered: discovered, reg: reg, core: extension.New(extension.WithCollectors(stats)), collected: collected, deps: deps}, nil
 }

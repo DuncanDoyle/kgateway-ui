@@ -1,6 +1,8 @@
 package api
 
 import (
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
+
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +30,7 @@ type handlerConfig struct {
 	ext        []ExtMount
 	capSources []func() []Capability
 	coreSource func() []Capability
+	commands   diagnose.Commands
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

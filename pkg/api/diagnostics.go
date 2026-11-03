@@ -1,0 +1,278 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"slices"
+	"time"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+// Sizes of the diagnostics payload (design §5.2, §6).
+const (
+	maxGroups        = 10
+	maxGroupAffected = 5
+)
+
+// xdsCheckName is the check whose failure leaves the data plane unknown.
+const xdsCheckName = "xDS rejects"
+
+// WithCommands sets the next-step commands; the default is diagnose.Kubectl.
+func WithCommands(c diagnose.Commands) HandlerOption {
+	return func(cfg *handlerConfig) { cfg.commands = c }
+}
+
+// xdsPlain is health.XDSRejectsEvidence without its methods.
+type xdsPlain health.XDSRejectsEvidence
+
+// XDSEvidence is KGWUI-001's evidence on the wire: recently changed objects
+// are those the caller may view, each with its link (§14 rule 14).
+type XDSEvidence struct {
+	xdsPlain
+	RecentlyChanged []LinkedRef `json:"recentlyChanged,omitempty"`
+}
+
+// EvidenceKind implements health.Evidence.
+func (*XDSEvidence) EvidenceKind() string { return health.EvidenceXDSRejects }
+
+// MarshalJSON adds the kind tag.
+func (e *XDSEvidence) MarshalJSON() ([]byte, error) {
+	type plain XDSEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{health.EvidenceXDSRejects, (*plain)(e)})
+}
+
+// decodeEvidence decodes evidence as the API sends it: xds-rejects as XDSEvidence.
+func decodeEvidence(b []byte) (health.Evidence, error) {
+	ev, err := health.DecodeEvidence(b)
+	if _, ok := ev.(*health.XDSRejectsEvidence); !ok || err != nil {
+		return ev, err
+	}
+	x := &XDSEvidence{}
+	return x, json.Unmarshal(b, x)
+}
+
+// UnmarshalJSON decodes the typed evidence by its kind; Go clients decode a detail with it.
+func (d *FindingDetail) UnmarshalJSON(b []byte) error {
+	type plain FindingDetail
+	w := struct {
+		*plain
+		Evidence json.RawMessage `json:"evidence"`
+	}{plain: (*plain)(d)}
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	ev, err := decodeEvidence(w.Evidence)
+	d.Evidence = ev
+	return err
+}
+
+// wireEvidence is e for the caller of v, times in UTC: KGWUI-001 keeps the
+// recently changed objects v may view. The model's evidence is never changed.
+func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
+	switch ev := e.(type) {
+	case *health.XDSRejectsEvidence:
+		out := &XDSEvidence{xdsPlain: xdsPlain(*ev)}
+		out.xdsPlain.RecentlyChanged = nil
+		out.Types = slices.Clone(ev.Types)
+		for i := range out.Types {
+			out.Types[i].FirstSeen = wireTime(out.Types[i].FirstSeen)
+		}
+		out.ProxyStats = slices.Clone(ev.ProxyStats)
+		for i := range out.ProxyStats {
+			ts := slices.Clone(out.ProxyStats[i].Types)
+			for j := range ts {
+				ts[j].RejectingSince = wirePtr(ts[j].RejectingSince)
+			}
+			out.ProxyStats[i].Types = ts
+		}
+		for _, r := range ev.RecentlyChanged {
+			if v.can(r) {
+				out.RecentlyChanged = append(out.RecentlyChanged, l.linked(r))
+			}
+		}
+		return out
+	case *health.ProcessEvidence:
+		out := *ev
+		if t := ev.Termination; t != nil {
+			c := *t
+			c.At = wireTime(c.At)
+			out.Termination = &c
+		}
+		if p := ev.Probe; p != nil {
+			c := *p
+			c.Last = wireTime(c.Last)
+			out.Probe = &c
+		}
+		return &out
+	}
+	return e
+}
+
+// wirePtr is wireTime of *t, nil for nil.
+func wirePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	at := wireTime(*t)
+	return &at
+}
+
+// stepsInput is what diagnose.Steps reads of i.
+func stepsInput(m *engine.Model, i *engine.InstallModel) diagnose.Input {
+	return diagnose.Input{Install: i.Resolved, Owned: i.Owned, Snapshot: m.Snapshot, Served: m.Served}
+}
+
+// nextSteps converts steps to the wire; nil for none.
+func nextSteps(ss []diagnose.NextStep) []NextStep {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]NextStep, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, NextStep{Title: s.Title, Command: s.Command, Needs: s.Needs, Note: s.Note})
+	}
+	return out
+}
+
+// shownSince is the since f's row shows the caller of v: none when restricted,
+// the resource's when evidence-restricted (§14 rule 12).
+func shownSince(v *view, f *health.Finding) *time.Time {
+	switch {
+	case f.Resource != nil && !v.can(*f.Resource):
+		return nil
+	case !v.allOf(f.Evidence):
+		return f.ResourceSince
+	}
+	return f.Since
+}
+
+// verdict is rep's state and counts over every finding (§14 rule 18), with
+// the oldest problem since the caller of v may see.
+func verdict(v *view, rep *health.Report) Verdict {
+	out := Verdict{State: rep.State, Counts: rep.Counts, Problems: rep.Counts[health.SeverityError] + rep.Counts[health.SeverityWarning]}
+	if out.Counts == nil {
+		out.Counts = map[health.Severity]int{}
+	}
+	for k := range rep.Findings {
+		f := &rep.Findings[k]
+		if f.Severity == health.SeverityInfo {
+			continue
+		}
+		if s := shownSince(v, f); s != nil && (out.OldestSince == nil || s.Before(*out.OldestSince)) {
+			out.OldestSince = s
+		}
+	}
+	out.OldestSince = wirePtr(out.OldestSince)
+	if rep.State == health.StateUnknown {
+		if j := slices.IndexFunc(rep.Checks, func(c health.CheckResult) bool { return c.Required && !c.OK && c.Unavailable == "" }); j >= 0 {
+			out.Reason = rep.Checks[j].Name
+		}
+	}
+	return out
+}
+
+// groupRow is g on the wire for the caller of v; top is its first member in
+// rank order. A hidden cause leaves severity, code and counts (§14 rule 13).
+func (h *handler) groupRow(v *view, l linker, g *diagnose.Group, fs []health.Finding, top int, in diagnose.Input) GroupRow {
+	row := GroupRow{ID: g.ID, Code: fs[top].Code, Severity: g.Severity, Class: g.Class, Members: len(g.Members), Affected: []LinkedRef{}}
+	if g.Cause != nil {
+		lr := l.linked(*g.Cause)
+		row.Cause = &lr
+		if !v.can(*g.Cause) {
+			row.Restricted = true
+			return row
+		}
+	}
+	row.Title = fs[top].Message
+	refs := visibleAffected(v, g)
+	row.AffectedTotal = len(refs)
+	for _, r := range refs[:min(len(refs), maxGroupAffected)] {
+		row.Affected = append(row.Affected, l.linked(r))
+	}
+	since := g.Since
+	if !v.all {
+		since = nil
+		for _, k := range g.Members {
+			if s := shownSince(v, &fs[k]); s != nil && (since == nil || s.Before(*since)) {
+				since = s
+			}
+		}
+	}
+	row.Since = wirePtr(since)
+	row.NextSteps = nextSteps(diagnose.Steps(*g, fs, in, h.commands, v.visible()))
+	return row
+}
+
+func (h *handler) diagnostics(w http.ResponseWriter, r *http.Request) {
+	p, i := h.find(w, r)
+	if i == nil {
+		return
+	}
+	if vals, err := url.ParseQuery(r.URL.RawQuery); err != nil || len(vals) > 0 {
+		writeErr(w, http.StatusBadRequest, badParam("diagnostics takes no parameters").Error())
+		return
+	}
+	v := h.view(r)
+	l := linkerFor(v, p.Model, i)
+	d, rep, at := diagnosis(i), &i.Health, wireTime(p.ConfirmedAt)
+	in := stepsInput(p.Model, i)
+	out := Diagnostics{Install: i.Resolved.ID(), Verdict: verdict(v, rep), Groups: []GroupRow{}, Checks: wireChecks(rep.Checks), CollectedAt: at}
+	// d.Rank lists each group's members in group order, so a group's first is its top member.
+	off := 0
+	for k := range d.Groups {
+		g := &d.Groups[k]
+		top := off
+		off += len(g.Members)
+		if !g.Ranked || g.Severity == health.SeverityInfo || len(g.Members) == 0 {
+			continue
+		}
+		if out.GroupTotal++; len(out.Groups) < maxGroups {
+			out.Groups = append(out.Groups, h.groupRow(v, l, g, rep.Findings, d.Rank[top], in))
+		}
+	}
+	ps := newProcSummary(v, i)
+	out.Processes = ProcessSummaries{Controller: ps.controllerSummary(), Proxies: ps.proxySummary()}
+	out.DataPlane = dataPlane(v, i)
+	writeJSON(w, out)
+}
+
+// dataPlane counts i's rejecting Gateways over every finding; a hidden Gateway
+// counts only when its restricted 001 row already names it.
+func dataPlane(v *view, i *engine.InstallModel) DataPlaneSummary {
+	var out DataPlaneSummary
+	rejecting := map[objects.Ref]bool{}
+	for k := range i.Health.Findings {
+		if f := &i.Health.Findings[k]; f.Code == health.CodeXDSRejected && f.Resource != nil {
+			rejecting[*f.Resource] = true
+		}
+	}
+	out.Rejecting = len(rejecting)
+	if i.Owned != nil {
+		for _, u := range i.Owned.Gateways {
+			if ref := objects.RefOf(u); rejecting[ref] || v.can(ref) {
+				out.Gateways++
+			}
+		}
+	}
+	j := slices.IndexFunc(i.Health.Checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName })
+	out.Unavailable = j >= 0 && !i.Health.Checks[j].OK
+	return out
+}
+
+// wireChecks is cs with UTC times, never nil.
+func wireChecks(cs []health.CheckResult) []health.CheckResult {
+	out := make([]health.CheckResult, len(cs))
+	for k, c := range cs {
+		c.CollectedAt = wireTime(c.CollectedAt)
+		out[k] = c
+	}
+	return out
+}

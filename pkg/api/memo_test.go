@@ -456,7 +456,8 @@ func TestMemoizedResponsesEqualUncached(t *testing.T) {
 		{"deadline passes", func() { now = testutil.Now.Add(health.Grace + time.Second) }},
 	}
 	paths := []string{"/api/v1/installs/kgw.kgateway/health", "/api/v1/installs/kgw.kgateway/overview", "/api/v1/installs/kgw.kgateway/findings",
-		"/api/v1/installs/kgw.kgateway/findings?sort=since.desc&limit=1"}
+		"/api/v1/installs/kgw.kgateway/findings?sort=since.desc&limit=1", "/api/v1/installs/kgw.kgateway/diagnostics",
+		"/api/v1/installs/kgw.kgateway/processes"}
 	for _, st := range steps {
 		st.do()
 		memo.e.Compute()
