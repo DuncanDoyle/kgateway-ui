@@ -1,4 +1,5 @@
 import type { HealthState } from "../theme/tokens";
+import type { Evidence } from "./diagTypes";
 import type { Link, LinkedRef } from "./exploreTypes";
 
 export * from "./diagTypes";
@@ -25,6 +26,7 @@ export interface Ref {
  * restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013).
  * evidenceRestricted: the detail was replaced because it quotes an object the caller may not view.
  * id opens the finding's page; group is its cause's group (both from sub-phase 3.1).
+ * evidence is the typed evidence (sub-phase 3.2); absent when restricted or evidence-restricted.
  */
 export interface Finding {
   id?: string;
@@ -39,6 +41,7 @@ export interface Finding {
   since?: string;
   restricted?: boolean;
   evidenceRestricted?: boolean;
+  evidence?: Evidence;
 }
 /** detail: context for an OK check (e.g. scope source); pending: not OK only because of the grace period. */
 export interface CheckResult {

@@ -2,8 +2,18 @@ import badRequestGolden from "../../../../../pkg/api/testdata/golden/bad-request
 import bareInstalls from "../../../../../pkg/api/testdata/golden/bare-installs.json";
 import bareMeta from "../../../../../pkg/api/testdata/golden/bare-meta.json";
 import bareOverview from "../../../../../pkg/api/testdata/golden/bare-overview.json";
+import diagnosticsGolden from "../../../../../pkg/api/testdata/golden/diagnostics.json";
+import diagnosticsRestrictedGolden from "../../../../../pkg/api/testdata/golden/diagnostics-restricted.json";
 import findingDetailOtherGolden from "../../../../../pkg/api/testdata/golden/finding-detail-other.json";
+import findingDetailProcessGolden from "../../../../../pkg/api/testdata/golden/finding-detail-process.json";
+import findingDetailProcessRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-process-restricted.json";
+import findingDetailProxyStatsGolden from "../../../../../pkg/api/testdata/golden/finding-detail-proxy-stats.json";
+import findingDetailProxyStatsRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-proxy-stats-restricted.json";
 import findingDetailRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-restricted.json";
+import findingDetailVersionSkewGolden from "../../../../../pkg/api/testdata/golden/finding-detail-version-skew.json";
+import findingDetailVersionSkewRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-version-skew-restricted.json";
+import findingDetailXdsRejectsGolden from "../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects.json";
+import findingDetailXdsRejectsRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects-restricted.json";
 import findingsGolden from "../../../../../pkg/api/testdata/golden/findings.json";
 import findingsRestrictedGolden from "../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
@@ -19,6 +29,8 @@ import listenersetsGolden from "../../../../../pkg/api/testdata/golden/listeners
 import meta from "../../../../../pkg/api/testdata/golden/meta.json";
 import notFound from "../../../../../pkg/api/testdata/golden/not-found.json";
 import overview from "../../../../../pkg/api/testdata/golden/overview.json";
+import processesGolden from "../../../../../pkg/api/testdata/golden/processes.json";
+import processesRestrictedGolden from "../../../../../pkg/api/testdata/golden/processes-restricted.json";
 import refsGolden from "../../../../../pkg/api/testdata/golden/refs.json";
 import refsRestrictedGolden from "../../../../../pkg/api/testdata/golden/refs-restricted.json";
 import routeDelegationGolden from "../../../../../pkg/api/testdata/golden/route-delegation.json";
@@ -55,10 +67,12 @@ import type {
   DelegationContext,
   DelegationRef,
   DelegationRow,
+  Diagnostics,
   EffectiveContext,
   EffectiveEdge,
   EffectiveRule,
   ErrorResponse,
+  Evidence,
   Filter,
   Finding,
   FindingDetail,
@@ -66,8 +80,10 @@ import type {
   Fraction,
   GatewayDetail,
   GatewayListRow,
+  GatewayProcesses,
   GatewayRow,
   GroupKind,
+  GroupRow,
   HealthReport,
   InstallHeader,
   InstallSummary,
@@ -92,6 +108,14 @@ import type {
   ParentSummary,
   PathMatch,
   PathStep,
+  ProbeFacts,
+  ProcessEvidence,
+  ProcessesResponse,
+  ProcessInfo,
+  ProcessSet,
+  ProxyPodStats,
+  ProxyStatsEvidence,
+  ProxyTypeRejects,
   Readiness,
   Ref,
   RouteAttachment,
@@ -103,7 +127,12 @@ import type {
   ServedKind,
   SpecParentRef,
   SuggestedFix,
+  TerminationFacts,
   TrailRefs,
+  VersionPods,
+  VersionSkewEvidence,
+  XDSRejectsEvidence,
+  XDSTypeRejects,
 } from "./types";
 
 // Checks the backend's golden wire format (pkg/api golden_test.go) against these types.
@@ -127,6 +156,8 @@ interface Shape {
   keys: Record<string, "!" | "?">;
   nested: Record<string, Shape>;
   enums: Record<string, Record<string, 1>>;
+  /** A tagged union: the member shape named by the value of key. */
+  tagged?: { key: string; by: Record<string, Shape> };
 }
 const shape = <T>(
   keys: Spec<T>,
@@ -161,6 +192,109 @@ const delegationRefEnums = {
 const ref = shape<Ref>({ group: "!", kind: "!", namespace: "?", name: "!" });
 const linkedRef = shape<LinkedRef>({ group: "!", kind: "!", namespace: "?", name: "!", link: "!" }, {}, link);
 const trailRefs = shape<TrailRefs>({ install: "!", refs: "!" }, { refs: linkedRef });
+// Typed evidence (sub-phase 3.2): one shape per kind, chosen by the kind tag.
+const termination = shape<TerminationFacts>({
+  reason: "?",
+  exitCode: "!",
+  at: "!",
+});
+const probe = shape<ProbeFacts>({
+  type: "?",
+  failures: "!",
+  last: "!",
+  historyUnknown: "?",
+});
+const versionPods = shape<VersionPods>({ version: "!", pods: "!", total: "!" });
+const xdsTypeRejects = shape<XDSTypeRejects>({
+  typeUrl: "!",
+  streams: "!",
+  reportedBy: "!",
+  firstSeen: "!",
+  totalSinceFirstSeen: "!",
+});
+const proxyTypeRejects = shape<ProxyTypeRejects>({
+  typeUrl: "!",
+  rejecting: "!",
+  rejectingSince: "?",
+  envoyResources: "?",
+  envoyResourcesTruncated: "?",
+});
+const evidenceShapes = {
+  process: shape<ProcessEvidence>(
+    {
+      kind: "!",
+      pod: "!",
+      restarts: "?",
+      termination: "?",
+      waiting: "?",
+      probe: "?",
+    },
+    { termination, probe },
+    { kind: { process: 1 } },
+  ),
+  "version-skew": shape<VersionSkewEvidence>(
+    {
+      kind: "!",
+      controller: "?",
+      proxies: "?",
+      replicas: "?",
+      crds: "?",
+      expected: "?",
+    },
+    {
+      proxies: versionPods,
+      replicas: versionPods,
+      crds: shape<NonNullable<VersionSkewEvidence["crds"]>[number]>({
+        name: "!",
+        bundleVersion: "?",
+        channel: "?",
+      }),
+    },
+    { kind: { "version-skew": 1 } },
+  ),
+  "xds-rejects": shape<XDSRejectsEvidence>(
+    {
+      kind: "!",
+      types: "!",
+      proxies: "?",
+      statusSaysHealthy: "!",
+      proxyStats: "?",
+      recentlyChanged: "?",
+    },
+    {
+      types: xdsTypeRejects,
+      proxies: shape<NonNullable<XDSRejectsEvidence["proxies"]>>({
+        ready: "!",
+        desired: "!",
+      }),
+      proxyStats: shape<NonNullable<XDSRejectsEvidence["proxyStats"]>[number]>(
+        { pod: "!", types: "!" },
+        { types: proxyTypeRejects },
+      ),
+      recentlyChanged: linkedRef,
+    },
+    { kind: { "xds-rejects": 1 } },
+  ),
+  "proxy-stats": shape<ProxyStatsEvidence>(
+    { kind: "!", pods: "!" },
+    {
+      pods: shape<ProxyPodStats>({
+        pod: "!",
+        connected: "?",
+        warmingListeners: "?",
+        warmingClusters: "?",
+        serverState: "?",
+      }),
+    },
+    { kind: { "proxy-stats": 1 } },
+  ),
+} satisfies Record<Evidence["kind"], Shape>;
+const evidence: Shape = {
+  keys: {},
+  nested: {},
+  enums: {},
+  tagged: { key: "kind", by: evidenceShapes },
+};
 const finding = shape<Finding>(
   {
     id: "?",
@@ -175,8 +309,9 @@ const finding = shape<Finding>(
     since: "?",
     restricted: "?",
     evidenceRestricted: "?",
+    evidence: "?",
   },
-  { resource: linkedRef },
+  { resource: linkedRef, evidence },
   { severity: { error: 1, warning: 1, info: 1 } },
 );
 const check = shape<CheckResult>(
@@ -654,8 +789,132 @@ const suggestedFix = shape<SuggestedFix>(
   { target: linkedRef },
 );
 const findingDetail = shape<FindingDetail>(
-  { install: "!", finding: "!", suggestedFix: "?", nextSteps: "?", affected: "!", collectedAt: "!" },
-  { finding: findingItem, suggestedFix, nextSteps: nextStep, affected: page(linkedRef) },
+  {
+    install: "!",
+    finding: "!",
+    evidence: "?",
+    suggestedFix: "?",
+    nextSteps: "?",
+    affected: "!",
+    collectedAt: "!",
+  },
+  {
+    finding: findingItem,
+    evidence,
+    suggestedFix,
+    nextSteps: nextStep,
+    affected: page(linkedRef),
+  },
+);
+// Diagnostics and processes (sub-phase 3.2).
+const groupRow = shape<GroupRow>(
+  {
+    id: "!",
+    title: "!",
+    code: "!",
+    severity: "!",
+    class: "!",
+    cause: "?",
+    members: "!",
+    affected: "!",
+    affectedTotal: "!",
+    since: "?",
+    nextSteps: "?",
+    restricted: "?",
+  },
+  { cause: linkedRef, affected: linkedRef, nextSteps: nextStep },
+  severity,
+);
+const diagnostics = shape<Diagnostics>(
+  {
+    install: "!",
+    verdict: "!",
+    groups: "!",
+    groupTotal: "!",
+    processes: "!",
+    dataPlane: "!",
+    checks: "!",
+    collectedAt: "!",
+  },
+  {
+    verdict: shape<Diagnostics["verdict"]>(
+      { state: "!", problems: "!", counts: "!", oldestSince: "?", reason: "?" },
+      {},
+      { state: healthState },
+    ),
+    groups: groupRow,
+    processes: shape<Diagnostics["processes"]>(
+      { controller: "!", proxies: "!" },
+      {
+        controller: shape<Diagnostics["processes"]["controller"]>({
+          observed: "!",
+          ready: "?",
+          desired: "?",
+          restartsRecent: "?",
+          version: "?",
+          restricted: "?",
+        }),
+        proxies: shape<Diagnostics["processes"]["proxies"]>({
+          gateways: "!",
+          ready: "!",
+          rejecting: "!",
+          skew: "!",
+          restarting: "!",
+          notObserved: "!",
+        }),
+      },
+    ),
+    dataPlane: shape<Diagnostics["dataPlane"]>({
+      gateways: "!",
+      rejecting: "!",
+      unavailable: "?",
+    }),
+    checks: check,
+  },
+);
+const processInfo = shape<ProcessInfo>(
+  {
+    name: "!",
+    ready: "?",
+    restarts: "?",
+    restartsRecent: "?",
+    lastStart: "?",
+    termination: "?",
+    waiting: "?",
+    version: "?",
+    probe: "?",
+  },
+  { termination, probe },
+);
+const processSet = shape<ProcessSet>(
+  {
+    observed: "!",
+    desired: "?",
+    ready: "?",
+    processes: "!",
+    rollout: "?",
+    restricted: "?",
+  },
+  {
+    processes: processInfo,
+    rollout: shape<NonNullable<ProcessSet["rollout"]>>({
+      progressing: "!",
+      reason: "?",
+    }),
+  },
+);
+const processes = shape<ProcessesResponse>(
+  { install: "!", controller: "!", proxies: "!", collectedAt: "!" },
+  {
+    controller: processSet,
+    proxies: page(
+      shape<GatewayProcesses>(
+        { gateway: "!", health: "!", set: "!", rejects: "?", skew: "?" },
+        { gateway: linkedRef, set: processSet },
+        { health: healthState },
+      ),
+    ),
+  },
 );
 
 /** problems lists keys the types do not declare, required keys the wire omits and values outside a union, recursing. */
@@ -663,6 +922,11 @@ function problems(s: Shape, v: unknown, path: string): string[] {
   if (Array.isArray(v)) return v.flatMap((e, i) => problems(s, e, `${path}[${i}]`));
   if (v === null || typeof v !== "object") return [`${path}: want an object, got ${JSON.stringify(v)}`];
   const o = v as Record<string, unknown>;
+  if (s.tagged) {
+    const tag = o[s.tagged.key];
+    const member = typeof tag === "string" && Object.hasOwn(s.tagged.by, tag) ? s.tagged.by[tag] : undefined;
+    return member ? problems(member, v, path) : [`${path}.${s.tagged.key}: ${JSON.stringify(tag)} not in types.ts`];
+  }
   const out = Object.keys(o)
     .filter((k) => !Object.hasOwn(s.keys, k))
     .map((k) => `${path}.${k}: not in types.ts`);
@@ -744,6 +1008,35 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["finding-detail-restricted", findingDetailRestrictedGolden.body satisfies Wide<FindingDetail>, findingDetail],
     ["refs", refsGolden.body satisfies Wide<TrailRefs>, trailRefs],
     ["refs-restricted", refsRestrictedGolden.body satisfies Wide<TrailRefs>, trailRefs],
+    ["diagnostics", diagnosticsGolden.body satisfies Wide<Diagnostics>, diagnostics],
+    ["diagnostics-restricted", diagnosticsRestrictedGolden.body satisfies Wide<Diagnostics>, diagnostics],
+    ["processes", processesGolden.body satisfies Wide<ProcessesResponse>, processes],
+    ["processes-restricted", processesRestrictedGolden.body satisfies Wide<ProcessesResponse>, processes],
+    ["finding-detail-xds-rejects", findingDetailXdsRejectsGolden.body satisfies Wide<FindingDetail>, findingDetail],
+    [
+      "finding-detail-xds-rejects-restricted",
+      findingDetailXdsRejectsRestrictedGolden.body satisfies Wide<FindingDetail>,
+      findingDetail,
+    ],
+    ["finding-detail-process", findingDetailProcessGolden.body satisfies Wide<FindingDetail>, findingDetail],
+    [
+      "finding-detail-process-restricted",
+      findingDetailProcessRestrictedGolden.body satisfies Wide<FindingDetail>,
+      findingDetail,
+    ],
+    ["finding-detail-version-skew", findingDetailVersionSkewGolden.body satisfies Wide<FindingDetail>, findingDetail],
+    [
+      "finding-detail-version-skew-restricted",
+      findingDetailVersionSkewRestrictedGolden.body satisfies Wide<FindingDetail>,
+      findingDetail,
+    ],
+    ["finding-detail-proxy-stats", findingDetailProxyStatsGolden.body satisfies Wide<FindingDetail>, findingDetail],
+    [
+      "finding-detail-proxy-stats-restricted",
+      findingDetailProxyStatsRestrictedGolden.body satisfies Wide<FindingDetail>,
+      findingDetail,
+    ],
+    ["refs-restricted", refsRestrictedGolden.body satisfies Wide<TrailRefs>, trailRefs],
   ] as const)("%s", (_, body, s) => {
     expect(problems(s, body, "body")).toEqual([]);
   });
@@ -755,6 +1048,14 @@ describe("types.ts matches the golden v1 wire format", () => {
     expect(problems(page(delegationRow), body, "body")).toEqual([
       'body.items[0].computed.state: "bogus" not in types.ts',
     ]);
+  });
+
+  it("checks evidence against the member its kind names", () => {
+    const body = structuredClone(findingDetailXdsRejectsGolden.body);
+    Object.assign(body.evidence, { extra: 1 });
+    expect(problems(findingDetail, body, "body")).toEqual(["body.evidence.extra: not in types.ts"]);
+    Object.assign(body.evidence, { kind: "bogus" });
+    expect(problems(findingDetail, body, "body")).toEqual(['body.evidence.kind: "bogus" not in types.ts']);
   });
 
   it("reports a wire key named constructor as undeclared", () => {
@@ -913,5 +1214,37 @@ describe("types.ts matches the golden v1 wire format", () => {
     const none = refsRestrictedGolden.body.refs.filter((r) => r.link === "none").map((r) => r.name);
     expect(none).toEqual(["secret", "ghost", "edge"]);
     expect(refsGolden.body.refs.map((r) => r.link)).toEqual(["detail", "detail", "detail", "yaml", "none"]);
+  });
+
+  // Evidence and diagnostics: every evidence kind, a restricted detail without it, a restricted group and counts-only sets.
+  it("covers 3.2: every evidence kind, restricted rows and counts-only process sets", () => {
+    const kinds = [
+      findingDetailXdsRejectsGolden,
+      findingDetailProcessGolden,
+      findingDetailVersionSkewGolden,
+      findingDetailProxyStatsGolden,
+    ].map((g) => g.body.evidence?.kind);
+    expect(kinds).toEqual(["xds-rejects", "process", "version-skew", "proxy-stats"]);
+    const xds = findingDetailXdsRejectsGolden.body.evidence;
+    expect(xds.proxyStats.some((p) => p.types.some((t) => t.rejecting && t.rejectingSince))).toBe(true);
+    expect(xds.proxyStats.some((p) => p.types.some((t) => t.envoyResources?.length))).toBe(true);
+    expect(xds.recentlyChanged.every((r) => r.link === "detail")).toBe(true);
+    for (const g of [
+      findingDetailXdsRejectsRestrictedGolden,
+      findingDetailProcessRestrictedGolden,
+      findingDetailVersionSkewRestrictedGolden,
+      findingDetailProxyStatsRestrictedGolden,
+    ])
+      expect(!("evidence" in g.body) && g.body.finding.evidenceRestricted).toBe(true);
+    expect(findingDetailProcessGolden.body.nextSteps?.[0]?.needs).toEqual(["pods/log"]);
+    const hidden = diagnosticsRestrictedGolden.body.groups.find((g) => "restricted" in g && g.restricted);
+    expect(hidden && hidden.title === "" && hidden.affected.length === 0 && !("nextSteps" in hidden)).toBe(true);
+    expect(diagnosticsGolden.body.groups.every((g) => g.affected.length <= 5)).toBe(true);
+    expect(processesRestrictedGolden.body.controller.restricted).toBe(true);
+    expect(processesRestrictedGolden.body.proxies.deniedInInstall).toBeGreaterThan(0);
+    expect(
+      processesGolden.body.proxies.items.some((g) => "skew" in g && g.skew && g.set.processes[0]?.restartsRecent),
+    ).toBe(true);
+    expect(processesGolden.body.proxies.items.some((g) => !g.set.observed && g.health === "unknown")).toBe(true);
   });
 });

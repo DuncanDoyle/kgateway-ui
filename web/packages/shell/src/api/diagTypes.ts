@@ -1,5 +1,6 @@
+import type { HealthState } from "../theme/tokens";
 import type { LinkedRef, Page } from "./exploreTypes";
-import type { Severity } from "./types";
+import type { CheckResult, Severity } from "./types";
 
 /** Mirrors the diagnostics DTOs of pkg/api/diag_types.go as built (sub-phase 3.1, design §13.3). */
 
@@ -36,13 +37,189 @@ export interface SuggestedFix {
   yaml: string;
   basis: string;
 }
-/** GET …/findings/{findingId}: affected pages through the visible objects of the finding's group, 50 at a time. */
+/** GET …/findings/{findingId}: affected pages through the visible objects of the finding's group, 50 at a time.
+ * evidence and nextSteps are absent on restricted and evidence-restricted findings. */
 export interface FindingDetail {
   install: string;
   finding: FindingItem;
+  evidence?: Evidence;
   suggestedFix?: SuggestedFix;
   nextSteps?: NextStep[];
   affected: Page<LinkedRef>;
   collectedAt: string;
 }
 export type FindingList = Page<FindingItem>;
+
+/** Typed evidence of a finding, tagged by kind (design §13.3, sub-phase 3.2). */
+export type Evidence = ProcessEvidence | VersionSkewEvidence | XDSRejectsEvidence | ProxyStatsEvidence;
+/** How a process last ended; never its message. */
+export interface TerminationFacts {
+  reason?: string;
+  exitCode: number;
+  at: string;
+}
+/** Probe failures observed in the Events window; type is absent when the Pod defines more than one probe type. */
+export interface ProbeFacts {
+  type?: string;
+  failures: number;
+  last: string;
+  historyUnknown?: boolean;
+}
+/** One Pod's facts behind KGWUI-005, 006 and 019–021; restarts are those observed in the window. */
+export interface ProcessEvidence {
+  kind: "process";
+  pod: string;
+  restarts?: number;
+  termination?: TerminationFacts;
+  waiting?: string;
+  probe?: ProbeFacts;
+}
+/** The Pods running one version: the first few names, and total counts them all. */
+export interface VersionPods {
+  version: string;
+  pods: string[];
+  total: number;
+}
+/** The versions behind KGWUI-022; expected is the Gateway API bundle minor the controller is built against. */
+export interface VersionSkewEvidence {
+  kind: "version-skew";
+  controller?: string;
+  proxies?: VersionPods[];
+  replicas?: VersionPods[];
+  crds?: { name: string; bundleVersion?: string; channel?: string }[];
+  expected?: string;
+}
+/** One rejected xDS type: streams summed over the reporting controller Pods, rejects_total growth since firstSeen. */
+export interface XDSTypeRejects {
+  typeUrl: string;
+  streams: number;
+  reportedBy: string[];
+  firstSeen: string;
+  totalSinceFirstSeen: number;
+}
+/** Whether a type's update_rejected grew since the Pod's previous scrape; envoyResources are Envoy names, never objects. */
+export interface ProxyTypeRejects {
+  typeUrl: string;
+  rejecting: boolean;
+  rejectingSince?: string;
+  envoyResources?: string[];
+  envoyResourcesTruncated?: boolean;
+}
+/** KGWUI-001: rejected types, the Gateway's proxies, and visible objects changed shortly before the first reject. */
+export interface XDSRejectsEvidence {
+  kind: "xds-rejects";
+  types: XDSTypeRejects[];
+  proxies?: { ready: number; desired: number };
+  statusSaysHealthy: boolean;
+  proxyStats?: { pod: string; types: ProxyTypeRejects[] }[];
+  recentlyChanged?: LinkedRef[];
+}
+/** One Ready proxy's Envoy stats behind KGWUI-025 or 026; an absent field was not reported. */
+export interface ProxyPodStats {
+  pod: string;
+  connected?: boolean;
+  warmingListeners?: number;
+  warmingClusters?: number;
+  serverState?: string;
+}
+export interface ProxyStatsEvidence {
+  kind: "proxy-stats";
+  pods: ProxyPodStats[];
+}
+
+/**
+ * One ranked group of "Needs attention", with its rank keys. class: 1 data plane, 2 processes, 3 traffic, 4 hygiene.
+ * code and title are the top member's. restricted: the cause is hidden; title is "" and there are no affected objects or steps.
+ */
+export interface GroupRow {
+  id: string;
+  title: string;
+  code: string;
+  severity: Severity;
+  class: number;
+  cause?: LinkedRef;
+  members: number;
+  affected: LinkedRef[];
+  affectedTotal: number;
+  since?: string;
+  nextSteps?: NextStep[];
+  restricted?: boolean;
+}
+/** The install's state over every finding; reason names the required check that made it unknown. */
+export interface Verdict {
+  state: HealthState;
+  problems: number;
+  counts: Partial<Record<Severity, number>>;
+  oldestSince?: string;
+  reason?: string;
+}
+/** The controller line; restricted keeps the counts only. */
+export interface ProcessSummary {
+  observed: boolean;
+  ready?: number;
+  desired?: number;
+  restartsRecent?: number;
+  version?: string;
+  restricted?: boolean;
+}
+/** Visible Gateways: with every proxy ready, rejecting, with skew, restarting, and not observed. */
+export interface ProxySummary {
+  gateways: number;
+  ready: number;
+  rejecting: number;
+  skew: number;
+  restarting: number;
+  notObserved: number;
+}
+export interface DataPlaneSummary {
+  gateways: number;
+  rejecting: number;
+  unavailable?: boolean;
+}
+/** GET …/diagnostics: groups are the first 10 of groupTotal. */
+export interface Diagnostics {
+  install: string;
+  verdict: Verdict;
+  groups: GroupRow[];
+  groupTotal: number;
+  processes: { controller: ProcessSummary; proxies: ProxySummary };
+  dataPlane: DataPlaneSummary;
+  checks: CheckResult[];
+  collectedAt: string;
+}
+/** One replica or proxy; an absent field was not observed. */
+export interface ProcessInfo {
+  name: string;
+  ready?: boolean;
+  restarts?: number;
+  restartsRecent?: number;
+  lastStart?: string;
+  termination?: TerminationFacts;
+  waiting?: string;
+  version?: string;
+  probe?: ProbeFacts;
+}
+/** The processes behind one role; observed false means not observed, never failing. restricted: counts only. */
+export interface ProcessSet {
+  observed: boolean;
+  desired?: number;
+  ready?: number;
+  processes: ProcessInfo[];
+  rollout?: { progressing: boolean; reason?: string };
+  restricted?: boolean;
+}
+/** One Gateway's proxies; skew includes patch differences, which are never a finding. */
+export interface GatewayProcesses {
+  gateway: LinkedRef;
+  health: HealthState;
+  set: ProcessSet;
+  rejects?: number;
+  skew?: boolean;
+}
+/** GET …/processes?health=…&q=…&skew=…&restarts=… */
+export interface ProcessesResponse {
+  install: string;
+  controller: ProcessSet;
+  proxies: Page<GatewayProcesses>;
+  collectedAt: string;
+}
