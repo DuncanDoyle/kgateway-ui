@@ -119,13 +119,20 @@ func (h *harness) updatePod(t *testing.T, p *corev1.Pod) {
 		t.Fatal(err)
 	}
 	want := p.Status.ContainerStatuses[0].RestartCount
-	h.awaitCache(t, "pod "+p.Name, func(s *cache.Snapshot) bool {
-		for _, q := range s.Pods {
-			if q.UID == p.UID && len(q.Status.ContainerStatuses) > 0 && q.Status.ContainerStatuses[0].RestartCount == want {
-				return true
+	// Controller and proxy Pods sit in separate informers; a Pod the proxy one holds must show the update too.
+	updated := func(pods []*corev1.Pod) (found, ok bool) {
+		for _, q := range pods {
+			if q.UID == p.UID {
+				found = true
+				ok = len(q.Status.ContainerStatuses) > 0 && q.Status.ContainerStatuses[0].RestartCount == want
 			}
 		}
-		return false
+		return found, ok
+	}
+	h.awaitCache(t, "pod "+p.Name, func(s *cache.Snapshot) bool {
+		_, inPods := updated(s.Pods)
+		found, inProxy := updated(s.ProxyPods)
+		return inPods && (!found || inProxy)
 	})
 }
 
