@@ -59,6 +59,8 @@ const Identity = styled.div`
   padding-left: ${(p) => p.theme.space(3)};
   border-left: 1px solid ${(p) => p.theme.color.borderStrong};
   white-space: nowrap;
+  /* The install nav gives way first on narrow windows (it scrolls). */
+  @media (max-width: 899px) { flex: none; }
 `;
 const Chip = styled.span`
   padding: 2px 8px;

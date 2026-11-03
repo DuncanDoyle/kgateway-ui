@@ -61,6 +61,8 @@ interface ListFrameProps {
   search: { label: string; placeholder: string; value: string; onChange: (v: string) => void };
   /** Filter chips and tags, rendered from the URL, so they are there before the data. */
   filters?: ReactNode;
+  /** Content above the filter bar that the filters do not apply to, e.g. the Processes page's controller. */
+  lead?: ReactNode;
   onClearFilters?: () => void;
   children: ReactNode;
   stylesOverride?: SerializedStyles;
@@ -77,6 +79,7 @@ export function ListFrame({
   loaded,
   search,
   filters,
+  lead,
   onClearFilters,
   children,
   stylesOverride,
@@ -102,6 +105,7 @@ export function ListFrame({
         {collectedAt && !failed ? <DataAge collectedAt={collectedAt} /> : null}
         {total !== undefined && !failed ? <span className="count">{count(total, noun)}</span> : null}
       </div>
+      {lead}
       <Bar>
         <SearchBox>
           <Search size={14} aria-hidden="true" />

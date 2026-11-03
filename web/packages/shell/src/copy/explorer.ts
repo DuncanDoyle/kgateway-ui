@@ -13,6 +13,7 @@ export const navCopy = {
   routes: "Routes",
   listenerSets: "ListenerSets",
   findings: "Findings", // S02
+  processes: "Processes",
   label: "Install", // S03
   copyCommand: "Copy kubectl command", // S04
 };
@@ -75,6 +76,11 @@ export const routeStateCopy = {
   pending: "Waiting for status", // S16
   declared: "No status entry for the parent route", // S17
   "no-parent": "No parent", // S18
+};
+
+/** The data-plane flag (3.2): its Gateway's proxies reject config. Offered to Phase 3 servers only. */
+export const routeStateDataPlaneCopy = {
+  "gateway-rejecting": "Gateway rejects config",
 };
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
@@ -490,4 +496,41 @@ export const diagnosticsCopy = {
   rejects: "Rejects",
   problems: (n: number) => plural(n, ["problem", "problems"]),
   oldestProblem: (ago: string) => `Oldest problem ${ago}`,
+};
+
+/** The Processes page and the Gateway page's Data plane and Proxies sections (Task 50 drafts). */
+export const processesCopy = {
+  title: "Processes",
+  search: "Filter Gateways",
+  placeholder: "Filter by Gateway name",
+  showOnly: "Show only",
+  skew: "Version skew",
+  restarting: "Restarting",
+  controllerTable: "Controller processes",
+  gatewayProxies: "Gateway proxies",
+  gateway: "Gateway",
+  proxies: "Proxies",
+  rejects: "Rejecting streams",
+  version: "Version",
+  restarts: "Recent restarts",
+  differs: "differs from controller",
+  proxiesOf: (gw: string) => `Proxies of ${gw}`,
+};
+export const dataPlaneCopy = {
+  title: "Data plane",
+  rejecting: "Proxies reject this Gateway's config",
+  unavailable: "Rejects cannot be read right now",
+  evidenceRestricted: "Details hidden: they name objects you cannot view.",
+  nextSteps: "Next steps",
+  snapshot: "Built by the controller",
+  snapshotNote: "From the controller's metrics: what it built, not what proxies accepted.",
+  snapshotFacts: {
+    listeners: "Listeners",
+    routes: "Routes",
+    clusters: "Clusters",
+    endpoints: "Endpoints",
+    secrets: "Secrets",
+  },
+  proxyStats: "Proxy stats",
+  proxyStatsOn: "Collected",
 };

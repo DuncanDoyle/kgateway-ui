@@ -547,6 +547,24 @@ it("Routes state filter offers disagrees and listener-unknown", async () => {
   );
 });
 
+it("Routes state filter offers gateway-rejecting to a Phase 3 server only", async () => {
+  const phase3 = { ...meta, filters: { ...meta.filters, findings: ["severity"] } };
+  serve((u) => (u.pathname === "/api/v1/meta" ? phase3 : u.pathname.endsWith("/routes") ? routes() : undefined));
+  const first = mountWithLocation(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const group = screen.getByRole("group", { name: "Route state" });
+  await userEvent.click(await within(group).findByRole("button", { name: "Gateway rejects config" }));
+  await waitFor(() => expect(search().get("state")).toBe("gateway-rejecting"));
+  await waitFor(() => expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["gateway-rejecting"]));
+  first.unmount();
+  serve((u) => (u.pathname === "/api/v1/meta" ? meta : u.pathname.endsWith("/routes") ? routes() : undefined));
+  mount(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const older = screen.getByRole("group", { name: "Route state" });
+  await within(older).findByRole("button", { name: "Unknown listener" });
+  expect(within(older).queryByRole("button", { name: "Gateway rejects config" })).toBeNull();
+});
+
 it("an older server is not offered the 2.3 state values", async () => {
   serve((u) =>
     u.pathname === "/api/v1/meta"

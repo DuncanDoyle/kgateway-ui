@@ -9,6 +9,13 @@ const Nav = styled.nav`
   display: flex;
   flex: none;
   gap: ${(p) => p.theme.space(1)};
+  /* Narrow windows scroll the nav sideways rather than let it run over the install label. */
+  @media (max-width: 899px) {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
   a {
     display: inline-flex;
     align-items: center;
@@ -47,6 +54,7 @@ export const installNavEntries: InstallNavEntry[] = [
   { label: navCopy.routes, to: "routes" },
   { label: navCopy.listenerSets, to: "listenersets" },
   { label: navCopy.findings, to: "findings" },
+  { label: navCopy.processes, to: "processes" },
 ];
 
 // region Component

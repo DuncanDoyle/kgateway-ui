@@ -65,6 +65,8 @@ export interface CorePages {
   RoutePage?: ComponentType;
   /** The finding detail page at findings/:findingId (sub-phase 3.1). */
   FindingPage?: ComponentType;
+  /** The Processes page at processes (sub-phase 3.2). */
+  ProcessesPage?: ComponentType;
   /** Replaces the install page's Needs attention and Processes block (sub-phase 3.2). */
   DiagnosticsSection?: ComponentType<DiagnosticsSectionProps>;
 }

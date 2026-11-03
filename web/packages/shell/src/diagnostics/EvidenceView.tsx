@@ -48,7 +48,7 @@ const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
 
 // region Helpers
 /** The type's message name, e.g. "Cluster" for envoy.config.cluster.v3.Cluster. */
-const shortType = (typeUrl: string) => typeUrl.split(/[./]/).pop() || typeUrl;
+export const shortType = (typeUrl: string) => typeUrl.split(/[./]/).pop() || typeUrl;
 
 /** Pod names with the count of those not listed. */
 const podList = (v: VersionPods) => {

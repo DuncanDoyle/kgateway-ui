@@ -23,6 +23,15 @@ it("hides entries with no route", () => {
   expect(within(nav()).getAllByRole("link")).toHaveLength(2);
 });
 
+it("lists Processes after Findings", () => {
+  renderWithTheme(<InstallNav installId="kgw.kgateway" paths={[...paths, "processes"]} />, { path: "/i/kgw.kgateway" });
+  const links = within(nav()).getAllByRole("link");
+  expect(links.map((a) => [a.textContent, a.getAttribute("href")]).slice(-2)).toEqual([
+    ["Findings", "/i/kgw.kgateway/findings"],
+    ["Processes", "/i/kgw.kgateway/processes"],
+  ]);
+});
+
 it.each([
   ["/i/kgw.kgateway", "Overview"],
   ["/i/kgw.kgateway/findings", "Findings"],

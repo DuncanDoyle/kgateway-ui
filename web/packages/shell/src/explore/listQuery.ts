@@ -5,7 +5,7 @@ import { useInstallId } from "../shell/extension";
 import { type ParamChanges, useUrlParams } from "../shell/urlParams";
 
 // region Helpers
-export type ListName = "routes" | "gateways" | "listenersets" | "findings";
+export type ListName = "routes" | "gateways" | "listenersets" | "findings" | "processes";
 
 /** The params each list's server documents (design §7.2), in the order they are sent. listener is 2.3 and never sent. */
 const API_PARAMS: Record<ListName, string[]> = {
@@ -13,6 +13,7 @@ const API_PARAMS: Record<ListName, string[]> = {
   gateways: ["namespace", "health", "q", "sort", "cursor"],
   listenersets: ["namespace", "parent", "health", "q", "sort", "cursor"],
   findings: ["severity", "code", "kind", "namespace", "group", "q", "sort", "cursor"],
+  processes: ["health", "q", "skew", "restarts", "cursor"],
 };
 /** The server's default sort per list, as the URL writes it. */
 const DEFAULT_SORT: Record<ListName, string> = {
@@ -20,6 +21,7 @@ const DEFAULT_SORT: Record<ListName, string> = {
   gateways: "name.asc",
   listenersets: "name.asc",
   findings: "rank.asc",
+  processes: "name.asc",
 };
 /** Repeatable params; the page URL holds them comma-joined (no value of theirs can contain a comma). */
 const REPEATED = new Set(["namespace", "kind", "state", "health", "backend", "severity", "code"]);
@@ -35,6 +37,8 @@ export const FILTER_PARAMS = [
   "severity",
   "code",
   "group",
+  "skew",
+  "restarts",
   "q",
 ];
 
@@ -79,16 +83,16 @@ export interface SortState {
 }
 
 // region Component
-type ListHook<T> = (
+type ListHook<P> = (
   id: string,
   query: URLSearchParams,
-) => { data?: Page<T>; error?: ApiError; cursorRejected: boolean; isLaggy: boolean };
+) => { data?: P; error?: ApiError; cursorRejected: boolean; isLaggy: boolean };
 
 /**
  * URL state and data of one list page: filters, sort and cursor live in the query string (design §8.1).
  * skip names params the server does not advertise (/meta filters); they stay in the URL but are never sent.
  */
-export function useListPage<T>(list: ListName, useList: ListHook<T>, skip: string[] = []) {
+export function useListPage<T, P extends Page<T> = Page<T>>(list: ListName, useList: ListHook<P>, skip: string[] = []) {
   const id = useInstallId();
   const [params, update] = useUrlParams();
   const text = params.get("q") ?? "";

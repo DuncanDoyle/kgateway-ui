@@ -160,6 +160,7 @@ it("the header's install nav links only to pages that exist, and navigates", asy
     ["Routes", "/i/kgw.kgateway/routes"],
     ["ListenerSets", "/i/kgw.kgateway/listenersets"],
     ["Findings", "/i/kgw.kgateway/findings"],
+    ["Processes", "/i/kgw.kgateway/processes"],
   ]);
   await userEvent.click(within(nav).getByRole("link", { name: "Findings" }));
   expect(await screen.findByText("findings page")).toBeInTheDocument();
