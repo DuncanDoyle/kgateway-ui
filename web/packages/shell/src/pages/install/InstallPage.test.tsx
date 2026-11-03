@@ -945,3 +945,18 @@ it("Show all, View processes and the What was checked toggle carry hover, active
   for (const el of controls)
     for (const p of [":hover", ":active", ":focus-visible"]) expect(pseudoRules(el, p).length).toBeGreaterThan(0);
 });
+
+it("below 900 px the Gateway table keeps Status, Data plane, the name and routes in view", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q === "(max-width: 899px)",
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  mount(unhealthy());
+  const table = await screen.findByRole("table", { name: "Gateways" });
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent),
+  ).toEqual(["Status", "Data plane", "Gateway", "Routes"]);
+});

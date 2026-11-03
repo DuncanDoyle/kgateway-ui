@@ -17,6 +17,7 @@ import { objectPath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
 import { ResourceName } from "../../resource/ResourceName";
 import { useUrlParams, useUrlText } from "../../shell/urlParams";
+import { useMedia } from "../../shell/useMedia";
 import type { HealthState } from "../../theme/tokens";
 
 // region Styles
@@ -136,6 +137,10 @@ const Empty = styled.p`
 
 // region Helpers
 const col = createColumnHelper<GatewayRow>();
+/** Below 900 px the lower-value columns go, so Status, Data plane, the name and routes stay in view (as ObjectTable). */
+const NARROW = "(max-width: 899px)";
+const narrowHidden = { class: false, listeners: false, addresses: false };
+const allShown = {};
 const rank = { error: 0, unknown: 1, warning: 2, healthy: 3 } as const;
 const gatewayKey = (r: GatewayRow) => `${r.ref.namespace ?? ""}/${r.ref.name}`;
 /** Where a row opens, from its server-computed link only; an older backend sends none, so the row is text. */
@@ -174,6 +179,13 @@ function columns(installId: string) {
       cell: (c) => <HealthBadge state={c.getValue()} />,
       sortingFn: (a, b) => rank[a.original.state] - rank[b.original.state],
     }),
+    col.accessor((r) => r.dataPlane ?? "unknown", {
+      id: "dataPlane",
+      header: diagnosticsCopy.dataPlane,
+      cell: (c) => <DataPlaneBadge value={c.getValue()} />,
+      sortingFn: (a, b) =>
+        dataPlaneRank[a.original.dataPlane ?? "unknown"] - dataPlaneRank[b.original.dataPlane ?? "unknown"],
+    }),
     col.accessor(gatewayKey, {
       id: "gateway",
       header: "Gateway",
@@ -183,13 +195,6 @@ function columns(installId: string) {
         const name = <ResourceName namespace={ref.namespace} name={ref.name} />;
         return to ? <Link to={to}>{name}</Link> : name;
       },
-    }),
-    col.accessor((r) => r.dataPlane ?? "unknown", {
-      id: "dataPlane",
-      header: diagnosticsCopy.dataPlane,
-      cell: (c) => <DataPlaneBadge value={c.getValue()} />,
-      sortingFn: (a, b) =>
-        dataPlaneRank[a.original.dataPlane ?? "unknown"] - dataPlaneRank[b.original.dataPlane ?? "unknown"],
     }),
     col.accessor("class", { header: "Class" }),
     col.accessor("listeners", { header: "Listeners" }),
@@ -242,10 +247,11 @@ export const GatewayTable = memo(function GatewayTable({
     return [{ id: id || "state", desc: dir === "desc" }];
   }, [sort]);
   const cols = useMemo(() => columns(installId), [installId]);
+  const narrow = useMedia(NARROW);
   const table = useReactTable({
     data: visible,
     columns: cols,
-    state: { sorting },
+    state: { sorting, columnVisibility: narrow ? narrowHidden : allShown },
     getRowId: gatewayKey,
     enableSortingRemoval: false,
     // No pagination or expansion: their auto-resets would only add state updates.
