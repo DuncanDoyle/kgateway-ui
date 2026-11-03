@@ -521,12 +521,18 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	var m *Model
 	fc := testutil.FakeClock()
 	if tier.IsWorst {
-		// The measurement world's cache and fake clients go before the snapshot is measured.
+		// The measurement world's cache and fake clients go before the snapshot is measured,
+		// once every goroutine they started has returned.
+		g := runtime.NumGoroutine()
 		w = measure.New(t, tier, fc)
 		snap = w.Live.Cache.Snapshot()
 		w.Live.Stop()
 		w.Live = nil
-		time.Sleep(time.Second) // the stopped informers' goroutines return
+		for deadline := time.Now().Add(time.Minute); runtime.NumGoroutine() > g; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
+			}
+		}
 	} else {
 		snap = scale.Snapshot(tier, 1)
 	}
