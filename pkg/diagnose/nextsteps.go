@@ -110,11 +110,13 @@ type NextStep struct {
 
 // Wording of the next steps (design §8.5).
 const (
-	StepEnvoyReason   = "See Envoy's reason"
-	StepProxyLog      = "See it on the proxy"
-	StepProxyCounters = "Check the proxy's counters"
+	StepEnvoyReason   = "See the reason in the controller log"
+	StepProxyLog      = "See the reject in the proxy log"
+	StepProxyCounters = "Read the proxy's update counters"
 	StepPanicTrace    = "Read the panic's stack trace"
 	StepShareNote     = "Log lines and admin output can contain configuration values, including secrets. Share them with care."
+	// StepPortForwardNote leads the counters step's note: it is the one command that opens a connection (§12).
+	StepPortForwardNote = "This command opens a connection to the proxy's admin port."
 )
 
 // stepsSince is how far back the log commands read.
@@ -135,7 +137,11 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands, can func(ob
 	var out []NextStep
 	add := func(title, cmd, needs string, refs ...objects.Ref) {
 		if cmd != "" && !slices.ContainsFunc(refs, func(r objects.Ref) bool { return !can(r) }) {
-			out = append(out, NextStep{Title: title, Command: cmd, Needs: []string{needs}, Note: StepShareNote, Refs: refs})
+			note := StepShareNote
+			if needs == needsPortForward {
+				note = StepPortForwardNote + " " + note
+			}
+			out = append(out, NextStep{Title: title, Command: cmd, Needs: []string{needs}, Note: note, Refs: refs})
 		}
 	}
 	for _, i := range g.Members {

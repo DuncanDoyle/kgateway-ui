@@ -264,7 +264,7 @@ func TestProbeFailures(t *testing.T) {
 		}
 		if f != nil {
 			ev := f.Facts.(*ProcessEvidence)
-			if ev.Probe == nil || ev.Probe.Type != "readiness" || ev.Probe.Failures != 3 || !ev.Probe.Last.Equal(last) || f.Detail != "Pod p failed its readiness probe 3 times in the last 15 minutes, from Events." {
+			if ev.Probe == nil || ev.Probe.Type != "readiness" || ev.Probe.Failures != 3 || !ev.Probe.Last.Equal(last) || f.Detail != "Events show Pod p failed its readiness probe 3 times in the last 15 minutes." {
 				t.Fatalf("020 %+v %+v", f, ev.Probe)
 			}
 			if want := first.Add(cache.EventWindow + time.Nanosecond); !r.Next.Equal(want) {
@@ -329,7 +329,7 @@ func TestAmbiguousProxyDeployment(t *testing.T) {
 	a.OwnerReferences, b.OwnerReferences, b.Name = nil, nil, "edge-copy"
 	w.deploys = []*appsv1.Deployment{w.ctrl, a, b}
 	f := find(Evaluate(processInput(t, w), Upstream(), Runtime{}), CodeProxyNotReady)
-	if f == nil || f.Message != "More than one proxy deployment matches this Gateway" || f.Severity != SeverityWarning {
+	if f == nil || f.Message != "More than one proxy Deployment matches this Gateway" || f.Severity != SeverityWarning {
 		t.Fatalf("006 %+v", f)
 	}
 }
@@ -358,7 +358,7 @@ func TestProxyGapInResult(t *testing.T) {
 		for _, name := range []string{restartsCheckName, probesCheckName} {
 			c, wantDetail := resultOf(r, name), ""
 			if tc.why != "" {
-				wantDetail = "Proxy Pods are not watched; proxies were not checked"
+				wantDetail = "Proxy Pods are not watched, so proxies were not checked"
 			}
 			if !c.OK || c.Detail != wantDetail || c.Unavailable != tc.why || r.State == StateUnknown {
 				t.Fatalf("%s %s: %+v", tc.name, name, c)

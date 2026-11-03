@@ -13,7 +13,7 @@ export const navCopy = {
   routes: "Routes",
   listenerSets: "ListenerSets",
   findings: "Findings", // S02
-  processes: "Processes",
+  processes: "Processes", // S412
   label: "Install", // S03
   copyCommand: "Copy kubectl command", // S04
 };
@@ -80,7 +80,7 @@ export const routeStateCopy = {
 
 /** The data-plane flag (3.2): its Gateway's proxies reject config. Offered to Phase 3 servers only. */
 export const routeStateDataPlaneCopy = {
-  "gateway-rejecting": "Gateway rejects config",
+  "gateway-rejecting": "Gateway rejects config", // S457
 };
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
@@ -411,120 +411,123 @@ export const findingsCopy = {
   copyLabel: (title: string) => `Copy ${title}`, // S293
 };
 
-// region Diagnostics (Phase 3.2 drafts; Task 51 runs the wording pass and assigns ids)
+// region Diagnostics (Phase 3.2, ids in docs/phases/phase-3/phase-3.2-wording.md)
 export const diagnosticsCopy = {
-  copied: "Copied",
-  copyFailed: "Could not copy",
-  nextStep: "Next step",
-  affected: (n: number) => `${n} affected`,
-  findings: (n: number) => plural(n, ["finding", "findings"]),
+  copied: "Copied", // S376
+  copyFailed: "Could not copy", // S377
+  nextStep: "Next steps", // S375
+  affected: (n: number) => `${n} affected`, // S380
+  findings: (n: number) => plural(n, ["finding", "findings"]), // S381
   // Evidence
-  rejectedTypes: "Rejected config types",
-  type: "Type",
-  streams: "Streams",
-  firstSeen: "First seen",
-  reportedBy: "Reported by",
-  proxies: "Proxies",
-  proxiesReady: (ready: number, desired: number) => `${ready} of ${desired} ready`,
-  statusSaysHealthy: "Status says healthy, but proxies reject its config.",
-  proxyRejects: "Rejects seen on each proxy",
-  pod: "Pod",
-  rejectingSince: "Rejecting since",
-  envoyResources: "Envoy resources",
-  rejecting: (n: number) => `${n} rejecting`,
-  rejectingNow: "Rejecting",
-  notRejecting: "Not rejecting",
-  truncated: "and more",
-  recentlyChanged: "Changed shortly before the first reject",
-  recentlyChangedNote: "A hint, not a cause.",
-  restartsInWindow: "Restarts",
-  lastEnded: "Last ended",
-  termination: (reason: string | undefined, exitCode: number) => `${reason ?? "Exited"}, exit code ${exitCode}`,
-  waiting: "Waiting",
-  probe: "Probe",
+  rejectedTypes: "Rejected config types", // S426
+  type: "Type", // S427
+  streams: "Streams", // S428
+  firstSeen: "First seen", // S429
+  reportedBy: "Reported by", // S430
+  proxies: "Proxies", // S392
+  proxiesReady: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393
+  statusSaysHealthy: "Status says Programmed, but proxies reject its config", // S432
+  proxyRejects: "Rejects seen on each proxy", // S431
+  pod: "Pod", // S433
+  rejectingSince: (ago: string) => `New rejects, started ${ago}`, // S434
+  envoyResources: "Envoy resources", // S436
+  rejecting: (n: number) => `${n} rejecting`, // S397
+  rejectingNow: "New rejects", // S434
+  notRejecting: "No new rejects", // S435
+  truncated: "and more", // S437
+  recentlyChanged: "Changed shortly before the first reject", // S438
+  recentlyChangedNote: "A hint, not a cause.", // S439
+  restartsInWindow: "Restarts", // S402
+  lastEnded: "Last exit", // S404
+  termination: (reason: string | undefined, exitCode: number) => `${reason ?? "Exited"}, exit code ${exitCode}`, // S405
+  waiting: "Waiting", // S411
+  probe: "Probe", // S409
+  // S410
   probeFailures: (type: string | undefined, n: number) =>
     `${type ? `${type} probe` : "A probe"} failed ${n === 1 ? "once" : `${n} times`}`,
-  historyUnknown: "Earlier failures were not counted.",
-  controllerVersion: "Controller version",
-  expected: "Gateway API expected",
-  proxyVersions: "Proxy versions",
-  replicaVersions: "Controller replica versions",
-  crds: "Gateway API CRDs",
-  more: (n: number) => `and ${n} more`,
-  proxyStats: "Proxy stats",
-  connected: "Connected",
+  historyUnknown: "Earlier failures were not counted.", // S440
+  controllerVersion: "Controller version", // S441
+  expected: "Gateway API expected", // S442
+  proxyVersions: "Proxy versions", // S443
+  replicaVersions: "Controller replica versions", // S444
+  crds: "Gateway API CRDs", // S445
+  more: (n: number) => `and ${n} more`, // S446
+  proxyStats: "Proxy stats", // S447
+  connected: "Connected", // S448
   disconnected: "Not connected",
-  warmingListeners: "Warming listeners",
+  warmingListeners: "Warming listeners", // S449
   warmingClusters: "Warming clusters",
-  serverState: "Server state",
-  notReported: "Not reported",
+  serverState: "Server state", // S450
+  notReported: "Not reported", // S365
   // Processes
-  controller: "Controller",
-  readyOf: (ready: number, desired: number) => `${ready}/${desired} ready`,
-  version: (v: string) => `version ${v}`,
-  versionHeader: "Version",
-  notObserved: "Not observed",
-  noGateways: "No Gateways you can view",
-  gatewaysReady: (ready: number, total: number) => `${ready}/${total} Gateways ready`,
-  skew: (n: number) => `${n} with version skew`,
-  restarting: (n: number) => `${n} restarting`,
-  gatewaysNotObserved: (n: number) => `${n} not observed`,
+  controller: "Controller", // S391
+  readyOf: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393
+  version: (v: string) => `version ${v}`, // S394
+  versionHeader: "Version", // S406
+  notObserved: "Not observed", // S363
+  noGateways: "No Gateways you can view", // S395
+  gatewaysReady: (ready: number, total: number) => `${ready}/${total} Gateways ready`, // S396
+  skew: (n: number) => `${n} with version skew`, // S398
+  restarting: (n: number) => `${n} restarted recently`, // S399
+  gatewaysNotObserved: (n: number) => `${n} not observed`, // S364
   name: "Name",
-  ready: "Ready",
+  ready: "Ready", // S400
   notReady: "Not ready",
+  // S401
   restarts: (total: number | undefined, recent: number | undefined) =>
     total === undefined ? (recent ? `${recent} recent` : "") : recent ? `${total} (${recent} recent)` : String(total),
-  lastStart: "Last start",
-  rolloutStuck: (reason: string) => `Rollout stuck: ${reason}`,
-  noProcesses: "No processes you can view.",
+  lastStart: "Last start", // S403
+  rolloutStuck: (reason: string) => `Rollout stuck: ${reason}`, // S407
+  noProcesses: "No processes you can view.", // S408
   // Install page (Task 49)
-  needsAttention: "Needs attention",
-  showAllGroups: (n: number) => `Show all groups (${n})`,
-  processesTitle: "Processes",
-  viewProcesses: "View processes",
-  whatWasChecked: "What was checked",
-  notAvailable: "Not available",
+  needsAttention: "Needs attention", // S378
+  showAllGroups: (n: number) => `Show all groups (${n})`, // S379
+  processesTitle: "Processes", // S386
+  viewProcesses: "View processes", // S387
+  whatWasChecked: "What was checked", // S385
+  notAvailable: "Not available", // S358
   unavailableReason: {
-    off: "Turned off",
-    denied: "No permission to read its input",
-    failing: "Its input is failing",
-    "not-on-version": "Not available on this version",
-    "not-observed": "Not observed",
+    off: "Turned off", // S359
+    denied: "No permission to read its input", // S360
+    failing: "Its input is failing", // S361
+    "not-on-version": "Not available on this version", // S362
+    "not-observed": "Not observed", // S363
   } as Record<string, string>,
-  dataPlane: "Data plane",
-  noRejects: "No rejects",
-  rejects: "Rejects",
-  problems: (n: number) => plural(n, ["problem", "problems"]),
-  oldestProblem: (ago: string) => `Oldest problem ${ago}`,
+  dataPlane: "Data plane", // S388
+  noRejects: "No rejects", // S389
+  rejects: "Rejects", // S390
+  problems: (n: number) => plural(n, ["problem", "problems"]), // S383
+  oldestProblem: (ago: string) => `Oldest problem ${ago}`, // S384
 };
 
-/** The Processes page and the Gateway page's Data plane and Proxies sections (Task 50 drafts). */
+/** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */
 export const processesCopy = {
-  title: "Processes",
-  search: "Filter Gateways",
-  placeholder: "Filter by Gateway name",
-  showOnly: "Show only",
-  skew: "Version skew",
-  restarting: "Restarting",
-  controllerTable: "Controller processes",
-  gatewayProxies: "Gateway proxies",
-  gateway: "Gateway",
-  proxies: "Proxies",
-  rejects: "Rejecting streams",
-  version: "Version",
-  restarts: "Recent restarts",
-  differs: "differs from controller",
-  hidden: "Hidden",
-  proxiesOf: (gw: string) => `Proxies of ${gw}`,
+  title: "Processes", // S412
+  search: "Filter Gateways", // S413
+  placeholder: "Filter by Gateway name or namespace", // S414
+  showOnly: "Show only", // S415
+  skew: "Version skew", // S416
+  restarting: "Restarted recently", // S417
+  controllerTable: "Controller processes", // S418
+  gatewayProxies: "Gateway proxies", // S419
+  gateway: "Gateway", // S420
+  proxies: "Proxies", // S392
+  rejects: "Rejecting streams", // S421
+  version: "Version", // S406
+  restarts: "Recent restarts", // S422
+  differs: "differs from controller", // S423
+  hidden: "Hidden", // S424
+  proxiesOf: (gw: string) => `Proxies of ${gw}`, // S425
 };
 export const dataPlaneCopy = {
-  title: "Data plane",
-  rejecting: "Proxies reject this Gateway's config",
-  unavailable: "Rejects cannot be read right now",
-  evidenceRestricted: "Details hidden: they name objects you cannot view.",
-  nextSteps: "Next steps",
-  snapshot: "Built by the controller",
-  snapshotNote: "From the controller's metrics: what it built, not what proxies accepted.",
+  title: "Data plane", // S388
+  rejecting: "Proxies reject this Gateway's config", // S305
+  unavailable: "Rejects cannot be read right now", // S451
+  evidenceRestricted: "Details hidden: they name objects you cannot view.", // S452
+  nextSteps: "Next steps", // S291
+  snapshot: "Built by the controller", // S453
+  snapshotNote: "From controller metrics. This is what it built, not what proxies accepted.", // S454
+  // S455
   snapshotFacts: {
     listeners: "Listeners",
     routes: "Routes",
@@ -532,6 +535,6 @@ export const dataPlaneCopy = {
     endpoints: "Endpoints",
     secrets: "Secrets",
   },
-  proxyStats: "Proxy stats",
-  proxyStatsOn: "Collected",
+  proxyStats: "Proxy stats", // S447
+  proxyStatsOn: "Collected", // S456
 };

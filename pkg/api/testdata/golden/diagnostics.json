@@ -71,7 +71,7 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:10Z",
-        "detail": "Proxy Pods are not watched; proxies were not checked",
+        "detail": "Proxy Pods are not watched, so proxies were not checked",
         "name": "process restarts",
         "ok": true,
         "required": false,
@@ -93,7 +93,7 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:10Z",
-        "detail": "Proxy Pods are not watched; proxies were not checked; Gateway API CRDs are not watched; CRD versions were not checked",
+        "detail": "Proxy Pods are not watched, so proxies were not checked; Gateway API CRDs are not watched, so their versions were not checked",
         "name": "version skew",
         "ok": true,
         "required": false,
@@ -101,14 +101,14 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:10Z",
-        "detail": "No proxy stats for 1 of 2 Gateways.",
+        "detail": "1 of 2 Gateways have no proxy stats.",
         "name": "proxy config warming",
         "ok": true,
         "required": false
       },
       {
         "collectedAt": "2026-10-17T12:00:10Z",
-        "detail": "No proxy stats for 1 of 2 Gateways.",
+        "detail": "1 of 2 Gateways have no proxy stats.",
         "name": "proxy connection",
         "ok": true,
         "required": false
@@ -163,7 +163,7 @@
               "pods/log"
             ],
             "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-            "title": "See Envoy's reason"
+            "title": "See the reason in the controller log"
           },
           {
             "command": "kubectl logs -n infra deploy/edge --since=1h | grep -i rejected",
@@ -171,15 +171,15 @@
               "pods/log"
             ],
             "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-            "title": "See it on the proxy"
+            "title": "See the reject in the proxy log"
           },
           {
             "command": "kubectl port-forward -n infra deploy/edge 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'",
             "needs": [
               "pods/portforward"
             ],
-            "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-            "title": "Check the proxy's counters"
+            "note": "This command opens a connection to the proxy's admin port. Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "Read the proxy's update counters"
           }
         ],
         "severity": "error",
@@ -207,7 +207,7 @@
               "pods/log"
             ],
             "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-            "title": "See Envoy's reason"
+            "title": "See the reason in the controller log"
           },
           {
             "command": "kubectl logs -n infra deploy/nack --since=1h | grep -i rejected",
@@ -215,15 +215,15 @@
               "pods/log"
             ],
             "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-            "title": "See it on the proxy"
+            "title": "See the reject in the proxy log"
           },
           {
             "command": "kubectl port-forward -n infra deploy/nack 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'",
             "needs": [
               "pods/portforward"
             ],
-            "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-            "title": "Check the proxy's counters"
+            "note": "This command opens a connection to the proxy's admin port. Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "Read the proxy's update counters"
           }
         ],
         "severity": "error",

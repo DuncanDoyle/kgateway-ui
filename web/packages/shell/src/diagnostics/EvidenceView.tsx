@@ -115,7 +115,7 @@ function XDSRejects({ e, installId, now }: { e: XDSRejectsEvidence; installId: s
                           state="error"
                           label={
                             t.rejectingSince
-                              ? `${diagnosticsCopy.rejectingSince} ${ago(t.rejectingSince, now)}`
+                              ? diagnosticsCopy.rejectingSince(ago(t.rejectingSince, now))
                               : diagnosticsCopy.rejectingNow
                           }
                         />

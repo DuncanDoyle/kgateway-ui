@@ -30,7 +30,7 @@
       "nextSteps": [],
       "proxyStats": {
         "available": false,
-        "reason": "proxy stats not collected yet",
+        "reason": "Proxy stats are not collected yet",
         "unavailable": "failing"
       },
       "recentlyChanged": [],

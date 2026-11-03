@@ -40,8 +40,8 @@ const (
 	xdsTypeStreams          = "%s rejected on %d streams."
 	xdsTypeStream           = "%s rejected on 1 stream."
 	xdsActiveRejects        = "%.0f active rejects"
-	xdsHoldError            = "A controller Pod restarted or was replaced; waiting up to 60 s for proxies to reconnect"
-	xdsStaleError           = "controller metrics are stale (last collected at %s)"
+	xdsHoldError            = "A controller Pod restarted or was replaced. Waiting up to 60 s for rejects to return"
+	xdsStaleError           = "Controller metrics are stale. Last collected at %s"
 )
 
 // xdsCheck: KGWUI-001, one finding per Gateway with active rejects (design §8.3).

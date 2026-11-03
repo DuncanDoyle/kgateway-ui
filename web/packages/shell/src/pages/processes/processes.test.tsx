@@ -288,7 +288,7 @@ describe("Gateway page sections", () => {
     await screen.findByRole("region", { name: dataPlaneCopy.title });
     expect(within(dataPlane()).getByText(diagnosticsCopy.noRejects)).toBeInTheDocument();
     // Proxy stats show the server's reason when they do not run.
-    expect(within(dataPlane()).getByText("proxy stats not collected yet")).toBeInTheDocument();
+    expect(within(dataPlane()).getByText("Proxy stats are not collected yet")).toBeInTheDocument();
     first.unmount();
     unavailable = true;
     mount(GW("edge"));

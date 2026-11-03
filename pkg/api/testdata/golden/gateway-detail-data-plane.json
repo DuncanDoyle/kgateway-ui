@@ -33,7 +33,7 @@
             "pods/log"
           ],
           "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-          "title": "See Envoy's reason"
+          "title": "See the reason in the controller log"
         },
         {
           "command": "kubectl logs -n infra deploy/nack --since=1h | grep -i rejected",
@@ -41,15 +41,15 @@
             "pods/log"
           ],
           "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-          "title": "See it on the proxy"
+          "title": "See the reject in the proxy log"
         },
         {
           "command": "kubectl port-forward -n infra deploy/nack 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'",
           "needs": [
             "pods/portforward"
           ],
-          "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
-          "title": "Check the proxy's counters"
+          "note": "This command opens a connection to the proxy's admin port. Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+          "title": "Read the proxy's update counters"
         }
       ],
       "proxyStats": {

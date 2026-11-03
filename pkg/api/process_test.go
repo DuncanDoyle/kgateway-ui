@@ -360,9 +360,9 @@ func TestProbeFailuresAtTheAPI(t *testing.T) {
 			if f == nil {
 				continue
 			}
-			probe, wantType, wantDetail := processFacts(t, f).Probe, "readiness", "Pod kgateway-0 failed its readiness probe 3 times in the last 15 minutes, from Events."
+			probe, wantType, wantDetail := processFacts(t, f).Probe, "readiness", "Events show Pod kgateway-0 failed its readiness probe 3 times in the last 15 minutes."
 			if two {
-				wantType, wantDetail = "", "Pod kgateway-0 failed a probe 3 times in the last 15 minutes, from Events."
+				wantType, wantDetail = "", "Events show Pod kgateway-0 failed a probe 3 times in the last 15 minutes."
 			}
 			if probe == nil || probe.Type != wantType || probe.Failures != 3 || !probe.Last.Equal(last) || f.Detail != wantDetail ||
 				f.Resource.Ref != (objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}) {
@@ -386,7 +386,7 @@ func TestFirstSeenCountIsNotCountedAtTheAPI(t *testing.T) {
 	h.clk.set(testutil.Now.Add(time.Second))
 	h.putEvent(t, ev, false, 3, true)
 	f := findingOf(h.at(t, testutil.Now.Add(time.Second)), health.CodeProbeFailing)
-	if f == nil || processFacts(t, f).Probe.Failures != 3 || !strings.HasSuffix(f.Detail, " Earlier failures not counted.") {
+	if f == nil || processFacts(t, f).Probe.Failures != 3 || !strings.HasSuffix(f.Detail, " Earlier failures were not counted.") {
 		t.Fatalf("020 %+v", f)
 	}
 }
@@ -492,7 +492,7 @@ func TestProxyPodsUnwatchedGapAtTheAPI(t *testing.T) {
 			r := h.at(t, testutil.Now)
 			for _, name := range []string{"process restarts", "probe failures"} {
 				c := checkOf(r, name)
-				if c == nil || !c.OK || c.Detail != "Proxy Pods are not watched; proxies were not checked" || c.Unavailable != tc.why {
+				if c == nil || !c.OK || c.Detail != "Proxy Pods are not watched, so proxies were not checked" || c.Unavailable != tc.why {
 					t.Fatalf("%s: %+v", name, c)
 				}
 			}

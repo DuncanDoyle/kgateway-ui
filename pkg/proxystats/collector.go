@@ -31,7 +31,7 @@ const (
 )
 
 // OffReason is the reason published when proxy stats are turned off.
-const OffReason = "proxy stats are turned off"
+const OffReason = "Proxy stats are turned off"
 
 // errTimedOut is a Pod's error when its fetch or the round ran out of time.
 const errTimedOut = "timed out"

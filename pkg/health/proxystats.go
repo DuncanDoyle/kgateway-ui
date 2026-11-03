@@ -20,15 +20,15 @@ const proxyStartsKey = "starts"
 
 // Wording of KGWUI-025 and 026 and of the proxy stats gaps (design §8.8).
 const (
-	proxyWarmingMessage      = "Proxy is Ready but some config is still loading"
+	proxyWarmingMessage      = "Proxy is Ready, but some config is still loading"
 	proxyWarmingDetail       = "Config is still loading on %s."
 	proxyDisconnectedMessage = "Proxy lost its connection to the controller"
 	proxyDisconnectedDetail  = "%s lost its connection to the controller. It keeps serving its last config."
-	proxyStatsNotCollected   = "proxy stats not collected yet"
-	proxyStatsUnavailable    = "proxy stats are not available"
-	proxyStatsGatewayGap     = "No proxy stats for %d of %d Gateways."
-	proxyStatsPodGap         = "1 proxy failed its stats scrape."
-	proxyStatsPodsGap        = "%d proxies failed their stats scrape."
+	proxyStatsNotCollected   = "Proxy stats are not collected yet"
+	proxyStatsUnavailable    = "Proxy stats are not available"
+	proxyStatsGatewayGap     = "%d of %d Gateways have no proxy stats."
+	proxyStatsPodGap         = "Could not read stats from 1 proxy."
+	proxyStatsPodsGap        = "Could not read stats from %d proxies."
 	proxyNamesMore           = "%s and %d more"
 )
 

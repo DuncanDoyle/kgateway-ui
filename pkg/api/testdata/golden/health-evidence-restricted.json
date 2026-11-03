@@ -69,7 +69,7 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
-        "detail": "Proxy Pods are not watched; proxies were not checked",
+        "detail": "Proxy Pods are not watched, so proxies were not checked",
         "name": "process restarts",
         "ok": true,
         "required": false,
@@ -91,7 +91,7 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
-        "detail": "Proxy Pods are not watched; proxies were not checked; Gateway API CRDs are not watched; CRD versions were not checked",
+        "detail": "Proxy Pods are not watched, so proxies were not checked; Gateway API CRDs are not watched, so their versions were not checked",
         "name": "version skew",
         "ok": true,
         "required": false,
@@ -99,7 +99,7 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
-        "error": "proxy stats not collected yet",
+        "error": "Proxy stats are not collected yet",
         "name": "proxy config warming",
         "ok": false,
         "required": false,
@@ -107,7 +107,7 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
-        "error": "proxy stats not collected yet",
+        "error": "Proxy stats are not collected yet",
         "name": "proxy connection",
         "ok": false,
         "required": false,

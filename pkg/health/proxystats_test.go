@@ -83,7 +83,7 @@ func TestProxyConditionsMatureAfter60s(t *testing.T) {
 		want                 ProxyPodStats
 	}{
 		{CodeProxyDisconnected, "proxy connection", "Proxy lost its connection to the controller", disconnected, ProxyPodStats{Pod: "edge-0", Connected: ptr(false), ServerState: "live"}},
-		{CodeProxyConfigWarming, "proxy config warming", "Proxy is Ready but some config is still loading", warming, ProxyPodStats{Pod: "edge-0", Connected: ptr(true), WarmingListeners: ptr(int64(2)), ServerState: "live"}},
+		{CodeProxyConfigWarming, "proxy config warming", "Proxy is Ready, but some config is still loading", warming, ProxyPodStats{Pod: "edge-0", Connected: ptr(true), WarmingListeners: ptr(int64(2)), ServerState: "live"}},
 	}
 	for _, c := range cases {
 		t.Run(c.code, func(t *testing.T) {
@@ -150,13 +150,13 @@ func TestProxyStatsAvailability(t *testing.T) {
 		ok     bool
 		detail string
 	}{
-		{"absent", collect.Snapshot{}, AvailFailing, false, "proxy stats not collected yet"},
+		{"absent", collect.Snapshot{}, AvailFailing, false, "Proxy stats are not collected yet"},
 		{"off", collect.Snapshot{Values: map[string]collect.Value{proxystats.Key: {State: collect.Off, Reason: proxystats.OffReason}}}, AvailOff, false, proxystats.OffReason},
 		{"expired", collect.Snapshot{Values: map[string]collect.Value{proxystats.Key: {State: collect.Unavailable, Reason: "expired"}}}, AvailFailing, false, "expired"},
-		{"every proxy failing", collected(testutil.Now, edgeStats(statsPod("edge-0", failing))), AvailFailing, false, "No proxy stats for 1 of 1 Gateways."},
-		{"not observed", collected(testutil.Now, proxystats.Gateway{Gateway: testutil.GwRef("infra", "edge").Ref()}), AvailNotObserved, false, "No proxy stats for 1 of 1 Gateways."},
+		{"every proxy failing", collected(testutil.Now, edgeStats(statsPod("edge-0", failing))), AvailFailing, false, "1 of 1 Gateways have no proxy stats."},
+		{"not observed", collected(testutil.Now, proxystats.Gateway{Gateway: testutil.GwRef("infra", "edge").Ref()}), AvailNotObserved, false, "1 of 1 Gateways have no proxy stats."},
 		// One proxy failing beside a scraped one: the Gateway stays available, and the Pod is named in the count.
-		{"one of two failing", collected(testutil.Now, edgeStats(statsPod("edge-0", failing), statsPod("edge-1", nil))), "", true, "1 proxy failed its stats scrape."},
+		{"one of two failing", collected(testutil.Now, edgeStats(statsPod("edge-0", failing), statsPod("edge-1", nil))), "", true, "Could not read stats from 1 proxy."},
 		{"no Gateways", collected(testutil.Now), "", true, ""},
 	}
 	for _, c := range cases {

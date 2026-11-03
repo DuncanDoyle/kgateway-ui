@@ -132,7 +132,7 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 const (
 	reasonDenied  = "Access to this resource is denied"
 	reasonFailing = "The watch is failing"
-	// reasonStatsFailing is a placeholder until the 3.2 wording pass (Task 51).
+	// reasonStatsFailing: the collector stopped or is stuck (wording pass, Task 51).
 	reasonStatsFailing = "Proxy stats are not being collected"
 )
 

@@ -222,7 +222,7 @@ func TestProxyStatsGapsAtTheAPI(t *testing.T) {
 	sh := newStatsHarness(t, setup{proxyPods: true}, lm, edgeStatsWorld()...)
 	sh.src.set(gwRef("infra", "edge"), pod("edge-0", nil), proxystats.PodStats{UID: "pod/infra/edge-1", Name: "edge-1", Err: "connection refused"})
 	r := sh.at(t, testutil.Now)
-	if c := checkOf(r, "proxy connection"); !c.OK || c.Detail != "1 proxy failed its stats scrape." || r.State == health.StateUnknown {
+	if c := checkOf(r, "proxy connection"); !c.OK || c.Detail != "Could not read stats from 1 proxy." || r.State == health.StateUnknown {
 		t.Fatalf("%s %+v", r.State, c)
 	}
 	sh.store.Fail(proxystats.Key, collect.Off, proxystats.OffReason)

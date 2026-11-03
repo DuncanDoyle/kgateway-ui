@@ -28,24 +28,24 @@ const (
 	gatewayCRD = "gateways." + objects.GatewayAPIGroup
 )
 
-// Wording of KGWUI-022 (design §9.4); Task 51 runs the wording pass.
+// Wording of KGWUI-022 (design §9.4), from the wording pass (Task 51).
 const (
 	skewProxyMessage     = "Proxy version differs from the controller"
 	skewProxyDetail      = "Proxy %s, controller %s. kgateway does not support mixed minor versions."
-	skewPinnedDetail     = " GatewayParameters %s pins the proxy image, which is the likely cause."
+	skewPinnedDetail     = " GatewayParameters %s sets the proxy image. That is the likely cause."
 	skewReplicasMessage  = "Controller Pods run different versions"
-	skewReplicasDetail   = "Controller Pods run %s after the rollout ended."
+	skewReplicasDetail   = "Controller Pods still run %s after the rollout ended."
 	skewCRDMessage       = "Gateway API CRDs do not match this kgateway version"
-	skewCRDDetail        = "%s is Gateway API %s; kgateway %s is built against %s."
+	skewCRDDetail        = "%s is Gateway API %s. kgateway %s expects %s."
 	skewMixedMessage     = "Gateway API CRDs are from different versions or channels"
-	skewMixedDetail      = "%s is %s; most Gateway API CRDs are %s."
-	skewSuppressedDetail = "A controller rollout is running or ended less than 10 minutes ago; versions were not compared"
-	skewUnknownDetail    = "Some images have no version tag; those Pods were not compared"
-	skewNoExpected       = "No Gateway API version on record for kgateway %s; CRDs were not compared with it"
-	skewCtrlUnknown      = "Controller version unknown; CRDs were not compared with the Gateway API version it expects"
-	skewStuckDetail      = "The controller rollout is stuck (KGWUI-021); versions were not compared"
-	skewCRDsOffDetail    = "Gateway API CRDs are not watched; CRD versions were not checked"
-	skewCRDsSyncDetail   = "the CRD watch has not synced yet"
+	skewMixedDetail      = "%s is %s, but most Gateway API CRDs are %s."
+	skewSuppressedDetail = "Versions are compared 10 minutes after a controller rollout ends"
+	skewUnknownDetail    = "Pods whose image has no version tag were not compared"
+	skewNoExpected       = "No known Gateway API version for kgateway %s, so CRDs were not compared"
+	skewCtrlUnknown      = "The controller version is not known, so CRDs were not compared"
+	skewStuckDetail      = "Versions were not compared: the controller rollout is stuck (KGWUI-021)"
+	skewCRDsOffDetail    = "Gateway API CRDs are not watched, so their versions were not checked"
+	skewCRDsSyncDetail   = "The CRD watch has not synced yet"
 )
 
 var versionRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:\.\d+)?(?:[-+][0-9A-Za-z.+-]*)?$`)

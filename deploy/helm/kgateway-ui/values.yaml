@@ -16,7 +16,7 @@ diagnostics:
   events: true       # Warning Events on controller and proxy Pods
   crds: true         # Gateway API CRD metadata
   proxyStats: true   # Envoy stats from each proxy Pod's port 9091
-  endpoints: true    # Services and EndpointSlices (read from 3.4)
+  endpoints: true    # Services and EndpointSlices (no check reads them yet)
   controllerLogs: false   # derived signals from controller logs; text is never kept
   controllerLogsNamespaces: [kgateway-system]   # a pods/log Role is created in each
 # More flags for the UI binary, appended after the chart's own args,

@@ -212,7 +212,7 @@ func TestSkewExpectedNotes(t *testing.T) {
 		name, label, image, note string
 	}{
 		{"unknown", "", "cr.kgateway.dev/kgateway-dev/kgateway@sha256:0123", skewCtrlUnknown},
-		{"no row", "2.6.0", "cr.kgateway.dev/kgateway-dev/kgateway:v2.6.0", "No Gateway API version on record for kgateway 2.6"},
+		{"no row", "2.6.0", "cr.kgateway.dev/kgateway-dev/kgateway:v2.6.0", "No known Gateway API version for kgateway 2.6"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := healthyWorld()

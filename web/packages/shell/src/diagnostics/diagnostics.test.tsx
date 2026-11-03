@@ -26,7 +26,7 @@ afterEach(() => {
 
 const gw = "gateway.networking.k8s.io";
 const step = (command: string, extra: Partial<NextStep> = {}): NextStep => ({
-  title: "See Envoy's reason",
+  title: "See the reason in the controller log",
   command,
   ...extra,
 });
@@ -51,7 +51,7 @@ describe("NextSteps", () => {
     const status = screen.getByRole("status");
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveTextContent("");
-    const button = screen.getByRole("button", { name: findingsCopy.copyLabel("See Envoy's reason") });
+    const button = screen.getByRole("button", { name: findingsCopy.copyLabel("See the reason in the controller log") });
     expect(styled(button)).toBe(true);
     fireEvent.click(button);
     expect(writeText).toHaveBeenCalledWith("kubectl logs -n kgw kgateway-0");

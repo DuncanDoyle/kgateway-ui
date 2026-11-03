@@ -673,7 +673,7 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 }
 
 // proxyAmbiguousMessage is 006's message when several Deployments carry the Gateway's label.
-const proxyAmbiguousMessage = "More than one proxy deployment matches this Gateway"
+const proxyAmbiguousMessage = "More than one proxy Deployment matches this Gateway"
 
 // unwatchedCheck: KGWUI-004.
 type unwatchedCheck struct{}

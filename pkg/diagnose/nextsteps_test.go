@@ -100,7 +100,7 @@ func TestCommandsQuoteValues(t *testing.T) {
 		{Title: diagnose.StepProxyLog, Command: "kubectl logs -n infra deploy/edge --since=1h | grep -i rejected",
 			Needs: []string{"pods/log"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{edgeDeploy, edgeGW}},
 		{Title: diagnose.StepProxyCounters, Command: k.ProxyCounters(edgeDeploy),
-			Needs: []string{"pods/portforward"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{edgeDeploy, edgeGW}},
+			Needs: []string{"pods/portforward"}, Note: diagnose.StepPortForwardNote + " " + diagnose.StepShareNote, Refs: []objects.Ref{edgeDeploy, edgeGW}},
 	}
 	if !reflect.DeepEqual(gs[0], want) {
 		t.Fatalf("steps\n%+v\nwant\n%+v", gs[0], want)

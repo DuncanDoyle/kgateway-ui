@@ -29,7 +29,7 @@ const (
 	maxRestartsSeen = 32
 )
 
-// Wording of the process findings (design §9.3); Task 51 runs the wording pass.
+// Wording of the process findings (design §9.3), from the wording pass (Task 51).
 const (
 	restartedMessage   = "%s restarted in the last 15 minutes"
 	restartedTimes     = "Pod %s restarted %s in the last 15 minutes."
@@ -38,16 +38,16 @@ const (
 	lastExitCode       = " Last exit code %d."
 	panicNote          = " A Go panic exits with code 2. The stack trace is in the previous container's log."
 	probeMessage       = "%s probes failing"
-	probeDetail        = "Pod %s failed %s %d times in the last 15 minutes, from Events."
-	probeUncounted     = " Earlier failures not counted."
+	probeDetail        = "Events show Pod %s failed %s %d times in the last 15 minutes."
+	probeUncounted     = " Earlier failures were not counted."
 	rolloutMessage     = "%s rollout stuck"
 	rolloutDetail      = "The rollout passed its progress deadline (ProgressDeadlineExceeded)."
 	rolloutWaiting     = " Pod %s is waiting: %s."
 	notReadyFacts      = "%d/%d ready: %s"
 	eventsOffDetail    = "Events are turned off"
-	eventsSyncDetail   = "the Events watch has not synced yet"
-	eventsCappedDetail = "More than 10,000 Events; the oldest were dropped"
-	proxiesUnchecked   = "Proxy Pods are not watched; proxies were not checked"
+	eventsSyncDetail   = "The Events watch has not synced yet"
+	eventsCappedDetail = "More than 10,000 Events, so some were dropped"
+	proxiesUnchecked   = "Proxy Pods are not watched, so proxies were not checked"
 )
 
 // stuckWaiting are the waiting reasons KGWUI-021 quotes as evidence.

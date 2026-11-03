@@ -39,7 +39,7 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `diagnostics.events` | `true` | Watch Warning Events for controller and proxy Pods. Off drops the `events` rule; checks that need it report "not available". |
 | `diagnostics.crds` | `true` | Watch Gateway API CRD metadata (bundle version and channel). Off drops the `customresourcedefinitions` rule. |
 | `diagnostics.proxyStats` | `true` | Read Envoy stats from each proxy Pod on port 9091. Needs no RBAC; the UI Pod must reach proxy Pods on 9091. Off skips the reads. |
-| `diagnostics.endpoints` | `true` | Grant `services` and `endpointslices`. The UI starts reading them in 3.4. Off drops both rules. |
+| `diagnostics.endpoints` | `true` | Grants `services` and `endpointslices`. No check reads them yet. Off drops both rules. |
 | `diagnostics.controllerLogs` | `false` | Read controller logs for derived signals. Adds a `pods/log` `get` Role in each namespace below. The UI keeps fixed fields and never stores or shows log text. |
 | `diagnostics.controllerLogsNamespaces` | `[kgateway-system]` | Namespaces that get the `pods/log` Role. Only used when `diagnostics.controllerLogs` is on. |
 | `extraArgs` | `[]` | More flags for the UI binary, appended after the chart's own args, e.g. `--set extraArgs={--poll-interval=10m}`. |
@@ -78,4 +78,4 @@ Kinds added downstream through `extension.WithKinds` need matching rules in this
 
 ## NetworkPolicy
 
-In-cluster, the UI scrapes controller metrics directly from the controller pods on port 9092. If a NetworkPolicy blocks that traffic, the UI reports the signal as unavailable (KGWUI-008) instead of showing it green. Allow ingress from the UI pod to the controller pods on 9092 to get metrics-based checks. Proxy stats need the UI pod to reach proxy pods on 9091.
+In-cluster, the UI scrapes controller metrics directly from the controller pods on port 9092. If a NetworkPolicy blocks that traffic, the UI reports the signal as unavailable (KGWUI-008) instead of showing it green. Allow ingress from the UI pod to the controller pods on 9092 to get metrics-based checks. Proxy stats need the UI Pod to reach port 9091 on proxy Pods.
