@@ -164,6 +164,12 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 
 ## Upgrade notes
 
+### Health overview (sub-phase 3.2)
+
+- The install page lists ranked groups of findings, not single findings.
+- Finding actions now render on the finding page, not the install page. `FindingRow` still renders them.
+- Finding renderers now render on the finding page, through the evidence view, for evidence kinds the shell does not know. `FindingRow` still renders them.
+
 ### Findings (sub-phase 3.1)
 
 - Every finding now has an `id`, such as `f1-…`, and a `group`. Both appear in every response, `/health` included, and on restricted rows. Treat the `id` as opaque: compare it, never parse it.
