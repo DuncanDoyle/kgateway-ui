@@ -105,7 +105,8 @@ export function ListFrame({
         {collectedAt && !failed ? <DataAge collectedAt={collectedAt} /> : null}
         {total !== undefined && !failed ? <span className="count">{count(total, noun)}</span> : null}
       </div>
-      {lead}
+      {/* Without data the error below stands in for the lead too. */}
+      {failed ? null : lead}
       <Bar>
         <SearchBox>
           <Search size={14} aria-hidden="true" />

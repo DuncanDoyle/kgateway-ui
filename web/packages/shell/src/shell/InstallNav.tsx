@@ -1,10 +1,14 @@
 import styled from "@emotion/styled";
-import { NavLink } from "react-router-dom";
+import { useCallback, useEffect, useRef } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { navCopy } from "../copy/explorer";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerTint } from "./headerTint";
 import { installPath } from "./paths";
 
 // region Styles
+/** Width of the edge fade, px. */
+const FADE = 24;
+
 const Nav = styled.nav`
   display: flex;
   flex: none;
@@ -15,6 +19,12 @@ const Nav = styled.nav`
     min-width: 0;
     overflow-x: auto;
     scrollbar-width: thin;
+  }
+  /* A mask fades the side with entries off-screen; it works on any header colour. */
+  &[data-fade="end"] { mask-image: linear-gradient(to right, #000 calc(100% - ${FADE}px), transparent); }
+  &[data-fade="start"] { mask-image: linear-gradient(to left, #000 calc(100% - ${FADE}px), transparent); }
+  &[data-fade="both"] {
+    mask-image: linear-gradient(to right, transparent, #000 ${FADE}px, #000 calc(100% - ${FADE}px), transparent);
   }
   a {
     display: inline-flex;
@@ -68,8 +78,33 @@ interface InstallNavProps {
 /** The install-scoped header nav; aria-current marks the active page. */
 export function InstallNav({ installId, paths, entries = installNavEntries }: InstallNavProps) {
   const shown = entries.filter((e) => paths.includes(e.to));
+  const ref = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+  // Marks which edges hide entries; set on the element, so scrolling never re-renders the nav.
+  const fade = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const start = el.scrollLeft > 1;
+    const end = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    const v = start && end ? "both" : start ? "start" : end ? "end" : "";
+    if (v) el.setAttribute("data-fade", v);
+    else el.removeAttribute("data-fade");
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the trigger; the active link changes with it.
+  useEffect(() => {
+    const el = ref.current;
+    el?.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+    fade();
+  }, [pathname, fade]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(fade);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fade]);
   return (
-    <Nav aria-label={navCopy.label}>
+    <Nav aria-label={navCopy.label} ref={ref} onScroll={fade}>
       {shown.map((e) => (
         // The overview is the install's root, so it is active only on its own path.
         <NavLink key={e.to} to={installPath(installId, e.to)} end={e.to === ""}>

@@ -171,6 +171,34 @@ describe("Processes page", () => {
     expect(within(rowOf("edge")).getByText(diagnosticsCopy.readyOf(1, 1))).toBeInTheDocument();
   });
 
+  it("hidden versions and restarts read Hidden, not Not reported", async () => {
+    serve((u) => (u.pathname === `${API}/processes` ? processes(processesRestrictedGolden) : undefined));
+    mount(`/i/${ID}/processes`);
+    await screen.findByText("2 Gateways");
+    const edge = rowOf("edge");
+    expect(within(edge).queryByText(diagnosticsCopy.notReported)).toBeNull();
+    expect(within(edge).getAllByText(processesCopy.hidden).length).toBeGreaterThan(0);
+  });
+
+  it("a failed first load shows the error, not a shimmering controller", async () => {
+    serve((u) => (u.pathname === `${API}/processes` ? [500, { error: "boom" }] : undefined));
+    mount(`/i/${ID}/processes`);
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(screen.queryByTestId("shimmer")).toBeNull();
+    expect(screen.queryByRole("region", { name: diagnosticsCopy.controller })).toBeNull();
+  });
+
+  it("the Show only chips carry a visible label", async () => {
+    serve((u) => (u.pathname === `${API}/processes` ? processes() : undefined));
+    mount(`/i/${ID}/processes`);
+    await screen.findByText("kgateway-0");
+    const label = screen.getByText(processesCopy.showOnly);
+    expect(label).toBeVisible();
+    // The label sits beside its chips, outside the health group.
+    expect(label.closest('[role="group"]')).toBeNull();
+    expect(label.parentElement).toContainElement(screen.getByRole("button", { name: processesCopy.skew }));
+  });
+
   it("stale data turns every state unknown", async () => {
     const old = new Date(Date.now() - 10 * 60_000).toISOString();
     serve((u) =>

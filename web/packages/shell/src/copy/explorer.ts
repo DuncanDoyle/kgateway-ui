@@ -514,6 +514,7 @@ export const processesCopy = {
   version: "Version",
   restarts: "Recent restarts",
   differs: "differs from controller",
+  hidden: "Hidden",
   proxiesOf: (gw: string) => `Proxies of ${gw}`,
 };
 export const dataPlaneCopy = {

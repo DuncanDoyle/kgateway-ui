@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { pseudoRules, renderWithTheme } from "../test/render";
 import { controlRoomDark, controlRoomLight } from "../theme/themes";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerTint } from "./headerTint";
@@ -30,6 +30,40 @@ it("lists Processes after Findings", () => {
     ["Findings", "/i/kgw.kgateway/findings"],
     ["Processes", "/i/kgw.kgateway/processes"],
   ]);
+});
+
+it("scrolls the active entry into view on route change", () => {
+  const scroll = vi.fn();
+  Element.prototype.scrollIntoView = scroll;
+  renderWithTheme(<InstallNav installId="kgw.kgateway" paths={[...paths, "processes"]} />, {
+    path: "/i/kgw.kgateway/processes",
+  });
+  expect(scroll).toHaveBeenCalledWith({ inline: "nearest", block: "nearest" });
+  expect(scroll.mock.contexts.at(-1)).toBe(within(nav()).getByRole("link", { name: "Processes" }));
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
+});
+
+it("fades the edge that has entries off-screen", () => {
+  const box = { scrollWidth: 400, clientWidth: 200 };
+  const sw = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(() => box.scrollWidth);
+  const cw = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => box.clientWidth);
+  renderWithTheme(<InstallNav installId="kgw.kgateway" paths={paths} />, { path: "/i/kgw.kgateway" });
+  const n = nav();
+  expect(n).toHaveAttribute("data-fade", "end");
+  n.scrollLeft = 100;
+  fireEvent.scroll(n);
+  expect(n).toHaveAttribute("data-fade", "both");
+  n.scrollLeft = 200;
+  fireEvent.scroll(n);
+  expect(n).toHaveAttribute("data-fade", "start");
+  box.scrollWidth = 200;
+  n.scrollLeft = 0;
+  fireEvent.scroll(n);
+  expect(n).not.toHaveAttribute("data-fade");
+  // The fade is a mask, so it works on either theme's header colour.
+  expect(pseudoRules(n, '[data-fade="end"]').join()).toContain("mask-image");
+  sw.mockRestore();
+  cw.mockRestore();
 });
 
 it.each([

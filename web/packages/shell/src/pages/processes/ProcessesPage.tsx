@@ -54,6 +54,18 @@ const ProxiesHeading = styled.h2`
   font-size: ${(p) => p.theme.font.size.base};
   font-weight: ${(p) => p.theme.font.weight.semibold};
 `;
+const ShowOnly = styled.div`
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: ${(p) => p.theme.space(1)} ${(p) => p.theme.space(2)};
+  padding-left: ${(p) => p.theme.space(2)};
+  border-left: 1px solid ${(p) => p.theme.color.borderStrong};
+  .label {
+    color: ${(p) => p.theme.color.textMuted};
+    font-size: ${(p) => p.theme.font.size.sm};
+  }
+`;
 const Mono = styled.span`
   font-family: ${(p) => p.theme.font.mono};
 `;
@@ -89,6 +101,7 @@ function ProxyCount({ set }: { set: ProcessSet }) {
 /** The visible proxies' versions; the skew flag is the server's and includes patch differences. */
 function Versions({ row }: { row: GatewayProcesses }) {
   const versions = [...new Set(row.set.processes.map((p) => p.version).filter(Boolean))].join(", ");
+  if (!versions && podsHidden(row.set)) return <Muted>{processesCopy.hidden}</Muted>;
   if (!versions) return <Muted>{row.set.observed ? diagnosticsCopy.notReported : null}</Muted>;
   return (
     <OneLine text={row.skew ? `${versions} ${processesCopy.differs}` : versions}>
@@ -97,6 +110,10 @@ function Versions({ row }: { row: GatewayProcesses }) {
     </OneLine>
   );
 }
+
+/** The server sent counts but no Pods: the caller may not view them (§14 rule 16). */
+const podsHidden = (set: ProcessSet) =>
+  !!set.restricted || (set.observed && set.processes.length === 0 && (set.desired ?? set.ready ?? 0) > 0);
 
 function recentRestarts(set: ProcessSet): number | undefined {
   const known = set.processes.filter((p) => p.restartsRecent !== undefined);
@@ -120,7 +137,13 @@ function columns(installId: string): ObjectColumn<GatewayProcesses>[] {
       header: processesCopy.restarts,
       width: "130px",
       secondary: true,
-      cell: (r) => recentRestarts(r.set) ?? <Muted aria-label={diagnosticsCopy.notReported}>—</Muted>,
+      cell: (r) =>
+        recentRestarts(r.set) ??
+        (podsHidden(r.set) ? (
+          <Muted>{processesCopy.hidden}</Muted>
+        ) : (
+          <Muted aria-label={diagnosticsCopy.notReported}>—</Muted>
+        )),
     },
   ];
 }
@@ -187,15 +210,21 @@ export function ProcessesPage({ stylesOverride }: ProcessesPageProps = {}) {
         }}
         filters={
           <ListFilters params={l.params} setFilter={l.setFilter} tags={[]}>
-            <StateFilter
-              label={processesCopy.showOnly}
-              options={SHOW.map((s) => ({ value: s.key, label: s.label }))}
-              selected={shown}
-              // An unpressed chip removes its param: the page never sends false.
-              onChange={(v) =>
-                l.setFilter(Object.fromEntries(SHOW.map((s) => [s.key, v.includes(s.key) ? "true" : null])))
-              }
-            />
+            {/* A visible label and divider set these apart from the health chips. */}
+            <ShowOnly>
+              <span className="label" aria-hidden="true">
+                {processesCopy.showOnly}
+              </span>
+              <StateFilter
+                label={processesCopy.showOnly}
+                options={SHOW.map((s) => ({ value: s.key, label: s.label }))}
+                selected={shown}
+                // An unpressed chip removes its param: the page never sends false.
+                onChange={(v) =>
+                  l.setFilter(Object.fromEntries(SHOW.map((s) => [s.key, v.includes(s.key) ? "true" : null])))
+                }
+              />
+            </ShowOnly>
           </ListFilters>
         }
         onClearFilters={l.filtered ? l.clearFilters : undefined}
