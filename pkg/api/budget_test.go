@@ -29,7 +29,6 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/memlimit"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
@@ -641,9 +640,9 @@ func matured(m *engine.Model) (findings, checks int) {
 
 func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	const mib = 1 << 20
-	// The binary's default soft limit under the chart's 512Mi pod limit (D-043); GOMEMLIMIT still wins.
+	// The binary's soft limit under the chart's 512Mi pod limit: 90 % of it (D-025); GOMEMLIMIT still wins.
 	if os.Getenv("GOMEMLIMIT") == "" {
-		defer debug.SetMemoryLimit(debug.SetMemoryLimit(memlimit.Default))
+		defer debug.SetMemoryLimit(debug.SetMemoryLimit(512 << 20 / 10 * 9))
 	}
 	dur := 10 * time.Minute
 	if testing.Short() {
