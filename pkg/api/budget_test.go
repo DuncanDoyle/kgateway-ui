@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"runtime/metrics"
 	"slices"
 	"strconv"
@@ -28,6 +29,7 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/DuncanDoyle/kgateway-ui/internal/memlimit"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
@@ -449,11 +451,11 @@ func gcCPU() (gc, used float64) {
 // TestBudgetSustainedStream: over a real cache and Run loop at Large, one
 // HTTPRoute update per 100 ms for 10 min (-short: 60 s) while 20 clients poll
 // /routes every 5 s gives ≤ 1 recompute per s and process CPU ≤ 15 % of one
-// core (rusage delta; it bounds the engine's share), and the memory obtained
-// from the OS stays ≤ half the chart's 512 MiB pod limit. GC share is logged.
-// Both the consistent world and the worst case run, each in a fresh process
-// so earlier tests' heap and CPU do not count; the worst case starts once
-// every check has matured.
+// core (rusage delta; it bounds the engine's share) in every run, and the median
+// memory obtained from the OS over five runs stays ≤ half the chart's 512 MiB pod
+// limit (D-043). GC share is logged. Both the consistent world and the worst case
+// run, each in fresh processes so earlier tests' heap and CPU do not count; the
+// worst case starts once every check has matured.
 func TestBudgetSustainedStream(t *testing.T) {
 	inChild(t, "TestBudgetSustainedStream", []scale.Tier{scale.Large, scale.Large.Contradicting()}, func(t *testing.T, tier scale.Tier) {
 		sustainedStream(t, tier, annotationStream)
@@ -461,38 +463,65 @@ func TestBudgetSustainedStream(t *testing.T) {
 }
 
 // TestBudgetSpecEditStream is the sustained stream at Large and in the 3.2
-// measurement world with route spec edits instead of annotations; it reports
-// and gates nothing (design §16.3).
+// measurement world with route spec edits instead of annotations: process CPU
+// ≤ 25 % of one core in every run and the median memory from the OS ≤ 256 MiB (design §16.3, D-043).
 func TestBudgetSpecEditStream(t *testing.T) {
 	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large, scale.Large.Contradicting().Worst()}, func(t *testing.T, tier scale.Tier) {
 		sustainedStream(t, tier, specEditStream)
 	})
 }
 
-// inChild runs run once per tier, each in a fresh process that runs only
-// test, and logs the child's report lines.
+// streamRuns is the child count per world; the OS-memory gate reads their median (D-043).
+const streamRuns = 5
+
+// streamResult is the line a stream child prints for its parent.
+type streamResult struct{ Sys uint64 }
+
+// inChild runs run streamRuns times per tier, each in a fresh process that runs
+// only test, logs the children's report lines and gates their median memory from the OS.
 func inChild(t *testing.T, test string, tiers []scale.Tier, run func(*testing.T, scale.Tier)) {
 	if name := os.Getenv(streamChildEnv); name != "" {
 		run(t, tiers[slices.IndexFunc(tiers, func(x scale.Tier) bool { return x.Name == name })])
 		return
 	}
+	const mib = 1 << 20
 	for _, tier := range tiers {
 		t.Run(tier.Name, func(t *testing.T) {
-			args := []string{"-test.run=^" + test + "$", "-test.count=1", "-test.v"}
-			if testing.Short() {
-				args = append(args, "-test.short")
-			}
-			cmd := exec.Command(os.Args[0], args...)
-			cmd.Env = append(os.Environ(), streamChildEnv+"="+tier.Name)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Errorf("stream child: %v\n%s", err, out)
-				return
-			}
-			for line := range strings.Lines(string(out)) {
-				if strings.Contains(line, "budget_test.go") {
-					t.Log(strings.TrimSpace(line))
+			var sys []uint64
+			for n := range streamRuns {
+				args := []string{"-test.run=^" + test + "$", "-test.count=1", "-test.v"}
+				if testing.Short() {
+					args = append(args, "-test.short")
 				}
+				cmd := exec.Command(os.Args[0], args...)
+				cmd.Env = append(os.Environ(), streamChildEnv+"="+tier.Name)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Errorf("stream child %d: %v\n%s", n+1, err, out)
+					return
+				}
+				for line := range strings.Lines(string(out)) {
+					if strings.Contains(line, "budget_test.go") {
+						t.Logf("run %d: %s", n+1, strings.TrimSpace(line))
+					}
+					if j, ok := strings.CutPrefix(line, "stream: "); ok {
+						var r streamResult
+						if err := json.Unmarshal([]byte(j), &r); err != nil {
+							t.Fatal(err)
+						}
+						sys = append(sys, r.Sys)
+					}
+				}
+			}
+			if len(sys) != streamRuns {
+				t.Fatalf("%d of %d stream children reported", len(sys), streamRuns)
+			}
+			slices.Sort(sys)
+			med := sys[len(sys)/2]
+			t.Logf("%s: memory from the OS over %d runs: median %.1f MiB, min %.1f, max %.1f (budget median ≤ 256 MiB)",
+				tier.Name, streamRuns, float64(med)/mib, float64(sys[0])/mib, float64(sys[len(sys)-1])/mib)
+			if med > 256*mib {
+				t.Errorf("median memory from the OS %.1f MiB, budget ≤ 256 MiB", float64(med)/mib)
 			}
 		})
 	}
@@ -505,6 +534,7 @@ const streamChildEnv = "KGWUI_STREAM_CHILD"
 type streamVariant struct {
 	name  string // log prefix
 	gated bool
+	cpu   float64 // process CPU budget per run, a share of one core
 	// edit changes u, a copy of a seeded route, for update n in pass over the routes.
 	edit func(u *unstructured.Unstructured, n, pass int) error
 }
@@ -518,13 +548,13 @@ func (v streamVariant) budget(note string) string {
 }
 
 // annotationStream changes one annotation per update; the views memo absorbs it.
-var annotationStream = streamVariant{gated: true, edit: func(u *unstructured.Unstructured, n, _ int) error {
+var annotationStream = streamVariant{gated: true, cpu: 0.15, edit: func(u *unstructured.Unstructured, n, _ int) error {
 	u.SetAnnotations(map[string]string{"stream": strconv.Itoa(n)})
 	return nil
 }}
 
 // specEditStream edits spec and generation, as the API server does; status stays stale.
-var specEditStream = streamVariant{name: "spec-edit ", edit: togglePath}
+var specEditStream = streamVariant{name: "spec-edit ", cpu: 0.25, edit: togglePath}
 
 // togglePath appends "-x" to u's first path value on even passes and removes
 // it on odd ones; a pass edits each route once, so generation rises by one.
@@ -611,6 +641,10 @@ func matured(m *engine.Model) (findings, checks int) {
 
 func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	const mib = 1 << 20
+	// The binary's default soft limit under the chart's 512Mi pod limit (D-043); GOMEMLIMIT still wins.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		defer debug.SetMemoryLimit(debug.SetMemoryLimit(memlimit.Default))
+	}
 	dur := 10 * time.Minute
 	if testing.Short() {
 		dur = time.Minute
@@ -776,7 +810,7 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	rate := float64(runs) / wall.Seconds()
 	share := cpu.Seconds() / wall.Seconds()
 	t.Logf("%sstream %v: %d updates, %d recomputes (%.2f/s%s), %d publications; process CPU %v = %.1f %% of one core%s; recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
-		v.name, wall.Round(time.Millisecond), updates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, v.budget(" (budget ≤ 15 %)"), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
+		v.name, wall.Round(time.Millisecond), updates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, fmt.Sprintf(" (budget ≤ %.0f %%)", 100*v.cpu), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
 	t.Logf("polls: %d, p50 %v p95 %v max %v", len(polls), rd(percentile(polls, 50)), rd(percentile(polls, 95)), rd(polls[len(polls)-1]))
 	heapEnd := liveHeap()
 	if heap60 == 0 {
@@ -787,8 +821,13 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	f, c := matured(e.Current().Model)
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB%s",
-		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib, v.budget(" (budget ≤ 256 MiB, half the 512 MiB pod limit)"))
+	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB",
+		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib)
+	j, _ := json.Marshal(streamResult{Sys: ms.Sys})
+	fmt.Println("stream: " + string(j))
+	if share > v.cpu {
+		t.Errorf("process CPU %.1f %% of one core, budget ≤ %.0f %%", 100*share, 100*v.cpu)
+	}
 	if !v.gated {
 		codes := map[string]int{}
 		for _, x := range e.Current().Model.Installs[0].Health.Findings {
@@ -803,14 +842,8 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	if !tier.Contradict && (f != 0 || c != 0) {
 		t.Errorf("consistent world: %d KGWUI-012 of %d checks at the end", f, c)
 	}
-	if ms.Sys > 256*mib {
-		t.Errorf("memory from the OS %.1f MiB, budget ≤ 256 MiB", float64(ms.Sys)/mib)
-	}
 	if rate > 1 {
 		t.Errorf("%.2f recomputes per s, budget ≤ 1", rate)
-	}
-	if share > 0.15 {
-		t.Errorf("process CPU %.1f %% of one core, budget ≤ 15 %%", 100*share)
 	}
 }
 
