@@ -239,6 +239,8 @@ interface ObjectTableProps<T> {
   skeletonRows?: number;
   /** Whether the footer says how many objects the caller cannot view; one table per page should. */
   showDenied?: boolean;
+  /** Drops the empty footer once loaded; only for a table nothing sits below, so no layout moves. */
+  collapseEmptyFooter?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
@@ -264,10 +266,14 @@ export function ObjectTable<T>({
   onPage,
   skeletonRows = SKELETON_ROWS,
   showDenied = true,
+  collapseEmptyFooter = false,
   stylesOverride,
 }: ObjectTableProps<T>) {
   const navigate = useNavigate();
   const narrow = useMedia(NARROW);
+  const denied = showDenied && page?.deniedInInstall ? listCopy.denied(page.deniedInInstall, noun) : null;
+  const pager = !page || !!page.prev || !!page.next;
+  const footerEmpty = !denied && !pager;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [active, setActive] = useState(0);
   const rowEls = useRef<(HTMLTableRowElement | null)[]>([]);
@@ -453,13 +459,13 @@ export function ObjectTable<T>({
           })}
         </tbody>
       </Table>
-      <Footer data-testid="list-footer">
-        <span className="denied">
-          {showDenied && page?.deniedInInstall ? listCopy.denied(page.deniedInInstall, noun) : null}
-        </span>
-        {/* Once loaded, a single page has no pager; the footer keeps its height. */}
-        {!page || page.prev || page.next ? <Pager prev={page?.prev} next={page?.next} onPage={onPage} /> : null}
-      </Footer>
+      {footerEmpty && collapseEmptyFooter ? null : (
+        <Footer data-testid="list-footer">
+          <span className="denied">{denied}</span>
+          {/* Once loaded, a single page has no pager; the footer keeps its height. */}
+          {pager ? <Pager prev={page?.prev} next={page?.next} onPage={onPage} /> : null}
+        </Footer>
+      )}
     </Frame>
   );
 }

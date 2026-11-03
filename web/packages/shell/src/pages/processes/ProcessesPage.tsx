@@ -59,8 +59,6 @@ const ShowOnly = styled.div`
   flex-wrap: wrap;
   align-items: center;
   gap: ${(p) => p.theme.space(1)} ${(p) => p.theme.space(2)};
-  padding-left: ${(p) => p.theme.space(2)};
-  border-left: 1px solid ${(p) => p.theme.color.borderStrong};
   .label {
     color: ${(p) => p.theme.color.textMuted};
     font-size: ${(p) => p.theme.font.size.sm};
@@ -210,7 +208,7 @@ export function ProcessesPage({ stylesOverride }: ProcessesPageProps = {}) {
         }}
         filters={
           <ListFilters params={l.params} setFilter={l.setFilter} tags={[]}>
-            {/* A visible label and divider set these apart from the health chips. */}
+            {/* Spacing and a visible label set these apart from the health chips. */}
             <ShowOnly>
               <span className="label" aria-hidden="true">
                 {processesCopy.showOnly}
@@ -244,6 +242,7 @@ export function ProcessesPage({ stylesOverride }: ProcessesPageProps = {}) {
           sort={NO_SORT}
           onSort={noop}
           onPage={l.setCursor}
+          collapseEmptyFooter
         />
       </ListFrame>
     </StaleWhen>

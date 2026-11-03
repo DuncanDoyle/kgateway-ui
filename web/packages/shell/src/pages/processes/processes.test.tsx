@@ -148,6 +148,8 @@ describe("Processes page", () => {
     expect(within(edge).getByText("1")).toBeInTheDocument();
     expect(hrefPath(within(edge).getByRole("link", { name: /edge/ }))).toBe(`/i/${ID}/gateways/infra/edge`);
     expect(within(rowOf("calm")).queryByText(processesCopy.differs)).toBeNull();
+    // One page and no denied count: the empty footer is gone once loaded.
+    expect(screen.queryByTestId("list-footer")).toBeNull();
   });
 
   it("not observed for a self-managed Gateway", async () => {
