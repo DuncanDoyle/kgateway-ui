@@ -11,7 +11,7 @@ export const SHELL_API_VERSION = 1;
 
 export { ApiError, apiFetch } from "./api/client";
 export { useNow } from "./api/clock";
-export { useFindingDetail, useFindings } from "./api/diagHooks";
+export { useDiagnostics, useFindingDetail, useFindings, useProcesses } from "./api/diagHooks";
 export {
   useDelegation,
   useGatewayDetail,
@@ -37,6 +37,11 @@ export {
   useResource,
 } from "./api/hooks";
 export * from "./api/types";
+export { EvidenceView } from "./diagnostics/EvidenceView";
+export { GROUP_ROW_H, GroupRow } from "./diagnostics/GroupRow";
+export { NextSteps } from "./diagnostics/NextSteps";
+export { PROCESS_LINE_H, ProcessLine } from "./diagnostics/ProcessLine";
+export { ProcessTable } from "./diagnostics/ProcessTable";
 export { ComputedBadge } from "./explore/ComputedBadge";
 export { CopyCommandButton } from "./explore/CopyCommandButton";
 export { LinkedName } from "./explore/LinkedName";
@@ -64,6 +69,7 @@ export { DetailColumns, layout } from "./shell/layout";
 export type { ObjectHeaderProps } from "./shell/ObjectHeader";
 export { ObjectHeader } from "./shell/ObjectHeader";
 export { installPath } from "./shell/paths";
+export { renderWhenFontsReady } from "./shell/renderWhenFontsReady";
 export { Shell } from "./shell/Shell";
 export { Tooltip } from "./shell/Tooltip";
 export type { Crumb } from "./shell/trail";

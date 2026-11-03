@@ -3,7 +3,7 @@ import type { ApiError } from "./client";
 import { apiFetch } from "./client";
 import { forInstall, seg, useList, withQuery } from "./exploreHooks";
 import { installApi, live } from "./hooks";
-import type { FindingDetail, FindingItem } from "./types";
+import type { Diagnostics, FindingDetail, FindingItem, ProcessesResponse } from "./types";
 
 /** GET …/findings with the page's query string (filters, sort, cursor); a 400 on a cursor loads page one. */
 export function useFindings(id: string, query: URLSearchParams) {
@@ -33,4 +33,25 @@ export function useFindingDetail(id: string, findingId: string, affectedCursor?:
     cursorRejected,
     isLaggy: !own && data !== undefined,
   };
+}
+
+/** GET …/diagnostics, polled: the verdict, the ranked groups and the process and data-plane summaries. */
+export function useDiagnostics(id: string) {
+  const { data, error, mutate } = useSWR<Diagnostics, ApiError>(`${installApi(id)}/diagnostics`, apiFetch, live);
+  return { data: forInstall(data, id), error, mutate };
+}
+
+/**
+ * GET …/processes with the page's query string (health, q, skew, restarts, limit, cursor), polled. A filter or page
+ * change keeps the previous rows, marked laggy, while the new ones load; cursorRejected is a 400 on a cursor.
+ */
+export function useProcesses(id: string, query: URLSearchParams) {
+  const { cache } = useSWRConfig();
+  const key = withQuery(`${installApi(id)}/processes`, query);
+  const r = useSWR<ProcessesResponse, ApiError>(key, apiFetch, { ...live, keepPreviousData: true });
+  const own = cache.get(key)?.data !== undefined;
+  const cursorRejected = query.has("cursor") && r.error?.status === 400;
+  // As useFindingDetail: kept data shows only while the new key loads, and a rejected cursor keeps it.
+  const data = own || !r.error || cursorRejected ? forInstall(r.data, id) : undefined;
+  return { data, error: r.error, mutate: r.mutate, cursorRejected, isLaggy: !own && data !== undefined };
 }

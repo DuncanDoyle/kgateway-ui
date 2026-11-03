@@ -52,6 +52,11 @@ export type FindingList = Page<FindingItem>;
 
 /** Typed evidence of a finding, tagged by kind (design §13.3, sub-phase 3.2). */
 export type Evidence = ProcessEvidence | VersionSkewEvidence | XDSRejectsEvidence | ProxyStatsEvidence;
+/** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
+export interface OtherEvidence {
+  kind: string;
+  [field: string]: unknown;
+}
 /** How a process last ended; never its message. */
 export interface TerminationFacts {
   reason?: string;
