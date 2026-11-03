@@ -306,7 +306,6 @@ it("a throwing finding action or finding renderer leaves the finding page up and
     [`${API}/findings/f1-edge`]: {
       install: ID,
       finding: { id: "f1-edge", code: "KGWUI-001", slug: "xds-rejected", severity: "error", message: "Rejected" },
-      evidence: { kind: "not-built-in" },
       affected: { install: ID, items: [], total: 0, collectedAt: now() },
       collectedAt: now(),
     },

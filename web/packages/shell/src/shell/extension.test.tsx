@@ -57,7 +57,6 @@ it("a downstream extension contributes brand, theme, page, nav entry, finding re
     "/api/v1/installs/kgw.kgateway/findings/f1-acme": {
       install: "kgw.kgateway",
       finding: { id: "f1-acme", code: "ACME-001", slug: "demo", severity: "error", message: "Downstream finding" },
-      evidence: { kind: "acme-widgets" },
       affected: { install: "kgw.kgateway", items: [], total: 0, collectedAt: new Date(now).toISOString() },
       collectedAt: new Date(now).toISOString(),
     },
@@ -91,7 +90,7 @@ it("a downstream extension contributes brand, theme, page, nav entry, finding re
   window.history.pushState({}, "", "/i/kgw.kgateway/widgets");
   window.dispatchEvent(new PopStateEvent("popstate"));
   await waitFor(() => expect(screen.getByText("widgets page")).toBeInTheDocument());
-  // The finding renderer shows its own evidence kind on the finding's page.
+  // The finding renderer shows on the finding's page.
   window.history.pushState({}, "", "/i/kgw.kgateway/findings/f1-acme");
   window.dispatchEvent(new PopStateEvent("popstate"));
   expect(await screen.findByText("acme detail")).toBeInTheDocument();

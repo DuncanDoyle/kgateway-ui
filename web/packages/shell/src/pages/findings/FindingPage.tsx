@@ -229,8 +229,8 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
                   </>
                 ) : null}
               </Facts>
-              {/* EvidenceView owns the finding renderers (unknown kinds); actions follow (design §4.1 gap 6). */}
-              {data.evidence && finding ? <EvidenceView evidence={data.evidence} finding={finding} /> : null}
+              {/* EvidenceView owns the finding renderers (unknown or no evidence); actions follow (design §4.1 gap 6). */}
+              {finding ? <EvidenceView evidence={data.evidence} finding={finding} /> : null}
               {finding ? <FindingContributions finding={finding} /> : null}
             </Section>
             {data.suggestedFix ? <FixSection fix={data.suggestedFix} installId={id} /> : null}

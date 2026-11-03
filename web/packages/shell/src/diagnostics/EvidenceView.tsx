@@ -290,7 +290,8 @@ function ProxyStats({ e }: { e: ProxyStatsEvidence }) {
 
 // region Component
 interface EvidenceViewProps {
-  evidence: Evidence | OtherEvidence;
+  /** Absent when the finding has none: its code's renderer still applies (the 3.0 renderer contract). */
+  evidence?: Evidence | OtherEvidence;
   /** The finding the evidence belongs to; an unknown kind goes to the renderer registered for its code. */
   finding?: Finding;
   stylesOverride?: SerializedStyles;
@@ -301,9 +302,9 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
   const installId = useInstallId();
   const now = useNow();
   const { findingRenderers } = useShellExtension();
-  const e = evidence as Evidence;
+  const e = evidence as Evidence | undefined;
   let body: ReactNode;
-  switch (e.kind) {
+  switch (e?.kind) {
     case "xds-rejects":
       body = <XDSRejects e={e} installId={installId} now={now} />;
       break;
@@ -317,14 +318,15 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
       body = <ProxyStats e={e} />;
       break;
     default: {
-      const render = finding ? rendererFor(findingRenderers, finding.code) : undefined;
+      // A restricted finding shows only its identity, so no renderer runs for it.
+      const render = finding && !finding.restricted ? rendererFor(findingRenderers, finding.code) : undefined;
       if (!finding || !render) return null;
       const f = { ...finding, evidence };
       return <Slot id={`finding-renderer:${f.code}`} resetKey={findingKey(f)} render={() => render(f)} />;
     }
   }
   return (
-    <Frame data-kind={e.kind} stylesOverride={stylesOverride}>
+    <Frame data-kind={e?.kind} stylesOverride={stylesOverride}>
       {body}
     </Frame>
   );

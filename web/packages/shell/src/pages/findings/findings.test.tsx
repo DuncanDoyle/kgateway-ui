@@ -356,6 +356,32 @@ it("the finding page renders a downstream renderer for an unknown evidence kind 
   expect(render.mock.calls.at(-1)?.[0].evidence).toEqual({ kind: "acme-widgets", widgets: 3 });
 });
 
+it("a finding without evidence keeps its code's renderer on the finding page, once", async () => {
+  const render = vi.fn((f: Finding) => <span>acme note for {f.code}</span>);
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${FINDING}`)
+      ? { ...detail(), finding: { ...detail().finding, code: "ACME-002" }, evidence: undefined }
+      : undefined,
+  );
+  function WithRenderer({ children }: { children: ReactNode }) {
+    const base = useShellExtension();
+    return (
+      <ShellExtensionContext.Provider value={{ ...base, findingRenderers: { "ACME-": render } }}>
+        {children}
+      </ShellExtensionContext.Provider>
+    );
+  }
+  renderWithTheme(
+    <WithRenderer>
+      <Routes>
+        <Route path="/i/:id/findings/:findingId" element={<FindingPage />} />
+      </Routes>
+    </WithRenderer>,
+    { path: `/i/${ID}/findings/${FINDING}` },
+  );
+  expect(await screen.findAllByText("acme note for ACME-002")).toHaveLength(1);
+});
+
 it("the finding page shows built-in evidence", async () => {
   const xds = xdsGolden.body.finding.id;
   serve((u) =>
