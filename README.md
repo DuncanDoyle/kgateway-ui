@@ -168,7 +168,7 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 
 - The install page lists ranked groups of findings, not single findings.
 - Finding actions now render on the finding page, not the install page. `FindingRow` still renders them.
-- Finding renderers now render on the finding page, through the evidence view, for evidence kinds the shell does not know. `FindingRow` still renders them.
+- Finding renderers now render on the finding page, through the evidence view, for evidence kinds the shell does not know, or when a finding has no evidence. `FindingRow` still renders them.
 
 ### Findings (sub-phase 3.1)
 

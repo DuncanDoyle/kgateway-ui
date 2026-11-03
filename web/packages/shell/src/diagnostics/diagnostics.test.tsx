@@ -173,6 +173,33 @@ describe("EvidenceView", () => {
     expect(renderer).toHaveBeenCalledWith(expect.objectContaining({ code: "ACME-007", evidence }));
   });
 
+  it("a restricted finding with a registered renderer renders no renderer", () => {
+    const renderer = vi.fn<FindingRenderer>(() => <p>acme hidden</p>);
+    function WithRenderer({ children }: { children: ReactNode }) {
+      const ext = useShellExtension();
+      return (
+        <ShellExtensionContext.Provider value={{ ...ext, findingRenderers: { "ACME-": renderer } }}>
+          {children}
+        </ShellExtensionContext.Provider>
+      );
+    }
+    const finding: Finding = {
+      code: "ACME-007",
+      slug: "quota",
+      severity: "warning",
+      install: "kgw.kgateway",
+      message: "",
+    };
+    const { container } = renderWithTheme(
+      <WithRenderer>
+        <EvidenceView finding={{ ...finding, restricted: true }} />
+        <EvidenceView evidence={{ kind: "acme-quota" }} finding={{ ...finding, restricted: true }} />
+      </WithRenderer>,
+    );
+    expect(renderer).not.toHaveBeenCalled();
+    expect(container.textContent).toBe("");
+  });
+
   it("an unknown kind without a renderer shows nothing", () => {
     const { container } = renderWithTheme(<EvidenceView evidence={{ kind: "acme-quota" }} />);
     expect(container.textContent).toBe("");
