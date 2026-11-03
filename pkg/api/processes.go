@@ -12,6 +12,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
 
@@ -246,18 +247,25 @@ func allReady(s *process.Set) bool {
 	return s.Desired == nil || int32(len(s.Processes)) >= *s.Desired // #nosec G115 -- a replica count fits in int32
 }
 
-// proxySummary counts the visible Gateways' proxies. State is the worst health of those
-// with a known one; unknown when none has (not observed is never failing).
+// proxySummary counts the visible Gateways' proxies. State orders their health as Gateway rows do
+// (overview.RowState): an unobserved or absent Gateway makes it unknown unless one errors (D-006).
 func (ps *procSummary) proxySummary() ProxySummary {
-	out := ProxySummary{State: health.StateUnknown}
+	var out ProxySummary
+	var worst health.State
+	unknown := false
 	for _, g := range ps.gateways() {
 		if !ps.v.can(g.ref) {
 			continue
 		}
-		switch st := g.health(); {
-		case st == health.StateError, st == health.StateWarning && out.State != health.StateError,
-			st == health.StateHealthy && out.State == health.StateUnknown:
-			out.State = st
+		switch g.health() {
+		case health.StateError:
+			worst = health.StateError
+		case health.StateWarning:
+			if worst != health.StateError {
+				worst = health.StateWarning
+			}
+		case health.StateUnknown:
+			unknown = true
 		}
 		out.Gateways++
 		if allReady(g.set) {
@@ -276,6 +284,8 @@ func (ps *procSummary) proxySummary() ProxySummary {
 			out.NotObserved++
 		}
 	}
+	// No visible Gateway is no signal, never green.
+	out.State = overview.RowState(worst, unknown || out.Gateways == 0)
 	return out
 }
 

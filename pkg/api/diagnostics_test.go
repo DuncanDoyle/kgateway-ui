@@ -454,7 +454,7 @@ func TestProcessSetCountsOnlyWhenPodHidden(t *testing.T) {
 		t.Fatalf("hidden controller summary %+v", c)
 	}
 	d := get[Diagnostics](t, h.srv, diagPath, 200).Processes
-	if d.Proxies != (ProxySummary{State: health.StateWarning, Gateways: 3, Ready: 2, Skew: 1, Restarting: 1, NotObserved: 1}) || d.Controller.Version != "2.4.7" {
+	if d.Proxies != (ProxySummary{State: health.StateUnknown, Gateways: 3, Ready: 2, Skew: 1, Restarting: 1, NotObserved: 1}) || d.Controller.Version != "2.4.7" {
 		t.Fatalf("summaries %+v", d)
 	}
 }
@@ -645,10 +645,19 @@ func TestProcessSummaryState(t *testing.T) {
 		t.Fatalf("ready controller %+v", p.Controller)
 	}
 
-	// Proxies: the worst known Gateway health; a hidden Gateway counts for nothing, so none visible is unknown.
+	// Proxies: error > unknown > warning > healthy, as Gateway rows (D-006). lone is unobserved, so
+	// the line is unknown beside edge's warning and, with edge hidden, beside calm's healthy.
 	h := procsWorld(t, setup{})
-	if p := get[Diagnostics](t, h.srv, diagPath, 200).Processes.Proxies; p.State != health.StateWarning {
+	if p := get[Diagnostics](t, h.srv, diagPath, 200).Processes.Proxies; p.State != health.StateUnknown {
 		t.Fatalf("proxies %+v", p)
+	}
+	noEdge := authzSrv(t, h, deny(testutil.GwRef("infra", "edge").Ref()))
+	if p := get[Diagnostics](t, noEdge, diagPath, 200).Processes.Proxies; p.State != health.StateUnknown || p.Gateways != 2 {
+		t.Fatalf("healthy calm and unobserved lone %+v", p)
+	}
+	onlyCalm := authzSrv(t, h, deny(testutil.GwRef("infra", "edge").Ref(), testutil.GwRef("infra", "lone").Ref()))
+	if p := get[Diagnostics](t, onlyCalm, diagPath, 200).Processes.Proxies; p.State != health.StateHealthy || p.Gateways != 1 {
+		t.Fatalf("healthy calm alone %+v", p)
 	}
 	hidden := authzSrv(t, h, deny(testutil.GwRef("infra", "edge").Ref(), testutil.GwRef("infra", "calm").Ref(), testutil.GwRef("infra", "lone").Ref()))
 	if p := get[Diagnostics](t, hidden, diagPath, 200).Processes.Proxies; p.State != health.StateUnknown || p.Gateways != 0 {
