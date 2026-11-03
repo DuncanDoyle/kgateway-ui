@@ -26,6 +26,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
@@ -525,10 +526,10 @@ var annotationStream = streamVariant{gated: true, edit: func(u *unstructured.Uns
 // specEditStream edits spec and generation, as the API server does; status stays stale.
 var specEditStream = streamVariant{name: "spec-edit ", edit: togglePath}
 
-// togglePath appends "-x" to u's first path value on even passes and restores
+// togglePath appends "-x" to u's first path value on even passes and removes
 // it on odd ones; a pass edits each route once, so generation rises by one.
 func togglePath(u *unstructured.Unstructured, _, pass int) error {
-	u.SetGeneration(u.GetGeneration() + int64(pass) + 1)
+	u.SetGeneration(u.GetGeneration() + 1)
 	rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "rules")
 	for _, r := range rules {
 		ms, _ := r.(map[string]any)["matches"].([]any)
@@ -540,6 +541,8 @@ func togglePath(u *unstructured.Unstructured, _, pass int) error {
 			}
 			if pass%2 == 0 {
 				p["value"] = v + "-x"
+			} else {
+				p["value"] = strings.TrimSuffix(v, "-x")
 			}
 			return unstructured.SetNestedSlice(u.Object, rules, "spec", "rules")
 		}
@@ -664,6 +667,12 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 		}
 		testutil.Drain(ev)
 	}
+	// Each update edits the fake's current copy, so the seeded routes are not kept alive.
+	routes := make([]types.NamespacedName, len(w.Routes))
+	for i, r := range w.Routes {
+		routes[i] = types.NamespacedName{Namespace: r.GetNamespace(), Name: r.GetName()}
+	}
+	w.Routes = nil
 	h := NewHandler(e, fstest.MapFS{}, nil)
 	path := "/api/v1/installs/" + e.Current().Model.Installs[0].Resolved.ID() + "/routes"
 
@@ -737,10 +746,14 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 		if heap60 == 0 && dur > time.Minute && time.Since(start) >= time.Minute {
 			heap60 = liveHeap()
 		}
-		u := w.Routes[updates%len(w.Routes)].DeepCopy()
+		ref := routes[updates%len(routes)]
+		u, err := w.GetRoute(context.Background(), ref.Namespace, ref.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
 		updates++
 		u.SetResourceVersion(strconv.Itoa(1_000_000 + updates))
-		if err := v.edit(u, updates, (updates-1)/len(w.Routes)); err != nil {
+		if err := v.edit(u, updates, (updates-1)/len(routes)); err != nil {
 			t.Fatal(err)
 		}
 		if err := w.Update(context.Background(), u); err != nil {

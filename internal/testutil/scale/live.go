@@ -27,8 +27,9 @@ type LiveWorld struct {
 	// Routes are the seeded HTTPRoutes; RouteGVR is their resource.
 	Routes   []*unstructured.Unstructured
 	RouteGVR schema.GroupVersionResource
-	// Update writes u to the fake dynamic client.
-	Update func(ctx context.Context, u *unstructured.Unstructured) error
+	// Update writes u to the fake dynamic client; GetRoute reads a copy of an HTTPRoute from it.
+	Update   func(ctx context.Context, u *unstructured.Unstructured) error
+	GetRoute func(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error)
 	// CRDs and Metrics are the tier's Gateway API CRD metadata and controller
 	// metrics capture; LivePhase3 sets them.
 	CRDs    []*metav1.PartialObjectMetadata
@@ -108,6 +109,11 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 		dyn.ClearActions()
 		kube.ClearActions()
 		return err
+	}
+	w.GetRoute = func(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
+		u, err := dyn.Resource(w.RouteGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		dyn.ClearActions()
+		return u, err
 	}
 	det := install.UpstreamDetector{}
 	cfg := cache.Config{Dynamic: dyn, Kube: kube, Served: served, Now: now, Changes: w.Signal,
