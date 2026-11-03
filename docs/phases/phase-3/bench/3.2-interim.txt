@@ -1,243 +1,92 @@
-# Sub-phase 3.2 interim measurement, local (Task 46), after Phase A (measurement artifacts) and Phase B (optimisation)
-# Measurement world: scale.Large.Contradicting().Worst() from scale.LivePhase3, with the proxy Pod, Event and CRD
-# watches on, process data, controller rejects on every Gateway, probe failures seen after the watch started and a
-# stub proxy stats source (2 Pods per Gateway). 103 Gateways, 6,713 findings, 2,690 groups. The analyzer stage's
-# §16.3 scope (ruling R35) replays the Phase 1-2 checks' results.
-# Phase A: the world leaves out the 11,000 Services and EndpointSlices no 3.2 watch reads; probe failures go in
-# batches (the fake watch panicked at 100 queued events); the heap child waits for the world's goroutines.
-# Phase B: the stream edits the fake's current routes instead of keeping seeds; health reuses the merged findings
-# and the engine the diagnosis when no check reran; merged findings sort in place; ID memo keys are shorter.
+# Sub-phase 3.2 interim measurement, local (Task 46), final: Phase A artifacts removed, Phase B optimised, D-043 applied
+# Measurement world: scale.Large.Contradicting().Worst() from scale.LivePhase3: proxy Pod, Event and CRD watches on,
+# process data, controller rejects on every Gateway, probe failures seen after the watch started, a stub proxy stats
+# source (2 Pods per Gateway). No Services, EndpointSlices or Service backendRefs (3.4 seeds them, D-043).
+# The analyzer stage's §16.3 scope (ruling R35) replays the Phase 1-2 checks' results.
+# Streams: five children per world, -short (60 s); OS memory gated on the median (D-043), CPU and rate in every run.
+# Stream children run with the binary's default soft memory limit (224 MiB, internal/memlimit).
 go: go1.27.3 darwin/arm64
 cpu: Apple M5 Max, 18 CPUs
-commit: Phase A 284ce02; Phase B 9b596f4 (heap rerun and four stream children on 4106f57, which changes only heap attribution)
-# load before:  8:28  up 1 day, 21:18, 13 users, load averages: 3.95 3.96 3.96
-# load before stream:  8:29  up 1 day, 21:18, 13 users, load averages: 3.53 3.86 3.93
-# load after:  8:32  up 1 day, 21:21, 13 users, load averages: 3.90 3.83 3.90
-# 
+commit: 036794e (measured code; the record commit adds only docs)
+# load before:  9:57  up 1 day, 22:47, 14 users, load averages: 2.87 3.43 3.79
+# load before streams:  9:57  up 1 day, 22:47, 14 users, load averages: 4.08 3.66 3.87
+# load after: 10:28  up 1 day, 23:17, 14 users, load averages: 3.24 3.59 3.62
 
-## Gates after Phase A (commit 284ce02; medians; headroom = budget - value)
-
-| Gate | World | Value | Budget | Headroom |
-|---|---|---|---|---|
-| Warm recompute | large / contradicting / measurement | 34.7 / 46.1 / 47.4 ms | <= 150 ms | 115.3 / 103.9 / 102.6 ms |
-| Cold recompute | large / contradicting / measurement | 51 / 55 / 58 ms | <= 1 s | 949 / 945 / 942 ms |
-| Analyzer stage, warm, §16.3 scope | large / measurement | 0.07 / 3.87 ms | <= 20 ms | 19.93 / 16.13 ms |
-| Analyzer stage, memoized, §16.3 scope | large / measurement | 0.06 / 2.51 ms | <= 2 ms | 1.94 / -0.51 ms BROKEN |
-| Retained heap over the 2.1 baseline | large / contradicting / measurement | +23.2 / +27.6 / +32.8 MiB | <= 32 MiB | 8.8 / 4.4 / -0.8 MiB BROKEN |
-| Retained heap over the 3.1 baseline | large / contradicting / measurement | -0.0 / +3.2 / +8.4 MiB | <= +24 MiB | 24.0 / 20.8 / 15.6 MiB |
-| Dense retained heap | DenseSelection(100, 1000) | 160 MiB | <= 176 MiB | 16 MiB |
-| Dense allocated by the cold Compute | DenseSelection(100, 1000) | 207 MiB | <= 246 MiB | 39 MiB |
-| Dense allocated per warm Compute | DenseSelection(100, 1000) | 166 MiB | <= 185 MiB | 19 MiB |
-| Spec-edit stream CPU (-short, 60 s) | large / measurement | 8.2 / 10.3 % | <= 25 % | 16.8 / 14.7 points |
-| OS memory during the spec-edit stream | large / measurement | 196.3 / 268.8 MiB | <= 256 MiB | 59.7 / -12.8 MiB BROKEN |
-
-Heap variance: HeapAlloc at the snapshot point was equal in every child (19.85 MiB); HeapInuse jumped by 7 MiB in
-3 of 18 children, span fragmentation from the fake clients' 11,000 extra objects. Without them, 25 children show
-no outlier; retained spread 58.9-61.1 MB.
-
-## Gates after Phase B (medians; headroom = budget - value)
+## Gates (medians; headroom = budget - value)
 
 | Gate | World | Value | Budget | Headroom |
 |---|---|---|---|---|
-| Warm recompute | large / contradicting / measurement | 34.6 / 45.8 / 47.3 ms | <= 150 ms | 115.4 / 104.2 / 102.7 ms |
-| Cold recompute | large / contradicting / measurement | 52 / 53 / 59 ms | <= 1 s | 948 / 947 / 941 ms |
-| Analyzer stage, warm, §16.3 scope | large / measurement | 0.08 / 3.92 ms | <= 20 ms | 19.92 / 16.08 ms |
-| Analyzer stage, memoized, §16.3 scope | large / measurement | 0.03 / 0.22 ms | <= 2 ms | 1.97 / 1.78 ms |
-| Retained heap over the 2.1 baseline | large / contradicting / measurement | +23.3 / +27.2 / +32.5 MiB | <= 32 MiB | 8.7 / 4.8 / -0.5 MiB BROKEN |
-| Retained heap over the 3.1 baseline | large / contradicting / measurement | +0.1 / +2.8 / +8.1 MiB | <= +24 MiB | 23.9 / 21.2 / 15.9 MiB |
+| Warm recompute | large / contradicting / measurement | 37.6 / 45.5 / 48.4 ms | <= 150 ms | 112.4 / 104.5 / 101.6 ms |
+| Cold recompute | large / contradicting / measurement | 55 / 53 / 57 ms | <= 1 s | 945 / 947 / 943 ms |
+| Analyzer stage, warm, §16.3 scope | large / measurement | 0.07 / 4.08 ms | <= 20 ms | 19.93 / 15.92 ms |
+| Analyzer stage, memoized, §16.3 scope | large / measurement | 0.03 / 0.23 ms | <= 2 ms | 1.97 / 1.77 ms |
+| Retained heap over the 2.1 baseline | large / contradicting / measurement | +23.1 / +27.1 / +30.0 MiB | <= 32 MiB | 8.9 / 4.9 / 2.0 MiB |
+| Retained heap over the 3.1 baseline | large / contradicting / measurement | -0.1 / +2.7 / +5.6 MiB | <= +24 MiB | 24.1 / 21.3 / 18.4 MiB |
 | Dense retained heap | DenseSelection(100, 1000) | 160 MiB | <= 176 MiB | 16 MiB |
 | Dense allocated by the cold Compute | DenseSelection(100, 1000) | 207 MiB | <= 246 MiB | 39 MiB |
 | Dense allocated per warm Compute | DenseSelection(100, 1000) | 166 MiB | <= 185 MiB | 19 MiB |
-| Spec-edit stream CPU (-short, 60 s) | large / measurement | 6.6 / 9.9 % | <= 25 % | 18.4 / 15.1 points |
-| OS memory during the spec-edit stream | large / measurement | 180.2 / 264.2 MiB | <= 256 MiB | 75.8 / -8.2 MiB BROKEN |
+| Annotation stream CPU, worst run | large / contradicting | 5.9 / 7.5 % | <= 15 % | 9.1 / 7.5 points |
+| Annotation stream recomputes, worst run | large / contradicting | 0.95 / 0.95 per s | <= 1 per s | 0.05 / 0.05 |
+| OS memory, annotation stream (median of 5) | large / contradicting | 159.7 / 183.9 MiB | <= 256 MiB | 96.3 / 72.1 MiB |
+| Spec-edit stream CPU, worst run | large / measurement | 7.6 / 7.9 % | <= 25 % | 17.4 / 17.1 points |
+| OS memory, spec-edit stream (median of 5) | large / measurement | 175.8 / 212.0 MiB | <= 256 MiB | 80.2 / 44.0 MiB |
 
-STOP: two gates still break in the measurement world (retained heap, OS memory). No gate was changed.
+Every gate passes. Spread over five children: measurement OS memory 211.8-223.8 MiB; annotation contradicting
+175.8-195.9 MiB. Live heap after GC in the measurement stream: 66.1-67.3 MiB.
 
 Notes:
-1. Memoized analyzer stage. With every check reused, health reuses the last merged and sorted findings and the
-   engine the last diagnosis while Owned is unchanged. In the live engine the Phase 1-2 checks declare Clock and
-   rerun on every compute, so this reuse rarely fires there: the whole stage memoized stays 10.9 ms (reported).
-2. Retained heap +32.5 MiB, 0.5 MiB over. Phase B cut 0.3 MiB (ID memo keys). Worst against contradicting:
-   snapshot +1.9 MB HeapAlloc, engine and model +2.0 MB, fragmentation +1.5 MB. The Service backendRefs
-   LivePhase3 adds for 3.4 cost about 1.6 MB (measured without them: 58.45-58.68 MB retained, about +31.4 MiB).
-3. OS memory: five worst-case children on the final commit gave 264.2, 284.6, 268.8, 273.0 and 252.4 MiB
-   (median 268.8). Live heap after GC fell from 80.6 to 68.6 MiB with the seeds gone, but the peak follows
-   the GC goal: a GC during the 60 s maturation compute marks about 115 MB live (world, old and new model,
-   in-flight work), so the goal reaches about 230 MB. Warm compute allocates 50.5 MiB, most of it Phase 2.
+1. Memoized analyzer stage: with every check reused, health reuses the last merged findings and the engine the last
+   diagnosis. In the live engine the Phase 1-2 checks declare Clock and rerun every compute, so the whole stage
+   memoized stays about 11 ms (reported).
+2. Retained heap: Phase B (ID memo keys) cut 0.3 MiB and the 3.4 Service backendRefs left the world (D-043).
+3. OS memory: the 224 MiB soft limit holds the GC goal near the limit; Phase B left it at 252-285 MiB without it.
 
-## Raw output (Phase B)
-load before:  8:28  up 1 day, 21:18, 13 users, load averages: 3.95 3.96 3.96
+## Raw output
+load before:  9:57  up 1 day, 22:47, 14 users, load averages: 2.87 3.43 3.79
 === RUN   TestBudgetWarmRecompute
 === RUN   TestBudgetWarmRecompute/large
     budget_test.go:354: large: 3551 checks, 0 KGWUI-012 findings, 0 persistence entries
-    budget_test.go:359: large: cold median 52ms max 59ms (budget median ≤ 1 s); warm median 34.6ms p95 42.4ms max 42.9ms (budget median ≤ 150 ms); warm alloc median 36.3 MiB max 36.3 MiB (reported, D-022); persistence step median 6µs max 32µs
-    budget_test.go:364: large: warm median with unchanged views input 21.2ms (reported)
+    budget_test.go:359: large: cold median 55ms max 63ms (budget median ≤ 1 s); warm median 37.6ms p95 42.1ms max 43.2ms (budget median ≤ 150 ms); warm alloc median 36.3 MiB max 36.3 MiB (reported, D-022); persistence step median 6µs max 32µs
+    budget_test.go:364: large: warm median with unchanged views input 21.7ms (reported)
 === RUN   TestBudgetWarmRecompute/large-contradicting
     budget_test.go:354: large-contradicting: 3551 checks, 3391 KGWUI-012 findings, 3511 persistence entries
-    budget_test.go:359: large-contradicting: cold median 53ms max 60ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 45.8ms p95 50.9ms max 51.5ms (budget median ≤ 150 ms); warm alloc median 48.4 MiB max 48.4 MiB (reported, D-022); persistence step median 219µs max 255µs
-    budget_test.go:364: large-contradicting: warm median with unchanged views input 31.3ms (reported)
+    budget_test.go:359: large-contradicting: cold median 53ms max 55ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 45.5ms p95 50ms max 51.1ms (budget median ≤ 150 ms); warm alloc median 48.4 MiB max 48.4 MiB (reported, D-022); persistence step median 219µs max 357µs
+    budget_test.go:364: large-contradicting: warm median with unchanged views input 32.8ms (reported)
 === RUN   TestBudgetWarmRecompute/large-contradicting-worst
     budget_test.go:303: measurement world: 103 Gateways, 6713 findings map[KGWUI-001:103 KGWUI-002:2576 KGWUI-011:38 KGWUI-012:3391 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103], 2690 groups
     budget_test.go:354: large-contradicting-worst: 3554 checks, 3391 KGWUI-012 findings, 3511 persistence entries
-    budget_test.go:359: large-contradicting-worst: cold median 59ms max 62ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 47.3ms p95 51.9ms max 53.5ms (budget median ≤ 150 ms); warm alloc median 50.5 MiB max 50.6 MiB (reported, D-022); persistence step median 217µs max 257µs
-    budget_test.go:364: large-contradicting-worst: warm median with unchanged views input 34.4ms (reported)
---- PASS: TestBudgetWarmRecompute (5.65s)
-    --- PASS: TestBudgetWarmRecompute/large (1.47s)
-    --- PASS: TestBudgetWarmRecompute/large-contradicting (1.93s)
-    --- PASS: TestBudgetWarmRecompute/large-contradicting-worst (2.25s)
+    budget_test.go:359: large-contradicting-worst: cold median 57ms max 58ms, a first compute with no matured windows (budget median ≤ 1 s); warm median 48.4ms p95 51.7ms max 58ms (budget median ≤ 150 ms); warm alloc median 49.2 MiB max 49.3 MiB (reported, D-022); persistence step median 227µs max 275µs
+    budget_test.go:364: large-contradicting-worst: warm median with unchanged views input 36.1ms (reported)
+--- PASS: TestBudgetWarmRecompute (5.76s)
+    --- PASS: TestBudgetWarmRecompute/large (1.54s)
+    --- PASS: TestBudgetWarmRecompute/large-contradicting (1.94s)
+    --- PASS: TestBudgetWarmRecompute/large-contradicting-worst (2.27s)
 === RUN   TestBudgetAnalyzerStage
 === RUN   TestBudgetAnalyzerStage/large
-    budget_test.go:414: large: warm, §16.3 scope median 80µs p95 80µs max 110µs (budget median ≤ 20ms)
-    budget_test.go:414: large: memoized, §16.3 scope median 30µs p95 30µs max 30µs (budget median ≤ 2ms)
-    budget_test.go:414: large: warm, whole stage median 2.04ms p95 3.93ms max 4.28ms (reported)
-    budget_test.go:414: large: memoized, whole stage median 1.9ms p95 2.38ms max 3.56ms (reported)
+    budget_test.go:414: large: warm, §16.3 scope median 70µs p95 100µs max 100µs (budget median ≤ 20ms)
+    budget_test.go:414: large: memoized, §16.3 scope median 30µs p95 80µs max 110µs (budget median ≤ 2ms)
+    budget_test.go:414: large: warm, whole stage median 2.07ms p95 2.47ms max 3.48ms (reported)
+    budget_test.go:414: large: memoized, whole stage median 2.08ms p95 2.43ms max 2.44ms (reported)
 === RUN   TestBudgetAnalyzerStage/large-contradicting-worst
     bench_test.go:189: measurement world: 103 Gateways, 6713 findings map[KGWUI-001:103 KGWUI-002:2576 KGWUI-011:38 KGWUI-012:3391 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103], 2690 groups
-    budget_test.go:414: large-contradicting-worst: warm, §16.3 scope median 3.92ms p95 6.55ms max 6.71ms (budget median ≤ 20ms)
-    budget_test.go:414: large-contradicting-worst: memoized, §16.3 scope median 220µs p95 230µs max 270µs (budget median ≤ 2ms)
-    budget_test.go:414: large-contradicting-worst: warm, whole stage median 11.89ms p95 15.74ms max 17.06ms (reported)
-    budget_test.go:414: large-contradicting-worst: memoized, whole stage median 10.89ms p95 14.03ms max 15.61ms (reported)
---- PASS: TestBudgetAnalyzerStage (1.68s)
+    budget_test.go:414: large-contradicting-worst: warm, §16.3 scope median 4.08ms p95 5.26ms max 6.99ms (budget median ≤ 20ms)
+    budget_test.go:414: large-contradicting-worst: memoized, §16.3 scope median 230µs p95 940µs max 2.28ms (budget median ≤ 2ms)
+    budget_test.go:414: large-contradicting-worst: warm, whole stage median 12.84ms p95 14.74ms max 14.8ms (reported)
+    budget_test.go:414: large-contradicting-worst: memoized, whole stage median 11.65ms p95 14.07ms max 14.95ms (reported)
+--- PASS: TestBudgetAnalyzerStage (1.72s)
     --- PASS: TestBudgetAnalyzerStage/large (0.35s)
-    --- PASS: TestBudgetAnalyzerStage/large-contradicting-worst (1.33s)
+    --- PASS: TestBudgetAnalyzerStage/large-contradicting-worst (1.37s)
 PASS
-ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	7.641s
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	7.863s
 === RUN   TestBudgetHeap
 === RUN   TestBudgetHeap/large
     budget_test.go:487: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
-    budget_test.go:489: 1    3547136    22315008      50003968      27688960
-    budget_test.go:489: 2    3522560    22298624      49922048      27623424
-    budget_test.go:489: 3    3514368    22249472      49872896      27623424
-    budget_test.go:489: 4    3563520    22323200      49774592      27451392
-    budget_test.go:489: 5    3579904    22315008      49700864      27385856
-    budget_test.go:494: median retained 49872896 B (47.6 MiB); +23.3 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +0.1 MiB over the 3.1 baseline's +23.2 (budget ≤ +24 MiB)
-    budget_test.go:497:   index: route rows               2.14 MiB
-    budget_test.go:497:   index: Gateway rows             0.05 MiB
-    budget_test.go:497:   index: ListenerSet rows         0.04 MiB
-    budget_test.go:497:   index: lookups                  2.64 MiB
-    budget_test.go:497:   health: findings                0.00 MiB
-    budget_test.go:497:   diagnosis: groups and rank      0.02 MiB
-    budget_test.go:497:   process data                    0.02 MiB
-    budget_test.go:497:   check Stores                    0.10 MiB
-    budget_test.go:497:   proxy stats and collector      -0.00 MiB
-    budget_test.go:497:   computed: checks                1.52 MiB
-    budget_test.go:497:   computed: delegation            0.00 MiB
-    budget_test.go:497:   computed: attachment            0.00 MiB
-    budget_test.go:497:   persistence: windows            0.00 MiB
-    budget_test.go:497:   decode: HTTPRoute views         0.19 MiB
-    budget_test.go:497:   decode: route views             0.08 MiB
-    budget_test.go:497:   decode: route hostnames         0.00 MiB
-    budget_test.go:497:   decode: Gateway views           0.10 MiB
-    budget_test.go:497:   decode: ListenerSet views       0.08 MiB
-    budget_test.go:497:   decode: Backend views           0.00 MiB
-    budget_test.go:497:   rest of engine and model       15.22 MiB
-=== RUN   TestBudgetHeap/large-contradicting
-    budget_test.go:487: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
-    budget_test.go:489: 1    3244032    20168704      53960704      33792000
-    budget_test.go:489: 2    3244032    20070400      53706752      33636352
-    budget_test.go:489: 3    3571712    20439040      53993472      33554432
-    budget_test.go:489: 4    3579904    20455424      53829632      33374208
-    budget_test.go:489: 5    3678208    20537344      54124544      33587200
-    budget_test.go:494: median retained 53960704 B (51.5 MiB); +27.2 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +2.8 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
-    budget_test.go:497:   index: route rows               2.09 MiB
-    budget_test.go:497:   index: Gateway rows             0.07 MiB
-    budget_test.go:497:   index: ListenerSet rows         0.05 MiB
-    budget_test.go:497:   index: lookups                  2.92 MiB
-    budget_test.go:497:   health: findings                0.00 MiB
-    budget_test.go:497:   diagnosis: groups and rank      0.85 MiB
-    budget_test.go:497:   process data                    0.02 MiB
-    budget_test.go:497:   check Stores                    3.68 MiB
-    budget_test.go:497:   proxy stats and collector      -0.01 MiB
-    budget_test.go:497:   computed: checks                1.52 MiB
-    budget_test.go:497:   computed: delegation            0.00 MiB
-    budget_test.go:497:   computed: attachment            0.00 MiB
-    budget_test.go:497:   persistence: windows            0.44 MiB
-    budget_test.go:497:   decode: HTTPRoute views         0.19 MiB
-    budget_test.go:497:   decode: route views             0.08 MiB
-    budget_test.go:497:   decode: route hostnames         0.00 MiB
-    budget_test.go:497:   decode: Gateway views           0.10 MiB
-    budget_test.go:497:   decode: ListenerSet views       0.08 MiB
-    budget_test.go:497:   decode: Backend views           0.00 MiB
-    budget_test.go:497:   rest of engine and model       14.91 MiB
-=== RUN   TestBudgetHeap/large-contradicting-worst
-    budget_test.go:487: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
-    budget_test.go:489: 1    3686400    23781376      59760640      35979264
-    budget_test.go:489: 2    3235840    24109056      59138048      35028992
-    budget_test.go:489: 3    3235840    24166400      59490304      35323904
-    budget_test.go:489: 4    3604480    24018944      60096512      36077568
-    budget_test.go:489: 5    3588096    23887872      58777600      34889728
-    budget_test.go:494: median retained 59490304 B (56.7 MiB); +32.5 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +8.1 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
-    budget_test.go:497:   index: route rows               2.09 MiB
-    budget_test.go:497:   index: Gateway rows             0.07 MiB
-    budget_test.go:497:   index: ListenerSet rows         0.05 MiB
-    budget_test.go:497:   index: lookups                  3.27 MiB
-    budget_test.go:497:   health: findings                0.00 MiB
-    budget_test.go:497:   diagnosis: groups and rank     -0.00 MiB
-    budget_test.go:497:   process data                    0.07 MiB
-    budget_test.go:497:   check Stores                    1.35 MiB
-    budget_test.go:497:   proxy stats and collector       0.05 MiB
-    budget_test.go:497:   computed: checks                1.52 MiB
-    budget_test.go:497:   computed: delegation            0.00 MiB
-    budget_test.go:497:   computed: attachment            0.00 MiB
-    budget_test.go:497:   persistence: windows            0.44 MiB
-    budget_test.go:497:   decode: HTTPRoute views         0.19 MiB
-    budget_test.go:497:   decode: route views             0.08 MiB
-    budget_test.go:497:   decode: route hostnames         0.00 MiB
-    budget_test.go:497:   decode: Gateway views           0.11 MiB
-    budget_test.go:497:   decode: ListenerSet views       0.08 MiB
-    budget_test.go:497:   decode: Backend views           0.00 MiB
-    budget_test.go:497:   rest of engine and model       19.57 MiB
-    budget_test.go:500: retained heap 32.5 MiB above the baseline, budget ≤ 32 MiB
---- FAIL: TestBudgetHeap (4.00s)
-    --- PASS: TestBudgetHeap/large (0.91s)
-    --- PASS: TestBudgetHeap/large-contradicting (1.13s)
-    --- FAIL: TestBudgetHeap/large-contradicting-worst (1.96s)
-FAIL
-FAIL	github.com/DuncanDoyle/kgateway-ui/pkg/engine	4.206s
-FAIL
-=== RUN   TestBudgetDenseMemory
-    budget_test.go:649: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  459 MiB; peak HeapInuse cold  203 MiB warm  397 MiB; peak HeapAlloc cold  196 MiB warm  387 MiB
-    budget_test.go:649: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  465 MiB; peak HeapInuse cold  223 MiB warm  426 MiB; peak HeapAlloc cold  216 MiB warm  416 MiB
-    budget_test.go:649: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  488 MiB; peak HeapInuse cold  222 MiB warm  453 MiB; peak HeapAlloc cold  215 MiB warm  443 MiB
-    budget_test.go:649: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  472 MiB; peak HeapInuse cold  223 MiB warm  424 MiB; peak HeapAlloc cold  216 MiB warm  414 MiB
-    budget_test.go:649: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  477 MiB; peak HeapInuse cold  230 MiB warm  426 MiB; peak HeapAlloc cold  223 MiB warm  416 MiB
-    budget_test.go:657: edges  10000: medians over 5 runs: retained heap  160 MiB, allocated cold  207 MiB, per warm Compute  166 MiB, peak HeapInuse  426 MiB (logged only)
-    budget_test.go:649: edges  20000:  20000 rows; retained heap  186 MiB; allocated cold  247 MiB, per warm Compute  206 MiB; peak RSS  498 MiB; peak HeapInuse cold  236 MiB warm  446 MiB; peak HeapAlloc cold  228 MiB warm  434 MiB
-    budget_test.go:649: edges  50000:  50000 rows; retained heap  261 MiB; allocated cold  368 MiB, per warm Compute  320 MiB; peak RSS  822 MiB; peak HeapInuse cold  380 MiB warm  706 MiB; peak HeapAlloc cold  368 MiB warm  690 MiB
---- PASS: TestBudgetDenseMemory (7.23s)
-PASS
-ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	7.429s
-load before stream:  8:29  up 1 day, 21:18, 13 users, load averages: 3.53 3.86 3.93
-=== RUN   TestBudgetSpecEditStream
-=== RUN   TestBudgetSpecEditStream/large
-    budget_test.go:494: budget_test.go:778: spec-edit stream 1m0.002s: 600 updates, 57 recomputes (0.95/s), 57 publications; process CPU 3.99s = 6.6 % of one core; recompute wall 2.491s = 4.2 %; GC share 26.5 % of used CPU (1.8 % of one core)
-    budget_test.go:494: budget_test.go:780: polls: 241, p50 1.39ms p95 1.54ms max 1.83ms
-    budget_test.go:494: budget_test.go:785: large: heap after GC 60.4 MiB at 1 min, 60.4 MiB at the end (+0.0 MiB)
-    budget_test.go:494: budget_test.go:790: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 180.2 MiB, heap in use 75.1 MiB
-    budget_test.go:494: budget_test.go:797: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:771]
-=== RUN   TestBudgetSpecEditStream/large-contradicting-worst
-    budget_test.go:494: budget_test.go:778: spec-edit stream 1m0s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 5.963s = 9.9 % of one core; recompute wall 3.957s = 6.6 %; GC share 26.4 % of used CPU (2.8 % of one core)
-    budget_test.go:494: budget_test.go:780: polls: 240, p50 1.43ms p95 2.06ms max 10.72ms
-    budget_test.go:494: budget_test.go:785: large-contradicting-worst: heap after GC 68.6 MiB at 1 min, 68.6 MiB at the end (+0.0 MiB)
-    budget_test.go:494: budget_test.go:790: large-contradicting-worst: 2540 KGWUI-012 of 2540 checks at the end; memory from the OS 264.2 MiB, heap in use 88.7 MiB
-    budget_test.go:494: budget_test.go:797: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1843 KGWUI-003:769 KGWUI-011:38 KGWUI-012:2540 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103]
---- PASS: TestBudgetSpecEditStream (180.98s)
-    --- PASS: TestBudgetSpecEditStream/large (60.15s)
-    --- PASS: TestBudgetSpecEditStream/large-contradicting-worst (120.83s)
-PASS
-ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	181.302s
-load after:  8:32  up 1 day, 21:21, 13 users, load averages: 3.90 3.83 3.90
-
-## Raw output (Phase B heap, rerun with the corrected part attribution, commit 4106f57)
-=== RUN   TestBudgetHeap
-=== RUN   TestBudgetHeap/large
-    budget_test.go:487: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
-    budget_test.go:489: 1    3547136    22241280      49823744      27582464
-    budget_test.go:489: 2    3522560    22298624      49831936      27533312
-    budget_test.go:489: 3    3571712    22413312      49831936      27418624
-    budget_test.go:489: 4    3489792    22233088      49872896      27639808
-    budget_test.go:489: 5    3235840    21856256      49586176      27729920
-    budget_test.go:494: median retained 49831936 B (47.5 MiB); +23.3 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +0.1 MiB over the 3.1 baseline's +23.2 (budget ≤ +24 MiB)
+    budget_test.go:489: 1    3235840    21839872      49545216      27705344
+    budget_test.go:489: 2    3661824    22503424      49504256      27000832
+    budget_test.go:489: 3    3514368    22257664      49717248      27459584
+    budget_test.go:489: 4    3457024    22216704      49831936      27615232
+    budget_test.go:489: 5    3227648    21880832      49586176      27705344
+    budget_test.go:494: median retained 49586176 B (47.3 MiB); +23.1 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); -0.1 MiB over the 3.1 baseline's +23.2 (budget ≤ +24 MiB)
     budget_test.go:497:   index: route rows               2.14 MiB
     budget_test.go:497:   index: Gateway rows             0.05 MiB
     budget_test.go:497:   index: ListenerSet rows         0.05 MiB
@@ -251,21 +100,21 @@ load after:  8:32  up 1 day, 21:21, 13 users, load averages: 3.90 3.83 3.90
     budget_test.go:497:   computed: delegation            0.00 MiB
     budget_test.go:497:   computed: attachment            0.00 MiB
     budget_test.go:497:   persistence: windows            0.00 MiB
-    budget_test.go:497:   decode: HTTPRoute views         0.18 MiB
+    budget_test.go:497:   decode: HTTPRoute views         0.19 MiB
     budget_test.go:497:   decode: route views             0.08 MiB
     budget_test.go:497:   decode: route hostnames         0.00 MiB
     budget_test.go:497:   decode: Gateway views           0.10 MiB
     budget_test.go:497:   decode: ListenerSet views       0.08 MiB
     budget_test.go:497:   decode: Backend views           0.00 MiB
-    budget_test.go:497:   rest of engine and model       15.22 MiB
+    budget_test.go:497:   rest of engine and model       15.21 MiB
 === RUN   TestBudgetHeap/large-contradicting
     budget_test.go:487: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
-    budget_test.go:489: 1    3588096    20455424      54149120      33693696
-    budget_test.go:489: 2    3596288    20340736      54132736      33792000
-    budget_test.go:489: 3    3227648    20054016      53706752      33652736
-    budget_test.go:489: 4    3514368    20307968      53895168      33587200
-    budget_test.go:489: 5    3547136    20430848      53813248      33382400
-    budget_test.go:494: median retained 53895168 B (51.4 MiB); +27.2 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +2.8 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
+    budget_test.go:489: 1    3235840    20094976      53854208      33759232
+    budget_test.go:489: 2    3579904    20520960      53829632      33308672
+    budget_test.go:489: 3    3547136    20447232      53805056      33357824
+    budget_test.go:489: 4    3538944    20389888      54157312      33767424
+    budget_test.go:489: 5    3571712    20373504      53780480      33406976
+    budget_test.go:494: median retained 53829632 B (51.3 MiB); +27.1 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +2.7 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
     budget_test.go:497:   index: route rows               2.09 MiB
     budget_test.go:497:   index: Gateway rows             0.07 MiB
     budget_test.go:497:   index: ListenerSet rows         0.05 MiB
@@ -274,34 +123,34 @@ load after:  8:32  up 1 day, 21:21, 13 users, load averages: 3.90 3.83 3.90
     budget_test.go:497:   diagnosis: groups and rank      0.85 MiB
     budget_test.go:497:   process data                    0.02 MiB
     budget_test.go:497:   check Stores and findings       3.68 MiB
-    budget_test.go:497:   proxy stats and collector      -0.00 MiB
+    budget_test.go:497:   proxy stats and collector       0.00 MiB
     budget_test.go:497:   computed: checks                1.52 MiB
-    budget_test.go:497:   computed: delegation            0.00 MiB
+    budget_test.go:497:   computed: delegation           -0.00 MiB
     budget_test.go:497:   computed: attachment            0.00 MiB
-    budget_test.go:497:   persistence: windows            0.55 MiB
-    budget_test.go:497:   decode: HTTPRoute views         0.18 MiB
+    budget_test.go:497:   persistence: windows            0.44 MiB
+    budget_test.go:497:   decode: HTTPRoute views         0.19 MiB
     budget_test.go:497:   decode: route views             0.08 MiB
     budget_test.go:497:   decode: route hostnames         0.00 MiB
     budget_test.go:497:   decode: Gateway views           0.10 MiB
     budget_test.go:497:   decode: ListenerSet views       0.08 MiB
-    budget_test.go:497:   decode: Backend views           0.00 MiB
+    budget_test.go:497:   decode: Backend views          -0.01 MiB
     budget_test.go:497:   rest of engine and model       14.91 MiB
 === RUN   TestBudgetHeap/large-contradicting-worst
     budget_test.go:487: run  start (B)  snapshot (B)  retained (B)  engine+model over snapshot (B)
-    budget_test.go:489: 1    3530752    24043520      59514880      35471360
-    budget_test.go:489: 2    3473408    24453120      59555840      35102720
-    budget_test.go:489: 3    3465216    24215552      59375616      35160064
-    budget_test.go:489: 4    3309568    24248320      60039168      35790848
-    budget_test.go:489: 5    3612672    23625728      58679296      35053568
-    budget_test.go:494: median retained 59514880 B (56.8 MiB); +32.5 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +8.1 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
-    budget_test.go:497:   index: route rows               2.09 MiB
+    budget_test.go:489: 1    3235840    22683648      56762368      34078720
+    budget_test.go:489: 2    3547136    22732800      58105856      35373056
+    budget_test.go:489: 3    3571712    22683648      56860672      34177024
+    budget_test.go:489: 4    3465216    23265280      57794560      34529280
+    budget_test.go:489: 5    3555328    22544384      56811520      34267136
+    budget_test.go:494: median retained 56860672 B (54.2 MiB); +30.0 MiB over the 2.1 baseline 25411584 B (budget ≤ 32 MiB); +5.6 MiB over the 3.1 baseline's +24.4 (budget ≤ +24 MiB)
+    budget_test.go:497:   index: route rows               2.08 MiB
     budget_test.go:497:   index: Gateway rows             0.07 MiB
     budget_test.go:497:   index: ListenerSet rows         0.05 MiB
-    budget_test.go:497:   index: lookups                  3.27 MiB
+    budget_test.go:497:   index: lookups                  2.92 MiB
     budget_test.go:497:   health: findings                0.00 MiB
     budget_test.go:497:   diagnosis: groups and rank      0.98 MiB
     budget_test.go:497:   process data                    0.07 MiB
-    budget_test.go:497:   check Stores and findings       4.69 MiB
+    budget_test.go:497:   check Stores and findings       4.72 MiB
     budget_test.go:497:   proxy stats and collector       0.09 MiB
     budget_test.go:497:   computed: checks                1.52 MiB
     budget_test.go:497:   computed: delegation            0.00 MiB
@@ -313,26 +162,132 @@ load after:  8:32  up 1 day, 21:21, 13 users, load averages: 3.90 3.83 3.90
     budget_test.go:497:   decode: Gateway views           0.11 MiB
     budget_test.go:497:   decode: ListenerSet views       0.08 MiB
     budget_test.go:497:   decode: Backend views           0.00 MiB
-    budget_test.go:497:   rest of engine and model       15.16 MiB
-    budget_test.go:500: retained heap 32.5 MiB above the baseline, budget ≤ 32 MiB
---- FAIL: TestBudgetHeap (4.02s)
-    --- PASS: TestBudgetHeap/large (0.93s)
-    --- PASS: TestBudgetHeap/large-contradicting (1.14s)
-    --- FAIL: TestBudgetHeap/large-contradicting-worst (1.95s)
-FAIL
-FAIL	github.com/DuncanDoyle/kgateway-ui/pkg/engine	4.385s
-FAIL
-
-## Raw output: OS memory, four more worst-case stream children on the final code
-    budget_test.go:778: spec-edit stream 1m0.001s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 5.883s = 9.8 % of one core; recompute wall 3.927s = 6.5 %; GC share 28.5 % of used CPU (3.0 % of one core)
-    budget_test.go:785: large-contradicting-worst: heap after GC 68.1 MiB at 1 min, 68.1 MiB at the end (+0.0 MiB)
-    budget_test.go:790: large-contradicting-worst: 2538 KGWUI-012 of 2538 checks at the end; memory from the OS 284.6 MiB, heap in use 91.1 MiB
-    budget_test.go:778: spec-edit stream 1m0.001s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 5.854s = 9.8 % of one core; recompute wall 3.934s = 6.6 %; GC share 28.7 % of used CPU (3.1 % of one core)
-    budget_test.go:785: large-contradicting-worst: heap after GC 68.5 MiB at 1 min, 68.5 MiB at the end (+0.0 MiB)
-    budget_test.go:790: large-contradicting-worst: 2538 KGWUI-012 of 2538 checks at the end; memory from the OS 268.8 MiB, heap in use 92.8 MiB
-    budget_test.go:778: spec-edit stream 1m0.002s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 5.776s = 9.6 % of one core; recompute wall 3.841s = 6.4 %; GC share 27.1 % of used CPU (2.8 % of one core)
-    budget_test.go:785: large-contradicting-worst: heap after GC 68.3 MiB at 1 min, 68.3 MiB at the end (+0.0 MiB)
-    budget_test.go:790: large-contradicting-worst: 2539 KGWUI-012 of 2539 checks at the end; memory from the OS 273.0 MiB, heap in use 91.6 MiB
-    budget_test.go:778: spec-edit stream 1m0.001s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 5.881s = 9.8 % of one core; recompute wall 3.971s = 6.6 %; GC share 25.8 % of used CPU (2.7 % of one core)
-    budget_test.go:785: large-contradicting-worst: heap after GC 68.5 MiB at 1 min, 68.5 MiB at the end (+0.0 MiB)
-    budget_test.go:790: large-contradicting-worst: 2540 KGWUI-012 of 2540 checks at the end; memory from the OS 252.4 MiB, heap in use 89.2 MiB
+    budget_test.go:497:   rest of engine and model       14.94 MiB
+--- PASS: TestBudgetHeap (3.92s)
+    --- PASS: TestBudgetHeap/large (0.91s)
+    --- PASS: TestBudgetHeap/large-contradicting (1.13s)
+    --- PASS: TestBudgetHeap/large-contradicting-worst (1.88s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	4.125s
+=== RUN   TestBudgetDenseMemory
+    budget_test.go:650: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  469 MiB; peak HeapInuse cold  216 MiB warm  418 MiB; peak HeapAlloc cold  209 MiB warm  408 MiB
+    budget_test.go:650: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  454 MiB; peak HeapInuse cold  215 MiB warm  419 MiB; peak HeapAlloc cold  208 MiB warm  409 MiB
+    budget_test.go:650: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  488 MiB; peak HeapInuse cold  229 MiB warm  426 MiB; peak HeapAlloc cold  222 MiB warm  416 MiB
+    budget_test.go:650: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  473 MiB; peak HeapInuse cold  232 MiB warm  429 MiB; peak HeapAlloc cold  225 MiB warm  419 MiB
+    budget_test.go:650: edges  10000:  10000 rows; retained heap  160 MiB; allocated cold  207 MiB, per warm Compute  166 MiB; peak RSS  460 MiB; peak HeapInuse cold  230 MiB warm  421 MiB; peak HeapAlloc cold  223 MiB warm  412 MiB
+    budget_test.go:658: edges  10000: medians over 5 runs: retained heap  160 MiB, allocated cold  207 MiB, per warm Compute  166 MiB, peak HeapInuse  421 MiB (logged only)
+    budget_test.go:650: edges  20000:  20000 rows; retained heap  186 MiB; allocated cold  247 MiB, per warm Compute  206 MiB; peak RSS  553 MiB; peak HeapInuse cold  235 MiB warm  490 MiB; peak HeapAlloc cold  227 MiB warm  479 MiB
+    budget_test.go:650: edges  50000:  50000 rows; retained heap  261 MiB; allocated cold  368 MiB, per warm Compute  320 MiB; peak RSS  833 MiB; peak HeapInuse cold  391 MiB warm  793 MiB; peak HeapAlloc cold  379 MiB warm  775 MiB
+--- PASS: TestBudgetDenseMemory (7.17s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/engine	7.380s
+load before streams:  9:57  up 1 day, 22:47, 14 users, load averages: 4.08 3.66 3.87
+=== RUN   TestBudgetSustainedStream
+=== RUN   TestBudgetSustainedStream/large
+    budget_test.go:505: run 1: budget_test.go:812: stream 1m0.001s: 600 updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 3.527s = 5.9 % of one core (budget ≤ 15 %); recompute wall 2.241s = 3.7 %; GC share 25.8 % of used CPU (1.6 % of one core)
+    budget_test.go:505: run 1: budget_test.go:814: polls: 240, p50 1.28ms p95 1.5ms max 2.68ms
+    budget_test.go:505: run 1: budget_test.go:819: large: heap after GC 60.1 MiB at 1 min, 60.1 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 1: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 163.2 MiB, heap in use 73.9 MiB
+    budget_test.go:505: run 2: budget_test.go:812: stream 1m0.001s: 600 updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 3.008s = 5.0 % of one core (budget ≤ 15 %); recompute wall 1.735s = 2.9 %; GC share 25.7 % of used CPU (1.4 % of one core)
+    budget_test.go:505: run 2: budget_test.go:814: polls: 241, p50 1.45ms p95 2.38ms max 3.67ms
+    budget_test.go:505: run 2: budget_test.go:819: large: heap after GC 60.1 MiB at 1 min, 60.1 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 2: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 159.0 MiB, heap in use 73.4 MiB
+    budget_test.go:505: run 3: budget_test.go:812: stream 1m0.002s: 600 updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 3.128s = 5.2 % of one core (budget ≤ 15 %); recompute wall 1.868s = 3.1 %; GC share 27.3 % of used CPU (1.5 % of one core)
+    budget_test.go:505: run 3: budget_test.go:814: polls: 241, p50 1.38ms p95 1.67ms max 8.71ms
+    budget_test.go:505: run 3: budget_test.go:819: large: heap after GC 60.8 MiB at 1 min, 60.8 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 3: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 163.8 MiB, heap in use 73.8 MiB
+    budget_test.go:505: run 4: budget_test.go:812: stream 1m0.002s: 600 updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 2.755s = 4.6 % of one core (budget ≤ 15 %); recompute wall 1.616s = 2.7 %; GC share 27.6 % of used CPU (1.3 % of one core)
+    budget_test.go:505: run 4: budget_test.go:814: polls: 241, p50 1.04ms p95 1.51ms max 1.69ms
+    budget_test.go:505: run 4: budget_test.go:819: large: heap after GC 60.7 MiB at 1 min, 60.7 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 4: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 159.2 MiB, heap in use 71.7 MiB
+    budget_test.go:505: run 5: budget_test.go:812: stream 1m0.001s: 600 updates, 56 recomputes (0.93/s, budget ≤ 1/s), 56 publications; process CPU 3.314s = 5.5 % of one core (budget ≤ 15 %); recompute wall 2.114s = 3.5 %; GC share 24.7 % of used CPU (1.4 % of one core)
+    budget_test.go:505: run 5: budget_test.go:814: polls: 240, p50 1.37ms p95 1.5ms max 2.07ms
+    budget_test.go:505: run 5: budget_test.go:819: large: heap after GC 64.4 MiB at 1 min, 64.4 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 5: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 159.7 MiB, heap in use 75.8 MiB
+    budget_test.go:521: large: memory from the OS over 5 runs: median 159.7 MiB, min 159.0, max 163.8 (budget median ≤ 256 MiB)
+=== RUN   TestBudgetSustainedStream/large-contradicting
+    budget_test.go:505: run 1: budget_test.go:812: stream 1m0.001s: 600 updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 4.029s = 6.7 % of one core (budget ≤ 15 %); recompute wall 2.519s = 4.2 %; GC share 26.3 % of used CPU (1.9 % of one core)
+    budget_test.go:505: run 1: budget_test.go:814: polls: 240, p50 1.33ms p95 1.46ms max 10.32ms
+    budget_test.go:505: run 1: budget_test.go:819: large-contradicting: heap after GC 62.4 MiB at 1 min, 62.4 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 1: budget_test.go:824: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 175.8 MiB, heap in use 74.3 MiB
+    budget_test.go:505: run 2: budget_test.go:812: stream 1m0.002s: 600 updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 4.501s = 7.5 % of one core (budget ≤ 15 %); recompute wall 3.035s = 5.1 %; GC share 26.4 % of used CPU (2.2 % of one core)
+    budget_test.go:505: run 2: budget_test.go:814: polls: 241, p50 1.03ms p95 1.42ms max 10.14ms
+    budget_test.go:505: run 2: budget_test.go:819: large-contradicting: heap after GC 62.6 MiB at 1 min, 62.6 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 2: budget_test.go:824: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 187.9 MiB, heap in use 74.9 MiB
+    budget_test.go:505: run 3: budget_test.go:812: stream 1m0.002s: 600 updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 4.497s = 7.5 % of one core (budget ≤ 15 %); recompute wall 2.98s = 5.0 %; GC share 24.8 % of used CPU (2.0 % of one core)
+    budget_test.go:505: run 3: budget_test.go:814: polls: 241, p50 1.3ms p95 1.66ms max 1.92ms
+    budget_test.go:505: run 3: budget_test.go:819: large-contradicting: heap after GC 62.5 MiB at 1 min, 62.5 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 3: budget_test.go:824: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 195.9 MiB, heap in use 74.2 MiB
+    budget_test.go:505: run 4: budget_test.go:812: stream 1m0.001s: 600 updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 3.955s = 6.6 % of one core (budget ≤ 15 %); recompute wall 2.486s = 4.1 %; GC share 27.8 % of used CPU (2.0 % of one core)
+    budget_test.go:505: run 4: budget_test.go:814: polls: 240, p50 1.13ms p95 1.47ms max 7.69ms
+    budget_test.go:505: run 4: budget_test.go:819: large-contradicting: heap after GC 62.4 MiB at 1 min, 62.4 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 4: budget_test.go:824: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 183.9 MiB, heap in use 74.5 MiB
+    budget_test.go:505: run 5: budget_test.go:812: stream 1m0.002s: 600 updates, 57 recomputes (0.95/s, budget ≤ 1/s), 57 publications; process CPU 4.149s = 6.9 % of one core (budget ≤ 15 %); recompute wall 2.657s = 4.4 %; GC share 27.0 % of used CPU (1.9 % of one core)
+    budget_test.go:505: run 5: budget_test.go:814: polls: 241, p50 1.25ms p95 1.45ms max 1.73ms
+    budget_test.go:505: run 5: budget_test.go:819: large-contradicting: heap after GC 62.6 MiB at 1 min, 62.6 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 5: budget_test.go:824: large-contradicting: 3391 KGWUI-012 of 3391 checks at the end; memory from the OS 183.6 MiB, heap in use 74.6 MiB
+    budget_test.go:521: large-contradicting: memory from the OS over 5 runs: median 183.9 MiB, min 175.8, max 195.9 (budget median ≤ 256 MiB)
+--- PASS: TestBudgetSustainedStream (902.25s)
+    --- PASS: TestBudgetSustainedStream/large (300.79s)
+    --- PASS: TestBudgetSustainedStream/large-contradicting (601.46s)
+=== RUN   TestBudgetSpecEditStream
+=== RUN   TestBudgetSpecEditStream/large
+    budget_test.go:505: run 1: budget_test.go:812: spec-edit stream 1m0.002s: 600 updates, 57 recomputes (0.95/s), 57 publications; process CPU 4.57s = 7.6 % of one core (budget ≤ 25 %); recompute wall 2.92s = 4.9 %; GC share 27.8 % of used CPU (2.3 % of one core)
+    budget_test.go:505: run 1: budget_test.go:814: polls: 241, p50 1.25ms p95 1.5ms max 1.63ms
+    budget_test.go:505: run 1: budget_test.go:819: large: heap after GC 60.3 MiB at 1 min, 60.3 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 1: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.5 MiB, heap in use 76.1 MiB
+    budget_test.go:505: run 1: budget_test.go:836: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:770]
+    budget_test.go:505: run 2: budget_test.go:812: spec-edit stream 1m0.002s: 600 updates, 57 recomputes (0.95/s), 57 publications; process CPU 3.989s = 6.6 % of one core (budget ≤ 25 %); recompute wall 2.481s = 4.1 %; GC share 27.4 % of used CPU (1.9 % of one core)
+    budget_test.go:505: run 2: budget_test.go:814: polls: 241, p50 1.14ms p95 1.53ms max 2.8ms
+    budget_test.go:505: run 2: budget_test.go:819: large: heap after GC 61.0 MiB at 1 min, 61.0 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 2: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.8 MiB, heap in use 78.0 MiB
+    budget_test.go:505: run 2: budget_test.go:836: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:768]
+    budget_test.go:505: run 3: budget_test.go:812: spec-edit stream 1m0.003s: 600 updates, 57 recomputes (0.95/s), 57 publications; process CPU 3.995s = 6.7 % of one core (budget ≤ 25 %); recompute wall 2.46s = 4.1 %; GC share 27.4 % of used CPU (1.9 % of one core)
+    budget_test.go:505: run 3: budget_test.go:814: polls: 241, p50 1.23ms p95 1.5ms max 2.01ms
+    budget_test.go:505: run 3: budget_test.go:819: large: heap after GC 60.6 MiB at 1 min, 60.6 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 3: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 179.5 MiB, heap in use 77.2 MiB
+    budget_test.go:505: run 3: budget_test.go:836: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:768]
+    budget_test.go:505: run 4: budget_test.go:812: spec-edit stream 1m0.002s: 600 updates, 57 recomputes (0.95/s), 57 publications; process CPU 4.033s = 6.7 % of one core (budget ≤ 25 %); recompute wall 2.446s = 4.1 %; GC share 28.8 % of used CPU (2.0 % of one core)
+    budget_test.go:505: run 4: budget_test.go:814: polls: 241, p50 1.25ms p95 1.52ms max 5.91ms
+    budget_test.go:505: run 4: budget_test.go:819: large: heap after GC 60.3 MiB at 1 min, 60.3 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 4: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.0 MiB, heap in use 76.5 MiB
+    budget_test.go:505: run 4: budget_test.go:836: large: findings by code at the end map[KGWUI-002:97 KGWUI-003:771]
+    budget_test.go:505: run 5: budget_test.go:812: spec-edit stream 1m0.001s: 600 updates, 56 recomputes (0.93/s), 56 publications; process CPU 3.905s = 6.5 % of one core (budget ≤ 25 %); recompute wall 2.576s = 4.3 %; GC share 26.2 % of used CPU (1.9 % of one core)
+    budget_test.go:505: run 5: budget_test.go:814: polls: 240, p50 914µs p95 1.55ms max 2.47ms
+    budget_test.go:505: run 5: budget_test.go:819: large: heap after GC 60.7 MiB at 1 min, 60.7 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 5: budget_test.go:824: large: 0 KGWUI-012 of 0 checks at the end; memory from the OS 175.8 MiB, heap in use 77.9 MiB
+    budget_test.go:505: run 5: budget_test.go:836: large: findings by code at the end map[KGWUI-002:98 KGWUI-003:759]
+    budget_test.go:521: large: memory from the OS over 5 runs: median 175.8 MiB, min 175.0, max 179.5 (budget median ≤ 256 MiB)
+=== RUN   TestBudgetSpecEditStream/large-contradicting-worst
+    budget_test.go:505: run 1: budget_test.go:812: spec-edit stream 1m0.001s: 600 updates, 58 recomputes (0.97/s), 58 publications; process CPU 4.716s = 7.9 % of one core (budget ≤ 25 %); recompute wall 3.052s = 5.1 %; GC share 27.5 % of used CPU (2.3 % of one core)
+    budget_test.go:505: run 1: budget_test.go:814: polls: 240, p50 588µs p95 1.44ms max 2.89ms
+    budget_test.go:505: run 1: budget_test.go:819: large-contradicting-worst: heap after GC 66.1 MiB at 1 min, 66.1 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 1: budget_test.go:824: large-contradicting-worst: 2538 KGWUI-012 of 2538 checks at the end; memory from the OS 211.8 MiB, heap in use 82.7 MiB
+    budget_test.go:505: run 1: budget_test.go:836: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1841 KGWUI-003:771 KGWUI-011:38 KGWUI-012:2538 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:505: run 2: budget_test.go:812: spec-edit stream 1m0.003s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 4.748s = 7.9 % of one core (budget ≤ 25 %); recompute wall 3.047s = 5.1 %; GC share 27.9 % of used CPU (2.3 % of one core)
+    budget_test.go:505: run 2: budget_test.go:814: polls: 241, p50 592µs p95 1.42ms max 4.05ms
+    budget_test.go:505: run 2: budget_test.go:819: large-contradicting-worst: heap after GC 66.5 MiB at 1 min, 66.5 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 2: budget_test.go:824: large-contradicting-worst: 2538 KGWUI-012 of 2538 checks at the end; memory from the OS 212.0 MiB, heap in use 82.5 MiB
+    budget_test.go:505: run 2: budget_test.go:836: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1841 KGWUI-003:771 KGWUI-011:38 KGWUI-012:2538 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:505: run 3: budget_test.go:812: spec-edit stream 1m0.003s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 4.75s = 7.9 % of one core (budget ≤ 25 %); recompute wall 3.062s = 5.1 %; GC share 27.7 % of used CPU (2.3 % of one core)
+    budget_test.go:505: run 3: budget_test.go:814: polls: 241, p50 874µs p95 1.44ms max 8.9ms
+    budget_test.go:505: run 3: budget_test.go:819: large-contradicting-worst: heap after GC 67.0 MiB at 1 min, 67.0 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 3: budget_test.go:824: large-contradicting-worst: 2541 KGWUI-012 of 2541 checks at the end; memory from the OS 220.0 MiB, heap in use 83.7 MiB
+    budget_test.go:505: run 3: budget_test.go:836: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1844 KGWUI-003:768 KGWUI-011:38 KGWUI-012:2541 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:505: run 4: budget_test.go:812: spec-edit stream 1m0.002s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 4.769s = 7.9 % of one core (budget ≤ 25 %); recompute wall 3.056s = 5.1 %; GC share 27.5 % of used CPU (2.3 % of one core)
+    budget_test.go:505: run 4: budget_test.go:814: polls: 240, p50 828µs p95 1.44ms max 3.66ms
+    budget_test.go:505: run 4: budget_test.go:819: large-contradicting-worst: heap after GC 67.3 MiB at 1 min, 67.3 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 4: budget_test.go:824: large-contradicting-worst: 2539 KGWUI-012 of 2539 checks at the end; memory from the OS 212.0 MiB, heap in use 84.3 MiB
+    budget_test.go:505: run 4: budget_test.go:836: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1842 KGWUI-003:770 KGWUI-011:38 KGWUI-012:2539 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:505: run 5: budget_test.go:812: spec-edit stream 1m0.002s: 600 updates, 59 recomputes (0.98/s), 59 publications; process CPU 4.642s = 7.7 % of one core (budget ≤ 25 %); recompute wall 3.031s = 5.1 %; GC share 27.7 % of used CPU (2.2 % of one core)
+    budget_test.go:505: run 5: budget_test.go:814: polls: 240, p50 517µs p95 1.42ms max 1.77ms
+    budget_test.go:505: run 5: budget_test.go:819: large-contradicting-worst: heap after GC 66.3 MiB at 1 min, 66.3 MiB at the end (+0.0 MiB)
+    budget_test.go:505: run 5: budget_test.go:824: large-contradicting-worst: 2539 KGWUI-012 of 2539 checks at the end; memory from the OS 223.8 MiB, heap in use 81.5 MiB
+    budget_test.go:505: run 5: budget_test.go:836: large-contradicting-worst: findings by code at the end map[KGWUI-001:103 KGWUI-002:1842 KGWUI-003:770 KGWUI-011:38 KGWUI-012:2539 KGWUI-019:103 KGWUI-020:89 KGWUI-021:103 KGWUI-022:104 KGWUI-025:103 KGWUI-026:103]
+    budget_test.go:521: large-contradicting-worst: memory from the OS over 5 runs: median 212.0 MiB, min 211.8, max 223.8 (budget median ≤ 256 MiB)
+--- PASS: TestBudgetSpecEditStream (905.17s)
+    --- PASS: TestBudgetSpecEditStream/large (300.85s)
+    --- PASS: TestBudgetSpecEditStream/large-contradicting-worst (604.33s)
+PASS
+ok  	github.com/DuncanDoyle/kgateway-ui/pkg/api	1807.819s
+load after: 10:28  up 1 day, 23:17, 14 users, load averages: 3.24 3.59 3.62
