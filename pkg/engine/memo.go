@@ -15,6 +15,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
@@ -357,6 +358,40 @@ func collectedPrint(col collect.Snapshot, key string) uint64 {
 	p.str(string(v.State))
 	p.str(v.Reason)
 	return p.h.Sum64()
+}
+
+// diagMemo is an install's last diagnosis and the findings and Owned print it was built from.
+type diagMemo struct {
+	findings *health.Finding
+	n        int
+	key      uint64
+	diag     *diagnose.Diagnosis
+}
+
+// diagnosis groups and ranks rep. While rep's findings are the slice the last
+// diagnosis was built on (health.Evaluate reused them) and the install and Owned
+// are unchanged, it returns that diagnosis; with pc nil it always builds.
+func (e *Engine) diagnosis(rep *health.Report, in diagnose.Input, pc *printCtx) *diagnose.Diagnosis {
+	id := in.Install.ID()
+	if pc == nil || pc.snap.Source.Kinds == nil {
+		delete(e.diags, id)
+		return diagnose.Build(rep, in, diagnose.Families())
+	}
+	key := mix(installPrint(in.Install), lazy(&pc.owned, func() uint64 { return e.ownedPrint(pc) }))
+	if m := e.diags[id]; m != nil && m.key == key && m.n == len(rep.Findings) && m.findings == first(rep.Findings) {
+		return m.diag
+	}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	e.diags[id] = &diagMemo{findings: first(rep.Findings), n: len(rep.Findings), key: key, diag: d}
+	return d
+}
+
+// first is fs's first element, which identifies its backing array; nil when fs is empty.
+func first(fs []health.Finding) *health.Finding {
+	if len(fs) == 0 {
+		return nil
+	}
+	return &fs[0]
 }
 
 // mix folds v into h: an FNV-1a step, then the splitmix64 finaliser.

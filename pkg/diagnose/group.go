@@ -150,7 +150,10 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 			g.Since = f.Since
 		}
 		g.Ranked = g.Ranked || f.Code != health.CodeSignalUnavailable
-		f.Group = gid
+		// A report reused by health.Evaluate is shared with a published model and already carries gid.
+		if f.Group != gid {
+			f.Group = gid
+		}
 	}
 	in.IDs.Sweep()
 	groups = slices.Clip(groups)

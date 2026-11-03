@@ -4,6 +4,7 @@ package engine
 
 import (
 	"log/slog"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -147,6 +148,8 @@ type Engine struct {
 	views map[string]*viewsMemo
 	// states holds each install's check Stores, keyed by install ID; only touched under computeMu.
 	states map[string]*health.States
+	// diags holds each install's last diagnosis; only touched under computeMu.
+	diags map[string]*diagMemo
 	// kindKeys and ownedKeys name the kinds input prints read; see kindKeys.
 	kindKeys  map[objects.GroupKind]kindKey
 	ownedKeys []kindKey
@@ -187,7 +190,7 @@ func New(cfg Config) *Engine {
 		cfg.DelegationBounds = computed.DefaultBounds
 	}
 	e := &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
-		decode: newDecodeCache(), persist: newPersistence()}
+		decode: newDecodeCache(), persist: newPersistence(), diags: map[string]*diagMemo{}}
 	e.kindKeys, e.ownedKeys = kindKeys(cfg.Served)
 	return e
 }
@@ -362,8 +365,9 @@ func (e *Engine) compute() *Published {
 		}
 		proc := e.processes(res, owned, snap)
 		rt := health.Runtime{States: states[res.ID()], Collected: col}
+		var pc *printCtx
 		if !e.cfg.NoMemo {
-			pc := &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
+			pc = &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
 				ver: &ver, views: views[i], kc: kc, col: col, proc: proc}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
@@ -373,13 +377,14 @@ func (e *Engine) compute() *Published {
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}
-		diag := diagnose.Build(&rep, diagnose.Input{Install: res, Owned: owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()}, diagnose.Families())
+		diag := e.diagnosis(&rep, diagnose.Input{Install: res, Owned: owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()}, pc)
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
 			Computed: views[i]})
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Diagnosis: diag, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
 			Rules: r.sel, Computed: views[i], Process: proc})
 	}
+	maps.DeleteFunc(e.diags, func(id string, _ *diagMemo) bool { return states[id] == nil })
 	m.Next = next.next
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(),
 		Collected: col.Print}, ConfirmedAt: snap.TakenAt}

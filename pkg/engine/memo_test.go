@@ -17,6 +17,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -422,4 +423,60 @@ func TestRecentlyChangedThroughTheMemo(t *testing.T) {
 	if got := recent(); !reflect.DeepEqual(got, want) || runs != 4 {
 		t.Fatalf("edit after the reject: %v in %d runs, want %v in 4", got, runs, want)
 	}
+}
+
+// §16.2: when every check reuses its memo, the report reuses the last findings and,
+// while Owned is unchanged, the last diagnosis; each step equals an uncached compute.
+func TestUnchangedChecksReuseReportAndDiagnosis(t *testing.T) {
+	pods := health.InputSet{Kinds: []objects.GroupKind{{Kind: "Pod"}}}
+	checks := []health.Check{probe{"pods probe", pods, okRun("pods probe", "")}, probe{"second probe", pods, okRun("second probe", "x")}}
+	e, src, _ := memoEngine(t, checks...)
+	plainCfg := e.cfg
+	plainCfg.NoMemo = true
+	plain := New(plainCfg)
+	type step struct {
+		rep  health.Report
+		diag *diagnose.Diagnosis
+	}
+	compute := func() step {
+		m, p := e.Compute(), plain.Compute()
+		got, want := installOf(t, m), installOf(t, p)
+		if !reflect.DeepEqual(got.Health.Findings, want.Health.Findings) || !reflect.DeepEqual(got.Diagnosis.Groups, want.Diagnosis.Groups) ||
+			!reflect.DeepEqual(got.Diagnosis.Rank, want.Diagnosis.Rank) {
+			t.Fatalf("memoized and uncached differ:\n%+v\n%+v", got.Diagnosis.Groups, want.Diagnosis.Groups)
+		}
+		return step{got.Health, got.Diagnosis}
+	}
+	same := func(a, b step) bool { return first(a.rep.Findings) == first(b.rep.Findings) }
+	first := compute()
+	second := compute()
+	if !same(first, second) || first.diag != second.diag {
+		t.Fatal("unchanged checks and Owned: the findings and diagnosis are not reused")
+	}
+	gws := gvr(t, "Gateway")
+	src.edit(t, gws, annotated(src.base.Objects[gws][0], "2"))
+	third := compute()
+	if !same(second, third) || second.diag == third.diag {
+		t.Fatal("an Owned edit no check declares: want the findings reused and the diagnosis rebuilt")
+	}
+	pod := src.base.Pods[0].DeepCopy()
+	pod.ResourceVersion = "2"
+	s := *src.base
+	s.Pods = []*corev1.Pod{pod}
+	src.base = &s
+	if fourth := compute(); same(third, fourth) {
+		t.Fatal("a declared edit reran the checks: want new findings")
+	}
+}
+
+// installOf is install kgw.kgateway's model in m.
+func installOf(t *testing.T, m *Model) InstallModel {
+	t.Helper()
+	for _, im := range m.Installs {
+		if im.Resolved.ID() == "kgw.kgateway" {
+			return im
+		}
+	}
+	t.Fatal("no kgw.kgateway")
+	return InstallModel{}
 }

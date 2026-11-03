@@ -123,14 +123,14 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool) func() *diagnose
 	}
 	run := func() *diagnose.Diagnosis {
 		rt := health.Runtime{States: e.states[res.ID()], Collected: col}
+		var pc *printCtx
 		if memo {
-			pc := &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: e.cfg.MetricsMaxAge, ver: &ver, views: im.Computed, kc: kc, col: col,
+			pc = &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: e.cfg.MetricsMaxAge, ver: &ver, views: im.Computed, kc: kc, col: col,
 				proc: im.Process}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
 		rep := health.Evaluate(in, checks, rt)
-		d := diagnose.Build(&rep, diagnose.Input{Install: res, Owned: im.Owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()},
-			diagnose.Families())
+		d := e.diagnosis(&rep, diagnose.Input{Install: res, Owned: im.Owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()}, pc)
 		if len(rep.Findings) != len(im.Health.Findings) || len(d.Groups) != len(im.Diagnosis.Groups) {
 			tb.Fatalf("the stage gave %d findings in %d groups, the model %d in %d", len(rep.Findings), len(d.Groups), len(im.Health.Findings), len(im.Diagnosis.Groups))
 		}

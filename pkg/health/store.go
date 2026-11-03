@@ -99,6 +99,13 @@ type States struct {
 	// ids memoise each check's finding IDs; groups the install's group IDs.
 	ids    map[string]*IDs
 	groups *IDs
+	merged merged
+}
+
+// merged is the last Evaluate's findings and the memo each check had after it.
+type merged struct {
+	memos    []*memo
+	findings []Finding
 }
 
 // NewStates returns States with no Stores.

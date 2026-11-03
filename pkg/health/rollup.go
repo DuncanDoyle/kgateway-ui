@@ -55,6 +55,8 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // inside the grace period wakes the report at the grace end (Report.Next).
 // A check without Clock reuses its memo while its input print holds and its wake time is not due (§16.2).
 // Every finding gets its ID; one without Since gets its first-seen time from its check's Store (design §5.1).
+// When every check reuses the same memos as the last Evaluate, the findings are that
+// report's slice, shared and with the Group values diagnose.Build set on it.
 func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
 	memoize := rt.Print != nil && rt.States != nil
@@ -76,9 +78,18 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	}
 	// Run every check first so the findings are allocated once.
 	runs := make([][]Finding, len(checks))
+	var used []*memo // each check's memo after this evaluation; nil when it has none
+	reused := memoize
+	if memoize {
+		used = make([]*memo, len(checks))
+	}
 	n := 0
 	for i, c := range checks {
-		fs, cr, wake, out := evaluateOne(in, c, inputs[i], rt, memoize, outputs, outPrints)
+		fs, cr, wake, out, hit := evaluateOne(in, c, inputs[i], rt, memoize, outputs, outPrints)
+		if memoize {
+			used[i] = rt.States.memos[c.Name()]
+			reused = reused && hit
+		}
 		runs[i] = fs
 		n += len(fs)
 		r.Checks = append(r.Checks, cr)
@@ -92,18 +103,14 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 			r.Next = wake
 		}
 	}
-	r.Findings = make([]Finding, 0, n)
-	for _, fs := range runs {
-		for _, f := range fs {
-			if _, known := sevRank[f.Severity]; !known {
-				note := fmt.Sprintf("unrecognised severity %q", f.Severity)
-				f.Detail = strings.TrimSuffix(note+": "+f.Detail, ": ")
-				f.Severity = SeverityWarning
-			}
-			r.Findings = append(r.Findings, f)
+	if reused && slices.Equal(used, rt.States.merged.memos) {
+		r.Findings = rt.States.merged.findings
+	} else {
+		r.Findings = merge(runs, n)
+		if memoize {
+			rt.States.merged = merged{memos: used, findings: r.Findings}
 		}
 	}
-	r.Findings = sortFindings(r.Findings)
 	for _, f := range r.Findings {
 		r.Counts[f.Severity]++
 	}
@@ -111,12 +118,28 @@ func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	return r
 }
 
-// evaluateOne runs c, or reuses its memo, and returns its findings, result,
+// merge returns runs' n findings in one sorted slice, an unknown severity made a warning.
+func merge(runs [][]Finding, n int) []Finding {
+	all := make([]Finding, 0, n)
+	for _, fs := range runs {
+		for _, f := range fs {
+			if _, known := sevRank[f.Severity]; !known {
+				note := fmt.Sprintf("unrecognised severity %q", f.Severity)
+				f.Detail = strings.TrimSuffix(note+": "+f.Detail, ": ")
+				f.Severity = SeverityWarning
+			}
+			all = append(all, f)
+		}
+	}
+	return sortFindings(all)
+}
+
+// evaluateOne runs c, or reuses its memo (hit), and returns its findings, result,
 // wake time and, when a later check reads it (outPrints has its name), its
 // output print.
 func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outputs map[string]CheckOutput,
 	outPrints map[string]uint64,
-) (fs []Finding, cr CheckResult, wake time.Time, out uint64) {
+) (fs []Finding, cr CheckResult, wake time.Time, out uint64, hit bool) {
 	var key uint64
 	keyed := false
 	if memoize && !set.Clock {
@@ -136,7 +159,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 				if _, read := outPrints[c.Name()]; read {
 					out = stampPrint(m.out, at)
 				}
-				return m.findings, cr, m.wake, out
+				return m.findings, cr, m.wake, out, true
 			}
 		}
 	}
@@ -160,7 +183,7 @@ func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outp
 	} else if memoize {
 		delete(rt.States.memos, c.Name())
 	}
-	return fs, cr, wake, out
+	return fs, cr, wake, out, false
 }
 
 // runContext returns c's RunContext: its Store, a fresh sink, and in with
