@@ -31,8 +31,7 @@
             "rollout": {
               "progressing": false
             }
-          },
-          "skew": true
+          }
         },
         {
           "gateway": {

@@ -210,10 +210,9 @@
     "install": "kgw.kgateway",
     "processes": {
       "controller": {
-        "desired": 1,
+        "desired": 2,
         "observed": true,
         "ready": 2,
-        "restartsRecent": 0,
         "version": "2.4.7"
       },
       "proxies": {

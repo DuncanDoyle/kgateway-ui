@@ -76,9 +76,12 @@ func newProcSummary(v *view, i *engine.InstallModel) *procSummary {
 			sf.reject = f
 		}
 	}
-	for _, p := range ps.controller().Processes {
-		if p.Waiting == "" && p.Version != "" && !slices.Contains(ps.ctrl, p.Version) {
-			ps.ctrl = append(ps.ctrl, p.Version)
+	// Controller versions come from the Pods the caller may view, never through a hidden Deployment (§14 rule 16).
+	if d := i.Resolved.Deployment; d != nil && v.can(objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}) {
+		for _, p := range ps.controller().Processes {
+			if p.Waiting == "" && p.Version != "" && !slices.Contains(ps.ctrl, p.Version) && v.can(process.PodRef(d.Namespace, p)) {
+				ps.ctrl = append(ps.ctrl, p.Version)
+			}
 		}
 	}
 	if v := strings.TrimPrefix(i.Resolved.Version, "v"); len(ps.ctrl) == 0 && v != "" {
@@ -157,18 +160,13 @@ func (ps *procSummary) controllerSummary() ProcessSummary {
 	if s.Restricted || !s.Observed {
 		return out
 	}
-	var n int32
 	for k, p := range s.Processes {
-		if p.RestartsRecent != nil {
-			n += *p.RestartsRecent
-		}
 		if k == 0 {
 			out.Version = p.Version
 		} else if p.Version != out.Version {
 			out.Version = ""
 		}
 	}
-	out.RestartsRecent = &n
 	return out
 }
 
@@ -214,13 +212,13 @@ func (g *gatewayProc) health() health.State {
 
 func (g *gatewayProc) restarting() bool { return g.facts != nil && g.facts.restarting }
 
-// skew reports a proxy on a version no running controller replica has, or a 022.
+// skew reports a visible proxy on a version no visible controller replica has, or a 022.
 func (ps *procSummary) skew(g *gatewayProc) bool {
 	if g.facts != nil && g.facts.skew {
 		return true
 	}
 	for _, p := range g.set.Processes {
-		if p.Waiting == "" && p.Version != "" && len(ps.ctrl) > 0 && !slices.Contains(ps.ctrl, p.Version) {
+		if p.Waiting == "" && p.Version != "" && len(ps.ctrl) > 0 && !slices.Contains(ps.ctrl, p.Version) && ps.v.can(process.PodRef(g.ref.Namespace, p)) {
 			return true
 		}
 	}

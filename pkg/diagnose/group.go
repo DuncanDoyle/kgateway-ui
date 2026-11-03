@@ -60,7 +60,8 @@ type Input struct {
 	IDs *health.IDs
 }
 
-// Family is one kind of shared cause, a row of the design §5.2 table.
+// Family is one kind of shared cause, a row of the design §5.2 table. Upstream families
+// claim a finding's own resource as its cause; the API still checks a title's member.
 type Family interface {
 	// Name identifies the family; it is part of its groups' IDs.
 	Name() string

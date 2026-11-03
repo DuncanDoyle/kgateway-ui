@@ -158,7 +158,6 @@ export interface ProcessSummary {
   observed: boolean;
   ready?: number;
   desired?: number;
-  restartsRecent?: number;
   version?: string;
   restricted?: boolean;
 }

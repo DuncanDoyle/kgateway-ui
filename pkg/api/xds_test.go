@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -90,8 +91,15 @@ func withoutRejects(m ctrlmetrics.Metrics) ctrlmetrics.Metrics {
 // Gateway infra/nack (status of an older generation) with a 2/2 proxy.
 func nackWorld(extra ...runtime.Object) []runtime.Object {
 	d := testutil.ControllerDeployment("kgw", "kgateway", img, 2, 2, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`))
-	return isolated(append([]runtime.Object{testutil.ControllerPod(d, "kgateway-1", true), stale(testutil.Gateway("infra", "nack", "kgateway", nil)),
+	objs := isolated(append([]runtime.Object{testutil.ControllerPod(d, "kgateway-1", true), stale(testutil.Gateway("infra", "nack", "kgateway", nil)),
 		testutil.ProxyDeployment("infra", "nack", 2, 2)}, extra...)...)
+	// Both controller Pods belong to d, so it replaces the world's 1-replica Deployment.
+	for i, o := range objs {
+		if c, ok := o.(*appsv1.Deployment); ok && c.Namespace == "kgw" && c.Name == "kgateway" {
+			objs[i] = d
+		}
+	}
+	return objs
 }
 
 // xdsHarness starts nackWorld with lm; the metrics are collected at the engine clock.

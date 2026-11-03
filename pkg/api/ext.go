@@ -1,8 +1,6 @@
 package api
 
 import (
-	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
-
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 

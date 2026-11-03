@@ -20,6 +20,7 @@ import (
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
@@ -88,9 +89,8 @@ func noTyped(t *testing.T, what string, m map[string]any) {
 	}
 }
 
-// Review finding 13: a restricted finding on /health, /overview and its
-// detail carries no evidence, fix or steps; a visible finding with a hidden
-// dependency gets evidenceRestricted and no evidence.
+// A restricted finding carries no evidence, fix or steps on /health, /overview or its detail;
+// a hidden dependency gives evidenceRestricted and no evidence.
 func TestTypedEvidenceRestrictedOnHealthAndOverview(t *testing.T) {
 	h := xdsHarness(t, setup{}, edgeRejects(t), nackWorld()...)
 	nack := xdsFinding(h.at(t, testutil.Now), "infra", "nack")
@@ -287,7 +287,7 @@ func TestDiagnosticsTopTen(t *testing.T) {
 	if d.DataPlane != (DataPlaneSummary{Gateways: 2, Rejecting: 2}) || len(d.Checks) != len(r.Checks) || d.Install != "kgw.kgateway" || !d.CollectedAt.Equal(r.CollectedAt) {
 		t.Fatalf("data plane %+v, %d checks", d.DataPlane, len(d.Checks))
 	}
-	if c := d.Processes.Controller; !c.Observed || c.Desired == nil || *c.Desired != 1 || c.Ready == nil || *c.Ready != 2 || c.Version != "2.4.7" {
+	if c := d.Processes.Controller; !c.Observed || c.Desired == nil || *c.Desired != 2 || c.Ready == nil || *c.Ready != 2 || c.Version != "2.4.7" {
 		b, _ := json.Marshal(c)
 		t.Fatalf("controller summary %s", b)
 	}
@@ -434,12 +434,23 @@ func TestProcessSetCountsOnlyWhenPodHidden(t *testing.T) {
 		t.Fatalf("hidden Pod names in %s", body)
 	}
 
+	// Skew needs a visible proxy: edge-0 hidden reads no skew, and skew=true leaves edge out.
+	if e.Skew || len(get[ProcessesResponse](t, srv, procsPath+"?skew=true", 200).Proxies.Items) != 0 ||
+		get[Diagnostics](t, srv, diagPath, 200).Processes.Proxies.Skew != 0 {
+		t.Fatalf("hidden edge-0 reads skew: %+v", e)
+	}
+	// A hidden controller and edge-0: no version is learnt through either.
+	hid := authzSrv(t, h, deny(ctrlDeployment, podRef("infra", "edge-0")))
+	if p := get[ProcessesResponse](t, hid, procsPath+"?skew=true", 200).Proxies; len(p.Items) != 0 {
+		t.Fatalf("hidden controller and edge-0: skew rows %v", gatewayNames(p))
+	}
+
 	srv = authzSrv(t, h, deny(ctrlDeployment))
 	r = get[ProcessesResponse](t, srv, procsPath, 200)
 	if c := r.Controller; !c.Restricted || len(c.Processes) != 0 || c.Rollout != nil || c.Desired == nil || *c.Desired != 1 {
 		t.Fatalf("hidden controller Deployment: %+v", c)
 	}
-	if c := get[Diagnostics](t, srv, diagPath, 200).Processes.Controller; !c.Restricted || c.Version != "" || c.RestartsRecent != nil || c.Desired == nil {
+	if c := get[Diagnostics](t, srv, diagPath, 200).Processes.Controller; !c.Restricted || c.Version != "" || c.Desired == nil {
 		t.Fatalf("hidden controller summary %+v", c)
 	}
 	d := get[Diagnostics](t, h.srv, diagPath, 200).Processes
@@ -549,8 +560,8 @@ func TestFindingDetailProcessNextStep(t *testing.T) {
 	if pg := groupOn(t, g, ctrlDeployment); pg.Code != health.CodeProcessRestarting || len(pg.NextSteps) != 1 || pg.Class != diagnose.ClassProcesses {
 		t.Fatalf("process group %+v", pg)
 	}
-	if c := g.Processes.Controller; c.RestartsRecent == nil || *c.RestartsRecent != 1 {
-		t.Fatalf("controller summary %+v", c)
+	if g.Processes.Proxies.Restarting != 0 || g.Processes.Controller.Version != "2.4.7" {
+		t.Fatalf("summaries %+v", g.Processes)
 	}
 }
 
@@ -599,4 +610,17 @@ func proxyStatsWorld(t *testing.T, apply func(*proxystats.PodStats)) *harness {
 	sh.at(t, testutil.Now)
 	sh.at(t, testutil.Now.Add(61*time.Second))
 	return sh.harness
+}
+
+// A group row's title quotes its top member only when the caller may view that member's resource.
+func TestGroupTitleNeedsTheMember(t *testing.T) {
+	gw, hidden := edgeRef.Ref(), route("shop", "cart")
+	fs := []health.Finding{{Code: health.CodeConditionFalse, Severity: health.SeverityError, Resource: &hidden, Message: "hidden message"}}
+	g := &diagnose.Group{ID: "g", Cause: &gw, Members: []int{0}, Severity: health.SeverityError}
+	h := &handler{commands: diagnose.Kubectl{}}
+	v := &view{a: deny(hidden), seen: map[objects.Ref]bool{}}
+	l := linkerFor(v, &engine.Model{}, &engine.InstallModel{})
+	if row := h.groupRow(v, l, g, fs, 0, diagnose.Input{}); row.Restricted || row.Title != hiddenTitle {
+		t.Fatalf("row %+v", row)
+	}
 }

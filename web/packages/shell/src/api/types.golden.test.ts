@@ -850,7 +850,6 @@ const diagnostics = shape<Diagnostics>(
           observed: "!",
           ready: "?",
           desired: "?",
-          restartsRecent: "?",
           version: "?",
           restricted: "?",
         }),

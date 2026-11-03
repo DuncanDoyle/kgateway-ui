@@ -107,8 +107,6 @@ type ProcessSummary struct {
 	Observed bool   `json:"observed"`
 	Ready    *int32 `json:"ready,omitempty"`
 	Desired  *int32 `json:"desired,omitempty"`
-	// RestartsRecent are the restarts of the visible replicas in the last 15 minutes.
-	RestartsRecent *int32 `json:"restartsRecent,omitempty"`
 	// Version is the version every visible replica runs; empty when they differ.
 	Version    string `json:"version,omitempty"`
 	Restricted bool   `json:"restricted,omitempty"`

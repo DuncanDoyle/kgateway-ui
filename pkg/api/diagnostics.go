@@ -22,6 +22,9 @@ const (
 // xdsCheckName is the check whose failure leaves the data plane unknown.
 const xdsCheckName = "xDS rejects"
 
+// hiddenTitle is a group's title when the caller may not view its top member's resource.
+const hiddenTitle = "Details hidden"
+
 // WithCommands sets the next-step commands; the default is diagnose.Kubectl.
 func WithCommands(c diagnose.Commands) HandlerOption {
 	return func(cfg *handlerConfig) { cfg.commands = c }
@@ -192,6 +195,9 @@ func (h *handler) groupRow(v *view, l linker, g *diagnose.Group, fs []health.Fin
 		}
 	}
 	row.Title = fs[top].Message
+	if r := fs[top].Resource; r != nil && !v.can(*r) {
+		row.Title = hiddenTitle
+	}
 	refs := visibleAffected(v, g)
 	row.AffectedTotal = len(refs)
 	for _, r := range refs[:min(len(refs), maxGroupAffected)] {
