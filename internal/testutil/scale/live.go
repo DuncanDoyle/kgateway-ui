@@ -49,8 +49,8 @@ func Live(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
 
 // LivePhase3 is Live with the tier's proxy Deployments, proxy Pods and Warning Events
 // seeded on the fake typed client, its CRDs on a fake metadata client and its Metrics
-// set. The proxy Pod, Event and CRD watches run. Services and EndpointSlices
-// (testutil.ScaleServices) are left out until a watch reads them.
+// set. The proxy Pod, Event and CRD watches run. Services, EndpointSlices and the
+// routes' Service backendRefs (referenceServices) are left out: 3.4 seeds them together.
 func LivePhase3(tb testing.TB, tier Tier, now func() time.Time) *LiveWorld {
 	tb.Helper()
 	return live(tb, tier, now, true)
@@ -88,7 +88,6 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 		for _, d := range testutil.ScaleProxyDeployments(tier.Shape()) {
 			objs = append(objs, d)
 		}
-		referenceServices(tier, w.Routes)
 		for _, gw := range testutil.ScaleLongGatewayObjects(tier.Shape()) {
 			gw.SetResourceVersion("1")
 			objs = append(objs, gw)

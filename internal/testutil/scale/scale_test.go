@@ -529,8 +529,8 @@ func TestLivePhase3Seeds(t *testing.T) {
 	if len(w.CRDs) != Typical.GatewayAPICRDs || len(w.Metrics) == 0 {
 		t.Fatalf("crds %d metrics %d", len(w.CRDs), len(w.Metrics))
 	}
-	if got, want := serviceRefs(w.Routes), referencedSet(Typical); !reflect.DeepEqual(got, want) {
-		t.Fatalf("named %d Services, referenced %d", len(got), len(want))
+	if got := serviceRefs(w.Routes); len(got) != 0 {
+		t.Fatalf("the 3.2 world names %d Services", len(got))
 	}
 	if Live(t, Typical, func() time.Time { return testutil.Now }).Metrics != nil {
 		t.Fatal("Live seeds Phase 3")
