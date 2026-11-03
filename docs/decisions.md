@@ -733,19 +733,20 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 
 **Alternatives:** CSS `order` or grid placement; rejected, since tab order would then differ from the visual order.
 
-## D-043 — Default soft memory limit; median-of-five OS-memory gate (2026-11-03, phase 3)
-**Status:** accepted 2026-11-03 (user, Task 46 interim measurement)
+## D-043 — Median-of-five OS-memory gate at a measured value; opt-in chart memory limit (2026-11-03, phase 3)
+**Status:** accepted 2026-11-03 (user, Task 46 interim measurement); amends D-022's and design §16.3's 256 MiB OS-memory gate
 
 **Context:**
-- The 3.2 measurement world broke the OS-memory gate (≤ 256 MiB, D-022). Five stream runs gave 252–285 MiB. Memory from the OS follows the GC goal, and a GC during a maturation compute marks about 115 MB live, so the goal reaches about 230 MB.
+- The 3.2 measurement world broke the OS-memory gate (≤ 256 MiB). Memory from the OS follows the GC goal: a GC during a maturation compute marks about 115 MB live, so the goal reaches about 230 MB.
 - One run per world is noisy: runs on the same code differed by up to 45 MiB.
+- A 224 MiB default soft limit passed the stream gate, but thrashed the dense Extreme world (100 × 1000, default edge cap): warm recompute 110 → 312 ms, GC cycles 12 → 395, GC CPU 0.6 → 20.9 s. 90 % of the 512Mi limit (460 MiB) matched no limit. A fixed default would also stop a raised `limits.memory` from raising the target.
 - Retained heap broke by 0.5 MiB. The world's routes carried a Service backendRef per referenced Service, seeded for 3.4, which no 3.2 check reads; they cost 1.6 MB.
 
 **Decision:**
-1. With `GOMEMLIMIT` unset, the binary sets a soft memory limit of 224 MiB, or 90 % of the pod's memory limit when that is lower (`internal/memlimit`, `app.ApplyMemoryLimit`). `GOMEMLIMIT` still wins. The chart's `memoryLimit` renders `GOMEMLIMIT`; empty keeps the default.
-2. The stream OS-memory gate reads the median of five runs per world, like the heap and dense gates. CPU stays gated in every run.
+1. No default soft limit beyond D-025: the binary sets 90 % of the pod's memory limit, `GOMEMLIMIT` wins, and no pod limit sets none. The chart's `memoryLimit` is opt-in and renders `GOMEMLIMIT`; empty renders nothing.
+2. The stream OS-memory gate reads the median of five runs per world, like the heap and dense gates, and is 288 MiB: the worst median of the spec-edit and annotation streams plus about 10 %, rounded up to 8 MiB (256.1 MiB, spec-edit in the measurement world). CPU stays gated in every run.
 3. The Service backendRefs leave the 3.2 measurement world. 3.4 seeds them again with the Services and EndpointSlices.
 
-**Consequences:** GC runs more often near the limit, at some CPU cost inside the stream budgets. A stream test takes five times as long.
+**Consequences:** The gate keeps OS memory inside the 512Mi pod limit with headroom, but no longer at half of it. A stream test takes five times as long.
 
-**Alternatives:** A lower GOGC (rejected: it costs CPU at every heap size, not only near the limit); cutting per-recompute garbage, mostly Phase 2 views and the explorer index (deferred: a larger refactor).
+**Alternatives:** A 224 MiB default soft limit (rejected: the dense thrash above); a lower GOGC (rejected: it costs CPU at every heap size); cutting per-recompute garbage, mostly Phase 2 views and the explorer index (deferred: a larger refactor).
