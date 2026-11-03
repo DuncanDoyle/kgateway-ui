@@ -319,7 +319,7 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
     default: {
       const render = finding ? rendererFor(findingRenderers, finding.code) : undefined;
       if (!finding || !render) return null;
-      const f = { ...finding, evidence: evidence as Evidence };
+      const f = { ...finding, evidence };
       return <Slot id={`finding-renderer:${f.code}`} resetKey={findingKey(f)} render={() => render(f)} />;
     }
   }

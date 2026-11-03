@@ -42,7 +42,7 @@ export interface SuggestedFix {
 export interface FindingDetail {
   install: string;
   finding: FindingItem;
-  evidence?: Evidence;
+  evidence?: Evidence | OtherEvidence;
   suggestedFix?: SuggestedFix;
   nextSteps?: NextStep[];
   affected: Page<LinkedRef>;

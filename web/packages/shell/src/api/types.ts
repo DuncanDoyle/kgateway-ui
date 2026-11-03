@@ -1,5 +1,5 @@
 import type { HealthState } from "../theme/tokens";
-import type { Evidence } from "./diagTypes";
+import type { Evidence, OtherEvidence } from "./diagTypes";
 import type { Link, LinkedRef } from "./exploreTypes";
 
 export * from "./diagTypes";
@@ -41,7 +41,7 @@ export interface Finding {
   since?: string;
   restricted?: boolean;
   evidenceRestricted?: boolean;
-  evidence?: Evidence;
+  evidence?: Evidence | OtherEvidence;
 }
 /** detail: context for an OK check (e.g. scope source); pending: not OK only because of the grace period. */
 export interface CheckResult {
