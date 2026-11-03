@@ -14,7 +14,7 @@ import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "
 import { renderWhenFontsReady } from "../shell/renderWhenFontsReady";
 import { pseudoRules, renderWithTheme, stubApi } from "../test/render";
 import { EvidenceView } from "./EvidenceView";
-import { GROUP_ROW_H, GroupRow } from "./GroupRow";
+import { DiagnosticsGroupRow, GROUP_ROW_H } from "./GroupRow";
 import { NextSteps } from "./NextSteps";
 import { ProcessLine } from "./ProcessLine";
 import { ProcessTable } from "./ProcessTable";
@@ -196,7 +196,7 @@ describe("GroupRow", () => {
   });
 
   it("shows state, title, cause, blast radius, age and code, with a next-step expander", () => {
-    renderWithTheme(<GroupRow group={group()} installId="kgw.kgateway" />);
+    renderWithTheme(<DiagnosticsGroupRow group={group()} installId="kgw.kgateway" />);
     expect(screen.getByText("Error")).toBeInTheDocument();
     expect(screen.getByText("Proxies reject this Gateway's config")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /edge/ })).toBeInTheDocument();
@@ -222,7 +222,7 @@ describe("GroupRow", () => {
       since: undefined,
       cause: { group: gw, kind: "Gateway", namespace: "infra", name: "secret-gw", link: "none" },
     });
-    const { container } = renderWithTheme(<GroupRow group={hidden} installId="kgw.kgateway" />);
+    const { container } = renderWithTheme(<DiagnosticsGroupRow group={hidden} installId="kgw.kgateway" />);
     expect(screen.getByText(findingsCopy.restricted)).toBeInTheDocument();
     expect(screen.getByText("KGWUI-001")).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/secret-gw/);
@@ -231,7 +231,7 @@ describe("GroupRow", () => {
 
   it("reserves a fixed row height, so late data shifts nothing", () => {
     const { container } = renderWithTheme(
-      <GroupRow group={group({ nextSteps: undefined })} installId="kgw.kgateway" />,
+      <DiagnosticsGroupRow group={group({ nextSteps: undefined })} installId="kgw.kgateway" />,
     );
     const row = container.querySelector("[data-testid=group-row]") as HTMLElement;
     const css = [...document.querySelectorAll("style")].map((s) => s.textContent ?? "").join("");

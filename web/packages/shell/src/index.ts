@@ -38,7 +38,7 @@ export {
 } from "./api/hooks";
 export * from "./api/types";
 export { EvidenceView } from "./diagnostics/EvidenceView";
-export { GROUP_ROW_H, GroupRow } from "./diagnostics/GroupRow";
+export { DiagnosticsGroupRow, GROUP_ROW_H } from "./diagnostics/GroupRow";
 export { NextSteps } from "./diagnostics/NextSteps";
 export { PROCESS_LINE_H, ProcessLine } from "./diagnostics/ProcessLine";
 export { ProcessTable } from "./diagnostics/ProcessTable";

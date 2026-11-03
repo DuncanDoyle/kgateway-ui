@@ -118,7 +118,7 @@ interface GroupRowProps {
  * One "Needs attention" group: state, title, cause, blast radius, age, code and its next steps.
  * A restricted group shows only its severity, code and the restricted label (design §14 rule 13).
  */
-export function GroupRow({ group: g, installId, stylesOverride }: GroupRowProps) {
+export function DiagnosticsGroupRow({ group: g, installId, stylesOverride }: GroupRowProps) {
   const now = useNow();
   const [open, setOpen] = useState(false);
   const panelId = useId();
