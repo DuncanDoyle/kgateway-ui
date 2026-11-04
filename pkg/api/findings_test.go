@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
@@ -26,6 +29,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
@@ -684,5 +688,166 @@ func TestFindingsCursorFarTimes(t *testing.T) {
 		if err != nil || !slices.Equal(fwd, want) || !slices.Equal(back, want) {
 			t.Errorf("%+v: forward %v, back %v, want %v (%v)", s, fwd, back, want, err)
 		}
+	}
+}
+
+// fixCatalog serves core Service and Secret, and Service in the extra groups.
+func fixCatalog(extra []string, unknown ...string) func() kinds.Catalog {
+	gks := []schema.GroupKind{{Kind: "Service"}, {Kind: "Secret"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"}}
+	for _, g := range extra {
+		gks = append(gks, schema.GroupKind{Group: g, Kind: "Service"})
+	}
+	c := kinds.NewCatalog(gks, unknown)
+	return func() kinds.Catalog { return c }
+}
+
+// refsRoute is shop/r on infra/edge with ResolvedRefs=False/reason and refs as its backendRefs.
+func refsRoute(reason string, refs ...any) *unstructured.Unstructured {
+	gw := testutil.GwRef("infra", "edge")
+	u := testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, reason)}})
+	return testutil.WithRules(u, map[string]any{"backendRefs": refs})
+}
+
+// tlsEdge is the Gateway infra/tls whose listener https is RefNotPermitted and names certs/tls-cert.
+func tlsEdge() *unstructured.Unstructured {
+	gw := testutil.Gateway("infra", "tls", "kgateway", nil, testutil.Listener{Name: "https", Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed"),
+		testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")}})
+	l := gw.Object["spec"].(map[string]any)["listeners"].([]any)[0].(map[string]any)
+	l["protocol"], l["tls"] = "HTTPS", map[string]any{"certificateRefs": []any{map[string]any{"name": "tls-cert", "namespace": "certs"}}}
+	return gw
+}
+
+// fixDetail returns the detail of the one code finding on resource ns/name.
+func fixDetail(t *testing.T, srv *httptest.Server, code, ns, name string) FindingDetail {
+	t.Helper()
+	p := get[Page[FindingRow]](t, srv, findingsBase+"?code="+code+"&namespace="+ns, http.StatusOK)
+	var id string
+	for _, r := range p.Items {
+		if r.Resource != nil && r.Resource.Name == name {
+			if id != "" {
+				t.Fatalf("two %s on %s/%s", code, ns, name)
+			}
+			id = r.ID
+		}
+	}
+	if id == "" {
+		t.Fatalf("no %s on %s/%s in %+v", code, ns, name, p.Items)
+	}
+	return findingDetail(t, srv, id)
+}
+
+// roundTrip parses y and renders it again, failing t when y does not parse.
+func roundTrip(t *testing.T, y string) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := sigsyaml.Unmarshal([]byte(y), &m); err != nil {
+		t.Fatalf("YAML does not parse: %v\n%s", err, y)
+	}
+	again, err := sigsyaml.Marshal(m)
+	if err != nil || string(again) != y {
+		t.Fatalf("YAML does not round-trip: %v\n%s\nvs\n%s", err, y, again)
+	}
+	return m
+}
+
+// Design §7.7 and R77: one served group with the kind gives the corrected-group
+// fragment; two, or an unknown served state, give none. 014 on a spec-defined
+// field gives the grant in the target namespace, group "" for a defaulted core ref.
+func TestSuggestedFixes(t *testing.T) {
+	typo := map[string]any{"group": "delegation.gateway.example", "kind": "Service", "name": "cart", "port": int64(80)}
+	crossNS := map[string]any{"name": "cart", "namespace": "store", "port": int64(80)}
+	typoCross := map[string]any{"group": "delegation.gateway.example", "kind": "Service", "name": "cart", "namespace": "store"}
+	route := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "r"}
+	grant := func(ns, name string) objects.Ref {
+		return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "ReferenceGrant", Namespace: ns, Name: name}
+	}
+	groupYAML := func(ns string) map[string]any {
+		return map[string]any{"group": "", "kind": "Service", "name": "cart", "namespace": ns}
+	}
+	cases := []struct {
+		name, code, ns, res string
+		obj                 *unstructured.Unstructured
+		catalog             func() kinds.Catalog
+		want                *SuggestedFix
+		yaml                map[string]any
+	}{
+		{"013 one served group", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog(nil),
+			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
+				Basis: "API discovery: only group `core` serves kind `Service`."}, groupYAML("shop")},
+		{"013 two served groups", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog([]string{"other.example"}), nil, nil},
+		{"013 served state unknown", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog(nil, "delegation.gateway.example"), nil, nil},
+		{"014 backendRef grant", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", crossNS), fixCatalog(nil),
+			&SuggestedFix{Title: "Create a ReferenceGrant in `store`", Target: LinkedRef{Ref: grant("store", "allow-shop-httproute-cart")}, Create: true,
+				Basis: "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace."},
+			map[string]any{"apiVersion": "gateway.networking.k8s.io/v1beta1", "kind": "ReferenceGrant",
+				"metadata": map[string]any{"name": "allow-shop-httproute-cart", "namespace": "store"},
+				"spec": map[string]any{"from": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute", "namespace": "shop"}},
+					"to": []any{map[string]any{"group": "", "kind": "Service", "name": "cart"}}}}},
+		{"014 certificateRef grant", health.CodeRefNotPermitted, "infra", "tls", tlsEdge(), fixCatalog(nil),
+			&SuggestedFix{Title: "Create a ReferenceGrant in `certs`", Target: LinkedRef{Ref: grant("certs", "allow-infra-gateway-tls-cert")}, Create: true,
+				Basis: "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace."},
+			map[string]any{"apiVersion": "gateway.networking.k8s.io/v1beta1", "kind": "ReferenceGrant",
+				"metadata": map[string]any{"name": "allow-infra-gateway-tls-cert", "namespace": "certs"},
+				"spec": map[string]any{"from": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "Gateway", "namespace": "infra"}},
+					"to": []any{map[string]any{"group": "", "kind": "Secret", "name": "tls-cert"}}}}},
+		// R77: a wrong group is never a missing grant.
+		{"014 wrong group", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog(nil),
+			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
+				Basis: "API discovery: only group `core` serves kind `Service`."}, groupYAML("store")},
+		{"014 wrong group, two served", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog([]string{"other.example"}), nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{catalog: tc.catalog, rulesFor: computedtest.NoViews}, world(tc.obj)...)
+			d := fixDetail(t, srv, tc.code, tc.ns, tc.res)
+			if tc.want == nil {
+				if d.SuggestedFix != nil {
+					t.Fatalf("want no fix, got %+v", d.SuggestedFix)
+				}
+				return
+			}
+			got := d.SuggestedFix
+			if got == nil {
+				t.Fatalf("no fix; evidence %+v", d.Evidence)
+			}
+			y := got.YAML
+			got.YAML, got.Target.Link = "", ""
+			if !reflect.DeepEqual(*got, *tc.want) {
+				t.Fatalf("fix %+v\nwant %+v", *got, *tc.want)
+			}
+			if m := roundTrip(t, y); !reflect.DeepEqual(m, tc.yaml) {
+				t.Fatalf("YAML %v, want %v", m, tc.yaml)
+			}
+		})
+	}
+}
+
+// Design §7.7: two cross-namespace refs on the failing parent leave no single
+// ref, so the detail lists both candidates and has no YAML.
+func TestNoFixWithoutAttribution(t *testing.T) {
+	a := map[string]any{"name": "cart", "namespace": "store"}
+	b := map[string]any{"name": "pay", "namespace": "bank"}
+	_, srv, _ := startWith(t, setup{catalog: fixCatalog(nil), rulesFor: computedtest.NoViews}, world(refsRoute("RefNotPermitted", a, b))...)
+	d := fixDetail(t, srv, health.CodeRefNotPermitted, "shop", "r")
+	ev, ok := d.Evidence.(*health.RefsEvidence)
+	if !ok || ev.Attributed || len(ev.Candidates) != 2 || ev.Candidates[0].Path != "spec.rules[0].backendRefs[0]" || ev.Candidates[1].Path != "spec.rules[0].backendRefs[1]" {
+		t.Fatalf("evidence %#v: want both candidates, not attributed", d.Evidence)
+	}
+	if d.SuggestedFix != nil {
+		t.Fatalf("want no fix, got %+v", d.SuggestedFix)
+	}
+}
+
+// Design §14 rule 15: a fix that names an object the caller may not view is
+// dropped; the finding keeps its evidence.
+func TestNoFixNamingHiddenObject(t *testing.T) {
+	hideCart := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Namespace != "store" })
+	_, srv, _ := startWith(t, setup{authz: hideCart, catalog: fixCatalog(nil), rulesFor: computedtest.NoViews},
+		world(refsRoute("RefNotPermitted", map[string]any{"name": "cart", "namespace": "store"}))...)
+	d := fixDetail(t, srv, health.CodeRefNotPermitted, "shop", "r")
+	if d.Finding.Restricted || d.SuggestedFix != nil {
+		t.Fatalf("restricted %v fix %+v: want a visible finding without a fix", d.Finding.Restricted, d.SuggestedFix)
 	}
 }

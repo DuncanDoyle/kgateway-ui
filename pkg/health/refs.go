@@ -295,6 +295,11 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 		}
 	}
 	ev.Attributed = attributable && len(ev.Candidates) == 1
+	if ev.Attributed && len(bad) > 0 {
+		if gs := in.Catalog.GroupsWithKind(bad[0].Ref.Kind); len(gs) == 1 {
+			ev.Group = &gs[0]
+		}
+	}
 	f.Facts = ev
 	return f, true
 }

@@ -238,6 +238,9 @@ type RefsEvidence struct {
 	Explanation string        `json:"explanation"`
 	Candidates  []RefLocation `json:"candidates,omitempty"`
 	Attributed  bool          `json:"attributed"`
+	// Group is the one group discovery says serves the candidate's kind, set
+	// only for an attributed kind-not-served explanation. Never serialised.
+	Group *string `json:"-"`
 }
 
 // EvidenceKind implements Evidence.
