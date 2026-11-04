@@ -68,6 +68,7 @@ func TestFreshnessKindsAtTheAPI(t *testing.T) {
 		{"older generation", "shop/old", health.FreshnessStale, stale(routeWith("old", accepted, resolved)), 1},
 		{"reason Pending", "shop/pend", health.FreshnessPending, routeWith("pend", pendingAccepted, resolved), 0},
 		{"status Unknown", "shop/unk", health.FreshnessPending, routeWith("unk", accepted, unknownRefs), 0},
+		{"parent not found", "shop/lost", health.FreshnessNeverWritten, testutil.HTTPRoute("shop", "lost", []objects.ParentRef{testutil.GwRef("infra", "gone")}), 0},
 		{"policy with no ancestor", "shop/tp", health.FreshnessNoAncestor, policy, 0},
 		{"stale and Pending", "shop/both", health.FreshnessStale, stale(routeWith("both", pendingAccepted, resolved)), 1},
 	}
@@ -119,7 +120,7 @@ func TestEvidenceClipsLongStatus(t *testing.T) {
 			detail, id = f.Detail, f.ID
 		}
 	}
-	if !strings.Contains(detail, "…[truncated]") || len(detail) > 1024+200 || !utf8.ValidString(detail) {
+	if !strings.Contains(detail, "…[truncated]") || len(detail) > 1024+200 || !utf8.ValidString(detail) || strings.Contains(detail, "�") {
 		t.Fatalf("KGWUI-002 detail not cut at 1 KiB at a rune boundary: %d bytes", len(detail))
 	}
 	route := "/api/v1/installs/kgw.kgateway/routes/" + objects.GatewayAPIGroup + "/HTTPRoute/shop/big"

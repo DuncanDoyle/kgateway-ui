@@ -330,13 +330,18 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// owned are the Gateways and ListenerSets of this install: the only
 	// ancestors whose policy status counts here.
 	owned := map[objects.Ref]bool{}
-	// ListenerSet status is required like a Gateway's (D-017 §2). A rejected
+	// ListenerSet status is required like a Gateway's (D-017 §2). The CRDs
+	// default top-level conditions, so none at all is never written (§10.1). A rejected
 	// ListenerSet may have no listener status (reason NotAllowed), so while it
 	// is Accepted=False only the listener blocks present are judged.
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
 		v := in.views().ListenerSet(ls)
 		cs := v.Conditions
+		if len(cs) == 0 {
+			pending(ls, noControllerStatus, FreshnessNeverWritten)
+			continue
+		}
 		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
 			continue
 		}
@@ -346,7 +351,11 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
 		v := in.views().Gateway(gw)
-		evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "", self)
+		if len(v.Conditions) == 0 {
+			pending(gw, noControllerStatus, FreshnessNeverWritten)
+		} else {
+			evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "", self)
+		}
 		listeners(gw, v.ListenerStatus, true)
 	}
 	// Routes: one status block per current parentRef of this install, and per
@@ -469,6 +478,9 @@ func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 
 // GatewayPending is RoutePending for a Gateway or ListenerSet status block.
 func GatewayPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	if len(cs) == 0 {
+		return noControllerStatus
+	}
 	return pendingReason(u, cs, gatewayRequired, nil)
 }
 

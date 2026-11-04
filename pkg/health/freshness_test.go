@@ -41,8 +41,8 @@ func TestFreshnessFirstKindWinsAcrossBlocks(t *testing.T) {
 	}
 }
 
-// Only a block that is all CRD default is never written; a block the
-// controller has partly written is judged by its own conditions.
+// Only a block that is all CRD default, or a Gateway with no conditions, is
+// never written; a partly written block is judged by its own conditions.
 func TestBlockFreshnessCRDDefault(t *testing.T) {
 	dflt := metav1.Condition{Type: "Accepted", Status: metav1.ConditionUnknown, Reason: "Pending", Message: "Waiting for controller", LastTransitionTime: metav1.Unix(0, 0)}
 	programmed := testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")
@@ -58,11 +58,16 @@ func TestBlockFreshnessCRDDefault(t *testing.T) {
 		// The default's observedGeneration 0 is stale.
 		{"default beside a written condition", []metav1.Condition{dflt, programmed}, FreshnessStale},
 		{"Pending, not at the epoch", []metav1.Condition{func() metav1.Condition { c := notEpoch; c.ObservedGeneration = 1; return c }(), programmed}, FreshnessPending},
-		{"no conditions", nil, FreshnessPending},
 	}
 	for _, tc := range cases {
 		if _, kind, _ := blockFreshness(u, tc.cs, gatewayRequired, nil); kind != tc.kind {
 			t.Errorf("%s: kind %q, want %q", tc.name, kind, tc.kind)
 		}
+	}
+	// A Gateway with no top-level conditions is never written.
+	w := healthyWorld()
+	w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{})
+	if f, ev := freshness003(t, w.report(t), "infra/edge"); ev.Freshness != FreshnessNeverWritten || f.Detail != noControllerStatus {
+		t.Fatalf("want never-written, got %q %+v", f.Detail, ev)
 	}
 }
