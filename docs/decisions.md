@@ -834,7 +834,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Gate the 10 min total at a measured value (rejected by the user); let a grace deadline wait for a pending burst (rejected: it amends D-019, and a warning could appear up to 1 s late); have a fake controller catch status up (rejected: it changes what the variant measures).
 
 ## D-048 — Proxy stats evidence carries flags and names, not counts (2026-11-04, phase 3)
-**Status:** accepted during 3.2 execution (rulings R48, R49, R52, R53, R55); recorded at the 3.2 close. Amends design §8.8 and §13.3
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (rulings R48, R49, R52, R53, R55); recorded at the 3.2 close. Amends design §8.8 and §13.3
 
 **Context:**
 - §13.3 gave KGWUI-001 a per-Pod `rejectsSinceLastScrape` count. While a proxy rejects, its `update_rejected` counter grows by hundreds a minute, because the controller pushes again and again.
@@ -855,7 +855,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** The per-Pod count of §13.3, which Codex 3.2 review #3 asked for (rejected: R49, the fingerprint churn above).
 
 ## D-049 — Probe type from the whole Pod; skew rules for CRDs and ListenerSets (2026-11-04, phase 3)
-**Status:** accepted during 3.2 execution (rulings R41, R45); recorded at the 3.2 close. Amends design §9.2 and §9.4
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (rulings R41, R45); recorded at the 3.2 close. Amends design §9.2 and §9.4
 
 **Context:**
 - §9.2 names a probe type when "the container" defines one. The cache keeps no Event `fieldPath`, so the UI cannot tell which container's probe failed.
@@ -872,7 +872,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** n/a.
 
 ## D-050 — Diagnostics are built per request; summary shapes (2026-11-04, phase 3)
-**Status:** accepted during 3.2 execution (Task 45 and 49 reviews, ruling R62); recorded at the 3.2 close. Amends design §6, §13.1, §13.3 and §20
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (Task 45 and 49 reviews, ruling R62); recorded at the 3.2 close. Amends design §6, §13.1, §13.3 and §20
 
 **Context:**
 - §20 precomputes the diagnostics summary per Model. Retained heap had about 4 MiB headroom at the 3.2 start (3.1 record), and 3.2 watches add to it.
@@ -894,7 +894,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Precompute per Model, as §20 planned (not taken: retained heap headroom).
 
 ## D-051 — Next-step commands from a Go seam; the evidence view owns finding renderers (2026-11-04, phase 3)
-**Status:** accepted during 3.2 execution (rulings R39, R64); recorded at the 3.2 close. Amends design §8.5 and §17.2
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (rulings R39, R64); recorded at the 3.2 close. Amends design §8.5 and §17.2
 
 **Context:**
 - §8.5 takes commands from the SPA `Vocabulary`. Next steps are built on the server, per caller, so that rule 15 hides commands that name hidden objects.
@@ -910,7 +910,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** n/a.
 
 ## D-052 — A memo with a wake time reuses only while scrape times hold (2026-11-04, phase 3)
-**Status:** accepted during 3.2 execution (Task 52, rulings R69 and R70); recorded at the 3.2 close. Amends design §16.2
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (Task 52, rulings R69 and R70); recorded at the 3.2 close. Amends design §16.2
 
 **Context:**
 - A memo hit returned the wake time of the run that stored it. The xDS rejects check wakes at `Metrics.CollectedAt` + max age, which the input print leaves out. Idle scrapes then kept an old wake and forced a recompute every 45 s: 29 idle recomputes in 10 min against 20.
