@@ -23,6 +23,7 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/benchgate"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -179,7 +180,7 @@ func TestBudgetBurst(t *testing.T) {
 		t.Errorf("recomputes in the burst window + 2 s = %d, budget ≤ 2", pubs)
 	}
 	if p95 > 1200*time.Millisecond {
-		t.Errorf("event-to-publication p95 %v, budget ≤ 1.2 s", p95)
+		benchgate.Timing(t, "event-to-publication p95 %v, budget ≤ 1.2 s", p95)
 	}
 }
 
@@ -239,7 +240,7 @@ func TestBudgetConfirmTick(t *testing.T) {
 		slices.Sort(d)
 		t.Logf("confirm tick %s: median %v, max %v (budget at Large ≤ 5 ms)", tier.Name, d[len(d)/2], d[len(d)-1])
 		if tier.Name == scale.Large.Name && d[len(d)/2] > 5*time.Millisecond {
-			t.Errorf("confirm tick median at Large %v, budget ≤ 5 ms", d[len(d)/2])
+			benchgate.Timing(t, "confirm tick median at Large %v, budget ≤ 5 ms", d[len(d)/2])
 		}
 	}
 }
@@ -369,10 +370,10 @@ func TestBudgetWarmRecompute(t *testing.T) {
 				t.Fatalf("the consistent world has %d KGWUI-012 findings and %d windows", len(disagreements(m)), len(e.persist.m))
 			}
 			if cold[len(cold)/2] > time.Second {
-				t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
+				benchgate.Timing(t, "cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
 			}
 			if warm[len(warm)/2] > 150*time.Millisecond {
-				t.Errorf("warm recompute median %v, budget ≤ 150 ms", warm[len(warm)/2])
+				benchgate.Timing(t, "warm recompute median %v, budget ≤ 150 ms", warm[len(warm)/2])
 			}
 		})
 	}
@@ -384,10 +385,40 @@ const (
 	analyzerMemoizedBudget = 2 * time.Millisecond
 )
 
+// allocBudget caps the median bytes and allocations of one run.
+type allocBudget struct{ bytes, allocs uint64 }
+
+// analyzerAllocBudget gates the §16.3-scope stage per world and mode (D-044):
+// the 3.2 measurement (in the comments; the same on darwin/arm64 and amd64) plus about 10 %.
+var analyzerAllocBudget = map[string]allocBudget{
+	"large/warm, §16.3 scope":                                              {192_000, 710},      // 173,864 B, 642
+	"large/memoized, §16.3 scope":                                          {32_000, 540},       // 28,904 B, 491
+	"large/memoized, §16.3 scope, new scrape each run":                     {35_000, 555},       // 31,480 B, 503
+	"large-contradicting-worst/warm, §16.3 scope":                          {5_570_000, 20_700}, // 5,061,760 B, 18,837
+	"large-contradicting-worst/memoized, §16.3 scope":                      {88_000, 1_620},     // 80,024 B, 1,471
+	"large-contradicting-worst/memoized, §16.3 scope, new scrape each run": {1_027_000, 5_870},  // 933,136 B, 5,335
+}
+
+// runAllocs is the median bytes and allocations of one call of run, over n calls.
+func runAllocs[T any](n int, run func() T) (bytes, allocs uint64) {
+	b, a := make([]uint64, n), make([]uint64, n)
+	var m0, m1 runtime.MemStats
+	for i := range n {
+		runtime.ReadMemStats(&m0)
+		run()
+		runtime.ReadMemStats(&m1)
+		b[i], a[i] = m1.TotalAlloc-m0.TotalAlloc, m1.Mallocs-m0.Mallocs
+	}
+	slices.Sort(b)
+	slices.Sort(a)
+	return b[n/2], a[n/2]
+}
+
 // TestBudgetAnalyzerStage: at Large and in the 3.2 measurement world, design
 // §16.3's stage (identity, groups, rank and the Phase 3 checks; ruling R35)
 // has a median ≤ 20 ms warm and ≤ 2 ms memoized, also when each run reads a new
-// scrape at the binary's max age (R70). The whole stage, Phase 1–2 checks included, is reported.
+// scrape at the binary's max age (R70); each scoped mode's allocations per run
+// stay in analyzerAllocBudget. The whole stage, Phase 1–2 checks included, is reported.
 func TestBudgetAnalyzerStage(t *testing.T) {
 	for _, tier := range []scale.Tier{scale.Large, measuredTier} {
 		t.Run(tier.Name, func(t *testing.T) {
@@ -416,7 +447,14 @@ func TestBudgetAnalyzerStage(t *testing.T) {
 				t.Logf("%s: %s median %v p95 %v max %v (%s)", tier.Name, mode.name, med.Round(10*time.Microsecond),
 					percentile(d, 95).Round(10*time.Microsecond), d[len(d)-1].Round(10*time.Microsecond), note)
 				if mode.budget > 0 && med > mode.budget {
-					t.Errorf("%s: %s median %v, budget ≤ %v", tier.Name, mode.name, med, mode.budget)
+					benchgate.Timing(t, "%s: %s median %v, budget ≤ %v", tier.Name, mode.name, med, mode.budget)
+				}
+				if a, ok := analyzerAllocBudget[tier.Name+"/"+mode.name]; ok {
+					bytes, n := runAllocs(31, run)
+					t.Logf("%s: %s allocates median %d B in %d allocations per run (budget ≤ %d B, ≤ %d allocations)", tier.Name, mode.name, bytes, n, a.bytes, a.allocs)
+					if bytes > a.bytes || n > a.allocs {
+						t.Errorf("%s: %s allocates %d B in %d allocations per run, budget ≤ %d B, ≤ %d", tier.Name, mode.name, bytes, n, a.bytes, a.allocs)
+					}
 				}
 			}
 		})

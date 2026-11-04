@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/benchgate"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -264,13 +265,13 @@ func TestBudgetListRequests(t *testing.T) {
 					mx.name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)),
 					rd(percentile(conc, 50)), rd(percentile(conc, 95)), rd(percentile(conc, 99)))
 				if p := percentile(seq, 95); p >= 50*time.Millisecond {
-					t.Errorf("%s: sequential p95 %v, budget < 50 ms", mx.name, p)
+					benchgate.Timing(t, "%s: sequential p95 %v, budget < 50 ms", mx.name, p)
 				}
 				if p := percentile(seq, 99); p >= 100*time.Millisecond {
-					t.Errorf("%s: sequential p99 %v, budget < 100 ms", mx.name, p)
+					benchgate.Timing(t, "%s: sequential p99 %v, budget < 100 ms", mx.name, p)
 				}
 				if p := percentile(conc, 95); p >= 100*time.Millisecond {
-					t.Errorf("%s: 20-client p95 %v, budget < 100 ms", mx.name, p)
+					benchgate.Timing(t, "%s: 20-client p95 %v, budget < 100 ms", mx.name, p)
 				}
 			}
 			for _, dt := range []struct {
@@ -280,7 +281,7 @@ func TestBudgetListRequests(t *testing.T) {
 				d := latencies(t, h, base+"/routes/gateway.networking.k8s.io/HTTPRoute/"+dt.ref.Namespace+"/"+dt.ref.Name, requestsPerMix, 1)
 				t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", dt.name, rd(percentile(d, 50)), rd(percentile(d, 95)), rd(percentile(d, 99)))
 				if p := percentile(d, 95); p >= 50*time.Millisecond {
-					t.Errorf("%s p95 %v, budget < 50 ms", dt.name, p)
+					benchgate.Timing(t, "%s p95 %v, budget < 50 ms", dt.name, p)
 				}
 			}
 			// A full breadcrumb trail: one GET …/refs per page view.
@@ -402,7 +403,7 @@ func requestBudget(t *testing.T, h http.Handler, name, path string, list bool) {
 	if !list {
 		t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)))
 		if p := percentile(seq, 95); p >= 50*time.Millisecond {
-			t.Errorf("%s p95 %v, budget < 50 ms", name, p)
+			benchgate.Timing(t, "%s p95 %v, budget < 50 ms", name, p)
 		}
 		return
 	}
@@ -411,13 +412,13 @@ func requestBudget(t *testing.T, h http.Handler, name, path string, list bool) {
 		name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)),
 		rd(percentile(conc, 50)), rd(percentile(conc, 95)), rd(percentile(conc, 99)))
 	if p := percentile(seq, 95); p >= 50*time.Millisecond {
-		t.Errorf("%s: sequential p95 %v, budget < 50 ms", name, p)
+		benchgate.Timing(t, "%s: sequential p95 %v, budget < 50 ms", name, p)
 	}
 	if p := percentile(seq, 99); p >= 100*time.Millisecond {
-		t.Errorf("%s: sequential p99 %v, budget < 100 ms", name, p)
+		benchgate.Timing(t, "%s: sequential p99 %v, budget < 100 ms", name, p)
 	}
 	if p := percentile(conc, 95); p >= 100*time.Millisecond {
-		t.Errorf("%s: 20-client p95 %v, budget < 100 ms", name, p)
+		benchgate.Timing(t, "%s: 20-client p95 %v, budget < 100 ms", name, p)
 	}
 }
 
@@ -556,7 +557,7 @@ func inChild(t *testing.T, test string, tiers []scale.Tier, run func(*testing.T,
 			t.Logf("%s: memory from the OS over %d runs: median %.1f MiB, min %.1f, max %.1f (budget median ≤ %d MiB)",
 				tier.Name, streamRuns, float64(med)/mib, float64(sys[0])/mib, float64(sys[len(sys)-1])/mib, streamOSBudget/mib)
 			if med > streamOSBudget {
-				t.Errorf("median memory from the OS %.1f MiB, budget ≤ %d MiB", float64(med)/mib, streamOSBudget/mib)
+				benchgate.Timing(t, "median memory from the OS %.1f MiB, budget ≤ %d MiB", float64(med)/mib, streamOSBudget/mib)
 			}
 		})
 	}
@@ -861,7 +862,7 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	j, _ := json.Marshal(streamResult{Sys: ms.Sys})
 	fmt.Println("stream: " + string(j))
 	if share > v.cpu {
-		t.Errorf("process CPU %.1f %% of one core, budget ≤ %.0f %%", 100*share, 100*v.cpu)
+		benchgate.Timing(t, "process CPU %.1f %% of one core, budget ≤ %.0f %%", 100*share, 100*v.cpu)
 	}
 	if !v.gated {
 		codes := map[string]int{}
