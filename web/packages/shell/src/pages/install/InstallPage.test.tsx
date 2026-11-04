@@ -12,7 +12,6 @@ import type {
   ScopeSummary,
 } from "../../api/types";
 import { diagnosticsCopy } from "../../copy/explorer";
-import { GROUP_ROW_H } from "../../diagnostics/GroupRow";
 import { type CorePages, CorePagesContext } from "../../shell/extension";
 import { InstallSwitcher } from "../../shell/InstallSwitcher";
 import {
@@ -30,7 +29,6 @@ import {
 } from "../../test/fixtures";
 import { pseudoRules, renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
-import { SHOW_ALL_H } from "./NeedsAttention";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -182,7 +180,7 @@ function needsAttentionBlock(rowId: string, footSel: string) {
   };
 }
 
-it("Needs attention reserves its loaded height from the first render and keeps it", async () => {
+it("Needs attention reserves its loaded rows from the first render and keeps them", async () => {
   const diag = diagnostics(unhealthy());
   let answer: (r: Response) => void = () => {};
   const routes: Record<string, unknown> = {
@@ -203,32 +201,24 @@ it("Needs attention reserves its loaded height from the first render and keeps i
     </Routes>,
     { path: "/i/kgw.kgateway" },
   );
-  // Loading: the heading, one placeholder per server-counted row at the row height, and the footer.
+  // Loading: the heading, one placeholder per server-counted row, and the footer. The geometry is checked in
+  // a browser by e2e/needs-attention.spec.ts.
   await screen.findAllByTestId("group-row-shimmer");
   const skel = needsAttentionBlock("group-row-shimmer", "[data-testid=show-all-shimmer]");
   expect(screen.getByRole("status", { name: "Loading this install…" })).toBeInTheDocument();
   expect(skel.heading).toBe(diagnosticsCopy.needsAttention);
   expect(skel.rows).toHaveLength(diag.groups.length);
+  expect(skel.foot).toBeInTheDocument();
   expect(skel.before).toBe(true);
-  // A row is GROUP_ROW_H; each after the first adds the loaded block's 1px divider.
-  skel.rows.forEach((r, i) => {
-    expect(r).toHaveStyle({ height: `${GROUP_ROW_H}px` });
-    if (i > 0) expect(r).toHaveStyle({ boxSizing: "content-box", borderTopWidth: "1px", borderTopStyle: "solid" });
-  });
-  expect(skel.foot).toHaveStyle({ height: `${SHOW_ALL_H}px`, borderTopWidth: "1px" });
   await act(async () => answer(new Response(JSON.stringify(diag), { status: 200 })));
-  // Loaded: the same heading, row count, row height, dividers and footer in the same place.
+  // Loaded: the same heading, row count and footer, still above Processes.
   const rows = await screen.findAllByTestId("group-row");
   const loaded = needsAttentionBlock("group-row", ".more");
   expect(screen.queryByTestId("needs-attention-shimmer")).toBeNull();
   expect(loaded.heading).toBe(skel.heading);
   expect(loaded.rows).toHaveLength(skel.rows.length);
+  expect(loaded.foot).toBeInTheDocument();
   expect(loaded.before).toBe(true);
-  rows.forEach((r, i) => {
-    expect(r.querySelector(".line")).toHaveStyle({ minHeight: `${GROUP_ROW_H}px` });
-    expect(r).toHaveStyle({ borderBottomWidth: i < rows.length - 1 ? "1px" : "0px" });
-  });
-  expect(loaded.foot).toHaveStyle({ height: `${SHOW_ALL_H}px`, borderTopWidth: "1px", boxSizing: "border-box" });
   // The next poll never answers: the rows stay as they are, never a skeleton.
   fetch.mockImplementation(async () => new Promise<Response>(() => {}));
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
