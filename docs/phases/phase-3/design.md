@@ -779,6 +779,8 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Change burst, idle, cold recompute | Phase 2 gates, unchanged | 3.1–3.4 |
 | Proxy stats scrape, 2 proxies per Gateway at Large; log reader at 50 matching lines/s | inside the stream CPU and retained-heap gates above, measured with both on | 3.2–3.3 |
 
+The time budgets above gate on the reference machine; CI gates the deterministic ones and timing regressions against the base **(user, 2026-11-04; D-044)**.
+
 No gate changes without the user. If the 3.1 baseline, or any later sub-phase, breaks a gate, the work stops and the numbers go to the user, who decides **(user, 2026-10-29)**.
 
 **Scale tiers grow** (`internal/testutil/scale`):

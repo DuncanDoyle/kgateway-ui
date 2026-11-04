@@ -669,7 +669,7 @@ quirk 2 (prefix /q):
 **Alternatives:** n/a.
 
 ## D-039 — Dense memory gate on retained heap and bytes per recompute (2026-11-01, phase 3)
-**Status:** accepted 2026-11-01 (user)
+**Status:** accepted 2026-11-01 (user); D-044 adds the analyzer stage's allocations to the deterministic gates
 
 **Context:** `TestBudgetDenseMemory` gated the median peak heap of five runs at ≤ 432 MiB (D-025). Peak heap depends on when the GC runs: on the same code, medians ranged 427–440 MiB, and the 2.4 code (`3eceda6`) failed it too. The heap retained and the bytes allocated were identical in every run, before and after 3.0.
 
@@ -734,7 +734,7 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Alternatives:** CSS `order` or grid placement; rejected, since tab order would then differ from the visual order.
 
 ## D-043 — Median-of-five OS-memory gate at a measured value; opt-in chart memory limit (2026-11-03, phase 3)
-**Status:** accepted 2026-11-03 (user, Task 46 interim measurement); amends D-022's and design §16.3's 256 MiB OS-memory gate
+**Status:** accepted 2026-11-03 (user, Task 46 interim measurement); amends D-022's and design §16.3's 256 MiB OS-memory gate; D-044 makes the 288 MiB gate a reference-machine budget, reported in CI
 
 **Context:**
 - The 3.2 measurement world broke the OS-memory gate (≤ 256 MiB). Memory from the OS follows the GC goal: a GC during a maturation compute marks about 115 MB live, so the goal reaches about 230 MB.
@@ -750,3 +750,27 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Consequences:** The gate keeps OS memory inside the 512Mi pod limit with headroom, but no longer at half of it. A stream test takes five times as long.
 
 **Alternatives:** A 224 MiB default soft limit (rejected: the dense thrash above); a lower GOGC (rejected: it costs CPU at every heap size); cutting per-recompute garbage, mostly Phase 2 views and the explorer index (deferred: a larger refactor).
+
+## D-044 — Bench gates split by what they measure (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user); amends D-039 and D-043
+
+**Context:** GitHub-hosted runners are shared VMs with variable CPU. On identical code, 3.1's warm recompute ranged 102.9–151.3 ms on CI. The 3.2 memoized analyzer stage with a new scrape each run is 1.14 ms locally and 2.31 ms on CI run 41718646271, against a 2 ms gate. D-039 already moved dense memory to deterministic measures for the same reason.
+
+**Decision:** Three classes of gate.
+1. **Deterministic**, gated everywhere, CI included: retained heap (over the 2.1 and 3.1 baselines), dense retained heap and cold and warm allocation (D-039), recompute counts (idle 10 min, burst, stream rate), the matcher page allocation, and the analyzer stage's allocations per run. The stage budgets are the 3.2 measurement plus about 10 %, the same on darwin/arm64 and amd64:
+
+   | World / §16.3-scope mode | Measured | Budget |
+   |---|---|---|
+   | Large, warm | 173,864 B, 642 allocs | 192,000 B, 710 |
+   | Large, memoized | 28,904 B, 491 | 32,000 B, 540 |
+   | Large, memoized, new scrape each run | 31,480 B, 503 | 35,000 B, 555 |
+   | Measurement world, warm | 5,061,760 B, 18,837 | 5,570,000 B, 20,700 |
+   | Measurement world, memoized | 80,024 B, 1,471 | 88,000 B, 1,620 |
+   | Measurement world, memoized, new scrape each run | 933,136 B, 5,335 | 1,027,000 B, 5,870 |
+
+2. **Timing regression**, gated in CI: base and head run in the same job, interleaved, five runs each (`make bench-ab`, `internal/benchab`). The gate fails when head's median ns/op is more than 15 % above base's. It covers warm recompute (Large, contradicting, unchanged views, measurement world), cold recompute, the confirm tick at Large and the analyzer stage's three §16.3-scope modes. A benchmark base lacks is reported "new", not gated. The base is the PR's base commit, or the `base` input of a manual run (default `main`). Stream CPU stays reported in CI: five 60 s runs per world and variant take about 20 min a side.
+3. **Reference**, absolute time budgets: warm ≤ 150 ms, cold ≤ 1 s, analyzer ≤ 20 / 2 ms, confirm tick ≤ 5 ms, burst p95 ≤ 1.2 s, endpoints p95 < 50 / p99 < 100 / 20 clients p95 < 100 ms, stream CPU ≤ 15 / 25 %, OS memory median ≤ 288 MiB. They gate on the reference machine, an Apple M5 Max at the default GOMAXPROCS (all 18 CPUs), in `make bench`. `KGWUI_BENCH_TIMING=report`, which the workflow sets, logs a miss instead of failing; unset or `reference` gates.
+
+**Consequences:** CI fails on what changes deterministically or on a measured slowdown against the base on the same VM, not on runner speed. The §16.3 time budgets hold only as measured on the reference machine; each sub-phase's local `make bench` record carries them. The workflow runs about twice the engine benchmarks. A PR from a long-lived phase branch compares against `main`, so its A/B reports the whole phase's change.
+
+**Alternatives:** Raise the CI time budgets (rejected: runner speed varies more than the headroom); retry flaky timing gates (rejected: it hides real regressions).
