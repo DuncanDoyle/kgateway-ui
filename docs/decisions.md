@@ -832,3 +832,95 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** The 60 s gate has 5–7 % headroom. This is structural: under a steady stream, the debounce runs once per `MaxDelay` (1 s) plus the wait for the next edit. Any change to the debounce or the edit cadence moves that number. Over 10 min, deadline runs absorb pending bursts, so the edit-driven rate falls. Grace deadlines are not bounded by a gate.
 
 **Alternatives:** Gate the 10 min total at a measured value (rejected by the user); let a grace deadline wait for a pending burst (rejected: it amends D-019, and a warning could appear up to 1 s late); have a fake controller catch status up (rejected: it changes what the variant measures).
+
+## D-048 — Proxy stats evidence carries flags and names, not counts (2026-11-04, phase 3)
+**Status:** accepted during 3.2 execution (rulings R48, R49, R52, R53, R55); recorded at the 3.2 close. Amends design §8.8 and §13.3
+
+**Context:**
+- §13.3 gave KGWUI-001 a per-Pod `rejectsSinceLastScrape` count. While a proxy rejects, its `update_rejected` counter grows by hundreds a minute, because the controller pushes again and again.
+- A published count changes the collector's fingerprint on every scrape. Every dependent check would then rerun on every scrape, against the D-044 recompute-count gates.
+- §8.8 pairs `cluster.<name>.update_rejected` with CDS. In Envoy it is the per-cluster EDS subscription counter.
+- §8.8 gates 025 and 026 on a Ready proxy. A downstream stats source can report a Pod the process data does not know.
+- §13.3 gives 025 and 026 evidence for one Pod, but each is one finding per Gateway.
+
+**Decision:**
+1. Per Pod and xDS type, proxy stats publish `rejecting` (the counter grew since the previous scrape) and `rejectingSince`, plus the Envoy names whose counters grew (`envoyResources`, capped, with `envoyResourcesTruncated`). Never a raw count (R49).
+2. Names from `cluster.<name>.update_rejected` are listed under `ClusterLoadAssignment`. CDS rejects carry no names (R53).
+3. A stats Pod the process data does not know counts as Ready when Envoy reports `server.state` `live`, which is what Envoy's `/ready` checks. Unknown readiness is not Ready (R52).
+4. 025 and 026 evidence is `{kind: "proxy-stats", pods: [{pod, connected?, warmingListeners?, warmingClusters?, serverState?}]}`. A missing field was not reported.
+5. On `xds-rejects` evidence, `proxies` and `recentlyChanged` are omitted when empty. A self-managed Gateway has no proxies the UI knows (R48, R55).
+
+**Consequences:** The evidence shows "New rejects, started …", never a number. A growing counter no longer changes the fingerprint on every scrape. A Cluster reject shows `rejecting` on the Cluster type only.
+
+**Alternatives:** The per-Pod count of §13.3, which Codex 3.2 review #3 asked for (rejected: R49, the fingerprint churn above).
+
+## D-049 — Probe type from the whole Pod; skew rules for CRDs and ListenerSets (2026-11-04, phase 3)
+**Status:** accepted during 3.2 execution (rulings R41, R45); recorded at the 3.2 close. Amends design §9.2 and §9.4
+
+**Context:**
+- §9.2 names a probe type when "the container" defines one. The cache keeps no Event `fieldPath`, so the UI cannot tell which container's probe failed.
+- §9.4 says a standard-channel Gateway CRD decides the ListenerSet hint. Gateway API v1.5 and later standard CRDs define `allowedListeners`, so the channel alone is not enough.
+- §7.1 suppresses all of 022 during a controller rollout; §9.4 states it for proxies only.
+
+**Decision:**
+1. The probe type is the one type the Pod's containers define together, else "a probe" (R41).
+2. The ListenerSet hint decides from channel and bundle version. Standard before v1.5 and experimental before v1.3 lack `allowedListeners`; a CRD that defines it drops the hint (R45).
+3. Every 022 finding, the CRD ones included, is suppressed during a controller rollout and for 10 min after (R45, §7.1).
+
+**Consequences:** A Pod with a sidecar that has its own probe reads "a probe". A CRD skew warning waits for the controller rollout to settle.
+
+**Alternatives:** n/a.
+
+## D-050 — Diagnostics are built per request; summary shapes (2026-11-04, phase 3)
+**Status:** accepted during 3.2 execution (Task 45 and 49 reviews, ruling R62); recorded at the 3.2 close. Amends design §6, §13.1, §13.3 and §20
+
+**Context:**
+- §20 precomputes the diagnostics summary per Model. Retained heap had about 4 MiB headroom at the 3.2 start (3.1 record), and 3.2 watches add to it.
+- §13.3 names `ProcessSummary` and `ProxySummary` but gives no fields. The SPA must not derive health (R62).
+- §6 shows the controller's restarts in 15 min. The restart check keeps its window per Pod but names one Pod per subject, so a sum over Pods undercounts.
+
+**Decision:**
+1. `GET …/diagnostics` is built per request from the published Model and the caller's view. Nothing per caller is retained.
+2. `ProcessSummary` is `{state, observed, ready?, desired?, version?, restricted?}`. `state` is the worst controller finding, 005 included; unknown when not observed and none fired (R62).
+3. `ProxySummary` is `{state, gateways, ready, rejecting, skew, restarting, notObserved}`, over visible Gateways. `state` is the worst known Gateway health in the row-state order; a healthy Gateway with unobserved proxies counts as unknown.
+4. `ProcessSummary` has no `restartsRecent`. A recent restart shows as a 019 group and on the Processes page, where `ProcessDTO.restartsRecent` is the named Pod's count.
+5. `dataPlane` is `{gateways, rejecting, unavailable?}`. `rejecting` counts Gateways with a 001 over every finding (§14 rule 18). `gateways` counts visible Gateways plus hidden ones a restricted 001 already names, so `rejecting` never exceeds it and no hidden count leaks. `withheld` waits for 024 (3.4).
+6. `DataPlaneDTO` on the Gateway page adds `rejecting`, `unavailable` (the xDS rejects check is not OK, so `rejecting: false` means unknown), `evidenceRestricted` and `proxyStats {available, unavailable?, reason?}` per Gateway. `snapshot` gains `by: "controller"`.
+7. `GroupRow` adds `code`, the top member's code, which restricted rows show. `Verdict` adds `counts` per severity. `ProcessSetDTO` adds `restricted`.
+8. `OverviewGatewayRow` gains `dataPlane`: `ok`, `rejects` or `unknown`, computed on the server.
+
+**Consequences:** The worst-case diagnostics request takes p95 0.86 ms sequential and 4.85 ms with 20 clients (restricted, measurement world; `bench/3.2.txt`). The controller line shows no restart count until the restart check exposes every Pod's window.
+
+**Alternatives:** Precompute per Model, as §20 planned (not taken: retained heap headroom).
+
+## D-051 — Next-step commands from a Go seam; the evidence view owns finding renderers (2026-11-04, phase 3)
+**Status:** accepted during 3.2 execution (rulings R39, R64); recorded at the 3.2 close. Amends design §8.5 and §17.2
+
+**Context:**
+- §8.5 takes commands from the SPA `Vocabulary`. Next steps are built on the server, per caller, so that rule 15 hides commands that name hidden objects.
+- The install page no longer lists single findings, so finding renderers and actions lost their place there. Two components rendering the same renderer gave it two owners.
+
+**Decision:**
+1. Commands come from `diagnose.Commands`, default `diagnose.Kubectl`. A downstream replaces them with `extension.WithCommands`, for a platform without kubectl (R39).
+2. `EvidenceView` is the only owner of `findingRenderers`. It renders the code's renderer for an evidence kind the shell does not know, or for a finding with no evidence; a restricted finding renders none (R64).
+3. `findingActions` render on the finding page. `FindingRow` still renders both.
+
+**Consequences:** A downstream that changes commands ships Go, not only an SPA build. The README upgrade notes say where renderers and actions moved.
+
+**Alternatives:** n/a.
+
+## D-052 — A memo with a wake time reuses only while scrape times hold (2026-11-04, phase 3)
+**Status:** accepted during 3.2 execution (Task 52, rulings R69 and R70); recorded at the 3.2 close. Amends design §16.2
+
+**Context:**
+- A memo hit returned the wake time of the run that stored it. The xDS rejects check wakes at `Metrics.CollectedAt` + max age, which the input print leaves out. Idle scrapes then kept an old wake and forced a recompute every 45 s: 29 idle recomputes in 10 min against 20.
+- Fixing that reruns xDS rejects after every scrape. Its fresh findings slice then made health re-merge the report and the engine rebuild the diagnosis: the memoized analyzer stage took 3.11 ms against 2 ms (R70).
+
+**Decision:**
+1. A memo whose result set a wake time is reused only while the times of the metrics and the declared collector values are unchanged (`timesPrint`).
+2. A rerun whose findings equal the memo's returns the memo's slice. The merged report and the diagnosis are reused when every check's findings slice is the same.
+3. The diagnosis is built only from the inputs its memo key covers: findings, the install, Owned, the views of Owned's objects and the group ids. Next steps read the snapshot per request.
+
+**Consequences:** Idle 10 min is back to 20 recomputes. The memoized stage with a new scrape each run is 1.14 ms on the reference machine (measurement world).
+
+**Alternatives:** Drop the xDS rejects wake time (rejected: the declared-input guard needs it).

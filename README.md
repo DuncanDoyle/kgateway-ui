@@ -166,6 +166,24 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 
 ### Health overview (sub-phase 3.2)
 
+- KGWUI-001 is re-specified. It is one finding per Gateway, with the rejected xDS types as evidence. Only the controller's `rejects_active` gauge raises it; proxy stats add evidence. When a reject disappears during a controller restart, the `xDS rejects` check stays pending for 60 s, so the install reads unknown, not healthy.
+- A route, ListenerSet or policy whose Gateway has a KGWUI-001 is never shown healthy: it is at least a warning and carries the `gateway-rejecting` flag. The routes list takes `state=gateway-rejecting`.
+- New finding codes, all warnings:
+  - KGWUI-019 `process-restarting`: a controller or proxy container restarted in the last 15 min.
+  - KGWUI-020 `probe-failing`: 3 or more probe failures on one Pod in 15 min, from Events.
+  - KGWUI-021 `rollout-stuck`: a controller or proxy Deployment passed its progress deadline.
+  - KGWUI-022 `version-skew`: proxies on another minor than the controller, controller replicas on two versions, or Gateway API CRDs that do not match the expected bundle.
+  - KGWUI-025 `proxy-config-warming`: a Ready proxy still loads config after 60 s.
+  - KGWUI-026 `proxy-disconnected`: a Ready proxy lost its controller connection for 60 s.
+- New watches: proxy Pods, Warning Events on controller and proxy Pods, and Gateway API CRD metadata. The UI also reads Envoy stats from each proxy Pod on port 9091, so the UI Pod must reach that port.
+- Each input has a chart toggle and a flag: `diagnostics.events` (`--diagnostics-events`), `diagnostics.crds` (`--diagnostics-crds`) and `diagnostics.proxyStats` (`--diagnostics-proxy-stats`), all on by default. When one is off, denied or failing, its checks read "not available" with the reason, and the install state does not change. `/meta` lists each running input under `capabilities`.
+- `diagnostics.endpoints` (on) grants Services and EndpointSlices; no check reads them until a later release. `diagnostics.controllerLogs` (off) adds a `pods/log` Role in each of `diagnostics.controllerLogsNamespaces`; the log reader arrives in a later release.
+- A `since` the UI derives, for KGWUI-001 and the new codes, is when the UI first saw the problem. It resets when the UI restarts.
+- New endpoints: `GET /api/v1/installs/{id}/diagnostics` (the verdict, up to 10 ranked groups, the process and data-plane summaries) and `GET /api/v1/installs/{id}/processes` (the controller's processes and a page of Gateways' proxies). The Gateway detail gains `dataPlane` and `proxies`; overview Gateway rows gain `dataPlane`.
+
+For downstream builds:
+
+- Next-step commands come from Go: replace the default kubectl commands with `extension.WithCommands`.
 - The install page lists ranked groups of findings, not single findings.
 - Finding actions now render on the finding page, not the install page. `FindingRow` still renders them.
 - Finding renderers now render on the finding page, through the evidence view, for evidence kinds the shell does not know, or when a finding has no evidence. `FindingRow` still renders them.

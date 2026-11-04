@@ -727,7 +727,7 @@ type Target struct { ID, Name string; Gateway objects.Ref; Addr string }
 **Interfaces:**
 - `CodeProxyConfigWarming = "KGWUI-025"` (`proxy-config-warming`), `CodeProxyDisconnected = "KGWUI-026"` (`proxy-disconnected`), warnings, one per Gateway, Pods as evidence; mature after 60 s of the condition on a Ready proxy (start kept in the Store, `WakeAt(start + 60 s)`).
 - `ProxyStatsEvidence` kind `proxy-stats`.
-- 001 evidence per Pod: `rejectsSinceLastScrape` per type, the delta of `update_rejected` against the previous value per Pod UID in the Store (a new UID or a lower value is a reset, read as 0); RDS and cluster names with a positive delta listed. Proxy stats never raise 001 and never mark it active; a disagreement with the controller gauge is evidence only (review finding 4).
+- 001 evidence per Pod (as built: `rejecting` and `rejectingSince` per type, never a count, D-048): `rejectsSinceLastScrape` per type, the delta of `update_rejected` against the previous value per Pod UID in the Store (a new UID or a lower value is a reset, read as 0); RDS and cluster names with a positive delta listed. Proxy stats never raise 001 and never mark it active; a disagreement with the controller gauge is evidence only (review finding 4).
 
 - [ ] **Step 1: Failing tests** 025 and 026 at 59 s (none) and 61 s; a not-Ready proxy (none); rejects observed since the last scrape per Pod (`(3,8)` → `(4,9)` reads as 1 observed reject, never as "rejecting now"); RDS and cluster names; `TestNoRejectFindingFromProxyStatsAlone` (controller metrics unavailable, proxy stats show rejects: no 001, the check unavailable as today); `TestProxyStatsResetIsNotAReject` (Review Focus 2: a new UID with counters at zero is neither a reject nor a recovery).
 - [ ] **Step 2: Implement, run, commit** `feat(health): proxy config warming, lost controller connection, observed rejects per Pod as evidence`.
@@ -769,7 +769,7 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 **Files:** Create `pkg/api/diagnostics.go`, `pkg/api/processes.go`, `pkg/api/diagnostics_test.go`; Modify `pkg/api/diag_types.go`, `pkg/api/handlers.go` (incl. `visibleHealth:145`, which clears only message, detail and since today), `pkg/api/findings.go` (evidence and next steps in detail), `pkg/api/golden_test.go`; goldens `diagnostics.json`, `diagnostics-restricted.json`, `processes.json`, `processes-restricted.json`, `finding-detail-xds-rejects.json`, `…-process.json`, `…-version-skew.json`, `…-proxy-stats.json` (+ restricted). **⚠ guardrail** (≥ 12 files).
 
 **Interfaces:**
-- `GET …/diagnostics` → `Diagnostics` (§13.3): verdict (state, problems, `oldestSince`, reason), top 10 groups (`GroupRow` with first 5 affected and `affectedTotal`), `groupTotal`, process summary, data-plane summary, `checks`, `collectedAt`. Precomputed per Model.
+- `GET …/diagnostics` → `Diagnostics` (§13.3): verdict (state, problems, `oldestSince`, reason), top 10 groups (`GroupRow` with first 5 affected and `affectedTotal`), `groupTotal`, process summary, data-plane summary, `checks`, `collectedAt`. Built per request (D-050).
 - `GET …/processes` → `{controller: ProcessSetDTO, proxies: Page<GatewayProcesses>}`; filters `health`, `q`, `skew`, `restarts`.
 - Authorizer rules 13 (restricted group rows; visible-only affected and `affectedTotal`; install-wide members), 14 (recently changed each authorized, hidden ones left out without a count), 15 (next steps name only visible objects), 16 (process facts need the Deployment or Gateway; Pod names and per-Pod facts also need the Pod).
 
@@ -826,7 +826,7 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 
 **Files:** Modify `pkg/engine/budget_test.go`, `pkg/api/budget_test.go`, `.github/workflows/bench.yaml` (paths `pkg/process/**`, `pkg/proxystats/**`); Create `bench/3.2.txt`, `3.2-ci.txt`.
 
-- [ ] **Step 1: Extend** with the worst-case world, proxy stats (2 per Gateway, served by an in-process stub) and process data: `TestBudgetAnalyzerStage` ≤ 20 ms warm, ≤ 2 ms memoized; spec-edit stream ≤ 25 %; OS memory ≤ 256 MiB; `…/diagnostics` and `…/processes` latency; retained heap ≤ +24 MiB above the 3.1 baseline and ≤ 32 MiB; every other gate.
+- [ ] **Step 1: Extend** with the worst-case world, proxy stats (2 per Gateway, served by an in-process stub) and process data: `TestBudgetAnalyzerStage` ≤ 20 ms warm, ≤ 2 ms memoized; spec-edit stream ≤ 25 %; OS memory ≤ 256 MiB (as built: median of five ≤ 288 MiB, D-043); `…/diagnostics` and `…/processes` latency; retained heap ≤ +24 MiB above the 3.1 baseline and ≤ 32 MiB; every other gate.
 - [ ] **Step 2: Run** `make bench | tee docs/phases/phase-3/bench/3.2.txt` → PASS, or **STOP with the numbers**. **Commit** `test: 3.2 budgets with processes and proxy stats`.
 
 ### Task 53: kind e2e, Playwright and ui-loop for 3.2

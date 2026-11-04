@@ -4,7 +4,7 @@
 **Date:** 2026-10-29
 **Base:** `544dcd5`
 **Roadmap:** `docs/roadmap.md`, Phase 3
-**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-038 (§22).
+**Decisions:** D-001 … D-026 in `docs/decisions.md`. This design proposes D-027 … D-038 (§22). Execution added D-039 … D-052.
 **kgateway refs:** behaviour claims cite `file:line` at tag `v2.4.7` (`b4a2bf74`) or `v2.3.11` (`c2af2887`), as in Phase 2. Claims about unreleased behaviour cite `main` at `643f50b` (2026-10-28) or tag `v2.5.0-rc.1` (published 2026-10-27). Paths without a `pkg/` or `api/` prefix are under `pkg/kgateway/`.
 
 Every choice in this draft is **(our call)** unless it repeats an earlier user decision, which keeps its original marker. Decisions from the user's answers are marked **(user, 2026-10-29)**; those from the builder check are marked **(our call, 2.4 builder check)**. §25 holds the one open item.
@@ -71,7 +71,7 @@ What already exists. Phase 1 raises KGWUI-001 from `kgateway_envoy_xds_rejects_a
 
 1. **"Is it healthy, and what do I fix first?"** Open the install. The verdict strip says healthy, unknown with a reason, or "3 problems". Below it, "Needs attention" lists problem groups by rank: "Gateway `infra/edge`: proxies reject route config. Status says Accepted on 37 routes" first, then "Controller restarted 4 times in 15 min, last OOMKilled", then "Service `shop/cart` has no ready endpoints: 6 routes". Each row links to its subject and opens its next steps.
 2. **"Why does my change not take effect?"** The Gateway page's Data plane section says: "2 of 3 proxies reject RouteConfiguration since 09:12. Status still says Accepted on 37 routes. Envoy keeps serving its last accepted config." It lists the routes and policies on this Gateway that changed in the 10 minutes before the first reject, labelled as a hint. It gives three copyable commands: the controller replica's log line with Envoy's reason, the proxy log, and the proxy's reject counters.
-3. **"Is the control plane OK?"** The process strip shows the controller (2/2 ready, 0 restarts in 15 min, v2.4.7) and the proxies (12 Gateways, 1 with a crash-looping pod, 1 on an older version). It links to a Processes page with one row per Gateway.
+3. **"Is the control plane OK?"** The process strip shows the controller (2/2 ready, v2.4.7) and the proxies (12 Gateways, 1 with a crash-looping pod, 1 on an older version). It links to a Processes page with one row per Gateway.
 4. **"Why is this route broken?"** The route's finding says "Backend not found: Service `shop/cart` exists but has no port 8080 (ports: 80)", or "Not permitted: add a ReferenceGrant in `shop` from `HTTPRoute` in `web` to `Service`", with the grant as YAML to copy.
 5. **"Why does nothing update?"** An install finding says "The controller has not written status for 14 objects in 6 minutes", and gives the log command.
 
@@ -193,9 +193,9 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 |---|---|---|
 | Verdict strip | unchanged states and wording rules (Phase 1 design §5.3). Unhealthy: "N problems", counts per severity, the oldest problem's age (the oldest finding `since`, §5.1) | `diagnostics.verdict` |
 | Needs attention | up to 10 groups by rank (§5.3). Each row: state (icon, colour, text), title, subject as a link, blast radius ("37 routes"), age, code, and a "Next step" expander with the group's commands (§12). "Show all" opens the findings page grouped | `diagnostics.groups` |
-| Processes | one line for the controller (ready/desired, restarts in 15 min, version) and one for proxies (Gateways with every proxy ready, with a reject, with skew, with restarts). Links to `/i/:id/processes` | `diagnostics.processes` |
+| Processes | one line for the controller (state, ready/desired, version; a recent restart shows as a 019 group, D-050) and one for proxies (Gateways with every proxy ready, with a reject, with skew, with restarts). Links to `/i/:id/processes` | `diagnostics.processes` |
 | What was checked | unchanged; collapsed when unhealthy | `checks[]` |
-| Count tiles, Gateway table | unchanged; the Gateway table gains a "Data plane" column: ✓, "Rejects" or "Unknown" | overview |
+| Count tiles, Gateway table | unchanged; the Gateway table gains a "Data plane" column: ✓, "Rejects" or "Unknown" | overview rows' `dataPlane` (D-050) |
 
 - Healthy installs keep the slim green strip and show "What was checked", never an empty "Needs attention" box. While diagnostics load, the skeleton reserves the summary's `groupRows` rows, so a healthy install reserves none (D-045).
 - A group whose cause the caller cannot view shows its severity, code and "Restricted: ask the owning team", as findings do today (D-013).
@@ -378,7 +378,7 @@ The Gateway page's Data plane section and the finding's next steps carry these c
    ```
 4. **What changed:** routes, ListenerSets and policies on this Gateway whose generation changed in the 10 minutes before the first reject, newest first, at most 10. Labelled "Changed shortly before the first reject. A hint, not a cause." The research shows operators bisect by recent change; the UI has the first-seen times already.
 
-The copy also says: "Log lines and admin output can contain configuration values, including secrets. Share them with care." Commands come from `Vocabulary` (Phase 2 design §8.2), so a platform without kubectl can override or hide them.
+The copy also says: "Log lines and admin output can contain configuration values, including secrets. Share them with care." Commands come from `diagnose.Commands`, default `diagnose.Kubectl`. A platform without kubectl replaces them with `extension.WithCommands` (D-051).
 
 ### 8.6 Withheld configuration on kgateway 2.5 (024)
 
@@ -406,10 +406,12 @@ A draft issue sits outside the repo, because the repo is public. It asks kgatewa
 |---|---|
 | `control_plane.connected_state` | **026**: 0 on a Ready proxy for 60 s. "Proxy `infra/edge-…` lost its connection to the controller. It keeps serving its last config" |
 | `cluster_manager.warming_clusters`, `listener_manager.total_listeners_warming` | **025**: above 0 on a Ready proxy for 60 s. "Proxy is Ready but some config is still loading" (#14363) |
-| `listener_manager.lds.update_rejected` / `update_success`, `cluster_manager.cds.update_rejected` / `update_success` | KGWUI-001 evidence: rejects observed per proxy Pod and type since the last scrape. A sampled counter pair cannot tell whether the last update was a reject, so this never claims a Pod rejects now **(our call, Codex review 2026-11-01)** |
-| `http.<prefix>.rds.<route config>.update_rejected`, `cluster.<name>.update_rejected` | KGWUI-001 evidence: Envoy route configs or clusters with rejects observed since the last scrape, by Envoy name |
+| `listener_manager.lds.update_rejected` / `update_success`, `cluster_manager.cds.update_rejected` / `update_success` | KGWUI-001 evidence: rejects observed per proxy Pod and type since the last scrape, as `rejecting` and `rejectingSince`, never a count (D-048). A sampled counter pair cannot tell whether the last update was a reject, so this never claims a Pod rejects now **(our call, Codex review 2026-11-01)** |
+| `http.<prefix>.rds.<route config>.update_rejected`, `cluster.<name>.update_rejected` | KGWUI-001 evidence: Envoy route configs, and clusters with rejects observed since the last scrape, by Envoy name. `cluster.<name>.update_rejected` is the per-cluster EDS counter, so its names sit under `ClusterLoadAssignment`; CDS rejects carry no names (D-048) |
 | `server.state`, `server.uptime` | process evidence: draining or initializing proxies (§9) |
 | `cluster.<name>.membership_healthy`, `membership_total` | KGWUI-023 evidence: the endpoints the proxy really holds (below) |
+
+"Ready" is the Pod's Ready condition. A Pod the process data does not know, from a downstream source, is Ready when Envoy reports `server.state` `live` (D-048).
 
 **KGWUI-001 keeps the controller metric as its only trigger** **(our call, Codex review 2026-11-01)**. Its active state is the controller's `rejects_active` gauge. Proxy stats are evidence only: the Pods that saw rejects since the last scrape, and for RDS and CDS the Envoy resource names. When the controller metric is unavailable, 001 is unavailable too; proxy stats never raise it. A disagreement between the two is shown as evidence, never as a finding.
 
@@ -503,7 +505,7 @@ Probe failures, back-off and image pulls appear only as Events.
 - **Counting** **(our call, Codex review 2026-11-01)**. Facts are observed deltas: per Event UID, the count increase the UI saw, with the time it saw it, in a bounded 15-minute window. Counts from before the UI started, or from an Event first seen with a count above 1, are "unknown" and never counted. A series is counted by its series count, never twice.
 - Kept reasons: `Unhealthy` (probe failure), `BackOff`, `Failed`, `FailedScheduling`, `FailedMount`.
 - Events expire after an hour by default and can be aggregated, so event-based facts read "in the last 15 minutes, from Events" and never claim a total.
-- **Probe type** **(our call, Codex review 2026-11-01)**. Event messages stay unread (§18.2). The probe type comes from the Pod spec: when the container defines exactly one probe type, that type; otherwise "a probe".
+- **Probe type** **(our call, Codex review 2026-11-01)**. Event messages stay unread (§18.2). The probe type comes from the Pod spec: when the Pod's containers together define exactly one probe type, that type; otherwise "a probe". The cache keeps no Event `fieldPath`, so the failing container is unknown (D-049).
 - Retained events are capped at 10,000 per UI. Past the cap the oldest go, and the `events` check notes it.
 - RBAC and the chart toggle: §18.
 
@@ -535,8 +537,8 @@ KGWUI-005 (controller not ready) and 006 (proxy not ready) stay the error findin
 
 **Gateway API CRDs.** The UI reads CRD **metadata only**, through a metadata informer, and keeps the CRDs of the groups `gateway.networking.k8s.io` and `gateway.networking.x-k8s.io` (RBAC cannot filter by group, so the filter is client-side). It reads the annotations `gateway.networking.k8s.io/bundle-version` and `gateway.networking.k8s.io/channel`.
 - The expected bundle version per kgateway minor is a pinned, pluggable table next to the rule sets: 2.3 → v1.5, 2.4 → v1.6, 2.5 → v1.7, from each tag's `go.mod` (`v1.5.1`, `v1.6.1`, `v1.7.0-rc.3`). The 2.5 entry is re-read from the GA tag in 3.4. It is release metadata, not translation. The upstream ask is machine-readable compatibility metadata (#13683; #13940 is closed, and no chart annotation was found up to `v2.5.0-rc.1`).
-- A warning when an installed CRD's bundle minor differs from the expected one. A warning when the Gateway API CRDs carry different bundle versions or channels.
-- The channel also sharpens Phase 2's ListenerSet hint (Phase 2 design §8.5). Today it is worded as a possibility, because the UI could not tell an unset `allowedListeners` from a CRD that lacks it. A standard-channel Gateway CRD next to a ListenerSet CRD now says which.
+- A warning when an installed CRD's bundle minor differs from the expected one. A warning when the Gateway API CRDs carry different bundle versions or channels. Like proxy skew, both are suppressed during a controller rollout and for 10 min after (§7.1, D-049).
+- The channel also sharpens Phase 2's ListenerSet hint (Phase 2 design §8.5). Today it is worded as a possibility, because the UI could not tell an unset `allowedListeners` from a CRD that lacks it. The channel and bundle version now say which: standard before v1.5 and experimental before v1.3 lack the field, so the hint is definite; a CRD that defines it drops the hint (D-049).
 
 ## 10. Status freshness
 
@@ -580,7 +582,7 @@ At about 200 bytes per kept object this stays small at Large (§16.3). The same 
 
 ## 12. Checks the UI cannot run
 
-These checks need access the UI does not have, by design. Proxy stats (§8.8) and opt-in derived log signals (§8.9) cover part of what used to be here. Raw log text, `/config_dump`, `/clusters` and the controller's admin server stay out until the UI can show them with the viewer's own rights (Phase 10; Phase 9 for the config comparison) **(user, 2026-11-01)**. The UI shows what it knows and the command that gets the rest. Commands are filled in with the install's namespace, Deployment and Pod names, and go through `Vocabulary`.
+These checks need access the UI does not have, by design. Proxy stats (§8.8) and opt-in derived log signals (§8.9) cover part of what used to be here. Raw log text, `/config_dump`, `/clusters` and the controller's admin server stay out until the UI can show them with the viewer's own rights (Phase 10; Phase 9 for the config comparison) **(user, 2026-11-01)**. The UI shows what it knows and the command that gets the rest. Commands are filled in with the install's namespace, Deployment and Pod names, and come from `diagnose.Commands` (D-051).
 
 | Question | Where the answer is | Why the UI does not read it | What the UI shows |
 |---|---|---|---|
@@ -612,6 +614,7 @@ Existing payloads gain:
 - every finding, everywhere: optional `id`, `group` and `evidence`;
 - `GatewayDetail`: optional `dataPlane` (§8) and `proxies`;
 - route rows: the flag `gateway-rejecting` (§8.4);
+- overview Gateway rows: `dataPlane`, `ok`, `rejects` or `unknown`, computed on the server (D-050);
 - `InstallSummary`: `groupRows`, the number of groups `…/diagnostics` lists for the same caller (D-045);
 - `/meta` `capabilities`: `processes`, `events`, `crds`, `endpoints`, `proxyStats`, `controllerLogs`, each present only when its input runs; and `filters.findings`, listing the findings filters.
 
@@ -630,30 +633,38 @@ FindingDetail  { install, finding: FindingRow, evidence?: Evidence, suggestedFix
                  nextSteps?: NextStep[], affected: Page<LinkedRef>, collectedAt }
 Evidence       // a tagged union on "kind"; one shape per code. Examples:
   { kind: "xds-rejects", types: { typeUrl, streams, reportedBy: string[], firstSeen, totalSinceFirstSeen }[],
-    proxies: { ready, desired }, statusSaysHealthy: boolean, recentlyChanged: LinkedRef[],
-    proxyStats?: { pod, types: { typeUrl, rejectsSinceLastScrape, envoyResources?: string[] }[] }[],   // §8.8
+    proxies?: { ready, desired }, statusSaysHealthy: boolean, recentlyChanged?: LinkedRef[],        // D-048
+    proxyStats?: { pod, types: { typeUrl, rejecting, rejectingSince?, envoyResources?: string[],
+                                 envoyResourcesTruncated? }[] }[],                                  // §8.8, D-048
     logEvents?: { time, typeUrl, envoyResources: string[], errorClass }[] }                     // §8.9, no text
-  { kind: "proxy-stats", pod, connected: boolean, warmingListeners, warmingClusters, serverState }   // 025, 026
+  { kind: "proxy-stats", pods: { pod, connected?, warmingListeners?, warmingClusters?, serverState? }[] }  // 025, 026; D-048
   { kind: "ref-unresolved", ref: BackendRefDTO, reason, message, explanation?: string, computed?: Computed }
   { kind: "ref-not-permitted", ref }                              // the grant is the suggested fix (§7.7)
   { kind: "rule-replaced", matchIndex, reason, message, policy?: LinkedRef }
-  { kind: "process", restarts?, termination?: { reason, exitCode, at }, waiting?, probe?: { type, failures, last } }
-  { kind: "version-skew", controller, proxies: { version, pods }[], crds?: { name, bundleVersion, channel }[], expected? }
+  { kind: "process", pod, restarts?, termination?: { reason, exitCode, at }, waiting?,
+    probe?: { type?, failures, last, historyUnknown? } }                    // type absent: "a probe" (D-049)
+  { kind: "version-skew", controller?, proxies?: { version, pods, total }[], replicas?: { version, pods, total }[],
+    crds?: { name, bundleVersion?, channel? }[], expected? }
   { kind: "endpoints", service: LinkedRef, port, ready: 0, total, slices }
   { kind: "freshness", freshness: "never-written"|"stale"|"pending"|"no-ancestor", observed?, current?, since? }
 NextStep       { title, command, needs?: string[], note? }       // needs: e.g. ["pods/log"]
 SuggestedFix   { title, target: LinkedRef, create: boolean, path?: string, yaml, basis }
                                                                 // path: the fragment's location when create is false
-GroupRow       { id, title, severity, class, cause: LinkedRef, members: number, affected: LinkedRef[],
-                 affectedTotal, since, nextSteps?: NextStep[], restricted? }
-Diagnostics    { install, verdict: { state, problems, oldestSince?, reason? }, groups: GroupRow[], groupTotal,
+GroupRow       { id, title, code, severity, class, cause?: LinkedRef, members: number, affected: LinkedRef[],
+                 affectedTotal, since?, nextSteps?: NextStep[], restricted? }
+Diagnostics    { install, verdict: { state, problems, counts, oldestSince?, reason? }, groups: GroupRow[], groupTotal,
                  processes: { controller: ProcessSummary, proxies: ProxySummary },
-                 dataPlane: { gateways, rejecting, withheld?, unavailable? }, checks: CheckResult[], collectedAt }
-ProcessSetDTO  { observed, desired?, ready?, processes: ProcessDTO[], rollout?: { progressing, reason? } }
+                 dataPlane: { gateways, rejecting, unavailable? }, checks: CheckResult[], collectedAt }
+                                                                // withheld? arrives with 024 (3.4); D-050
+ProcessSummary { state, observed, ready?, desired?, version?, restricted? }            // no restart count (D-050)
+ProxySummary   { state, gateways, ready, rejecting, skew, restarting, notObserved }
+ProcessSetDTO  { observed, desired?, ready?, processes: ProcessDTO[], rollout?: { progressing, reason? }, restricted? }
 ProcessDTO     { name, ready?, restarts?, restartsRecent?, lastStart?, termination?, waiting?, version?, probe? }
 GatewayProcesses { gateway: LinkedRef, health, set: ProcessSetDTO, rejects?: number, skew?: boolean }
-DataPlaneDTO   { rejects: { typeUrl, streams, firstSeen }[], statusSaysHealthy, snapshot?: { listeners, routes,
-                 clusters, endpoints, secrets }, nextSteps: NextStep[], recentlyChanged: LinkedRef[] }
+DataPlaneDTO   { rejecting, rejects: { typeUrl, streams, firstSeen }[], statusSaysHealthy,
+                 snapshot?: { by, listeners, routes, clusters, endpoints, secrets }, nextSteps: NextStep[],
+                 recentlyChanged: LinkedRef[], evidenceRestricted?, unavailable?,
+                 proxyStats: { available, unavailable?, reason? } }               // D-050
 ```
 
 - Wire names follow Phase 2's conventions. Times are UTC.
@@ -762,6 +773,8 @@ type RunContext struct {
 
 **Memoization.** The engine reuses a check's previous result when the fingerprints of its declared inputs are unchanged. The fingerprints are the per-kind hashes D-019 already computes (`Snapshot()` source fingerprint), plus the metrics result identity, a process-data hash and the fingerprints of any checks it reads. It is the views-memo pattern Phase 2 used for annotation-only edits. Time-driven checks (019, 020, 024, every maturation and hold) also key on their next deadline, so a skipped run never misses a deadline. A check that writes its Store is still skipped when its inputs and deadline are unchanged.
 
+**Memo reuse with a wake time (D-052).** A memo whose result set a wake time is reused only while the times of the metrics and the declared collector values are unchanged, so an idle scrape never keeps an old wake. A rerun whose findings equal the memo's returns the memo's slice, so the merged report and the diagnosis are reused. The diagnosis is built only from the inputs its key covers; next steps read the snapshot per request.
+
 ### 16.3 Budgets
 
 Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on CI; stream CPU 10–12 % against 15 % (annotation-only, through the views memo); dense peak heap 416 MiB against 432 MiB; retained heap +23 to +25 MiB against 32 MiB. The gates stay: 150 ms warm, 15 % stream CPU, 432 MiB dense median, retained heap 32 MiB **(user, 2026-10-29)**. The dense gate became retained heap and bytes per warm recompute in 3.0 **(user, 2026-11-01; D-039)**. 3.2, 3.3 and 3.4 each show, with numbers, that they stay within them. Phase 3 adds per-stage gates **(our call)**:
@@ -775,7 +788,7 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core. If the baseline already exceeds 22 %, the numbers go to the user before a gate is set | 3.1–3.4 |
 | Retained heap | the Phase 2 gate of 32 MiB, unchanged; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
 | Dense memory | at the default edge cap, medians of: retained heap ≤ 176 MiB, bytes allocated by the cold recompute ≤ 246 MiB and per warm recompute ≤ 185 MiB; peak heap and RSS logged, not gated (D-039) | 3.0–3.4 |
-| OS memory during the stream | ≤ 256 MiB (D-022) | 3.2–3.4 |
+| OS memory during the stream | median of five ≤ 288 MiB (D-043; was ≤ 256 MiB, D-022) | 3.2–3.4 |
 | `GET …/diagnostics`, `GET …/findings` (each filter mix), `GET …/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 3.1–3.4 |
 | Change burst, idle, cold recompute | Phase 2 gates, unchanged | 3.1–3.4 |
 | Proxy stats scrape, 2 proxies per Gateway at Large; log reader at 50 matching lines/s | inside the stream CPU and retained-heap gates above, measured with both on | 3.2–3.3 |
@@ -817,7 +830,7 @@ The install nav gains Processes. `CorePages` gains optional `DiagnosticsSection`
 
 - `NextSteps`: numbered steps, each a code block with a copy button, the needed permission and a note. Commands render as text, never as HTML.
 - `SuggestedFix`: the target object as a link, the fragment's location, the YAML with copy and download buttons, and the basis in one line. Shown above the next steps (§7.7).
-- `EvidenceView`: one renderer per evidence `kind`. A downstream renders its own kinds through the finding-renderer extension point (Phase 1 design §6.3).
+- `EvidenceView`: one renderer per evidence `kind`. It is the only owner of `findingRenderers` (Phase 1 design §6.3): a kind the shell does not know, or a finding with no evidence, renders the code's renderer, and a restricted finding renders none. Finding actions render on the finding page (D-051).
 - `GroupRow`: state, title, cause link, blast radius, age, code chip and the next-step expander.
 - `ProcessLine`, `ProcessTable`.
 
@@ -909,7 +922,7 @@ All additions are get/list/watch only. Each has a chart toggle under `diagnostic
 | Proxy Pod selector | an optional detector method; no new `corev1` import outside the allowlist |
 | Events, Services, EndpointSlices, CRD metadata | read in `pkg/cache` (allowlisted) and handed to checks as neutral projections; each behind a capability |
 | Analyzers, identity, groups, rank | `pkg/diagnose` and `pkg/health`: objects through `pkg/objects` only, covered by `internal/boundary/imports_test.go` |
-| Next-step commands | through `Vocabulary`; a platform without kubectl overrides or hides them |
+| Next-step commands | through `diagnose.Commands`; a platform without kubectl replaces them with `extension.WithCommands` (D-051) |
 | Version skew | versions come from `Process.Version`, whatever the provider parses |
 | Proxy stats, derived log signals | behind the `proxyStats` and `controllerLogs` capabilities. Proxy stats come through the replaceable `proxystats.Source` (targets, transport, interpretation) **(our call, Codex review 2026-11-01)**; the log parsers and Envoy name mapping sit on the rule-set seam, so a downstream proxy or log format plugs in its own |
 
@@ -925,7 +938,7 @@ This phase generates no data-plane configuration and no xDS churn.
 | Recompute | analyzers are linear in findings and objects; memoized per input (§16.2) |
 | Metrics | the same scrape; more samples kept, per Pod and type |
 | Memory | projections of the new kinds, and finding identities; gated (§16.3) |
-| Per request | the diagnostics summary is precomputed per Model; findings paging uses keyset cursors over a precomputed rank order |
+| Per request | the diagnostics summary is built per request from the published Model (D-050); findings paging uses keyset cursors over a precomputed rank order |
 
 ## 21. Testing
 

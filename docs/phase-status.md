@@ -12,8 +12,8 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q3 Cross-model review of design + plan, triage, user approval — `reviews/design-codex.md`, 15 findings accepted and applied; user approved all of 3.0–3.4 on 2026-11-01 ("I approve the entire phase 3, so 3.0 to 3.4")
 - [x] Q4 Sub-phase 3.0 Extension seams (Tasks 1–11) — closed 2026-11-02, phases/phase-3/phase-3.0-complete.md
 - [x] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33) — closed 2026-11-02, phases/phase-3/phase-3.1-complete.md
-- [ ] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) ← CURRENT
-- [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73)
+- [x] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) — closed 2026-11-04, phases/phase-3/phase-3.2-complete.md
+- [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73) ← NEXT
 - [ ] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87)
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -24,11 +24,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 3.2 Data plane, processes and the overview
-Kind: planned
-Status: implementing
-Base: 8bc1bae82607a427dae805928717b482a3ceeb7a
-Brief: phases/phase-3/phase-3.2-brief.md
+n/a (3.2 closed 2026-11-04; 3.3 not started)
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
@@ -43,18 +39,22 @@ Consumers: E2 (kgwctl Phase 1, available with caveats), E3 (kgwctl Phase 3, the 
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
 - (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md
 - (P4) Stable finding identity for Phase 3 diagnostics — src: phases/phase-2/reviews/phase-codex.md#8 — done in 3.1 (D-028, D-040)
-- (P4) Apps that embed `Shell` must wait for fonts before rendering, as `web/app/src/main.tsx` does, or long names shift the layout on load — src: phases/phase-2/phase-2.4-complete.md — planned for 3.2 (design §15)
+- (P4) Apps that embed `Shell` must wait for fonts before rendering, as `web/app/src/main.tsx` does, or long names shift the layout on load — src: phases/phase-2/phase-2.4-complete.md — done in 3.2 (`renderWhenFontsReady`, D-045)
 - (P4) Downstream detectors cannot report their base kgateway version, so experimental classification is conservative for them — seam milestone — src: phases/phase-1/phase-1.5-complete.md
 - (P4) Extension seam: finding-code prefix registry (Phase 1 uses a documented convention) — for the seam milestone after Phase 2 — src: phases/phase-1/phase-1.1-complete.md
 - (P4) Extension seam: analyzers, API-route registration, per-kind renderers, health cards — for the seam milestone after Phase 2 — src: phases/phase-1/reviews/design-codex.md#16
 - (P4) Refactors of design §14.4, triggered by the standalone PoC; neutral `Install` and `Detector` before the seam milestone
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039); a regression that holds more at once without allocating more passes. Candidate: a child with the production soft limit, gating peak RSS against the pod limit — src: phases/phase-3/reviews/3.0-gate-codex.md#2
-- (P3) The 3.2 memoized analyzer gate (≤ 2 ms) needs narrower inputs: memoized runs 8.1 ms at the worst case, because Phase 1–2 checks declare `Clock` (ruling R20) — src: phases/phase-3/phase-3.1-complete.md — for 3.2
-- (P3) Retained heap headroom is 4.2 MiB in the contradicting world (+27.8 of 32 MiB); 3.2 watches add to it — src: phases/phase-3/phase-3.1-complete.md — for 3.2
+- (P3) The 3.2 memoized analyzer gate (≤ 2 ms) needs narrower inputs: memoized runs 8.1 ms at the worst case, because Phase 1–2 checks declare `Clock` (ruling R20) — src: phases/phase-3/phase-3.1-complete.md — done in 3.2 (§16.3 scope, R35; measurement world 0.21 ms, 1.14 ms with a scrape per run, D-052)
+- (P3) Retained heap headroom is 1.2 MiB in the 3.2 measurement world (+30.8 of 32 MiB); 3.3 and 3.4 add to it — src: phases/phase-3/phase-3.2-complete.md
+- (P3) R57: re-seed Services and EndpointSlices in the measurement world with the 3.4 watches — src: phases/phase-3/phase-3.2-complete.md — for 3.4
+- (P3) R59: proxy Pod ownership by UID needs a ReplicaSet watch; the name check (R50) stays until then — src: phases/phase-3/phase-3.2-complete.md — for 3.4
+- (P3) The first CI run of the branch must cover the D-046 and D-047 gates and the kind rows 1 and 3 with `NACK=1`; the Task 54 fixes did not run on kind (local inotify limit) — src: phases/phase-3/phase-3.2-complete.md
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-04: Sub-phase 3.2 closed (phases/phase-3/phase-3.2-complete.md). Codex review and re-review triaged; the user decided D-045, D-046 and D-047, and D-048 … D-052 record the design deviations. Standard gates pass on e4416b8; `make bench` passes on ce9983b. kind e2e last ran in Task 53 (9e5f8f0); the Task 54 fixes did not run on kind. 3.3 is next; the user starts it.
 - 2026-11-02: Sub-phase 3.2 started (user). Brief phases/phase-3/phase-3.2-brief.md. Two gates are tight at the start: the memoized analyzer stage fails today (R20), and the CI warm worst case is 25 ms against 20; retained heap headroom is 4.2 MiB (local) in the contradicting world.
 - 2026-11-02: Sub-phase 3.1 closed (phases/phase-3/phase-3.1-complete.md). D-027 keeps the full recompute. Three Codex rounds triaged; the user decided D-040 (finding ids), D-041 (breadcrumbs through `/refs`) and D-042 (side column from 1600 px), replacing R24, R31 and R30. Gates pass locally; kind e2e passed on all three rows at 205e164.
 - 2026-11-02: Sub-phase 3.1 started. Baseline recorded (bench/3.1-baseline.txt, -ci.txt): every gate passes on 544dcd5 and 3.0; spec-edit 11.0 % local (10 min), 14.0 % CI (60 s). Throwaway branch `duncandoyle/baseline3` pushed for the CI run (user go), never merged. The user raised the D-039 cold-allocation budget to 246 MiB (CI measures 224) and approved Task 15 after seeing D-027.
