@@ -924,3 +924,22 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** Idle 10 min is back to 20 recomputes. The memoized stage with a new scrape each run is 1.14 ms on the reference machine (measurement world).
 
 **Alternatives:** Drop the xDS rejects wake time (rejected: the declared-input guard needs it).
+
+## D-053 — An exported config helper and a static metrics source for one-shot callers (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, for program edge E8 ([#13](https://github.com/DuncanDoyle/kgateway-ui/issues/13)); planned as Task 71a in sub-phase 3.3. Adds to the plan; no design section changes
+
+**Context:**
+- kgwctl's `check` runs `engine.New(cfg).Compute()` once over a settled cache, with controller metrics from one `Collect` call (program edge E8).
+- `cache.Config` and `engine.Config` are built in `pkg/app/app.go`. `pkg/app` is the UI's wiring, not a library, so a second caller copies the scope, detector, selector and verifier setup and drifts from it.
+- `ctrlmetrics.Source` is exported, so a caller can wrap a `Collect` result itself, but its staleness handling can then differ from the UI's.
+- #13 asks whether the helper should take the time-based checks into account (restart hold, grace periods, `Report.Next`).
+
+**Decision:**
+1. A new package under `pkg/` (`pkg/setup`) builds `cache.Config` and `engine.Config` from the Kubernetes clients, the options and an `*extension.Registry`, the way `pkg/app` does. `pkg/app` builds its own config through it, so the two cannot drift. `pkg/app` keeps its exported names.
+2. `ctrlmetrics.Static` is an optional `ctrlmetrics.Source` over one `Collect` result per install. Staleness is the engine's, through `MetricsMaxAge`, the same as in the UI.
+3. Time-based waiting stays with the caller. Neither the helper nor the static source waits. A single pass reads the restart hold, grace periods, scope-verifier persistence and metric staleness as pending, and `Report.Next` says when to compute again. The Go doc says so. This answers #13's open question.
+4. This is an addition to the versioned `pkg/` API (D-003): new names only, no existing signature changes.
+
+**Consequences:** kgwctl drops its copy of the wiring. `pkg/setup/setup.go` gets an import-boundary allowlist entry (D-016), since it names the client-go interfaces. Task 71a touches 6 files (⚠ guardrail, approved here). Its one-shot test also serves as the E3 acceptance test: an external module runs the analyzer over a cache snapshot.
+
+**Alternatives:** A helper that waits for the time-based checks (rejected: a CLI picks its own timeout and output, and a library that sleeps hides latency). Leave the wiring to each caller (rejected: drift).

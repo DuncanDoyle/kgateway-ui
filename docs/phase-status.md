@@ -13,7 +13,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q4 Sub-phase 3.0 Extension seams (Tasks 1–11) — closed 2026-11-02, phases/phase-3/phase-3.0-complete.md
 - [x] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33) — closed 2026-11-02, phases/phase-3/phase-3.1-complete.md
 - [x] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) — closed 2026-11-04, phases/phase-3/phase-3.2-complete.md
-- [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73) ← NEXT
+- [ ] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73, 71a) ← CURRENT
 - [ ] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87)
 ### Exit gates
 - [ ] tests/vet pass (observed)
@@ -24,12 +24,45 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-n/a (3.2 closed 2026-11-04; 3.3 not started)
+Sub-phase: 3.3 Analyzer
+Kind: planned
+Status: implementing
+Base: 79a53073ff5914a5b1396dfbb11803e04a11d5c6
+Brief: phases/phase-3/phase-3.3-brief.md
+
+### Allowed work
+Features within the approved design: 003 kinds, 013–018, the four groups and grouped view, suggested fixes for 013 and 014, opt-in controller log signals, `docs/findings.md`, and the one-shot config helper and static metrics source (D-053).
+
+### Not allowed
+Design changes without a `decisions.md` entry and the user's approval; gate changes; 3.4 work (Services, 023, 024, the 2.5 rule set, R57, R59).
+
+### Queue
+- [x] Task 55 Brief for 3.3
+- [ ] Task 56 KGWUI-003 kinds and the 1 KiB clip ← CURRENT
+- [ ] Task 57 KGWUI-013 and 014 from status
+- [ ] Task 58 Suggested fixes for 013 and 014
+- [ ] Task 59 KGWUI-015 rules replaced or dropped
+- [ ] Task 60 Policy targets rule (computed)
+- [ ] Task 61 KGWUI-016 and its verifier
+- [ ] Task 62 KGWUI-017 listener conflicts
+- [ ] Task 63 KGWUI-018 status not progressing
+- [ ] Task 64 3.3 groups and the grouped findings view
+- [ ] Task 65 Controller log reader (opt-in)
+- [ ] Task 66 Log parsers pinned per version
+- [ ] Task 67 Derived log evidence
+- [ ] Task 68 `docs/findings.md` and "Learn more"
+- [ ] Task 69 SPA for 3.3
+- [ ] Task 70 Wording pass for 3.3
+- [ ] Task 71a One-shot config helper and static metrics source (E8, #13, D-053)
+- [ ] Task 71 3.3 budgets
+- [ ] Task 72 kind e2e for 3.3
+- [ ] Task 73 Close sub-phase 3.3
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
 Waiting on: none
-Consumers: E2 (kgwctl Phase 1, available with caveats), E3 (kgwctl Phase 3, the 3.3 analyzer as a package under `pkg/`). E7 (kgwctl Phase 4, policy model under `pkg/`) is Phase 5.
+Consumers: E2 (kgwctl Phase 1, available with caveats). E3 (kgwctl Phase 4, the analyzer as a package under `pkg/`): in progress in 3.3. E8 (kgwctl Phase 2, #13, config helper and static metrics source): added to 3.3 as Task 71a (D-053). E7 (kgwctl Phase 5, policy model under `pkg/`) is UI Phase 5.
+Provided to this repo: E4 (#15, krp `v0.1.0`) is for UI Phase 9; 3.3 does not consume it. The long-running backend must not use krp `pkg/envoy/source/kube` until krp#25 is fixed.
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
@@ -53,6 +86,7 @@ Consumers: E2 (kgwctl Phase 1, available with caveats), E3 (kgwctl Phase 3, the 
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-04: Sub-phase 3.3 started at base 79a5307. Brief phases/phase-3/phase-3.3-brief.md; its `(inferred)` outputs and six plan points go to the user before their tasks. The user added E8 to 3.3 (Task 71a, D-053). Retained heap headroom is 1.2 MiB in the measurement world.
 - 2026-11-04: Sub-phase 3.2 closed (phases/phase-3/phase-3.2-complete.md). Codex review and re-review triaged; the user decided D-045, D-046 and D-047, and D-048 … D-052 record the design deviations. Standard gates pass on e4416b8; `make bench` passes on ce9983b. CI on fd4fe3c (bench32): kind e2e passed on all three rows with NACK=1 and the bench passed with the D-046 and D-047 gates. 3.3 is next; the user starts it.
 - 2026-11-02: Sub-phase 3.2 started (user). Brief phases/phase-3/phase-3.2-brief.md. Two gates are tight at the start: the memoized analyzer stage fails today (R20), and the CI warm worst case is 25 ms against 20; retained heap headroom is 4.2 MiB (local) in the contradicting world.
 - 2026-11-02: Sub-phase 3.1 closed (phases/phase-3/phase-3.1-complete.md). D-027 keeps the full recompute. Three Codex rounds triaged; the user decided D-040 (finding ids), D-041 (breadcrumbs through `/refs`) and D-042 (side column from 1600 px), replacing R24, R31 and R30. Gates pass locally; kind e2e passed on all three rows at 205e164.

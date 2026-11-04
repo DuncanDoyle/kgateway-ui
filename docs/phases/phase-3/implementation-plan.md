@@ -27,6 +27,7 @@
   - `pkg/process/kube.go` — "process facts from Pods, Deployments and Events" (Task 37)
   - `pkg/proxystats/kube.go` — "the Kubernetes proxy stats source: proxy Pod targets and transport" (Task 41)
   - `pkg/ctrllogs/stream.go` — "follows controller Pod logs" (Task 65)
+  - `pkg/setup/setup.go` — "builds cache and engine config from the Kubernetes clients" (Task 71a, D-053)
   `pkg/collect`, `pkg/diagnose`, `pkg/extension`, the rest of `pkg/proxystats` and the new `pkg/health` files stay outside the allowlist.
 - **Availability (D-034).** No Phase 3 check sets `Required: true`. A check whose input is off, denied, failing or absent on this version returns `health.NotAvailable(...)`; it never raises KGWUI-008 and never turns the install unknown. The existing required checks keep their flag, `xDS rejects` included.
 - **Go style.** Go Doc Comments on every exported name. Code comments 1–2 lines, grouped, describing the code as it is (no history). Match the surrounding idiom.
@@ -59,7 +60,7 @@ Each sub-phase starts with a brief (`docs/phases/phase-3/phase-3.N-brief.md`, ag
 | **3.0 Extension seams** | A downstream adds a whole feature without forking (§4.1, D-038) | 1–11 | Seven seams and the two §15 seam carry-overs; `examples/downstream` uses each, tested in CI (Go, chart overlay, web package from the tarball); README extension docs and stability rule; stock UI unchanged (goldens, bench numbers unchanged); Codex review triaged |
 | **3.1 Foundations, performance and the KRT decision** | Same pages, easier to read; findings with ids, paged on the server | 12–33 | Baseline on `544dcd5` recorded (local and CI); spec-edit variant reported; KRT spike and D-027; D-032 contract, Store and memoization; every check migrated; README upgrade notes; delegation memory carry-over; captures and per-Pod metrics; ids, `since`, groups and rank; findings endpoints and pages; scale tiers; ObjectHeader, fluid layout, breadcrumbs; wording pass; 3.1 budgets; Codex review triaged |
 | **3.2 Data plane, processes and the overview** | The ranked health overview with xDS rejects and process health | 34–54 | Watches and toggles; `pkg/process`; 001 re-specified; 019–022, 025, 026; proxy stats; diagnostics and processes endpoints; install page, Processes page, Gateway sections; RBAC and README fix; `renderWhenFontsReady`; wording pass; all §16.3 gates incl. analyzer stage and spec-edit; kind e2e on 2.3.11 and 2.4.7; Codex review triaged |
-| **3.3 Analyzer** | The analyzer floor and freshness, with suggested fixes | 55–73 | 003 kinds; 013 (no Service data), 014, 015, 016 computed with rules section and verifier, 017, 018; four groups and the grouped view; fixes for 013 and 014; opt-in log signals; `docs/findings.md`; wording pass; budgets with the log reader; kind e2e; Codex review triaged |
+| **3.3 Analyzer** | The analyzer floor and freshness, with suggested fixes | 55–73, 71a | 003 kinds; 013 (no Service data), 014, 015, 016 computed with rules section and verifier, 017, 018; four groups and the grouped view; fixes for 013 and 014; opt-in log signals; `docs/findings.md`; wording pass; the one-shot config helper and static metrics source (D-053); budgets with the log reader; kind e2e; Codex review triaged |
 | **3.4 Backends and kgateway 2.5** | Empty backends; 2.5 supported at GA | 74–87 | Service and EndpointSlice watches; 023; 013 Service explanations and port fix; platform-neutral test; wording pass; budgets; kind e2e. After 2.5.0 GA (D-033): `kgw25`, 016 from status, 024, `kgateway_build_info`, the 2.5 e2e row with the TCPRoute fixture on v1; Codex review triaged. If GA is not out, Tasks 83–86 wait and the rest ships |
 
 **Lifecycle.** A sub-phase's first task records it in `docs/phase-status.md` under `## Sub-phase` (`3.N <name>`, `Status: active`, `Base: <git rev-parse HEAD>` before its first commit). Its review diffs from that base: `BASE=$(awk '/^## Sub-phase/{f=1} f && /^Base:/{print $2; exit}' docs/phase-status.md)`. Its close task writes the README upgrade notes, updates `docs/roadmap.md` and resets `## Sub-phase`. Each brief reminds the user of the open item in §25 and the scope-endpoint issue (carry-over P3); filing stays the user's call.
@@ -113,14 +114,16 @@ pkg/computed/kgw25/                 copy of kgw24 plus TargetNotFound (3.4)
 pkg/computed/rulesets/gatewayapi.go expected Gateway API bundle per minor (3.2; 2.5 entry 3.4)
 pkg/computed/bound.go               MaxPathBytes, ClipDisplay (3.1)
 pkg/ctrlmetrics/parse.go, scrape.go per Pod and type; rejects_total, updates_dropped (3.1); snapshot_resources (3.2); status_syncs (3.3); per-client and build_info (3.4)
+pkg/ctrlmetrics/static.go           static Source over one Collect result, for one-shot callers (3.3, D-053)
+pkg/setup/setup.go                  cache.Config and engine.Config as pkg/app builds them (3.3, D-053; allowlisted)
 pkg/scopeverify/verify.go           dropped updates → KGWUI-008 (3.1)
 pkg/cache/cache.go, events.go, crds.go, services.go   proxy Pods, Events, CRD metadata (3.2); Services, EndpointSlices (3.4); new files allowlisted
 pkg/engine/engine.go, memo.go       States per install, memo, Diagnosis in InstallModel (3.1); process data (3.2)
 pkg/explore/rows.go, query.go       gateway-rejecting flag and filter (3.2)
 pkg/kinds/catalog.go                served group/kinds from discovery for 013 (3.3)
-pkg/app/app.go, cmd/kgateway-ui/main.go   seams wiring (3.0); diagnostics toggles and collectors (3.2, 3.3, 3.4)
+pkg/app/app.go, cmd/kgateway-ui/main.go   seams wiring (3.0); diagnostics toggles and collectors (3.2, 3.3, 3.4); config through pkg/setup (3.3)
 internal/testutil/scale/scale.go    Phase 3 tier fields and worst case (3.1)
-internal/boundary/imports_test.go   six allowlist entries (3.2, 3.3, 3.4; Global Constraints)
+internal/boundary/imports_test.go   seven allowlist entries (3.2, 3.3, 3.4; Global Constraints)
 examples/downstream/                every seam (3.0); new contract (3.1); web/ and chart/ overlays (3.0)
 deploy/helm/kgateway-ui/            extension values (3.0); diagnostics toggles and rules (3.2, 3.3, 3.4)
 web/packages/shell/package.json, tsconfig.build.json   built package (3.0)
@@ -976,6 +979,20 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 
 - [ ] Strings: messages per code 003 kinds, 013–018; explanation texts; fix titles and basis lines; the 015 hint; log-signal labels; grouped-view labels; capability reasons. Same procedure; record in `phase-3.3-wording.md`; apply; goldens; **commit** `copy: wording pass for the analyzer`.
 
+### Task 71a: One-shot config helper and static metrics source (E8, D-053)
+
+Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/DuncanDoyle/kgateway-ui/issues/13)); decision D-053. It runs before Task 71, so the budgets measure `pkg/app` built through the helper. Its one-shot test is also the acceptance test of edge E3.
+
+**Files:** Create `pkg/setup/setup.go`, `pkg/setup/setup_test.go`, `pkg/ctrlmetrics/static.go`, `pkg/ctrlmetrics/static_test.go`; Modify `pkg/app/app.go` (build its config through `pkg/setup`), `internal/boundary/imports_test.go` (`pkg/setup/setup.go`: "builds cache and engine config from the Kubernetes clients"). **⚠ guardrail** (6 files; approved by D-053).
+
+**Interfaces:**
+- `pkg/setup` builds `cache.Config` and `engine.Config` from the Kubernetes clients, the options and an `*extension.Registry` the way `pkg/app` does: served kinds, detectors and their Pod, Deployment and proxy Pod selectors, scope, the scope verifier and its persistence, rule sets, the process source, checks, the metrics max age (3 × the metrics interval) and the diagnostics toggles. `pkg/app` uses it, so the two cannot drift. `pkg/app` keeps its exported names.
+- `ctrlmetrics.Static` is a `ctrlmetrics.Source` over one `Collect` result per install. Staleness is the engine's, through `MetricsMaxAge`, as in the UI.
+- Neither waits. Time-based checks (restart hold, grace periods, scope-verifier persistence, metric staleness) are the caller's: a single pass reads them as pending, and `Report.Next` says when to compute again. The Go doc of both says so.
+
+- [ ] **Step 1: Failing tests** a black-box test (package `setup_test`) that imports only `pkg/` packages, builds both configs over fake clients, computes once and gets the same findings and ids as `pkg/app` over the same objects, 013–018 included; `ctrlmetrics.Static` at max age − 1 s (used) and + 1 s (stale, `xDS rejects` unavailable); an install without a result; existing `pkg/app` tests and goldens unchanged.
+- [ ] **Step 2: Implement, run, commit** `feat(setup): exported cache and engine config for one-shot callers (D-053)`.
+
 ### Task 71: 3.3 budgets
 
 - [ ] Extend the worst-case world with the analyzer codes and the log reader at 50 matching lines/s (stub stream); every §16.3 gate; `make bench | tee bench/3.3.txt` → PASS or **STOP with the numbers**; path filter `pkg/ctrllogs/**`. **Commit** `test: 3.3 budgets with the analyzer and log reader`.
@@ -989,7 +1006,7 @@ The design names `?view=groups` for the page (§17.1) but no API for paging grou
 
 ### Task 73: Close sub-phase 3.3
 
-- [ ] Standard gates; Codex review against §7, §8.9, §10, §14, §16.3 and D-030, D-036, D-037 (focus: one finding per condition; fixes only with one answer; no log text anywhere; computed 016 verifier; grouping exclusivity); triage; record (bench vs 3.2); README upgrade notes (013–018, 002 replaced for those reasons, the log toggle); status and roadmap. **Commit** `docs: close sub-phase 3.3`.
+- [ ] Standard gates; Codex review against §7, §8.9, §10, §14, §16.3 and D-030, D-036, D-037, D-053 (focus: one finding per condition; fixes only with one answer; no log text anywhere; computed 016 verifier; grouping exclusivity; `pkg/setup` and `pkg/app` cannot drift); triage; record (bench vs 3.2); README upgrade notes (013–018, 002 replaced for those reasons, the log toggle, `pkg/setup`); status and roadmap; close #13 with the commit; draft the E3 and E8 program-file update and the kgwctl `cross-repo` notice, posted with the user's go. **Commit** `docs: close sub-phase 3.3`.
 
 ---
 
