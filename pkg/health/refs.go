@@ -164,6 +164,54 @@ func (in Input) listenerRefs(u *unstructured.Unstructured, name string) (out []w
 	return append(out, ca...), true
 }
 
+// listenerPolicyCARefs reports whether an owned ListenerPolicy that may target
+// Gateway or ListenerSet u, or a ListenerSet's Gateway, sets
+// clientCertificateValidation.caCertificateRefs; kgateway resolves those per
+// listener. A targetSelector counts as a target.
+func (in Input) listenerPolicyCARefs(u *unstructured.Unstructured) bool {
+	self := objects.RefOf(u)
+	owners := []objects.Ref{self}
+	if self.Group != objects.GatewayAPIGroup || self.Kind != "Gateway" {
+		pr := in.views().ListenerSet(u).Parent
+		owners = append(owners, objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: pr.Namespace, Name: pr.Name})
+	}
+	ca := func(cfg any) bool {
+		return len(asList(asMap(asMap(cfg)["clientCertificateValidation"])["caCertificateRefs"])) > 0
+	}
+	for _, p := range in.Owned.Policies {
+		gvk := p.Obj.GroupVersionKind()
+		if gvk.Group != "gateway.kgateway.dev" || gvk.Kind != "ListenerPolicy" {
+			continue
+		}
+		spec := asMap(p.Obj.Object["spec"])
+		targets := false
+		for _, o := range owners {
+			if o.Namespace != p.Obj.GetNamespace() {
+				continue
+			}
+			targets = targets || len(asList(spec["targetSelectors"])) > 0
+			for _, t := range asList(spec["targetRefs"]) {
+				g, _ := asMap(t)["group"].(string)
+				k, _ := asMap(t)["kind"].(string)
+				n, _ := asMap(t)["name"].(string)
+				targets = targets || g == o.Group && k == o.Kind && n == o.Name
+			}
+		}
+		if !targets {
+			continue
+		}
+		if ca(spec["default"]) {
+			return true
+		}
+		for _, pp := range asList(spec["perPort"]) {
+			if ca(asMap(pp)["listener"]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // gatewayCARefs returns the frontend validation caCertificateRefs of Gateway g
 // that apply to port: the perPort entry for it, else the default. Without a
 // known port it returns every entry's.
@@ -209,6 +257,7 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 	var attributable bool
 	if listener != "" {
 		refs, attributable = in.listenerRefs(u, listener)
+		attributable = attributable && !in.listenerPolicyCARefs(u)
 	} else {
 		refs = routeBackendRefs(u)
 		attributable = !in.delegationRoute(u, refs)

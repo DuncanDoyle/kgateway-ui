@@ -392,3 +392,43 @@ func TestListenerSetAndMirrorCandidates(t *testing.T) {
 		t.Fatalf("candidates %+v attributed %v, want %+v unattributed", ev.Candidates, ev.Attributed, want)
 	}
 }
+
+// R87: a ListenerPolicy's clientCertificateValidation CA refs are resolved per
+// listener, so one that targets the Gateway leaves no listener 014 attributed.
+func TestListenerPolicyCARefNeverAttributed(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	lp := testutil.Policy("gateway.kgateway.dev/v1alpha1", "ListenerPolicy", "infra", "mtls", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}})
+	lp.Object["spec"] = map[string]any{
+		"targetRefs": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "Gateway", "name": "edge"}},
+		"default": map[string]any{"clientCertificateValidation": map[string]any{"mode": "Require",
+			"caCertificateRefs": []any{map[string]any{"group": "", "kind": "ConfigMap", "name": "ca", "namespace": "pki"}}}},
+	}
+	for _, tc := range []struct {
+		name       string
+		policy     bool
+		attributed bool
+	}{{"no ListenerPolicy", false, true}, {"ListenerPolicy with a CA ref", true, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := healthyWorld()
+			w.objs[1] = tlsGateway("RefNotPermitted", map[string]any{"name": "wild", "namespace": "certs"})
+			if tc.policy {
+				w.objs = append(w.objs, lp.DeepCopy())
+			}
+			_, ev := only(t, refsReport(t, w, served()), CodeRefNotPermitted, "infra/edge")
+			if len(ev.Candidates) != 1 || ev.Attributed != tc.attributed {
+				t.Fatalf("candidates %+v attributed %v, want one, attributed %v", ev.Candidates, ev.Attributed, tc.attributed)
+			}
+			// A ListenerSet's listeners take the policy on its Gateway too.
+			bad := testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")
+			ls := testutil.ListenerSet("infra", "more", gw, nil, testutil.Listener{Name: "extra", Conds: []metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed"), bad}})
+			l := ls.Object["spec"].(map[string]any)["listeners"].([]any)[0].(map[string]any)
+			l["protocol"], l["tls"] = "HTTPS", map[string]any{"certificateRefs": []any{map[string]any{"name": "wild", "namespace": "certs"}}}
+			w.objs = append(w.objs, ls)
+			if _, ev := only(t, refsReport(t, w, served()), CodeRefNotPermitted, "infra/more"); ev.Attributed != tc.attributed {
+				t.Fatalf("ListenerSet: attributed %v, want %v", ev.Attributed, tc.attributed)
+			}
+		})
+	}
+}
