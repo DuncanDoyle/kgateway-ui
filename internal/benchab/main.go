@@ -62,8 +62,15 @@ func main() {
 			check(os.WriteFile(filepath.Join(*out, "bench-ab-"+s.name+".txt"), s.raw.Bytes(), 0o600))
 		}
 	}
-	rows, failed := compare(parse(&sides[0].raw), parse(&sides[1].raw), *threshold)
+	baseRes, err := parse(&sides[0].raw)
+	check(err)
+	headRes, err := parse(&sides[1].raw)
+	check(err)
+	rows, failed := compare(baseRes, headRes, *threshold)
 	fmt.Print(report(rows, *threshold))
+	if len(headRes) == 0 {
+		fmt.Fprintln(os.Stderr, "benchab: head produced no benchmark results")
+	}
 	if failed {
 		_ = os.RemoveAll(tmp)
 		os.Exit(1)
@@ -87,7 +94,7 @@ var procs = regexp.MustCompile(`-\d+$`)
 
 // parse returns the ns/op samples per benchmark name in Go benchmark output. A
 // log line can split a result line, so a name with no result waits for the next numbers.
-func parse(r io.Reader) map[string][]float64 {
+func parse(r io.Reader) (map[string][]float64, error) {
 	out := map[string][]float64{}
 	pending := ""
 	sc := bufio.NewScanner(r)
@@ -116,7 +123,7 @@ func parse(r io.Reader) map[string][]float64 {
 			}
 		}
 	}
-	return out
+	return out, sc.Err()
 }
 
 // row is one benchmark's verdict.
@@ -126,7 +133,8 @@ type row struct {
 	verdict    string  // ok, slower, new or gone
 }
 
-// compare matches head's benchmarks to base's; failed is true when one is slower than threshold.
+// compare matches head's benchmarks to base's. It fails when one is slower than
+// threshold, one on base is gone from head, or head has none; "new" only reports.
 func compare(base, head map[string][]float64, threshold float64) (rows []row, failed bool) {
 	for name, h := range head {
 		r := row{name: name, head: median(h), verdict: "new"}
@@ -143,8 +151,11 @@ func compare(base, head map[string][]float64, threshold float64) (rows []row, fa
 			rows = append(rows, row{name: name, base: median(b), verdict: "gone"})
 		}
 	}
+	for _, r := range rows {
+		failed = failed || r.verdict == "gone"
+	}
 	slices.SortFunc(rows, func(a, b row) int { return strings.Compare(a.name, b.name) })
-	return rows, failed
+	return rows, failed || len(head) == 0
 }
 
 func median(v []float64) float64 {

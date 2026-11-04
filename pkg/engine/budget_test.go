@@ -420,7 +420,15 @@ func runAllocs[T any](n int, run func() T) (bytes, allocs uint64) {
 // scrape at the binary's max age (R70); each scoped mode's allocations per run
 // stay in analyzerAllocBudget. The whole stage, Phase 1–2 checks included, is reported.
 func TestBudgetAnalyzerStage(t *testing.T) {
-	for _, tier := range []scale.Tier{scale.Large, measuredTier} {
+	tiers := []scale.Tier{scale.Large, measuredTier}
+	measured := map[string]bool{}
+	for k := range analyzerAllocBudget {
+		// A budget whose world is not run would never gate.
+		if w, _, _ := strings.Cut(k, "/"); !slices.ContainsFunc(tiers, func(x scale.Tier) bool { return x.Name == w }) {
+			t.Errorf("allocation budget %q names no world this test runs", k)
+		}
+	}
+	for _, tier := range tiers {
 		t.Run(tier.Name, func(t *testing.T) {
 			e := analyzerEngine(t, tier)
 			for _, mode := range []struct {
@@ -450,11 +458,18 @@ func TestBudgetAnalyzerStage(t *testing.T) {
 					benchgate.Timing(t, "%s: %s median %v, budget ≤ %v", tier.Name, mode.name, med, mode.budget)
 				}
 				if a, ok := analyzerAllocBudget[tier.Name+"/"+mode.name]; ok {
+					measured[tier.Name+"/"+mode.name] = true
 					bytes, n := runAllocs(31, run)
 					t.Logf("%s: %s allocates median %d B in %d allocations per run (budget ≤ %d B, ≤ %d allocations)", tier.Name, mode.name, bytes, n, a.bytes, a.allocs)
 					if bytes > a.bytes || n > a.allocs {
 						t.Errorf("%s: %s allocates %d B in %d allocations per run, budget ≤ %d B, ≤ %d", tier.Name, mode.name, bytes, n, a.bytes, a.allocs)
 					}
+				}
+			}
+			// A renamed or dropped mode fails its budget instead of skipping it.
+			for k := range analyzerAllocBudget {
+				if strings.HasPrefix(k, tier.Name+"/") && !measured[k] {
+					t.Errorf("allocation budget %q: no mode measured it", k)
 				}
 			}
 		})

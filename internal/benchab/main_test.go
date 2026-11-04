@@ -16,8 +16,8 @@ BenchmarkCompute/extreme-4   	2026/11/03 21:27:34 WARN delegation compute cap hi
 BenchmarkCompute/large-4   	      34	  34000000 ns/op	38034842 B/op	  130572 allocs/op
 PASS
 `
-	got := parse(strings.NewReader(in))
-	if len(got) != 2 || len(got["BenchmarkCompute/large"]) != 2 || got["BenchmarkCompute/extreme"][0] != 112547662 {
+	got, err := parse(strings.NewReader(in))
+	if err != nil || len(got) != 2 || len(got["BenchmarkCompute/large"]) != 2 || got["BenchmarkCompute/extreme"][0] != 112547662 {
 		t.Fatalf("parse = %v", got)
 	}
 }
@@ -36,7 +36,28 @@ func TestCompare(t *testing.T) {
 			t.Errorf("%s: %s, want %s", r.name, r.verdict, want[r.name])
 		}
 	}
-	if _, failed := compare(base, map[string][]float64{"B": {114}, "New": {1}}, 0.15); failed {
+	if _, failed := compare(map[string][]float64{"B": {100}}, map[string][]float64{"B": {114}, "New": {1}}, 0.15); failed {
 		t.Error("14 % slower and a new benchmark failed the gate")
+	}
+}
+
+// A benchmark gone from head, or a head with no results, fails the gate.
+func TestCompareNothing(t *testing.T) {
+	if _, failed := compare(map[string][]float64{"B": {100}, "Gone": {1}}, map[string][]float64{"B": {100}}, 0.15); !failed {
+		t.Error("a benchmark gone from head passed")
+	}
+	if _, failed := compare(map[string][]float64{"B": {100}}, map[string][]float64{}, 0.15); !failed {
+		t.Error("a head with no results passed")
+	}
+	if _, failed := compare(map[string][]float64{}, map[string][]float64{}, 0.15); !failed {
+		t.Error("comparing nothing passed")
+	}
+}
+
+// A line longer than the scanner's buffer is an error, not a silently short run.
+func TestParseTooLong(t *testing.T) {
+	in := "BenchmarkA-4 1 100 ns/op\n" + strings.Repeat("x", 2<<20) + "\nBenchmarkB-4 1 100 ns/op\n"
+	if _, err := parse(strings.NewReader(in)); err == nil {
+		t.Error("an over-long line parsed without error")
 	}
 }
