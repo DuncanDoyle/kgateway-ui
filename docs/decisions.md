@@ -811,3 +811,24 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Consequences:** Growth in the new watches' state fails the heap test on its own, even while the main gate has headroom. The worst world's histories cost about 57 KB. Each heap child builds one more world.
 
 **Alternatives:** Re-baseline the whole retained heap with the live cache kept (rejected: it counts Phase 2 stores and fake trackers); bound the stores by their caps and log them (rejected: R75 asks for a measured gate).
+
+## D-047 — The spec-edit stream gates edit-driven recomputes; grace deadlines are logged (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user, Codex 3.2 review #4); amends D-044's "stream rate" for the spec-edit variant
+
+**Context:** The spec-edit stream totals 1.25–1.38 recomputes/s over 10 min, against ≤ 1/s. Each edit leaves the route's status stale, so KGWUI-003 turns from info to warning at first-seen + 60 s (`health.Grace`). D-019 runs that grace deadline without debounce. A deadline run stamps the edits since the last run, so it schedules another run 60 s later. In a 150 s run, all 47 deadline runs raised KGWUI-003 warnings, so these runs are needed.
+
+**Decision:**
+1. The stream counts each run by cause in the harness: deadline when the last published `Model.Next` is due at its start, safety 30 s after the last publication, edit-driven otherwise. The engine records no cause.
+2. Edit-driven runs are gated ≤ 1/s in the spec-edit stream, 60 s and 10 min, deterministic (D-044). This uses its own flag. Deadline and total rates are logged only. KGWUI-012 assertions stay off for spec-edit.
+3. The annotation stream keeps its ≤ 1/s gate on the total.
+
+Measured on the reference machine, 5 runs per world:
+
+| Run | Edit-driven | Deadline | Total |
+|---|---|---|---|
+| 60 s (`make bench`) | 0.93–0.95/s | 0 | 0.93–0.95/s |
+| 10 min (`make bench-specedit`) | 0.51–0.60/s | 0.70–0.81/s | 1.25–1.38/s |
+
+**Consequences:** The 60 s gate has 5–7 % headroom. This is structural: under a steady stream, the debounce runs once per `MaxDelay` (1 s) plus the wait for the next edit. Any change to the debounce or the edit cadence moves that number. Over 10 min, deadline runs absorb pending bursts, so the edit-driven rate falls. Grace deadlines are not bounded by a gate.
+
+**Alternatives:** Gate the 10 min total at a measured value (rejected by the user); let a grace deadline wait for a pending burst (rejected: it amends D-019, and a warning could appear up to 1 s late); have a fake controller catch status up (rejected: it changes what the variant measures).

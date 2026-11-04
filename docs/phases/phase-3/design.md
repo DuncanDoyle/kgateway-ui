@@ -784,6 +784,8 @@ The time budgets above gate on the reference machine; CI gates the deterministic
 
 The new watches' own state (proxy Pod, Event and CRD informer stores, the Pod UID index, Event delta histories) is a separate retained-heap part: median ≤ 1,600,000 B in every Large world, deterministic; measured 1,392,888 B (large), 1,392,984 B (contradicting), 1,450,216 B (measurement world) **(user, 2026-11-04; D-046)**.
 
+The spec-edit stream gates its edit-driven recomputes at ≤ 1/s. Grace-deadline runs are logged, not gated, because D-019 runs them undebounced: 0.70–0.81/s over 10 min, total 1.25–1.38/s **(user, 2026-11-04; D-047)**.
+
 No gate changes without the user. If the 3.1 baseline, or any later sub-phase, breaks a gate, the work stops and the numbers go to the user, who decides **(user, 2026-10-29)**.
 
 **Scale tiers grow** (`internal/testutil/scale`):

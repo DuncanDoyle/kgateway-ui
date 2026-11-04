@@ -496,7 +496,8 @@ func TestBudgetSustainedStream(t *testing.T) {
 
 // TestBudgetSpecEditStream is the sustained stream at Large and in the 3.2
 // measurement world with route spec edits instead of annotations: process CPU
-// ≤ 25 % of one core in every run and the median memory from the OS ≤ 288 MiB (design §16.3, D-043).
+// ≤ 25 % of one core in every run, edit-driven recomputes ≤ 1/s (D-047) and the
+// median memory from the OS ≤ 288 MiB (design §16.3, D-043).
 func TestBudgetSpecEditStream(t *testing.T) {
 	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large, scale.Large.Contradicting().Worst()}, func(t *testing.T, tier scale.Tier) {
 		sustainedStream(t, tier, specEditStream)
@@ -570,7 +571,9 @@ const streamChildEnv = "KGWUI_STREAM_CHILD"
 type streamVariant struct {
 	name  string // log prefix
 	gated bool
-	cpu   float64 // process CPU budget per run, a share of one core
+	// burstGated gates the edit-driven runs alone ≤ 1/s; grace deadlines are logged (D-047).
+	burstGated bool
+	cpu        float64 // process CPU budget per run, a share of one core
 	// edit changes u, a copy of a seeded route, for update n in pass over the routes.
 	edit func(u *unstructured.Unstructured, n, pass int) error
 }
@@ -590,7 +593,7 @@ var annotationStream = streamVariant{gated: true, cpu: 0.15, edit: func(u *unstr
 }}
 
 // specEditStream edits spec and generation, as the API server does; status stays stale.
-var specEditStream = streamVariant{name: "spec-edit ", cpu: 0.25, edit: togglePath}
+var specEditStream = streamVariant{name: "spec-edit ", burstGated: true, cpu: 0.25, edit: togglePath}
 
 // togglePath appends "-x" to u's first path value on even passes and removes
 // it on odd ones; a pass edits each route once, so generation rises by one.
@@ -747,9 +750,11 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	path := "/api/v1/installs/" + e.Current().Model.Installs[0].Resolved.ID() + "/routes"
 
 	// Count runs and their wall time from loop events while the stream runs.
-	var runs, pubs int
+	var runs, pubs, deadlineRuns, safetyRuns int
 	var busy time.Duration
 	var runStart time.Time
+	// A run whose start finds the last published deadline due ran for it; one 30 s after the last publication, for the safety timer.
+	lastNext, lastPub := e.Current().Model.Next, time.Now()
 	counted := make(chan struct{})
 	collect, stopCollect := context.WithCancel(context.Background())
 	go func() {
@@ -761,9 +766,16 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 				case engine.EvRunStarted:
 					runs++
 					runStart = x.At
+					switch {
+					case lastNext.Due(x.At):
+						deadlineRuns++
+					case x.At.Sub(lastPub) >= 30*time.Second:
+						safetyRuns++
+					}
 				case engine.EvPublished:
 					pubs++
 					busy += x.At.Sub(runStart)
+					lastNext, lastPub = x.Published.Model.Next, x.At
 				}
 			case <-collect.Done():
 				return
@@ -844,9 +856,15 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	}
 	slices.Sort(polls)
 	rate := float64(runs) / wall.Seconds()
+	bursts := runs - deadlineRuns - safetyRuns
+	burstRate := float64(bursts) / wall.Seconds()
 	share := cpu.Seconds() / wall.Seconds()
 	t.Logf("%sstream %v: %d updates, %d recomputes (%.2f/s%s), %d publications; process CPU %v = %.1f %% of one core%s; recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
 		v.name, wall.Round(time.Millisecond), updates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, fmt.Sprintf(" (budget ≤ %.0f %%)", 100*v.cpu), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
+	if v.burstGated {
+		t.Logf("%srecomputes by cause: %d edit-driven (%.2f/s, budget ≤ 1/s), %d deadline (%.2f/s), %d safety; total %.2f/s (deadlines and total logged)",
+			v.name, bursts, burstRate, deadlineRuns, float64(deadlineRuns)/wall.Seconds(), safetyRuns, rate)
+	}
 	t.Logf("polls: %d, p50 %v p95 %v max %v", len(polls), rd(percentile(polls, 50)), rd(percentile(polls, 95)), rd(polls[len(polls)-1]))
 	heapEnd := liveHeap()
 	if heap60 == 0 {
@@ -863,6 +881,9 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	fmt.Println("stream: " + string(j))
 	if share > v.cpu {
 		benchgate.Timing(t, "process CPU %.1f %% of one core, budget ≤ %.0f %%", 100*share, 100*v.cpu)
+	}
+	if v.burstGated && burstRate > 1 {
+		t.Errorf("%.2f edit-driven recomputes per s, budget ≤ 1", burstRate)
 	}
 	if !v.gated {
 		codes := map[string]int{}
