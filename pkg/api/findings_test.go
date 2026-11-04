@@ -195,7 +195,9 @@ func TestFindingsFilters(t *testing.T) {
 		{"severity=error", func(f health.Finding) bool { return f.Severity == health.SeverityError }, 2},
 		{"severity=warning&severity=info", func(f health.Finding) bool { return f.Severity != health.SeverityError }, 2},
 		{"code=KGWUI-004", func(f health.Finding) bool { return f.Code == "KGWUI-004" }, 1},
-		{"code=KGWUI-002&code=KGWUI-003", func(f health.Finding) bool { return f.Code == "KGWUI-002" || f.Code == "KGWUI-003" }, 3},
+		{"code=KGWUI-013&code=KGWUI-014&code=KGWUI-003", func(f health.Finding) bool {
+			return f.Code == "KGWUI-013" || f.Code == "KGWUI-014" || f.Code == "KGWUI-003"
+		}, 3},
 		{"code=ACME-001", func(health.Finding) bool { return false }, 0},
 		{"kind=" + httproute, func(f health.Finding) bool { return f.Resource != nil && f.Resource.Kind == "HTTPRoute" }, 4},
 		{"kind=core/Service", func(health.Finding) bool { return false }, 0},
@@ -253,7 +255,7 @@ func TestFindingsFiltersRevealNothingHidden(t *testing.T) {
 			t.Errorf("%s: allow-all %d, restricted %d; want 1 and 0", q, total(all, q), total(some, q))
 		}
 	}
-	for _, q := range []string{"", "severity=error", "code=KGWUI-002", "kind=gateway.networking.k8s.io/HTTPRoute", "namespace=shop",
+	for _, q := range []string{"", "severity=error", "code=KGWUI-013", "kind=gateway.networking.k8s.io/HTTPRoute", "namespace=shop",
 		"group=" + broken.Group, "q=broken", "q=shop/broken", "sort=since", "sort=code.desc"} {
 		if a, s := total(all, q), total(some, q); a != s || a == 0 {
 			t.Errorf("%q: allow-all total %d, restricted %d", q, a, s)

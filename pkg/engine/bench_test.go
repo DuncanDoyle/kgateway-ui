@@ -136,6 +136,12 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 	if e.cfg.Collected != nil {
 		col = e.cfg.Collected()
 	}
+	// The bench world's kinds and core Services, so 013 and 014 can reach explanation 1.
+	gks := []schema.GroupKind{{Kind: "Service"}, {Kind: "Secret"}}
+	for _, s := range served {
+		gks = append(gks, schema.GroupKind{Group: s.Group, Kind: s.Kind})
+	}
+	cat := kinds.NewCatalog(gks, nil)
 	res := im.Resolved
 	maxAge, scrapes := e.cfg.MetricsMaxAge, 0
 	if scrape > 0 {
@@ -146,7 +152,7 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 		MetricsMaxAge: maxAge, Now: now, Views: e.decode})
 	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: read.Result,
 		HasMetrics: read.Present, MetricsMaxAge: maxAge, FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
-		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode}
+		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode, Catalog: cat}
 	in.Process, in.GatewayAPI = im.Process, gatewayAPI(im.Rules)
 	checks := e.cfg.Checks
 	if scoped {
@@ -162,7 +168,7 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 		rt := health.Runtime{States: e.states[res.ID()], Collected: col}
 		var pc *printCtx
 		if memo {
-			pc = &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: maxAge, ver: &ver, views: im.Computed, kc: kc, col: col,
+			pc = &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: maxAge, ver: &ver, views: im.Computed, kc: kc, cat: cat, col: col,
 				proc: im.Process}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}

@@ -8,9 +8,9 @@
     },
     "collectedAt": "2026-10-17T12:00:00Z",
     "finding": {
-      "code": "KGWUI-002",
+      "code": "KGWUI-013",
       "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
-      "id": "f1-qrj7dmlw4tyjgwdiej2mypflzd",
+      "id": "f1-mvx3oc6sg55xmltbfspi7tgxtj",
       "resource": {
         "group": "gateway.networking.k8s.io",
         "kind": "HTTPRoute",
@@ -20,7 +20,7 @@
       },
       "restricted": true,
       "severity": "error",
-      "slug": "condition-false"
+      "slug": "ref-unresolved"
     },
     "install": "kgw.kgateway"
   },

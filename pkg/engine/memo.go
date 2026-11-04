@@ -62,10 +62,11 @@ type printCtx struct {
 	ver    *scopeverify.Result
 	views  *computed.Views
 	kc     kinds.Change
+	cat    kinds.Catalog
 	col    collect.Snapshot
 	proc   *health.ProcessData
 
-	owned, metrics, verify, computed, change *uint64
+	owned, metrics, verify, computed, change, catalog *uint64
 }
 
 // lazy returns *p, computing it with f on first use.
@@ -110,6 +111,9 @@ func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
 	}
 	if set.KindsChange {
 		p = mix(p, lazy(&ctx.change, func() uint64 { return strPrint(ctx.kc.String()) }))
+	}
+	if set.Catalog {
+		p = mix(p, lazy(&ctx.catalog, func() uint64 { return strPrint(ctx.cat.Key()) }))
 	}
 	if set.Process {
 		p = mix(p, mix(1, processPrintOf(ctx.proc)))

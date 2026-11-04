@@ -26,11 +26,13 @@ type Source struct {
 	Kinds string
 	// Collected is the collector store's print; zero without collectors.
 	Collected uint64
+	// Catalog is the served-kind catalog's kinds.Catalog.Key().
+	Catalog string
 }
 
 // Equal reports whether s and o describe the same source data.
 func (s Source) Equal(o Source) bool {
-	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
+	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Catalog == o.Catalog && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
 }
 
 // Published is one publication: a Model, the Source it was computed from and
@@ -204,6 +206,9 @@ func (e *Engine) liveSource(p *Published, now time.Time) Source {
 	src.Metrics = encodeMetrics(reads, now, e.cfg.MetricsMaxAge)
 	if e.cfg.KindsChange != nil {
 		src.Kinds = e.cfg.KindsChange().String()
+	}
+	if e.cfg.Catalog != nil {
+		src.Catalog = e.cfg.Catalog().Key()
 	}
 	if e.cfg.Collected != nil {
 		src.Collected = e.cfg.Collected().Print

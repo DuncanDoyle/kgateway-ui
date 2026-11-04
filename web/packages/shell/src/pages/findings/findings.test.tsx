@@ -137,7 +137,7 @@ it("restricted rows show code, severity and the restricted label", async () => {
   mount(`/i/${ID}/findings`);
   await screen.findByText("Restricted: ask the owning team");
   const row = rowOf("Restricted: ask the owning team");
-  expect(row).toHaveTextContent("KGWUI-002");
+  expect(row).toHaveTextContent("KGWUI-013");
   expect(row).toHaveTextContent("Error");
   expect(row).toHaveTextContent("shop/broken");
   // Neither the hidden object nor the finding opens: there is nothing more this caller may see.
@@ -165,7 +165,7 @@ it("finding detail pages the affected objects", async () => {
   expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
     "Reference not permitted (missing ReferenceGrant)",
   );
-  expect(screen.getByText("KGWUI-002")).toBeInTheDocument();
+  expect(screen.getByText("KGWUI-014")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "shop/denied" })).toHaveAttribute(
     "href",
     `/i/${ID}/routes/${GW}/HTTPRoute/shop/denied`,
@@ -189,7 +189,7 @@ it("a restricted finding shows its identity only, and an unknown one says so", a
   });
   const { unmount } = mount(`/i/${ID}/findings/${detailRestrictedGolden.body.finding.id}`);
   expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Restricted: ask the owning team");
-  expect(screen.getByText("KGWUI-002")).toBeInTheDocument();
+  expect(screen.getByText("KGWUI-013")).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /broken/ })).toBeNull();
   expect(screen.queryByRole("table", { name: "Affected objects" })).toBeNull();
   unmount();

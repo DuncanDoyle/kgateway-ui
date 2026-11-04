@@ -127,9 +127,9 @@
     },
     "findings": [
       {
-        "code": "KGWUI-002",
+        "code": "KGWUI-013",
         "group": "f1-vptc6qogpx6j2mni6gfndp6a4b",
-        "id": "f1-xcl7l3ilhdoo5rswd3ek6gtmar",
+        "id": "f1-6v7c4acvz7jdqney2mwpwjkxpr",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -141,13 +141,38 @@
         },
         "restricted": true,
         "severity": "error",
-        "slug": "condition-false"
+        "slug": "ref-unresolved"
       },
       {
-        "code": "KGWUI-002",
+        "code": "KGWUI-013",
         "detail": "A delegating rule selects no child route the controller accepted; ResolvedRefs=False, reason BackendNotFound (parent Gateway infra/edge section sel)",
+        "evidence": {
+          "attributed": false,
+          "candidates": [
+            {
+              "path": "spec.rules[0].backendRefs[0]",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute",
+                "name": "c",
+                "namespace": "zoned"
+              }
+            },
+            {
+              "path": "spec.rules[0].backendRefs[1]",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute",
+                "name": "d",
+                "namespace": "zoned"
+              }
+            }
+          ],
+          "explanation": "controller",
+          "kind": "refs"
+        },
         "group": "f1-dishx3pq7yu2lksxzjnafj4hc7",
-        "id": "f1-egajxha6wm77fqgb62jrp22oor",
+        "id": "f1-xklzdd5suosrnq5d5ik2zw3cbr",
         "install": "kgw.kgateway",
         "message": "A delegating rule has no accepted child route",
         "resource": {
@@ -159,7 +184,7 @@
         },
         "severity": "error",
         "since": "2026-10-17T11:00:00Z",
-        "slug": "condition-false"
+        "slug": "ref-unresolved"
       },
       {
         "code": "KGWUI-004",

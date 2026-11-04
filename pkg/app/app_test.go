@@ -319,7 +319,7 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)), broken,
 	}, nil, Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, &stubScraper{}, extension.WithAuthorizer(deny))
 
-	// Wait for the first model: the broken route's KGWUI-002 makes the state error.
+	// Wait for the first model: the broken route's KGWUI-013 makes the state error.
 	var h api.HealthResponse
 	eventually(t, "health never settled", func() bool {
 		h = api.HealthResponse{}
@@ -331,7 +331,7 @@ func TestAuthorizerSeamRestrictsDeniedResources(t *testing.T) {
 			restricted = &h.Findings[i]
 		}
 	}
-	if restricted == nil || !restricted.Restricted || restricted.Code != health.CodeConditionFalse || restricted.Severity != health.SeverityError ||
+	if restricted == nil || !restricted.Restricted || restricted.Code != health.CodeRefUnresolved || restricted.Severity != health.SeverityError ||
 		restricted.Message != "" || restricted.Detail != "" || restricted.Since != nil {
 		t.Fatalf("the denied route's finding must stay listed, restricted, with code/severity/ref and no message or evidence: %+v", restricted)
 	}

@@ -124,6 +124,8 @@ import type {
   ProxyTypeRejects,
   Readiness,
   Ref,
+  RefLocation,
+  RefsEvidence,
   RouteAttachment,
   RouteCounts,
   RouteDetail,
@@ -298,6 +300,11 @@ const evidenceShapes = {
     { kind: "!", freshness: "!", observed: "?", current: "?", since: "?" },
     {},
     { kind: { freshness: 1 }, freshness: { "never-written": 1, stale: 1, pending: 1, "no-ancestor": 1 } },
+  ),
+  refs: shape<RefsEvidence>(
+    { kind: "!", explanation: "!", candidates: "?", attributed: "!" },
+    { candidates: shape<RefLocation>({ path: "!", ref: "!" }, { ref }) },
+    { kind: { refs: 1 }, explanation: { "kind-not-served": 1, controller: 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

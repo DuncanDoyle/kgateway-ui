@@ -54,6 +54,8 @@ const (
 	CodeSelfManagedProxy     = "KGWUI-010"
 	CodeDelegatedNotAttached = "KGWUI-011"
 	CodeComputedDisagrees    = "KGWUI-012"
+	CodeRefUnresolved        = "KGWUI-013"
+	CodeRefNotPermitted      = "KGWUI-014"
 	CodeProcessRestarting    = "KGWUI-019"
 	CodeProbeFailing         = "KGWUI-020"
 	CodeRolloutStuck         = "KGWUI-021"
@@ -142,8 +144,10 @@ type Input struct {
 	Served []kinds.Served
 	// KindsChange is how the kinds served now differ from Served, which the cache watches.
 	KindsChange kinds.Change
-	Metrics     ctrlmetrics.Result
-	HasMetrics  bool
+	// Catalog is every kind the API server serves; the zero Catalog knows none.
+	Catalog    kinds.Catalog
+	Metrics    ctrlmetrics.Result
+	HasMetrics bool
 	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
 	// interval); zero means no limit.
 	MetricsMaxAge time.Duration

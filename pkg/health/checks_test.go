@@ -136,10 +136,10 @@ func TestChecks(t *testing.T) {
 			w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionFalse, "AddressNotAssigned")})
 		}, CodeConditionFalse, SeverityError, "infra/edge", StateError},
-		{"002 route backend not found", func(w *world) {
+		{"013 route backend not found", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
-		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
+		}, CodeRefUnresolved, SeverityError, "shop/cart", StateError},
 		{"002 rule replaced (2.4, optional condition present)", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),

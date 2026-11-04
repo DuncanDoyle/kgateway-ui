@@ -186,9 +186,9 @@ func TestDelegationBackendNotFoundHasDelegationDetail(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := testutil.WithRules(testutil.HTTPRoute("shop", "p", []objects.ParentRef{gw}, failing), map[string]any{"backendRefs": tc.backends})
 			r := delegationWorld(p).report(t)
-			fs := findingsFor(r, CodeConditionFalse, "shop/p")
+			fs := findingsFor(r, CodeRefUnresolved, "shop/p")
 			if len(fs) != 1 || fs[0].Severity != SeverityError {
-				t.Fatalf("want one KGWUI-002 error: %+v", r.Findings)
+				t.Fatalf("want one KGWUI-013 error: %+v", r.Findings)
 			}
 			got := fs[0].Message == DelegationNoChildMessage && strings.HasPrefix(fs[0].Detail, DelegationNoChildDetail)
 			if got != tc.delegation || (!tc.delegation && fs[0].Message != "Backend not found") {

@@ -36,7 +36,8 @@ func busyWorld(t *testing.T) Input {
 	w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw, withSection("infra", "edge", "http"), gone})
 	w.objs = append(w.objs,
 		testutil.HTTPRoute("shop", "api", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
-			testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}}),
+			testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
+			testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleReplaced")}}),
 		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
 			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}}),
 		testutil.TrafficPolicy("shop", "lonely"),

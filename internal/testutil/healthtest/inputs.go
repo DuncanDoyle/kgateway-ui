@@ -71,6 +71,10 @@ func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.
 			out.KindsChange = kinds.Change{}
 		}
 	}
+	if !set.Catalog {
+		// Another catalog: one that knows every group, serving only a perturbed kind.
+		out.Catalog = kinds.NewCatalog([]schema.GroupKind{{Group: fmt.Sprintf("perturbed%d.example", seed), Kind: "Service"}}, nil)
+	}
 	return out
 }
 

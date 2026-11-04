@@ -24,6 +24,8 @@ type InputSet struct {
 	Computed bool
 	// KindsChange is how the served kinds differ from the watched ones.
 	KindsChange bool
+	// Catalog is every kind the API server serves.
+	Catalog bool
 	// Process is process data.
 	Process bool
 	// Clock marks a check that reads Now beyond its WakeAt deadlines; it is never memoized.

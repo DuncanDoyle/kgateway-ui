@@ -116,12 +116,12 @@ func TestEvidenceClipsLongStatus(t *testing.T) {
 	hr := get[HealthResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/health", 200)
 	var detail, id string
 	for _, f := range findingsOn(hr, "shop/big") {
-		if f.Code == health.CodeConditionFalse {
+		if f.Code == health.CodeRefUnresolved {
 			detail, id = f.Detail, f.ID
 		}
 	}
 	if !strings.Contains(detail, "…[truncated]") || len(detail) > 1024+200 || !utf8.ValidString(detail) || strings.Contains(detail, "�") {
-		t.Fatalf("KGWUI-002 detail not cut at 1 KiB at a rune boundary: %d bytes", len(detail))
+		t.Fatalf("KGWUI-013 detail not cut at 1 KiB at a rune boundary: %d bytes", len(detail))
 	}
 	route := "/api/v1/installs/kgw.kgateway/routes/" + objects.GatewayAPIGroup + "/HTTPRoute/shop/big"
 	for _, path := range []string{

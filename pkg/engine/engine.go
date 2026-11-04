@@ -40,8 +40,10 @@ type Config struct {
 	Served []kinds.Served
 	// KindsChange, if set, reports how the kinds served now differ from Served.
 	KindsChange func() kinds.Change
-	Detectors   []install.Detector
-	Scope       install.ScopeProvider
+	// Catalog, if set, returns every kind the API server serves.
+	Catalog   func() kinds.Catalog
+	Detectors []install.Detector
+	Scope     install.ScopeProvider
 	// Verifier checks scope against the controller; its persistence should be
 	// 2 × the metrics interval (design §4.4).
 	Verifier scopeverify.Verifier
@@ -286,6 +288,10 @@ func (e *Engine) compute() *Published {
 	if e.cfg.KindsChange != nil {
 		kc = e.cfg.KindsChange()
 	}
+	var cat kinds.Catalog
+	if e.cfg.Catalog != nil {
+		cat = e.cfg.Catalog()
+	}
 	found, errs := install.Discover(snap, e.cfg.Detectors)
 	for _, err := range errs {
 		m.Rejected = append(m.Rejected, err.Error())
@@ -368,10 +374,10 @@ func (e *Engine) compute() *Published {
 		var pc *printCtx
 		if !e.cfg.NoMemo {
 			pc = &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
-				ver: &ver, views: views[i], kc: kc, col: col, proc: proc}
+				ver: &ver, views: views[i], kc: kc, cat: cat, col: col, proc: proc}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
-		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
+		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
 			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel)}, e.cfg.Checks, rt)
 		if !rep.Next.IsZero() {
@@ -386,7 +392,7 @@ func (e *Engine) compute() *Published {
 	}
 	maps.DeleteFunc(e.diags, func(id string, _ *diagMemo) bool { return states[id] == nil })
 	m.Next = next.next
-	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(),
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(), Catalog: cat.Key(),
 		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
 	return p
 }

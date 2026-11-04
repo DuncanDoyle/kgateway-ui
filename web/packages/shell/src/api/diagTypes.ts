@@ -1,6 +1,6 @@
 import type { HealthState } from "../theme/tokens";
 import type { LinkedRef, Page } from "./exploreTypes";
-import type { CheckResult, Severity } from "./types";
+import type { CheckResult, Ref, Severity } from "./types";
 
 /** Mirrors the diagnostics DTOs of pkg/api/diag_types.go as built (sub-phase 3.1, design §13.3). */
 
@@ -56,7 +56,8 @@ export type Evidence =
   | VersionSkewEvidence
   | XDSRejectsEvidence
   | ProxyStatsEvidence
-  | FreshnessEvidence;
+  | FreshnessEvidence
+  | RefsEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -143,6 +144,21 @@ export interface FreshnessEvidence {
   observed?: number;
   current?: number;
   since?: string;
+}
+/** A ref and where its referrer writes it, e.g. spec.rules[2].backendRefs[0]; ref has the spec defaults applied. */
+export interface RefLocation {
+  path: string;
+  ref: Ref;
+}
+/**
+ * Why KGWUI-013 or 014 names its refs (design §7.3). candidates are the refs the condition may be about;
+ * attributed is true only with exactly one.
+ */
+export interface RefsEvidence {
+  kind: "refs";
+  explanation: "kind-not-served" | "controller";
+  candidates?: RefLocation[];
+  attributed: boolean;
 }
 
 /**

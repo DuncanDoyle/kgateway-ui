@@ -221,6 +221,8 @@ it("keeps the public export surface", () => {
         "RawHealthReport",
         "Readiness",
         "Ref",
+        "RefLocation",
+        "RefsEvidence",
         "RouteAttachment",
         "RouteContribution",
         "RouteCounts",

@@ -219,7 +219,11 @@ type conditionsCheck struct{}
 func (conditionsCheck) Name() string { return "resource status" }
 
 // Inputs implements Check.
-func (conditionsCheck) Inputs() InputSet { return AllInputs() }
+func (conditionsCheck) Inputs() InputSet {
+	s := AllInputs()
+	s.Catalog = true // 013 and 014 explanation 1
+	return s
+}
 
 // Run implements Check.
 func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
@@ -294,6 +298,13 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
 					if owner == nil {
 						owner = in.parentKey(u, parent)
+					}
+					// 013 and 014 own their ResolvedRefs reasons; 002 takes the rest (D-030).
+					if l := listenerName(parent, owner); parent != (objects.ParentRef{}) || l != "" {
+						if f, ok := in.refsFinding(u, *cond, l, extra, owner); ok {
+							fs = append(fs, f)
+							continue
+						}
 					}
 					add(u, SeverityError, *cond, extra, owner)
 				}
@@ -461,6 +472,15 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			Error: fmt.Sprintf("%d %s being processed by the controller", n, noun)}
 	}
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// listenerName returns the listener a status block's owner names, "" for a
+// route parent or any other owner.
+func listenerName(parent objects.ParentRef, owner []string) string {
+	if parent == (objects.ParentRef{}) && len(owner) == 2 && owner[0] == ownerListener {
+		return owner[1]
+	}
+	return ""
 }
 
 // pendingReason returns why a status block of u is not current, or "" when

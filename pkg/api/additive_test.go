@@ -25,6 +25,30 @@ var appended = map[string]struct {
 	"body.kinds":  {"kind", []string{"Backend"}},
 }
 
+// additiveExceptions are the scalar changes D-030 permits, per fixture and
+// JSON path: the code and slug of the findings 013 and 014 took over from 002.
+var additiveExceptions = map[string]map[string][2]string{
+	"health": {
+		"body.findings[0].code": {"KGWUI-002", "KGWUI-013"},
+		"body.findings[0].slug": {"condition-false", "ref-unresolved"},
+		"body.findings[1].code": {"KGWUI-002", "KGWUI-014"},
+		"body.findings[1].slug": {"condition-false", "ref-not-permitted"},
+	},
+}
+
+// unexcepted returns the diffs of fixture that additiveExceptions does not list.
+func unexcepted(diffs []string, fixture string) []string {
+	var out []string
+	for _, d := range diffs {
+		p, _, _ := strings.Cut(d, ": ")
+		if e, ok := additiveExceptions[fixture][p]; ok && d == fmt.Sprintf("%s: %s became %s", p, e[0], e[1]) {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 // snapshotTime in a golden-v1 fixture stands for a cache snapshot time, which
 // v1 did not pin.
 const snapshotTime = "<snapshot time>"
@@ -106,10 +130,31 @@ func TestAdditiveHelper(t *testing.T) {
 	}
 }
 
+// Only the listed code and slug changes pass; any other scalar change still fails.
+func TestAdditiveExceptionsAreListedOnly(t *testing.T) {
+	old := `{"body":{"findings":[{"code":"KGWUI-002","slug":"condition-false","message":"m"}]}}`
+	for _, tc := range []struct {
+		name, fixture, cur string
+		ok                 bool
+	}{
+		{"listed code and slug", "health", `{"body":{"findings":[{"code":"KGWUI-013","slug":"ref-unresolved","message":"m"}]}}`, true},
+		{"listed path, other value", "health", `{"body":{"findings":[{"code":"KGWUI-015","slug":"ref-unresolved","message":"m"}]}}`, false},
+		{"unlisted scalar", "health", `{"body":{"findings":[{"code":"KGWUI-013","slug":"ref-unresolved","message":"n"}]}}`, false},
+		{"listed in another fixture", "overview", `{"body":{"findings":[{"code":"KGWUI-013","slug":"ref-unresolved","message":"m"}]}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := unexcepted(additions(decode(t, old), decode(t, tc.cur), ""), tc.fixture)
+			if tc.ok != (len(got) == 0) {
+				t.Errorf("ok = %v, want %v: %v", len(got) == 0, tc.ok, got)
+			}
+		})
+	}
+}
+
 // additive fails t for every way cur is more than old plus permitted additions.
 func additive(t *testing.T, old, cur any, fixture string) {
 	t.Helper()
-	for _, d := range additions(old, cur, "") {
+	for _, d := range unexcepted(additions(old, cur, ""), fixture) {
 		t.Errorf("%s: %s", fixture, d)
 	}
 }

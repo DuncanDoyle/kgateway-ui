@@ -196,6 +196,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	changes := trigger.New()
 	mon := kinds.NewMonitor(c.Discovery, reg.Kinds, served)
 	mon.OnChange = changes
+	// The first refresh lists the Catalog, so 013 and 014 explain refs from the first compute.
+	if err := mon.Refresh(); err != nil {
+		slog.Warn("listing served kinds failed; refs are explained from the controller's message", "err", err)
+	}
 	var podSel, depSel, proxySel []labels.Selector
 	for _, d := range reg.Detectors {
 		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
@@ -229,7 +233,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	discovered := make(chan struct{})
 	var once sync.Once
-	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
+	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Catalog: mon.Catalog, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
 		RulesFor: reg.RulesFor, Process: reg.Process,
 		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop, Clock: o.Clock,

@@ -213,6 +213,45 @@ func (e *FreshnessEvidence) MarshalJSON() ([]byte, error) {
 	}{EvidenceFreshness, (*plain)(e)})
 }
 
+// EvidenceRefs is the kind of RefsEvidence.
+const EvidenceRefs = "refs"
+
+// Explanations of KGWUI-013 and 014, first match wins (design §7.3).
+const (
+	// RefExplainKindNotServed: discovery says the ref's group serves no such kind.
+	RefExplainKindNotServed = "kind-not-served"
+	// RefExplainController: the controller's reason and message, as written.
+	RefExplainController = "controller"
+)
+
+// RefLocation is one ref and where its referrer writes it, such as
+// "spec.rules[2].backendRefs[0]". Ref has the spec defaults applied.
+type RefLocation struct {
+	Path string      `json:"path"`
+	Ref  objects.Ref `json:"ref"`
+}
+
+// RefsEvidence is why KGWUI-013 or 014 names its refs. The condition names a
+// parent or listener, not a ref, so Candidates are the refs it may be about;
+// Attributed is true only with exactly one.
+type RefsEvidence struct {
+	Explanation string        `json:"explanation"`
+	Candidates  []RefLocation `json:"candidates,omitempty"`
+	Attributed  bool          `json:"attributed"`
+}
+
+// EvidenceKind implements Evidence.
+func (*RefsEvidence) EvidenceKind() string { return EvidenceRefs }
+
+// MarshalJSON adds the kind tag.
+func (e *RefsEvidence) MarshalJSON() ([]byte, error) {
+	type plain RefsEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{EvidenceRefs, (*plain)(e)})
+}
+
 // RawEvidence is evidence of a kind this build does not know, kept as sent.
 type RawEvidence struct {
 	Kind string
@@ -251,6 +290,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 		return e, json.Unmarshal(b, e)
 	case EvidenceFreshness:
 		e := &FreshnessEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceRefs:
+		e := &RefsEvidence{}
 		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil

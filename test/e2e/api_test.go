@@ -198,7 +198,8 @@ func TestRealCluster(t *testing.T) {
 	for {
 		var h api.HealthResponse
 		get(t, "/api/v1/installs/kgw-a.kgateway/health", &h)
-		ok := has(h, health.CodeConditionFalse, "shop/broken") && has(h, health.CodeNamespaceNotWatched, "blog/posts") &&
+		// shop/broken's missing Service is 013 now, never also 002 (D-030).
+		ok := has(h, health.CodeRefUnresolved, "shop/broken") && !has(h, health.CodeConditionFalse, "shop/broken") && has(h, health.CodeNamespaceNotWatched, "blog/posts") &&
 			has(h, tpCode, "shop/tp-missing-target", tpMsg) && has(h, health.CodeSelfManagedProxy, "infra/self") &&
 			!has(h, health.CodeConditionFalse, "shop/good")
 		xds := slices.ContainsFunc(h.Checks, func(c health.CheckResult) bool {
