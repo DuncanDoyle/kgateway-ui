@@ -26,16 +26,16 @@ n/a
 Done: `phase-3.2-wording.md`. 167 strings (S304–S470), five options each, chosen by a separate picker; 40 changed. R66 settles the picker's doubtful entries.
 
 ## Waivers
-None. The kind e2e did not run on the Task 54 fixes; see Deliverables.
+None.
 
 ## Deliverables
 - Acceptance tests failed before and passed after, per the task reports (Tasks 35–54, in the SDD workspace).
 - Standard gates on [`e4416b8`](https://github.com/DuncanDoyle/kgateway-ui/commit/e4416b8), observed at the close: `go vet ./...` and `-tags e2e`, `go test ./... -race` (32 packages ok, the downstream example included), `TZ=Europe/Amsterdam go test ./pkg/api`, `make lint` (0 issues), web vitest (701 tests), typecheck, lint and build, `helm lint` and `REQUIRE_HELM=1 go test ./deploy/...`: all pass.
 - `make bench` on [`ce9983b`](https://github.com/DuncanDoyle/kgateway-ui/commit/ce9983b), reference mode: all gates pass. The spec-edit stream reran with the D-047 gate of [`11f8c45`](https://github.com/DuncanDoyle/kgateway-ui/commit/11f8c45). Later commits change tests only. Record: `bench/3.2.txt`.
 - kind e2e, `NACK=1 make e2e` on v2.4.7 and v2.3.11, last ran in Task 53 on [`9e5f8f0`](https://github.com/DuncanDoyle/kgateway-ui/commit/9e5f8f0): Go ok (6 tests, 1 skip as designed), Playwright 50 passed.
-- The Task 54 fixes did not run on kind. Cluster creation failed: the local Docker VM hit its inotify limit (128), with two other sessions' clusters up.
+- The Task 54 fixes ran on kind in CI ([run 41870029468](https://github.com/DuncanDoyle/kgateway-ui/actions/runs/41870029468), [`fd4fe3c`](https://github.com/DuncanDoyle/kgateway-ui/commit/fd4fe3c), throwaway branch `duncandoyle/bench32`, `NACK=1`): all three rows (v2.4.7 with `--poll-interval=10m`, v2.3.11, v2.4.7 with `SECOND_INSTALL=1`) passed 5 Go tests and 54 Playwright tests each. A local run was not possible: the Docker VM hit its inotify limit (128) with two other sessions' clusters up.
 - `web/e2e/needs-attention.spec.ts` stubs the API with `page.route`. It ran 4/4 three times on the Vite dev server and once on the production bundle. At 720 px with web fonts, a collapsed row's content is 70 px in its 88 px row: 2 px headroom by the spec's measure.
-- CI bench: [run 41804175589](https://github.com/DuncanDoyle/kgateway-ui/actions/runs/41804175589) on [`27e2b62`](https://github.com/DuncanDoyle/kgateway-ui/commit/27e2b62), throwaway branch `duncandoyle/bench32`: success. A/A [run 41810366248](https://github.com/DuncanDoyle/kgateway-ui/actions/runs/41810366248): 13 benchmarks within −2.1 % to +3.5 %. Record: `bench/3.2-ci.txt`.
+- CI bench: [run 41804175589](https://github.com/DuncanDoyle/kgateway-ui/actions/runs/41804175589) on [`27e2b62`](https://github.com/DuncanDoyle/kgateway-ui/commit/27e2b62), throwaway branch `duncandoyle/bench32`: success. A/A [run 41810366248](https://github.com/DuncanDoyle/kgateway-ui/actions/runs/41810366248): 13 benchmarks within −2.1 % to +3.5 %. After the Task 54 fixes, [run 41870035617](https://github.com/DuncanDoyle/kgateway-ui/actions/runs/41870035617) on [`fd4fe3c`](https://github.com/DuncanDoyle/kgateway-ui/commit/fd4fe3c) passed with the D-046 and D-047 gates; the timing regression gate against `27e2b62` stayed within −1.7 % to +3.6 %. Record: `bench/3.2-ci.txt`.
 - Evidence: `phase-3.2-evidence.md`.
 
 ### Benchmarks (Large tier)
@@ -138,7 +138,6 @@ The install page now ranks what to fix first and shows the health of the control
 - Retained heap has 1.2 MiB headroom in the measurement world (+30.8 of 32 MiB locally, +31.0 on CI). 3.3 and 3.4 add to it.
 - The spec-edit 60 s edit-driven gate has 5–7 % headroom, by structure: the debounce runs once per second plus the wait for the next edit (D-047).
 - On CI, several reported budgets sit close: warm worst 144.8 ms, diagnostics restricted 20-client p95 96.6 ms, memoized new-scrape 2.92 ms.
-- CI bench last ran on `27e2b62`. The first CI run of the branch must cover D-046 and D-047, and the kind rows 1 (`--poll-interval=10m`) and 3 (`SECOND_INSTALL=1`) with `NACK=1`, which did not run locally.
 - `diagnostics.controllerLogs` creates its Role, but no code reads logs until the 3.3 reader (Task 67).
 - `ProcessSummary` has no restart count until the restart check exposes every Pod's window (D-050).
 - Program edges: E3 needs the 3.3 analyzer exported as a package under `pkg/`. E8 (kgwctl check) is proposed: it would need an exported static metrics source and the cache and engine config helper; it arrives as a cross-repo issue if the user approves.
