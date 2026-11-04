@@ -42,6 +42,6 @@ Fixed:
 - A settled rollout read "Rollout stuck: NewReplicaSetAvailable" on the Processes page: the server sent the reason of every rollout. `/processes` now sends a reason only for `ProgressDeadlineExceeded`, as `RolloutDTO` documents.
 - At 720 px the Gateway page scrolled sideways by 15 px: the Data plane body and the next-steps list were grids whose auto column grew to the longest command. Both use `minmax(0, 1fr)`; the command scrolls in its block.
 
-Open (wording):
-- A proxy with no probe failures reads "A probe failed 0 times".
-- 026's detail for two Pods reads "… lost its connection to the controller. It keeps serving its last config."
+Fixed in review round 1:
+- Every process row read "A probe failed 0 times": the model set probe facts on every Pod while Events were readable. Probe facts now come only with a counted failure, so the column is hidden and `probe.last` is never the zero time.
+- 026's detail for two or more Pods is plural: "… lost their connection to the controller. They keep serving their last config." (S471).

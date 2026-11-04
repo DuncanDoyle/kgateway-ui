@@ -400,6 +400,47 @@ func TestFirstSeenCountIsNotCountedAtTheAPI(t *testing.T) {
 	}
 }
 
+// A Pod with readable Events but no counted probe failure has no probe in /processes,
+// so no row reads "failed 0 times"; a counted failure shows it.
+func TestProcessesProbeOnlyWithFailures(t *testing.T) {
+	h, pod := probeWorld(t, false)
+	ctrlProbe := func() *health.ProbeFacts {
+		t.Helper()
+		p := get[ProcessesResponse](t, h.srv, procsPath, 200)
+		if len(p.Controller.Processes) != 1 {
+			t.Fatalf("controller processes %+v", p.Controller.Processes)
+		}
+		for _, g := range p.Proxies.Items {
+			for _, x := range g.Set.Processes {
+				if x.Probe != nil {
+					t.Fatalf("proxy %s probe %+v without failures", x.Name, x.Probe)
+				}
+			}
+		}
+		return p.Controller.Processes[0].Probe
+	}
+	h.at(t, testutil.Now)
+	if pr := ctrlProbe(); pr != nil {
+		t.Fatalf("no Events: probe %+v, want none", pr)
+	}
+	// First seen with count 50: earlier failures are unknown and none is counted.
+	ev := testutil.WarningEvent(pod, "probe", "Unhealthy", testutil.Now)
+	ev.Count = 50
+	h.putEvent(t, ev, true, 0, true)
+	h.at(t, testutil.Now)
+	if pr := ctrlProbe(); pr != nil {
+		t.Fatalf("no counted failure: probe %+v, want none", pr)
+	}
+	last := testutil.Now.Add(time.Second)
+	ev.Count, ev.LastTimestamp = 51, metav1.NewTime(last)
+	h.clk.set(last)
+	h.putEvent(t, ev, false, 1, true)
+	h.at(t, last)
+	if pr := ctrlProbe(); pr == nil || pr.Failures != 1 || !pr.Last.Equal(last) {
+		t.Fatalf("one counted failure: probe %+v", pr)
+	}
+}
+
 // Review Focus 5: an aggregated Event's count jump is observed failures in a
 // 15-minute window, never a total. Once its observations leave the window
 // 020 clears, although the Event still reads count 10.

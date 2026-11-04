@@ -47,7 +47,7 @@ type Process struct {
 	Waiting string
 	// Version is the image tag without a leading "v"; empty when unknown.
 	Version string
-	// Probe is nil when the provider has no probe events.
+	// Probe is nil when the provider has no probe events or counted no failure.
 	Probe *ProbeFailures
 }
 

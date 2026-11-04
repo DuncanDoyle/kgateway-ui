@@ -116,6 +116,32 @@ func TestProxyConditionsMatureAfter60s(t *testing.T) {
 	}
 }
 
+// 026 names one Pod in the singular and two or more in the plural.
+func TestProxyDisconnectedDetailNumber(t *testing.T) {
+	for _, tc := range []struct {
+		ready2 bool
+		want   string
+	}{
+		{false, "edge-0 lost its connection to the controller. It keeps serving its last config."},
+		{true, "edge-0, edge-1 lost their connection to the controller. They keep serving their last config."},
+	} {
+		st := NewStates()
+		col := collected(testutil.Now, edgeStats(statsPod("edge-0", disconnected), statsPod("edge-1", disconnected)))
+		run := func(at time.Time) Report {
+			in := statsInput(t, at)
+			for _, ps := range in.Process.Proxies {
+				*ps.Processes[1].Ready = tc.ready2
+			}
+			return Evaluate(in, Upstream(), Runtime{States: st, Collected: col})
+		}
+		run(testutil.Now)
+		f := findingOn(run(testutil.Now.Add(61*time.Second)), CodeProxyDisconnected)
+		if f == nil || f.Detail != tc.want {
+			t.Fatalf("both Ready %v: 026 %+v, want detail %q", tc.ready2, f, tc.want)
+		}
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
 
 // A not-Ready proxy raises nothing; a proxy the process data does not know is

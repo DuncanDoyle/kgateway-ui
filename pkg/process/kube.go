@@ -196,7 +196,7 @@ func containerFacts(out *Process, cs *corev1.ContainerStatus) {
 }
 
 // probeFailures sums p's observed probe failures in the window ending at
-// snap.TakenAt. The type comes from the Pod spec, never an Event message.
+// snap.TakenAt; nil when none is counted. The type comes from the Pod spec, never an Event message.
 func probeFailures(p *corev1.Pod, snap *cache.Snapshot) *ProbeFailures {
 	f := &ProbeFailures{Type: probeType(p), HistoryUnknown: snap.EventHistoryUnknown[p.UID]}
 	from := snap.TakenAt.Add(-cache.EventWindow)
@@ -211,6 +211,9 @@ func probeFailures(p *corev1.Pod, snap *cache.Snapshot) *ProbeFailures {
 		if o.At.After(f.Last) {
 			f.Last = o.At
 		}
+	}
+	if f.Count == 0 {
+		return nil
 	}
 	return f
 }

@@ -343,6 +343,17 @@ describe("ProcessTable", () => {
     expect(within(row).getByText(diagnosticsCopy.termination("Error", 1))).toBeInTheDocument();
   });
 
+  it("processes without probe facts show no probe column", () => {
+    renderWithTheme(
+      <ProcessTable
+        set={{ observed: true, ready: 1, desired: 1, processes: [{ name: "edge-0", ready: true }] }}
+        label="Proxies"
+      />,
+    );
+    expect(screen.queryByRole("columnheader", { name: diagnosticsCopy.probe })).toBeNull();
+    expect(screen.queryByText(/probe failed/i)).toBeNull();
+  });
+
   it("an unobserved set reads Not observed", () => {
     renderWithTheme(<ProcessTable set={{ observed: false, processes: [] }} label="Proxies" />);
     expect(screen.getByText(diagnosticsCopy.notObserved)).toBeInTheDocument();

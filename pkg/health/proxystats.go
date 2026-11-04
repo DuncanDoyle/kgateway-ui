@@ -24,6 +24,7 @@ const (
 	proxyWarmingDetail       = "Config is still loading on %s."
 	proxyDisconnectedMessage = "Proxy lost its connection to the controller"
 	proxyDisconnectedDetail  = "%s lost its connection to the controller. It keeps serving its last config."
+	proxyDisconnectedPlural  = "%s lost their connection to the controller. They keep serving their last config."
 	proxyStatsNotCollected   = "Proxy stats are not collected yet"
 	proxyStatsUnavailable    = "Proxy stats are not available"
 	proxyStatsGatewayGap     = "%d of %d Gateways have no proxy stats."
@@ -147,6 +148,9 @@ func (c proxyStatsCheck) finding(in Input, gw objects.Ref, pods []proxystats.Pod
 	f := Finding{Code: CodeProxyDisconnected, Slug: "proxy-disconnected", Severity: SeverityWarning, Install: in.Install.ID(), Resource: &gw,
 		Message: proxyDisconnectedMessage}
 	detail := proxyDisconnectedDetail
+	if len(pods) > 1 {
+		detail = proxyDisconnectedPlural
+	}
 	if c.cond == proxyWarming {
 		f.Code, f.Slug, f.Message, detail = CodeProxyConfigWarming, "proxy-config-warming", proxyWarmingMessage, proxyWarmingDetail
 	}

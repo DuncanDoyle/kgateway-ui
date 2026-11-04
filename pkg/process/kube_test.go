@@ -375,10 +375,17 @@ func TestNilFieldsMeanNotObserved(t *testing.T) {
 		two := bare.DeepCopy()
 		two.Spec.Containers[0].LivenessProbe = &corev1.Probe{}
 		withEvents.ProxyPods = []*corev1.Pod{two}
-		withEvents.EventDeltas, withEvents.EventHistoryUnknown = nil, nil
+		withEvents.EventDeltas = map[types.UID][]cache.Observation{"pod/edge-1": {{At: at, Reason: "Unhealthy", Delta: 1}}}
+		withEvents.EventHistoryUnknown = nil
 		got = process.Kube{}.Proxies(resolved(), gw, &withEvents).Processes[0].Probe
-		if got == nil || *got != (process.ProbeFailures{}) {
-			t.Fatalf("two probe types, no failures: want a zero ProbeFailures, got %+v", got)
+		if got == nil || *got != (process.ProbeFailures{Count: 1, First: at, Last: at}) {
+			t.Fatalf("two probe types, one failure: want no type, got %+v", got)
+		}
+		// No counted failure, even with history unknown: no probe facts, so nothing reads "failed 0 times".
+		withEvents.EventDeltas, withEvents.EventHistoryUnknown = nil, map[types.UID]bool{"pod/edge-1": true}
+		got = process.Kube{}.Proxies(resolved(), gw, &withEvents).Processes[0].Probe
+		if got != nil {
+			t.Fatalf("no failures: want nil, got %+v", got)
 		}
 	})
 

@@ -107,6 +107,11 @@ for (const theme of themes) {
     expect(stuck, "the settled controller rollout has no stuck reason").toBeUndefined();
     await expect(page.getByText(/^Rollout stuck/)).toHaveCount(stuck ? 1 : 0);
 
+    // Probe facts come only with a counted failure, so the column follows the server and never reads 0.
+    const probes = p.controller.processes.some((x) => x.probe);
+    await expect(ctrl.getByRole("columnheader", { name: diagnosticsCopy.probe })).toHaveCount(probes ? 1 : 0);
+    await expect(page.getByText(/failed 0 times/)).toHaveCount(0);
+
     const proxies = page.getByRole("table", { name: processesCopy.gatewayProxies });
     const rows = await dataRows(proxies);
     await expect(rows).toHaveCount(p.proxies.items.length);
@@ -114,7 +119,8 @@ for (const theme of themes) {
       const id = `${item.gateway.namespace}/${item.gateway.name}`;
       const r = rows.filter({ has: page.getByRole("link", { name: id, exact: true }) });
       if (!item.set.observed) await expect(r).toContainText(diagnosticsCopy.notObserved);
-      if (item.rejects !== undefined) await expect(r).toContainText(String(item.rejects));
+      if (item.rejects !== undefined)
+        await expect(r.getByRole("cell", { name: String(item.rejects), exact: true })).toHaveCount(1);
     }
 
     const chip = page.getByRole("button", { name: processesCopy.skew });
@@ -128,6 +134,7 @@ for (const theme of themes) {
     const filtered = await fetchJSON<ProcessesResponse>(page, "/processes?q=nack");
     const names = filtered.proxies.items.map((x) => `${x.gateway.namespace}/${x.gateway.name}`);
     expect(names).toContain(nack);
+    expect(names, "q=nack filters out the other Gateways").not.toContain("infra/edge");
     await expect((await dataRows(proxies)).locator("td a")).toHaveText(names);
     await page.reload();
     await expect(page.getByRole("searchbox", { name: processesCopy.search })).toHaveValue("nack");
@@ -161,6 +168,9 @@ for (const theme of themes) {
 
     const proxies = page.getByRole("table", { name: processesCopy.proxiesOf(nack) });
     await expect(proxies.locator("tbody > tr > td:first-child")).toHaveText(gw.proxies.processes.map((x) => x.name));
+    const probes = gw.proxies.processes.some((x) => x.probe);
+    await expect(proxies.getByRole("columnheader", { name: diagnosticsCopy.probe })).toHaveCount(probes ? 1 : 0);
+    await expect(page.getByText(/failed 0 times/)).toHaveCount(0);
     const step = dp.nextSteps[0] as NonNullable<(typeof dp.nextSteps)[0]>;
     expect(step, "the data plane's first next step").toBeTruthy();
     const copy = section.getByRole("button", { name: findingsCopy.copyLabel(step.title), exact: true });
