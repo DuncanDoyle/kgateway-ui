@@ -1,4 +1,6 @@
+import { useTheme } from "@emotion/react";
 import { act, render, screen } from "@testing-library/react";
+import { FONT_FALLBACK_CLASS } from "./fontFallback";
 import { ThemeProvider, useThemeSwitch } from "./ThemeProvider";
 import { readStoredTheme, THEME_PAINT_KEY, THEME_STORAGE_KEY } from "./themeStorage";
 import { defaultThemes } from "./themes";
@@ -102,4 +104,39 @@ it("writes the paint record for the applied theme", () => {
   expect(JSON.parse(localStorage.getItem(THEME_PAINT_KEY) ?? "null")).toEqual({ bg: "#0F1220", scheme: "dark" });
   act(() => screen.getByRole("button").click());
   expect(JSON.parse(localStorage.getItem(THEME_PAINT_KEY) ?? "null")).toEqual({ bg: "#FFFFFF", scheme: "light" });
+});
+
+it("keeps the fallback fonts across theme switches once the font wait was cut short", async () => {
+  /** The mono stack the emotion theme hands components. */
+  function Mono() {
+    return <output data-testid="mono">{useTheme().font.mono}</output>;
+  }
+  // Whether the body (UI) and mono stacks name their web fonts.
+  const web = () => [
+    getComputedStyle(document.body).fontFamily.includes("Figtree Variable"),
+    screen.getByTestId("mono").textContent?.includes("JetBrains Mono Variable"),
+  ];
+  try {
+    const plain = render(
+      <ThemeProvider themes={defaultThemes}>
+        <Mono />
+      </ThemeProvider>,
+    );
+    expect(web()).toEqual([true, true]);
+    plain.unmount();
+    document.documentElement.classList.add(FONT_FALLBACK_CLASS);
+    render(
+      <ThemeProvider themes={defaultThemes}>
+        <Probe />
+        <Mono />
+      </ThemeProvider>,
+    );
+    expect(web()).toEqual([false, false]);
+    expect(getComputedStyle(document.body).fontFamily).toBe("Figtree, system-ui, sans-serif");
+    await act(async () => screen.getByRole("button").click());
+    expect(screen.getByRole("button")).toHaveTextContent("control-room-light");
+    expect(web()).toEqual([false, false]);
+  } finally {
+    document.documentElement.classList.remove(FONT_FALLBACK_CLASS);
+  }
 });

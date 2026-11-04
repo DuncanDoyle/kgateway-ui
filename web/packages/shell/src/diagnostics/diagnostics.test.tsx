@@ -13,6 +13,7 @@ import { diagnosticsCopy, findingsCopy } from "../copy/explorer";
 import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "../shell/extension";
 import { renderWhenFontsReady } from "../shell/renderWhenFontsReady";
 import { pseudoRules, renderWithTheme, stubApi } from "../test/render";
+import { FONT_FALLBACK_CLASS } from "../theme/fontFallback";
 import { EvidenceView } from "./EvidenceView";
 import { DiagnosticsGroupRow, GROUP_ROW_H } from "./GroupRow";
 import { NextSteps } from "./NextSteps";
@@ -430,6 +431,7 @@ describe("renderWhenFontsReady", () => {
   afterEach(() => {
     Reflect.deleteProperty(document, "fonts");
     document.body.replaceChildren();
+    document.documentElement.classList.remove(FONT_FALLBACK_CLASS);
   });
 
   it("renderWhenFontsReady renders after fonts load and after a font failure", async () => {
@@ -445,18 +447,26 @@ describe("renderWhenFontsReady", () => {
         await done;
       });
       expect(root.textContent).toBe(`app ${fail}`);
+      // Fonts in time: the theme keeps its web fonts.
+      expect(document.documentElement).not.toHaveClass(FONT_FALLBACK_CLASS);
     }
   });
 
-  it("renders at the cap when a font never settles", async () => {
-    stubFonts();
+  it("renders at the cap with the fallback fonts, which stay after a late font load", async () => {
+    const { pending } = stubFonts();
     const { root, done } = await start("app");
     await act(async () => vi.advanceTimersByTime(2999));
     expect(root.textContent).toBe("");
+    expect(document.documentElement).not.toHaveClass(FONT_FALLBACK_CLASS);
     await act(async () => {
       vi.advanceTimersByTime(1);
       await done;
     });
     expect(root.textContent).toBe("app");
+    expect(document.documentElement).toHaveClass(FONT_FALLBACK_CLASS);
+    await act(async () => {
+      for (const p of pending) p.resolve();
+    });
+    expect(document.documentElement).toHaveClass(FONT_FALLBACK_CLASS);
   });
 });
