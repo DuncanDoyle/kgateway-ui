@@ -1,6 +1,8 @@
 # kgateway UI — Roadmap
 
-**Last updated:** 2026-10-29
+**Last updated:** 2026-11-04
+
+**Program:** [kgateway-tooling program.md](https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md)
 
 ## Goal
 A read-only web UI for kgateway (Envoy data plane) that lets platform operators see at a glance whether their gateways are healthy, understand where traffic goes and which policies apply, and debug misrouted traffic in large deployments (100s of hostnames, 1000s of routes). It layers the higher-level semantics of Gateway API and kgateway policies on top of the cluster state, rather than being yet another Kubernetes resource viewer. The project is built so that downstream distributions can extend it without forking or copying code.
@@ -128,7 +130,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 - The actual Envoy HTTP filter chain and filter order per route, mapped back to the Gateway API and policy resources that produced it.
 - Intended configuration (the controller's xDS snapshot) compared with the configuration Envoy accepted.
-- Builds on [krp](https://github.com/DuncanDoyle/krp) as a Go library, which first requires moving its parser, model and filter packages out of `internal/`.
+- Builds on the `pkg/envoy` library of [krp](https://github.com/DuncanDoyle/krp) (krp Phase 4, v0.1.0). krp owns the mapping from Envoy names to Gateway API refs, and `computed.EnvoyNamer` delegates to it (program P-001, edges E4/E5).
 - Easier standalone, because the admin server (9095) and Envoy admin are local (D-016).
 
 ### Phase 10 — App-Team Views
@@ -167,7 +169,7 @@ The evidence from Phases 4–6 (backends, policies, the route tester) is what ma
 ## Deferred / out of roadmap
 - **Per-user authentication and authorisation** (D-013). OIDC login, Kubernetes SubjectAccessReview per request against the shared cache, with health roll-ups that still show which resource is wrong when the user may not see its details (D-013). It plugs into the Phase 1 `Authorizer` seam. Required before the UI reads Secrets (Phase 7 certificate details).
 - **Pre-apply "what-if" analysis of pasted YAML** (like gwctl `analyze -f`). Valuable, but write-path adjacent; revisit after Phase 6.
-- **A CLI sharing the analyzer library.** Possible once the Phase 3 analyzer exists as a package. The MCP server milestone covers part of this need.
+- **A kgateway CLI** is now a planned separate project. It imports `pkg/cache` and `pkg/engine` for a one-shot load (edge E2) and the Phase 3.3 analyzer as a package (edge E3). The MCP server milestone covers part of this need.
 - **A Headlamp plugin.** It would be a second surface; one surface comes first.
 - **A support-bundle export.** Revisit after Phase 9.
 - **The agentgateway data plane.** It has its own controller, so this roadmap covers the Envoy data plane only.
