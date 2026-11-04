@@ -48,56 +48,144 @@ func refRuleFor(cond metav1.Condition, listener bool) (refRule, bool) {
 // writtenRef is one ref of a failing field, with defaults applied.
 type writtenRef struct {
 	RefLocation
-	// delegation marks a backendRef that delegates to child routes: no
-	// served kind, and never a ReferenceGrant target.
+	// delegation marks a backendRef that delegates to child routes: it has no
+	// served kind of its own.
 	delegation bool
 }
 
-// routeBackendRefs returns every spec.rules[].backendRefs[] entry of route u.
-// Group defaults to core, kind to Service and namespace to u's.
+// objRef decodes a written ref map with defKind and namespace ns as defaults.
+func objRef(m map[string]any, defKind, ns string) (objects.Ref, bool) {
+	group, hasGroup := m["group"].(string)
+	kind, hasKind := m["kind"].(string)
+	r := objects.Ref{Group: group, Kind: kind, Namespace: ns}
+	r.Name, _ = m["name"].(string)
+	if !hasKind || kind == "" {
+		r.Kind = defKind
+	}
+	if n, _ := m["namespace"].(string); n != "" {
+		r.Namespace = n
+	}
+	// As objects.DecodeHTTPRoute classifies delegation: group and kind both written.
+	del := hasGroup && hasKind && (group == objects.GatewayAPIGroup && kind == "HTTPRoute" || group == "delegation.kgateway.dev" && kind == "label")
+	return r, del
+}
+
+// routeBackendRefs returns every spec.rules[].backendRefs[] entry of route u and
+// every RequestMirror backendRef in their filters and the rules'. Group defaults
+// to core, kind to Service and namespace to u's.
 func routeBackendRefs(u *unstructured.Unstructured) []writtenRef {
 	rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "rules")
 	var out []writtenRef
-	for i, r := range rules {
-		rm, _ := r.(map[string]any)
-		brs, _ := rm["backendRefs"].([]any)
-		for j, b := range brs {
-			bm, _ := b.(map[string]any)
-			group, hasGroup := bm["group"].(string)
-			kind, hasKind := bm["kind"].(string)
-			ref := objects.Ref{Group: group, Kind: kind, Namespace: u.GetNamespace()}
-			ref.Name, _ = bm["name"].(string)
-			if !hasKind || kind == "" {
-				ref.Kind = "Service"
+	add := func(m map[string]any, path string) {
+		r, del := objRef(m, "Service", u.GetNamespace())
+		out = append(out, writtenRef{RefLocation{Path: path, Ref: r}, del})
+	}
+	mirrors := func(fs any, path string) {
+		for k, f := range asList(fs) {
+			if m, ok := asMap(asMap(f)["requestMirror"])["backendRef"].(map[string]any); ok {
+				add(m, fmt.Sprintf("%s.filters[%d].requestMirror.backendRef", path, k))
 			}
-			if ns, _ := bm["namespace"].(string); ns != "" {
-				ref.Namespace = ns
-			}
-			// As objects.DecodeHTTPRoute classifies delegation: group and kind both written.
-			del := hasGroup && hasKind && (group == objects.GatewayAPIGroup && kind == "HTTPRoute" || group == "delegation.kgateway.dev" && kind == "label")
-			out = append(out, writtenRef{RefLocation{Path: fmt.Sprintf("spec.rules[%d].backendRefs[%d]", i, j), Ref: ref}, del})
 		}
+	}
+	for i, r := range rules {
+		rm := asMap(r)
+		for j, b := range asList(rm["backendRefs"]) {
+			path := fmt.Sprintf("spec.rules[%d].backendRefs[%d]", i, j)
+			add(asMap(b), path)
+			mirrors(asMap(b)["filters"], path)
+		}
+		mirrors(rm["filters"], fmt.Sprintf("spec.rules[%d]", i))
 	}
 	return out
 }
 
-// listenerCertRefs returns the certificateRefs of the listener named name of
-// Gateway or ListenerSet u, as decoded by objects (kind Secret, u's namespace).
-func (in Input) listenerCertRefs(u *unstructured.Unstructured, name string) []writtenRef {
-	var ls []objects.Listener
-	if gvk := u.GroupVersionKind(); gvk.Group == objects.GatewayAPIGroup && gvk.Kind == "Gateway" {
-		ls = in.views().Gateway(u).Listeners
-	} else {
-		ls = in.views().ListenerSet(u).Listeners
+func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
+
+func asList(v any) []any { l, _ := v.([]any); return l }
+
+// delegationRoute reports whether route u delegates or is a delegation child:
+// a delegation cycle is RefNotPermitted too, so no ref can be singled out.
+func (in Input) delegationRoute(u *unstructured.Unstructured, refs []writtenRef) bool {
+	if slices.ContainsFunc(refs, func(r writtenRef) bool { return r.delegation }) {
+		return true
 	}
-	var out []writtenRef
+	route := func(group, kind string) bool { return group == objects.GatewayAPIGroup && kind == "HTTPRoute" }
+	for _, p := range asList(asMap(u.Object["spec"])["parentRefs"]) {
+		if g, _ := asMap(p)["group"].(string); route(g, fmt.Sprint(asMap(p)["kind"])) {
+			return true
+		}
+	}
+	return slices.ContainsFunc(in.routeParents(u), func(s objects.RouteParentStatus) bool { return route(s.ParentRef.Group, s.ParentRef.Kind) })
+}
+
+// listenerRefs returns the certificateRefs of the listener named name of
+// Gateway or ListenerSet u (kind Secret, u's namespace by default), and the
+// CA certificate refs of the Gateway's frontend TLS for its port. complete is
+// false for a ListenerSet whose Gateway is not owned or has CA refs, whose
+// refs live on another object.
+func (in Input) listenerRefs(u *unstructured.Unstructured, name string) (out []writtenRef, complete bool) {
+	gateway := func(g *unstructured.Unstructured) bool {
+		gvk := g.GroupVersionKind()
+		return gvk.Group == objects.GatewayAPIGroup && gvk.Kind == "Gateway"
+	}
+	var ls []objects.Listener
+	var parent *unstructured.Unstructured
+	if gateway(u) {
+		ls, parent = in.views().Gateway(u).Listeners, u
+	} else {
+		v := in.views().ListenerSet(u)
+		ls = v.Listeners
+		for _, g := range in.Owned.Gateways {
+			if r := objects.RefOf(g); r.Name == v.Parent.Name && r.Namespace == v.Parent.Namespace {
+				parent = g
+			}
+		}
+	}
+	port, found := int32(0), false
 	for i, l := range ls {
-		if l.Name != name || l.TLS == nil {
+		if l.Name != name {
+			continue
+		}
+		port, found = l.Port, true
+		if l.TLS == nil {
 			continue
 		}
 		for j, r := range l.TLS.CertificateRefs {
 			out = append(out, writtenRef{RefLocation: RefLocation{Path: fmt.Sprintf("spec.listeners[%d].tls.certificateRefs[%d]", i, j), Ref: r}})
 		}
+	}
+	if parent == nil {
+		return out, false
+	}
+	ca := gatewayCARefs(parent, port, found)
+	if parent != u {
+		return out, len(ca) == 0
+	}
+	return append(out, ca...), true
+}
+
+// gatewayCARefs returns the frontend validation caCertificateRefs of Gateway g
+// that apply to port: the perPort entry for it, else the default. Without a
+// known port it returns every entry's.
+func gatewayCARefs(g *unstructured.Unstructured, port int32, known bool) []writtenRef {
+	front := asMap(asMap(asMap(g.Object["spec"])["tls"])["frontend"])
+	var out []writtenRef
+	refs := func(tls any, path string) {
+		for k, r := range asList(asMap(asMap(tls)["validation"])["caCertificateRefs"]) {
+			ref, _ := objRef(asMap(r), "", g.GetNamespace())
+			out = append(out, writtenRef{RefLocation: RefLocation{Path: fmt.Sprintf("%s.validation.caCertificateRefs[%d]", path, k), Ref: ref}})
+		}
+	}
+	perPort := false
+	for n, pp := range asList(front["perPort"]) {
+		p, _ := asMap(pp)["port"].(int64)
+		if !known || int32(p) == port { //nolint:gosec // a port fits in int32
+			refs(asMap(pp)["tls"], fmt.Sprintf("spec.tls.frontend.perPort[%d].tls", n))
+			perPort = known
+		}
+	}
+	if !perPort {
+		refs(front["default"], "spec.tls.frontend.default")
 	}
 	return out
 }
@@ -117,18 +205,21 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 		return Finding{}, false
 	}
 	var refs []writtenRef
+	// attributable is false when the condition may concern a ref outside refs.
+	var attributable bool
 	if listener != "" {
-		refs = in.listenerCertRefs(u, listener)
+		refs, attributable = in.listenerRefs(u, listener)
 	} else {
 		refs = routeBackendRefs(u)
+		attributable = !in.delegationRoute(u, refs)
 	}
-	// field holds the refs the condition can be about: 014 only cross-namespace,
-	// non-delegating refs; 013 every ref.
+	// field holds the refs the condition can be about: 014 every cross-namespace
+	// ref, delegating ones included; 013 every ref.
 	field := refs
 	if rule == refNotPermitted {
 		field = nil
 		for _, r := range refs {
-			if !r.delegation && r.Ref.Namespace != u.GetNamespace() {
+			if r.Ref.Namespace != u.GetNamespace() {
 				field = append(field, r)
 			}
 		}
@@ -154,7 +245,7 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 			delegationCondition(&f, u, cond)
 		}
 	}
-	ev.Attributed = len(ev.Candidates) == 1
+	ev.Attributed = attributable && len(ev.Candidates) == 1
 	f.Facts = ev
 	return f, true
 }

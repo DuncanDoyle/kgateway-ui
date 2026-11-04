@@ -1,8 +1,11 @@
 package engine
 
 import (
+	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,12 +139,10 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 	if e.cfg.Collected != nil {
 		col = e.cfg.Collected()
 	}
-	// The bench world's kinds and core Services, so 013 and 014 can reach explanation 1.
-	gks := []schema.GroupKind{{Kind: "Service"}, {Kind: "Secret"}}
-	for _, s := range served {
-		gks = append(gks, schema.GroupKind{Group: s.Group, Kind: s.Kind})
+	cat := benchCatalog(served)
+	if e.cfg.Catalog != nil {
+		cat = e.cfg.Catalog()
 	}
-	cat := kinds.NewCatalog(gks, nil)
 	res := im.Resolved
 	maxAge, scrapes := e.cfg.MetricsMaxAge, 0
 	if scrape > 0 {
@@ -280,11 +281,53 @@ func measureEngine(tb testing.TB) (*Engine, *measure.World, *clocktesting.FakeCl
 	return measuredEngine(tb, w, fc, w.Live.Cache.Snapshot()), w, fc
 }
 
-// measuredEngine is measureEngine's engine over w's snapshot snap.
+// benchCatalog serves served and core Services, Secrets and ConfigMaps.
+func benchCatalog(served []kinds.Served) kinds.Catalog {
+	gks := []schema.GroupKind{{Kind: "Service"}, {Kind: "Secret"}, {Kind: "ConfigMap"}}
+	for _, s := range served {
+		gks = append(gks, schema.GroupKind{Group: s.Group, Kind: s.Kind})
+	}
+	return kinds.NewCatalog(gks, nil)
+}
+
+// typoBackend is a backendRef whose group serves no such kind.
+var typoBackend = map[string]any{"group": "gateway.kgateway.example", "kind": "Backend", "name": "typo"}
+
+// withTypoRef returns snap with typoBackend added to the first route whose
+// status has ResolvedRefs=False, so that 013 reaches explanation 1.
+func withTypoRef(tb testing.TB, snap *cache.Snapshot) *cache.Snapshot {
+	tb.Helper()
+	for g, us := range snap.Objects {
+		for i, u := range us {
+			if u.GetKind() != "HTTPRoute" || !strings.Contains(fmt.Sprint(u.Object["status"]), "BackendNotFound") {
+				continue
+			}
+			c := u.DeepCopy()
+			rules, _, _ := unstructured.NestedSlice(c.Object, "spec", "rules")
+			r := rules[0].(map[string]any)
+			r["backendRefs"] = append(r["backendRefs"].([]any), maps.Clone(typoBackend))
+			_ = unstructured.SetNestedSlice(c.Object, rules, "spec", "rules")
+			c.SetResourceVersion(u.GetResourceVersion() + "-typo")
+			out := *snap
+			out.Objects = maps.Clone(snap.Objects)
+			out.Objects[g] = slices.Clone(us)
+			out.Objects[g][i] = c
+			return &out
+		}
+	}
+	tb.Fatal("no route with ResolvedRefs=False/BackendNotFound")
+	return nil
+}
+
+// measuredEngine is measureEngine's engine over w's snapshot snap, with one
+// typo'd backendRef and a Catalog, so 013 explanation 1 is measured too.
 func measuredEngine(tb testing.TB, w *measure.World, fc *clocktesting.FakeClock, snap *cache.Snapshot) *Engine {
 	tb.Helper()
+	snap = withTypoRef(tb, snap)
 	cfg := config(snap, w.Metrics, fc.Now)
 	cfg.MetricsMaxAge, cfg.Collected = 0, w.Store.Snapshot
+	cat := benchCatalog(cfg.Served)
+	cfg.Catalog = func() kinds.Catalog { return cat }
 	e := New(cfg)
 	var m *Model
 	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(m) })
@@ -339,6 +382,12 @@ func measuredSanity(tb testing.TB, m *Model) {
 		if want := gws; byCode[c] < want && (c != health.CodeProbeFailing || byCode[c] == 0) {
 			tb.Fatalf("%s on %d of %d Gateways: %v", c, byCode[c], gws, byCode)
 		}
+	}
+	if !slices.ContainsFunc(in.Health.Findings, func(f health.Finding) bool {
+		ev, ok := f.Facts.(*health.RefsEvidence)
+		return ok && ev.Explanation == health.RefExplainKindNotServed
+	}) {
+		tb.Fatalf("no 013 or 014 reaches explanation 1: %v", byCode)
 	}
 	if withStats != gws || byCode[health.CodeComputedDisagrees] == 0 {
 		tb.Fatalf("001 with proxy stats on %d of %d Gateways; %d KGWUI-012", withStats, gws, byCode[health.CodeComputedDisagrees])

@@ -1462,3 +1462,72 @@ func TestCommandsSeamReachesTheAPI(t *testing.T) {
 		t.Fatalf("steps %+v", s)
 	}
 }
+
+// growingDiscovery serves base plus lists added while the app runs, through
+// ServerGroupsAndResources too.
+type growingDiscovery struct {
+	base  kinds.DiscoveryClient
+	mu    sync.Mutex
+	extra []*metav1.APIResourceList
+}
+
+func (g *growingDiscovery) add(l *metav1.APIResourceList) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.extra = append(g.extra, l)
+}
+
+func (g *growingDiscovery) ServerResourcesForGroupVersion(gv string) (*metav1.APIResourceList, error) {
+	g.mu.Lock()
+	for _, l := range g.extra {
+		if l.GroupVersion == gv {
+			g.mu.Unlock()
+			return l, nil
+		}
+	}
+	g.mu.Unlock()
+	return g.base.ServerResourcesForGroupVersion(gv)
+}
+
+func (g *growingDiscovery) ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error) {
+	groups, lists, err := g.base.(interface {
+		ServerGroupsAndResources() ([]*metav1.APIGroup, []*metav1.APIResourceList, error)
+	}).ServerGroupsAndResources()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, l := range g.extra {
+		gv, _ := schema.ParseGroupVersion(l.GroupVersion)
+		groups = append(groups, &metav1.APIGroup{Name: gv.Group, Versions: []metav1.GroupVersionForDiscovery{{GroupVersion: l.GroupVersion, Version: gv.Version}}})
+		lists = append(lists, l)
+	}
+	return groups, lists, err
+}
+
+// A Gateway API CRD installed while the UI runs refreshes the Catalog on the
+// next compute, long before the served-kinds interval.
+func TestCRDInstallRefreshesCatalog(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	scheme := metadatafake.NewTestScheme()
+	if err := metav1.AddMetaToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	md := metadatafake.NewSimpleMetadataClient(scheme)
+	disc := &growingDiscovery{base: kube.Discovery()}
+	o := Options{PollInterval: time.Hour, MetricsInterval: time.Hour, KindsInterval: time.Hour, UI: ui}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: disc, Metadata: md, Scraper: &stubScraper{}}, o, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	const group = "gateway.networking.x-k8s.io"
+	eventually(t, "the first Catalog", func() bool { return a.kinds.Catalog().Known(group) && !a.kinds.Catalog().Served(group, "XMesh") })
+	// Wait for a compute that has seen the empty CRD set, so the install is a change.
+	eventually(t, "a first model", func() bool { p := a.Engine.Current(); return p != nil && p.Model.Snapshot.Synced })
+	disc.add(&metav1.APIResourceList{GroupVersion: group + "/v1alpha1", APIResources: []metav1.APIResource{{Name: "xmeshes", Kind: "XMesh"}}})
+	if _, err := md.Resource(cache.CRDsGVR).(metadatafake.MetadataClient).CreateFake(testutil.CRDMetadata("xmeshes."+group, "v1.4.0", "experimental"), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the CRD install to refresh the Catalog", func() bool { return a.kinds.Catalog().Served(group, "XMesh") })
+}

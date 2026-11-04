@@ -20,6 +20,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -607,5 +608,30 @@ func TestStoppedScrapesTurnXDSStaleOnTime(t *testing.T) {
 	*now = last.Add(maxAge + time.Nanosecond)
 	if r := xdsResult(t, e.Compute()); r.OK || !strings.Contains(r.Error, "stale") {
 		t.Fatalf("just after C+max age: %+v; want the stale error", r)
+	}
+}
+
+// A memoized check that declares Catalog is skipped while the Catalog's key
+// is unchanged and runs again when it changes.
+func TestCatalogChangeRerunsCheck(t *testing.T) {
+	var runs int
+	c := counted{probe{"catalog probe", health.InputSet{Catalog: true}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		return okRun("catalog probe", ctx.Catalog.Key())(ctx)
+	}}, &runs}
+	cat := kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}}, nil)
+	now := testutil.Now
+	src := &memoSource{base: snapshot(t), now: &now}
+	cfg := config(nil, metricsAt(testutil.Now), func() time.Time { return now })
+	cfg.Snapshots, cfg.MetricsMaxAge, cfg.Checks = src, 0, append(health.Upstream(), c)
+	cfg.Catalog = func() kinds.Catalog { return cat }
+	e := New(cfg)
+	e.Compute()
+	e.Compute()
+	if runs != 1 {
+		t.Fatalf("an unchanged Catalog ran the check: %d runs, want 1", runs)
+	}
+	cat = kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: "acme.example", Kind: "Widget"}}, nil)
+	if got := detailOf(report(t, e.Compute()), "catalog probe"); runs != 2 || got != cat.Key() {
+		t.Fatalf("a changed Catalog must run the check: %d runs, detail %q", runs, got)
 	}
 }

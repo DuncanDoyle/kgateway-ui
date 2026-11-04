@@ -20,7 +20,7 @@ import (
 
 // served is a catalog of a cluster with core, Gateway API and kgateway kinds.
 func served(unknown ...string) kinds.Catalog {
-	return kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Kind: "Secret"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"},
+	return kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Kind: "Secret"}, {Kind: "ConfigMap"}, {Group: objects.GatewayAPIGroup, Kind: "HTTPRoute"},
 		{Group: "gateway.kgateway.dev", Kind: "Backend"}}, unknown)
 }
 
@@ -327,5 +327,68 @@ func TestMonitorCatalogExplainsRefs(t *testing.T) {
 	}
 	if got := m.Catalog().GroupsWithKind("Service"); !reflect.DeepEqual(got, []string{""}) {
 		t.Fatalf("GroupsWithKind(Service) = %v", got)
+	}
+}
+
+// R86: RefNotPermitted can come from a delegation cycle, so a route that
+// delegates is never attributed, even with one cross-namespace backendRef.
+func TestDelegatingRouteNeverAttributed(t *testing.T) {
+	w := healthyWorld()
+	w.objs[2] = refRoute("RefNotPermitted", "", map[string]any{"name": "cart", "namespace": "store"}, testutil.DelegateTo("shop", "cart"))
+	_, ev := only(t, refsReport(t, w, served()), CodeRefNotPermitted, "shop/cart")
+	if want := []RefLocation{loc("spec.rules[0].backendRefs[0]", svc("store", "cart"))}; !reflect.DeepEqual(ev.Candidates, want) || ev.Attributed {
+		t.Fatalf("candidates %+v attributed %v, want %+v unattributed", ev.Candidates, ev.Attributed, want)
+	}
+}
+
+// R86: a listener's CA certificate refs can be the ones not permitted, so
+// they are candidates beside its certificateRefs.
+func TestListenerCACertRefIsCandidate(t *testing.T) {
+	w := healthyWorld()
+	gw := tlsGateway("RefNotPermitted", map[string]any{"name": "wild", "namespace": "certs"})
+	gw.Object["spec"].(map[string]any)["tls"] = map[string]any{"frontend": map[string]any{"default": map[string]any{"validation": map[string]any{
+		"caCertificateRefs": []any{map[string]any{"group": "", "kind": "ConfigMap", "name": "ca", "namespace": "pki"}}}}}}
+	w.objs[1] = gw
+	_, ev := only(t, refsReport(t, w, served()), CodeRefNotPermitted, "infra/edge")
+	want := []RefLocation{loc("spec.listeners[0].tls.certificateRefs[0]", objects.Ref{Kind: "Secret", Namespace: "certs", Name: "wild"}),
+		loc("spec.tls.frontend.default.validation.caCertificateRefs[0]", objects.Ref{Kind: "ConfigMap", Namespace: "pki", Name: "ca"})}
+	if !reflect.DeepEqual(ev.Candidates, want) || ev.Attributed {
+		t.Fatalf("candidates %+v attributed %v, want %+v unattributed", ev.Candidates, ev.Attributed, want)
+	}
+}
+
+// A ListenerSet's CA refs live on its Gateway, so a ListenerSet listener is
+// unattributed while that Gateway has CA refs for its port; a route mirror is a candidate.
+func TestListenerSetAndMirrorCandidates(t *testing.T) {
+	bad := testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")
+	ls := testutil.ListenerSet("infra", "more", testutil.GwRef("infra", "edge"), nil, testutil.Listener{Name: "extra", Conds: []metav1.Condition{
+		testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed"), bad}})
+	l := ls.Object["spec"].(map[string]any)["listeners"].([]any)[0].(map[string]any)
+	l["protocol"], l["tls"] = "HTTPS", map[string]any{"certificateRefs": []any{map[string]any{"name": "wild", "namespace": "certs"}}}
+	for _, tc := range []struct {
+		name       string
+		perPort    int64
+		attributed bool
+	}{{"Gateway CA refs on the listener's port", 8081, false}, {"Gateway CA refs on another port", 9443, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := healthyWorld()
+			w.objs[1].Object["spec"].(map[string]any)["tls"] = map[string]any{"frontend": map[string]any{"perPort": []any{map[string]any{"port": tc.perPort,
+				"tls": map[string]any{"validation": map[string]any{"caCertificateRefs": []any{map[string]any{"group": "", "kind": "ConfigMap", "name": "ca"}}}}}}}}
+			w.objs = append(w.objs, ls.DeepCopy())
+			_, ev := only(t, refsReport(t, w, served()), CodeRefNotPermitted, "infra/more")
+			if len(ev.Candidates) != 1 || ev.Attributed != tc.attributed {
+				t.Fatalf("candidates %+v attributed %v, want one, attributed %v", ev.Candidates, ev.Attributed, tc.attributed)
+			}
+		})
+	}
+
+	w := healthyWorld()
+	mirror := map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": map[string]any{"name": "shadow", "namespace": "lab"}}}
+	w.objs[2] = refRoute("RefNotPermitted", "", map[string]any{"name": "cart", "namespace": "store", "filters": []any{mirror}})
+	_, ev := only(t, refsReport(t, w, served()), CodeRefNotPermitted, "shop/cart")
+	want := []RefLocation{loc("spec.rules[0].backendRefs[0]", svc("store", "cart")),
+		loc("spec.rules[0].backendRefs[0].filters[0].requestMirror.backendRef", svc("lab", "shadow"))}
+	if !reflect.DeepEqual(ev.Candidates, want) || ev.Attributed {
+		t.Fatalf("candidates %+v attributed %v, want %+v unattributed", ev.Candidates, ev.Attributed, want)
 	}
 }

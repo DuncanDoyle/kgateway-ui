@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -233,6 +235,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	discovered := make(chan struct{})
 	var once sync.Once
+	crds := crdRefresher{mon: mon}
 	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Catalog: mon.Catalog, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
 		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
 		RulesFor: reg.RulesFor, Process: reg.Process,
@@ -245,6 +248,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 			if m.Snapshot.Synced && len(m.Installs) > 0 {
 				once.Do(func() { close(discovered) })
 			}
+			crds.observe(m.Snapshot.CRDs)
 		}}
 	// The proxy stats collector is core, so the engine always reads the store.
 	if slices.ContainsFunc(reg.Collectors(), func(c extension.Collector) bool { return c.Name() == proxystats.CollectorName }) {
@@ -419,4 +423,37 @@ func restConfig(kubeconfig string) (*rest.Config, bool, error) {
 	}
 	c, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{}).ClientConfig()
 	return c, false, err
+}
+
+// crdRefresher re-lists the Catalog when the Gateway API CRD set changes, so a
+// CRD installed while the UI runs is served from the next compute, not the next
+// interval. Other groups wait for the interval. observe runs on the engine loop.
+type crdRefresher struct {
+	mon        *kinds.Monitor
+	seen       bool
+	key        string
+	refreshing atomic.Bool
+}
+
+func (r *crdRefresher) observe(crds []cache.CRDMeta) {
+	names := make([]string, 0, len(crds))
+	for _, c := range crds {
+		names = append(names, c.Name)
+	}
+	key := strings.Join(names, ",")
+	if !r.seen {
+		r.seen, r.key = true, key
+		return
+	}
+	// A refresh in flight may predate this change; the key stays old so the next compute retries.
+	if key == r.key || !r.refreshing.CompareAndSwap(false, true) {
+		return
+	}
+	r.key = key
+	go func() {
+		defer r.refreshing.Store(false)
+		if err := r.mon.Refresh(); err != nil {
+			slog.Warn("re-listing served kinds after a CRD change failed", "err", err)
+		}
+	}()
 }

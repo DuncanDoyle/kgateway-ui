@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
@@ -18,6 +19,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -1214,4 +1216,28 @@ func TestCollectedExpiryIsADeadline(t *testing.T) {
 	if v := seen.Load().(collect.Value); v.State != collect.Unavailable || v.Data != nil {
 		t.Fatalf("the expired value must read unavailable: %+v", v)
 	}
+}
+
+// A Catalog change whose trigger was lost is caught by the confirm tick: no
+// confirmation, then one recompute that publishes the new key.
+func TestConfirmTickCatchesCatalogChange(t *testing.T) {
+	var cat atomic.Pointer[kinds.Catalog]
+	first := kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}}, nil)
+	cat.Store(&first)
+	h := newHarness(t, func(c *Config) { c.Catalog = func() kinds.Catalog { return *cat.Load() } })
+	h.start(time.Hour)
+	p1 := h.e.Current()
+	next := kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: "acme.example", Kind: "Widget"}}, nil)
+	cat.Store(&next) // no Notify
+	h.c.Step(ConfirmEvery)
+	h.await(EvConfirmRefused)
+	if p := h.e.Current(); p != p1 {
+		t.Fatal("a Catalog change must not confirm")
+	}
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	if got := h.await(EvPublished).Published.Source.Catalog; got != next.Key() {
+		t.Fatalf("published Catalog %q, want %q", got, next.Key())
+	}
+	h.await(EvArmed)
+	h.tickIdle()
 }
