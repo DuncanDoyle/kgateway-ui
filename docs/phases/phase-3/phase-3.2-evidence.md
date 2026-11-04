@@ -44,4 +44,4 @@ Fixed:
 
 Fixed in review round 1:
 - Every process row read "A probe failed 0 times": the model set probe facts on every Pod while Events were readable. Probe facts now come only with a counted failure, so the column is hidden and `probe.last` is never the zero time.
-- 026's detail for two or more Pods is plural: "… lost their connection to the controller. They keep serving their last config." (S471).
+- 026's detail for two or more Pods is plural: "… are disconnected from the controller. They still serve their last config." (S471).

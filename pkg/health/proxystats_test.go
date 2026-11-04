@@ -123,7 +123,7 @@ func TestProxyDisconnectedDetailNumber(t *testing.T) {
 		want   string
 	}{
 		{false, "edge-0 lost its connection to the controller. It keeps serving its last config."},
-		{true, "edge-0, edge-1 lost their connection to the controller. They keep serving their last config."},
+		{true, "edge-0, edge-1 are disconnected from the controller. They still serve their last config."},
 	} {
 		st := NewStates()
 		col := collected(testutil.Now, edgeStats(statsPod("edge-0", disconnected), statsPod("edge-1", disconnected)))

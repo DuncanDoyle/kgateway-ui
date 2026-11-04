@@ -24,7 +24,7 @@ const (
 	proxyWarmingDetail       = "Config is still loading on %s."
 	proxyDisconnectedMessage = "Proxy lost its connection to the controller"
 	proxyDisconnectedDetail  = "%s lost its connection to the controller. It keeps serving its last config."
-	proxyDisconnectedPlural  = "%s lost their connection to the controller. They keep serving their last config."
+	proxyDisconnectedPlural  = "%s are disconnected from the controller. They still serve their last config."
 	proxyStatsNotCollected   = "Proxy stats are not collected yet"
 	proxyStatsUnavailable    = "Proxy stats are not available"
 	proxyStatsGatewayGap     = "%d of %d Gateways have no proxy stats."
