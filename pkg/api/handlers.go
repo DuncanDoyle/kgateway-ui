@@ -225,7 +225,8 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		hd, rep := i.Overview.Header, visibleHealth(v, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
-			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
+			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, GroupRows: min(groupTotal(diagnosis(i)), maxGroups),
+			ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
 	}
 	writeJSON(w, out)
 }

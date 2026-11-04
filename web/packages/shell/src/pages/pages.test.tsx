@@ -39,6 +39,7 @@ function inst(
     readiness: { state: "ready", ready: 1, desired: 1 },
     scope: { mode: "selectors", watched: 12, total: 40, ...scope },
     health: { state, counts },
+    groupRows: 0,
     computedAt,
   };
 }

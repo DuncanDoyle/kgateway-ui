@@ -371,7 +371,7 @@ const headerKeys = {
 } as const;
 const header = shape<InstallHeader>(headerKeys, { readiness, scope });
 const summary = shape<InstallSummary>(
-  { ...headerKeys, health: "!", computedAt: "!", confirmedAt: "?" },
+  { ...headerKeys, health: "!", groupRows: "!", computedAt: "!", confirmedAt: "?" },
   {
     readiness,
     scope,

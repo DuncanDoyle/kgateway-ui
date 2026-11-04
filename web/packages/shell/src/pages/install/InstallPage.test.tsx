@@ -2,7 +2,7 @@ import { css } from "@emotion/react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { POLL_MS } from "../../api/hooks";
+import { POLL_MS, useInstalls } from "../../api/hooks";
 import type {
   Diagnostics,
   GatewayRow,
@@ -11,6 +11,7 @@ import type {
   OverviewResponse,
   ScopeSummary,
 } from "../../api/types";
+import { diagnosticsCopy } from "../../copy/explorer";
 import { GROUP_ROW_H } from "../../diagnostics/GroupRow";
 import { type CorePages, CorePagesContext } from "../../shell/extension";
 import { InstallSwitcher } from "../../shell/InstallSwitcher";
@@ -29,6 +30,7 @@ import {
 } from "../../test/fixtures";
 import { pseudoRules, renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
+import { SHOW_ALL_H } from "./NeedsAttention";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -53,7 +55,7 @@ function mount(
   diag: Diagnostics = diagnostics(health),
 ) {
   stubApi({
-    "/api/v1/installs": [installSummary()],
+    "/api/v1/installs": [installSummary(Date.now(), {}, diag.groups.length)],
     "/api/v1/installs/kgw.kgateway/overview": ov,
     "/api/v1/installs/kgw.kgateway/diagnostics": diag,
     "/api/v1/meta": meta,
@@ -161,32 +163,103 @@ it("restricted group row", async () => {
   expect(within(row).queryByRole("button")).toBeNull();
 });
 
-it("Needs attention keeps its row height while loading", async () => {
+/** Marks when /api/v1/installs has answered. */
+function InstallsProbe() {
+  return useInstalls().data ? <output data-testid="installs-loaded" /> : null;
+}
+
+/** The block's heading text, its row elements and footer, and whether the Processes heading follows it. */
+function needsAttentionBlock(rowId: string, footSel: string) {
+  const rows = screen.getAllByTestId(rowId);
+  const box = rows[0]?.parentElement as HTMLElement;
+  const heading = box.previousElementSibling as HTMLElement;
+  const processes = screen.getByRole("heading", { name: diagnosticsCopy.processesTitle });
+  return {
+    heading: heading.textContent,
+    rows,
+    foot: box.querySelector(footSel) as HTMLElement,
+    before: !!(box.compareDocumentPosition(processes) & Node.DOCUMENT_POSITION_FOLLOWING),
+  };
+}
+
+it("Needs attention reserves its loaded height from the first render and keeps it", async () => {
+  const diag = diagnostics(unhealthy());
+  let answer: (r: Response) => void = () => {};
   const routes: Record<string, unknown> = {
+    "/api/v1/installs": [installSummary(Date.now(), {}, diag.groups.length)],
     "/api/v1/installs/kgw.kgateway/overview": overview(),
-    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(unhealthy()),
     "/api/v1/meta": meta,
   };
   stubApi(routes);
   const fetch = globalThis.fetch as ReturnType<typeof vi.fn>;
+  const served = fetch.getMockImplementation() as (url: string) => Promise<Response>;
+  // Diagnostics answer only when the test says so: the summary arrives first.
+  fetch.mockImplementation((url: string) =>
+    url.endsWith("/diagnostics") ? new Promise<Response>((r) => (answer = r)) : served(url),
+  );
   renderWithTheme(
     <Routes>
       <Route path="/i/:id" element={<InstallPage />} />
     </Routes>,
     { path: "/i/kgw.kgateway" },
   );
+  // Loading: the heading, one placeholder per server-counted row at the row height, and the footer.
+  await screen.findAllByTestId("group-row-shimmer");
+  const skel = needsAttentionBlock("group-row-shimmer", "[data-testid=show-all-shimmer]");
+  expect(screen.getByRole("status", { name: "Loading this install…" })).toBeInTheDocument();
+  expect(skel.heading).toBe(diagnosticsCopy.needsAttention);
+  expect(skel.rows).toHaveLength(diag.groups.length);
+  expect(skel.before).toBe(true);
+  // A row is GROUP_ROW_H; each after the first adds the loaded block's 1px divider.
+  skel.rows.forEach((r, i) => {
+    expect(r).toHaveStyle({ height: `${GROUP_ROW_H}px` });
+    if (i > 0) expect(r).toHaveStyle({ boxSizing: "content-box", borderTopWidth: "1px", borderTopStyle: "solid" });
+  });
+  expect(skel.foot).toHaveStyle({ height: `${SHOW_ALL_H}px`, borderTopWidth: "1px" });
+  await act(async () => answer(new Response(JSON.stringify(diag), { status: 200 })));
+  // Loaded: the same heading, row count, row height, dividers and footer in the same place.
   const rows = await screen.findAllByTestId("group-row");
-  // Each collapsed row reserves its height from the first render.
-  for (const r of rows) expect(r.querySelector(".line")).toHaveStyle({ minHeight: `${GROUP_ROW_H}px` });
+  const loaded = needsAttentionBlock("group-row", ".more");
+  expect(screen.queryByTestId("needs-attention-shimmer")).toBeNull();
+  expect(loaded.heading).toBe(skel.heading);
+  expect(loaded.rows).toHaveLength(skel.rows.length);
+  expect(loaded.before).toBe(true);
+  rows.forEach((r, i) => {
+    expect(r.querySelector(".line")).toHaveStyle({ minHeight: `${GROUP_ROW_H}px` });
+    expect(r).toHaveStyle({ borderBottomWidth: i < rows.length - 1 ? "1px" : "0px" });
+  });
+  expect(loaded.foot).toHaveStyle({ height: `${SHOW_ALL_H}px`, borderTopWidth: "1px", boxSizing: "border-box" });
   // The next poll never answers: the rows stay as they are, never a skeleton.
   fetch.mockImplementation(async () => new Promise<Response>(() => {}));
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   act(() => {
     window.dispatchEvent(new Event("online"));
   });
-  await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(3));
+  await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(5));
   expect(screen.getAllByTestId("group-row")).toHaveLength(rows.length);
   expect(screen.queryByRole("status", { name: "Loading this install…" })).toBeNull();
+});
+
+it("a healthy install's loading skeleton reserves no Needs attention block", async () => {
+  stubApi({ "/api/v1/installs": [installSummary()], "/api/v1/meta": meta });
+  const fetch = globalThis.fetch as ReturnType<typeof vi.fn>;
+  const served = fetch.getMockImplementation() as (url: string) => Promise<Response>;
+  fetch.mockImplementation((url: string) =>
+    url.startsWith("/api/v1/installs/") ? new Promise<Response>(() => {}) : served(url),
+  );
+  renderWithTheme(
+    <>
+      <InstallsProbe />
+      <Routes>
+        <Route path="/i/:id" element={<InstallPage />} />
+      </Routes>
+    </>,
+    { path: "/i/kgw.kgateway" },
+  );
+  await screen.findByTestId("installs-loaded");
+  expect(screen.getByRole("status", { name: "Loading this install…" })).toBeInTheDocument();
+  expect(screen.queryByTestId("needs-attention-shimmer")).toBeNull();
+  expect(screen.queryByRole("heading", { name: diagnosticsCopy.needsAttention })).toBeNull();
 });
 
 it("the loading skeleton reserves the Processes block", async () => {
@@ -861,7 +934,7 @@ it("the install page has an h1 and accepts stylesOverride", async () => {
 // region Switching installs
 
 function summary(ov: OverviewResponse): InstallSummary {
-  return { ...ov.header, health: { state: "healthy", counts: {} }, computedAt: new Date().toISOString() };
+  return { ...ov.header, health: { state: "healthy", counts: {} }, groupRows: 0, computedAt: new Date().toISOString() };
 }
 
 function Path() {

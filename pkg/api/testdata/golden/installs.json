@@ -8,6 +8,7 @@
       ],
       "displayName": "kgw/kgateway",
       "edition": "kgateway",
+      "groupRows": 3,
       "health": {
         "counts": {
           "error": 2,

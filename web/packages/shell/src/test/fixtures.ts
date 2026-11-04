@@ -247,10 +247,12 @@ export function restricted(at = Date.now()): HealthReport {
 export function installSummary(
   at = Date.now(),
   times: { confirmedAt?: string; computedAt?: string } = {},
+  groupRows = 0,
 ): InstallSummary {
   return {
     ...overview(at).header,
     health: { state: "error", counts: { error: 1, warning: 6 } },
+    groupRows,
     computedAt: times.computedAt ?? new Date(at).toISOString(),
     ...(times.confirmedAt ? { confirmedAt: times.confirmedAt } : {}),
   };

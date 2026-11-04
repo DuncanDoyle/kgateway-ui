@@ -109,6 +109,8 @@ export interface InstallHeader {
  */
 export interface InstallSummary extends InstallHeader {
   health: { state: HealthState; counts: Partial<Record<Severity, number>> };
+  /** The number of groups diagnostics lists: the install page reserves that many Needs attention rows while they load. */
+  groupRows: number;
   computedAt: string;
   confirmedAt?: string;
 }

@@ -4,7 +4,7 @@ import { useContext, useId } from "react";
 import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { useDiagnostics } from "../../api/diagHooks";
-import { isStale, useCapabilities, useMeta, useOverview } from "../../api/hooks";
+import { isStale, useCapabilities, useInstalls, useMeta, useOverview } from "../../api/hooks";
 import { diagnosticsCopy } from "../../copy/explorer";
 import { plural } from "../../format";
 import { StaleView } from "../../health/staleView";
@@ -20,7 +20,7 @@ import { CheckedSection } from "./CheckedList";
 import { CountTiles, TILE_H, TileGrid } from "./CountTiles";
 import { FILTER_H, GatewayTable } from "./GatewayTable";
 import { HealthStrip, STRIP_H } from "./HealthStrip";
-import { NeedsAttention } from "./NeedsAttention";
+import { NeedsAttention, NeedsAttentionSkeleton } from "./NeedsAttention";
 import { PROCESSES_H, ProcessesSection } from "./ProcessesSection";
 
 // region Styles
@@ -96,6 +96,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const ov = useOverview(id);
   const d = useDiagnostics(id);
   const { data: meta } = useMeta();
+  const { data: installs } = useInstalls();
   const caps = useCapabilities();
   const panels = useInstallPanels();
   const Section = useContext(CorePagesContext).DiagnosticsSection ?? DiagnosticsSection;
@@ -116,7 +117,8 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
     return (
       <Page role="status" aria-busy="true" aria-label="Loading this install…" stylesOverride={stylesOverride}>
         <Shimmer h={STRIP_H} />
-        {/* Processes always shows; Needs attention appears only with groups, so it has no placeholder. */}
+        {/* Needs attention reserves the rows the server counted; Processes always shows. */}
+        <NeedsAttentionSkeleton rows={installs?.find((s) => s.id === id)?.groupRows ?? 0} />
         <h2>{diagnosticsCopy.processesTitle}</h2>
         <div data-testid="processes-shimmer">
           <Shimmer h={PROCESSES_H} />

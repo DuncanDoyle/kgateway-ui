@@ -14,6 +14,9 @@ import { NextSteps } from "./NextSteps";
 // region Styles
 /** Height of a collapsed row, fixed from the first render so polling and late data shift nothing (design §17.4). */
 export const GROUP_ROW_H = 64;
+/** Below this viewport width the state takes its own line, and a collapsed row is GROUP_ROW_H_NARROW. */
+export const GROUP_ROW_NARROW = 720;
+export const GROUP_ROW_H_NARROW = 88;
 
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   border-bottom: 1px solid ${(p) => p.theme.color.border};
@@ -67,9 +70,10 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   .panel {
     padding: 0 ${(p) => p.theme.space(3)} ${(p) => p.theme.space(3)} calc(112px + ${(p) => p.theme.space(6)});
   }
-  @media (max-width: 720px) {
+  @media (max-width: ${GROUP_ROW_NARROW}px) {
     .line {
       grid-template-columns: minmax(0, 1fr) auto;
+      min-height: ${GROUP_ROW_H_NARROW}px;
     }
     .sev {
       grid-column: 1 / -1;

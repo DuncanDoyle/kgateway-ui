@@ -217,6 +217,23 @@ func (h *handler) groupRow(v *view, l linker, g *diagnose.Group, fs []health.Fin
 	return row
 }
 
+// needsAttention reports whether g is a Needs attention group: ranked, with
+// members, above info. Every caller sees it, restricted when its cause is hidden.
+func needsAttention(g *diagnose.Group) bool {
+	return g.Ranked && g.Severity != health.SeverityInfo && len(g.Members) > 0
+}
+
+// groupTotal is the number of Needs attention groups in d, the diagnostics groupTotal.
+func groupTotal(d *diagnose.Diagnosis) int {
+	n := 0
+	for k := range d.Groups {
+		if needsAttention(&d.Groups[k]) {
+			n++
+		}
+	}
+	return n
+}
+
 func (h *handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 	p, i := h.find(w, r)
 	if i == nil {
@@ -237,7 +254,7 @@ func (h *handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 		g := &d.Groups[k]
 		top := off
 		off += len(g.Members)
-		if !g.Ranked || g.Severity == health.SeverityInfo || len(g.Members) == 0 {
+		if !needsAttention(g) {
 			continue
 		}
 		if out.GroupTotal++; len(out.Groups) < maxGroups {

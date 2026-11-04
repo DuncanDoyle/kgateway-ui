@@ -4,8 +4,9 @@ import { useId } from "react";
 import { Link } from "react-router-dom";
 import type { GroupRow } from "../../api/types";
 import { diagnosticsCopy } from "../../copy/explorer";
-import { DiagnosticsGroupRow } from "../../diagnostics/GroupRow";
+import { DiagnosticsGroupRow, GROUP_ROW_H, GROUP_ROW_H_NARROW, GROUP_ROW_NARROW } from "../../diagnostics/GroupRow";
 import { installPath } from "../../shell/paths";
+import { Shimmer } from "../../states/Shimmer";
 
 // region Styles
 /** Height of the "Show all" footer, fixed like the rows above it. */
@@ -40,6 +41,37 @@ const Box = styled.div<{ stylesOverride?: SerializedStyles }>`
   }
   ${(p) => p.stylesOverride}
 `;
+// Rows and footer of the loaded block: a row is GROUP_ROW_H (narrow: GROUP_ROW_H_NARROW) plus a 1px divider.
+const SkeletonBox = styled(Box)`
+  .row {
+    display: flex;
+    align-items: center;
+    height: ${GROUP_ROW_H}px;
+    padding: 0 ${(p) => p.theme.space(3)};
+  }
+  .row + .row {
+    box-sizing: content-box;
+    border-top: 1px solid ${(p) => p.theme.color.border};
+  }
+  .row > * {
+    flex: 1;
+  }
+  .foot {
+    display: flex;
+    align-items: center;
+    height: ${SHOW_ALL_H}px;
+    padding: 0 ${(p) => p.theme.space(3)};
+    border-top: 1px solid ${(p) => p.theme.color.border};
+  }
+  .foot > * {
+    width: 120px;
+  }
+  @media (max-width: ${GROUP_ROW_NARROW}px) {
+    .row {
+      height: ${GROUP_ROW_H_NARROW}px;
+    }
+  }
+`;
 
 // region Component
 interface NeedsAttentionProps {
@@ -65,6 +97,26 @@ export function NeedsAttention({ groups, groupTotal, installId, stylesOverride }
           {diagnosticsCopy.showAllGroups(Math.max(groupTotal, groups.length))}
         </Link>
       </Box>
+    </section>
+  );
+}
+
+/** The loading placeholder for rows groups: the loaded block's heading, rows and footer; nothing for 0 (design §17.4). */
+export function NeedsAttentionSkeleton({ rows }: { rows: number }) {
+  if (rows <= 0) return null;
+  return (
+    <section data-testid="needs-attention-shimmer">
+      <h2>{diagnosticsCopy.needsAttention}</h2>
+      <SkeletonBox>
+        {Array.from({ length: rows }, (_, i) => `row-${i}`).map((k) => (
+          <div key={k} className="row" data-testid="group-row-shimmer">
+            <Shimmer h={32} />
+          </div>
+        ))}
+        <div className="foot" data-testid="show-all-shimmer">
+          <Shimmer h={12} />
+        </div>
+      </SkeletonBox>
     </section>
   );
 }

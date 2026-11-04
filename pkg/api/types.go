@@ -23,6 +23,9 @@ type InstallSummary struct {
 	Readiness       overview.Readiness     `json:"readiness"`
 	Scope           *overview.ScopeSummary `json:"scope,omitempty"`
 	Health          HealthSummary          `json:"health"`
+	// GroupRows is the number of groups diagnostics lists: the install page
+	// reserves that many Needs attention rows while diagnostics load.
+	GroupRows int `json:"groupRows"`
 	// ComputedAt is when the model behind Health was computed. Clients fall back
 	// to it when ConfirmedAt is absent.
 	ComputedAt time.Time `json:"computedAt"`

@@ -306,6 +306,49 @@ func TestDiagnosticsTopTen(t *testing.T) {
 	}
 }
 
+// The installs groupRows is the number of diagnostics groups for every caller:
+// a group with a hidden cause counts on both, as its restricted row shows.
+func TestInstallsGroupRowsMatchDiagnostics(t *testing.T) {
+	var extra []runtime.Object
+	for _, n := range []string{"b01", "b02", "b03", "b04", "b05", "b06", "b07", "b08", "b09", "b10", "b11", "b12"} {
+		extra = append(extra, brokenRoute(n))
+	}
+	h := xdsHarness(t, setup{disputes: true}, edgeRejects(t), nackWorld(extra...)...)
+	h.at(t, testutil.Now)
+	none := AuthorizerFunc(func(*http.Request, objects.Ref) bool { return false })
+	views := map[string]*httptest.Server{
+		"all":           h.srv,
+		"hidden cause":  authzSrv(t, h, deny(edgeRef.Ref())),
+		"hidden route":  authzSrv(t, h, deny(route("shop", "b01"))),
+		"hidden pod":    authzSrv(t, h, deny(podRef("kgw", "kgateway-0"))),
+		"nothing shown": authzSrv(t, h, none),
+	}
+	for name, srv := range views {
+		d := get[Diagnostics](t, srv, diagPath, 200)
+		insts := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)
+		if len(insts) != 1 || d.GroupTotal < 14 || insts[0].GroupRows != len(d.Groups) || len(d.Groups) != maxGroups {
+			t.Errorf("%s: installs %+v, diagnostics %d of %d groups", name, insts, len(d.Groups), d.GroupTotal)
+		}
+	}
+
+	// Fewer groups than the cap: every one is a row, a restricted one included.
+	few := rejectingEdge(t, setup{})
+	for name, srv := range map[string]*httptest.Server{"all": few.srv, "hidden cause": authzSrv(t, few, deny(edgeRef.Ref()))} {
+		d := get[Diagnostics](t, srv, diagPath, 200)
+		if in := get[[]InstallSummary](t, srv, "/api/v1/installs", 200)[0]; len(d.Groups) == 0 || len(d.Groups) >= maxGroups || in.GroupRows != len(d.Groups) {
+			t.Errorf("few, %s: installs groupRows %d, diagnostics %d groups", name, in.GroupRows, len(d.Groups))
+		}
+	}
+
+	// A healthy install has no groups on either.
+	ok := newHarness(t, setup{}, isolated()...)
+	ok.at(t, testutil.Now)
+	d := get[Diagnostics](t, ok.srv, diagPath, 200)
+	if in := get[[]InstallSummary](t, ok.srv, "/api/v1/installs", 200)[0]; in.GroupRows != 0 || d.GroupTotal != 0 || len(d.Groups) != 0 {
+		t.Fatalf("healthy: installs groupRows %d, diagnostics %d %v", in.GroupRows, d.GroupTotal, d.Groups)
+	}
+}
+
 // gwProxy is a proxy Deployment for infra/name with its selector and Pod template labels.
 func gwProxy(name string, desired, ready int32) *appsv1.Deployment {
 	d := testutil.ProxyDeployment("infra", name, desired, ready)
