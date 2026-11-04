@@ -387,3 +387,22 @@ func TestProxyStatsPerInstallAtTheAPI(t *testing.T) {
 		t.Fatalf("second install: %+v", r.Findings)
 	}
 }
+
+// A Gateway whose every proxy failed to scrape reads failing on its own page,
+// while a scraped Gateway beside it stays available (§8.8, per Gateway).
+func TestProxyStatsAvailabilityPerGateway(t *testing.T) {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", cleanMetrics("pod/kgw/kgateway-0", "kgateway-0"))
+	sh := newStatsHarness(t, setup{proxyPods: true}, lm, edgeStatsWorld(testutil.Gateway("infra", "calm", "kgateway", nil))...)
+	sh.src.set(gwRef("infra", "edge"), proxystats.PodStats{UID: "pod/infra/edge-0", Name: "edge-0", Err: "connection refused"},
+		proxystats.PodStats{UID: "pod/infra/edge-1", Name: "edge-1", Err: "connection refused"})
+	sh.src.set(gwRef("infra", "calm"), pod("calm-0", nil))
+	sh.at(t, testutil.Now)
+	edge := get[GatewayDetail](t, sh.srv, gwDetail, 200).DataPlane
+	if edge == nil || edge.ProxyStats.Available || edge.ProxyStats.Unavailable != health.AvailFailing || edge.ProxyStats.Reason != "Could not read stats from 2 proxies." {
+		t.Fatalf("edge, every proxy failing: %+v", edge)
+	}
+	if calm := get[GatewayDetail](t, sh.srv, base+"/gateways/infra/calm", 200).DataPlane; calm == nil || !calm.ProxyStats.Available {
+		t.Fatalf("calm, scraped: %+v", calm)
+	}
+}

@@ -82,9 +82,11 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	var fs []Finding
 	gws := st[in.Install.ID()]
 	gaps, failing := 0, 0
+	var perGw []GatewayGap
 	for _, g := range gws {
 		if !g.Observed {
 			gaps++
+			perGw = append(perGw, GatewayGap{Gateway: g.Gateway, Unavailable: AvailNotObserved})
 			continue
 		}
 		var matured []proxystats.Pod
@@ -119,6 +121,7 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		// A Gateway with no Pod scraped has no stats; otherwise its failing Pods are counted.
 		if scraped == 0 && errs > 0 {
 			gaps++
+			perGw = append(perGw, GatewayGap{Gateway: g.Gateway, Unavailable: AvailFailing, Reason: gapDetail(0, 0, errs)})
 		} else {
 			failing += errs
 		}
@@ -137,9 +140,11 @@ func (c proxyStatsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				why = AvailFailing
 			}
 		}
-		return fs, NotAvailable(c.Name(), why, detail, res.CollectedAt)
+		res = NotAvailable(c.Name(), why, detail, res.CollectedAt)
+		res.Gaps = perGw
+		return fs, res
 	}
-	res.Detail = detail
+	res.Detail, res.Gaps = detail, perGw
 	return fs, res
 }
 

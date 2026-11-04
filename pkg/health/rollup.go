@@ -398,5 +398,11 @@ func outputPrint(fs []Finding, cr CheckResult) uint64 {
 	str(cr.Detail)
 	flag(cr.Pending)
 	str(string(cr.Unavailable))
+	u64(uint64(len(cr.Gaps)))
+	for _, g := range cr.Gaps {
+		ref(g.Gateway)
+		str(string(g.Unavailable))
+		str(g.Reason)
+	}
 	return h.Sum64()
 }

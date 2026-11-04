@@ -276,7 +276,7 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 		return slices.IndexFunc(fs, func(f health.Finding) bool { return f.Code == code && f.Resource != nil && *f.Resource == gw })
 	}
 	dp := &DataPlaneDTO{Rejects: []DataPlaneTypes{}, NextSteps: []NextStep{}, RecentlyChanged: []LinkedRef{}, Snapshot: d.snapshot(gw),
-		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, on(health.CodeSelfManagedProxy) >= 0)}
+		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, gw, on(health.CodeSelfManagedProxy) >= 0)}
 	k := on(health.CodeXDSRejected)
 	if k < 0 {
 		return dp, &proxies
@@ -319,9 +319,9 @@ func (d *detail) snapshot(gw objects.Ref) *SnapshotDTO {
 	return nil
 }
 
-// proxyStats says whether proxy stats feed a Gateway: off or denied first, then
-// not observed for a self-managed one (KGWUI-010), then a failing collector.
-func proxyStats(checks []health.CheckResult, selfManaged bool) ProxyStatsDTO {
+// proxyStats says whether proxy stats feed Gateway gw: off or denied first, then
+// not observed for a self-managed one (KGWUI-010), then a failing collector or gw's own gap.
+func proxyStats(checks []health.CheckResult, gw objects.Ref, selfManaged bool) ProxyStatsDTO {
 	var c health.CheckResult
 	if j := slices.IndexFunc(checks, func(c health.CheckResult) bool { return c.Name == proxyStatsCheckName }); j >= 0 {
 		c = checks[j]
@@ -335,6 +335,9 @@ func proxyStats(checks []health.CheckResult, selfManaged bool) ProxyStatsDTO {
 		return ProxyStatsDTO{Unavailable: health.AvailNotObserved}
 	case c.Unavailable != "":
 		return ProxyStatsDTO{Unavailable: c.Unavailable, Reason: c.Error}
+	}
+	if j := slices.IndexFunc(c.Gaps, func(g health.GatewayGap) bool { return g.Gateway == gw }); j >= 0 {
+		return ProxyStatsDTO{Unavailable: c.Gaps[j].Unavailable, Reason: c.Gaps[j].Reason}
 	}
 	return ProxyStatsDTO{Available: true}
 }

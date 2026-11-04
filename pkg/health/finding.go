@@ -120,6 +120,16 @@ type CheckResult struct {
 	Pending bool `json:"pending,omitempty"`
 	// Unavailable says why the check's optional input is missing; RollUp ignores it.
 	Unavailable Availability `json:"unavailable,omitempty"`
+	// Gaps are the Gateways a per-Gateway input has nothing for, in Ref order.
+	// Never serialised: a Gateway page reads its own entry after authorizing it.
+	Gaps []GatewayGap `json:"-"`
+}
+
+// GatewayGap says why a check's input is not available for one Gateway.
+type GatewayGap struct {
+	Gateway     objects.Ref
+	Unavailable Availability
+	Reason      string
 }
 
 // Input is everything a check may look at for one install.
