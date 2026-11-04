@@ -1,6 +1,8 @@
 package diagnose
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -32,7 +34,7 @@ const (
 	// FixGroupTitle names the group to use.
 	FixGroupTitle = "Set the group to `%s`"
 	// FixGroupBasis names the group and the kind.
-	FixGroupBasis = "API discovery: only group `%s` serves kind `%s`."
+	FixGroupBasis = "API discovery: only group `%s` serves kind `%s`. This sets only group, kind, name and namespace; keep the port and other fields."
 )
 
 // grantFields are the refs the Gateway API spec requires a ReferenceGrant for
@@ -91,10 +93,20 @@ func grantFix(referrer, to objects.Ref) *SuggestedFix {
 		Basis: FixGrantBasis, Names: []objects.Ref{referrer, to}}
 }
 
-// grantName is a valid object name for the grant from referrer to to.
+// grantName is a valid object name for the grant from referrer to to. It
+// names to's kind, and group unless core; a cut name ends in a hash of the whole.
 func grantName(referrer, to objects.Ref) string {
-	n := strings.ToLower("allow-" + referrer.Namespace + "-" + referrer.Kind + "-" + to.Name)
-	return strings.TrimRight(n[:min(len(n), maxName)], "-.")
+	parts := []string{"allow", referrer.Namespace, referrer.Kind}
+	if to.Group != "" {
+		parts = append(parts, to.Group)
+	}
+	n := strings.ToLower(strings.Join(append(parts, to.Kind, to.Name), "-"))
+	if len(n) <= maxName {
+		return n
+	}
+	sum := sha256.Sum256([]byte(n))
+	suffix := "-" + hex.EncodeToString(sum[:4])
+	return strings.TrimRight(n[:maxName-len(suffix)], "-.") + suffix
 }
 
 // groupName is group as messages show it: "core" for the core group.

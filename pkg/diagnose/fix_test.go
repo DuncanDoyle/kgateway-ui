@@ -54,12 +54,27 @@ func TestFixNeedsOneSpecDefinedRef(t *testing.T) {
 	}
 }
 
-// A long grant name is cut to a valid object name.
-func TestGrantNameFitsObjectName(t *testing.T) {
-	long := objects.Ref{Kind: "Secret", Namespace: "certs", Name: strings.Repeat("b", 253)}
-	f := refsFinding(health.CodeRefNotPermitted, health.RefExplainController, "spec.rules[0].backendRefs[0]", long, nil)
-	if fx := diagnose.Fix(&f); fx == nil || len(fx.Target.Name) > 253 || strings.HasSuffix(fx.Target.Name, "-") {
-		t.Fatalf("grant %+v", fx)
+// R89: grants to different objects get different names, and a name cut to
+// 253 characters ends in a hash of the whole, so two cuts never match.
+func TestGrantNamesDistinct(t *testing.T) {
+	name := func(to objects.Ref) string {
+		t.Helper()
+		f := refsFinding(health.CodeRefNotPermitted, health.RefExplainController, "spec.rules[0].backendRefs[0]", to, nil)
+		fx := diagnose.Fix(&f)
+		if fx == nil || len(fx.Target.Name) > 253 || strings.HasSuffix(fx.Target.Name, "-") || strings.HasSuffix(fx.Target.Name, ".") {
+			t.Fatalf("grant %+v", fx)
+		}
+		return fx.Target.Name
+	}
+	svc := name(objects.Ref{Kind: "Service", Namespace: "store", Name: "cart"})
+	be := name(objects.Ref{Group: "gateway.kgateway.dev", Kind: "Backend", Namespace: "store", Name: "cart"})
+	if svc != "allow-shop-httproute-service-cart" || be != "allow-shop-httproute-gateway.kgateway.dev-backend-cart" {
+		t.Fatalf("names %q and %q", svc, be)
+	}
+	a := name(objects.Ref{Kind: "Secret", Namespace: "certs", Name: strings.Repeat("b", 253) + "x"})
+	b := name(objects.Ref{Kind: "Secret", Namespace: "certs", Name: strings.Repeat("b", 253) + "y"})
+	if a == b || len(a) != 253 {
+		t.Fatalf("cut names %q (%d) and %q", a, len(a), b)
 	}
 }
 

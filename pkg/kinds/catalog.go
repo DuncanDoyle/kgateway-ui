@@ -56,6 +56,10 @@ func (c Catalog) Served(group, kind string) bool {
 // is known not to be served. A group discovery never listed is known.
 func (c Catalog) Known(group string) bool { return c.served != nil && !c.unknown[group] }
 
+// Complete reports whether discovery listed every group, so GroupsWithKind
+// names every group that serves a kind.
+func (c Catalog) Complete() bool { return c.served != nil && len(c.unknown) == 0 }
+
 // GroupsWithKind returns the groups that serve kind, sorted.
 func (c Catalog) GroupsWithKind(kind string) []string { return slices.Clone(c.byKind[kind]) }
 

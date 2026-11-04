@@ -763,6 +763,7 @@ func TestSuggestedFixes(t *testing.T) {
 	grant := func(ns, name string) objects.Ref {
 		return objects.Ref{Group: objects.GatewayAPIGroup, Kind: "ReferenceGrant", Namespace: ns, Name: name}
 	}
+	const groupBasis = "API discovery: only group `core` serves kind `Service`. This sets only group, kind, name and namespace; keep the port and other fields."
 	groupYAML := func(ns string) map[string]any {
 		return map[string]any{"group": "", "kind": "Service", "name": "cart", "namespace": ns}
 	}
@@ -775,27 +776,29 @@ func TestSuggestedFixes(t *testing.T) {
 	}{
 		{"013 one served group", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog(nil),
 			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
-				Basis: "API discovery: only group `core` serves kind `Service`."}, groupYAML("shop")},
+				Basis: groupBasis}, groupYAML("shop")},
 		{"013 two served groups", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog([]string{"other.example"}), nil, nil},
+		// Review Focus 2: an unknown group may serve the kind too.
+		{"013 another group unknown", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog(nil, "metrics.example"), nil, nil},
 		{"013 served state unknown", health.CodeRefUnresolved, "shop", "r", refsRoute("BackendNotFound", typo), fixCatalog(nil, "delegation.gateway.example"), nil, nil},
 		{"014 backendRef grant", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", crossNS), fixCatalog(nil),
-			&SuggestedFix{Title: "Create a ReferenceGrant in `store`", Target: LinkedRef{Ref: grant("store", "allow-shop-httproute-cart")}, Create: true,
+			&SuggestedFix{Title: "Create a ReferenceGrant in `store`", Target: LinkedRef{Ref: grant("store", "allow-shop-httproute-service-cart")}, Create: true,
 				Basis: "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace."},
 			map[string]any{"apiVersion": "gateway.networking.k8s.io/v1beta1", "kind": "ReferenceGrant",
-				"metadata": map[string]any{"name": "allow-shop-httproute-cart", "namespace": "store"},
+				"metadata": map[string]any{"name": "allow-shop-httproute-service-cart", "namespace": "store"},
 				"spec": map[string]any{"from": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute", "namespace": "shop"}},
 					"to": []any{map[string]any{"group": "", "kind": "Service", "name": "cart"}}}}},
 		{"014 certificateRef grant", health.CodeRefNotPermitted, "infra", "tls", tlsEdge(), fixCatalog(nil),
-			&SuggestedFix{Title: "Create a ReferenceGrant in `certs`", Target: LinkedRef{Ref: grant("certs", "allow-infra-gateway-tls-cert")}, Create: true,
+			&SuggestedFix{Title: "Create a ReferenceGrant in `certs`", Target: LinkedRef{Ref: grant("certs", "allow-infra-gateway-secret-tls-cert")}, Create: true,
 				Basis: "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace."},
 			map[string]any{"apiVersion": "gateway.networking.k8s.io/v1beta1", "kind": "ReferenceGrant",
-				"metadata": map[string]any{"name": "allow-infra-gateway-tls-cert", "namespace": "certs"},
+				"metadata": map[string]any{"name": "allow-infra-gateway-secret-tls-cert", "namespace": "certs"},
 				"spec": map[string]any{"from": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "Gateway", "namespace": "infra"}},
 					"to": []any{map[string]any{"group": "", "kind": "Secret", "name": "tls-cert"}}}}},
 		// R77: a wrong group is never a missing grant.
 		{"014 wrong group", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog(nil),
 			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
-				Basis: "API discovery: only group `core` serves kind `Service`."}, groupYAML("store")},
+				Basis: groupBasis}, groupYAML("store")},
 		{"014 wrong group, two served", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog([]string{"other.example"}), nil, nil},
 	}
 	for _, tc := range cases {
