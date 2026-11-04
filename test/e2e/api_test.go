@@ -818,22 +818,38 @@ func TestExplorerShowsControllerStatus(t *testing.T) {
 	})
 
 	t.Run("not-programmed", func(t *testing.T) {
-		want := map[string]bool{}
+		want, rules := map[string]bool{}, map[string]bool{}
+		ruleReason := func(c *kcond) bool {
+			return c != nil && c.Status == "False" && (c.Reason == "RouteRuleReplaced" || c.Reason == "RouteRuleDropped")
+		}
 		for id, r := range w.routes {
 			for _, e := range r.Status.Parents {
 				p, a := findCond(e.Conditions, programmed), findCond(e.Conditions, "Accepted")
-				if e.ControllerName == ours && (p != nil && p.Status == "False" ||
-					a != nil && a.Status == "False" && (a.Reason == "RouteRuleReplaced" || a.Reason == "RouteRuleDropped")) {
+				if e.ControllerName == ours && (p != nil && p.Status == "False" || ruleReason(a)) {
 					want[id] = true
+				}
+				if e.ControllerName == ours && (ruleReason(p) || ruleReason(a)) {
+					rules[id] = true
 				}
 			}
 		}
-		if !want["shop/replaced"] {
+		if !want["shop/replaced"] || !rules["shop/replaced"] {
 			t.Errorf("fixture: shop/replaced has no replaced rule")
 		}
 		eventually(t, func() error {
 			if got := rowIDs(routeList(t, "state=not-programmed")); !slices.Equal(got, sortedKeys(want)) {
 				return fmt.Errorf("state=not-programmed: API %v, controller %v", got, sortedKeys(want))
+			}
+			return nil
+		})
+		// A replaced or dropped rule is 015 on every version, never also 002 (D-030).
+		eventually(t, func() error {
+			var h api.HealthResponse
+			get(t, install+"/health", &h)
+			for _, id := range sortedKeys(rules) {
+				if !has(h, health.CodeRuleReplaced, id) || has(h, health.CodeConditionFalse, id) {
+					return fmt.Errorf("%s: want 015 and no 002: %+v", id, h.Findings)
+				}
 			}
 			return nil
 		})

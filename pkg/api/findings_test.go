@@ -854,3 +854,52 @@ func TestNoFixNamingHiddenObject(t *testing.T) {
 		t.Fatalf("restricted %v fix %+v: want a visible finding without a fix", d.Finding.Restricted, d.SuggestedFix)
 	}
 }
+
+// Design §7.4, §14 row 015: a 015 naming a served policy links it as evidence and
+// joins its "Replaced by policy" group; a caller who cannot view the policy gets
+// evidenceRestricted and a restricted group row.
+func TestRuleReplacedThroughTheAPI(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	cond := testutil.Cond("Accepted", metav1.ConditionFalse, "RouteRuleReplaced")
+	cond.Message = "Replaced Rule (2): gateway.kgateway.dev/TrafficPolicy/shop/auth: ext auth unavailable"
+	route := testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{cond, testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+	tp := objects.Ref{Group: kinds.KgatewayGroup, Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
+	catalog := func() kinds.Catalog {
+		return kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: tp.Group, Kind: tp.Kind}}, nil)
+	}
+	hideTP := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != tp })
+	for _, tc := range []struct {
+		name   string
+		authz  Authorizer
+		hidden bool
+	}{{"policy visible", nil, false}, {"policy hidden", hideTP, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{authz: tc.authz, catalog: catalog, rulesFor: computedtest.NoViews}, world(route)...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+			var got []FindingDTO
+			for _, f := range findingsOn(h, "shop/r") {
+				if f.Code == health.CodeConditionFalse {
+					t.Fatalf("002 next to 015: %+v", f)
+				}
+				if f.Code == health.CodeRuleReplaced {
+					got = append(got, f)
+				}
+			}
+			if len(got) != 1 || got[0].Restricted || got[0].EvidenceRestricted != tc.hidden || (got[0].Facts == nil) != tc.hidden {
+				t.Fatalf("015 findings %+v", got)
+			}
+			if !tc.hidden && got[0].Facts.EvidenceKind() != health.EvidenceRuleReplaced {
+				t.Fatalf("evidence kind %q", got[0].Facts.EvidenceKind())
+			}
+			d := get[Diagnostics](t, srv, "/api/v1/installs/kgw.kgateway/diagnostics", http.StatusOK)
+			i := slices.IndexFunc(d.Groups, func(g GroupRow) bool { return g.ID == got[0].Group })
+			if i < 0 || d.Groups[i].Code != health.CodeRuleReplaced || d.Groups[i].Restricted != tc.hidden {
+				t.Fatalf("group %q in %+v", got[0].Group, d.Groups)
+			}
+			if g := d.Groups[i]; !tc.hidden && (g.Cause == nil || g.Cause.Ref != tp || len(g.Affected) != 1 || g.Affected[0].String() != "shop/r") {
+				t.Fatalf("policy group %+v", g)
+			}
+		})
+	}
+}

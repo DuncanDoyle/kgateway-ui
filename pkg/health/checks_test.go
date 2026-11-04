@@ -140,15 +140,15 @@ func TestChecks(t *testing.T) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
 		}, CodeRefUnresolved, SeverityError, "shop/cart", StateError},
-		{"002 rule replaced (2.4, optional condition present)", func(w *world) {
+		{"015 rule replaced (2.4, optional condition present)", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
 				testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleReplaced")}})
-		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
-		{"002 rule replaced on 2.3 (Accepted=False)", func(w *world) {
+		}, CodeRuleReplaced, SeverityError, "shop/cart", StateError},
+		{"015 rule replaced on 2.3 (Accepted=False)", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionFalse, "RouteRuleReplaced"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
-		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
+		}, CodeRuleReplaced, SeverityError, "shop/cart", StateError},
 		// Main only: v2.3.x and v2.4.x write no status for a missing target (see "003 policy without ancestors").
 		{"002 policy target not found (main)", func(w *world) {
 			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{

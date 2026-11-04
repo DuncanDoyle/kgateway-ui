@@ -207,7 +207,7 @@ var (
 	policyOptional   = []string{"Attached"}
 )
 
-// conditionsCheck: KGWUI-002, KGWUI-003 and KGWUI-011's status trigger. Freshness is decided before
+// conditionsCheck: KGWUI-002, 003, 013–015 and KGWUI-011's status trigger. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
 // condition with reason Pending, or any stale condition makes the resource
 // "not yet processed"; only current conditions are reported or count as
@@ -299,9 +299,15 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 					if owner == nil {
 						owner = in.parentKey(u, parent)
 					}
-					// 013 and 014 own their ResolvedRefs reasons; 002 takes the rest (D-030).
+					// 013, 014 and 015 own their reasons; 002 takes the rest (D-030).
 					if l := listenerName(parent, owner); parent != (objects.ParentRef{}) || l != "" {
 						if f, ok := in.refsFinding(u, *cond, l, extra, owner); ok {
+							fs = append(fs, f)
+							continue
+						}
+					}
+					if parent != (objects.ParentRef{}) {
+						if f, ok := in.ruleFinding(u, *cond, extra, owner, ctx.WakeAt); ok {
 							fs = append(fs, f)
 							continue
 						}
@@ -458,6 +464,8 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		switch {
 		case f.Code == CodeConditionFalse:
 			return len(f.Key) - 1, true
+		case f.Code == CodeRuleReplaced: // the match index is status data
+			return len(f.Key) - 2, true
 		case f.Code == CodeDelegatedNotAttached && len(f.Key) > 0 && f.Key[0] == computedOwner:
 			return 1, true
 		}

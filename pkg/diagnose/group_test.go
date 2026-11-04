@@ -298,6 +298,36 @@ func TestDataPlaneAndProcessFamilies(t *testing.T) {
 	}
 }
 
+// Design §5.2: every 015 naming one policy joins that policy's group, with its
+// routes affected; a 015 that names no policy is in "Other".
+func TestReplacedByPolicyFamily(t *testing.T) {
+	tp := objects.Ref{Group: "gateway.kgateway.dev", Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
+	rule := func(name string, res *objects.Ref, policy *objects.Ref) health.Finding {
+		f := finding(name, health.CodeRuleReplaced, health.SeverityError, res, nil)
+		f.Facts = &health.RuleReplacedEvidence{Reason: "RouteRuleReplaced", Policy: policy}
+		return f
+	}
+	rep := &health.Report{Findings: []health.Finding{
+		rule("cart-0", ref("HTTPRoute", "cart"), &tp),
+		rule("api-1", ref("HTTPRoute", "api"), &tp),
+		rule("cart-1", ref("HTTPRoute", "cart"), &tp),
+		rule("unparsed", ref("HTTPRoute", "web"), nil),
+	}}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	if len(d.Groups) != 2 {
+		t.Fatalf("groups %+v", d.Groups)
+	}
+	g := d.Groups[0]
+	if g.Family != "Replaced by policy" || g.Cause == nil || *g.Cause != tp || g.ID != health.GroupID(in.Install.ID(), g.Family, &tp, nil) ||
+		!slices.Equal(groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}}), []string{"cart-0+api-1+cart-1"}) ||
+		!slices.Equal(g.Affected, []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "cart")}) {
+		t.Fatalf("policy group %+v", g)
+	}
+	if o := d.Groups[1]; o.Family != "Other" || o.Cause == nil || o.Cause.Name != "web" {
+		t.Fatalf("unparsed group %+v", o)
+	}
+}
+
 // A report reused across recomputes is served by the published model: when a
 // group ID changes, Build writes a copy, never the served slice (R56).
 func TestBuildNeverWritesAServedReport(t *testing.T) {

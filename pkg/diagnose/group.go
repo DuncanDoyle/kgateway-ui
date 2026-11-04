@@ -30,7 +30,7 @@ var classes = map[string]Class{
 	health.CodeXDSRejected: ClassDataPlane, "KGWUI-024": ClassDataPlane, "KGWUI-025": ClassDataPlane, "KGWUI-026": ClassDataPlane,
 	health.CodeControllerNotReady: ClassProcesses, health.CodeProxyNotReady: ClassProcesses,
 	"KGWUI-019": ClassProcesses, "KGWUI-020": ClassProcesses, "KGWUI-021": ClassProcesses,
-	"KGWUI-013": ClassTraffic, "KGWUI-014": ClassTraffic, "KGWUI-015": ClassTraffic, "KGWUI-016": ClassTraffic,
+	"KGWUI-013": ClassTraffic, "KGWUI-014": ClassTraffic, health.CodeRuleReplaced: ClassTraffic, "KGWUI-016": ClassTraffic,
 	"KGWUI-017": ClassTraffic, "KGWUI-023": ClassTraffic, health.CodeDelegatedNotAttached: ClassTraffic,
 }
 
@@ -212,7 +212,7 @@ func claim(f health.Finding, in Input, families []Family) (int, *objects.Ref, []
 }
 
 // Families returns the families in design §5.2 table order; "Other" is last.
-func Families() []Family { return []Family{dataPlane{}, processFamily{}, other{}} }
+func Families() []Family { return []Family{dataPlane{}, replacedByPolicy{}, processFamily{}, other{}} }
 
 // dataPlane groups a Gateway's KGWUI-001. Its affected objects have a current
 // Accepted=True or Programmed=True status for the Gateway (design §8.4).
@@ -233,6 +233,33 @@ func (dataPlane) Affected(gs []Claimed, _ []health.Finding, in Input) [][]object
 	out := make([][]objects.Ref, len(gs))
 	for k, g := range gs {
 		out[k] = byGW[*g.Cause]
+	}
+	return out
+}
+
+// replacedByPolicy groups every KGWUI-015 whose message names the same policy
+// (design §7.4); a 015 that names none stays in "Other". Its routes are affected.
+type replacedByPolicy struct{}
+
+func (replacedByPolicy) Name() string { return "Replaced by policy" }
+
+func (replacedByPolicy) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	ev, ok := f.Facts.(*health.RuleReplacedEvidence)
+	if f.Code != health.CodeRuleReplaced || !ok || ev.Policy == nil {
+		return nil, nil, false
+	}
+	return ev.Policy, nil, true
+}
+
+func (replacedByPolicy) Affected(gs []Claimed, fs []health.Finding, _ Input) [][]objects.Ref {
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		for _, i := range g.Members {
+			if r := fs[i].Resource; r != nil && !slices.Contains(out[k], *r) {
+				out[k] = append(out[k], *r)
+			}
+		}
+		slices.SortFunc(out[k], objects.Ref.Compare)
 	}
 	return out
 }
