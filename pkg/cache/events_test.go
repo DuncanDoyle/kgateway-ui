@@ -164,20 +164,23 @@ func TestEventBeforePodIsKeptOnNextUpdate(t *testing.T) {
 	}
 }
 
-// An Event first seen with count 50 contributes nothing and marks the Pod's
-// history unknown for one window.
+// An Event first seen with count 50, or with count 1 from before the UI
+// started, contributes nothing and marks the Pod's history unknown (§9.2);
+// a count-1 Event that occurs after the start is counted.
 func TestFirstSeenCountIsUnknown(t *testing.T) {
 	ctrl := ctrlPod()
 	ev := testutil.WarningEvent(ctrl, "probe", "Unhealthy", testutil.Now.Add(-time.Minute))
 	ev.Count = 50
-	fresh := testutil.WarningEvent(ctrl, "fresh", "BackOff", testutil.Now.Add(-time.Minute))
-	w := newOptWorld(t, true, false, []runtime.Object{ctrl, ev, fresh}, nil, nil)
-	s := w.c.Snapshot()
-	if got, want := s.EventDeltas[ctrl.UID], []Observation{{At: testutil.Now.Add(-time.Minute), Reason: "BackOff", Delta: 1}}; !slices.Equal(got, want) {
-		t.Fatalf("deltas %+v, want only the fresh Event's %+v", got, want)
+	before := testutil.WarningEvent(ctrl, "before", "BackOff", testutil.Now.Add(-time.Minute))
+	w := newOptWorld(t, true, false, []runtime.Object{ctrl, ev, before}, nil, nil)
+	if s := w.c.Snapshot(); len(s.EventDeltas) != 0 || !s.EventHistoryUnknown[ctrl.UID] {
+		t.Fatalf("deltas %+v, unknown %v; want none counted and the history unknown", s.EventDeltas, s.EventHistoryUnknown)
 	}
-	if !s.EventHistoryUnknown[ctrl.UID] {
-		t.Fatal("history not marked unknown")
+	w.clk.Step(time.Second)
+	w.create(t, testutil.WarningEvent(ctrl, "after", "BackOff", testutil.Now.Add(time.Second)))
+	waitFor(t, "the Event after the start", func() bool { return len(w.c.Snapshot().EventDeltas[ctrl.UID]) == 1 })
+	if got, want := w.c.Snapshot().EventDeltas[ctrl.UID], []Observation{{At: testutil.Now.Add(time.Second), Reason: "BackOff", Delta: 1}}; !slices.Equal(got, want) {
+		t.Fatalf("deltas %+v, want only the Event after the start %+v", got, want)
 	}
 	w.clk.Step(EventWindow + time.Second)
 	if s := w.c.Snapshot(); s.EventHistoryUnknown[ctrl.UID] || len(s.EventDeltas) != 0 {
@@ -185,12 +188,15 @@ func TestFirstSeenCountIsUnknown(t *testing.T) {
 	}
 }
 
+// startedEarlier moves the UI's start an hour back, so Events from the last hour are watched ones.
+func startedEarlier(w *optWorld) { w.c.evf.deltas.start = testutil.Now.Add(-time.Hour) }
+
 // Review finding 7: a series counts by its series count only, never by
 // Count and the series count together.
 func TestSeriesCountedOnce(t *testing.T) {
 	ctrl := ctrlPod()
 	ev := testutil.WarningEvent(ctrl, "probe", "Unhealthy", testutil.Now.Add(-time.Minute))
-	w := newOptWorld(t, true, false, []runtime.Object{ctrl, ev}, nil, nil)
+	w := newOptWorld(t, true, false, []runtime.Object{ctrl, ev}, nil, startedEarlier)
 	sum := func() (n int32) {
 		for _, o := range w.c.Snapshot().EventDeltas[ctrl.UID] {
 			n += o.Delta
@@ -382,6 +388,7 @@ func TestEventsListIsNotPaged(t *testing.T) {
 	}
 	var limits []int64
 	w := newOptWorld(t, true, false, typed, nil, func(w *optWorld) {
+		startedEarlier(w)
 		w.c.evf.max = 2
 		w.kube.PrependReactor("list", "events", func(a clienttesting.Action) (bool, runtime.Object, error) {
 			o := a.(clienttesting.ListActionImpl).ListOptions
@@ -428,7 +435,7 @@ func TestVanishedPodLeavesNoEvents(t *testing.T) {
 	busy.Count = 9
 	w := newOptWorld(t, true, false, []runtime.Object{ctrl, proxy, busy,
 		testutil.WarningEvent(proxy, "probe", "Unhealthy", testutil.Now.Add(-time.Second)),
-		testutil.WarningEvent(ctrl, "old", "BackOff", testutil.Now.Add(-10*time.Minute))}, nil, func(w *optWorld) { w.c.evf.max = 3 })
+		testutil.WarningEvent(ctrl, "old", "BackOff", testutil.Now.Add(-10*time.Minute))}, nil, func(w *optWorld) { startedEarlier(w); w.c.evf.max = 3 })
 	s := w.c.Snapshot()
 	if len(s.Events) != 3 || len(s.EventDeltas[proxy.UID]) != 1 || !s.EventHistoryUnknown[proxy.UID] {
 		t.Fatalf("before: events %v, deltas %+v, unknown %v", eventNames(s), s.EventDeltas, s.EventHistoryUnknown)

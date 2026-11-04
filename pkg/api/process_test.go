@@ -4,6 +4,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -397,6 +398,22 @@ func TestFirstSeenCountIsNotCountedAtTheAPI(t *testing.T) {
 	f := findingOf(h.at(t, testutil.Now.Add(time.Second)), health.CodeProbeFailing)
 	if f == nil || processFacts(t, f).Probe.Failures != 3 || !strings.HasSuffix(f.Detail, " Earlier failures were not counted.") {
 		t.Fatalf("020 %+v", f)
+	}
+}
+
+// Three count-1 Unhealthy Events from before the UI started are not counted
+// (§9.2): no 020, however many there are.
+func TestPreStartEventsAreNotCountedAtTheAPI(t *testing.T) {
+	h, pod := probeWorld(t, false)
+	for i := range 3 {
+		ev := testutil.WarningEvent(pod, "probe-"+strconv.Itoa(i), "Unhealthy", testutil.Now.Add(time.Duration(i-3)*time.Minute))
+		if _, err := h.kube.CoreV1().Events(ev.Namespace).Create(h.ctx, ev, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.awaitCache(t, "the three Events", func(s *cache.Snapshot) bool { return len(s.Events) == 3 })
+	if f := findingOf(h.at(t, testutil.Now), health.CodeProbeFailing); f != nil {
+		t.Fatalf("pre-start Events raised 020: %+v", f)
 	}
 }
 

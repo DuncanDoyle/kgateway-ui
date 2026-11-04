@@ -68,6 +68,8 @@ type EventDeltas struct {
 	byEvent map[types.UID]*eventHistory
 	// unknown is, per Pod UID, when its uncounted history leaves the window.
 	unknown map[types.UID]time.Time
+	// start is when the UI began watching; earlier occurrences are never counted.
+	start time.Time
 }
 
 type eventHistory struct {
@@ -100,8 +102,8 @@ func latest(ev *corev1.Event) time.Time {
 	return t
 }
 
-// observe records ev's count, seen at now. A first count above 1 is a
-// baseline: it adds nothing and marks the Pod's history unknown for a window.
+// observe records ev's count, seen at now. A first count above 1, or a first
+// count of 1 from before start, is a baseline: it adds nothing and marks the Pod's history unknown.
 func (d *EventDeltas) observe(ev *corev1.Event, now time.Time) {
 	n, at := counter(ev), latest(ev)
 	if at.IsZero() || at.After(now) {
@@ -111,9 +113,12 @@ func (d *EventDeltas) observe(ev *corev1.Event, now time.Time) {
 	if !seen {
 		h = &eventHistory{pod: ev.InvolvedObject.UID, reason: ev.Reason, last: n}
 		d.byEvent[ev.UID] = h
-		if n > 1 {
+		switch {
+		case n > 1:
 			d.unknown[h.pod] = latestOf(d.unknown[h.pod], now.Add(EventWindow))
-		} else {
+		case at.Before(d.start):
+			d.unknown[h.pod] = latestOf(d.unknown[h.pod], at.Add(EventWindow))
+		default:
 			h.obs = []Observation{{At: at, Reason: ev.Reason, Delta: 1}}
 		}
 		return
@@ -258,7 +263,7 @@ type eventFilter struct {
 
 func newEventFilter(pods *podSet, now func() time.Time) *eventFilter {
 	f := &eventFilter{pods: pods, now: now, max: MaxEvents, kept: map[string]keptEvent{},
-		deltas: EventDeltas{byEvent: map[types.UID]*eventHistory{}, unknown: map[types.UID]time.Time{}}}
+		deltas: EventDeltas{byEvent: map[types.UID]*eventHistory{}, unknown: map[types.UID]time.Time{}, start: now()}}
 	pods.gone = f.podGone
 	return f
 }
