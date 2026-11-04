@@ -251,6 +251,9 @@ type Cache struct {
 	evf          *eventFilter
 	uids         *podSet
 	uidRegs      []toolscache.ResourceEventHandlerRegistration
+	// stopOptional cancels the optional watches' context; optional tracks their goroutines.
+	stopOptional func()
+	optional     sync.WaitGroup
 	// settled is set once every informer has settled, after the settle notify.
 	settled atomic.Bool
 	// handlerHook, if set, runs in each event handler before it notifies (tests).
@@ -364,14 +367,16 @@ func (c *Cache) Start(ctx context.Context) {
 	for _, t := range all {
 		go t.inf.RunWithContext(ctx)
 	}
+	octx, cancel := context.WithCancel(ctx)
+	c.stopOptional = func() { cancel() }
 	for _, t := range c.proxyPods {
-		go t.inf.RunWithContext(ctx)
+		c.optional.Go(func() { t.inf.RunWithContext(octx) })
 	}
 	if c.crds != nil {
-		go c.crds.inf.RunWithContext(ctx)
+		c.optional.Go(func() { c.crds.inf.RunWithContext(octx) })
 	}
 	if c.events != nil {
-		go c.runEvents(ctx)
+		c.optional.Go(func() { c.runEvents(octx) })
 	}
 	go func() {
 		settled := func(context.Context) (bool, error) {

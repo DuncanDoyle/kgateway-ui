@@ -782,6 +782,8 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 
 The time budgets above gate on the reference machine; CI gates the deterministic ones and timing regressions against the base **(user, 2026-11-04; D-044)**.
 
+The new watches' own state (proxy Pod, Event and CRD informer stores, the Pod UID index, Event delta histories) is a separate retained-heap part: median ≤ 1,600,000 B in every Large world, deterministic; measured 1,392,888 B (large), 1,392,984 B (contradicting), 1,450,216 B (measurement world) **(user, 2026-11-04; D-046)**.
+
 No gate changes without the user. If the 3.1 baseline, or any later sub-phase, breaks a gate, the work stops and the numbers go to the user, who decides **(user, 2026-10-29)**.
 
 **Scale tiers grow** (`internal/testutil/scale`):

@@ -790,3 +790,24 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Consequences:** Loading to loaded shifts nothing when the summary is cached, as it is once the header has loaded. A first visit with a slow font request stays on the fallback fonts until reload. A theme's font stacks must lead with their web font.
 
 **Alternatives:** Reserve one row for every install (rejected: healthy installs shift, and others still move); derive the rows from the summary's finding counts (rejected: R62, and groups ≤ findings); amend §17.4 to exempt the loading swap; `font-display: optional` (rejected: a cold load may use the fallback even when the font is fast); no font cap (rejected: a hung request blocks the page).
+
+## D-046 — The 3.2 watches' retained state is its own heap part (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user, Codex 3.2 review #7; ruling R75); adds to design §16.3's retained-heap gate
+
+**Context:** The retained-heap gate stops the measurement world's live cache before it measures, so the snapshot's copies count but the proxy Pod, Event and CRD informer stores, the Pod UID index and the Event delta histories do not. Keeping the whole cache would also count the Phase 2 stores and the fake clients' trackers, which no baseline counted.
+
+**Decision:**
+1. Each heap child builds a fresh measurement world for its tier and measures the HeapAlloc freed by stopping only the proxy Pod, Event and CRD watches. They run under their own context in `cache.Start`; a `bench`-tagged hook stops them and drops their state.
+2. The part is gated on its median of five, deterministic class (D-044): ≤ 1,600,000 B in every world, the measurement world's median plus about 10 %. Measured on darwin/arm64:
+
+   | World | Median | Min–max |
+   |---|---|---|
+   | large | 1,392,888 B | 1,392,840–1,393,000 |
+   | large-contradicting | 1,392,984 B | 1,392,872–1,393,000 |
+   | large-contradicting-worst (measurement) | 1,450,216 B | 1,450,136–1,450,344 |
+
+3. The retained-heap gates (≤ 32 MiB over 2.1, ≤ +24 MiB over 3.1) and their baselines are unchanged.
+
+**Consequences:** Growth in the new watches' state fails the heap test on its own, even while the main gate has headroom. The worst world's histories cost about 57 KB. Each heap child builds one more world.
+
+**Alternatives:** Re-baseline the whole retained heap with the live cache kept (rejected: it counts Phase 2 stores and fake trackers); bound the stores by their caps and log them (rejected: R75 asks for a measured gate).

@@ -488,6 +488,8 @@ const heapChildEnv = "KGWUI_HEAP_CHILD"
 type heapRun struct {
 	Start, Snapshot, Retained uint64
 	Parts                     []heapPart
+	// Watches is the HeapAlloc freed by stopping a fresh measurement world's proxy Pod, Event and CRD watches.
+	Watches int64
 }
 
 type heapPart struct {
@@ -498,7 +500,7 @@ type heapPart struct {
 // TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
 // and five runs, the median retained heap at Large ≤ 32 MiB above it, for the
 // consistent world and the worst case. Each part is then dropped in turn; its
-// freed HeapAlloc is reported per kind.
+// freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part.
 func TestBudgetHeap(t *testing.T) {
 	cases := append(slices.Clone(largeCases), measuredTier)
 	if name := os.Getenv(heapChildEnv); name != "" {
@@ -550,6 +552,17 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 		med.Retained, float64(med.Retained)/mib, float64(over)/mib, heapBaseline, float64(over)/mib-heap31[tier.Name], heap31[tier.Name])
 	for _, p := range med.Parts {
 		t.Logf("  %-28s %7.2f MiB", p.Name, float64(p.Freed)/mib)
+	}
+	watches := make([]int64, len(runs))
+	for i, r := range runs {
+		watches[i] = r.Watches
+	}
+	slices.Sort(watches)
+	wm := watches[len(watches)/2]
+	t.Logf("3.2 watches' retained state: median %d B (%.2f MiB), min %d, max %d (budget median ≤ %d B)",
+		wm, float64(wm)/mib, watches[0], watches[len(watches)-1], watchesHeapBudget)
+	if wm > watchesHeapBudget {
+		t.Errorf("3.2 watches' retained state %d B, budget ≤ %d B", wm, watchesHeapBudget)
 	}
 	if over > 32*mib {
 		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 32 MiB", float64(over)/mib)
@@ -637,12 +650,49 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("decode: Backend views", func() { e.decode.backends = viewCache[objects.BackendView]{} })
 	// What the engine and model still hold above the snapshot: the rest of health, overview, first-seen.
 	r.Parts = append(r.Parts, heapPart{"rest of engine and model", int64(prev) - int64(snapAlloc)})
+	r.Watches = watchesHeap(t, tier)
 	runtime.KeepAlive(e)
 	runtime.KeepAlive(m)
 	runtime.KeepAlive(snap)
 	runtime.KeepAlive(w)
 	j, _ := json.Marshal(r)
 	fmt.Println("heap: " + string(j))
+}
+
+// watchesHeapBudget is the 3.2 watches' median retained state per world: the
+// measurement world's 1,450,216 B plus about 10 % (D-046).
+const watchesHeapBudget = 1_600_000
+
+// watchesHeap builds tier's measurement world, so its cache runs the proxy Pod, Event and CRD
+// watches, and returns the HeapAlloc freed by stopping those watches alone. The fake clients'
+// objects and the other informers stay, so they do not count.
+func watchesHeap(t *testing.T, tier scale.Tier) int64 {
+	alloc := func() int64 {
+		runtime.GC()
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		return int64(m.HeapAlloc) //nolint:gosec // a heap size fits
+	}
+	w := measure.New(t, tier, testutil.FakeClock())
+	defer w.Live.Stop()
+	before := alloc()
+	g := runtime.NumGoroutine()
+	cache.StopOptional(w.Live.Cache)
+	// A stopped watch's filter goroutine returns once its source closes; wait until the count holds.
+	for deadline, n, same := time.Now().Add(time.Minute), g, 0; same < 3; time.Sleep(20 * time.Millisecond) {
+		if c := runtime.NumGoroutine(); c == n {
+			same++
+		} else {
+			n, same = c, 0
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("goroutines did not settle after the watches stopped")
+		}
+	}
+	freed := before - alloc()
+	runtime.KeepAlive(w)
+	return freed
 }
 
 // The 2.4 dense-memory budget (D-025): the edge cap keeps the densest
