@@ -51,7 +51,12 @@ export interface FindingDetail {
 export type FindingList = Page<FindingItem>;
 
 /** Typed evidence of a finding, tagged by kind (design §13.3, sub-phase 3.2). */
-export type Evidence = ProcessEvidence | VersionSkewEvidence | XDSRejectsEvidence | ProxyStatsEvidence;
+export type Evidence =
+  | ProcessEvidence
+  | VersionSkewEvidence
+  | XDSRejectsEvidence
+  | ProxyStatsEvidence
+  | FreshnessEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -130,6 +135,14 @@ export interface ProxyPodStats {
 export interface ProxyStatsEvidence {
   kind: "proxy-stats";
   pods: ProxyPodStats[];
+}
+/** Why KGWUI-003 judges a status not current (design §10.1); observed, current and since are set when stale. */
+export interface FreshnessEvidence {
+  kind: "freshness";
+  freshness: "never-written" | "stale" | "pending" | "no-ancestor";
+  observed?: number;
+  current?: number;
+  since?: string;
 }
 
 /**

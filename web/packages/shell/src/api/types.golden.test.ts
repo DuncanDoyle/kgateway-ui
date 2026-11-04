@@ -83,6 +83,7 @@ import type {
   FindingDetail,
   FindingItem,
   Fraction,
+  FreshnessEvidence,
   GatewayDetail,
   GatewayListRow,
   GatewayProcesses,
@@ -292,6 +293,11 @@ const evidenceShapes = {
       }),
     },
     { kind: { "proxy-stats": 1 } },
+  ),
+  freshness: shape<FreshnessEvidence>(
+    { kind: "!", freshness: "!", observed: "?", current: "?", since: "?" },
+    {},
+    { kind: { freshness: 1 }, freshness: { "never-written": 1, stale: 1, pending: 1, "no-ancestor": 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

@@ -239,17 +239,21 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		res    objects.Ref
 		parent objects.ParentRef
 	}
-	reported := map[pendingKey]bool{}
+	reported := map[pendingKey]int{}  // index in fs
 	inGrace := map[objects.Ref]bool{} // resources being processed
 	// notProcessed reports u (for parent) once: info while u's current
-	// generation was first seen less than Grace ago, warning after.
-	notProcessed := func(u *unstructured.Unstructured, parent objects.ParentRef, msg, why string) {
+	// generation was first seen less than Grace ago, warning after. A later
+	// block whose kind comes first in §10.1 order replaces the evidence.
+	notProcessed := func(u *unstructured.Unstructured, parent objects.ParentRef, msg, why string, ev *FreshnessEvidence) {
 		r := objects.RefOf(u)
 		k := pendingKey{r, parent}
-		if reported[k] {
+		if i, ok := reported[k]; ok {
+			if prev := fs[i].Facts.(*FreshnessEvidence); freshnessRank[ev.Freshness] < freshnessRank[prev.Freshness] {
+				fs[i].Detail, fs[i].Facts = why, ev
+			}
 			return
 		}
-		reported[k] = true
+		reported[k] = len(fs)
 		sev := SeverityWarning
 		if in.Now.Sub(in.firstSeen(u)) < Grace {
 			sev, msg = SeverityInfo, "Being processed by the controller"
@@ -260,20 +264,20 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			key = in.parentKey(u, parent)
 		}
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
-			Message: msg, Detail: why, Key: key, parent: &parent})
+			Message: msg, Detail: why, Key: key, Facts: ev, parent: &parent})
 	}
 	// pendingFor reports a block of u that is not processed; parent is set for
 	// route parents. An experimental-only kind gets a hint (D-018 §2).
-	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why string) {
-		notProcessed(u, parent, "Not yet processed by the controller", why+in.experimentalHint(u))
+	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why, kind string, observed int64) {
+		notProcessed(u, parent, "Not yet processed by the controller", why+in.experimentalHint(u), in.freshnessEvidence(u, kind, observed))
 	}
-	pending := func(u *unstructured.Unstructured, why string) { pendingFor(u, objects.ParentRef{}, why) }
+	pending := func(u *unstructured.Unstructured, why, kind string) { pendingFor(u, objects.ParentRef{}, why, kind, 0) }
 	// current reports false when the block is pending: a required condition is
 	// missing or Unknown, a present condition has reason Pending, or a present
 	// condition may describe an older generation (including observedGeneration 0).
 	current := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) bool {
-		if why := pendingReason(u, cs, required, optional); why != "" {
-			pendingFor(u, parent, why+within(extra))
+		if why, kind, observed := blockFreshness(u, cs, required, optional); why != "" {
+			pendingFor(u, parent, why+within(extra), kind, observed)
 			return false
 		}
 		return true
@@ -312,7 +316,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			l, ok := byName[name]
 			if !ok {
 				if all {
-					pending(u, "no status for listener "+name)
+					pending(u, "no status for listener "+name, FreshnessNeverWritten)
 				}
 				continue
 			}
@@ -362,7 +366,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				}
 			}
 			if st == nil {
-				pendingFor(r.Obj, p, "no status from the controller for "+extra)
+				pendingFor(r.Obj, p, noControllerStatus+" for "+extra, FreshnessNeverWritten, 0)
 				continue
 			}
 			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, nil)
@@ -375,7 +379,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
-			"parent "+parentDesc(u.Parent)+" does not exist")
+			"parent "+parentDesc(u.Parent)+" does not exist", in.freshnessEvidence(u.Route.Obj, FreshnessNeverWritten, 0))
 	}
 	// Declared candidates: KGWUI-011's status trigger. Inside its grace the
 	// route is being processed, so this check is pending (design §6.2).
@@ -407,7 +411,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 		}
 		if len(mine) == 0 {
-			pending(p.Obj, "no status from the controller")
+			pending(p.Obj, noControllerStatus, FreshnessNoAncestor)
 			continue
 		}
 		for _, a := range mine {
@@ -451,32 +455,10 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 }
 
 // pendingReason returns why a status block of u is not current, or "" when
-// it is: a required condition is missing or Unknown, or a present condition
-// has reason Pending or may describe an older generation (D-006).
+// it is (D-006, design §10.1).
 func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string) string {
-	for _, t := range required {
-		if objects.FindCondition(cs, t) == nil {
-			return fmt.Sprintf("no %s condition", t)
-		}
-	}
-	for _, t := range append(slices.Clone(required), optional...) {
-		cond := objects.FindCondition(cs, t)
-		if cond == nil {
-			continue
-		}
-		if cond.Reason == "Pending" {
-			return t + " is Pending"
-		}
-		if objects.IsStale(u, *cond) {
-			return "status describes an older generation"
-		}
-	}
-	for _, t := range required {
-		if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
-			return t + " is Unknown"
-		}
-	}
-	return ""
+	why, _, _ := blockFreshness(u, cs, required, optional)
+	return why
 }
 
 // RoutePending returns why one status.parents entry of route u is not

@@ -185,6 +185,10 @@
       {
         "code": "KGWUI-003",
         "detail": "no status from the controller for parent Gateway infra/edge",
+        "evidence": {
+          "freshness": "never-written",
+          "kind": "freshness"
+        },
         "group": "f1-6rs7xu5krjcminsp33q3ojjxnk",
         "id": "f1-25xcevxfbsh3ekqknmbjwgacwg",
         "install": "kgw.kgateway",

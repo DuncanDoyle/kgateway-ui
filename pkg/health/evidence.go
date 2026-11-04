@@ -188,6 +188,31 @@ func (e *ProxyStatsEvidence) MarshalJSON() ([]byte, error) {
 	}{EvidenceProxyStats, (*plain)(e)})
 }
 
+// EvidenceFreshness is the kind of FreshnessEvidence.
+const EvidenceFreshness = "freshness"
+
+// FreshnessEvidence is why KGWUI-003 judges a status not current (design §10.1).
+// Observed, Current and Since are set for a stale status only.
+type FreshnessEvidence struct {
+	Freshness string `json:"freshness"`
+	Observed  *int64 `json:"observed,omitempty"`
+	Current   *int64 `json:"current,omitempty"`
+	// Since is when the UI first saw the current generation.
+	Since *time.Time `json:"since,omitempty"`
+}
+
+// EvidenceKind implements Evidence.
+func (*FreshnessEvidence) EvidenceKind() string { return EvidenceFreshness }
+
+// MarshalJSON adds the kind tag.
+func (e *FreshnessEvidence) MarshalJSON() ([]byte, error) {
+	type plain FreshnessEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{EvidenceFreshness, (*plain)(e)})
+}
+
 // RawEvidence is evidence of a kind this build does not know, kept as sent.
 type RawEvidence struct {
 	Kind string
@@ -223,6 +248,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 		return e, json.Unmarshal(b, e)
 	case EvidenceProxyStats:
 		e := &ProxyStatsEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceFreshness:
+		e := &FreshnessEvidence{}
 		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil

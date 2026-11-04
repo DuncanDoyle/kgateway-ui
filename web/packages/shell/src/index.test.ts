@@ -169,6 +169,7 @@ it("keeps the public export surface", () => {
         "FontSizes",
         "FontWeights",
         "Fraction",
+        "FreshnessEvidence",
         "GatewayDetail",
         "GatewayList",
         "GatewayListRow",

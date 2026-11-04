@@ -189,7 +189,7 @@ func (d *detail) routeCounts(parent objects.Ref) RouteCounts {
 
 // condition is c of object u on the wire.
 func condition(u *unstructured.Unstructured, c metav1.Condition) Condition {
-	return Condition{Type: c.Type, Status: string(c.Status), Reason: c.Reason, Message: c.Message, ObservedGeneration: c.ObservedGeneration,
+	return Condition{Type: c.Type, Status: string(c.Status), Reason: c.Reason, Message: computed.ClipDisplay(c.Message, computed.MaxStatusBytes), ObservedGeneration: c.ObservedGeneration,
 		LastTransitionTime: wireTime(c.LastTransitionTime.Time), Stale: objects.IsStale(u, c)}
 }
 

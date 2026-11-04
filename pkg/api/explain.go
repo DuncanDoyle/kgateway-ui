@@ -357,7 +357,7 @@ func explainFit(f *computed.FitFailure) string {
 		return ""
 	}
 	// The compared values are display text: clipped, never the computed match.
-	parent, child := computed.ClipDisplay(f.Parent), computed.ClipDisplay(f.Child)
+	parent, child := computed.ClipDisplay(f.Parent, computed.MaxDisplayBytes), computed.ClipDisplay(f.Child, computed.MaxDisplayBytes)
 	key := func(what string) string {
 		if child == "" {
 			return fmt.Sprintf(fitKeyNone, what, parent)
