@@ -15,6 +15,8 @@ import { Facts, Section } from "../detailParts";
 // region Styles
 const Body = styled.div<{ stylesOverride?: SerializedStyles }>`
   display: grid;
+  /* minmax(0, …): a long command scrolls in its block instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: ${(p) => p.theme.space(4)};
   h3 {
     margin: 0 0 ${(p) => p.theme.space(1)};

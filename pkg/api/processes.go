@@ -127,7 +127,11 @@ func (ps *procSummary) set(s *process.Set, podNS string, sf *subjectFacts, visib
 		return out
 	}
 	if r := s.Rollout; r != nil {
-		out.Rollout = &RolloutDTO{Progressing: r.Progressing, Reason: r.Reason}
+		out.Rollout = &RolloutDTO{Progressing: r.Progressing}
+		// Only a stuck rollout names its reason; the Processes page shows it as stuck.
+		if !r.Progressing && r.Reason == "ProgressDeadlineExceeded" {
+			out.Rollout.Reason = r.Reason
+		}
 	}
 	for _, p := range s.Processes {
 		if ps.v.can(process.PodRef(podNS, p)) {

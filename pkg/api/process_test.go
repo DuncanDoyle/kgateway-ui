@@ -303,13 +303,22 @@ func TestRolloutStuckAtTheAPI(t *testing.T) {
 	}{
 		{"deadline exceeded", appsv1.DeploymentCondition{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}, true},
 		{"still progressing", appsv1.DeploymentCondition{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue, Reason: "ReplicaSetUpdated"}, false},
+		{"settled", appsv1.DeploymentCondition{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue, Reason: "NewReplicaSetAvailable"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := edgeProxy(1, 1)
 			d.Status.Conditions = []appsv1.DeploymentCondition{tc.cond}
 			old := edgePod(d, "edge-old", true, corev1.ContainerStatus{State: runningSince(testutil.Old.Time)})
 			pulling := edgePod(d, "edge-new", false, corev1.ContainerStatus{State: waiting("ImagePullBackOff")})
-			r := get[HealthResponse](t, newHarness(t, setup{proxyPods: true}, procWorld(nil, d, old, pulling)...).srv, healthPath, 200)
+			srv := newHarness(t, setup{proxyPods: true}, procWorld(nil, d, old, pulling)...).srv
+			r := get[HealthResponse](t, srv, healthPath, 200)
+			// The processes list names a reason for a stuck rollout only, never for a settled one.
+			p := get[ProcessesResponse](t, srv, procsPath, 200)
+			for _, g := range p.Proxies.Items {
+				if g.Gateway.Ref == edgeRef.Ref() && (g.Set.Rollout == nil || (g.Set.Rollout.Reason != "") != tc.want) {
+					t.Fatalf("processes: edge rollout %+v, want a reason %v", g.Set.Rollout, tc.want)
+				}
+			}
 			if findingOf(r, health.CodeProxyNotReady) != nil {
 				t.Fatalf("006 beside a ready replica: %+v", r.Findings)
 			}

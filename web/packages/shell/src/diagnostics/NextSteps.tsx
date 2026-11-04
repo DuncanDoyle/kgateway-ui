@@ -12,6 +12,8 @@ import { VisuallyHidden } from "../states/VisuallyHidden";
 // region Styles
 const Steps = styled.ol<{ stylesOverride?: SerializedStyles }>`
   display: grid;
+  /* minmax(0, …): a long command scrolls in its block instead of widening the list. */
+  grid-template-columns: minmax(0, 1fr);
   gap: ${(p) => p.theme.space(3)};
   margin: 0;
   padding-left: ${(p) => p.theme.space(5)};
