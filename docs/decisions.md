@@ -774,3 +774,19 @@ Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 
 **Consequences:** CI fails on what changes deterministically or on a measured slowdown against the base on the same VM, not on runner speed. The §16.3 time budgets hold only as measured on the reference machine; each sub-phase's local `make bench` record carries them. The workflow runs about twice the engine benchmarks. A PR from a long-lived phase branch compares against `main`, so its A/B reports the whole phase's change.
 
 **Alternatives:** Raise the CI time budgets (rejected: runner speed varies more than the headroom); retry flaky timing gates (rejected: it hides real regressions).
+
+## D-045 — Install page reserves Needs attention from the summary; fallback fonts after the font cap (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user, Codex 3.2 review #5 and #6)
+
+**Context:**
+- The install page skeleton reserved no Needs attention block, so an unhealthy install pushed Processes and the inventory down when diagnostics arrived (§17.4). A fixed reservation would show an empty box on healthy installs (§6), and the SPA derives no state (ruling R62).
+- The first render waits up to 3 s for the bundled fonts. They load with `font-display: swap`, so a font that arrived after the cap still swapped in and could rewrap text.
+
+**Decision:**
+1. `InstallSummary` gains `groupRows`: the number of groups `…/diagnostics` lists for the same caller (at most 10). A group with a hidden cause counts, as its restricted row shows.
+2. When the summary arrives before diagnostics, the skeleton reserves the loaded block: the heading, `groupRows` rows at the collapsed row height and the "Show all" footer. `groupRows: 0` reserves nothing. Below 720 px a collapsed row is 88 px, so both layouts keep a fixed height.
+3. The 3 s font cap stays. When it fires, `renderWhenFontsReady` sets `font-fallback` on the root element, and the theme drops the leading web font from its UI and mono stacks for the session.
+
+**Consequences:** Loading to loaded shifts nothing when the summary is cached, as it is once the header has loaded. A first visit with a slow font request stays on the fallback fonts until reload. A theme's font stacks must lead with their web font.
+
+**Alternatives:** Reserve one row for every install (rejected: healthy installs shift, and others still move); derive the rows from the summary's finding counts (rejected: R62, and groups ≤ findings); amend §17.4 to exempt the loading swap; `font-display: optional` (rejected: a cold load may use the fallback even when the font is fast); no font cap (rejected: a hung request blocks the page).

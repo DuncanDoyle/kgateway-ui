@@ -197,7 +197,7 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 | What was checked | unchanged; collapsed when unhealthy | `checks[]` |
 | Count tiles, Gateway table | unchanged; the Gateway table gains a "Data plane" column: ✓, "Rejects" or "Unknown" | overview |
 
-- Healthy installs keep the slim green strip and show "What was checked", never an empty "Needs attention" box.
+- Healthy installs keep the slim green strip and show "What was checked", never an empty "Needs attention" box. While diagnostics load, the skeleton reserves the summary's `groupRows` rows, so a healthy install reserves none (D-045).
 - A group whose cause the caller cannot view shows its severity, code and "Restricted: ask the owning team", as findings do today (D-013).
 - Stale data turns every state unknown, as today. No green badge survives on stale data.
 
@@ -612,6 +612,7 @@ Existing payloads gain:
 - every finding, everywhere: optional `id`, `group` and `evidence`;
 - `GatewayDetail`: optional `dataPlane` (§8) and `proxies`;
 - route rows: the flag `gateway-rejecting` (§8.4);
+- `InstallSummary`: `groupRows`, the number of groups `…/diagnostics` lists for the same caller (D-045);
 - `/meta` `capabilities`: `processes`, `events`, `crds`, `endpoints`, `proxyStats`, `controllerLogs`, each present only when its input runs; and `filters.findings`, listing the findings filters.
 
 `/health` keeps returning every finding, for compatibility. The SPA moves to the paged endpoint, because a worst-case Large install carries thousands of findings (D-022 measured 3,309 KGWUI-012 and 2,574 KGWUI-002 in one model).
@@ -829,7 +830,8 @@ Phase 2 design §8.7 applies.
 - Every new interactive element (group rows, expanders, copy buttons, filters) has hover, active and focus-visible styles in both themes.
 - Expanders carry `aria-expanded`. Copy buttons announce "Copied" to screen readers.
 - State is always icon, colour and text, at WCAG AA, checked by the existing token test.
-- The "Needs attention" list keeps a fixed row height from the first render, so polling and late data do not shift the layout.
+- The "Needs attention" list keeps a fixed row height from the first render, so polling and late data do not shift the layout. The loading skeleton reserves the loaded block from the install summary's `groupRows` (D-045).
+- The first render waits up to 3 s for the bundled fonts. Past that, the page keeps the fallback fonts for the session, so a late font never reflows it (D-045).
 
 ### 17.5 Wording pass
 

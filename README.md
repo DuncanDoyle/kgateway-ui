@@ -169,6 +169,8 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEnt
 - The install page lists ranked groups of findings, not single findings.
 - Finding actions now render on the finding page, not the install page. `FindingRow` still renders them.
 - Finding renderers now render on the finding page, through the evidence view, for evidence kinds the shell does not know, or when a finding has no evidence. `FindingRow` still renders them.
+- Each `GET /api/v1/installs` entry now has `groupRows`: how many groups the install's diagnostics list for you, at most 10. The install page reserves that many rows while diagnostics load.
+- `renderWhenFontsReady` now sets the `font-fallback` class on the root element when its 3 s font wait runs out. The theme then leaves out the web fonts for the session, so a late font does not reflow the page. A theme's font stacks must lead with their web font.
 
 ### Findings (sub-phase 3.1)
 
