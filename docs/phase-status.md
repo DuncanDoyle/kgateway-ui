@@ -22,6 +22,11 @@ Status: not started; Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.
 ## Sub-phase
 none
 
+## Program
+Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
+Waiting on: none
+Consumers: E2 (kgwctl Phase 1, available with caveats), E3 (kgwctl Phase 3, the 3.3 analyzer as a package under `pkg/`). E7 (kgwctl Phase 4, policy model under `pkg/`) is Phase 5.
+
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
 - (P3) Delegation memory: bound generated path bytes in inherit merges and charge failure-reason text and JSON escaping in the page budget — src: phases/phase-2/reviews/2.4-codex.md (final round)
