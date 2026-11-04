@@ -76,6 +76,31 @@ func BenchmarkCompute(b *testing.B) {
 			e.Compute()
 		}
 	})
+	b.Run(measuredTier.Name, func(b *testing.B) {
+		e, _, _ := measureEngine(b)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for b.Loop() {
+			e.forgetViews()
+			e.Compute()
+		}
+	})
+}
+
+// BenchmarkColdCompute measures the first Compute of a fresh engine, before any window matures.
+func BenchmarkColdCompute(b *testing.B) {
+	for _, tier := range []scale.Tier{scale.Large, scale.Large.Contradicting()} {
+		snap := scale.Snapshot(tier, 1)
+		b.Run(tier.Name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				b.StopTimer()
+				e := New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+				b.StartTimer()
+				e.Compute()
+			}
+		})
+	}
 }
 
 // liveSnapshot is tier's world from a settled cache, whose Source has the kind

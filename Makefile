@@ -8,12 +8,17 @@ UI_EXTRA_ARGS ?=
 PORT ?= 18080
 UI_URL ?= http://127.0.0.1:$(PORT)
 ACTIONLINT_VERSION := v1.7.12
+# The timing regression gate's benchmarks (D-044): warm and cold recompute, confirm tick, analyzer stage.
+BENCH_AB ?= ^Benchmark(Compute|ColdCompute|ConfirmTick|AnalyzerStage)$$/^(large|warm-scope|memoized-scope)
+BENCH_AB_COUNT ?= 5
 
-.PHONY: help test lint actionlint build web shell-pack example-web run e2e e2e-down bench bench-stream
+.PHONY: help test lint actionlint build web shell-pack example-web run e2e e2e-down bench bench-ab bench-stream
 help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
 	@echo "make bench  run the scale benchmarks and budget tests, after the Go version, machine and host load"
+	@echo "           KGWUI_BENCH_TIMING=report logs the absolute time budgets instead of failing (CI; D-044)"
+	@echo "make bench-ab BASE_DIR=<checkout>  run the timing benchmarks of BASE_DIR and this tree interleaved; fail when one is > 15 % slower"
 	@echo "make bench-stream  run the 10-minute sustained-stream budget, 5 runs per world, about 105 min (make bench runs the 60 s -short one)"
 	@echo "make bench-specedit  run the 10-minute spec-edit stream, 5 runs per world, about 105 min (make bench runs the 60 s -short one)"
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
@@ -32,6 +37,7 @@ bench:
 	@go version
 	@echo "machine: $$(uname -sm), $$(getconf _NPROCESSORS_ONLN) CPUs"
 	@echo "load: $$(uptime)"
+	@echo "timing budgets: $${KGWUI_BENCH_TIMING:-reference} (D-044)"
 	@# -short shortens only the API stream; no engine or cache budget may read testing.Short().
 	@# The budget tests run once; the benchmarks five times.
 	go test -tags bench -v -short -run 'Budget' -count 1 ./pkg/engine ./pkg/cache
@@ -39,6 +45,9 @@ bench:
 	@# The API budgets take 10,000 samples per case, so they run once; -short keeps each of the 5 stream runs per world at 60 s.
 	go test -tags bench -v -short -run 'Budget' -count 1 -timeout 75m ./pkg/api
 	go test -tags bench -run '^$$' -bench . -benchmem -count 5 ./pkg/api
+bench-ab:
+	@test -n "$(BASE_DIR)" || { echo "BASE_DIR is required"; exit 2; }
+	go run ./internal/benchab -base "$(BASE_DIR)" -head . -pkg ./pkg/engine -bench '$(BENCH_AB)' -count $(BENCH_AB_COUNT) -out "$(or $(BENCH_AB_OUT),.)"
 bench-stream:
 	go test -tags bench -v -run 'TestBudgetSustainedStream' -count 1 -timeout 150m ./pkg/api
 .PHONY: bench-specedit
