@@ -101,6 +101,9 @@ func tpMissingTarget() (code, msg string) {
 
 func secondInstall() bool { return os.Getenv("SECOND_INSTALL") == "1" }
 
+// nack reports whether setup.sh applied fixtures/nack.yaml (NACK=1).
+func nack() bool { return os.Getenv("NACK") == "1" }
+
 func TestRealCluster(t *testing.T) {
 	var meta api.MetaResponse
 	get(t, "/api/v1/meta", &meta)
@@ -133,7 +136,10 @@ func TestRealCluster(t *testing.T) {
 	// Gateways edge and self; posts in the unlabelled blog namespace must not count. An in-scope
 	// HTTPRoute is owned, so counted, when a parentRef names one of the install's Gateways or
 	// ListenerSets (denied ones included), or once the settled controller wrote it an entry (design §4.2).
-	routes := 0
+	routes, gateways := 0, 2
+	if nack() {
+		gateways++ // infra/nack
+	}
 	w := settledWorld(t)
 	for _, r := range w.routes {
 		parent := slices.ContainsFunc(r.Spec.ParentRefs, func(p kref) bool {
@@ -154,8 +160,8 @@ func TestRealCluster(t *testing.T) {
 		for _, c := range o.Counts {
 			counts[c.Kind] = c.Count
 		}
-		if counts["Gateway"] != 2 || counts["HTTPRoute"] != routes {
-			return fmt.Errorf("counts: want Gateway 2, HTTPRoute %d; got %+v", routes, counts)
+		if counts["Gateway"] != gateways || counts["HTTPRoute"] != routes {
+			return fmt.Errorf("counts: want Gateway %d, HTTPRoute %d; got %+v", gateways, routes, counts)
 		}
 		return nil
 	})

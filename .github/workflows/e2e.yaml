@@ -32,6 +32,8 @@ jobs:
       GWAPI_VERSION: ${{ matrix.gwapi }}
       SECOND_INSTALL: ${{ matrix.second }}
       UI_EXTRA_ARGS: ${{ matrix.ui_args }}
+      # The xDS reject fixture (fixtures/nack.yaml) for TestDataPlaneDiagnostics and diagnostics.spec.ts.
+      NACK: "1"
       E2E_DIR: ${{ github.workspace }}/.e2e
     steps:
       - uses: actions/checkout@v7

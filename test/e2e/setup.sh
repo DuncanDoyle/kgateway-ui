@@ -88,6 +88,10 @@ fi
 # The Gateway must exist before kubectl wait can watch it.
 poll 60 kubectl -n infra get gateway/edge
 kubectl -n infra wait --for=condition=Programmed gateway/edge --timeout=180s
+if [[ "${NACK:-}" == 1 ]]; then
+  kubectl -n infra wait --for=condition=Programmed gateway/nack --timeout=180s
+  kubectl -n infra rollout status deploy/nack --timeout=180s
+fi
 kubectl -n shop rollout status deploy/httpbin --timeout=180s
 
 docker build -t kgateway-ui:e2e --build-arg VERSION=e2e .
