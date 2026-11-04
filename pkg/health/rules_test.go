@@ -108,6 +108,11 @@ func TestRuleReplacedOrDropped(t *testing.T) {
 			ruleCond("Accepted", "RouteRuleReplaced", "Replaced Rule (3): gateway.kgateway.dev/TrafficPolicy/shop/auth: x; gateway.kgateway.dev/TrafficPolicy/shop/rl: y", since),
 			policyCatalog(), "Rule replaced by a direct response",
 			RuleReplacedEvidence{MatchIndex: intp(3), Reason: "RouteRuleReplaced", Message: "Replaced Rule (3): gateway.kgateway.dev/TrafficPolicy/shop/auth: x; gateway.kgateway.dev/TrafficPolicy/shop/rl: y"}},
+		// kgateway joins rule errors with "\n" (summarizeRuleErrors), so the parse spans lines.
+		{"errors joined with a newline",
+			ruleCond("kgateway.dev/Programmed", "RouteRuleReplaced", "Replaced Rule (1): gateway.kgateway.dev/TrafficPolicy/shop/auth: x\ngateway.kgateway.dev/TrafficPolicy/shop/auth: y", since),
+			policyCatalog(), "Rule replaced by a direct response",
+			RuleReplacedEvidence{MatchIndex: intp(1), Reason: "RouteRuleReplaced", Message: "Replaced Rule (1): gateway.kgateway.dev/TrafficPolicy/shop/auth: x\ngateway.kgateway.dev/TrafficPolicy/shop/auth: y", Policy: tp}},
 		{"long message is clipped",
 			ruleCond("Accepted", "RouteRuleReplaced", long, since),
 			policyCatalog(), "Rule replaced by a direct response",

@@ -131,6 +131,7 @@ import type {
   RouteDetail,
   RouteRow,
   Rule,
+  RuleReplacedEvidence,
   ScopeSummary,
   ServedKind,
   SpecParentRef,
@@ -305,6 +306,11 @@ const evidenceShapes = {
     { kind: "!", explanation: "!", candidates: "?", attributed: "!" },
     { candidates: shape<RefLocation>({ path: "!", ref: "!" }, { ref }) },
     { kind: { refs: 1 }, explanation: { "kind-not-served": 1, controller: 1 } },
+  ),
+  "rule-replaced": shape<RuleReplacedEvidence>(
+    { kind: "!", matchIndex: "?", reason: "!", message: "!", policy: "?" },
+    { policy: linkedRef },
+    { kind: { "rule-replaced": 1 }, reason: { RouteRuleReplaced: 1, RouteRuleDropped: 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

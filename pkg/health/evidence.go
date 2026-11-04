@@ -298,6 +298,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 	case EvidenceRefs:
 		e := &RefsEvidence{}
 		return e, json.Unmarshal(b, e)
+	case EvidenceRuleReplaced:
+		e := &RuleReplacedEvidence{}
+		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil
 }

@@ -903,3 +903,48 @@ func TestRuleReplacedThroughTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// Design §13.3: a 015's policy is a LinkedRef on the wire. The e2e fixture's
+// no-such-policy does not exist, so it links to nothing; an owned policy that
+// exists opens.
+func TestRuleReplacedPolicyLink(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	route := func(policy string) *unstructured.Unstructured {
+		cond := testutil.Cond("Accepted", metav1.ConditionFalse, "RouteRuleReplaced")
+		cond.Message = "Replaced Rule (0): gateway.kgateway.dev/TrafficPolicy/shop/" + policy + ": policy not found"
+		return testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+			Conds: []metav1.Condition{cond, testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+	}
+	catalog := func() kinds.Catalog {
+		return kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: kinds.KgatewayGroup, Kind: "TrafficPolicy"}}, nil)
+	}
+	accepted := testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Valid")}}
+	for _, tc := range []struct {
+		name, policy string
+		objs         []runtime.Object
+		absent       bool
+	}{
+		{"no-such-policy", "no-such-policy", world(route("no-such-policy")), true},
+		{"existing policy", "auth", world(route("auth"), testutil.TrafficPolicy("shop", "auth", accepted)), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{catalog: catalog, rulesFor: computedtest.NoViews}, tc.objs...)
+			d := fixDetail(t, srv, health.CodeRuleReplaced, "shop", "r")
+			ev, ok := d.Evidence.(*RuleEvidence)
+			if !ok || ev.Policy == nil || ev.Policy.Name != tc.policy || ev.MatchIndex == nil || *ev.MatchIndex != 0 || (ev.Policy.Link == LinkNone) != tc.absent {
+				t.Fatalf("evidence %#v", d.Evidence)
+			}
+			// /health sends the same wire shape: the policy with its link.
+			h := get[map[string]any](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+			var links []any
+			for _, f := range h["findings"].([]any) {
+				if m := f.(map[string]any); m["code"] == health.CodeRuleReplaced {
+					links = append(links, m["evidence"].(map[string]any)["policy"].(map[string]any)["link"])
+				}
+			}
+			if len(links) != 1 || links[0] != string(ev.Policy.Link) {
+				t.Fatalf("health policy links %v, detail %s", links, ev.Policy.Link)
+			}
+		})
+	}
+}

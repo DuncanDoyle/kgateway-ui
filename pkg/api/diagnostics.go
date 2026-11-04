@@ -52,14 +52,44 @@ func (e *XDSEvidence) MarshalJSON() ([]byte, error) {
 	}{health.EvidenceXDSRejects, (*plain)(e)})
 }
 
-// decodeEvidence decodes evidence as the API sends it: xds-rejects as XDSEvidence.
+// rulePlain is health.RuleReplacedEvidence without its methods.
+type rulePlain health.RuleReplacedEvidence
+
+// RuleEvidence is KGWUI-015's evidence on the wire: the policy carries its link.
+type RuleEvidence struct {
+	rulePlain
+	Policy *LinkedRef `json:"policy,omitempty"`
+}
+
+// EvidenceKind implements health.Evidence.
+func (*RuleEvidence) EvidenceKind() string { return health.EvidenceRuleReplaced }
+
+// MarshalJSON adds the kind tag.
+func (e *RuleEvidence) MarshalJSON() ([]byte, error) {
+	type plain RuleEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{health.EvidenceRuleReplaced, (*plain)(e)})
+}
+
+// decodeEvidence decodes evidence as the API sends it: xds-rejects as
+// XDSEvidence, rule-replaced as RuleEvidence.
 func decodeEvidence(b []byte) (health.Evidence, error) {
 	ev, err := health.DecodeEvidence(b)
-	if _, ok := ev.(*health.XDSRejectsEvidence); !ok || err != nil {
+	if err != nil {
 		return ev, err
 	}
-	x := &XDSEvidence{}
-	return x, json.Unmarshal(b, x)
+	var out health.Evidence
+	switch ev.(type) {
+	case *health.XDSRejectsEvidence:
+		out = &XDSEvidence{}
+	case *health.RuleReplacedEvidence:
+		out = &RuleEvidence{}
+	default:
+		return ev, nil
+	}
+	return out, json.Unmarshal(b, out)
 }
 
 // UnmarshalJSON decodes the typed evidence by its kind; Go clients decode a detail with it.
@@ -78,7 +108,7 @@ func (d *FindingDetail) UnmarshalJSON(b []byte) error {
 }
 
 // wireEvidence is e for the caller of v, times in UTC: KGWUI-001 keeps the
-// recently changed objects v may view. The model's evidence is never changed.
+// recently changed objects v may view; KGWUI-015 links its policy. The model's evidence is never changed.
 func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 	switch ev := e.(type) {
 	case *health.XDSRejectsEvidence:
@@ -115,6 +145,15 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 			out.Probe = &c
 		}
 		return &out
+	case *health.RuleReplacedEvidence:
+		// The policy is in Finding.Evidence, so a caller who gets here may view it.
+		out := &RuleEvidence{rulePlain: rulePlain(*ev)}
+		out.rulePlain.Policy = nil
+		if ev.Policy != nil {
+			lr := l.linked(*ev.Policy)
+			out.Policy = &lr
+		}
+		return out
 	}
 	return e
 }

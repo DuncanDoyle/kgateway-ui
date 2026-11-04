@@ -57,7 +57,8 @@ export type Evidence =
   | XDSRejectsEvidence
   | ProxyStatsEvidence
   | FreshnessEvidence
-  | RefsEvidence;
+  | RefsEvidence
+  | RuleReplacedEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -159,6 +160,17 @@ export interface RefsEvidence {
   explanation: "kind-not-served" | "controller";
   candidates?: RefLocation[];
   attributed: boolean;
+}
+/**
+ * Why KGWUI-015 reports a rule (design §7.4). matchIndex is the controller's match index, not a rule index,
+ * and absent when the message does not parse; policy is the one served policy the message names.
+ */
+export interface RuleReplacedEvidence {
+  kind: "rule-replaced";
+  matchIndex?: number;
+  reason: "RouteRuleReplaced" | "RouteRuleDropped";
+  message: string;
+  policy?: LinkedRef;
 }
 
 /**
