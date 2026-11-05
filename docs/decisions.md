@@ -957,3 +957,28 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** 5.2 MiB of headroom for 3.4. `TestBudgetHeap` gates 40 MiB.
 
 **Alternatives:** Cut retained state to fit 32 MiB (not taken: about 0.2 MiB of savings found; the other gates already bound the pod's memory).
+
+## D-055 — Sub-phase 3.3 as built: deviations from the design (2026-11-05, phase 3)
+**Status:** accepted by the user on 2026-11-05; rulings R79, R88, R94, R95, R101, R105 and R108 and the 3.3 task reviews. Amends design §5.2, §5.3, §7.5, §7.7, §8.9, §13.3, §17.2, §17.4 and the 3.3 row of §23
+
+**Context:**
+- 3.3 shipped with the choices below, made while building it. Each is verified against the code.
+
+**Decision:**
+1. §7.7, R88: `Finding.Fix` is dropped. `diagnose.Fix(f)` builds the suggested fix per request from the finding's evidence alone.
+2. §5.3, Task 64: a group's class is its lowest-numbered member class, so its rank follows its most severe member.
+3. §5.2, Task 64: the "Not permitted" group key is (from namespace, to namespace, to group and kind).
+4. §7.5, R94, R95: rule names are "listener port and hostname" and "listener port and protocol". The condition's reason picks the other side, from listeners kgateway kept only. Other reasons list none.
+5. §8.9, R101: the previous-container read asks for the last 200 lines with a 4 MiB client cap and sends no byte limit, which would cut the end of the tail.
+6. §8.9, Task 68: KGWUI-001's `since` survives a UI restart only within the 15-minute log backfill.
+7. §8.9, Task 72: Envoy never creates a rejected cluster or listener, so CDS and LDS reject names never appear in proxy stats. On real clusters those rejects keep only the error class. Unit tests cover the name-keeping path.
+8. §13.3, R108: `GroupRow` gains `grant`, the shape of a "Not permitted" group, which has no cause object.
+9. §17.2, Task 69: the web component is `SuggestedFixView`. The type `SuggestedFix` keeps its name.
+10. §8.9, Tasks 65 and 66: the log parser types (`LogParser`, `LogWindow`, `DeployerLogClass`) live in `pkg/computed`.
+11. §8.9, R105: "withheld" evidence expires 15 minutes after the last qualifying line.
+12. §17.4, Task 69: the grouped findings view drops the flat view's filters, and browser Back does not restore them.
+13. §23 (3.3 row), R79: `analyze -f` over files is not in 3.3. 3.3 delivers the analyzer over a cache snapshot, proven by the one-shot test (D-053, program edge E3).
+
+**Consequences:** The design states the as-built behaviour. Offline snapshot semantics for `analyze -f` (served kinds, discovery, access, install) need a design before they are built. Changing the previous-container read is one constant.
+
+**Alternatives:** n/a.

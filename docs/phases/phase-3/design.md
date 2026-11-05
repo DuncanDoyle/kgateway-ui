@@ -159,7 +159,7 @@ A **group** is one cause with the findings it explains. The home page lists grou
 |---|---|---|---|
 | Data plane rejects | the Gateway | its KGWUI-001 | routes, ListenerSets and policies with a current `Accepted=True` or `Programmed=True` entry for that Gateway (§8.4) |
 | Missing backend | the unresolved backend identity, after defaults | every KGWUI-013 whose route names it | those routes |
-| Not permitted | (from namespace, to namespace, to kind) | every KGWUI-014 with that shape | those routes and listeners |
+| Not permitted | (from namespace, to namespace, to group and kind) | every KGWUI-014 with that shape | those routes and listeners |
 | Replaced by policy | the policy named in the rule message, when it parses (§7.4) | every KGWUI-015 naming it | those routes |
 | Status not progressing | the controller Deployment | KGWUI-018 and the KGWUI-003 warnings it explains | those objects |
 | Empty backend | the Service | its KGWUI-023 | routes that reference it |
@@ -174,7 +174,7 @@ A **group** is one cause with the findings it explains. The home page lists grou
 
 Groups are ordered by these keys, in order **(our call)**:
 1. **Severity** of the worst member: error, then warning, then info.
-2. **Class:**
+2. **Class:** a group takes its lowest-numbered member class (D-055).
    1. data plane: 001, 024, 026, 025;
    2. processes: 005, 006, 019, 020, 021;
    3. traffic-affecting configuration: 015, 017, 013, 014, 023, 016, 011, and 003 after grace;
@@ -274,7 +274,7 @@ Listener `InvalidCertificateRef` quotes the controller. The UI cannot read Secre
 ### 7.5 Listener conflicts (017)
 
 - The trigger is the controller's `Conflicted=True` on a listener. Today Phase 1 reports only `False` conditions, so a conflicted listener on a Gateway that says `Accepted=True` with reason `ListenersNotValid` raises nothing.
-- **Both sides named.** The evidence lists the other listeners on the same Gateway, including its ListenerSets, that the controller kept: current status, `Accepted=True`, no `Conflicted=True`, and supported kinds. The rule follows the condition's reason, labelled "Computed by the UI" with the rule name. A `HostnameConflict` lists those with the same port and the exact same hostname, rule "listener port and hostname". A `ProtocolConflict` lists those with the same port and a different protocol, rule "listener port and protocol". Any other reason lists none (R94, R95; decision recorded at the 3.3 close). This is a spec-level comparison of two listener specs, not translation. If the UI finds no other side, the evidence says "The controller reports a conflict. The UI finds no other accepted listener on port 443 with this hostname" (or "uses another protocol") and raises no disagreement.
+- **Both sides named.** The evidence lists the other listeners on the same Gateway, including its ListenerSets, that the controller kept: current status, `Accepted=True`, no `Conflicted=True`, and supported kinds. The rule follows the condition's reason, labelled "Computed by the UI" with the rule name. A `HostnameConflict` lists those with the same port and the exact same hostname, rule "listener port and hostname". A `ProtocolConflict` lists those with the same port and a different protocol, rule "listener port and protocol". Any other reason lists none (R94, R95; D-055). This is a spec-level comparison of two listener specs, not translation. If the UI finds no other side, the evidence says "The controller reports a conflict. The UI finds no other accepted listener on port 443 with this hostname" (or "uses another protocol") and raises no disagreement.
 
 ### 7.6 Policy target not found (016)
 
@@ -309,6 +309,7 @@ Where the evidence leaves exactly one correct change, the finding carries a **su
 Rules **(our call)**:
 - A fix is only suggested when exactly one answer follows from the spec, discovery or a watched object. More than one candidate, or any kgateway-specific behaviour, gives no fix, only next steps. The UI never derives a fix from translation logic (principle 4).
 - **A fix needs one attributable ref** **(our call, Codex review 2026-11-01)**. A `ResolvedRefs` condition names its parent or listener, not the ref that failed. 013's group and port fixes are attributable because the UI's own check finds the one ref with that fault (discovery, Service ports). 014 gets a fix only when the parent or listener has exactly one cross-namespace ref of the failing field (route `backendRefs`, listener `certificateRefs`). Otherwise the finding lists the candidate refs with their locations and gives next steps, with no YAML.
+- A fix is built per request from the finding's evidence alone, by `diagnose.Fix(f)`; a finding stores none (R88, D-055).
 - The UI never applies a fix (D-001). The user copies the YAML, or downloads it as a file.
 - A fix for an existing object is the changed fragment with its location (`spec.rules[2].backendRefs[0]`), not the whole object, so it cannot overwrite fields the user did not see.
 - A fix names only objects the caller may view (§14 rule 15). If it would need a hidden name, there is no fix.
@@ -433,21 +434,21 @@ The decisive data for a reject, Envoy's reason, is in the controller log: kgatew
 
 **Reading.**
 - One follow stream per controller replica, starting 15 min back (`sinceSeconds=900`), reconnecting with back-off.
-- After a controller restart (019), one read of the previous container's log, capped at 256 KiB.
+- After a controller restart (019), one read of the previous container's log, asked for as its last 200 lines, with a client cap of 4 MiB and no byte limit sent, so the API never cuts the end of the tail where a crash sits (D-055).
 - A substring prefilter on fixed markers runs first. A line without a marker is dropped unparsed and never buffered.
 
 **What is kept.** Each marker has a parser pinned per kgateway version, tested on captured lines (like the rule sets):
 
 | Marker | Fields kept | Used by |
 |---|---|---|
-| `"xds error"` | time, Gateway, type URL; from Envoy's message, the resource names in Envoy's fixed NACK shapes (for example `Error adding/updating listener(s) <name>:`) that equal a name known from proxy stats, and an error class from a fixed list | KGWUI-001 evidence: the rejected Envoy resource and error class; the earliest event becomes `since`, which survives a UI restart |
-| the snapshot-deferral line on 2.3 and 2.4 (exact text pinned when the parser is written) | time, Gateway | the "withheld" evidence that 024 gives on 2.5 |
+| `"xds error"` | time, Gateway, type URL; from Envoy's message, the resource names in Envoy's fixed NACK shapes (for example `Error adding/updating listener(s) <name>:`) that equal a name known from proxy stats, and an error class from a fixed list | KGWUI-001 evidence: the rejected Envoy resource and error class; the earliest event becomes `since`, which survives a UI restart only while that event is inside the 15 min backfill (D-055) |
+| the snapshot-deferral line on 2.3 and 2.4 (exact text pinned when the parser is written) | time, Gateway | the "withheld" evidence that 024 gives on 2.5; a Gateway reads withheld on two or more such lines at least 60 s apart, and 15 min after the last one it no longer does (D-055) |
 | a Go panic, previous container only | the class `panic` and the top frame's function name | KGWUI-019 evidence |
 | deployer apply errors | time, the object kind and name, error class | KGWUI-021 and KGWUI-006 evidence |
 
 Rules **(our call)**:
 - Log text is never stored, logged by the UI, sent anywhere or returned by the API. After matching, only the fields above remain.
-- A name is kept only if it equals an Envoy resource name the UI already knows from that Gateway's proxy stats (§8.8). Any other extracted text is discarded and only the error class is kept, because a grammar alone admits a credential that looks like a name **(our call, Codex review 2026-11-01)**. With proxy stats off or failing, no names are kept. An error class not on the list becomes `other`.
+- A name is kept only if it equals an Envoy resource name the UI already knows from that Gateway's proxy stats (§8.8). Any other extracted text is discarded and only the error class is kept, because a grammar alone admits a credential that looks like a name **(our call, Codex review 2026-11-01)**. With proxy stats off or failing, no names are kept. Envoy never creates a rejected cluster or listener, so a CDS or LDS reject name never appears in proxy stats: on a real cluster those rejects keep only the error class, and the name-keeping path is covered by unit tests only (D-055). An error class not on the list becomes `other`.
 - At most 1,000 derived events per install; the oldest are dropped.
 - When markers match but a parser fails 10 times in a row, the capability turns "not available: log format not recognised", so a format change never yields silent wrong output.
 - Derived events name objects, so the Authorizer rules apply (§14).
@@ -651,7 +652,8 @@ NextStep       { title, command, needs?: string[], note? }       // needs: e.g. 
 SuggestedFix   { title, target: LinkedRef, create: boolean, path?: string, yaml, basis }
                                                                 // path: the fragment's location when create is false
 GroupRow       { id, title, code, severity, class, cause?: LinkedRef, members: number, affected: LinkedRef[],
-                 affectedTotal, since?, nextSteps?: NextStep[], restricted? }
+                 affectedTotal, since?, nextSteps?: NextStep[], restricted?,
+                 grant?: { fromNamespace, toNamespace, toGroup, toKind } }   // "Not permitted" groups only (D-055)
 Diagnostics    { install, verdict: { state, problems, counts, oldestSince?, reason? }, groups: GroupRow[], groupTotal,
                  processes: { controller: ProcessSummary, proxies: ProxySummary },
                  dataPlane: { gateways, rejecting, unavailable? }, checks: CheckResult[], collectedAt }
@@ -829,7 +831,7 @@ The install nav gains Processes. `CorePages` gains optional `DiagnosticsSection`
 ### 17.2 Components
 
 - `NextSteps`: numbered steps, each a code block with a copy button, the needed permission and a note. Commands render as text, never as HTML.
-- `SuggestedFix`: the target object as a link, the fragment's location, the YAML with copy and download buttons, and the basis in one line. Shown above the next steps (§7.7).
+- `SuggestedFixView` (the type stays `SuggestedFix`, D-055): the target object as a link, the fragment's location, the YAML with copy and download buttons, and the basis in one line. Shown above the next steps (§7.7).
 - `EvidenceView`: one renderer per evidence `kind`. It is the only owner of `findingRenderers` (Phase 1 design §6.3): a kind the shell does not know, or a finding with no evidence, renders the code's renderer, and a restricted finding renders none. Finding actions render on the finding page (D-051).
 - `GroupRow`: state, title, cause link, blast radius, age, code chip and the next-step expander.
 - `ProcessLine`, `ProcessTable`.
@@ -844,6 +846,7 @@ Phase 2's state table (Phase 2 design §8.6) applies. Added:
 ### 17.4 Interaction and accessibility
 
 Phase 2 design §8.7 applies.
+- The grouped findings view drops the flat view's filters, and browser Back does not restore them (D-055).
 - Every new interactive element (group rows, expanders, copy buttons, filters) has hover, active and focus-visible styles in both themes.
 - Expanders carry `aria-expanded`. Copy buttons announce "Copied" to screen readers.
 - State is always icon, colour and text, at WCAG AA, checked by the existing token test.
@@ -1059,7 +1062,7 @@ Each sub-phase has its own brief, a cross-model review of its diff, its benchmar
 | **3.0 Extension seams** | The seven seams of §4.1: `WithHandlers`, `WithCollectors`, `WithCapabilities`, the built shell package, `ShellExtension.contributions`, the chart extension values; `examples/downstream` extended to use each, with tests; README extension docs. No change for users of the stock UI | A downstream can add a whole feature without forking |
 | **3.1 Foundations, performance and the KRT decision** | Performance work first: Phase 2 baselines, including the spec-edit stream variant; per-check memoization; the KRT spike and D-027. The new `health.Check` contract and the Store (D-032): every core, example and `examples/downstream` check migrated; README upgrade notes. Delegation memory carry-over. Finding `id`, `group` and rank fields; `since` per §5.1. `GET …/findings` and `GET …/findings/{id}`; the SPA findings page moves to server paging. Metrics: per Pod and per type, `rejects_total`, `resources_updates_dropped_total`. Scale tier extension. 2.5 fixtures if cheap. Shell and navigation (§17.6, D-035): `ObjectHeader`, the fluid and two-column layout, path-based breadcrumbs | Same pages, easier to read and navigate; findings have ids and page on the server |
 | **3.2 Data plane, processes and the overview** | KGWUI-001 re-specified: evidence, `since`, restart hold, `gateway-rejecting`, next steps. `pkg/process` and the Kubernetes source; proxy Pod, Event and CRD metadata watches; 019, 020, 021, 022; the processes endpoint and page; the diagnostics endpoint; the install page's "Needs attention" and "Processes"; the Gateway Data plane and Proxies sections. Proxy Envoy stats (§8.8), 025 and 026, and the per-Pod 001 evidence. RBAC (events, CRDs) and toggles; the README RBAC fix; `renderWhenFontsReady`. Wording pass | The health overview, ranked, with xDS rejects and process health |
-| **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; suggested fixes for 013 and 014 (§7.7); derived controller log signals behind `diagnostics.controllerLogs` (§8.9); `docs/findings.md`. Wording pass | The analyzer floor and freshness findings, with suggested fixes |
+| **3.3 Analyzer** | 013 (without Service data), 014, 015, 016 with the new `computed-rules.md` section and verifier, 017, 018, KGWUI-003 evidence kinds; groups for missing backend, not permitted, replaced by policy and status not progressing; findings grouped view; suggested fixes for 013 and 014 (§7.7); derived controller log signals behind `diagnostics.controllerLogs` (§8.9); `docs/findings.md`. Wording pass. The analyzer runs over a cache snapshot, proven by a one-shot test; `analyze -f` over files is not in 3.3 (R79, D-055) | The analyzer floor and freshness findings, with suggested fixes |
 | **3.4 Backends and kgateway 2.5** | Service and EndpointSlice watches with transforms; 023; 013's Service explanations; the `endpoints` capability and toggle. Once 2.5.0 GA ships (D-033): the 2.5 rule set, a 2.5 e2e row, 024, the controller-reported `TargetNotFound` path for 016, `kgateway_build_info` for the controller version, and the 2.5 fixtures if 3.1 did not capture them | Empty backends; kgateway 2.5 supported |
 
 A stabilization sub-phase follows the phase review, as in Phases 1 and 2. 3.0 comes first: 3.1's contract adds collector keys to `InputSet`, and 3.1's layout work keeps the slots of §4.1. Every sub-phase builds on 3.1's check contract, Store, identity and paging; 3.4's 013 explanation depends on 3.3's 013. Each of 3.2, 3.3 and 3.4 shows its benchmarks within the §16.3 gates before it ships. The order puts the research's top-ranked signals (rejects, processes) first, after the performance work. If 2.5.0 GA is not out when the rest of 3.4 is ready, the 2.5 items wait for it and the rest ships.
