@@ -59,7 +59,8 @@ export type Evidence =
   | FreshnessEvidence
   | RefsEvidence
   | RuleReplacedEvidence
-  | ListenerConflictEvidence;
+  | ListenerConflictEvidence
+  | StatusProgressEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -196,6 +197,22 @@ export interface ListenerConflictEvidence {
   rule?: "listener port and hostname" | "listener port and protocol";
   others?: ConflictingListener[];
   othersTotal: number;
+}
+
+/** How many stuck objects have one design §10.1 kind; an object counts under its first kind in table order. */
+export interface FreshnessCount {
+  freshness: FreshnessEvidence["freshness"];
+  objects: number;
+}
+/**
+ * Why KGWUI-018 reports the controller (design §10.2): stuck objects per kind, the oldest KGWUI-003 warning's since,
+ * and the status syncs in the last 5 min. syncs is absent when unknown, which never means zero.
+ */
+export interface StatusProgressEvidence {
+  kind: "status-progress";
+  kinds: FreshnessCount[];
+  oldest: string;
+  syncs?: number;
 }
 
 /**

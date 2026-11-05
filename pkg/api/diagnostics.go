@@ -194,6 +194,10 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 			out.Others = append(out.Others, ConflictListener{Owner: l.linked(o.Owner), Name: o.Name, Protocol: o.Protocol, Hostname: o.Hostname})
 		}
 		return out
+	case *health.StatusProgressEvidence:
+		out := *ev
+		out.Oldest = wireTime(ev.Oldest)
+		return &out
 	}
 	return e
 }

@@ -189,3 +189,23 @@ func TestStepsNameOnlyVisibleObjects(t *testing.T) {
 		}
 	}
 }
+
+// Design §10.2: 018's step greps the controller log for status, through the
+// Deployment, once for the whole group; a hidden Deployment gets no step.
+func TestStatusNotProgressingStep(t *testing.T) {
+	ctrl := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	route := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "cart"}
+	fs := []health.Finding{
+		{Code: health.CodeStatusNotProgressing, Severity: health.SeverityWarning, Resource: &ctrl, Facts: &health.StatusProgressEvidence{}},
+		{Code: health.CodeRouteUnattached, Severity: health.SeverityWarning, Resource: &route, Facts: &health.FreshnessEvidence{Freshness: health.FreshnessStale}},
+	}
+	gs := steps(t, stepsInput(), diagnose.Kubectl{}, fs...)
+	want := []diagnose.NextStep{{Title: diagnose.StepStatusLog, Command: "kubectl logs -n kgw deploy/kgateway --since=1h | grep status",
+		Needs: []string{"pods/log"}, Note: diagnose.StepShareNote, Refs: []objects.Ref{ctrl}}}
+	if len(gs) != 1 || !reflect.DeepEqual(gs[0], want) {
+		t.Fatalf("steps %+v, want %+v", gs, want)
+	}
+	if gs := stepsFor(t, stepsInput(), diagnose.Kubectl{}, func(r objects.Ref) bool { return r != ctrl }, fs...); len(gs[0]) != 0 {
+		t.Fatalf("hidden controller: %+v", gs[0])
+	}
+}

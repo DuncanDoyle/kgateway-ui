@@ -26,6 +26,9 @@ const (
 	// XDSSnapshotResources is the controller's xDS snapshot per Gateway and
 	// resource type: what it built, not what proxies accepted.
 	XDSSnapshotResources = "kgateway_xds_snapshot_resources"
+	// StatusSyncsTotal counts status syncs per syncer, object and result
+	// (labels name, namespace, syncer, result; proxy_syncer/metrics.go:23-30 on v2.3.11 and v2.4.7).
+	StatusSyncsTotal = "kgateway_status_syncer_status_syncs_total"
 )
 
 // GatewayKey identifies a Gateway in metric labels.
@@ -55,6 +58,10 @@ type PodMetrics struct {
 	// family is absent, which never means zero.
 	Dropped        float64
 	DroppedPresent bool
+	// StatusSyncs is status_syncs_total summed over its series; StatusSyncsPresent
+	// is false when the family is absent, which never means zero.
+	StatusSyncs        float64
+	StatusSyncsPresent bool
 }
 
 // Metrics is the interpreted subset of one or more controller scrapes.
@@ -100,6 +107,12 @@ func Parse(r io.Reader) (Metrics, error) {
 		pod.DroppedPresent = len(f.GetMetric()) > 0
 		for _, s := range f.GetMetric() {
 			pod.Dropped += s.GetCounter().GetValue()
+		}
+	}
+	if f, ok := fams[StatusSyncsTotal]; ok {
+		pod.StatusSyncsPresent = len(f.GetMetric()) > 0
+		for _, s := range f.GetMetric() {
+			pod.StatusSyncs += s.GetCounter().GetValue()
 		}
 	}
 	m.PerPod = []PodMetrics{pod}

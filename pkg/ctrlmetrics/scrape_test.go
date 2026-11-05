@@ -267,6 +267,26 @@ func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	testutil.Recv(t, c.OnResult.C(), "the notification for changed content")
 }
 
+// A scrape whose only change is status_syncs_total notifies, so 018's syncs
+// evidence never waits for the staleness deadline.
+func TestCollectorNotifiesOnStatusSyncsChange(t *testing.T) {
+	syncs := func(n string) *string {
+		b := sample + "# TYPE " + StatusSyncsTotal + " counter\n" + StatusSyncsTotal + `{name="gw",namespace="app-a",result="success",syncer="GatewayStatusSyncer"} ` + n + "\n"
+		return &b
+	}
+	var body atomic.Pointer[string]
+	body.Store(syncs("2"))
+	c, clk, acks := runHooked(t, &body, time.Hour)
+	ack(t, acks, clk.Now())
+	testutil.Recv(t, c.OnResult.C(), "the first notification")
+	body.Store(syncs("3"))
+	clk.Step(10 * time.Second)
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("a changed status_syncs_total must notify")
+	}
+	testutil.Recv(t, c.OnResult.C(), "the notification for changed syncs")
+}
+
 // Codex 1: a result that follows a stale one notifies even with equal content.
 func TestCollectorNotifiesAfterStaleResult(t *testing.T) {
 	var body atomic.Pointer[string]

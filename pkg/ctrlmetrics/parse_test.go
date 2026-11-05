@@ -260,3 +260,26 @@ func TestParseSnapshotResources(t *testing.T) {
 		t.Errorf("an absent family is no snapshot: %+v", m.Snapshot)
 	}
 }
+
+// Contract: status_syncs_total is summed over its series per Pod, on every
+// supported version; a scrape without the family is not present, never zero.
+func TestParseStatusSyncs(t *testing.T) {
+	for _, tag := range []string{"v2.3.11", "v2.4.7"} {
+		f := "testdata/" + tag + ".txt"
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ls := range labelNames(t, string(b), StatusSyncsTotal) {
+			if strings.Join(ls, ",") != "name,namespace,result,syncer" {
+				t.Errorf("%s: %s labels %v, want name,namespace,result,syncer", f, StatusSyncsTotal, ls)
+			}
+		}
+		if p := parseFile(t, f).PerPod[0]; !p.StatusSyncsPresent || p.StatusSyncs != 4 {
+			t.Errorf("%s: status syncs %+v, want 4 summed over the capture's three series", f, p)
+		}
+	}
+	if p := parseFile(t, "testdata/v2.3.11-rejects-a.txt").PerPod[0]; p.StatusSyncsPresent || p.StatusSyncs != 0 {
+		t.Errorf("a capture without the family is not present: %+v", p)
+	}
+}

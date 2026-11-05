@@ -84,6 +84,7 @@ import type {
   FindingDetail,
   FindingItem,
   Fraction,
+  FreshnessCount,
   FreshnessEvidence,
   GatewayDetail,
   GatewayListRow,
@@ -137,6 +138,7 @@ import type {
   ScopeSummary,
   ServedKind,
   SpecParentRef,
+  StatusProgressEvidence,
   SuggestedFix,
   TerminationFacts,
   TrailRefs,
@@ -334,6 +336,17 @@ const evidenceShapes = {
       kind: { "listener-conflict": 1 },
       rule: { "listener port and hostname": 1, "listener port and protocol": 1 },
     },
+  ),
+  "status-progress": shape<StatusProgressEvidence>(
+    { kind: "!", kinds: "!", oldest: "!", syncs: "?" },
+    {
+      kinds: shape<FreshnessCount>(
+        { freshness: "!", objects: "!" },
+        {},
+        { freshness: { "never-written": 1, stale: 1, pending: 1, "no-ancestor": 1 } },
+      ),
+    },
+    { kind: { "status-progress": 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

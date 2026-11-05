@@ -114,6 +114,7 @@ const (
 	StepProxyLog      = "See the reject in the proxy log"
 	StepProxyCounters = "Read the proxy's update counters"
 	StepPanicTrace    = "Read the panic's stack trace"
+	StepStatusLog     = "See status errors in the controller log"
 	StepShareNote     = "Log lines and admin output can contain configuration values, including secrets. Share them with care."
 	// StepPortForwardNote leads the counters step's note: it is the one command that opens a connection (§12).
 	StepPortForwardNote = "This command opens a connection to the proxy's admin port."
@@ -174,6 +175,9 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands, can func(ob
 			}
 			pod := process.PodRef(f.Resource.Namespace, process.Process{Name: ev.Pod})
 			add(StepPanicTrace, c.PreviousLog(pod, in.Install.Container), needsLog, pod)
+		case *health.StatusProgressEvidence:
+			// kubectl reads one of the Deployment's Pods; the grep is design §10.2's.
+			add(StepStatusLog, c.ControllerLog(*f.Resource, stepsSince, "status"), needsLog, *f.Resource)
 		}
 	}
 	return out

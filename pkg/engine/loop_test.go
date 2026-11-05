@@ -594,6 +594,14 @@ func TestMetricsIdentityCoversContent(t *testing.T) {
 	if enc(later, true) != enc(res(1), true) {
 		t.Fatal("CollectedAt is not part of the identity")
 	}
+	pod := func(n float64, present bool) ctrlmetrics.Result {
+		r := res(1)
+		r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u", Name: "p", StatusSyncs: n, StatusSyncsPresent: present}}
+		return r
+	}
+	if enc(pod(2, true), true) == enc(pod(3, true), true) || enc(pod(0, true), true) == enc(pod(0, false), true) {
+		t.Fatal("status_syncs_total and its presence must be part of the identity")
+	}
 	errRes := res(0)
 	errRes.Err = "no ready controller pod to scrape"
 	if enc(errRes, true) == enc(res(0), true) {

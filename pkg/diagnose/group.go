@@ -31,7 +31,7 @@ var classes = map[string]Class{
 	health.CodeControllerNotReady: ClassProcesses, health.CodeProxyNotReady: ClassProcesses,
 	"KGWUI-019": ClassProcesses, "KGWUI-020": ClassProcesses, "KGWUI-021": ClassProcesses,
 	"KGWUI-013": ClassTraffic, "KGWUI-014": ClassTraffic, health.CodeRuleReplaced: ClassTraffic, "KGWUI-016": ClassTraffic,
-	"KGWUI-017": ClassTraffic, "KGWUI-023": ClassTraffic, health.CodeDelegatedNotAttached: ClassTraffic,
+	health.CodeListenerConflicted: ClassTraffic, "KGWUI-023": ClassTraffic, health.CodeDelegatedNotAttached: ClassTraffic,
 }
 
 // ClassOf returns f's class (design §5.3): KGWUI-003 is traffic once a
@@ -115,6 +115,7 @@ type Diagnosis struct {
 // a diagnosis on exactly those, so a family must not read Snapshot or Served (Steps may).
 func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	id := in.Install.ID()
+	families = bindAll(rep.Findings, families)
 	groups := make([]Group, 0, len(rep.Findings))
 	// meta is per group: its family's index in families (len for "Other"), cause key and member count.
 	type groupMeta struct {
@@ -199,6 +200,25 @@ func Build(rep *health.Report, in Input, families []Family) *Diagnosis {
 	return d
 }
 
+// binder is a family whose claims depend on the report's other findings.
+type binder interface {
+	bind(fs []health.Finding) Family
+}
+
+// bindAll returns families with each binder bound to fs; a copy only when one is bound.
+func bindAll(fs []health.Finding, families []Family) []Family {
+	out, copied := families, false
+	for j, fam := range families {
+		if b, ok := fam.(binder); ok {
+			if !copied {
+				out, copied = slices.Clone(families), true
+			}
+			out[j] = b.bind(fs)
+		}
+	}
+	return out
+}
+
 // claim returns the index in families of the family claiming f first and f's
 // cause in it; len(families) is the "Other" family.
 func claim(f health.Finding, in Input, families []Family) (int, *objects.Ref, []string) {
@@ -212,7 +232,9 @@ func claim(f health.Finding, in Input, families []Family) (int, *objects.Ref, []
 }
 
 // Families returns the families in design §5.2 table order; "Other" is last.
-func Families() []Family { return []Family{dataPlane{}, replacedByPolicy{}, processFamily{}, other{}} }
+func Families() []Family {
+	return []Family{dataPlane{}, replacedByPolicy{}, statusNotProgressing{}, processFamily{}, other{}}
+}
 
 // dataPlane groups a Gateway's KGWUI-001. Its affected objects have a current
 // Accepted=True or Programmed=True status for the Gateway (design §8.4).
@@ -256,6 +278,47 @@ func (replacedByPolicy) Affected(gs []Claimed, fs []health.Finding, _ Input) [][
 	for k, g := range gs {
 		for _, i := range g.Members {
 			if r := fs[i].Resource; r != nil && !slices.Contains(out[k], *r) {
+				out[k] = append(out[k], *r)
+			}
+		}
+		slices.SortFunc(out[k], objects.Ref.Compare)
+	}
+	return out
+}
+
+// statusNotProgressing groups KGWUI-018 with every KGWUI-003 warning of the
+// install, which it explains (design §5.2, R77). The cause is 018's controller
+// Deployment; the 003s' objects are affected. Unbound, it claims only 018.
+type statusNotProgressing struct{ cause *objects.Ref }
+
+func (statusNotProgressing) Name() string { return "Status not progressing" }
+
+func (statusNotProgressing) bind(fs []health.Finding) Family {
+	for i := range fs {
+		if fs[i].Code == health.CodeStatusNotProgressing && fs[i].Resource != nil {
+			return statusNotProgressing{cause: fs[i].Resource}
+		}
+	}
+	return statusNotProgressing{}
+}
+
+func (s statusNotProgressing) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	switch {
+	case f.Code == health.CodeStatusNotProgressing:
+		return f.Resource, nil, f.Resource != nil
+	case f.Code == health.CodeRouteUnattached && f.Severity == health.SeverityWarning:
+		return s.cause, nil, s.cause != nil
+	}
+	return nil, nil, false
+}
+
+func (statusNotProgressing) Affected(gs []Claimed, fs []health.Finding, _ Input) [][]objects.Ref {
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		seen := make(map[objects.Ref]bool, len(g.Members))
+		for _, i := range g.Members {
+			if r := fs[i].Resource; r != nil && fs[i].Code == health.CodeRouteUnattached && !seen[*r] {
+				seen[*r] = true
 				out[k] = append(out[k], *r)
 			}
 		}

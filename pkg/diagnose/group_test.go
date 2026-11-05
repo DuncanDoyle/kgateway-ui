@@ -355,3 +355,37 @@ func TestBuildNeverWritesAServedReport(t *testing.T) {
 		t.Fatalf("want the report regrouped in its own slice: %+v", rep.Findings)
 	}
 }
+
+// Design §5.2 and R77: a 018 explains every 003 warning of its install, so they
+// share its group on the controller Deployment, with their objects affected.
+// A 003 inside its grace stays in "Other", as does every 003 without a 018.
+func TestStatusNotProgressingFamily(t *testing.T) {
+	deploy := &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	a, b, c := ref("HTTPRoute", "a"), ref("HTTPRoute", "b"), ref("HTTPRoute", "c")
+	fs := []health.Finding{
+		finding("a-1", health.CodeRouteUnattached, health.SeverityWarning, a, nil),
+		finding("progress", health.CodeStatusNotProgressing, health.SeverityWarning, deploy, nil),
+		finding("b-1", health.CodeRouteUnattached, health.SeverityWarning, b, nil),
+		finding("a-2", health.CodeRouteUnattached, health.SeverityWarning, a, nil),
+		finding("c-grace", health.CodeRouteUnattached, health.SeverityInfo, c, nil),
+	}
+	rep := &health.Report{Findings: slices.Clone(fs)}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	got := map[string]string{}
+	for _, g := range d.Groups {
+		got[groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0]] = g.Family
+		if g.Family == "Status not progressing" &&
+			(*g.Cause != *deploy || g.ID != health.GroupID(in.Install.ID(), g.Family, deploy, nil) || !slices.Equal(g.Affected, []objects.Ref{*a, *b})) {
+			t.Errorf("status group %+v", g)
+		}
+	}
+	if want := map[string]string{"a-1+progress+b-1+a-2": "Status not progressing", "c-grace": "Other"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("groups %v, want %v", got, want)
+	}
+	rep = &health.Report{Findings: slices.Delete(slices.Clone(fs), 1, 2)}
+	for _, g := range diagnose.Build(rep, in, diagnose.Families()).Groups {
+		if g.Family != "Other" {
+			t.Errorf("without a 018: group %+v", g)
+		}
+	}
+}

@@ -1,11 +1,19 @@
 package health
 
 import (
+	"fmt"
+	"reflect"
+	"slices"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 // freshness003 returns the evidence of the one KGWUI-003 on res.
@@ -69,5 +77,240 @@ func TestBlockFreshnessCRDDefault(t *testing.T) {
 	w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{})
 	if f, ev := freshness003(t, w.report(t), "infra/edge"); ev.Freshness != FreshnessNeverWritten || f.Detail != noControllerStatus {
 		t.Fatalf("want never-written, got %q %+v", f.Detail, ev)
+	}
+}
+
+// progressWorld is the healthy world with total objects with status: the
+// GatewayClass, the Gateway and routes, of which stale and never are routes
+// with a KGWUI-003 warning (a stale status, and none from the controller).
+func progressWorld(total, stale, never int) *world {
+	w := healthyWorld()
+	gw := testutil.GwRef("infra", "edge")
+	w.objs = w.objs[:2]
+	for i := range total - 2 {
+		var r *unstructured.Unstructured
+		if i < never {
+			r = testutil.HTTPRoute("shop", fmt.Sprintf("r%03d", i), []objects.ParentRef{gw})
+		} else {
+			r = testutil.HTTPRoute("shop", fmt.Sprintf("r%03d", i), []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller))
+			if i < never+stale {
+				r.SetGeneration(2) // conditions observed generation 1
+			}
+		}
+		w.objs = append(w.objs, r)
+	}
+	return w
+}
+
+// progressRuns evaluates w at testutil.Now plus each offset on one States; at
+// sets the metrics collected at an offset, nil leaves them as they are.
+func progressRuns(t *testing.T, w *world, at func(off time.Duration) *ctrlmetrics.Result, offsets ...time.Duration) []Report {
+	t.Helper()
+	rt := Runtime{States: NewStates()}
+	var out []Report
+	for _, off := range offsets {
+		if at != nil {
+			w.metrics = at(off)
+		}
+		in := w.input(t)
+		in.Now = testutil.Now.Add(off)
+		out = append(out, Evaluate(in, Upstream(), rt))
+	}
+	return out
+}
+
+// notProgressing returns the KGWUI-018 findings of r.
+func notProgressing(r Report) []Finding {
+	var out []Finding
+	for _, f := range r.Findings {
+		if f.Code == CodeStatusNotProgressing {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// Design §10.2: 018 matures 5 min after the condition starts; until then the
+// check wakes at the deadline. Its evidence counts objects per §10.1 kind.
+func TestStatusNotProgressingMatures(t *testing.T) {
+	w := progressWorld(20, 8, 2)
+	rs := progressRuns(t, w, nil, 0, 4*time.Minute+59*time.Second, 5*time.Minute+time.Second)
+	deadline := testutil.Now.Add(progressHold)
+	for i, r := range rs[:2] {
+		if fs := notProgressing(r); len(fs) != 0 {
+			t.Fatalf("run %d: 018 before maturing: %+v", i, fs)
+		}
+	}
+	if !rs[1].Next.Equal(deadline) {
+		t.Errorf("at 4:59 next is %v, want %v", rs[1].Next, deadline)
+	}
+	fs := notProgressing(rs[2])
+	if len(fs) != 1 {
+		t.Fatalf("want one 018 at 5:01, got %+v", fs)
+	}
+	f := fs[0]
+	if f.Severity != SeverityWarning || f.Resource == nil || *f.Resource != (objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}) || f.Slug != "status-not-progressing" ||
+		f.Since == nil || !f.Since.Equal(testutil.Now) {
+		t.Fatalf("018 %+v", f)
+	}
+	ev, _ := f.Facts.(*StatusProgressEvidence)
+	want := &StatusProgressEvidence{Kinds: []FreshnessCount{{FreshnessNeverWritten, 2}, {FreshnessStale, 8}}, Oldest: testutil.Now}
+	if !reflect.DeepEqual(ev, want) {
+		t.Fatalf("evidence %+v, want %+v", ev, want)
+	}
+	if f.Message != "Status is not progressing on 10 objects" || f.Detail != "2 never written, 8 stale" {
+		t.Errorf("wording %q / %q", f.Message, f.Detail)
+	}
+}
+
+// Design §10.2: at least 10 objects, or 10 % of objects with status with a
+// minimum of 3.
+func TestStatusNotProgressingThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		stuck, total int
+		want         bool
+	}{{9, 200, false}, {10, 200, true}, {2, 10, false}, {3, 30, true}, {3, 31, false}} {
+		rs := progressRuns(t, progressWorld(tc.total, tc.stuck, 0), nil, 0, 5*time.Minute+time.Second)
+		if got := len(notProgressing(rs[1])) == 1; got != tc.want {
+			t.Errorf("%d of %d: 018 %v, want %v", tc.stuck, tc.total, got, tc.want)
+		}
+	}
+}
+
+// Design §10.2: a controller that is not ready raises 005 instead, and the
+// condition starts again once it is ready.
+func TestStatusNotProgressingNeedsAReadyController(t *testing.T) {
+	w := progressWorld(20, 10, 0)
+	rt := Runtime{States: NewStates()}
+	run := func(off time.Duration, ready int32) Report {
+		w.ctrl.Status.ReadyReplicas = ready
+		in := w.input(t)
+		in.Now = testutil.Now.Add(off)
+		return Evaluate(in, Upstream(), rt)
+	}
+	run(0, 1)
+	if r := run(5*time.Minute+time.Second, 0); len(notProgressing(r)) != 0 || !has(r, CodeControllerNotReady, SeverityError, "") {
+		t.Fatalf("not ready: want 005 and no 018: %+v", r.Findings)
+	}
+	if r := run(6*time.Minute, 1); len(notProgressing(r)) != 0 {
+		t.Fatalf("ready again: the condition restarts: %+v", notProgressing(r))
+	}
+	if r := run(11*time.Minute+time.Second, 1); len(notProgressing(r)) != 1 {
+		t.Fatalf("5 min after ready again: want 018: %+v", r.Findings)
+	}
+}
+
+// syncs is a metrics result collected at off with each Pod UID's status_syncs_total.
+func syncs(off time.Duration, pods map[string]float64) *ctrlmetrics.Result {
+	r := &ctrlmetrics.Result{CollectedAt: testutil.Now.Add(off), Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{},
+		Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}
+	for uid, v := range pods {
+		r.Metrics.PerPod = append(r.Metrics.PerPod, ctrlmetrics.PodMetrics{UID: uid, Name: uid, StatusSyncs: v, StatusSyncsPresent: true})
+	}
+	return r
+}
+
+// The evidence quotes status_syncs_total's growth over the last 5 min, per
+// Pod UID: a reset counts the counter's new value, never a negative delta,
+// and a Pod seen for the first time sets a baseline.
+func TestStatusNotProgressingSyncs(t *testing.T) {
+	samples := map[time.Duration]map[string]float64{
+		0:                             {"a": 100},
+		150 * time.Second:             {"a": 103},
+		5*time.Minute + time.Second:   {"a": 2, "b": 50}, // a restarted; b is new
+		5*time.Minute + 2*time.Second: {"a": 2, "b": 50},
+	}
+	at := func(off time.Duration) *ctrlmetrics.Result { return syncs(off, samples[off]) }
+	rs := progressRuns(t, progressWorld(20, 10, 0), at, 0, 150*time.Second, 5*time.Minute+time.Second, 5*time.Minute+2*time.Second)
+	for i, want := range map[int]int64{2: 5, 3: 5} {
+		fs := notProgressing(rs[i])
+		if len(fs) != 1 {
+			t.Fatalf("run %d: want 018, got %+v", i, fs)
+		}
+		ev := fs[0].Facts.(*StatusProgressEvidence)
+		if ev.Syncs == nil || *ev.Syncs != want {
+			t.Errorf("run %d: syncs %v, want %d", i, ev.Syncs, want)
+		}
+		if fs[0].Detail != "10 stale; status syncs in the last 5 min: 5" {
+			t.Errorf("run %d: detail %q", i, fs[0].Detail)
+		}
+	}
+}
+
+// Without the family, or with metrics stale, missing or failing, the growth is
+// not known and the evidence has none: it never reads as zero (D-006).
+func TestStatusNotProgressingSyncsUnknown(t *testing.T) {
+	offsets := []time.Duration{0, 5*time.Minute + time.Second}
+	present := func(off time.Duration) *ctrlmetrics.Result { return syncs(off, map[string]float64{"a": 7}) }
+	for name, at := range map[string]func(time.Duration) *ctrlmetrics.Result{
+		"absent": func(off time.Duration) *ctrlmetrics.Result {
+			r := syncs(off, map[string]float64{"a": 0})
+			r.Metrics.PerPod[0].StatusSyncsPresent = false
+			return r
+		},
+		"stale at the end": func(time.Duration) *ctrlmetrics.Result { return present(0) },
+		"failing at the end": func(off time.Duration) *ctrlmetrics.Result {
+			r := present(off)
+			if off > 0 {
+				r.Err = "scrape failed"
+			}
+			return r
+		},
+		"window not covered": func(off time.Duration) *ctrlmetrics.Result {
+			if off == 0 {
+				return &ctrlmetrics.Result{CollectedAt: testutil.Now, Err: "not yet"}
+			}
+			return present(off)
+		},
+	} {
+		fs := notProgressing(progressRuns(t, progressWorld(20, 10, 0), at, offsets...)[1])
+		if len(fs) != 1 || fs[0].Facts.(*StatusProgressEvidence).Syncs != nil || fs[0].Detail != "10 stale" {
+			t.Errorf("%s: want 018 without syncs, got %+v", name, fs)
+		}
+	}
+	// No growth over a covered window is a known zero.
+	fs := notProgressing(progressRuns(t, progressWorld(20, 10, 0), present, offsets...)[1])
+	if len(fs) != 1 || fs[0].Facts.(*StatusProgressEvidence).Syncs == nil || *fs[0].Facts.(*StatusProgressEvidence).Syncs != 0 {
+		t.Fatalf("want syncs 0, got %+v", fs)
+	}
+}
+
+// Info 003s (inside the grace period) are not stuck, so they never start 018.
+func TestStatusNotProgressingIgnoresGrace(t *testing.T) {
+	w := progressWorld(20, 10, 0)
+	w.firstSeen = func(*unstructured.Unstructured) time.Time { return testutil.Now.Add(10 * time.Minute) }
+	for _, r := range progressRuns(t, w, nil, 0, 5*time.Minute+time.Second) {
+		if fs := notProgressing(r); len(fs) != 0 {
+			t.Fatalf("018 from 003s in grace: %+v", fs)
+		}
+	}
+}
+
+// The objects with status are exactly those the resource status check judges:
+// an experimental-only route whose status only another controller wrote is out
+// (D-018 §1), and an unattached route counts once.
+func TestStatusNotProgressingDenominator(t *testing.T) {
+	w := healthyWorld()
+	gw := testutil.GwRef("infra", "edge")
+	foreign := testutil.HTTPRoute("shop", "tcp", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: "example.com/other",
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}})
+	foreign.SetAPIVersion("gateway.networking.k8s.io/v1alpha2")
+	foreign.SetKind("TCPRoute")
+	in := w.input(t)
+	in.Served = slices.Clone(in.Served)
+	for i := range in.Served {
+		if in.Served[i].Kind == "TCPRoute" {
+			in.Served[i].Version = "v1alpha2"
+		}
+	}
+	if !in.ignored(foreign) {
+		t.Fatal("fixture: the TCPRoute must be experimental-only with foreign status")
+	}
+	cart := in.Owned.Routes[0]
+	in.Owned = &install.Owned{GatewayClasses: in.Owned.GatewayClasses, Gateways: in.Owned.Gateways,
+		Routes:     []install.OwnedObject{cart, {Obj: foreign}},
+		Unattached: []install.UnattachedRoute{{Route: cart, Parent: testutil.GwRef("infra", "gone")}}}
+	if got := in.withStatus(); got != 3 {
+		t.Fatalf("objects with status %d, want 3: the class, the Gateway and cart", got)
 	}
 }

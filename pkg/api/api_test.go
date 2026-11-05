@@ -2676,8 +2676,9 @@ func TestComputedDisagreementAtTheAPI(t *testing.T) {
 			if rep.State == health.StateError {
 				t.Fatalf("state %s: KGWUI-012 is never an error", rep.State)
 			}
-			if c := rep.Checks[len(rep.Checks)-1]; c.Name != "computed views" || !c.OK || c.Required {
-				t.Fatalf("last check %+v", c)
+			i := slices.IndexFunc(rep.Checks, func(c health.CheckResult) bool { return c.Name == "computed views" })
+			if i < 0 || !rep.Checks[i].OK || rep.Checks[i].Required {
+				t.Fatalf("computed views check %+v", rep.Checks)
 			}
 		})
 	}

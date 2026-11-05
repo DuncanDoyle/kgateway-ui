@@ -120,6 +120,12 @@
         "name": "computed views",
         "ok": true,
         "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "status progress",
+        "ok": true,
+        "required": false
       }
     ],
     "collectedAt": "2026-10-17T12:00:00Z",

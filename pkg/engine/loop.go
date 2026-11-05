@@ -139,6 +139,8 @@ func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uin
 			str(p.Name)
 			flag(p.DroppedPresent)
 			u64(math.Float64bits(p.Dropped))
+			flag(p.StatusSyncsPresent)
+			u64(math.Float64bits(p.StatusSyncs))
 			for _, series := range []map[ctrlmetrics.TypeKey]float64{p.Active, p.Total} {
 				keys := sortedKeys(series, func(a, b ctrlmetrics.TypeKey) int {
 					return cmp.Or(cmp.Compare(a.Gateway.Namespace, b.Gateway.Namespace), cmp.Compare(a.Gateway.Name, b.Gateway.Name), cmp.Compare(a.TypeURL, b.TypeURL))

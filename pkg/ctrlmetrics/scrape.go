@@ -141,6 +141,7 @@ func (r Result) SameContent(o Result) bool {
 // samePod compares two Pods' samples by bit pattern.
 func samePod(a, b PodMetrics) bool {
 	return a.UID == b.UID && a.Name == b.Name && a.DroppedPresent == b.DroppedPresent && sameBits(a.Dropped, b.Dropped) &&
+		a.StatusSyncsPresent == b.StatusSyncsPresent && sameBits(a.StatusSyncs, b.StatusSyncs) &&
 		maps.EqualFunc(a.Active, b.Active, sameBits) && maps.EqualFunc(a.Total, b.Total, sameBits)
 }
 

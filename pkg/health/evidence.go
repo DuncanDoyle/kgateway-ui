@@ -304,6 +304,9 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 	case EvidenceListenerConflict:
 		e := &ListenerConflictEvidence{}
 		return e, json.Unmarshal(b, e)
+	case EvidenceStatusProgress:
+		e := &StatusProgressEvidence{}
+		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil
 }
