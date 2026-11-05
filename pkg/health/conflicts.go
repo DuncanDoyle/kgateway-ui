@@ -35,12 +35,12 @@ const (
 	// conflictSameHostname leads the hostname rule's other side; %s is the listeners.
 	conflictSameHostname = "Same port and hostname as %s."
 	// conflictPortKeeps leads the protocol rule's: the port, the kept protocols, the listeners.
-	conflictPortKeeps = "Port %d keeps %s: %s."
+	conflictPortKeeps = "On port %d the controller kept %s: %s."
 	// conflictComputed follows either lead-in; %s is the rule.
 	conflictComputed = " Computed by the UI's %s rule."
 	// conflictNoHostname and conflictNoProtocol end the detail when the rule finds none.
-	conflictNoHostname = "The controller reports a conflict; no other accepted listener on port %d has the same hostname."
-	conflictNoProtocol = "The controller reports a conflict; no other accepted listener on port %d uses another protocol."
+	conflictNoHostname = "The controller reports a conflict. The UI finds no other accepted listener on port %d with this hostname."
+	conflictNoProtocol = "The controller reports a conflict. The UI finds no other protocol among accepted listeners on port %d."
 )
 
 // ListenerConflictEvidence is what KGWUI-017 quotes: the controller's

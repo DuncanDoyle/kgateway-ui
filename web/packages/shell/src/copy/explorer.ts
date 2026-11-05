@@ -498,87 +498,88 @@ export const diagnosticsCopy = {
   rejects: "Rejects", // S390
   problems: (n: number) => plural(n, ["problem", "problems"]), // S383
   oldestProblem: (ago: string) => `Oldest problem ${ago}`, // S384
-  // 3.3 drafts (Task 68); ids come with the 3.3 wording pass.
-  learnMore: "Learn more",
-  learnMoreLabel: (code: string) => `Learn more about ${code} (opens in a new tab)`,
-  // 3.3 drafts (Task 69): evidence of 003, 013–015, 017, 018 and the controller log.
-  status: "Status",
+  // Phase 3.3: Learn more, and evidence of 003, 013–015, 017, 018 and the controller log.
+  learnMore: "Learn more", // S560
+  learnMoreLabel: (code: string) => `Learn more about ${code} (opens in a new tab)`, // S561
+  status: "Status", // S481
   since: "Since", // S272
   freshness: {
-    "never-written": "The controller never wrote a status",
-    stale: "Status is for an older generation",
-    pending: "Waiting for the controller",
-    "no-ancestor": "No status entry from this controller",
+    "never-written": "The controller has not written a status", // S482
+    stale: "Status is for an older generation", // S483
+    pending: "Waiting for the controller", // S484
+    "no-ancestor": "No status entry from this controller", // S485
   } as Record<string, string>,
-  generation: "Generation",
-  generations: (observed: number, current: number) => `Status has ${observed}, object is at ${current}`,
-  refsAttributed: "The ref",
-  refsCandidates: "Refs the condition may be about",
-  refsNotAttributed: "The condition does not say which of these refs failed.",
-  location: "Location",
-  ref: "Ref",
-  kindNotServed: "No such kind in this group",
-  ruleReason: { RouteRuleReplaced: "Replaced", RouteRuleDropped: "Dropped" } as Record<string, string>,
-  reason: "Reason",
-  match: "Match",
-  matchIndex: (n: number) => `match ${n}`,
-  matchNote: "The controller's match index, not a rule number.",
-  policy: "Policy",
-  controllerMessage: "Controller message",
-  listener: "Listener",
-  port: "Port",
-  protocol: "Protocol",
-  hostname: "Hostname",
-  rule: "Rule",
-  computedRule: (rule: string) => `Computed by the UI: ${rule}`,
-  keptListeners: "Listeners the controller kept",
-  owner: "Owner",
-  stuckObjects: "Objects with a stuck status",
-  objects: "Objects",
-  oldest: "Oldest",
-  syncs: "Status syncs, last 5 min",
-  notKnown: "Not known",
-  controllerLog: "Controller log",
-  logState: { read: "Read", "not-read": "Not read" } as Record<string, string>,
-  panic: "Panic",
-  panicReadAt: (ago: string) => `Read from the log ${ago}. The trace has no time.`,
+  generation: "Generation", // S486
+  generations: (observed: number, current: number) => `Status has ${observed}, object is at ${current}`, // S487
+  refsAttributed: "The ref", // S491
+  refsCandidates: "Refs the condition may be about", // S492
+  refsNotAttributed: "The condition does not say which of these refs failed.", // S493
+  location: "Location", // S494, equal to fixCopy.location
+  ref: "Ref", // S495
+  kindNotServed: "No such kind in this group", // S496
+  ruleReason: { RouteRuleReplaced: "Replaced", RouteRuleDropped: "Dropped" } as Record<string, string>, // S498
+  reason: "Reason", // S499
+  match: "Match", // S500
+  matchIndex: (n: number) => `match ${n}`, // S500
+  matchNote: "The controller's match index, not a rule number.", // S501
+  policy: "Policy", // S502
+  controllerMessage: "Controller message", // S503
+  listener: "Listener", // S520
+  port: "Port", // S520
+  protocol: "Protocol", // S520
+  hostname: "Hostname", // S520
+  rule: "Rule", // S521
+  computedRule: (rule: string) => `Computed by the UI: ${rule}`, // S522
+  keptListeners: "Listeners the controller kept", // S523
+  owner: "Owner", // S524
+  stuckObjects: "Objects with a stuck status", // S530
+  objects: "Objects", // S530
+  oldest: "Oldest", // S530
+  syncs: "Status syncs, last 5 min", // S531
+  notKnown: "Not known", // S532
+  controllerLog: "Controller log", // S552, equal to dataPlaneCopy.controllerLog
+  logState: { read: "Read", "not-read": "Not read" } as Record<string, string>, // S553
+  panic: "Panic", // S554
+  panicReadAt: (ago: string) => `Read from the log ${ago}. The trace has no time.`, // S555
+  // S551
   grantShape: (from: string, to: string, group: string, kind: string) =>
     `From ${from} to ${kind}${group ? ` (${group})` : ""} in ${to}`,
-  topFrame: "Top frame",
-  deployerErrors: "Deployer errors",
-  errorClass: "Error class",
-  lastSeen: "Last seen",
-  logEvents: "Controller log events",
-  classes: "Error classes",
+  topFrame: "Top frame", // S554
+  deployerErrors: "Deployer errors", // S556
+  errorClass: "Error class", // S556
+  lastSeen: "Last seen", // S556
+  logEvents: "Controller log events", // S557
+  classes: "Error classes", // S557
 };
 
-/** The suggested fix block of a finding (design §7.7); 3.3 drafts (Task 69). */
+/** The suggested fix block of a finding (design §7.7, Phase 3.3). */
 export const fixCopy = {
   object: "Object", // S271
-  newObject: "New object",
-  location: "Location",
-  merge: "Change only these fields at this location. Keep the rest.",
-  basis: "Basis",
-  createWith: "Create it with",
-  createNote: "`kubectl create` fails if the name is taken, so it never replaces an object.",
+  newObject: "New object", // S537
+  location: "Location", // S494, equal to diagnosticsCopy.location
+  merge: "Change only these fields at this location. Keep the rest.", // S538
+  basis: "Basis", // S539
+  yaml: "YAML", // S540
+  createWith: "Create it with", // S541
+  createNote: "`kubectl create` fails if the name is taken, so it never replaces an object.", // S542
   copy: "Copy", // S293
   // Backticks mark names in the title; a screen reader would read them aloud.
-  copyLabel: (title: string) => `Copy YAML: ${title.replaceAll("`", "")}`,
-  download: "Download",
-  downloadLabel: (file: string) => `Download ${file}`,
+  copyLabel: (title: string) => `Copy YAML: ${title.replaceAll("`", "")}`, // S543
+  download: "Download", // S544
+  downloadLabel: (file: string) => `Download ${file}`, // S544
 };
 
-/** The grouped findings view (design §17.1); 3.3 drafts (Task 69). */
+/** The grouped findings view (design §17.1, Phase 3.3). */
 export const groupsCopy = {
-  view: "View",
-  flat: "Findings",
-  groups: "Groups",
-  title: "Cause",
-  cause: "Cause object",
-  affected: "Affected",
-  members: "Findings",
+  view: "View", // S545
+  flat: "Findings", // S546
+  groups: "Groups", // S546
+  title: "Cause", // S547
+  cause: "Cause object", // S548
+  affected: "Affected", // S549
+  members: "Findings", // S549
   since: "Since", // S272
-  noun: ["group", "groups"] as const,
+  noun: ["group", "groups"] as const, // S550
 };
 
 /** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */
@@ -618,8 +619,7 @@ export const dataPlaneCopy = {
   },
   proxyStats: "Proxy stats", // S447
   proxyStatsOn: "Collected", // S456
-  // 3.3 drafts (Task 69); the withheld label is R105's provisional text.
-  withheld: "Proxies may not be getting config updates",
-  withheldSpan: (first: string, last: string) => `First logged ${first}, last ${last}`,
-  controllerLog: "Controller log",
+  withheld: "Proxies may not be getting config updates", // S558, equal to health.WithheldMessage
+  withheldSpan: (first: string, last: string) => `First logged ${first}, last ${last}`, // S559
+  controllerLog: "Controller log", // S552
 };

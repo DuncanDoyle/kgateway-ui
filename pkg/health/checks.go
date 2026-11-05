@@ -341,7 +341,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			l, ok := byName[name]
 			if !ok {
 				if all {
-					pending(u, "no status for listener "+name, FreshnessNeverWritten)
+					pending(u, "No status for listener "+name, FreshnessNeverWritten)
 				}
 				continue
 			}
@@ -430,7 +430,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
-			"parent "+parentDesc(u.Parent)+" does not exist", in.freshnessEvidence(u.Route.Obj, FreshnessNeverWritten, 0))
+			"Parent "+parentDesc(u.Parent)+" does not exist", in.freshnessEvidence(u.Route.Obj, FreshnessNeverWritten, 0))
 	}
 	// Declared candidates: KGWUI-011's status trigger. Inside its grace the
 	// route is being processed, so this check is pending (design §6.2).

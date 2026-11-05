@@ -161,7 +161,7 @@ const (
 	reasonStatsFailing = "Proxy stats are not being collected"
 	// Controller log reasons (design §8.9).
 	reasonLogsFailing      = "Controller logs cannot be read"
-	reasonLogsUnrecognised = "Log format not recognised"
+	reasonLogsUnrecognised = "The controller log format is not recognised"
 	reasonLogsNoParser     = "No log format is known for this kgateway version"
 	reasonLogsNotConnected = "No controller log stream is connected"
 )

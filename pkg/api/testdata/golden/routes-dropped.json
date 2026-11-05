@@ -33,7 +33,7 @@
         "parents": [
           {
             "attachment": "pending",
-            "reason": "parent not found",
+            "reason": "Parent not found",
             "ref": {
               "group": "gateway.networking.k8s.io",
               "kind": "HTTPRoute",

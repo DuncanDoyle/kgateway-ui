@@ -248,7 +248,7 @@ func TestAttachmentFromCurrentStatusOnly(t *testing.T) {
 	for _, name := range []string{"stale-true", "stale-false"} {
 		_, r := row(t, ix, "shop", name)
 		p := r.Parents[0]
-		if p.Attachment != AttachmentPending || p.Pending != "status describes an older generation" || p.Cond != nil || r.Flags != FlagPending {
+		if p.Attachment != AttachmentPending || p.Pending != "Status describes an older generation" || p.Cond != nil || r.Flags != FlagPending {
 			t.Errorf("%s: %+v flags %v", name, p, r.Flags.Names())
 		}
 	}

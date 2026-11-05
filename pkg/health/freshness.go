@@ -43,11 +43,11 @@ func blockFreshness(u *unstructured.Unstructured, cs []metav1.Condition, require
 		}
 	}
 	if stale {
-		return "status describes an older generation", FreshnessStale, observed
+		return "Status describes an older generation", FreshnessStale, observed
 	}
 	for _, t := range required {
 		if objects.FindCondition(cs, t) == nil {
-			return fmt.Sprintf("no %s condition", t), FreshnessPending, 0
+			return fmt.Sprintf("No %s condition", t), FreshnessPending, 0
 		}
 	}
 	for _, t := range types {
@@ -267,7 +267,7 @@ func progressDetail(ev *StatusProgressEvidence) string {
 	}
 	d := strings.Join(parts, ", ")
 	if ev.Syncs != nil {
-		d += fmt.Sprintf("; status syncs in the last 5 min: %d", *ev.Syncs)
+		d += fmt.Sprintf(". Status syncs in the last 5 min: %d", *ev.Syncs)
 	}
 	return d
 }

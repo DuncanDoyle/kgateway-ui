@@ -44,7 +44,7 @@ func TestFreshnessFirstKindWinsAcrossBlocks(t *testing.T) {
 	testutil.AddSpecListener(gw, "https")
 	w.objs[1] = gw
 	f, ev := freshness003(t, w.report(t), "infra/edge")
-	if ev.Freshness != FreshnessNeverWritten || ev.Observed != nil || f.Detail != "no status for listener https" {
+	if ev.Freshness != FreshnessNeverWritten || ev.Observed != nil || f.Detail != "No status for listener https" {
 		t.Fatalf("want never-written for the listener, got %q %+v", f.Detail, ev)
 	}
 }
@@ -231,7 +231,7 @@ func TestStatusNotProgressingSyncs(t *testing.T) {
 		if ev.Syncs == nil || *ev.Syncs != want {
 			t.Errorf("run %d: syncs %v, want %d", i, ev.Syncs, want)
 		}
-		if fs[0].Detail != "10 stale; status syncs in the last 5 min: 5" {
+		if fs[0].Detail != "10 stale. Status syncs in the last 5 min: 5" {
 			t.Errorf("run %d: detail %q", i, fs[0].Detail)
 		}
 	}

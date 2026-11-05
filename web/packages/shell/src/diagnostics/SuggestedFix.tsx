@@ -169,7 +169,7 @@ export function SuggestedFixView({ fix, installId, stylesOverride }: SuggestedFi
         </Facts>
         <div>
           <div className="code-head">
-            <h3>YAML</h3>
+            <h3>{fixCopy.yaml}</h3>
             <Action type="button" aria-label={fixCopy.copyLabel(fix.title)} onClick={copy}>
               <CopyIcon size={14} aria-hidden="true" />
               {fixCopy.copy}

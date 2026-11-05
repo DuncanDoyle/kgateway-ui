@@ -181,7 +181,7 @@ func TestListenerConflictProtocol(t *testing.T) {
 	if ev.Rule != ListenerProtocolRule || !reflect.DeepEqual(ev.Others, []ConflictingListener{{Owner: gwRef("infra", "edge"), Name: "tcp", Protocol: "TCP"}}) {
 		t.Fatalf("evidence %+v", ev)
 	}
-	if !strings.Contains(fs[i].Detail, "Port 443 keeps TCP: listener `tcp` of Gateway infra/edge. Computed by the UI's listener port and protocol rule.") {
+	if !strings.Contains(fs[i].Detail, "On port 443 the controller kept TCP: listener `tcp` of Gateway infra/edge. Computed by the UI's listener port and protocol rule.") {
 		t.Fatalf("detail %q", fs[i].Detail)
 	}
 }
@@ -189,8 +189,8 @@ func TestListenerConflictProtocol(t *testing.T) {
 // Phase-3.3 brief: with no other side the evidence says so, and no KGWUI-012 is raised.
 func TestListenerConflictNoOtherSide(t *testing.T) {
 	for _, tc := range []struct{ reason, text string }{
-		{"HostnameConflict", "The controller reports a conflict; no other accepted listener on port 443 has the same hostname."},
-		{"ProtocolConflict", "The controller reports a conflict; no other accepted listener on port 443 uses another protocol."},
+		{"HostnameConflict", "The controller reports a conflict. The UI finds no other accepted listener on port 443 with this hostname."},
+		{"ProtocolConflict", "The controller reports a conflict. The UI finds no other protocol among accepted listeners on port 443."},
 	} {
 		t.Run(tc.reason, func(t *testing.T) {
 			gw := notValidGateway([]objects.Listener{{Name: "http", Port: 80, Hostname: "a.example.com"}, {Name: "https", Port: 443, Hostname: "b.example.com"}},
@@ -240,7 +240,7 @@ func TestListenerConflictProtocolKept(t *testing.T) {
 	if ev := fs[i].Facts.(*ListenerConflictEvidence); !reflect.DeepEqual(ev.Others, []ConflictingListener{{Owner: gwRef("infra", "edge"), Name: "http", Protocol: "HTTP"}}) {
 		t.Fatalf("https names %+v", ev.Others)
 	}
-	if !strings.Contains(fs[i].Detail, "Port 443 keeps HTTP: listener `http` of Gateway infra/edge.") {
+	if !strings.Contains(fs[i].Detail, "On port 443 the controller kept HTTP: listener `http` of Gateway infra/edge.") {
 		t.Fatalf("detail %q", fs[i].Detail)
 	}
 }
@@ -269,7 +269,7 @@ func TestListenerConflictRejectedComparator(t *testing.T) {
 			}
 			ev, _ := f.Facts.(*ListenerConflictEvidence)
 			if ev == nil || len(ev.Others) != 0 || ev.OthersTotal != 0 || len(f.Evidence) != 0 ||
-				!strings.Contains(f.Detail, "The controller reports a conflict; no other accepted listener on port 443 has the same hostname.") {
+				!strings.Contains(f.Detail, "The controller reports a conflict. The UI finds no other accepted listener on port 443 with this hostname.") {
 				t.Fatalf("017 %+v, evidence %+v", f, ev)
 			}
 		})
@@ -352,7 +352,7 @@ func TestListenerConflictOthersCapped(t *testing.T) {
 	if len(ev.Others) != maxConflictOthers || ev.OthersTotal != maxConflictOthers+2 || len(f.Evidence) != maxConflictOthers+2 {
 		t.Fatalf("others %d, total %d, dependencies %d", len(ev.Others), ev.OthersTotal, len(f.Evidence))
 	}
-	if !strings.Contains(f.Detail, "Port 443 keeps HTTP: listeners `l` of ListenerSet shop/ls-a, ") {
+	if !strings.Contains(f.Detail, "On port 443 the controller kept HTTP: listeners `l` of ListenerSet shop/ls-a, ") {
 		t.Fatalf("detail %q", f.Detail)
 	}
 	if !strings.Contains(f.Detail, " and 2 more. Computed by the UI's listener port and protocol rule.") {

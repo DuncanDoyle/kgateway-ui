@@ -21,7 +21,7 @@ import (
 // Pending reasons that do not come from a status entry.
 const (
 	pendingNoStatus      = "no status from the controller"
-	pendingParentMissing = "parent not found"
+	pendingParentMissing = "Parent not found"
 )
 
 // programmedType is kgateway's route programming condition (2.4).

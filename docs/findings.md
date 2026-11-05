@@ -287,7 +287,7 @@ It is raised only after the policy's 60 s grace and after the result held for 30
   - `HostnameConflict`, the "listener port and hostname" rule: listeners with the same port and exactly the same hostname.
   - `ProtocolConflict`, the "listener port and protocol" rule: listeners with the same port and another protocol.
   - Any other reason: no other side.
-- When the rule finds no other side, the detail says so, for example "The controller reports a conflict; no other accepted listener on port 443 has the same hostname".
+- When the rule finds no other side, the detail says so, for example "The controller reports a conflict. The UI finds no other accepted listener on port 443 with this hostname".
 
 **Fix.** Give one of the listeners another port or hostname, or align their protocols. When one side is on a ListenerSet, change the side you own.
 
