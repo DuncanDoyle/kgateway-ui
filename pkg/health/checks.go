@@ -476,7 +476,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		case f.Code == CodeDelegatedNotAttached && len(f.Key) > 0 && f.Key[0] == computedOwner:
 			return 1, true
 		case f.Code == CodeComputedDisagrees: // the policy-target verifier's check key
-			return 1, true
+			return 0, true
 		}
 		return 0, false
 	})

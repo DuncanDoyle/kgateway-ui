@@ -65,11 +65,20 @@ func accepted(gw objects.ParentRef) testutil.PolicyAncestor {
 // each offset after the grace end, sharing one States; it returns the last report.
 func targetsRun(t *testing.T, sel computed.Selection, objs []*unstructured.Unstructured, after ...time.Duration) Report {
 	t.Helper()
+	return targetsRunWith(t, sel, nil, objs, after...)
+}
+
+// targetsRunWith is targetsRun with the controller's global policy namespace setting.
+func targetsRunWith(t *testing.T, sel computed.Selection, global *install.Setting, objs []*unstructured.Unstructured, after ...time.Duration) Report {
+	t.Helper()
 	w := healthyWorld()
 	w.objs = append(w.objs, objs...)
 	w.firstSeen = func(*unstructured.Unstructured) time.Time { return t0 }
 	in := w.input(t)
 	in.Rules = sel
+	if global != nil {
+		in.Install.Settings.GlobalPolicyNamespace = *global
+	}
 	rt := Runtime{States: NewStates()}
 	var r Report
 	for _, d := range after {
@@ -228,6 +237,8 @@ func TestPolicyTargetVerifier(t *testing.T) {
 				targetPolicy("shop", []map[string]any{tRef("HTTPRoute", "cart", "nope")}, nil, accepted(other))}, "shop/tp", false, true},
 		{"the controller also reports TargetNotFound",
 			[]*unstructured.Unstructured{targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", "nope")}, nil, notFound)}, "infra/tp", false, true},
+		{"route not found is not verified",
+			[]*unstructured.Unstructured{targetPolicy("shop", []map[string]any{tRef("HTTPRoute", "nope", "")}, nil, accepted(edge))}, "shop/tp", false, false},
 		{"route whose parent is a ListenerSet is not verified",
 			[]*unstructured.Unstructured{testutil.HTTPRoute("shop", "lsr", []objects.ParentRef{edge, ls}),
 				targetPolicy("shop", []map[string]any{tRef("HTTPRoute", "lsr", "nope")}, nil, accepted(edge))}, "shop/tp", false, false},
@@ -346,5 +357,84 @@ func TestPolicyTargetEmptyNamespaceUnknown(t *testing.T) {
 	refs, sels := computed.DecodeTargets(tp)
 	if rs := in.targetResults(rules24.PolicyTargeter(), tp, refs, sels); len(rs) != 0 {
 		t.Fatalf("results %+v", rs)
+	}
+}
+
+// R93: with the global policy namespace setting read, a labelled selector that
+// matches nothing is a 016; one in the global namespace may match elsewhere.
+func TestPolicyTargetLabelledSelector(t *testing.T) {
+	none := &install.Setting{Known: true}
+	global := &install.Setting{Known: true, Value: "infra"}
+	unread := &install.Setting{Reason: "valueFrom"}
+	never := targetPolicy("shop", nil, []map[string]any{tSel("HTTPRoute", map[string]any{"pick": "never"})})
+	r := targetsRunWith(t, rules24, none, []*unstructured.Unstructured{never}, 0, 31*time.Second)
+	fs := targetFindings(r, "shop/tp")
+	if len(fs) != 1 || !strings.Contains(fs[0].Detail, "targetSelectors[0] HTTPRoute `pick=never`: matches nothing in namespace shop") ||
+		!strings.Contains(fs[0].Detail, TargetNotVerified) {
+		t.Fatalf("labelled selector: %+v", r.Findings)
+	}
+	if r := targetsRunWith(t, rules24, unread, []*unstructured.Unstructured{never}, 0, 31*time.Second); has(r, CodePolicyTargetNotFound, "", "") {
+		t.Fatalf("unread setting: %+v", r.Findings)
+	}
+	// shop/cart carries the label; a policy in the global namespace infra selects it.
+	cart := testutil.HTTPRoute("shop", "cart", []objects.ParentRef{testutil.GwRef("infra", "edge")}, testutil.AcceptedBy(testutil.GwRef("infra", "edge"), testutil.Controller))
+	cart.SetLabels(map[string]string{"pick": "yes"})
+	inGlobal := targetPolicy("infra", nil, []map[string]any{tSel("HTTPRoute", map[string]any{"pick": "yes"})})
+	if r := targetsRunWith(t, rules24, global, []*unstructured.Unstructured{cart, inGlobal}, 0, 31*time.Second); has(r, CodePolicyTargetNotFound, "", "infra/tp") {
+		t.Fatalf("global namespace selector: %+v", r.Findings)
+	}
+	if r := targetsRunWith(t, rules24, none, []*unstructured.Unstructured{cart, inGlobal}, 0, 31*time.Second); !has(r, CodePolicyTargetNotFound, "", "infra/tp") {
+		t.Fatalf("without a global namespace the selector is local: %+v", r.Findings)
+	}
+}
+
+// R93 (phase-2 rules §9.3): the verifier's 012 has its own 30 s window from
+// the ancestor's first sight, with that as since; it restarts when the ancestor goes.
+func TestPolicyTargetVerifierWindow(t *testing.T) {
+	edge := testutil.GwRef("infra", "edge")
+	bare := targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", "nope")}, nil)
+	withAncestor := targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", "nope")}, nil, accepted(edge))
+	w := healthyWorld()
+	w.firstSeen = func(*unstructured.Unstructured) time.Time { return t0 }
+	rt := Runtime{States: NewStates()}
+	steps := []struct {
+		at       time.Duration
+		ancestor bool
+		want     bool
+	}{
+		{0, false, false},
+		{40 * time.Second, true, false},  // 016 matured; the ancestor appears: the window starts
+		{69 * time.Second, true, false},  // 29 s into the window
+		{71 * time.Second, true, true},   // 31 s
+		{80 * time.Second, false, false}, // gone: the window ends
+		{90 * time.Second, true, false},  // back: a new window
+		{119 * time.Second, true, false},
+		{121 * time.Second, true, true},
+	}
+	for _, s := range steps {
+		p := bare
+		if s.ancestor {
+			p = withAncestor
+		}
+		w.objs = append(healthyWorld().objs, p)
+		in := w.input(t)
+		in.Rules, in.Now = rules24, t0.Add(Grace+s.at)
+		r := Evaluate(in, Upstream(), rt)
+		got := findingsFor(r, CodeComputedDisagrees, "infra/tp")
+		if (len(got) == 1) != s.want || len(got) > 1 {
+			t.Fatalf("grace + %s (ancestor %v): 012 %+v, want %v", s.at, s.ancestor, got, s.want)
+		}
+		if !has(r, CodePolicyTargetNotFound, "", "infra/tp") && s.at > 30*time.Second {
+			t.Fatalf("grace + %s: the 016 stays: %+v", s.at, r.Findings)
+		}
+		if s.want {
+			start := t0.Add(Grace + 40*time.Second)
+			if s.at > 100*time.Second {
+				start = t0.Add(Grace + 90*time.Second)
+			}
+			if got[0].Since == nil || !got[0].Since.Equal(start) {
+				t.Fatalf("grace + %s: since %v, want %v", s.at, got[0].Since, start)
+			}
+		}
 	}
 }

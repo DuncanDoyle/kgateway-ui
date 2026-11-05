@@ -101,36 +101,57 @@ func (p *policyTargets) findings(u *unstructured.Unstructured) (fs []Finding, al
 			continue
 		}
 		key := holdKey(u, r)
-		seen, ok := p.prev[key]
-		if !ok {
-			seen = in.Now
-		}
-		p.next[key] = seen
+		seen := p.hold(key)
 		// The hold runs from the later of the first sight and the grace end.
 		due := graceEnd
 		if seen.After(due) {
 			due = seen
 		}
 		due = due.Add(TargetHold)
+		selector := r.Index >= len(refs)
+		// An absent route has no Gateways to tie an ancestor to.
+		verifiable := r.Verifiable && !selector && !in.listenerSetParent(u, r.Ref) &&
+			(r.Outcome != computed.TargetNotFound || r.Ref.Kind == "Gateway")
+		// The verifier's 012 has its own window from the ancestor's first sight (phase-2 rules §9.3).
+		var ancestor objects.Ref
+		var ancestorDue, ancestorSeen time.Time
+		if verifiable {
+			if a, ok := in.ancestorFor(u, r.Ref); ok {
+				ancestor, ancestorSeen = a, p.hold(key+"\x00ancestor\x00"+a.String())
+				ancestorDue = ancestorSeen.Add(TargetHold)
+				if ancestorDue.Before(due) {
+					ancestorDue = due
+				}
+			}
+		}
+		if !ancestorDue.IsZero() && in.Now.Before(ancestorDue) {
+			p.wake(ancestorDue)
+		}
 		if in.Now.Before(due) {
 			p.wake(due)
 			all = false
 			continue
 		}
-		selector := r.Index >= len(refs)
-		verifiable := r.Verifiable && !selector && !in.listenerSetParent(u, r.Ref)
 		since := seen
 		f := Finding{Code: CodePolicyTargetNotFound, Slug: "policy-target-not-found", Severity: SeverityWarning, Install: in.Install.ID(),
 			Resource: ref(u), Message: PolicyTargetNotFoundMessage, Detail: in.targetDetail(u, r, refs, sels, verifiable), Since: &since,
 			Key: []string{strconv.Itoa(r.Index), r.Ref.Group, r.Ref.Kind, r.Ref.Name, r.Ref.SectionName}}
 		fs = append(fs, f)
-		if verifiable {
-			if a, ok := in.ancestorFor(u, r.Ref); ok {
-				fs = append(fs, in.targetDisagrees(u, r, a, since, len(refs)))
-			}
+		if !ancestorDue.IsZero() && !in.Now.Before(ancestorDue) {
+			fs = append(fs, in.targetDisagrees(u, r, ancestor, ancestorSeen, len(refs)))
 		}
 	}
 	return fs, all
+}
+
+// hold returns when key was first seen, now on its first sight, and keeps it for the next run.
+func (p *policyTargets) hold(key string) time.Time {
+	seen, ok := p.prev[key]
+	if !ok {
+		seen = p.in.Now
+	}
+	p.next[key] = seen
+	return seen
 }
 
 // holdKey names one target of u, by uid and ref, index and ref as written.
@@ -148,9 +169,8 @@ func (in Input) targetResults(t computed.PolicyTargeter, u *unstructured.Unstruc
 	}
 	return t.PolicyTargets(computed.TargetInput{Policy: objects.RefOf(u), TargetRefs: refs, Selectors: sels,
 		Lookup: in.lookup, Labelled: in.labelled, Served: in.servedWatched,
-		ScopeKnown: in.Install.Scope.Mode != install.ScopeUnknown,
-		// The UI does not read KGW_GLOBAL_POLICY_NAMESPACE (R91).
-		GlobalPolicyNamespaceKnown: false})
+		ScopeKnown:            in.Install.Scope.Mode != install.ScopeUnknown,
+		GlobalPolicyNamespace: in.Install.Settings.GlobalPolicyNamespace.Value, GlobalPolicyNamespaceKnown: in.Install.Settings.GlobalPolicyNamespace.Known})
 }
 
 // lookup returns the cached object of gk named ns/name.
@@ -320,5 +340,6 @@ func (in Input) targetDisagrees(u *unstructured.Unstructured, r computed.TargetR
 	return Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning, Install: in.Install.ID(),
 		Resource: ref(u), Message: ComputedDisagreesMessage, Since: &since, ResourceSince: &own, Evidence: []objects.Ref{ancestor},
 		Detail: fmt.Sprintf(targetDisagrees, targetDesc(r, refs, false, nil), outcome, ancestor.Kind+" "+ancestor.Namespace+"/"+ancestor.Name) + in.ruleSetText(),
-		Key:    []string{string(computed.KindPolicyTarget), strconv.Itoa(r.Index), r.Ref.Group, r.Ref.Kind, r.Ref.Name, r.Ref.SectionName}}
+		// The check kind and key become "#n" (design §5.1).
+		Key: []string{string(computed.KindPolicyTarget), strconv.Itoa(r.Index), r.Ref.Group, r.Ref.Kind, r.Ref.Name, r.Ref.SectionName}}
 }
