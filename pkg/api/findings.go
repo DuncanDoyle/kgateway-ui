@@ -157,10 +157,6 @@ func (q *findingsQuery) match(v *view, f *health.Finding, t *diagnose.Text) bool
 	return strings.Contains(t.Message, q.q) || v.allOf(f.Evidence) && strings.Contains(t.Detail, q.q)
 }
 
-// containsLower reports whether lower-cased s contains sub, which is lower case:
-// match's test on s, whose diagnose.Text field is strings.ToLower(s).
-func containsLower(s, sub string) bool { return strings.Contains(strings.ToLower(s), sub) }
-
 // restrictedDetail is f's detail for a caller who may not view all of its
 // evidence: restrictedEvidence, plus a 015's restart hint, which names no object (R108).
 func restrictedDetail(f *health.Finding) string {
@@ -239,8 +235,8 @@ func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
 }
 
 // findingGroups writes the page of i's groups for q (design §5.2, §17.1): a group matches
-// when one member passes match, or q names its cause and one member passes the other
-// filters. A group whose cause the caller cannot view matches q by identity only (§14 rule 17).
+// when one member passes match (R98). A group whose cause the caller cannot view matches q
+// by its members' identity only (§14 rule 17).
 func (h *handler) findingGroups(w http.ResponseWriter, p *engine.Published, i *engine.InstallModel, v *view, q *findingsQuery, match func(k int) bool) {
 	d, fs := diagnosis(i), i.Health.Findings
 	// d.Rank lists each group's members in group order, so a group's first is its top member.
@@ -253,10 +249,7 @@ func (h *handler) findingGroups(w http.ResponseWriter, p *engine.Published, i *e
 	pass := func(m int) bool { return noQ.match(v, &fs[m], nil) }
 	matchGroup := func(k int) bool {
 		g := &d.Groups[k]
-		if q.q == "" || g.Cause != nil && containsLower(g.Cause.Namespace+"/"+g.Cause.Name, q.q) {
-			return slices.ContainsFunc(g.Members, pass)
-		}
-		if g.Cause != nil && !v.can(*g.Cause) {
+		if g.Cause != nil && !v.can(*g.Cause) && q.q != "" {
 			ts := d.Index.Text(fs)
 			return slices.ContainsFunc(g.Members, func(m int) bool { return pass(m) && strings.Contains(ts[m].Identity, q.q) })
 		}

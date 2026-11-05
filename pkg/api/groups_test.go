@@ -136,9 +136,26 @@ func TestFindingsGroupsView(t *testing.T) {
 	if rows := filtered("code=KGWUI-013&q=two"); len(rows) != 1 || rows[0].Cause == nil || rows[0].Cause.Name != "two" {
 		t.Errorf("q filter %+v", rows)
 	}
-	// q matches a group by its cause's identity too.
-	if rows := filtered("q=shop/cart&code=KGWUI-013"); len(rows) != 1 || rows[0].ID != mb.ID {
+	// R98: q matches members, not the cause, so the cause's name alone lists nothing.
+	if rows := filtered("q=shop/cart&code=KGWUI-013"); len(rows) != 0 {
 		t.Errorf("cause identity %+v", rows)
+	}
+}
+
+// R98: each group the grouped view lists for q opens, with the same q, to a
+// flat view of at least one of its findings (the web link keeps q and group).
+func TestFindingsGroupsDrillDownKeepsMembers(t *testing.T) {
+	for name, authz := range map[string]Authorizer{"all": nil, "cause hidden": hideCart} {
+		_, srv := groupsWorld(t, authz)
+		for _, q := range []string{"shop/cart", "shop/web", "not found", "store", "grant", "two"} {
+			rows := get[Page[GroupRow]](t, srv, findingsBase+"?view=groups&q="+url.QueryEscape(q), http.StatusOK).Items
+			for _, g := range rows {
+				flat := get[Page[FindingRow]](t, srv, findingsBase+"?group="+g.ID+"&q="+url.QueryEscape(q), http.StatusOK)
+				if flat.Total == 0 {
+					t.Errorf("%s: q=%q lists group %s (%s) but its flat view is empty", name, q, g.ID, g.Title)
+				}
+			}
+		}
 	}
 }
 
@@ -212,8 +229,8 @@ func TestFindingsGroupsRestricted(t *testing.T) {
 	if count("q=not+found") != 0 {
 		t.Error("q matched a restricted group by its members' message")
 	}
-	if count("q=shop/web") != 1 || count("q=shop/cart") != 1 {
-		t.Error("q did not match a restricted group by identity")
+	if count("q=shop/web") != 1 || count("q=shop/cart") != 0 {
+		t.Error("q did not match a restricted group by its members' identity only")
 	}
 }
 

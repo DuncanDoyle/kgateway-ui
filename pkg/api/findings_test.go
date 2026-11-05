@@ -595,18 +595,6 @@ func TestFindingsCursorSealed(t *testing.T) {
 	}
 }
 
-// q compares lower-cased runes, so a match may change length when lowered.
-func TestFindingsQueryFoldsRunes(t *testing.T) {
-	for _, tc := range []struct {
-		s, q string
-		want bool
-	}{{"\u212Aelvin route", "kelvin", true}, {"ÉCOLE", "école", true}, {"Straße", "strasse", false}, {"shop/cart", "cart", true}} {
-		if got := containsLower(tc.s, strings.ToLower(tc.q)); got != tc.want {
-			t.Errorf("containsLower(%q, %q) = %v, want %v", tc.s, tc.q, got, tc.want)
-		}
-	}
-}
-
 // Descending since and code keep ties in rank order, and a nil since sorts last both ways.
 func TestFindingsDescendingTies(t *testing.T) {
 	at := func(m int) *time.Time { s := testutil.Now.Add(time.Duration(m) * time.Minute); return &s }
