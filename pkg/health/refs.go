@@ -273,9 +273,10 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 			}
 		}
 	}
+	// Rule 1 runs on every ref first, so a local wrong group is never a missing grant.
 	var bad []RefLocation
 	if rule == refNotPermitted || listener == "" {
-		for _, r := range field {
+		for _, r := range refs {
 			if !r.delegation && in.notServed(r.Ref) {
 				bad = append(bad, r.RefLocation)
 			}

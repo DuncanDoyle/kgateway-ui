@@ -164,6 +164,13 @@ func TestRouteRefNotPermitted(t *testing.T) {
 		{"wrong group: never a missing grant", "No kind `Backend` in group `gateway.kgateway.example`. Check the group.", RefExplainKindNotServed,
 			[]map[string]any{local, {"group": "gateway.kgateway.example", "kind": "Backend", "name": "be", "namespace": "store"}},
 			[]RefLocation{loc("spec.rules[0].backendRefs[1]", objects.Ref{Group: "gateway.kgateway.example", Kind: "Backend", Namespace: "store", Name: "be"})}},
+		// §7.3: rule 1 runs on every ref before the cross-namespace filter.
+		{"local wrong group beside a cross-namespace ref", "No kind `Service` in group `delegation.gateway.example`. Check the group.", RefExplainKindNotServed,
+			[]map[string]any{{"group": "delegation.gateway.example", "kind": "Service", "name": "cart"}, omitted},
+			[]RefLocation{loc("spec.rules[0].backendRefs[0]", objects.Ref{Group: "delegation.gateway.example", Kind: "Service", Namespace: "shop", Name: "cart"})}},
+		{"only a local wrong group", "No kind `Service` in group `delegation.gateway.example`. Check the group.", RefExplainKindNotServed,
+			[]map[string]any{{"group": "delegation.gateway.example", "kind": "Service", "name": "cart"}},
+			[]RefLocation{loc("spec.rules[0].backendRefs[0]", objects.Ref{Group: "delegation.gateway.example", Kind: "Service", Namespace: "shop", Name: "cart"})}},
 		// A kgateway-specific field (policy or extension ref): the controller's message, no candidate.
 		{"kgateway-specific field", "Reference not permitted (missing ReferenceGrant)", RefExplainController,
 			[]map[string]any{local}, nil},

@@ -806,6 +806,10 @@ func TestSuggestedFixes(t *testing.T) {
 		{"014 wrong group", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog(nil),
 			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
 				Basis: groupBasis}, groupYAML("store")},
+		// §7.3: a local wrong group is found before the cross-namespace filter.
+		{"014 local wrong group beside a cross-namespace ref", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typo, crossNS), fixCatalog(nil),
+			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
+				Basis: groupBasis}, groupYAML("shop")},
 		{"014 wrong group, two served", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog([]string{"other.example"}), nil, nil},
 	}
 	for _, tc := range cases {
