@@ -316,14 +316,16 @@ func (s *progressState) record(in Input) bool {
 	if n := len(s.samples); n == 0 || !s.samples[n-1].at.Equal(m.CollectedAt) {
 		s.samples = append(s.samples, syncSample{at: m.CollectedAt, pods: pods})
 	}
+	// Pruned on every record, so the history stays bounded while 018 is not due.
+	if base := s.base(); base > 0 {
+		s.samples = slices.Delete(s.samples, 0, base)
+	}
 	return true
 }
 
-// syncs returns the status syncs over the progressHold before the newest
-// sample, and drops the samples older than the window needs. It is nil when no
-// sample is that old. Growth is per Pod UID: a counter that went down was
-// reset and counts its new value; a UID seen for the first time sets a baseline.
-func (s *progressState) syncs() *int64 {
+// base is the index of the newest sample at least progressHold older than the
+// newest one, or -1 when none is that old.
+func (s *progressState) base() int {
 	last := s.samples[len(s.samples)-1].at
 	base := -1
 	for i, x := range s.samples {
@@ -331,10 +333,17 @@ func (s *progressState) syncs() *int64 {
 			base = i
 		}
 	}
-	if base < 0 {
+	return base
+}
+
+// syncs returns the status syncs over the progressHold before the newest
+// sample, which record keeps pruned to that window. It is nil when no sample
+// is that old. Growth is per Pod UID: a counter that went down was reset and
+// counts its new value; a UID seen for the first time sets a baseline.
+func (s *progressState) syncs() *int64 {
+	if s.base() < 0 {
 		return nil
 	}
-	s.samples = s.samples[base:]
 	var g float64
 	for i := 1; i < len(s.samples); i++ {
 		for uid, v := range s.samples[i].pods {

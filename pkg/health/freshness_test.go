@@ -195,6 +195,38 @@ func TestStatusNotProgressingNeedsAPersistentObject(t *testing.T) {
 	}
 }
 
+// While stuck objects keep rotating, 018 never matures, and the syncs history
+// still keeps only the samples its 5-min window needs.
+func TestStatusNotProgressingBoundsHistoryWhileObjectsRotate(t *testing.T) {
+	w := progressWorld(22, 10, 0)
+	rt := Runtime{States: NewStates()}
+	const every = 30 * time.Second
+	for off := time.Duration(0); off <= 30*time.Minute; off += every {
+		// Every 4 min the stuck ten swap with the other ten.
+		half := int(off/(4*time.Minute)) % 2
+		for i, o := range w.objs[2:] {
+			gen := int64(1)
+			if i/10 == half {
+				gen = 2
+			}
+			o.SetGeneration(gen)
+		}
+		w.metrics = syncs(off, map[string]float64{"a": float64(off / time.Second)})
+		in := w.input(t)
+		in.Now = testutil.Now.Add(off)
+		if fs := notProgressing(Evaluate(in, Upstream(), rt)); len(fs) != 0 {
+			t.Fatalf("at %v: 018 while objects rotate: %+v", off, fs)
+		}
+	}
+	st, _ := Load[*progressState](rt.States.store(progressCheck{}.Name()), progressKey)
+	if st == nil {
+		t.Fatal("no 018 state while the condition holds")
+	}
+	if max := int(progressHold/every) + 2; len(st.samples) > max {
+		t.Fatalf("kept %d samples after 30 min, want at most %d", len(st.samples), max)
+	}
+}
+
 // Design §10.2: at least 10 objects, or 10 % of objects with status with a
 // minimum of 3.
 func TestStatusNotProgressingThreshold(t *testing.T) {
