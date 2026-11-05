@@ -226,10 +226,15 @@ func TestTogglesPassedAsFlags(t *testing.T) {
 	}
 }
 
-// pods/log is never in the ClusterRole; controllerLogs adds a Role per listed namespace.
+// pods/log is never in the ClusterRole; controllerLogs adds a Role and a
+// RoleBinding to the UI's ServiceAccount only in each listed namespace.
 func TestControllerLogsRoleIsOptInAndNamespaced(t *testing.T) {
 	if r := kind(render(t), "Role"); len(r) != 0 {
 		t.Errorf("no Role by default, got %d", len(r))
+	}
+	off := render(t, "--set", "diagnostics.controllerLogsNamespaces={kgateway-system,other}")
+	if n := len(kind(off, "Role")) + len(kind(off, "RoleBinding")); n != 0 {
+		t.Errorf("namespaces alone must not render a Role or RoleBinding, got %d", n)
 	}
 	args := []string{"--set", "diagnostics.controllerLogs=true", "--set", "diagnostics.controllerLogsNamespaces={kgateway-system,other}"}
 	docs := render(t, args...)
@@ -252,8 +257,24 @@ func TestControllerLogsRoleIsOptInAndNamespaced(t *testing.T) {
 	if !slices.Equal(seen, []string{"kgateway-system", "other"}) {
 		t.Errorf("Role namespaces = %v", seen)
 	}
-	if n := len(kind(docs, "RoleBinding")); n != 2 {
-		t.Errorf("want 2 RoleBindings, got %d", n)
+	var bound []string
+	for _, d := range kind(docs, "RoleBinding") {
+		b, _ := yaml.Marshal(d)
+		var rb rbacv1.RoleBinding
+		if err := yaml.Unmarshal(b, &rb); err != nil {
+			t.Fatal(err)
+		}
+		if rb.RoleRef.Kind != "Role" || rb.RoleRef.Name != "ui-kgateway-ui-logs" {
+			t.Errorf("RoleBinding %s/%s must bind the logs Role: %+v", rb.Namespace, rb.Name, rb.RoleRef)
+		}
+		if want := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "ui-kgateway-ui", Namespace: "kgateway-ui"}}; !slices.Equal(rb.Subjects, want) {
+			t.Errorf("RoleBinding %s/%s subjects = %+v", rb.Namespace, rb.Name, rb.Subjects)
+		}
+		bound = append(bound, rb.Namespace)
+	}
+	slices.Sort(bound)
+	if !slices.Equal(bound, []string{"kgateway-system", "other"}) {
+		t.Errorf("RoleBinding namespaces = %v", bound)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -29,6 +30,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
@@ -114,11 +116,10 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 			out = append(out, api.Capability{Name: in.name, State: api.CapFailing, Reason: reasonFailing})
 		}
 	}
-	if d.NoProxyStats {
-		return append(out, api.Capability{Name: "proxyStats", State: api.CapOff})
-	}
 	// Per-Gateway failures stay in the value; only a stopped or stuck collector is failing here.
 	switch v, ok := collected.Get(proxystats.Key); {
+	case d.NoProxyStats:
+		out = append(out, api.Capability{Name: "proxyStats", State: api.CapOff})
 	case !ok:
 	case v.State == collect.OK:
 		out = append(out, api.Capability{Name: "proxyStats", State: api.CapOn})
@@ -127,7 +128,27 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 	default:
 		out = append(out, api.Capability{Name: "proxyStats", State: api.CapFailing, Reason: reasonStatsFailing})
 	}
-	return out
+	if !d.ControllerLogs {
+		return append(out, api.Capability{Name: "controllerLogs", State: api.CapOff})
+	}
+	st, ok := ctrllogs.Availability(collected)
+	if !ok {
+		return out
+	}
+	c := api.Capability{Name: "controllerLogs", State: api.CapFailing}
+	switch st {
+	case ctrllogs.StateOn:
+		c.State = api.CapOn
+	case ctrllogs.StateDenied:
+		c.State, c.Reason = api.CapDenied, reasonDenied
+	case ctrllogs.StateUnrecognised:
+		c.Reason = reasonLogsUnrecognised
+	case ctrllogs.StateNoParser:
+		c.Reason = reasonLogsNoParser
+	default:
+		c.Reason = reasonLogsFailing
+	}
+	return append(out, c)
 }
 
 // /api/v1/meta is not gated, so its reasons are fixed text; the raw error stays in check results.
@@ -136,6 +157,10 @@ const (
 	reasonFailing = "The watch is failing"
 	// reasonStatsFailing: the collector stopped or is stuck (wording pass, Task 51).
 	reasonStatsFailing = "Proxy stats are not being collected"
+	// Controller log reasons (design §8.9).
+	reasonLogsFailing      = "Controller logs cannot be read"
+	reasonLogsUnrecognised = "Log format not recognised"
+	reasonLogsNoParser     = "No log format is known for this kgateway version"
 )
 
 // Clients are the Kubernetes clients the app uses.
@@ -251,8 +276,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 			crds.observe(m.Snapshot.CRDs)
 		}}
 	// The proxy stats collector is core, so the engine always reads the store.
-	if slices.ContainsFunc(reg.Collectors(), func(c extension.Collector) bool { return c.Name() == proxystats.CollectorName }) {
-		return nil, fmt.Errorf("collector name %q is reserved for the core proxy stats collector", proxystats.CollectorName)
+	for _, name := range []string{proxystats.CollectorName, ctrllogs.CollectorName} {
+		if slices.ContainsFunc(reg.Collectors(), func(c extension.Collector) bool { return c.Name() == name }) {
+			return nil, fmt.Errorf("collector name %q is reserved for a core collector", name)
+		}
 	}
 	collected := collect.New(changes, now)
 	cfg.Collected = collected.Snapshot
@@ -274,8 +301,65 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		return CoreCapabilities(snap, o.Diagnostics, collected.Snapshot())
 	}
 	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates), api.WithCommands(reg.Commands))
+	cores := []extension.Collector{stats}
+	if o.Diagnostics.ControllerLogs {
+		cores = append(cores, controllerLogsCollector(c, o, eng, collected))
+	}
 	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
-		discovered: discovered, reg: reg, core: extension.New(extension.WithCollectors(stats)), collected: collected, deps: deps}, nil
+		discovered: discovered, reg: reg, core: extension.New(extension.WithCollectors(cores...)), collected: collected, deps: deps}, nil
+}
+
+// controllerLogsCollector reads each install's controller logs through pods/log
+// with the UI's Role, and names only from the latest proxy stats (D-037).
+func controllerLogsCollector(c Clients, o Options, eng *engine.Engine, collected *collect.Store) logsCollector {
+	installs := func() ([]ctrllogs.Install, bool) {
+		p := eng.Current()
+		if p == nil || p.Model == nil || p.Model.Snapshot == nil || !p.Model.Snapshot.Synced {
+			return nil, false
+		}
+		snap := p.Model.Snapshot
+		out := make([]ctrllogs.Install, 0, len(p.Model.Installs))
+		for _, im := range p.Model.Installs {
+			in := ctrllogs.Install{Resolved: im.Resolved, Parser: im.Rules.LogParser()}
+			if im.Owned != nil {
+				for _, g := range im.Owned.Gateways {
+					in.Gateways = append(in.Gateways, objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: g.GetNamespace(), Name: g.GetName()})
+				}
+			}
+			gws := in.Gateways
+			// A deployer error keeps its object only when it is a Gateway of the install or a Deployment the UI sees.
+			in.Known = func(r objects.Ref) bool {
+				if r.Kind == "Deployment" && (r.Group == "" || r.Group == "apps") {
+					return slices.ContainsFunc(snap.Deployments, func(d *appsv1.Deployment) bool { return d.Namespace == r.Namespace && d.Name == r.Name })
+				}
+				return slices.ContainsFunc(gws, func(g objects.Ref) bool { return g == r })
+			}
+			out = append(out, in)
+		}
+		return out, true
+	}
+	stats := func() (proxystats.Stats, bool) {
+		v, ok := collected.Snapshot().Get(proxystats.Key)
+		if !ok || v.State != collect.OK {
+			return nil, false
+		}
+		s, ok := v.Data.(proxystats.Stats)
+		return s, ok
+	}
+	var clk clock.WithTicker
+	if o.Clock != nil {
+		clk = o.Clock
+	}
+	return logsCollector{ctrllogs.New(ctrllogs.Config{Source: ctrllogs.Kube{Client: c.Kube}, Every: o.MetricsInterval, Clock: clk, Installs: installs, Stats: stats})}
+}
+
+// logsCollector runs the controller log collector on the collector seam.
+type logsCollector struct{ c *ctrllogs.Collector }
+
+func (logsCollector) Name() string { return ctrllogs.CollectorName }
+
+func (lc logsCollector) Start(ctx context.Context, d extension.Deps) error {
+	return lc.c.Run(ctx, d.Publish, d.Fail)
 }
 
 // proxyStatsCollector is the core proxy stats collector over reg's Source, or

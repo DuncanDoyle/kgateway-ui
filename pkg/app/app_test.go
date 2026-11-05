@@ -40,6 +40,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
@@ -1006,7 +1008,7 @@ func TestBuildCapabilities(t *testing.T) {
 	rec := httptest.NewRecorder()
 	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/meta", nil))
 	var meta api.MetaResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil || !slices.Contains(meta.Capabilities, "acme-widgets") || len(meta.CapabilityStates) != 1 {
+	if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil || !slices.Contains(meta.Capabilities, "acme-widgets") || len(meta.CapabilityStates) != 2 { // acme-widgets and controllerLogs off
 		t.Errorf("meta: %v %+v", err, meta)
 	}
 }
@@ -1129,7 +1131,7 @@ func TestCoreProxyStatsCollector(t *testing.T) {
 	store.Publish(proxystats.Key, proxystats.Stats{}, 1, time.Second)
 	now = now.Add(time.Second)
 	got := CoreCapabilities(nil, Diagnostics{}, store.Snapshot())
-	if !slices.Equal(got, []api.Capability{{Name: "proxyStats", State: api.CapFailing, Reason: reasonStatsFailing}}) {
+	if !slices.Equal(got, []api.Capability{{Name: "proxyStats", State: api.CapFailing, Reason: reasonStatsFailing}, {Name: "controllerLogs", State: api.CapOff}}) {
 		t.Fatalf("expired proxy stats: %+v", got)
 	}
 }
@@ -1404,12 +1406,92 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 // snapshot have no state; a toggle that is off always reads off.
 func TestCoreCapabilitiesPendingAndMissing(t *testing.T) {
 	d := Diagnostics{NoCRDs: true}
-	if got := CoreCapabilities(nil, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}}) {
+	if got := CoreCapabilities(nil, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}, {Name: "controllerLogs", State: api.CapOff}}) {
 		t.Errorf("before the first snapshot: %+v", got)
 	}
 	snap := &cache.Snapshot{Access: map[schema.GroupVersionResource]cache.Access{cache.EventsGVR: {}, cache.CRDsGVR: {Err: "x is forbidden: y"}}}
-	if got := CoreCapabilities(snap, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}}) {
+	if got := CoreCapabilities(snap, d, collect.Snapshot{}); !slices.Equal(got, []api.Capability{{Name: "crds", State: api.CapOff}, {Name: "controllerLogs", State: api.CapOff}}) {
 		t.Errorf("syncing events, no proxy Pod watch, crds off: %+v", got)
+	}
+}
+
+// logRules is the 2.4 rule set with a log parser that reads nothing.
+type logRules struct{ computed.Rules }
+
+func (logRules) Markers() []string { return []string{"xds error"} }
+func (logRules) Parse([]byte) (computed.LogFields, bool, error) {
+	return computed.LogFields{}, false, nil
+}
+
+// controllerLogs is off by default and reads off with no stream; when on, a
+// rule set without a parser reads no logs, a parser reads them, and a
+// forbidden pods/log reads denied. The core collector name is reserved.
+func TestControllerLogsCapability(t *testing.T) {
+	dyn, kube := testutil.Clients(t)
+	clash := &fakeCollector{name: ctrllogs.CollectorName}
+	if _, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: time.Second, MetricsInterval: time.Second, UI: ui}, extension.New(extension.WithCollectors(clash))); err == nil ||
+		!strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("a downstream collector named %q: %v", ctrllogs.CollectorName, err)
+	}
+	withParser := extension.WithComputedRules(func(string) computed.Selection { return computed.Selection{Rules: logRules{kgw24.New()}} })
+	for _, tc := range []struct {
+		name   string
+		on     bool
+		opts   []extension.Option
+		denied bool
+		want   api.Capability
+	}{
+		{"off", false, nil, false, api.Capability{Name: "controllerLogs", State: api.CapOff}},
+		{"no parser", true, nil, false, api.Capability{Name: "controllerLogs", State: api.CapFailing, Reason: reasonLogsNoParser}},
+		{"on", true, []extension.Option{withParser}, false, api.Capability{Name: "controllerLogs", State: api.CapOn}},
+		{"denied", true, []extension.Option{withParser}, true, api.Capability{Name: "controllerLogs", State: api.CapDenied, Reason: reasonDenied}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+			dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+			logs := make(chan struct{}, 64)
+			kube.PrependReactor("get", "pods", func(a clienttesting.Action) (bool, runtime.Object, error) {
+				if a.GetSubresource() != "log" {
+					return false, nil, nil
+				}
+				select {
+				case logs <- struct{}{}:
+				default:
+				}
+				if tc.denied {
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods/log"}, "kgateway-0", errors.New("no Role"))
+				}
+				return false, nil, nil
+			})
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: 10 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, Diagnostics: Diagnostics{ControllerLogs: tc.on}}, extension.New(tc.opts...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			eventually(t, "controllerLogs "+string(tc.want.State), func() bool {
+				var meta api.MetaResponse
+				getJSON(t, srv, "/api/v1/meta", &meta)
+				return slices.Contains(meta.CapabilityStates, tc.want)
+			})
+			if tc.want.State == api.CapOn || tc.denied {
+				testutil.Recv(t, logs, "a pods/log request")
+			} else if len(logs) > 0 {
+				t.Fatal("pods/log requested without a reader")
+			}
+		})
+	}
+	// The worst install state wins; an unrecognised format reads failing with its reason.
+	store := collect.New(nil, func() time.Time { return testutil.Now })
+	store.Publish(ctrllogs.Key, ctrllogs.Logs{"a": {State: ctrllogs.StateUnrecognised}}, 1, 0)
+	got := CoreCapabilities(nil, Diagnostics{NoProxyStats: true, ControllerLogs: true}, store.Snapshot())
+	if want := (api.Capability{Name: "controllerLogs", State: api.CapFailing, Reason: reasonLogsUnrecognised}); !slices.Contains(got, want) {
+		t.Fatalf("unrecognised: %+v", got)
 	}
 }
 
