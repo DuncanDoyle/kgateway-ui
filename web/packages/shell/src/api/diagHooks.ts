@@ -3,11 +3,18 @@ import type { ApiError } from "./client";
 import { apiFetch } from "./client";
 import { forInstall, seg, useList, withQuery } from "./exploreHooks";
 import { installApi, live } from "./hooks";
-import type { Diagnostics, FindingDetail, FindingItem, ProcessesResponse } from "./types";
+import type { Diagnostics, FindingDetail, FindingItem, GroupRow, ProcessesResponse } from "./types";
 
 /** GET …/findings with the page's query string (filters, sort, cursor); a 400 on a cursor loads page one. */
 export function useFindings(id: string, query: URLSearchParams) {
   return useList<FindingItem>(id, "findings", query);
+}
+
+/** GET …/findings?view=groups with the page's query string: the groups of the findings the flat view lists (R98). */
+export function useFindingGroups(id: string, query: URLSearchParams) {
+  const q = new URLSearchParams(query);
+  q.set("view", "groups");
+  return useList<GroupRow>(id, "findings", q);
 }
 
 /**

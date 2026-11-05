@@ -42,6 +42,7 @@ export { DiagnosticsGroupRow, GROUP_ROW_H } from "./diagnostics/GroupRow";
 export { NextSteps } from "./diagnostics/NextSteps";
 export { PROCESS_LINE_H, ProcessLine } from "./diagnostics/ProcessLine";
 export { ProcessTable } from "./diagnostics/ProcessTable";
+export { SuggestedFixView } from "./diagnostics/SuggestedFix";
 export { ComputedBadge } from "./explore/ComputedBadge";
 export { CopyCommandButton } from "./explore/CopyCommandButton";
 export { LinkedName } from "./explore/LinkedName";

@@ -4,12 +4,15 @@ import type { ReactNode } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import detailGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-other.json";
 import detailRestrictedGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-restricted.json";
+import ruleGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-rule-replaced.json";
+import ruleRestrictedGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-rule-replaced-restricted.json";
 import xdsGolden from "../../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects.json";
 import findingsGolden from "../../../../../../pkg/api/testdata/golden/findings.json";
+import groupsGolden from "../../../../../../pkg/api/testdata/golden/findings-groups.json";
 import findingsRestrictedGolden from "../../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import meta from "../../../../../../pkg/api/testdata/golden/meta.json";
-import type { Finding, FindingDetail, FindingList, LinkedRef } from "../../api/types";
-import { diagnosticsCopy, findingsCopy } from "../../copy/explorer";
+import type { Finding, FindingDetail, FindingList, GroupList, LinkedRef } from "../../api/types";
+import { diagnosticsCopy, findingsCopy, fixCopy, groupsCopy } from "../../copy/explorer";
 import { ROW_H } from "../../explore/ObjectTable";
 import { ShellExtensionContext, useShellExtension } from "../../shell/extension";
 import { pseudoRules, renderWithTheme } from "../../test/render";
@@ -407,4 +410,140 @@ it("the finding page links its code's entry in the findings reference, restricte
     "href",
     expect.stringMatching(/#kgwui-013$/),
   );
+});
+
+it("grouped view round-trips ?view=groups", async () => {
+  const groups = (): GroupList => ({ ...(groupsGolden.body as GroupList), collectedAt: now() });
+  serve((u) =>
+    u.pathname.endsWith("/findings") ? (u.searchParams.get("view") === "groups" ? groups() : findings()) : undefined,
+  );
+  mount(`/i/${ID}/findings?severity=error&kind=${GW}/HTTPRoute&q=shop&sort=code.asc`);
+  await screen.findByText("Backend not found");
+  const view = screen.getByRole("group", { name: groupsCopy.view });
+  const flat = within(view).getByRole("button", { name: groupsCopy.flat });
+  const grouped = within(view).getByRole("button", { name: groupsCopy.groups });
+  expect(flat).toHaveAttribute("aria-pressed", "true");
+  expect([":hover", ":active", ":focus-visible"].every((p) => pseudoRules(grouped, p).length > 0)).toBe(true);
+  await userEvent.click(grouped);
+  // The groups view takes severity, code and q only; the others leave the URL, so it never 400s.
+  await waitFor(() => expect(search().get("view")).toBe("groups"));
+  expect(search().has("kind")).toBe(false);
+  expect(search().has("sort")).toBe(false);
+  expect(search().get("severity")).toBe("error");
+  await screen.findByText("Reference not permitted (missing ReferenceGrant)");
+  const sent = listCalls().at(-1)?.searchParams;
+  expect([...(sent?.entries() ?? [])]).toEqual([
+    ["severity", "error"],
+    ["q", "shop"],
+    ["view", "groups"],
+  ]);
+  // A row's code is its top member's; the row opens the flat view of its group, with the same filters (R98).
+  const first = groupsGolden.body.items[0] as GroupList["items"][number];
+  const row = rowOf("Reference not permitted (missing ReferenceGrant)");
+  expect(within(row).getByText(first.code)).toBeInTheDocument();
+  await userEvent.click(within(row).getByRole("link", { name: first.title }));
+  await waitFor(() => expect(search().get("group")).toBe(first.id));
+  expect(search().has("view")).toBe(false);
+  expect(search().get("severity")).toBe("error");
+  expect(search().get("q")).toBe("shop");
+  await waitFor(() => expect(listCalls().at(-1)?.searchParams.get("group")).toBe(first.id));
+  // Back on the flat view, Groups again keeps the filters; reload keeps the view.
+  await userEvent.click(screen.getByRole("button", { name: groupsCopy.groups }));
+  await waitFor(() => expect(search().get("view")).toBe("groups"));
+  expect(search().has("group")).toBe(false);
+});
+
+it("a restricted group row shows its code and the restricted label, and still opens its findings", async () => {
+  const restrictedGroups = (): GroupList => ({
+    ...(groupsGolden.body as GroupList),
+    items: (groupsGolden.body as GroupList).items.map((g, i) =>
+      i === 1 ? { ...g, title: "", restricted: true, cause: undefined, affected: [], affectedTotal: 0 } : g,
+    ),
+    collectedAt: now(),
+  });
+  serve((u) => (u.pathname.endsWith("/findings") ? restrictedGroups() : undefined));
+  mount(`/i/${ID}/findings?view=groups`);
+  const label = await screen.findByText(findingsCopy.restricted);
+  const row = label.closest("tr") as HTMLElement;
+  expect(within(row).getByText("KGWUI-013")).toBeInTheDocument();
+  expect(row).not.toHaveTextContent("cart");
+  const id = (groupsGolden.body as GroupList).items[1]?.id ?? "";
+  expect(within(row).getByRole("link", { name: findingsCopy.restricted })).toHaveAttribute(
+    "href",
+    expect.stringContaining(`group=${id}`),
+  );
+});
+
+it("the finding page shows the suggested fix above next steps, and one Learn more", async () => {
+  const fix = {
+    title: "Create a ReferenceGrant in `store`",
+    target: { group: GW, kind: "ReferenceGrant", namespace: "store", name: "allow-shop", link: "none" as const },
+    create: true,
+    yaml: "kind: ReferenceGrant\n",
+    basis: "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace.",
+  };
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${FINDING}`)
+      ? {
+          ...detail(),
+          suggestedFix: fix,
+          nextSteps: [{ title: "See the routes", command: "kubectl get httproute -A" }],
+        }
+      : undefined,
+  );
+  mount(`/i/${ID}/findings/${FINDING}`);
+  const fixHeading = await screen.findByRole("heading", { name: findingsCopy.suggestedFix });
+  const steps = screen.getByRole("heading", { name: findingsCopy.nextSteps });
+  expect(fixHeading.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: fixCopy.downloadLabel("referencegrant-allow-shop.yaml") }),
+  ).toBeInTheDocument();
+  expect(screen.getAllByRole("link", { name: /^Learn more/ })).toHaveLength(1);
+});
+
+it("the finding page shows a 015's policy and hint; a hidden policy never reads as no hint", async () => {
+  const id = ruleGolden.body.finding.id;
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${id}`) ? { ...(ruleGolden.body as FindingDetail), collectedAt: now() } : undefined,
+  );
+  const { unmount } = mount(`/i/${ID}/findings/${id}`);
+  expect(await screen.findByText(diagnosticsCopy.matchIndex(2))).toBeInTheDocument();
+  expect(screen.getByText(/some versions keep the rule replaced until the controller restarts/)).toBeInTheDocument();
+  unmount();
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${id}`)
+      ? { ...(ruleRestrictedGolden.body as FindingDetail), collectedAt: now() }
+      : undefined,
+  );
+  mount(`/i/${ID}/findings/${id}`);
+  // The hint is withheld with the rest of the detail: the page says details are hidden, not that there is none.
+  expect(await screen.findByText(ruleRestrictedGolden.body.finding.detail)).toBeInTheDocument();
+  expect(screen.queryByText(diagnosticsCopy.matchIndex(2))).toBeNull();
+  expect(document.body.textContent).not.toMatch(/no hint|not temporary|restart(s)? (is|are) not needed/i);
+});
+
+it("a computed 016 says Not verified and names its rule and rule set", async () => {
+  const d = detail();
+  const text =
+    "targetRefs[0] Gateway edge: no such object in namespace shop. Computed by the UI's policy targets rule. Not verified: the controller's status cannot confirm this. Rule set kgateway 2.4.";
+  serve((u) =>
+    u.pathname.endsWith(`/findings/${FINDING}`)
+      ? {
+          ...d,
+          finding: {
+            ...d.finding,
+            code: "KGWUI-016",
+            slug: "policy-target-not-found",
+            severity: "warning",
+            detail: text,
+          },
+          evidence: undefined,
+          suggestedFix: undefined,
+        }
+      : undefined,
+  );
+  mount(`/i/${ID}/findings/${FINDING}`);
+  expect(await screen.findByText(/Not verified: the controller's status cannot confirm this\./)).toBeInTheDocument();
+  expect(screen.getByText(/Computed by the UI's policy targets rule/)).toBeInTheDocument();
+  expect(screen.getByText(/Rule set kgateway 2\.4/)).toBeInTheDocument();
 });

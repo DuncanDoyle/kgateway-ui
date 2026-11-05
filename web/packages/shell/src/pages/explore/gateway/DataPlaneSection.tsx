@@ -102,6 +102,14 @@ export function DataPlaneSection({ installId, dataPlane: dp, stylesOverride }: D
           <Headline dp={dp} />
           {dp.evidenceRestricted ? <div className="muted">{dataPlaneCopy.evidenceRestricted}</div> : null}
         </div>
+        {dp.withheld ? (
+          <div>
+            <HealthBadge state="warning" label={dataPlaneCopy.withheld} />
+            <div className="muted">
+              {dataPlaneCopy.withheldSpan(ago(dp.withheld.first, now), ago(dp.withheld.last, now))}
+            </div>
+          </div>
+        ) : null}
         {dp.rejects.length ? (
           <DiagTable>
             <table aria-label={diagnosticsCopy.rejectedTypes}>
@@ -148,6 +156,9 @@ export function DataPlaneSection({ installId, dataPlane: dp, stylesOverride }: D
         <Facts>
           <dt>{dataPlaneCopy.proxyStats}</dt>
           <dd>{proxyStatsText(dp.proxyStats)}</dd>
+          {/* Not read is never "not withheld": an absent withheld is then unobserved (D-006). */}
+          <dt>{dataPlaneCopy.controllerLog}</dt>
+          <dd>{diagnosticsCopy.logState[dp.controllerLogs] ?? dp.controllerLogs}</dd>
         </Facts>
         {snap ? (
           <div>

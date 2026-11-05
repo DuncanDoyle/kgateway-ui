@@ -75,6 +75,7 @@ it("keeps the public export surface", () => {
         "SHELL_API_VERSION",
         "Shell",
         "Shimmer",
+        "SuggestedFixView",
         "THEME_PAINT_KEY",
         "ThemeProvider",
         "Tooltip",

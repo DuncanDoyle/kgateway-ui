@@ -278,6 +278,36 @@ describe("Gateway page sections", () => {
     expect(within(dp).getByText(/kgateway-1/)).toBeInTheDocument();
   });
 
+  it("Data plane shows withheld config and the controller log state, never a blank", async () => {
+    const base = dataPlaneGolden.body.dataPlane as GatewayDetail["dataPlane"] & object;
+    let dp: Partial<GatewayDetail["dataPlane"] & object> = { controllerLogs: "not-read" };
+    serve((u) =>
+      u.pathname === `${API}/gateways/infra/nack`
+        ? gateway(dataPlaneGolden, { dataPlane: { ...base, ...dp } })
+        : undefined,
+    );
+    const first = mount(GW("nack"));
+    await screen.findByRole("region", { name: dataPlaneCopy.title });
+    // Unread logs say so; an absent withheld then never reads as "updates flow" (D-006).
+    expect(within(dataPlane()).getByText(dataPlaneCopy.controllerLog)).toBeInTheDocument();
+    expect(within(dataPlane()).getByText(diagnosticsCopy.logState["not-read"] as string)).toBeInTheDocument();
+    expect(within(dataPlane()).queryByText(dataPlaneCopy.withheld)).toBeNull();
+    first.unmount();
+    dp = {
+      controllerLogs: "read",
+      withheld: {
+        message: "deferring",
+        first: new Date(Date.now() - 600_000).toISOString(),
+        last: new Date().toISOString(),
+      },
+    };
+    mount(GW("nack"));
+    await screen.findByRole("region", { name: dataPlaneCopy.title });
+    expect(within(dataPlane()).getByText(dataPlaneCopy.withheld)).toBeInTheDocument();
+    expect(within(dataPlane()).getByText(dataPlaneCopy.withheldSpan("10m ago", "0s ago"))).toBeInTheDocument();
+    expect(within(dataPlane()).getByText(diagnosticsCopy.logState.read as string)).toBeInTheDocument();
+  });
+
   it("no rejects reads healthy only while the check runs; unavailable reads unknown", async () => {
     const base = gatewayGolden.body.dataPlane as GatewayDetail["dataPlane"] & object;
     let unavailable = false;

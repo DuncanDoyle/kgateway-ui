@@ -501,6 +501,80 @@ export const diagnosticsCopy = {
   // 3.3 drafts (Task 68); ids come with the 3.3 wording pass.
   learnMore: "Learn more",
   learnMoreLabel: (code: string) => `Learn more about ${code} (opens in a new tab)`,
+  // 3.3 drafts (Task 69): evidence of 003, 013–015, 017, 018 and the controller log.
+  status: "Status",
+  since: "Since", // S272
+  freshness: {
+    "never-written": "The controller never wrote a status",
+    stale: "Status is for an older generation",
+    pending: "Waiting for the controller",
+    "no-ancestor": "No status entry from this controller",
+  } as Record<string, string>,
+  generation: "Generation",
+  generations: (observed: number, current: number) => `Status has ${observed}, object is at ${current}`,
+  refsAttributed: "The ref",
+  refsCandidates: "Refs the condition may be about",
+  refsNotAttributed: "The condition does not say which of these refs failed.",
+  location: "Location",
+  ref: "Ref",
+  kindNotServed: "No such kind in this group",
+  ruleReason: { RouteRuleReplaced: "Replaced", RouteRuleDropped: "Dropped" } as Record<string, string>,
+  reason: "Reason",
+  match: "Match",
+  matchIndex: (n: number) => `match ${n}`,
+  matchNote: "The controller's match index, not a rule number.",
+  policy: "Policy",
+  controllerMessage: "Controller message",
+  listener: "Listener",
+  port: "Port",
+  protocol: "Protocol",
+  hostname: "Hostname",
+  rule: "Rule",
+  computedRule: (rule: string) => `Computed by the UI: ${rule}`,
+  keptListeners: "Listeners the controller kept",
+  owner: "Owner",
+  stuckObjects: "Objects with a stuck status",
+  objects: "Objects",
+  oldest: "Oldest",
+  syncs: "Status syncs, last 5 min",
+  notKnown: "Not known",
+  controllerLog: "Controller log",
+  logState: { read: "Read", "not-read": "Not read" } as Record<string, string>,
+  panic: "Panic",
+  topFrame: "Top frame",
+  deployerErrors: "Deployer errors",
+  errorClass: "Error class",
+  lastSeen: "Last seen",
+  logEvents: "Controller log events",
+  classes: "Error classes",
+};
+
+/** The suggested fix block of a finding (design §7.7); 3.3 drafts (Task 69). */
+export const fixCopy = {
+  object: "Object", // S271
+  newObject: "New object",
+  location: "Location",
+  merge: "Change only these fields at this location. Keep the rest.",
+  basis: "Basis",
+  createWith: "Create it with",
+  createNote: "`kubectl create` fails if the name is taken, so it never replaces an object.",
+  copy: "Copy", // S293
+  copyLabel: (title: string) => `Copy YAML: ${title}`,
+  download: "Download",
+  downloadLabel: (file: string) => `Download ${file}`,
+};
+
+/** The grouped findings view (design §17.1); 3.3 drafts (Task 69). */
+export const groupsCopy = {
+  view: "View",
+  flat: "Findings",
+  groups: "Groups",
+  title: "Cause",
+  cause: "Cause object",
+  affected: "Affected",
+  members: "Findings",
+  since: "Since", // S272
+  noun: ["group", "groups"] as const,
 };
 
 /** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */
@@ -540,4 +614,8 @@ export const dataPlaneCopy = {
   },
   proxyStats: "Proxy stats", // S447
   proxyStatsOn: "Collected", // S456
+  // 3.3 drafts (Task 69); the withheld label is R105's provisional text.
+  withheld: "Proxies may not be getting config updates",
+  withheldSpan: (first: string, last: string) => `First logged ${first}, last ${last}`,
+  controllerLog: "Controller log",
 };

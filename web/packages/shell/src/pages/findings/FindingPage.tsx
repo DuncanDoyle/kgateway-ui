@@ -1,23 +1,21 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { useFindingDetail } from "../../api/diagHooks";
 import { isStale } from "../../api/hooks";
-import type { LinkedRef, NextStep, SuggestedFix } from "../../api/types";
+import type { LinkedRef, NextStep } from "../../api/types";
 import { columnCopy, findingsCopy, listCopy } from "../../copy/explorer";
 import { EvidenceView, LearnMore } from "../../diagnostics/EvidenceView";
 import { NextSteps } from "../../diagnostics/NextSteps";
+import { SuggestedFixView, withCode } from "../../diagnostics/SuggestedFix";
 import { LinkedName } from "../../explore/LinkedName";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { StaleView } from "../../health/staleView";
-import { IconButton } from "../../resource/CopyNameButton";
 import { useInstallId, useVocabulary } from "../../shell/extension";
 import { layout } from "../../shell/layout";
 import { installPath } from "../../shell/paths";
-import { Tooltip } from "../../shell/Tooltip";
 import { BackLink } from "../../states/controls";
 import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
@@ -69,29 +67,16 @@ const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
   .spacer {
     flex: 1;
   }
+  /* The finding's facts, its evidence and contributed actions, spaced as separate blocks. */
+  .details {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: ${(p) => p.theme.space(4)};
+  }
   .prose {
     max-width: ${layout.proseMax};
   }
   ${(p) => p.stylesOverride}
-`;
-const Block = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: ${(p) => p.theme.space(1)};
-  max-width: 100ch;
-  pre {
-    flex: 1;
-    min-width: 0;
-    margin: 0;
-    padding: ${(p) => p.theme.space(2)} ${(p) => p.theme.space(3)};
-    overflow-x: auto;
-    font-family: ${(p) => p.theme.font.mono};
-    font-size: ${(p) => p.theme.font.size.sm};
-    color: ${(p) => p.theme.color.text};
-    background: ${(p) => p.theme.color.surfaceRaised};
-    border: 1px solid ${(p) => p.theme.color.border};
-    border-radius: ${(p) => p.theme.radius.sm};
-  }
 `;
 const Skeleton = styled.div`
   display: grid;
@@ -108,42 +93,6 @@ const affectedColumns = (installId: string): ObjectColumn<LinkedRef>[] => [
 const self = (r: LinkedRef) => r;
 
 // region Component
-/** Preformatted text with a copy button; rendered as text, never as HTML (design §17.2). */
-function CopyBlock({ text, label }: { text: string; label: string }) {
-  return (
-    <Block>
-      <pre>{text}</pre>
-      <Tooltip label={findingsCopy.copy} placement="end">
-        <IconButton
-          type="button"
-          aria-label={findingsCopy.copyLabel(label)}
-          onClick={() => void navigator.clipboard?.writeText(text).catch(() => {})}
-        >
-          <Copy size={14} aria-hidden="true" />
-        </IconButton>
-      </Tooltip>
-    </Block>
-  );
-}
-
-function FixSection({ fix, installId }: { fix: SuggestedFix; installId: string }) {
-  return (
-    <Section aria-labelledby="finding-fix">
-      <h2 id="finding-fix">{findingsCopy.suggestedFix}</h2>
-      <p className="prose">{fix.title}</p>
-      <Facts>
-        <dt>{findingsCopy.object}</dt>
-        <dd>
-          <LinkedName refValue={fix.target} installId={installId} />
-          {fix.path ? ` (${fix.path})` : null}
-        </dd>
-      </Facts>
-      <p className="prose">{fix.basis}</p>
-      <CopyBlock text={fix.yaml} label={fix.title} />
-    </Section>
-  );
-}
-
 function StepsSection({ steps }: { steps: NextStep[] }) {
   return (
     <Section aria-labelledby="finding-steps">
@@ -207,7 +156,7 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
         {body}
         {data && f ? (
           <>
-            <Section aria-label={listCopy.details}>
+            <Section aria-label={listCopy.details} className="details">
               <Facts>
                 {f.resource ? (
                   <>
@@ -226,7 +175,7 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
                 {f.detail ? (
                   <>
                     <dt>{findingsCopy.detail}</dt>
-                    <dd className="prose">{f.detail}</dd>
+                    <dd className="prose">{withCode(f.detail)}</dd>
                   </>
                 ) : null}
               </Facts>
@@ -234,7 +183,7 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
               {finding ? <EvidenceView evidence={data.evidence} finding={finding} /> : null}
               {finding ? <FindingContributions finding={finding} /> : null}
             </Section>
-            {data.suggestedFix ? <FixSection fix={data.suggestedFix} installId={id} /> : null}
+            {data.suggestedFix ? <SuggestedFixView fix={data.suggestedFix} installId={id} /> : null}
             {data.nextSteps?.length ? <StepsSection steps={data.nextSteps} /> : null}
             {/* A restricted finding has no affected objects to show (design §14 rule 13). */}
             {f.restricted ? null : (

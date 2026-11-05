@@ -1,0 +1,34 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "finding": {
+      "code": "KGWUI-015",
+      "detail": "Details depend on objects you cannot view",
+      "evidenceRestricted": true,
+      "group": "f1-vmugvx4eo3s4dvlxqwh4vvjdha",
+      "id": "f1-xiv44rnuamgfoe3ynakyfdwceg",
+      "message": "Rule replaced by a direct response",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "HTTPRoute",
+        "link": "detail",
+        "name": "r",
+        "namespace": "shop"
+      },
+      "severity": "error",
+      "slug": "rule-replaced"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

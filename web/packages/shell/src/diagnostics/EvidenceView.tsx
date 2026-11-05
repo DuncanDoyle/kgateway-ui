@@ -5,11 +5,18 @@ import { Fragment, type ReactNode } from "react";
 import { useNow } from "../api/clock";
 import { useMeta } from "../api/hooks";
 import type {
+  ControllerLogs,
   Evidence,
   Finding,
+  FreshnessEvidence,
+  ListenerConflictEvidence,
   OtherEvidence,
   ProcessEvidence,
   ProxyStatsEvidence,
+  Ref,
+  RefsEvidence,
+  RuleReplacedEvidence,
+  StatusProgressEvidence,
   VersionPods,
   VersionSkewEvidence,
   XDSRejectsEvidence,
@@ -174,6 +181,34 @@ function XDSRejects({ e, installId, now }: { e: XDSRejectsEvidence; installId: s
           </table>
         </DiagTable>
       ) : null}
+      <LogState state={e.controllerLogs} />
+      {e.logEvents?.length ? (
+        <DiagTable>
+          <table aria-label={diagnosticsCopy.logEvents}>
+            <thead>
+              <tr>
+                <th scope="col">{diagnosticsCopy.type}</th>
+                <th scope="col">{diagnosticsCopy.classes}</th>
+                <th scope="col">{diagnosticsCopy.envoyResources}</th>
+                <th scope="col">{diagnosticsCopy.firstSeen}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Names and classes only: a log line's text is never sent or shown (design §8.9). */}
+              {e.logEvents.map((l) => (
+                <tr key={l.typeUrl}>
+                  <td className="mono" title={l.typeUrl}>
+                    {shortType(l.typeUrl)}
+                  </td>
+                  <td className="mono">{l.classes.join(", ")}</td>
+                  <td className="mono">{l.envoyResources?.join(", ")}</td>
+                  <td className="muted">{ago(l.since, now)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DiagTable>
+      ) : null}
       {e.recentlyChanged?.length ? (
         <div>
           <h3>{diagnosticsCopy.recentlyChanged}</h3>
@@ -191,11 +226,61 @@ function XDSRejects({ e, installId, now }: { e: XDSRejectsEvidence; installId: s
   );
 }
 
-function Process({ e, now }: { e: ProcessEvidence; now: number }) {
+/** Whether the controller log was read; not read is never "nothing found" (D-006). */
+function LogState({ state }: { state?: ControllerLogs }) {
+  if (!state) return null;
   return (
     <Facts>
-      <dt>{diagnosticsCopy.pod}</dt>
-      <dd className="mono">{e.pod}</dd>
+      <dt>{diagnosticsCopy.controllerLog}</dt>
+      <dd className={state === "read" ? undefined : "muted"}>{diagnosticsCopy.logState[state] ?? state}</dd>
+    </Facts>
+  );
+}
+
+/** "Gateway infra/edge"; group adds a non-core group, as a ref's group can be its fault (013). */
+const refText = (r: Ref, group = false) =>
+  `${group && r.group ? `${r.group}/` : ""}${r.kind} ${r.namespace ? `${r.namespace}/` : ""}${r.name}`;
+
+function Process({ e, now }: { e: ProcessEvidence; now: number }) {
+  return (
+    <>
+      <ProcessFacts e={e} now={now} />
+      {e.deployer?.length ? (
+        <DiagTable>
+          <table aria-label={diagnosticsCopy.deployerErrors}>
+            <thead>
+              <tr>
+                <th scope="col">{diagnosticsCopy.errorClass}</th>
+                <th scope="col">{diagnosticsCopy.objects}</th>
+                <th scope="col">{diagnosticsCopy.lastSeen}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {e.deployer.map((d) => (
+                <tr key={`${d.class}|${d.object ? refText(d.object) : ""}`}>
+                  <td className="mono">{d.class}</td>
+                  <td className="mono">{d.object ? refText(d.object) : null}</td>
+                  <td className="muted">{ago(d.last, now)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DiagTable>
+      ) : null}
+    </>
+  );
+}
+
+function ProcessFacts({ e, now }: { e: ProcessEvidence; now: number }) {
+  return (
+    <Facts>
+      {/* A 021 from the controller log alone has no Pod. */}
+      {e.pod ? (
+        <>
+          <dt>{diagnosticsCopy.pod}</dt>
+          <dd className="mono">{e.pod}</dd>
+        </>
+      ) : null}
       {e.restarts !== undefined ? (
         <>
           <dt>{diagnosticsCopy.restartsInWindow}</dt>
@@ -227,7 +312,213 @@ function Process({ e, now }: { e: ProcessEvidence; now: number }) {
           </dd>
         </>
       ) : null}
+      {e.panic ? (
+        <>
+          <dt>{diagnosticsCopy.panic}</dt>
+          <dd>
+            <span className="mono">{e.panic.class}</span> <span className="muted">{ago(e.panic.readAt, now)}</span>
+          </dd>
+          {e.panic.frame ? (
+            <>
+              <dt>{diagnosticsCopy.topFrame}</dt>
+              <dd className="mono">{e.panic.frame}</dd>
+            </>
+          ) : null}
+        </>
+      ) : null}
+      {e.controllerLogs ? (
+        <>
+          <dt>{diagnosticsCopy.controllerLog}</dt>
+          <dd className={e.controllerLogs === "read" ? undefined : "muted"}>
+            {diagnosticsCopy.logState[e.controllerLogs] ?? e.controllerLogs}
+          </dd>
+        </>
+      ) : null}
     </Facts>
+  );
+}
+
+function Refs({ e }: { e: RefsEvidence }) {
+  const title = e.attributed ? diagnosticsCopy.refsAttributed : diagnosticsCopy.refsCandidates;
+  return (
+    <>
+      {e.explanation === "kind-not-served" ? (
+        <Facts>
+          <dt>{diagnosticsCopy.reason}</dt>
+          <dd>{diagnosticsCopy.kindNotServed}</dd>
+        </Facts>
+      ) : null}
+      {e.candidates?.length ? (
+        <div>
+          <h3>{title}</h3>
+          {e.attributed ? null : <div className="muted">{diagnosticsCopy.refsNotAttributed}</div>}
+          <DiagTable>
+            <table aria-label={title}>
+              <thead>
+                <tr>
+                  <th scope="col">{diagnosticsCopy.location}</th>
+                  <th scope="col">{diagnosticsCopy.ref}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {e.candidates.map((c) => (
+                  <tr key={c.path}>
+                    <td className="mono">{c.path}</td>
+                    <td className="mono">{refText(c.ref, true)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DiagTable>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function RuleReplaced({ e, installId }: { e: RuleReplacedEvidence; installId: string }) {
+  return (
+    <Facts>
+      <dt>{diagnosticsCopy.reason}</dt>
+      <dd>{diagnosticsCopy.ruleReason[e.reason] ?? e.reason}</dd>
+      {e.matchIndex !== undefined ? (
+        <>
+          <dt>{diagnosticsCopy.match}</dt>
+          <dd>
+            <span className="mono">{diagnosticsCopy.matchIndex(e.matchIndex)}</span>
+            <div className="muted">{diagnosticsCopy.matchNote}</div>
+          </dd>
+        </>
+      ) : null}
+      {e.policy ? (
+        <>
+          <dt>{diagnosticsCopy.policy}</dt>
+          <dd>
+            {e.policy.kind} <LinkedName refValue={e.policy} installId={installId} />
+          </dd>
+        </>
+      ) : null}
+      <dt>{diagnosticsCopy.controllerMessage}</dt>
+      <dd className="mono">{e.message}</dd>
+    </Facts>
+  );
+}
+
+function Freshness({ e, now }: { e: FreshnessEvidence; now: number }) {
+  return (
+    <Facts>
+      <dt>{diagnosticsCopy.status}</dt>
+      <dd>{diagnosticsCopy.freshness[e.freshness] ?? e.freshness}</dd>
+      {e.observed !== undefined && e.current !== undefined ? (
+        <>
+          <dt>{diagnosticsCopy.generation}</dt>
+          <dd>{diagnosticsCopy.generations(e.observed, e.current)}</dd>
+        </>
+      ) : null}
+      {e.since ? (
+        <>
+          <dt>{diagnosticsCopy.since}</dt>
+          <dd>{ago(e.since, now)}</dd>
+        </>
+      ) : null}
+    </Facts>
+  );
+}
+
+function ListenerConflict({ e, installId }: { e: ListenerConflictEvidence; installId: string }) {
+  const others = e.others ?? [];
+  const rest = e.othersTotal - others.length;
+  return (
+    <>
+      <Facts>
+        <dt>{diagnosticsCopy.listener}</dt>
+        <dd className="mono">{e.listener}</dd>
+        <dt>{diagnosticsCopy.port}</dt>
+        <dd>{e.port}</dd>
+        {e.protocol ? (
+          <>
+            <dt>{diagnosticsCopy.protocol}</dt>
+            <dd className="mono">{e.protocol}</dd>
+          </>
+        ) : null}
+        {e.hostname ? (
+          <>
+            <dt>{diagnosticsCopy.hostname}</dt>
+            <dd className="mono">{e.hostname}</dd>
+          </>
+        ) : null}
+        <dt>{diagnosticsCopy.reason}</dt>
+        <dd className="mono">{e.reason}</dd>
+        {e.rule ? (
+          <>
+            <dt>{diagnosticsCopy.rule}</dt>
+            <dd>{diagnosticsCopy.computedRule(e.rule)}</dd>
+          </>
+        ) : null}
+      </Facts>
+      {others.length ? (
+        <div>
+          <h3>{diagnosticsCopy.keptListeners}</h3>
+          <DiagTable>
+            <table aria-label={diagnosticsCopy.keptListeners}>
+              <thead>
+                <tr>
+                  <th scope="col">{diagnosticsCopy.owner}</th>
+                  <th scope="col">{diagnosticsCopy.listener}</th>
+                  <th scope="col">{diagnosticsCopy.protocol}</th>
+                  <th scope="col">{diagnosticsCopy.hostname}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {others.map((o) => (
+                  <tr key={`${o.owner.kind}/${o.owner.namespace ?? ""}/${o.owner.name}/${o.name}`}>
+                    <td>
+                      {o.owner.kind} <LinkedName refValue={o.owner} installId={installId} />
+                    </td>
+                    <td className="mono">{o.name}</td>
+                    <td className="mono">{reported(o.protocol)}</td>
+                    <td className="mono">{reported(o.hostname)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DiagTable>
+          {rest > 0 ? <div className="muted">{diagnosticsCopy.more(rest)}</div> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function StatusProgress({ e, now }: { e: StatusProgressEvidence; now: number }) {
+  return (
+    <>
+      <DiagTable>
+        <table aria-label={diagnosticsCopy.stuckObjects}>
+          <thead>
+            <tr>
+              <th scope="col">{diagnosticsCopy.status}</th>
+              <th scope="col">{diagnosticsCopy.objects}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {e.kinds.map((k) => (
+              <tr key={k.freshness}>
+                <td>{diagnosticsCopy.freshness[k.freshness] ?? k.freshness}</td>
+                <td>{k.objects}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </DiagTable>
+      <Facts>
+        <dt>{diagnosticsCopy.oldest}</dt>
+        <dd>{ago(e.oldest, now)}</dd>
+        <dt>{diagnosticsCopy.syncs}</dt>
+        {/* Absent means unknown, never zero (D-006). */}
+        <dd className={e.syncs === undefined ? "muted" : undefined}>{e.syncs ?? diagnosticsCopy.notKnown}</dd>
+      </Facts>
+    </>
   );
 }
 
@@ -381,6 +672,21 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
       break;
     case "proxy-stats":
       body = <ProxyStats e={e} />;
+      break;
+    case "refs":
+      body = <Refs e={e} />;
+      break;
+    case "rule-replaced":
+      body = <RuleReplaced e={e} installId={installId} />;
+      break;
+    case "freshness":
+      body = <Freshness e={e} now={now} />;
+      break;
+    case "listener-conflict":
+      body = <ListenerConflict e={e} installId={installId} />;
+      break;
+    case "status-progress":
+      body = <StatusProgress e={e} now={now} />;
       break;
     default: {
       // A restricted finding shows only its identity, so no renderer runs for it.

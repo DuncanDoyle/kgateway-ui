@@ -234,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 369
+	const want = 373
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -640,6 +640,8 @@ func diagCases(t *testing.T) []goldenCase {
 	skewed.at(t, testutil.Now)
 	no := false
 	stats := proxyStatsWorld(t, func(p *proxystats.PodStats) { p.Connected = &no })
+	replaced := ruleReplacedWorld(t)
+	authPolicy := objects.Ref{Group: "gateway.kgateway.dev", Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
 	nack, edge := testutil.GwRef("infra", "nack").Ref(), edgeRef.Ref()
 	id := func(h *harness, code, name string) string {
 		for _, f := range h.e.Current().Model.Installs[0].Health.Findings {
@@ -664,6 +666,8 @@ func diagCases(t *testing.T) []goldenCase {
 		{"finding-detail-version-skew-restricted", authzSrv(t, skewed, deny(podRef("infra", "edge-0"))), detail(skewed, health.CodeVersionSkew, "")},
 		{"finding-detail-proxy-stats", stats.srv, detail(stats, health.CodeProxyDisconnected, "")},
 		{"finding-detail-proxy-stats-restricted", authzSrv(t, stats, deny(podRef("infra", "edge-0"))), detail(stats, health.CodeProxyDisconnected, "")},
+		{"finding-detail-rule-replaced", replaced.srv, detail(replaced, health.CodeRuleReplaced, "r")},
+		{"finding-detail-rule-replaced-restricted", authzSrv(t, replaced, deny(authPolicy)), detail(replaced, health.CodeRuleReplaced, "r")},
 		{"gateway-detail-data-plane", rej.srv, nackDetail},
 		{"gateway-detail-data-plane-restricted", authzSrv(t, rej, deny(podRef("kgw", "kgateway-0"), route("shop", "fresh-n"))), nackDetail},
 		{"gateway-detail-proxies", procs.srv, gwDetail},

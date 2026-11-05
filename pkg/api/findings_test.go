@@ -862,6 +862,22 @@ func TestNoFixNamingHiddenObject(t *testing.T) {
 	}
 }
 
+// ruleReplacedWorld has route shop/r with a rule replaced by the owned
+// TrafficPolicy shop/auth for an hour, so its detail carries the hint.
+func ruleReplacedWorld(t *testing.T) *harness {
+	t.Helper()
+	gw := testutil.GwRef("infra", "edge")
+	cond := testutil.Cond("Accepted", metav1.ConditionFalse, "RouteRuleReplaced")
+	cond.Message = "Replaced Rule (2): gateway.kgateway.dev/TrafficPolicy/shop/auth: ext auth unavailable"
+	route := testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{cond, testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
+	accepted := testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Valid")}}
+	catalog := func() kinds.Catalog {
+		return kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: kinds.KgatewayGroup, Kind: "TrafficPolicy"}}, nil)
+	}
+	return newHarness(t, setup{catalog: catalog, rulesFor: computedtest.NoViews}, world(route, testutil.TrafficPolicy("shop", "auth", accepted))...)
+}
+
 // Design §7.4, §14 row 015: a 015 naming a served policy links it as evidence and
 // joins its "Replaced by policy" group; a caller who cannot view the policy gets
 // evidenceRestricted and a restricted group row.

@@ -3,13 +3,21 @@ import type { ReactNode } from "react";
 import diagnosticsGolden from "../../../../../pkg/api/testdata/golden/diagnostics.json";
 import findingDetailProcessGolden from "../../../../../pkg/api/testdata/golden/finding-detail-process.json";
 import findingDetailProxyStatsGolden from "../../../../../pkg/api/testdata/golden/finding-detail-proxy-stats.json";
+import findingDetailRuleReplacedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-rule-replaced.json";
 import findingDetailVersionSkewGolden from "../../../../../pkg/api/testdata/golden/finding-detail-version-skew.json";
 import findingDetailXdsRejectsGolden from "../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects.json";
 import processesGolden from "../../../../../pkg/api/testdata/golden/processes.json";
 import processesRestrictedGolden from "../../../../../pkg/api/testdata/golden/processes-restricted.json";
 import { useDiagnostics, useProcesses } from "../api/diagHooks";
-import type { Evidence, Finding, GroupRow as GroupRowData, NextStep, ProcessSet } from "../api/types";
-import { diagnosticsCopy, findingsCopy } from "../copy/explorer";
+import type {
+  Evidence,
+  Finding,
+  GroupRow as GroupRowData,
+  NextStep,
+  ProcessSet,
+  SuggestedFix as SuggestedFixData,
+} from "../api/types";
+import { diagnosticsCopy, findingsCopy, fixCopy } from "../copy/explorer";
 import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "../shell/extension";
 import { renderWhenFontsReady } from "../shell/renderWhenFontsReady";
 import { pseudoRules, renderWithTheme, stubApi } from "../test/render";
@@ -20,6 +28,7 @@ import { DiagnosticsGroupRow, GROUP_ROW_H } from "./GroupRow";
 import { NextSteps } from "./NextSteps";
 import { ProcessLine } from "./ProcessLine";
 import { ProcessTable } from "./ProcessTable";
+import { SuggestedFixView } from "./SuggestedFix";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -76,6 +85,82 @@ describe("NextSteps", () => {
     expect(container.querySelector("img, b, i")).toBeNull();
     expect(container.querySelector("pre")?.textContent).toBe(command);
     expect(screen.getByText("<i>note</i>")).toBeInTheDocument();
+  });
+});
+
+describe("SuggestedFix", () => {
+  const grant: SuggestedFixData = {
+    title: "Create a ReferenceGrant in `store`",
+    target: {
+      group: gw,
+      kind: "ReferenceGrant",
+      namespace: "store",
+      name: "allow-shop-httproute-service-cart",
+      link: "none",
+    },
+    create: true,
+    yaml: "apiVersion: gateway.networking.k8s.io/v1beta1\nkind: ReferenceGrant\nmetadata:\n  name: allow-shop-httproute-service-cart\n",
+    basis: "Gateway API: a ref to another namespace needs a ReferenceGrant in that namespace.",
+  };
+  const fragment: SuggestedFixData = {
+    title: "Set the group to `gateway.kgateway.dev`",
+    target: { group: gw, kind: "HTTPRoute", namespace: "shop", name: "r", link: "detail" },
+    create: false,
+    path: "spec.rules[0].backendRefs[0]",
+    yaml: "group: gateway.kgateway.dev\nkind: Backend\nname: cart\nnamespace: store\n",
+    basis: "API discovery: only group `gateway.kgateway.dev` serves kind `Backend`.",
+  };
+  const show = (fix: SuggestedFixData) =>
+    renderWithTheme(<SuggestedFixView fix={fix} installId="kgw.kgateway" />, { path: "/i/kgw.kgateway" });
+
+  it("SuggestedFix copies and downloads the YAML", async () => {
+    const writeText = clipboard();
+    const blobs: Blob[] = [];
+    // jsdom has no object URLs; the stub keeps the Blob the button hands over.
+    Object.assign(URL, {
+      createObjectURL: vi.fn((b: Blob) => {
+        blobs.push(b);
+        return "blob:fix";
+      }),
+      revokeObjectURL: vi.fn(),
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    show(grant);
+    expect(screen.getByRole("heading", { name: findingsCopy.suggestedFix })).toBeInTheDocument();
+    expect(screen.getByText("store", { selector: "code" })).toBeInTheDocument();
+    expect(screen.getByText(fixCopy.newObject)).toBeInTheDocument();
+    const file = "referencegrant-allow-shop-httproute-service-cart.yaml";
+    // A new object is created, never applied, so a taken name fails instead of replacing a grant (R89).
+    expect(screen.getByText(`kubectl create -f ${file}`)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/kubectl apply/);
+    const copy = screen.getByRole("button", { name: fixCopy.copyLabel(grant.title) });
+    const download = screen.getByRole("button", { name: fixCopy.downloadLabel(file) });
+    expect(styled(copy)).toBe(true);
+    expect(styled(download)).toBe(true);
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledWith(grant.yaml);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(diagnosticsCopy.copied));
+    fireEvent.click(download);
+    expect(click).toHaveBeenCalledTimes(1);
+    const a = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(a.download).toBe(file);
+    const text = await new Promise<string>((done) => {
+      const r = new FileReader();
+      r.onload = () => done(String(r.result));
+      r.readAsText(blobs[0] as Blob);
+    });
+    expect(text).toBe(grant.yaml);
+    expect(screen.getByText(grant.yaml.split("\n")[0] as string, { exact: false }).tagName).toBe("PRE");
+  });
+
+  it("fragment shows its location", () => {
+    show(fragment);
+    expect(screen.getByText("spec.rules[0].backendRefs[0]")).toBeInTheDocument();
+    expect(screen.getByText(fixCopy.merge)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /shop\/r|^r$/ })).toBeInTheDocument();
+    expect(screen.queryByText(fixCopy.newObject)).toBeNull();
+    expect(screen.queryByText(/kubectl create/)).toBeNull();
+    expect(screen.getByRole("button", { name: fixCopy.downloadLabel("httproute-r-fix.yaml") })).toBeInTheDocument();
   });
 });
 
@@ -146,6 +231,204 @@ describe("EvidenceView", () => {
     expect(within(row).getByText(diagnosticsCopy.disconnected)).toBeInTheDocument();
     expect(within(row).getByText("live")).toBeInTheDocument();
     expect(within(row).getAllByText(diagnosticsCopy.notReported)).toHaveLength(2);
+  });
+
+  const svc = (namespace: string, name: string) => ({ group: "", kind: "Service", namespace, name });
+
+  it("renders ref-unresolved: a kind the group does not serve, attributed to one ref", () => {
+    show({
+      kind: "refs",
+      explanation: "kind-not-served",
+      attributed: true,
+      candidates: [
+        {
+          path: "spec.rules[2].backendRefs[0]",
+          ref: { group: "delegation.gateway.example", kind: "Service", namespace: "shop", name: "cart" },
+        },
+      ],
+    });
+    expect(screen.getByText(diagnosticsCopy.kindNotServed)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: diagnosticsCopy.refsAttributed })).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: diagnosticsCopy.refsAttributed });
+    expect(within(table).getByText("spec.rules[2].backendRefs[0]")).toBeInTheDocument();
+    expect(within(table).getByText("delegation.gateway.example/Service shop/cart")).toBeInTheDocument();
+    expect(screen.queryByText(diagnosticsCopy.refsNotAttributed)).toBeNull();
+  });
+
+  it("renders ref-not-permitted: every candidate with its location, not attributed", () => {
+    show({
+      kind: "refs",
+      explanation: "controller",
+      attributed: false,
+      candidates: [
+        { path: "spec.rules[0].backendRefs[0]", ref: svc("store", "cart") },
+        { path: "spec.rules[0].backendRefs[1]", ref: svc("bank", "pay") },
+      ],
+    });
+    const table = screen.getByRole("table", { name: diagnosticsCopy.refsCandidates });
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    expect(within(table).getByText("Service store/cart")).toBeInTheDocument();
+    expect(within(table).getByText("spec.rules[0].backendRefs[1]")).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.refsNotAttributed)).toBeInTheDocument();
+    expect(screen.queryByText(diagnosticsCopy.kindNotServed)).toBeNull();
+  });
+
+  it("renders rule-replaced: the match index, reason, message and policy link", () => {
+    show(findingDetailRuleReplacedGolden.body.evidence as Evidence);
+    expect(screen.getByText(diagnosticsCopy.matchIndex(2))).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.matchNote)).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.ruleReason.RouteRuleReplaced as string)).toBeInTheDocument();
+    expect(screen.getByText(/ext auth unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /auth/ })).toBeInTheDocument();
+  });
+
+  it("renders rule-replaced without a parsed match: the message only", () => {
+    show({ kind: "rule-replaced", reason: "RouteRuleDropped", message: "Dropped Rule: unparsed" });
+    expect(screen.getByText(diagnosticsCopy.ruleReason.RouteRuleDropped as string)).toBeInTheDocument();
+    expect(screen.getByText("Dropped Rule: unparsed")).toBeInTheDocument();
+    expect(screen.queryByText(diagnosticsCopy.match)).toBeNull();
+    expect(screen.queryByText(diagnosticsCopy.policy)).toBeNull();
+  });
+
+  it("renders freshness: the kind, the generations and since", () => {
+    vi.useFakeTimers({ now: new Date("2026-10-17T12:00:00Z"), toFake: ["Date"] });
+    show({ kind: "freshness", freshness: "stale", observed: 3, current: 4, since: "2026-10-17T11:55:00Z" });
+    expect(screen.getByText(diagnosticsCopy.freshness.stale as string)).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.generations(3, 4))).toBeInTheDocument();
+    expect(screen.getByText("5m ago")).toBeInTheDocument();
+  });
+
+  it("renders freshness: never written has no generations", () => {
+    show({ kind: "freshness", freshness: "never-written" });
+    expect(screen.getByText(diagnosticsCopy.freshness["never-written"] as string)).toBeInTheDocument();
+    expect(screen.queryByText(diagnosticsCopy.generation)).toBeNull();
+  });
+
+  it("renders listener-conflict: the listener, the computed rule and the listeners kept", () => {
+    show({
+      kind: "listener-conflict",
+      listener: "https",
+      port: 443,
+      protocol: "HTTPS",
+      hostname: "a.example.com",
+      reason: "HostnameConflict",
+      message: "Listener conflicts with another",
+      rule: "listener port and hostname",
+      others: [
+        {
+          owner: { group: gw, kind: "ListenerSet", namespace: "apps", name: "first", link: "detail" },
+          name: "web",
+          hostname: "a.example.com",
+        },
+      ],
+      othersTotal: 3,
+    });
+    expect(screen.getByText("https")).toBeInTheDocument();
+    expect(screen.getByText("443")).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.computedRule("listener port and hostname"))).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: diagnosticsCopy.keptListeners });
+    expect(within(table).getByRole("link", { name: /first/ })).toBeInTheDocument();
+    expect(within(table).getByText("web")).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.more(2))).toBeInTheDocument();
+  });
+
+  it("renders listener-conflict for a reason no rule covers: no rule, no table", () => {
+    show({
+      kind: "listener-conflict",
+      listener: "l",
+      port: 80,
+      reason: "PortUnavailable",
+      message: "m",
+      othersTotal: 0,
+    });
+    expect(screen.getByText("PortUnavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/Computed by the UI/)).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("renders status-progress: stuck objects per kind; unknown syncs read Not known, never 0", () => {
+    const ev: Evidence = {
+      kind: "status-progress",
+      kinds: [
+        { freshness: "stale", objects: 4 },
+        { freshness: "never-written", objects: 1 },
+      ],
+      oldest: "2026-10-17T11:00:00Z",
+    };
+    const { unmount } = show(ev);
+    const table = screen.getByRole("table", { name: diagnosticsCopy.stuckObjects });
+    expect(within(table).getByText(diagnosticsCopy.freshness.stale as string)).toBeInTheDocument();
+    expect(within(table).getByText("4")).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.notKnown)).toBeInTheDocument();
+    unmount();
+    show({ ...ev, syncs: 0 } as Evidence);
+    expect(screen.queryByText(diagnosticsCopy.notKnown)).toBeNull();
+    expect(screen.getByText("0")).toBeInTheDocument();
+  });
+
+  it("renders process from the controller log only: no Pod row, the panic and deployer errors", () => {
+    show({
+      kind: "process",
+      controllerLogs: "read",
+      panic: {
+        class: "nil-pointer",
+        frame: "github.com/kgateway-dev/kgateway/v2/pkg/x.(*T).Run",
+        readAt: "2026-10-17T11:59:00Z",
+      },
+      deployer: [
+        {
+          class: "render",
+          object: { group: gw, kind: "Gateway", namespace: "infra", name: "edge" },
+          last: "2026-10-17T11:58:00Z",
+        },
+      ],
+    });
+    expect(screen.queryByText(diagnosticsCopy.pod)).toBeNull();
+    expect(document.querySelectorAll("dd:empty")).toHaveLength(0);
+    expect(screen.getByText(diagnosticsCopy.logState.read as string)).toBeInTheDocument();
+    expect(screen.getByText("nil-pointer")).toBeInTheDocument();
+    expect(screen.getByText("github.com/kgateway-dev/kgateway/v2/pkg/x.(*T).Run")).toBeInTheDocument();
+    const table = screen.getByRole("table", { name: diagnosticsCopy.deployerErrors });
+    expect(within(table).getByText("render")).toBeInTheDocument();
+    expect(within(table).getByText("Gateway infra/edge")).toBeInTheDocument();
+  });
+
+  it("renders process: an unread controller log reads Not read", () => {
+    show({ ...(findingDetailProcessGolden.body.evidence as Evidence) });
+    expect(screen.getByText(diagnosticsCopy.controllerLog)).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.logState["not-read"] as string)).toBeInTheDocument();
+  });
+
+  it("log events show names and class, never text", () => {
+    const secret = "AKIAFAKEKEY123456";
+    // Fields a raw log line might carry; the view must render only names and classes.
+    const ev = {
+      ...(findingDetailXdsRejectsGolden.body.evidence as Evidence),
+      controllerLogs: "read",
+      logEvents: [
+        {
+          typeUrl: "type.googleapis.com/envoy.config.cluster.v3.Cluster",
+          since: "2026-10-17T11:58:00Z",
+          classes: ["invalid-cluster"],
+          envoyResources: ["kube_shop_cart_80"],
+          message: `secret ${secret}`,
+          line: secret,
+        },
+      ],
+    } as unknown as Evidence;
+    show(ev);
+    const table = screen.getByRole("table", { name: diagnosticsCopy.logEvents });
+    expect(within(table).getByText("Cluster")).toBeInTheDocument();
+    expect(within(table).getByText("invalid-cluster")).toBeInTheDocument();
+    expect(within(table).getByText("kube_shop_cart_80")).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(secret);
+  });
+
+  it("xds-rejects with an unread controller log says Not read and lists no events", () => {
+    show(findingDetailXdsRejectsGolden.body.evidence as Evidence);
+    expect(screen.getByText(diagnosticsCopy.controllerLog)).toBeInTheDocument();
+    expect(screen.getByText(diagnosticsCopy.logState["not-read"] as string)).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: diagnosticsCopy.logEvents })).toBeNull();
   });
 
   it("an unknown kind uses the finding renderer", () => {
