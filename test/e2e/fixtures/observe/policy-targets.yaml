@@ -1,0 +1,143 @@
+# Policy target observations (computed-rules.md "Policy targets"), on a cluster made by EXPLORER=0 test/e2e/setup.sh.
+# Each TrafficPolicy is one shape; record which ancestors the controller writes under status.ancestors.
+apiVersion: v1
+kind: Namespace
+metadata: { name: pt, labels: { team: a, observe: policy-targets } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: gw, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - { name: http, port: 8080, protocol: HTTP }
+    - { name: alt, port: 8081, protocol: HTTP }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: gw2, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  gatewayClassName: kgateway
+  listeners: [{ name: http, port: 8080, protocol: HTTP }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: r1, namespace: pt, labels: { observe: policy-targets, pick: "yes" } }
+spec:
+  parentRefs: [{ name: gw }]
+  rules:
+    - name: rule-a
+      matches: [{ path: { type: PathPrefix, value: /a } }]
+      backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: r2, namespace: pt, labels: { observe: policy-targets, pick: "yes" } }
+spec:
+  parentRefs: [{ name: gw }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /b } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
+---
+# Attached to two Gateways: one route target, two ancestors.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: r3, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  parentRefs: [{ name: gw }, { name: gw2 }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /c } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata: { name: pt-to-httpbin, namespace: shop, labels: { observe: policy-targets } }
+spec:
+  from: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: pt }]
+  to: [{ group: "", kind: Service }]
+---
+# Shapes. timeouts.request exists in both the v2.3.x and v2.4.x TrafficPolicy schema.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: one-gateway, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: gw }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: gateway-listener, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: gw, sectionName: alt }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: one-route, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1 }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: route-section, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1, sectionName: rule-a }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: two-routes, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs:
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1 }
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: r2 }
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: selector, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetSelectors: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: { pick: "yes" } }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: route-two-gateways, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: r3 }]
+  timeouts: { request: 10s }
+---
+# Missing targets: what the controller writes when the rule would call a target missing.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: missing-gateway, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: nope }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: missing-route-section, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1, sectionName: nope }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: missing-listener, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: gw, sectionName: nope }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: selector-none, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetSelectors: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: { pick: "never" } }]
+  timeouts: { request: 10s }
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: one-found-one-missing, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs:
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1 }
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: nope }
+  timeouts: { request: 10s }

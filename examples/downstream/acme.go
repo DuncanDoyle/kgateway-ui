@@ -13,6 +13,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -156,4 +158,16 @@ func (acmeProxyStats) Interpret(t proxystats.Target, body []byte) (proxystats.Po
 	}
 	return proxystats.PodStats{UID: t.ID, Name: t.Name, Gateway: t.Gateway, Connected: &j.Connected, ServerState: j.State,
 		LDS: proxystats.Pair{Rejected: j.ListenerRejects}}, nil
+}
+
+// acmeRules is acme's computed rule set: kgateway 2.4's views under acme's name.
+// Embedding computed.Rules promotes only its methods, so kgw24's optional
+// PolicyTargeter is not offered and no computed KGWUI-016 is raised.
+type acmeRules struct{ computed.Rules }
+
+func (acmeRules) Version() string { return "acme-2.4" }
+
+// acmeRuleSet selects acmeRules for every controller, for extension.WithComputedRules.
+func acmeRuleSet(string) computed.Selection {
+	return computed.Selection{Rules: acmeRules{kgw24.New()}}
 }

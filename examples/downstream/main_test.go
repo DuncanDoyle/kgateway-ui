@@ -405,3 +405,61 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 		t.Fatal("a reconnected proxy clears the finding")
 	}
 }
+
+// An acme rule set wrapping kgw24 through WithComputedRules, without
+// PolicyTargeter, builds and serves its views; a policy whose only target is
+// missing raises no computed KGWUI-016 under it.
+func TestDownstreamRuleSet(t *testing.T) {
+	if pt := acmeRuleSet("2.4.7").PolicyTargeter(); pt != nil {
+		t.Fatalf("acme's rule set must not offer PolicyTargeter, got %T", pt)
+	}
+	ui, err := fs.Sub(dist, "dist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	tp := testutil.TrafficPolicy("infra", "tp-missing-target")
+	if err := unstructured.SetNestedSlice(tp.Object, []any{map[string]any{
+		"group": "gateway.networking.k8s.io", "kind": "Gateway", "name": "nope"}}, "spec", "targetRefs"); err != nil {
+		t.Fatal(err)
+	}
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d,
+		testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true),
+		testutil.Gateway("infra", "edge", "kgateway", nil), tp)
+	events := make(chan engine.LoopEvent, 4096)
+	o := options(ui)
+	o.OnLoop = func(e engine.LoopEvent) {
+		select {
+		case events <- e:
+		default:
+		}
+	}
+	opts := append(extensions(clock.RealClock{}), extension.WithComputedRules(acmeRuleSet))
+	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}}, o, extension.New(opts...))
+	if err != nil {
+		t.Fatalf("the example with acme's rule set must build: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+
+	// Each publication is read back until the Gateway's computed views name acme's rule set.
+	var g api.GatewayDetail
+	for {
+		if p := a.Engine.Current(); p != nil && len(p.Model.Installs) == 1 {
+			g = api.GatewayDetail{}
+			if getJSON(t, srv, "/api/v1/installs/kgw.kgateway/gateways/infra/edge", &g) == http.StatusOK && g.RuleSet != "" {
+				break
+			}
+		}
+		testutil.Recv(t, events, "the Gateway's computed views")
+	}
+	if g.RuleSet != "acme-2.4" {
+		t.Fatalf("ruleSet %q, want acme-2.4", g.RuleSet)
+	}
+	if healthHas(t, srv, "KGWUI-016") {
+		t.Fatal("a rule set without PolicyTargeter must raise no computed KGWUI-016")
+	}
+}

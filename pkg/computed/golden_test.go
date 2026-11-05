@@ -150,6 +150,10 @@ func goldens(t *testing.T, dir, tag string) {
 			if rules.Version() != dir {
 				t.Fatalf("controller %q selects %s, not %s", c.ControllerVersion, rules.Version(), dir)
 			}
+			if c.Expect["policyTargets"] != nil {
+				comparePolicyTargets(t, c, rules)
+				return
+			}
 			want := decodeExpect(t, c.Expect)
 			ain := attachmentInput(c)
 			att := rules.Attachment(ain)
@@ -610,4 +614,168 @@ func ctxRules(c computed.Context) string {
 		s = append(s, fmt.Sprintf("r%d %s", r.Index, strings.Join(ms, " | ")))
 	}
 	return strings.Join(s, "; ")
+}
+
+// targetExpect is one target's outcome, keyed "<ns>/<policy> #<index>".
+type targetExpect struct {
+	Outcome    string `json:"outcome"`
+	Verifiable bool   `json:"verifiable,omitempty"`
+}
+
+// gkOf is an object's group and kind.
+func gkOf(u *unstructured.Unstructured) objects.GroupKind {
+	r := objects.RefOf(u)
+	return objects.GroupKind{Group: r.Group, Kind: r.Kind}
+}
+
+// upstreamServed reports the kinds.Upstream kinds as served and watched.
+func upstreamServed(gk objects.GroupKind) bool {
+	return slices.ContainsFunc(kinds.Upstream(), func(d kinds.Descriptor) bool { return d.Group == gk.Group && d.Kind == gk.Kind })
+}
+
+// targetInputs builds one TargetInput per policy of a case: its
+// gateway.kgateway.dev objects with targets. Every object is in the cache.
+func targetInputs(c testutil.RuleCase, scopeKnown bool, served func(objects.GroupKind) bool) []computed.TargetInput {
+	lookup := func(gk objects.GroupKind, ns, name string) (*unstructured.Unstructured, bool) {
+		i := slices.IndexFunc(c.Objects, func(u *unstructured.Unstructured) bool {
+			return gkOf(u) == gk && u.GetNamespace() == ns && u.GetName() == name
+		})
+		if i < 0 {
+			return nil, false
+		}
+		return c.Objects[i], true
+	}
+	labelled := func(gk objects.GroupKind, ns string, sel map[string]string) bool {
+		return slices.ContainsFunc(c.Objects, func(u *unstructured.Unstructured) bool {
+			if gkOf(u) != gk || u.GetNamespace() != ns {
+				return false
+			}
+			for k, v := range sel {
+				if got, ok := u.GetLabels()[k]; !ok || got != v {
+					return false
+				}
+			}
+			return true
+		})
+	}
+	var ins []computed.TargetInput
+	for _, u := range c.Objects {
+		if gkOf(u).Group != "gateway.kgateway.dev" {
+			continue
+		}
+		refs, sels := computed.DecodeTargets(u)
+		ins = append(ins, computed.TargetInput{Policy: objects.RefOf(u), TargetRefs: refs, Selectors: sels,
+			Lookup: lookup, Labelled: labelled, Served: served, ScopeKnown: scopeKnown})
+	}
+	return ins
+}
+
+// policyTargets runs t over ins and keys each result as the expect block does.
+func policyTargets(t *testing.T, pt computed.PolicyTargeter, ins []computed.TargetInput) map[string]targetExpect {
+	t.Helper()
+	got := map[string]targetExpect{}
+	for _, in := range ins {
+		res := pt.PolicyTargets(in)
+		if len(res) != len(in.TargetRefs)+len(in.Selectors) {
+			t.Errorf("%s: %d results for %d targets", in.Policy, len(res), len(in.TargetRefs)+len(in.Selectors))
+		}
+		for _, r := range res {
+			got[fmt.Sprintf("%s #%d", nsName(in.Policy), r.Index)] = targetExpect{Outcome: r.Outcome, Verifiable: r.Verifiable}
+		}
+	}
+	return got
+}
+
+// comparePolicyTargets checks a policy-targets case: every target of every policy is written.
+func comparePolicyTargets(t *testing.T, c testutil.RuleCase, rules computed.Rules) {
+	t.Helper()
+	pt, ok := rules.(computed.PolicyTargeter)
+	if !ok {
+		t.Fatalf("%s has no PolicyTargeter", rules.Version())
+	}
+	b, err := json.Marshal(c.Expect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	var want struct {
+		PolicyTargets map[string]targetExpect `json:"policyTargets"`
+	}
+	if err := dec.Decode(&want); err != nil {
+		t.Fatalf("expect: %v", err)
+	}
+	if got := policyTargets(t, pt, targetInputs(c, scope(c).Mode != install.ScopeUnknown, upstreamServed)); !reflect.DeepEqual(got, want.PolicyTargets) {
+		t.Errorf("policyTargets:\n got %v\nwant %v", got, want.PolicyTargets)
+	}
+}
+
+// An unknown scope makes every target unknown (D-024), and a kind that is not
+// served or watched is unknown while the other targets keep their outcome.
+func TestPolicyTargetsUnknown(t *testing.T) {
+	for dir := range tags {
+		t.Run(dir, func(t *testing.T) {
+			c := testutil.LoadRuleCase(t, filepath.Join("testdata", dir, "policy-targets.yaml"))
+			pt := rulesets.Select(c.ControllerVersion).PolicyTargeter()
+			if pt == nil {
+				t.Fatalf("%s has no PolicyTargeter", dir)
+			}
+			for k, r := range policyTargets(t, pt, targetInputs(c, false, upstreamServed)) {
+				if r != (targetExpect{Outcome: computed.TargetUnknown}) {
+					t.Errorf("scope unknown: %s is %+v", k, r)
+				}
+			}
+			known := policyTargets(t, pt, targetInputs(c, true, upstreamServed))
+			noRoutes := policyTargets(t, pt, targetInputs(c, true, func(gk objects.GroupKind) bool {
+				return gk.Kind != "HTTPRoute" && upstreamServed(gk)
+			}))
+			routeTargets := 0
+			for _, in := range targetInputs(c, true, upstreamServed) {
+				for i, gk := range targetKinds(in) {
+					k := fmt.Sprintf("%s #%d", nsName(in.Policy), i)
+					want := known[k]
+					if gk.Kind == "HTTPRoute" {
+						routeTargets++
+						want = targetExpect{Outcome: computed.TargetUnknown}
+					}
+					if noRoutes[k] != want {
+						t.Errorf("HTTPRoute not served: %s is %+v, want %+v", k, noRoutes[k], want)
+					}
+				}
+			}
+			if routeTargets == 0 {
+				t.Fatal("the case has no HTTPRoute target")
+			}
+		})
+	}
+}
+
+// targetKinds are the kinds of in's targets in result order.
+func targetKinds(in computed.TargetInput) []objects.GroupKind {
+	var out []objects.GroupKind
+	for _, r := range in.TargetRefs {
+		out = append(out, objects.GroupKind{Group: r.Group, Kind: r.Kind})
+	}
+	for _, s := range in.Selectors {
+		out = append(out, objects.GroupKind{Group: s.Group, Kind: s.Kind})
+	}
+	return out
+}
+
+// TestRuleSetWithoutPolicyTargeterRaisesNo016: PolicyTargeter is optional, so
+// a downstream rule set that wraps kgw24 has none and gets no target results;
+// the shipped sets, and 2.4's set chosen for a newer controller, have one.
+func TestRuleSetWithoutPolicyTargeterRaisesNo016(t *testing.T) {
+	wrapped := computed.Selection{Rules: struct{ computed.Rules }{rulesets.Select("v2.4.7").Rules}}
+	if wrapped.Rules.Version() != "kgateway-2.4" {
+		t.Fatalf("the wrapper serves %s", wrapped.Rules.Version())
+	}
+	if pt := wrapped.PolicyTargeter(); pt != nil {
+		t.Fatalf("a rule set without PolicyTargets has a targeter: %T", pt)
+	}
+	for _, v := range []string{"v2.3.11", "v2.4.7", "v2.5.0-rc.1"} {
+		if rulesets.Select(v).PolicyTargeter() == nil {
+			t.Errorf("%s: the selected rule set has no PolicyTargeter", v)
+		}
+	}
 }

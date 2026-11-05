@@ -1,0 +1,122 @@
+# Policy targets (computed-rules "Policy targets", phase 3). The observed shapes and their ancestors
+# come from test/e2e/fixtures/observe/policy-targets.yaml on v2.4.7; the rest from the rule's text.
+# A selector's index continues after the last targetRef. verifiable is absent when false.
+provenance: computed-rules §Policy targets (phase 3), observed on v2.4.7
+controllerVersion: v2.4.7
+ruleOnly: true
+namespaces: {pt: {}, other: {}, shop: {}}
+objects:
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw, namespace: pt}
+  spec:
+    gatewayClassName: kgateway
+    listeners:
+    - {name: http, protocol: HTTP, port: 8080}
+    - {name: alt, protocol: HTTP, port: 8081}
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata: {name: gw2, namespace: pt}
+  spec:
+    gatewayClassName: kgateway
+    listeners: [{name: http, protocol: HTTP, port: 8080}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r1, namespace: pt, labels: {pick: "yes"}}
+  spec:
+    parentRefs: [{name: gw}]
+    rules: [{name: rule-a, matches: [{path: {type: PathPrefix, value: /a}}]}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r2, namespace: pt, labels: {pick: "yes"}}
+  spec:
+    parentRefs: [{name: gw}]
+    rules: [{matches: [{path: {type: PathPrefix, value: /b}}]}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata: {name: r3, namespace: pt}
+  spec:
+    parentRefs: [{name: gw}, {name: gw2}]
+    rules: [{matches: [{path: {type: PathPrefix, value: /c}}]}]
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: ListenerSet
+  metadata: {name: ls, namespace: pt}
+  spec:
+    parentRef: {name: gw}
+    listeners: [{name: extra, protocol: HTTP, port: 8082}]
+- apiVersion: v1
+  kind: Service
+  metadata: {name: httpbin, namespace: pt}
+  spec: {ports: [{port: 8000}]}
+# Observed shapes (test/e2e/fixtures/observe/policy-targets.yaml).
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: one-gateway, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: gateway-listener, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw, sectionName: alt}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: one-route, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: route-section, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1, sectionName: rule-a}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: route-two-gateways, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r3}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: two-routes, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1}, {group: gateway.networking.k8s.io, kind: HTTPRoute, name: r2}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: selector, namespace: pt},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: "yes"}}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: one-found-one-missing, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1}, {group: gateway.networking.k8s.io, kind: HTTPRoute, name: nope}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: missing-gateway, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: nope}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: missing-listener, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw, sectionName: nope}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: missing-route-section, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1, sectionName: nope}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: selector-none, namespace: pt},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: never}}]}}
+# Rule shapes.
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: unnamed-rule-section, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: r2, sectionName: rule-0}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: selector-empty-labels, namespace: pt},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {}}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: selector-section, namespace: pt},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: "yes"}, sectionName: nope}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: ref-and-selector, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw}],
+    targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: never}}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: listenerset, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: ListenerSet, name: ls, sectionName: extra}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: missing-listenerset, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: ListenerSet, name: nope}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: BackendConfigPolicy, metadata: {name: service-target, namespace: pt},
+  spec: {targetRefs: [{group: "", kind: Service, name: httpbin}]}}
+# Local refs (GEP-713): pt's objects are not in other.
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: other-namespace, namespace: other},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: other-namespace-selector, namespace: other},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: "yes"}}]}}
+expect:
+  policyTargets:
+    "pt/one-gateway #0": {outcome: found, verifiable: true}
+    "pt/gateway-listener #0": {outcome: found, verifiable: true}
+    "pt/one-route #0": {outcome: found, verifiable: true}
+    "pt/route-section #0": {outcome: found, verifiable: true}
+    "pt/route-two-gateways #0": {outcome: found, verifiable: true}
+    "pt/two-routes #0": {outcome: found}
+    "pt/two-routes #1": {outcome: found}
+    "pt/selector #0": {outcome: found}
+    "pt/one-found-one-missing #0": {outcome: found}
+    "pt/one-found-one-missing #1": {outcome: not-found}
+    "pt/missing-gateway #0": {outcome: not-found, verifiable: true}
+    "pt/missing-listener #0": {outcome: section-not-found, verifiable: true}
+    "pt/missing-route-section #0": {outcome: section-not-found, verifiable: true}
+    "pt/selector-none #0": {outcome: matches-nothing}
+    "pt/unnamed-rule-section #0": {outcome: section-not-found, verifiable: true}
+    "pt/selector-empty-labels #0": {outcome: matches-nothing}
+    "pt/selector-section #0": {outcome: found}
+    "pt/ref-and-selector #0": {outcome: found}
+    "pt/ref-and-selector #1": {outcome: matches-nothing}
+    "pt/listenerset #0": {outcome: found}
+    "pt/missing-listenerset #0": {outcome: not-found}
+    "pt/service-target #0": {outcome: unknown}
+    "other/other-namespace #0": {outcome: not-found, verifiable: true}
+    "other/other-namespace-selector #0": {outcome: matches-nothing}
