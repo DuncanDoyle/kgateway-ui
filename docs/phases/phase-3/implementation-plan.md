@@ -916,7 +916,7 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 
 **Files:** Create `pkg/health/conflicts.go`, `pkg/health/conflicts_test.go`; Modify `pkg/health/evidence.go`.
 
-**Interfaces:** `CodeListenerConflicted = "KGWUI-017"` (`listener-conflicted`, error), Key listener name; trigger `Conflicted=True` on an owned Gateway or ListenerSet listener; evidence lists other listeners on the same Gateway (ListenerSets included) with the same port and an overlapping hostname, labelled "Computed by the UI" with the rule "listener port and hostname overlap"; none found → the "no other listener overlaps" text, no disagreement. Deps: each other listener's owner.
+**Interfaces:** `CodeListenerConflicted = "KGWUI-017"` (`listener-conflicted`, error), Key listener name; trigger `Conflicted=True` on an owned Gateway or ListenerSet listener; evidence lists other listeners on the same Gateway (ListenerSets included) that kgateway kept, on the same port, matched by the condition's reason (`HostnameConflict`: exact hostname, rule "listener port and hostname"; `ProtocolConflict`: different protocol, rule "listener port and protocol"; R94, R95), labelled "Computed by the UI"; none found → the "no other listener overlaps" text, no disagreement. Deps: each other listener's owner.
 
 - [ ] **Step 1: Failing tests** both sides named; no other side; `Accepted=True/ListenersNotValid` Gateway with a conflicted listener now raises 017. **Step 2: Implement, run, commit** `feat(health): conflicted listeners with both sides named`.
 
