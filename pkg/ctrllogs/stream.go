@@ -43,9 +43,9 @@ func (k Kube) Follow(ctx context.Context, t Target, since time.Duration) (io.Rea
 }
 
 // Previous implements Source.
-func (k Kube) Previous(ctx context.Context, t Target, limit int64) (io.ReadCloser, error) {
+func (k Kube) Previous(ctx context.Context, t Target) (io.ReadCloser, error) {
 	tail := int64(PreviousTailLines)
-	return k.open(ctx, t, &corev1.PodLogOptions{Container: t.Container, Previous: true, TailLines: &tail, LimitBytes: &limit})
+	return k.open(ctx, t, &corev1.PodLogOptions{Container: t.Container, Previous: true, TailLines: &tail})
 }
 
 func (k Kube) open(ctx context.Context, t Target, o *corev1.PodLogOptions) (io.ReadCloser, error) {

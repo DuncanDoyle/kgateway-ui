@@ -26,11 +26,11 @@ import (
 const (
 	// FollowSince is how far back a replica's first stream starts.
 	FollowSince = 900 * time.Second
-	// PreviousLimit caps the one read of a restarted container's previous log.
-	PreviousLimit = 256 << 10
-	// PreviousTailLines asks for the previous log's tail, where a crash ends. The API cuts
-	// the tail's end at PreviousLimit, so 500 lines fit it at up to 512 B a line.
-	PreviousTailLines = 500
+	// PreviousTailLines asks for the previous log's tail, where a crash ends; no byte
+	// limit is sent, as the API would cut the tail's end (R101).
+	PreviousTailLines = 200
+	// PreviousLimit is the client's safety cap on that read.
+	PreviousLimit = 4 << 20
 	// MaxFailures marked lines in a row that fail to parse make the format unrecognised.
 	MaxFailures = 10
 	// backoffMin and backoffMax bound the wait before a stream reconnects.
@@ -60,8 +60,8 @@ type Source interface {
 	Targets(in install.Resolved) []Target
 	// Follow streams t's current container log from since ago until ctx ends.
 	Follow(ctx context.Context, t Target, since time.Duration) (io.ReadCloser, error)
-	// Previous reads at most limit bytes of t's previous container log.
-	Previous(ctx context.Context, t Target, limit int64) (io.ReadCloser, error)
+	// Previous reads the tail of t's previous container log; the Collector caps the bytes it reads.
+	Previous(ctx context.Context, t Target) (io.ReadCloser, error)
 }
 
 // Target is one controller replica.
@@ -116,6 +116,8 @@ type Collector struct {
 	// recMu serialises Reconcile; streams is only touched under it.
 	recMu   sync.Mutex
 	streams map[streamKey]*stream
+	// waitFrom is when Reconcile first found proxy stats pending; it waits at most 3 intervals.
+	waitFrom time.Time
 	// mu guards installs, which the streams update.
 	mu       sync.Mutex
 	installs map[string]*installState
@@ -220,8 +222,13 @@ func (c *Collector) Reconcile(ctx context.Context) bool {
 	present := map[string]bool{}
 	waiting := false
 	if c.cfg.Stats != nil {
-		_, ss := c.cfg.Stats()
-		waiting = ss == StatsPending
+		if _, ss := c.cfg.Stats(); ss == StatsPending {
+			// A collector that never publishes must not hold the streams back; they start without names.
+			if c.waitFrom.IsZero() {
+				c.waitFrom = c.cfg.Clock.Now()
+			}
+			waiting = c.cfg.Clock.Since(c.waitFrom) < 3*c.cfg.Every
+		}
 	}
 	c.mu.Lock()
 	for _, in := range ins {
@@ -391,7 +398,7 @@ func (c *Collector) follow(s *stream, k streamKey, t Target, p computed.LogParse
 // previous reads t's previous container log once, at most PreviousLimit bytes.
 func (c *Collector) previous(s *stream, k streamKey, t Target, p computed.LogParser) {
 	defer s.wg.Done()
-	rc, err := c.cfg.Source.Previous(s.ctx, t, PreviousLimit)
+	rc, err := c.cfg.Source.Previous(s.ctx, t)
 	if err != nil {
 		return // the follow stream reports access
 	}

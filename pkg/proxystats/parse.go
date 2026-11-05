@@ -21,7 +21,9 @@ var statsRe = regexp.MustCompile(StatsFilter)
 const (
 	maxNames       = 64
 	maxParsedNames = 4096
-	maxNameLen     = 200
+	// maxPodNames caps Pod.Names, every name a scrape reported, for the controller log reader.
+	maxPodNames = 1024
+	maxNameLen  = 200
 )
 
 // serverStates are Envoy's server.state values.

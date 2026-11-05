@@ -280,25 +280,28 @@ func (c *Collector) fold(key podKey, t Target, r scraped, now time.Time) Pod {
 	cur.clusters, p.Clusters, cur.clustersCut = names(reset, prev.clusters, prev.clustersCut, ps.Clusters)
 	cur.rdsCut, cur.clustersCut = cur.rdsCut || ps.RDSTruncated, cur.clustersCut || ps.ClustersTruncated
 	p.RDSTruncated, p.ClustersTruncated = cur.rdsCut, cur.clustersCut
-	p.Names = allNames(cur.rds, cur.clusters)
+	p.Names = allNames(ps.RDS, ps.Clusters)
 	c.pods[key] = cur
 	return p
 }
 
-// allNames lists the kept route config and cluster names, sorted.
+// allNames lists the valid route config and cluster names a scrape parsed,
+// sorted, at most maxPodNames: its own cap, apart from the reject lists' maxNames.
 func allNames(rds, clusters map[string]int64) []string {
-	if len(rds)+len(clusters) == 0 {
+	out := make([]string, 0, len(rds)+len(clusters))
+	for _, m := range []map[string]int64{rds, clusters} {
+		for n := range m {
+			if validName(n) {
+				out = append(out, n)
+			}
+		}
+	}
+	if len(out) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(rds)+len(clusters))
-	for n := range rds {
-		out = append(out, n)
-	}
-	for n := range clusters {
-		out = append(out, n)
-	}
 	slices.Sort(out)
-	return slices.Compact(out)
+	out = slices.Compact(out)
+	return out[:min(len(out), maxPodNames)]
 }
 
 // observe reports growth from old to cur as rejects seen, keeping since while

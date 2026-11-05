@@ -103,7 +103,6 @@ type followReply struct {
 
 type prevCall struct {
 	t     Target
-	limit int64
 	reply chan followReply
 }
 
@@ -142,8 +141,8 @@ func (s *fakeSource) Follow(ctx context.Context, t Target, since time.Duration) 
 	}
 }
 
-func (s *fakeSource) Previous(ctx context.Context, t Target, limit int64) (io.ReadCloser, error) {
-	c := prevCall{t: t, limit: limit, reply: make(chan followReply, 1)}
+func (s *fakeSource) Previous(ctx context.Context, t Target) (io.ReadCloser, error) {
+	c := prevCall{t: t, reply: make(chan followReply, 1)}
 	s.prevs <- c
 	select {
 	case r := <-c.reply:
@@ -360,19 +359,19 @@ func TestStreamEndsWhenPodGoes(t *testing.T) {
 	}
 }
 
-// A restart gets one read of the previous container, at most 256 KiB, and
+// A restart gets one read of the previous container, at most 4 MiB, and
 // never a second read for the same restart.
 func TestPreviousReadIsCappedAndOnce(t *testing.T) {
 	src := newSource(pod("a", 1))
 	h := newHarness(t, src)
 	h.c.Reconcile(h.ctx)
 	var b strings.Builder
-	for i := 0; b.Len() < 1<<20; i++ {
+	for i := 0; b.Len() < 5<<20; i++ {
 		fmt.Fprintf(&b, "xds error gw=infra/edge t=%d %s\n", i, strings.Repeat("p", 1200))
 	}
 	pc := testutil.Recv(t, src.prevs, "the previous read")
-	if pc.limit != PreviousLimit || PreviousLimit != 256<<10 {
-		t.Fatalf("previous limit = %d", pc.limit)
+	if PreviousLimit != 4<<20 {
+		t.Fatalf("previous cap = %d", PreviousLimit)
 	}
 	ls := &liveStream{r: strings.NewReader(b.String()), closed: make(chan struct{})} // ends at EOF
 	pc.reply <- followReply{rc: ls}
@@ -381,7 +380,7 @@ func TestPreviousReadIsCappedAndOnce(t *testing.T) {
 		t.Fatalf("read %d bytes of the previous log, cap %d", ls.read, PreviousLimit)
 	}
 	lineLen := len(fmt.Sprintf("xds error gw=infra/edge t=%d %s\n", 0, strings.Repeat("p", 1200)))
-	if n, max := len(h.logs(t).Events), PreviousLimit/lineLen+1; n == 0 || n > max {
+	if n, max := len(h.logs(t).Events), min(PreviousLimit/lineLen+1, MaxEvents); n == 0 || n > max {
 		t.Fatalf("events from the previous log = %d, want 1..%d", n, max)
 	}
 	call := testutil.Recv(t, src.follows, "the follow")
@@ -617,7 +616,7 @@ func TestKubeSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = rc.Close()
-	rc, err = src.Previous(context.Background(), ts[0], PreviousLimit)
+	rc, err = src.Previous(context.Background(), ts[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +633,7 @@ func TestKubeSource(t *testing.T) {
 	if o := opts[0]; !o.Follow || o.Container != "kgateway" || o.SinceSeconds == nil || *o.SinceSeconds != 900 || o.Previous {
 		t.Errorf("follow options = %+v", o)
 	}
-	if o := opts[1]; !o.Previous || o.Follow || o.LimitBytes == nil || *o.LimitBytes != PreviousLimit || o.TailLines == nil || *o.TailLines != PreviousTailLines {
+	if o := opts[1]; !o.Previous || o.Follow || o.LimitBytes != nil || o.TailLines == nil || *o.TailLines != 200 {
 		t.Errorf("previous options = %+v", o)
 	}
 	kube.PrependReactor("get", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
@@ -657,11 +656,12 @@ func TestKubeSource(t *testing.T) {
 
 // The previous read asks for the log's tail, so the last lines, where a crash
 // ends, come back rather than the first 256 KiB (R100). The fake API applies
-// TailLines first, then LimitBytes, which cuts the end.
+// TailLines first, then LimitBytes, which cuts the end; lines are 20 KiB.
 func TestPreviousReadReturnsTheTail(t *testing.T) {
+	const n = 600
 	var b strings.Builder
-	for i := 1; i <= 5000; i++ {
-		fmt.Fprintf(&b, "xds error gw=infra/edge t=%d %s\n", i, strings.Repeat("p", 100))
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "xds error gw=infra/edge t=%d %s\n", i, strings.Repeat("p", 20<<10))
 	}
 	all := strings.SplitAfter(b.String(), "\n")
 	all = all[:len(all)-1]
@@ -680,16 +680,16 @@ func TestPreviousReadReturnsTheTail(t *testing.T) {
 	})
 	h := newHarness(t, newSource())
 	h.c.Reconcile(h.ctx)
-	rc, err := Kube{Client: kube}.Previous(context.Background(), pod("a", 1), PreviousLimit)
+	rc, err := Kube{Client: kube}.Previous(context.Background(), pod("a", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = h.c.read(streamKey{install: installID, target: "a"}, h.parser, io.LimitReader(rc, PreviousLimit), time.Time{})
 	ev := h.logs(t).Events
-	if len(ev) == 0 || !ev[len(ev)-1].Time.Equal(testutil.Now.Add(5000*time.Second)) {
+	if len(ev) == 0 || !ev[len(ev)-1].Time.Equal(testutil.Now.Add(n*time.Second)) {
 		t.Fatalf("the last line is missing: %d events, %v..%v", len(ev), ev[0].Time, ev[len(ev)-1].Time)
 	}
-	if first := testutil.Now.Add((5000 - PreviousTailLines) * time.Second); ev[0].Time.Before(first) {
+	if first := testutil.Now.Add((n - PreviousTailLines) * time.Second); ev[0].Time.Before(first) {
 		t.Fatalf("the first event %v is from the head of the log", ev[0].Time)
 	}
 }
@@ -800,5 +800,27 @@ func TestOnOnlyAfterAStreamConnects(t *testing.T) {
 	testutil.Recv(t, ls.blocked, "the stream to connect")
 	if st := h.logs(t).State; st != StateOn {
 		t.Fatalf("connected: %q", st)
+	}
+}
+
+// With proxy stats that never publish, streams wait at most three intervals,
+// then start without names.
+func TestBackfillWaitIsBounded(t *testing.T) {
+	h := newHarness(t, newSource(pod("a", 0)))
+	h.stats = func() (proxystats.Stats, StatsState) { return nil, StatsPending }
+	if h.c.Reconcile(h.ctx) || h.c.Streams() != 0 {
+		t.Fatal("a stream started while proxy stats are pending")
+	}
+	h.clk.Step(3*10*time.Second - time.Second)
+	if h.c.Reconcile(h.ctx) || h.c.Streams() != 0 {
+		t.Fatal("a stream started before three intervals")
+	}
+	h.clk.Step(time.Second)
+	if !h.c.Reconcile(h.ctx) || h.c.Streams() != 1 {
+		t.Fatalf("no stream after three intervals: %d", h.c.Streams())
+	}
+	h.serve(t, "xds error gw=infra/edge t=1 names=listener~80\n")
+	if ev := h.logs(t).Events; len(ev) != 1 || ev[0].Names != nil {
+		t.Fatalf("events = %+v", ev)
 	}
 }

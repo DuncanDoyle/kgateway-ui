@@ -525,6 +525,26 @@ func TestPodNamesListEveryReportedName(t *testing.T) {
 	}
 }
 
+// On a Gateway with more clusters than the published reject list keeps, a
+// new cluster with a zero counter, sorting last, is still in Names.
+func TestPodNamesBeyondTheRejectCap(t *testing.T) {
+	gw := gwRef("infra", "edge")
+	p := counters(0, 0, 10, nil)
+	p.Clusters = map[string]int64{"zz_new_8080": 0}
+	for i := range 70 {
+		p.Clusters[fmt.Sprintf("kube_shop_svc%02d_8080", i)] = 1
+	}
+	src := &scriptSource{targets: map[objects.Ref][]proxystats.Target{gw: {{ID: "u1", Name: "edge-1", Gateway: gw}}},
+		script: map[string][]proxystats.PodStats{"u1": {p}}}
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gw}}
+	c := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Clock: testutil.FakeClock(), Installs: static(snapshot(nil), in)})
+	st, _, _ := c.Round(context.Background())
+	got := podsOf(t, st, in.Resolved.ID(), gw).Pods[0].Names
+	if len(got) != 71 || !slices.Contains(got, "zz_new_8080") {
+		t.Fatalf("names = %d, zz_new_8080 in: %v", len(got), slices.Contains(got, "zz_new_8080"))
+	}
+}
+
 // Carry-forward b: a proxy that keeps rejecting grows its counters on every
 // scrape, but what is published, and so its fingerprint, holds still.
 func TestKeptRejectingIsOneFingerprint(t *testing.T) {
