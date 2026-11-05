@@ -22,7 +22,7 @@ const EvidenceListenerConflict = "listener-conflict"
 // Rules that find a conflict's other side, one per Conflicted reason (design §7.5, R94).
 const (
 	// ListenerHostnameRule is HostnameConflict's: same port and the same hostname.
-	ListenerHostnameRule = "listener port and hostname overlap"
+	ListenerHostnameRule = "listener port and hostname"
 	// ListenerProtocolRule is ProtocolConflict's: same port and a different protocol.
 	ListenerProtocolRule = "listener port and protocol"
 )
@@ -30,13 +30,17 @@ const (
 // maxConflictOthers caps ListenerConflictEvidence.Others; OthersTotal counts them all.
 const maxConflictOthers = 10
 
-// Wording for KGWUI-017 (design §7.5): the listeners or port, then the rule.
+// Wording for KGWUI-017 (design §7.5): a lead-in per rule, then the rule.
 const (
-	// conflictOthers ends the detail when the rule finds other listeners.
-	conflictOthers = "Overlaps %s on port %d. Computed by the UI's %s rule."
+	// conflictSameHostname leads the hostname rule's other side; %s is the listeners.
+	conflictSameHostname = "Same port and hostname as %s."
+	// conflictPortKeeps leads the protocol rule's: the port, the kept protocols, the listeners.
+	conflictPortKeeps = "Port %d keeps %s: %s."
+	// conflictComputed follows either lead-in; %s is the rule.
+	conflictComputed = " Computed by the UI's %s rule."
 	// conflictNoHostname and conflictNoProtocol end the detail when the rule finds none.
-	conflictNoHostname = "The controller reports a conflict; no other listener on port %d overlaps."
-	conflictNoProtocol = "The controller reports a conflict; no other listener on port %d uses another protocol."
+	conflictNoHostname = "The controller reports a conflict; no other accepted listener on port %d has the same hostname."
+	conflictNoProtocol = "The controller reports a conflict; no other accepted listener on port %d uses another protocol."
 )
 
 // ListenerConflictEvidence is what KGWUI-017 quotes: the controller's
@@ -76,10 +80,27 @@ func (e *ListenerConflictEvidence) MarshalJSON() ([]byte, error) {
 	}{EvidenceListenerConflict, (*plain)(e)})
 }
 
-// listenerSide is a spec listener and its Gateway or ListenerSet.
+// listenerSide is a spec listener and its Gateway or ListenerSet; kept is
+// whether its status says the controller kept it.
 type listenerSide struct {
 	owner objects.Ref
 	l     objects.Listener
+	kept  bool
+}
+
+// keptListener reports whether status block st of u says the controller kept
+// the listener (R95): current, Accepted=True, not Conflicted, with supported kinds.
+func keptListener(u *unstructured.Unstructured, st objects.ListenerStatus) bool {
+	if len(st.SupportedKinds) == 0 {
+		return false
+	}
+	for _, c := range st.Conditions {
+		if objects.IsStale(u, c) {
+			return false
+		}
+	}
+	a, cf := objects.FindCondition(st.Conditions, "Accepted"), objects.FindCondition(st.Conditions, "Conflicted")
+	return a != nil && a.Status == metav1.ConditionTrue && (cf == nil || cf.Status != metav1.ConditionTrue)
 }
 
 // gatewayListeners returns the spec listeners of each owned Gateway, its own
@@ -87,16 +108,19 @@ type listenerSide struct {
 // the Gateway does not allow (current Accepted=False/NotAllowed) is left out.
 func (in Input) gatewayListeners() map[objects.Ref][]listenerSide {
 	out := map[objects.Ref][]listenerSide{}
-	add := func(gw, owner objects.Ref, ls []objects.Listener) {
+	add := func(u *unstructured.Unstructured, gw objects.Ref, ls []objects.Listener, status []objects.ListenerStatus) {
+		owner := objects.RefOf(u)
 		for _, l := range ls {
-			if l.Name != "" {
-				out[gw] = append(out[gw], listenerSide{owner, l})
+			if l.Name == "" {
+				continue
 			}
+			i := slices.IndexFunc(status, func(st objects.ListenerStatus) bool { return st.Name == l.Name })
+			out[gw] = append(out[gw], listenerSide{owner, l, i >= 0 && keptListener(u, status[i])})
 		}
 	}
 	for _, gw := range in.Owned.Gateways {
-		r := objects.RefOf(gw)
-		add(r, r, in.views().Gateway(gw).Listeners)
+		v := in.views().Gateway(gw)
+		add(gw, objects.RefOf(gw), v.Listeners, v.ListenerStatus)
 	}
 	sets := slices.Clone(in.Owned.ListenerSets)
 	slices.SortFunc(sets, func(a, b *unstructured.Unstructured) int { return objects.RefOf(a).Compare(objects.RefOf(b)) })
@@ -105,12 +129,12 @@ func (in Input) gatewayListeners() map[objects.Ref][]listenerSide {
 		if a := objects.FindCondition(v.Conditions, "Accepted"); a != nil && a.Status == metav1.ConditionFalse && a.Reason == "NotAllowed" && !objects.IsStale(ls, *a) {
 			continue
 		}
-		add(v.Parent.Ref(), objects.RefOf(ls), v.Listeners)
+		add(ls, v.Parent.Ref(), v.Listeners, v.ListenerStatus)
 	}
 	return out
 }
 
-// conflictRule returns the rule for a Conflicted reason, whether other
+// conflictRule returns the rule for a Conflicted reason, whether a kept
 // listener s is its other side for l, and its no-other-side text; ok is false
 // for a reason no rule covers. Per the Gateway API Listener distinctness rules
 // (gateway_types.go:113-166), listeners are distinct by port and protocol, then hostname.
@@ -138,9 +162,9 @@ func (in Input) conflictFinding(u *unstructured.Unstructured, l objects.Listener
 		return f
 	}
 	ev.Rule = rule
-	var named []string
+	var named, protocols []string
 	for _, s := range sides {
-		if (s.owner == self && s.l.Name == l.Name) || s.l.Port != l.Port || !match(l, s.l) {
+		if !s.kept || (s.owner == self && s.l.Name == l.Name) || s.l.Port != l.Port || !match(l, s.l) {
 			continue
 		}
 		ev.OthersTotal++
@@ -150,6 +174,9 @@ func (in Input) conflictFinding(u *unstructured.Unstructured, l objects.Listener
 		if len(ev.Others) < maxConflictOthers {
 			ev.Others = append(ev.Others, ConflictingListener{Owner: s.owner, Name: s.l.Name, Protocol: s.l.Protocol, Hostname: s.l.Hostname})
 			named = append(named, fmt.Sprintf("`%s` of %s %s", s.l.Name, s.owner.Kind, s.owner))
+			if !slices.Contains(protocols, s.l.Protocol) {
+				protocols = append(protocols, s.l.Protocol)
+			}
 		}
 	}
 	end := fmt.Sprintf(none, l.Port)
@@ -161,7 +188,11 @@ func (in Input) conflictFinding(u *unstructured.Unstructured, l objects.Listener
 		if more := ev.OthersTotal - len(named); more > 0 {
 			list = "listeners " + strings.Join(named, ", ") + fmt.Sprintf(" and %d more", more)
 		}
-		end = fmt.Sprintf(conflictOthers, list, l.Port, rule)
+		end = fmt.Sprintf(conflictSameHostname, list)
+		if rule == ListenerProtocolRule {
+			end = fmt.Sprintf(conflictPortKeeps, l.Port, strings.Join(protocols, ", "), list)
+		}
+		end += fmt.Sprintf(conflictComputed, rule)
 	}
 	f.Detail += ". " + end
 	return f

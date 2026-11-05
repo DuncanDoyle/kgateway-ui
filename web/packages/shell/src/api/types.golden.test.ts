@@ -332,7 +332,7 @@ const evidenceShapes = {
     },
     {
       kind: { "listener-conflict": 1 },
-      rule: { "listener port and hostname overlap": 1, "listener port and protocol": 1 },
+      rule: { "listener port and hostname": 1, "listener port and protocol": 1 },
     },
   ),
 } satisfies Record<Evidence["kind"], Shape>;

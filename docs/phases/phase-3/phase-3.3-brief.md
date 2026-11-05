@@ -82,8 +82,8 @@ Two program edges ride along. E3: the analyzer is usable by an external Go modul
 
 | Input / action | Expected |
 |---|---|
-| A Gateway `Accepted=True/ListenersNotValid` with listener `https` `Conflicted=True`, and a ListenerSet listener on 443 with an overlapping hostname | 017 error keyed by `https`. Evidence names the other listener, labelled "Computed by the UI", rule "listener port and hostname overlap" |
-| `Conflicted=True` and no other listener overlaps | 017 with "The controller reports a conflict; no other listener on port 443 overlaps". No KGWUI-012 |
+| A Gateway `Accepted=True/ListenersNotValid` with listener `https` `Conflicted=True`, and an accepted listener on 443 with the same hostname | 017 error keyed by `https`. Evidence names the other listener, labelled "Computed by the UI", rule "listener port and hostname" (R95) |
+| `Conflicted=True` and no other accepted listener matches | 017 with "The controller reports a conflict; no other accepted listener on port 443 has the same hostname". No KGWUI-012 |
 | The other side's Gateway or ListenerSet is hidden from the caller | `evidenceRestricted: true`, no evidence |
 
 ### Status not progressing: 018 (Task 63)

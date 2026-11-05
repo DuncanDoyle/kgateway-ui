@@ -960,6 +960,7 @@ func TestListenerConflictThroughTheAPI(t *testing.T) {
 	listenerSet := func(ns, name string, cs []metav1.Condition, l testutil.Listener, age time.Duration) *unstructured.Unstructured {
 		u := testutil.ListenerSet(ns, name, testutil.GwRef("infra", "edge"), cs, l)
 		u.Object["spec"].(map[string]any)["listeners"] = []any{map[string]any{"name": l.Name, "port": int64(443), "protocol": "HTTP", "hostname": "a.example.com"}}
+		u.Object["status"].(map[string]any)["listeners"].([]any)[0].(map[string]any)["supportedKinds"] = []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "HTTPRoute"}}
 		u.SetCreationTimestamp(metav1.NewTime(testutil.Old.Add(-age)))
 		return u
 	}

@@ -193,7 +193,7 @@ export interface ListenerConflictEvidence {
   hostname?: string;
   reason: string;
   message: string;
-  rule?: "listener port and hostname overlap" | "listener port and protocol";
+  rule?: "listener port and hostname" | "listener port and protocol";
   others?: ConflictingListener[];
   othersTotal: number;
 }
