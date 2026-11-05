@@ -803,6 +803,49 @@ func TestOnOnlyAfterAStreamConnects(t *testing.T) {
 	}
 }
 
+// A stream that ends, by a read error or EOF, and then does not reconnect
+// leaves its replica not connected or failing, never on (D-006).
+func TestEndedStreamIsNotConnected(t *testing.T) {
+	src := newSource(pod("a", 0))
+	h := newHarness(t, src)
+	h.c.Reconcile(h.ctx)
+	h.c.Reconcile(h.ctx)
+	// connect answers the next Follow with a pipe; a line read through it means the stream is on.
+	connect := func() *io.PipeWriter {
+		pr, pw := io.Pipe()
+		t.Cleanup(func() { _ = pw.Close() }) // a pipe read does not end with the stream's context
+		testutil.Recv(t, src.follows, "a follow").reply <- followReply{rc: pr}
+		if _, err := pw.Write([]byte("info\n")); err != nil {
+			t.Fatal(err)
+		}
+		if st := h.logs(t).State; st != StateOn {
+			t.Fatalf("connected: %q", st)
+		}
+		return pw
+	}
+	// reconnect answers the next Follow with err and checks the state after it.
+	reconnect := func(how string, err error, want State) {
+		testutil.Recv(t, h.waits, "the back-off").ch <- time.Time{}
+		testutil.Recv(t, src.follows, "a follow").reply <- followReply{err: err}
+		w := testutil.Recv(t, h.waits, "the back-off")
+		if st := h.logs(t).State; st != want {
+			t.Fatalf("%s: %q, want %q", how, st, want)
+		}
+		w.ch <- time.Time{}
+	}
+	connect().CloseWithError(errors.New("connection reset"))
+	reconnect("read error, then not ready", ErrNotReady, StateNotConnected)
+	_ = connect().Close()
+	reconnect("EOF, then not ready", ErrNotReady, StateNotConnected)
+	testutil.Recv(t, src.follows, "a follow").reply <- followReply{err: errors.New("connection refused")}
+	if w := testutil.Recv(t, h.waits, "the back-off"); h.logs(t).State != StateFailing {
+		t.Fatalf("reconnect refused: %q", h.logs(t).State)
+	} else {
+		w.ch <- time.Time{}
+	}
+	connect()
+}
+
 // With proxy stats that never publish, streams wait at most three intervals,
 // then start without names.
 func TestBackfillWaitIsBounded(t *testing.T) {

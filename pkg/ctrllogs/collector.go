@@ -358,7 +358,8 @@ func (st *installState) state() State {
 }
 
 // follow streams t's log until s ends, reconnecting with back-off from 1 s
-// to 60 s. A reconnect starts where the last stream ended, plus 1 s of overlap.
+// to 60 s. A reconnect starts where the last stream ended, plus 1 s of overlap;
+// one that does not connect ends the replica's on state.
 func (c *Collector) follow(s *stream, k streamKey, t Target, p computed.LogParser) {
 	defer s.wg.Done()
 	from := c.cfg.Clock.Now().Add(-FollowSince)
@@ -385,6 +386,9 @@ func (c *Collector) follow(s *stream, k streamKey, t Target, p computed.LogParse
 		switch {
 		case errors.Is(err, ErrDenied):
 			c.setStream(k, StateDenied)
+		case errors.Is(err, ErrNotReady) && !ended.IsZero():
+			// A stream ended and its container has no log to follow: nothing reads (D-006).
+			c.setStream(k, StateNotConnected)
 		case err != nil && !errors.Is(err, ErrNotReady):
 			c.setStream(k, StateFailing)
 		}
