@@ -17,7 +17,6 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -29,19 +28,15 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/setup"
 )
 
 // Options are the runtime settings.
@@ -202,48 +197,21 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.PollInterval <= 0 || o.MetricsInterval <= 0 {
 		return nil, fmt.Errorf("poll interval (%v) and metrics interval (%v) must be positive", o.PollInterval, o.MetricsInterval)
 	}
-	if o.DelegationEdgeCap < 0 {
-		return nil, fmt.Errorf("delegation edge cap %d must not be negative", o.DelegationEdgeCap)
-	}
-	if err := reg.Err(); err != nil {
-		return nil, err
-	}
-	if err := health.ValidateOrder(reg.Checks); err != nil {
-		return nil, err
-	}
-	pinned, err := install.ParsePinned(o.Pinned)
-	if err != nil {
-		return nil, err
-	}
-	served, err := kinds.Resolve(c.Discovery, reg.Kinds)
-	if err != nil {
-		return nil, err
-	}
 	if o.KindsInterval <= 0 {
 		o.KindsInterval = 60 * time.Second
 	}
-	// One coalescing signal: object, access, metrics and served-kind changes all start a recompute (D-019).
-	changes := trigger.New()
-	mon := kinds.NewMonitor(c.Discovery, reg.Kinds, served)
-	mon.OnChange = changes
-	// The first refresh lists the Catalog, so 013 and 014 explain refs from the first compute.
-	if err := mon.Refresh(); err != nil {
-		slog.Warn("listing served kinds failed; refs are explained from the controller's message", "err", err)
+	sc, err := setup.Build(setup.Clients{Dynamic: c.Dynamic, Kube: c.Kube, Discovery: c.Discovery, Metadata: c.Metadata},
+		setup.Options{Pinned: o.Pinned, MetricsInterval: o.MetricsInterval, DelegationEdgeCap: o.DelegationEdgeCap,
+			NoEvents: o.Diagnostics.NoEvents, NoCRDs: o.Diagnostics.NoCRDs, Clock: o.Clock}, reg)
+	if err != nil {
+		return nil, err
 	}
-	var podSel, depSel, proxySel []labels.Selector
-	for _, d := range reg.Detectors {
-		podSel = append(podSel, d.ControllerPodSelector()) // Pods may lack the Deployment's component label
-		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
-		if pd, ok := d.(install.ProxyPodDetector); ok {
-			proxySel = append(proxySel, pd.ProxyPodSelector())
-		}
-	}
+	changes, mon := sc.Changes, sc.Kinds
 	now := time.Now
 	if o.Clock != nil {
 		now = o.Clock.Now
 	}
-	ca := cache.New(cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel,
-		ProxyPodSelectors: proxySel, Events: !o.Diagnostics.NoEvents, CRDs: !o.Diagnostics.NoCRDs, Metadata: c.Metadata, Changes: changes, Now: now})
+	ca := cache.New(sc.Cache)
 	scraper := c.Scraper
 	switch {
 	case scraper != nil:
@@ -252,45 +220,27 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	default:
 		scraper = ctrlmetrics.PodProxyScraper{Kube: c.Kube}
 	}
-	// Metrics older than three scrape intervals are unavailable, not reused.
-	maxAge := 3 * o.MetricsInterval
-	col := ctrlmetrics.NewCollector(scraper, ctrlmetrics.WithMaxAge(maxAge))
+	col := ctrlmetrics.NewCollector(scraper, ctrlmetrics.WithMaxAge(sc.Engine.MetricsMaxAge))
 	col.OnResult = changes
-	verifier := reg.Verifier
-	if verifier == nil {
-		// A mismatch must outlast two scrapes before it is reported (design §4.4).
-		verifier = scopeverify.NewManagedCountVerifier(2 * o.MetricsInterval)
-	}
 	discovered := make(chan struct{})
 	var once sync.Once
 	crds := crdRefresher{mon: mon}
-	cfg := engine.Config{Snapshots: ca, Served: served, KindsChange: mon.Change, Catalog: mon.Catalog, Detectors: reg.Detectors, Scope: reg.Scope, Verifier: verifier,
-		Metrics: col, Checks: reg.Checks, Pinned: pinned, Platform: platform.Kubernetes(), MetricsMaxAge: maxAge, ProxyMode: reg.ProxyMode,
-		RulesFor: reg.RulesFor, Process: reg.Process,
-		Triggers: changes, ConfirmEvery: o.ConfirmEvery, OnLoop: o.OnLoop, Clock: o.Clock,
-		// The other bounds stay zero: the walker gives each its default.
-		DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap},
-		OnCompute: func(m *engine.Model) {
-			// An unsettled cache can hold a Deployment without its Pods; scraping
-			// that install fails and is not retried for a full metrics interval.
-			if m.Snapshot.Synced && len(m.Installs) > 0 {
-				once.Do(func() { close(discovered) })
-			}
-			crds.observe(m.Snapshot.CRDs)
-		}}
-	// The proxy stats collector is core, so the engine always reads the store.
-	for _, name := range []string{proxystats.CollectorName, ctrllogs.CollectorName} {
-		if slices.ContainsFunc(reg.Collectors(), func(c extension.Collector) bool { return c.Name() == name }) {
-			return nil, fmt.Errorf("collector name %q is reserved for a core collector", name)
+	cfg := sc.Engine
+	cfg.Snapshots, cfg.Metrics = ca, col
+	cfg.ConfirmEvery, cfg.OnLoop = o.ConfirmEvery, o.OnLoop
+	cfg.OnCompute = func(m *engine.Model) {
+		// An unsettled cache can hold a Deployment without its Pods; scraping
+		// that install fails and is not retried for a full metrics interval.
+		if m.Snapshot.Synced && len(m.Installs) > 0 {
+			once.Do(func() { close(discovered) })
 		}
+		crds.observe(m.Snapshot.CRDs)
 	}
+	// The proxy stats collector is core, so the engine always reads the store.
 	collected := collect.New(changes, now)
 	cfg.Collected = collected.Snapshot
 	eng := engine.New(cfg)
 	stats := proxyStatsCollector(c, o, reg, eng)
-	if err := reg.CheckCapabilities(eng.Platform().Capabilities); err != nil {
-		return nil, err
-	}
 	deps := extension.Deps{Current: eng.Current, Authorizer: reg.Authorizer, Capabilities: reg.CapabilityStates, Logger: slog.Default()}
 	mounts, err := reg.Mounts(deps)
 	if err != nil {

@@ -41,6 +41,7 @@ var allowed = map[string]string{
 	"pkg/process/kube.go":           "process facts from Pods, Deployments and Events",
 	"pkg/proxystats/kube.go":        "the Kubernetes proxy stats source: proxy Pod targets and transport",
 	"pkg/scopeverify/verify.go":     "Namespace objects for scope",
+	"pkg/setup/setup.go":            "builds cache and engine config from the Kubernetes clients",
 }
 
 // violations walks the Go files under root. bad lists non-test files outside
