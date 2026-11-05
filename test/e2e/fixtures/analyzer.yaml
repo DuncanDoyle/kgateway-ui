@@ -1,0 +1,33 @@
+# Analyzer scenario (design §7), applied after explorer.yaml: one object per 3.3 finding.
+# Every object carries e2e=analyzer. TestAnalyzer and diagnostics.spec.ts assert on these names.
+# 014: a backendRef to another namespace with no ReferenceGrant there. TestAnalyzer creates the suggested grant.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: no-grant, namespace: shop, labels: { e2e: analyzer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /no-grant } }], backendRefs: [{ name: web, namespace: store, port: 8000 }] }]
+---
+# 013: the Service exists, but has no port 9999; the finding quotes the controller's message.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: wrong-port, namespace: shop, labels: { e2e: analyzer } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /wrong-port } }], backendRefs: [{ name: httpbin, port: 9999 }] }]
+---
+# 016: the only target is a Gateway that does not exist. kgateway 2.3 and 2.4 write no status, so the UI computes it.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: tp-missing-gateway, namespace: shop, labels: { e2e: analyzer } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: nope }]
+  timeouts: { request: 10s }
+---
+# 017: edge's https listener port with another protocol (ProtocolConflict); edge allows ListenerSets from infra.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata: { name: analyzer, namespace: infra, labels: { e2e: analyzer } }
+spec:
+  parentRef: { name: edge }
+  listeners: [{ name: proto, port: 8443, protocol: HTTP }]

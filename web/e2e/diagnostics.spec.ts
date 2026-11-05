@@ -1,15 +1,28 @@
+import { readFileSync } from "node:fs";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import type { Diagnostics, GatewayDetail, ProcessesResponse } from "../packages/shell/src/api/types";
+import type {
+  Diagnostics,
+  FindingDetail,
+  FindingList,
+  GatewayDetail,
+  GroupList,
+  ProcessesResponse,
+  XDSRejectsEvidence,
+} from "../packages/shell/src/api/types";
 import {
   dataPlaneCopy,
   diagnosticsCopy,
   findingsCopy,
+  fixCopy,
+  groupsCopy,
+  listCopy,
   navCopy,
   processesCopy,
 } from "../packages/shell/src/copy/explorer";
 
-// The 3.2 health pages over test/e2e/fixtures/nack.yaml (Task 53). Every value asserted comes from the
-// API response the page renders (R62): the SPA shows the server's states and derives none.
+// The 3.2 health pages over test/e2e/fixtures/nack.yaml (Task 53) and the 3.3 analyzer pages over
+// fixtures/analyzer.yaml (Task 72). Every value asserted comes from the API response the page renders
+// (R62): the SPA shows the server's states and derives none.
 const install = "/i/kgw-a.kgateway";
 const api = "/api/v1/installs/kgw-a.kgateway";
 const nack = "infra/nack";
@@ -46,6 +59,18 @@ async function keyboardFocus(page: Page, target: Locator) {
   await page.keyboard.press("Tab");
   await expect(target).toBeFocused();
   await expect(target).toHaveCSS("outline-style", "solid");
+}
+
+/** The dd that follows the dt labelled term in scope. */
+const factValue = (scope: Locator, term: string) =>
+  scope.locator("dt", { hasText: term }).locator("xpath=following-sibling::dd[1]");
+
+/** The finding with code on namespace/name, from the flat list. */
+async function findingOn(page: Page, code: string, id: string) {
+  const list = await fetchJSON<FindingList>(page, `/findings?code=${code}&limit=200`);
+  const f = list.items.find((x) => x.resource && `${x.resource.namespace}/${x.resource.name}` === id);
+  expect(f, `a ${code} on ${id}`).toBeTruthy();
+  return f as NonNullable<typeof f>;
 }
 
 function shot(page: Page, theme: Theme, name: string, target?: Locator) {
@@ -165,6 +190,10 @@ for (const theme of themes) {
     await expect(section).toContainText(
       dp.proxyStats.available ? dataPlaneCopy.proxyStatsOn : diagnosticsCopy.notAvailable,
     );
+    // Read or not read, as the server says; never left out (D-006).
+    await expect(factValue(section, dataPlaneCopy.controllerLog)).toHaveText(
+      diagnosticsCopy.logState[dp.controllerLogs] as string,
+    );
 
     const proxies = page.getByRole("table", { name: processesCopy.proxiesOf(nack) });
     await expect(proxies.locator("tbody > tr > td:first-child")).toHaveText(gw.proxies.processes.map((x) => x.name));
@@ -178,5 +207,112 @@ for (const theme of themes) {
     await shot(page, theme, "dataplane-copy-hover", section);
     await keyboardFocus(page, copy);
     await shot(page, theme, "gateway");
+  });
+}
+
+for (const theme of themes) {
+  test(`finding page: 014's ReferenceGrant copies, downloads and names its create command (${theme.name})`, async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const f = await findingOn(page, "KGWUI-014", "shop/no-grant");
+    const d = await fetchJSON<FindingDetail>(page, `/findings/${encodeURIComponent(f.id)}`);
+    const fix = d.suggestedFix;
+    expect(fix?.create, "the server's fix creates a ReferenceGrant").toBe(true);
+    if (!fix) return;
+    await page.goto(`${install}/findings/${encodeURIComponent(f.id)}`);
+    await pickTheme(page, theme);
+
+    const section = page.getByRole("region", { name: findingsCopy.suggestedFix });
+    await expect(section).toContainText(fix.title.replaceAll("`", ""));
+    await expect(factValue(section, fixCopy.object)).toContainText(
+      `${fix.target.kind} ${fix.target.namespace}/${fix.target.name}`,
+    );
+    await expect(factValue(section, fixCopy.basis)).toHaveText(fix.basis.replaceAll("`", ""));
+    const [yaml, create] = [section.locator("pre").nth(0), section.locator("pre").nth(1)];
+    expect(await yaml.textContent()).toBe(fix.yaml);
+    // A new object downloads under its kind and name, the file the create command reads.
+    const file = `${fix.target.kind.toLowerCase()}-${fix.target.name}.yaml`;
+    await expect(create).toHaveText(`kubectl create -f ${file}`);
+
+    const copy = section.getByRole("button", { name: fixCopy.copyLabel(fix.title), exact: true });
+    await copy.hover();
+    await shot(page, theme, "fix-copy-hover", section);
+    await copy.click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(fix.yaml);
+    const downloading = page.waitForEvent("download");
+    await section.getByRole("button", { name: fixCopy.downloadLabel(file), exact: true }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe(file);
+    const saved = await download.path();
+    expect(readFileSync(saved, "utf8")).toBe(fix.yaml);
+    await keyboardFocus(page, copy);
+    await shot(page, theme, "fix-copy-focus", section);
+    await shot(page, theme, "finding-fix");
+  });
+
+  test(`findings page: the grouped view shows the grant shape and opens its members (${theme.name})`, async ({
+    page,
+  }) => {
+    const f = await findingOn(page, "KGWUI-014", "shop/no-grant");
+    const groups = await fetchJSON<GroupList>(page, "/findings?view=groups&limit=200");
+    const g = groups.items.find((x) => x.id === f.group);
+    expect(g?.grant, "the 014's group is a Not permitted group with its grant shape").toBeTruthy();
+    if (!g?.grant) return;
+    await page.goto(`${install}/findings`);
+    await pickTheme(page, theme);
+    const view = page.getByRole("group", { name: groupsCopy.view });
+    const toGroups = view.getByRole("button", { name: groupsCopy.groups });
+    await toGroups.hover();
+    await shot(page, theme, "view-switch-hover", view);
+    await toGroups.click();
+    await expect(page).toHaveURL(/[?&]view=groups(&|$)/);
+
+    const table = page.getByRole("table", { name: findingsCopy.title });
+    const rows = await dataRows(table);
+    await expect(rows).toHaveCount(groups.items.length);
+    const grant = diagnosticsCopy.grantShape(
+      g.grant.fromNamespace,
+      g.grant.toNamespace,
+      g.grant.toGroup,
+      g.grant.toKind,
+    );
+    const row = rows.filter({ hasText: grant });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(g.code);
+    await expect(row).toContainText(g.title);
+    await row.getByRole("link", { name: g.title }).hover();
+    await shot(page, theme, "group-row-hover", row);
+    await shot(page, theme, "groups");
+
+    // The row opens the flat view of its members.
+    await row.getByRole("link", { name: g.title }).click();
+    await expect(page).toHaveURL(new RegExp(`[?&]group=${g.id}(&|$)`));
+    const members = await dataRows(page.getByRole("table", { name: findingsCopy.title }));
+    await expect(members).toHaveCount(g.members);
+    await expect(members.getByRole("link", { name: "shop/no-grant", exact: true })).toHaveCount(1);
+  });
+
+  test(`finding page: 001's controller log events (${theme.name})`, async ({ page }) => {
+    const f = await findingOn(page, "KGWUI-001", nack);
+    const d = await fetchJSON<FindingDetail>(page, `/findings/${encodeURIComponent(f.id)}`);
+    const ev = d.evidence as XDSRejectsEvidence;
+    await page.goto(`${install}/findings/${encodeURIComponent(f.id)}`);
+    await pickTheme(page, theme);
+    const details = page.getByRole("region", { name: listCopy.details });
+    await expect(factValue(details, diagnosticsCopy.controllerLog)).toHaveText(
+      diagnosticsCopy.logState[ev.controllerLogs] as string,
+    );
+    const table = page.getByRole("table", { name: diagnosticsCopy.logEvents });
+    const events = ev.logEvents ?? [];
+    await expect(table).toHaveCount(events.length ? 1 : 0);
+    for (const [i, l] of events.entries()) {
+      const cells = table.locator("tbody tr").nth(i).locator("td");
+      await expect(cells.nth(0)).toHaveAttribute("title", l.typeUrl);
+      await expect(cells.nth(1)).toHaveText(l.classes.join(", "));
+      await expect(cells.nth(2)).toHaveText((l.envoyResources ?? []).join(", "));
+    }
+    await shot(page, theme, "finding-logs");
   });
 }

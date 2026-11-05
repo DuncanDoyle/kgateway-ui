@@ -4,13 +4,23 @@ package e2e
 
 import (
 	"fmt"
+	"io"
+	"maps"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // Envoy xDS types as the controller metrics and the API name them.
@@ -482,4 +492,411 @@ func testControllerDown(t *testing.T) {
 	if c := checkResult(h, "xDS rejects"); c == nil || c.OK {
 		t.Errorf("xDS rejects check %+v with no controller, want not OK", c)
 	}
+}
+
+// region Analyzer (fixtures/analyzer.yaml)
+
+const (
+	noGrantID   = "shop/no-grant"
+	wrongPortID = "shop/wrong-port"
+	tpGatewayID = "shop/tp-missing-gateway"
+	edgeID      = "infra/edge"
+)
+
+// findingDetail is the part of GET …/findings/{id} TestAnalyzer reads.
+type findingDetail struct {
+	Finding      api.FindingRow    `json:"finding"`
+	SuggestedFix *api.SuggestedFix `json:"suggestedFix"`
+}
+
+// detailOf is the finding detail of f.
+func detailOf(t *testing.T, f *api.FindingDTO) findingDetail {
+	t.Helper()
+	var d findingDetail
+	get(t, install+"/findings/"+url.PathEscape(f.ID), &d)
+	return d
+}
+
+// waitFinding waits until /health has a finding with code on kind id, and returns it with its response.
+func waitFinding(t *testing.T, limit time.Duration, code, kind, id string) (api.HealthResponse, *api.FindingDTO) {
+	t.Helper()
+	h := waitHealth(t, limit, code+" on "+kind+" "+id, func(h api.HealthResponse) bool { return finding(h, code, kind, id) != nil })
+	return h, finding(h, code, kind, id)
+}
+
+// parentCond is the condition typ that the controller wrote on route id for Gateway infra/edge.
+func parentCond(t *testing.T, id, typ string) *kcond {
+	t.Helper()
+	var r kobj
+	ns, name, _ := strings.Cut(id, "/")
+	kubectl(t, &r, "-n", ns, "get", "httproutes.gateway.networking.k8s.io/"+name, "-o", "json")
+	e := ourEntry(r, objects.ParentRef{Group: gwGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"})
+	return findCond(e.condsOrNil(), typ)
+}
+
+// refsOf is f's refs evidence; it fails the test when f has none.
+func refsOf(t *testing.T, f *api.FindingDTO) *health.RefsEvidence {
+	t.Helper()
+	ev, ok := f.Facts.(*health.RefsEvidence)
+	if !ok {
+		t.Fatalf("%s on %s: evidence %#v, want refs", f.Code, f.Resource, f.Facts)
+	}
+	return ev
+}
+
+// TestAnalyzer checks the 3.3 findings on fixtures/analyzer.yaml (design §7): 013 quoting the
+// controller, 014 with its ReferenceGrant (created as the UI says, the finding then clears), the
+// computed 016 after grace and hold, 017 with the kept listeners, and the groups they form.
+func TestAnalyzer(t *testing.T) {
+	t.Run("ref unresolved", testRefUnresolved)
+	t.Run("ref not permitted", testRefNotPermitted)
+	t.Run("policy target not found", testPolicyTargetNotFound)
+	t.Run("listener conflicted", testListenerConflicted)
+}
+
+// testRefUnresolved: a backendRef to a missing Service port is 013 with the controller's reason and
+// message, attributed to its one ref, with no suggested fix; it joins that Service's Missing backend group.
+func testRefUnresolved(t *testing.T) {
+	h, f := waitFinding(t, 3*time.Minute, health.CodeRefUnresolved, "HTTPRoute", wrongPortID)
+	c := parentCond(t, wrongPortID, "ResolvedRefs")
+	if c == nil || c.Status != "False" {
+		t.Fatalf("%s: controller wrote ResolvedRefs %+v, want False", wrongPortID, c)
+	}
+	t.Logf("controller: ResolvedRefs=False, reason %s: %s", c.Reason, c.Message)
+	if want := fmt.Sprintf("ResolvedRefs=False, reason %s: %s", c.Reason, c.Message); f.Severity != health.SeverityError || !strings.HasPrefix(f.Detail, want) {
+		t.Errorf("013 on %s: severity %s, detail %q; want error quoting %q", wrongPortID, f.Severity, f.Detail, want)
+	}
+	if has(h, health.CodeConditionFalse, wrongPortID) {
+		t.Errorf("013 and 002 both on %s (D-030)", wrongPortID)
+	}
+	ev := refsOf(t, f)
+	httpbin := objects.Ref{Kind: "Service", Namespace: "shop", Name: "httpbin"}
+	want := []health.RefLocation{{Path: "spec.rules[0].backendRefs[0]", Ref: httpbin}}
+	if ev.Explanation != health.RefExplainController || !ev.Attributed || !slices.Equal(ev.Candidates, want) {
+		t.Errorf("013 on %s: evidence %+v; want the controller's explanation attributed to %+v", wrongPortID, ev, want)
+	}
+	// A fix comes only from the UI's own check (a group discovery serves); this one quotes the controller.
+	if d := detailOf(t, f); d.SuggestedFix != nil {
+		t.Errorf("013 on %s: fix %+v; want none", wrongPortID, d.SuggestedFix)
+	}
+	g := groupOf(t, f.Group)
+	if g.Code != health.CodeRefUnresolved || g.Cause == nil || g.Cause.Ref != httpbin || !affects(g, routeRef(wrongPortID)) {
+		t.Errorf("013 on %s: group %+v; want the Missing backend group of Service shop/httpbin", wrongPortID, g)
+	}
+}
+
+// testRefNotPermitted: a backendRef to another namespace with no grant is 014 with the
+// ReferenceGrant to create. Created with kubectl create -f, as the UI says, it clears the 014.
+func testRefNotPermitted(t *testing.T) {
+	_, f := waitFinding(t, 3*time.Minute, health.CodeRefNotPermitted, "HTTPRoute", noGrantID)
+	if c := parentCond(t, noGrantID, "ResolvedRefs"); c == nil || c.Status != "False" || c.Reason != "RefNotPermitted" {
+		t.Fatalf("%s: controller wrote ResolvedRefs %+v, want False/RefNotPermitted", noGrantID, c)
+	}
+	web := objects.Ref{Kind: "Service", Namespace: "store", Name: "web"}
+	ev := refsOf(t, f)
+	if want := []health.RefLocation{{Path: "spec.rules[0].backendRefs[0]", Ref: web}}; f.Severity != health.SeverityError ||
+		ev.Explanation != health.RefExplainController || !ev.Attributed || !slices.Equal(ev.Candidates, want) {
+		t.Errorf("014 on %s: severity %s, evidence %+v; want an error attributed to %+v", noGrantID, f.Severity, ev, want)
+	}
+
+	const grant = "allow-shop-httproute-service-web"
+	const wantYAML = `apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: ` + grant + `
+  namespace: store
+spec:
+  from:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    namespace: shop
+  to:
+  - group: ""
+    kind: Service
+    name: web
+`
+	d := detailOf(t, f)
+	fx := d.SuggestedFix
+	if fx == nil {
+		t.Fatalf("014 on %s: no suggested fix", noGrantID)
+	}
+	target := objects.Ref{Group: gwGroup, Kind: "ReferenceGrant", Namespace: "store", Name: grant}
+	if fx.Title != "Create a ReferenceGrant in `store`" || fx.Target.Ref != target || !fx.Create || fx.Path != "" ||
+		fx.YAML != wantYAML || fx.Basis != diagnose.FixGrantBasis {
+		t.Errorf("014 fix %+v; want the grant %s with YAML\n%s", fx, target, wantYAML)
+	}
+
+	g := groupOf(t, f.Group)
+	shape := &api.GrantShape{FromNamespace: "shop", ToNamespace: "store", ToGroup: "", ToKind: "Service"}
+	if g.Code != health.CodeRefNotPermitted || g.Cause != nil || !reflect.DeepEqual(g.Grant, shape) || !affects(g, routeRef(noGrantID)) {
+		t.Errorf("014 on %s: group %+v; want the Not permitted group %+v", noGrantID, g, shape)
+	}
+
+	// The UI's create command, on the file the UI downloads.
+	file := filepath.Join(t.TempDir(), "referencegrant-"+grant+".yaml")
+	if err := os.WriteFile(file, []byte(fx.YAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		must(t, "-n", "store", "delete", "referencegrant/"+grant, "--ignore-not-found")
+		waitFinding(t, 3*time.Minute, health.CodeRefNotPermitted, "HTTPRoute", noGrantID)
+	})
+	must(t, "create", "-f", file)
+	waitHealth(t, 3*time.Minute, "014 on "+noGrantID+" cleared by the grant", func(h api.HealthResponse) bool {
+		return !slices.ContainsFunc(h.Findings, func(f api.FindingDTO) bool { return f.Resource != nil && f.Resource.String() == noGrantID })
+	})
+	if c := parentCond(t, noGrantID, "ResolvedRefs"); c == nil || c.Status != "True" {
+		t.Errorf("%s with the grant: controller wrote ResolvedRefs %+v, want True", noGrantID, c)
+	}
+}
+
+// testPolicyTargetNotFound re-creates a TrafficPolicy whose only target is a missing Gateway: the UI
+// computes 016 once the target stayed missing for the grace and the hold, and it replaces the 003.
+func testPolicyTargetNotFound(t *testing.T) {
+	const fixture = "fixtures/analyzer.yaml"
+	must(t, "-n", "shop", "delete", "trafficpolicy/tp-missing-gateway", "--wait=true")
+	waitHealth(t, 2*time.Minute, "no finding on "+tpGatewayID+" after the delete", func(h api.HealthResponse) bool {
+		return !slices.ContainsFunc(h.Findings, func(f api.FindingDTO) bool { return f.Resource != nil && f.Resource.String() == tpGatewayID })
+	})
+	applied := time.Now()
+	must(t, "apply", "-f", fixture)
+	// The UI first sees the policy after the apply; the creation time is cut to the second.
+	due := applied.Add(health.Grace + health.TargetHold - time.Second)
+	h := waitHealth(t, 4*time.Minute, "016 on "+tpGatewayID, func(h api.HealthResponse) bool {
+		f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
+		if f != nil && time.Now().Before(due) {
+			t.Fatalf("016 on %s %s after the apply, before the grace and the hold", tpGatewayID, time.Since(applied))
+		}
+		return f != nil
+	})
+	t.Logf("016 on %s %s after the apply", tpGatewayID, time.Since(applied).Round(time.Second))
+	f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
+	want := fmt.Sprintf("targetRefs[0] Gateway `nope`: not found in namespace shop. Computed by the UI's policy targets rule. Rule set kgateway-%s.", kgwMinor(t))
+	if f.Severity != health.SeverityWarning || f.Message != health.PolicyTargetNotFoundMessage || f.Detail != want {
+		t.Errorf("016 on %s: severity %s, message %q, detail %q; want a warning with %q", tpGatewayID, f.Severity, f.Message, f.Detail, want)
+	}
+	for _, code := range []string{health.CodeRouteUnattached, health.CodeComputedDisagrees} {
+		if finding(h, code, "TrafficPolicy", tpGatewayID) != nil {
+			t.Errorf("%s beside 016 on %s", code, tpGatewayID)
+		}
+	}
+}
+
+// testListenerConflicted: kgateway marks edge's ListenerSet listeners conflicted, and 017 names only the
+// listeners the controller kept: the same hostname for HostnameConflict, another protocol for ProtocolConflict.
+func testListenerConflicted(t *testing.T) {
+	edgeHTTP := health.ConflictingListener{Owner: objects.Ref{Group: gwGroup, Kind: "Gateway", Namespace: "infra", Name: "edge"}, Name: "http", Protocol: "HTTP"}
+	edgeHTTPS := health.ConflictingListener{Owner: edgeHTTP.Owner, Name: "https", Protocol: "HTTPS", Hostname: "*.example.com"}
+	cases := []struct {
+		set, listener, reason, rule string
+		port                        int32
+		others                      []health.ConflictingListener
+		end                         string
+	}{
+		{"infra/extra", "clash", "HostnameConflict", health.ListenerHostnameRule, 8080, []health.ConflictingListener{edgeHTTP},
+			"Same port and hostname as listener `http` of Gateway infra/edge. Computed by the UI's listener port and hostname rule."},
+		{"infra/analyzer", "proto", "ProtocolConflict", health.ListenerProtocolRule, 8443, []health.ConflictingListener{edgeHTTPS},
+			"On port 8443 the controller kept HTTPS: listener `https` of Gateway infra/edge. Computed by the UI's listener port and protocol rule."},
+	}
+	for _, c := range cases {
+		var s kobj
+		ns, name, _ := strings.Cut(c.set, "/")
+		kubectl(t, &s, "-n", ns, "get", "listenersets.gateway.networking.k8s.io/"+name, "-o", "json")
+		var cond *kcond
+		for _, l := range s.Status.Listeners {
+			if l.Name == c.listener {
+				cond = findCond(l.Conditions, "Conflicted")
+			}
+		}
+		if cond == nil || cond.Status != "True" || cond.Reason != c.reason {
+			t.Errorf("ListenerSet %s listener %s: controller wrote Conflicted %+v, want True/%s", c.set, c.listener, cond, c.reason)
+			continue
+		}
+		h := waitHealth(t, 2*time.Minute, "017 on "+c.set, func(h api.HealthResponse) bool { return conflictOn(h, c.set, c.listener) != nil })
+		f := conflictOn(h, c.set, c.listener)
+		ev := f.Facts.(*health.ListenerConflictEvidence)
+		if f.Severity != health.SeverityError || ev.Port != c.port || ev.Reason != c.reason || ev.Rule != c.rule ||
+			!slices.Equal(ev.Others, c.others) || ev.OthersTotal != len(c.others) || !strings.HasSuffix(f.Detail, c.end) {
+			t.Errorf("017 on %s listener %s: severity %s, evidence %+v, detail %q; want others %+v and %q",
+				c.set, c.listener, f.Severity, ev, f.Detail, c.others, c.end)
+		}
+	}
+}
+
+// conflictOn is the 017 on listener l of ListenerSet id in h, or nil.
+func conflictOn(h api.HealthResponse, id, l string) *api.FindingDTO {
+	for i, f := range h.Findings {
+		ev, ok := f.Facts.(*health.ListenerConflictEvidence)
+		if f.Code == health.CodeListenerConflicted && f.Resource != nil && f.Resource.Kind == "ListenerSet" && f.Resource.String() == id && ok && ev.Listener == l {
+			return &h.Findings[i]
+		}
+	}
+	return nil
+}
+
+// groupOf is the row of group id in the grouped findings view.
+func groupOf(t *testing.T, id string) api.GroupRow {
+	t.Helper()
+	var p api.Page[api.GroupRow]
+	get(t, install+"/findings?view=groups&limit=200", &p)
+	i := slices.IndexFunc(p.Items, func(g api.GroupRow) bool { return g.ID == id })
+	if i < 0 {
+		t.Fatalf("group %s not in the grouped view: %+v", id, p.Items)
+	}
+	return p.Items[i]
+}
+
+// affects reports whether g lists r as affected.
+func affects(g api.GroupRow, r objects.Ref) bool {
+	return slices.ContainsFunc(g.Affected, func(a api.LinkedRef) bool { return a.Ref == r })
+}
+
+// region Controller log signals
+
+// envoyNACKTexts are fixed parts of the Envoy messages behind nack.yaml's rejects, which kgateway logs verbatim.
+var envoyNACKTexts = []string{"RE2 program size", "Failed to initialize cipher suites"}
+
+// controllerLogs reports whether setup.sh installed the UI with diagnostics.controllerLogs (CONTROLLER_LOGS=1).
+func controllerLogs(t *testing.T) bool {
+	return slices.Contains(uiArgs(t), "--diagnostics-controller-logs=true")
+}
+
+// TestControllerLogSignals reads 001 on infra/nack with the controller log on (design §8.9): each
+// rejected type has its error class, a derived Envoy name only when the Gateway's proxy stats report
+// it, and no API body quotes the Envoy message the controller logged.
+func TestControllerLogSignals(t *testing.T) {
+	if !nack() || !controllerLogs(t) {
+		t.Skip("needs the NACK fixture and the controller log on (NACK=1 CONTROLLER_LOGS=1 test/e2e/setup.sh)")
+	}
+	var meta api.MetaResponse
+	get(t, "/api/v1/meta", &meta)
+	if !slices.Contains(meta.CapabilityStates, api.Capability{Name: "controllerLogs", State: api.CapOn}) {
+		t.Fatalf("meta: controllerLogs %+v, want on", meta.CapabilityStates)
+	}
+	controllerSettled(t)
+
+	classes := map[string]string{typeRoutes: "regex", typeCluster: "tls"}
+	h := waitHealth(t, 3*time.Minute, "001 on infra/nack with a log event per rejected type", func(h api.HealthResponse) bool {
+		ev, _ := factsOf(finding(h, health.CodeXDSRejected, "Gateway", nackID)).(*health.XDSRejectsEvidence)
+		return ev != nil && len(ev.LogEvents) == len(classes)
+	})
+	ev := finding(h, health.CodeXDSRejected, "Gateway", nackID).Facts.(*health.XDSRejectsEvidence)
+	if ev.ControllerLogs != health.LogsRead {
+		t.Errorf("001 on %s: controllerLogs %q, want %q", nackID, ev.ControllerLogs, health.LogsRead)
+	}
+	names := proxyStatNames(t)
+	for _, le := range ev.LogEvents {
+		t.Logf("log event %s: classes %v, Envoy names %v", le.TypeURL, le.Classes, le.EnvoyResources)
+		if want, ok := classes[le.TypeURL]; !ok || !slices.Equal(le.Classes, []string{want}) {
+			t.Errorf("001 on %s, log event %s: classes %v, want [%s]", nackID, le.TypeURL, le.Classes, want)
+		}
+		for _, n := range le.EnvoyResources {
+			if !slices.Contains(names, n) {
+				t.Errorf("001 on %s, log event %s: Envoy name %q is in no proxy's stats %v", nackID, le.TypeURL, n, names)
+			}
+		}
+		// The CDS line names nack's cluster; it is kept exactly when the proxies report it.
+		const cluster = "kube_shop_httpbin-nack_8000"
+		if le.TypeURL == typeCluster && slices.Contains(names, cluster) != slices.Contains(le.EnvoyResources, cluster) {
+			t.Errorf("001 on %s: cluster names %v; proxy stats report %s: %v", nackID, le.EnvoyResources, cluster, slices.Contains(names, cluster))
+		}
+	}
+
+	var gw api.GatewayDetail
+	get(t, install+"/gateways/infra/nack", &gw)
+	if gw.DataPlane == nil || gw.DataPlane.ControllerLogs != health.LogsRead {
+		t.Errorf("Gateway detail data plane %+v, want the controller log read", gw.DataPlane)
+	}
+
+	// The log holds the Envoy messages, so their absence from the API means the UI kept none of their text.
+	logs, err := kubectlRun(t, "-n", "kgw-a", "logs", "deploy/kgateway", "--since=1h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range envoyNACKTexts {
+		if !strings.Contains(string(logs), s) {
+			t.Fatalf("controller log has no %q: the leak check would prove nothing", s)
+		}
+	}
+	for _, p := range apiPaths(t) {
+		b := body(t, p)
+		for _, s := range envoyNACKTexts {
+			if strings.Contains(b, s) {
+				t.Errorf("GET %s quotes the Envoy message %q", p, s)
+			}
+		}
+	}
+}
+
+// proxyStatNames are the route config and cluster names the nack proxies report, read with the UI's query.
+func proxyStatNames(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	q := url.Values{"filter": {proxystats.StatsFilter}}.Encode() + "&usedonly"
+	for _, pod := range podNames(t, "infra", nackSelector) {
+		b, err := kubectlRun(t, "get", "--raw", fmt.Sprintf("/api/v1/namespaces/infra/pods/%s:%d/proxy/stats?%s", pod, proxystats.StatsPort, q))
+		if err != nil {
+			t.Fatalf("proxy stats of %s: %v", pod, err)
+		}
+		ps, err := proxystats.ParseEnvoy(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(append(out, slices.Collect(maps.Keys(ps.RDS))...), slices.Collect(maps.Keys(ps.Clusters))...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// apiPaths are install A's list endpoints and the detail of every object and finding they list.
+func apiPaths(t *testing.T) []string {
+	t.Helper()
+	paths := []string{"/api/v1/meta", "/api/v1/installs"}
+	for _, p := range []string{"/overview", "/health", "/diagnostics", "/processes", "/findings?limit=200", "/findings?view=groups&limit=200",
+		"/gateways?limit=200", "/listenersets?limit=200", "/routes?limit=200"} {
+		paths = append(paths, install+p)
+	}
+	var fs api.Page[api.FindingRow]
+	get(t, install+"/findings?limit=200", &fs)
+	for _, f := range fs.Items {
+		paths = append(paths, install+"/findings/"+url.PathEscape(f.ID))
+	}
+	// An object links its detail view, or its YAML when its kind has none.
+	add := func(l api.LinkedRef, detail string) {
+		switch l.Link {
+		case api.LinkDetail:
+			paths = append(paths, install+detail)
+		case api.LinkYAML:
+			paths = append(paths, install+"/resources/"+l.Group+"/"+l.Kind+"/"+l.String())
+		}
+	}
+	var gws api.Page[api.GatewayListRow]
+	get(t, install+"/gateways?limit=200", &gws)
+	for _, g := range gws.Items {
+		add(g.Ref, "/gateways/"+g.Ref.String())
+	}
+	var sets api.Page[api.ListenerSetRow]
+	get(t, install+"/listenersets?limit=200", &sets)
+	for _, s := range sets.Items {
+		add(s.Ref, "/listenersets/"+s.Ref.Group+"/"+s.Ref.Kind+"/"+s.Ref.String())
+	}
+	for _, r := range routeList(t, "") {
+		add(r.Ref, "/routes/"+r.Ref.Group+"/"+r.Ref.Kind+"/"+r.Ref.String())
+	}
+	return paths
+}
+
+// body is one 200 response body of path.
+func body(t *testing.T, path string) string {
+	t.Helper()
+	resp, err := http.Get(base + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: status %d, %v", path, resp.StatusCode, err)
+	}
+	return string(b)
 }

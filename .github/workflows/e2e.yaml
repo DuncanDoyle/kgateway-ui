@@ -26,12 +26,15 @@ jobs:
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", ui_args: "--poll-interval=10m" }
           - { kgw: v2.3.11, gwapi: v1.5.1, second: "0" }
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "1" }
+          # The log row: diagnostics.controllerLogs on, with its pods/log Role in kgw-a, for TestControllerLogSignals.
+          - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", logs: "1" }
     runs-on: ubuntu-latest
     env:
       KGW_VERSION: ${{ matrix.kgw }}
       GWAPI_VERSION: ${{ matrix.gwapi }}
       SECOND_INSTALL: ${{ matrix.second }}
       UI_EXTRA_ARGS: ${{ matrix.ui_args }}
+      CONTROLLER_LOGS: ${{ matrix.logs }}
       # The xDS reject fixture (fixtures/nack.yaml) for TestDataPlaneDiagnostics and diagnostics.spec.ts.
       NACK: "1"
       E2E_DIR: ${{ github.workspace }}/.e2e
@@ -57,7 +60,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-${{ matrix.kgw }}-${{ matrix.second }}
+          name: e2e-${{ matrix.kgw }}-${{ matrix.second }}${{ matrix.logs == '1' && '-logs' || '' }}
           path: |
             web/test-results
             web/playwright-report
