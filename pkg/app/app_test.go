@@ -1418,6 +1418,9 @@ func TestCoreCapabilitiesPendingAndMissing(t *testing.T) {
 // logRules is the 2.4 rule set with a log parser that reads nothing.
 type logRules struct{ computed.Rules }
 
+// noLogRules is a rule set without a log parser: the embedded interface hides kgw24's.
+type noLogRules struct{ computed.Rules }
+
 func (logRules) Markers() []string { return []string{"xds error"} }
 func (logRules) Parse([]byte) (computed.LogFields, bool, error) {
 	return computed.LogFields{}, false, nil
@@ -1435,6 +1438,7 @@ func TestControllerLogsCapability(t *testing.T) {
 		t.Fatalf("a downstream collector named %q: %v", ctrllogs.CollectorName, err)
 	}
 	withParser := extension.WithComputedRules(func(string) computed.Selection { return computed.Selection{Rules: logRules{kgw24.New()}} })
+	noParser := extension.WithComputedRules(func(string) computed.Selection { return computed.Selection{Rules: noLogRules{kgw24.New()}} })
 	for _, tc := range []struct {
 		name   string
 		on     bool
@@ -1443,8 +1447,9 @@ func TestControllerLogsCapability(t *testing.T) {
 		want   api.Capability
 	}{
 		{"off", false, nil, false, api.Capability{Name: "controllerLogs", State: api.CapOff}},
-		{"no parser", true, nil, false, api.Capability{Name: "controllerLogs", State: api.CapFailing, Reason: reasonLogsNoParser}},
+		{"no parser", true, []extension.Option{noParser}, false, api.Capability{Name: "controllerLogs", State: api.CapFailing, Reason: reasonLogsNoParser}},
 		{"on", true, []extension.Option{withParser}, false, api.Capability{Name: "controllerLogs", State: api.CapOn}},
+		{"shipped parser", true, nil, false, api.Capability{Name: "controllerLogs", State: api.CapOn}},
 		{"denied", true, []extension.Option{withParser}, true, api.Capability{Name: "controllerLogs", State: api.CapDenied, Reason: reasonDenied}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -34,6 +35,8 @@ type Event struct {
 	Class string
 	// Object is the known object a deployer error names, nil when none.
 	Object *objects.Ref
+	// Frame is a panic's top frame function, from the previous container only.
+	Frame string
 }
 
 // Logs is the value under Key, per install ID.
@@ -165,12 +168,19 @@ func (r *ring) add(e Event, stamped bool) bool {
 		i++
 	}
 	if len(r.events) >= MaxEvents {
-		if i == 0 {
-			return false // older than every kept event
+		// The newest panic keeps a reserved slot, so newer events cannot evict it (R102).
+		j, reserved := 0, r.newestPanic()
+		if newest := e.Class == computed.LogClassPanic && (reserved < 0 || !e.Time.Before(r.events[reserved].Time)); !newest && reserved == 0 {
+			j = 1
 		}
-		r.forget(r.events[0])
-		r.events = slices.Delete(r.events, 0, 1)
-		i--
+		if i <= j && e.Class != computed.LogClassPanic {
+			return false // older than every event it could replace
+		}
+		r.forget(r.events[j])
+		r.events = slices.Delete(r.events, j, j+1)
+		if j < i {
+			i--
+		}
 	}
 	r.events = slices.Insert(r.events, i, e)
 	if r.seen == nil {
@@ -181,6 +191,16 @@ func (r *ring) add(e Event, stamped bool) bool {
 		r.stamped[k] = true
 	}
 	return true
+}
+
+// newestPanic is the index of the newest panic event, or -1.
+func (r *ring) newestPanic() int {
+	for i := len(r.events) - 1; i >= 0; i-- {
+		if r.events[i].Class == computed.LogClassPanic {
+			return i
+		}
+	}
+	return -1
 }
 
 func (r *ring) forget(e Event) {
@@ -256,4 +276,5 @@ func (w *writer) event(e Event) {
 	} else {
 		w.u64(0)
 	}
+	w.str(e.Frame)
 }

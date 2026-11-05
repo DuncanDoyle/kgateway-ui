@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +28,8 @@ const (
 	// FollowSince is how far back a replica's first stream starts.
 	FollowSince = 900 * time.Second
 	// PreviousTailLines asks for the previous log's tail, where a crash ends; no byte
-	// limit is sent, as the API would cut the tail's end (R101).
+	// limit is sent, as the API would cut the tail's end (R101). Under GOTRACEBACK=all
+	// a panic's first line can sit above this tail: no event then, which never means no panic.
 	PreviousTailLines = 200
 	// PreviousLimit is the client's safety cap on that read.
 	PreviousLimit = 4 << 20
@@ -369,7 +371,7 @@ func (c *Collector) follow(s *stream, k streamKey, t Target, p computed.LogParse
 		if err == nil {
 			c.setStream(k, StateOn)
 			// A read error ends this stream like EOF; the reconnect covers the gap.
-			n, _ := c.read(k, p, rc, ended)
+			n, _ := c.read(k, p, rc, ended, false)
 			_ = rc.Close()
 			from = c.cfg.Clock.Now()
 			ended = from
@@ -403,21 +405,32 @@ func (c *Collector) previous(s *stream, k streamKey, t Target, p computed.LogPar
 		return // the follow stream reports access
 	}
 	defer func() { _ = rc.Close() }()
-	_, _ = c.read(k, p, io.LimitReader(rc, PreviousLimit), time.Time{})
+	_, _ = c.read(k, p, io.LimitReader(rc, PreviousLimit), time.Time{}, true)
 }
 
 // read hands each line of r with one of p's markers to handle. A marked line
 // over maxLine counts as a parse failure, unread past the scanner's buffer; a
 // last line without a newline, as a capped read ends, is dropped. ended is
-// when the stream's previous connection ended, zero for none. It returns the bytes read.
-func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader, ended time.Time) (int64, error) {
+// when the stream's previous connection ended, zero for none; previous marks
+// the previous container's read. It returns the bytes read.
+func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader, ended time.Time, previous bool) (int64, error) {
 	markers := p.Markers()
+	wp, _ := p.(computed.LogWindow)
 	br := bufio.NewReaderSize(r, maxLine)
+	// win holds the one open window; its lines are copies, at most MaxLogWindow (R102).
+	var win *window
+	defer func() { c.closeWindow(k, wp, &win, ended, previous) }()
 	var n int64
 	for {
 		line, err := br.ReadSlice('\n')
 		n += int64(len(line))
 		if errors.Is(err, bufio.ErrBufferFull) {
+			if win != nil {
+				win.add(nil) // an oversized line keeps its place, empty
+				if win.full() {
+					c.closeWindow(k, wp, &win, ended, previous)
+				}
+			}
 			// tail keeps a chunk's last bytes, so a marker across two fills is found.
 			span := maxMarker(markers)
 			marked := marker(line, markers) != ""
@@ -441,10 +454,54 @@ func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader, ended t
 		if err != nil {
 			return n, eof(err)
 		}
-		if m := marker(line, markers); m != "" {
-			c.handle(k, p, m, bytes.TrimRight(line, "\r\n"), ended)
+		line = bytes.TrimRight(line, "\r\n")
+		if win != nil {
+			if win.add(line); win.full() {
+				c.closeWindow(k, wp, &win, ended, previous)
+			}
 		}
+		m := marker(line, markers)
+		if m == "" {
+			continue
+		}
+		if size := windowSize(wp, m, previous); size > 0 {
+			// Windows do not nest: such a line inside an open window, as a re-panic's, is only part of it.
+			if win == nil {
+				win = &window{m: m, line: bytes.Clone(line), size: size}
+			}
+			continue
+		}
+		c.handle(k, m, ended, previous, func() (computed.LogFields, bool, error) { return p.Parse(line) })
 	}
+}
+
+// window is a marked line and the lines after it that its parser asked for.
+type window struct {
+	m    string
+	line []byte
+	next [][]byte
+	size int
+}
+
+func (w *window) add(l []byte) { w.next = append(w.next, bytes.Clone(l)) }
+func (w *window) full() bool   { return len(w.next) >= w.size }
+
+// windowSize is how many lines after a line with m the parser reads, at most MaxLogWindow.
+func windowSize(wp computed.LogWindow, m string, previous bool) int {
+	if wp == nil {
+		return 0
+	}
+	return min(wp.Window(m, previous), computed.MaxLogWindow)
+}
+
+// closeWindow hands an open window to its parser once and drops it.
+func (c *Collector) closeWindow(k streamKey, wp computed.LogWindow, win **window, ended time.Time, previous bool) {
+	w := *win
+	if w == nil {
+		return
+	}
+	*win = nil
+	c.handle(k, w.m, ended, previous, func() (computed.LogFields, bool, error) { return wp.ParseWindow(w.line, w.next, previous) })
 }
 
 // maxMarker is one less than the longest marker's length: the bytes a marker can span across two chunks.
@@ -476,9 +533,9 @@ func marker(line []byte, markers []string) string {
 	return ""
 }
 
-// handle parses one marked line and keeps its event.
-func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []byte, ended time.Time) {
-	f, ok, err := p.Parse(line)
+// handle parses one marked line, or window, and keeps its event.
+func (c *Collector) handle(k streamKey, m string, ended time.Time, previous bool, parse func() (computed.LogFields, bool, error)) {
+	f, ok, err := parse()
 	var stats proxystats.Stats
 	statsOK := false
 	if err == nil && ok && len(f.Names) > 0 && c.cfg.Stats != nil {
@@ -502,7 +559,7 @@ func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []b
 		c.notify()
 	}
 	st.failures, st.unrecognised = 0, false
-	e, keep := c.event(k.install, st, f, m, stats, statsOK)
+	e, keep := c.event(k.install, st, f, m, previous, stats, statsOK)
 	if !keep {
 		return
 	}
@@ -532,16 +589,28 @@ func (c *Collector) failLocked(st *installState) {
 	}
 }
 
-// event keeps only f's fields that are in a closed set: a Gateway of the
-// install, a known type URL, class and object, and names in that Gateway's
-// proxy stats. A line naming another Gateway is dropped.
-func (c *Collector) event(id string, st *installState, f computed.LogFields, m string, stats proxystats.Stats, statsOK bool) (Event, bool) {
+// event keeps only f's fields that are in a closed set: one of the parser's
+// markers, a Gateway of the install, a known type URL, class and object,
+// names in that Gateway's proxy stats, and a frame of Go symbol characters.
+// A line naming another Gateway, or a panic outside the previous container, is dropped.
+func (c *Collector) event(id string, st *installState, f computed.LogFields, m string, previous bool, stats proxystats.Stats, statsOK bool) (Event, bool) {
 	e := Event{Time: f.Time.UTC(), Marker: m, Class: f.Class}
+	if f.Marker != "" && st.in.Parser != nil && slices.Contains(st.in.Parser.Markers(), f.Marker) {
+		e.Marker = f.Marker
+	}
 	if f.Time.IsZero() {
 		e.Time = c.cfg.Clock.Now().UTC()
 	}
 	if e.Class != "" && !computed.KnownLogClass(e.Class) {
 		e.Class = computed.LogClassOther
+	}
+	if e.Class == computed.LogClassPanic {
+		if !previous {
+			return Event{}, false // a running container has not crashed
+		}
+		if goSymbol(f.Frame) {
+			e.Frame = f.Frame
+		}
 	}
 	if typeURLs[f.TypeURL] {
 		e.TypeURL = f.TypeURL
@@ -562,6 +631,21 @@ func (c *Collector) event(id string, st *installState, f computed.LogFields, m s
 		e.Names = knownNames(stats[id], e.Gateway, f.Names)
 	}
 	return e, true
+}
+
+// goSymbol accepts a Go function symbol as tracebacks print it: 1 to 256
+// letters, digits and the characters of package paths, receivers and generics.
+func goSymbol(s string) bool {
+	if s == "" || len(s) > 256 || !strings.Contains(s, ".") {
+		return false
+	}
+	for _, r := range s {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./*()[]~-", r)
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // knownNames are the names of cand that one of gw's Pods reports in proxy stats, sorted.

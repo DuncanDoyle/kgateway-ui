@@ -470,7 +470,7 @@ func TestEventKeepsOnlyClosedSetFields(t *testing.T) {
 	h.stats = func() (proxystats.Stats, StatsState) { return stats, StatsReady }
 	body := "xds error gw=infra/edge t=1 type=type.googleapis.com/envoy.config.route.v3.RouteConfiguration names=" + sentinel + ",listener~80,kube_x,kube_other class=" + sentinel + " obj=Secret/infra/" + sentinel + "\n" +
 		"xds error gw=infra/" + sentinel + " t=2 class=panic\n" +
-		"xds error t=3 type=" + sentinel + " class=panic obj=Deployment/infra/edge\n"
+		"xds error t=3 type=" + sentinel + " class=tls obj=Deployment/infra/edge\n"
 	_, w := h.serve(t, body)
 	ev := h.logs(t).Events
 	if len(ev) != 2 {
@@ -481,7 +481,7 @@ func TestEventKeepsOnlyClosedSetFields(t *testing.T) {
 	if got := ev[0]; got.Object != nil || got.Time != want.Time || got.Gateway != want.Gateway || got.TypeURL != want.TypeURL || !slices.Equal(got.Names, want.Names) || got.Class != want.Class {
 		t.Fatalf("event = %+v, want %+v", got, want)
 	}
-	if got := ev[1]; got.TypeURL != "" || got.Class != computed.LogClassPanic || got.Object == nil || *got.Object != (objects.Ref{Kind: "Deployment", Namespace: "infra", Name: "edge"}) {
+	if got := ev[1]; got.TypeURL != "" || got.Class != computed.LogClassTLS || got.Object == nil || *got.Object != (objects.Ref{Kind: "Deployment", Namespace: "infra", Name: "edge"}) {
 		t.Fatalf("event = %+v", got)
 	}
 	if s := fmt.Sprintf("%+v", ev); strings.Contains(s, sentinel) {
@@ -684,7 +684,7 @@ func TestPreviousReadReturnsTheTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = h.c.read(streamKey{install: installID, target: "a"}, h.parser, io.LimitReader(rc, PreviousLimit), time.Time{})
+	_, _ = h.c.read(streamKey{install: installID, target: "a"}, h.parser, io.LimitReader(rc, PreviousLimit), time.Time{}, true)
 	ev := h.logs(t).Events
 	if len(ev) == 0 || !ev[len(ev)-1].Time.Equal(testutil.Now.Add(n*time.Second)) {
 		t.Fatalf("the last line is missing: %d events, %v..%v", len(ev), ev[0].Time, ev[len(ev)-1].Time)
@@ -733,7 +733,7 @@ func TestBackfillWaitsForTheFirstScrape(t *testing.T) {
 func TestEventTimes(t *testing.T) {
 	h := newHarness(t, newSource(pod("a", 0)))
 	h.c.Reconcile(h.ctx)
-	line := "xds error gw=infra/edge class=panic\n"
+	line := "xds error gw=infra/edge class=tls\n"
 	_, w := h.serve(t, "xds error gw=infra/edge t=1 tz=EVIL\n"+line)
 	if ev := h.logs(t).Events; len(ev) != 2 || ev[0].Time.Location() != time.UTC || ev[1].Time.Location() != time.UTC {
 		t.Fatalf("events = %+v", ev)
