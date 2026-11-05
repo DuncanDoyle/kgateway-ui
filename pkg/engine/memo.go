@@ -66,7 +66,7 @@ type printCtx struct {
 	col    collect.Snapshot
 	proc   *health.ProcessData
 
-	owned, metrics, verify, computed, change, catalog *uint64
+	install, owned, metrics, verify, computed, change, catalog *uint64
 }
 
 // lazy returns *p, computing it with f on first use.
@@ -84,7 +84,7 @@ func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
 	if (set.Owned || len(set.Kinds) > 0) && ctx.snap.Source.Kinds == nil || len(set.Collected) > health.MaxStampedCollected {
 		return 0, false
 	}
-	p := installPrint(ctx.res)
+	p := lazy(&ctx.install, func() uint64 { return installPrint(ctx.res) })
 	if ctx.snap.Synced {
 		p = mix(p, 1)
 	}
