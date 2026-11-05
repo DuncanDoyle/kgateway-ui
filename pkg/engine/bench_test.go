@@ -19,6 +19,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -118,9 +119,9 @@ func liveSnapshot(tb testing.TB, tier scale.Tier) *cache.Snapshot {
 
 // analyzerStage returns e's analyzer stage (checks, groups, rank, index) for its only
 // install, with inputs built as compute builds them; memo sets the input prints.
-// Scoped replays the Phase 1–2 checks' results, so it times design §16.3's scope.
+// A non-nil scope replays every other check's results, so phase3Checks times design §16.3's scope.
 // With scrape > 0 as the metrics max age, each run reads a new scrape of unchanged content.
-func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Duration) func() *diagnose.Diagnosis {
+func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape time.Duration) func() *diagnose.Diagnosis {
 	tb.Helper()
 	m := e.Compute()
 	snap, now, served := m.Snapshot, e.cfg.Now(), e.cfg.Served
@@ -156,8 +157,8 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode, Catalog: cat}
 	in.Process, in.GatewayAPI, in.Rules = im.Process, gatewayAPI(im.Rules), im.Rules
 	checks := e.cfg.Checks
-	if scoped {
-		checks = scopedChecks(tb, e, in, col)
+	if scope != nil {
+		checks = scopedChecks(tb, e, in, col, scope)
 	}
 	run := func() *diagnose.Diagnosis {
 		if scrape > 0 {
@@ -185,7 +186,8 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 }
 
 // phase3Checks are the checks of design §16.3's analyzer-stage scope (ruling
-// R35): KGWUI-001 as re-specified, 019–022, 025 and 026.
+// R35): KGWUI-001 as re-specified, 019–022, 025 and 026. The 013–017 come from
+// the resource status check, replayed but identified, grouped and ranked.
 var phase3Checks = []string{"xDS rejects", "process restarts", "probe failures", "stuck rollouts", "version skew", "proxy config warming", "proxy connection"}
 
 // replayed is a check whose Run returns its results from one earlier run.
@@ -200,29 +202,62 @@ func (replayed) Inputs() health.InputSet { return health.InputSet{Owned: true} }
 
 func (r replayed) Run(health.RunContext) ([]health.Finding, health.CheckResult) { return r.fs, r.cr }
 
-// scopedChecks are e's checks with every check outside phase3Checks replayed
-// from a run over in, on scratch Stores so e's are untouched. A replayed
-// check's findings are still identified on every warm run.
-func scopedChecks(tb testing.TB, e *Engine, in health.Input, col collect.Snapshot) []health.Check {
+// recorder reads every named check's output on its run; it raises nothing.
+type recorder struct {
+	names []string
+	outs  map[string]health.CheckOutput
+}
+
+func (*recorder) Name() string { return "replay recorder" }
+
+func (r *recorder) Inputs() health.InputSet { return health.InputSet{Checks: r.names} }
+
+func (r *recorder) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	r.outs = map[string]health.CheckOutput{}
+	for _, n := range r.names {
+		r.outs[n], _ = ctx.Output(n)
+	}
+	return nil, health.CheckResult{Name: r.Name(), OK: true}
+}
+
+// scopedChecks are e's checks with every check outside scope replayed from
+// its output in one run of all of them over in, on scratch Stores so e's are
+// untouched. Runs at the measurement world's earlier computes go first, so
+// held findings (016, 018) mature as in the model. A replayed check's findings
+// are still identified on every warm run.
+func scopedChecks(tb testing.TB, e *Engine, in health.Input, col collect.Snapshot, scope []string) []health.Check {
 	tb.Helper()
+	rec := &recorder{}
+	for _, c := range e.cfg.Checks {
+		rec.names = append(rec.names, c.Name())
+	}
+	all := append(slices.Clone(e.cfg.Checks), rec)
+	st := health.NewStates()
+	for _, at := range []time.Time{testutil.Now, matureAt, in.Now} {
+		if !at.After(in.Now) {
+			run := in
+			run.Now = at
+			health.Evaluate(run, all, health.Runtime{States: st, Collected: col})
+		}
+	}
 	out := make([]health.Check, 0, len(e.cfg.Checks))
 	n := 0
 	for _, c := range e.cfg.Checks {
-		if slices.Contains(phase3Checks, c.Name()) {
+		if slices.Contains(scope, c.Name()) {
 			out = append(out, c)
 			n++
 			continue
 		}
-		rep := health.Evaluate(in, []health.Check{c}, health.Runtime{States: health.NewStates(), Collected: col})
-		var fs []health.Finding
-		for _, f := range rep.Findings {
+		o := rec.outs[c.Name()]
+		fs := make([]health.Finding, 0, len(o.Findings))
+		for _, f := range o.Findings {
 			f.ID, f.Group = "", ""
 			fs = append(fs, f)
 		}
-		out = append(out, replayed{c, fs, rep.Checks[0]})
+		out = append(out, replayed{c, fs, o.Result})
 	}
-	if n != len(phase3Checks) {
-		tb.Fatalf("%d of the %d Phase 3 checks are configured", n, len(phase3Checks))
+	if n != len(scope) {
+		tb.Fatalf("%d of the %d Phase 3 checks are configured", n, len(scope))
 	}
 	return out
 }
@@ -241,15 +276,16 @@ func analyzerEngine(tb testing.TB, tier scale.Tier) *Engine {
 // "scope" replays the Phase 1–2 checks (design §16.3, ruling R35).
 func BenchmarkAnalyzerStage(b *testing.B) {
 	for _, mode := range []struct {
-		name         string
-		memo, scoped bool
-		scrape       time.Duration
-	}{{"warm", false, false, 0}, {"memoized", true, false, 0}, {"warm-scope", false, true, 0}, {"memoized-scope", true, true, 0},
-		{"memoized-scope-scrape", true, true, prodMaxAge}} {
+		name   string
+		memo   bool
+		scope  []string
+		scrape time.Duration
+	}{{"warm", false, nil, 0}, {"memoized", true, nil, 0}, {"warm-scope", false, phase3Checks, 0}, {"memoized-scope", true, phase3Checks, 0},
+		{"memoized-scope-scrape", true, phase3Checks, prodMaxAge}} {
 		b.Run(mode.name, func(b *testing.B) {
 			for _, tier := range []scale.Tier{scale.Large, measuredTier} {
 				b.Run(tier.Name, func(b *testing.B) {
-					run := analyzerStage(b, analyzerEngine(b, tier), mode.memo, mode.scoped, mode.scrape)
+					run := analyzerStage(b, analyzerEngine(b, tier), mode.memo, mode.scope, mode.scrape)
 					b.ReportAllocs()
 					b.ResetTimer()
 					for b.Loop() {
@@ -265,6 +301,10 @@ func BenchmarkAnalyzerStage(b *testing.B) {
 // missing child entry's grace end.
 var matureAt = testutil.Now.Add(max(Window, health.Grace) + time.Second)
 
+// progressAt is 5 min after matureAt, when 003 warnings first show: 018's hold
+// has matured, as has 016's past the policies' grace.
+var progressAt = matureAt.Add(5 * time.Minute)
+
 // prodMaxAge is the binary's metrics max age: 3 × the default 10 s interval (R70).
 const prodMaxAge = 30 * time.Second
 
@@ -272,8 +312,8 @@ const prodMaxAge = 30 * time.Second
 var measuredTier = scale.Large.Contradicting().Worst()
 
 // measureEngine is an engine over the 3.2 measurement world on a fake clock:
-// computed at testutil.Now around a proxy stats scrape, then at matureAt after
-// a second one, so every window, hold and proxy condition has matured.
+// computed at testutil.Now around a proxy stats scrape, then at matureAt and
+// progressAt after one more each, so every window, hold and proxy condition has matured.
 func measureEngine(tb testing.TB) (*Engine, *measure.World, *clocktesting.FakeClock) {
 	tb.Helper()
 	fc := testutil.FakeClock()
@@ -329,23 +369,26 @@ func measuredEngine(tb testing.TB, w *measure.World, fc *clocktesting.FakeClock,
 	cat := benchCatalog(cfg.Served)
 	cfg.Catalog = func() kinds.Catalog { return cat }
 	e := New(cfg)
-	var m *Model
-	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(m) })
-	m = e.Compute()
+	// The current model, as the app reads it, so no older model stays alive.
+	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(e.Current()) })
+	e.Compute()
 	w.Scrape(tb)
-	m = e.Compute()
-	fc.SetTime(matureAt)
-	w.Scrape(tb)
-	m = e.Compute()
-	measuredSanity(tb, m)
+	e.Compute()
+	for _, at := range []time.Time{matureAt, progressAt} {
+		fc.SetTime(at)
+		w.Scrape(tb)
+		e.Compute()
+	}
+	measuredSanity(tb, e.Current().Model, w)
 	return e
 }
 
-// statsInstalls are m's installs and Gateways, as the app feeds the proxy stats collector.
-func statsInstalls(m *Model) ([]proxystats.Install, *cache.Snapshot) {
-	if m == nil {
+// statsInstalls are p's installs and Gateways, as the app feeds the proxy stats collector.
+func statsInstalls(p *Published) ([]proxystats.Install, *cache.Snapshot) {
+	if p == nil {
 		return nil, nil
 	}
+	m := p.Model
 	out := make([]proxystats.Install, 0, len(m.Installs))
 	for _, im := range m.Installs {
 		in := proxystats.Install{Resolved: im.Resolved}
@@ -363,9 +406,18 @@ func statsInstalls(m *Model) ([]proxystats.Install, *cache.Snapshot) {
 var measuredCodes = []string{health.CodeXDSRejected, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck,
 	health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
 
+// analyzerCodes are the 3.3 codes the measurement world must raise; the
+// families in sharedGroups must each hold a group with two or more findings.
+var (
+	analyzerCodes = []string{health.CodeRefUnresolved, health.CodeRefNotPermitted, health.CodeRuleReplaced, health.CodePolicyTargetNotFound,
+		health.CodeListenerConflicted, health.CodeStatusNotProgressing}
+	sharedGroups = []string{"Missing backend", "Not permitted", "Replaced by policy", "Status not progressing"}
+)
+
 // measuredSanity fails tb unless m raises measuredCodes on every Gateway, 001
-// with proxy stats evidence, every check is available and KGWUI-012 matured.
-func measuredSanity(tb testing.TB, m *Model) {
+// with proxy stats evidence, analyzerCodes in shared groups, every check is
+// available, KGWUI-012 matured and w's log reader kept its full ring.
+func measuredSanity(tb testing.TB, m *Model, w *measure.World) {
 	tb.Helper()
 	in := m.Installs[0]
 	gws := len(in.Owned.Gateways)
@@ -400,7 +452,29 @@ func measuredSanity(tb testing.TB, m *Model) {
 	if in.Process == nil || len(in.Process.Proxies) != gws || in.Diagnosis == nil || len(in.Diagnosis.Groups) == 0 {
 		tb.Fatalf("process data for %d Gateways, diagnosis %v", len(in.Process.Proxies), in.Diagnosis != nil)
 	}
-	tb.Logf("measurement world: %d Gateways, %d findings %v, %d groups", gws, len(in.Health.Findings), byCode, len(in.Diagnosis.Groups))
+	for _, c := range analyzerCodes {
+		if byCode[c] == 0 {
+			tb.Fatalf("no %s: %v", c, byCode)
+		}
+	}
+	shared, families := map[string]int{}, map[string]int{}
+	for _, g := range in.Diagnosis.Groups {
+		families[g.Family]++
+		if len(g.Members) > 1 {
+			shared[g.Family]++
+		}
+	}
+	for _, f := range sharedGroups {
+		if shared[f] == 0 {
+			tb.Fatalf("no %q group with two or more findings: %v", f, shared)
+		}
+	}
+	logs, _ := w.Logs.Value()
+	if l := logs[in.Resolved.ID()]; len(l.Events) != ctrllogs.MaxEvents || l.State != ctrllogs.StateOn {
+		tb.Fatalf("the log reader kept %d events, state %s", len(l.Events), l.State)
+	}
+	tb.Logf("measurement world: %d Gateways, %d findings %v, %d groups %v (%v with two or more findings), %d derived log events",
+		gws, len(in.Health.Findings), byCode, len(in.Diagnosis.Groups), families, shared, ctrllogs.MaxEvents)
 }
 
 // denseSnapshot is a synced snapshot of scale.DenseSelection(parents, routes)

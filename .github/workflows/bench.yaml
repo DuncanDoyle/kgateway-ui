@@ -9,7 +9,7 @@ on:
         type: string
         default: main
   pull_request:
-    paths: ["pkg/engine/**", "pkg/cache/**", "pkg/ctrlmetrics/**", "pkg/trigger/**", "pkg/explore/**", "pkg/computed/**", "pkg/install/**", "pkg/objects/**", "pkg/health/**", "pkg/api/**", "pkg/collect/**", "pkg/diagnose/**", "pkg/process/**", "pkg/proxystats/**", "internal/testutil/**", "internal/benchab/**", "Makefile", ".github/workflows/bench.yaml"]
+    paths: ["pkg/engine/**", "pkg/cache/**", "pkg/ctrlmetrics/**", "pkg/ctrllogs/**", "pkg/trigger/**", "pkg/explore/**", "pkg/computed/**", "pkg/install/**", "pkg/objects/**", "pkg/health/**", "pkg/api/**", "pkg/collect/**", "pkg/diagnose/**", "pkg/process/**", "pkg/proxystats/**", "internal/testutil/**", "internal/benchab/**", "Makefile", ".github/workflows/bench.yaml"]
 permissions: { contents: read }
 jobs:
   bench:

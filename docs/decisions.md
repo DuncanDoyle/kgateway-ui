@@ -943,3 +943,17 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** kgwctl drops its copy of the wiring. `pkg/setup/setup.go` gets an import-boundary allowlist entry (D-016), since it names the client-go interfaces. Task 71a touches 6 files (⚠ guardrail, approved here). Its one-shot test also serves as the E3 acceptance test: an external module runs the analyzer over a cache snapshot.
 
 **Alternatives:** A helper that waits for the time-based checks (rejected: a CLI picks its own timeout and output, and a library that sleeps hides latency). Leave the wiring to each caller (rejected: drift).
+
+## D-054 — Retained heap over 2.1 raised to 40 MiB (2026-11-05, phase 3)
+**Status:** accepted by the user on 2026-11-05 (sub-phase 3.3, Task 71). Changes design §16.3's retained-heap gate
+
+**Context:**
+- The gate holds the median retained heap at Large to ≤ 32 MiB above the 2.1 baseline. The 32 MiB is our own number (D-022); every sub-phase adds findings and state to it.
+- 3.3 measures +34.8 MiB (3.2: +30.8). The growth is the 3.3 checks' findings and state, plus about 1 MiB of derived log events; no regression was found.
+- The gates that guard the pod limit pass: OS memory during the stream 210.2 MiB (≤ 288 MiB, D-043; pod limit 512 Mi), and +10.4 MiB above the 3.1 baseline (≤ +24 MiB).
+
+**Decision:** The retained-heap gate over the 2.1 baseline is ≤ 40 MiB. The ≤ +24 MiB gate over the 3.1 baseline and every other gate are unchanged.
+
+**Consequences:** 5.2 MiB of headroom for 3.4. `TestBudgetHeap` gates 40 MiB.
+
+**Alternatives:** Cut retained state to fit 32 MiB (not taken: about 0.2 MiB of savings found; the other gates already bound the pod's memory).

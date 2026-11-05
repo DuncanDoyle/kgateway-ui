@@ -1,7 +1,8 @@
-// Package measure builds the measurement world of the 3.2 budgets (design
-// §16.3): scale.LivePhase3 with its optional watches, controller metrics with
-// rejects per Gateway, observed probe failures and a stub proxy stats source
-// published through the real collector store. It never imports the engine.
+// Package measure builds the measurement world of the 3.2 and 3.3 budgets
+// (design §16.3): scale.LivePhase3 with its optional watches, controller
+// metrics with rejects per Gateway, observed probe failures, a stub proxy
+// stats source and the controller log reader over a stub stream at LogRate,
+// both published through the real collector store. It never imports the engine.
 package measure
 
 import (
@@ -20,6 +21,10 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs/ctrllogstest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -29,6 +34,9 @@ import (
 
 // Every is the proxy stats scrape interval, the metrics interval.
 const Every = 10 * time.Second
+
+// LogRate is the controller log's marked lines per second (design §16.3).
+const LogRate = 50
 
 // Controller Pod of every scale world (scale.Live).
 const (
@@ -47,7 +55,13 @@ type World struct {
 	// Stats scrapes the stub source; Installs feeds its rounds.
 	Stats    *proxystats.Collector
 	Installs func() ([]proxystats.Install, *cache.Snapshot)
-	mu       sync.Mutex
+	// Logs reads LogSource's "xds error" lines, one per Gateway in turn, with the
+	// kgateway 2.4 parser; Scrape and Run publish it to Store.
+	Logs      *ctrllogs.Collector
+	LogSource *ctrllogstest.Source
+	logsCtx   context.Context
+	logsOff   bool
+	mu        sync.Mutex
 }
 
 // New builds tier's measurement world on clk, which also stamps the cache, the
@@ -77,7 +91,61 @@ func New(tb testing.TB, tier scale.Tier, clk clock.WithTicker) *World {
 		}
 		return f()
 	}})
+	w.LogSource = &ctrllogstest.Source{Rate: LogRate, Clock: clk, Line: xdsLine(tier)}
+	parser := computed.Selection{Rules: kgw24.New()}.LogParser()
+	w.Logs = ctrllogs.New(ctrllogs.Config{Source: w.LogSource, Every: Every, Clock: clk, Installs: func() ([]ctrllogs.Install, bool) {
+		w.mu.Lock()
+		f, off := w.Installs, w.logsOff
+		w.mu.Unlock()
+		if off {
+			return nil, true
+		}
+		if f == nil {
+			return nil, false
+		}
+		ins, snap := f()
+		if snap == nil {
+			return nil, false
+		}
+		out := make([]ctrllogs.Install, 0, len(ins))
+		for _, in := range ins {
+			out = append(out, ctrllogs.Install{Resolved: in.Resolved, Parser: parser, Gateways: in.Gateways})
+		}
+		return out, true
+	}, Stats: func() (proxystats.Stats, ctrllogs.StatsState) {
+		v, ok := w.Store.Snapshot().Get(proxystats.Key)
+		if !ok {
+			return nil, ctrllogs.StatsPending
+		}
+		if s, isStats := v.Data.(proxystats.Stats); v.State == collect.OK && isStats {
+			return s, ctrllogs.StatsReady
+		}
+		return nil, ctrllogs.StatsUnavailable
+	}})
+	ctx, cancel := context.WithCancel(context.Background())
+	tb.Cleanup(cancel)
+	w.logsCtx = ctx
 	return w
+}
+
+// xdsLine is a kgateway 2.4 "xds error" line for one of tier's Gateways in
+// turn, rejecting the cluster the stub proxy stats name, so its name is kept.
+func xdsLine(tier scale.Tier) func(int, time.Time) []byte {
+	return func(n int, at time.Time) []byte {
+		i := n % tier.Gateways
+		ns, gw := testutil.ScaleNamespace(i%tier.Namespaces), testutil.ScaleGateway(i)
+		return fmt.Appendf(nil, `{"time":%q,"level":"warn","msg":"xds error","component":"xds/envoy","gateway_name":%q,"gateway_ns":%q,`+
+			`"resource":"envoy.config.cluster.v3.Cluster","error":"Error adding/updating cluster(s) kube_%s_%s_8080: Failed to initialize cipher suites NOT-A-CIPHER"}`,
+			at.UTC().Format(time.RFC3339Nano), gw, ns, ns, gw)
+	}
+}
+
+// StopLogs ends the controller log streams and waits for them.
+func (w *World) StopLogs() {
+	w.mu.Lock()
+	w.logsOff = true
+	w.mu.Unlock()
+	w.Logs.Reconcile(w.logsCtx)
 }
 
 // SetInstalls sets what the stats rounds scrape.
@@ -87,7 +155,8 @@ func (w *World) SetInstalls(f func() ([]proxystats.Install, *cache.Snapshot)) {
 	w.mu.Unlock()
 }
 
-// Scrape runs one stats round and publishes it, as the collector's Run does.
+// Scrape runs one stats round and publishes it, then the controller logs read
+// up to the clock's now, as the collectors' Run does. The first Scrape starts the log streams.
 func (w *World) Scrape(tb testing.TB) {
 	tb.Helper()
 	st, fp, ok := w.Stats.Round(context.Background())
@@ -95,15 +164,34 @@ func (w *World) Scrape(tb testing.TB) {
 		tb.Fatal("no installs for the proxy stats round")
 	}
 	w.Store.Publish(proxystats.Key, st, fp, 3*Every)
+	if !w.Logs.Reconcile(w.logsCtx) || w.Logs.Streams() == 0 {
+		tb.Fatalf("the controller log round started %d streams", w.Logs.Streams())
+	}
+	ctx, cancel := context.WithTimeout(w.logsCtx, time.Minute)
+	defer cancel()
+	if err := w.LogSource.WaitIdle(ctx, w.Logs.Streams()); err != nil {
+		tb.Fatalf("the controller log streams did not catch up: %v", err)
+	}
+	v, lfp := w.Logs.Value()
+	w.Store.Publish(ctrllogs.Key, v, lfp, 3*Every)
 }
 
-// Run scrapes every Every until ctx is done.
+// Run scrapes and reads the controller logs, publishing every Every, until ctx is done.
 func (w *World) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		_ = w.Logs.Run(ctx, func(key string, v any, fp uint64, ttl time.Duration) {
+			w.Store.Publish(ctrllogs.CollectorName+"/"+key, v, fp, ttl)
+		}, func(key string, st collect.State, reason string) {
+			w.Store.Fail(ctrllogs.CollectorName+"/"+key, st, reason)
+		})
+	})
 	_ = w.Stats.Run(ctx, func(key string, v any, fp uint64, ttl time.Duration) {
 		w.Store.Publish(proxystats.CollectorName+"/"+key, v, fp, ttl)
 	}, func(key string, st collect.State, reason string) {
 		w.Store.Fail(proxystats.CollectorName+"/"+key, st, reason)
 	})
+	wg.Wait()
 }
 
 // failProbes adds three probe failures, seen at at, to every Unhealthy Event,

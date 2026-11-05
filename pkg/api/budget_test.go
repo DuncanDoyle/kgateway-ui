@@ -34,7 +34,9 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
@@ -325,6 +327,9 @@ func TestBudgetFindingsRequests(t *testing.T) {
 				{"q", base + "/findings?q=r-01"},
 				{"group", base + "/findings?group=" + big.ID},
 				{"sort=since", base + "/findings?sort=since.desc"},
+				{"view=groups", base + "/findings?view=groups"},
+				{"view=groups&severity=error", base + "/findings?view=groups&severity=error"},
+				{"view=groups&q", base + "/findings?view=groups&q=r-01"},
 			}
 			for _, mx := range mixes {
 				items, total := listRows(t, h, mx.path)
@@ -360,6 +365,8 @@ func TestBudgetDiagnosticsRequests(t *testing.T) {
 				{"processes", base + "/processes"},
 				{"processes?q", base + "/processes?q=g-01&health=healthy&health=unknown"},
 				{"processes?restarts", base + "/processes?health=error&health=warning&restarts=true"},
+				{"findings?view=groups", base + "/findings?view=groups"},
+				{"findings?view=groups&code", base + "/findings?view=groups&code=" + health.CodeRefNotPermitted},
 			} {
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, mx.path, nil))
@@ -380,19 +387,31 @@ func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Mode
 		Detectors: []install.Detector{install.UpstreamDetector{}}, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: w.Metrics, Collected: w.Store.Snapshot,
 		Checks: health.Upstream(), Now: fc.Now})
-	var m *engine.Model
-	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(m) })
-	// Two scrapes around testutil.Now and past every window, so windows, holds and proxy conditions mature.
-	m = e.Compute()
+	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(current(e)) })
+	// Scrapes around testutil.Now, past every window and 5 min later, so windows, holds,
+	// proxy conditions, 016 and 018 mature.
+	e.Compute()
 	w.Scrape(t)
-	m = e.Compute()
-	fc.SetTime(testutil.Now.Add(max(engine.Window, health.Grace) + time.Second))
-	w.Scrape(t)
-	m = e.Compute()
-	if f, c := matured(m); f != c || c == 0 || !hasCodes(m, measuredCodes) {
+	e.Compute()
+	mature := testutil.Now.Add(max(engine.Window, health.Grace) + time.Second)
+	for _, at := range []time.Time{mature, mature.Add(5 * time.Minute)} {
+		fc.SetTime(at)
+		w.Scrape(t)
+		e.Compute()
+	}
+	m := current(e)
+	if f, c := matured(m); f != c || c == 0 || !hasCodes(m, measuredCodes) || !hasCodes(m, analyzerCodes) {
 		t.Fatalf("measurement world did not mature: %d KGWUI-012 of %d checks", f, c)
 	}
 	return NewHandler(e, fstest.MapFS{}, authz), m
+}
+
+// current is e's published model, nil before the first.
+func current(e *engine.Engine) *engine.Model {
+	if p := e.Current(); p != nil {
+		return p.Model
+	}
+	return nil
 }
 
 // requestBudget gates path's sequential p95 < 50 ms and, for a list, its
@@ -623,6 +642,14 @@ func togglePath(u *unstructured.Unstructured, _, pass int) error {
 var measuredCodes = []string{health.CodeXDSRejected, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck,
 	health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
 
+// analyzerCodes are the 3.3 codes it raises 5 min after maturing; streamCodes
+// those a stream waits for, as 018 holds for 5 min first.
+var (
+	analyzerCodes = append(slices.Clone(streamCodes), health.CodeStatusNotProgressing)
+	streamCodes   = []string{health.CodeRefUnresolved, health.CodeRefNotPermitted, health.CodeRuleReplaced, health.CodePolicyTargetNotFound,
+		health.CodeListenerConflicted}
+)
+
 // hasCodes reports whether m's install raises every code of codes.
 func hasCodes(m *engine.Model, codes []string) bool {
 	seen := map[string]bool{}
@@ -630,6 +657,14 @@ func hasCodes(m *engine.Model, codes []string) bool {
 		seen[f.Code] = true
 	}
 	return !slices.ContainsFunc(codes, func(c string) bool { return !seen[c] })
+}
+
+// logsOn reports whether mw's log reader is on and has published m's install's full ring.
+func logsOn(m *engine.Model, mw *measure.World) bool {
+	v, ok := mw.Store.Snapshot().Get(ctrllogs.Key)
+	logs, _ := v.Data.(ctrllogs.Logs)
+	l := logs[m.Installs[0].Resolved.ID()]
+	return ok && v.State == collect.OK && l.State == ctrllogs.StateOn && len(l.Events) == ctrllogs.MaxEvents
 }
 
 // statsInstalls are m's installs and Gateways, as the app feeds the proxy stats collector.
@@ -731,7 +766,10 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	if tier.Contradict {
 		// Windows mature on the real clock 30 s after start-up, missing child entries and proxy conditions at 60 s.
 		for deadline := time.Now().Add(3 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
-			if f, c := matured(e.Current().Model); f == c && c > 0 && (mw == nil || hasCodes(e.Current().Model, measuredCodes)) {
+			// Loop events hold their models; drained here, so waiting keeps no more of them than the UI does.
+			testutil.Drain(ev)
+			m := e.Current().Model
+			if f, c := matured(m); f == c && c > 0 && (mw == nil || hasCodes(m, measuredCodes) && hasCodes(m, streamCodes) && logsOn(m, mw)) {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -774,7 +812,9 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 					}
 				case engine.EvPublished:
 					pubs++
-					busy += x.At.Sub(runStart)
+					if !runStart.IsZero() { // a run started before counting began has no start here
+						busy += x.At.Sub(runStart)
+					}
 					lastNext, lastPub = x.Published.Model.Next, x.At
 				}
 			case <-collect.Done():

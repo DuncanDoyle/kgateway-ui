@@ -28,6 +28,8 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
@@ -216,6 +218,90 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	}
 }
 
+// syncsBody is managedBody with status_syncs_total at n.
+func syncsBody(n int) string {
+	return managedBody + fmt.Sprintf("# TYPE %s counter\n%s{syncer=\"HTTPRoute\",result=\"success\"} %d\n", ctrlmetrics.StatusSyncsTotal, ctrlmetrics.StatusSyncsTotal, n)
+}
+
+// TestBudgetSyncOnlyScrapes reports what scrapes that change only
+// status_syncs_total cost an idle cluster (Task 63): on fake clocks, 600
+// one-second steps with a scrape every 10 s, each with 7 more syncs, at Large
+// with no 018. It counts the recomputes, the publications and those whose
+// findings differ from the last publication's; nothing is gated.
+func TestBudgetSyncOnlyScrapes(t *testing.T) {
+	const safety, every, maxAge = 30 * time.Second, 10 * time.Second, 45 * time.Second
+	clk := testutil.FakeClock()
+	w := newWorld(t, scale.Large, clk.Now)
+	syncs := 0
+	s := newScraping(syncsBody(syncs), maxAge)
+	s.col.OnResult = w.sig
+	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge })
+	runLoop(t, e, safety)
+	awaitKind(t, ev, EvPublished)
+	awaitKind(t, ev, EvArmed)
+	s.start(t, every, e.Installs)
+	awaitKind(t, ev, EvTriggered)
+	awaitKind(t, ev, EvArmed)
+	s.cc.Step(time.Second)
+	clk.Step(time.Second)
+	prev := awaitKind(t, ev, EvPublished).Published.Model
+	awaitKind(t, ev, EvArmed)
+	var scrapes, runs, changed, triggers int
+	for range 600 {
+		if next := s.cc.Now().Add(time.Second); next.Sub(testutil.Now)%every == 0 {
+			syncs += 7
+			b := syncsBody(syncs)
+			s.sc.body.Store(&b)
+		}
+		s.cc.Step(time.Second)
+		if s.cc.Now().Sub(testutil.Now)%every == 0 {
+			s.wait(t, s.cc.Now())
+			scrapes++
+		}
+		clk.Step(time.Second)
+		for inFlight := false; ; {
+			x := testutil.Recv(t, ev, "loop event")
+			switch x.Kind {
+			case EvTriggered:
+				triggers++
+			case EvRunStarted:
+				inFlight = true
+			case EvPublished:
+				inFlight = false
+				runs++
+				if m := x.Published.Model; !sameFindings(prev, m) {
+					changed++
+				}
+				prev = x.Published.Model
+			}
+			if x.Kind == EvArmed && !inFlight {
+				break
+			}
+		}
+	}
+	t.Logf("sync-only scrapes, 10 min idle at Large: %d scrapes, %d triggers, %d recomputes and publications (%.2f/s), %d with findings that differ from the last (reported)",
+		scrapes, triggers, runs, float64(runs)/600, changed)
+	if scrapes != 60 {
+		t.Errorf("%d scrapes, want 60", scrapes)
+	}
+}
+
+// sameFindings reports whether a and b's installs have the same findings by ID, severity, detail and since.
+func sameFindings(a, b *Model) bool {
+	if len(a.Installs) != len(b.Installs) {
+		return false
+	}
+	for i := range a.Installs {
+		fa, fb := a.Installs[i].Health.Findings, b.Installs[i].Health.Findings
+		if !slices.EqualFunc(fa, fb, func(x, y health.Finding) bool {
+			return x.ID == y.ID && x.Severity == y.Severity && x.Detail == y.Detail && (x.Since == nil) == (y.Since == nil) && (x.Since == nil || x.Since.Equal(*y.Since))
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
 // tick is the confirm tick's work on an idle loop: the live source,
 // fingerprint, metrics identity and kinds, compared and swapped in.
 func tick(tb testing.TB, e *Engine) {
@@ -379,6 +465,10 @@ func TestBudgetWarmRecompute(t *testing.T) {
 	}
 }
 
+// withProgress is phase3Checks with 018's check, which declares Clock and so
+// always runs; its rows are reported, not gated (Task 71).
+var withProgress = append(slices.Clone(phase3Checks), "status progress")
+
 // Analyzer stage gates from sub-phase 3.2 (design §16.3).
 const (
 	analyzerWarmBudget     = 20 * time.Millisecond
@@ -432,14 +522,16 @@ func TestBudgetAnalyzerStage(t *testing.T) {
 		t.Run(tier.Name, func(t *testing.T) {
 			e := analyzerEngine(t, tier)
 			for _, mode := range []struct {
-				name         string
-				memo, scoped bool
-				budget       time.Duration
-				scrape       time.Duration
-			}{{"warm, §16.3 scope", false, true, analyzerWarmBudget, 0}, {"memoized, §16.3 scope", true, true, analyzerMemoizedBudget, 0},
-				{"memoized, §16.3 scope, new scrape each run", true, true, analyzerMemoizedBudget, prodMaxAge},
-				{"warm, whole stage", false, false, 0, 0}, {"memoized, whole stage", true, false, 0, 0}} {
-				run := analyzerStage(t, e, mode.memo, mode.scoped, mode.scrape)
+				name   string
+				memo   bool
+				scope  []string
+				budget time.Duration
+				scrape time.Duration
+			}{{"warm, §16.3 scope", false, phase3Checks, analyzerWarmBudget, 0}, {"memoized, §16.3 scope", true, phase3Checks, analyzerMemoizedBudget, 0},
+				{"memoized, §16.3 scope, new scrape each run", true, phase3Checks, analyzerMemoizedBudget, prodMaxAge},
+				{"warm, §16.3 scope and 018", false, withProgress, 0, 0}, {"memoized, §16.3 scope and 018", true, withProgress, 0, 0},
+				{"warm, whole stage", false, nil, 0, 0}, {"memoized, whole stage", true, nil, 0, 0}} {
+				run := analyzerStage(t, e, mode.memo, mode.scope, mode.scrape)
 				d := make([]time.Duration, 31)
 				for i := range d {
 					t0 := time.Now()
@@ -456,6 +548,10 @@ func TestBudgetAnalyzerStage(t *testing.T) {
 					percentile(d, 95).Round(10*time.Microsecond), d[len(d)-1].Round(10*time.Microsecond), note)
 				if mode.budget > 0 && med > mode.budget {
 					benchgate.Timing(t, "%s: %s median %v, budget ≤ %v", tier.Name, mode.name, med, mode.budget)
+				}
+				if _, gated := analyzerAllocBudget[tier.Name+"/"+mode.name]; !gated && mode.scope != nil {
+					bytes, n := runAllocs(31, run)
+					t.Logf("%s: %s allocates median %d B in %d allocations per run (reported)", tier.Name, mode.name, bytes, n)
 				}
 				if a, ok := analyzerAllocBudget[tier.Name+"/"+mode.name]; ok {
 					measured[tier.Name+"/"+mode.name] = true
@@ -498,7 +594,7 @@ type heapPart struct {
 }
 
 // TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
-// and five runs, the median retained heap at Large ≤ 32 MiB above it, for the
+// and five runs, the median retained heap at Large ≤ 40 MiB (D-054) above it, for the
 // consistent world and the worst case. Each part is then dropped in turn; its
 // freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part.
 func TestBudgetHeap(t *testing.T) {
@@ -548,7 +644,7 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 	slices.SortFunc(runs, func(a, b heapRun) int { return cmp.Compare(a.Retained, b.Retained) })
 	med := runs[len(runs)/2]
 	over := int64(med.Retained) - heapBaseline
-	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 32 MiB); %+.1f MiB over the 3.1 baseline's %+.1f (budget ≤ +24 MiB)",
+	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 40 MiB); %+.1f MiB over the 3.1 baseline's %+.1f (budget ≤ +24 MiB)",
 		med.Retained, float64(med.Retained)/mib, float64(over)/mib, heapBaseline, float64(over)/mib-heap31[tier.Name], heap31[tier.Name])
 	for _, p := range med.Parts {
 		t.Logf("  %-28s %7.2f MiB", p.Name, float64(p.Freed)/mib)
@@ -564,8 +660,8 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 	if wm > watchesHeapBudget {
 		t.Errorf("3.2 watches' retained state %d B, budget ≤ %d B", wm, watchesHeapBudget)
 	}
-	if over > 32*mib {
-		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 32 MiB", float64(over)/mib)
+	if over > 40*mib {
+		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 40 MiB", float64(over)/mib)
 	}
 	if d := float64(over)/mib - heap31[tier.Name]; d > 24 {
 		t.Errorf("retained heap %+.1f MiB above the 3.1 baseline, budget ≤ +24 MiB", d)
@@ -637,6 +733,11 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("diagnosis: groups and rank", func() { m.Installs[0].Diagnosis, e.diags = nil, nil })
 	drop("process data", func() { m.Installs[0].Process = nil })
 	drop("check Stores and findings", func() { e.states = nil })
+	drop("controller log reader", func() {
+		if w != nil {
+			w.StopLogs()
+		}
+	})
 	drop("proxy stats and collector", func() { e.cfg.Collected, w = nil, nil })
 	drop("computed: checks", func() { m.Installs[0].Computed.Checks = nil })
 	drop("computed: delegation", func() { m.Installs[0].Computed.Delegation = computed.DelegationResult{} })

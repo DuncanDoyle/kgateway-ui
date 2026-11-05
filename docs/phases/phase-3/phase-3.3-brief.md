@@ -167,7 +167,7 @@ No gate changes without the user. A broken gate stops the work, and the numbers 
 | Stream CPU, annotation-only | ≤ 15 % | 6.5 / 8.0 % | 9.8 / 13.6 % |
 | Stream CPU, spec-edit, measurement world | ≤ 25 %; edit-driven recomputes ≤ 1/s (D-047) | 13.8 % (10 min); 0.93–0.95/s | 19.4 % (60 s) |
 | OS memory, median of five | ≤ 288 MiB (D-043) | 264.0 MiB (spec-edit, measurement world) | — |
-| Retained heap over 2.1, measurement world | ≤ 32 MiB, and ≤ +24 MiB above `3.1-baseline.txt` | +30.8 MiB ⚠ | +31.0 MiB ⚠ |
+| Retained heap over 2.1, measurement world | ≤ 32 MiB (40 MiB from D-054), and ≤ +24 MiB above `3.1-baseline.txt` | +30.8 MiB ⚠ | +31.0 MiB ⚠ |
 | 3.2 watches' retained state | ≤ 1,600,000 B (D-046) | 1,450,136 B | — |
 | Dense: retained / cold / per warm | 176 / 246 / 185 MiB | 160 / 207 / 166 MiB | 160 / 221 / 166 MiB |
 | `GET …/findings` (grouped view included), `…/diagnostics`, `…/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 clients | 0.59 / 0.86 / 0.30 ms; 20 clients 1.37 / 4.85 / 1.21 ms | 20 clients 82.7 / 96.6 ms ⚠ |
