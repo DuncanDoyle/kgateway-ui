@@ -280,8 +280,25 @@ func (c *Collector) fold(key podKey, t Target, r scraped, now time.Time) Pod {
 	cur.clusters, p.Clusters, cur.clustersCut = names(reset, prev.clusters, prev.clustersCut, ps.Clusters)
 	cur.rdsCut, cur.clustersCut = cur.rdsCut || ps.RDSTruncated, cur.clustersCut || ps.ClustersTruncated
 	p.RDSTruncated, p.ClustersTruncated = cur.rdsCut, cur.clustersCut
+	p.Names = allNames(cur.rds, cur.clusters)
 	c.pods[key] = cur
 	return p
+}
+
+// allNames lists the kept route config and cluster names, sorted.
+func allNames(rds, clusters map[string]int64) []string {
+	if len(rds)+len(clusters) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(rds)+len(clusters))
+	for n := range rds {
+		out = append(out, n)
+	}
+	for n := range clusters {
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // observe reports growth from old to cur as rejects seen, keeping since while

@@ -145,6 +145,8 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 		c.Reason = reasonLogsUnrecognised
 	case ctrllogs.StateNoParser:
 		c.Reason = reasonLogsNoParser
+	case ctrllogs.StateNotConnected:
+		c.Reason = reasonLogsNotConnected
 	default:
 		c.Reason = reasonLogsFailing
 	}
@@ -161,6 +163,7 @@ const (
 	reasonLogsFailing      = "Controller logs cannot be read"
 	reasonLogsUnrecognised = "Log format not recognised"
 	reasonLogsNoParser     = "No log format is known for this kgateway version"
+	reasonLogsNotConnected = "No controller log stream is connected"
 )
 
 // Clients are the Kubernetes clients the app uses.
@@ -338,13 +341,16 @@ func controllerLogsCollector(c Clients, o Options, eng *engine.Engine, collected
 		}
 		return out, true
 	}
-	stats := func() (proxystats.Stats, bool) {
+	// Until the first proxy stats value lands, streams wait, so the backfill meets its names.
+	stats := func() (proxystats.Stats, ctrllogs.StatsState) {
 		v, ok := collected.Snapshot().Get(proxystats.Key)
-		if !ok || v.State != collect.OK {
-			return nil, false
+		if !ok {
+			return nil, ctrllogs.StatsPending
 		}
-		s, ok := v.Data.(proxystats.Stats)
-		return s, ok
+		if s, isStats := v.Data.(proxystats.Stats); v.State == collect.OK && isStats {
+			return s, ctrllogs.StatsReady
+		}
+		return nil, ctrllogs.StatsUnavailable
 	}
 	var clk clock.WithTicker
 	if o.Clock != nil {

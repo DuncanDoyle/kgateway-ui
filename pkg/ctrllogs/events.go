@@ -48,7 +48,7 @@ type InstallLogs struct {
 // State is how an install's log reading goes.
 type State string
 
-// Reading states; Availability ranks on, failing, unrecognised, denied from best to worst.
+// Reading states; Availability ranks on, not connected, failing, unrecognised, denied from best to worst.
 const (
 	StateOn State = "on"
 	// StateNoParser: the install's rule set reads no logs, so nothing is read.
@@ -59,9 +59,13 @@ const (
 	StateUnrecognised State = "unrecognised"
 	// StateDenied: the UI may not read a controller Pod's log.
 	StateDenied State = "denied"
+	// StatePending: the first round has not connected a stream yet.
+	StatePending State = "pending"
+	// StateNotConnected: no stream has connected after the first round.
+	StateNotConnected State = "not-connected"
 )
 
-var stateRank = map[State]int{StateOn: 0, StateFailing: 1, StateUnrecognised: 2, StateDenied: 3}
+var stateRank = map[State]int{StateOn: 0, StateNotConnected: 1, StateFailing: 2, StateUnrecognised: 3, StateDenied: 4}
 
 // worse returns the worse of a and b.
 func worse(a, b State) State {
@@ -73,7 +77,8 @@ func worse(a, b State) State {
 
 // Availability is the controllerLogs capability's state from the collected
 // value: the worst state of the installs that read logs, no-parser when none
-// does, failing when the value is not current, and false before the first publication.
+// does, failing when the value is not current, and false before the first
+// publication or while every reading install is pending.
 func Availability(snap collect.Snapshot) (State, bool) {
 	v, ok := snap.Get(Key)
 	if !ok {
@@ -87,15 +92,22 @@ func Availability(snap collect.Snapshot) (State, bool) {
 		// No install yet: nothing is read, and nothing fails.
 		return StateOn, true
 	}
-	st := StateNoParser
+	st, pending := StateNoParser, false
 	for _, l := range logs {
-		if l.State == StateNoParser {
+		switch l.State {
+		case StateNoParser:
+			continue
+		case StatePending:
+			pending = true
 			continue
 		}
 		if st == StateNoParser {
 			st = StateOn
 		}
 		st = worse(st, l.State)
+	}
+	if st == StateNoParser && pending {
+		return "", false // nothing settled yet
 	}
 	return st, true
 }
@@ -119,10 +131,30 @@ var typeURLs = map[string]bool{
 type ring struct {
 	events []Event
 	seen   map[uint64]int
+	// stamped marks events the reader's clock timed that no re-read matched yet.
+	stamped map[uint64]bool
 }
 
-// add inserts e in time order and reports whether it changed the ring.
-func (r *ring) add(e Event) bool {
+// absorb reports whether a stamped event equal to e but for its time lies in
+// [lo, hi], and marks it matched, so each absorbs one re-read.
+func (r *ring) absorb(e Event, lo, hi time.Time) bool {
+	i, _ := slices.BinarySearchFunc(r.events, lo, func(a Event, t time.Time) int { return a.Time.Compare(t) })
+	for ; i < len(r.events) && !r.events[i].Time.After(hi); i++ {
+		x := r.events[i]
+		k := eventKey(x)
+		y := e
+		y.Time = x.Time
+		if r.stamped[k] && eventKey(y) == k {
+			r.stamped[k] = false
+			return true
+		}
+	}
+	return false
+}
+
+// add inserts e in time order and reports whether it changed the ring;
+// stamped means the reader's clock timed it.
+func (r *ring) add(e Event, stamped bool) bool {
 	k := eventKey(e)
 	if r.seen[k] > 0 {
 		return false
@@ -142,9 +174,12 @@ func (r *ring) add(e Event) bool {
 	}
 	r.events = slices.Insert(r.events, i, e)
 	if r.seen == nil {
-		r.seen = map[uint64]int{}
+		r.seen, r.stamped = map[uint64]int{}, map[uint64]bool{}
 	}
 	r.seen[k]++
+	if stamped {
+		r.stamped[k] = true
+	}
 	return true
 }
 
@@ -152,6 +187,7 @@ func (r *ring) forget(e Event) {
 	k := eventKey(e)
 	if r.seen[k]--; r.seen[k] <= 0 {
 		delete(r.seen, k)
+		delete(r.stamped, k)
 	}
 }
 

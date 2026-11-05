@@ -1493,6 +1493,11 @@ func TestControllerLogsCapability(t *testing.T) {
 	if want := (api.Capability{Name: "controllerLogs", State: api.CapFailing, Reason: reasonLogsUnrecognised}); !slices.Contains(got, want) {
 		t.Fatalf("unrecognised: %+v", got)
 	}
+	store.Publish(ctrllogs.Key, ctrllogs.Logs{"a": {State: ctrllogs.StateNotConnected}}, 2, 0)
+	got = CoreCapabilities(nil, Diagnostics{NoProxyStats: true, ControllerLogs: true}, store.Snapshot())
+	if want := (api.Capability{Name: "controllerLogs", State: api.CapFailing, Reason: reasonLogsNotConnected}); !slices.Contains(got, want) {
+		t.Fatalf("not connected: %+v", got)
+	}
 }
 
 // captureScraper serves a controller metrics capture with rejects on infra/edge.

@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
@@ -36,8 +37,8 @@ var (
 )
 
 // fakeParser reads "xds error" lines of space-separated key=value fields:
-// t (Unix seconds), gw (ns/name), type, names (comma-separated), class, obj
-// (Kind/ns/name). A line with "bad" fails; one with "skip" is not its own.
+// t (seconds after testutil.Now), tz (a zone name for t), gw (ns/name), type,
+// names (comma-separated), class, obj (Kind/ns/name). A line with "bad" fails; one with "skip" is not its own.
 type fakeParser struct {
 	mu    sync.Mutex
 	calls int
@@ -63,6 +64,8 @@ func (p *fakeParser) Parse(line []byte) (computed.LogFields, bool, error) {
 		case "t":
 			n, _ := strconv.ParseInt(v, 10, 64)
 			f.Time = testutil.Now.Add(time.Duration(n) * time.Second)
+		case "tz":
+			f.Time = f.Time.In(time.FixedZone(v, 3600))
 		case "gw":
 			ns, name, _ := strings.Cut(v, "/")
 			f.Gateway = objects.Ref{Namespace: ns, Name: name}
@@ -192,7 +195,8 @@ type harness struct {
 	parser *fakeParser
 	waits  chan wait
 	ctx    context.Context
-	stats  func() (proxystats.Stats, bool)
+	stats  func() (proxystats.Stats, StatsState)
+	clk    *clocktesting.FakeClock
 }
 
 const installID = "kgateway-system.kgateway"
@@ -205,15 +209,16 @@ func newHarness(t *testing.T, src *fakeSource) *harness {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &harness{src: src, parser: &fakeParser{}, waits: make(chan wait, 8), ctx: ctx}
-	h.stats = func() (proxystats.Stats, bool) { return nil, false }
-	h.c = New(Config{Source: src, Every: 10 * time.Second, Clock: testutil.FakeClock(),
+	h.stats = func() (proxystats.Stats, StatsState) { return nil, StatsUnavailable }
+	h.clk = testutil.FakeClock()
+	h.c = New(Config{Source: src, Every: 10 * time.Second, Clock: h.clk,
 		Installs: func() ([]Install, bool) {
 			return []Install{{Resolved: resolved(), Parser: h.parser, Gateways: []objects.Ref{edge},
 				Known: func(r objects.Ref) bool {
 					return r == objects.Ref{Kind: "Deployment", Namespace: "infra", Name: "edge"}
 				}}}, true
 		},
-		Stats: func() (proxystats.Stats, bool) { return h.stats() }})
+		Stats: func() (proxystats.Stats, StatsState) { return h.stats() }})
 	h.c.after = func(d time.Duration) <-chan time.Time {
 		ch := make(chan time.Time, 1)
 		h.waits <- wait{d: d, ch: ch}
@@ -460,10 +465,10 @@ func TestEventKeepsOnlyClosedSetFields(t *testing.T) {
 	h := newHarness(t, newSource(pod("a", 0)))
 	h.c.Reconcile(h.ctx)
 	stats := proxystats.Stats{installID: {
-		{Gateway: edge, Observed: true, Pods: []proxystats.Pod{{UID: "p1", RDS: []string{"listener~80"}}, {UID: "p2", Err: "timed out", Clusters: []string{"kube_x"}}}},
-		{Gateway: other, Observed: true, Pods: []proxystats.Pod{{UID: "p3", Clusters: []string{"kube_other"}}}},
+		{Gateway: edge, Observed: true, Pods: []proxystats.Pod{{UID: "p1", Names: []string{"listener~80"}}, {UID: "p2", Err: "timed out", Names: []string{"kube_x"}}}},
+		{Gateway: other, Observed: true, Pods: []proxystats.Pod{{UID: "p3", Names: []string{"kube_other"}}}},
 	}}
-	h.stats = func() (proxystats.Stats, bool) { return stats, true }
+	h.stats = func() (proxystats.Stats, StatsState) { return stats, StatsReady }
 	body := "xds error gw=infra/edge t=1 type=type.googleapis.com/envoy.config.route.v3.RouteConfiguration names=" + sentinel + ",listener~80,kube_x,kube_other class=" + sentinel + " obj=Secret/infra/" + sentinel + "\n" +
 		"xds error gw=infra/" + sentinel + " t=2 class=panic\n" +
 		"xds error t=3 type=" + sentinel + " class=panic obj=Deployment/infra/edge\n"
@@ -483,7 +488,7 @@ func TestEventKeepsOnlyClosedSetFields(t *testing.T) {
 	if s := fmt.Sprintf("%+v", ev); strings.Contains(s, sentinel) {
 		t.Fatalf("the sentinel survived: %s", s)
 	}
-	h.stats = func() (proxystats.Stats, bool) { return nil, false }
+	h.stats = func() (proxystats.Stats, StatsState) { return nil, StatsUnavailable }
 	w.ch <- time.Time{}
 	h.serve(t, "xds error gw=infra/edge t=9 names=listener~80\n")
 	if ev := h.logs(t).Events; ev[len(ev)-1].Names != nil {
@@ -507,6 +512,9 @@ func TestAvailability(t *testing.T) {
 		{Logs{"a": {State: StateNoParser}, "b": {State: StateOn}}, StateOn},
 		{Logs{"a": {State: StateFailing}, "b": {State: StateUnrecognised}}, StateUnrecognised},
 		{Logs{"a": {State: StateDenied}, "b": {State: StateUnrecognised}}, StateDenied},
+		{Logs{"a": {State: StatePending}, "b": {State: StateOn}}, StateOn},
+		{Logs{"a": {State: StateNotConnected}, "b": {State: StateOn}}, StateNotConnected},
+		{Logs{"a": {State: StatePending}, "b": {State: StateNoParser}}, ""},
 	} {
 		store.Publish(Key, tc.logs, fingerprint(tc.logs), time.Second)
 		if st, _ := Availability(store.Snapshot()); st != tc.want {
@@ -562,7 +570,7 @@ func TestRunPublishesAndStopsStreams(t *testing.T) {
 	go func() {
 		done <- c.Run(ctx, func(k string, v any, _ uint64, ttl time.Duration) { pubs <- pub{k, v.(Logs), ttl} }, nil)
 	}()
-	if p := testutil.Recv(t, pubs, "the first publication"); p.key != ValueKey || p.ttl != 3*time.Hour || p.logs[installID].State != StateOn {
+	if p := testutil.Recv(t, pubs, "the first publication"); p.key != ValueKey || p.ttl != 3*time.Hour || p.logs[installID].State != StatePending {
 		t.Fatalf("published %+v", p)
 	}
 	call := testutil.Recv(t, src.follows, "a follow")
@@ -626,7 +634,7 @@ func TestKubeSource(t *testing.T) {
 	if o := opts[0]; !o.Follow || o.Container != "kgateway" || o.SinceSeconds == nil || *o.SinceSeconds != 900 || o.Previous {
 		t.Errorf("follow options = %+v", o)
 	}
-	if o := opts[1]; !o.Previous || o.Follow || o.LimitBytes == nil || *o.LimitBytes != PreviousLimit {
+	if o := opts[1]; !o.Previous || o.Follow || o.LimitBytes == nil || *o.LimitBytes != PreviousLimit || o.TailLines == nil || *o.TailLines != PreviousTailLines {
 		t.Errorf("previous options = %+v", o)
 	}
 	kube.PrependReactor("get", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
@@ -644,5 +652,153 @@ func TestKubeSource(t *testing.T) {
 	}
 	if err := classify(apierrors.NewInternalError(errors.New(sentinel))); errors.Is(err, ErrDenied) || errors.Is(err, ErrNotReady) || strings.Contains(err.Error(), sentinel) {
 		t.Errorf("internal: %v", err)
+	}
+}
+
+// The previous read asks for the log's tail, so the last lines, where a crash
+// ends, come back rather than the first 256 KiB (R100). The fake API applies
+// TailLines first, then LimitBytes, which cuts the end.
+func TestPreviousReadReturnsTheTail(t *testing.T) {
+	var b strings.Builder
+	for i := 1; i <= 5000; i++ {
+		fmt.Fprintf(&b, "xds error gw=infra/edge t=%d %s\n", i, strings.Repeat("p", 100))
+	}
+	all := strings.SplitAfter(b.String(), "\n")
+	all = all[:len(all)-1]
+	kube := kubefake.NewClientset()
+	kube.PrependReactor("get", "pods", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		o := a.(k8stesting.GenericAction).GetValue().(*corev1.PodLogOptions)
+		lines := all
+		if o.TailLines != nil && int(*o.TailLines) < len(lines) {
+			lines = lines[len(lines)-int(*o.TailLines):]
+		}
+		body := strings.Join(lines, "")
+		if o.LimitBytes != nil && int64(len(body)) > *o.LimitBytes {
+			body = body[:*o.LimitBytes]
+		}
+		return true, &runtime.Unknown{Raw: []byte(body)}, nil
+	})
+	h := newHarness(t, newSource())
+	h.c.Reconcile(h.ctx)
+	rc, err := Kube{Client: kube}.Previous(context.Background(), pod("a", 1), PreviousLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = h.c.read(streamKey{install: installID, target: "a"}, h.parser, io.LimitReader(rc, PreviousLimit), time.Time{})
+	ev := h.logs(t).Events
+	if len(ev) == 0 || !ev[len(ev)-1].Time.Equal(testutil.Now.Add(5000*time.Second)) {
+		t.Fatalf("the last line is missing: %d events, %v..%v", len(ev), ev[0].Time, ev[len(ev)-1].Time)
+	}
+	if first := testutil.Now.Add((5000 - PreviousTailLines) * time.Second); ev[0].Time.Before(first) {
+		t.Fatalf("the first event %v is from the head of the log", ev[0].Time)
+	}
+}
+
+// A name equal to any name in the Gateway's latest scrape is kept, even when
+// the scrape that shows its counter growing has not landed yet (R100).
+func TestNameKeptBeforeTheGrowthScrape(t *testing.T) {
+	h := newHarness(t, newSource(pod("a", 0)))
+	stats := proxystats.Stats{installID: {{Gateway: edge, Observed: true, Pods: []proxystats.Pod{{UID: "p1", Names: []string{"kube_shop_cart_8080"}}}}}}
+	h.stats = func() (proxystats.Stats, StatsState) { return stats, StatsReady }
+	h.c.Reconcile(h.ctx)
+	h.serve(t, "xds error gw=infra/edge t=1 names=kube_shop_cart_8080\n")
+	if ev := h.logs(t).Events; len(ev) != 1 || !slices.Equal(ev[0].Names, []string{"kube_shop_cart_8080"}) {
+		t.Fatalf("events = %+v", ev)
+	}
+}
+
+// Streams wait for the first proxy stats value, so the 15 min backfill is
+// matched against the first scrape's names.
+func TestBackfillWaitsForTheFirstScrape(t *testing.T) {
+	h := newHarness(t, newSource(pod("a", 0)))
+	h.stats = func() (proxystats.Stats, StatsState) { return nil, StatsPending }
+	h.c.Reconcile(h.ctx)
+	if n := h.c.Streams(); n != 0 {
+		t.Fatalf("streams before the first scrape = %d", n)
+	}
+	stats := proxystats.Stats{installID: {{Gateway: edge, Observed: true, Pods: []proxystats.Pod{{UID: "p1", Names: []string{"listener~80"}}}}}}
+	h.stats = func() (proxystats.Stats, StatsState) { return stats, StatsReady }
+	h.c.Reconcile(h.ctx)
+	call, _ := h.serve(t, "xds error gw=infra/edge t=-600 names=listener~80\n")
+	if call.since != FollowSince {
+		t.Fatalf("since = %v", call.since)
+	}
+	if ev := h.logs(t).Events; len(ev) != 1 || !slices.Equal(ev[0].Names, []string{"listener~80"}) {
+		t.Fatalf("backfill events = %+v", ev)
+	}
+}
+
+// Times are stored in UTC. A line without a time gets the reader's clock, and
+// the same line re-read in the 1 s reconnect overlap is still one event.
+func TestEventTimes(t *testing.T) {
+	h := newHarness(t, newSource(pod("a", 0)))
+	h.c.Reconcile(h.ctx)
+	line := "xds error gw=infra/edge class=panic\n"
+	_, w := h.serve(t, "xds error gw=infra/edge t=1 tz=EVIL\n"+line)
+	if ev := h.logs(t).Events; len(ev) != 2 || ev[0].Time.Location() != time.UTC || ev[1].Time.Location() != time.UTC {
+		t.Fatalf("events = %+v", ev)
+	}
+	h.clk.Step(time.Second)
+	w.ch <- time.Time{}
+	_, w = h.serve(t, line)
+	if n := len(h.logs(t).Events); n != 2 {
+		t.Fatalf("a line without a time re-read in the overlap gave %d events", n)
+	}
+	// Outside the overlap, the same line again is a new event.
+	h.clk.Step(5 * time.Second)
+	w.ch <- time.Time{}
+	h.serve(t, line)
+	if n := len(h.logs(t).Events); n != 3 {
+		t.Fatalf("a repeat after the overlap: %d events, want 3", n)
+	}
+}
+
+// A marked line over the scanner's buffer counts as a parse failure, also
+// when its marker spans two buffer fills.
+func TestOversizedMarkedLineCountsAsFailure(t *testing.T) {
+	h := newHarness(t, newSource(pod("a", 0)))
+	h.c.Reconcile(h.ctx)
+	long := strings.Repeat("y", 100<<10)
+	var b strings.Builder
+	for i := range MaxFailures {
+		if i%2 == 0 {
+			b.WriteString("xds error " + long + "\n")
+		} else {
+			b.WriteString(long[:maxLine-4] + "xds error" + long + "\n")
+		}
+	}
+	h.serve(t, b.String())
+	if st := h.logs(t).State; st != StateUnrecognised {
+		t.Fatalf("state = %q, want unrecognised", st)
+	}
+	if n := h.parser.Calls(); n != 0 {
+		t.Fatalf("parsed %d oversized lines", n)
+	}
+}
+
+// An install reads on only once a stream connected; with none connected after
+// its first round it reads not connected (D-006).
+func TestOnOnlyAfterAStreamConnects(t *testing.T) {
+	src := newSource()
+	h := newHarness(t, src)
+	h.c.Reconcile(h.ctx)
+	if st := h.logs(t).State; st != StatePending {
+		t.Fatalf("first round without a Pod: %q", st)
+	}
+	h.c.Reconcile(h.ctx)
+	if st := h.logs(t).State; st != StateNotConnected {
+		t.Fatalf("second round without a Pod: %q", st)
+	}
+	src.set(pod("a", 0))
+	h.c.Reconcile(h.ctx)
+	call := testutil.Recv(t, src.follows, "a follow")
+	if st := h.logs(t).State; st != StateNotConnected {
+		t.Fatalf("before the stream connects: %q", st)
+	}
+	ls := live(call.ctx, "")
+	call.reply <- followReply{rc: ls}
+	testutil.Recv(t, ls.blocked, "the stream to connect")
+	if st := h.logs(t).State; st != StateOn {
+		t.Fatalf("connected: %q", st)
 	}
 }

@@ -506,6 +506,25 @@ func TestRejectsObservedSinceLastScrape(t *testing.T) {
 	}
 }
 
+// Names lists every RDS and cluster name a scrape reported, grown or not, so
+// a log line read before the scrape that shows its growth still matches (R100).
+func TestPodNamesListEveryReportedName(t *testing.T) {
+	gw := gwRef("infra", "edge")
+	first := counters(0, 0, 10, map[string]int64{"listener~8080": 2})
+	first.Clusters = map[string]int64{"kube_shop_cart_8080": 1}
+	src := &scriptSource{targets: map[objects.Ref][]proxystats.Target{gw: {{ID: "u1", Name: "edge-1", Gateway: gw}}},
+		script: map[string][]proxystats.PodStats{"u1": {first, first}}}
+	in := proxystats.Install{Resolved: installOf(t, "kgw"), Gateways: []objects.Ref{gw}}
+	c := proxystats.New(proxystats.Config{Source: src, Every: 10 * time.Second, Clock: testutil.FakeClock(), Installs: static(snapshot(nil), in)})
+	for i := range 2 {
+		st, _, _ := c.Round(context.Background())
+		p := podsOf(t, st, in.Resolved.ID(), gw).Pods[0]
+		if p.RDS != nil || p.Clusters != nil || !slices.Equal(p.Names, []string{"kube_shop_cart_8080", "listener~8080"}) {
+			t.Fatalf("scrape %d: %+v", i, p)
+		}
+	}
+}
+
 // Carry-forward b: a proxy that keeps rejecting grows its counters on every
 // scrape, but what is published, and so its fingerprint, holds still.
 func TestKeptRejectingIsOneFingerprint(t *testing.T) {

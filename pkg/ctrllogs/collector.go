@@ -28,11 +28,16 @@ const (
 	FollowSince = 900 * time.Second
 	// PreviousLimit caps the one read of a restarted container's previous log.
 	PreviousLimit = 256 << 10
+	// PreviousTailLines asks for the previous log's tail, where a crash ends. The API cuts
+	// the tail's end at PreviousLimit, so 500 lines fit it at up to 512 B a line.
+	PreviousTailLines = 500
 	// MaxFailures marked lines in a row that fail to parse make the format unrecognised.
 	MaxFailures = 10
 	// backoffMin and backoffMax bound the wait before a stream reconnects.
 	backoffMin = time.Second
 	backoffMax = 60 * time.Second
+	// overlapWindow is how far before a stream's end a reconnect re-reads, rounded up to the second.
+	overlapWindow = 2 * time.Second
 	// maxLine is the line scanner's buffer; a longer line is dropped unparsed.
 	maxLine = 64 << 10
 	// firstRoundRetry is how soon a round without a model is retried.
@@ -87,9 +92,19 @@ type Config struct {
 	Clock clock.WithTicker
 	// Installs returns the installs to read; false means no model yet.
 	Installs func() ([]Install, bool)
-	// Stats returns the latest proxy stats; false when they are off, failing or absent.
-	Stats func() (proxystats.Stats, bool)
+	// Stats returns the latest proxy stats and their state; nil means unavailable.
+	Stats func() (proxystats.Stats, StatsState)
 }
+
+// StatsState is how the latest proxy stats stand for the name check.
+type StatsState int
+
+// Proxy stats states. While pending, no stream starts, so the backfill meets the first scrape.
+const (
+	StatsUnavailable StatsState = iota
+	StatsReady
+	StatsPending
+)
 
 // Collector follows each controller replica's log and keeps derived events per install.
 type Collector struct {
@@ -124,6 +139,8 @@ type installState struct {
 	// failures counts marked lines in a row that failed to parse.
 	failures     int
 	unrecognised bool
+	// rounds counts the reconcile rounds that could start streams.
+	rounds int
 	// streams holds each running stream's access state by target ID.
 	streams map[string]State
 }
@@ -156,7 +173,7 @@ func (c *Collector) Run(ctx context.Context, publish func(key string, v any, fp 
 		if c.Reconcile(ctx) {
 			publishNow()
 		} else {
-			// No model yet: try again soon rather than a whole interval later.
+			// No model or proxy stats yet: try again soon rather than a whole interval later.
 			retry = c.cfg.Clock.After(min(c.cfg.Every, firstRoundRetry))
 		}
 	wait:
@@ -190,7 +207,7 @@ func (c *Collector) notify() {
 
 // Reconcile starts a stream for each new replica and a previous read for
 // each new restart, and stops, and waits for, the streams of replicas that
-// went. It returns false when there is no model yet.
+// went. It returns false when there is no model or no proxy stats value yet.
 func (c *Collector) Reconcile(ctx context.Context) bool {
 	ins, ok := c.cfg.Installs()
 	if !ok {
@@ -201,6 +218,11 @@ func (c *Collector) Reconcile(ctx context.Context) bool {
 	want := map[streamKey]Target{}
 	parsers := map[string]computed.LogParser{}
 	present := map[string]bool{}
+	waiting := false
+	if c.cfg.Stats != nil {
+		_, ss := c.cfg.Stats()
+		waiting = ss == StatsPending
+	}
 	c.mu.Lock()
 	for _, in := range ins {
 		id := in.Resolved.ID()
@@ -211,15 +233,19 @@ func (c *Collector) Reconcile(ctx context.Context) bool {
 			c.installs[id] = st
 		}
 		st.in = in
-		if in.Parser == nil {
+		if in.Parser == nil || waiting {
 			continue
 		}
+		st.rounds++
 		parsers[id] = in.Parser
 		for _, t := range c.cfg.Source.Targets(in.Resolved) {
 			want[streamKey{install: id, target: t.ID}] = t
 		}
 	}
 	c.mu.Unlock()
+	if waiting {
+		return false
+	}
 	for k, s := range c.streams {
 		if _, ok := want[k]; ok {
 			continue
@@ -246,6 +272,11 @@ func (c *Collector) Reconcile(ctx context.Context) bool {
 			sctx, cancel := context.WithCancel(ctx)
 			s = &stream{ctx: sctx, cancel: cancel}
 			c.streams[k] = s
+			c.mu.Lock()
+			if st := c.installs[k.install]; st != nil {
+				st.streams[k.target] = StatePending
+			}
+			c.mu.Unlock()
 			s.wg.Add(1)
 			go c.follow(s, k, t, parsers[k.install])
 		}
@@ -295,14 +326,26 @@ func (st *installState) state() State {
 	if st.in.Parser == nil {
 		return StateNoParser
 	}
-	s := StateOn
+	s, connected := StateOn, false
 	for _, x := range st.streams {
-		s = worse(s, x)
+		switch x {
+		case StateOn:
+			connected = true
+		case StatePending:
+		default:
+			s = worse(s, x)
+		}
 	}
 	if st.unrecognised {
 		s = worse(s, StateUnrecognised)
 	}
-	return s
+	switch {
+	case s != StateOn || connected:
+		return s
+	case st.rounds <= 1:
+		return StatePending
+	}
+	return StateNotConnected
 }
 
 // follow streams t's log until s ends, reconnecting with back-off from 1 s
@@ -310,6 +353,8 @@ func (st *installState) state() State {
 func (c *Collector) follow(s *stream, k streamKey, t Target, p computed.LogParser) {
 	defer s.wg.Done()
 	from := c.cfg.Clock.Now().Add(-FollowSince)
+	// ended is when the previous connection ended; zero before the first.
+	var ended time.Time
 	wait := backoffMin
 	for {
 		since := min(c.cfg.Clock.Since(from)+time.Second, FollowSince)
@@ -317,9 +362,10 @@ func (c *Collector) follow(s *stream, k streamKey, t Target, p computed.LogParse
 		if err == nil {
 			c.setStream(k, StateOn)
 			// A read error ends this stream like EOF; the reconnect covers the gap.
-			n, _ := c.read(k, p, rc)
+			n, _ := c.read(k, p, rc, ended)
 			_ = rc.Close()
 			from = c.cfg.Clock.Now()
+			ended = from
 			if n > 0 {
 				wait = backoffMin
 			}
@@ -350,13 +396,14 @@ func (c *Collector) previous(s *stream, k streamKey, t Target, p computed.LogPar
 		return // the follow stream reports access
 	}
 	defer func() { _ = rc.Close() }()
-	_, _ = c.read(k, p, io.LimitReader(rc, PreviousLimit))
+	_, _ = c.read(k, p, io.LimitReader(rc, PreviousLimit), time.Time{})
 }
 
-// read hands each line of r with one of p's markers to handle. A line over
-// maxLine, and a last line without a newline, as a capped read ends, are
-// dropped unparsed. It returns the bytes read.
-func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader) (int64, error) {
+// read hands each line of r with one of p's markers to handle. A marked line
+// over maxLine counts as a parse failure, unread past the scanner's buffer; a
+// last line without a newline, as a capped read ends, is dropped. ended is
+// when the stream's previous connection ended, zero for none. It returns the bytes read.
+func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader, ended time.Time) (int64, error) {
 	markers := p.Markers()
 	br := bufio.NewReaderSize(r, maxLine)
 	var n int64
@@ -364,12 +411,23 @@ func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader) (int64,
 		line, err := br.ReadSlice('\n')
 		n += int64(len(line))
 		if errors.Is(err, bufio.ErrBufferFull) {
+			// tail keeps a chunk's last bytes, so a marker across two fills is found.
+			span := maxMarker(markers)
+			marked := marker(line, markers) != ""
+			tail := append([]byte(nil), last(line, span)...)
 			for errors.Is(err, bufio.ErrBufferFull) {
 				line, err = br.ReadSlice('\n')
 				n += int64(len(line))
+				if !marked {
+					marked = marker(line, markers) != "" || marker(append(tail, head(line, span)...), markers) != ""
+					tail = append(tail[:0], last(line, span)...)
+				}
 			}
 			if err != nil {
 				return n, eof(err)
+			}
+			if marked {
+				c.failure(k)
 			}
 			continue
 		}
@@ -377,10 +435,22 @@ func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader) (int64,
 			return n, eof(err)
 		}
 		if m := marker(line, markers); m != "" {
-			c.handle(k, p, m, bytes.TrimRight(line, "\r\n"))
+			c.handle(k, p, m, bytes.TrimRight(line, "\r\n"), ended)
 		}
 	}
 }
+
+// maxMarker is one less than the longest marker's length: the bytes a marker can span across two chunks.
+func maxMarker(markers []string) int {
+	n := 0
+	for _, m := range markers {
+		n = max(n, len(m)-1)
+	}
+	return n
+}
+
+func head(b []byte, n int) []byte { return b[:min(n, len(b))] }
+func last(b []byte, n int) []byte { return b[len(b)-min(n, len(b)):] }
 
 func eof(err error) error {
 	if errors.Is(err, io.EOF) {
@@ -400,12 +470,14 @@ func marker(line []byte, markers []string) string {
 }
 
 // handle parses one marked line and keeps its event.
-func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []byte) {
+func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []byte, ended time.Time) {
 	f, ok, err := p.Parse(line)
 	var stats proxystats.Stats
 	statsOK := false
 	if err == nil && ok && len(f.Names) > 0 && c.cfg.Stats != nil {
-		stats, statsOK = c.cfg.Stats()
+		var ss StatsState
+		stats, ss = c.cfg.Stats()
+		statsOK = ss == StatsReady
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -414,10 +486,7 @@ func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []b
 	case st == nil:
 		return
 	case err != nil:
-		if st.failures++; st.failures >= MaxFailures && !st.unrecognised {
-			st.unrecognised = true
-			c.notify()
-		}
+		c.failLocked(st)
 		return
 	case !ok:
 		return
@@ -426,7 +495,32 @@ func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []b
 		c.notify()
 	}
 	st.failures, st.unrecognised = 0, false
-	if e, keep := c.event(k.install, st, f, m, stats, statsOK); keep && st.ring.add(e) {
+	e, keep := c.event(k.install, st, f, m, stats, statsOK)
+	if !keep {
+		return
+	}
+	stamped := f.Time.IsZero()
+	// A line without a time re-read in the reconnect overlap matches the one stamped before the end.
+	if stamped && !ended.IsZero() && st.ring.absorb(e, ended.Add(-overlapWindow), ended) {
+		return
+	}
+	if st.ring.add(e, stamped) {
+		c.notify()
+	}
+}
+
+// failure counts an unreadable marked line.
+func (c *Collector) failure(k streamKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if st := c.installs[k.install]; st != nil {
+		c.failLocked(st)
+	}
+}
+
+func (c *Collector) failLocked(st *installState) {
+	if st.failures++; st.failures >= MaxFailures && !st.unrecognised {
+		st.unrecognised = true
 		c.notify()
 	}
 }
@@ -435,9 +529,9 @@ func (c *Collector) handle(k streamKey, p computed.LogParser, m string, line []b
 // install, a known type URL, class and object, and names in that Gateway's
 // proxy stats. A line naming another Gateway is dropped.
 func (c *Collector) event(id string, st *installState, f computed.LogFields, m string, stats proxystats.Stats, statsOK bool) (Event, bool) {
-	e := Event{Time: f.Time, Marker: m, Class: f.Class}
-	if e.Time.IsZero() {
-		e.Time = c.cfg.Clock.Now()
+	e := Event{Time: f.Time.UTC(), Marker: m, Class: f.Class}
+	if f.Time.IsZero() {
+		e.Time = c.cfg.Clock.Now().UTC()
 	}
 	if e.Class != "" && !computed.KnownLogClass(e.Class) {
 		e.Class = computed.LogClassOther
@@ -475,7 +569,7 @@ func knownNames(gws []proxystats.Gateway, gw objects.Ref, cand []string) []strin
 				continue
 			}
 			for _, n := range cand {
-				if slices.Contains(p.RDS, n) || slices.Contains(p.Clusters, n) {
+				if slices.Contains(p.Names, n) {
 					out = append(out, n)
 				}
 			}

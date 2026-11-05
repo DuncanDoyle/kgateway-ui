@@ -46,6 +46,9 @@ type Pod struct {
 	RDS, Clusters []string
 	// RDSTruncated and ClustersTruncated are set when names were dropped from that list.
 	RDSTruncated, ClustersTruncated bool
+	// Names are every Envoy route config and cluster name this scrape reported, grown
+	// or not, sorted; the controller log reader matches log names against them.
+	Names []string
 }
 
 // Rejects are a type's rejects observed since the previous scrape; never
@@ -145,4 +148,5 @@ func (w *writer) pod(p Pod) {
 	w.strs(p.Clusters)
 	w.bool(p.RDSTruncated)
 	w.bool(p.ClustersTruncated)
+	w.strs(p.Names)
 }
