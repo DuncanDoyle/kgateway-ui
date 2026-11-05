@@ -23,6 +23,12 @@
         "affectedTotal": 2,
         "class": 3,
         "code": "KGWUI-014",
+        "grant": {
+          "fromNamespace": "shop",
+          "toGroup": "",
+          "toKind": "Service",
+          "toNamespace": "store"
+        },
         "id": "f1-kg6jygxgidz4w4uyuoeqvqsufl",
         "members": 2,
         "severity": "error",

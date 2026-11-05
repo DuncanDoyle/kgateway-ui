@@ -266,6 +266,15 @@ export interface GroupRow {
   since?: string;
   nextSteps?: NextStep[];
   restricted?: boolean;
+  /** A "Not permitted" group's shape, as it has no cause object; absent when the caller may not view it. */
+  grant?: GrantShape;
+}
+/** The (from namespace, to namespace, to group and kind) one ReferenceGrant allows; toGroup is "" for core. */
+export interface GrantShape {
+  fromNamespace: string;
+  toNamespace: string;
+  toGroup: string;
+  toKind: string;
 }
 /** The install's state over every finding; reason names the required check that made it unknown. */
 export interface Verdict {

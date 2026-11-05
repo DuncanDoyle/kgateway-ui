@@ -216,3 +216,36 @@ func TestFindingsGroupsRestricted(t *testing.T) {
 		t.Error("q did not match a restricted group by identity")
 	}
 }
+
+// R108, design §5.2: a "Not permitted" group has no cause object, so its row
+// carries the grant shape; a caller who may not view the target gets none.
+func TestNotPermittedGroupShape(t *testing.T) {
+	want := &GrantShape{FromNamespace: "shop", ToNamespace: "store", ToGroup: "", ToKind: "Service"}
+	hideStore := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Namespace != "store" })
+	for _, tc := range []struct {
+		name  string
+		authz Authorizer
+		want  *GrantShape
+	}{{"visible", nil, want}, {"target hidden", hideStore, nil}} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv := groupsWorld(t, tc.authz)
+			for _, path := range []string{findingsBase + "?view=groups", "/api/v1/installs/kgw.kgateway/diagnostics"} {
+				var rows []GroupRow
+				if path == findingsBase+"?view=groups" {
+					rows = get[Page[GroupRow]](t, srv, path, http.StatusOK).Items
+				} else {
+					rows = get[Diagnostics](t, srv, path, http.StatusOK).Groups
+				}
+				r := rowOf(t, rows, health.CodeRefNotPermitted, 2)
+				if (r.Grant == nil) != (tc.want == nil) || r.Grant != nil && *r.Grant != *tc.want {
+					t.Fatalf("%s: grant %+v, want %+v", path, r.Grant, tc.want)
+				}
+				for _, o := range rows {
+					if o.Code != health.CodeRefNotPermitted && o.Grant != nil {
+						t.Fatalf("%s: %s row has a grant shape", path, o.Code)
+					}
+				}
+			}
+		})
+	}
+}

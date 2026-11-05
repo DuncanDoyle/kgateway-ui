@@ -183,31 +183,34 @@ function XDSRejects({ e, installId, now }: { e: XDSRejectsEvidence; installId: s
       ) : null}
       <LogState state={e.controllerLogs} />
       {e.logEvents?.length ? (
-        <DiagTable>
-          <table aria-label={diagnosticsCopy.logEvents}>
-            <thead>
-              <tr>
-                <th scope="col">{diagnosticsCopy.type}</th>
-                <th scope="col">{diagnosticsCopy.classes}</th>
-                <th scope="col">{diagnosticsCopy.envoyResources}</th>
-                <th scope="col">{diagnosticsCopy.firstSeen}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Names and classes only: a log line's text is never sent or shown (design §8.9). */}
-              {e.logEvents.map((l) => (
-                <tr key={l.typeUrl}>
-                  <td className="mono" title={l.typeUrl}>
-                    {shortType(l.typeUrl)}
-                  </td>
-                  <td className="mono">{l.classes.join(", ")}</td>
-                  <td className="mono">{l.envoyResources?.join(", ")}</td>
-                  <td className="muted">{ago(l.since, now)}</td>
+        <div>
+          <h3>{diagnosticsCopy.logEvents}</h3>
+          <DiagTable>
+            <table aria-label={diagnosticsCopy.logEvents}>
+              <thead>
+                <tr>
+                  <th scope="col">{diagnosticsCopy.type}</th>
+                  <th scope="col">{diagnosticsCopy.classes}</th>
+                  <th scope="col">{diagnosticsCopy.envoyResources}</th>
+                  <th scope="col">{diagnosticsCopy.firstSeen}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </DiagTable>
+              </thead>
+              <tbody>
+                {/* Names and classes only: a log line's text is never sent or shown (design §8.9). */}
+                {e.logEvents.map((l) => (
+                  <tr key={l.typeUrl}>
+                    <td className="mono" title={l.typeUrl}>
+                      {shortType(l.typeUrl)}
+                    </td>
+                    <td className="mono">{l.classes.join(", ")}</td>
+                    <td className="mono">{l.envoyResources?.join(", ")}</td>
+                    <td className="muted">{ago(l.since, now)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DiagTable>
+        </div>
       ) : null}
       {e.recentlyChanged?.length ? (
         <div>
@@ -246,26 +249,29 @@ function Process({ e, now }: { e: ProcessEvidence; now: number }) {
     <>
       <ProcessFacts e={e} now={now} />
       {e.deployer?.length ? (
-        <DiagTable>
-          <table aria-label={diagnosticsCopy.deployerErrors}>
-            <thead>
-              <tr>
-                <th scope="col">{diagnosticsCopy.errorClass}</th>
-                <th scope="col">{diagnosticsCopy.objects}</th>
-                <th scope="col">{diagnosticsCopy.lastSeen}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {e.deployer.map((d) => (
-                <tr key={`${d.class}|${d.object ? refText(d.object) : ""}`}>
-                  <td className="mono">{d.class}</td>
-                  <td className="mono">{d.object ? refText(d.object) : null}</td>
-                  <td className="muted">{ago(d.last, now)}</td>
+        <div>
+          <h3>{diagnosticsCopy.deployerErrors}</h3>
+          <DiagTable>
+            <table aria-label={diagnosticsCopy.deployerErrors}>
+              <thead>
+                <tr>
+                  <th scope="col">{diagnosticsCopy.errorClass}</th>
+                  <th scope="col">{diagnosticsCopy.objects}</th>
+                  <th scope="col">{diagnosticsCopy.lastSeen}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </DiagTable>
+              </thead>
+              <tbody>
+                {e.deployer.map((d) => (
+                  <tr key={`${d.class}|${d.object ? refText(d.object) : ""}`}>
+                    <td className="mono">{d.class}</td>
+                    <td className="mono">{d.object ? refText(d.object) : null}</td>
+                    <td className="muted">{ago(d.last, now)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DiagTable>
+        </div>
       ) : null}
     </>
   );
@@ -316,7 +322,8 @@ function ProcessFacts({ e, now }: { e: ProcessEvidence; now: number }) {
         <>
           <dt>{diagnosticsCopy.panic}</dt>
           <dd>
-            <span className="mono">{e.panic.class}</span> <span className="muted">{ago(e.panic.readAt, now)}</span>
+            <span className="mono">{e.panic.class}</span>
+            <div className="muted">{diagnosticsCopy.panicReadAt(ago(e.panic.readAt, now))}</div>
           </dd>
           {e.panic.frame ? (
             <>
@@ -493,24 +500,27 @@ function ListenerConflict({ e, installId }: { e: ListenerConflictEvidence; insta
 function StatusProgress({ e, now }: { e: StatusProgressEvidence; now: number }) {
   return (
     <>
-      <DiagTable>
-        <table aria-label={diagnosticsCopy.stuckObjects}>
-          <thead>
-            <tr>
-              <th scope="col">{diagnosticsCopy.status}</th>
-              <th scope="col">{diagnosticsCopy.objects}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {e.kinds.map((k) => (
-              <tr key={k.freshness}>
-                <td>{diagnosticsCopy.freshness[k.freshness] ?? k.freshness}</td>
-                <td>{k.objects}</td>
+      <div>
+        <h3>{diagnosticsCopy.stuckObjects}</h3>
+        <DiagTable>
+          <table aria-label={diagnosticsCopy.stuckObjects}>
+            <thead>
+              <tr>
+                <th scope="col">{diagnosticsCopy.status}</th>
+                <th scope="col">{diagnosticsCopy.objects}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </DiagTable>
+            </thead>
+            <tbody>
+              {e.kinds.map((k) => (
+                <tr key={k.freshness}>
+                  <td>{diagnosticsCopy.freshness[k.freshness] ?? k.freshness}</td>
+                  <td>{k.objects}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DiagTable>
+      </div>
       <Facts>
         <dt>{diagnosticsCopy.oldest}</dt>
         <dd>{ago(e.oldest, now)}</dd>

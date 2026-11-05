@@ -147,6 +147,16 @@ export function DiagnosticsGroupRow({ group: g, installId, stylesOverride }: Gro
                 {g.cause.kind} <LinkedName refValue={g.cause} installId={installId} truncate />
               </span>
             ) : null}
+            {!g.restricted && !g.cause && g.grant ? (
+              <span className="cause">
+                {diagnosticsCopy.grantShape(
+                  g.grant.fromNamespace,
+                  g.grant.toNamespace,
+                  g.grant.toGroup,
+                  g.grant.toKind,
+                )}
+              </span>
+            ) : null}
             {!g.restricted && g.affectedTotal > 0 ? <span>{diagnosticsCopy.affected(g.affectedTotal)}</span> : null}
             {!g.restricted && g.members > 1 ? <span>{diagnosticsCopy.findings(g.members)}</span> : null}
             {!g.restricted && g.since ? <span>{ago(g.since, now)}</span> : null}

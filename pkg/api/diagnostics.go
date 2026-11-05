@@ -324,7 +324,26 @@ func (h *handler) groupRow(v *view, l linker, g *diagnose.Group, fs []health.Fin
 	}
 	row.Since = wirePtr(since)
 	row.NextSteps = nextSteps(diagnose.Steps(*g, fs, in, h.commands, v.visible()))
+	row.Grant = grantShape(v, g, &fs[top])
 	return row
+}
+
+// notPermittedFamily is the name of diagnose's "Not permitted" family.
+const notPermittedFamily = "Not permitted"
+
+// grantShape is the shape of a "Not permitted" group from its top member, whose
+// one attributed ref every member shares (diagnose notPermitted.Claim); nil when the
+// caller may not view that member or its ref.
+func grantShape(v *view, g *diagnose.Group, top *health.Finding) *GrantShape {
+	ev, ok := top.Facts.(*health.RefsEvidence)
+	if g.Family != notPermittedFamily || top.Resource == nil || !ok || !ev.Attributed || len(ev.Candidates) != 1 {
+		return nil
+	}
+	to := ev.Candidates[0].Ref
+	if !v.can(*top.Resource) || !v.can(to) {
+		return nil
+	}
+	return &GrantShape{FromNamespace: top.Resource.Namespace, ToNamespace: to.Namespace, ToGroup: to.Group, ToKind: to.Kind}
 }
 
 // needsAttention reports whether g is a Needs attention group: ranked, with

@@ -71,6 +71,17 @@ type GroupRow struct {
 	Since         *time.Time      `json:"since,omitempty"`
 	NextSteps     []NextStep      `json:"nextSteps,omitempty"`
 	Restricted    bool            `json:"restricted,omitempty"`
+	// Grant is the shape of a "Not permitted" group, which has no cause object (design §5.2).
+	Grant *GrantShape `json:"grant,omitempty"`
+}
+
+// GrantShape is the (from namespace, to namespace, to group and kind) one
+// ReferenceGrant allows; ToGroup is "" for the core group.
+type GrantShape struct {
+	FromNamespace string `json:"fromNamespace"`
+	ToNamespace   string `json:"toNamespace"`
+	ToGroup       string `json:"toGroup"`
+	ToKind        string `json:"toKind"`
 }
 
 // Diagnostics is GET …/diagnostics (design §13.3): the verdict, the top

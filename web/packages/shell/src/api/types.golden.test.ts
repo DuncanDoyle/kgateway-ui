@@ -93,6 +93,7 @@ import type {
   GatewayListRow,
   GatewayProcesses,
   GatewayRow,
+  GrantShape,
   GroupKind,
   GroupList,
   GroupRow,
@@ -880,8 +881,14 @@ const groupRow = shape<GroupRow>(
     since: "?",
     nextSteps: "?",
     restricted: "?",
+    grant: "?",
   },
-  { cause: linkedRef, affected: linkedRef, nextSteps: nextStep },
+  {
+    cause: linkedRef,
+    affected: linkedRef,
+    nextSteps: nextStep,
+    grant: shape<GrantShape>({ fromNamespace: "!", toNamespace: "!", toGroup: "!", toKind: "!" }),
+  },
   severity,
 );
 const diagnostics = shape<Diagnostics>(

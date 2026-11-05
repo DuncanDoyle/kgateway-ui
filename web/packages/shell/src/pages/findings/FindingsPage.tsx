@@ -5,8 +5,8 @@ import { Link, useLocation } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { useFindingGroups, useFindings } from "../../api/diagHooks";
 import { isStale, useListFilter } from "../../api/hooks";
-import type { FindingItem, GroupRow, LinkedRef, Severity } from "../../api/types";
-import { columnCopy, findingsCopy, groupsCopy, listCopy } from "../../copy/explorer";
+import type { FindingItem, GrantShape, GroupRow, LinkedRef, Severity } from "../../api/types";
+import { columnCopy, diagnosticsCopy, findingsCopy, groupsCopy, listCopy } from "../../copy/explorer";
 import { ListFrame } from "../../explore/ListFrame";
 import { listValues, useListPage } from "../../explore/listQuery";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -95,6 +95,9 @@ const groupFindingsPath = (installId: string, g: { id: string }, params: URLSear
   q.set("group", g.id);
   return `${installPath(installId, "findings")}?${q}`;
 };
+
+/** A "Not permitted" group's shape in words, e.g. "From shop to Service in store". */
+const grantText = (s: GrantShape) => diagnosticsCopy.grantShape(s.fromNamespace, s.toNamespace, s.toGroup, s.toKind);
 
 /** A tag's value in words: a group/Kind filter shows its kind. */
 const tagValue = (key: string, v: string) => (key === "kind" ? (v.split("/").at(-1) ?? v) : v);
@@ -219,7 +222,16 @@ function groupColumns(installId: string, params: URLSearchParams): ObjectColumn<
       id: "cause",
       header: groupsCopy.cause,
       width: "24%",
-      cell: (g) => (!g.restricted && g.cause ? <NameCell r={g.cause} installId={installId} /> : <NoValue />),
+      cell: (g) =>
+        g.restricted ? (
+          <NoValue />
+        ) : g.cause ? (
+          <NameCell r={g.cause} installId={installId} />
+        ) : g.grant ? (
+          <OneLine text={grantText(g.grant)} />
+        ) : (
+          <NoValue />
+        ),
     },
     {
       id: "affected",

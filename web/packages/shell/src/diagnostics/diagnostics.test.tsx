@@ -133,7 +133,9 @@ describe("SuggestedFix", () => {
     // A new object is created, never applied, so a taken name fails instead of replacing a grant (R89).
     expect(screen.getByText(`kubectl create -f ${file}`)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/kubectl apply/);
-    const copy = screen.getByRole("button", { name: fixCopy.copyLabel(grant.title) });
+    // The label reads the title without the backticks that mark names.
+    const copy = screen.getByRole("button", { name: "Copy YAML: Create a ReferenceGrant in store" });
+    expect(copy.getAttribute("aria-label")).not.toContain("`");
     const download = screen.getByRole("button", { name: fixCopy.downloadLabel(file) });
     expect(styled(copy)).toBe(true);
     expect(styled(download)).toBe(true);
@@ -356,6 +358,7 @@ describe("EvidenceView", () => {
       oldest: "2026-10-17T11:00:00Z",
     };
     const { unmount } = show(ev);
+    expect(screen.getByRole("heading", { name: diagnosticsCopy.stuckObjects })).toBeInTheDocument();
     const table = screen.getByRole("table", { name: diagnosticsCopy.stuckObjects });
     expect(within(table).getByText(diagnosticsCopy.freshness.stale as string)).toBeInTheDocument();
     expect(within(table).getByText("4")).toBeInTheDocument();
@@ -367,6 +370,7 @@ describe("EvidenceView", () => {
   });
 
   it("renders process from the controller log only: no Pod row, the panic and deployer errors", () => {
+    vi.useFakeTimers({ now: new Date("2026-10-17T12:00:00Z"), toFake: ["Date"] });
     show({
       kind: "process",
       controllerLogs: "read",
@@ -388,6 +392,10 @@ describe("EvidenceView", () => {
     expect(screen.getByText(diagnosticsCopy.logState.read as string)).toBeInTheDocument();
     expect(screen.getByText("nil-pointer")).toBeInTheDocument();
     expect(screen.getByText("github.com/kgateway-dev/kgateway/v2/pkg/x.(*T).Run")).toBeInTheDocument();
+    // A trace has no time: the time shown is when the log was read, and says so.
+    expect(screen.getByText(diagnosticsCopy.panicReadAt("1m ago"))).toBeInTheDocument();
+    expect(screen.queryByText("1m ago")).toBeNull();
+    expect(screen.getByRole("heading", { name: diagnosticsCopy.deployerErrors })).toBeInTheDocument();
     const table = screen.getByRole("table", { name: diagnosticsCopy.deployerErrors });
     expect(within(table).getByText("render")).toBeInTheDocument();
     expect(within(table).getByText("Gateway infra/edge")).toBeInTheDocument();
@@ -417,6 +425,7 @@ describe("EvidenceView", () => {
       ],
     } as unknown as Evidence;
     show(ev);
+    expect(screen.getByRole("heading", { name: diagnosticsCopy.logEvents })).toBeInTheDocument();
     const table = screen.getByRole("table", { name: diagnosticsCopy.logEvents });
     expect(within(table).getByText("Cluster")).toBeInTheDocument();
     expect(within(table).getByText("invalid-cluster")).toBeInTheDocument();
@@ -603,6 +612,20 @@ describe("GroupRow", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     const panel = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
     expect(panel).toHaveTextContent("kubectl logs -n kgw kgateway-0");
+  });
+
+  it("a Not permitted group names its grant shape instead of a cause", () => {
+    renderWithTheme(
+      <DiagnosticsGroupRow
+        group={group({
+          code: "KGWUI-014",
+          cause: undefined,
+          grant: { fromNamespace: "shop", toNamespace: "store", toGroup: "", toKind: "Service" },
+        })}
+        installId="kgw.kgateway"
+      />,
+    );
+    expect(screen.getByText(diagnosticsCopy.grantShape("shop", "store", "", "Service"))).toBeInTheDocument();
   });
 
   it("a restricted group shows severity, code and the placeholder, never its cause", () => {

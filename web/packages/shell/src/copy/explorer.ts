@@ -541,6 +541,9 @@ export const diagnosticsCopy = {
   controllerLog: "Controller log",
   logState: { read: "Read", "not-read": "Not read" } as Record<string, string>,
   panic: "Panic",
+  panicReadAt: (ago: string) => `Read from the log ${ago}. The trace has no time.`,
+  grantShape: (from: string, to: string, group: string, kind: string) =>
+    `From ${from} to ${kind}${group ? ` (${group})` : ""} in ${to}`,
   topFrame: "Top frame",
   deployerErrors: "Deployer errors",
   errorClass: "Error class",
@@ -559,7 +562,8 @@ export const fixCopy = {
   createWith: "Create it with",
   createNote: "`kubectl create` fails if the name is taken, so it never replaces an object.",
   copy: "Copy", // S293
-  copyLabel: (title: string) => `Copy YAML: ${title}`,
+  // Backticks mark names in the title; a screen reader would read them aloud.
+  copyLabel: (title: string) => `Copy YAML: ${title.replaceAll("`", "")}`,
   download: "Download",
   downloadLabel: (file: string) => `Download ${file}`,
 };

@@ -306,14 +306,14 @@ func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedA
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
 	out.Report.Findings = nil // shadowed by out.Findings
 	l := linkerFor(v, m, i)
-	for _, f := range rep.Findings {
+	for k, f := range rep.Findings {
 		d := FindingDTO{Finding: f}
 		if f.Resource != nil {
 			lr := l.linked(*f.Resource)
 			d.Resource = &lr
 		}
 		if !f.Restricted && !v.allOf(f.Evidence) {
-			d.Detail, d.Facts, d.EvidenceRestricted = restrictedEvidence, nil, true
+			d.Detail, d.Facts, d.EvidenceRestricted = restrictedDetail(&rep.Findings[k]), nil, true
 			if f.Since != nil {
 				d.Since = nil
 				if f.ResourceSince != nil {

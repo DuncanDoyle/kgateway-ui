@@ -9,7 +9,7 @@
     "collectedAt": "2026-10-17T12:00:00Z",
     "finding": {
       "code": "KGWUI-015",
-      "detail": "Details depend on objects you cannot view",
+      "detail": "Details depend on objects you cannot view. If the cause was temporary, such as an identity provider outage, some versions keep the rule replaced until the controller restarts.",
       "evidenceRestricted": true,
       "group": "f1-vmugvx4eo3s4dvlxqwh4vvjdha",
       "id": "f1-xiv44rnuamgfoe3ynakyfdwceg",

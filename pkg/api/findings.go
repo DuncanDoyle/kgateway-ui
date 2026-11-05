@@ -161,6 +161,15 @@ func (q *findingsQuery) match(v *view, f *health.Finding, t *diagnose.Text) bool
 // match's test on s, whose diagnose.Text field is strings.ToLower(s).
 func containsLower(s, sub string) bool { return strings.Contains(strings.ToLower(s), sub) }
 
+// restrictedDetail is f's detail for a caller who may not view all of its
+// evidence: restrictedEvidence, plus a 015's restart hint, which names no object (R108).
+func restrictedDetail(f *health.Finding) string {
+	if f.Code == health.CodeRuleReplaced && strings.HasSuffix(f.Detail, health.RuleReplacedHint) {
+		return restrictedEvidence + ". " + health.RuleReplacedHint
+	}
+	return restrictedEvidence
+}
+
 // findingRow is f on the wire for the caller of v, restricted per D-013 and
 // design §14 rules 11 and 12. Times are UTC.
 func findingRow(v *view, l linker, f *health.Finding) FindingRow {
@@ -175,7 +184,7 @@ func findingRow(v *view, l linker, f *health.Finding) FindingRow {
 	}
 	row.Message, row.Detail, row.Since = f.Message, f.Detail, f.Since
 	if !v.allOf(f.Evidence) {
-		row.Detail, row.EvidenceRestricted, row.Since = restrictedEvidence, true, f.ResourceSince
+		row.Detail, row.EvidenceRestricted, row.Since = restrictedDetail(f), true, f.ResourceSince
 	}
 	if row.Since != nil {
 		at := wireTime(*row.Since)

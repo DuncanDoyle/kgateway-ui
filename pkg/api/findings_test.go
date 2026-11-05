@@ -878,6 +878,47 @@ func ruleReplacedWorld(t *testing.T) *harness {
 	return newHarness(t, setup{catalog: catalog, rulesFor: computedtest.NoViews}, world(route, testutil.TrafficPolicy("shop", "auth", accepted))...)
 }
 
+// policyTargetWorld has policy infra/tp-two with two missing Gateway targets,
+// past grace and the 30 s hold, so each 016 is computed and not verified.
+func policyTargetWorld(t *testing.T) *harness {
+	t.Helper()
+	tp := testutil.TrafficPolicy("infra", "tp-two")
+	refs := []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "Gateway", "name": "nope"},
+		map[string]any{"group": objects.GatewayAPIGroup, "kind": "Gateway", "name": "gone"}}
+	if err := unstructured.SetNestedSlice(tp.Object, refs, "spec", "targetRefs"); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, setup{}, world(tp)...)
+	h.clk.set(testutil.Now.Add(30 * time.Second))
+	h.e.Compute()
+	return h
+}
+
+// R108 (R90 Minor 2): the 10-minute hint names no object, so it stays when a
+// hidden policy restricts the rest of a 015's detail, in every finding view.
+func TestRuleReplacedHintSurvivesRestrictedEvidence(t *testing.T) {
+	h := ruleReplacedWorld(t)
+	tp := objects.Ref{Group: kinds.KgatewayGroup, Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
+	srv := authzSrv(t, h, deny(tp))
+	want := restrictedEvidence + ". " + health.RuleReplacedHint
+	d := fixDetail(t, srv, health.CodeRuleReplaced, "shop", "r")
+	rows := get[Page[FindingRow]](t, srv, findingsBase+"?code="+health.CodeRuleReplaced, http.StatusOK).Items
+	hr := findingsOn(get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK), "shop/r")
+	var health015 []FindingDTO
+	for _, f := range hr {
+		if f.Code == health.CodeRuleReplaced {
+			health015 = append(health015, f)
+		}
+	}
+	if !d.Finding.EvidenceRestricted || d.Finding.Detail != want || len(rows) != 1 || rows[0].Detail != want ||
+		len(health015) != 1 || health015[0].Detail != want {
+		t.Fatalf("detail %q, rows %+v, health %+v; want %q", d.Finding.Detail, rows, health015, want)
+	}
+	if strings.Contains(d.Finding.Detail, "auth") {
+		t.Fatalf("restricted detail names the hidden policy: %q", d.Finding.Detail)
+	}
+}
+
 // Design §7.4, §14 row 015: a 015 naming a served policy links it as evidence and
 // joins its "Replaced by policy" group; a caller who cannot view the policy gets
 // evidenceRestricted and a restricted group row.
