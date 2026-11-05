@@ -125,6 +125,16 @@ type CheckResult struct {
 	// Gaps are the Gateways a per-Gateway input has nothing for, in Ref order.
 	// Never serialised: a Gateway page reads its own entry after authorizing it.
 	Gaps []GatewayGap `json:"-"`
+	// Withheld are the Gateways whose proxies may get no config updates, in Ref order (R105).
+	// Never serialised: a Gateway page reads its own entry after authorizing it.
+	Withheld []WithheldGateway `json:"-"`
+}
+
+// WithheldGateway is a Gateway whose snapshot deferral recurred after its
+// proxies and the controller started: the first and last such line.
+type WithheldGateway struct {
+	Gateway     objects.Ref
+	First, Last time.Time
 }
 
 // GatewayGap says why a check's input is not available for one Gateway.

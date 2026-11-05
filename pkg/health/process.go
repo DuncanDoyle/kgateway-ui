@@ -409,22 +409,24 @@ func (c rolloutsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				&ProcessEvidence{Pod: p.Name, Waiting: p.Waiting}, p)
 		}
 		if !s.controller {
-			ev, _ := f.Facts.(*ProcessEvidence)
-			if ev == nil {
-				ev = &ProcessEvidence{}
-				f.Facts = ev
-			}
-			ev.ControllerLogs = logs
-			ev.Deployer = deployerErrors(ctx, events, s.ref)
+			addDeployerErrors(ctx, &f, events, logs)
 		}
 		fs = append(fs, f)
 	}
 	return fs, ok(c.Name(), false, takenAt(in))
 }
 
-// deployerClasses are the error classes only deployer lines carry.
-var deployerClasses = map[string]bool{computed.LogClassApply: true, computed.LogClassParameters: true, computed.LogClassRender: true,
-	computed.LogClassNoValidPorts: true, computed.LogClassStatusUpdate: true, computed.LogClassPrune: true}
+// addDeployerErrors adds the controller log state and the deployer errors on
+// f's Gateway to 006 or 021 f, with process evidence of its own when it has none.
+func addDeployerErrors(ctx RunContext, f *Finding, events []ctrllogs.Event, logs string) {
+	ev, _ := f.Facts.(*ProcessEvidence)
+	if ev == nil {
+		ev = &ProcessEvidence{}
+		f.Facts = ev
+	}
+	ev.ControllerLogs = logs
+	ev.Deployer = deployerErrors(ctx, events, *f.Resource)
+}
 
 // deployerErrors are the deployer errors on Gateway gw in the window, one
 // per class and object with its latest time, newest first. A line of class
@@ -433,7 +435,7 @@ func deployerErrors(ctx RunContext, events []ctrllogs.Event, gw objects.Ref) []D
 	from := ctx.Now.Add(-ProcessWindow)
 	var out []DeployerError
 	for _, e := range events {
-		deployer := deployerClasses[e.Class] || e.Class == computed.LogClassOther && e.Object != nil
+		deployer := computed.DeployerLogClass(e.Class) || e.Class == computed.LogClassOther && e.Object != nil
 		if e.Gateway != gw || e.TypeURL != "" || !deployer || !e.Time.After(from) {
 			continue
 		}

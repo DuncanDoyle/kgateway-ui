@@ -77,6 +77,16 @@ const (
 	LogClassOther            = "other"
 )
 
+// DeployerLogClass reports whether c is one of the deployer's error classes,
+// which only deployer lines carry.
+func DeployerLogClass(c string) bool {
+	switch c {
+	case LogClassApply, LogClassParameters, LogClassRender, LogClassNoValidPorts, LogClassStatusUpdate, LogClassPrune:
+		return true
+	}
+	return false
+}
+
 // KnownLogClass reports whether c is on the fixed list of error classes.
 func KnownLogClass(c string) bool {
 	switch c {

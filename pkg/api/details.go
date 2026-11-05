@@ -276,7 +276,8 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 		return slices.IndexFunc(fs, func(f health.Finding) bool { return f.Code == code && f.Resource != nil && *f.Resource == gw })
 	}
 	dp := &DataPlaneDTO{Rejects: []DataPlaneTypes{}, NextSteps: []NextStep{}, RecentlyChanged: []LinkedRef{}, Snapshot: d.snapshot(gw),
-		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, gw, on(health.CodeSelfManagedProxy) >= 0)}
+		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, gw, on(health.CodeSelfManagedProxy) >= 0),
+		Withheld: withheldOn(d.i.Health.Checks, gw)}
 	k := on(health.CodeXDSRejected)
 	if k < 0 {
 		return dp, &proxies
@@ -304,6 +305,21 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 		}
 	}
 	return dp, &proxies
+}
+
+// withheldOn is gw's withheld config from the xDS rejects check; nil when there is none.
+func withheldOn(checks []health.CheckResult, gw objects.Ref) *WithheldDTO {
+	for _, c := range checks {
+		if c.Name != xdsCheckName {
+			continue
+		}
+		for _, w := range c.Withheld {
+			if w.Gateway == gw {
+				return &WithheldDTO{Message: health.WithheldMessage, First: wireTime(w.First), Last: wireTime(w.Last)}
+			}
+		}
+	}
+	return nil
 }
 
 // snapshot is gw's xDS snapshot from the install's last complete metrics read; nil without one.

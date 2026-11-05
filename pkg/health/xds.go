@@ -34,7 +34,15 @@ const (
 	RecentWindow = 10 * time.Minute
 	// MaxRecentlyChanged is how many recently changed objects 001 lists.
 	MaxRecentlyChanged = 10
+	// WithheldAfter is how long after the latest start a deferral line counts,
+	// and how far apart two such lines must be (R105).
+	WithheldAfter = 60 * time.Second
+	// WithheldWindow is how long after the last such line the Gateway reads withheld.
+	WithheldWindow = 15 * time.Minute
 )
+
+// WithheldMessage labels withheld config in a Gateway's Data plane section (R105).
+const WithheldMessage = "Proxies may not be getting config updates"
 
 // Wording of KGWUI-001 (design §8.3).
 const (
@@ -90,10 +98,18 @@ type xdsStreams struct {
 	pods    []string
 }
 
-// Run implements Check. Missing, failed or stale metrics, or a scrape without
+// Run implements Check: the rejects, and on every result the Gateways whose
+// config may be withheld, which the controller log tells without metrics.
+func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	fs, res := c.rejects(ctx)
+	res.Withheld = withheld(ctx)
+	return fs, res
+}
+
+// rejects is 001. Missing, failed or stale metrics, or a scrape without
 // the resources_managed family while Gateways are owned, are KGWUI-008 and
 // leave the Store as it is, so a failed scrape adds no rejects_total growth.
-func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	old, _ := Load[*xdsState](ctx.State, xdsKey)
 	if old == nil {
@@ -341,6 +357,79 @@ func installLogs(ctx RunContext) ([]ctrllogs.Event, string) {
 		return nil, LogsNotRead
 	}
 	return l.Events, LogsRead
+}
+
+// withheld are the owned Gateways whose snapshot deferral recurred: two
+// deferral lines at least WithheldAfter apart, both at least WithheldAfter
+// after the latest start of every controller Pod and of the Gateway's proxy
+// Pods, the last within WithheldWindow (R105). A startup burst or one
+// reconnect never qualifies; unknown starts never do.
+func withheld(ctx RunContext) []WithheldGateway {
+	events, state := installLogs(ctx)
+	if state != LogsRead || ctx.Process == nil {
+		return nil
+	}
+	ctrl, known := latestStart(ctx.Process.Controller)
+	if !known {
+		return nil
+	}
+	var out []WithheldGateway
+	for _, gw := range ctx.Owned.Gateways {
+		r := *ref(gw)
+		proxies, known := latestStart(ctx.Process.Proxies[r])
+		if !known {
+			continue
+		}
+		from := ctrl
+		if proxies.After(from) {
+			from = proxies
+		}
+		from = from.Add(WithheldAfter)
+		var w WithheldGateway
+		for _, e := range events {
+			if !deferral(e) || e.Gateway != r || e.Time.Before(from) {
+				continue
+			}
+			if w.First.IsZero() || e.Time.Before(w.First) {
+				w.First = e.Time
+			}
+			if e.Time.After(w.Last) {
+				w.Last = e.Time
+			}
+		}
+		if w.First.IsZero() || w.Last.Sub(w.First) < WithheldAfter || !ctx.Now.Before(w.Last.Add(WithheldWindow)) {
+			continue
+		}
+		w.Gateway = r
+		ctx.WakeAt(w.Last.Add(WithheldWindow))
+		out = append(out, w)
+	}
+	slices.SortFunc(out, func(a, b WithheldGateway) int { return compareRefs(a.Gateway, b.Gateway) })
+	return out
+}
+
+// deferral reports whether e is a snapshot-deferral line: a Gateway and no
+// other field, unlike rejects, deployer errors and panics.
+func deferral(e ctrllogs.Event) bool {
+	return e.Gateway != (objects.Ref{}) && e.TypeURL == "" && e.Class == "" && e.Frame == "" && e.Object == nil
+}
+
+// latestStart is the latest start of s's processes; false when s is not
+// observed, has none, or one has no known start.
+func latestStart(s process.Set) (time.Time, bool) {
+	if !s.Observed || len(s.Processes) == 0 {
+		return time.Time{}, false
+	}
+	var at time.Time
+	for _, p := range s.Processes {
+		if p.LastStart == nil {
+			return time.Time{}, false
+		}
+		if p.LastStart.After(at) {
+			at = *p.LastStart
+		}
+	}
+	return at, true
 }
 
 func minTime(a, b time.Time) time.Time {

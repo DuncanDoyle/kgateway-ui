@@ -981,8 +981,10 @@ const dataPlane = shape<DataPlane>(
     evidenceRestricted: "?",
     unavailable: "?",
     proxyStats: "!",
+    withheld: "?",
   },
   {
+    withheld: shape<NonNullable<DataPlane["withheld"]>>({ message: "!", first: "!", last: "!" }),
     rejects: shape<DataPlane["rejects"][number]>({ typeUrl: "!", streams: "!", firstSeen: "!" }),
     snapshot: shape<NonNullable<DataPlane["snapshot"]>>(
       { by: "!", listeners: "!", routes: "!", clusters: "!", endpoints: "!", secrets: "!" },

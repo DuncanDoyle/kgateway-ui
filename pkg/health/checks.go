@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -666,6 +667,7 @@ func (proxyCheck) Inputs() InputSet {
 	in := AllInputs()
 	in.Kinds = []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}
 	in.Process = true
+	in.Collected = []string{ctrllogs.Key}
 	return in
 }
 
@@ -722,9 +724,22 @@ func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		if inGrace == 1 {
 			msg = "1 proxy not found yet"
 		}
+		addProxyDeployerErrors(ctx, fs)
 		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt, Error: msg}
 	}
+	addProxyDeployerErrors(ctx, fs)
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
+}
+
+// addProxyDeployerErrors adds the deployer's errors to each 006 in fs, as a
+// failed apply is often why a proxy Deployment is missing or not ready.
+func addProxyDeployerErrors(ctx RunContext, fs []Finding) {
+	events, logs := installLogs(ctx)
+	for i := range fs {
+		if fs[i].Code == CodeProxyNotReady {
+			addDeployerErrors(ctx, &fs[i], events, logs)
+		}
+	}
 }
 
 // proxyAmbiguousMessage is 006's message when several Deployments carry the Gateway's label.

@@ -369,4 +369,6 @@ export interface DataPlane {
   evidenceRestricted?: boolean;
   unavailable?: boolean;
   proxyStats: { available: boolean; unavailable?: CheckResult["unavailable"]; reason?: string };
+  /** The controller log shows proxies may get no config updates (kgateway 2.3 and 2.4): the first and last such line. */
+  withheld?: { message: string; first: string; last: string };
 }

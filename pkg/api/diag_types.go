@@ -198,6 +198,16 @@ type DataPlaneDTO struct {
 	// Unavailable is set while the xDS rejects check is not OK: Rejecting false then means unknown.
 	Unavailable bool          `json:"unavailable,omitempty"`
 	ProxyStats  ProxyStatsDTO `json:"proxyStats"`
+	// Withheld is set when the controller log shows the Gateway's proxies may get no config updates (R105).
+	Withheld *WithheldDTO `json:"withheld,omitempty"`
+}
+
+// WithheldDTO is the snapshot deferral that recurred after the proxies
+// connected: the first and last such line (kgateway 2.3 and 2.4).
+type WithheldDTO struct {
+	Message string    `json:"message"`
+	First   time.Time `json:"first"`
+	Last    time.Time `json:"last"`
 }
 
 // DataPlaneTypes is one rejected xDS type: the rejecting streams and when the UI first saw them.

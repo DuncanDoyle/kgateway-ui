@@ -1262,3 +1262,87 @@ func TestDeployerErrorsAtTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// deferralLine is a snapshot-deferral event for Gateway infra/name.
+func deferralLine(at time.Time, name string) ctrllogs.Event {
+	return ctrllogs.Event{Time: at.UTC(), Marker: "per-client inputs not ready; deferring snapshot", Gateway: gwRef("infra", name)}
+}
+
+// The Data plane section says proxies may get no config updates only when
+// deferral lines for the Gateway recur at least 60 s apart, both at least 60 s
+// after the latest controller and proxy start (R105). A startup burst and a
+// single reconnect never do; a restart between the lines and age undo it.
+func TestWithheldInTheDataPlaneSection(t *testing.T) {
+	started := testutil.Now.Add(-10 * time.Minute)
+	burst := func(at time.Time) []ctrllogs.Event {
+		return []ctrllogs.Event{deferralLine(at, "edge"), deferralLine(at.Add(time.Second), "edge"), deferralLine(at.Add(2*time.Second), "edge")}
+	}
+	stuck := []ctrllogs.Event{deferralLine(testutil.Now.Add(-5*time.Minute), "edge"), deferralLine(testutil.Now.Add(-3*time.Minute), "edge")}
+	for _, tc := range []struct {
+		name      string
+		proxyFrom time.Time
+		events    []ctrllogs.Event
+		want      *WithheldDTO
+	}{
+		{"startup burst", started, append(burst(started.Add(time.Second)), deferralLine(started.Add(3*time.Second), "edge")), nil},
+		// 63 s apart, but the first is a startup line: only one line counts.
+		{"startup line and one after", started, []ctrllogs.Event{deferralLine(started.Add(2*time.Second), "edge"), deferralLine(started.Add(65*time.Second), "edge")}, nil},
+		{"single reconnect", started, burst(testutil.Now.Add(-5 * time.Minute)), nil},
+		{"stuck client", started, stuck, &WithheldDTO{Message: "Proxies may not be getting config updates", First: testutil.Now.Add(-5 * time.Minute), Last: testutil.Now.Add(-3 * time.Minute)}},
+		{"proxy restarted between the lines", testutil.Now.Add(-4 * time.Minute), stuck, nil},
+		{"lines older than 15 min", testutil.Now.Add(-40 * time.Minute), []ctrllogs.Event{deferralLine(testutil.Now.Add(-25*time.Minute), "edge"), deferralLine(testutil.Now.Add(-20*time.Minute), "edge")}, nil},
+		{"another Gateway's lines", started, []ctrllogs.Event{deferralLine(testutil.Now.Add(-5*time.Minute), "nack"), deferralLine(testutil.Now.Add(-3*time.Minute), "nack")}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			feed := newLogFeed()
+			feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: tc.events}})
+			d := edgeProxy(1, 1)
+			proxy := edgePod(d, "edge-0", true, corev1.ContainerStatus{State: runningSince(tc.proxyFrom)})
+			h := newHarness(t, setup{proxyPods: true, collected: feed.store.Snapshot}, procWorld(container(corev1.ContainerStatus{State: runningSince(started)}), d, proxy)...)
+			h.at(t, testutil.Now)
+			dp := get[GatewayDetail](t, h.srv, gwDetail, 200).DataPlane
+			if dp == nil || !reflect.DeepEqual(dp.Withheld, tc.want) {
+				t.Fatalf("data plane %+v, withheld %+v; want %+v", dp, dp.Withheld, tc.want)
+			}
+			if body := string(wire(t, h.srv, gwDetail)); strings.Contains(body, `"withheld"`) != (tc.want != nil) {
+				t.Fatalf("body %s", body)
+			}
+		})
+	}
+}
+
+// 006 on a Gateway carries the deployer's errors too: a missing proxy
+// Deployment, where a failed apply shows, and a not-ready one beside its Pod's facts.
+func TestDeployerErrorsOn006AtTheAPI(t *testing.T) {
+	feed := newLogFeed()
+	feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+		{Time: testutil.Now.Add(-time.Minute).UTC(), Marker: "error handling ", Gateway: gwRef("infra", "edge"), Class: computed.LogClassParameters},
+	}}})
+	want := []health.DeployerError{{Class: computed.LogClassParameters, Last: testutil.Now.Add(-time.Minute)}}
+	t.Run("not found", func(t *testing.T) {
+		objs := slices.DeleteFunc(world(), func(o runtime.Object) bool {
+			d, ok := o.(*appsv1.Deployment)
+			return ok && d.Namespace == "infra" && d.Name == "edge"
+		})
+		h := newHarness(t, setup{collected: feed.store.Snapshot}, objs...)
+		f := findingOf(h.at(t, testutil.Now), health.CodeProxyNotReady)
+		if f == nil || f.Message != "Proxy deployment not found" {
+			t.Fatalf("006 %+v", f)
+		}
+		if ev := processFacts(t, f); !reflect.DeepEqual(ev.Deployer, want) || ev.ControllerLogs != health.LogsRead || ev.Pod != "" {
+			t.Fatalf("006 evidence %+v", ev)
+		}
+	})
+	t.Run("not ready", func(t *testing.T) {
+		crash := corev1.ContainerStatus{RestartCount: 4, State: waiting("CrashLoopBackOff")}
+		d := edgeProxy(1, 0)
+		h := newHarness(t, setup{proxyPods: true, collected: feed.store.Snapshot}, procWorld(nil, d, edgePod(d, "edge-0", false, crash))...)
+		f := findingOf(h.at(t, testutil.Now), health.CodeProxyNotReady)
+		if f == nil {
+			t.Fatal("no 006")
+		}
+		if ev := processFacts(t, f); !reflect.DeepEqual(ev.Deployer, want) || ev.Pod != "edge-0" || ev.Waiting != "CrashLoopBackOff" {
+			t.Fatalf("006 evidence %+v", ev)
+		}
+	})
+}
