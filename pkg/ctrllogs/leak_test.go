@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,8 +61,12 @@ func deferralLine(sec int, client string) string {
 	return string(b) + "\n"
 }
 
+// deployerBase dates deployer lines inside the process window, which 021's evidence reads.
+var deployerBase = time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+
 func deployerLine(sec int, key, errText string) string {
-	b, _ := json.Marshal(map[string]string{"level": "error", "time": fmt.Sprintf("2026-11-05T09:02:%02d.000001Z", sec), "scope": "controllers",
+	at := deployerBase.Add(time.Duration(sec)*time.Second + time.Microsecond).Format(time.RFC3339Nano)
+	b, _ := json.Marshal(map[string]string{"level": "error", "time": at, "scope": "controllers",
 		"msg": "error handling " + key + ", retrying (retry count: 1): " + errText, "controller": "GatewayController"})
 	return string(b) + "\n"
 }
@@ -264,10 +271,16 @@ func TestLogSecretLeavesNoTrace(t *testing.T) {
 		t.Run(version, func(t *testing.T) {
 			d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:"+version, 1, 1)
 			ctrl := testutil.ControllerPod(d, "kgateway-0", true)
-			ctrl.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "kgateway", RestartCount: 1, Ready: true}}
+			// A recent exit with code 2 raises 019, whose evidence carries the panic.
+			crashed := metav1.NewTime(time.Now().Add(-time.Minute))
+			ctrl.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "kgateway", RestartCount: 1, Ready: true,
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 2, FinishedAt: crashed}}}}
 			programmed := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
+			// A stuck edge rollout raises 021, whose evidence carries the deployer errors.
+			edge := testutil.ProxyDeployment("infra", "edge", 1, 1)
+			edge.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
 			dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d, ctrl,
-				testutil.ProxyDeployment("infra", "edge", 1, 1), testutil.ProxyDeployment("infra", "nack", 1, 1),
+				edge, testutil.ProxyDeployment("infra", "nack", 1, 1),
 				testutil.GatewayClass("kgateway", testutil.Controller, true),
 				testutil.Gateway("infra", "edge", "kgateway", programmed), testutil.Gateway("infra", "nack", "kgateway", programmed))
 			var follows atomic.Int32
@@ -286,7 +299,7 @@ func TestLogSecretLeavesNoTrace(t *testing.T) {
 				return true, &runtime.Unknown{Raw: []byte(body)}, nil
 			})
 			p := &probe{}
-			a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}},
+			a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: rejectScraper{t: t, version: version}},
 				app.Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: fstest.MapFS{"index.html": {Data: []byte("x")}},
 					Diagnostics: app.Diagnostics{ControllerLogs: true}},
 				extension.New(extension.WithProxyStatsSource(stats{}), extension.WithChecks("LEAK-", p)))
@@ -313,11 +326,19 @@ func TestLogSecretLeavesNoTrace(t *testing.T) {
 				got = l[install]
 			}
 
+			// The API serves the log evidence on 001, 019 and 021; only then do the bodies test the gate.
+			base := "/api/v1/installs/" + install
+			for !served(get(t, srv, base+"/health")) {
+				if time.Now().After(deadline) {
+					t.Fatalf("the API never served the log evidence: %s", get(t, srv, base+"/health"))
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+
 			bodies := map[string][]byte{}
 			for _, path := range []string{"/api/v1/meta", "/api/v1/installs"} {
 				bodies[path] = get(t, srv, path)
 			}
-			base := "/api/v1/installs/" + install
 			for _, sub := range []string{"/overview", "/health", "/findings", "/diagnostics", "/processes", "/routes", "/gateways",
 				"/listenersets", "/gateways/infra/edge", "/gateways/infra/nack", "/refs",
 				"/resources/gateway.networking.k8s.io/Gateway/infra/edge", "/resources/gateway.networking.k8s.io/Gateway/infra/nack"} {
@@ -380,9 +401,43 @@ func kept(l ctrllogs.InstallLogs) bool {
 	return l.State == ctrllogs.StateOn && name && deferral && object && frame
 }
 
-// emptyScraper serves no controller metrics.
-type emptyScraper struct{}
+// served reports whether a /health body carries the log evidence the reader kept:
+// nack's known name on 001, the panic's top frame on 019 and edge's Deployment on 021.
+func served(body []byte) bool {
+	var h struct {
+		Findings []struct {
+			Code     string          `json:"code"`
+			Evidence json.RawMessage `json:"evidence"`
+		} `json:"findings"`
+	}
+	if json.Unmarshal(body, &h) != nil {
+		return false
+	}
+	var name, frame, object bool
+	for _, f := range h.Findings {
+		ev := string(f.Evidence)
+		switch f.Code {
+		case health.CodeXDSRejected:
+			name = name || strings.Contains(ev, `"logEvents"`) && strings.Contains(ev, known)
+		case health.CodeProcessRestarting:
+			frame = frame || strings.Contains(ev, `"frame":"github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs"`)
+		case health.CodeRolloutStuck:
+			object = object || strings.Contains(ev, `"deployer"`) && strings.Contains(ev, `"kind":"Deployment"`)
+		}
+	}
+	return name && frame && object
+}
 
-func (emptyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+// rejectScraper serves the version's Task 20 capture with rejects on nack and edge.
+type rejectScraper struct {
+	t       *testing.T
+	version string
+}
+
+func (s rejectScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
+	b, err := os.ReadFile(filepath.Join("..", "ctrlmetrics", "testdata", s.version+"-rejects-a.txt"))
+	if err != nil {
+		s.t.Error(err)
+	}
+	return io.NopCloser(bytes.NewReader(b)), err
 }

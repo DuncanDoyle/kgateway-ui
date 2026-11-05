@@ -75,6 +75,7 @@ import type {
   DelegationContext,
   DelegationRef,
   DelegationRow,
+  DeployerError,
   Diagnostics,
   EffectiveContext,
   EffectiveEdge,
@@ -115,6 +116,7 @@ import type {
   NextStep,
   OverviewResponse,
   Page,
+  PanicFacts,
   ParentRef,
   ParentStatus,
   ParentSummary,
@@ -147,6 +149,7 @@ import type {
   TrailRefs,
   VersionPods,
   VersionSkewEvidence,
+  XDSLogEvent,
   XDSRejectsEvidence,
   XDSTypeRejects,
 } from "./types";
@@ -228,6 +231,8 @@ const xdsTypeRejects = shape<XDSTypeRejects>({
   firstSeen: "!",
   totalSinceFirstSeen: "!",
 });
+const xdsLogEvent = shape<XDSLogEvent>({ typeUrl: "!", since: "!", classes: "!", envoyResources: "?" });
+const controllerLogs = { controllerLogs: { read: 1, "not-read": 1 } } as const;
 const proxyTypeRejects = shape<ProxyTypeRejects>({
   typeUrl: "!",
   rejecting: "!",
@@ -239,14 +244,22 @@ const evidenceShapes = {
   process: shape<ProcessEvidence>(
     {
       kind: "!",
-      pod: "!",
+      pod: "?",
       restarts: "?",
       termination: "?",
       waiting: "?",
       probe: "?",
+      controllerLogs: "?",
+      panic: "?",
+      deployer: "?",
     },
-    { termination, probe },
-    { kind: { process: 1 } },
+    {
+      termination,
+      probe,
+      panic: shape<PanicFacts>({ class: "!", frame: "?", readAt: "!" }),
+      deployer: shape<DeployerError>({ class: "!", object: "?", last: "!" }, { object: ref }),
+    },
+    { kind: { process: 1 }, ...controllerLogs },
   ),
   "version-skew": shape<VersionSkewEvidence>(
     {
@@ -276,9 +289,12 @@ const evidenceShapes = {
       statusSaysHealthy: "!",
       proxyStats: "?",
       recentlyChanged: "?",
+      controllerLogs: "!",
+      logEvents: "?",
     },
     {
       types: xdsTypeRejects,
+      logEvents: xdsLogEvent,
       proxies: shape<NonNullable<XDSRejectsEvidence["proxies"]>>({
         ready: "!",
         desired: "!",
@@ -289,7 +305,7 @@ const evidenceShapes = {
       ),
       recentlyChanged: linkedRef,
     },
-    { kind: { "xds-rejects": 1 } },
+    { kind: { "xds-rejects": 1 }, ...controllerLogs },
   ),
   "proxy-stats": shape<ProxyStatsEvidence>(
     { kind: "!", pods: "!" },

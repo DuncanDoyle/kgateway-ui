@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
@@ -27,6 +29,8 @@ const (
 	restartsKey = "restarts"
 	// maxRestartsSeen bounds the restart observations kept per process.
 	maxRestartsSeen = 32
+	// maxDeployerErrors bounds the deployer errors one finding quotes.
+	maxDeployerErrors = 5
 )
 
 // Wording of the process findings (design §9.3), from the wording pass (Task 51).
@@ -147,10 +151,10 @@ type restartsCheck struct{}
 // Name implements Check.
 func (restartsCheck) Name() string { return restartsCheckName }
 
-// Inputs implements Check: process data, and proxy Pods access for the gap
-// note; the window ends through WakeAt.
+// Inputs implements Check: process data, proxy Pods access for the gap note,
+// and controller logs for the panic; the window ends through WakeAt.
 func (restartsCheck) Inputs() InputSet {
-	return InputSet{Process: true, Kinds: []objects.GroupKind{cache.ProxyPodsKind}}
+	return InputSet{Process: true, Kinds: []objects.GroupKind{cache.ProxyPodsKind}, Collected: []string{ctrllogs.Key}}
 }
 
 // restartState is the restarts check's Store value: the last restart count
@@ -177,6 +181,7 @@ func (c restartsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	cur := &restartState{counts: make(map[string]int32, len(old.counts))}
 	from := in.Now.Add(-ProcessWindow)
+	events, logs := installLogs(ctx)
 	var fs []Finding
 	for _, s := range subjects(in) {
 		var best *process.Process
@@ -192,10 +197,38 @@ func (c restartsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		ctx.WakeAt(bestAt.Add(ProcessWindow))
-		fs = append(fs, restartFinding(in, s, best, bestN))
+		f := restartFinding(in, s, best, bestN)
+		if s.controller {
+			addPanic(ctx, &f, events, logs, from)
+		}
+		fs = append(fs, f)
 	}
 	ctx.State.Set(restartsKey, cur)
 	return fs, res
+}
+
+// addPanic adds the controller log state and a panic read in the window to
+// 019 f: the newest with a top frame, else the newest. The read time is the
+// panic's only time, so it lowers since.
+func addPanic(ctx RunContext, f *Finding, events []ctrllogs.Event, logs string, from time.Time) {
+	ev := f.Facts.(*ProcessEvidence)
+	ev.ControllerLogs = logs
+	var p *ctrllogs.Event
+	for i := len(events) - 1; i >= 0; i-- {
+		if e := &events[i]; e.Class == computed.LogClassPanic && e.Time.After(from) && (p == nil || p.Frame == "" && e.Frame != "") {
+			p = e
+		}
+	}
+	if p == nil {
+		return
+	}
+	ev.Panic = &PanicFacts{Class: p.Class, Frame: p.Frame, ReadAt: p.Time}
+	ctx.WakeAt(p.Time.Add(ProcessWindow))
+	key := sincePrefix + FindingID(ctx.Install.ID(), f.Code, f.Resource, nil)
+	t, seen := ctx.State.Get(key)
+	if old, _ := t.(time.Time); p.Time.Before(ctx.Now) && (!seen || p.Time.Before(old)) {
+		ctx.State.Set(key, p.Time)
+	}
 }
 
 // observe records p's restart count in s and returns its last restart in the
@@ -350,15 +383,17 @@ type rolloutsCheck struct{}
 // Name implements Check.
 func (rolloutsCheck) Name() string { return rolloutsCheckName }
 
-// Inputs implements Check: process data, and Deployments for ready replicas.
+// Inputs implements Check: process data, Deployments for ready replicas, and
+// controller logs for the deployer's errors.
 func (rolloutsCheck) Inputs() InputSet {
-	return InputSet{Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}}
+	return InputSet{Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}, Collected: []string{ctrllogs.Key}}
 }
 
 // Run implements Check. A Pod's waiting reason is evidence; template hashes
 // are not compared (review finding 8).
 func (c rolloutsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	events, logs := installLogs(ctx)
 	var fs []Finding
 	for _, s := range subjects(in) {
 		r := s.set.Rollout
@@ -373,9 +408,60 @@ func (c rolloutsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			f = processFinding(in, s, CodeRolloutStuck, "rollout-stuck", rolloutMessage, rolloutDetail+fmt.Sprintf(rolloutWaiting, p.Name, p.Waiting),
 				&ProcessEvidence{Pod: p.Name, Waiting: p.Waiting}, p)
 		}
+		if !s.controller {
+			ev, _ := f.Facts.(*ProcessEvidence)
+			if ev == nil {
+				ev = &ProcessEvidence{}
+				f.Facts = ev
+			}
+			ev.ControllerLogs = logs
+			ev.Deployer = deployerErrors(ctx, events, s.ref)
+		}
 		fs = append(fs, f)
 	}
 	return fs, ok(c.Name(), false, takenAt(in))
+}
+
+// deployerClasses are the error classes only deployer lines carry.
+var deployerClasses = map[string]bool{computed.LogClassApply: true, computed.LogClassParameters: true, computed.LogClassRender: true,
+	computed.LogClassNoValidPorts: true, computed.LogClassStatusUpdate: true, computed.LogClassPrune: true}
+
+// deployerErrors are the deployer errors on Gateway gw in the window, one
+// per class and object with its latest time, newest first. A line of class
+// other is a deployer's only when it names an object, which rejects never do.
+func deployerErrors(ctx RunContext, events []ctrllogs.Event, gw objects.Ref) []DeployerError {
+	from := ctx.Now.Add(-ProcessWindow)
+	var out []DeployerError
+	for _, e := range events {
+		deployer := deployerClasses[e.Class] || e.Class == computed.LogClassOther && e.Object != nil
+		if e.Gateway != gw || e.TypeURL != "" || !deployer || !e.Time.After(from) {
+			continue
+		}
+		i := slices.IndexFunc(out, func(d DeployerError) bool { return d.Class == e.Class && ptrEqual(d.Object, e.Object) })
+		if i < 0 {
+			d := DeployerError{Class: e.Class}
+			if e.Object != nil {
+				o := *e.Object
+				d.Object = &o
+			}
+			out = append(out, d)
+			i = len(out) - 1
+		}
+		if e.Time.After(out[i].Last) {
+			out[i].Last = e.Time
+		}
+	}
+	// Stable over the time-ordered events, so equal times keep a fixed order.
+	slices.SortStableFunc(out, func(a, b DeployerError) int { return b.Last.Compare(a.Last) })
+	out = out[:min(len(out), maxDeployerErrors)]
+	for _, d := range out {
+		ctx.WakeAt(d.Last.Add(ProcessWindow))
+	}
+	return out
+}
+
+func ptrEqual(a, b *objects.Ref) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 // readyReplicas is the ready count of s's Deployment; 0 when it is not found.

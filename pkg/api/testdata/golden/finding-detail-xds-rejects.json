@@ -8,6 +8,7 @@
     },
     "collectedAt": "2026-10-17T12:00:10Z",
     "evidence": {
+      "controllerLogs": "not-read",
       "kind": "xds-rejects",
       "proxies": {
         "desired": 2,

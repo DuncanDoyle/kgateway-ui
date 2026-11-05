@@ -14,6 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,6 +26,10 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
@@ -993,6 +999,265 @@ func TestListenerConflictThroughTheAPI(t *testing.T) {
 			if !isConflict || ev.Listener != "b" || ev.Port != 443 || ev.Rule != health.ListenerHostnameRule || len(ev.Others) != 1 ||
 				ev.Others[0].Owner.Ref != other || ev.Others[0].Name != "a" || ev.Others[0].Owner.Link == "" {
 				t.Fatalf("evidence %#v", d.Evidence)
+			}
+		})
+	}
+}
+
+// logFeed publishes controller log values as the reader does, each with a new fingerprint.
+type logFeed struct {
+	store *collect.Store
+	n     uint64
+}
+
+func newLogFeed() *logFeed {
+	return &logFeed{store: collect.New(nil, func() time.Time { return testutil.Now })}
+}
+
+func (f *logFeed) publish(ls ctrllogs.Logs) {
+	f.n++
+	f.store.Publish(ctrllogs.Key, ls, f.n, 0)
+}
+
+const (
+	logInstall  = "kgw.kgateway"
+	clusterType = "envoy.config.cluster.v3.Cluster"
+	knownName   = "kube_shop_httpbin-nack_8000"
+)
+
+// rejectLine is an "xds error" event for Gateway infra/name.
+func rejectLine(at time.Time, name, typ, class string, names ...string) ctrllogs.Event {
+	return ctrllogs.Event{Time: at.UTC(), Marker: "xds error", Gateway: gwRef("infra", name), TypeURL: "type.googleapis.com/" + typ, Class: class, Names: names}
+}
+
+func xdsFacts(t *testing.T, f *FindingDTO) *health.XDSRejectsEvidence {
+	t.Helper()
+	if f == nil {
+		t.Fatal("no 001")
+	}
+	ev, ok := f.Facts.(*health.XDSRejectsEvidence)
+	if !ok {
+		t.Fatalf("evidence %T %+v", f.Facts, f.Facts)
+	}
+	return ev
+}
+
+func rejectCaptures(t *testing.T, v string) *liveMetrics {
+	t.Helper()
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, v+"-rejects-a", "kgw", "kgateway-0"), ctrlCapture(t, v+"-rejects-b", "kgw", "kgateway-1"))
+	return lm
+}
+
+// 001 gains one log event per rejected type, whichever replica logged it, with
+// the earliest time; a type no longer rejected and another Gateway's lines stay
+// out. A new log value reruns the check at an unchanged scrape (D-052), and
+// after an engine restart since is the earliest event (design §8.9).
+func TestXDSLogEventsAtTheAPI(t *testing.T) {
+	feed := newLogFeed()
+	feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn}})
+	h := xdsHarness(t, setup{collected: feed.store.Snapshot}, rejectCaptures(t, "v2.4.7"), nackWorld()...)
+	f := xdsFinding(h.at(t, testutil.Now), "infra", "nack")
+	if ev := xdsFacts(t, f); ev.ControllerLogs != health.LogsRead || ev.LogEvents != nil || !f.Since.Equal(testutil.Now) {
+		t.Fatalf("no lines yet: %+v since %v", ev, f.Since)
+	}
+
+	first := testutil.Now.Add(-8 * time.Minute)
+	feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+		rejectLine(first, "nack", clusterType, computed.LogClassTLS, knownName),
+		rejectLine(first.Add(2*time.Second), "nack", clusterType, computed.LogClassTLS, knownName), // the other replica
+		rejectLine(first.Add(time.Minute), "edge", clusterType, computed.LogClassDuplicate),
+		rejectLine(testutil.Now.Add(-3*time.Minute), "nack", routeType, computed.LogClassOther),
+		rejectLine(testutil.Now.Add(-time.Minute), "nack", listenerType, computed.LogClassBind), // not rejected now
+	}}})
+	want := []health.XDSLogEvent{
+		{TypeURL: clusterType, Since: first, Classes: []string{computed.LogClassTLS}, EnvoyResources: []string{knownName}},
+		{TypeURL: routeType, Since: testutil.Now.Add(-3 * time.Minute), Classes: []string{computed.LogClassOther}},
+	}
+	f = xdsFinding(h.at(t, testutil.Now), "infra", "nack")
+	ev := xdsFacts(t, f)
+	if !reflect.DeepEqual(ev.LogEvents, want) {
+		t.Fatalf("log events %+v, want %+v", ev.LogEvents, want)
+	}
+	if !f.Since.Equal(first) || !ev.Types[0].FirstSeen.Equal(first) || !ev.Types[1].FirstSeen.Equal(want[1].Since) {
+		t.Fatalf("since %v, types %+v; want the earliest line %v", f.Since, ev.Types, first)
+	}
+	if edge := xdsFacts(t, xdsFinding(h.at(t, testutil.Now), "infra", "edge")); len(edge.LogEvents) != 1 || edge.LogEvents[0].Classes[0] != computed.LogClassDuplicate {
+		t.Fatalf("edge log events %+v", edge.LogEvents)
+	}
+	if body := string(wire(t, h.srv, healthPath)); !strings.Contains(body, `"controllerLogs": "read"`) || !strings.Contains(body, `"logEvents"`) {
+		t.Fatalf("body %s", body)
+	}
+
+	// A restarted UI reads the same lines: since is the earliest event again, not the restart.
+	restarted := xdsHarness(t, setup{collected: feed.store.Snapshot}, rejectCaptures(t, "v2.4.7"), nackWorld()...)
+	f = xdsFinding(restarted.at(t, testutil.Now.Add(time.Minute)), "infra", "nack")
+	if !f.Since.Equal(first) {
+		t.Fatalf("since after a restart %v, want %v", f.Since, first)
+	}
+
+	// Per install: this install reads no logs although another does; since stays.
+	feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateNoParser}, "kgw2.kgateway": {State: ctrllogs.StateOn, Events: []ctrllogs.Event{rejectLine(first, "nack", clusterType, computed.LogClassTLS)}}})
+	f = xdsFinding(restarted.at(t, testutil.Now.Add(time.Minute)), "infra", "nack")
+	if ev := xdsFacts(t, f); ev.ControllerLogs != health.LogsNotRead || ev.LogEvents != nil || !f.Since.Equal(first) {
+		t.Fatalf("not read: %+v since %v", ev, f.Since)
+	}
+	if body := string(wire(t, restarted.srv, healthPath)); !strings.Contains(body, `"controllerLogs": "not-read"`) {
+		t.Fatalf("body %s", body)
+	}
+
+	// Logs off: no collector value at all, never an empty read.
+	off := xdsHarness(t, setup{}, rejectCaptures(t, "v2.4.7"), nackWorld()...)
+	if ev := xdsFacts(t, xdsFinding(off.at(t, testutil.Now), "infra", "nack")); ev.ControllerLogs != health.LogsNotRead || ev.LogEvents != nil {
+		t.Fatalf("logs off: %+v", ev)
+	}
+}
+
+// namerRules maps Envoy names to objects, like a rule set with a verified naming function.
+type namerRules struct {
+	computed.Rules
+	m map[string]objects.Ref
+}
+
+func (n namerRules) Object(name string) (objects.Ref, bool) {
+	r, ok := n.m[name]
+	return r, ok
+}
+
+// A log name the rule set maps to an object is filtered as that object (§14):
+// a caller who may not view the Service loses the name, keeps the class, and
+// the rest of the evidence stays.
+func TestXDSLogNamesFilteredAsTheirObjects(t *testing.T) {
+	svc := objects.Ref{Kind: "Service", Namespace: "shop", Name: "httpbin-nack"}
+	rules := func(v string) computed.Selection {
+		s := rulesets.Select(v)
+		s.Rules = namerRules{Rules: s.Rules, m: map[string]objects.Ref{knownName: svc}}
+		return s
+	}
+	for _, tc := range []struct {
+		name  string
+		authz Authorizer
+		names []string
+	}{
+		{"visible", nil, []string{knownName}},
+		{"hidden", AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != svc }), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			feed := newLogFeed()
+			feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+				rejectLine(testutil.Now.Add(-time.Minute), "nack", clusterType, computed.LogClassTLS, knownName)}}})
+			h := xdsHarness(t, setup{collected: feed.store.Snapshot, rulesFor: rules, authz: tc.authz}, rejectCaptures(t, "v2.4.7"), nackWorld()...)
+			f := xdsFinding(h.at(t, testutil.Now), "infra", "nack")
+			if f.EvidenceRestricted {
+				t.Fatal("a hidden name restricts the whole evidence")
+			}
+			ev := xdsFacts(t, f)
+			if len(ev.LogEvents) != 1 || !slices.Equal(ev.LogEvents[0].EnvoyResources, tc.names) || ev.LogEvents[0].Classes[0] != computed.LogClassTLS {
+				t.Fatalf("log events %+v, want names %v", ev.LogEvents, tc.names)
+			}
+			detail := string(wire(t, h.srv, findingsBase+"/"+f.ID))
+			if strings.Contains(detail, knownName) != (tc.names != nil) {
+				t.Fatalf("finding detail %s", detail)
+			}
+		})
+	}
+}
+
+// 019 on the controller carries the panic's class and top frame from the
+// previous container, dated when the UI read it, and since is that time when
+// earlier. A panic read before the window stays out; logs off say not read.
+func TestPanicTopFrameAtTheAPI(t *testing.T) {
+	restart := testutil.Now.Add(-time.Minute)
+	readAt := restart.Add(20 * time.Second)
+	panicLine := func(at time.Time, frame string) ctrllogs.Event {
+		return ctrllogs.Event{Time: at.UTC(), Marker: "panic: ", Class: computed.LogClassPanic, Frame: frame}
+	}
+	for _, tc := range []struct {
+		name  string
+		logs  *ctrllogs.InstallLogs
+		panic *health.PanicFacts
+		state string
+		since time.Time
+	}{
+		// A frameless panic read with it, such as one past the 8-line window, does not hide the frame.
+		{"panic read", &ctrllogs.InstallLogs{State: ctrllogs.StateOn, Events: []ctrllogs.Event{panicLine(testutil.Now.Add(-time.Hour), "old.F"), panicLine(readAt, "main.run"),
+			panicLine(readAt, "")}},
+			&health.PanicFacts{Class: computed.LogClassPanic, Frame: "main.run", ReadAt: readAt}, health.LogsRead, readAt},
+		{"no panic in the window", &ctrllogs.InstallLogs{State: ctrllogs.StateOn, Events: []ctrllogs.Event{panicLine(testutil.Now.Add(-time.Hour), "old.F")}},
+			nil, health.LogsRead, testutil.Now},
+		{"logs off", nil, nil, health.LogsNotRead, testutil.Now},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := setup{}
+			if tc.logs != nil {
+				feed := newLogFeed()
+				feed.publish(ctrllogs.Logs{logInstall: *tc.logs})
+				s.collected = feed.store.Snapshot
+			}
+			h := newHarness(t, s, procWorld(container(corev1.ContainerStatus{State: runningSince(testutil.Old.Time)}), nil)...)
+			h.at(t, testutil.Now)
+			p := h.ctrlPod(t)
+			container(corev1.ContainerStatus{RestartCount: 1, State: runningSince(restart), LastTerminationState: exitedAt("Error", 2, restart)})(p)
+			h.updatePod(t, p)
+			f := findingOf(h.at(t, testutil.Now), health.CodeProcessRestarting)
+			if f == nil {
+				t.Fatal("no 019")
+			}
+			ev := processFacts(t, f)
+			if !reflect.DeepEqual(ev.Panic, tc.panic) || ev.ControllerLogs != tc.state || ev.Pod != "kgateway-0" || !f.Since.Equal(tc.since) {
+				t.Fatalf("019 since %v, evidence %+v panic %+v; want panic %+v, logs %s, since %v", f.Since, ev, ev.Panic, tc.panic, tc.state, tc.since)
+			}
+		})
+	}
+}
+
+// 021 on a Gateway carries the deployer's errors for it in the last 15 min, one
+// per class and object with the latest time, newest first. An object the caller
+// may not view is left out on its own (§14); a 021 without a waiting Pod still
+// carries them.
+func TestDeployerErrorsAtTheAPI(t *testing.T) {
+	deployment := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "infra", Name: "edge"}
+	deployerLine := func(at time.Time, gw, class string, obj *objects.Ref) ctrllogs.Event {
+		return ctrllogs.Event{Time: at.UTC(), Marker: "error handling ", Gateway: gwRef("infra", gw), Class: class, Object: obj}
+	}
+	feed := newLogFeed()
+	feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+		deployerLine(testutil.Now.Add(-20*time.Minute), "edge", computed.LogClassRender, nil), // before the window
+		deployerLine(testutil.Now.Add(-2*time.Minute), "edge", computed.LogClassApply, &deployment),
+		deployerLine(testutil.Now.Add(-time.Minute), "edge", computed.LogClassApply, &deployment),
+		deployerLine(testutil.Now.Add(-50*time.Second), "nack", computed.LogClassApply, nil), // another Gateway
+		deployerLine(testutil.Now.Add(-30*time.Second), "edge", computed.LogClassNoValidPorts, nil),
+		{Time: testutil.Now.Add(-10 * time.Second), Marker: "per-client inputs not ready; deferring snapshot", Gateway: gwRef("infra", "edge")},
+	}}})
+	all := []health.DeployerError{
+		{Class: computed.LogClassNoValidPorts, Last: testutil.Now.Add(-30 * time.Second)},
+		{Class: computed.LogClassApply, Object: &deployment, Last: testutil.Now.Add(-time.Minute)},
+	}
+	for _, tc := range []struct {
+		name    string
+		waiting bool
+		authz   Authorizer
+		want    []health.DeployerError
+	}{
+		{"waiting Pod", true, nil, all},
+		{"no waiting Pod", false, nil, all},
+		{"hidden Deployment", true, AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != deployment }), all[:1]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := edgeProxy(1, 1)
+			d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
+			pods := []*corev1.Pod{edgePod(d, "edge-old", true, corev1.ContainerStatus{State: runningSince(testutil.Old.Time)})}
+			if tc.waiting {
+				pods = append(pods, edgePod(d, "edge-new", false, corev1.ContainerStatus{State: waiting("ImagePullBackOff")}))
+			}
+			h := newHarness(t, setup{proxyPods: true, collected: feed.store.Snapshot, authz: tc.authz}, procWorld(nil, d, pods...)...)
+			f := findingOf(h.at(t, testutil.Now), health.CodeRolloutStuck)
+			if f == nil || f.EvidenceRestricted {
+				t.Fatalf("021 %+v", f)
+			}
+			ev := processFacts(t, f)
+			if !reflect.DeepEqual(ev.Deployer, tc.want) || ev.ControllerLogs != health.LogsRead || (ev.Pod == "edge-new") != tc.waiting {
+				t.Fatalf("021 evidence %+v deployer %+v, want %+v", ev, ev.Deployer, tc.want)
 			}
 		})
 	}

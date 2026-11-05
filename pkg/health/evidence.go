@@ -16,14 +16,45 @@ type Evidence interface {
 // EvidenceProcess is the kind of ProcessEvidence.
 const EvidenceProcess = "process"
 
-// ProcessEvidence is one Pod's facts behind KGWUI-005, 006 and 019–021.
+// ProcessEvidence is one Pod's facts behind KGWUI-005, 006 and 019–021. Pod
+// is empty on a 021 whose only facts come from the controller log.
 type ProcessEvidence struct {
-	Pod string `json:"pod"`
+	Pod string `json:"pod,omitempty"`
 	// Restarts are the restarts observed in the window; nil when none was observed.
 	Restarts    *int32            `json:"restarts,omitempty"`
 	Termination *TerminationFacts `json:"termination,omitempty"`
 	Waiting     string            `json:"waiting,omitempty"`
 	Probe       *ProbeFacts       `json:"probe,omitempty"`
+	// ControllerLogs says whether the controller log was read, on the codes it informs (019, 021).
+	ControllerLogs string `json:"controllerLogs,omitempty"`
+	// Panic is the controller's last panic in the window, from the previous container's log.
+	Panic *PanicFacts `json:"panic,omitempty"`
+	// Deployer are the deployer errors for the Gateway in the window, newest first.
+	Deployer []DeployerError `json:"deployer,omitempty"`
+}
+
+// Whether an install's controller log was read (design §8.9). Not read is
+// never "nothing found": the log events are then absent, not empty.
+const (
+	LogsRead    = "read"
+	LogsNotRead = "not-read"
+)
+
+// PanicFacts are a Go panic's class and top frame. A trace has no time, so
+// ReadAt is when the UI read the previous container's log.
+type PanicFacts struct {
+	Class  string    `json:"class"`
+	Frame  string    `json:"frame,omitempty"`
+	ReadAt time.Time `json:"readAt"`
+}
+
+// DeployerError is one kind of deployer error on a Gateway: its class, the
+// object it names when the UI knows it, and when it was last logged.
+type DeployerError struct {
+	Class string `json:"class"`
+	// Object is filtered on its own for the caller (design §14).
+	Object *objects.Ref `json:"object,omitempty"`
+	Last   time.Time    `json:"last"`
 }
 
 // TerminationFacts are how a process last ended; never its message.
@@ -112,6 +143,21 @@ type XDSRejectsEvidence struct {
 	// RecentlyChanged are objects on the Gateway changed shortly before the first
 	// reject, newest first. Not in Finding.Evidence: each is authorized on its own (§14 rule 14).
 	RecentlyChanged []objects.Ref `json:"recentlyChanged,omitempty"`
+	// ControllerLogs says whether the controller log was read; LogEvents are absent when not.
+	ControllerLogs string `json:"controllerLogs"`
+	// LogEvents are the log's rejects per rejected type, one per type whichever replica logged it.
+	LogEvents []XDSLogEvent `json:"logEvents,omitempty"`
+}
+
+// XDSLogEvent is one rejected type's "xds error" lines: the earliest, the
+// error classes and the Envoy names known from proxy stats.
+type XDSLogEvent struct {
+	TypeURL        string    `json:"typeUrl"`
+	Since          time.Time `json:"since"`
+	Classes        []string  `json:"classes"`
+	EnvoyResources []string  `json:"envoyResources,omitempty"`
+	// Objects are the objects the rule set maps names to; each name is filtered as its object (§14). Never serialised.
+	Objects map[string]objects.Ref `json:"-"`
 }
 
 // ProxyRejects is one proxy Pod's rejects observed per xDS type.

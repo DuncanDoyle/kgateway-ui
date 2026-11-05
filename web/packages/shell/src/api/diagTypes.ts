@@ -81,14 +81,34 @@ export interface ProbeFacts {
   last: string;
   historyUnknown?: boolean;
 }
-/** One Pod's facts behind KGWUI-005, 006 and 019–021; restarts are those observed in the window. */
+/** Whether the install's controller log was read; not read is never "nothing found". */
+export type ControllerLogs = "read" | "not-read";
+/** A Go panic from the previous container's log; a trace has no time, so readAt is when the UI read it. */
+export interface PanicFacts {
+  class: string;
+  frame?: string;
+  readAt: string;
+}
+/** One kind of deployer error on a Gateway: its class, the object it names when visible, and when last logged. */
+export interface DeployerError {
+  class: string;
+  object?: Ref;
+  last: string;
+}
+/**
+ * One Pod's facts behind KGWUI-005, 006 and 019–021; restarts are those observed in the window. pod is absent on a
+ * 021 whose only facts come from the controller log; deployer is newest first.
+ */
 export interface ProcessEvidence {
   kind: "process";
-  pod: string;
+  pod?: string;
   restarts?: number;
   termination?: TerminationFacts;
   waiting?: string;
   probe?: ProbeFacts;
+  controllerLogs?: ControllerLogs;
+  panic?: PanicFacts;
+  deployer?: DeployerError[];
 }
 /** The Pods running one version: the first few names, and total counts them all. */
 export interface VersionPods {
@@ -121,7 +141,17 @@ export interface ProxyTypeRejects {
   envoyResources?: string[];
   envoyResourcesTruncated?: boolean;
 }
-/** KGWUI-001: rejected types, the Gateway's proxies, and visible objects changed shortly before the first reject. */
+/** One rejected type's controller log lines, whichever replica logged them: the earliest, classes, and visible Envoy names. */
+export interface XDSLogEvent {
+  typeUrl: string;
+  since: string;
+  classes: string[];
+  envoyResources?: string[];
+}
+/**
+ * KGWUI-001: rejected types, the Gateway's proxies, visible objects changed shortly before the first reject, and the
+ * controller log's events, absent when the log was not read.
+ */
 export interface XDSRejectsEvidence {
   kind: "xds-rejects";
   types: XDSTypeRejects[];
@@ -129,6 +159,8 @@ export interface XDSRejectsEvidence {
   statusSaysHealthy: boolean;
   proxyStats?: { pod: string; types: ProxyTypeRejects[] }[];
   recentlyChanged?: LinkedRef[];
+  controllerLogs: ControllerLogs;
+  logEvents?: XDSLogEvent[];
 }
 /** One Ready proxy's Envoy stats behind KGWUI-025 or 026; an absent field was not reported. */
 export interface ProxyPodStats {

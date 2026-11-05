@@ -163,9 +163,36 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 				out.RecentlyChanged = append(out.RecentlyChanged, l.linked(r))
 			}
 		}
+		// A name the rule set maps to an object is filtered as that object (§14).
+		out.LogEvents = slices.Clone(ev.LogEvents)
+		for i := range out.LogEvents {
+			le := &out.LogEvents[i]
+			le.Since = wireTime(le.Since)
+			le.EnvoyResources = slices.DeleteFunc(slices.Clone(le.EnvoyResources), func(n string) bool {
+				o, mapped := le.Objects[n]
+				return mapped && !v.can(o)
+			})
+			if len(le.EnvoyResources) == 0 {
+				le.EnvoyResources = nil
+			}
+			le.Objects = nil
+		}
 		return out
 	case *health.ProcessEvidence:
 		out := *ev
+		if p := ev.Panic; p != nil {
+			c := *p
+			c.ReadAt = wireTime(c.ReadAt)
+			out.Panic = &c
+		}
+		// Each deployer error's object is filtered on its own (§14).
+		out.Deployer = nil
+		for _, d := range ev.Deployer {
+			if d.Object == nil || v.can(*d.Object) {
+				d.Last = wireTime(d.Last)
+				out.Deployer = append(out.Deployer, d)
+			}
+		}
 		if t := ev.Termination; t != nil {
 			c := *t
 			c.At = wireTime(c.At)

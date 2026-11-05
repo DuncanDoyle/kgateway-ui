@@ -11,6 +11,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -145,12 +146,20 @@ func GuardCollectedWorlds(t *testing.T) map[string]GuardWorld {
 		return collect.Snapshot{Values: map[string]collect.Value{proxystats.Key: {State: collect.OK, Data: st, Fingerprint: 3, At: testutil.Now}}}
 	}
 	edge := testutil.GwRef("infra", "edge").Ref()
+	deployment := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "infra", Name: "edge"}
+	logs := value(proxystats.Gateway{Gateway: edge, Observed: true, Pods: pods})
+	logs.Values[ctrllogs.Key] = collect.Value{State: collect.OK, Fingerprint: 5, At: testutil.Now, Data: ctrllogs.Logs{"kgw.kgateway": {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+		{Time: since.Add(-time.Minute), Gateway: edge, TypeURL: "type.googleapis.com/envoy.config.listener.v3.Listener", Class: computed.LogClassBind},
+		{Time: since, Gateway: edge, Class: computed.LogClassApply, Object: &deployment},
+		{Time: since, Class: computed.LogClassPanic, Frame: "main.run"},
+	}}}}
 	worlds := map[string]collect.Snapshot{
-		"stats":         value(proxystats.Gateway{Gateway: edge, Observed: true, Pods: pods}),
-		"not observed":  value(proxystats.Gateway{Gateway: edge}),
-		"stats off":     {Values: map[string]collect.Value{proxystats.Key: {State: collect.Off, Reason: proxystats.OffReason, At: testutil.Now}}},
-		"stats failing": {Values: map[string]collect.Value{proxystats.Key: {State: collect.Failing, Reason: "collector stopped", At: testutil.Now}}},
-		"stats absent":  {},
+		"stats":          value(proxystats.Gateway{Gateway: edge, Observed: true, Pods: pods}),
+		"stats and logs": logs,
+		"not observed":   value(proxystats.Gateway{Gateway: edge}),
+		"stats off":      {Values: map[string]collect.Value{proxystats.Key: {State: collect.Off, Reason: proxystats.OffReason, At: testutil.Now}}},
+		"stats failing":  {Values: map[string]collect.Value{proxystats.Key: {State: collect.Failing, Reason: "collector stopped", At: testutil.Now}}},
+		"stats absent":   {},
 	}
 	yes := true
 	out := map[string]GuardWorld{}

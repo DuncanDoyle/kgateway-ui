@@ -12,6 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
@@ -51,10 +54,11 @@ type xdsCheck struct{}
 func (xdsCheck) Name() string { return "xDS rejects" }
 
 // Inputs implements Check: no Clock, as holds and staleness end through
-// WakeAt; Deployments give proxy counts, proxy stats per-Pod evidence.
+// WakeAt; Deployments give proxy counts, proxy stats per-Pod evidence and
+// controller logs the rejects' log events.
 func (xdsCheck) Inputs() InputSet {
 	return InputSet{Owned: true, Metrics: true, Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}},
-		Collected: []string{proxyStatsKey}}
+		Collected: []string{proxyStatsKey, ctrllogs.Key}}
 }
 
 // xdsState is the check's Store value: controller Pods and their last change,
@@ -127,9 +131,11 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	streams := rejectStreams(m.PerPod)
 	var proxies map[objects.Ref]*proxystats.Gateway
 	var changes map[objects.Ref][]change
+	lg := xdsLogs{start: cur.start, slack: in.MetricsMaxAge, namer: in.Rules.EnvoyNamer()}
 	if len(m.Rejects) > 0 {
 		proxies = proxyGateways(ctx)
 		changes = changesOn(in, m.Rejects, cur.start)
+		lg.events, lg.state = installLogs(ctx)
 	}
 	var fs []Finding
 	held := false
@@ -138,7 +144,7 @@ func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		prev := old.gateways[key]
 		if m.Rejects[key] > 0 {
 			g := &xdsGateway{}
-			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth, proxies, changes[*ref(gw)]))
+			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth, proxies, changes[*ref(gw)], lg))
 			cur.keep(key, g)
 			continue
 		}
@@ -189,19 +195,20 @@ func (s *xdsState) keep(k ctrlmetrics.GatewayKey, g *xdsGateway) {
 }
 
 // xdsFinding is 001 on gw. A Gateway first seen now takes its since entry as
-// first seen, so types and the finding's since agree (design §5.1).
+// first seen, so types and the finding's since agree (design §5.1); a log
+// line of the reject lowers both, and the lowered since outlives the line.
 func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.GatewayKey, prev, g *xdsGateway,
-	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64, proxies map[objects.Ref]*proxystats.Gateway, changes []change,
+	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64, proxies map[objects.Ref]*proxystats.Gateway, changes []change, lg xdsLogs,
 ) Finding {
 	in := ctx.Input
 	r := ref(gw)
+	sinceKey := sincePrefix + FindingID(in.Install.ID(), CodeXDSRejected, r, nil)
 	first := in.Now
-	if prev == nil {
-		if t, seen := ctx.State.Get(sincePrefix + FindingID(in.Install.ID(), CodeXDSRejected, r, nil)); seen {
-			first, _ = t.(time.Time)
-		}
+	stored, hasSince := ctx.State.Get(sinceKey)
+	if prev == nil && hasSince {
+		first, _ = stored.(time.Time)
 	}
-	ev := &XDSRejectsEvidence{Types: make([]XDSTypeRejects, 0, len(types)), StatusSaysHealthy: statusSaysHealthy(in, gw)}
+	ev := &XDSRejectsEvidence{Types: make([]XDSTypeRejects, 0, len(types)), StatusSaysHealthy: statusSaysHealthy(in, gw), ControllerLogs: lg.state}
 	g.types = make(map[string]xdsType, len(types))
 	var pods []string
 	var detail strings.Builder
@@ -214,6 +221,10 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 			} else {
 				ty = xdsType{firstSeen: in.Now}
 			}
+		}
+		if le, ok := lg.event(*r, t, ty.firstSeen); ok {
+			ty.firstSeen = minTime(ty.firstSeen, le.Since)
+			ev.LogEvents = append(ev.LogEvents, le)
 		}
 		g.types[t] = ty
 		slices.Sort(s.pods)
@@ -253,8 +264,90 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 			onset = t.FirstSeen
 		}
 	}
+	// Only a log line moves onset before the since entry; identify reads the entry.
+	if old, _ := stored.(time.Time); onset.Before(in.Now) && (!hasSince || onset.Before(old)) {
+		ctx.State.Set(sinceKey, onset)
+	}
 	ev.RecentlyChanged = recentlyChanged(changes, onset)
 	return f
+}
+
+// xdsLogs are the controller log events 001 reads for one install.
+type xdsLogs struct {
+	events []ctrllogs.Event
+	state  string
+	// start is the check's first run: before it the UI saw no metrics, so a line then may begin the reject.
+	start time.Time
+	// slack is how long before first seen a line still belongs to the reject: one scrape's lag.
+	slack time.Duration
+	namer computed.EnvoyNamer
+}
+
+// event is the one log event of gw's rejected type t (no type URL prefix),
+// whichever replica logged its lines: lines from firstSeen less slack on, or
+// from before start. False when there is none.
+func (lg xdsLogs) event(gw objects.Ref, t string, firstSeen time.Time) (XDSLogEvent, bool) {
+	from := firstSeen.Add(-lg.slack)
+	var out XDSLogEvent
+	for _, e := range lg.events {
+		if e.Gateway != gw || strings.TrimPrefix(e.TypeURL, xdsTypePrefix) != t || e.TypeURL == "" || e.Time.Before(from) && !e.Time.Before(lg.start) {
+			continue
+		}
+		if out.TypeURL == "" || e.Time.Before(out.Since) {
+			out.TypeURL, out.Since = t, e.Time
+		}
+		out.Classes = append(out.Classes, e.Class)
+		for _, n := range e.Names {
+			out.EnvoyResources = append(out.EnvoyResources, n)
+			if o, mapped := lg.object(n); mapped {
+				if out.Objects == nil {
+					out.Objects = map[string]objects.Ref{}
+				}
+				out.Objects[n] = o
+			}
+		}
+	}
+	if out.TypeURL == "" {
+		return XDSLogEvent{}, false
+	}
+	slices.Sort(out.Classes)
+	out.Classes = slices.Compact(out.Classes)
+	slices.Sort(out.EnvoyResources)
+	out.EnvoyResources = slices.Compact(out.EnvoyResources)
+	return out, true
+}
+
+// object maps Envoy name n to its object through the rule set's naming function.
+func (lg xdsLogs) object(n string) (objects.Ref, bool) {
+	if lg.namer == nil {
+		return objects.Ref{}, false
+	}
+	return lg.namer.Object(n)
+}
+
+// xdsTypePrefix is the prefix the metrics strip from a type URL and log events keep.
+const xdsTypePrefix = "type.googleapis.com/"
+
+// installLogs is the install's derived controller log events, oldest first,
+// and LogsRead; nil and LogsNotRead unless the install's log reading is on.
+func installLogs(ctx RunContext) ([]ctrllogs.Event, string) {
+	v, have := ctx.Collected(ctrllogs.Key)
+	if !have || v.State != collect.OK {
+		return nil, LogsNotRead
+	}
+	logs, _ := v.Data.(ctrllogs.Logs)
+	l, ok := logs[ctx.Install.ID()]
+	if !ok || l.State != ctrllogs.StateOn {
+		return nil, LogsNotRead
+	}
+	return l.Events, LogsRead
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }
 
 // change is an object on a rejecting Gateway and when its generation was first seen.
