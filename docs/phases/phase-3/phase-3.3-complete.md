@@ -35,7 +35,7 @@ Done: `phase-3.3-wording.md`. 96 strings (S472–S567), five options each, chose
 ## Decisions
 - D-053: `pkg/setup` and `ctrlmetrics.Static` for one-shot callers (user, 2026-11-04).
 - D-054: retained heap over 2.1 raised to ≤ 40 MiB (user, 2026-11-05).
-- D-055: the as-built deviations from the design, items 1–13 confirmed by the user on 2026-11-05. **Item 14** (R102: the newest panic keeps a reserved slot in the capped event store) was added at the close and awaits the user's confirmation.
+- D-055: the as-built deviations from the design, confirmed by the user on 2026-11-05; item 14 (R102: the newest panic keeps a reserved slot in the capped event store), added at the close, confirmed the same day.
 - The user confirmed rulings R77, R79, R82, R84, R94/R95 and R101 on 2026-11-05, and kept the defaults for R96 (sync-only publishes, revisit in 3.4), 018 outside the analyzer-stage budget, and S475 (R110).
 
 ## Waivers
