@@ -21,12 +21,17 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
-// Findings list parameters (design §13.1); findingsSingle may appear once.
+// Findings list parameters (design §13.1); findingsSingle may appear once. The
+// grouped view (view=groups, design §17.1) takes only groupsParams.
 var (
 	findingsFilters = []string{"severity", "code", "kind", "namespace", "group", "q"}
-	findingsParams  = append(slices.Clone(findingsFilters), "sort", "limit", "cursor")
-	findingsSingle  = []string{"group", "q", "sort", "limit", "cursor"}
+	findingsParams  = append(slices.Clone(findingsFilters), "sort", "limit", "cursor", "view")
+	findingsSingle  = []string{"group", "q", "sort", "limit", "cursor", "view"}
+	groupsParams    = []string{"severity", "code", "q", "limit", "cursor", "view"}
 )
+
+// viewGroups is the view parameter of the grouped findings view.
+const viewGroups = "groups"
 
 // affectedLimit is the finding detail's affected page size (design §13.1).
 const affectedLimit = 50
@@ -43,6 +48,7 @@ type findingsQuery struct {
 	kinds      []objects.GroupKind
 	namespaces []string
 	group, q   string // q is lower-cased
+	groups     bool   // view=groups
 	sort       diagnose.Sort
 	limit      int
 	cursor     string
@@ -62,6 +68,17 @@ func parseFindingsQuery(r *http.Request) (findingsQuery, error) {
 		}
 		if len(vals[name]) > 1 && slices.Contains(findingsSingle, name) {
 			return q, badParam("parameter %q given more than once", name)
+		}
+	}
+	if vals.Has("view") {
+		if v := vals.Get("view"); v != viewGroups {
+			return q, badParam("view %q: want groups", v)
+		}
+		q.groups = true
+		for _, name := range slices.Sorted(maps.Keys(vals)) {
+			if !slices.Contains(groupsParams, name) {
+				return q, badParam("parameter %q: the groups view takes severity, code, q, limit and cursor", name)
+			}
 		}
 	}
 	for _, v := range vals["severity"] {
@@ -194,6 +211,10 @@ func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
 		ts := ix.Text(fs)
 		match = func(k int) bool { return q.match(v, &fs[k], &ts[k]) }
 	}
+	if q.groups {
+		h.findingGroups(w, p, i, v, &q, match)
+		return
+	}
 	pg, err := ix.Page(fs, i.Resolved.ID(), q.sort, q.limit, q.cursor, match)
 	if err != nil {
 		fail(w, err)
@@ -205,6 +226,44 @@ func (h *handler) findings(w http.ResponseWriter, r *http.Request) {
 		items = append(items, findingRow(v, l, &fs[k]))
 	}
 	writeJSON(w, Page[FindingRow]{Install: i.Resolved.ID(), Items: items, Total: pg.Total, Next: pg.Next, Prev: pg.Prev,
+		CollectedAt: wireTime(p.ConfirmedAt)})
+}
+
+// findingGroups writes the page of i's groups for q (design §5.2, §17.1): a group matches
+// when one member passes match, or q names its cause and one member passes the other
+// filters. A group whose cause the caller cannot view matches q by identity only (§14 rule 17).
+func (h *handler) findingGroups(w http.ResponseWriter, p *engine.Published, i *engine.InstallModel, v *view, q *findingsQuery, match func(k int) bool) {
+	d, fs := diagnosis(i), i.Health.Findings
+	// d.Rank lists each group's members in group order, so a group's first is its top member.
+	tops := make([]int, len(d.Groups))
+	for k, off := 0, 0; k < len(d.Groups); k++ {
+		tops[k], off = off, off+len(d.Groups[k].Members)
+	}
+	noQ := *q
+	noQ.q = ""
+	pass := func(m int) bool { return noQ.match(v, &fs[m], nil) }
+	matchGroup := func(k int) bool {
+		g := &d.Groups[k]
+		if q.q == "" || g.Cause != nil && containsLower(g.Cause.Namespace+"/"+g.Cause.Name, q.q) {
+			return slices.ContainsFunc(g.Members, pass)
+		}
+		if g.Cause != nil && !v.can(*g.Cause) {
+			ts := d.Index.Text(fs)
+			return slices.ContainsFunc(g.Members, func(m int) bool { return pass(m) && strings.Contains(ts[m].Identity, q.q) })
+		}
+		return slices.ContainsFunc(g.Members, match)
+	}
+	pg, err := d.Index.PageGroups(i.Resolved.ID(), q.limit, q.cursor, matchGroup)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	l, in := linkerFor(v, p.Model, i), stepsInput(p.Model, i)
+	items := make([]GroupRow, 0, len(pg.Items))
+	for _, k := range pg.Items {
+		items = append(items, h.groupRow(v, l, &d.Groups[k], fs, d.Rank[tops[k]], in))
+	}
+	writeJSON(w, Page[GroupRow]{Install: i.Resolved.ID(), Items: items, Total: pg.Total, Next: pg.Next, Prev: pg.Prev,
 		CollectedAt: wireTime(p.ConfirmedAt)})
 }
 

@@ -169,8 +169,8 @@ type Sort struct {
 	Desc bool
 }
 
-// Page is one page of findings: indexes into the report's findings. Total
-// counts every finding that matches, not only this page.
+// Page is one page of findings or groups: indexes into the report's findings,
+// or the diagnosis groups. Total counts every item that matches, not only this page.
 type Page struct {
 	Items      []int
 	Total      int
@@ -378,15 +378,40 @@ func (ix *Index) Page(fs []health.Finding, install string, s Sort, limit int, cu
 	if !ok {
 		return Page{}, fmt.Errorf("%w: sort %q", explore.ErrBadQuery, s.Key)
 	}
+	key := func(k int) (rankKey, string) { return ix.keyOf(fs, order[k]) }
+	return page(install, s, len(order), key, limit, cursor, func(k int) int { return int(order[k]) }, match)
+}
+
+// SortGroups is the sort of group pages: rank order, which has no descending form.
+const SortGroups = "groups"
+
+// groupKey is group g's rank key: compareGroups' keys, with the group's ID as its own ID.
+func groupKey(g *Group) rankKey {
+	k := rankKey{Unranked: !g.Ranked, GroupSev: sevRank(g.Severity), Class: g.Class, Affected: len(g.Affected), Group: g.ID, ID: g.ID}
+	if g.Since != nil {
+		k.GroupSince, k.HasGroupSince = stampOf(*g.Since), true
+	}
+	return k
+}
+
+// PageGroups returns up to limit groups that match, as indexes into the
+// diagnosis groups in rank order, after or before cursor. Cursors are sealed
+// as findings cursors are, under their own sort, so neither list opens the other's.
+func (ix *Index) PageGroups(install string, limit int, cursor string, match func(g int) bool) (Page, error) {
+	key := func(k int) (rankKey, string) { return groupKey(&ix.groups[k]), "" }
+	return page(install, Sort{Key: SortGroups}, len(ix.groups), key, limit, cursor, func(k int) int { return k }, match)
+}
+
+// page pages n items in s's order: key gives position k's ordering tuple, item
+// its index, and match filters items. See Page for the cursor rules.
+func page(install string, s Sort, n int, key func(k int) (rankKey, string), limit int, cursor string, item func(k int) int, match func(i int) bool) (Page, error) {
 	if limit < 1 {
 		return Page{}, fmt.Errorf("%w: limit %d", explore.ErrBadQuery, limit)
 	}
-	n := len(order)
-	at := func(k int) int32 { return order[k] } // the finding at position k of s
-	// ms are the positions of the matching findings, ascending.
+	// ms are the positions of the matching items, ascending.
 	ms := make([]int, 0, n)
 	for k := range n {
-		if match == nil || match(int(at(k))) {
+		if match == nil || match(item(k)) {
 			ms = append(ms, k)
 		}
 	}
@@ -400,8 +425,8 @@ func (ix *Index) Page(fs []health.Finding, install string, s Sort, limit int, cu
 		cur = &w
 		// a is the anchor's insertion point: the first position not before it.
 		a, found := sort.Find(n, func(k int) int {
-			key, code := ix.keyOf(fs, at(k))
-			return compareIn(s, w.K, w.Code, key, code)
+			kk, code := key(k)
+			return compareIn(s, w.K, w.Code, kk, code)
 		})
 		if w.B {
 			end = sort.SearchInts(ms, a)
@@ -416,11 +441,11 @@ func (ix *Index) Page(fs []health.Finding, install string, s Sort, limit int, cu
 	}
 	p := Page{Items: make([]int, 0, end-start), Total: len(ms)}
 	for _, k := range ms[start:end] {
-		p.Items = append(p.Items, int(at(k)))
+		p.Items = append(p.Items, item(k))
 	}
 	anchor := func(before bool, k int) string {
-		key, code := ix.keyOf(fs, at(k))
-		return encodeCursor(install, s, before, key, code)
+		kk, code := key(k)
+		return encodeCursor(install, s, before, kk, code)
 	}
 	switch {
 	case end > start:

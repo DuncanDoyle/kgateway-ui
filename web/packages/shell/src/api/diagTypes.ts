@@ -49,6 +49,8 @@ export interface FindingDetail {
   collectedAt: string;
 }
 export type FindingList = Page<FindingItem>;
+/** GET …/findings?view=groups: every group in rank order, a group listed when one member matches the filters. */
+export type GroupList = Page<GroupRow>;
 
 /** Typed evidence of a finding, tagged by kind (design §13.3, sub-phase 3.2). */
 export type Evidence =
@@ -216,7 +218,7 @@ export interface StatusProgressEvidence {
 }
 
 /**
- * One ranked group of "Needs attention", with its rank keys. class: 1 data plane, 2 processes, 3 traffic, 4 hygiene.
+ * One ranked group of "Needs attention" or the grouped findings view, with its rank keys. class: 1 data plane, 2 processes, 3 traffic, 4 hygiene.
  * code and title are the top member's. restricted: the cause is hidden; title is "" and there are no affected objects or steps.
  */
 export interface GroupRow {

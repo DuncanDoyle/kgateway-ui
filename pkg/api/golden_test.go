@@ -234,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 358
+	const want = 369
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -389,12 +389,14 @@ func wire(t *testing.T, srv *httptest.Server, path string) []byte {
 
 // TestGoldenFindings pins the findings list and detail bodies (Phase 3
 // design §13.3) over the Phase 1 golden world, for every caller and for one
-// who may not view shop/broken.
+// who may not view shop/broken, and the grouped view over the groups world.
 func TestGoldenFindings(t *testing.T) { runGolden(t, findingsCases(t)) }
 
 func findingsCases(t *testing.T) []goldenCase {
 	e, all := findingsWorld(t, nil)
 	_, some := findingsWorld(t, hideBroken)
+	_, groups := groupsWorld(t, nil)
+	_, groupsHidden := groupsWorld(t, hideCart)
 	id := func(name string) string {
 		for _, f := range e.Current().Model.Installs[0].Health.Findings {
 			if f.Resource != nil && f.Resource.Name == name {
@@ -409,6 +411,8 @@ func findingsCases(t *testing.T) []goldenCase {
 		{"findings-restricted", some, findingsBase + "?severity=error&sort=since.desc"},
 		{"finding-detail-other", all, findingsBase + "/" + id("denied")},
 		{"finding-detail-restricted", some, findingsBase + "/" + id("broken")},
+		{"findings-groups", groups, findingsBase + "?view=groups"},
+		{"findings-groups-restricted", groupsHidden, findingsBase + "?view=groups&severity=error"},
 	}
 }
 

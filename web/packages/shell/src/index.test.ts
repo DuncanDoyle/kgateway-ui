@@ -178,6 +178,7 @@ it("keeps the public export surface", () => {
         "GatewayProcesses",
         "GatewayRow",
         "GroupKind",
+        "GroupList",
         "GroupRow",
         "HealthReport",
         "HealthState",

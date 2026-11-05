@@ -15,6 +15,8 @@ import findingDetailVersionSkewRestrictedGolden from "../../../../../pkg/api/tes
 import findingDetailXdsRejectsGolden from "../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects.json";
 import findingDetailXdsRejectsRestrictedGolden from "../../../../../pkg/api/testdata/golden/finding-detail-xds-rejects-restricted.json";
 import findingsGolden from "../../../../../pkg/api/testdata/golden/findings.json";
+import findingsGroupsGolden from "../../../../../pkg/api/testdata/golden/findings-groups.json";
+import findingsGroupsRestrictedGolden from "../../../../../pkg/api/testdata/golden/findings-groups-restricted.json";
 import findingsRestrictedGolden from "../../../../../pkg/api/testdata/golden/findings-restricted.json";
 import gatewayDetailGolden from "../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import gatewayDetailDataPlaneGolden from "../../../../../pkg/api/testdata/golden/gateway-detail-data-plane.json";
@@ -91,6 +93,7 @@ import type {
   GatewayProcesses,
   GatewayRow,
   GroupKind,
+  GroupList,
   GroupRow,
   HealthReport,
   InstallHeader,
@@ -1108,6 +1111,8 @@ describe("types.ts matches the golden v1 wire format", () => {
     ["health-evidence-restricted", healthEvidenceRestrictedGolden.body satisfies Wide<HealthReport>, healthReport],
     ["findings", findingsGolden.body satisfies Wide<Page<FindingItem>>, page(findingItem)],
     ["findings-restricted", findingsRestrictedGolden.body satisfies Wide<Page<FindingItem>>, page(findingItem)],
+    ["findings-groups", findingsGroupsGolden.body satisfies Wide<GroupList>, page(groupRow)],
+    ["findings-groups-restricted", findingsGroupsRestrictedGolden.body satisfies Wide<GroupList>, page(groupRow)],
     ["finding-detail-other", findingDetailOtherGolden.body satisfies Wide<FindingDetail>, findingDetail],
     ["finding-detail-restricted", findingDetailRestrictedGolden.body satisfies Wide<FindingDetail>, findingDetail],
     ["refs", refsGolden.body satisfies Wide<TrailRefs>, trailRefs],

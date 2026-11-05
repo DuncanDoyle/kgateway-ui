@@ -4,6 +4,7 @@ package diagnose
 
 import (
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
@@ -233,7 +234,7 @@ func claim(f health.Finding, in Input, families []Family) (int, *objects.Ref, []
 
 // Families returns the families in design §5.2 table order; "Other" is last.
 func Families() []Family {
-	return []Family{dataPlane{}, replacedByPolicy{}, statusNotProgressing{}, processFamily{}, other{}}
+	return []Family{dataPlane{}, missingBackend{}, notPermitted{}, replacedByPolicy{}, statusNotProgressing{}, processFamily{}, other{}}
 }
 
 // dataPlane groups a Gateway's KGWUI-001. Its affected objects have a current
@@ -259,6 +260,66 @@ func (dataPlane) Affected(gs []Claimed, _ []health.Finding, in Input) [][]object
 	return out
 }
 
+// attributedRef returns the one ref an attributed KGWUI-013 or 014 names, with spec
+// defaults applied; it points into f's evidence, so a claim allocates nothing.
+func attributedRef(f health.Finding, code string) *health.RefLocation {
+	ev, ok := f.Facts.(*health.RefsEvidence)
+	if f.Code != code || f.Resource == nil || !ok || !ev.Attributed || len(ev.Candidates) != 1 {
+		return nil
+	}
+	return &ev.Candidates[0]
+}
+
+// memberResources returns, per group, its members' resources, sorted and deduplicated.
+func memberResources(gs []Claimed, fs []health.Finding) [][]objects.Ref {
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		for _, i := range g.Members {
+			if r := fs[i].Resource; r != nil && !slices.Contains(out[k], *r) {
+				out[k] = append(out[k], *r)
+			}
+		}
+		slices.SortFunc(out[k], objects.Ref.Compare)
+	}
+	return out
+}
+
+// missingBackend groups every route KGWUI-013 attributed to one backend by that
+// backend's identity (design §5.2); an unattributed 013 stays in "Other". Its routes are affected.
+type missingBackend struct{}
+
+func (missingBackend) Name() string { return "Missing backend" }
+
+func (missingBackend) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	c := attributedRef(f, health.CodeRefUnresolved)
+	if c == nil || !strings.HasPrefix(c.Path, "spec.rules[") {
+		return nil, nil, false
+	}
+	return &c.Ref, nil, true
+}
+
+func (missingBackend) Affected(gs []Claimed, fs []health.Finding, _ Input) [][]objects.Ref {
+	return memberResources(gs, fs)
+}
+
+// notPermitted groups every attributed KGWUI-014 by (from namespace, to namespace, to
+// group and kind), the shape one ReferenceGrant allows (design §5.2). Its referrers are affected.
+type notPermitted struct{}
+
+func (notPermitted) Name() string { return "Not permitted" }
+
+func (notPermitted) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	c := attributedRef(f, health.CodeRefNotPermitted)
+	if c == nil {
+		return nil, nil, false
+	}
+	return nil, []string{f.Resource.Namespace, c.Ref.Namespace, c.Ref.Group, c.Ref.Kind}, true
+}
+
+func (notPermitted) Affected(gs []Claimed, fs []health.Finding, _ Input) [][]objects.Ref {
+	return memberResources(gs, fs)
+}
+
 // replacedByPolicy groups every KGWUI-015 whose message names the same policy
 // (design §7.4); a 015 that names none stays in "Other". Its routes are affected.
 type replacedByPolicy struct{}
@@ -274,16 +335,7 @@ func (replacedByPolicy) Claim(f health.Finding, _ Input) (*objects.Ref, []string
 }
 
 func (replacedByPolicy) Affected(gs []Claimed, fs []health.Finding, _ Input) [][]objects.Ref {
-	out := make([][]objects.Ref, len(gs))
-	for k, g := range gs {
-		for _, i := range g.Members {
-			if r := fs[i].Resource; r != nil && !slices.Contains(out[k], *r) {
-				out[k] = append(out[k], *r)
-			}
-		}
-		slices.SortFunc(out[k], objects.Ref.Compare)
-	}
-	return out
+	return memberResources(gs, fs)
 }
 
 // statusNotProgressing groups KGWUI-018 with every KGWUI-003 warning of the
