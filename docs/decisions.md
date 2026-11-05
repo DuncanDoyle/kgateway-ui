@@ -959,7 +959,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Cut retained state to fit 32 MiB (not taken: about 0.2 MiB of savings found; the other gates already bound the pod's memory).
 
 ## D-055 — Sub-phase 3.3 as built: deviations from the design (2026-11-05, phase 3)
-**Status:** accepted by the user on 2026-11-05; rulings R79, R88, R94, R95, R101, R105 and R108 and the 3.3 task reviews. Amends design §5.2, §5.3, §7.5, §7.7, §8.9, §13.3, §17.2, §17.4 and the 3.3 row of §23
+**Status:** accepted by the user on 2026-11-05; rulings R79, R88, R94, R95, R101, R102, R105 and R108 and the 3.3 task reviews. Amends design §5.2, §5.3, §7.5, §7.7, §8.9, §13.3, §17.2, §17.4 and the 3.3 row of §23
 
 **Context:**
 - 3.3 shipped with the choices below, made while building it. Each is verified against the code.
@@ -978,6 +978,7 @@ Measured on the reference machine, 5 runs per world:
 11. §8.9, R105: "withheld" evidence expires 15 minutes after the last qualifying line.
 12. §17.4, Task 69: the grouped findings view drops the flat view's filters, and browser Back does not restore them.
 13. §23 (3.3 row), R79: `analyze -f` over files is not in 3.3. 3.3 delivers the analyzer over a cache snapshot, proven by the one-shot test (D-053, program edge E3).
+14. §8.9, R102: the newest panic keeps a reserved slot in the 1,000-event cap. When that panic is the oldest event, the next oldest is dropped instead, so newer events never evict it.
 
 **Consequences:** The design states the as-built behaviour. Offline snapshot semantics for `analyze -f` (served kinds, discovery, access, install) need a design before they are built. Changing the previous-container read is one constant.
 

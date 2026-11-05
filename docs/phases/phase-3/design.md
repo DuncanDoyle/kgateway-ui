@@ -449,7 +449,7 @@ The decisive data for a reject, Envoy's reason, is in the controller log: kgatew
 Rules **(our call)**:
 - Log text is never stored, logged by the UI, sent anywhere or returned by the API. After matching, only the fields above remain.
 - A name is kept only if it equals an Envoy resource name the UI already knows from that Gateway's proxy stats (§8.8). Any other extracted text is discarded and only the error class is kept, because a grammar alone admits a credential that looks like a name **(our call, Codex review 2026-11-01)**. With proxy stats off or failing, no names are kept. Envoy never creates a rejected cluster or listener, so a CDS or LDS reject name never appears in proxy stats: on a real cluster those rejects keep only the error class, and the name-keeping path is covered by unit tests only (D-055). An error class not on the list becomes `other`.
-- At most 1,000 derived events per install; the oldest are dropped.
+- At most 1,000 derived events per install; the oldest are dropped, except the newest panic, which keeps its slot (D-055).
 - When markers match but a parser fails 10 times in a row, the capability turns "not available: log format not recognised", so a format change never yields silent wrong output.
 - Derived events name objects, so the Authorizer rules apply (§14).
 - Availability: capability `controllerLogs`; `off`, `denied` or `failing` as for every Phase 3 input (§7.1).
