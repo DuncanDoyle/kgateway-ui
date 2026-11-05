@@ -22,6 +22,8 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/metadata"
+	metadatafake "k8s.io/client-go/metadata/fake"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
@@ -138,7 +140,11 @@ func world() []runtime.Object {
 	for _, ns := range []string{"kgw", "infra", "shop", "other", "global"} {
 		objs = append(objs, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: types.UID("ns/" + ns)}})
 	}
-	return append(objs, dep, pod)
+	// A kept Warning Event: its add makes the app recompute
+	// once the Events watch has read, as the other watches' adds do.
+	ev := &corev1.Event{ObjectMeta: metav1.ObjectMeta{Namespace: "kgw", Name: "kgateway-0.1", UID: "event/kgw/kgateway-0.1"}, Type: corev1.EventTypeWarning,
+		Reason: "FailedMount", InvolvedObject: corev1.ObjectReference{Kind: "Pod", Namespace: "kgw", Name: "kgateway-0", UID: pod.UID}, Count: 1}
+	return append(objs, dep, pod, ev)
 }
 
 // fakeClients serves every upstream kind at its first version, with objs in
@@ -195,14 +201,19 @@ func newOneShot(t *testing.T, ctx context.Context, objs []runtime.Object) *oneSh
 	t.Helper()
 	dyn, kube := fakeClients(t, objs)
 	clk := clocktesting.NewFakeClock(t0)
-	cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()},
+	cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t)},
 		setup.Options{MetricsInterval: time.Hour, Clock: clk}, extension.New())
 	if err != nil {
 		t.Fatal(err)
 	}
 	ca := cache.New(cfg.Cache)
 	ca.Start(ctx)
-	settle(t, ctx, ca.Settled)
+	settle(t, ctx, func() bool { return ca.Settled() && optionalSettled(ca.Snapshot()) })
+	for _, gvr := range optional {
+		if a := ca.Snapshot().Access[gvr]; !a.OK {
+			t.Fatalf("optional watch %v: %+v; want it read", gvr, a)
+		}
+	}
 	cfg.Engine.Snapshots = ca
 	installs, errs := install.Discover(ca.Snapshot(), cfg.Engine.Detectors)
 	if len(installs) != 1 || len(errs) > 0 {
@@ -228,7 +239,7 @@ func newRunning(t *testing.T, ctx context.Context, objs []runtime.Object) *runni
 	t.Helper()
 	dyn, kube := fakeClients(t, objs)
 	r := &running{clk: clocktesting.NewFakeClock(t0), events: make(chan engine.LoopEvent, 4096)}
-	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}},
+	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t), Scraper: emptyScraper{}},
 		app.Options{PollInterval: time.Hour, MetricsInterval: time.Hour, ConfirmEvery: time.Hour, UI: fstest.MapFS{"index.html": {Data: []byte("x")}},
 			Clock: r.clk, Diagnostics: app.Diagnostics{NoProxyStats: true}, OnLoop: func(e engine.LoopEvent) {
 				if e.Kind == engine.EvPublished || e.Kind == engine.EvArmed {
@@ -242,9 +253,33 @@ func newRunning(t *testing.T, ctx context.Context, objs []runtime.Object) *runni
 	return r
 }
 
-// settledModel is whether m is over a settled cache with metrics read.
+// optional are the optional watches a single pass waits for.
+var optional = []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.CRDsGVR, cache.EventsGVR}
+
+// optionalSettled is whether each optional watch in snap is OK or failed.
+func optionalSettled(snap *cache.Snapshot) bool {
+	for _, gvr := range optional {
+		if a, ok := snap.Access[gvr]; ok && !a.OK && a.Err == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// settledModel is whether m is over a settled cache, optional watches
+// included, with metrics read.
 func settledModel(m *engine.Model) bool {
-	return m.Snapshot.Synced && len(m.Installs) == 1 && len(m.MetricsRead) == 1 && m.MetricsRead[0].Present
+	return m.Snapshot.Synced && optionalSettled(m.Snapshot) && len(m.Installs) == 1 && len(m.MetricsRead) == 1 && m.MetricsRead[0].Present
+}
+
+// fakeMetadata serves no CRDs, so the CRD metadata watch runs and reads empty.
+func fakeMetadata(t *testing.T) metadata.Interface {
+	t.Helper()
+	scheme := metadatafake.NewTestScheme()
+	if err := metav1.AddMetaToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	return metadatafake.NewSimpleMetadataClient(scheme)
 }
 
 // first returns the app's first settled model. Its loop debounces triggers on
@@ -307,6 +342,24 @@ func findings(m *engine.Model) []string {
 	return out
 }
 
+// proxyStatsChecks read the proxy stats collector, which only pkg/app runs:
+// off there, not collected for a one-shot caller.
+var proxyStatsChecks = []string{"proxy config warming", "proxy connection"}
+
+// checks is the install's state and each check's name, state and
+// availability, the proxy stats checks left out.
+func checks(m *engine.Model) []string {
+	h := m.Installs[0].Health
+	out := []string{"state " + string(h.State)}
+	for _, c := range h.Checks {
+		if slices.Contains(proxyStatsChecks, c.Name) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s ok=%v required=%v pending=%v unavailable=%q error=%q", c.Name, c.OK, c.Required, c.Pending, c.Unavailable, c.Error))
+	}
+	return out
+}
+
 func codes(m *engine.Model) map[string]bool {
 	out := map[string]bool{}
 	for _, f := range m.Installs[0].Health.Findings {
@@ -335,7 +388,10 @@ func follow(t *testing.T, m *engine.Model, next func(*engine.Model) *engine.Mode
 func same(t *testing.T, what string, got, want *engine.Model) {
 	t.Helper()
 	if g, w := findings(got), findings(want); !slices.Equal(g, w) {
-		t.Fatalf("%s:\none-shot %s\napp      %s", what, strings.Join(g, "\n         "), strings.Join(w, "\n         "))
+		t.Fatalf("%s findings:\none-shot %s\napp      %s", what, strings.Join(g, "\n         "), strings.Join(w, "\n         "))
+	}
+	if g, w := checks(got), checks(want); !slices.Equal(g, w) {
+		t.Fatalf("%s checks:\none-shot %s\napp      %s", what, strings.Join(g, "\n         "), strings.Join(w, "\n         "))
 	}
 }
 
@@ -353,6 +409,12 @@ func TestOneShotMatchesTheApp(t *testing.T) {
 		t.Fatalf("first pass: codes %v, next %v; want 016 and 018 pending and a next pass", c, first.Next)
 	}
 	same(t, "first pass", first, uiFirst)
+	// Without the collector, proxy stats read as not collected, never healthy (D-006).
+	for _, c := range first.Installs[0].Health.Checks {
+		if slices.Contains(proxyStatsChecks, c.Name) && (c.OK || c.Unavailable != health.AvailFailing) {
+			t.Errorf("%s: %+v; want not collected", c.Name, c)
+		}
+	}
 
 	last := follow(t, first, func(m *engine.Model) *engine.Model {
 		at := m.Next.At

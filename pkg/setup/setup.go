@@ -3,9 +3,16 @@
 // pkg/app builds its own configuration here, so the two cannot drift.
 //
 // Nothing here waits. The time-based checks (restart hold, grace periods,
-// scope-verifier persistence, metrics staleness) read as pending in a single
-// pass; [engine.Model.Next] and each [health.Report.Next] say when computing
-// again can change the result. Waiting, and for how long, is the caller's.
+// scope-verifier persistence) read as pending in a single pass. A fresh
+// metrics result reads OK, and Next marks when it goes stale.
+// [engine.Model.Next] and each [health.Report.Next] say when computing again
+// can change the result. Waiting, and for how long, is the caller's.
+//
+// Before a single pass, wait with [cache.Cache.Settled], not by receiving on
+// Changes. Settled covers the required informers only. Then wait until each
+// optional watch in Snapshot().Access ([cache.ProxyPodsGVR], [cache.CRDsGVR],
+// [cache.EventsGVR], when present) is OK or has an Err. Otherwise a pass can
+// read them as not yet read, and the output varies between runs.
 //
 // Controller logs and proxy stats come from long-running collectors that
 // pkg/app runs and this package does not. A caller without them gets those
@@ -74,7 +81,8 @@ type Config struct {
 	// once. A long-running caller runs it; a one-shot caller can ignore it.
 	Kinds *kinds.Monitor
 	// Changes is the one coalescing recompute signal the cache, the kinds
-	// monitor and the engine share (D-019).
+	// monitor and the engine share (D-019). A one-shot caller waits with
+	// Cache.Settled and the optional Access entries, not on Changes.
 	Changes *trigger.Signal
 }
 
