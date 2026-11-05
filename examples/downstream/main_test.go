@@ -30,6 +30,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -408,11 +409,25 @@ func TestDownstreamProxyStatsSource(t *testing.T) {
 
 // An acme rule set wrapping kgw24 through WithComputedRules, without
 // PolicyTargeter, builds and serves its views; a policy whose only target is
-// missing raises no computed KGWUI-016 under it.
+// missing raises no computed KGWUI-016 under it. The same world on the shipped
+// kgw24 raises one, so the absence is acme's doing (R91).
 func TestDownstreamRuleSet(t *testing.T) {
 	if pt := acmeRuleSet("2.4.7").PolicyTargeter(); pt != nil {
 		t.Fatalf("acme's rule set must not offer PolicyTargeter, got %T", pt)
 	}
+	if set, has := missingTarget016(t, acmeRuleSet); set != "acme-2.4" || has {
+		t.Fatalf("acme: ruleSet %q, KGWUI-016 %v; want acme-2.4 and none", set, has)
+	}
+	if set, has := missingTarget016(t, nil); set != "kgateway-2.4" || !has {
+		t.Fatalf("shipped rules: ruleSet %q, KGWUI-016 %v; want kgateway-2.4 and one", set, has)
+	}
+}
+
+// missingTarget016 builds the example, with rules when set, over a policy whose
+// only target is missing, and runs it past the policy's grace and the 016 hold.
+// It returns the Gateway's rule set and whether /health has a KGWUI-016.
+func missingTarget016(t *testing.T, rules func(string) computed.Selection) (string, bool) {
+	t.Helper()
 	ui, err := fs.Sub(dist, "dist")
 	if err != nil {
 		t.Fatal(err)
@@ -426,40 +441,51 @@ func TestDownstreamRuleSet(t *testing.T) {
 	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d,
 		testutil.ControllerPod(d, "kgateway-0", true), testutil.GatewayClass("kgateway", testutil.Controller, true),
 		testutil.Gateway("infra", "edge", "kgateway", nil), tp)
+	clk := afterClock{FakeClock: testutil.FakeClock(), afters: make(chan struct{}, 64)}
 	events := make(chan engine.LoopEvent, 4096)
 	o := options(ui)
+	o.Clock = clk
 	o.OnLoop = func(e engine.LoopEvent) {
 		select {
 		case events <- e:
 		default:
 		}
 	}
-	opts := append(extensions(clock.RealClock{}), extension.WithComputedRules(acmeRuleSet))
+	opts := extensions(clk)
+	if rules != nil {
+		opts = append(opts, extension.WithComputedRules(rules))
+	}
 	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: emptyScraper{}}, o, extension.New(opts...))
 	if err != nil {
-		t.Fatalf("the example with acme's rule set must build: %v", err)
+		t.Fatalf("the example must build: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	a.Start(ctx)
 	srv := httptest.NewServer(a.Handler)
 	t.Cleanup(srv.Close)
-
-	// Each publication is read back until the Gateway's computed views name acme's rule set.
-	var g api.GatewayDetail
-	for {
-		if p := a.Engine.Current(); p != nil && len(p.Model.Installs) == 1 {
-			g = api.GatewayDetail{}
-			if getJSON(t, srv, "/api/v1/installs/kgw.kgateway/gateways/infra/edge", &g) == http.StatusOK && g.RuleSet != "" {
-				break
+	// until steps the clock past the debounce each time the engine waits, until ok holds.
+	until := func(what string, ok func(*engine.Published) bool) {
+		t.Helper()
+		for {
+			if e := testutil.Recv(t, events, what); e.Kind != engine.EvArmed {
+				continue
 			}
+			if p := a.Engine.Current(); p != nil && len(p.Model.Installs) == 1 && ok(p) {
+				return
+			}
+			clk.Step(engine.MaxDelay)
 		}
-		testutil.Recv(t, events, "the Gateway's computed views")
 	}
-	if g.RuleSet != "acme-2.4" {
-		t.Fatalf("ruleSet %q, want acme-2.4", g.RuleSet)
+	var at time.Time
+	// The hold counts from the first model over the synced cache, which holds the policy.
+	until("the first synced model", func(p *engine.Published) bool { at = p.Model.ComputedAt; return p.Model.Snapshot.Synced })
+	due := at.Add(health.Grace + health.TargetHold + time.Second)
+	clk.Step(health.Grace + health.TargetHold + time.Second)
+	until("a model past the hold", func(p *engine.Published) bool { return !p.Model.ComputedAt.Before(due) })
+	var g api.GatewayDetail
+	if c := getJSON(t, srv, "/api/v1/installs/kgw.kgateway/gateways/infra/edge", &g); c != http.StatusOK {
+		t.Fatalf("GET gateway: %d", c)
 	}
-	if healthHas(t, srv, "KGWUI-016") {
-		t.Fatal("a rule set without PolicyTargeter must raise no computed KGWUI-016")
-	}
+	return g.RuleSet, healthHas(t, srv, health.CodePolicyTargetNotFound)
 }

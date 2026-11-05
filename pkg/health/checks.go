@@ -207,7 +207,7 @@ var (
 	policyOptional   = []string{"Attached"}
 )
 
-// conditionsCheck: KGWUI-002, 003, 013–015 and KGWUI-011's status trigger. Freshness is decided before
+// conditionsCheck: KGWUI-002, 003, 013–016 and KGWUI-011's status trigger. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
 // condition with reason Pending, or any stale condition makes the resource
 // "not yet processed"; only current conditions are reported or count as
@@ -423,8 +423,12 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// Policies: ancestors written by this install's controller, for a Gateway
 	// or ListenerSet it owns or for any other kind. Assign drops policies
 	// processed only for another install, so none here means not yet processed;
-	// on v2.3/v2.4 that includes a policy whose target is missing.
+	// on v2.3/v2.4 that includes a policy whose target is missing. A computed
+	// 016 for every target replaces that 003 (design §7.6).
+	targets := in.newPolicyTargets(ctx.State, ctx.WakeAt)
 	for _, p := range in.Owned.Policies {
+		tfs, allMissing := targets.findings(p.Obj)
+		fs = append(fs, tfs...)
 		var mine []objects.AncestorStatus
 		for _, a := range objects.PolicyAncestors(p.Obj) {
 			if !slices.Contains(in.Install.ControllerNames, a.ControllerName) {
@@ -437,7 +441,9 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 		}
 		if len(mine) == 0 {
-			pending(p.Obj, noControllerStatus, FreshnessNoAncestor)
+			if !allMissing {
+				pending(p.Obj, noControllerStatus, FreshnessNoAncestor)
+			}
 			continue
 		}
 		for _, a := range mine {
@@ -457,6 +463,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 		}
 	}
+	targets.save(ctx.State)
 	// Status-only owners become ranks; 002 then ranks the condition type and a computed 011 its parent.
 	rankOwners(fs, ownerAncestor, ownerAncestor)
 	rankOwners(fs, ownerStatusParent, ownerParent)
@@ -467,6 +474,8 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		case f.Code == CodeRuleReplaced: // the match index is status data
 			return len(f.Key) - 2, true
 		case f.Code == CodeDelegatedNotAttached && len(f.Key) > 0 && f.Key[0] == computedOwner:
+			return 1, true
+		case f.Code == CodeComputedDisagrees: // the policy-target verifier's check key
 			return 1, true
 		}
 		return 0, false

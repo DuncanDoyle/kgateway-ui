@@ -1798,3 +1798,52 @@ func TestComputedChildOutsideBucketsKeepsSince(t *testing.T) {
 		t.Errorf("restricted: since %v, want c's first-seen %v; %+v", f.Since, seen, f)
 	}
 }
+
+// Review Focus 4 (design §7.6): a v2.5.0-rc.1 controller runs on the 2.4 rule
+// set with the "newer than tested" note, and the computed 016 applies there:
+// none at grace + 29 s, then a 016 that names the rule set and the note, with no 003.
+func TestNewerThanTestedUsesComputed016(t *testing.T) {
+	const note = "Rules not yet verified for 2.5"
+	tp := testutil.TrafficPolicy("infra", "tp-missing-target")
+	if err := unstructured.SetNestedSlice(tp.Object, []any{map[string]any{
+		"group": objects.GatewayAPIGroup, "kind": "Gateway", "name": "nope"}}, "spec", "targetRefs"); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, setup{}, withControllerVersion("v2.5.0-rc.1", world(tp))...)
+	if g := get[GatewayDetail](t, h.srv, gwDetail, 200); g.RuleSet != "kgateway-2.4" {
+		t.Fatalf("ruleSet %q, want kgateway-2.4", g.RuleSet)
+	}
+	// The seeded policy's grace ended at testutil.Now - 1 s.
+	graceEnd := testutil.Now.Add(-time.Second)
+	find := func(code string) []FindingDTO {
+		var out []FindingDTO
+		for _, f := range get[HealthResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/health", 200).Findings {
+			if f.Code == code && f.Resource != nil && f.Resource.String() == "infra/tp-missing-target" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	h.clk.set(graceEnd.Add(29 * time.Second))
+	h.e.Compute()
+	if fs := find(health.CodePolicyTargetNotFound); len(fs) != 0 {
+		t.Fatalf("016 at grace + 29 s: %+v", fs)
+	}
+	if len(find(health.CodeRouteUnattached)) != 1 {
+		t.Fatal("003 expected until 016 matures")
+	}
+	h.clk.set(graceEnd.Add(31 * time.Second))
+	h.e.Compute()
+	fs := find(health.CodePolicyTargetNotFound)
+	if len(fs) != 1 || fs[0].Severity != health.SeverityWarning || !strings.Contains(fs[0].Detail, "Rule set kgateway-2.4. "+note+".") {
+		t.Fatalf("016 %+v", fs)
+	}
+	if n := len(find(health.CodeRouteUnattached)); n != 0 {
+		t.Fatalf("016 replaces 003, got %d", n)
+	}
+	for _, l := range get[GatewayDetail](t, h.srv, gwDetail, 200).Listeners {
+		if l.Computed != nil && l.Computed.Note != note {
+			t.Errorf("listener note %q, want %q", l.Computed.Note, note)
+		}
+	}
+}

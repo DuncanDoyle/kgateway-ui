@@ -169,6 +169,8 @@ type Input struct {
 	Process *ProcessData
 	// GatewayAPI is the rule-set selection's Gateway API table (design §9.4); nil means none.
 	GatewayAPI func(kgatewayMinor string) (bundle string, ok bool)
+	// Rules is the install's rule set; one without a PolicyTargeter raises no computed KGWUI-016.
+	Rules computed.Selection
 }
 
 // ProcessData is one install's controller and per-Gateway proxy processes

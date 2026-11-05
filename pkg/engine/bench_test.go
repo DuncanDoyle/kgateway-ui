@@ -154,7 +154,7 @@ func analyzerStage(tb testing.TB, e *Engine, memo, scoped bool, scrape time.Dura
 	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: read.Result,
 		HasMetrics: read.Present, MetricsMaxAge: maxAge, FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
 		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode, Catalog: cat}
-	in.Process, in.GatewayAPI = im.Process, gatewayAPI(im.Rules)
+	in.Process, in.GatewayAPI, in.Rules = im.Process, gatewayAPI(im.Rules), im.Rules
 	checks := e.cfg.Checks
 	if scoped {
 		checks = scopedChecks(tb, e, in, col)

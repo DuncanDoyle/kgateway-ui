@@ -379,7 +379,7 @@ func (e *Engine) compute() *Published {
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat, Metrics: met,
 			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel)}, e.cfg.Checks, rt)
+			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel}, e.cfg.Checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}

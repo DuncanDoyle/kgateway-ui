@@ -90,13 +90,13 @@ func has(h api.HealthResponse, code, res string, msg ...string) bool {
 }
 
 // tpMissingTarget is the finding expected for tp-missing-target. Only kgateway
-// main reports TargetNotFound; v2.3.x and v2.4.x write no status for a policy
-// whose target is missing, so after the grace period it is "not yet processed" (finding 7).
+// main reports TargetNotFound; on v2.3.x and v2.4.x the UI computes it, and the
+// computed 016 replaces "not yet processed" after the grace and the hold (design §7.6).
 func tpMissingTarget() (code, msg string) {
 	if os.Getenv("KGW_MAIN") == "1" {
-		return health.CodeConditionFalse, "Policy target not found"
+		return health.CodeConditionFalse, health.PolicyTargetNotFoundMessage
 	}
-	return health.CodeRouteUnattached, "Not yet processed by the controller"
+	return health.CodePolicyTargetNotFound, health.PolicyTargetNotFoundMessage
 }
 
 func secondInstall() bool { return os.Getenv("SECOND_INSTALL") == "1" }
@@ -194,13 +194,14 @@ func TestRealCluster(t *testing.T) {
 
 	// Findings settle once kgateway has written status and metrics were scraped.
 	tpCode, tpMsg := tpMissingTarget()
-	deadline := time.Now().Add(3 * time.Minute) // covers health.Grace for the policy
+	deadline := time.Now().Add(3 * time.Minute) // covers health.Grace and health.TargetHold for the policy
 	for {
 		var h api.HealthResponse
 		get(t, "/api/v1/installs/kgw-a.kgateway/health", &h)
 		// shop/broken's missing Service is 013 now, never also 002 (D-030).
 		ok := has(h, health.CodeRefUnresolved, "shop/broken") && !has(h, health.CodeConditionFalse, "shop/broken") && has(h, health.CodeNamespaceNotWatched, "blog/posts") &&
-			has(h, tpCode, "shop/tp-missing-target", tpMsg) && has(h, health.CodeSelfManagedProxy, "infra/self") &&
+			has(h, tpCode, "shop/tp-missing-target", tpMsg) && !has(h, health.CodeRouteUnattached, "shop/tp-missing-target") &&
+			has(h, health.CodeSelfManagedProxy, "infra/self") &&
 			!has(h, health.CodeConditionFalse, "shop/good")
 		xds := slices.ContainsFunc(h.Checks, func(c health.CheckResult) bool {
 			return c.Name == "xDS rejects" && c.OK // in-cluster metrics scraping works
