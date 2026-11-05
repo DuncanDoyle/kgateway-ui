@@ -220,12 +220,48 @@ func instrument(p *progress, list toolscache.ListWithContextFunc, watchFn toolsc
 			if !watchList {
 				p.recover(openedAt) // a working classic watch recovers the kind
 			}
-			return watch.Filter(w, func(e watch.Event) (watch.Event, bool) {
-				p.event(e, watchList, openedAt)
-				return e, true
-			}), nil
+			return observe(w, func(e watch.Event) { p.event(e, watchList, openedAt) }), nil
 		},
 	}
+}
+
+// observed passes every event of in to its reader after calling f. Unlike
+// watch.Filter, its loop also ends when the reader calls Stop mid-send.
+type observed struct {
+	in   watch.Interface
+	out  chan watch.Event
+	stop chan struct{}
+	once sync.Once
+}
+
+func observe(in watch.Interface, f func(watch.Event)) watch.Interface {
+	w := &observed{in: in, out: make(chan watch.Event), stop: make(chan struct{})}
+	go w.loop(f)
+	return w
+}
+
+func (w *observed) loop(f func(watch.Event)) {
+	defer close(w.out)
+	for e := range w.in.ResultChan() {
+		f(e)
+		select {
+		case w.out <- e:
+		case <-w.stop:
+			for range w.in.ResultChan() { // drain until the stopped watch closes
+			}
+			return
+		}
+	}
+}
+
+func (w *observed) ResultChan() <-chan watch.Event { return w.out }
+
+// Stop stops the inner watch and ends the loop, even when nobody reads out.
+func (w *observed) Stop() {
+	w.once.Do(func() {
+		close(w.stop)
+		w.in.Stop()
+	})
 }
 
 // tracked is an informer with the progress of its own List and Watch calls.
