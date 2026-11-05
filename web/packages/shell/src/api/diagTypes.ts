@@ -58,7 +58,8 @@ export type Evidence =
   | ProxyStatsEvidence
   | FreshnessEvidence
   | RefsEvidence
-  | RuleReplacedEvidence;
+  | RuleReplacedEvidence
+  | ListenerConflictEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -171,6 +172,27 @@ export interface RuleReplacedEvidence {
   reason: "RouteRuleReplaced" | "RouteRuleDropped";
   message: string;
   policy?: LinkedRef;
+}
+/** Another listener on the same Gateway and port with an overlapping hostname; owner is its Gateway or ListenerSet. */
+export interface ConflictingListener {
+  owner: LinkedRef;
+  name: string;
+  hostname?: string;
+}
+/**
+ * Why KGWUI-017 reports a listener (design §7.5): the controller's Conflicted condition, and the other listeners
+ * the UI computes overlap it by rule. others holds the first few; othersTotal counts them all.
+ */
+export interface ListenerConflictEvidence {
+  kind: "listener-conflict";
+  listener: string;
+  port: number;
+  hostname?: string;
+  reason: string;
+  message: string;
+  rule: string;
+  others?: ConflictingListener[];
+  othersTotal: number;
 }
 
 /**

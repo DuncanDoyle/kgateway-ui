@@ -73,8 +73,36 @@ func (e *RuleEvidence) MarshalJSON() ([]byte, error) {
 	}{health.EvidenceRuleReplaced, (*plain)(e)})
 }
 
+// conflictPlain is health.ListenerConflictEvidence without its methods.
+type conflictPlain health.ListenerConflictEvidence
+
+// ConflictEvidence is KGWUI-017's evidence on the wire: each other listener's owner carries its link.
+type ConflictEvidence struct {
+	conflictPlain
+	Others []ConflictListener `json:"others,omitempty"`
+}
+
+// ConflictListener is a health.ConflictingListener whose owner carries its link.
+type ConflictListener struct {
+	Owner    LinkedRef `json:"owner"`
+	Name     string    `json:"name"`
+	Hostname string    `json:"hostname,omitempty"`
+}
+
+// EvidenceKind implements health.Evidence.
+func (*ConflictEvidence) EvidenceKind() string { return health.EvidenceListenerConflict }
+
+// MarshalJSON adds the kind tag.
+func (e *ConflictEvidence) MarshalJSON() ([]byte, error) {
+	type plain ConflictEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{health.EvidenceListenerConflict, (*plain)(e)})
+}
+
 // decodeEvidence decodes evidence as the API sends it: xds-rejects as
-// XDSEvidence, rule-replaced as RuleEvidence.
+// XDSEvidence, rule-replaced as RuleEvidence, listener-conflict as ConflictEvidence.
 func decodeEvidence(b []byte) (health.Evidence, error) {
 	ev, err := health.DecodeEvidence(b)
 	if err != nil {
@@ -86,6 +114,8 @@ func decodeEvidence(b []byte) (health.Evidence, error) {
 		out = &XDSEvidence{}
 	case *health.RuleReplacedEvidence:
 		out = &RuleEvidence{}
+	case *health.ListenerConflictEvidence:
+		out = &ConflictEvidence{}
 	default:
 		return ev, nil
 	}
@@ -108,7 +138,8 @@ func (d *FindingDetail) UnmarshalJSON(b []byte) error {
 }
 
 // wireEvidence is e for the caller of v, times in UTC: KGWUI-001 keeps the
-// recently changed objects v may view; KGWUI-015 links its policy. The model's evidence is never changed.
+// recently changed objects v may view; KGWUI-015 links its policy and KGWUI-017
+// its other listeners' owners. The model's evidence is never changed.
 func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 	switch ev := e.(type) {
 	case *health.XDSRejectsEvidence:
@@ -152,6 +183,14 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 		if ev.Policy != nil {
 			lr := l.linked(*ev.Policy)
 			out.Policy = &lr
+		}
+		return out
+	case *health.ListenerConflictEvidence:
+		// The owners are in Finding.Evidence, so a caller who gets here may view them.
+		out := &ConflictEvidence{conflictPlain: conflictPlain(*ev)}
+		out.conflictPlain.Others = nil
+		for _, o := range ev.Others {
+			out.Others = append(out.Others, ConflictListener{Owner: l.linked(o.Owner), Name: o.Name, Hostname: o.Hostname})
 		}
 		return out
 	}

@@ -67,6 +67,7 @@ import type {
   Computed,
   ComputedAttachment,
   Condition,
+  ConflictingListener,
   Count,
   DataPlane,
   DelegationContext,
@@ -99,6 +100,7 @@ import type {
   LinkedRef,
   Listener,
   ListenerAttachment,
+  ListenerConflictEvidence,
   ListenerSetDetail,
   ListenerSetRow,
   ListenerStatus,
@@ -311,6 +313,21 @@ const evidenceShapes = {
     { kind: "!", matchIndex: "?", reason: "!", message: "!", policy: "?" },
     { policy: linkedRef },
     { kind: { "rule-replaced": 1 }, reason: { RouteRuleReplaced: 1, RouteRuleDropped: 1 } },
+  ),
+  "listener-conflict": shape<ListenerConflictEvidence>(
+    {
+      kind: "!",
+      listener: "!",
+      port: "!",
+      hostname: "?",
+      reason: "!",
+      message: "!",
+      rule: "!",
+      others: "?",
+      othersTotal: "!",
+    },
+    { others: shape<ConflictingListener>({ owner: "!", name: "!", hostname: "?" }, { owner: linkedRef }) },
+    { kind: { "listener-conflict": 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

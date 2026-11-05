@@ -207,7 +207,7 @@ var (
 	policyOptional   = []string{"Attached"}
 )
 
-// conditionsCheck: KGWUI-002, 003, 013–016 and KGWUI-011's status trigger. Freshness is decided before
+// conditionsCheck: KGWUI-002, 003, 013–017 and KGWUI-011's status trigger. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
 // condition with reason Pending, or any stale condition makes the resource
 // "not yet processed"; only current conditions are reported or count as
@@ -324,7 +324,9 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// listeners evaluates the listener status of a Gateway or ListenerSet; both
 	// share the listener status shape. With all, every configured listener
 	// needs a status block; otherwise only present blocks are judged.
-	listeners := func(u *unstructured.Unstructured, status []objects.ListenerStatus, all bool) {
+	// A conflict's other side is any listener on the same Gateway (017); built on the first conflict.
+	var sides map[objects.Ref][]listenerSide
+	listeners := func(u *unstructured.Unstructured, gw objects.Ref, spec []objects.Listener, status []objects.ListenerStatus, all bool) {
 		byName := map[string]objects.ListenerStatus{}
 		for _, l := range status {
 			byName[l.Name] = l
@@ -339,8 +341,17 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			}
 			owner := []string{ownerListener, l.Name}
 			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name, owner)
+			// 017 owns the Conflicted condition; 002 never reports it (D-030).
 			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(u, *cf) {
-				add(u, SeverityError, *cf, "listener "+l.Name, owner)
+				if sides == nil {
+					sides = in.gatewayListeners()
+				}
+				i := slices.IndexFunc(spec, func(s objects.Listener) bool { return s.Name == name })
+				sl := objects.Listener{Name: name}
+				if i >= 0 {
+					sl = spec[i]
+				}
+				fs = append(fs, in.conflictFinding(u, sl, *cf, sides[gw], owner))
 			}
 		}
 	}
@@ -363,7 +374,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			continue
 		}
 		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "", self)
-		listeners(ls, v.ListenerStatus, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
+		listeners(ls, v.Parent.Ref(), v.Listeners, v.ListenerStatus, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
@@ -373,7 +384,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		} else {
 			evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "", self)
 		}
-		listeners(gw, v.ListenerStatus, true)
+		listeners(gw, objects.RefOf(gw), v.Listeners, v.ListenerStatus, true)
 	}
 	// Routes: one status block per current parentRef of this install, and per
 	// reported HTTPRoute parent, matched on the full parentRef including section name and port.

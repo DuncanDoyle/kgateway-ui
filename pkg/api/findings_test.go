@@ -948,3 +948,60 @@ func TestRuleReplacedPolicyLink(t *testing.T) {
 		})
 	}
 }
+
+// Phase-3.3 brief, 017: a conflicted Gateway listener names the ListenerSet in
+// another namespace through the handlers, as a LinkedRef; a caller who may not
+// view that ListenerSet gets evidenceRestricted and no evidence.
+func TestListenerConflictThroughTheAPI(t *testing.T) {
+	ok := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
+	conflicted := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "HostnameConflict"),
+		testutil.Cond("Programmed", metav1.ConditionFalse, "HostnameConflict"), testutil.Cond("Conflicted", metav1.ConditionTrue, "HostnameConflict")}
+	gw := testutil.GatewayWithListeners("infra", "edge", "kgateway",
+		[]objects.Listener{{Name: "http", Port: 8080, Protocol: "HTTP", AllowedRoutes: objects.AllowedRoutes{Namespaces: objects.RouteNamespaces{From: "All"}}},
+			{Name: "https", Port: 443, Protocol: "HTTP", Hostname: "*.example.com"}},
+		testutil.Listener{Name: "http", Conds: ok}, testutil.Listener{Name: "https", Conds: conflicted})
+	ls := testutil.ListenerSet("shop", "more", testutil.GwRef("infra", "edge"), nil, testutil.Listener{Name: "a", Conds: ok})
+	ls.Object["spec"].(map[string]any)["listeners"] = []any{map[string]any{"name": "a", "port": int64(443), "protocol": "HTTP", "hostname": "a.example.com"}}
+	objs := world(ls)
+	for i, o := range objs {
+		if u, isU := o.(*unstructured.Unstructured); isU && u.GetKind() == "Gateway" && u.GetName() == "edge" {
+			objs[i] = gw
+		}
+	}
+	more := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "shop", Name: "more"}
+	hideLS := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != more })
+	for _, tc := range []struct {
+		name   string
+		authz  Authorizer
+		hidden bool
+	}{{"other side visible", nil, false}, {"other side hidden", hideLS, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{authz: tc.authz, rulesFor: computedtest.NoViews}, objs...)
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+			var got []FindingDTO
+			for _, f := range findingsOn(h, "infra/edge") {
+				if f.Code == health.CodeConditionFalse && strings.HasPrefix(f.Detail, "Conflicted=") {
+					t.Fatalf("002 next to 017: %+v", f)
+				}
+				if f.Code == health.CodeListenerConflicted {
+					got = append(got, f)
+				}
+			}
+			if len(got) != 1 || got[0].Restricted || got[0].EvidenceRestricted != tc.hidden || (got[0].Facts == nil) != tc.hidden {
+				t.Fatalf("017 findings %+v", got)
+			}
+			if tc.hidden {
+				if strings.Contains(got[0].Detail, "shop/more") {
+					t.Fatalf("hidden other side in the detail: %q", got[0].Detail)
+				}
+				return
+			}
+			d := fixDetail(t, srv, health.CodeListenerConflicted, "infra", "edge")
+			ev, isConflict := d.Evidence.(*ConflictEvidence)
+			if !isConflict || ev.Listener != "https" || ev.Port != 443 || ev.Rule != health.ListenerOverlapRule || len(ev.Others) != 1 ||
+				ev.Others[0].Owner.Ref != more || ev.Others[0].Name != "a" || ev.Others[0].Owner.Link == "" {
+				t.Fatalf("evidence %#v", d.Evidence)
+			}
+		})
+	}
+}
