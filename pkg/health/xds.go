@@ -152,6 +152,7 @@ func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 		proxies = proxyGateways(ctx)
 		changes = changesOn(in, m.Rejects, cur.start)
 		lg.events, lg.state = installLogs(ctx)
+		lg.byGateway = byGateway(lg.events, nil)
 	}
 	var fs []Finding
 	held := false
@@ -291,7 +292,9 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 // xdsLogs are the controller log events 001 reads for one install.
 type xdsLogs struct {
 	events []ctrllogs.Event
-	state  string
+	// byGateway indexes events per Gateway, oldest first.
+	byGateway map[objects.Ref][]int32
+	state     string
 	// start is the check's first run: before it the UI saw no metrics, so a line then may begin the reject.
 	start time.Time
 	// slack is how long before first seen a line still belongs to the reject: one scrape's lag.
@@ -308,8 +311,9 @@ func (lg xdsLogs) event(gw objects.Ref, t string, firstSeen time.Time) (XDSLogEv
 	from := firstSeen.Add(-lg.slack)
 	backfill := !firstSeen.After(lg.start)
 	var out XDSLogEvent
-	for _, e := range lg.events {
-		ofType := e.Gateway == gw && e.TypeURL != "" && strings.TrimPrefix(e.TypeURL, xdsTypePrefix) == t
+	for _, i := range lg.byGateway[gw] {
+		e := &lg.events[i]
+		ofType := e.TypeURL != "" && strings.TrimPrefix(e.TypeURL, xdsTypePrefix) == t
 		// A line before from counts only as backfill from before the first run.
 		early := e.Time.Before(from)
 		if !ofType || early && (!backfill || !e.Time.Before(lg.start)) {
@@ -318,9 +322,14 @@ func (lg xdsLogs) event(gw objects.Ref, t string, firstSeen time.Time) (XDSLogEv
 		if out.TypeURL == "" || e.Time.Before(out.Since) {
 			out.TypeURL, out.Since = t, e.Time
 		}
-		out.Classes = append(out.Classes, e.Class)
+		// Kept once each: a Gateway's lines repeat the same few classes and names.
+		if !slices.Contains(out.Classes, e.Class) {
+			out.Classes = append(out.Classes, e.Class)
+		}
 		for _, n := range e.Names {
-			out.EnvoyResources = append(out.EnvoyResources, n)
+			if !slices.Contains(out.EnvoyResources, n) {
+				out.EnvoyResources = append(out.EnvoyResources, n)
+			}
 			if o, mapped := lg.object(n); mapped {
 				if out.Objects == nil {
 					out.Objects = map[string]objects.Ref{}
@@ -345,6 +354,34 @@ func (lg xdsLogs) object(n string) (objects.Ref, bool) {
 		return objects.Ref{}, false
 	}
 	return lg.namer.Object(n)
+}
+
+// byGateway indexes the events keep accepts by Gateway, each list oldest first
+// as events are; nil keep accepts every event with a Gateway. One backing array holds the lists.
+func byGateway(events []ctrllogs.Event, keep func(*ctrllogs.Event) bool) map[objects.Ref][]int32 {
+	n := map[objects.Ref]int{}
+	total := 0
+	for i := range events {
+		if e := &events[i]; e.Gateway != (objects.Ref{}) && (keep == nil || keep(e)) {
+			n[e.Gateway]++
+			total++
+		}
+	}
+	if total == 0 {
+		return nil
+	}
+	buf := make([]int32, total)
+	out := make(map[objects.Ref][]int32, len(n))
+	at := 0
+	for g, c := range n {
+		out[g], at = buf[at:at:at+c], at+c
+	}
+	for i := range events {
+		if e := &events[i]; e.Gateway != (objects.Ref{}) && (keep == nil || keep(e)) {
+			out[e.Gateway] = append(out[e.Gateway], int32(i)) //nolint:gosec // at most ctrllogs.MaxEvents
+		}
+	}
+	return out
 }
 
 // xdsTypePrefix is the prefix the metrics strip from a type URL and log events keep.
@@ -380,9 +417,16 @@ func withheld(ctx RunContext) ([]WithheldGateway, string) {
 	if !known {
 		return nil, state
 	}
+	deferrals := byGateway(events, deferral)
+	if len(deferrals) == 0 {
+		return nil, state
+	}
 	var out []WithheldGateway
 	for _, gw := range ctx.Owned.Gateways {
 		r := *ref(gw)
+		if len(deferrals[r]) == 0 {
+			continue
+		}
 		proxies, known := latestStart(ctx.Process.Proxies[r])
 		if !known {
 			continue
@@ -393,8 +437,9 @@ func withheld(ctx RunContext) ([]WithheldGateway, string) {
 		}
 		from = from.Add(WithheldAfter)
 		var w WithheldGateway
-		for _, e := range events {
-			if !deferral(e) || e.Gateway != r || e.Time.Before(from) {
+		for _, i := range deferrals[r] {
+			e := &events[i]
+			if e.Time.Before(from) {
 				continue
 			}
 			if w.First.IsZero() || e.Time.Before(w.First) {
@@ -417,7 +462,7 @@ func withheld(ctx RunContext) ([]WithheldGateway, string) {
 
 // deferral reports whether e is a snapshot-deferral line: a Gateway and no
 // other field, unlike rejects, deployer errors and panics.
-func deferral(e ctrllogs.Event) bool {
+func deferral(e *ctrllogs.Event) bool {
 	return e.Gateway != (objects.Ref{}) && e.TypeURL == "" && e.Class == "" && e.Frame == "" && e.Object == nil
 }
 
