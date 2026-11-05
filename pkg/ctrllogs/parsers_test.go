@@ -185,7 +185,8 @@ func TestPanicFromThePreviousContainer(t *testing.T) {
 				}
 			}
 			frame := "github.com/kgateway-dev/kgateway/v2/pkg/kgateway/proxy_syncer.snapshotPerClient.func3"
-			if len(panics) != 2 || panics[0].Frame != frame || panics[0].Marker != "panic: " || panics[1].Frame != "" || !xdsSeen {
+			nilDeref := "github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs"
+			if len(panics) != 3 || panics[0].Frame != frame || panics[0].Marker != "panic: " || panics[1].Frame != nilDeref || panics[2].Frame != "" || !xdsSeen {
 				t.Fatalf("panics = %+v, xds event in the window: %v", panics, xdsSeen)
 			}
 			// The same trace on the follow stream yields no panic.
@@ -198,8 +199,8 @@ func TestPanicFromThePreviousContainer(t *testing.T) {
 					n++
 				}
 			}
-			if n != 2 {
-				t.Fatalf("panics after the follow stream = %d, want the 2 previous ones", n)
+			if n != 3 {
+				t.Fatalf("panics after the follow stream = %d, want the 3 previous ones", n)
 			}
 		})
 	}
@@ -215,7 +216,7 @@ type windowParser struct {
 
 func (*windowParser) Markers() []string { return []string{"xds error", "open"} }
 
-func (w *windowParser) Window(m string, previous bool) int {
+func (w *windowParser) Window(_ []byte, m string, previous bool) int {
 	if m == "open" {
 		return w.want
 	}
@@ -293,6 +294,29 @@ func TestRepanicStaysInOneWindow(t *testing.T) {
 			testutil.Recv(t, ls.closed, "the previous read to end")
 			ev := h.logs(t).Events
 			if len(ev) != 1 || ev[0].Frame != "github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs" {
+				t.Fatalf("events = %+v", ev)
+			}
+		})
+	}
+}
+
+// A JSON line quoting a panic opens no window, so a real panic right after it keeps its frame.
+func TestQuotedPanicOpensNoWindow(t *testing.T) {
+	for _, rs := range ruleSets {
+		t.Run(rs.name, func(t *testing.T) {
+			src := newSource(pod("a", 1))
+			h := parserHarness(t, src, rs.p)
+			h.c.Reconcile(h.ctx)
+			pc := testutil.Recv(t, src.prevs, "the previous read")
+			body := `{"level":"error","time":"2026-11-05T09:10:00Z","msg":"Reconciler error","error":"panic: boom [recovered]"}` + "\n" +
+				"panic: runtime error: invalid memory address or nil pointer dereference\n" +
+				"[signal SIGSEGV: segmentation violation code=0x2 addr=0x0 pc=0x10441cbc4]\n\ngoroutine 1 [running]:\n" +
+				"github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs(0x1?)\n\tdeployer.go:322 +0x4\n"
+			ls := &liveStream{r: strings.NewReader(body), closed: make(chan struct{})}
+			pc.reply <- followReply{rc: ls}
+			testutil.Recv(t, ls.closed, "the previous read to end")
+			ev := h.logs(t).Events
+			if len(ev) != 1 || ev[0].Class != computed.LogClassPanic || ev[0].Frame != "github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs" {
 				t.Fatalf("events = %+v", ev)
 			}
 		})

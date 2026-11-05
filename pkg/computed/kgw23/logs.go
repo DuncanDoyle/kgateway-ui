@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -58,9 +57,10 @@ func (rules) Parse(line []byte) (computed.LogFields, bool, error) {
 	return computed.LogFields{}, false, nil
 }
 
-// Window implements computed.LogWindow: a panic reads the lines after it, in the previous container only (R102).
-func (rules) Window(m string, previous bool) int {
-	if m == markerPanic && previous {
+// Window implements computed.LogWindow: a raw panic line reads the lines after
+// it, in the previous container only (R102); a JSON line quoting one does not.
+func (rules) Window(line []byte, m string, previous bool) int {
+	if m == markerPanic && previous && bytes.HasPrefix(line, []byte(markerPanic)) {
 		return computed.MaxLogWindow
 	}
 	return 0
@@ -77,6 +77,13 @@ func (r rules) ParseWindow(line []byte, next [][]byte, previous bool) (computed.
 	return computed.LogFields{Marker: markerPanic, Class: computed.LogClassPanic, Frame: topFrame(next)}, true, nil
 }
 
+// Parse errors are fixed texts: a time or JSON error would quote the line.
+var (
+	errNotJSON = errors.New("not a JSON log line")
+	errBadJSON = errors.New("unreadable JSON log line")
+	errBadTime = errors.New("unreadable log time")
+)
+
 // logLine holds the fields a line is read by; the rest of the line is never decoded.
 type logLine struct {
 	time, msg, component, scope, controller           string
@@ -90,22 +97,22 @@ type logLine struct {
 func decodeLine(line []byte) (logLine, error) {
 	var l logLine
 	if !bytes.HasPrefix(line, []byte("{")) {
-		return l, errors.New("not a JSON log line")
+		return l, errNotJSON
 	}
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if _, err := dec.Token(); err != nil {
-		return l, err
+		return l, errBadJSON
 	}
 	seen := map[string]bool{}
 	for dec.More() {
 		tok, err := dec.Token()
 		if err != nil {
-			return l, err
+			return l, errBadJSON
 		}
 		key, _ := tok.(string)
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
-			return l, err
+			return l, errBadJSON
 		}
 		dst := l.field(key)
 		if dst == nil {
@@ -119,14 +126,14 @@ func decodeLine(line []byte) (logLine, error) {
 		}
 		seen[key] = true
 		if err := json.Unmarshal(raw, dst); err != nil {
-			return l, fmt.Errorf("field %s: %w", key, err)
+			return l, errBadJSON
 		}
 	}
 	if _, err := dec.Token(); err != nil {
-		return l, err
+		return l, errBadJSON
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return l, errors.New("data after the JSON object")
+		return l, errBadJSON
 	}
 	return l, nil
 }
@@ -162,7 +169,11 @@ func (l logLine) stamp() (time.Time, error) {
 	if l.time == "" {
 		return time.Time{}, nil
 	}
-	return time.Parse(time.RFC3339Nano, l.time)
+	t, err := time.Parse(time.RFC3339Nano, l.time)
+	if err != nil {
+		return time.Time{}, errBadTime
+	}
+	return t, nil
 }
 
 func gateway(ns, name string) objects.Ref {
@@ -208,7 +219,7 @@ func clusterNames(msg string) []string {
 }
 
 // routeNames reads "Unexpected RDS configuration (expecting <name>): <name>"
-// (Envoy rds_route_config_subscription.cc:103 at v1.37.9).
+// (Envoy source/common/rds/rds_route_config_subscription.cc:103 at v1.37.9).
 func routeNames(msg string) []string {
 	rest, ok := strings.CutPrefix(msg, "Unexpected RDS configuration (expecting ")
 	if !ok {
@@ -243,7 +254,7 @@ var xdsClasses = []phrase{
 	{"Failed to initialize cipher suites", computed.LogClassTLS},                            // tls/context_impl.cc:144
 	{"Failed to initialize ECDH curves", computed.LogClassTLS},                              // tls/context_impl.cc:153
 	{"Failed to load certificate chain", computed.LogClassTLS},                              // tls/context_impl.cc:245
-	{"Failed to load private key", computed.LogClassTLS},                                    // ssl/tls_certificate_config_impl.cc:108
+	{"Failed to load private key", computed.LogClassTLS},                                    // tls/context_impl.cc:747
 	{"Failed to load trusted CA certificates", computed.LogClassTLS},                        // tls/cert_validator/default_validator.cc:86
 	{"duplicate listener ", computed.LogClassDuplicate},                                     // listener_manager/lds_api.cc:96
 	{"duplicate cluster ", computed.LogClassDuplicate},                                      // upstream/cds_api_helper.cc:49
@@ -320,6 +331,9 @@ func parseDeployer(l logLine) (computed.LogFields, bool, error) {
 	return f, true, nil
 }
 
+// signalLine is the runtime's line after a signal panic's message (runtime/panic.go:1570 at go1.26.10).
+var signalLine = regexp.MustCompile(`^\[signal [^\]]*\]$`)
+
 // goroutineHeader is the line the Go runtime prints before the panicking
 // goroutine's frames, with GOTRACEBACK=system's extra fields.
 var goroutineHeader = regexp.MustCompile(`^goroutine [0-9]+ (gp=0x[0-9a-f]+ m=[0-9]+ (mp=0x[0-9a-f]+ )?)?\[running[^\]]*\]:$`)
@@ -333,6 +347,9 @@ func topFrame(next [][]byte) string {
 	i := 0
 	for i < len(next) && bytes.HasPrefix(next[i], []byte("\t")) {
 		i++ // the panic message's further lines
+	}
+	if i < len(next) && signalLine.Match(next[i]) {
+		i++ // a signal panic's "[signal SIGSEGV: …]" line
 	}
 	if i+1 >= len(next) || len(next[i]) != 0 || !goroutineHeader.Match(next[i+1]) {
 		return ""

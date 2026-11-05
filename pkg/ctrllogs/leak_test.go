@@ -86,6 +86,8 @@ func followBody() string {
 		xdsLine(4, "infra", s, cds, "x"),
 		xdsLine(5, s, "nack", cds, "x"),
 		xdsLine(9, "infra", lower, cds, "x"),
+		// The time slot.
+		`{"time":"` + s + `","level":"warn","msg":"xds error","component":"xds/envoy","gateway_name":"nack","gateway_ns":"infra","resource":"` + cds + `","error":"x"}` + "\n",
 		xdsLine(6, "infra", "nack", s, "x"),
 		xdsLine(7, "infra", "nack", "envoy.config.cluster.v3."+s, "x"),
 		// The deferral's client, in its namespace and name slots.
@@ -118,6 +120,7 @@ func followBody() string {
 func previousBody() string {
 	s := secret
 	return xdsLine(8, "infra", "nack", cds, "Error adding/updating cluster(s) "+s+": x") +
+		`{"level":"error","time":"2026-11-05T09:09:00Z","msg":"Reconciler error","error":"panic: ` + s + ` [recovered]"}` + "\n" +
 		"panic: " + s + " [recovered]\n\tpanic: " + s + "\n\tgoroutine 9 [running]:\n\t" + s + ".Forged()\n\n" +
 		"goroutine 412 [running]:\n" +
 		"github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs(0x" + s + ", {0x1, 0x2})\n" +

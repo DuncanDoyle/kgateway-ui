@@ -464,7 +464,7 @@ func (c *Collector) read(k streamKey, p computed.LogParser, r io.Reader, ended t
 		if m == "" {
 			continue
 		}
-		if size := windowSize(wp, m, previous); size > 0 {
+		if size := windowSize(wp, line, m, previous); size > 0 {
 			// Windows do not nest: such a line inside an open window, as a re-panic's, is only part of it.
 			if win == nil {
 				win = &window{m: m, line: bytes.Clone(line), size: size}
@@ -486,12 +486,12 @@ type window struct {
 func (w *window) add(l []byte) { w.next = append(w.next, bytes.Clone(l)) }
 func (w *window) full() bool   { return len(w.next) >= w.size }
 
-// windowSize is how many lines after a line with m the parser reads, at most MaxLogWindow.
-func windowSize(wp computed.LogWindow, m string, previous bool) int {
+// windowSize is how many lines after line, with marker m, the parser reads, at most MaxLogWindow.
+func windowSize(wp computed.LogWindow, line []byte, m string, previous bool) int {
 	if wp == nil {
 		return 0
 	}
-	return min(wp.Window(m, previous), computed.MaxLogWindow)
+	return min(wp.Window(line, m, previous), computed.MaxLogWindow)
 }
 
 // closeWindow hands an open window to its parser once and drops it.

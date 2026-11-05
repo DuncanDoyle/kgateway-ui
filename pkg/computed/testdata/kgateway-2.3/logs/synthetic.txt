@@ -1,6 +1,6 @@
 # Synthetic: one line per error class not in the captures, in the JSON layout of the captured
 # lines. Envoy texts follow its fixed shapes at v1.37.9 and v1.38.7 (cds_api_impl.cc:110,
-# cds_api_helper.cc:55, lds_api.cc:122, rds_route_config_subscription.cc:103); the deployer
+# cds_api_helper.cc:55, lds_api.cc:122, source/common/rds/rds_route_config_subscription.cc:103); the deployer
 # texts follow kgateway v2.3.11 (pkg/deployer/deployer.go, pkg/kgateway/controller/gw_controller.go).
 {"time":"2026-11-05T09:00:01Z","level":"warn","msg":"xds error","component":"xds/envoy","gateway_name":"edge","gateway_ns":"infra","resource":"envoy.config.listener.v3.Listener","error":"Error adding/updating listener(s) listener~8080: cannot bind '0.0.0.0:8080': Address already in use\n"}
 {"time":"2026-11-05T09:00:02Z","level":"warn","msg":"xds error","component":"xds/envoy","gateway_name":"edge","gateway_ns":"infra","resource":"envoy.config.cluster.v3.Cluster","error":"Error adding/updating cluster(s) kube_shop_secure_443: Failed to load certificate chain from <inline>, only P-256, P-384 or P-521 ECDSA certificates are supported"}

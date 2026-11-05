@@ -34,7 +34,7 @@ type LogParser interface {
 	// Markers are the fixed substrings of the lines Parse reads; a line without one is never parsed.
 	Markers() []string
 	// Parse reads one line, valid only during the call. ok false with a nil
-	// error means the line is not one it reads; an error means it failed.
+	// error means the line is not one it reads; an error means it failed, in a fixed text without log content.
 	Parse(line []byte) (fields LogFields, ok bool, err error)
 }
 
@@ -44,9 +44,9 @@ const MaxLogWindow = 8
 // LogWindow is an optional interface of a LogParser whose marker needs the
 // lines after it, such as a Go panic's top frame (R102).
 type LogWindow interface {
-	// Window is how many lines after a line with marker m ParseWindow reads, at
-	// most MaxLogWindow; previous reports a read of the previous container. 0 means none.
-	Window(m string, previous bool) int
+	// Window is how many lines after line, which holds marker m, ParseWindow reads,
+	// at most MaxLogWindow; previous reports a read of the previous container. 0 means none.
+	Window(line []byte, m string, previous bool) int
 	// ParseWindow reads a marked line and the lines after it, fewer at the end
 	// of the read; all are valid only during the call. Results are as for Parse.
 	ParseWindow(line []byte, next [][]byte, previous bool) (fields LogFields, ok bool, err error)
