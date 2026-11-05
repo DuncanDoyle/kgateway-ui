@@ -30,6 +30,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
@@ -1113,6 +1114,30 @@ func TestXDSLogEventsAtTheAPI(t *testing.T) {
 	}
 }
 
+// A line from before the first run lowers since only for a type that was
+// rejecting then: the UI saw this one start later, so an older line from an
+// ended episode leaves since at first seen.
+func TestOldLineDoesNotPredateAWatchedStart(t *testing.T) {
+	lm := newLiveMetrics()
+	clean := func(v string) []ctrlmetrics.Metrics {
+		return []ctrlmetrics.Metrics{withoutRejects(ctrlCapture(t, v+"-rejects-a", "kgw", "kgateway-0")), withoutRejects(ctrlCapture(t, v+"-rejects-b", "kgw", "kgateway-1"))}
+	}
+	lm.set("kgw.kgateway", clean("v2.4.7")...)
+	feed := newLogFeed()
+	feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+		rejectLine(testutil.Now.Add(-5*time.Minute), "nack", clusterType, computed.LogClassTLS)}}})
+	h := xdsHarness(t, setup{collected: feed.store.Snapshot}, lm, nackWorld()...)
+	if f := xdsFinding(h.at(t, testutil.Now), "infra", "nack"); f != nil {
+		t.Fatalf("001 before the reject: %+v", f)
+	}
+	later := testutil.Now.Add(2 * time.Minute)
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.4.7-rejects-a", "kgw", "kgateway-0"), ctrlCapture(t, "v2.4.7-rejects-b", "kgw", "kgateway-1"))
+	f := xdsFinding(h.at(t, later), "infra", "nack")
+	if ev := xdsFacts(t, f); !f.Since.Equal(later) || !ev.Types[0].FirstSeen.Equal(later) || ev.LogEvents != nil {
+		t.Fatalf("since %v, types %+v, log events %+v; want first seen %v and no old line", f.Since, ev.Types, ev.LogEvents, later)
+	}
+}
+
 // namerRules maps Envoy names to objects, like a rule set with a verified naming function.
 type namerRules struct {
 	computed.Rules
@@ -1170,7 +1195,7 @@ func TestPanicTopFrameAtTheAPI(t *testing.T) {
 	restart := testutil.Now.Add(-time.Minute)
 	readAt := restart.Add(20 * time.Second)
 	panicLine := func(at time.Time, frame string) ctrllogs.Event {
-		return ctrllogs.Event{Time: at.UTC(), Marker: "panic: ", Class: computed.LogClassPanic, Frame: frame}
+		return ctrllogs.Event{Time: at.UTC(), Marker: "panic: ", Class: computed.LogClassPanic, Frame: frame, Pod: "pod/kgw/kgateway-0"}
 	}
 	for _, tc := range []struct {
 		name  string
@@ -1206,6 +1231,38 @@ func TestPanicTopFrameAtTheAPI(t *testing.T) {
 			ev := processFacts(t, f)
 			if !reflect.DeepEqual(ev.Panic, tc.panic) || ev.ControllerLogs != tc.state || ev.Pod != "kgateway-0" || !f.Since.Equal(tc.since) {
 				t.Fatalf("019 since %v, evidence %+v panic %+v; want panic %+v, logs %s, since %v", f.Since, ev, ev.Panic, tc.panic, tc.state, tc.since)
+			}
+		})
+	}
+}
+
+// A panic attaches to the 019 of the replica whose previous container logged
+// it: with two replicas, kgateway-1's panic never shows beside kgateway-0.
+func TestPanicOfItsOwnReplica(t *testing.T) {
+	restart := testutil.Now.Add(-time.Minute)
+	readAt := restart.Add(20 * time.Second)
+	for _, tc := range []struct {
+		name, pod string
+		want      *health.PanicFacts
+	}{
+		{"own replica", "pod/kgw/kgateway-0", &health.PanicFacts{Class: computed.LogClassPanic, Frame: "main.run", ReadAt: readAt}},
+		{"other replica", "pod/kgw/kgateway-1", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			feed := newLogFeed()
+			feed.publish(ctrllogs.Logs{logInstall: {State: ctrllogs.StateOn, Events: []ctrllogs.Event{
+				{Time: readAt.UTC(), Marker: "panic: ", Class: computed.LogClassPanic, Frame: "main.run", Pod: tc.pod}}}})
+			h := xdsHarness(t, setup{collected: feed.store.Snapshot}, rejectCaptures(t, "v2.4.7"), nackWorld()...)
+			h.at(t, testutil.Now)
+			p := h.ctrlPod(t)
+			container(corev1.ContainerStatus{RestartCount: 1, State: runningSince(restart), LastTerminationState: exitedAt("Error", 2, restart)})(p)
+			h.updatePod(t, p)
+			f := findingOf(h.at(t, testutil.Now), health.CodeProcessRestarting)
+			if f == nil {
+				t.Fatal("no 019")
+			}
+			if ev := processFacts(t, f); ev.Pod != "kgateway-0" || !reflect.DeepEqual(ev.Panic, tc.want) {
+				t.Fatalf("019 %+v panic %+v, want %+v", ev, ev.Panic, tc.want)
 			}
 		})
 	}
@@ -1301,11 +1358,36 @@ func TestWithheldInTheDataPlaneSection(t *testing.T) {
 			h := newHarness(t, setup{proxyPods: true, collected: feed.store.Snapshot}, procWorld(container(corev1.ContainerStatus{State: runningSince(started)}), d, proxy)...)
 			h.at(t, testutil.Now)
 			dp := get[GatewayDetail](t, h.srv, gwDetail, 200).DataPlane
-			if dp == nil || !reflect.DeepEqual(dp.Withheld, tc.want) {
+			if dp == nil || !reflect.DeepEqual(dp.Withheld, tc.want) || dp.ControllerLogs != health.LogsRead {
 				t.Fatalf("data plane %+v, withheld %+v; want %+v", dp, dp.Withheld, tc.want)
 			}
 			if body := string(wire(t, h.srv, gwDetail)); strings.Contains(body, `"withheld"`) != (tc.want != nil) {
 				t.Fatalf("body %s", body)
+			}
+		})
+	}
+}
+
+// Without a controller log read, the Data plane section says so: a missing
+// withheld is then unobserved, never "not withheld" (D-006).
+func TestDataPlaneSaysLogsNotRead(t *testing.T) {
+	d := edgeProxy(1, 1)
+	proxy := edgePod(d, "edge-0", true, corev1.ContainerStatus{State: runningSince(testutil.Old.Time)})
+	for _, tc := range []struct {
+		name string
+		logs *ctrllogs.InstallLogs
+	}{{"logs off", nil}, {"no parser", &ctrllogs.InstallLogs{State: ctrllogs.StateNoParser}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := setup{proxyPods: true}
+			if tc.logs != nil {
+				feed := newLogFeed()
+				feed.publish(ctrllogs.Logs{logInstall: *tc.logs})
+				s.collected = feed.store.Snapshot
+			}
+			h := newHarness(t, s, procWorld(container(corev1.ContainerStatus{State: runningSince(testutil.Old.Time)}), d, proxy)...)
+			h.at(t, testutil.Now)
+			if dp := get[GatewayDetail](t, h.srv, gwDetail, 200).DataPlane; dp == nil || dp.ControllerLogs != health.LogsNotRead || dp.Withheld != nil {
+				t.Fatalf("data plane %+v", dp)
 			}
 		})
 	}

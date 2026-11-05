@@ -404,5 +404,12 @@ func outputPrint(fs []Finding, cr CheckResult) uint64 {
 		str(string(g.Unavailable))
 		str(g.Reason)
 	}
+	u64(uint64(len(cr.Withheld)))
+	for _, w := range cr.Withheld {
+		ref(w.Gateway)
+		at(&w.First)
+		at(&w.Last)
+	}
+	str(cr.ControllerLogs)
 	return h.Sum64()
 }

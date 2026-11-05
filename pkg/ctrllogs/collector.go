@@ -559,7 +559,7 @@ func (c *Collector) handle(k streamKey, m string, ended time.Time, previous bool
 		c.notify()
 	}
 	st.failures, st.unrecognised = 0, false
-	e, keep := c.event(k.install, st, f, m, previous, stats, statsOK)
+	e, keep := c.event(k, st, f, m, previous, stats, statsOK)
 	if !keep {
 		return
 	}
@@ -591,9 +591,11 @@ func (c *Collector) failLocked(st *installState) {
 
 // event keeps only f's fields that are in a closed set: one of the parser's
 // markers, a Gateway of the install, a known type URL, class and object,
-// names in that Gateway's proxy stats, and a frame of Go symbol characters.
-// A line naming another Gateway, or a panic outside the previous container, is dropped.
-func (c *Collector) event(id string, st *installState, f computed.LogFields, m string, previous bool, stats proxystats.Stats, statsOK bool) (Event, bool) {
+// names in that Gateway's proxy stats, a frame of Go symbol characters, and
+// for a panic the replica k reads. A line naming another Gateway, or a panic
+// outside the previous container, is dropped.
+func (c *Collector) event(k streamKey, st *installState, f computed.LogFields, m string, previous bool, stats proxystats.Stats, statsOK bool) (Event, bool) {
+	id := k.install
 	e := Event{Time: f.Time.UTC(), Marker: m, Class: f.Class}
 	if f.Marker != "" && st.in.Parser != nil && slices.Contains(st.in.Parser.Markers(), f.Marker) {
 		e.Marker = f.Marker
@@ -611,6 +613,7 @@ func (c *Collector) event(id string, st *installState, f computed.LogFields, m s
 		if goSymbol(f.Frame) {
 			e.Frame = f.Frame
 		}
+		e.Pod = k.target // the replica's ID, from the API: a closed set
 	}
 	if typeURLs[f.TypeURL] {
 		e.TypeURL = f.TypeURL

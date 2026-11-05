@@ -27,6 +27,7 @@
       }
     ],
     "dataPlane": {
+      "controllerLogs": "not-read",
       "nextSteps": [],
       "proxyStats": {
         "available": false,

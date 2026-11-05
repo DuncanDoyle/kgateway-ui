@@ -277,7 +277,8 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 	}
 	dp := &DataPlaneDTO{Rejects: []DataPlaneTypes{}, NextSteps: []NextStep{}, RecentlyChanged: []LinkedRef{}, Snapshot: d.snapshot(gw),
 		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, gw, on(health.CodeSelfManagedProxy) >= 0),
-		Withheld: withheldOn(d.i.Health.Checks, gw)}
+		ControllerLogs: health.LogsNotRead}
+	dp.Withheld, dp.ControllerLogs = withheldOn(d.i.Health.Checks, gw)
 	k := on(health.CodeXDSRejected)
 	if k < 0 {
 		return dp, &proxies
@@ -307,19 +308,21 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 	return dp, &proxies
 }
 
-// withheldOn is gw's withheld config from the xDS rejects check; nil when there is none.
-func withheldOn(checks []health.CheckResult, gw objects.Ref) *WithheldDTO {
+// withheldOn is gw's withheld config from the xDS rejects check, nil when
+// there is none, and whether the controller log was read: not read without the check.
+func withheldOn(checks []health.CheckResult, gw objects.Ref) (*WithheldDTO, string) {
 	for _, c := range checks {
-		if c.Name != xdsCheckName {
+		if c.Name != xdsCheckName || c.ControllerLogs == "" {
 			continue
 		}
 		for _, w := range c.Withheld {
 			if w.Gateway == gw {
-				return &WithheldDTO{Message: health.WithheldMessage, First: wireTime(w.First), Last: wireTime(w.Last)}
+				return &WithheldDTO{Message: health.WithheldMessage, First: wireTime(w.First), Last: wireTime(w.Last)}, c.ControllerLogs
 			}
 		}
+		return nil, c.ControllerLogs
 	}
-	return nil
+	return nil, health.LogsNotRead
 }
 
 // snapshot is gw's xDS snapshot from the install's last complete metrics read; nil without one.

@@ -91,9 +91,8 @@ func DeployerLogClass(c string) bool {
 func KnownLogClass(c string) bool {
 	switch c {
 	case LogClassRegex, LogClassTLS, LogClassDuplicate, LogClassBind, LogClassValidation, LogClassUnknownExtension,
-		LogClassApply, LogClassParameters, LogClassRender, LogClassNoValidPorts, LogClassStatusUpdate, LogClassPrune,
 		LogClassPanic, LogClassOther:
 		return true
 	}
-	return false
+	return DeployerLogClass(c)
 }

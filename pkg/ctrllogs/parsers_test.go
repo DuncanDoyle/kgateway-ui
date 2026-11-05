@@ -189,6 +189,12 @@ func TestPanicFromThePreviousContainer(t *testing.T) {
 			if len(panics) != 3 || panics[0].Frame != frame || panics[0].Marker != "panic: " || panics[1].Frame != nilDeref || panics[2].Frame != "" || !xdsSeen {
 				t.Fatalf("panics = %+v, xds event in the window: %v", panics, xdsSeen)
 			}
+			// Each panic names the replica whose previous container logged it; other events name none.
+			for _, e := range h.logs(t).Events {
+				if want := map[bool]string{true: "a"}[e.Class == computed.LogClassPanic]; e.Pod != want {
+					t.Fatalf("event %+v: Pod %q, want %q", e, e.Pod, want)
+				}
+			}
 			// The same trace on the follow stream yields no panic.
 			call := testutil.Recv(t, src.follows, "the follow")
 			call.reply <- followReply{rc: io.NopCloser(strings.NewReader("panic: third\n" + trace))}

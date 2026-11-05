@@ -26,6 +26,7 @@
       }
     ],
     "dataPlane": {
+      "controllerLogs": "not-read",
       "nextSteps": [
         {
           "command": "kubectl logs -n kgw kgateway-0 --since=1h | grep 'xds error' | grep nack",

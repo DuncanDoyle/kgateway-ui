@@ -37,6 +37,9 @@ type Event struct {
 	Object *objects.Ref
 	// Frame is a panic's top frame function, from the previous container only.
 	Frame string
+	// Pod is the ID of the replica whose previous container logged a panic. It is
+	// empty on other events, so one line logged by two replicas stays one event.
+	Pod string
 }
 
 // Logs is the value under Key, per install ID.
@@ -277,4 +280,5 @@ func (w *writer) event(e Event) {
 		w.u64(0)
 	}
 	w.str(e.Frame)
+	w.str(e.Pod)
 }

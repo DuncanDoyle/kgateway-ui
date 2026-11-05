@@ -102,7 +102,7 @@ type xdsStreams struct {
 // config may be withheld, which the controller log tells without metrics.
 func (c xdsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	fs, res := c.rejects(ctx)
-	res.Withheld = withheld(ctx)
+	res.Withheld, res.ControllerLogs = withheld(ctx)
 	return fs, res
 }
 
@@ -300,13 +300,19 @@ type xdsLogs struct {
 }
 
 // event is the one log event of gw's rejected type t (no type URL prefix),
-// whichever replica logged its lines: lines from firstSeen less slack on, or
-// from before start. False when there is none.
+// whichever replica logged its lines: lines from firstSeen less slack on, and
+// lines from before start when t was rejecting at the first run. A type first
+// seen later started while the UI watched, so an older line is another episode.
+// False when there is none.
 func (lg xdsLogs) event(gw objects.Ref, t string, firstSeen time.Time) (XDSLogEvent, bool) {
 	from := firstSeen.Add(-lg.slack)
+	backfill := !firstSeen.After(lg.start)
 	var out XDSLogEvent
 	for _, e := range lg.events {
-		if e.Gateway != gw || strings.TrimPrefix(e.TypeURL, xdsTypePrefix) != t || e.TypeURL == "" || e.Time.Before(from) && !e.Time.Before(lg.start) {
+		ofType := e.Gateway == gw && e.TypeURL != "" && strings.TrimPrefix(e.TypeURL, xdsTypePrefix) == t
+		// A line before from counts only as backfill from before the first run.
+		early := e.Time.Before(from)
+		if !ofType || early && (!backfill || !e.Time.Before(lg.start)) {
 			continue
 		}
 		if out.TypeURL == "" || e.Time.Before(out.Since) {
@@ -363,15 +369,16 @@ func installLogs(ctx RunContext) ([]ctrllogs.Event, string) {
 // deferral lines at least WithheldAfter apart, both at least WithheldAfter
 // after the latest start of every controller Pod and of the Gateway's proxy
 // Pods, the last within WithheldWindow (R105). A startup burst or one
-// reconnect never qualifies; unknown starts never do.
-func withheld(ctx RunContext) []WithheldGateway {
+// reconnect never qualifies; unknown starts never do. It also returns
+// whether the log was read, as no withheld Gateway means nothing otherwise.
+func withheld(ctx RunContext) ([]WithheldGateway, string) {
 	events, state := installLogs(ctx)
 	if state != LogsRead || ctx.Process == nil {
-		return nil
+		return nil, state
 	}
 	ctrl, known := latestStart(ctx.Process.Controller)
 	if !known {
-		return nil
+		return nil, state
 	}
 	var out []WithheldGateway
 	for _, gw := range ctx.Owned.Gateways {
@@ -405,7 +412,7 @@ func withheld(ctx RunContext) []WithheldGateway {
 		out = append(out, w)
 	}
 	slices.SortFunc(out, func(a, b WithheldGateway) int { return compareRefs(a.Gateway, b.Gateway) })
-	return out
+	return out, state
 }
 
 // deferral reports whether e is a snapshot-deferral line: a Gateway and no

@@ -128,6 +128,9 @@ type CheckResult struct {
 	// Withheld are the Gateways whose proxies may get no config updates, in Ref order (R105).
 	// Never serialised: a Gateway page reads its own entry after authorizing it.
 	Withheld []WithheldGateway `json:"-"`
+	// ControllerLogs says whether a check that reads the controller log read it
+	// (LogsRead or LogsNotRead); empty for other checks. Never serialised.
+	ControllerLogs string `json:"-"`
 }
 
 // WithheldGateway is a Gateway whose snapshot deferral recurred after its

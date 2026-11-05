@@ -199,7 +199,7 @@ func (c restartsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		ctx.WakeAt(bestAt.Add(ProcessWindow))
 		f := restartFinding(in, s, best, bestN)
 		if s.controller {
-			addPanic(ctx, &f, events, logs, from)
+			addPanic(ctx, &f, events, logs, from, best.ID)
 		}
 		fs = append(fs, f)
 	}
@@ -207,15 +207,15 @@ func (c restartsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	return fs, res
 }
 
-// addPanic adds the controller log state and a panic read in the window to
-// 019 f: the newest with a top frame, else the newest. The read time is the
-// panic's only time, so it lowers since.
-func addPanic(ctx RunContext, f *Finding, events []ctrllogs.Event, logs string, from time.Time) {
+// addPanic adds the controller log state and a panic of replica pod, read in
+// the window, to 019 f: the newest with a top frame, else the newest. The read
+// time is the panic's only time, so it lowers since.
+func addPanic(ctx RunContext, f *Finding, events []ctrllogs.Event, logs string, from time.Time, pod string) {
 	ev := f.Facts.(*ProcessEvidence)
 	ev.ControllerLogs = logs
 	var p *ctrllogs.Event
 	for i := len(events) - 1; i >= 0; i-- {
-		if e := &events[i]; e.Class == computed.LogClassPanic && e.Time.After(from) && (p == nil || p.Frame == "" && e.Frame != "") {
+		if e := &events[i]; e.Class == computed.LogClassPanic && e.Pod == pod && e.Time.After(from) && (p == nil || p.Frame == "" && e.Frame != "") {
 			p = e
 		}
 	}

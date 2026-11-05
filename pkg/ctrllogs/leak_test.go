@@ -55,8 +55,13 @@ func xdsLine(sec int, gwNS, gwName, resource, errText string) string {
 	return string(b) + "\n"
 }
 
+// started is when the controller and proxy containers started; deferral lines
+// at deployerBase are past the startup, so edge's two lines 89 s apart read withheld.
+var started = deployerBase.Add(-5 * time.Minute)
+
 func deferralLine(sec int, client string) string {
-	b, _ := json.Marshal(map[string]string{"time": fmt.Sprintf("2026-11-05T09:01:%02dZ", sec), "level": "info",
+	at := deployerBase.Add(time.Duration(sec) * time.Second).Format(time.RFC3339Nano)
+	b, _ := json.Marshal(map[string]string{"time": at, "level": "info",
 		"msg": "per-client inputs not ready; deferring snapshot", "component": "proxy_syncer", "client": client})
 	return string(b) + "\n"
 }
@@ -99,6 +104,7 @@ func followBody() string {
 		xdsLine(7, "infra", "nack", "envoy.config.cluster.v3."+s, "x"),
 		// The deferral's client, in its namespace and name slots.
 		deferralLine(1, "kgateway-kube-gateway-api~infra~edge~1~infra"),
+		deferralLine(90, "kgateway-kube-gateway-api~infra~edge~1~infra"),
 		deferralLine(2, "kgateway-kube-gateway-api~infra~"+s+"~1~infra"),
 		deferralLine(3, "kgateway-kube-gateway-api~"+s+"~edge~1~"+s),
 		deferralLine(4, "kgateway-kube-gateway-api~infra~"+lower+"~1~infra"),
@@ -273,14 +279,19 @@ func TestLogSecretLeavesNoTrace(t *testing.T) {
 			ctrl := testutil.ControllerPod(d, "kgateway-0", true)
 			// A recent exit with code 2 raises 019, whose evidence carries the panic.
 			crashed := metav1.NewTime(time.Now().Add(-time.Minute))
-			ctrl.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "kgateway", RestartCount: 1, Ready: true,
+			running := corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(started)}}
+			ctrl.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "kgateway", RestartCount: 1, Ready: true, State: running,
 				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 2, FinishedAt: crashed}}}}
+			// An edge proxy Pod with a start time, so withheld is computed and its body scanned.
+			proxy := testutil.ProxyPod("infra", "edge", 0, "abc", 0)
+			proxy.Status.ContainerStatuses[0].State = running
 			programmed := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionTrue, "Programmed")}
 			// A stuck edge rollout raises 021, whose evidence carries the deployer errors.
 			edge := testutil.ProxyDeployment("infra", "edge", 1, 1)
 			edge.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
+			edge.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"gateway.networking.k8s.io/gateway-name": "edge"}}
 			dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d, ctrl,
-				edge, testutil.ProxyDeployment("infra", "nack", 1, 1),
+				edge, proxy, testutil.ProxyDeployment("infra", "nack", 1, 1),
 				testutil.GatewayClass("kgateway", testutil.Controller, true),
 				testutil.Gateway("infra", "edge", "kgateway", programmed), testutil.Gateway("infra", "nack", "kgateway", programmed))
 			var follows atomic.Int32
@@ -326,11 +337,11 @@ func TestLogSecretLeavesNoTrace(t *testing.T) {
 				got = l[install]
 			}
 
-			// The API serves the log evidence on 001, 019 and 021; only then do the bodies test the gate.
+			// The API serves the log evidence on 001, 019, 021 and edge's withheld; only then do the bodies test the gate.
 			base := "/api/v1/installs/" + install
-			for !served(get(t, srv, base+"/health")) {
+			for !served(get(t, srv, base+"/health")) || !bytes.Contains(get(t, srv, base+"/gateways/infra/edge"), []byte(`"withheld":`)) {
 				if time.Now().After(deadline) {
-					t.Fatalf("the API never served the log evidence: %s", get(t, srv, base+"/health"))
+					t.Fatalf("the API never served the log evidence: %s\n%s", get(t, srv, base+"/health"), get(t, srv, base+"/gateways/infra/edge"))
 				}
 				time.Sleep(20 * time.Millisecond)
 			}

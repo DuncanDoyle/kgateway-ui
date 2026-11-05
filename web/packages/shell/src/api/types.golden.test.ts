@@ -982,6 +982,7 @@ const dataPlane = shape<DataPlane>(
     unavailable: "?",
     proxyStats: "!",
     withheld: "?",
+    controllerLogs: "!",
   },
   {
     withheld: shape<NonNullable<DataPlane["withheld"]>>({ message: "!", first: "!", last: "!" }),
@@ -999,6 +1000,7 @@ const dataPlane = shape<DataPlane>(
       { unavailable: { off: 1, denied: 1, failing: 1, "not-on-version": 1, "not-observed": 1 } },
     ),
   },
+  controllerLogs,
 );
 const gatewayDetail = shape<GatewayDetail>(
   {
