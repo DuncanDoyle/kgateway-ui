@@ -32,10 +32,12 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	metadatafake "k8s.io/client-go/metadata/fake"
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
@@ -86,11 +88,25 @@ type setup struct {
 	zone *time.Location
 	// rulesFor replaces the engine's rule selection; nil runs the real rule sets.
 	rulesFor func(string) computed.Selection
+	// opts are extra NewHandler options.
+	opts []HandlerOption
 	// disputes marks a world that disagrees with the computed views on purpose;
 	// every other world must agree, so fixture drift fails here (consistentWithViews).
 	disputes bool
 	// bounds caps views B and C; zero is computed.DefaultBounds.
 	bounds computed.Bounds
+	// optional turns on the Events and CRD watches, CRDs over a fake metadata
+	// client that prepareMeta, when set, prepares before the cache starts.
+	optional    bool
+	prepareMeta func(*metadatafake.FakeMetadataClient)
+	// checks run after the upstream checks.
+	checks []health.Check
+	// proxyPods watches the detectors' proxy Pods.
+	proxyPods bool
+	// collected returns the collector values checks read; nil means none.
+	collected func() collect.Snapshot
+	// catalog is the served-kind catalog; nil knows none.
+	catalog func() kinds.Catalog
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -146,6 +162,7 @@ type harness struct {
 	srv   *httptest.Server
 	dyn   *dynamicfake.FakeDynamicClient
 	kube  *kubefake.Clientset
+	meta  *metadatafake.FakeMetadataClient
 	clk   *clock
 }
 
@@ -189,10 +206,13 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if dets == nil {
 		dets = []install.Detector{install.UpstreamDetector{}}
 	}
-	var podSel, depSel []labels.Selector
+	var podSel, depSel, proxySel []labels.Selector
 	for _, d := range dets {
 		podSel = append(podSel, d.ControllerPodSelector())
 		depSel = append(depSel, d.ControllerSelector(), d.ProxySelector())
+		if pd, ok := d.(install.ProxyPodDetector); ok && s.proxyPods {
+			proxySel = append(proxySel, pd.ProxyPodSelector())
+		}
 	}
 	clk := &clock{}
 	clk.set(testutil.Now.Add(-health.Grace - time.Second))
@@ -203,14 +223,23 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		return clk.now()
 	}
 	// The cache stamps snapshots on the same clock, so snapshot times are pinned too.
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, Now: now})
+	scheme := metadatafake.NewTestScheme()
+	if err := metav1.AddMetaToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	meta := metadatafake.NewSimpleMetadataClient(scheme)
+	if s.prepareMeta != nil {
+		s.prepareMeta(meta)
+	}
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
+		Events: s.optional, CRDs: s.optional, Metadata: meta})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
-		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: health.Upstream(), Pinned: s.pinned,
+		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
 		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
-		DelegationBounds: s.bounds})
+		DelegationBounds: s.bounds, Collected: s.collected, Catalog: s.catalog})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {
@@ -225,9 +254,9 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if m := e.Compute(); !s.disputes {
 		consistentWithViews(t, m)
 	}
-	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz))
+	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, s.opts...))
 	t.Cleanup(srv.Close)
-	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, clk: clk}
+	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, meta: meta, clk: clk}
 }
 
 // createAndWait creates u through the fake dynamic client and waits until the cache holds it.
@@ -398,6 +427,135 @@ func count(o OverviewResponse, kind string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// Events and CRDs denied, then allowed: no KGWUI-008, cluster access stays
+// OK and the install state matches a run without them; the checks that read
+// them run again after recovery.
+func TestDeniedOptionalWatchNeverUnknown(t *testing.T) {
+	var denied atomic.Bool
+	denied.Store(true)
+	deny := func(gr schema.GroupResource) clienttesting.ReactionFunc {
+		return func(clienttesting.Action) (bool, runtime.Object, error) {
+			if denied.Load() {
+				return true, nil, apierrors.NewForbidden(gr, "", nil)
+			}
+			return false, nil, nil
+		}
+	}
+	var runs atomic.Int32
+	probe := scriptCheck{"probe optional", health.InputSet{Kinds: []objects.GroupKind{cache.EventsKind, cache.CRDsKind}}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		runs.Add(1)
+		ev, crd := ctx.Snapshot.Access[cache.EventsGVR], ctx.Snapshot.Access[cache.CRDsGVR]
+		return nil, health.CheckResult{Name: "probe optional", OK: true, CollectedAt: ctx.Now, Detail: fmt.Sprintf("events %v, crds %v", ev.OK, crd.OK)}
+	}}
+	h := newHarness(t, setup{optional: true, checks: []health.Check{probe},
+		prepare: func(_ *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset) {
+			kube.PrependReactor("list", "events", deny(schema.GroupResource{Resource: "events"}))
+		},
+		prepareMeta: func(m *metadatafake.FakeMetadataClient) {
+			m.PrependReactor("list", "customresourcedefinitions", deny(cache.CRDsGVR.GroupResource()))
+		},
+	}, world()...)
+	want := get[HealthResponse](t, startHarnessSrv(t), "/api/v1/installs/kgw.kgateway/health", 200).State
+	await := func(what string, ok bool) {
+		t.Helper()
+		deadline := time.Now().Add(20 * time.Second)
+		for {
+			s := h.cache.Snapshot()
+			ev, crd := s.Access[cache.EventsGVR], s.Access[cache.CRDsGVR]
+			if ok && ev.OK && crd.OK || !ok && ev.Err != "" && crd.Err != "" {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: events %+v, crds %+v", what, ev, crd)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	verify := func(phase, detail string) {
+		t.Helper()
+		h.e.Compute()
+		r := get[HealthResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/health", 200)
+		if hasFinding(r, health.CodeSignalUnavailable, "") {
+			t.Fatalf("%s: KGWUI-008 raised: %+v", phase, r.Findings)
+		}
+		if r.State != want {
+			t.Fatalf("%s: install state %s, want %s as without the watches", phase, r.State, want)
+		}
+		for _, c := range r.Checks {
+			if c.Name == "cluster access" && !c.OK || c.Name == "probe optional" && c.Detail != detail {
+				t.Fatalf("%s: check %+v", phase, c)
+			}
+		}
+	}
+	await("the denial", false)
+	verify("denied", "events false, crds false")
+	n := runs.Load()
+	denied.Store(false)
+	await("the recovery", true)
+	verify("recovered", "events true, crds true")
+	if runs.Load() == n {
+		t.Fatal("the probe did not run again after recovery")
+	}
+}
+
+// D-034: a not-available check never turns the install unknown, raises no
+// KGWUI-008, and "What was checked" carries its reason.
+func TestNotAvailableNeverUnknown(t *testing.T) {
+	base := get[HealthResponse](t, startHarnessSrv(t), "/api/v1/installs/kgw.kgateway/health", 200)
+	if base.State == health.StateUnknown {
+		t.Fatalf("world() state %s", base.State)
+	}
+	for _, why := range []health.Availability{health.AvailOff, health.AvailDenied, health.AvailFailing, health.AvailNotOnVersion, health.AvailNotObserved} {
+		for _, required := range []bool{false, true} {
+			probe := scriptCheck{"probe events", health.InputSet{}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+				r := health.NotAvailable("probe events", why, "reason "+string(why), ctx.Now)
+				r.Required = required // a check that also claims Required is still ignored
+				return nil, r
+			}}
+			_, srv, _ := startWith(t, setup{checks: []health.Check{probe}}, world()...)
+			rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			if rep.State != base.State || hasFinding(rep, health.CodeSignalUnavailable, "") || len(rep.Findings) != len(base.Findings) {
+				t.Fatalf("%s (required %v): state %s, findings %+v", why, required, rep.State, rep.Findings)
+			}
+			c := rep.Checks[len(rep.Checks)-1]
+			if c.Name != "probe events" || c.OK || c.Unavailable != why || c.Error != "reason "+string(why) {
+				t.Fatalf("%s: check %+v", why, c)
+			}
+		}
+	}
+}
+
+// D-034: the core required checks keep Required: true, xDS rejects included,
+// beside a not-available check.
+func TestRequiredChecksKeepTheirFlag(t *testing.T) {
+	probe := scriptCheck{"probe crds", health.InputSet{}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		return nil, health.NotAvailable("probe crds", health.AvailOff, "", ctx.Now)
+	}}
+	_, srv, _ := startWith(t, setup{checks: []health.Check{probe}}, world()...)
+	rep := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+	required := map[string]bool{"cluster access": true, "served kinds": true, "controller scope": true, "controller pods": true,
+		"resource status": true, "gateway proxies": true, "xDS rejects": true}
+	seen := 0
+	for _, c := range rep.Checks {
+		if c.Required != required[c.Name] {
+			t.Errorf("check %q required %v, want %v", c.Name, c.Required, required[c.Name])
+		}
+		if required[c.Name] {
+			seen++
+		}
+	}
+	if seen != len(required) {
+		t.Fatalf("saw %d of %d required checks: %+v", seen, len(required), rep.Checks)
+	}
+}
+
+// startHarnessSrv is the server of a harness over world() without the optional watches.
+func startHarnessSrv(t *testing.T) *httptest.Server {
+	t.Helper()
+	_, srv, _ := startWith(t, setup{}, world()...)
+	return srv
 }
 
 func hasFinding(h HealthResponse, code, res string) bool {
@@ -642,7 +800,7 @@ func TestEveryFindingCodeAtTheAPI(t *testing.T) {
 	}{
 		{"001 rejects", setup{metrics: rejects}, world(), false, health.CodeXDSRejected, "infra/edge", true, health.StateError},
 		{"001 no rejects", setup{}, world(), false, health.CodeXDSRejected, "infra/edge", false, ""},
-		{"002 backend not found", setup{}, world(broken), false, health.CodeConditionFalse, "shop/broken", true, health.StateError},
+		{"013 backend not found", setup{}, world(broken), false, health.CodeRefUnresolved, "shop/broken", true, health.StateError},
 		{"002 accepted route", setup{}, world(), false, health.CodeConditionFalse, "shop/cart", false, ""},
 		{"003 route without status", setup{}, world(testutil.HTTPRoute("shop", "new", []objects.ParentRef{gw})), false, health.CodeRouteUnattached, "shop/new", true, ""},
 		{"003 stale True", setup{}, world(stale(testutil.HTTPRoute("shop", "old", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, testutil.Controller)))), false, health.CodeRouteUnattached, "shop/old", true, ""},
@@ -2518,8 +2676,115 @@ func TestComputedDisagreementAtTheAPI(t *testing.T) {
 			if rep.State == health.StateError {
 				t.Fatalf("state %s: KGWUI-012 is never an error", rep.State)
 			}
-			if c := rep.Checks[len(rep.Checks)-1]; c.Name != "computed views" || !c.OK || c.Required {
-				t.Fatalf("last check %+v", c)
+			i := slices.IndexFunc(rep.Checks, func(c health.CheckResult) bool { return c.Name == "computed views" })
+			if i < 0 || !rep.Checks[i].OK || rep.Checks[i].Required {
+				t.Fatalf("computed views check %+v", rep.Checks)
+			}
+		})
+	}
+}
+
+func TestMetaListsExtensionCapability(t *testing.T) {
+	src := func() []Capability {
+		return []Capability{{Name: "acme-widgets", State: CapOn}, {Name: "acme-audit", State: CapDenied, Reason: "needs a role"}, {Name: "acme-beta", State: CapOff}}
+	}
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(src)}}, world()...)
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	// Platform capabilities first, then the "on" extension ones; "off" and "denied" stay out.
+	if want := []string{platform.Scope, platform.Workloads, "acme-widgets"}; !slices.Equal(meta.Capabilities, want) {
+		t.Errorf("capabilities = %v, want %v", meta.Capabilities, want)
+	}
+	want := []Capability{{Name: "acme-audit", State: CapDenied, Reason: "needs a role"}, {Name: "acme-beta", State: CapOff}, {Name: "acme-widgets", State: CapOn}}
+	if !slices.Equal(meta.CapabilityStates, want) {
+		t.Errorf("capabilityStates = %+v, want %+v", meta.CapabilityStates, want)
+	}
+}
+
+func TestMetaListsFailingCapabilityReason(t *testing.T) {
+	src := func() []Capability {
+		return []Capability{{Name: "acme-scrape", State: CapFailing, Reason: "target unreachable"}}
+	}
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(src)}}, world()...)
+	meta := get[MetaResponse](t, srv, "/api/v1/meta", 200)
+	if slices.Contains(meta.Capabilities, "acme-scrape") {
+		t.Errorf("a failing capability must not be listed in capabilities: %v", meta.Capabilities)
+	}
+	if want := []Capability{{Name: "acme-scrape", State: CapFailing, Reason: "target unreachable"}}; !slices.Equal(meta.CapabilityStates, want) {
+		t.Errorf("capabilityStates = %+v, want %+v", meta.CapabilityStates, want)
+	}
+}
+
+func TestCapabilityNameCollision(t *testing.T) {
+	plat := []string{platform.Scope, platform.Workloads}
+	ok := func() []Capability { return []Capability{{Name: "acme-widgets", State: CapOn}} }
+	if err := CheckCapabilities(plat, ok); err != nil {
+		t.Fatalf("a distinct name: %v", err)
+	}
+	for _, name := range []string{"processes", "events", "crds", "endpoints", "proxyStats", "controllerLogs", platform.Scope, platform.Workloads, ""} {
+		src := func() []Capability { return []Capability{{Name: name, State: CapOn}} }
+		if CheckCapabilities(plat, src) == nil {
+			t.Errorf("name %q: want an error", name)
+		}
+	}
+	if CheckCapabilities(plat, ok, ok) == nil {
+		t.Error("two sources with one name: want an error")
+	}
+	dup := func() []Capability { return []Capability{{Name: "a", State: CapOn}, {Name: "a", State: CapOff}} }
+	if CheckCapabilities(plat, dup) == nil {
+		t.Error("one source with a repeated name: want an error")
+	}
+	bad := func() []Capability { return []Capability{{Name: "a", State: "maybe"}} }
+	if CheckCapabilities(plat, bad) == nil {
+		t.Error("an unknown state: want an error")
+	}
+	// A source that starts colliding after Build cannot shadow a core name on the wire.
+	flip := func() []Capability { return []Capability{{Name: "processes", State: CapOn}} }
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(flip)}}, world()...)
+	if meta := get[MetaResponse](t, srv, "/api/v1/meta", 200); slices.Contains(meta.Capabilities, "processes") || len(meta.CapabilityStates) != 0 {
+		t.Errorf("a colliding name must be dropped: %+v", meta)
+	}
+}
+
+// Design §8.1: once the controller dropped metric updates, resources_managed is
+// invalid, so scope verification is unavailable instead of comparing counts.
+func TestDroppedUpdatesTurnScopeCheckUnavailable(t *testing.T) {
+	// The UI sees 2 Gateways in infra; the gauge says 9, a mismatch when it is valid.
+	managed := func(pods ...ctrlmetrics.PodMetrics) fakeMetrics {
+		return fakeMetrics{"kgw.kgateway": {CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{
+			Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true, PerPod: pods,
+			Managed: map[ctrlmetrics.ManagedKey]float64{{Namespace: "infra", Resource: "Gateway"}: 9, {Namespace: "shop", Resource: "HTTPRoute"}: 1}}}}
+	}
+	const text = "scope verification unavailable: the controller dropped metric updates"
+	cases := []struct {
+		name    string
+		metrics fakeMetrics
+		dropped bool
+	}{
+		{"one of two Pods dropped updates", managed(
+			ctrlmetrics.PodMetrics{UID: "a", Name: "a", Dropped: 0, DroppedPresent: true},
+			ctrlmetrics.PodMetrics{UID: "b", Name: "b", Dropped: 2, DroppedPresent: true}), true},
+		{"no Pod dropped updates", managed(ctrlmetrics.PodMetrics{UID: "a", Name: "a", DroppedPresent: true}), false},
+		{"family absent", managed(ctrlmetrics.PodMetrics{UID: "a", Name: "a"}), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e, srv, _ := startWith(t, setup{metrics: tc.metrics, immediate: true}, isolated()...)
+			e.Compute()
+			h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", 200)
+			var mismatch, unavailable []FindingDTO
+			for _, f := range h.Findings {
+				switch f.Code {
+				case health.CodeScopeMismatch:
+					mismatch = append(mismatch, f)
+				case health.CodeSignalUnavailable:
+					unavailable = append(unavailable, f)
+				}
+			}
+			if tc.dropped && (len(mismatch) != 0 || len(unavailable) != 1 || unavailable[0].Detail != text) {
+				t.Fatalf("want no KGWUI-007 and one KGWUI-008 %q: %+v", text, h.Findings)
+			}
+			if !tc.dropped && (len(mismatch) == 0 || len(unavailable) != 0) {
+				t.Fatalf("want KGWUI-007 and no KGWUI-008: %+v", h.Findings)
 			}
 		})
 	}

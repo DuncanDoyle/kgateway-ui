@@ -1,0 +1,46 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "code": "KGWUI-013",
+        "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
+        "id": "f1-mvx3oc6sg55xmltbfspi7tgxtj",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "none",
+          "name": "broken",
+          "namespace": "shop"
+        },
+        "restricted": true,
+        "severity": "error",
+        "slug": "ref-unresolved"
+      },
+      {
+        "code": "KGWUI-014",
+        "detail": "ResolvedRefs=False, reason RefNotPermitted (parent Gateway infra/edge)",
+        "group": "f1-mvg6d2emebndncdtexypelvglv",
+        "id": "f1-n5yxfgmniicf4ryima4zdmprah",
+        "message": "Reference not permitted (missing ReferenceGrant)",
+        "resource": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "denied",
+          "namespace": "shop"
+        },
+        "severity": "error",
+        "since": "2026-10-17T11:00:00Z",
+        "slug": "ref-not-permitted"
+      }
+    ],
+    "total": 2
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

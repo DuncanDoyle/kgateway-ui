@@ -14,12 +14,13 @@ import { type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useMe
 import { useNavigate } from "react-router-dom";
 import type { LinkedRef, Page } from "../api/types";
 import { listCopy } from "../copy/explorer";
+import { useLinkVia } from "../shell/trail";
 import { useMedia } from "../shell/useMedia";
 import { QuietButton } from "../states/controls";
 import { Shimmer } from "../states/Shimmer";
 import { VisuallyHidden } from "../states/VisuallyHidden";
 import type { SortState } from "./listQuery";
-import { objectPath } from "./objectPath";
+import { objectPath, withVia } from "./objectPath";
 import { Pager } from "./Pager";
 
 // region Styles
@@ -220,6 +221,10 @@ interface ObjectTableProps<T> {
   noun: readonly [string, string];
   columns: ObjectColumn<T>[];
   rowRef: (row: T) => LinkedRef;
+  /** A row's identity when its ref is not unique, e.g. several findings on one object; defaults to the ref. */
+  rowKey?: (row: T) => string;
+  /** Where a row opens; defaults to its ref's objectPath. */
+  rowPath?: (row: T) => string | undefined;
   page?: Page<T>;
   loading: boolean;
   /** The rows shown belong to the previous query while a new one loads: busy and dimmed, never moved. */
@@ -234,6 +239,8 @@ interface ObjectTableProps<T> {
   skeletonRows?: number;
   /** Whether the footer says how many objects the caller cannot view; one table per page should. */
   showDenied?: boolean;
+  /** Drops the empty footer once loaded; only for a table nothing sits below, so no layout moves. */
+  collapseEmptyFooter?: boolean;
   stylesOverride?: SerializedStyles;
 }
 
@@ -247,6 +254,8 @@ export function ObjectTable<T>({
   noun,
   columns,
   rowRef,
+  rowKey,
+  rowPath,
   page,
   loading,
   busy = false,
@@ -257,15 +266,25 @@ export function ObjectTable<T>({
   onPage,
   skeletonRows = SKELETON_ROWS,
   showDenied = true,
+  collapseEmptyFooter = false,
   stylesOverride,
 }: ObjectTableProps<T>) {
   const navigate = useNavigate();
   const narrow = useMedia(NARROW);
+  const denied = showDenied && page?.deniedInInstall ? listCopy.denied(page.deniedInInstall, noun) : null;
+  const pager = !page || !!page.prev || !!page.next;
+  const footerEmpty = !denied && !pager;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [active, setActive] = useState(0);
   const rowEls = useRef<(HTMLTableRowElement | null)[]>([]);
   const secondary = columns.filter((c) => c.secondary);
   const collapse = narrow && secondary.length > 0;
+  const keyOf = useCallback((r: T) => (rowKey ? rowKey(r) : refKey(rowRef(r))), [rowKey, rowRef]);
+  const via = useLinkVia(installId);
+  const pathOf = (r: T) => {
+    const to = rowPath ? rowPath(r) : objectPath(installId, rowRef(r));
+    return to ? withVia(to, via) : undefined;
+  };
   const toggle = useCallback(
     (k: string) =>
       setExpanded((prev) => {
@@ -281,15 +300,16 @@ export function ObjectTable<T>({
       id: "expand",
       cell: (c) => {
         const r = rowRef(c.row.original);
+        const k = keyOf(c.row.original);
         // Read through meta, so expanding changes no column def and the button keeps its focus.
-        const open = (c.table.options.meta as { expanded: ReadonlySet<string> }).expanded.has(refKey(r));
+        const open = (c.table.options.meta as { expanded: ReadonlySet<string> }).expanded.has(k);
         return (
           <button
             type="button"
             className="expand"
             aria-expanded={open}
             aria-label={listCopy.toggleDetails(open, nameOf(r))}
-            onClick={() => toggle(refKey(r))}
+            onClick={() => toggle(k)}
           >
             {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
           </button>
@@ -300,7 +320,7 @@ export function ObjectTable<T>({
       ...(collapse ? [expand] : []),
       ...columns.map((col) => h.display({ id: col.id, header: col.header, cell: (c) => col.cell(c.row.original) })),
     ];
-  }, [columns, collapse, rowRef, toggle]);
+  }, [columns, collapse, rowRef, keyOf, toggle]);
   const visibility = useMemo<VisibilityState>(
     () => Object.fromEntries(secondary.map((c) => [c.id, !collapse])),
     [secondary, collapse],
@@ -315,7 +335,7 @@ export function ObjectTable<T>({
     columns: defs,
     state: { sorting, columnVisibility: visibility },
     meta: { expanded },
-    getRowId: (r) => refKey(rowRef(r)),
+    getRowId: keyOf,
     manualSorting: true,
     manualPagination: true,
     autoResetAll: false,
@@ -326,7 +346,7 @@ export function ObjectTable<T>({
   const shown = table.getVisibleLeafColumns();
   const rows = table.getRowModel().rows;
   const open = (r: T) => {
-    const to = objectPath(installId, rowRef(r));
+    const to = pathOf(r);
     if (to) navigate(to);
   };
   const onRowClick = (e: MouseEvent, r: T) => {
@@ -403,7 +423,7 @@ export function ObjectTable<T>({
           ) : null}
           {rows.map((r, i) => {
             const k = r.id;
-            const linked = !!objectPath(installId, rowRef(r.original));
+            const linked = !!pathOf(r.original);
             return [
               <tr
                 key={k}
@@ -439,13 +459,13 @@ export function ObjectTable<T>({
           })}
         </tbody>
       </Table>
-      <Footer data-testid="list-footer">
-        <span className="denied">
-          {showDenied && page?.deniedInInstall ? listCopy.denied(page.deniedInInstall, noun) : null}
-        </span>
-        {/* Once loaded, a single page has no pager; the footer keeps its height. */}
-        {!page || page.prev || page.next ? <Pager prev={page?.prev} next={page?.next} onPage={onPage} /> : null}
-      </Footer>
+      {footerEmpty && collapseEmptyFooter ? null : (
+        <Footer data-testid="list-footer">
+          <span className="denied">{denied}</span>
+          {/* Once loaded, a single page has no pager; the footer keeps its height. */}
+          {pager ? <Pager prev={page?.prev} next={page?.next} onPage={onPage} /> : null}
+        </Footer>
+      )}
     </Frame>
   );
 }

@@ -1,20 +1,29 @@
 name: bench
-# Records the design §9.6 budgets on a GitHub-hosted runner: on demand, and on PRs that touch the engine paths.
+# Runs the design §16.3 budgets on a GitHub-hosted runner, on demand and on PRs that touch the engine paths (D-044):
+# deterministic budgets gate, absolute time budgets are reported, and timing regressions gate against the base.
 on:
   workflow_dispatch:
+    inputs:
+      base:
+        description: Ref the timing regression gate compares against
+        type: string
+        default: main
   pull_request:
-    paths: ["pkg/engine/**", "pkg/cache/**", "pkg/ctrlmetrics/**", "pkg/trigger/**", "pkg/explore/**", "pkg/computed/**", "pkg/install/**", "pkg/objects/**", "pkg/health/**", "pkg/api/**", "internal/testutil/scale/**", "Makefile", ".github/workflows/bench.yaml"]
+    paths: ["pkg/engine/**", "pkg/cache/**", "pkg/ctrlmetrics/**", "pkg/ctrllogs/**", "pkg/trigger/**", "pkg/explore/**", "pkg/computed/**", "pkg/install/**", "pkg/objects/**", "pkg/health/**", "pkg/api/**", "pkg/collect/**", "pkg/diagnose/**", "pkg/process/**", "pkg/proxystats/**", "internal/testutil/**", "internal/benchab/**", "Makefile", ".github/workflows/bench.yaml"]
 permissions: { contents: read }
 jobs:
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
       - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - name: make bench
         shell: bash
+        env:
+          KGWUI_BENCH_TIMING: report
         run: |
           set -o pipefail
           {
@@ -23,9 +32,24 @@ jobs:
             make bench
             echo "# load after: $(uptime)"
           } 2>&1 | tee bench.txt
+      - name: timing regression against the base
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base }}
+        run: |
+          set -o pipefail
+          sha=$(git rev-parse --verify --quiet "origin/$BASE^{commit}" || git rev-parse --verify "$BASE^{commit}")
+          git worktree add --detach "$RUNNER_TEMP/base" "$sha"
+          {
+            echo "# base: $BASE ($sha), head: $GITHUB_SHA"
+            make bench-ab BASE_DIR="$RUNNER_TEMP/base" BENCH_AB_OUT=.
+          } 2>&1 | tee bench-ab.txt
       - if: always()
         uses: actions/upload-artifact@v7
         with:
           name: bench
-          path: bench.txt
+          path: |
+            bench.txt
+            bench-ab*.txt
           if-no-files-found: error

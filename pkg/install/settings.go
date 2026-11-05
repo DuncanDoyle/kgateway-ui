@@ -38,27 +38,34 @@ const WildcardEnv = "DELEGATION_WILDCARD_NAMESPACE"
 // WildcardAll is the wildcard namespace's default: no namespace is special.
 const WildcardAll = "all"
 
+// GlobalPolicyEnv is the controller env var naming the namespace whose policies'
+// targetSelectors match in every namespace.
+const GlobalPolicyEnv = "KGW_GLOBAL_POLICY_NAMESPACE"
+
 // Settings are the controller settings the UI reads.
 type Settings struct {
 	Experimental Setting
 	// WildcardNamespace is the delegation wildcard namespace; "all" when absent or empty.
 	WildcardNamespace Setting
+	// GlobalPolicyNamespace is the global policy namespace; "" when absent or empty: none.
+	GlobalPolicyNamespace Setting
 }
 
 // ReadSettings reads the controller settings from the same source as Scope (D-015).
 // An absent experimental entry means "true", the controller's default; an
-// absent or empty wildcard entry means "all".
+// absent or empty wildcard entry means "all"; an absent global policy namespace means none.
 func ReadSettings(inst Install) Settings {
 	c, source, errMsg := controllerContainer(inst)
 	if c == nil {
 		s := Setting{Reason: errMsg, Source: source}
-		return Settings{Experimental: s, WildcardNamespace: s}
+		return Settings{Experimental: s, WildcardNamespace: s, GlobalPolicyNamespace: s}
 	}
 	wc := readEnv(c, source, WildcardEnv, WildcardAll)
 	if wc.Known && wc.Value == "" {
 		wc.Value = WildcardAll // an empty value also means all (rules §5.2)
 	}
-	return Settings{Experimental: readEnv(c, source, ExperimentalEnv, "true"), WildcardNamespace: wc}
+	return Settings{Experimental: readEnv(c, source, ExperimentalEnv, "true"), WildcardNamespace: wc,
+		GlobalPolicyNamespace: readEnv(c, source, GlobalPolicyEnv, "")}
 }
 
 // NamespaceLabels returns the labels of every cached Namespace by name; ok is

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
@@ -120,7 +121,7 @@ func (ls *list) parentSummary(id explore.RowID, p explore.ParentLink) ParentSumm
 	}
 	switch {
 	case p.Cond != nil:
-		s.ConditionType, s.Reason, s.Message = p.Cond.Type, p.Cond.Reason, p.Cond.Message
+		s.ConditionType, s.Reason, s.Message = p.Cond.Type, p.Cond.Reason, computed.ClipDisplay(p.Cond.Message, computed.MaxStatusBytes)
 	case p.Attachment == explore.AttachmentPending:
 		s.Reason = p.Pending
 	}

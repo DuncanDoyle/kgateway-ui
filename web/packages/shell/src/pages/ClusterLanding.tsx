@@ -10,6 +10,7 @@ import { HealthBadge } from "../health/HealthBadge";
 import { stateLabel } from "../health/state";
 import { useVocabulary } from "../shell/extension";
 import { InstallName } from "../shell/InstallName";
+import { layout } from "../shell/layout";
 import { installPath } from "../shell/paths";
 import { PageNotice } from "../states/PageNotice";
 import { PageState } from "../states/PageState";
@@ -19,7 +20,7 @@ import { scopeText } from "./scope";
 
 // region Styles
 const Grid = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
   display: grid;

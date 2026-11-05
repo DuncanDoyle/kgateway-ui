@@ -1,0 +1,55 @@
+# xDS rejects on a dedicated Gateway (install A): its two proxies reject one
+# RouteConfiguration and one Cluster while status stays Programmed=True.
+# Clusters reach every proxy of the install, so edge's proxy rejects the Cluster too.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata: { name: nack-proxy, namespace: infra }
+spec: { kube: { deployment: { replicas: 2 } } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: nack, namespace: infra }
+spec:
+  gatewayClassName: kgateway
+  infrastructure:
+    parametersRef: { group: gateway.kgateway.dev, kind: GatewayParameters, name: nack-proxy }
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+      allowedRoutes: { namespaces: { from: All } }
+---
+# RouteConfiguration reject: the regex passes kgateway's syntax check but exceeds Envoy's RE2 program size limit (100).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: nack-regex, namespace: shop }
+spec:
+  parentRefs: [{ name: nack, namespace: infra }]
+  rules:
+    - matches: [{ path: { type: RegularExpression, value: "/nack/[a-z0-9]{200}" } }]
+      backendRefs: [{ name: httpbin, port: 8000 }]
+---
+# A Service of its own, so edge's httpbin cluster stays valid.
+apiVersion: v1
+kind: Service
+metadata: { name: httpbin-nack, namespace: shop }
+spec: { selector: { app: httpbin }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: nack-cluster, namespace: shop }
+spec:
+  parentRefs: [{ name: nack, namespace: infra }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /cluster } }]
+      backendRefs: [{ name: httpbin-nack, port: 8000 }]
+---
+# Cluster reject: Envoy fails to initialise an unknown cipher suite; standard validation mode passes it.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: BackendConfigPolicy
+metadata: { name: nack-cipher, namespace: shop }
+spec:
+  targetRefs: [{ group: "", kind: Service, name: httpbin-nack }]
+  tls:
+    insecureSkipVerify: true
+    parameters: { cipherSuites: [NOT-A-CIPHER] }

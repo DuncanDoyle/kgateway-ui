@@ -1,0 +1,82 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "install": "kgw.kgateway",
+    "items": [
+      {
+        "affected": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "x",
+            "namespace": "shop"
+          },
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "y",
+            "namespace": "shop"
+          }
+        ],
+        "affectedTotal": 2,
+        "class": 3,
+        "code": "KGWUI-014",
+        "grant": {
+          "fromNamespace": "shop",
+          "toGroup": "",
+          "toKind": "Service",
+          "toNamespace": "store"
+        },
+        "id": "f1-kg6jygxgidz4w4uyuoeqvqsufl",
+        "members": 2,
+        "severity": "error",
+        "since": "2026-10-17T11:00:00Z",
+        "title": "Reference not permitted (missing ReferenceGrant)"
+      },
+      {
+        "affected": [],
+        "affectedTotal": 0,
+        "cause": {
+          "group": "",
+          "kind": "Service",
+          "link": "none",
+          "name": "cart",
+          "namespace": "shop"
+        },
+        "class": 3,
+        "code": "KGWUI-013",
+        "id": "f1-uhey57urdhjsrvrht6j3ipjka5",
+        "members": 2,
+        "restricted": true,
+        "severity": "error",
+        "title": ""
+      },
+      {
+        "affected": [],
+        "affectedTotal": 0,
+        "cause": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "two",
+          "namespace": "shop"
+        },
+        "class": 3,
+        "code": "KGWUI-013",
+        "id": "f1-6hrj4xm6jswazs447h5if7ggth",
+        "members": 1,
+        "severity": "error",
+        "since": "2026-10-17T11:00:00Z",
+        "title": "Backend not found"
+      }
+    ],
+    "total": 3
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

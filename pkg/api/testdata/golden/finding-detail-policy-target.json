@@ -1,0 +1,34 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:30Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:30Z",
+    "finding": {
+      "code": "KGWUI-016",
+      "detail": "targetRefs[0] Gateway `nope`: not found in namespace infra. Computed by the UI's policy targets rule. Not verified: the controller's status cannot confirm this. Rule set kgateway-2.4.",
+      "group": "f1-dtkl3ndanmprnm5sicxzkflmd2",
+      "id": "f1-nviswyuqexok5wugdbitwpmqh3",
+      "message": "Policy target not found",
+      "resource": {
+        "group": "gateway.kgateway.dev",
+        "kind": "TrafficPolicy",
+        "link": "yaml",
+        "name": "tp-two",
+        "namespace": "infra"
+      },
+      "severity": "warning",
+      "since": "2026-10-17T11:58:59Z",
+      "slug": "policy-target-not-found"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

@@ -4,6 +4,7 @@ package kgw24
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
@@ -61,20 +62,20 @@ func TestFitClauses(t *testing.T) {
 
 func TestOmittedMatchesUnderPrefix(t *testing.T) {
 	child := &objects.HTTPRouteView{Rules: []objects.Rule{{Index: 0}}}
-	rules, kept := viewC(child, prefix("/api"))
+	rules, kept, _ := viewC(child, prefix("/api"))
 	want := computed.EffectiveRule{Index: 0, Reason: &computed.FitFailure{Rule: 0, Match: 0, Clause: computed.ClauseDefaultSlash, Parent: "/api", Child: "/"}}
 	if kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
 		t.Errorf("under /api: %+v, %v; want %+v dropped", rules, kept, want)
 	}
 
-	rules, kept = viewC(child, prefix("/"))
+	rules, kept, _ = viewC(child, prefix("/"))
 	want = computed.EffectiveRule{Index: 0, Kept: true, Matches: []objects.Match{prefix("/")}}
 	if !kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
 		t.Errorf("under /: %+v, %v; want %+v kept", rules, kept, want)
 	}
 
 	// Under an Exact parent the clause is path-type, not default-slash.
-	rules, kept = viewC(child, pm("Exact", "/api"))
+	rules, kept, _ = viewC(child, pm("Exact", "/api"))
 	want = computed.EffectiveRule{Index: 0, Reason: &computed.FitFailure{Rule: 0, Match: 0, Clause: computed.ClausePathType, Parent: "Exact", Child: "/"}}
 	if kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
 		t.Errorf("under Exact /api: %+v, %v; want %+v dropped", rules, kept, want)
@@ -82,7 +83,7 @@ func TestOmittedMatchesUnderPrefix(t *testing.T) {
 
 	// Inherit mode merges the default PathPrefix / into the parent's path.
 	inherit := &objects.HTTPRouteView{InheritParentMatcher: true, Rules: []objects.Rule{{Index: 0}}}
-	rules, kept = viewC(inherit, prefix("/api"))
+	rules, kept, _ = viewC(inherit, prefix("/api"))
 	want = computed.EffectiveRule{Index: 0, Kept: true, Matches: []objects.Match{prefix("/api")}}
 	if !kept || len(rules) != 1 || !reflect.DeepEqual(rules[0], want) {
 		t.Errorf("inherit under /api: %+v, %v; want %+v kept", rules, kept, want)
@@ -111,14 +112,14 @@ func TestMerge(t *testing.T) {
 		// Beyond the brief: a trailing slash is cleaned away, as path.Join does.
 		{"trailing slash", prefix("/api"), prefix("/x/"), prefix("/api/x")},
 	} {
-		if got := merge(c.parent, c.child); !reflect.DeepEqual(got, c.want) {
+		if got, _ := merge(c.parent, c.child); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: merge = %+v; want %+v", c.name, got, c.want)
 		}
 	}
 
 	// merge never writes through to its inputs.
 	parent, child := withHeaders(prefix("/api"), kv("a", "1")), withHeaders(prefix("/x"), kv("b", "2"))
-	merge(parent, child)
+	_, _ = merge(parent, child)
 	if child.Path.Value != "/x" || len(child.Headers) != 1 || len(parent.Headers) != 1 {
 		t.Errorf("merge mutated its inputs: %+v, %+v", parent, child)
 	}
@@ -127,14 +128,14 @@ func TestMerge(t *testing.T) {
 func TestExplicitEmptyMatches(t *testing.T) {
 	parent := withHeaders(prefix("/api"), kv("x", "1"))
 	child := &objects.HTTPRouteView{InheritParentMatcher: true, Rules: []objects.Rule{{Index: 0, Matches: []objects.Match{}}}}
-	rules, kept := viewC(child, parent)
+	rules, kept, _ := viewC(child, parent)
 	want := []computed.EffectiveRule{{Index: 0, Kept: true, Matches: []objects.Match{parent}}}
 	if !kept || !reflect.DeepEqual(rules, want) {
 		t.Errorf("inherit: %+v, %v; want %+v", rules, kept, want)
 	}
 
 	child.InheritParentMatcher = false
-	rules, kept = viewC(child, parent)
+	rules, kept, _ = viewC(child, parent)
 	want = []computed.EffectiveRule{{Index: 0, Reason: &computed.FitFailure{Rule: 0, Match: -1, Clause: computed.ClauseNoMatches, Parent: "/api"}}}
 	if kept || !reflect.DeepEqual(rules, want) {
 		t.Errorf("default: %+v, %v; want %+v", rules, kept, want)
@@ -149,7 +150,7 @@ func TestViewCKeepsChildIffAnyRuleKept(t *testing.T) {
 	parent := withMethod(prefix("/api"), "GET")
 
 	// Rule 0 keeps its second match; rule 1 fails on its first match's clause.
-	rules, kept := viewC(child, parent)
+	rules, kept, _ := viewC(child, parent)
 	want := []computed.EffectiveRule{
 		{Index: 0, Kept: true, Matches: []objects.Match{withMethod(prefix("/api/x"), "GET")}},
 		{Index: 1, Reason: &computed.FitFailure{Rule: 1, Match: 0, Clause: computed.ClausePathPrefix, Parent: "/api", Child: "/other"}},
@@ -158,16 +159,28 @@ func TestViewCKeepsChildIffAnyRuleKept(t *testing.T) {
 		t.Errorf("one rule kept: %+v, %v; want %+v", rules, kept, want)
 	}
 
-	rules, kept = viewC(child, prefix("/none"))
+	rules, kept, _ = viewC(child, prefix("/none"))
 	if kept || len(rules) != 2 || rules[0].Kept || rules[1].Kept {
 		t.Errorf("no rule kept: %+v, %v; want both dropped", rules, kept)
 	}
 
 	// Inherit mode keeps every match, merged.
 	child.InheritParentMatcher = true
-	rules, kept = viewC(child, parent)
+	rules, kept, _ = viewC(child, parent)
 	if !kept || len(rules) != 2 || !rules[0].Kept || !rules[1].Kept ||
 		!reflect.DeepEqual(rules[1].Matches, []objects.Match{withMethod(prefix("/api/other"), "GET"), withMethod(prefix("/api/api/y"), "GET")}) {
 		t.Errorf("inherit: %+v, %v", rules, kept)
+	}
+}
+
+// A merged path past computed.MaxPathBytes is refused, and one at it is kept whole.
+func TestMergeBoundsPathBytes(t *testing.T) {
+	at := strings.Repeat("a", computed.MaxPathBytes-5)
+	got, ok := merge(prefix("/api"), prefix("/"+at))
+	if !ok || len(got.Path.Value) != computed.MaxPathBytes {
+		t.Fatalf("at the bound: ok %v, %d bytes", ok, len(got.Path.Value))
+	}
+	if _, ok := merge(prefix("/api"), prefix("/"+at+"b")); ok {
+		t.Errorf("past the bound: merged")
 	}
 }

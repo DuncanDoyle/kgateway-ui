@@ -3,7 +3,8 @@ import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
 import type { LinkedRef } from "../api/types";
 import { ResourceName } from "../resource/ResourceName";
-import { objectPath } from "./objectPath";
+import { useLinkVia } from "../shell/trail";
+import { linkTarget } from "./objectPath";
 
 // region Styles
 const oneLine = css`
@@ -41,7 +42,7 @@ interface LinkedNameProps {
   stylesOverride?: SerializedStyles;
 }
 
-/** A resource name that opens where its server-computed link says; a "none" link renders as text. */
+/** A resource name that opens where its server-computed link says, with the trail; a "none" link renders as text. */
 export function LinkedName({
   refValue,
   installId,
@@ -49,7 +50,7 @@ export function LinkedName({
   "aria-describedby": describedBy,
   stylesOverride,
 }: LinkedNameProps) {
-  const to = objectPath(installId, refValue);
+  const to = linkTarget(installId, refValue, useLinkVia(installId));
   const style = truncate ? css`${oneLine}${stylesOverride}` : stylesOverride;
   const name = (
     <ResourceName

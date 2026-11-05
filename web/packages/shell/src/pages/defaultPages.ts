@@ -6,8 +6,10 @@ import { ListenerSetPage } from "./explore/ListenerSetPage";
 import { ListenerSetsPage } from "./explore/ListenerSetsPage";
 import { RoutePage } from "./explore/RoutePage";
 import { RoutesPage } from "./explore/RoutesPage";
-import { FindingsPage } from "./FindingsPage";
-import { InstallPage } from "./install/InstallPage";
+import { FindingPage } from "./findings/FindingPage";
+import { FindingsPage } from "./findings/FindingsPage";
+import { DiagnosticsSection, InstallPage } from "./install/InstallPage";
+import { ProcessesPage } from "./processes/ProcessesPage";
 import { ResourcePage } from "./ResourcePage";
 
 /** The upstream page implementations. */
@@ -15,6 +17,7 @@ export const defaultPages: Required<CorePages> = {
   ClusterLanding,
   InstallPage,
   FindingsPage,
+  FindingPage,
   ResourcePage,
   GatewaysPage,
   GatewayPage,
@@ -22,4 +25,6 @@ export const defaultPages: Required<CorePages> = {
   ListenerSetPage,
   RoutesPage,
   RoutePage,
+  DiagnosticsSection,
+  ProcessesPage,
 };

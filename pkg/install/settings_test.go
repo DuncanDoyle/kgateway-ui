@@ -143,3 +143,31 @@ func TestReadWildcard(t *testing.T) {
 		t.Errorf("no workload must be unknown: %+v", s)
 	}
 }
+
+// KGW_GLOBAL_POLICY_NAMESPACE: absent or empty is known with no global
+// namespace; valueFrom and envFrom are unknown.
+func TestReadGlobalPolicyNamespace(t *testing.T) {
+	cases := []struct {
+		name    string
+		env     []corev1.EnvVar
+		envFrom bool
+		want    Setting // Reason compared with strings.Contains
+	}{
+		{"absent", nil, false, Setting{Known: true}},
+		{"empty", []corev1.EnvVar{testutil.Env(GlobalPolicyEnv, "")}, false, Setting{Known: true}},
+		{"namespace", []corev1.EnvVar{testutil.Env(GlobalPolicyEnv, "global")}, false, Setting{Value: "global", Known: true}},
+		{"valueFrom", []corev1.EnvVar{{Name: GlobalPolicyEnv, ValueFrom: &corev1.EnvVarSource{}}}, false, Setting{Reason: "valueFrom"}},
+		{"envFrom without entry", nil, true, Setting{Reason: "envFrom"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ReadSettings(settingsInstall(tc.env, tc.envFrom, true)).GlobalPolicyNamespace
+			if got.Value != tc.want.Value || got.Known != tc.want.Known || !strings.Contains(got.Reason, tc.want.Reason) {
+				t.Fatalf("want %+v got %+v", tc.want, got)
+			}
+		})
+	}
+	if s := ReadSettings(Install{Container: "kgateway"}).GlobalPolicyNamespace; s.Known || s.Reason == "" {
+		t.Errorf("no workload must be unknown: %+v", s)
+	}
+}

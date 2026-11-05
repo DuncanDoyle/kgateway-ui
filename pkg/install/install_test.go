@@ -112,3 +112,16 @@ func TestKgatewayVersion(t *testing.T) {
 		t.Errorf("other edition: got %q", v)
 	}
 }
+
+// A downstream detector sets BaseVersion; upstream keeps using Version.
+func TestKgatewayVersionUsesBaseVersion(t *testing.T) {
+	if v := (Install{Edition: "acme", Version: "9.9.9", BaseVersion: "v2.4.7"}).KgatewayVersion(); v != "v2.4.7" {
+		t.Errorf("downstream with base: got %q", v)
+	}
+	if v := (Install{Edition: "acme", Version: "9.9.9"}).KgatewayVersion(); v != "" {
+		t.Errorf("downstream without base: got %q", v)
+	}
+	if v := (Install{Edition: "kgateway", Version: "2.3.11", BaseVersion: "v2.4.7"}).KgatewayVersion(); v != "2.3.11" {
+		t.Errorf("upstream ignores base: got %q", v)
+	}
+}

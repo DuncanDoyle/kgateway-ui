@@ -13,6 +13,7 @@ export const navCopy = {
   routes: "Routes",
   listenerSets: "ListenerSets",
   findings: "Findings", // S02
+  processes: "Processes", // S412
   label: "Install", // S03
   copyCommand: "Copy kubectl command", // S04
 };
@@ -75,6 +76,11 @@ export const routeStateCopy = {
   pending: "Waiting for status", // S16
   declared: "No status entry for the parent route", // S17
   "no-parent": "No parent", // S18
+};
+
+/** The data-plane flag (3.2): its Gateway's proxies reject config. Offered to Phase 3 servers only. */
+export const routeStateDataPlaneCopy = {
+  "gateway-rejecting": "Gateway rejects config", // S457
 };
 
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
@@ -174,6 +180,11 @@ export const listenerSetCopy = {
   crdHintBefore: "If you set",
   crdHintAfter:
     "and it is missing here, the Gateway CRD in this cluster may not have the field. The API server drops fields its CRD does not define. If so, install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD.",
+  // The field name sits between the two parts; placeholder until the wording pass.
+  crdMissingBefore: (channel: string, version: string) =>
+    `The Gateway CRD in this cluster is from the ${channel} channel, ${version}, and has no`,
+  crdMissingAfter:
+    "field. The API server drops fields its CRD does not define. Install a Gateway CRD from the same Gateway API channel and version as the ListenerSet CRD.",
 };
 
 // region HTTPRoute page
@@ -371,4 +382,244 @@ export const effectiveCopy = {
   kept: "Fits", // S229
   dropped: "Does not fit", // S229
   moreParents: "More parent routes not shown.", // S230
+};
+
+// region Findings (Phase 3.1, ids in docs/phases/phase-3/phase-3.1-wording.md)
+export const findingsCopy = {
+  title: "Findings", // S265
+  search: "Filter findings", // S266
+  placeholder: "Filter by object, message or detail", // S267
+  severity: "Severity", // S268
+  code: "Code", // S269
+  finding: "Message", // S270: header of the message column
+  object: "Object", // S271
+  since: "Since", // S272
+  install: "The install", // S273: a finding about the install itself
+  noValue: "No value", // S281: accessible name of the muted dash
+  restricted: "Restricted: ask the owning team", // S280
+  tags: { code: "Code", kind: "Kind", namespace: "Namespace", group: "Group" } as Record<string, string>, // S269, S274, S275
+  allFindings: "Back to findings", // S283
+  notFound: "Finding not found", // S284
+  detail: "Detail", // S286
+  firstSeen: "Since", // S287
+  affected: "Affected objects", // S288
+  noAffected: "No affected objects you can view.", // S289
+  suggestedFix: "Suggested fix", // S290
+  nextSteps: "Next steps", // S291
+  needs: (perms: string[]) => `Needs ${perms.join(", ")}`, // S292
+  copy: "Copy", // S293
+  copyLabel: (title: string) => `Copy ${title}`, // S293
+};
+
+// region Diagnostics (Phase 3.2, ids in docs/phases/phase-3/phase-3.2-wording.md)
+export const diagnosticsCopy = {
+  copied: "Copied", // S376
+  copyFailed: "Could not copy", // S377
+  nextStep: "Next steps", // S375
+  affected: (n: number) => `${n} affected`, // S380
+  findings: (n: number) => plural(n, ["finding", "findings"]), // S381
+  // Evidence
+  rejectedTypes: "Rejected config types", // S426
+  type: "Type", // S427
+  streams: "Streams", // S428
+  firstSeen: "First seen", // S429
+  reportedBy: "Reported by", // S430
+  proxies: "Proxies", // S392
+  proxiesReady: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393
+  statusSaysHealthy: "Status says Programmed, but proxies reject its config", // S432
+  proxyRejects: "Rejects seen on each proxy", // S431
+  pod: "Pod", // S433
+  rejectingSince: (ago: string) => `New rejects, started ${ago}`, // S434
+  envoyResources: "Envoy resources", // S436
+  rejecting: (n: number) => `${n} rejecting`, // S397
+  rejectingNow: "New rejects", // S434
+  notRejecting: "No new rejects", // S435
+  truncated: "and more", // S437
+  recentlyChanged: "Changed shortly before the first reject", // S438
+  recentlyChangedNote: "A hint, not a cause.", // S439
+  restartsInWindow: "Restarts", // S402
+  lastEnded: "Last exit", // S404
+  termination: (reason: string | undefined, exitCode: number) => `${reason ?? "Exited"}, exit code ${exitCode}`, // S405
+  waiting: "Waiting", // S411
+  probe: "Probe", // S409
+  // S410
+  probeFailures: (type: string | undefined, n: number) =>
+    `${type ? `${type} probe` : "A probe"} failed ${n === 1 ? "once" : `${n} times`}`,
+  historyUnknown: "Earlier failures were not counted.", // S440
+  controllerVersion: "Controller version", // S441
+  expected: "Gateway API expected", // S442
+  proxyVersions: "Proxy versions", // S443
+  replicaVersions: "Controller replica versions", // S444
+  crds: "Gateway API CRDs", // S445
+  more: (n: number) => `and ${n} more`, // S446
+  proxyStats: "Proxy stats", // S447
+  connected: "Connected", // S448
+  disconnected: "Not connected",
+  warmingListeners: "Warming listeners", // S449
+  warmingClusters: "Warming clusters",
+  serverState: "Server state", // S450
+  notReported: "Not reported", // S365
+  // Processes
+  controller: "Controller", // S391
+  readyOf: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393
+  version: (v: string) => `version ${v}`, // S394
+  versionHeader: "Version", // S406
+  notObserved: "Not observed", // S363
+  noGateways: "No Gateways you can view", // S395
+  gatewaysReady: (ready: number, total: number) => `${ready}/${total} Gateways ready`, // S396
+  skew: (n: number) => `${n} with version skew`, // S398
+  restarting: (n: number) => `${n} restarted recently`, // S399
+  gatewaysNotObserved: (n: number) => `${n} not observed`, // S364
+  name: "Name",
+  ready: "Ready", // S400
+  notReady: "Not ready",
+  // S401
+  restarts: (total: number | undefined, recent: number | undefined) =>
+    total === undefined ? (recent ? `${recent} recent` : "") : recent ? `${total} (${recent} recent)` : String(total),
+  lastStart: "Last start", // S403
+  rolloutStuck: (reason: string) => `Rollout stuck: ${reason}`, // S407
+  noProcesses: "No processes you can view.", // S408
+  // Install page (Task 49)
+  needsAttention: "Needs attention", // S378
+  showAllGroups: (n: number) => `Show all groups (${n})`, // S379
+  processesTitle: "Processes", // S386
+  viewProcesses: "View processes", // S387
+  whatWasChecked: "What was checked", // S385
+  notAvailable: "Not available", // S358
+  unavailableReason: {
+    off: "Turned off", // S359
+    denied: "No permission to read its input", // S360
+    failing: "Its input is failing", // S361
+    "not-on-version": "Not available on this version", // S362
+    "not-observed": "Not observed", // S363
+  } as Record<string, string>,
+  dataPlane: "Data plane", // S388
+  noRejects: "No rejects", // S389
+  rejects: "Rejects", // S390
+  problems: (n: number) => plural(n, ["problem", "problems"]), // S383
+  oldestProblem: (ago: string) => `Oldest problem ${ago}`, // S384
+  // Phase 3.3: Learn more, and evidence of 003, 013–015, 017, 018 and the controller log.
+  learnMore: "Learn more", // S560
+  learnMoreLabel: (code: string) => `Learn more about ${code} (opens in a new tab)`, // S561
+  status: "Status", // S481
+  since: "Since", // S272
+  freshness: {
+    "never-written": "The controller has not written a status", // S482
+    stale: "Status is for an older generation", // S483
+    pending: "Waiting for the controller", // S484
+    "no-ancestor": "No status entry from this controller", // S485
+  } as Record<string, string>,
+  generation: "Generation", // S486
+  generations: (observed: number, current: number) => `Status has ${observed}, object is at ${current}`, // S487
+  refsAttributed: "The ref", // S491
+  refsCandidates: "Refs the condition may be about", // S492
+  refsNotAttributed: "The condition does not say which of these refs failed.", // S493
+  location: "Location", // S494, equal to fixCopy.location
+  ref: "Ref", // S495
+  kindNotServed: "No such kind in this group", // S496
+  ruleReason: { RouteRuleReplaced: "Replaced", RouteRuleDropped: "Dropped" } as Record<string, string>, // S498
+  reason: "Reason", // S499
+  match: "Match", // S500
+  matchIndex: (n: number) => `match ${n}`, // S500
+  matchNote: "The controller's match index, not a rule number.", // S501
+  policy: "Policy", // S502
+  controllerMessage: "Controller message", // S503
+  listener: "Listener", // S520
+  port: "Port", // S520
+  protocol: "Protocol", // S520
+  hostname: "Hostname", // S520
+  rule: "Rule", // S521
+  computedRule: (rule: string) => `Computed by the UI: ${rule}`, // S522
+  keptListeners: "Listeners the controller kept", // S523
+  owner: "Owner", // S524
+  stuckObjects: "Objects with a stuck status", // S530
+  objects: "Objects", // S530
+  oldest: "Oldest", // S530
+  syncs: "Status syncs, last 5 min", // S531
+  notKnown: "Not known", // S532
+  controllerLog: "Controller log", // S552, equal to dataPlaneCopy.controllerLog
+  logState: { read: "Read", "not-read": "Not read" } as Record<string, string>, // S553
+  panic: "Panic", // S554
+  panicReadAt: (ago: string) => `Read from the log ${ago}. The trace has no time.`, // S555
+  // S551
+  grantShape: (from: string, to: string, group: string, kind: string) =>
+    `From ${from} to ${kind}${group ? ` (${group})` : ""} in ${to}`,
+  topFrame: "Top frame", // S554
+  deployerErrors: "Deployer errors", // S556
+  errorClass: "Error class", // S556
+  lastSeen: "Last seen", // S556
+  logEvents: "Controller log events", // S557
+  classes: "Error classes", // S557
+};
+
+/** The suggested fix block of a finding (design §7.7, Phase 3.3). */
+export const fixCopy = {
+  object: "Object", // S271
+  newObject: "New object", // S537
+  location: "Location", // S494, equal to diagnosticsCopy.location
+  merge: "Change only these fields at this location. Keep the rest.", // S538
+  basis: "Basis", // S539
+  yaml: "YAML", // S540
+  createWith: "Create it with", // S541
+  createNote: "`kubectl create` fails if the name is taken, so it never replaces an object.", // S542
+  copy: "Copy", // S293
+  // Backticks mark names in the title; a screen reader would read them aloud.
+  copyLabel: (title: string) => `Copy YAML: ${title.replaceAll("`", "")}`, // S543
+  download: "Download", // S544
+  downloadLabel: (file: string) => `Download ${file}`, // S544
+};
+
+/** The grouped findings view (design §17.1, Phase 3.3). */
+export const groupsCopy = {
+  view: "View", // S545
+  flat: "Findings", // S546
+  groups: "Groups", // S546
+  title: "Cause", // S547
+  cause: "Cause object", // S548
+  affected: "Affected", // S549
+  members: "Findings", // S549
+  since: "Since", // S272
+  noun: ["group", "groups"] as const, // S550
+};
+
+/** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */
+export const processesCopy = {
+  title: "Processes", // S412
+  search: "Filter Gateways", // S413
+  placeholder: "Filter by Gateway name or namespace", // S414
+  showOnly: "Show only", // S415
+  skew: "Version skew", // S416
+  restarting: "Restarted recently", // S417
+  controllerTable: "Controller processes", // S418
+  gatewayProxies: "Gateway proxies", // S419
+  gateway: "Gateway", // S420
+  proxies: "Proxies", // S392
+  rejects: "Rejecting streams", // S421
+  version: "Version", // S406
+  restarts: "Recent restarts", // S422
+  differs: "differs from controller", // S423
+  hidden: "Hidden", // S424
+  proxiesOf: (gw: string) => `Proxies of ${gw}`, // S425
+};
+export const dataPlaneCopy = {
+  title: "Data plane", // S388
+  rejecting: "Proxies reject this Gateway's config", // S305
+  unavailable: "Rejects cannot be read right now", // S451
+  evidenceRestricted: "Details hidden: they name objects you cannot view.", // S452
+  nextSteps: "Next steps", // S291
+  snapshot: "Built by the controller", // S453
+  snapshotNote: "From controller metrics. This is what it built, not what proxies accepted.", // S454
+  // S455
+  snapshotFacts: {
+    listeners: "Listeners",
+    routes: "Routes",
+    clusters: "Clusters",
+    endpoints: "Endpoints",
+    secrets: "Secrets",
+  },
+  proxyStats: "Proxy stats", // S447
+  proxyStatsOn: "Collected", // S456
+  withheld: "Proxies may not be getting config updates", // S558, equal to health.WithheldMessage
+  withheldSpan: (first: string, last: string) => `First logged ${first}, last ${last}`, // S559
+  controllerLog: "Controller log", // S552
 };

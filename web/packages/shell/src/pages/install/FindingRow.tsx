@@ -3,13 +3,16 @@ import styled from "@emotion/styled";
 import { Link } from "react-router-dom";
 import { useInstalls } from "../../api/hooks";
 import type { Finding } from "../../api/types";
+import { findingsCopy } from "../../copy/explorer";
 import { objectPath, resourcePath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
 import { severityLabel, severityToState } from "../../health/state";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
+import { findingKey, Slot, useFindingActions } from "../../shell/contributions";
 import { type FindingRenderer, useShellExtension } from "../../shell/extension";
 import { InstallName } from "../../shell/InstallName";
+import { findingPath } from "../findings/FindingsPage";
 
 // region Styles
 const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
@@ -40,6 +43,12 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   }
   .msg {
     color: ${(p) => p.theme.color.text};
+  }
+  a.msg:hover {
+    text-decoration: underline;
+  }
+  a.msg:active {
+    color: ${(p) => p.theme.color.accentText};
   }
   .muted {
     color: ${(p) => p.theme.color.textMuted};
@@ -72,6 +81,23 @@ const Row = styled.div<{ stylesOverride?: SerializedStyles }>`
   ${(p) => p.stylesOverride}
 `;
 
+const Actions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${(p) => p.theme.space(2)};
+  margin-top: ${(p) => p.theme.space(1.5)};
+  /* Every action threw: its Slot rendered nothing, so the area takes no space. */
+  &:empty {
+    display: none;
+  }
+  fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+`;
+
 // region Helpers
 // The YAML view path lives with objectPath; re-exported here, where the public API has always found it.
 export { resourcePath };
@@ -86,13 +112,35 @@ export function rendererFor(renderers: Record<string, FindingRenderer>, code: st
 }
 
 // region Component
+/** A finding's contributed actions, each in its own Slot; a restricted finding gets none. Renderers belong to EvidenceView. */
+export function FindingContributions({ finding: f }: { finding: Finding }) {
+  const actions = useFindingActions(f);
+  const fk = findingKey(f);
+  if (f.restricted || actions.length === 0) return null;
+  return (
+    <Actions data-slot="finding-actions">
+      {actions.map((a) => (
+        <Slot
+          key={a.id}
+          id={`finding-action:${a.id}`}
+          resetKey={fk}
+          render={() => <fieldset aria-label={a.label}>{a.render(f)}</fieldset>}
+        />
+      ))}
+    </Actions>
+  );
+}
+
 interface FindingRowProps {
   finding: Finding;
   installId: string;
   stylesOverride?: SerializedStyles;
 }
 
-/** One finding: severity, code, resource, message, detail. The resource opens where its server-computed link says. */
+/**
+ * One finding: severity, code, resource, message, detail. The resource opens where its server-computed link says;
+ * the message opens the finding's page when the finding has an id.
+ */
 export function FindingRow({ finding: f, installId, stylesOverride }: FindingRowProps) {
   const { findingRenderers } = useShellExtension();
   const extra = rendererFor(findingRenderers, f.code);
@@ -108,6 +156,7 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
   );
   // A restricted finding (D-013) never links: its resource would 404 for this caller.
   const to = f.resource && !f.restricted ? objectPath(installId, f.resource) : undefined;
+  const page = findingPath(installId, f);
   return (
     <Row data-testid="finding-row" stylesOverride={stylesOverride}>
       <div className="sev">
@@ -120,12 +169,20 @@ export function FindingRow({ finding: f, installId, stylesOverride }: FindingRow
       </div>
       <div className="text">
         {f.restricted ? (
-          <div className="muted">Restricted: ask the owning team</div>
+          <div className="muted">{findingsCopy.restricted}</div>
         ) : (
           <>
-            <div className="msg">{f.message}</div>
+            {page ? (
+              <Link className="msg" to={page}>
+                {f.message}
+              </Link>
+            ) : (
+              <div className="msg">{f.message}</div>
+            )}
             {f.detail ? <div className="muted">{f.detail}</div> : null}
-            {extra ? extra(f) : null}
+            {/* The row is not on the finding page, so its renderer never doubles EvidenceView's. */}
+            {extra ? <Slot id={`finding-renderer:${f.code}`} resetKey={findingKey(f)} render={() => extra(f)} /> : null}
+            <FindingContributions finding={f} />
           </>
         )}
       </div>

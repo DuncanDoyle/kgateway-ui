@@ -1,0 +1,4 @@
+# Captured 2026-11-05 from kind cluster kgwui-e2e: kgateway v2.4.7 (cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7), Envoy 1.38.7,
+# test/e2e/setup.sh with NACK=1; kubectl logs deploy/kgateway -n kgw-a. Lines selected, otherwise unmodified.
+{"time":"2026-11-05T08:05:22.648580881Z","level":"info","msg":"no perclient clusters; defer building snapshot","component":"proxy_syncer","client":"kgateway-kube-gateway-api~infra~edge~7009316860631388847~infra"}
+{"time":"2026-11-05T08:05:22.648623423Z","level":"info","msg":"per-client inputs not ready; deferring snapshot","component":"proxy_syncer","client":"kgateway-kube-gateway-api~infra~edge~7009316860631388847~infra"}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type { ApiError } from "./client";
 import { apiFetch } from "./client";
@@ -13,24 +13,25 @@ import type {
   Ref,
   RouteDetail,
   RouteRow,
+  TrailRefs,
 } from "./types";
 
 // region Helpers
-const seg = encodeURIComponent;
-const withQuery = (path: string, q: URLSearchParams) => {
+export const seg = encodeURIComponent;
+export const withQuery = (path: string, q: URLSearchParams) => {
   const s = q.toString();
   return s ? `${path}?${s}` : path;
 };
 
 /** A response is shown only for the install in the URL, so a switch never shows the previous install's data. */
-const forInstall = <T extends { install: string }>(data: T | undefined, id: string) =>
+export const forInstall = <T extends { install: string }>(data: T | undefined, id: string) =>
   data?.install === id ? data : undefined;
 
 /**
  * One list page, polled. A 400 on a request with a cursor sets cursorRejected and loads page one instead (design §8.6);
  * the page should then drop the cursor from its URL. isLaggy marks rows of the previous query while a new one loads.
  */
-function useList<T>(id: string, list: string, query: URLSearchParams) {
+export function useList<T>(id: string, list: string, query: URLSearchParams) {
   const { cache } = useSWRConfig();
   const path = `${installApi(id)}/${list}`;
   const hasCursor = query.has("cursor");
@@ -102,4 +103,58 @@ export function useRouteDetail(id: string, r: Ref) {
 /** GET …/routes/{group}/{kind}/{ns}/{name}/delegation: view B's rows of one parent route, paged (rule, ref, outcome, cursor). */
 export function useDelegation(id: string, r: Ref, query: URLSearchParams) {
   return useList<DelegationRow>(id, `routes/${refPath(r)}/delegation`, query);
+}
+
+/** A trail ref parameter: "core" for the empty group, "-" for no namespace (GET …/refs). */
+const trailParam = (r: Ref) => `${r.group || "core"}/${r.kind}/${r.namespace || "-"}/${r.name}`;
+
+/** The most refs one GET …/refs takes: the server's bound. */
+export const REFS_BATCH = 6;
+
+/** GET …/refs for every param, in requests of at most {@link REFS_BATCH}, as one answer. */
+async function fetchTrailLinks([path, ...params]: readonly string[]): Promise<TrailRefs> {
+  const batches: string[][] = [];
+  for (let i = 0; i < params.length; i += REFS_BATCH) batches.push(params.slice(i, i + REFS_BATCH));
+  const pages = await Promise.all(
+    batches.map((b) => apiFetch<TrailRefs>(withQuery(path as string, new URLSearchParams(b.map((p) => ["ref", p]))))),
+  );
+  // An answer split across installs (a switch mid-flight) matches none, so forInstall drops it.
+  const install = pages.every((p) => p.install === pages[0]?.install) ? (pages[0]?.install ?? "") : "";
+  return { install, refs: pages.flatMap((p) => p.refs) };
+}
+
+/** A lost connection (status 0) or a server error may pass; a 4xx is the server's final answer. */
+const transient = (e: ApiError) => e.status === 0 || e.status >= 500;
+
+/**
+ * GET …/refs for the breadcrumb trail's objects: once per page view, never polled, batched within the server's bound.
+ * The key is the sorted refs, so the same trail is one lookup; no refs means no request. Only a 4xx is final (failed);
+ * a lost connection or a 5xx retries with backoff, and again on reconnect while it is still failing.
+ */
+export function useTrailLinks(id: string, refs: readonly Ref[]) {
+  const params = [...new Set(refs.map(trailParam))].sort();
+  const key = params.length ? [`${installApi(id)}/refs`, ...params] : null;
+  const [failing, setFailing] = useState(false);
+  // The pending retry; a success, a new key or unmount cancels it, so it never replaces a good answer.
+  const retry = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const cancel = () => clearTimeout(retry.current);
+  const keyId = key?.join(",") ?? "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyId is the trigger; cancel reads only the ref.
+  useEffect(() => cancel, [keyId]);
+  const { data, error } = useSWR<TrailRefs, ApiError>(key, fetchTrailLinks, {
+    onSuccess: () => {
+      cancel();
+      setFailing(false);
+    },
+    revalidateOnFocus: false,
+    // Config is read when the event fires, so a settled lookup never refetches on reconnect.
+    revalidateOnReconnect: failing,
+    onErrorRetry: (e, _key, _config, revalidate, opts) => {
+      setFailing(transient(e));
+      cancel();
+      if (!transient(e)) return;
+      retry.current = setTimeout(() => revalidate(opts), Math.min(1000 * 2 ** (opts.retryCount - 1), 30_000));
+    },
+  });
+  return { data: forInstall(data, id), error, failed: error !== undefined && !transient(error) };
 }

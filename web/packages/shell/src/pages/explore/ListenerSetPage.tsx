@@ -11,6 +11,7 @@ import { LinkedName } from "../../explore/LinkedName";
 import { ResourceName } from "../../resource/ResourceName";
 import { YamlBlock } from "../../resource/ResourceYaml";
 import { useInstallId } from "../../shell/extension";
+import { useTwoColumns } from "../../shell/layout";
 import { DetailFrame, Facts, Section } from "./detailParts";
 import { ListenerTable } from "./gateway/ListenerTable";
 import { Muted } from "./listParts";
@@ -56,7 +57,12 @@ function AllowedListenersBlock({ a }: { a: AllowedListeners }) {
       ) : (
         <p>{listenerSetCopy.allowedUnset}</p>
       )}
-      {a.crdHint ? (
+      {a.crdField === "missing" ? (
+        <p data-testid="crd-missing">
+          {listenerSetCopy.crdMissingBefore(a.crdChannel ?? "", a.crdBundleVersion ?? "")}{" "}
+          <code>{listenerSetCopy.allowedField}</code> {listenerSetCopy.crdMissingAfter}
+        </p>
+      ) : a.crdHint && a.crdField !== "defined" ? (
         <p>
           {listenerSetCopy.crdHintBefore} <code>{listenerSetCopy.allowedField}</code> {listenerSetCopy.crdHintAfter}
         </p>
@@ -77,8 +83,44 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
   const ref = useMemo<LinkedRef>(() => ({ group, kind, namespace: ns, name, link: "detail" }), [group, kind, ns, name]);
   const { data, error } = useListenerSetDetail(id, ref);
   const allowed = data?.parentAllowedListeners;
+  // The parent's server link decides its crumb in the trail.
+  const parentRef = useMemo(() => (data ? [data.parent] : undefined), [data]);
+  // From 1600 px the parent and conditions sit beside the structure; below, above it.
+  const wide = useTwoColumns();
+  const related = data ? (
+    <>
+      <Section aria-label={listenerSetCopy.parent}>
+        <Facts>
+          <dt>{listenerSetCopy.parentGateway}</dt>
+          <dd>
+            {/* parentFound is false for a hidden parent too, so the page never says it does not exist (D-013). */}
+            {data.parentFound ? (
+              <LinkedName refValue={data.parent} installId={id} />
+            ) : (
+              <>
+                <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
+                <Muted>{listenerSetCopy.notAvailable}</Muted>
+              </>
+            )}
+          </dd>
+        </Facts>
+      </Section>
+      <Section aria-labelledby="ls-conditions">
+        <h2 id="ls-conditions">{detailCopy.conditions}</h2>
+        <ConditionList
+          conditions={data.conditions}
+          generation={data.generation}
+          empty={data.experimentalHint}
+          extra={(c) => (data.parentFound && allowed && isNotAllowed(c) ? <AllowedListenersBlock a={allowed} /> : null)}
+        />
+      </Section>
+    </>
+  ) : null;
   return (
     <DetailFrame
+      trailRefs={parentRef}
+      side={wide ? related : null}
+      sideWhenWide
       installId={id}
       refValue={ref}
       noun="ListenerSet"
@@ -88,33 +130,7 @@ export function ListenerSetPage({ stylesOverride }: ListenerSetPageProps = {}) {
     >
       {data ? (
         <>
-          <Section aria-label={listenerSetCopy.parent}>
-            <Facts>
-              <dt>{listenerSetCopy.parentGateway}</dt>
-              <dd>
-                {/* parentFound is false for a hidden parent too, so the page never says it does not exist (D-013). */}
-                {data.parentFound ? (
-                  <LinkedName refValue={data.parent} installId={id} />
-                ) : (
-                  <>
-                    <ResourceName namespace={data.parent.namespace} name={data.parent.name} />{" "}
-                    <Muted>{listenerSetCopy.notAvailable}</Muted>
-                  </>
-                )}
-              </dd>
-            </Facts>
-          </Section>
-          <Section aria-labelledby="ls-conditions">
-            <h2 id="ls-conditions">{detailCopy.conditions}</h2>
-            <ConditionList
-              conditions={data.conditions}
-              generation={data.generation}
-              empty={data.experimentalHint}
-              extra={(c) =>
-                data.parentFound && allowed && isNotAllowed(c) ? <AllowedListenersBlock a={allowed} /> : null
-              }
-            />
-          </Section>
+          {wide ? null : related}
           <Section aria-labelledby="ls-listeners">
             <h2 id="ls-listeners">
               {gatewayCopy.listeners} <span className="note">{data.listeners.length}</span>

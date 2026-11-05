@@ -23,6 +23,9 @@ type InstallSummary struct {
 	Readiness       overview.Readiness     `json:"readiness"`
 	Scope           *overview.ScopeSummary `json:"scope,omitempty"`
 	Health          HealthSummary          `json:"health"`
+	// GroupRows is the number of groups diagnostics lists: the install page
+	// reserves that many Needs attention rows while diagnostics load.
+	GroupRows int `json:"groupRows"`
 	// ComputedAt is when the model behind Health was computed. Clients fall back
 	// to it when ConfirmedAt is absent.
 	ComputedAt time.Time `json:"computedAt"`
@@ -55,6 +58,9 @@ type MetaResponse struct {
 	// Capabilities are what the platform offers (platform.Scope,
 	// platform.Workloads). Clients branch on these, never on Platform.
 	Capabilities []string `json:"capabilities"`
+	// CapabilityStates lists the core and extension capabilities with their state, by name.
+	// Those that are on are also in Capabilities.
+	CapabilityStates []Capability `json:"capabilityStates,omitempty"`
 	// Kinds are the kinds the resource endpoint can serve: the served kinds,
 	// plus apps/Deployment under the workloads capability. The frontend links only these.
 	Kinds []kinds.Served `json:"kinds"`
@@ -66,9 +72,9 @@ type MetaResponse struct {
 }
 
 // addedFilters are the list filters added after API v1 (design §7.2). The
-// delegation list is new in 2.4; listing its filters tells a client the
-// endpoint exists (PF8).
-var addedFilters = map[string][]string{"routes": {"listener"}, "delegation": {"rule", "ref", "outcome"}}
+// delegation and findings lists are new; listing their filters tells a
+// client the endpoint exists (PF8, Phase 3 design §13.1).
+var addedFilters = map[string][]string{"routes": {"listener"}, "delegation": {"rule", "ref", "outcome"}, "findings": findingsFilters}
 
 // deploymentKind is listed in /api/v1/meta because finding links reach
 // controller Deployments (D-013). It is read through typed informers, not counted.

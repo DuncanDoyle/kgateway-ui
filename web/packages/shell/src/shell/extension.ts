@@ -1,8 +1,9 @@
 import { type ComponentType, createContext, type ReactNode, useContext } from "react";
 import { useParams } from "react-router-dom";
-import type { Finding } from "../api/types";
+import type { Diagnostics, Finding } from "../api/types";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
+import type { Contributions } from "./contributions";
 import { kubernetesVocabulary, type Vocabulary } from "./vocabulary";
 
 /** Product identity shown in the header (D-008). */
@@ -12,10 +13,8 @@ export interface Brand {
 }
 
 /**
- * A page contributed by an extension. Paths are relative, without a leading slash; install-scoped ones resolve
- * under /i/:id/. The core owns "/" at the top and "", "findings" and "r/..." under /i/:id/, and wins on its own URLs.
- * "gateways", "listenersets" and "routes" are reserved under /i/:id/: a contribution at or below them is ignored with
- * a console warning; replace those pages through their CorePages slots instead.
+ * A page contributed by an extension, at a relative path (install-scoped ones under /i/:id/). Core paths win; one at or
+ * below "gateways", "listenersets" or "routes" is ignored with a warning: use the CorePages slots.
  */
 export interface RouteContribution {
   path: string;
@@ -45,6 +44,10 @@ export interface ShellExtension {
   findingRenderers?: Record<string, FindingRenderer>;
   /** Platform copy; entries left out keep the Kubernetes defaults (D-016). */
   vocabulary?: Partial<Vocabulary>;
+  /** In-page slots: detail tabs, side sections, finding actions and install panels. */
+  contributions?: Contributions;
+  /** Base URL of the findings reference "Learn more" opens, e.g. a build's own copy of docs/findings.md; "#kgwui-0nn" is appended. */
+  findingsDocUrl?: string;
 }
 
 /**
@@ -62,12 +65,31 @@ export interface CorePages {
   ListenerSetPage?: ComponentType;
   RoutesPage?: ComponentType;
   RoutePage?: ComponentType;
+  /** The finding detail page at findings/:findingId (sub-phase 3.1). */
+  FindingPage?: ComponentType;
+  /** The Processes page at processes (sub-phase 3.2). */
+  ProcessesPage?: ComponentType;
+  /** Replaces the install page's Needs attention and Processes block (sub-phase 3.2). */
+  DiagnosticsSection?: ComponentType<DiagnosticsSectionProps>;
 }
+
+/** What the install page hands its diagnostics block; stale data must show every state as unknown (D-006). */
+export interface DiagnosticsSectionProps {
+  installId: string;
+  diagnostics: Diagnostics;
+  stale: boolean;
+}
+
+/** The CorePages the Shell was given, for slots that sit inside a page rather than at a route. */
+export const CorePagesContext = createContext<Partial<CorePages>>({});
 
 export const defaultBrand: Brand = { productName: "kgateway", logo: null };
 
 /** The extension merged with the upstream defaults; the vocabulary is complete. */
-export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary">> & { vocabulary: Vocabulary };
+export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary" | "findingsDocUrl">> & {
+  vocabulary: Vocabulary;
+  findingsDocUrl?: string;
+};
 
 export const ShellExtensionContext = createContext<ResolvedShellExtension>({
   brand: defaultBrand,
@@ -77,6 +99,7 @@ export const ShellExtensionContext = createContext<ResolvedShellExtension>({
   navEntries: [],
   findingRenderers: {},
   vocabulary: kubernetesVocabulary,
+  contributions: {},
 });
 
 /** The extension merged with the upstream defaults. */

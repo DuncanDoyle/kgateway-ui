@@ -11,10 +11,18 @@ import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routesGolden from "../../../../../../pkg/api/testdata/golden/routes.json";
 import routesByListenerGolden from "../../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import { POLL_MS } from "../../api/hooks";
-import type { GatewayDetail, ListenerSetDetail, ListenerSetList, RouteList, RouteRow } from "../../api/types";
+import type {
+  AllowedListeners,
+  GatewayDetail,
+  ListenerSetDetail,
+  ListenerSetList,
+  RouteList,
+  RouteRow,
+} from "../../api/types";
+import { breadcrumbsCopy } from "../../copy/navigation";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
-import { pseudoRules, renderWithTheme } from "../../test/render";
+import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { HEADER_H } from "./detailParts";
 import { GatewayPage } from "./GatewayPage";
@@ -324,8 +332,7 @@ it("ListenerSets are paged through the list endpoint", async () => {
   await waitFor(() => expect(listCalls("listenersets").at(-1)?.searchParams.get("cursor")).toBe("p2"));
   // The page URL does not carry a sub-table's cursor.
   expect(location()).toBe(GW_PATH);
-  expect(within(rowOf(t, "partial")).getByRole("link", { name: "infra/partial" })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(rowOf(t, "partial")).getByRole("link", { name: "infra/partial" }))).toBe(
     `/i/${ID}/listenersets/${GW}/ListenerSet/infra/partial`,
   );
 });
@@ -351,10 +358,7 @@ it("ListenerSet page says when the parent Gateway is missing", async () => {
 it("a found parent Gateway links to its page", async () => {
   serve(api({ ls: ls(lsInvalidGolden) }));
   mount(LS_PATH("partial"));
-  expect(await screen.findByRole("link", { name: "infra/edge" })).toHaveAttribute(
-    "href",
-    `/i/${ID}/gateways/infra/edge`,
-  );
+  expect(hrefPath(await screen.findByRole("link", { name: "infra/edge" }))).toBe(`/i/${ID}/gateways/infra/edge`);
   expect(screen.queryByText("Not available")).toBeNull();
 });
 
@@ -375,6 +379,26 @@ it("NotAllowed shows the parent's allowedListeners as written, or Not set with t
   expect(set.querySelector("pre")).toHaveTextContent("namespaces: from: Same");
   expect(set).not.toHaveTextContent("Not set");
   expect(set).not.toHaveTextContent("CRD");
+});
+
+it("the Gateway CRD's channel and bundle replace the possibility with which one it is", async () => {
+  const withField = (a: Partial<AllowedListeners>) => ({
+    ...ls(lsGolden),
+    parentAllowedListeners: { set: false, crdHint: true, ...a },
+  });
+  serve(api({ ls: withField({ crdField: "missing", crdChannel: "standard", crdBundleVersion: "v1.4.1" }) }));
+  const first = mount(LS_PATH("na"));
+  const missing = await screen.findByTestId("allowed-listeners");
+  expect(missing).toHaveTextContent(
+    "The Gateway CRD in this cluster is from the standard channel, v1.4.1, and has no allowedListeners field.",
+  );
+  expect(missing).not.toHaveTextContent("may not have");
+  first.unmount();
+  serve(api({ ls: withField({ crdField: "defined", crdChannel: "standard", crdBundleVersion: "v1.5.1" }) }));
+  mount(LS_PATH("na"));
+  const defined = await screen.findByTestId("allowed-listeners");
+  expect(defined).toHaveTextContent("Not set: the Gateway allows no ListenerSets.");
+  expect(defined).not.toHaveTextContent("CRD");
 });
 
 it("an accepted ListenerSet shows no allowed-listeners block", async () => {
@@ -413,8 +437,7 @@ it("candidate banner above the header", async () => {
   mount(GW_PATH);
   const banner = await screen.findByTestId("candidate-banner");
   expect(banner).toHaveTextContent("Not part of this install. Shown because HTTPRoute shop/mid refers to it.");
-  expect(within(banner).getByRole("link", { name: "shop/mid" })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(banner).getByRole("link", { name: "shop/mid" }))).toBe(
     `/i/${ID}/routes/${GW}/HTTPRoute/shop/mid`,
   );
   const header = screen.getByTestId("detail-header");
@@ -512,8 +535,14 @@ it("the header and tabs keep their size from loading to loaded", async () => {
   const tabs = () => getComputedStyle(screen.getByTestId("detail-tabs")).height;
   expect(header()).toBe(`${HEADER_H}px`);
   expect(tabs()).toBe(`${TABS_H}px`);
+  // No contributed sections: the skeleton and the loaded page are both one column.
+  const columns = () => screen.getByTestId("detail-columns");
+  const split = columns().className;
+  expect(screen.queryByTestId("detail-side")).not.toBeInTheDocument();
   await act(async () => release?.());
   await screen.findByRole("table", { name: "Listeners" });
+  expect(columns().className).toBe(split);
+  expect(screen.queryByTestId("detail-side")).not.toBeInTheDocument();
   expect(header()).toBe(`${HEADER_H}px`);
   expect(tabs()).toBe(`${TABS_H}px`);
 });
@@ -522,7 +551,7 @@ it("a detail 404 says the object is out of scope", async () => {
   serve((u) => (u.pathname === "/api/v1/meta" ? metaGolden.body : undefined));
   mount(GW_PATH);
   expect(await screen.findByText("Not in this install's scope")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Back to install" })).toHaveAttribute("href", `/i/${ID}`);
+  expect(hrefPath(screen.getByRole("link", { name: "Back to install" }))).toBe(`/i/${ID}`);
 });
 
 it("the header offers copy buttons", async () => {
@@ -860,8 +889,7 @@ it("an unknown-count listener shows the unknown state and its reason, never an e
   const box = await screen.findByTestId("listener-routes-unknown");
   expect(box).toHaveTextContent("Unknown: the UI cannot read a controller setting");
   expect(screen.queryByRole("table", { name: "Computed routes on listener tcp" })).toBeNull();
-  expect(within(box).getByRole("link", { name: /All routes of this Gateway/ })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(box).getByRole("link", { name: /All routes of this Gateway/ }))).toBe(
     `/i/${ID}/routes?parent=${encodeURIComponent(EDGE)}`,
   );
   // No member query for a listener whose count is unknown.
@@ -1064,4 +1092,138 @@ it("a ?listener= name the Gateway does not have says so and sends no request", a
   const box = await screen.findByTestId("listener-routes-unknown");
   expect(box).toHaveTextContent("This Gateway has no listener named nope.");
   expect(listCalls("routes").some((u) => u.searchParams.get("listener") === "nope")).toBe(false);
+});
+
+// region Trail (D-035)
+const viaOf = (...entries: string[]) => `?${new URLSearchParams({ via: entries.map((e) => `${ID}/${e}`).join(",") })}`;
+const trail = () => within(screen.getByRole("navigation", { name: breadcrumbsCopy.label }));
+
+it("on a Gateway page a crumb for a route its tables show as hidden gets the restricted label", async () => {
+  const hidden = (): RouteList => {
+    const r = routes();
+    return {
+      ...r,
+      items: r.items.map((x) => (x.ref.name === "posts" ? { ...x, ref: { ...x.ref, link: "none" } } : x)),
+    };
+  };
+  serve((u) => (u.pathname === `${API}/routes` ? hidden() : api()(u)));
+  mount(GW_PATH + viaOf(`${GW}/HTTPRoute/blog/posts`, `${GW}/HTTPRoute/shop/api`));
+  // Before the tables load the crumb links by its own path; their server links then decide it.
+  await waitFor(() => expect(trail().getByText(breadcrumbsCopy.hidden)).toBeInTheDocument());
+  expect(trail().queryByText(/posts/)).toBeNull();
+  expect(trail().getByText(breadcrumbsCopy.hidden).closest("a")).toBeNull();
+  expect(trail().getByRole("link", { name: "HTTPRoute shop/api" })).toBeInTheDocument();
+});
+
+it("on a ListenerSet page the parent's link decides its crumb", async () => {
+  const body = ls(lsGolden);
+  serve(api({ ls: { ...body, parent: { ...body.parent, link: "none" } } }));
+  mount(LS_PATH("na") + viaOf(`${GW}/Gateway/infra/edge`));
+  await waitFor(() => expect(trail().getByText(breadcrumbsCopy.hidden)).toBeInTheDocument());
+  expect(trail().queryByText(/edge/)).toBeNull();
+});
+
+it("the current crumb holds a placeholder until the page's own detail loads", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  const reply = api();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const u = new URL(url, "http://ui");
+      if (u.pathname === `${API}/gateways/infra/edge`) await held;
+      const r = reply(u);
+      return new Response(JSON.stringify(r ?? { error: "not found" }), { status: r === undefined ? 404 : 200 });
+    }),
+  );
+  // Every text the trail ever shows, so a name that flashes once is caught; the page has other navigation landmarks.
+  const seen: string[] = [];
+  const watch = new MutationObserver(() =>
+    seen.push(screen.queryByRole("navigation", { name: breadcrumbsCopy.label })?.textContent ?? ""),
+  );
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  mount(GW_PATH);
+  seen.push(trail().getByRole("link", { name: "Gateways" }).closest("nav")?.textContent ?? "");
+  const nav = screen.getByRole("navigation", { name: breadcrumbsCopy.label });
+  expect(nav.querySelector('[data-part="current"] [data-pending]')).not.toBeNull();
+  await act(async () => {});
+  expect(seen.some((s) => s.includes("edge"))).toBe(false);
+  release();
+  expect(await trail().findByText("Gateway infra/edge")).toHaveAttribute("aria-current", "page");
+  watch.disconnect();
+});
+
+/** Stubs matchMedia so only the two-column query (from 1600 px) matches when wide. */
+function viewport(wide: boolean) {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: wide && q === "(min-width: 1600px)",
+    media: q,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}
+const before = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+it("from 1600 px a Gateway's conditions render in the side column, after the structure in DOM order", async () => {
+  viewport(true);
+  serve(api());
+  mount(GW_PATH);
+  await screen.findByRole("table", { name: "Listeners" });
+  const side = screen.getByTestId("detail-side");
+  const main = screen.getByTestId("detail-main");
+  expect(within(side).getByRole("region", { name: "Conditions" })).toBeInTheDocument();
+  expect(within(main).queryByRole("region", { name: "Conditions" })).toBeNull();
+  expect(within(main).getByRole("table", { name: "Listeners" })).toBeInTheDocument();
+  // DOM order is visual order: tab order reaches the structure first, then the side.
+  expect(before(main, side)).toBe(true);
+});
+
+it("below 1600 px a Gateway's conditions stay at the top of the one column", async () => {
+  viewport(false);
+  serve(api());
+  mount(GW_PATH);
+  const listeners = await screen.findByRole("table", { name: "Listeners" });
+  expect(screen.queryByTestId("detail-side")).toBeNull();
+  const conditions = within(screen.getByTestId("detail-main")).getByRole("region", { name: "Conditions" });
+  expect(before(conditions, listeners)).toBe(true);
+});
+
+it("the skeleton holds a side column from 1600 px only, as the loaded page does", async () => {
+  for (const wide of [true, false]) {
+    viewport(wide);
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const reply = api();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = new URL(url, "http://ui");
+        if (u.pathname === `${API}/gateways/infra/edge`) await gate;
+        const r = reply(u);
+        return new Response(JSON.stringify(r ?? { error: "not found" }), { status: r === undefined ? 404 : 200 });
+      }),
+    );
+    const view = mount(GW_PATH);
+    const skeleton = await screen.findByTestId("detail-skeleton");
+    expect(within(skeleton).queryByTestId("detail-side") !== null).toBe(wide);
+    act(() => release());
+    await screen.findByRole("table", { name: "Listeners" });
+    expect(screen.queryByTestId("detail-side") !== null).toBe(wide);
+    view.unmount();
+  }
+});
+
+it("from 1600 px a ListenerSet's parent and conditions render in the side column", async () => {
+  viewport(true);
+  serve(api());
+  mount(LS_PATH("partial"));
+  await screen.findByRole("table", { name: "Listeners" });
+  const side = screen.getByTestId("detail-side");
+  expect(within(side).getByRole("region", { name: "Conditions" })).toBeInTheDocument();
+  expect(within(side).getByText("Parent Gateway")).toBeInTheDocument();
+  expect(within(screen.getByTestId("detail-main")).getByRole("table", { name: "Listeners" })).toBeInTheDocument();
 });

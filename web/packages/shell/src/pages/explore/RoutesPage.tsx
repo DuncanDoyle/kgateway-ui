@@ -9,6 +9,7 @@ import {
   listCopy,
   parentLineCopy,
   routeStateCopy,
+  routeStateDataPlaneCopy,
   routeStateDelegationCopy,
   viewACopy,
 } from "../../copy/explorer";
@@ -135,6 +136,12 @@ function columns(installId: string): ObjectColumn<RouteRow>[] {
   ];
 }
 
+/** The data-plane flag (3.2); Phase 3 servers list the findings filters, and 3.1 never shipped alone. */
+const dataPlaneOptions: FilterOption[] = Object.entries(routeStateDataPlaneCopy).map(([value, label]) => ({
+  value,
+  label,
+}));
+
 // region Component
 interface RoutesPageProps {
   stylesOverride?: SerializedStyles;
@@ -149,9 +156,14 @@ export function RoutesPage({ stylesOverride }: RoutesPageProps = {}) {
   const viewA = useListFilter("routes", "listener");
   // The dropped flag arrives with view B, which /meta advertises as the delegation list's filters (PF8).
   const viewB = useListFilter("delegation", "outcome");
+  const phase3 = useListFilter("findings", "severity");
   const options = useMemo(
-    () => [...(viewA ? viewAOptions : stateOptions), ...(viewB ? viewBOptions : [])],
-    [viewA, viewB],
+    () => [
+      ...(viewA ? viewAOptions : stateOptions),
+      ...(viewB ? viewBOptions : []),
+      ...(phase3 ? dataPlaneOptions : []),
+    ],
+    [viewA, viewB, phase3],
   );
   return (
     <ListFrame

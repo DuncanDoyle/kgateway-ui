@@ -10,12 +10,14 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -35,10 +37,28 @@ const (
 )
 
 // defaultClient is used when HTTPScraper.Client is nil.
-var defaultClient = &http.Client{Timeout: maxPodTimeout}
+var defaultClient = NewHTTPClient()
+
+// NewHTTPClient is the in-cluster client: a 5 s timeout, no proxy from the
+// environment and no redirects.
+func NewHTTPClient() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return &http.Client{Timeout: maxPodTimeout, Transport: t, CheckRedirect: noRedirect}
+}
+
+// noRedirect stops at a 3xx, which then fails as a status error.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// withoutRedirects is a copy of c that never follows a redirect.
+func withoutRedirects(c *http.Client) *http.Client {
+	cp := *c
+	cp.CheckRedirect = noRedirect
+	return &cp
+}
 
 // HTTPScraper scrapes the pod IP directly (in-cluster mode). A nil Client
-// uses one with a 5s timeout.
+// means NewHTTPClient(); a supplied one keeps its transport but never follows redirects.
 type HTTPScraper struct{ Client *http.Client }
 
 // Scrape implements Scraper.
@@ -52,28 +72,47 @@ func (s HTTPScraper) Scrape(ctx context.Context, pod *corev1.Pod, port int32) (i
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/plain;version=0.0.4")
-	client := s.Client
-	if client == nil {
-		client = defaultClient
+	client := defaultClient
+	if s.Client != nil {
+		client = withoutRedirects(s.Client)
 	}
-	resp, err := client.Do(req)
+	return get(client, req)
+}
+
+// get sends req once; a status other than 200 is closed unread and fails with the status only.
+func get(c *http.Client, req *http.Request) (io.ReadCloser, error) {
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+		return nil, fmt.Errorf("GET %s: %s", req.URL.Path, resp.Status)
 	}
 	return resp.Body, nil
 }
 
 // PodProxyScraper scrapes through the API server's pods/proxy subresource
-// (local mode; uses the user's kubeconfig rights).
+// (local mode; uses the user's kubeconfig rights). It sends one GET over the
+// REST client's HTTP client without redirects; Request.Stream is not used, as it
+// reads error bodies unbounded and retries on Retry-After.
 type PodProxyScraper struct{ Kube kubernetes.Interface }
 
 // Scrape implements Scraper.
 func (s PodProxyScraper) Scrape(ctx context.Context, pod *corev1.Pod, port int32) (io.ReadCloser, error) {
-	return s.Kube.CoreV1().Pods(pod.Namespace).ProxyGet("http", pod.Name, strconv.Itoa(int(port)), "/metrics", nil).Stream(ctx)
+	rc, ok := s.Kube.CoreV1().RESTClient().(*rest.RESTClient)
+	// A fake clientset has no REST client.
+	if !ok || rc == nil || rc.Client == nil {
+		return nil, errors.New("pods/proxy unavailable")
+	}
+	u := rc.Get().Namespace(pod.Namespace).Resource("pods").Name("http:" + pod.Name + ":" + strconv.Itoa(int(port))).
+		SubResource("proxy").Suffix("metrics").URL()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/plain;version=0.0.4")
+	return get(withoutRedirects(rc.Client), req)
 }
 
 // Result is the outcome of collecting one install's metrics.
@@ -95,7 +134,15 @@ func (r Result) Stale(now time.Time, maxAge time.Duration) bool {
 // CollectedAt is not content: freshness is a deadline, not a change (D-019).
 func (r Result) SameContent(o Result) bool {
 	return r.Err == o.Err && r.Metrics.ManagedPresent == o.Metrics.ManagedPresent &&
-		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits)
+		maps.EqualFunc(r.Metrics.Rejects, o.Metrics.Rejects, sameBits) && maps.EqualFunc(r.Metrics.Managed, o.Metrics.Managed, sameBits) &&
+		slices.EqualFunc(r.Metrics.PerPod, o.Metrics.PerPod, samePod) && maps.Equal(r.Metrics.Snapshot, o.Metrics.Snapshot)
+}
+
+// samePod compares two Pods' samples by bit pattern.
+func samePod(a, b PodMetrics) bool {
+	return a.UID == b.UID && a.Name == b.Name && a.DroppedPresent == b.DroppedPresent && sameBits(a.Dropped, b.Dropped) &&
+		a.StatusSyncsPresent == b.StatusSyncsPresent && sameBits(a.StatusSyncs, b.StatusSyncs) &&
+		maps.EqualFunc(a.Active, b.Active, sameBits) && maps.EqualFunc(a.Total, b.Total, sameBits)
 }
 
 // sameBits compares samples by bit pattern, so NaN equals NaN, as the engine's
@@ -163,6 +210,10 @@ func (c *Collector) Collect(ctx context.Context, in install.Install) Result {
 		m, err := c.scrapePod(ctx, p, in.MetricsPort)
 		if err != nil {
 			return Result{CollectedAt: c.clock.Now(), Err: fmt.Sprintf("pod %s: %v", p.Name, err)}
+		}
+		// Parse yields one unnamed Pod; name it for the per-Pod view.
+		for i := range m.PerPod {
+			m.PerPod[i].UID, m.PerPod[i].Name = string(p.UID), p.Name
 		}
 		per = append(per, m)
 	}

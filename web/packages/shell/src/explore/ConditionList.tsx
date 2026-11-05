@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { Condition } from "../api/types";
 import { detailCopy } from "../copy/explorer";
 import { HealthIcon } from "../health/HealthIcon";
+import { layout } from "../shell/layout";
 import type { HealthState } from "../theme/tokens";
 
 // region Styles
@@ -44,6 +45,9 @@ const List = styled.ul<{ stylesOverride?: SerializedStyles }>`
     font-size: ${(p) => p.theme.font.size.sm};
     color: ${(p) => p.theme.color.textMuted};
     overflow-wrap: anywhere;
+  }
+  .message {
+    max-width: ${layout.proseMax};
   }
   .fresh {
     display: inline-flex;

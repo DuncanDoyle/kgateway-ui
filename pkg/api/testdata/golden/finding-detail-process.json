@@ -1,0 +1,55 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "evidence": {
+      "controllerLogs": "not-read",
+      "kind": "process",
+      "pod": "kgateway-0",
+      "restarts": 1,
+      "termination": {
+        "at": "2026-10-17T11:59:00Z",
+        "exitCode": 2,
+        "reason": "Error"
+      }
+    },
+    "finding": {
+      "code": "KGWUI-019",
+      "detail": "Pod kgateway-0 restarted once in the last 15 minutes. Last exit: Error (exit code 2). A Go panic exits with code 2. The stack trace is in the previous container's log.",
+      "group": "f1-u6tezcmdxnjwk6cnpxbrnv5sfp",
+      "id": "f1-3yzk7jq6fi3ww2oxd777sx7svr",
+      "message": "Controller restarted in the last 15 minutes",
+      "resource": {
+        "group": "apps",
+        "kind": "Deployment",
+        "link": "yaml",
+        "name": "kgateway",
+        "namespace": "kgw"
+      },
+      "severity": "warning",
+      "since": "2026-10-17T12:00:00Z",
+      "slug": "process-restarting"
+    },
+    "install": "kgw.kgateway",
+    "nextSteps": [
+      {
+        "command": "kubectl logs --previous -n kgw kgateway-0 -c kgateway",
+        "needs": [
+          "pods/log"
+        ],
+        "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+        "title": "Read the panic's stack trace"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

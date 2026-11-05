@@ -9,6 +9,7 @@ import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import { DocumentTitle } from "./DocumentTitle";
 import {
   type CorePages,
+  CorePagesContext,
   defaultBrand,
   type ResolvedShellExtension,
   type RouteContribution,
@@ -56,7 +57,9 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       routes: extension.routes ?? [],
       navEntries: extension.navEntries ?? [],
       findingRenderers: extension.findingRenderers ?? {},
+      contributions: extension.contributions ?? {},
       vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },
+      findingsDocUrl: extension.findingsDocUrl,
     };
   }, [extension]);
   // A contribution at or below a reserved path is ignored, with one warning, so it cannot shadow an explorer page.
@@ -80,6 +83,8 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
   const ListenerSetPage = pages.ListenerSetPage ?? defaultPages.ListenerSetPage;
   const RoutesPage = pages.RoutesPage ?? defaultPages.RoutesPage;
   const RoutePage = pages.RoutePage ?? defaultPages.RoutePage;
+  const FindingPage = pages.FindingPage ?? defaultPages.FindingPage;
+  const ProcessesPage = pages.ProcessesPage ?? defaultPages.ProcessesPage;
   // Core pages under /i/:id/; the install nav shows an entry only when its path is listed here.
   const installRoutes: [string, ComponentType][] = [
     ["", InstallPage],
@@ -90,35 +95,39 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
     ["listenersets/:group/:kind/:ns/:name", ListenerSetPage],
     ["routes/:group/:kind/:ns/:name", RoutePage],
     ["findings", FindingsPage],
+    ["findings/:findingId", FindingPage],
+    ["processes", ProcessesPage],
     ["r/:group/:kind/:rns/:rname", ResourcePage],
   ];
   return (
     <ShellExtensionContext.Provider value={ext}>
-      {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}
-      <ThemeProvider themes={ext.themes} defaultThemeId={ext.defaultThemeId}>
-        <BrowserRouter>
-          <Root data-testid="shell-root" stylesOverride={stylesOverride}>
-            <DocumentTitle />
-            <Header installPaths={installRoutes.map(([path]) => path)} />
-            <main>
-              <Routes>
-                <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
-                {installRoutes.map(([path, Page]) => (
-                  <Route key={path} path={path ? `/i/:id/${path}` : "/i/:id"} element={<Page />} />
-                ))}
-                {contributed.map((r) => (
-                  <Route
-                    key={`${r.scope}:${r.path}`}
-                    path={r.scope === "install" ? `/i/:id/${r.path}` : `/${r.path}`}
-                    element={r.element}
-                  />
-                ))}
-                <Route path="*" element={<PageState kind="empty" title="Page not found" />} />
-              </Routes>
-            </main>
-          </Root>
-        </BrowserRouter>
-      </ThemeProvider>
+      <CorePagesContext.Provider value={pages}>
+        {/* The provider and the context share one resolved default; a stored choice still wins (D-011). */}
+        <ThemeProvider themes={ext.themes} defaultThemeId={ext.defaultThemeId}>
+          <BrowserRouter>
+            <Root data-testid="shell-root" stylesOverride={stylesOverride}>
+              <DocumentTitle />
+              <Header installPaths={installRoutes.map(([path]) => path)} />
+              <main>
+                <Routes>
+                  <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
+                  {installRoutes.map(([path, Page]) => (
+                    <Route key={path} path={path ? `/i/:id/${path}` : "/i/:id"} element={<Page />} />
+                  ))}
+                  {contributed.map((r) => (
+                    <Route
+                      key={`${r.scope}:${r.path}`}
+                      path={r.scope === "install" ? `/i/:id/${r.path}` : `/${r.path}`}
+                      element={r.element}
+                    />
+                  ))}
+                  <Route path="*" element={<PageState kind="empty" title="Page not found" />} />
+                </Routes>
+              </main>
+            </Root>
+          </BrowserRouter>
+        </ThemeProvider>
+      </CorePagesContext.Provider>
     </ShellExtensionContext.Provider>
   );
 }

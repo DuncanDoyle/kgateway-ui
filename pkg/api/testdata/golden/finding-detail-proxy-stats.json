@@ -1,0 +1,44 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:01:01Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:01:01Z",
+    "evidence": {
+      "kind": "proxy-stats",
+      "pods": [
+        {
+          "connected": false,
+          "pod": "edge-0",
+          "serverState": "live"
+        }
+      ]
+    },
+    "finding": {
+      "code": "KGWUI-026",
+      "detail": "edge-0 lost its connection to the controller. It keeps serving its last config.",
+      "group": "f1-lq7dgtmebriqqlfwkepjs6upro",
+      "id": "f1-exk6t5crda4pyesobrrvy7ixgm",
+      "message": "Proxy lost its connection to the controller",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "detail",
+        "name": "edge",
+        "namespace": "infra"
+      },
+      "severity": "warning",
+      "since": "2026-10-17T12:00:00Z",
+      "slug": "proxy-disconnected"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

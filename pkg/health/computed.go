@@ -21,8 +21,12 @@ type computedCheck struct{}
 // Name implements Check.
 func (computedCheck) Name() string { return "computed views" }
 
+// Inputs implements Check.
+func (computedCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c computedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	if v := in.Computed; v != nil {
 		n := 0
@@ -44,7 +48,8 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			on, since := ch.On, ch.Since
 			f := Finding{Code: CodeComputedDisagrees, Slug: "computed-view-disagrees", Severity: SeverityWarning,
 				Install: in.Install.ID(), Resource: &on, Message: ComputedDisagreesMessage, Detail: disagreeDetail(*ch, v.RuleSet, v.Delegation.Rows),
-				Since: &since, Evidence: evidence(ch, v.Delegation.Rows)}
+				Since: &since, Evidence: evidence(ch, v.Delegation.Rows),
+				Key: []string{string(ch.ID.Kind), ch.ID.Subject, ch.Key.Group, ch.Key.Kind, ch.Key.Namespace, ch.Key.Name, ch.Key.SectionName}}
 			// A caller who cannot view every dep gets the resource's own first-seen (design §7.4 rules 7, 9).
 			u := ownedObject(in.Owned, owned, on)
 			if u == nil {
@@ -56,6 +61,8 @@ func (c computedCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 			fs = append(fs, f)
 		}
+		// The check kind and key are hidden from a restricted row: rank them per resource.
+		ordinalKeys(fs, func(*Finding) (int, bool) { return 0, true })
 	}
 	return fs, ok(c.Name(), false, in.Now)
 }

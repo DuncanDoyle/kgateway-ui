@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +44,27 @@ type FindingDTO struct {
 	EvidenceRestricted bool       `json:"evidenceRestricted,omitempty"`
 }
 
+// UnmarshalJSON decodes the typed evidence by its kind, which encoding/json
+// cannot do for the Evidence interface; Go clients decode /health with it.
+func (d *FindingDTO) UnmarshalJSON(b []byte) error {
+	var w struct {
+		health.Finding
+		Resource           *LinkedRef      `json:"resource"`
+		EvidenceRestricted bool            `json:"evidenceRestricted"`
+		Facts              json.RawMessage `json:"evidence"`
+	}
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	facts, err := health.DecodeEvidence(w.Facts)
+	if err != nil {
+		return err
+	}
+	*d = FindingDTO{Finding: w.Finding, Resource: w.Resource, EvidenceRestricted: w.EvidenceRestricted}
+	d.Facts = facts
+	return nil
+}
+
 // HealthResponse is GET …/health. It carries the install ID. Findings
 // shadows the report's, so the change from health.Report is additive.
 type HealthResponse struct {
@@ -50,11 +72,23 @@ type HealthResponse struct {
 	Findings []FindingDTO `json:"findings"`
 }
 
-// OverviewGatewayRow is an overview Gateway row with its link.
+// OverviewGatewayRow is an overview Gateway row with its link and its Data
+// plane column (design §6).
 type OverviewGatewayRow struct {
 	overview.GatewayRow
-	Link Link `json:"link,omitempty"`
+	Link      Link   `json:"link,omitempty"`
+	DataPlane string `json:"dataPlane,omitempty"`
 }
+
+// The values of OverviewGatewayRow.DataPlane.
+const (
+	// DataPlaneOK: the xDS rejects check ran and found no reject for the Gateway.
+	DataPlaneOK = "ok"
+	// DataPlaneRejects: the Gateway has a KGWUI-001.
+	DataPlaneRejects = "rejects"
+	// DataPlaneUnknown: no reject, but the xDS rejects check is not OK or did not run.
+	DataPlaneUnknown = "unknown"
+)
 
 // Page is one page of a list (design §7.3). Total counts the visible rows
 // that match; DeniedInInstall is the unfiltered number of the install's rows
@@ -279,16 +313,21 @@ type GatewayDetail struct {
 	AttachedListenerSets *int32        `json:"attachedListenerSets,omitempty"`
 	ListenerSets         int           `json:"listenerSets"`
 	RouteCounts          RouteCounts   `json:"routeCounts"`
-	CollectedAt          time.Time     `json:"collectedAt"`
+	// DataPlane and Proxies are sent for a Gateway the install owns (design §13.1).
+	DataPlane   *DataPlaneDTO  `json:"dataPlane,omitempty"`
+	Proxies     *ProcessSetDTO `json:"proxies,omitempty"`
+	CollectedAt time.Time      `json:"collectedAt"`
 }
 
-// AllowedListenersDTO is the parent Gateway's spec.allowedListeners as
-// written. CRDHint is set whenever the field is absent: the UI reads no
-// CRDs, so it cannot tell an unset field from one the CRD lacks (design §8.5).
+// AllowedListenersDTO is the parent Gateway's spec.allowedListeners as written; CRDHint is set
+// whenever it is absent, and CRDField says whether the Gateway CRD defines it ("defined", "missing").
 type AllowedListenersDTO struct {
-	Set     bool           `json:"set"`
-	Value   map[string]any `json:"value,omitempty"`
-	CRDHint bool           `json:"crdHint"`
+	Set              bool           `json:"set"`
+	Value            map[string]any `json:"value,omitempty"`
+	CRDHint          bool           `json:"crdHint"`
+	CRDField         string         `json:"crdField,omitempty"`
+	CRDChannel       string         `json:"crdChannel,omitempty"`
+	CRDBundleVersion string         `json:"crdBundleVersion,omitempty"`
 }
 
 // ListenerSetDetail is GET …/listenersets/{group}/{kind}/{ns}/{name}.

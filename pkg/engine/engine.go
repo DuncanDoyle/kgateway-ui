@@ -4,6 +4,7 @@ package engine
 
 import (
 	"log/slog"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,9 +14,11 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
@@ -23,6 +26,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -36,8 +40,10 @@ type Config struct {
 	Served []kinds.Served
 	// KindsChange, if set, reports how the kinds served now differ from Served.
 	KindsChange func() kinds.Change
-	Detectors   []install.Detector
-	Scope       install.ScopeProvider
+	// Catalog, if set, returns every kind the API server serves.
+	Catalog   func() kinds.Catalog
+	Detectors []install.Detector
+	Scope     install.ScopeProvider
 	// Verifier checks scope against the controller; its persistence should be
 	// 2 × the metrics interval (design §4.4).
 	Verifier scopeverify.Verifier
@@ -49,6 +55,8 @@ type Config struct {
 	Platform platform.Info
 	// ProxyMode decides whether a Gateway is self-managed; nil means proxymode.GatewayParameters{}.
 	ProxyMode proxymode.Resolver
+	// Process reports each install's processes; nil means process.Kube{}.
+	Process process.Source
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
 	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
@@ -73,6 +81,12 @@ type Config struct {
 	ConfirmEvery time.Duration
 	// OnLoop, if set, is called on Run's goroutine after each loop transition (tests).
 	OnLoop func(LoopEvent)
+	// Collected, if set, returns the collector values; checks read them and
+	// the confirm tick compares their print (D-019).
+	Collected func() collect.Snapshot
+	// NoMemo turns per-check memoization off, so every check runs on every
+	// recompute (tests compare against it).
+	NoMemo bool
 }
 
 // InstallModel is everything the API serves about one install.
@@ -81,12 +95,16 @@ type InstallModel struct {
 	Owned    *install.Owned
 	Overview overview.Overview
 	Health   health.Report
+	// Diagnosis groups and ranks Health's findings; Build set each finding's Group.
+	Diagnosis *diagnose.Diagnosis
 	// Index is the explorer's immutable index; handlers never decode objects.
 	Index *explore.Index
 	// Rules is the computed rule set selected for this install's controller (D-020).
 	Rules computed.Selection
 	// Computed are the install's computed views with their check states.
 	Computed *computed.Views
+	// Process is the install's controller and proxy processes.
+	Process *health.ProcessData
 }
 
 // Model is one consistent computation over a snapshot.
@@ -130,6 +148,13 @@ type Engine struct {
 	persist persistence
 	// views holds each install's last view inputs and results; only touched under computeMu.
 	views map[string]*viewsMemo
+	// states holds each install's check Stores, keyed by install ID; only touched under computeMu.
+	states map[string]*health.States
+	// diags holds each install's last diagnosis; only touched under computeMu.
+	diags map[string]*diagMemo
+	// kindKeys and ownedKeys name the kinds input prints read; see kindKeys.
+	kindKeys  map[objects.GroupKind]kindKey
+	ownedKeys []kindKey
 	// beforeConfirmSwap, if set, runs in confirm between its read and its swap (tests).
 	beforeConfirmSwap func()
 }
@@ -160,11 +185,16 @@ func New(cfg Config) *Engine {
 	if cfg.RulesFor == nil {
 		cfg.RulesFor = rulesets.Select
 	}
+	if cfg.Process == nil {
+		cfg.Process = process.Kube{}
+	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
 	}
-	return &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
-		decode: newDecodeCache(), persist: newPersistence()}
+	e := &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
+		decode: newDecodeCache(), persist: newPersistence(), diags: map[string]*diagMemo{}}
+	e.kindKeys, e.ownedKeys = kindKeys(cfg.Served)
+	return e
 }
 
 // Platform returns the platform the engine computes models for.
@@ -258,6 +288,10 @@ func (e *Engine) compute() *Published {
 	if e.cfg.KindsChange != nil {
 		kc = e.cfg.KindsChange()
 	}
+	var cat kinds.Catalog
+	if e.cfg.Catalog != nil {
+		cat = e.cfg.Catalog()
+	}
 	found, errs := install.Discover(snap, e.cfg.Detectors)
 	for _, err := range errs {
 		m.Rejected = append(m.Rejected, err.Error())
@@ -271,15 +305,16 @@ func (e *Engine) compute() *Published {
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
-	firstSeen := e.firstSeen(now)
-	// Only an object health asks about while it is in grace gets a grace deadline.
-	seen := func(u *unstructured.Unstructured) time.Time {
-		t := firstSeen(u)
-		if now.Sub(t) < health.Grace {
-			next.add(t.Add(health.Grace), false) // in grace while now-firstSeen < Grace
+	var col collect.Snapshot
+	if e.cfg.Collected != nil {
+		col = e.cfg.Collected()
+		for _, v := range col.Values {
+			if v.State == collect.OK && !v.Expires.IsZero() {
+				next.add(v.Expires, false) // unavailable once now ≥ Expires
+			}
 		}
-		return t
 	}
+	firstSeen := e.firstSeen(now)
 	// Views first: one persistence step over every install's checks precedes health.
 	type run struct {
 		res   install.Resolved
@@ -309,6 +344,15 @@ func (e *Engine) compute() *Published {
 		}
 	}
 	e.views = memos // a vanished install's memo is dropped
+	states := make(map[string]*health.States, len(runs))
+	for _, r := range runs {
+		st := e.states[r.res.ID()]
+		if st == nil {
+			st = health.NewStates()
+		}
+		states[r.res.ID()] = st
+	}
+	e.states = states // a vanished install's Stores are dropped
 	if at := e.persist.persist(now, views, e.graceEnd(snap, served, firstSeen)); !at.IsZero() {
 		next.add(at, false) // mature once now − since ≥ Window, or at a missing entry's grace end
 	}
@@ -325,18 +369,55 @@ func (e *Engine) compute() *Published {
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
-		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: met,
-			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: seen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode}, e.cfg.Checks)
+		proc := e.processes(res, owned, snap)
+		rt := health.Runtime{States: states[res.ID()], Collected: col}
+		var pc *printCtx
+		if !e.cfg.NoMemo {
+			pc = &printCtx{snap: snap, res: res, all: all, read: m.MetricsRead[len(m.MetricsRead)-1], now: now, maxAge: e.cfg.MetricsMaxAge,
+				ver: &ver, views: views[i], kc: kc, cat: cat, col: col, proc: proc}
+			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
+		}
+		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat, Metrics: met,
+			HasMetrics: has, MetricsMaxAge: e.cfg.MetricsMaxAge, FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
+			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel}, e.cfg.Checks, rt)
+		if !rep.Next.IsZero() {
+			next.add(rep.Next, false) // a grace end or a check's WakeAt
+		}
+		diag := e.diagnosis(&rep, diagnose.Input{Install: res, Owned: owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()}, pc)
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
 			Computed: views[i]})
-		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
-			Rules: r.sel, Computed: views[i]})
+		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Diagnosis: diag, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
+			Rules: r.sel, Computed: views[i], Process: proc})
 	}
+	maps.DeleteFunc(e.diags, func(id string, _ *diagMemo) bool { return states[id] == nil })
 	m.Next = next.next
-	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String()}, ConfirmedAt: snap.TakenAt}
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(), Catalog: cat.Key(),
+		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
 	return p
+}
+
+// gatewayAPI is sel's Gateway API table, else the upstream one.
+func gatewayAPI(sel computed.Selection) func(string) (string, bool) {
+	if sel.GatewayAPI != nil {
+		return sel.GatewayAPI
+	}
+	return rulesets.ExpectedGatewayAPI
+}
+
+// processes asks the process source for res's controller and the proxies
+// of each Gateway it owns, and prints the result.
+func (e *Engine) processes(res install.Resolved, owned *install.Owned, snap *cache.Snapshot) *health.ProcessData {
+	d := &health.ProcessData{Controller: e.cfg.Process.Controller(res, snap)}
+	if owned != nil && len(owned.Gateways) > 0 {
+		d.Proxies = make(map[objects.Ref]process.Set, len(owned.Gateways))
+		for _, gw := range owned.Gateways {
+			ref := objects.RefOf(gw)
+			d.Proxies[ref] = e.cfg.Process.Proxies(res, ref, snap)
+		}
+	}
+	d.Print = processPrint(d)
+	return d
 }
 
 // deadlines collects the earliest deadline not yet due at now.

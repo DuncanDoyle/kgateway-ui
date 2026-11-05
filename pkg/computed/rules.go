@@ -18,6 +18,8 @@ type Selection struct {
 	Rules Rules
 	// Note is the selection label; it is part of every result's check note. Empty when the set matches.
 	Note string
+	// GatewayAPI maps a kgateway minor to its Gateway API bundle minor; nil means rulesets.ExpectedGatewayAPI.
+	GatewayAPI func(kgatewayMinor string) (bundle string, ok bool)
 }
 
 // UnknownReason says why a result could not be computed (rules §3.3).

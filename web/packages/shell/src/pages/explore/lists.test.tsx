@@ -9,7 +9,7 @@ import routesByBackendGolden from "../../../../../../pkg/api/testdata/golden/rou
 import routesRestrictedGolden from "../../../../../../pkg/api/testdata/golden/routes-restricted.json";
 import type { GatewayList, ListenerSetList, RouteList, RouteRow } from "../../api/types";
 import { FOOTER_H, ROW_H } from "../../explore/ObjectTable";
-import { pseudoRules, renderWithTheme } from "../../test/render";
+import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { GatewaysPage } from "./GatewaysPage";
 import { ListenerSetsPage } from "./ListenerSetsPage";
@@ -315,10 +315,10 @@ it("rows link by their link field", async () => {
   );
   mount(`/i/${ID}/routes`);
   await screen.findByText("orphan");
-  const href = (name: string) =>
-    within(rowOf(name))
-      .queryByRole("link", { name: `shop/${name}` })
-      ?.getAttribute("href");
+  const href = (name: string) => {
+    const a = within(rowOf(name)).queryByRole("link", { name: `shop/${name}` });
+    return a ? hrefPath(a) : undefined;
+  };
   expect(href("api")).toBe(`/i/${ID}/routes/${GW}/HTTPRoute/shop/api`);
   expect(href("grpc")).toBe(`/i/${ID}/r/${GW}/GRPCRoute/shop/grpc`);
   expect(href("orphan")).toBe(`/i/${ID}/r/${GW}/HTTPRoute/shop/orphan`);
@@ -400,7 +400,7 @@ describe("shows each list state", () => {
     serve(() => undefined);
     mount(`/i/${ID}/listenersets`);
     expect(await screen.findByText("Not in this install's scope")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to install" })).toHaveAttribute("href", `/i/${ID}`);
+    expect(hrefPath(screen.getByRole("link", { name: "Back to install" }))).toBe(`/i/${ID}`);
   });
 
   it("stale data turns every badge unknown", async () => {
@@ -432,8 +432,7 @@ it("renders the ListenerSets list with parent links", async () => {
   serve((u) => (u.pathname.endsWith("/listenersets") ? fresh(listenersetsGolden.body as ListenerSetList) : undefined));
   mount(`/i/${ID}/listenersets?sort=kind.desc`);
   await screen.findByText("partial");
-  expect(within(rowOf("partial")).getByRole("link", { name: "infra/edge" })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(rowOf("partial")).getByRole("link", { name: "infra/edge" }))).toBe(
     `/i/${ID}/gateways/infra/edge`,
   );
   expect(listCalls("listenersets")[0]?.searchParams.get("sort")).toBe("kind.desc");
@@ -546,6 +545,24 @@ it("Routes state filter offers disagrees and listener-unknown", async () => {
   await waitFor(() =>
     expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["disagrees", "listener-unknown"]),
   );
+});
+
+it("Routes state filter offers gateway-rejecting to a Phase 3 server only", async () => {
+  const phase3 = { ...meta, filters: { ...meta.filters, findings: ["severity"] } };
+  serve((u) => (u.pathname === "/api/v1/meta" ? phase3 : u.pathname.endsWith("/routes") ? routes() : undefined));
+  const first = mountWithLocation(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const group = screen.getByRole("group", { name: "Route state" });
+  await userEvent.click(await within(group).findByRole("button", { name: "Gateway rejects config" }));
+  await waitFor(() => expect(search().get("state")).toBe("gateway-rejecting"));
+  await waitFor(() => expect(listCalls("routes").at(-1)?.searchParams.getAll("state")).toEqual(["gateway-rejecting"]));
+  first.unmount();
+  serve((u) => (u.pathname === "/api/v1/meta" ? meta : u.pathname.endsWith("/routes") ? routes() : undefined));
+  mount(`/i/${ID}/routes`);
+  await screen.findByText("rejected");
+  const older = screen.getByRole("group", { name: "Route state" });
+  await within(older).findByRole("button", { name: "Unknown listener" });
+  expect(within(older).queryByRole("button", { name: "Gateway rejects config" })).toBeNull();
 });
 
 it("an older server is not offered the 2.3 state values", async () => {

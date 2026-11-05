@@ -1,0 +1,23 @@
+# A proxy rollout that cannot pull its image (TestDataPlaneDiagnostics applies it; setup.sh does not).
+# The envoy tag does not exist, and the 15 s progress deadline makes a stuck rollout show in seconds.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata: { name: stuck-proxy, namespace: infra }
+spec:
+  kube:
+    deployment: { replicas: 1 }
+    envoyContainer: { image: { tag: does-not-exist } }
+    deploymentOverlay: { spec: { progressDeadlineSeconds: 15 } }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: { name: stuck, namespace: infra }
+spec:
+  gatewayClassName: kgateway
+  infrastructure:
+    parametersRef: { group: gateway.kgateway.dev, kind: GatewayParameters, name: stuck-proxy }
+  listeners:
+    - name: http
+      port: 8080
+      protocol: HTTP
+      allowedRoutes: { namespaces: { from: Same } }

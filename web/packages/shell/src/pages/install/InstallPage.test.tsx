@@ -2,17 +2,21 @@ import { css } from "@emotion/react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { POLL_MS } from "../../api/hooks";
+import { POLL_MS, useInstalls } from "../../api/hooks";
 import type {
-  Finding,
+  Diagnostics,
   GatewayRow,
   HealthReport,
   InstallSummary,
   OverviewResponse,
   ScopeSummary,
 } from "../../api/types";
+import { diagnosticsCopy } from "../../copy/explorer";
+import { type CorePages, CorePagesContext } from "../../shell/extension";
 import { InstallSwitcher } from "../../shell/InstallSwitcher";
 import {
+  diagnostics,
+  groupRow,
   healthy,
   installSummary,
   meta,
@@ -23,7 +27,7 @@ import {
   unhealthy,
   unknown,
 } from "../../test/fixtures";
-import { renderWithTheme, stubApi } from "../../test/render";
+import { pseudoRules, renderWithTheme, stubApi } from "../../test/render";
 import { InstallPage } from "./InstallPage";
 
 afterEach(() => {
@@ -42,12 +46,16 @@ function Where() {
   );
 }
 
-function mount(health: HealthReport, path = "/i/kgw.kgateway", ov: OverviewResponse = overview()) {
+function mount(
+  health: HealthReport,
+  path = "/i/kgw.kgateway",
+  ov: OverviewResponse = overview(),
+  diag: Diagnostics = diagnostics(health),
+) {
   stubApi({
-    // Finding rows name the install from the installs list.
-    "/api/v1/installs": [installSummary()],
+    "/api/v1/installs": [installSummary(Date.now(), {}, diag.groups.length)],
     "/api/v1/installs/kgw.kgateway/overview": ov,
-    "/api/v1/installs/kgw.kgateway/health": health,
+    "/api/v1/installs/kgw.kgateway/diagnostics": diag,
     "/api/v1/meta": meta,
   });
   return renderWithTheme(
@@ -76,23 +84,318 @@ function gatewayRows() {
     .slice(1);
 }
 
-it("unhealthy: strip with counts, top 5 findings, show all", async () => {
+const groupRows = () => screen.getAllByTestId("group-row");
+const needsAttention = () => screen.queryByRole("region", { name: "Needs attention" });
+const checksToggle = () => screen.getByRole("button", { name: "What was checked" });
+
+it("unhealthy: strip with problems and counts, a group per cause, Show all", async () => {
   mount(unhealthy());
   const strip = await screen.findByTestId("health-strip");
-  expect(strip).toHaveTextContent("1 error, 6 warnings");
-  expect(screen.getAllByTestId("finding-row")).toHaveLength(5);
-  expect(screen.getByRole("link", { name: "Show all 7 findings" })).toHaveAttribute("href", "/i/kgw.kgateway/findings");
-  const first = screen.getAllByTestId("finding-row")[0] as HTMLElement;
+  expect(strip).toHaveTextContent("7 problems: 1 error, 6 warnings");
+  expect(within(needsAttention() as HTMLElement).getAllByTestId("group-row")).toHaveLength(7);
+  const first = groupRows()[0] as HTMLElement;
   expect(first).toHaveTextContent("Configuration rejected by Envoy");
-  expect(first).toHaveTextContent("2 active rejects");
+  expect(first).toHaveTextContent("Error");
   expect(first).toHaveTextContent("KGWUI-001");
 });
 
-it("healthy: slim strip and what was checked", async () => {
+it("healthy install shows the slim strip and What was checked, no Needs attention box", async () => {
   mount(healthy());
-  expect(await screen.findByTestId("health-strip")).toHaveTextContent("All healthy");
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent(/^All healthy/);
+  expect(needsAttention()).toBeNull();
+  expect(screen.queryAllByTestId("group-row")).toHaveLength(0);
+  expect(checksToggle()).toHaveAttribute("aria-expanded", "true");
   const checked = screen.getByRole("list", { name: "Checks" });
   expect(within(checked).getByText("xDS rejects")).toBeInTheDocument();
+  // Processes stay on the page whatever the verdict.
+  expect(screen.getByTestId("process-line-controller")).toHaveTextContent("2/2 ready");
+});
+
+it("10 groups in rank order with Show all to the grouped findings page", async () => {
+  const groups = Array.from({ length: 10 }, (_, i) =>
+    groupRow(i, { severity: i < 3 ? "error" : "warning", title: `Problem ${i}` }),
+  );
+  mount(unhealthy(), "/i/kgw.kgateway", overview(), { ...diagnostics(unhealthy(), groups), groupTotal: 14 });
+  await screen.findByTestId("health-strip");
+  // The server ranks; the page keeps its order.
+  expect(groupRows().map((r) => within(r).getByTitle(/^Problem/).textContent)).toEqual(groups.map((g) => g.title));
+  expect(within(groupRows()[0] as HTMLElement).getByRole("link", { name: "shop/route-0" })).toBeInTheDocument();
+  const all = screen.getByRole("link", { name: "Show all groups (14)" });
+  expect(all).toHaveAttribute("href", "/i/kgw.kgateway/findings?view=groups");
+  // Unhealthy: What was checked starts collapsed and opens on demand.
+  expect(checksToggle()).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("list", { name: "Checks" })).toBeNull();
+  await userEvent.click(checksToggle());
+  expect(checksToggle()).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("list", { name: "Checks" })).toBeInTheDocument();
+});
+
+it("restricted group row", async () => {
+  const hidden = groupRow(0, {
+    title: "",
+    code: "KGWUI-002",
+    severity: "error",
+    restricted: true,
+    members: 3,
+    affectedTotal: 0,
+    since: new Date(Date.now() - 3_600_000).toISOString(),
+    cause: {
+      group: "gateway.networking.k8s.io",
+      kind: "HTTPRoute",
+      namespace: "payments",
+      name: "checkout",
+      link: "none",
+    },
+  });
+  mount(restricted(), "/i/kgw.kgateway", overview(), diagnostics(restricted(), [hidden]));
+  const row = (await screen.findAllByTestId("group-row"))[0] as HTMLElement;
+  expect(row).toHaveTextContent("Error");
+  expect(row).toHaveTextContent("KGWUI-002");
+  expect(row).toHaveTextContent("Restricted: ask the owning team");
+  // Only severity, code and the label: no cause, counts, age or steps (design §14 rule 13).
+  expect(row).not.toHaveTextContent("checkout");
+  expect(row).not.toHaveTextContent("payments");
+  expect(row).not.toHaveTextContent("3 findings");
+  expect(row).not.toHaveTextContent("ago");
+  expect(within(row).queryByRole("link")).toBeNull();
+  expect(within(row).queryByRole("button")).toBeNull();
+});
+
+/** Marks when /api/v1/installs has answered. */
+function InstallsProbe() {
+  return useInstalls().data ? <output data-testid="installs-loaded" /> : null;
+}
+
+/** The block's heading text, its row elements and footer, and whether the Processes heading follows it. */
+function needsAttentionBlock(rowId: string, footSel: string) {
+  const rows = screen.getAllByTestId(rowId);
+  const box = rows[0]?.parentElement as HTMLElement;
+  const heading = box.previousElementSibling as HTMLElement;
+  const processes = screen.getByRole("heading", { name: diagnosticsCopy.processesTitle });
+  return {
+    heading: heading.textContent,
+    rows,
+    foot: box.querySelector(footSel) as HTMLElement,
+    before: !!(box.compareDocumentPosition(processes) & Node.DOCUMENT_POSITION_FOLLOWING),
+  };
+}
+
+it("Needs attention reserves its loaded rows from the first render and keeps them", async () => {
+  const diag = diagnostics(unhealthy());
+  let answer: (r: Response) => void = () => {};
+  const routes: Record<string, unknown> = {
+    "/api/v1/installs": [installSummary(Date.now(), {}, diag.groups.length)],
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
+    "/api/v1/meta": meta,
+  };
+  stubApi(routes);
+  const fetch = globalThis.fetch as ReturnType<typeof vi.fn>;
+  const served = fetch.getMockImplementation() as (url: string) => Promise<Response>;
+  // Diagnostics answer only when the test says so: the summary arrives first.
+  fetch.mockImplementation((url: string) =>
+    url.endsWith("/diagnostics") ? new Promise<Response>((r) => (answer = r)) : served(url),
+  );
+  renderWithTheme(
+    <Routes>
+      <Route path="/i/:id" element={<InstallPage />} />
+    </Routes>,
+    { path: "/i/kgw.kgateway" },
+  );
+  // Loading: the heading, one placeholder per server-counted row, and the footer. The geometry is checked in
+  // a browser by e2e/needs-attention.spec.ts.
+  await screen.findAllByTestId("group-row-shimmer");
+  const skel = needsAttentionBlock("group-row-shimmer", "[data-testid=show-all-shimmer]");
+  expect(screen.getByRole("status", { name: "Loading this install…" })).toBeInTheDocument();
+  expect(skel.heading).toBe(diagnosticsCopy.needsAttention);
+  expect(skel.rows).toHaveLength(diag.groups.length);
+  expect(skel.foot).toBeInTheDocument();
+  expect(skel.before).toBe(true);
+  await act(async () => answer(new Response(JSON.stringify(diag), { status: 200 })));
+  // Loaded: the same heading, row count and footer, still above Processes.
+  const rows = await screen.findAllByTestId("group-row");
+  const loaded = needsAttentionBlock("group-row", ".more");
+  expect(screen.queryByTestId("needs-attention-shimmer")).toBeNull();
+  expect(loaded.heading).toBe(skel.heading);
+  expect(loaded.rows).toHaveLength(skel.rows.length);
+  expect(loaded.foot).toBeInTheDocument();
+  expect(loaded.before).toBe(true);
+  // The next poll never answers: the rows stay as they are, never a skeleton.
+  fetch.mockImplementation(async () => new Promise<Response>(() => {}));
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  act(() => {
+    window.dispatchEvent(new Event("online"));
+  });
+  await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThan(5));
+  expect(screen.getAllByTestId("group-row")).toHaveLength(rows.length);
+  expect(screen.queryByRole("status", { name: "Loading this install…" })).toBeNull();
+});
+
+it("a healthy install's loading skeleton reserves no Needs attention block", async () => {
+  stubApi({ "/api/v1/installs": [installSummary()], "/api/v1/meta": meta });
+  const fetch = globalThis.fetch as ReturnType<typeof vi.fn>;
+  const served = fetch.getMockImplementation() as (url: string) => Promise<Response>;
+  fetch.mockImplementation((url: string) =>
+    url.startsWith("/api/v1/installs/") ? new Promise<Response>(() => {}) : served(url),
+  );
+  renderWithTheme(
+    <>
+      <InstallsProbe />
+      <Routes>
+        <Route path="/i/:id" element={<InstallPage />} />
+      </Routes>
+    </>,
+    { path: "/i/kgw.kgateway" },
+  );
+  await screen.findByTestId("installs-loaded");
+  expect(screen.getByRole("status", { name: "Loading this install…" })).toBeInTheDocument();
+  expect(screen.queryByTestId("needs-attention-shimmer")).toBeNull();
+  expect(screen.queryByRole("heading", { name: diagnosticsCopy.needsAttention })).toBeNull();
+});
+
+it("the loading skeleton reserves the Processes block", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === "/api/v1/meta" ? new Response(JSON.stringify(meta), { status: 200 }) : new Promise<Response>(() => {}),
+    ),
+  );
+  renderWithTheme(
+    <Routes>
+      <Route path="/i/:id" element={<InstallPage />} />
+    </Routes>,
+    { path: "/i/kgw.kgateway" },
+  );
+  const box = await screen.findByTestId("processes-shimmer");
+  const loaded = screen.getByRole("status", { name: "Loading this install…" });
+  expect(loaded).toContainElement(box);
+});
+
+it("stale data turns every group unknown", async () => {
+  const at = Date.now() - 60_000;
+  mount(unhealthy(at), "/i/kgw.kgateway", overview(at));
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent(/Data is stale/);
+  for (const r of groupRows()) {
+    expect(within(r).getByTestId("health-icon-unknown")).toBeInTheDocument();
+    expect(r).toHaveTextContent("Unknown");
+    expect(r).not.toHaveTextContent(/Error|Warning/);
+  }
+  // No green survives on stale data: processes, checks and the Data plane column included (D-006).
+  expect(screen.queryAllByTestId("health-icon-healthy")).toHaveLength(0);
+});
+
+it("Data plane column shows ✓, Rejects or Unknown", async () => {
+  const ov = overview();
+  const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
+  const lab = (name: string, dataPlane?: GatewayRow["dataPlane"]): GatewayRow => ({
+    ...internal,
+    ref: { ...internal.ref, name },
+    dataPlane,
+  });
+  mount(healthy(), "/i/kgw.kgateway?sort=gateway.asc", {
+    ...ov,
+    gateways: [edge, internal, lab("lab", "unknown"), lab("old")],
+  });
+  const table = await screen.findByRole("table", { name: "Gateways" });
+  const col = within(table)
+    .getAllByRole("columnheader")
+    .findIndex((h) => h.textContent === "Data plane");
+  expect(col).toBeGreaterThan(-1);
+  const cell = (name: string) => {
+    const row = gatewayRows().find((r) => r.textContent?.includes(`prod/${name}`)) as HTMLElement;
+    return within(row).getAllByRole("cell")[col] as HTMLElement;
+  };
+  expect(cell("edge")).toHaveTextContent(/^Rejects$/);
+  expect(within(cell("edge")).getByTestId("health-icon-error")).toBeInTheDocument();
+  expect(cell("internal")).toHaveTextContent(/^No rejects$/);
+  expect(within(cell("internal")).getByTestId("health-icon-healthy")).toBeInTheDocument();
+  expect(cell("lab")).toHaveTextContent(/^Unknown$/);
+  // An older server sends no value: unknown, never a tick.
+  expect(cell("old")).toHaveTextContent(/^Unknown$/);
+  expect(within(cell("old")).getByTestId("health-icon-unknown")).toBeInTheDocument();
+});
+
+it("not available checks show their reason", async () => {
+  const h = healthy();
+  h.checks.push(
+    {
+      name: "probe failures",
+      ok: false,
+      required: false,
+      collectedAt: h.collectedAt,
+      unavailable: "off",
+      error: "Events are turned off",
+    },
+    {
+      name: "version skew",
+      ok: false,
+      required: false,
+      collectedAt: h.collectedAt,
+      unavailable: "denied",
+    },
+  );
+  mount(h);
+  // Not available never makes the install unknown (D-034).
+  expect(await screen.findByTestId("health-strip")).toHaveTextContent(/^All healthy/);
+  const items = within(screen.getByRole("list", { name: "Checks" })).getAllByRole("listitem");
+  const off = items.find((li) => li.textContent?.includes("probe failures")) as HTMLElement;
+  expect(off).toHaveTextContent(/^Not available: probe failures\s*Events are turned off$/);
+  expect(within(off).getByTestId("check-unavailable")).toBeInTheDocument();
+  expect(within(off).queryByTestId("health-icon-unknown")).toBeNull();
+  // Without a message from the server, the reason names the cause.
+  const denied = items.find((li) => li.textContent?.includes("version skew")) as HTMLElement;
+  expect(denied).toHaveTextContent(/^Not available: version skew\s*No permission to read its input$/);
+});
+
+it("Processes shows the controller and proxies lines and links to the Processes page", async () => {
+  const d = diagnostics(unhealthy());
+  d.processes.proxies = { ...d.processes.proxies, state: "error", ready: 1, rejecting: 1 };
+  mount(unhealthy(), "/i/kgw.kgateway", overview(), d);
+  const section = await screen.findByRole("region", { name: "Processes" });
+  expect(within(section).getByTestId("process-line-controller")).toHaveTextContent("Healthy");
+  expect(within(section).getByTestId("process-line-controller")).toHaveTextContent("version 2.4.7");
+  const proxies = within(section).getByTestId("process-line-proxies");
+  expect(proxies).toHaveTextContent("Error");
+  expect(proxies).toHaveTextContent("1/2 Gateways ready");
+  expect(proxies).toHaveTextContent("1 rejecting");
+  expect(within(section).getByRole("link", { name: "View processes" })).toHaveAttribute(
+    "href",
+    "/i/kgw.kgateway/processes",
+  );
+});
+
+it("the strip names the oldest problem's age outside its live region", async () => {
+  const d = diagnostics(unhealthy());
+  d.verdict.oldestSince = new Date(Date.now() - 2 * 3_600_000).toISOString();
+  mount(unhealthy(), "/i/kgw.kgateway", overview(), d);
+  const strip = await screen.findByTestId("health-strip");
+  expect(strip).toHaveTextContent("Oldest problem 2h ago");
+  expect(within(strip).getByRole("status")).toHaveTextContent(/^7 problems: 1 error, 6 warnings$/);
+});
+
+it("a CorePages DiagnosticsSection replaces Needs attention and Processes", async () => {
+  stubApi({
+    "/api/v1/installs/kgw.kgateway/overview": overview(),
+    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(unhealthy()),
+    "/api/v1/meta": meta,
+  });
+  const pages: Partial<CorePages> = {
+    DiagnosticsSection: ({ diagnostics: d, installId }) => (
+      <p data-testid="own-section">
+        {installId}: {d.groupTotal} groups
+      </p>
+    ),
+  };
+  renderWithTheme(
+    <CorePagesContext.Provider value={pages}>
+      <Routes>
+        <Route path="/i/:id" element={<InstallPage />} />
+      </Routes>
+    </CorePagesContext.Provider>,
+    { path: "/i/kgw.kgateway" },
+  );
+  expect(await screen.findByTestId("own-section")).toHaveTextContent("kgw.kgateway: 7 groups");
+  expect(needsAttention()).toBeNull();
+  expect(screen.queryByRole("region", { name: "Processes" })).toBeNull();
 });
 
 it("each check names its state in text, not only in the icon", async () => {
@@ -131,7 +434,8 @@ it("unknown: never green, names the missing signal", async () => {
   expect(strip).toHaveTextContent("Health unknown: Cannot check xDS rejects");
   expect(strip).not.toHaveTextContent("No known problems");
   expect(within(strip).getByTestId("health-icon-unknown")).toBeInTheDocument();
-  expect(screen.getByTestId("finding-row")).toHaveTextContent("connection refused");
+  // Unknown has no groups to show; What was checked stays open with the reason.
+  expect(screen.getByRole("list", { name: "Checks" })).toHaveTextContent("connection refused");
 });
 
 it("unknown with warnings names the reason, then the warnings", async () => {
@@ -173,11 +477,9 @@ it("served kinds changed: the strip names the check and the finding shows its de
   });
   const strip = await screen.findByTestId("health-strip");
   expect(strip).toHaveTextContent("Health unknown: Cannot check served kinds");
-  const row = screen.getByTestId("finding-row");
-  expect(row).toHaveTextContent("Served kinds changed; restart the UI to watch them");
-  expect(row).toHaveTextContent("added TLSRoute");
-  // No resource: the install stands in, named once the installs list loads.
-  await waitFor(() => expect(row).toHaveTextContent("kgw/kgateway"));
+  // KGWUI-008 is not ranked: the strip names it and What was checked says why (design §5.3).
+  expect(screen.queryAllByTestId("group-row")).toHaveLength(0);
+  expect(screen.getByRole("list", { name: "Checks" })).toHaveTextContent("served kinds changed: added TLSRoute");
 });
 
 // The strip and the gateway rows age into stale on the shared clock, without new data.
@@ -392,78 +694,35 @@ it("a Gateway row follows its link: yaml opens the YAML view, none is plain text
   expect(screen.getByTestId("pathname").textContent).toBe("/i/kgw.kgateway");
 });
 
-const gw = "gateway.networking.k8s.io";
-const oneFinding = (resource: Finding["resource"], extra: Partial<Finding> = {}): HealthReport => ({
-  ...unhealthy(),
-  findings: [
-    {
-      code: "KGWUI-002",
-      slug: "condition-false",
-      severity: "error",
-      install: "kgw.kgateway",
-      message: "Backend not found",
-      resource,
-      ...extra,
-    },
-  ],
-  counts: { error: 1 },
-});
-
-it("finding on an HTTPRoute opens its detail page", async () => {
-  mount(oneFinding({ group: gw, kind: "HTTPRoute", namespace: "shop", name: "cart", link: "detail" }));
-  const row = await screen.findByTestId("finding-row");
-  expect(within(row).getByRole("link", { name: "shop/cart" })).toHaveAttribute(
-    "href",
-    "/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/cart",
+it("a group's cause opens where its link says; link none is plain text", async () => {
+  const gw = "gateway.networking.k8s.io";
+  mount(
+    unhealthy(),
+    "/i/kgw.kgateway",
+    overview(),
+    diagnostics(unhealthy(), [
+      groupRow(0, { cause: { group: gw, kind: "Gateway", namespace: "prod", name: "edge", link: "detail" } }),
+      groupRow(1, {
+        cause: { group: "gateway.kgateway.dev", kind: "Backend", namespace: "shop", name: "be1", link: "yaml" },
+      }),
+      groupRow(2, { cause: { group: gw, kind: "HTTPRoute", namespace: "shop", name: "cart", link: "none" } }),
+    ]),
   );
-});
-
-it("a finding on a Gateway opens the Gateway page", async () => {
-  mount(oneFinding({ group: gw, kind: "Gateway", namespace: "prod", name: "edge", link: "detail" }));
-  const row = await screen.findByTestId("finding-row");
-  expect(within(row).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
+  const [gateway, backend, none] = (await screen.findAllByTestId("group-row")) as [
+    HTMLElement,
+    HTMLElement,
+    HTMLElement,
+  ];
+  expect(within(gateway).getByRole("link", { name: "prod/edge" })).toHaveAttribute(
     "href",
     "/i/kgw.kgateway/gateways/prod/edge",
   );
-});
-
-it("a finding with link yaml opens the YAML view", async () => {
-  mount(oneFinding({ group: "gateway.kgateway.dev", kind: "Backend", namespace: "shop", name: "be1", link: "yaml" }));
-  const row = await screen.findByTestId("finding-row");
-  expect(within(row).getByRole("link", { name: "shop/be1" })).toHaveAttribute(
+  expect(within(backend).getByRole("link", { name: "shop/be1" })).toHaveAttribute(
     "href",
     "/i/kgw.kgateway/r/gateway.kgateway.dev/Backend/shop/be1",
   );
-});
-
-it("a finding with link none is plain text", async () => {
-  mount(oneFinding({ group: gw, kind: "HTTPRoute", namespace: "shop", name: "cart", link: "none" }));
-  const row = await screen.findByTestId("finding-row");
-  expect(row).toHaveTextContent("shop/cart");
-  expect(within(row).queryByRole("link")).toBeNull();
-});
-
-it("restricted finding never links", async () => {
-  // Even a detail link the server sent is ignored for a restricted finding.
-  mount(
-    oneFinding(
-      { group: gw, kind: "HTTPRoute", namespace: "payments", name: "checkout", link: "detail" },
-      { restricted: true, message: "" },
-    ),
-  );
-  const row = await screen.findByTestId("finding-row");
-  expect(row).toHaveTextContent("payments/checkout");
-  expect(within(row).queryByRole("link")).toBeNull();
-});
-
-it("a restricted finding shows its resource, severity and code, a short note and no link", async () => {
-  mount(restricted());
-  const row = await screen.findByTestId("finding-row");
-  expect(row).toHaveTextContent("payments/checkout");
-  expect(row).toHaveTextContent("Error");
-  expect(row).toHaveTextContent("KGWUI-002");
-  expect(row).toHaveTextContent("Restricted: ask the owning team");
-  expect(within(row).queryByRole("link")).toBeNull();
+  expect(none).toHaveTextContent("shop/cart");
+  expect(within(none).queryByRole("link", { name: "shop/cart" })).toBeNull();
 });
 
 it("switching installs never shows the previous install's data", async () => {
@@ -472,7 +731,11 @@ it("switching installs never shows the previous install's data", async () => {
     vi.fn(async (url: string) => {
       if (url.startsWith("/api/v1/installs/b.two/")) return new Promise<Response>(() => {}); // install B never answers
       if (url === "/api/v1/installs") return new Response(JSON.stringify([installSummary()]), { status: 200 });
-      const body = url.endsWith("/overview") ? overview() : url.endsWith("/health") ? unhealthy() : meta;
+      const body = url.endsWith("/overview")
+        ? overview()
+        : url.endsWith("/diagnostics")
+          ? diagnostics(unhealthy())
+          : meta;
       return new Response(JSON.stringify(body), { status: 200 });
     }),
   );
@@ -490,7 +753,7 @@ it("switching installs never shows the previous install's data", async () => {
   await waitFor(() => expect(screen.queryByTestId("health-strip")).toBeNull());
   expect(screen.getByRole("status", { name: "Loading this install…" })).toHaveAttribute("aria-busy", "true");
   expect(screen.queryByRole("table", { name: "Gateways" })).toBeNull();
-  expect(screen.queryAllByTestId("finding-row")).toHaveLength(0);
+  expect(screen.queryAllByTestId("group-row")).toHaveLength(0);
 });
 
 it("never renders a response that belongs to another install", async () => {
@@ -547,7 +810,7 @@ it("gateway table lists gateways with status text", async () => {
 it("API error shows a designed error state", async () => {
   stubApi({
     "/api/v1/installs/kgw.kgateway/overview": [404, { error: "install kgw/kgateway not found" }],
-    "/api/v1/installs/kgw.kgateway/health": [404, { error: "install kgw/kgateway not found" }],
+    "/api/v1/installs/kgw.kgateway/diagnostics": [404, { error: "install kgw/kgateway not found" }],
   });
   renderWithTheme(
     <Routes>
@@ -572,8 +835,9 @@ it("a failing required check turns non-error gateway rows unknown", async () => 
   await screen.findByTestId("health-strip");
   const [edge, internal] = gatewayRows() as [HTMLElement, HTMLElement];
   expect(edge).toHaveTextContent("Error"); // an error finding is still an error
-  expect(internal).toHaveTextContent("Unknown");
-  expect(within(internal).queryByTestId("health-icon-healthy")).toBeNull();
+  const status = within(internal).getAllByRole("cell")[0] as HTMLElement;
+  expect(status).toHaveTextContent("Unknown");
+  expect(within(status).queryByTestId("health-icon-healthy")).toBeNull();
 });
 
 it("a failing optional check leaves gateway rows as reported", async () => {
@@ -601,41 +865,10 @@ it("a healthy install without findings shows no findings link", async () => {
   expect(screen.queryByRole("link", { name: /info finding/ })).toBeNull();
 });
 
-it("gateway rows take the worst of their row state and their current health findings", async () => {
-  const h = healthy();
-  const gw = "gateway.networking.k8s.io";
-  h.state = "error";
-  h.counts = { error: 1, warning: 1 };
-  h.findings = [
-    {
-      code: "KGWUI-002",
-      slug: "condition-false",
-      severity: "warning",
-      install: "kgw.kgateway",
-      message: "Listener conflicted",
-      resource: { group: gw, kind: "Gateway", namespace: "prod", name: "internal", link: "yaml" },
-    },
-    // A finding on another kind with the same name does not count for the Gateway.
-    {
-      code: "KGWUI-002",
-      slug: "condition-false",
-      severity: "error",
-      install: "kgw.kgateway",
-      message: "Backend not found",
-      resource: { group: gw, kind: "HTTPRoute", namespace: "prod", name: "internal", link: "yaml" },
-    },
-  ];
-  mount(h);
-  await screen.findByTestId("health-strip");
-  const [edge, internal] = gatewayRows() as [HTMLElement, HTMLElement];
-  expect(edge).toHaveTextContent("Error"); // already an error on the overview
-  expect(internal).toHaveTextContent("Warning");
-});
-
 it("after a first load, a failing poll keeps the page and says so", async () => {
   const routes: Record<string, unknown> = {
     "/api/v1/installs/kgw.kgateway/overview": overview(),
-    "/api/v1/installs/kgw.kgateway/health": healthy(),
+    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(healthy()),
     "/api/v1/meta": meta,
   };
   stubApi(routes);
@@ -646,7 +879,7 @@ it("after a first load, a failing poll keeps the page and says so", async () => 
     { path: "/i/kgw.kgateway" },
   );
   await screen.findByTestId("health-strip");
-  routes["/api/v1/installs/kgw.kgateway/health"] = [503, { error: "connecting to cluster: cache not synced" }];
+  routes["/api/v1/installs/kgw.kgateway/diagnostics"] = [503, { error: "connecting to cluster: cache not synced" }];
   // SWR refetches on reconnect of a visible page (jsdom reports hidden).
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   act(() => {
@@ -665,7 +898,7 @@ it("after a first load, a failing poll keeps the page and says so", async () => 
 it("the install page has an h1 and accepts stylesOverride", async () => {
   stubApi({
     "/api/v1/installs/kgw.kgateway/overview": overview(),
-    "/api/v1/installs/kgw.kgateway/health": healthy(),
+    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(healthy()),
     "/api/v1/meta": meta,
   });
   renderWithTheme(
@@ -691,7 +924,7 @@ it("the install page has an h1 and accepts stylesOverride", async () => {
 // region Switching installs
 
 function summary(ov: OverviewResponse): InstallSummary {
-  return { ...ov.header, health: { state: "healthy", counts: {} }, computedAt: new Date().toISOString() };
+  return { ...ov.header, health: { state: "healthy", counts: {} }, groupRows: 0, computedAt: new Date().toISOString() };
 }
 
 function Path() {
@@ -724,9 +957,9 @@ it("switching installs does not carry the gateway filter over", async () => {
   b.header = { ...b.header, id: "b.two", displayName: "b/two", namespace: "b", name: "two" };
   stubApi({
     "/api/v1/installs/kgw.kgateway/overview": a,
-    "/api/v1/installs/kgw.kgateway/health": healthy(),
+    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(healthy()),
     "/api/v1/installs/b.two/overview": b,
-    "/api/v1/installs/b.two/health": { ...healthy(), install: "b.two" },
+    "/api/v1/installs/b.two/diagnostics": diagnostics({ ...healthy(), install: "b.two" }),
     "/api/v1/meta": meta,
   });
   renderWithTheme(
@@ -762,4 +995,31 @@ it("switching installs does not carry the gateway filter over", async () => {
   await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two/));
   expect(screen.getByTestId("path")).toHaveTextContent(/^\/i\/b\.two$/);
   expect(filterBox()).toHaveValue("");
+});
+
+it("Show all, View processes and the What was checked toggle carry hover, active and focus-visible styles", async () => {
+  mount(unhealthy());
+  await screen.findByTestId("health-strip");
+  const controls = [
+    screen.getByRole("link", { name: "Show all groups (7)" }),
+    screen.getByRole("link", { name: "View processes" }),
+    checksToggle(),
+  ];
+  for (const el of controls)
+    for (const p of [":hover", ":active", ":focus-visible"]) expect(pseudoRules(el, p).length).toBeGreaterThan(0);
+});
+
+it("below 900 px the Gateway table keeps Status, Data plane, the name and routes in view", async () => {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: q === "(max-width: 899px)",
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+  mount(unhealthy());
+  const table = await screen.findByRole("table", { name: "Gateways" });
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent),
+  ).toEqual(["Status", "Data plane", "Gateway", "Routes"]);
 });

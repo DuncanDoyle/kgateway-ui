@@ -1,0 +1,107 @@
+# Phase 3.1 KRT spike (Task 13, D-027), local
+# go version go1.27.3 darwin/arm64
+# cpu: Apple M5 Max, 18 CPUs (shared machine)
+# load: 9:43 8.62 7.31 6.03 (memory runs) ... 10:05 2.24 2.68 3.77 (end of spike stream)
+# current engine: 551ba49 (phase branch, unmodified)
+# spike:          00737fa on the local branch duncandoyle/krtSpike (never merged or pushed), base 551ba49
+#                 istio.io/istio v0.0.0-20261101220719-762ef74447cb (pkg/kube/krt)
+# Runs interleaved on the same machine in one session: current, spike, current, spike;
+# the two 10-minute spec-edit streams ran one after the other, current first.
+
+## What the spike built
+
+View A (attachment) as krt collections, kgateway 2.4 rule set only:
+- inputs: MutableCollection of Gateway/ListenerSet resources, MutableCollection of routes, a StaticSingleton
+  for the rest of AttachmentInput (namespace labels, settings, controller names, scope);
+- derived: resources -> parsed listener states (NewCollection) -> per-parentRef outcome, members and
+  per-listener count contributions (NewManyCollection, FetchOne by resource key);
+- fed from the same snapshot the engine already reads, by diff against the last fed value per object,
+  so only changed objects become krt events (what informer events would deliver);
+- each recompute waits for a barrier, then copies the collections into one immutable
+  AttachmentResult (sorted as the full recompute sorts) that goes into Published as before.
+Checks, views B and C, and everything after the views are unchanged.
+
+Correctness: the krt view A is reflect.DeepEqual to the full recompute at Large and
+Large-contradicting, before and after a one-route edit (TestKrtViewAEqual, spike branch).
+All unit tests pass on the spike branch, four runs in a row, and pkg/engine under -race.
+
+Per-request consistency needs a hand-built barrier. krt has no flush or settle call, and
+every handler gets its own delivery goroutines, so events from different inputs reach a derived
+collection in no fixed order. The first barrier (one sentinel through routes and resources together)
+raced: golden and visibility tests in pkg/api failed intermittently with a half-updated view A.
+The working barrier crosses each input path in turn (globals, resources -> states -> outputs,
+routes -> outputs) and waits for each, three round trips per recompute.
+
+## Measurements at Large
+
+Warm recompute, median of 20 (TestBudgetWarmRecompute), two interleaved runs each:
+                          current            spike
+  large                   38.3 / 38.0 ms     41.1 / 40.1 ms
+  large-contradicting     44.1 / 44.2 ms     46.8 / 46.5 ms
+  warm alloc median       36.3 / 44.6 MiB    43.6 / 51.9 MiB   (large / contradicting)
+  cold median             55 / 55 ms         73 / 71 ms
+Warm here forces views B and C; the krt view A then only assembles, so this is its best case.
+
+Retained heap, median of 5 fresh processes (TestBudgetHeap), over the 2.1 baseline 25411584 B:
+                          current            spike              spike - current
+  large, run 1            +23.3 MiB          +41.7 MiB          +18.4 MiB
+  large, run 2            +23.1 MiB          +42.5 MiB          +19.4 MiB
+  contradicting, run 1    +24.4 MiB          +40.9 MiB          +16.5 MiB
+  contradicting, run 2    +24.4 MiB          +41.9 MiB          +17.5 MiB
+  The spike fails the 32 MiB retained-heap gate. Of the ~19 MiB: ~2 MiB is heap at process
+  start (package init of the new modules), ~2 MiB more at the snapshot, ~16-18 MiB is the krt
+  state (copies of every input, parsed listeners and per-parentRef outputs).
+
+Dense memory, DenseSelection(100, 1000), medians of 5 (TestBudgetDenseMemory), two runs each:
+                          current            spike
+  retained heap           160 / 160 MiB      162 / 162 MiB
+  allocated cold          210 / 210 MiB      212 / 212 MiB
+  per warm Compute        168 / 168 MiB      168 / 169 MiB
+
+Spec-edit stream, 10 min (go test -tags bench -v -run SpecEdit -timeout 20m ./pkg/api):
+                          current (551ba49)                spike (00737fa)
+  process CPU             1m5.416s = 10.9 % of one core    1m24.927s = 14.2 % of one core
+  recomputes              784 (1.31/s)                     800 (1.33/s)
+  recompute wall          41.88 s = 7.0 %                  52.17 s = 8.7 %
+  GC share                29.4 % (3.3 % of one core)       31.3 % (4.6 % of one core)
+  poll p50 / p95          1.19 / 1.67 ms                   1.76 / 2.00 ms
+  heap in use at end      77.8 MiB                         108.2 MiB
+  memory from the OS      200.0 MiB                        232.6 MiB
+  Spike CPU is 30 % higher, not lower.
+
+Upper bound: a CPU profile of the current warm recompute (BenchmarkCompute/large) puts the
+view A rule (kgw24.attach) at 3.6 % of recompute CPU, CheckAttachment at ~10 %, all three views
+with their checks at ~50 %. Removing view A entirely cannot reach a 40 % cut; even incremental
+views B and C with their checks would need nearly all of the remaining recompute gone.
+
+## Dependency
+
+  go mod graph | wc -l          318 -> 1429
+  go list -m all | wc -l        81 -> 298 (218 new modules in the graph; 58 new modules linked into the binary)
+  replace directives            0 -> 0 (grep -c '^replace' go.mod)
+  binary (go build -ldflags=-s ./cmd/kgateway-ui)  29131218 B -> 37065730 B (+7.9 MB, +27 %)
+  Go version floor              istio.io/istio go 1.27.1; go.mod go directive 1.26.0 -> 1.27.1
+  forced upgrades               k8s.io/api, apimachinery, client-go v0.36.2 -> v0.37.1, plus kube-openapi,
+                                structured-merge-diff, go-openapi/*, x/time
+  versioning                    istio.io/istio has no semver tags: pseudo-versions of main only
+  new linked modules include    istio.io/api, istio.io/client-go, sigs.k8s.io/gateway-api,
+                                gateway-api-inference-extension, mcs-api, k8s.io/apiserver,
+                                apiextensions-apiserver, google.golang.org/grpc, go.opentelemetry.io/otel*,
+                                prometheus/client_golang, go.uber.org/zap, spf13/cobra, Masterminds/sprig
+  licences (LICENSE file of each of the 58 new linked modules; go-licenses not installed):
+                                Apache-2.0 37, MIT 14, BSD 5, MPL-2.0 2 (hashicorp/errwrap, go-multierror)
+                                All are Apache-2.0 compatible for binary distribution; MPL-2.0 is
+                                file-level copyleft (unmodified, so no obligation beyond notice).
+  side effect                   krt and istio logging print "info krt ... synced" lines to stdout
+
+## Decision rule (design §16.1), applied
+
+| Criterion                                          | Measured                                                        | Pass |
+|----------------------------------------------------|-----------------------------------------------------------------|------|
+| Spec-edit stream CPU at least 40 % lower           | 14.2 % vs 10.9 % of one core: 30 % higher                        | fail |
+| Retained heap no more than +16 MiB                 | +16.5 to +19.4 MiB over the current engine (4 medians)           | fail |
+| Every request reads one immutable published value  | yes, but only through a hand-built three-step barrier           | pass |
+| No replace directives                              | 0                                                               | pass |
+| Apache-2.0 compatible licences                     | Apache-2.0, MIT, BSD, MPL-2.0                                   | pass |
+
+Verdict: Keep. Keep the immutable full recompute and add per-check memoization (§16.2).

@@ -23,9 +23,12 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/benchgate"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -179,7 +182,7 @@ func TestBudgetBurst(t *testing.T) {
 		t.Errorf("recomputes in the burst window + 2 s = %d, budget ≤ 2", pubs)
 	}
 	if p95 > 1200*time.Millisecond {
-		t.Errorf("event-to-publication p95 %v, budget ≤ 1.2 s", p95)
+		benchgate.Timing(t, "event-to-publication p95 %v, budget ≤ 1.2 s", p95)
 	}
 }
 
@@ -215,6 +218,90 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	}
 }
 
+// syncsBody is managedBody with status_syncs_total at n.
+func syncsBody(n int) string {
+	return managedBody + fmt.Sprintf("# TYPE %s counter\n%s{syncer=\"HTTPRoute\",result=\"success\"} %d\n", ctrlmetrics.StatusSyncsTotal, ctrlmetrics.StatusSyncsTotal, n)
+}
+
+// TestBudgetSyncOnlyScrapes reports what scrapes that change only
+// status_syncs_total cost an idle cluster (Task 63): on fake clocks, 600
+// one-second steps with a scrape every 10 s, each with 7 more syncs, at Large
+// with no 018. It counts the recomputes, the publications and those whose
+// findings differ from the last publication's; nothing is gated.
+func TestBudgetSyncOnlyScrapes(t *testing.T) {
+	const safety, every, maxAge = 30 * time.Second, 10 * time.Second, 45 * time.Second
+	clk := testutil.FakeClock()
+	w := newWorld(t, scale.Large, clk.Now)
+	syncs := 0
+	s := newScraping(syncsBody(syncs), maxAge)
+	s.col.OnResult = w.sig
+	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge })
+	runLoop(t, e, safety)
+	awaitKind(t, ev, EvPublished)
+	awaitKind(t, ev, EvArmed)
+	s.start(t, every, e.Installs)
+	awaitKind(t, ev, EvTriggered)
+	awaitKind(t, ev, EvArmed)
+	s.cc.Step(time.Second)
+	clk.Step(time.Second)
+	prev := awaitKind(t, ev, EvPublished).Published.Model
+	awaitKind(t, ev, EvArmed)
+	var scrapes, runs, changed, triggers int
+	for range 600 {
+		if next := s.cc.Now().Add(time.Second); next.Sub(testutil.Now)%every == 0 {
+			syncs += 7
+			b := syncsBody(syncs)
+			s.sc.body.Store(&b)
+		}
+		s.cc.Step(time.Second)
+		if s.cc.Now().Sub(testutil.Now)%every == 0 {
+			s.wait(t, s.cc.Now())
+			scrapes++
+		}
+		clk.Step(time.Second)
+		for inFlight := false; ; {
+			x := testutil.Recv(t, ev, "loop event")
+			switch x.Kind {
+			case EvTriggered:
+				triggers++
+			case EvRunStarted:
+				inFlight = true
+			case EvPublished:
+				inFlight = false
+				runs++
+				if m := x.Published.Model; !sameFindings(prev, m) {
+					changed++
+				}
+				prev = x.Published.Model
+			}
+			if x.Kind == EvArmed && !inFlight {
+				break
+			}
+		}
+	}
+	t.Logf("sync-only scrapes, 10 min idle at Large: %d scrapes, %d triggers, %d recomputes and publications (%.2f/s), %d with findings that differ from the last (reported)",
+		scrapes, triggers, runs, float64(runs)/600, changed)
+	if scrapes != 60 {
+		t.Errorf("%d scrapes, want 60", scrapes)
+	}
+}
+
+// sameFindings reports whether a and b's installs have the same findings by ID, severity, detail and since.
+func sameFindings(a, b *Model) bool {
+	if len(a.Installs) != len(b.Installs) {
+		return false
+	}
+	for i := range a.Installs {
+		fa, fb := a.Installs[i].Health.Findings, b.Installs[i].Health.Findings
+		if !slices.EqualFunc(fa, fb, func(x, y health.Finding) bool {
+			return x.ID == y.ID && x.Severity == y.Severity && x.Detail == y.Detail && (x.Since == nil) == (y.Since == nil) && (x.Since == nil || x.Since.Equal(*y.Since))
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
 // tick is the confirm tick's work on an idle loop: the live source,
 // fingerprint, metrics identity and kinds, compared and swapped in.
 func tick(tb testing.TB, e *Engine) {
@@ -239,7 +326,7 @@ func TestBudgetConfirmTick(t *testing.T) {
 		slices.Sort(d)
 		t.Logf("confirm tick %s: median %v, max %v (budget at Large ≤ 5 ms)", tier.Name, d[len(d)/2], d[len(d)-1])
 		if tier.Name == scale.Large.Name && d[len(d)/2] > 5*time.Millisecond {
-			t.Errorf("confirm tick median at Large %v, budget ≤ 5 ms", d[len(d)/2])
+			benchgate.Timing(t, "confirm tick median at Large %v, budget ≤ 5 ms", d[len(d)/2])
 		}
 	}
 }
@@ -267,10 +354,6 @@ func BenchmarkConfirmTick(b *testing.B) {
 // A, and the worst case, where every check contradicts and has matured.
 var largeCases = []scale.Tier{scale.Large, scale.Large.Contradicting()}
 
-// matureAt is a time past every window opened at testutil.Now, and past a
-// missing child entry's grace end.
-var matureAt = testutil.Now.Add(max(Window, health.Grace) + time.Second)
-
 // largeEngine is an engine over tier's snapshot on a settable clock, with
 // metrics that never go stale. Under Contradict it computes once at
 // testutil.Now and moves the clock to matureAt, so the next Compute matures
@@ -288,24 +371,40 @@ func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
 	return e, now
 }
 
-// TestBudgetWarmRecompute: at Large, the median of 20 warm Computes ≤ 150 ms
-// with views B and C (design §9.6, 2.4)
-// and the median of 5 cold ones ≤ 1 s, for the consistent world and the worst
-// case. Allocation per warm Compute and the persistence step are reported (D-022).
+// TestBudgetWarmRecompute: at Large, consistent, contradicting and worst case, warm median ≤ 150 ms
+// with views B and C and cold median ≤ 1 s (design §9.6); allocation and persistence reported (D-022).
 func TestBudgetWarmRecompute(t *testing.T) {
 	const mib = 1 << 20
-	for _, tier := range largeCases {
+	for _, tier := range append(slices.Clone(largeCases), measuredTier) {
 		t.Run(tier.Name, func(t *testing.T) {
 			snap := scale.Snapshot(tier, 1)
+			fresh := func() *Engine {
+				return New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+			}
+			var e *Engine
+			now := new(time.Time)
+			if tier.IsWorst {
+				// The 3.2 measurement world: its metrics, proxy stats and process data.
+				var w *measure.World
+				var fc *clocktesting.FakeClock
+				e, w, fc = measureEngine(t)
+				snap, *now = e.cfg.Snapshots.Snapshot(), fc.Now()
+				fresh = func() *Engine {
+					cfg := config(snap, w.Metrics, func() time.Time { return testutil.Now })
+					cfg.MetricsMaxAge, cfg.Collected = 0, w.Store.Snapshot
+					return New(cfg)
+				}
+			} else {
+				e, now = largeEngine(snap, tier)
+			}
 			cold := make([]time.Duration, 5)
 			for i := range cold {
 				// The first Compute of a fresh engine, before any window matures.
-				e := New(config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now }))
+				c := fresh()
 				t0 := time.Now()
-				e.Compute()
+				c.Compute()
 				cold[i] = time.Since(t0)
 			}
-			e, now := largeEngine(snap, tier)
 			m := e.Compute()
 			warm := make([]time.Duration, 20)
 			alloc := make([]uint64, len(warm))
@@ -357,10 +456,117 @@ func TestBudgetWarmRecompute(t *testing.T) {
 				t.Fatalf("the consistent world has %d KGWUI-012 findings and %d windows", len(disagreements(m)), len(e.persist.m))
 			}
 			if cold[len(cold)/2] > time.Second {
-				t.Errorf("cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
+				benchgate.Timing(t, "cold recompute median %v, budget ≤ 1 s", cold[len(cold)/2])
 			}
 			if warm[len(warm)/2] > 150*time.Millisecond {
-				t.Errorf("warm recompute median %v, budget ≤ 150 ms", warm[len(warm)/2])
+				benchgate.Timing(t, "warm recompute median %v, budget ≤ 150 ms", warm[len(warm)/2])
+			}
+		})
+	}
+}
+
+// withProgress is phase3Checks with 018's check, which declares Clock and so
+// always runs; its rows are reported, not gated (Task 71).
+var withProgress = append(slices.Clone(phase3Checks), "status progress")
+
+// Analyzer stage gates from sub-phase 3.2 (design §16.3).
+const (
+	analyzerWarmBudget     = 20 * time.Millisecond
+	analyzerMemoizedBudget = 2 * time.Millisecond
+)
+
+// allocBudget caps the median bytes and allocations of one run.
+type allocBudget struct{ bytes, allocs uint64 }
+
+// analyzerAllocBudget gates the §16.3-scope stage per world and mode (D-044):
+// the 3.2 measurement (in the comments; the same on darwin/arm64 and amd64) plus about 10 %.
+var analyzerAllocBudget = map[string]allocBudget{
+	"large/warm, §16.3 scope":                                              {192_000, 710},      // 173,864 B, 642
+	"large/memoized, §16.3 scope":                                          {32_000, 540},       // 28,904 B, 491
+	"large/memoized, §16.3 scope, new scrape each run":                     {35_000, 555},       // 31,480 B, 503
+	"large-contradicting-worst/warm, §16.3 scope":                          {5_570_000, 20_700}, // 5,061,760 B, 18,837
+	"large-contradicting-worst/memoized, §16.3 scope":                      {88_000, 1_620},     // 80,024 B, 1,471
+	"large-contradicting-worst/memoized, §16.3 scope, new scrape each run": {1_027_000, 5_870},  // 933,136 B, 5,335
+}
+
+// runAllocs is the median bytes and allocations of one call of run, over n calls.
+func runAllocs[T any](n int, run func() T) (bytes, allocs uint64) {
+	b, a := make([]uint64, n), make([]uint64, n)
+	var m0, m1 runtime.MemStats
+	for i := range n {
+		runtime.ReadMemStats(&m0)
+		run()
+		runtime.ReadMemStats(&m1)
+		b[i], a[i] = m1.TotalAlloc-m0.TotalAlloc, m1.Mallocs-m0.Mallocs
+	}
+	slices.Sort(b)
+	slices.Sort(a)
+	return b[n/2], a[n/2]
+}
+
+// TestBudgetAnalyzerStage: at Large and in the 3.2 measurement world, design
+// §16.3's stage (identity, groups, rank and the Phase 3 checks; ruling R35)
+// has a median ≤ 20 ms warm and ≤ 2 ms memoized, also when each run reads a new
+// scrape at the binary's max age (R70); each scoped mode's allocations per run
+// stay in analyzerAllocBudget. The whole stage, Phase 1–2 checks included, is reported.
+func TestBudgetAnalyzerStage(t *testing.T) {
+	tiers := []scale.Tier{scale.Large, measuredTier}
+	measured := map[string]bool{}
+	for k := range analyzerAllocBudget {
+		// A budget whose world is not run would never gate.
+		if w, _, _ := strings.Cut(k, "/"); !slices.ContainsFunc(tiers, func(x scale.Tier) bool { return x.Name == w }) {
+			t.Errorf("allocation budget %q names no world this test runs", k)
+		}
+	}
+	for _, tier := range tiers {
+		t.Run(tier.Name, func(t *testing.T) {
+			e := analyzerEngine(t, tier)
+			for _, mode := range []struct {
+				name   string
+				memo   bool
+				scope  []string
+				budget time.Duration
+				scrape time.Duration
+			}{{"warm, §16.3 scope", false, phase3Checks, analyzerWarmBudget, 0}, {"memoized, §16.3 scope", true, phase3Checks, analyzerMemoizedBudget, 0},
+				{"memoized, §16.3 scope, new scrape each run", true, phase3Checks, analyzerMemoizedBudget, prodMaxAge},
+				{"warm, §16.3 scope and 018", false, withProgress, 0, 0}, {"memoized, §16.3 scope and 018", true, withProgress, 0, 0},
+				{"warm, whole stage", false, nil, 0, 0}, {"memoized, whole stage", true, nil, 0, 0}} {
+				run := analyzerStage(t, e, mode.memo, mode.scope, mode.scrape)
+				d := make([]time.Duration, 31)
+				for i := range d {
+					t0 := time.Now()
+					run()
+					d[i] = time.Since(t0)
+				}
+				slices.Sort(d)
+				med := d[len(d)/2]
+				note := "reported"
+				if mode.budget > 0 {
+					note = fmt.Sprintf("budget median ≤ %v", mode.budget)
+				}
+				t.Logf("%s: %s median %v p95 %v max %v (%s)", tier.Name, mode.name, med.Round(10*time.Microsecond),
+					percentile(d, 95).Round(10*time.Microsecond), d[len(d)-1].Round(10*time.Microsecond), note)
+				if mode.budget > 0 && med > mode.budget {
+					benchgate.Timing(t, "%s: %s median %v, budget ≤ %v", tier.Name, mode.name, med, mode.budget)
+				}
+				if _, gated := analyzerAllocBudget[tier.Name+"/"+mode.name]; !gated && mode.scope != nil {
+					bytes, n := runAllocs(31, run)
+					t.Logf("%s: %s allocates median %d B in %d allocations per run (reported)", tier.Name, mode.name, bytes, n)
+				}
+				if a, ok := analyzerAllocBudget[tier.Name+"/"+mode.name]; ok {
+					measured[tier.Name+"/"+mode.name] = true
+					bytes, n := runAllocs(31, run)
+					t.Logf("%s: %s allocates median %d B in %d allocations per run (budget ≤ %d B, ≤ %d allocations)", tier.Name, mode.name, bytes, n, a.bytes, a.allocs)
+					if bytes > a.bytes || n > a.allocs {
+						t.Errorf("%s: %s allocates %d B in %d allocations per run, budget ≤ %d B, ≤ %d", tier.Name, mode.name, bytes, n, a.bytes, a.allocs)
+					}
+				}
+			}
+			// A renamed or dropped mode fails its budget instead of skipping it.
+			for k := range analyzerAllocBudget {
+				if strings.HasPrefix(k, tier.Name+"/") && !measured[k] {
+					t.Errorf("allocation budget %q: no mode measured it", k)
+				}
 			}
 		})
 	}
@@ -378,6 +584,8 @@ const heapChildEnv = "KGWUI_HEAP_CHILD"
 type heapRun struct {
 	Start, Snapshot, Retained uint64
 	Parts                     []heapPart
+	// Watches is the HeapAlloc freed by stopping a fresh measurement world's proxy Pod, Event and CRD watches.
+	Watches int64
 }
 
 type heapPart struct {
@@ -386,19 +594,24 @@ type heapPart struct {
 }
 
 // TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
-// and five runs, the median retained heap at Large ≤ 32 MiB above it, for the
+// and five runs, the median retained heap at Large ≤ 40 MiB (D-054) above it, for the
 // consistent world and the worst case. Each part is then dropped in turn; its
-// freed HeapAlloc is reported per kind.
+// freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part.
 func TestBudgetHeap(t *testing.T) {
+	cases := append(slices.Clone(largeCases), measuredTier)
 	if name := os.Getenv(heapChildEnv); name != "" {
-		i := slices.IndexFunc(largeCases, func(x scale.Tier) bool { return x.Name == name })
-		heapChild(t, largeCases[i])
+		i := slices.IndexFunc(cases, func(x scale.Tier) bool { return x.Name == name })
+		heapChild(t, cases[i])
 		return
 	}
-	for _, tier := range largeCases {
+	for _, tier := range cases {
 		t.Run(tier.Name, func(t *testing.T) { heapBudget(t, tier) })
 	}
 }
+
+// heap31 is the 3.1 baseline's median retained heap over the 2.1 baseline per world
+// (bench/3.1-baseline.txt); the measurement world is held to the contradicting one.
+var heap31 = map[string]float64{"large": 23.2, "large-contradicting": 24.4, "large-contradicting-worst": 24.4}
 
 // heapBudget runs five heap children for tier and checks their median.
 func heapBudget(t *testing.T, tier scale.Tier) {
@@ -431,12 +644,27 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 	slices.SortFunc(runs, func(a, b heapRun) int { return cmp.Compare(a.Retained, b.Retained) })
 	med := runs[len(runs)/2]
 	over := int64(med.Retained) - heapBaseline
-	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 32 MiB)", med.Retained, float64(med.Retained)/mib, float64(over)/mib, heapBaseline)
+	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 40 MiB); %+.1f MiB over the 3.1 baseline's %+.1f (budget ≤ +24 MiB)",
+		med.Retained, float64(med.Retained)/mib, float64(over)/mib, heapBaseline, float64(over)/mib-heap31[tier.Name], heap31[tier.Name])
 	for _, p := range med.Parts {
 		t.Logf("  %-28s %7.2f MiB", p.Name, float64(p.Freed)/mib)
 	}
-	if over > 32*mib {
-		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 32 MiB", float64(over)/mib)
+	watches := make([]int64, len(runs))
+	for i, r := range runs {
+		watches[i] = r.Watches
+	}
+	slices.Sort(watches)
+	wm := watches[len(watches)/2]
+	t.Logf("3.2 watches' retained state: median %d B (%.2f MiB), min %d, max %d (budget median ≤ %d B)",
+		wm, float64(wm)/mib, watches[0], watches[len(watches)-1], watchesHeapBudget)
+	if wm > watchesHeapBudget {
+		t.Errorf("3.2 watches' retained state %d B, budget ≤ %d B", wm, watchesHeapBudget)
+	}
+	if over > 40*mib {
+		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 40 MiB", float64(over)/mib)
+	}
+	if d := float64(over)/mib - heap31[tier.Name]; d > 24 {
+		t.Errorf("retained heap %+.1f MiB above the 3.1 baseline, budget ≤ +24 MiB", d)
 	}
 }
 
@@ -451,13 +679,37 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	}
 	var r heapRun
 	r.Start = stats().HeapInuse
-	snap := scale.Snapshot(tier, 1)
+	var snap *cache.Snapshot
+	var e *Engine
+	var w *measure.World
+	var m *Model
+	fc := testutil.FakeClock()
+	if tier.IsWorst {
+		// The measurement world's cache and fake clients go before the snapshot is measured,
+		// once every goroutine they started has returned.
+		g := runtime.NumGoroutine()
+		w = measure.New(t, tier, fc)
+		snap = w.Live.Cache.Snapshot()
+		w.Live.Stop()
+		w.Live = nil
+		for deadline := time.Now().Add(time.Minute); runtime.NumGoroutine() > g; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d goroutines after the world stopped, %d before it", runtime.NumGoroutine(), g)
+			}
+		}
+	} else {
+		snap = scale.Snapshot(tier, 1)
+	}
 	st := stats()
 	r.Snapshot = st.HeapInuse
 	snapAlloc := st.HeapAlloc
-	e, _ := largeEngine(snap, tier)
-	e.Compute()
-	m := e.Compute()
+	if w != nil {
+		e = measuredEngine(t, w, fc, snap)
+	} else {
+		e, _ = largeEngine(snap, tier)
+		e.Compute()
+	}
+	m = e.Compute()
 	before := stats()
 	r.Retained = before.HeapInuse
 	if len(m.Installs) != 1 {
@@ -476,7 +728,17 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("index: Gateway rows", func() { ix.Gateways = nil })
 	drop("index: ListenerSet rows", func() { ix.ListenerSets = nil })
 	drop("index: lookups", func() { m.Installs[0].Index = nil })
+	// The engine keeps the last diagnosis, and the check Stores the last findings, so both go with them.
 	drop("health: findings", func() { m.Installs[0].Health.Findings = nil })
+	drop("diagnosis: groups and rank", func() { m.Installs[0].Diagnosis, e.diags = nil, nil })
+	drop("process data", func() { m.Installs[0].Process = nil })
+	drop("check Stores and findings", func() { e.states = nil })
+	drop("controller log reader", func() {
+		if w != nil {
+			w.StopLogs()
+		}
+	})
+	drop("proxy stats and collector", func() { e.cfg.Collected, w = nil, nil })
 	drop("computed: checks", func() { m.Installs[0].Computed.Checks = nil })
 	drop("computed: delegation", func() { m.Installs[0].Computed.Delegation = computed.DelegationResult{} })
 	drop("computed: attachment", func() { m.Installs[0].Computed = nil })
@@ -489,11 +751,49 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("decode: Backend views", func() { e.decode.backends = viewCache[objects.BackendView]{} })
 	// What the engine and model still hold above the snapshot: the rest of health, overview, first-seen.
 	r.Parts = append(r.Parts, heapPart{"rest of engine and model", int64(prev) - int64(snapAlloc)})
+	r.Watches = watchesHeap(t, tier)
 	runtime.KeepAlive(e)
 	runtime.KeepAlive(m)
 	runtime.KeepAlive(snap)
+	runtime.KeepAlive(w)
 	j, _ := json.Marshal(r)
 	fmt.Println("heap: " + string(j))
+}
+
+// watchesHeapBudget is the 3.2 watches' median retained state per world: the
+// measurement world's 1,450,216 B plus about 10 % (D-046).
+const watchesHeapBudget = 1_600_000
+
+// watchesHeap builds tier's measurement world, so its cache runs the proxy Pod, Event and CRD
+// watches, and returns the HeapAlloc freed by stopping those watches alone. The fake clients'
+// objects and the other informers stay, so they do not count.
+func watchesHeap(t *testing.T, tier scale.Tier) int64 {
+	alloc := func() int64 {
+		runtime.GC()
+		runtime.GC()
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		return int64(m.HeapAlloc) //nolint:gosec // a heap size fits
+	}
+	w := measure.New(t, tier, testutil.FakeClock())
+	defer w.Live.Stop()
+	before := alloc()
+	g := runtime.NumGoroutine()
+	cache.StopOptional(w.Live.Cache)
+	// A stopped watch's filter goroutine returns once its source closes; wait until the count holds.
+	for deadline, n, same := time.Now().Add(time.Minute), g, 0; same < 3; time.Sleep(20 * time.Millisecond) {
+		if c := runtime.NumGoroutine(); c == n {
+			same++
+		} else {
+			n, same = c, 0
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("goroutines did not settle after the watches stopped")
+		}
+	}
+	freed := before - alloc()
+	runtime.KeepAlive(w)
+	return freed
 }
 
 // The 2.4 dense-memory budget (D-025): the edge cap keeps the densest
@@ -502,19 +802,33 @@ func heapChild(t *testing.T, tier scale.Tier) {
 // denseMemChildEnv makes TestBudgetDenseMemory measure one edge cap in this process.
 const denseMemChildEnv = "KGWUI_DENSE_MEM_CHILD"
 
-// denseMemRun is one child's measurement: the peak heap sampled during the
-// cold Compute and during the warm ones, and the view B rows.
+// The dense budgets at the default edge cap (D-039): the 2.4 measurement
+// (160 MiB retained, 210 MiB cold, 224 on linux/amd64, 168 MiB per warm Compute)
+// plus about 10 % of the larger value.
+const (
+	denseRetainedBudget  = 176 << 20
+	denseAllocBudget     = 185 << 20
+	denseColdAllocBudget = 246 << 20
+)
+
+// denseMemRun is one child's measurement: the bytes allocated by the cold
+// Compute and per warm Compute, the heap retained after them, the peak heap sampled during the cold
+// Compute and during the warm ones, and the view B rows.
 type denseMemRun struct {
 	Edges, Rows                  int
+	ColdAlloc                    uint64
+	WarmAllocPerCompute          uint64
+	RetainedHeap                 uint64
 	ColdHeapInuse, WarmHeapInuse uint64
 	ColdHeapAlloc, WarmHeapAlloc uint64
 }
 
 // TestBudgetDenseMemory: DenseSelection(100, 1000) with realistic status, in a
-// fresh process with no GOMEMLIMIT, at the default edge cap: peak heap
-// (HeapInuse) ≤ 432 MiB, as the median of five children since one sample
-// flakes on GC timing. RSS is logged, not gated. Twice the default and 50,000
-// run once and are reported only (D-025).
+// fresh process with no GOMEMLIMIT, at the default edge cap: the heap retained
+// after warm Computes and the bytes allocated by the cold and per warm Compute stay in budget,
+// as the median of five children (D-039). Peak heap and RSS depend on GC timing,
+// so they are logged, not gated. Twice the default and 50,000 run once and are
+// reported only (D-025).
 func TestBudgetDenseMemory(t *testing.T) {
 	if v := os.Getenv(denseMemChildEnv); v != "" {
 		edges, err := strconv.Atoi(v)
@@ -532,21 +846,31 @@ func TestBudgetDenseMemory(t *testing.T) {
 		if edges == def {
 			runs = gateRuns
 		}
-		heaps := make([]uint64, 0, runs)
+		var retained, cold, perCompute, peaks []uint64
 		for range runs {
 			r, rss := denseMemParent(t, edges)
-			heaps = append(heaps, max(r.ColdHeapInuse, r.WarmHeapInuse))
-			t.Logf("edges %6d: %6d rows; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
-				edges, r.Rows, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
+			retained = append(retained, r.RetainedHeap)
+			cold = append(cold, r.ColdAlloc)
+			perCompute = append(perCompute, r.WarmAllocPerCompute)
+			peaks = append(peaks, max(r.ColdHeapInuse, r.WarmHeapInuse))
+			t.Logf("edges %6d: %6d rows; retained heap %4d MiB; allocated cold %4d MiB, per warm Compute %4d MiB; peak RSS %4d MiB; peak HeapInuse cold %4d MiB warm %4d MiB; peak HeapAlloc cold %4d MiB warm %4d MiB",
+				edges, r.Rows, r.RetainedHeap/mib, r.ColdAlloc/mib, r.WarmAllocPerCompute/mib, rss/mib, r.ColdHeapInuse/mib, r.WarmHeapInuse/mib, r.ColdHeapAlloc/mib, r.WarmHeapAlloc/mib)
 		}
 		if edges != def {
 			continue
 		}
-		slices.Sort(heaps)
-		median := heaps[len(heaps)/2]
-		t.Logf("edges %6d: median peak HeapInuse over %d runs %4d MiB", edges, runs, median/mib)
-		if median > 432*mib {
-			t.Errorf("median peak heap %d MiB over %d runs at the default edge cap %d, budget ≤ 432 MiB", median/mib, runs, def)
+		median := func(v []uint64) uint64 { slices.Sort(v); return v[len(v)/2] }
+		ret, cld, per := median(retained), median(cold), median(perCompute)
+		t.Logf("edges %6d: medians over %d runs: retained heap %4d MiB, allocated cold %4d MiB, per warm Compute %4d MiB, peak HeapInuse %4d MiB (logged only)",
+			edges, runs, ret/mib, cld/mib, per/mib, median(peaks)/mib)
+		if ret > denseRetainedBudget {
+			t.Errorf("median retained heap %d MiB at the default edge cap %d, budget ≤ %d MiB", ret/mib, def, denseRetainedBudget/mib)
+		}
+		if cld > denseColdAllocBudget {
+			t.Errorf("median allocated by the cold Compute %d MiB at the default edge cap %d, budget ≤ %d MiB", cld/mib, def, denseColdAllocBudget/mib)
+		}
+		if per > denseAllocBudget {
+			t.Errorf("median allocated per warm Compute %d MiB at the default edge cap %d, budget ≤ %d MiB", per/mib, def, denseAllocBudget/mib)
 		}
 	}
 }
@@ -626,13 +950,28 @@ func denseMemChild(t *testing.T, edges int) {
 	}
 	var m *Model
 	r := denseMemRun{Edges: edges}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	a0 := ms.TotalAlloc
 	r.ColdHeapInuse, r.ColdHeapAlloc = sample(func() { m = e.Compute() })
+	runtime.ReadMemStats(&ms)
+	r.ColdAlloc = ms.TotalAlloc - a0
+	const warm = 5
+	a0 = ms.TotalAlloc
 	r.WarmHeapInuse, r.WarmHeapAlloc = sample(func() {
-		for range 5 {
+		for range warm {
 			e.forgetViews()
 			m = e.Compute()
 		}
 	})
+	runtime.ReadMemStats(&ms)
+	r.WarmAllocPerCompute = (ms.TotalAlloc - a0) / warm
+	// What the engine and the last model keep once the garbage is collected.
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+	r.RetainedHeap = ms.HeapAlloc
+	runtime.KeepAlive(e)
 	if len(m.Installs) != 1 || m.Installs[0].Computed == nil {
 		t.Fatalf("installs %d", len(m.Installs))
 	}

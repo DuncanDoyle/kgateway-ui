@@ -35,6 +35,12 @@ func (UpstreamDetector) ProxySelector() labels.Selector {
 	return labels.SelectorFromSet(labels.Set{"app.kubernetes.io/managed-by": "kgateway", "app.kubernetes.io/component": "proxy"})
 }
 
+// ProxyPodSelector implements ProxyPodDetector with the proxy Pod template's
+// labels; the Deployment's managed-by label is not on the Pods.
+func (UpstreamDetector) ProxyPodSelector() labels.Selector {
+	return labels.SelectorFromSet(labels.Set{"kgateway": "kube-gateway", "app.kubernetes.io/component": "proxy"})
+}
+
 // Detect implements Detector.
 func (UpstreamDetector) Detect(d *appsv1.Deployment) (Install, bool) {
 	for _, c := range d.Spec.Template.Spec.Containers {
@@ -73,10 +79,11 @@ func splitImage(image string) (repo, tag string) {
 }
 
 // KgatewayVersion returns the kgateway version the controller runs, or ""
-// when unknown: other distributions number their own releases (D-018 §3).
+// when unknown. Other distributions number their own releases (D-018 §3), so
+// they report BaseVersion, which their detector may leave empty.
 func (i Install) KgatewayVersion() string {
 	if i.Edition != "kgateway" {
-		return ""
+		return i.BaseVersion
 	}
 	return i.Version
 }

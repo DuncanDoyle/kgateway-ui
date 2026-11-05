@@ -10,6 +10,14 @@
         "ref",
         "outcome"
       ],
+      "findings": [
+        "severity",
+        "code",
+        "kind",
+        "namespace",
+        "group",
+        "q"
+      ],
       "routes": [
         "listener"
       ]

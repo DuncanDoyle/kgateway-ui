@@ -1,0 +1,47 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "evidence": {
+      "controller": "2.4.7",
+      "kind": "version-skew",
+      "proxies": [
+        {
+          "pods": [
+            "edge-0"
+          ],
+          "total": 1,
+          "version": "2.3.6"
+        }
+      ]
+    },
+    "finding": {
+      "code": "KGWUI-022",
+      "detail": "Proxy 2.3.6, controller 2.4.7. kgateway does not support mixed minor versions.",
+      "group": "f1-lq7dgtmebriqqlfwkepjs6upro",
+      "id": "f1-rpmgfxmhpqaeensbfoaa6sigwa",
+      "message": "Proxy version differs from the controller",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "detail",
+        "name": "edge",
+        "namespace": "infra"
+      },
+      "severity": "warning",
+      "since": "2026-10-17T11:58:59Z",
+      "slug": "version-skew"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

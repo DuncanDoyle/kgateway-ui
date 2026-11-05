@@ -61,7 +61,8 @@ func healthyWorld() *world {
 	}
 }
 
-func (w *world) report(t *testing.T) Report {
+// input builds the install's Input for w.
+func (w *world) input(t *testing.T) Input {
 	t.Helper()
 	snap := &cache.Snapshot{Objects: testutil.ObjectsByGVR(t, w.objs...), Access: map[schema.GroupVersionResource]cache.Access{},
 		Namespaces: w.nss, Deployments: w.deploys, Pods: w.pods, Synced: true, TakenAt: testutil.Now}
@@ -88,7 +89,12 @@ func (w *world) report(t *testing.T) Report {
 		hi.Metrics, hi.HasMetrics = *w.metrics, true
 	}
 	hi.FirstSeen, hi.Computed = w.firstSeen, w.computed
-	return Evaluate(hi, Upstream())
+	return hi
+}
+
+func (w *world) report(t *testing.T) Report {
+	t.Helper()
+	return Evaluate(w.input(t), Upstream(), Runtime{})
 }
 
 // has reports whether r has a finding with code on res; an empty sev or res matches any.
@@ -130,19 +136,19 @@ func TestChecks(t *testing.T) {
 			w.objs[1] = testutil.Gateway("infra", "edge", "kgateway", []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("Programmed", metav1.ConditionFalse, "AddressNotAssigned")})
 		}, CodeConditionFalse, SeverityError, "infra/edge", StateError},
-		{"002 route backend not found", func(w *world) {
+		{"013 route backend not found", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
-		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
-		{"002 rule replaced (2.4, optional condition present)", func(w *world) {
+		}, CodeRefUnresolved, SeverityError, "shop/cart", StateError},
+		{"015 rule replaced (2.4, optional condition present)", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
 				testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleReplaced")}})
-		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
-		{"002 rule replaced on 2.3 (Accepted=False)", func(w *world) {
+		}, CodeRuleReplaced, SeverityError, "shop/cart", StateError},
+		{"015 rule replaced on 2.3 (Accepted=False)", func(w *world) {
 			w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller, Conds: []metav1.Condition{
 				testutil.Cond("Accepted", metav1.ConditionFalse, "RouteRuleReplaced"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs")}})
-		}, CodeConditionFalse, SeverityError, "shop/cart", StateError},
+		}, CodeRuleReplaced, SeverityError, "shop/cart", StateError},
 		// Main only: v2.3.x and v2.4.x write no status for a missing target (see "003 policy without ancestors").
 		{"002 policy target not found (main)", func(w *world) {
 			w.objs = append(w.objs, testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{
@@ -513,7 +519,7 @@ func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
 		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
 			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}}
-		r := Evaluate(hi, Upstream())
+		r := Evaluate(hi, Upstream(), Runtime{})
 		if r.State != StateHealthy || len(r.Findings) != 0 {
 			t.Fatalf("%s: state=%s findings=%+v", res.ID(), r.State, r.Findings)
 		}

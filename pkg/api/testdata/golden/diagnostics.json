@@ -1,0 +1,293 @@
+{
+  "body": {
+    "checks": [
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "cluster access",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "served kinds",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "controller scope",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "controller pods",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "error": "1 resource is being processed by the controller",
+        "name": "resource status",
+        "ok": false,
+        "pending": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "gateway proxies",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "xDS rejects",
+        "ok": true,
+        "required": true
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "watched namespaces",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "gateway ownership",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "scope matches controller",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "backend status",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "detail": "Proxy Pods are not watched, so proxies were not checked",
+        "name": "process restarts",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "error": "Events are turned off",
+        "name": "probe failures",
+        "ok": false,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "stuck rollouts",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "detail": "Proxy Pods are not watched, so proxies were not checked; Gateway API CRDs are not watched, so their versions were not checked",
+        "name": "version skew",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "detail": "1 of 2 Gateways have no proxy stats.",
+        "name": "proxy config warming",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "detail": "1 of 2 Gateways have no proxy stats.",
+        "name": "proxy connection",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "computed views",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:10Z",
+        "name": "status progress",
+        "ok": true,
+        "required": false
+      }
+    ],
+    "collectedAt": "2026-10-17T12:00:10Z",
+    "dataPlane": {
+      "gateways": 2,
+      "rejecting": 2
+    },
+    "groupTotal": 3,
+    "groups": [
+      {
+        "affected": [
+          {
+            "group": "gateway.networking.k8s.io",
+            "kind": "HTTPRoute",
+            "link": "detail",
+            "name": "cart",
+            "namespace": "shop"
+          },
+          {
+            "group": "gateway.kgateway.dev",
+            "kind": "TrafficPolicy",
+            "link": "yaml",
+            "name": "tp",
+            "namespace": "shop"
+          }
+        ],
+        "affectedTotal": 2,
+        "cause": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "edge",
+          "namespace": "infra"
+        },
+        "class": 1,
+        "code": "KGWUI-001",
+        "id": "f1-hu3aameknbak2tmtzfsfy7wnfj",
+        "members": 1,
+        "nextSteps": [
+          {
+            "command": "kubectl logs -n kgw kgateway-0 --since=1h | grep 'xds error' | grep edge",
+            "needs": [
+              "pods/log"
+            ],
+            "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "See the reason in the controller log"
+          },
+          {
+            "command": "kubectl logs -n infra deploy/edge --since=1h | grep -i rejected",
+            "needs": [
+              "pods/log"
+            ],
+            "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "See the reject in the proxy log"
+          },
+          {
+            "command": "kubectl port-forward -n infra deploy/edge 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'",
+            "needs": [
+              "pods/portforward"
+            ],
+            "note": "This command opens a connection to the proxy's admin port. Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "Read the proxy's update counters"
+          }
+        ],
+        "severity": "error",
+        "since": "2026-10-17T12:00:10Z",
+        "title": "Status says Programmed, but proxies reject its config"
+      },
+      {
+        "affected": [],
+        "affectedTotal": 0,
+        "cause": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "nack",
+          "namespace": "infra"
+        },
+        "class": 1,
+        "code": "KGWUI-001",
+        "id": "f1-pvlyyrq3x3fyb2klyeoiddhzs5",
+        "members": 1,
+        "nextSteps": [
+          {
+            "command": "kubectl logs -n kgw kgateway-0 --since=1h | grep 'xds error' | grep nack",
+            "needs": [
+              "pods/log"
+            ],
+            "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "See the reason in the controller log"
+          },
+          {
+            "command": "kubectl logs -n infra deploy/nack --since=1h | grep -i rejected",
+            "needs": [
+              "pods/log"
+            ],
+            "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "See the reject in the proxy log"
+          },
+          {
+            "command": "kubectl port-forward -n infra deploy/nack 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'",
+            "needs": [
+              "pods/portforward"
+            ],
+            "note": "This command opens a connection to the proxy's admin port. Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+            "title": "Read the proxy's update counters"
+          }
+        ],
+        "severity": "error",
+        "since": "2026-10-17T12:00:10Z",
+        "title": "Proxies reject this Gateway's config"
+      },
+      {
+        "affected": [],
+        "affectedTotal": 0,
+        "cause": {
+          "group": "gateway.networking.k8s.io",
+          "kind": "Gateway",
+          "link": "detail",
+          "name": "nack",
+          "namespace": "infra"
+        },
+        "class": 3,
+        "code": "KGWUI-003",
+        "id": "f1-47rcq2pjlzwuiukw7cngqsc4jw",
+        "members": 1,
+        "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
+        "title": "Not yet processed by the controller"
+      }
+    ],
+    "install": "kgw.kgateway",
+    "processes": {
+      "controller": {
+        "desired": 2,
+        "observed": true,
+        "ready": 2,
+        "state": "healthy",
+        "version": "2.4.7"
+      },
+      "proxies": {
+        "gateways": 2,
+        "notObserved": 2,
+        "ready": 0,
+        "rejecting": 2,
+        "restarting": 0,
+        "skew": 0,
+        "state": "error"
+      }
+    },
+    "verdict": {
+      "counts": {
+        "error": 2,
+        "info": 1,
+        "warning": 1
+      },
+      "oldestSince": "2026-10-17T11:58:59Z",
+      "problems": 3,
+      "state": "error"
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

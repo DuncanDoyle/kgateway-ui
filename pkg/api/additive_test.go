@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,9 +20,33 @@ var appended = map[string]struct {
 	Key    string
 	Values []string
 }{
-	"body.checks": {"name", []string{"backend status", "computed views"}},
+	"body.checks": {"name", []string{"backend status", "process restarts", "probe failures", "stuck rollouts", "version skew", "proxy config warming", "proxy connection", "computed views", "status progress"}},
 	"body.counts": {"kind", []string{"Backend"}},
 	"body.kinds":  {"kind", []string{"Backend"}},
+}
+
+// additiveExceptions are the scalar changes D-030 permits, per fixture and
+// JSON path: the code and slug of the findings 013 and 014 took over from 002.
+var additiveExceptions = map[string]map[string][2]string{
+	"health": {
+		"body.findings[0].code": {"KGWUI-002", "KGWUI-013"},
+		"body.findings[0].slug": {"condition-false", "ref-unresolved"},
+		"body.findings[1].code": {"KGWUI-002", "KGWUI-014"},
+		"body.findings[1].slug": {"condition-false", "ref-not-permitted"},
+	},
+}
+
+// unexcepted returns the diffs of fixture that additiveExceptions does not list.
+func unexcepted(diffs []string, fixture string) []string {
+	var out []string
+	for _, d := range diffs {
+		p, _, _ := strings.Cut(d, ": ")
+		if e, ok := additiveExceptions[fixture][p]; ok && d == fmt.Sprintf("%s: %s became %s", p, e[0], e[1]) {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // snapshotTime in a golden-v1 fixture stands for a cache snapshot time, which
@@ -34,6 +59,46 @@ func TestGoldenChangesAreAdditive(t *testing.T) {
 	for _, name := range []string{"meta", "installs", "overview", "health", "resource", "not-found", "bare-meta", "bare-installs", "bare-overview"} {
 		additive(t, readGolden(t, "golden-v1", name), readGolden(t, "golden", name), name)
 	}
+}
+
+// findingKeys are the keys a v1 finding may gain: the resource link (Phase
+// 2), a first-seen since (D-028), and id, group and evidence (Phase 3 design §13.1).
+var findingKeys = []string{".resource.link", ".since", ".id", ".group", ".evidence"}
+
+// TestHealthOverviewFindingsGainOnlyIdentity checks that /health and
+// /overview findings differ from v1 only by findingKeys.
+func TestHealthOverviewFindingsGainOnlyIdentity(t *testing.T) {
+	for _, name := range []string{"health", "overview", "bare-overview"} {
+		for _, k := range addedKeys(readGolden(t, "golden-v1", name), readGolden(t, "golden", name), "") {
+			_, rest, ok := strings.Cut(k, "findings[")
+			if _, key, _ := strings.Cut(rest, "]"); ok && !slices.Contains(findingKeys, key) {
+				t.Errorf("%s: finding gained %s", name, k)
+			}
+		}
+	}
+}
+
+// addedKeys returns the paths of the object keys in cur that old lacks, in
+// elements both have.
+func addedKeys(old, cur any, p string) []string {
+	var out []string
+	switch o := old.(type) {
+	case map[string]any:
+		c, _ := cur.(map[string]any)
+		for _, k := range slices.Sorted(maps.Keys(c)) {
+			if v, ok := o[k]; ok {
+				out = append(out, addedKeys(v, c[k], p+"."+k)...)
+			} else {
+				out = append(out, p+"."+k)
+			}
+		}
+	case []any:
+		c, _ := cur.([]any)
+		for i := range min(len(o), len(c)) {
+			out = append(out, addedKeys(o[i], c[i], fmt.Sprintf("%s[%d]", p, i))...)
+		}
+	}
+	return out
 }
 
 func TestAdditiveHelper(t *testing.T) {
@@ -65,10 +130,31 @@ func TestAdditiveHelper(t *testing.T) {
 	}
 }
 
+// Only the listed code and slug changes pass; any other scalar change still fails.
+func TestAdditiveExceptionsAreListedOnly(t *testing.T) {
+	old := `{"body":{"findings":[{"code":"KGWUI-002","slug":"condition-false","message":"m"}]}}`
+	for _, tc := range []struct {
+		name, fixture, cur string
+		ok                 bool
+	}{
+		{"listed code and slug", "health", `{"body":{"findings":[{"code":"KGWUI-013","slug":"ref-unresolved","message":"m"}]}}`, true},
+		{"listed path, other value", "health", `{"body":{"findings":[{"code":"KGWUI-015","slug":"ref-unresolved","message":"m"}]}}`, false},
+		{"unlisted scalar", "health", `{"body":{"findings":[{"code":"KGWUI-013","slug":"ref-unresolved","message":"n"}]}}`, false},
+		{"listed in another fixture", "overview", `{"body":{"findings":[{"code":"KGWUI-013","slug":"ref-unresolved","message":"m"}]}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := unexcepted(additions(decode(t, old), decode(t, tc.cur), ""), tc.fixture)
+			if tc.ok != (len(got) == 0) {
+				t.Errorf("ok = %v, want %v: %v", len(got) == 0, tc.ok, got)
+			}
+		})
+	}
+}
+
 // additive fails t for every way cur is more than old plus permitted additions.
 func additive(t *testing.T, old, cur any, fixture string) {
 	t.Helper()
-	for _, d := range additions(old, cur, "") {
+	for _, d := range unexcepted(additions(old, cur, ""), fixture) {
 		t.Errorf("%s: %s", fixture, d)
 	}
 }
@@ -165,4 +251,25 @@ func decode(t *testing.T, s string) any {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// TestMetaUnchangedWithoutCapabilitySource pins design §4.1 gap 4: with no
+// source, or one that reports nothing, meta is the golden body and carries no capabilityStates.
+func TestMetaUnchangedWithoutCapabilitySource(t *testing.T) {
+	base := wire(t, wireCases(t)[0].srv, "/api/v1/meta")
+	if bytes.Contains(base, []byte("capabilityStates")) {
+		t.Fatalf("meta without a source lists capabilityStates:\n%s", base)
+	}
+	golden, err := os.ReadFile(filepath.Join("testdata", "golden", "meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(golden), bytes.TrimSpace(base)) {
+		t.Errorf("meta differs from the golden:\n%s", base)
+	}
+	empty := func() []Capability { return nil }
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithCapabilitySources(empty)}}, world()...)
+	if got := wire(t, srv, "/api/v1/meta"); bytes.Contains(got, []byte("capabilityStates")) {
+		t.Errorf("meta with an empty source lists capabilityStates:\n%s", got)
+	}
 }

@@ -1,4 +1,5 @@
 import type { HealthState } from "../theme/tokens";
+import type { DataPlane, ProcessSet } from "./diagTypes";
 import type { LabelSelector, Ref } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
@@ -8,6 +9,11 @@ export type Link = "detail" | "yaml" | "none";
 /** A reference with its server-computed link; the link sits flat beside the ref fields. */
 export interface LinkedRef extends Ref {
   link: Link;
+}
+/** GET …/refs: the trail's objects with their links, in request order (design §17.6). */
+export interface TrailRefs {
+  install: string;
+  refs: LinkedRef[];
 }
 /** A group and kind, as in allowedRoutes.kinds or supportedKinds. */
 export interface GroupKind {
@@ -197,13 +203,22 @@ export interface GatewayDetail {
   /** The ListenerSets list's total for this caller; sizes the sub-table skeleton. */
   listenerSets?: number;
   routeCounts: RouteCounts;
+  /** Sent for a Gateway the install owns, not for a candidate. */
+  dataPlane?: DataPlane;
+  proxies?: ProcessSet;
   collectedAt: string;
 }
-/** The parent Gateway's spec.allowedListeners as written; crdHint is set whenever the field is absent. */
+/**
+ * The parent Gateway's spec.allowedListeners as written; crdHint is set whenever the field is absent.
+ * crdField says whether the watched Gateway CRD defines the field, when its channel and bundle tell.
+ */
 export interface AllowedListeners {
   set: boolean;
   value?: Record<string, unknown>;
   crdHint: boolean;
+  crdField?: "defined" | "missing";
+  crdChannel?: string;
+  crdBundleVersion?: string;
 }
 export interface ListenerSetDetail {
   install: string;

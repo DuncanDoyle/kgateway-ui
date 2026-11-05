@@ -3,14 +3,17 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"runtime/metrics"
 	"slices"
 	"strconv"
@@ -24,16 +27,23 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/benchgate"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -257,13 +267,13 @@ func TestBudgetListRequests(t *testing.T) {
 					mx.name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)),
 					rd(percentile(conc, 50)), rd(percentile(conc, 95)), rd(percentile(conc, 99)))
 				if p := percentile(seq, 95); p >= 50*time.Millisecond {
-					t.Errorf("%s: sequential p95 %v, budget < 50 ms", mx.name, p)
+					benchgate.Timing(t, "%s: sequential p95 %v, budget < 50 ms", mx.name, p)
 				}
 				if p := percentile(seq, 99); p >= 100*time.Millisecond {
-					t.Errorf("%s: sequential p99 %v, budget < 100 ms", mx.name, p)
+					benchgate.Timing(t, "%s: sequential p99 %v, budget < 100 ms", mx.name, p)
 				}
 				if p := percentile(conc, 95); p >= 100*time.Millisecond {
-					t.Errorf("%s: 20-client p95 %v, budget < 100 ms", mx.name, p)
+					benchgate.Timing(t, "%s: 20-client p95 %v, budget < 100 ms", mx.name, p)
 				}
 			}
 			for _, dt := range []struct {
@@ -273,10 +283,161 @@ func TestBudgetListRequests(t *testing.T) {
 				d := latencies(t, h, base+"/routes/gateway.networking.k8s.io/HTTPRoute/"+dt.ref.Namespace+"/"+dt.ref.Name, requestsPerMix, 1)
 				t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", dt.name, rd(percentile(d, 50)), rd(percentile(d, 95)), rd(percentile(d, 99)))
 				if p := percentile(d, 95); p >= 50*time.Millisecond {
-					t.Errorf("%s p95 %v, budget < 50 ms", dt.name, p)
+					benchgate.Timing(t, "%s p95 %v, budget < 50 ms", dt.name, p)
 				}
 			}
+			// A full breadcrumb trail: one GET …/refs per page view.
+			trail := url.Values{"ref": {refParam(gw), refParam(ls), refParam(parent), refParam(deepest), refParam(deleg), refParam(lk.Resource)}}
+			requestBudget(t, h, "refs-full-trail", base+"/refs?"+trail.Encode(), false)
 		})
+	}
+}
+
+// TestBudgetFindingsRequests: per findings mix and a finding detail, the list budgets
+// of TestBudgetListRequests, in the matured worst case from a settled cache, allowed and restricted.
+func TestBudgetFindingsRequests(t *testing.T) {
+	for _, a := range []struct {
+		name  string
+		authz Authorizer
+	}{{"allow-all", nil}, {"restricted", restricting}} {
+		t.Run(a.name, func(t *testing.T) {
+			tier := scale.Large.Contradicting().Worst()
+			h, m := snapshotHandler(scale.LivePhase3(t, tier, nil).Cache.Snapshot(), tier, a.authz)
+			in := m.Installs[0]
+			if f, c := matured(m); f != c || c == 0 {
+				t.Fatalf("worst case: %d KGWUI-012 of %d checks", f, c)
+			}
+			// The group with the most members, for the group mix and the detail.
+			d := in.Diagnosis
+			big := slices.MaxFunc(d.Groups, func(x, y diagnose.Group) int { return cmp.Compare(len(x.Members), len(y.Members)) })
+			member := in.Health.Findings[big.Members[0]]
+			if member.ID == "" {
+				t.Fatal("the largest group's first finding has no id")
+			}
+			codes := map[string]int{}
+			for _, f := range in.Health.Findings {
+				codes[f.Code+"/"+string(f.Severity)]++
+			}
+			t.Logf("%d findings by code and severity %v; %d groups, largest %s (%s, %d members)", len(in.Health.Findings), codes, len(d.Groups), big.ID, big.Family, len(big.Members))
+			base := "/api/v1/installs/" + in.Resolved.ID()
+			mixes := []struct{ name, path string }{
+				{"none", base + "/findings"},
+				{"severity=error", base + "/findings?severity=error"},
+				{"code=KGWUI-012", base + "/findings?code=" + health.CodeComputedDisagrees},
+				{"q", base + "/findings?q=r-01"},
+				{"group", base + "/findings?group=" + big.ID},
+				{"sort=since", base + "/findings?sort=since.desc"},
+				{"view=groups", base + "/findings?view=groups"},
+				{"view=groups&severity=error", base + "/findings?view=groups&severity=error"},
+				{"view=groups&q", base + "/findings?view=groups&q=r-01"},
+			}
+			for _, mx := range mixes {
+				items, total := listRows(t, h, mx.path)
+				t.Logf("%-25s %d rows on the page, total %d", mx.name, items, total)
+				if items == 0 {
+					t.Fatalf("%s: GET %s returned no rows; it would measure nothing", mx.name, mx.path)
+				}
+				requestBudget(t, h, mx.name, mx.path, true)
+			}
+			requestBudget(t, h, "detail-largest-group", base+"/findings/"+member.ID, false)
+		})
+	}
+}
+
+// TestBudgetDiagnosticsRequests: …/diagnostics and …/processes (with filters)
+// hold the list budgets in the matured 3.2 measurement world, allowed and restricted.
+func TestBudgetDiagnosticsRequests(t *testing.T) {
+	for _, a := range []struct {
+		name  string
+		authz Authorizer
+	}{{"allow-all", nil}, {"restricted", restricting}} {
+		t.Run(a.name, func(t *testing.T) {
+			h, m := measuredHandler(t, a.authz)
+			in := m.Installs[0]
+			base := "/api/v1/installs/" + in.Resolved.ID()
+			proxies := 0
+			for _, ps := range in.Process.Proxies {
+				proxies += len(ps.Processes)
+			}
+			t.Logf("%d findings, %d groups, %d Gateways, %d proxy Pods", len(in.Health.Findings), len(in.Diagnosis.Groups), len(in.Owned.Gateways), proxies)
+			for _, mx := range []struct{ name, path string }{
+				{"diagnostics", base + "/diagnostics"},
+				{"processes", base + "/processes"},
+				{"processes?q", base + "/processes?q=g-01&health=healthy&health=unknown"},
+				{"processes?restarts", base + "/processes?health=error&health=warning&restarts=true"},
+				{"findings?view=groups", base + "/findings?view=groups"},
+				{"findings?view=groups&code", base + "/findings?view=groups&code=" + health.CodeRefNotPermitted},
+			} {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, mx.path, nil))
+				t.Logf("%-25s %d B", mx.name, w.Body.Len())
+				requestBudget(t, h, mx.name, mx.path, true)
+			}
+		})
+	}
+}
+
+// measuredHandler is the handler over the matured 3.2 measurement world under
+// authz: rejects on every Gateway, process data and stub proxy stats, as the engine's gates use it.
+func measuredHandler(t *testing.T, authz Authorizer) (http.Handler, *engine.Model) {
+	tier := scale.Large.Contradicting().Worst()
+	fc := testutil.FakeClock()
+	w := measure.New(t, tier, fc)
+	e := engine.New(engine.Config{Snapshots: staticSnap{w.Live.Cache.Snapshot()}, Served: testutil.ServedUpstream(),
+		Detectors: []install.Detector{install.UpstreamDetector{}}, Scope: install.NamespaceSelectorScope{},
+		Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: w.Metrics, Collected: w.Store.Snapshot,
+		Checks: health.Upstream(), Now: fc.Now})
+	w.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(current(e)) })
+	// Scrapes around testutil.Now, past every window and 5 min later, so windows, holds,
+	// proxy conditions, 016 and 018 mature.
+	e.Compute()
+	w.Scrape(t)
+	e.Compute()
+	mature := testutil.Now.Add(max(engine.Window, health.Grace) + time.Second)
+	for _, at := range []time.Time{mature, mature.Add(5 * time.Minute)} {
+		fc.SetTime(at)
+		w.Scrape(t)
+		e.Compute()
+	}
+	m := current(e)
+	if f, c := matured(m); f != c || c == 0 || !hasCodes(m, measuredCodes) || !hasCodes(m, analyzerCodes) {
+		t.Fatalf("measurement world did not mature: %d KGWUI-012 of %d checks", f, c)
+	}
+	return NewHandler(e, fstest.MapFS{}, authz), m
+}
+
+// current is e's published model, nil before the first.
+func current(e *engine.Engine) *engine.Model {
+	if p := e.Current(); p != nil {
+		return p.Model
+	}
+	return nil
+}
+
+// requestBudget gates path's sequential p95 < 50 ms and, for a list, its
+// p99 < 100 ms and 20-client p95 < 100 ms.
+func requestBudget(t *testing.T, h http.Handler, name, path string, list bool) {
+	t.Helper()
+	seq := latencies(t, h, path, requestsPerMix, 1)
+	if !list {
+		t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms)", name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)))
+		if p := percentile(seq, 95); p >= 50*time.Millisecond {
+			benchgate.Timing(t, "%s p95 %v, budget < 50 ms", name, p)
+		}
+		return
+	}
+	conc := latencies(t, h, path, requestsPerMix, 20)
+	t.Logf("%-25s sequential p50 %v p95 %v p99 %v (budget p95 < 50 ms, p99 < 100 ms); 20 clients p50 %v p95 %v p99 %v (budget p95 < 100 ms)",
+		name, rd(percentile(seq, 50)), rd(percentile(seq, 95)), rd(percentile(seq, 99)),
+		rd(percentile(conc, 50)), rd(percentile(conc, 95)), rd(percentile(conc, 99)))
+	if p := percentile(seq, 95); p >= 50*time.Millisecond {
+		benchgate.Timing(t, "%s: sequential p95 %v, budget < 50 ms", name, p)
+	}
+	if p := percentile(seq, 99); p >= 100*time.Millisecond {
+		benchgate.Timing(t, "%s: sequential p99 %v, budget < 100 ms", name, p)
+	}
+	if p := percentile(conc, 95); p >= 100*time.Millisecond {
+		benchgate.Timing(t, "%s: 20-client p95 %v, budget < 100 ms", name, p)
 	}
 }
 
@@ -341,41 +502,188 @@ func gcCPU() (gc, used float64) {
 // TestBudgetSustainedStream: over a real cache and Run loop at Large, one
 // HTTPRoute update per 100 ms for 10 min (-short: 60 s) while 20 clients poll
 // /routes every 5 s gives ≤ 1 recompute per s and process CPU ≤ 15 % of one
-// core (rusage delta; it bounds the engine's share), and the memory obtained
-// from the OS stays ≤ half the chart's 512 MiB pod limit. GC share is logged.
-// Both the consistent world and the worst case run, each in a fresh process
-// so earlier tests' heap and CPU do not count; the worst case starts once
-// every check has matured.
+// core (rusage delta; it bounds the engine's share) in every run, and the median
+// memory obtained from the OS over five runs stays ≤ 288 MiB, inside the chart's 512 MiB
+// pod limit (D-043). GC share is logged. Both the consistent world and the worst case
+// run, each in fresh processes so earlier tests' heap and CPU do not count; the
+// worst case starts once every check has matured.
 func TestBudgetSustainedStream(t *testing.T) {
-	tiers := []scale.Tier{scale.Large, scale.Large.Contradicting()}
+	inChild(t, "TestBudgetSustainedStream", []scale.Tier{scale.Large, scale.Large.Contradicting()}, func(t *testing.T, tier scale.Tier) {
+		sustainedStream(t, tier, annotationStream)
+	})
+}
+
+// TestBudgetSpecEditStream is the sustained stream at Large and in the 3.2
+// measurement world with route spec edits instead of annotations: process CPU
+// ≤ 25 % of one core in every run, edit-driven recomputes ≤ 1/s (D-047) and the
+// median memory from the OS ≤ 288 MiB (design §16.3, D-043).
+func TestBudgetSpecEditStream(t *testing.T) {
+	inChild(t, "TestBudgetSpecEditStream", []scale.Tier{scale.Large, scale.Large.Contradicting().Worst()}, func(t *testing.T, tier scale.Tier) {
+		sustainedStream(t, tier, specEditStream)
+	})
+}
+
+// streamRuns is the child count per world; the OS-memory gate reads their median (D-043).
+const streamRuns = 5
+
+// streamOSBudget is the median memory from the OS a stream may take: the worst 3.2 median
+// (256.1 MiB, spec-edit in the measurement world) plus 10 %, rounded up to 8 MiB (D-043).
+const streamOSBudget = 288 << 20
+
+// streamResult is the line a stream child prints for its parent.
+type streamResult struct{ Sys uint64 }
+
+// inChild runs run streamRuns times per tier, each in a fresh process that runs
+// only test, logs the children's report lines and gates their median memory from the OS.
+func inChild(t *testing.T, test string, tiers []scale.Tier, run func(*testing.T, scale.Tier)) {
 	if name := os.Getenv(streamChildEnv); name != "" {
-		sustainedStream(t, tiers[slices.IndexFunc(tiers, func(x scale.Tier) bool { return x.Name == name })])
+		run(t, tiers[slices.IndexFunc(tiers, func(x scale.Tier) bool { return x.Name == name })])
 		return
 	}
+	const mib = 1 << 20
 	for _, tier := range tiers {
 		t.Run(tier.Name, func(t *testing.T) {
-			args := []string{"-test.run=^TestBudgetSustainedStream$", "-test.count=1", "-test.v"}
-			if testing.Short() {
-				args = append(args, "-test.short")
-			}
-			cmd := exec.Command(os.Args[0], args...)
-			cmd.Env = append(os.Environ(), streamChildEnv+"="+tier.Name)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Errorf("stream child: %v\n%s", err, out)
-				return
-			}
-			for line := range strings.Lines(string(out)) {
-				if strings.Contains(line, "budget_test.go") {
-					t.Log(strings.TrimSpace(line))
+			var sys []uint64
+			for n := range streamRuns {
+				args := []string{"-test.run=^" + test + "$", "-test.count=1", "-test.v"}
+				if testing.Short() {
+					args = append(args, "-test.short")
 				}
+				cmd := exec.Command(os.Args[0], args...)
+				cmd.Env = append(os.Environ(), streamChildEnv+"="+tier.Name)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Errorf("stream child %d: %v\n%s", n+1, err, out)
+					return
+				}
+				for line := range strings.Lines(string(out)) {
+					if strings.Contains(line, "budget_test.go") {
+						t.Logf("run %d: %s", n+1, strings.TrimSpace(line))
+					}
+					if j, ok := strings.CutPrefix(line, "stream: "); ok {
+						var r streamResult
+						if err := json.Unmarshal([]byte(j), &r); err != nil {
+							t.Fatal(err)
+						}
+						sys = append(sys, r.Sys)
+					}
+				}
+			}
+			if len(sys) != streamRuns {
+				t.Fatalf("%d of %d stream children reported", len(sys), streamRuns)
+			}
+			slices.Sort(sys)
+			med := sys[len(sys)/2]
+			t.Logf("%s: memory from the OS over %d runs: median %.1f MiB, min %.1f, max %.1f (budget median ≤ %d MiB)",
+				tier.Name, streamRuns, float64(med)/mib, float64(sys[0])/mib, float64(sys[len(sys)-1])/mib, streamOSBudget/mib)
+			if med > streamOSBudget {
+				benchgate.Timing(t, "median memory from the OS %.1f MiB, budget ≤ %d MiB", float64(med)/mib, streamOSBudget/mib)
 			}
 		})
 	}
 }
 
-// streamChildEnv makes TestBudgetSustainedStream run one world in this process.
+// streamChildEnv makes a stream test run one world in this process.
 const streamChildEnv = "KGWUI_STREAM_CHILD"
+
+// streamVariant is what each stream update changes, and whether the budgets gate it.
+type streamVariant struct {
+	name  string // log prefix
+	gated bool
+	// burstGated gates the edit-driven runs alone ≤ 1/s; grace deadlines are logged (D-047).
+	burstGated bool
+	cpu        float64 // process CPU budget per run, a share of one core
+	// edit changes u, a copy of a seeded route, for update n in pass over the routes.
+	edit func(u *unstructured.Unstructured, n, pass int) error
+}
+
+// budget is note when v is gated, else empty.
+func (v streamVariant) budget(note string) string {
+	if v.gated {
+		return note
+	}
+	return ""
+}
+
+// annotationStream changes one annotation per update; the views memo absorbs it.
+var annotationStream = streamVariant{gated: true, cpu: 0.15, edit: func(u *unstructured.Unstructured, n, _ int) error {
+	u.SetAnnotations(map[string]string{"stream": strconv.Itoa(n)})
+	return nil
+}}
+
+// specEditStream edits spec and generation, as the API server does; status stays stale.
+var specEditStream = streamVariant{name: "spec-edit ", burstGated: true, cpu: 0.25, edit: togglePath}
+
+// togglePath appends "-x" to u's first path value on even passes and removes
+// it on odd ones; a pass edits each route once, so generation rises by one.
+func togglePath(u *unstructured.Unstructured, _, pass int) error {
+	u.SetGeneration(u.GetGeneration() + 1)
+	rules, _, _ := unstructured.NestedSlice(u.Object, "spec", "rules")
+	for _, r := range rules {
+		ms, _ := r.(map[string]any)["matches"].([]any)
+		for _, m := range ms {
+			p, ok := m.(map[string]any)["path"].(map[string]any)
+			v, isStr := p["value"].(string)
+			if !ok || !isStr {
+				continue
+			}
+			if pass%2 == 0 {
+				p["value"] = v + "-x"
+			} else {
+				p["value"] = strings.TrimSuffix(v, "-x")
+			}
+			return unstructured.SetNestedSlice(u.Object, rules, "spec", "rules")
+		}
+	}
+	return fmt.Errorf("HTTPRoute %s/%s has no path match", u.GetNamespace(), u.GetName())
+}
+
+// measuredCodes are the Phase 3 codes the measurement world raises once matured.
+var measuredCodes = []string{health.CodeXDSRejected, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck,
+	health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
+
+// analyzerCodes are the 3.3 codes it raises 5 min after maturing; streamCodes
+// those a stream waits for, as 018 holds for 5 min first.
+var (
+	analyzerCodes = append(slices.Clone(streamCodes), health.CodeStatusNotProgressing)
+	streamCodes   = []string{health.CodeRefUnresolved, health.CodeRefNotPermitted, health.CodeRuleReplaced, health.CodePolicyTargetNotFound,
+		health.CodeListenerConflicted}
+)
+
+// hasCodes reports whether m's install raises every code of codes.
+func hasCodes(m *engine.Model, codes []string) bool {
+	seen := map[string]bool{}
+	for _, f := range m.Installs[0].Health.Findings {
+		seen[f.Code] = true
+	}
+	return !slices.ContainsFunc(codes, func(c string) bool { return !seen[c] })
+}
+
+// logsOn reports whether mw's log reader is on and has published m's install's full ring.
+func logsOn(m *engine.Model, mw *measure.World) bool {
+	v, ok := mw.Store.Snapshot().Get(ctrllogs.Key)
+	logs, _ := v.Data.(ctrllogs.Logs)
+	l := logs[m.Installs[0].Resolved.ID()]
+	return ok && v.State == collect.OK && l.State == ctrllogs.StateOn && len(l.Events) == ctrllogs.MaxEvents
+}
+
+// statsInstalls are m's installs and Gateways, as the app feeds the proxy stats collector.
+func statsInstalls(m *engine.Model) ([]proxystats.Install, *cache.Snapshot) {
+	if m == nil || !m.Snapshot.Synced {
+		return nil, nil
+	}
+	out := make([]proxystats.Install, 0, len(m.Installs))
+	for _, im := range m.Installs {
+		in := proxystats.Install{Resolved: im.Resolved}
+		if im.Owned != nil {
+			for _, g := range im.Owned.Gateways {
+				in.Gateways = append(in.Gateways, objects.RefOf(g))
+			}
+		}
+		out = append(out, in)
+	}
+	return out, m.Snapshot
+}
 
 // liveHeap is HeapAlloc after a full GC.
 func liveHeap() uint64 {
@@ -405,15 +713,18 @@ func matured(m *engine.Model) (findings, checks int) {
 	return findings, checks
 }
 
-func sustainedStream(t *testing.T, tier scale.Tier) {
+func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	const mib = 1 << 20
+	// The binary's soft limit under the chart's 512Mi pod limit: 90 % of it (D-025); GOMEMLIMIT still wins.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		defer debug.SetMemoryLimit(debug.SetMemoryLimit(512 << 20 / 10 * 9))
+	}
 	dur := 10 * time.Minute
 	if testing.Short() {
 		dur = time.Minute
 	}
-	w := scale.Live(t, tier, nil)
 	ev := make(chan engine.LoopEvent, 1<<16)
-	e := engine.New(engine.Config{Snapshots: w.Cache, Triggers: w.Signal, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
+	cfg := engine.Config{Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
 		// Static metrics never go stale here, as a scraped cluster's do not.
 		Checks: health.Upstream(), MetricsMaxAge: 0,
@@ -423,7 +734,19 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 			default:
 				t.Errorf("loop event buffer full")
 			}
-		}})
+		}}
+	var w *scale.LiveWorld
+	var mw *measure.World
+	if tier.IsWorst {
+		// The 3.2 measurement world on the real clock moved to its fixtures' time, its stats scraped every 10 s.
+		clk := measure.ShiftedTo(testutil.Now)
+		mw = measure.New(t, tier, clk)
+		w, cfg.Metrics, cfg.Collected, cfg.Clock = mw.Live, mw.Metrics, mw.Store.Snapshot, clk
+	} else {
+		w = scale.Live(t, tier, nil)
+	}
+	cfg.Snapshots, cfg.Triggers = w.Cache, w.Signal
+	e := engine.New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {
@@ -436,10 +759,17 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	})
 	for testutil.Recv(t, ev, "loop event").Kind != engine.EvPublished { // the start-up publication
 	}
+	if mw != nil {
+		mw.SetInstalls(func() ([]proxystats.Install, *cache.Snapshot) { return statsInstalls(e.Current().Model) })
+		go mw.Run(ctx)
+	}
 	if tier.Contradict {
-		// Windows mature on the real clock 30 s after start-up, missing child entries at 60 s.
-		for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
-			if f, c := matured(e.Current().Model); f == c && c > 0 {
+		// Windows mature on the real clock 30 s after start-up, missing child entries and proxy conditions at 60 s.
+		for deadline := time.Now().Add(3 * time.Minute); ; time.Sleep(500 * time.Millisecond) {
+			// Loop events hold their models; drained here, so waiting keeps no more of them than the UI does.
+			testutil.Drain(ev)
+			m := e.Current().Model
+			if f, c := matured(m); f == c && c > 0 && (mw == nil || hasCodes(m, measuredCodes) && hasCodes(m, streamCodes) && logsOn(m, mw)) {
 				break
 			}
 			if time.Now().After(deadline) {
@@ -448,13 +778,21 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 		}
 		testutil.Drain(ev)
 	}
+	// Each update edits the fake's current copy, so the seeded routes are not kept alive.
+	routes := make([]types.NamespacedName, len(w.Routes))
+	for i, r := range w.Routes {
+		routes[i] = types.NamespacedName{Namespace: r.GetNamespace(), Name: r.GetName()}
+	}
+	w.Routes = nil
 	h := NewHandler(e, fstest.MapFS{}, nil)
 	path := "/api/v1/installs/" + e.Current().Model.Installs[0].Resolved.ID() + "/routes"
 
 	// Count runs and their wall time from loop events while the stream runs.
-	var runs, pubs int
+	var runs, pubs, deadlineRuns, safetyRuns int
 	var busy time.Duration
 	var runStart time.Time
+	// A run whose start finds the last published deadline due ran for it; one 30 s after the last publication, for the safety timer.
+	lastNext, lastPub := e.Current().Model.Next, time.Now()
 	counted := make(chan struct{})
 	collect, stopCollect := context.WithCancel(context.Background())
 	go func() {
@@ -466,9 +804,18 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 				case engine.EvRunStarted:
 					runs++
 					runStart = x.At
+					switch {
+					case lastNext.Due(x.At):
+						deadlineRuns++
+					case x.At.Sub(lastPub) >= 30*time.Second:
+						safetyRuns++
+					}
 				case engine.EvPublished:
 					pubs++
-					busy += x.At.Sub(runStart)
+					if !runStart.IsZero() { // a run started before counting began has no start here
+						busy += x.At.Sub(runStart)
+					}
+					lastNext, lastPub = x.Published.Model.Next, x.At
 				}
 			case <-collect.Done():
 				return
@@ -521,10 +868,16 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 		if heap60 == 0 && dur > time.Minute && time.Since(start) >= time.Minute {
 			heap60 = liveHeap()
 		}
-		u := w.Routes[updates%len(w.Routes)].DeepCopy()
+		ref := routes[updates%len(routes)]
+		u, err := w.GetRoute(context.Background(), ref.Namespace, ref.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
 		updates++
 		u.SetResourceVersion(strconv.Itoa(1_000_000 + updates))
-		u.SetAnnotations(map[string]string{"stream": strconv.Itoa(updates)})
+		if err := v.edit(u, updates, (updates-1)/len(routes)); err != nil {
+			t.Fatal(err)
+		}
 		if err := w.Update(context.Background(), u); err != nil {
 			t.Fatal(err)
 		}
@@ -543,9 +896,15 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	}
 	slices.Sort(polls)
 	rate := float64(runs) / wall.Seconds()
+	bursts := runs - deadlineRuns - safetyRuns
+	burstRate := float64(bursts) / wall.Seconds()
 	share := cpu.Seconds() / wall.Seconds()
-	t.Logf("stream %v: %d updates, %d recomputes (%.2f/s, budget ≤ 1/s), %d publications; process CPU %v = %.1f %% of one core (budget ≤ 15 %%); recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
-		wall.Round(time.Millisecond), updates, runs, rate, pubs, cpu.Round(time.Millisecond), 100*share, busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
+	t.Logf("%sstream %v: %d updates, %d recomputes (%.2f/s%s), %d publications; process CPU %v = %.1f %% of one core%s; recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
+		v.name, wall.Round(time.Millisecond), updates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, fmt.Sprintf(" (budget ≤ %.0f %%)", 100*v.cpu), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
+	if v.burstGated {
+		t.Logf("%srecomputes by cause: %d edit-driven (%.2f/s, budget ≤ 1/s), %d deadline (%.2f/s), %d safety; total %.2f/s (deadlines and total logged)",
+			v.name, bursts, burstRate, deadlineRuns, float64(deadlineRuns)/wall.Seconds(), safetyRuns, rate)
+	}
 	t.Logf("polls: %d, p50 %v p95 %v max %v", len(polls), rd(percentile(polls, 50)), rd(percentile(polls, 95)), rd(polls[len(polls)-1]))
 	heapEnd := liveHeap()
 	if heap60 == 0 {
@@ -556,22 +915,32 @@ func sustainedStream(t *testing.T, tier scale.Tier) {
 	f, c := matured(e.Current().Model)
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
-	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB (budget ≤ 256 MiB, half the 512 MiB pod limit)",
+	t.Logf("%s: %d KGWUI-012 of %d checks at the end; memory from the OS %.1f MiB, heap in use %.1f MiB",
 		tier.Name, f, c, float64(ms.Sys)/mib, float64(ms.HeapInuse)/mib)
+	j, _ := json.Marshal(streamResult{Sys: ms.Sys})
+	fmt.Println("stream: " + string(j))
+	if share > v.cpu {
+		benchgate.Timing(t, "process CPU %.1f %% of one core, budget ≤ %.0f %%", 100*share, 100*v.cpu)
+	}
+	if v.burstGated && burstRate > 1 {
+		t.Errorf("%.2f edit-driven recomputes per s, budget ≤ 1", burstRate)
+	}
+	if !v.gated {
+		codes := map[string]int{}
+		for _, x := range e.Current().Model.Installs[0].Health.Findings {
+			codes[x.Code]++
+		}
+		t.Logf("%s: findings by code at the end %v", tier.Name, codes)
+		return
+	}
 	if tier.Contradict && f != c {
 		t.Errorf("worst case: %d KGWUI-012 of %d checks at the end", f, c)
 	}
 	if !tier.Contradict && (f != 0 || c != 0) {
 		t.Errorf("consistent world: %d KGWUI-012 of %d checks at the end", f, c)
 	}
-	if ms.Sys > 256*mib {
-		t.Errorf("memory from the OS %.1f MiB, budget ≤ 256 MiB", float64(ms.Sys)/mib)
-	}
 	if rate > 1 {
 		t.Errorf("%.2f recomputes per s, budget ≤ 1", rate)
-	}
-	if share > 0.15 {
-		t.Errorf("process CPU %.1f %% of one core, budget ≤ 15 %%", 100*share)
 	}
 }
 

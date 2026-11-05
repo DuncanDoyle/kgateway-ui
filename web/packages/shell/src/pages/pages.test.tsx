@@ -1,26 +1,17 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { POLL_MS } from "../api/hooks";
-import type { Finding, HealthReport, InstallSummary, ScopeSummary } from "../api/types";
+import type { Finding, InstallSummary, ScopeSummary } from "../api/types";
 import { defaultBrand, ShellExtensionContext } from "../shell/extension";
 import { kubernetesVocabulary } from "../shell/vocabulary";
-import { meta, overview, restricted, unhealthy } from "../test/fixtures";
+import { unhealthy } from "../test/fixtures";
 import { pseudoRules, renderWithTheme, stubApi } from "../test/render";
 import { ThemeProvider } from "../theme/ThemeProvider";
 import { defaultThemes } from "../theme/themes";
 import { ClusterLanding } from "./ClusterLanding";
-import { FindingsPage } from "./FindingsPage";
 import { FindingRow } from "./install/FindingRow";
 import { ResourcePage } from "./ResourcePage";
-
-// jsdom has no layout: give elements a size so the virtualiser renders rows.
-beforeEach(() => {
-  vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(800);
-  vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1000);
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(64);
-  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
-});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -48,6 +39,7 @@ function inst(
     readiness: { state: "ready", ready: 1, desired: 1 },
     scope: { mode: "selectors", watched: 12, total: 40, ...scope },
     health: { state, counts },
+    groupRows: 0,
     computedAt,
   };
 }
@@ -58,11 +50,6 @@ function revalidate() {
   act(() => {
     window.dispatchEvent(new Event("online"));
   });
-}
-
-function Where() {
-  const loc = useLocation();
-  return <output data-testid="location">{loc.search}</output>;
 }
 
 // region Cluster landing
@@ -159,151 +146,6 @@ it("cluster landing keeps the loaded cards when a later poll fails", async () =>
   expect(screen.queryAllByTestId("health-icon-healthy")).toHaveLength(0);
 });
 
-// region Findings page
-
-function findings(path: string, health: HealthReport = unhealthy()) {
-  stubApi({
-    "/api/v1/installs/kgw.kgateway/health": health,
-    "/api/v1/installs/kgw.kgateway/overview": overview(),
-    "/api/v1/meta": meta,
-  });
-  return renderWithTheme(
-    <>
-      <Routes>
-        <Route path="/i/:id/findings" element={<FindingsPage />} />
-      </Routes>
-      <Where />
-    </>,
-    { path },
-  );
-}
-
-it("findings page filters by severity chip and keeps it in the URL", async () => {
-  findings("/i/kgw.kgateway/findings");
-  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(7));
-  await userEvent.click(screen.getByRole("button", { name: "Error" }));
-  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(1));
-  expect(screen.getByRole("button", { name: "Error" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByTestId("location")).toHaveTextContent("?sev=error");
-  await userEvent.click(screen.getByRole("button", { name: "Error" }));
-  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(7));
-  expect(screen.getByTestId("location")).toBeEmptyDOMElement();
-});
-
-it("findings page builds kind chips from the findings and applies them from the URL", async () => {
-  findings("/i/kgw.kgateway/findings?kind=Gateway");
-  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(1));
-  expect(screen.getByRole("button", { name: "Gateway" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByRole("button", { name: "HTTPRoute" })).toHaveAttribute("aria-pressed", "false");
-});
-
-it("findings page applies filters from the URL and shows an empty state", async () => {
-  findings("/i/kgw.kgateway/findings?q=nothing-matches-this");
-  await waitFor(() => expect(screen.getByText("No findings match these filters")).toBeInTheDocument());
-  expect(screen.getByRole("textbox", { name: "Filter findings" })).toHaveValue("nothing-matches-this");
-});
-
-it("findings page says No findings when the install has none", async () => {
-  const h = unhealthy();
-  h.findings = [];
-  findings("/i/kgw.kgateway/findings", h);
-  await waitFor(() => expect(screen.getByText("No findings")).toBeInTheDocument());
-  expect(screen.queryByText("No findings match these filters")).toBeNull();
-});
-
-it.each([
-  ["message", "rejected by envoy", 1],
-  ["code", "kgwui-002", 6],
-  ["namespace/name", "shop/route-3", 1],
-])("findings free text matches the %s", async (_what, q, n) => {
-  findings(`/i/kgw.kgateway/findings?q=${encodeURIComponent(q)}`);
-  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(n));
-});
-
-it("findings free text never matches 'undefined' on a finding without a resource", async () => {
-  const h = unhealthy();
-  h.findings.push({
-    code: "KGWUI-008",
-    slug: "signal-unavailable",
-    severity: "info",
-    install: "kgw.kgateway",
-    message: "Could not check xDS rejects",
-  });
-  findings("/i/kgw.kgateway/findings?q=undefined", h);
-  await waitFor(() => expect(screen.getByText("No findings match these filters")).toBeInTheDocument());
-});
-
-it("findings page renders restricted findings without message or link", async () => {
-  findings("/i/kgw.kgateway/findings", restricted());
-  const row = await screen.findByTestId("finding-row");
-  expect(row).toHaveTextContent("Restricted: ask the owning team");
-  expect(row).toHaveTextContent("KGWUI-002");
-  expect(within(row).queryByRole("link")).toBeNull();
-});
-
-it("findings page says when the data was checked", async () => {
-  findings("/i/kgw.kgateway/findings");
-  expect(await screen.findByTestId("data-age")).toHaveTextContent(/^Last checked \d+s ago$/);
-});
-
-it("findings page marks old data as stale", async () => {
-  findings("/i/kgw.kgateway/findings", unhealthy(Date.now() - 75_000));
-  const age = await screen.findByTestId("data-age");
-  expect(age).toHaveTextContent("Data is stale. Last checked 1m ago");
-  expect(within(age).getByTestId("health-icon-unknown")).toBeInTheDocument();
-});
-
-it("findings page keeps the loaded findings when a later poll fails", async () => {
-  const routes: Record<string, unknown> = { "/api/v1/installs/kgw.kgateway/health": unhealthy(), "/api/v1/meta": meta };
-  stubApi(routes);
-  renderWithTheme(
-    <Routes>
-      <Route path="/i/:id/findings" element={<FindingsPage />} />
-    </Routes>,
-    { path: "/i/kgw.kgateway/findings" },
-  );
-  await waitFor(() => expect(screen.getAllByTestId("finding-row")).toHaveLength(7));
-  routes["/api/v1/installs/kgw.kgateway/health"] = [500, { error: "boom" }];
-  revalidate();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Cannot load findings: boom");
-  expect(screen.getAllByTestId("finding-row")).toHaveLength(7);
-});
-
-it("findings list is keyboard scrollable", async () => {
-  findings("/i/kgw.kgateway/findings");
-  expect(await screen.findByRole("region", { name: "Findings" })).toHaveAttribute("tabindex", "0");
-});
-
-it("findings page virtualises a long list", async () => {
-  const h = unhealthy();
-  h.findings = Array.from({ length: 5000 }, (_, i) => ({
-    code: "KGWUI-002",
-    slug: "condition-false",
-    severity: "warning" as const,
-    install: "kgw.kgateway",
-    message: "Backend not found",
-    resource: {
-      group: "gateway.networking.k8s.io",
-      kind: "HTTPRoute",
-      namespace: "shop",
-      name: `route-${i}`,
-      link: "yaml",
-    },
-  }));
-  findings("/i/kgw.kgateway/findings", h);
-  const rows = await screen.findAllByTestId("finding-row");
-  expect(rows.length).toBeGreaterThan(0);
-  expect(rows.length).toBeLessThan(100);
-});
-
-it("findings page never shows another install's findings", async () => {
-  const h = unhealthy();
-  h.install = "other/install";
-  findings("/i/kgw.kgateway/findings", h);
-  await waitFor(() => expect(screen.getByText("Loading findings…")).toBeInTheDocument());
-  expect(screen.queryAllByTestId("finding-row")).toHaveLength(0);
-});
-
 // region Finding renderers
 
 it("the longest matching finding renderer prefix wins", () => {
@@ -317,6 +159,7 @@ it("the longest matching finding renderer prefix wins", () => {
         routes: [],
         navEntries: [],
         vocabulary: kubernetesVocabulary,
+        contributions: {},
         findingRenderers: {
           KGWUI: () => <span>short</span>,
           "KGWUI-00": () => <span>longest</span>,

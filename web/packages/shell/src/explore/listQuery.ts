@@ -5,18 +5,42 @@ import { useInstallId } from "../shell/extension";
 import { type ParamChanges, useUrlParams } from "../shell/urlParams";
 
 // region Helpers
-export type ListName = "routes" | "gateways" | "listenersets";
+export type ListName = "routes" | "gateways" | "listenersets" | "findings" | "processes";
 
 /** The params each list's server documents (design §7.2), in the order they are sent. listener is 2.3 and never sent. */
 const API_PARAMS: Record<ListName, string[]> = {
   routes: ["namespace", "kind", "parent", "attachment", "state", "health", "backend", "q", "sort", "cursor"],
   gateways: ["namespace", "health", "q", "sort", "cursor"],
   listenersets: ["namespace", "parent", "health", "q", "sort", "cursor"],
+  findings: ["severity", "code", "kind", "namespace", "group", "q", "sort", "cursor"],
+  processes: ["health", "q", "skew", "restarts", "cursor"],
+};
+/** The server's default sort per list, as the URL writes it. */
+const DEFAULT_SORT: Record<ListName, string> = {
+  routes: "name.asc",
+  gateways: "name.asc",
+  listenersets: "name.asc",
+  findings: "rank.asc",
+  processes: "name.asc",
 };
 /** Repeatable params; the page URL holds them comma-joined (no value of theirs can contain a comma). */
-const REPEATED = new Set(["namespace", "kind", "state", "health", "backend"]);
+const REPEATED = new Set(["namespace", "kind", "state", "health", "backend", "severity", "code"]);
 /** Params that filter rows; Clear filters removes these and keeps the sort. */
-export const FILTER_PARAMS = ["namespace", "kind", "parent", "attachment", "state", "health", "backend", "q"];
+export const FILTER_PARAMS = [
+  "namespace",
+  "kind",
+  "parent",
+  "attachment",
+  "state",
+  "health",
+  "backend",
+  "severity",
+  "code",
+  "group",
+  "skew",
+  "restarts",
+  "q",
+];
 
 const Q_DEBOUNCE_MS = 250;
 
@@ -25,10 +49,11 @@ export function listValues(params: URLSearchParams, key: string): string[] {
   return params.get(key)?.split(",").filter(Boolean) ?? [];
 }
 
-/** The API query for list from the page URL: only documented params, repeatable ones expanded. */
-export function apiQuery(list: ListName, params: URLSearchParams, q: string): URLSearchParams {
+/** The API query for list from the page URL: only documented params, repeatable ones expanded; skip is never sent. */
+export function apiQuery(list: ListName, params: URLSearchParams, q: string, skip: string[] = []): URLSearchParams {
   const out = new URLSearchParams();
   for (const key of API_PARAMS[list]) {
+    if (skip.includes(key)) continue;
     if (key === "q") {
       if (q) out.set("q", q);
       continue;
@@ -51,26 +76,30 @@ function useDebounced(v: string, ms: number): string {
   return d;
 }
 
-/** A sort as the URL holds it: key.asc or key.desc; name ascending by default. */
+/** A sort as the URL holds it: key.asc or key.desc; the list's DEFAULT_SORT when absent. */
 export interface SortState {
   key: string;
   desc: boolean;
 }
 
 // region Component
-type ListHook<T> = (
+type ListHook<P> = (
   id: string,
   query: URLSearchParams,
-) => { data?: Page<T>; error?: ApiError; cursorRejected: boolean; isLaggy: boolean };
+) => { data?: P; error?: ApiError; cursorRejected: boolean; isLaggy: boolean };
 
-/** URL state and data of one list page: filters, sort and cursor live in the query string (design §8.1). */
-export function useListPage<T>(list: ListName, useList: ListHook<T>) {
+/**
+ * URL state and data of one list page: filters, sort and cursor live in the query string (design §8.1).
+ * skip names params the server does not advertise (/meta filters); they stay in the URL but are never sent.
+ */
+export function useListPage<T, P extends Page<T> = Page<T>>(list: ListName, useList: ListHook<P>, skip: string[] = []) {
   const id = useInstallId();
   const [params, update] = useUrlParams();
   const text = params.get("q") ?? "";
   const q = useDebounced(text, Q_DEBOUNCE_MS);
   // The debounced value starts at the URL's q, so a reload does not wait.
-  const query = useMemo(() => apiQuery(list, params, q), [list, params, q]);
+  const skipKey = skip.join(",");
+  const query = useMemo(() => apiQuery(list, params, q, skipKey.split(",")), [list, params, q, skipKey]);
   const { data, error, cursorRejected, isLaggy } = useList(id, query);
   // A rejected cursor is dropped (replace) and page one shows (design §8.6).
   useEffect(() => {
@@ -78,7 +107,7 @@ export function useListPage<T>(list: ListName, useList: ListHook<T>) {
   }, [cursorRejected, update]);
   // Any filter change starts again at page one: a cursor belongs to one query.
   const setFilter = useCallback((changes: ParamChanges) => update({ ...changes, cursor: null }), [update]);
-  const [key = "name", dir] = (params.get("sort") ?? "name.asc").split(".");
+  const [key = "name", dir] = (params.get("sort") ?? DEFAULT_SORT[list]).split(".");
   const sort: SortState = { key, desc: dir === "desc" };
   const filtered = FILTER_PARAMS.some((k) => params.get(k));
   const clearFilters = useCallback(

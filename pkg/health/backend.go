@@ -47,8 +47,12 @@ type backendCheck struct{}
 // Name implements Check.
 func (backendCheck) Name() string { return "backend status" }
 
+// Inputs implements Check.
+func (backendCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c backendCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c backendCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	if in.Owned != nil {
 		for _, b := range in.Owned.Backends {
@@ -56,8 +60,9 @@ func (c backendCheck) Run(in Input) ([]Finding, CheckResult) {
 			if cond == nil || cond.Status != metav1.ConditionFalse {
 				continue
 			}
+			// Keyed as conditionsCheck keys KGWUI-002: the owner and a rank, never the type.
 			f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Install: in.Install.ID(), Resource: ref(b),
-				Message: message(*cond), Since: since(*cond)}
+				Message: message(*cond), Since: since(*cond), Key: []string{ownerSelf, ordinal(1)}}
 			if current {
 				f.Severity, f.Detail = SeverityError, detail(*cond, "")
 			} else if cond.ObservedGeneration == 0 {

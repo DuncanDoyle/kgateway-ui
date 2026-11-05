@@ -160,6 +160,7 @@ it("the header's install nav links only to pages that exist, and navigates", asy
     ["Routes", "/i/kgw.kgateway/routes"],
     ["ListenerSets", "/i/kgw.kgateway/listenersets"],
     ["Findings", "/i/kgw.kgateway/findings"],
+    ["Processes", "/i/kgw.kgateway/processes"],
   ]);
   await userEvent.click(within(nav).getByRole("link", { name: "Findings" }));
   expect(await screen.findByText("findings page")).toBeInTheDocument();
@@ -259,6 +260,19 @@ it("resolves the default theme once: the context and the provider agree", async 
     routes: [{ path: "probe", element: <Probe />, scope: "top" }],
   });
   expect(await screen.findByTestId("probe")).toHaveTextContent(`${controlRoomDark.id}|${controlRoomDark.id}`);
+});
+
+it("passes a downstream's findings docs URL to the shell, and leaves it unset by default", async () => {
+  stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
+  function Probe() {
+    return <output data-testid="probe">{`[${useShellExtension().findingsDocUrl ?? ""}]`}</output>;
+  }
+  const routes = [{ path: "probe", element: <Probe />, scope: "top" as const }];
+  const { unmount } = mount("/probe", { routes, findingsDocUrl: "https://docs.acme.example/findings" });
+  expect(await screen.findByTestId("probe")).toHaveTextContent("[https://docs.acme.example/findings]");
+  unmount();
+  mount("/probe", { routes });
+  expect(await screen.findByTestId("probe")).toHaveTextContent("[]");
 });
 
 it("useInstallId is empty outside install routes", async () => {
@@ -412,6 +426,10 @@ it.each([
   ["/", "kgateway"],
   ["/i/kgw.kgateway", "kgw/kgateway"],
   ["/i/kgw.kgateway/findings", "Findings: kgw/kgateway"],
+  ["/i/kgw.kgateway/findings/f1-3cse5bxnvkqhgyfsdetkz57k6d", "Finding: kgw/kgateway"],
+  ["/i/kgw.kgateway/gateways", "Gateways: kgw/kgateway"],
+  ["/i/kgw.kgateway/gateways/infra/edge", "Gateway infra/edge: kgw/kgateway"],
+  ["/i/kgw.kgateway/routes/gateway.networking.k8s.io/HTTPRoute/shop/cart", "HTTPRoute shop/cart: kgw/kgateway"],
   ["/i/kgw.kgateway/r/gateway.networking.k8s.io/Gateway/prod/edge", "Gateway prod/edge: kgw/kgateway"],
   ["/i/kgw.kgateway/r/gateway.networking.k8s.io/GatewayClass/-/kgateway", "GatewayClass kgateway: kgw/kgateway"],
   ["/nope", "Page not found"],

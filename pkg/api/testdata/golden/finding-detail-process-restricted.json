@@ -1,0 +1,34 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "finding": {
+      "code": "KGWUI-019",
+      "detail": "Details depend on objects you cannot view",
+      "evidenceRestricted": true,
+      "group": "f1-u6tezcmdxnjwk6cnpxbrnv5sfp",
+      "id": "f1-3yzk7jq6fi3ww2oxd777sx7svr",
+      "message": "Controller restarted in the last 15 minutes",
+      "resource": {
+        "group": "apps",
+        "kind": "Deployment",
+        "link": "yaml",
+        "name": "kgateway",
+        "namespace": "kgw"
+      },
+      "severity": "warning",
+      "slug": "process-restarting"
+    },
+    "install": "kgw.kgateway"
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

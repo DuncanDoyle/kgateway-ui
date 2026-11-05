@@ -14,6 +14,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
@@ -53,6 +54,14 @@ const (
 	CodeSelfManagedProxy     = "KGWUI-010"
 	CodeDelegatedNotAttached = "KGWUI-011"
 	CodeComputedDisagrees    = "KGWUI-012"
+	CodeRefUnresolved        = "KGWUI-013"
+	CodeRefNotPermitted      = "KGWUI-014"
+	CodeProcessRestarting    = "KGWUI-019"
+	CodeProbeFailing         = "KGWUI-020"
+	CodeRolloutStuck         = "KGWUI-021"
+	CodeVersionSkew          = "KGWUI-022"
+	CodeProxyConfigWarming   = "KGWUI-025"
+	CodeProxyDisconnected    = "KGWUI-026"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -61,6 +70,9 @@ const Grace = 60 * time.Second
 
 // Finding is one problem or notable fact about an install.
 type Finding struct {
+	// ID is stable across recomputes and restarts and unique within the
+	// install; Evaluate sets it from Code, Resource and Key (design §5.1).
+	ID       string       `json:"id,omitempty"`
 	Code     string       `json:"code"`
 	Slug     string       `json:"slug"`
 	Severity Severity     `json:"severity"`
@@ -68,14 +80,24 @@ type Finding struct {
 	Resource *objects.Ref `json:"resource,omitempty"`
 	Message  string       `json:"message"`
 	Detail   string       `json:"detail,omitempty"`
-	Since    *time.Time   `json:"since,omitempty"`
+	// Since is when the problem started: a condition's lastTransitionTime, or
+	// for a finding returned without one, when the UI first saw its ID.
+	Since *time.Time `json:"since,omitempty"`
+	// Group is the ID of the group whose cause explains the finding (design §5.2).
+	Group string `json:"group,omitempty"`
+	// Key is the code's discriminator among findings on one resource (design
+	// §5.1); Evaluate hashes it into ID and clears it. Never serialised.
+	Key []string `json:"-"`
 	// Restricted marks a finding on a resource the caller may not view. The
 	// API keeps its code, severity and resource and empties Message, Detail
 	// and Since (D-013). Checks never set it.
 	Restricted bool `json:"restricted,omitempty"`
-	// Evidence are the objects, other than Resource, whose data Detail quotes
-	// (KGWUI-011: the parent route). Never serialised.
+	// Evidence are the objects, other than Resource, whose data Detail or
+	// Facts quote (KGWUI-011: the parent route). Never serialised.
 	Evidence []objects.Ref `json:"-"`
+	// Facts are the typed evidence; the API drops them for a caller who may
+	// not view Resource and all of Evidence (design §14 rule 12).
+	Facts Evidence `json:"evidence,omitempty"`
 	// ResourceSince is when the engine first saw Resource's current
 	// generation. It replaces Since for a caller who may not view all of
 	// Evidence, so Since tells that caller nothing about it. Never serialised.
@@ -86,7 +108,7 @@ type Finding struct {
 }
 
 // CheckResult records whether a check could collect current input. A Required
-// check that is not OK forces the state to unknown.
+// check that is not OK forces the state to unknown, unless Unavailable is set.
 type CheckResult struct {
 	Name        string    `json:"name"`
 	OK          bool      `json:"ok"`
@@ -98,6 +120,31 @@ type CheckResult struct {
 	// Pending marks a check that is not OK only because resources are still
 	// being processed inside the grace period.
 	Pending bool `json:"pending,omitempty"`
+	// Unavailable says why the check's optional input is missing; RollUp ignores it.
+	Unavailable Availability `json:"unavailable,omitempty"`
+	// Gaps are the Gateways a per-Gateway input has nothing for, in Ref order.
+	// Never serialised: a Gateway page reads its own entry after authorizing it.
+	Gaps []GatewayGap `json:"-"`
+	// Withheld are the Gateways whose proxies may get no config updates, in Ref order (R105).
+	// Never serialised: a Gateway page reads its own entry after authorizing it.
+	Withheld []WithheldGateway `json:"-"`
+	// ControllerLogs says whether a check that reads the controller log read it
+	// (LogsRead or LogsNotRead); empty for other checks. Never serialised.
+	ControllerLogs string `json:"-"`
+}
+
+// WithheldGateway is a Gateway whose snapshot deferral recurred after its
+// proxies and the controller started: the first and last such line.
+type WithheldGateway struct {
+	Gateway     objects.Ref
+	First, Last time.Time
+}
+
+// GatewayGap says why a check's input is not available for one Gateway.
+type GatewayGap struct {
+	Gateway     objects.Ref
+	Unavailable Availability
+	Reason      string
 }
 
 // Input is everything a check may look at for one install.
@@ -110,8 +157,10 @@ type Input struct {
 	Served []kinds.Served
 	// KindsChange is how the kinds served now differ from Served, which the cache watches.
 	KindsChange kinds.Change
-	Metrics     ctrlmetrics.Result
-	HasMetrics  bool
+	// Catalog is every kind the API server serves; the zero Catalog knows none.
+	Catalog    kinds.Catalog
+	Metrics    ctrlmetrics.Result
+	HasMetrics bool
 	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
 	// interval); zero means no limit.
 	MetricsMaxAge time.Duration
@@ -129,6 +178,20 @@ type Input struct {
 	// Views decodes Gateways, ListenerSets and routes; nil means objects.Direct.
 	// Its views are shared and read-only.
 	Views objects.Decoder
+	// Process is the install's process data; a check declares InputSet.Process to read it.
+	Process *ProcessData
+	// GatewayAPI is the rule-set selection's Gateway API table (design §9.4); nil means none.
+	GatewayAPI func(kgatewayMinor string) (bundle string, ok bool)
+	// Rules is the install's rule set; one without a PolicyTargeter raises no computed KGWUI-016.
+	Rules computed.Selection
+}
+
+// ProcessData is one install's controller and per-Gateway proxy processes
+// (§9.1); Print hashes both, and process.PodRef gives each Pod's ref.
+type ProcessData struct {
+	Controller process.Set
+	Proxies    map[objects.Ref]process.Set
+	Print      uint64
 }
 
 // views returns in.Views, or objects.Direct when it is unset.
@@ -164,10 +227,14 @@ func (in Input) proxyMode(gw *unstructured.Unstructured) proxymode.Mode {
 	return r.Resolve(gw, in.Snapshot, in.Served)
 }
 
-// Check produces findings for one concern.
+// Check produces findings for one concern. Evaluate runs checks in
+// registration order.
 type Check interface {
+	// Name identifies the check and its Store; it is unique among the registered checks.
 	Name() string
-	Run(in Input) ([]Finding, CheckResult)
+	// Inputs names what Run reads. Reading an undeclared input is a bug.
+	Inputs() InputSet
+	Run(ctx RunContext) ([]Finding, CheckResult)
 }
 
 // Report is the evaluated health of one install.
@@ -179,4 +246,7 @@ type Report struct {
 	Checks      []CheckResult    `json:"checks"`
 	Counts      map[Severity]int `json:"counts"`
 	CollectedAt time.Time        `json:"collectedAt"`
+	// Next is the earliest time after CollectedAt at which a check's output
+	// may change; zero means none.
+	Next time.Time `json:"-"`
 }

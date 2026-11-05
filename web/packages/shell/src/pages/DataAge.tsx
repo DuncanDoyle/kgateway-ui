@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useNow } from "../api/clock";
 import { isStale } from "../api/hooks";
+import { dataAgeCopy } from "../copy/navigation";
 import { HealthIcon } from "../health/HealthIcon";
 import { ago } from "./install/HealthStrip";
 
@@ -29,7 +30,7 @@ export function DataAge({ collectedAt, stylesOverride }: DataAgeProps) {
   return (
     <Age data-testid="data-age" stylesOverride={stylesOverride}>
       {stale ? <HealthIcon state="unknown" notice /> : null}
-      {stale ? `Data is stale. Last checked ${ago(collectedAt, now)}` : `Last checked ${ago(collectedAt, now)}`}
+      {stale ? dataAgeCopy.stale(ago(collectedAt, now)) : dataAgeCopy.fresh(ago(collectedAt, now))}
     </Age>
   );
 }

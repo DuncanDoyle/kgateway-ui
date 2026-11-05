@@ -52,9 +52,9 @@ func kind(docs []map[string]any, k string) []map[string]any {
 	return out
 }
 
-func clusterRole(t *testing.T) rbacv1.ClusterRole {
+func clusterRole(t *testing.T, args ...string) rbacv1.ClusterRole {
 	t.Helper()
-	crs := kind(render(t), "ClusterRole")
+	crs := kind(render(t, args...), "ClusterRole")
 	if len(crs) != 1 {
 		t.Fatalf("want 1 ClusterRole, got %d", len(crs))
 	}
@@ -101,6 +101,7 @@ func TestGrantsHandlesWildcards(t *testing.T) {
 	}
 }
 
+// Checks the default render only; rbac.extraRules is the operator's choice.
 func TestClusterRoleIsReadOnlyWithoutSecretsOrProxy(t *testing.T) {
 	cr := clusterRole(t)
 	for _, r := range cr.Rules {
@@ -160,19 +161,120 @@ func TestClusterRoleCoversBackends(t *testing.T) {
 	}
 }
 
-// TestClusterRoleOmitsUnreadKinds guards D-017 §5: nothing reads ReferenceGrants
-// or CRDs, and discovery needs neither.
+// TestClusterRoleOmitsUnreadKinds: nothing reads ReferenceGrants (D-017 §5).
 func TestClusterRoleOmitsUnreadKinds(t *testing.T) {
 	cr := clusterRole(t)
-	for _, c := range []struct{ group, resource string }{
-		{"gateway.networking.k8s.io", "referencegrants"},
-		{"apiextensions.k8s.io", "customresourcedefinitions"},
-	} {
-		for _, v := range []string{"get", "list", "watch"} {
-			if grants(cr.Rules, c.group, c.resource, v) {
-				t.Errorf("ClusterRole must not grant %s on %s (group %q)", v, c.resource, c.group)
-			}
+	for _, v := range []string{"get", "list", "watch"} {
+		if grants(cr.Rules, "gateway.networking.k8s.io", "referencegrants", v) {
+			t.Errorf("ClusterRole must not grant %s on referencegrants", v)
 		}
+	}
+}
+
+// grantsAll reports whether the rules allow get, list and watch on group/resource.
+func grantsAll(rules []rbacv1.PolicyRule, group, resource string) bool {
+	for _, v := range []string{"get", "list", "watch"} {
+		if !grants(rules, group, resource, v) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestEventsRuleFollowsToggle(t *testing.T) {
+	if !grantsAll(clusterRole(t).Rules, "", "events") {
+		t.Error("events must be readable by default")
+	}
+	if grants(clusterRole(t, "--set", "diagnostics.events=false").Rules, "", "events", "get") {
+		t.Error("diagnostics.events=false must drop the events rule")
+	}
+}
+
+func TestCRDRuleFollowsToggle(t *testing.T) {
+	if !grantsAll(clusterRole(t).Rules, "apiextensions.k8s.io", "customresourcedefinitions") {
+		t.Error("CRDs must be readable by default")
+	}
+	if grants(clusterRole(t, "--set", "diagnostics.crds=false").Rules, "apiextensions.k8s.io", "customresourcedefinitions", "get") {
+		t.Error("diagnostics.crds=false must drop the CRD rule")
+	}
+}
+
+func TestEndpointsRulesFollowToggle(t *testing.T) {
+	on := clusterRole(t).Rules
+	if !grantsAll(on, "", "services") || !grantsAll(on, "discovery.k8s.io", "endpointslices") {
+		t.Error("services and endpointslices must be readable by default")
+	}
+	off := clusterRole(t, "--set", "diagnostics.endpoints=false").Rules
+	if grants(off, "", "services", "get") || grants(off, "discovery.k8s.io", "endpointslices", "get") {
+		t.Error("diagnostics.endpoints=false must drop both rules")
+	}
+}
+
+// Defaults match the binary's, so only a non-default toggle becomes a flag.
+func TestTogglesPassedAsFlags(t *testing.T) {
+	if got, want := containerArgs(t), []string{"--listen=:8080"}; !slices.Equal(got, want) {
+		t.Errorf("default args = %v, want %v", got, want)
+	}
+	got := containerArgs(t,
+		"--set", "diagnostics.events=false", "--set", "diagnostics.crds=false",
+		"--set", "diagnostics.proxyStats=false", "--set", "diagnostics.endpoints=false",
+		"--set", "diagnostics.controllerLogs=true")
+	want := []string{"--listen=:8080", "--diagnostics-events=false", "--diagnostics-crds=false",
+		"--diagnostics-proxy-stats=false", "--diagnostics-endpoints=false", "--diagnostics-controller-logs=true"}
+	if !slices.Equal(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+// pods/log is never in the ClusterRole; controllerLogs adds a Role and a
+// RoleBinding to the UI's ServiceAccount only in each listed namespace.
+func TestControllerLogsRoleIsOptInAndNamespaced(t *testing.T) {
+	if r := kind(render(t), "Role"); len(r) != 0 {
+		t.Errorf("no Role by default, got %d", len(r))
+	}
+	off := render(t, "--set", "diagnostics.controllerLogsNamespaces={kgateway-system,other}")
+	if n := len(kind(off, "Role")) + len(kind(off, "RoleBinding")); n != 0 {
+		t.Errorf("namespaces alone must not render a Role or RoleBinding, got %d", n)
+	}
+	args := []string{"--set", "diagnostics.controllerLogs=true", "--set", "diagnostics.controllerLogsNamespaces={kgateway-system,other}"}
+	docs := render(t, args...)
+	if grants(clusterRole(t, args...).Rules, "", "pods/log", "get") {
+		t.Error("pods/log must not be in the ClusterRole")
+	}
+	var seen []string
+	for _, d := range kind(docs, "Role") {
+		b, _ := yaml.Marshal(d)
+		var r rbacv1.Role
+		if err := yaml.Unmarshal(b, &r); err != nil {
+			t.Fatal(err)
+		}
+		if len(r.Rules) != 1 || !slices.Equal(r.Rules[0].Resources, []string{"pods/log"}) || !slices.Equal(r.Rules[0].Verbs, []string{"get"}) {
+			t.Errorf("Role %s/%s must grant only get on pods/log: %+v", r.Namespace, r.Name, r.Rules)
+		}
+		seen = append(seen, r.Namespace)
+	}
+	slices.Sort(seen)
+	if !slices.Equal(seen, []string{"kgateway-system", "other"}) {
+		t.Errorf("Role namespaces = %v", seen)
+	}
+	var bound []string
+	for _, d := range kind(docs, "RoleBinding") {
+		b, _ := yaml.Marshal(d)
+		var rb rbacv1.RoleBinding
+		if err := yaml.Unmarshal(b, &rb); err != nil {
+			t.Fatal(err)
+		}
+		if rb.RoleRef.Kind != "Role" || rb.RoleRef.Name != "ui-kgateway-ui-logs" {
+			t.Errorf("RoleBinding %s/%s must bind the logs Role: %+v", rb.Namespace, rb.Name, rb.RoleRef)
+		}
+		if want := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "ui-kgateway-ui", Namespace: "kgateway-ui"}}; !slices.Equal(rb.Subjects, want) {
+			t.Errorf("RoleBinding %s/%s subjects = %+v", rb.Namespace, rb.Name, rb.Subjects)
+		}
+		bound = append(bound, rb.Namespace)
+	}
+	slices.Sort(bound)
+	if !slices.Equal(bound, []string{"kgateway-system", "other"}) {
+		t.Errorf("RoleBinding namespaces = %v", bound)
 	}
 }
 
@@ -311,7 +413,7 @@ func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
 }
 
 // The container's memory limit reaches the binary as KGWUI_MEMORY_LIMIT, and
-// the chart sets no GOMEMLIMIT of its own (D-025).
+// the chart sets GOMEMLIMIT only from the opt-in memoryLimit (D-025, D-043).
 func TestMemoryLimitEnv(t *testing.T) {
 	named := func(n string) func(corev1.EnvVar) bool { return func(e corev1.EnvVar) bool { return e.Name == n } }
 	env := containerEnv(t)
@@ -330,5 +432,81 @@ func TestMemoryLimitEnv(t *testing.T) {
 	env = containerEnv(t, "--set", "resources.limits.memory=null")
 	if slices.ContainsFunc(env, named("KGWUI_MEMORY_LIMIT")) {
 		t.Fatalf("KGWUI_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
+	}
+	for _, args := range [][]string{{"--set", "memoryLimit=300MiB"}, {"--set", "memoryLimit=300MiB", "--set", "resources.limits.memory=null"}} {
+		env = containerEnv(t, args...)
+		if i := slices.IndexFunc(env, named("GOMEMLIMIT")); i < 0 || env[i].Value != "300MiB" {
+			t.Fatalf("%v: want GOMEMLIMIT=300MiB: %+v", args, env)
+		}
+	}
+}
+
+// TestExtraRulesAppended: rbac.extraRules is the operator's choice and can
+// widen RBAC; the default render stays read-only (see the read-only test).
+func TestExtraRulesAppended(t *testing.T) {
+	base := len(clusterRole(t).Rules)
+	docs := render(t, "--set-json", `rbac.extraRules=[{"apiGroups":["example.dev"],"resources":["widgets"],"verbs":["get","delete"]}]`)
+	crs := kind(docs, "ClusterRole")
+	if len(crs) != 1 {
+		t.Fatalf("want 1 ClusterRole, got %d", len(crs))
+	}
+	b, _ := yaml.Marshal(crs[0])
+	var cr rbacv1.ClusterRole
+	if err := yaml.Unmarshal(b, &cr); err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Rules) != base+1 {
+		t.Fatalf("rules = %d, want %d", len(cr.Rules), base+1)
+	}
+	last := cr.Rules[len(cr.Rules)-1]
+	if !slices.Equal(last.Resources, []string{"widgets"}) || !slices.Equal(last.Verbs, []string{"get", "delete"}) {
+		t.Errorf("extra rule not appended last: %+v", last)
+	}
+}
+
+func TestExtraEnvVolumesAndContainers(t *testing.T) {
+	deployment := func(args ...string) appsv1.Deployment {
+		ds := kind(render(t, args...), "Deployment")
+		if len(ds) != 1 {
+			t.Fatalf("want 1 Deployment, got %d", len(ds))
+		}
+		b, _ := yaml.Marshal(ds[0])
+		var d appsv1.Deployment
+		if err := yaml.Unmarshal(b, &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	def := deployment().Spec.Template.Spec
+	if len(def.Containers) != 1 || len(def.Volumes) != 0 || len(def.Containers[0].VolumeMounts) != 0 {
+		t.Fatalf("defaults must add no containers, volumes or mounts: %+v", def)
+	}
+	d := deployment(
+		"--set-json", `extraEnv=[{"name":"ADDON","value":"1"}]`,
+		"--set-json", `extraVolumes=[{"name":"data","emptyDir":{}}]`,
+		"--set-json", `extraVolumeMounts=[{"name":"data","mountPath":"/data"}]`,
+		"--set-json", `extraContainers=[{"name":"addon","image":"example/addon:1"}]`,
+	).Spec.Template.Spec
+	if len(d.Containers) != 2 || d.Containers[0].Name != "kgateway-ui" || d.Containers[1].Name != "addon" {
+		t.Fatalf("containers = %+v", d.Containers)
+	}
+	if len(d.Containers[1].VolumeMounts) != 0 {
+		t.Errorf("the sidecar must get no volumeMounts: %+v", d.Containers[1].VolumeMounts)
+	}
+	ui := d.Containers[0]
+	if !slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "ADDON" && e.Value == "1" }) ||
+		!slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "KGWUI_MEMORY_LIMIT" }) {
+		t.Errorf("extraEnv must join the memory-limit env: %+v", ui.Env)
+	}
+	if len(ui.VolumeMounts) != 1 || ui.VolumeMounts[0].MountPath != "/data" {
+		t.Errorf("volumeMounts = %+v", ui.VolumeMounts)
+	}
+	if len(d.Volumes) != 1 || d.Volumes[0].Name != "data" {
+		t.Errorf("volumes = %+v", d.Volumes)
+	}
+	// extraEnv alone, without a memory limit, still renders an env list.
+	env := containerEnv(t, "--set", "resources.limits.memory=null", "--set-json", `extraEnv=[{"name":"ADDON","value":"1"}]`)
+	if len(env) != 1 || env[0].Name != "ADDON" {
+		t.Errorf("env = %+v", env)
 	}
 }

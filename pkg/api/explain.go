@@ -356,22 +356,24 @@ func explainFit(f *computed.FitFailure) string {
 	if f == nil {
 		return ""
 	}
+	// The compared values are display text: clipped, never the computed match.
+	parent, child := computed.ClipDisplay(f.Parent, computed.MaxDisplayBytes), computed.ClipDisplay(f.Child, computed.MaxDisplayBytes)
 	key := func(what string) string {
-		if f.Child == "" {
-			return fmt.Sprintf(fitKeyNone, what, f.Parent)
+		if child == "" {
+			return fmt.Sprintf(fitKeyNone, what, parent)
 		}
-		return fmt.Sprintf(fitKey, what, f.Parent, f.Child)
+		return fmt.Sprintf(fitKey, what, parent, child)
 	}
 	switch f.Clause {
 	case computed.ClausePathType:
-		if f.Parent == "" {
+		if parent == "" {
 			return fitNoPath
 		}
-		return fmt.Sprintf(fitPathType, f.Parent)
+		return fmt.Sprintf(fitPathType, parent)
 	case computed.ClausePathPrefix:
-		return fmt.Sprintf(fitPathPrefix, f.Child, f.Parent)
+		return fmt.Sprintf(fitPathPrefix, child, parent)
 	case computed.ClauseDefaultSlash:
-		return fmt.Sprintf(fitDefaultSlash, f.Parent)
+		return fmt.Sprintf(fitDefaultSlash, parent)
 	case computed.ClauseHeader:
 		return key("header")
 	case computed.ClauseQuery:

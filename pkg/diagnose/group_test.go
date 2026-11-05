@@ -1,0 +1,568 @@
+package diagnose_test
+
+import (
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+)
+
+var in = diagnose.Input{Install: install.Resolved{Install: install.Install{Namespace: "kgw", Name: "kgateway"}}}
+
+func ref(kind, name string) *objects.Ref {
+	return &objects.Ref{Group: objects.GatewayAPIGroup, Kind: kind, Namespace: "shop", Name: name}
+}
+
+func ago(d time.Duration) *time.Time { t := testutil.Now.Add(-d); return &t }
+
+// finding returns a finding named by its message, with an ID from code, resource and message.
+func finding(name, code string, sev health.Severity, res *objects.Ref, since *time.Time) health.Finding {
+	return health.Finding{ID: health.FindingID(in.Install.ID(), code, res, []string{name}), Code: code, Severity: sev,
+		Install: in.Install.ID(), Resource: res, Message: name, Since: since}
+}
+
+// fake claims the findings named in claims: each maps to a cause name, and
+// the cause's affected objects are routes a0..a(n-1), n from affected.
+type fake struct {
+	name     string
+	claims   map[string]string
+	affected map[string]int
+}
+
+func (f fake) Name() string { return f.name }
+
+func (f fake) Claim(x health.Finding, _ diagnose.Input) (*objects.Ref, []string, bool) {
+	c, ok := f.claims[x.Message]
+	if !ok {
+		return nil, nil, false
+	}
+	return ref("Gateway", c), nil, true
+}
+
+func (f fake) Affected(gs []diagnose.Claimed, _ []health.Finding, _ diagnose.Input) [][]objects.Ref {
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		for i := range f.affected[g.Cause.Name] {
+			out[k] = append(out[k], *ref("HTTPRoute", "a"+string(rune('0'+i))))
+		}
+	}
+	return out
+}
+
+// names returns the messages of fs at idx.
+func names(fs []health.Finding, idx []int) []string {
+	out := make([]string, len(idx))
+	for i, k := range idx {
+		out[i] = fs[k].Message
+	}
+	return out
+}
+
+// groupNames returns, per group in order, its members' messages joined by "+".
+func groupNames(rep *health.Report, d *diagnose.Diagnosis) []string {
+	out := make([]string, len(d.Groups))
+	for i, g := range d.Groups {
+		for j, n := range names(rep.Findings, g.Members) {
+			if j > 0 {
+				out[i] += "+"
+			}
+			out[i] += n
+		}
+	}
+	return out
+}
+
+func TestRankOrderEveryClass(t *testing.T) {
+	// Equal since and affected count tie on the group id; order that pair by it.
+	tieA, tieB := "tie-a", "tie-b"
+	if health.GroupID(in.Install.ID(), "Other", ref("HTTPRoute", tieA), nil) > health.GroupID(in.Install.ID(), "Other", ref("HTTPRoute", tieB), nil) {
+		tieA, tieB = tieB, tieA
+	}
+	rep := &health.Report{Findings: []health.Finding{
+		finding("hygiene-error", health.CodeComputedDisagrees, health.SeverityError, ref("HTTPRoute", "h"), ago(time.Hour)),
+		finding("process-error", health.CodeControllerNotReady, health.SeverityError, ref("Deployment", "p"), nil),
+		finding("dataplane-error", health.CodeXDSRejected, health.SeverityError, ref("Gateway", "d"), nil),
+		// Class 3 warnings: blast radius, then age, then group id.
+		finding("narrow", "KGWUI-015", health.SeverityWarning, ref("HTTPRoute", "n"), ago(time.Hour)),
+		finding("wide", "KGWUI-013", health.SeverityWarning, ref("HTTPRoute", "w"), nil),
+		finding("pending-old", health.CodeRouteUnattached, health.SeverityWarning, ref("HTTPRoute", "po"), ago(2*time.Hour)),
+		finding("no-since", "KGWUI-017", health.SeverityWarning, ref("HTTPRoute", "ns"), nil),
+		finding(tieB, "KGWUI-023", health.SeverityWarning, ref("HTTPRoute", tieB), ago(time.Minute)),
+		finding(tieA, "KGWUI-023", health.SeverityWarning, ref("HTTPRoute", tieA), ago(time.Minute)),
+		// A 003 inside grace is info and class 4; a 002 warning is class 4.
+		finding("hygiene-warning", health.CodeConditionFalse, health.SeverityWarning, ref("HTTPRoute", "hw"), ago(3*time.Hour)),
+		finding("in-grace", health.CodeRouteUnattached, health.SeverityInfo, ref("HTTPRoute", "ig"), nil),
+		finding("process-info", health.CodeProxyNotReady, health.SeverityInfo, ref("Gateway", "pi"), nil),
+		// A shared cause: an error and a warning member make an error group.
+		finding("shared-warning", "KGWUI-024", health.SeverityWarning, ref("Gateway", "s1"), ago(time.Minute)),
+		finding("shared-error", "KGWUI-014", health.SeverityError, ref("HTTPRoute", "s2"), ago(time.Second)),
+	}}
+	fam := fake{name: "Fake", claims: map[string]string{"narrow": "c-narrow", "wide": "c-wide", "shared-warning": "c-shared", "shared-error": "c-shared"},
+		affected: map[string]int{"c-narrow": 1, "c-wide": 3}}
+	d := diagnose.Build(rep, in, []diagnose.Family{fam})
+
+	want := []string{"shared-warning+shared-error", "dataplane-error", "process-error", "hygiene-error",
+		"wide", "narrow", "pending-old", tieA, tieB, "no-since", "hygiene-warning", "process-info", "in-grace"}
+	if got := groupNames(rep, d); !slices.Equal(got, want) {
+		t.Fatalf("group order\n got %v\nwant %v", got, want)
+	}
+	g := d.Groups[0]
+	if g.Severity != health.SeverityError || g.Class != diagnose.ClassDataPlane || g.Since == nil || !g.Since.Equal(*ago(time.Minute)) ||
+		g.Family != "Fake" || g.Cause == nil || g.Cause.Name != "c-shared" || !g.Ranked {
+		t.Errorf("shared group %+v", g)
+	}
+	// A finding ranks by its group, then severity, since and id.
+	wantRank := []string{"shared-error", "shared-warning", "dataplane-error", "process-error", "hygiene-error",
+		"wide", "narrow", "pending-old", tieA, tieB, "no-since", "hygiene-warning", "process-info", "in-grace"}
+	if got := names(rep.Findings, d.Rank); !slices.Equal(got, wantRank) {
+		t.Errorf("finding rank\n got %v\nwant %v", got, wantRank)
+	}
+	for k, c := range map[string]diagnose.Class{"dataplane-error": 1, "process-info": 2, "pending-old": 3, "no-since": 3, "in-grace": 4, "hygiene-warning": 4,
+		"hygiene-error": 4} {
+		f := rep.Findings[slices.IndexFunc(rep.Findings, func(f health.Finding) bool { return f.Message == k })]
+		if got := diagnose.ClassOf(f); got != c {
+			t.Errorf("ClassOf(%s) = %d, want %d", k, got, c)
+		}
+	}
+	if n := len(d.Groups[4].Affected); n != 3 {
+		t.Errorf("wide affected %d, want 3", n)
+	}
+}
+
+func TestGroupMembershipExclusive(t *testing.T) {
+	fs := []health.Finding{
+		finding("both", "KGWUI-013", health.SeverityWarning, ref("HTTPRoute", "a"), nil),
+		finding("second", "KGWUI-014", health.SeverityWarning, ref("HTTPRoute", "b"), nil),
+		finding("neither", health.CodeConditionFalse, health.SeverityWarning, ref("HTTPRoute", "c"), nil),
+	}
+	first := fake{name: "First", claims: map[string]string{"both": "x"}}
+	second := fake{name: "Second", claims: map[string]string{"both": "y", "second": "y"}}
+	build := func() (*health.Report, *diagnose.Diagnosis) {
+		rep := &health.Report{Findings: slices.Clone(fs)}
+		return rep, diagnose.Build(rep, in, []diagnose.Family{first, second})
+	}
+	rep, d := build()
+
+	seen := map[int]string{}
+	for _, g := range d.Groups {
+		for _, m := range g.Members {
+			if prev, dup := seen[m]; dup {
+				t.Errorf("finding %d in %s and %s", m, prev, g.ID)
+			}
+			seen[m] = g.ID
+			if rep.Findings[m].Group != g.ID {
+				t.Errorf("finding %d has group %q, member of %q", m, rep.Findings[m].Group, g.ID)
+			}
+		}
+	}
+	if len(seen) != len(fs) {
+		t.Errorf("%d of %d findings grouped", len(seen), len(fs))
+	}
+	if r := slices.Sorted(slices.Values(d.Rank)); !slices.Equal(r, []int{0, 1, 2}) {
+		t.Errorf("rank %v is not a permutation of the findings", d.Rank)
+	}
+	fam := map[string]string{}
+	for _, g := range d.Groups {
+		fam[names(rep.Findings, g.Members)[0]] = g.Family
+	}
+	if want := map[string]string{"both": "First", "second": "Second", "neither": "Other"}; !reflect.DeepEqual(fam, want) {
+		t.Errorf("families %v, want %v", fam, want)
+	}
+	// Recomputing gives the same ids, membership and order.
+	rep2, d2 := build()
+	if !reflect.DeepEqual(d, d2) || !reflect.DeepEqual(rep, rep2) {
+		t.Errorf("a recompute differs:\n%+v\n%+v", d, d2)
+	}
+}
+
+func TestOtherGroupPerResource(t *testing.T) {
+	a, b := ref("HTTPRoute", "a"), ref("HTTPRoute", "b")
+	rep := &health.Report{Findings: []health.Finding{
+		finding("a-1", health.CodeConditionFalse, health.SeverityWarning, a, nil),
+		finding("b-1", health.CodeConditionFalse, health.SeverityWarning, b, nil),
+		finding("a-2", health.CodeRouteUnattached, health.SeverityError, a, nil),
+		finding("install", health.CodeScopeMismatch, health.SeverityWarning, nil, nil),
+	}}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	got := map[string]string{}
+	for _, g := range d.Groups {
+		got[groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0]] = g.ID
+		if g.Family != "Other" || len(g.Affected) != 0 {
+			t.Errorf("group %+v", g)
+		}
+	}
+	id := in.Install.ID()
+	want := map[string]string{"a-1+a-2": health.GroupID(id, "Other", a, nil), "b-1": health.GroupID(id, "Other", b, nil),
+		"install": health.GroupID(id, "Other", nil, nil)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("groups %v, want %v", got, want)
+	}
+	if d.Groups[0].Cause == nil || *d.Groups[0].Cause != *a || d.Groups[0].Severity != health.SeverityError {
+		t.Errorf("first group %+v, want the error group on a", d.Groups[0])
+	}
+}
+
+func TestSignalUnavailableNotRanked(t *testing.T) {
+	rep := &health.Report{Findings: []health.Finding{
+		finding("signal", health.CodeSignalUnavailable, health.SeverityInfo, nil, ago(time.Hour)),
+		finding("scope", health.CodeScopeMismatch, health.SeverityInfo, nil, nil),
+		finding("info", health.CodeConditionFalse, health.SeverityInfo, ref("HTTPRoute", "i"), nil),
+	}}
+	// The two info groups tie on every key but the group id; KGWUI-008 comes last.
+	want := []string{"scope", "info", "signal"}
+	if health.GroupID(in.Install.ID(), "Other", nil, nil) > health.GroupID(in.Install.ID(), "Other", ref("HTTPRoute", "i"), nil) {
+		want[0], want[1] = want[1], want[0]
+	}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	if got := groupNames(rep, d); !slices.Equal(got, want) {
+		t.Fatalf("groups %v, want %v", got, want)
+	}
+	last := d.Groups[len(d.Groups)-1]
+	if last.Ranked || !d.Groups[0].Ranked || !d.Groups[1].Ranked {
+		t.Errorf("ranked flags %v %v %v", d.Groups[0].Ranked, d.Groups[1].Ranked, last.Ranked)
+	}
+	if rep.Findings[0].Group != last.ID || rep.Findings[0].Group == rep.Findings[1].Group {
+		t.Errorf("KGWUI-008 group %q, scope group %q", rep.Findings[0].Group, rep.Findings[1].Group)
+	}
+	if got := names(rep.Findings, d.Rank); got[len(got)-1] != "signal" {
+		t.Errorf("finding rank %v, want KGWUI-008 last", got)
+	}
+}
+
+// The Data plane family groups a Gateway's 001 with the objects whose current
+// status is True for it; the Process family groups 005, 006 and 019–021 on
+// their own resource, so a group id hashes only what a restricted row shows (D-040).
+func TestDataPlaneAndProcessFamilies(t *testing.T) {
+	edge, calm := testutil.GwRef("infra", "edge"), testutil.GwRef("infra", "calm")
+	route := func(name string, p objects.ParentRef) install.OwnedObject {
+		return install.OwnedObject{Obj: testutil.HTTPRoute("shop", name, []objects.ParentRef{p}, testutil.AcceptedBy(p, testutil.Controller)), Parents: []objects.ParentRef{p}}
+	}
+	fin := install.Install{Namespace: "kgw", Name: "kgateway", ControllerNames: []string{testutil.Controller}}
+	din := diagnose.Input{Install: install.Resolved{Install: fin}, Owned: &install.Owned{
+		Gateways: []*unstructured.Unstructured{testutil.Gateway("infra", "edge", "kgateway", nil), testutil.Gateway("infra", "calm", "kgateway", nil)},
+		Routes:   []install.OwnedObject{route("on-calm", calm), route("cart", edge), route("api", edge)}}}
+	gw, deploy := edge.Ref(), &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	id := din.Install.ID()
+	f := func(name, code string, sev health.Severity, res *objects.Ref) health.Finding {
+		return health.Finding{ID: health.FindingID(id, code, res, []string{name}), Code: code, Severity: sev, Install: id, Resource: res, Message: name}
+	}
+	rep := &health.Report{Findings: []health.Finding{
+		f("rejects", health.CodeXDSRejected, health.SeverityError, &gw),
+		f("proxy", health.CodeProxyNotReady, health.SeverityWarning, &gw),
+		f("probe", health.CodeProbeFailing, health.SeverityWarning, &gw),
+		f("gw-other", health.CodeConditionFalse, health.SeverityWarning, &gw),
+		f("ctrl", health.CodeControllerNotReady, health.SeverityError, deploy),
+		f("restart", health.CodeProcessRestarting, health.SeverityWarning, deploy),
+		f("rollout", health.CodeRolloutStuck, health.SeverityWarning, deploy),
+		f("skew", health.CodeVersionSkew, health.SeverityWarning, deploy),
+	}}
+	d := diagnose.Build(rep, din, diagnose.Families())
+	type want struct {
+		family  string
+		cause   objects.Ref
+		members string
+		affect  []objects.Ref
+	}
+	got := map[string]want{}
+	for _, g := range d.Groups {
+		if g.Cause == nil {
+			t.Fatalf("group without a cause %+v", g)
+		}
+		w := want{g.Family, *g.Cause, groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0], g.Affected}
+		got[w.members] = w
+		if g.ID != health.GroupID(id, g.Family, g.Cause, nil) {
+			t.Errorf("%s: id %s hashes more than family and cause", w.members, g.ID)
+		}
+	}
+	exp := map[string]want{
+		"rejects":              {"Data plane rejects", gw, "rejects", []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "cart")}},
+		"proxy+probe":          {"Process", gw, "proxy+probe", nil},
+		"gw-other":             {"Other", gw, "gw-other", nil},
+		"ctrl+restart+rollout": {"Process", *deploy, "ctrl+restart+rollout", nil},
+		"skew":                 {"Other", *deploy, "skew", nil},
+	}
+	if !reflect.DeepEqual(got, exp) {
+		t.Fatalf("groups\n got %+v\nwant %+v", got, exp)
+	}
+	// The data plane group ranks first and its blast radius counts the affected objects.
+	if g := d.Groups[0]; g.Family != "Data plane rejects" || len(g.Affected) != 2 {
+		t.Errorf("first group %+v", g)
+	}
+}
+
+// Design §5.2: every 015 naming one policy joins that policy's group, with its
+// routes affected; a 015 that names no policy is in "Other".
+func TestReplacedByPolicyFamily(t *testing.T) {
+	tp := objects.Ref{Group: "gateway.kgateway.dev", Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
+	rule := func(name string, res *objects.Ref, policy *objects.Ref) health.Finding {
+		f := finding(name, health.CodeRuleReplaced, health.SeverityError, res, nil)
+		f.Facts = &health.RuleReplacedEvidence{Reason: "RouteRuleReplaced", Policy: policy}
+		return f
+	}
+	rep := &health.Report{Findings: []health.Finding{
+		rule("cart-0", ref("HTTPRoute", "cart"), &tp),
+		rule("api-1", ref("HTTPRoute", "api"), &tp),
+		rule("cart-1", ref("HTTPRoute", "cart"), &tp),
+		rule("unparsed", ref("HTTPRoute", "web"), nil),
+	}}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	if len(d.Groups) != 2 {
+		t.Fatalf("groups %+v", d.Groups)
+	}
+	g := d.Groups[0]
+	if g.Family != "Replaced by policy" || g.Cause == nil || *g.Cause != tp || g.ID != health.GroupID(in.Install.ID(), g.Family, &tp, nil) ||
+		!slices.Equal(groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}}), []string{"cart-0+api-1+cart-1"}) ||
+		!slices.Equal(g.Affected, []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "cart")}) {
+		t.Fatalf("policy group %+v", g)
+	}
+	if o := d.Groups[1]; o.Family != "Other" || o.Cause == nil || o.Cause.Name != "web" {
+		t.Fatalf("unparsed group %+v", o)
+	}
+}
+
+// A report reused across recomputes is served by the published model: when a
+// group ID changes, Build writes a copy, never the served slice (R56).
+func TestBuildNeverWritesAServedReport(t *testing.T) {
+	served := []health.Finding{finding("a", "KGWUI-002", health.SeverityError, ref("HTTPRoute", "a"), nil),
+		finding("b", "KGWUI-002", health.SeverityError, ref("HTTPRoute", "b"), nil)}
+	first := health.Report{Findings: served}
+	diagnose.Build(&first, in, diagnose.Families())
+	gid := served[1].Group
+	served[1].Group = "stale" // as if an earlier Build had claimed it elsewhere
+	want := slices.Clone(served)
+	done := make(chan struct{})
+	go func() { // a handler reading the served model meanwhile
+		defer close(done)
+		for range 1000 {
+			_ = served[1].Group
+		}
+	}()
+	rep := health.Report{Findings: served}
+	d := diagnose.Build(&rep, in, diagnose.Families())
+	<-done
+	if !reflect.DeepEqual(served, want) {
+		t.Fatalf("Build wrote the served slice: %+v", served)
+	}
+	if &rep.Findings[0] == &served[0] || rep.Findings[1].Group != gid || len(d.Groups) != 2 {
+		t.Fatalf("want the report regrouped in its own slice: %+v", rep.Findings)
+	}
+}
+
+// Design §5.2 and R77: a 018 explains every 003 warning of its install, so they
+// share its group on the controller Deployment, with their objects affected.
+// A 003 inside its grace stays in "Other", as does every 003 without a 018.
+func TestStatusNotProgressingFamily(t *testing.T) {
+	deploy := &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	a, b, c := ref("HTTPRoute", "a"), ref("HTTPRoute", "b"), ref("HTTPRoute", "c")
+	fs := []health.Finding{
+		finding("a-1", health.CodeRouteUnattached, health.SeverityWarning, a, nil),
+		finding("progress", health.CodeStatusNotProgressing, health.SeverityWarning, deploy, nil),
+		finding("b-1", health.CodeRouteUnattached, health.SeverityWarning, b, nil),
+		finding("a-2", health.CodeRouteUnattached, health.SeverityWarning, a, nil),
+		finding("c-grace", health.CodeRouteUnattached, health.SeverityInfo, c, nil),
+	}
+	rep := &health.Report{Findings: slices.Clone(fs)}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	got := map[string]string{}
+	for _, g := range d.Groups {
+		got[groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0]] = g.Family
+		if g.Family == "Status not progressing" &&
+			(*g.Cause != *deploy || g.ID != health.GroupID(in.Install.ID(), g.Family, deploy, nil) || !slices.Equal(g.Affected, []objects.Ref{*a, *b})) {
+			t.Errorf("status group %+v", g)
+		}
+	}
+	if want := map[string]string{"a-1+progress+b-1+a-2": "Status not progressing", "c-grace": "Other"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("groups %v, want %v", got, want)
+	}
+	rep = &health.Report{Findings: slices.Delete(slices.Clone(fs), 1, 2)}
+	for _, g := range diagnose.Build(rep, in, diagnose.Families()).Groups {
+		if g.Family != "Other" {
+			t.Errorf("without a 018: group %+v", g)
+		}
+	}
+}
+
+// refs returns a 013 or 014 on res whose evidence names to at each path.
+func refs(name, code string, res *objects.Ref, attributed bool, paths ...string) health.Finding {
+	f := finding(name, code, health.SeverityError, res, nil)
+	ev := &health.RefsEvidence{Explanation: health.RefExplainController, Attributed: attributed}
+	for k, p := range paths {
+		to := objects.Ref{Kind: "Service", Namespace: "store", Name: "cart"}
+		if strings.Contains(p, "certificateRefs") {
+			to = objects.Ref{Kind: "Secret", Namespace: "certs", Name: "tls"}
+		}
+		if k > 0 {
+			to.Name = "pay"
+		}
+		ev.Candidates = append(ev.Candidates, health.RefLocation{Path: p, Ref: to})
+	}
+	f.Facts = ev
+	return f
+}
+
+// Design §5.2: the families run in the table's order and every finding of a
+// report with each family lands in exactly one group, the first that claims it.
+func TestEveryFamilyExclusive(t *testing.T) {
+	names := make([]string, 0, 7)
+	for _, f := range diagnose.Families() {
+		names = append(names, f.Name())
+	}
+	if want := []string{"Data plane rejects", "Missing backend", "Not permitted", "Replaced by policy", "Status not progressing", "Process", "Other"}; !slices.Equal(names, want) {
+		t.Fatalf("families %v, want %v", names, want)
+	}
+	deploy := &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
+	gw := ref("Gateway", "edge")
+	tp := objects.Ref{Group: "gateway.kgateway.dev", Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
+	replaced := func(name string, policy *objects.Ref) health.Finding {
+		f := finding(name, health.CodeRuleReplaced, health.SeverityError, ref("HTTPRoute", name), nil)
+		f.Facts = &health.RuleReplacedEvidence{Reason: "RouteRuleReplaced", Policy: policy}
+		return f
+	}
+	plain := func(name, code string, sev health.Severity, res *objects.Ref) health.Finding {
+		return finding(name, code, sev, res, nil)
+	}
+	backend, listener := "spec.rules[0].backendRefs[0]", "spec.listeners[0].tls.certificateRefs[0]"
+	cases := []struct {
+		f      health.Finding
+		family string
+		class  diagnose.Class
+	}{
+		{plain("rejects", health.CodeXDSRejected, health.SeverityError, gw), "Data plane rejects", diagnose.ClassDataPlane},
+		{refs("missing", health.CodeRefUnresolved, ref("HTTPRoute", "missing"), true, backend), "Missing backend", diagnose.ClassTraffic},
+		{refs("missing-two", health.CodeRefUnresolved, ref("HTTPRoute", "missing-two"), false, backend, "spec.rules[1].backendRefs[0]"), "Other", diagnose.ClassTraffic},
+		{refs("missing-none", health.CodeRefUnresolved, ref("HTTPRoute", "missing-none"), false), "Other", diagnose.ClassTraffic},
+		{refs("missing-cert", health.CodeRefUnresolved, gw, true, listener), "Other", diagnose.ClassTraffic},
+		{refs("denied", health.CodeRefNotPermitted, ref("HTTPRoute", "denied"), true, backend), "Not permitted", diagnose.ClassTraffic},
+		{refs("denied-cert", health.CodeRefNotPermitted, ref("Gateway", "tls"), true, listener), "Not permitted", diagnose.ClassTraffic},
+		{refs("denied-two", health.CodeRefNotPermitted, ref("HTTPRoute", "denied-two"), false, backend, "spec.rules[1].backendRefs[0]"), "Other", diagnose.ClassTraffic},
+		{replaced("replaced", &tp), "Replaced by policy", diagnose.ClassTraffic},
+		{replaced("replaced-unparsed", nil), "Other", diagnose.ClassTraffic},
+		{plain("progress", health.CodeStatusNotProgressing, health.SeverityWarning, deploy), "Status not progressing", diagnose.ClassHygiene},
+		{plain("pending", health.CodeRouteUnattached, health.SeverityWarning, ref("HTTPRoute", "pending")), "Status not progressing", diagnose.ClassTraffic},
+		{plain("in-grace", health.CodeRouteUnattached, health.SeverityInfo, ref("HTTPRoute", "in-grace")), "Other", diagnose.ClassHygiene},
+		{plain("ctrl", health.CodeControllerNotReady, health.SeverityError, deploy), "Process", diagnose.ClassProcesses},
+		{plain("proxy", health.CodeProxyNotReady, health.SeverityWarning, gw), "Process", diagnose.ClassProcesses},
+		{plain("restart", health.CodeProcessRestarting, health.SeverityWarning, deploy), "Process", diagnose.ClassProcesses},
+		{plain("conflict", health.CodeListenerConflicted, health.SeverityError, gw), "Other", diagnose.ClassTraffic},
+		{plain("unattached", health.CodeDelegatedNotAttached, health.SeverityWarning, ref("HTTPRoute", "child")), "Other", diagnose.ClassTraffic},
+		{plain("policy-target", "KGWUI-016", health.SeverityWarning, &tp), "Other", diagnose.ClassTraffic},
+		{plain("condition", health.CodeConditionFalse, health.SeverityWarning, ref("HTTPRoute", "c")), "Other", diagnose.ClassHygiene},
+		{plain("computed", health.CodeComputedDisagrees, health.SeverityWarning, ref("HTTPRoute", "c")), "Other", diagnose.ClassHygiene},
+		{plain("skew", health.CodeVersionSkew, health.SeverityWarning, deploy), "Other", diagnose.ClassHygiene},
+		{plain("scope", health.CodeScopeMismatch, health.SeverityWarning, nil), "Other", diagnose.ClassHygiene},
+		{plain("signal", health.CodeSignalUnavailable, health.SeverityInfo, nil), "Other", diagnose.ClassHygiene},
+	}
+	rep := &health.Report{}
+	for _, tc := range cases {
+		rep.Findings = append(rep.Findings, tc.f)
+	}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	of := map[int]*diagnose.Group{}
+	for k := range d.Groups {
+		g := &d.Groups[k]
+		for _, m := range g.Members {
+			if prev, dup := of[m]; dup {
+				t.Errorf("%s in %s and %s", rep.Findings[m].Message, prev.Family, g.Family)
+			}
+			of[m] = g
+		}
+	}
+	for i, tc := range cases {
+		t.Run(tc.f.Message, func(t *testing.T) {
+			g := of[i]
+			if g == nil {
+				t.Fatal("in no group")
+			}
+			if g.Family != tc.family || rep.Findings[i].Group != g.ID {
+				t.Errorf("family %s (group %s, finding says %s), want %s", g.Family, g.ID, rep.Findings[i].Group, tc.family)
+			}
+			if c := diagnose.ClassOf(tc.f); c != tc.class {
+				t.Errorf("class %d, want %d", c, tc.class)
+			}
+		})
+	}
+}
+
+// Design §5.2 and R77: a route 013 naming one backend joins the group of that
+// backend's identity, with its routes affected. The cause is the ref with spec
+// defaults applied, so routes that write it differently share one group.
+func TestMissingBackendFamily(t *testing.T) {
+	cart := objects.Ref{Kind: "Service", Namespace: "store", Name: "cart"}
+	pay := cart
+	pay.Name = "pay"
+	missing := func(name string, to objects.Ref) health.Finding {
+		f := finding(name, health.CodeRefUnresolved, health.SeverityError, ref("HTTPRoute", name), nil)
+		f.Facts = &health.RefsEvidence{Explanation: health.RefExplainController, Attributed: true,
+			Candidates: []health.RefLocation{{Path: "spec.rules[0].backendRefs[0]", Ref: to}}}
+		return f
+	}
+	rep := &health.Report{Findings: []health.Finding{missing("web", cart), missing("api", cart), missing("bill", pay)}}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	got := map[string]diagnose.Group{}
+	for _, g := range d.Groups {
+		got[groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0]] = g
+	}
+	g, ok := got["web+api"]
+	if !ok || g.Family != "Missing backend" || g.Cause == nil || *g.Cause != cart || g.ID != health.GroupID(in.Install.ID(), g.Family, &cart, nil) ||
+		!slices.Equal(g.Affected, []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "web")}) {
+		t.Fatalf("cart group %+v of %v", g, got)
+	}
+	if b := got["bill"]; b.Family != "Missing backend" || b.Cause == nil || *b.Cause != pay {
+		t.Fatalf("pay group %+v", b)
+	}
+}
+
+// Design §5.2 and R77: 014s share a group by (from namespace, to namespace,
+// to kind); the id hashes only that shape, and the referrers are affected.
+func TestNotPermittedFamily(t *testing.T) {
+	denied := func(name string, res *objects.Ref, to objects.Ref) health.Finding {
+		f := finding(name, health.CodeRefNotPermitted, health.SeverityError, res, nil)
+		f.Facts = &health.RefsEvidence{Explanation: health.RefExplainController, Attributed: true,
+			Candidates: []health.RefLocation{{Path: "spec.rules[0].backendRefs[0]", Ref: to}}}
+		return f
+	}
+	svc := func(ns, name string) objects.Ref { return objects.Ref{Kind: "Service", Namespace: ns, Name: name} }
+	other := objects.Ref{Group: "example.com", Kind: "Service", Namespace: "store", Name: "cart"}
+	infra := &objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "infra", Name: "edge"}
+	rep := &health.Report{Findings: []health.Finding{
+		denied("web", ref("HTTPRoute", "web"), svc("store", "cart")),
+		denied("api", ref("HTTPRoute", "api"), svc("store", "pay")),
+		denied("bank", ref("HTTPRoute", "bank"), svc("bank", "cart")),
+		denied("group", ref("HTTPRoute", "group"), other),
+		denied("infra", infra, svc("store", "cart")),
+	}}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	got := map[string]diagnose.Group{}
+	for _, g := range d.Groups {
+		if g.Family != "Not permitted" || g.Cause != nil {
+			t.Errorf("group %+v", g)
+		}
+		got[groupNames(rep, &diagnose.Diagnosis{Groups: []diagnose.Group{g}})[0]] = g
+	}
+	id := in.Install.ID()
+	want := map[string]string{
+		"web+api": health.GroupID(id, "Not permitted", nil, []string{"shop", "store", "", "Service"}),
+		"bank":    health.GroupID(id, "Not permitted", nil, []string{"shop", "bank", "", "Service"}),
+		"group":   health.GroupID(id, "Not permitted", nil, []string{"shop", "store", "example.com", "Service"}),
+		"infra":   health.GroupID(id, "Not permitted", nil, []string{"infra", "store", "", "Service"}),
+	}
+	ids := map[string]string{}
+	for k, g := range got {
+		ids[k] = g.ID
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("groups %v, want %v", ids, want)
+	}
+	if a := got["web+api"].Affected; !slices.Equal(a, []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "web")}) {
+		t.Errorf("affected %v", a)
+	}
+}

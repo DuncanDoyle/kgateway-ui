@@ -52,6 +52,11 @@ func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer, mut ...func(*c
 			return strings.Compare(x.GetNamespace()+"/"+x.GetName(), y.GetNamespace()+"/"+y.GetName())
 		})
 	}
+	return snapshotHandler(snap, tier, authz)
+}
+
+// snapshotHandler is tierHandler over snap, which is already sorted.
+func snapshotHandler(snap *cache.Snapshot, tier scale.Tier, authz Authorizer) (http.Handler, *engine.Model) {
 	now := testutil.Now
 	cfg := engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
 		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),

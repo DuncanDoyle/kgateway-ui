@@ -49,17 +49,21 @@ Flags:
 
 ## What it reads
 
-- **Read-only RBAC.** The ClusterRole grants only `get`, `list` and `watch`: Gateway API kinds, all `gateway.kgateway.dev` kinds, CRDs, namespaces, pods and Deployments.
-- **No Secrets, no ConfigMaps, no `*/proxy`.**
+- **Read-only RBAC.** The ClusterRole grants only `get`, `list` and `watch`: Gateway API kinds, all `gateway.kgateway.dev` kinds, namespaces, pods, Deployments, Warning Events, Gateway API CRD metadata, and Services and EndpointSlices. Each of the last three has a chart toggle. `diagnostics.controllerLogs` (off by default) adds `get` on `pods/log` in the controller namespace.
+- **No Secrets, no ConfigMaps, no `*/proxy`, no `pods/portforward`.**
 - **Controller metrics on port 9092.** In-cluster, the UI scrapes the controller pods directly. If a NetworkPolicy blocks that, the UI reports the signal as unavailable instead of green. Locally, it goes through the pods/proxy API with your kubeconfig's permissions.
 
 ## Scope
 
 The UI honours the controller's `discoveryNamespaceSelectors`. It only counts resources in namespaces the controller watches, and the install page shows the scope as "N of M namespaces".
 
+## Findings
+
+[docs/findings.md](docs/findings.md) has one entry per finding code: its cause, its evidence and how to fix it. "Learn more" on a finding's page opens that entry. A `since` the UI derives resets when the UI restarts.
+
 ## Extending
 
-Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds:
+Downstream builds extend the UI without forking it. The backend takes options from `pkg/extension`. This is [examples/downstream/main.go](examples/downstream/main.go), which the test suite builds and runs; the types it names are in [acme.go](examples/downstream/acme.go):
 
 ```go
 package main
@@ -72,33 +76,23 @@ import (
 	"net/http"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 )
 
 //go:embed all:dist
 var dist embed.FS
-
-// acmeProxyMode reads the self-managed flag from acme's own parameters kind.
-type acmeProxyMode struct{}
-
-func (acmeProxyMode) Resolve(gw *unstructured.Unstructured, snap *cache.Snapshot, served []kinds.Served) proxymode.Mode {
-	return proxymode.Managed
-}
 
 func main() {
 	ui, err := fs.Sub(dist, "dist")
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := app.Run(context.Background(), "", options(ui), extensions()...); err != nil {
+	if err := app.Run(context.Background(), "", options(ui), extensions(clock.RealClock{})...); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -109,31 +103,43 @@ func options(ui fs.FS) app.Options {
 	return app.Options{UI: ui, PollInterval: 30 * time.Second, MetricsInterval: 10 * time.Second}
 }
 
-// extensions are what this build adds to the stock UI.
-func extensions() []extension.Option {
+// extensions are what this build adds to the stock UI. The types are in
+// acme.go; clk drives the collector, so tests can step it.
+func extensions(clk clock.WithTicker) []extension.Option {
 	return []extension.Option{
 		// Watch, count and serve an extra policy kind
-		extension.WithKinds(kinds.Descriptor{
-			Group: "acme.example.com", Kind: "AcmePolicy", Resource: "acmepolicies",
-			Versions: []string{"v1"}, Namespaced: true, Category: kinds.CategoryPolicy, DisplayName: "AcmePolicy",
-		}),
+		extension.WithKinds(acmePolicy),
 		// Decide per request what the caller may see
 		extension.WithAuthorizer(api.AuthorizerFunc(func(r *http.Request, ref objects.Ref) bool {
 			return ref.Namespace != "acme-system"
 		})),
 		// Replace the upstream GatewayParameters resolution
 		extension.WithProxyModeResolver(acmeProxyMode{}),
+		// Publish a value between recomputes, for checks to read
+		extension.WithCollectors(&acmeWidgets{clock: clk}),
+		// Add checks; their finding codes start with ACME-
+		extension.WithChecks("ACME-", acmeWidgetCheck{}),
+		// Serve endpoints under /api/ext/acme/
+		extension.WithHandlers("acme", acmeHandlers),
+		// Report a feature's state in /api/v1/meta
+		extension.WithCapabilities(acmeCapabilities),
 	}
 }
 ```
 
-The other options are `WithDetectors`, `WithChecks`, `WithScopeProvider`, `WithScopeVerifier` and `WithComputedRules`. Kinds added with `WithKinds` need matching rules in the chart's ClusterRole.
+The other options are `WithDetectors`, `WithScopeProvider`, `WithScopeVerifier` and `WithComputedRules`.
 
-The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`:
+- **Checks.** `WithChecks` takes a finding-code prefix, such as `ACME-`. It is a capital letter, then one to fifteen capitals or digits, then a dash. Each prefix registers once, and `KGWUI-` is reserved. A bad or repeated prefix makes `app.Build` fail.
+- **Endpoints.** `WithHandlers("acme", …)` serves its routes under `/api/ext/acme/`, so they never collide with API v1. `Deps.Current` returns the published model. Filter objects with `api.Visible`, and reply with `api.WriteJSON` and `api.WriteError`.
+- **Collectors.** `WithCollectors` starts each collector with the app. It publishes values through `Deps.Publish(key, value, fingerprint, ttl)` or marks them failing with `Deps.Fail`. A check declares the keys it reads as `<collector>/<key>` in `Inputs().Collected` and reads them with `ctx.Collected(key)`. A new fingerprint triggers a recompute. An expired value, or one from a stopped collector, reads as unavailable.
+- **Capabilities.** `WithCapabilities` adds entries to `capabilityStates` in `/api/v1/meta`. A state is `on`, `off`, `denied` or `failing`. Names must not clash with core ones.
+
+Kinds added with `WithKinds`, and anything a collector reads, need matching rules in the chart's ClusterRole. Add them with `rbac.extraRules`, as [values-acme.yaml](examples/downstream/chart/values-acme.yaml) does. The chart also takes `extraEnv`, `extraVolumes`, `extraVolumeMounts` and `extraContainers`.
+
+The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
-import { defaultPages, Shell, type ShellExtension } from "@kgateway-ui/shell";
-import { createRoot } from "react-dom/client";
+import { defaultPages, renderWhenFontsReady, Shell, type ShellExtension } from "@kgateway-ui/shell";
 
 const acme: ShellExtension = {
   // Product identity in the header
@@ -142,14 +148,95 @@ const acme: ShellExtension = {
   findingRenderers: { "ACME-": (f) => <span>{f.message}</span> },
   // Platform copy; entries left out keep the Kubernetes defaults
   vocabulary: { landingTitle: "acme installs" },
+  // In-page slots, keyed "group/Kind" where they belong to one kind; WidgetsTab is in acme.tsx
+  contributions: {
+    detailTabs: {
+      "gateway.networking.k8s.io/Gateway": [
+        { id: "widgets", label: "Widgets", render: ({ ref }) => <WidgetsTab namespace={ref.namespace} /> },
+      ],
+    },
+  },
 };
 
-createRoot(document.getElementById("root") as HTMLElement).render(<Shell extension={acme} pages={defaultPages} />);
+// Waits for the theme fonts, so a late font swap cannot shift the layout
+void renderWhenFontsReady(document.getElementById("root") as HTMLElement, <Shell extension={acme} pages={defaultPages} />);
 ```
 
-A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes` and `navEntries`.
+An app that embeds `Shell` must render it with `renderWhenFontsReady(root, element)`. If its themes use other fonts, pass them as the third argument.
+
+A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntries` and `findingsDocUrl`. "Learn more" on a finding links the release tag's [docs/findings.md](docs/findings.md) when `/api/v1/meta` reports a release version, else `main`; a build with its own version sets `findingsDocUrl` to its own copy. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing. `CorePages.DiagnosticsSection` replaces the install page's Needs attention and Processes block; it gets the install ID, the diagnostics and whether they are stale.
 
 ## Upgrade notes
+
+### Health overview (sub-phase 3.2)
+
+- KGWUI-001 is re-specified. It is one finding per Gateway, with the rejected xDS types as evidence. Only the controller's `rejects_active` gauge raises it; proxy stats add evidence. When a reject disappears during a controller restart, the `xDS rejects` check stays pending for 60 s, so the install reads unknown, not healthy.
+- A route, ListenerSet or policy whose Gateway has a KGWUI-001 is never shown healthy: it is at least a warning and carries the `gateway-rejecting` flag. The routes list takes `state=gateway-rejecting`.
+- New finding codes, all warnings:
+  - KGWUI-019 `process-restarting`: a controller or proxy container restarted in the last 15 min.
+  - KGWUI-020 `probe-failing`: 3 or more probe failures on one Pod in 15 min, from Events.
+  - KGWUI-021 `rollout-stuck`: a controller or proxy Deployment passed its progress deadline.
+  - KGWUI-022 `version-skew`: proxies on another minor than the controller, controller replicas on two versions, or Gateway API CRDs that do not match the expected bundle.
+  - KGWUI-025 `proxy-config-warming`: a Ready proxy still loads config after 60 s.
+  - KGWUI-026 `proxy-disconnected`: a Ready proxy lost its controller connection for 60 s.
+- New watches: proxy Pods, Warning Events on controller and proxy Pods, and Gateway API CRD metadata. The UI also reads Envoy stats from each proxy Pod on port 9091, so the UI Pod must reach that port.
+- Each input has a chart toggle and a flag: `diagnostics.events` (`--diagnostics-events`), `diagnostics.crds` (`--diagnostics-crds`) and `diagnostics.proxyStats` (`--diagnostics-proxy-stats`), all on by default. When one is off, denied or failing, its checks read "not available" with the reason, and the install state does not change. `/meta` lists each running input under `capabilities`.
+- `diagnostics.endpoints` (on) grants Services and EndpointSlices; no check reads them until a later release. `diagnostics.controllerLogs` (off) adds a `pods/log` Role in each of `diagnostics.controllerLogsNamespaces`; the UI then reads controller logs for derived signals (see [docs/findings.md](docs/findings.md)). It keeps fixed fields only and never stores or shows log text.
+- A `since` the UI derives, for KGWUI-001 and the new codes, is when the UI first saw the problem. It resets when the UI restarts, except that with controller logs on, KGWUI-001 keeps a `since` from the last 15 minutes of logs.
+- New endpoints: `GET /api/v1/installs/{id}/diagnostics` (the verdict, up to 10 ranked groups, the process and data-plane summaries) and `GET /api/v1/installs/{id}/processes` (the controller's processes and a page of Gateways' proxies). The Gateway detail gains `dataPlane` and `proxies`; overview Gateway rows gain `dataPlane`.
+
+For downstream builds:
+
+- Next-step commands come from Go: replace the default kubectl commands with `extension.WithCommands`.
+- The install page lists ranked groups of findings, not single findings.
+- Finding actions now render on the finding page, not the install page. `FindingRow` still renders them.
+- Finding renderers now render on the finding page, through the evidence view, for evidence kinds the shell does not know, or when a finding has no evidence. `FindingRow` still renders them.
+- Each `GET /api/v1/installs` entry now has `groupRows`: how many groups the install's diagnostics list for you, at most 10. The install page reserves that many rows while diagnostics load.
+- `renderWhenFontsReady` now sets the `font-fallback` class on the root element when its 3 s font wait runs out. The theme then leaves out the web fonts for the session, so a late font does not reflow the page. A theme's font stacks must lead with their web font.
+
+### Findings (sub-phase 3.1)
+
+- Every finding now has an `id`, such as `f1-…`, and a `group`. Both appear in every response, `/health` included, and on restricted rows. Treat the `id` as opaque: compare it, never parse it.
+- An `id` survives rewording, a severity change and a UI restart. It can change when another finding of the same code on the same object appears or clears.
+- A finding with no status timestamp now has a `since`: when the UI first saw it. That time resets when the UI restarts. Findings from status keep the controller's `lastTransitionTime`. When an `id` changes, its `since` starts again.
+- The findings page now pages on the server. Its filters, sort and cursor live in the URL. Old `?sev=` links are ignored.
+- New endpoints:
+  - `GET /api/v1/installs/{id}/findings`: one page of findings. Filters `severity`, `code`, `kind`, `namespace`, `group` and `q`; sort `rank`, `since` or `code` with `.asc` or `.desc`; `limit` up to 200; `cursor`. A cursor works only for the install and sort it came from, and only until the UI restarts; a rejected cursor returns 400.
+  - `GET /api/v1/installs/{id}/findings/{findingId}`: one finding with 50 affected objects per page (`?affectedCursor=`). An unknown id returns 404.
+  - `GET /api/v1/installs/{id}/refs?ref=group/Kind/namespace/name`: up to 6 refs, each returned as a link or `none`. The breadcrumbs use it, so a crumb never shows a name you may not see.
+
+### Check contract (sub-phase 3.1)
+
+For downstream builds:
+
+- A check is now `Name()`, `Inputs()` and `Run(ctx health.RunContext)`. `Run` no longer takes a `health.Input`. `RunContext` embeds `Input`, so `ctx.Now` and `ctx.Install` still work.
+- `Inputs()` returns a `health.InputSet` naming what `Run` reads. Declare everything `Run` reads. `health.AllInputs()` declares everything except collector keys and earlier checks' output.
+- The engine reruns a check only when a declared input changes or its wake time passes, so an undeclared read can serve a stale result.
+- Collector values moved out of `health.Input.Collected`. Declare the key in `Inputs().Collected` and read it with `ctx.Collected("<collector>/<key>")`. It returns false for a key you did not declare.
+- Keep state between recomputes in `ctx.State`, a per-check `*health.Store`. Replace package-level variables with it. The engine owns the Store, and it is empty after a restart.
+- Call `ctx.WakeAt(t)` to be recomputed at a later time. Call `ctx.Output(name)` to read an earlier check's output, and declare that check in `Inputs().Checks`.
+- `app.Build` fails when a check declares a check that runs later or not at all, or when two checks share a name.
+- Keep passing the finding-code prefix to `WithChecks`, as in 3.0: `WithChecks("ACME-", acmeWidgetCheck{})`.
+
+```go
+func (acmeWidgetCheck) Inputs() health.InputSet {
+	// Declare exactly what Run reads
+	return health.InputSet{Collected: []string{"acme-widgets/widgets"}}
+}
+
+func (c acmeWidgetCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	// Undeclared keys read as missing
+	v, ok := ctx.Collected("acme-widgets/widgets")
+	// ...
+}
+```
+
+### Extension seams (sub-phase 3.0)
+
+For downstream builds:
+
+- `extension.WithChecks` now takes a finding-code prefix first: `WithChecks("ACME-", checks...)`. Calls without one no longer compile.
+- `app.Build` fails on the reserved `KGWUI-` prefix, a repeated prefix or a malformed one.
 
 ### Computed route delegation (sub-phase 2.4)
 

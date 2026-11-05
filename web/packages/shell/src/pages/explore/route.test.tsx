@@ -10,7 +10,7 @@ import type { Condition, RouteDetail, RouteList, RouteRow } from "../../api/type
 import { routeCopy } from "../../copy/explorer";
 import { TABS_H } from "../../explore/DetailTabs";
 import { ROW_H } from "../../explore/ObjectTable";
-import { pseudoRules, renderWithTheme } from "../../test/render";
+import { hrefPath, pseudoRules, renderWithTheme } from "../../test/render";
 import { controlRoomDark, controlRoomLight } from "../../theme/themes";
 import { HEADER_H } from "./detailParts";
 import { RoutePage } from "./RoutePage";
@@ -94,7 +94,7 @@ it("up-chain shows a restricted step and 'More paths not shown'", async () => {
   expect(paths).toHaveLength(5);
   // Root first; each step links where its link says; the route itself is the current page.
   const edge = within(paths[0] as HTMLElement).getByRole("link", { name: /infra\/edge/ });
-  expect(edge).toHaveAttribute("href", `/i/${ID}/gateways/infra/edge`);
+  expect(hrefPath(edge)).toBe(`/i/${ID}/gateways/infra/edge`);
   expect(
     within(paths[0] as HTMLElement)
       .getByLabelText("shop/mid")
@@ -245,10 +245,7 @@ it("a parent without a status entry links from its spec target; a hidden one is 
   mount(MID);
   await loaded();
   const edge = screen.getByRole("article", { name: "Parent infra/edge" });
-  expect(within(edge).getByRole("link", { name: "infra/edge" })).toHaveAttribute(
-    "href",
-    `/i/${ID}/gateways/infra/edge`,
-  );
+  expect(hrefPath(within(edge).getByRole("link", { name: "infra/edge" }))).toBe(`/i/${ID}/gateways/infra/edge`);
   expect(within(edge).getByText("No status from this install's controllers.")).toBeInTheDocument();
   const hidden = screen.getByRole("article", { name: "Parent shop/top1" });
   expect(within(hidden).queryByRole("link")).toBeNull();
@@ -285,8 +282,7 @@ it("an implicit child shows a card for each status entry its parentRefs do not n
   expect(within(card).getByTestId("condition-Accepted")).toHaveTextContent("Accepted: False");
   expect(within(card).getByTestId("condition-Accepted")).toHaveTextContent("UnsupportedValue");
   // The link follows the entry's ref.
-  expect(within(card).getByRole("link", { name: "shop/api" })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(card).getByRole("link", { name: "shop/api" }))).toBe(
     `/i/${ID}/routes/${GW}/HTTPRoute/shop/api`,
   );
   expect(screen.queryByText("No parentRefs.")).toBeNull();
@@ -333,8 +329,7 @@ it("each backendRef links to Other routes using this backend (routes?backend=…
   expect(lookup("cart-svc").searchParams.get("backend")).toBe("core/Service/shop/cart-svc");
   expect(lookup("be1").searchParams.get("backend")).toBe("gateway.kgateway.dev/Backend/shop/be1");
   // A Backend links to its YAML view and shows its state.
-  expect(within(backend("be1")).getByRole("link", { name: /shop\/be1/ })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(backend("be1")).getByRole("link", { name: /shop\/be1/ }))).toBe(
     `/i/${ID}/r/gateway.kgateway.dev/Backend/shop/be1`,
   );
   // A current Accepted=True reads "Configuration accepted", never "working".
@@ -351,8 +346,7 @@ it("delegation refs show their mode and status state", async () => {
   mount(MID);
   await loaded();
   const r = rule(1);
-  expect(within(backend("child")).getByRole("link", { name: /shop\/child/ })).toHaveAttribute(
-    "href",
+  expect(hrefPath(within(backend("child")).getByRole("link", { name: /shop\/child/ }))).toBe(
     `/i/${ID}/routes/${GW}/HTTPRoute/shop/child`,
   );
   expect(backend("child")).toHaveTextContent("Reported by the controller");
@@ -594,10 +588,7 @@ it("parent card lists computed listeners, one line each, with effective hostname
   expect(tipText.split("The controller does not report this")).toHaveLength(2);
   expect(tipText).toContain("The controller does not report effective hostnames.");
   // The listener links to the Gateway page with that listener selected.
-  expect(within(http).getByRole("link", { name: "http" })).toHaveAttribute(
-    "href",
-    `/i/${ID}/gateways/infra/edge?listener=http`,
-  );
+  expect(hrefPath(within(http).getByRole("link", { name: "http" }))).toBe(`/i/${ID}/gateways/infra/edge?listener=http`);
   // The parentRef's computed outcome, with its own badge.
   expect(within(card).getByTestId("computed-outcome")).toHaveTextContent("Accepted");
 });
@@ -641,4 +632,35 @@ it("a failed parentRef shows its computed explanation", async () => {
   const outcome = within(screen.getByRole("article", { name: "Parent infra/edge" })).getByTestId("computed-outcome");
   expect(outcome).toHaveTextContent("listener https has *.example.org, route has shop.example.com");
   expect(within(outcome).getByTestId("computed-badge")).toHaveTextContent("Consistent with the status");
+});
+
+/** Stubs matchMedia so only the two-column query (from 1600 px) matches when wide. */
+function viewport(wide: boolean) {
+  vi.stubGlobal("matchMedia", (q: string) => ({
+    matches: wide && q === "(min-width: 1600px)",
+    media: q,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
+}
+
+it("from 1600 px the up-chain and parents render in the side column; below, at the top of the main", async () => {
+  for (const wide of [true, false]) {
+    viewport(wide);
+    serve(api());
+    const view = mount(MID);
+    const upChain = await loaded();
+    const parents = screen.getByRole("region", { name: /^Parents/ });
+    const rules = screen.getByRole("region", { name: /^Rules/ });
+    const column = screen.getByTestId(wide ? "detail-side" : "detail-main");
+    expect(column).toContainElement(upChain);
+    expect(column).toContainElement(parents);
+    expect(screen.getByTestId("detail-main")).toContainElement(rules);
+    // DOM order is visual order at each width, so tab order follows what is visible.
+    const order = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(order(rules, parents)).toBe(wide);
+    expect(order(upChain, parents)).toBe(true);
+    view.unmount();
+    vi.unstubAllGlobals();
+  }
 });

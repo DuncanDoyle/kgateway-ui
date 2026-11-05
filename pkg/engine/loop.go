@@ -16,19 +16,23 @@ import (
 )
 
 // Source is the source fingerprint of a model (D-019 §2): the cache data it
-// was computed from, the identity of the metrics results it read and the
-// served-kinds change it saw.
+// was computed from, the identity of the metrics results it read, the
+// served-kinds change it saw and the collector values it read.
 type Source struct {
 	Cache cache.Fingerprint
 	// Metrics is encodeMetrics of the results read.
 	Metrics uint64
 	// Kinds is the served-kinds change as kinds.Change.String().
 	Kinds string
+	// Collected is the collector store's print; zero without collectors.
+	Collected uint64
+	// Catalog is the served-kind catalog's kinds.Catalog.Key().
+	Catalog string
 }
 
 // Equal reports whether s and o describe the same source data.
 func (s Source) Equal(o Source) bool {
-	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Cache.Equal(o.Cache)
+	return s.Metrics == o.Metrics && s.Kinds == o.Kinds && s.Catalog == o.Catalog && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
 }
 
 // Published is one publication: a Model, the Source it was computed from and
@@ -67,13 +71,10 @@ type LoopEvent struct {
 	Published *Published
 }
 
-// encodeMetrics is the identity of the metrics results reads: FNV-64a over,
-// per read in order, the ID and Present and, for a present result, whether it
-// is fresh at now under maxAge (strict age > maxAge), Err, ManagedPresent and
-// every Rejects and Managed entry in key order. CollectedAt itself is left
-// out, as in ctrlmetrics.Result.SameContent: a renewed scrape is not a change,
-// and the strict staleness deadline in Model.Next makes the next run read it.
-// Freshness is in, so a stale model is never confirmed once metrics recover.
+// encodeMetrics is the identity of the metrics results reads: FNV-64a over each
+// read's ID, Present and, if present, freshness at now, Err and every Metrics
+// entry (including Snapshot and PerPod) in key order. CollectedAt is left out, as in
+// ctrlmetrics.Result.SameContent; Model.Next's staleness deadline covers it.
 func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uint64 {
 	h := fnv.New64a()
 	var b [8]byte
@@ -120,6 +121,39 @@ func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uin
 			str(k.Resource)
 			u64(math.Float64bits(res.Metrics.Managed[k]))
 		}
+		snapshot := sortedKeys(res.Metrics.Snapshot, func(a, b ctrlmetrics.GatewayKey) int {
+			return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+		})
+		u64(uint64(len(snapshot)))
+		for _, k := range snapshot {
+			str(k.Namespace)
+			str(k.Name)
+			v := res.Metrics.Snapshot[k]
+			for _, n := range []int{v.Listeners, v.Routes, v.Clusters, v.Endpoints, v.Secrets} {
+				u64(uint64(n)) //nolint:gosec // a count; only its bits matter
+			}
+		}
+		u64(uint64(len(res.Metrics.PerPod)))
+		for _, p := range res.Metrics.PerPod {
+			str(p.UID)
+			str(p.Name)
+			flag(p.DroppedPresent)
+			u64(math.Float64bits(p.Dropped))
+			flag(p.StatusSyncsPresent)
+			u64(math.Float64bits(p.StatusSyncs))
+			for _, series := range []map[ctrlmetrics.TypeKey]float64{p.Active, p.Total} {
+				keys := sortedKeys(series, func(a, b ctrlmetrics.TypeKey) int {
+					return cmp.Or(cmp.Compare(a.Gateway.Namespace, b.Gateway.Namespace), cmp.Compare(a.Gateway.Name, b.Gateway.Name), cmp.Compare(a.TypeURL, b.TypeURL))
+				})
+				u64(uint64(len(keys)))
+				for _, k := range keys {
+					str(k.Gateway.Namespace)
+					str(k.Gateway.Name)
+					str(k.TypeURL)
+					u64(math.Float64bits(series[k]))
+				}
+			}
+		}
 	}
 	return h.Sum64()
 }
@@ -157,8 +191,8 @@ func (e *Engine) confirm(prev *Published, now time.Time) bool {
 	return e.cur.CompareAndSwap(prev, &Published{Model: prev.Model, Source: prev.Source, ConfirmedAt: now})
 }
 
-// liveSource is the Source the stores, the metrics and the kinds monitor
-// would give a computation at now, for the installs p read metrics for.
+// liveSource is the Source the stores, the metrics, the kinds monitor and the
+// collector store would give a computation at now, for the installs p read metrics for.
 func (e *Engine) liveSource(p *Published, now time.Time) Source {
 	var src Source
 	if f, ok := e.cfg.Snapshots.(cache.Fingerprinter); ok {
@@ -174,6 +208,12 @@ func (e *Engine) liveSource(p *Published, now time.Time) Source {
 	src.Metrics = encodeMetrics(reads, now, e.cfg.MetricsMaxAge)
 	if e.cfg.KindsChange != nil {
 		src.Kinds = e.cfg.KindsChange().String()
+	}
+	if e.cfg.Catalog != nil {
+		src.Catalog = e.cfg.Catalog().Key()
+	}
+	if e.cfg.Collected != nil {
+		src.Collected = e.cfg.Collected().Print
 	}
 	return src
 }

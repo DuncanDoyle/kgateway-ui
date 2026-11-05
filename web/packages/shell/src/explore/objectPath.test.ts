@@ -1,5 +1,5 @@
 import type { LinkedRef } from "../api/types";
-import { objectPath } from "./objectPath";
+import { linkTarget, objectPath, withVia } from "./objectPath";
 
 const gw = "gateway.networking.k8s.io";
 const ref: LinkedRef = { group: gw, kind: "HTTPRoute", namespace: "shop", name: "x", link: "detail" };
@@ -46,4 +46,14 @@ test("the install ID and names are encoded, never split", () => {
   expect(objectPath("a.b", { group: "", kind: "Namespace", name: "shop", link: "yaml" })).toBe(
     "/i/a.b/r/-/Namespace/-/shop",
   );
+});
+
+test("linkTarget adds the trail and params to where the link opens", () => {
+  const to = linkTarget("a.b", { ...ref, kind: "Gateway", namespace: "infra", name: "edge" }, "a.b/x", {
+    listener: "http",
+  });
+  expect(to).toBe("/i/a.b/gateways/infra/edge?listener=http&via=a.b%2Fx");
+  expect(linkTarget("a.b", ref)).toBe("/i/a.b/routes/gateway.networking.k8s.io/HTTPRoute/shop/x");
+  expect(linkTarget("a.b", { ...ref, link: "none" }, "a.b/x")).toBeUndefined();
+  expect(withVia("/i/a.b/routes?q=1", "v")).toBe("/i/a.b/routes?q=1&via=v");
 });

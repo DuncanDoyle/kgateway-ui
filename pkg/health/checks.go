@@ -1,27 +1,31 @@
 package health
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
 )
 
-// Upstream returns the Phase 1 checks (design §5.2).
+// Upstream returns the upstream checks (design §5.2, Phase 3 §9.3).
 func Upstream() []Check {
-	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{}, computedCheck{}}
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{},
+		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
@@ -40,30 +44,43 @@ func ok(name string, required bool, at time.Time) CheckResult {
 
 func unavailable(in Input, name, why string) ([]Finding, CheckResult) {
 	return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-			Message: "Could not check " + name, Detail: why}},
+			Message: "Could not check " + name, Detail: why, Key: []string{name}}},
 		CheckResult{Name: name, Required: true, CollectedAt: in.Now, Error: why}
 }
 
-// cacheCheck: the snapshot is synced and every served kind, plus Namespaces,
-// Pods and Deployments, is currently readable.
+// cacheCheck: the snapshot is synced and the core kinds are readable; optional
+// watches are left to the checks that read them.
 type cacheCheck struct{}
 
 // Name implements Check.
 func (cacheCheck) Name() string { return "cluster access" }
 
+// Inputs implements Check: the served kinds and Namespaces through Owned, plus Pods and Deployments.
+func (cacheCheck) Inputs() InputSet {
+	return InputSet{Owned: true, Kinds: []objects.GroupKind{{Kind: "Pod"}, {Group: "apps", Kind: "Deployment"}}}
+}
+
 // Run implements Check: one KGWUI-008 per kind that cannot be read.
-func (c cacheCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if !in.Snapshot.Synced {
 		return unavailable(in, c.Name(), "cache not synced")
 	}
 	var fs []Finding
-	for gvr, a := range in.Snapshot.Access {
-		if !a.OK {
+	core := []schema.GroupVersionResource{cache.NamespacesGVR, cache.PodsGVR, cache.DeploymentsGVR}
+	for _, s := range in.Served {
+		core = append(core, s.GVR())
+	}
+	for _, gvr := range core {
+		if a, known := in.Snapshot.Access[gvr]; known && !a.OK {
 			fs = append(fs, Finding{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-				Message: "No access to " + resourceName(gvr), Detail: a.Err})
+				Message: "No access to " + resourceName(gvr), Detail: a.Err, Key: []string{c.Name(), resourceName(gvr)}})
 		}
 	}
 	if len(fs) > 0 {
+		slices.SortFunc(fs, func(a, b Finding) int {
+			return cmp.Or(cmp.Compare(a.Message, b.Message), cmp.Compare(a.Detail, b.Detail))
+		})
 		return fs, CheckResult{Name: c.Name(), Required: true, CollectedAt: in.Snapshot.TakenAt, Error: fmt.Sprintf("%d kinds not readable", len(fs))}
 	}
 	return nil, ok(c.Name(), true, in.Snapshot.TakenAt)
@@ -83,15 +100,19 @@ type kindsCheck struct{}
 // Name implements Check.
 func (kindsCheck) Name() string { return "served kinds" }
 
+// Inputs implements Check.
+func (kindsCheck) Inputs() InputSet { return InputSet{KindsChange: true} }
+
 // Run implements Check: a served-kinds change is KGWUI-008 until the UI restarts
 // or the served set matches again, since the cache does not re-watch.
-func (c kindsCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c kindsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if in.KindsChange.Empty() {
 		return nil, ok(c.Name(), true, in.Now)
 	}
 	why := "served kinds changed: " + in.KindsChange.String()
 	return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-			Message: "Served kinds changed; restart the UI to watch them", Detail: in.KindsChange.String()}},
+			Message: "Served kinds changed; restart the UI to watch them", Detail: in.KindsChange.String(), Key: []string{c.Name()}}},
 		CheckResult{Name: c.Name(), Required: true, CollectedAt: in.Now, Error: why}
 }
 
@@ -101,9 +122,13 @@ type scopeCheck struct{}
 // Name implements Check.
 func (scopeCheck) Name() string { return "controller scope" }
 
+// Inputs implements Check: none beyond Install, which is always an input.
+func (scopeCheck) Inputs() InputSet { return InputSet{} }
+
 // Run implements Check: an unknown scope (for example a selector env set
 // through valueFrom) is KGWUI-008 with the scope's error as detail.
-func (c scopeCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c scopeCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if in.Install.Scope.Mode == install.ScopeUnknown {
 		return unavailable(in, c.Name(), in.Install.Scope.Err)
 	}
@@ -120,11 +145,22 @@ type controllerCheck struct{}
 // Name implements Check.
 func (controllerCheck) Name() string { return "controller pods" }
 
+// Inputs implements Check: AllInputs plus the process data its detail quotes.
+func (controllerCheck) Inputs() InputSet {
+	in := AllInputs()
+	in.Process = true
+	return in
+}
+
 // Run implements Check.
-func (c controllerCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c controllerCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	d := in.Install.Deployment
 	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
+		if in.Process != nil {
+			addNotReadyFacts(&f, &in.Process.Controller, d.Namespace, d.Status.ReadyReplicas, Desired(d))
+		}
 		return []Finding{f}, ok(c.Name(), true, in.Now)
 	}
 	return nil, ok(c.Name(), true, in.Now)
@@ -172,7 +208,7 @@ var (
 	policyOptional   = []string{"Attached"}
 )
 
-// conditionsCheck: KGWUI-002, KGWUI-003 and KGWUI-011's status trigger. Freshness is decided before
+// conditionsCheck: KGWUI-002, 003, 013–017 and KGWUI-011's status trigger. Freshness is decided before
 // status (D-006): a missing status block, a missing required condition, a
 // condition with reason Pending, or any stale condition makes the resource
 // "not yet processed"; only current conditions are reported or count as
@@ -183,13 +219,22 @@ type conditionsCheck struct{}
 // Name implements Check.
 func (conditionsCheck) Name() string { return "resource status" }
 
+// Inputs implements Check.
+func (conditionsCheck) Inputs() InputSet {
+	s := AllInputs()
+	s.Catalog = true // 013 and 014 explanation 1
+	return s
+}
+
 // Run implements Check.
-func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	id := in.Install.ID()
-	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string) {
+	// owner is the condition's discriminator owner: self, a listener, a parent or an ancestor.
+	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string, owner []string) {
 		f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
-			Message: message(cond), Detail: detail(cond, extra), Since: since(cond)}
+			Message: message(cond), Detail: detail(cond, extra), Since: since(cond), Key: append(slices.Clip(owner), cond.Type)}
 		delegationCondition(&f, u, cond)
 		fs = append(fs, f)
 	}
@@ -199,60 +244,95 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 		res    objects.Ref
 		parent objects.ParentRef
 	}
-	reported := map[pendingKey]bool{}
+	reported := map[pendingKey]int{}  // index in fs
 	inGrace := map[objects.Ref]bool{} // resources being processed
 	// notProcessed reports u (for parent) once: info while u's current
-	// generation was first seen less than Grace ago, warning after.
-	notProcessed := func(u *unstructured.Unstructured, parent objects.ParentRef, msg, why string) {
+	// generation was first seen less than Grace ago, warning after. A later
+	// block whose kind comes first in §10.1 order replaces the evidence.
+	notProcessed := func(u *unstructured.Unstructured, parent objects.ParentRef, msg, why string, ev *FreshnessEvidence) {
 		r := objects.RefOf(u)
 		k := pendingKey{r, parent}
-		if reported[k] {
+		if i, ok := reported[k]; ok {
+			if prev := fs[i].Facts.(*FreshnessEvidence); freshnessRank[ev.Freshness] < freshnessRank[prev.Freshness] {
+				fs[i].Detail, fs[i].Facts = why, ev
+			}
 			return
 		}
-		reported[k] = true
+		reported[k] = len(fs)
 		sev := SeverityWarning
 		if in.Now.Sub(in.firstSeen(u)) < Grace {
 			sev, msg = SeverityInfo, "Being processed by the controller"
 			inGrace[r] = true
 		}
+		key := []string{ownerSelf}
+		if parent != (objects.ParentRef{}) {
+			key = in.parentKey(u, parent)
+		}
 		fs = append(fs, Finding{Code: CodeRouteUnattached, Slug: "route-unattached", Severity: sev, Install: id, Resource: &r,
-			Message: msg, Detail: why, parent: &parent})
+			Message: msg, Detail: why, Key: key, Facts: ev, parent: &parent})
 	}
 	// pendingFor reports a block of u that is not processed; parent is set for
 	// route parents. An experimental-only kind gets a hint (D-018 §2).
-	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why string) {
-		notProcessed(u, parent, "Not yet processed by the controller", why+in.experimentalHint(u))
+	pendingFor := func(u *unstructured.Unstructured, parent objects.ParentRef, why, kind string, observed int64) {
+		notProcessed(u, parent, "Not yet processed by the controller", why+in.experimentalHint(u), in.freshnessEvidence(u, kind, observed))
 	}
-	pending := func(u *unstructured.Unstructured, why string) { pendingFor(u, objects.ParentRef{}, why) }
+	pending := func(u *unstructured.Unstructured, why, kind string) { pendingFor(u, objects.ParentRef{}, why, kind, 0) }
 	// current reports false when the block is pending: a required condition is
 	// missing or Unknown, a present condition has reason Pending, or a present
 	// condition may describe an older generation (including observedGeneration 0).
 	current := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) bool {
-		if why := pendingReason(u, cs, required, optional); why != "" {
-			pendingFor(u, parent, why+within(extra))
+		if why, kind, observed := blockFreshness(u, cs, required, optional); why != "" {
+			pendingFor(u, parent, why+within(extra), kind, observed)
 			return false
 		}
 		return true
 	}
 	// evaluate reports every present condition of a current block that is False;
 	// current() has already turned a required Unknown into "not processed".
-	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string) {
+	// A nil owner is a route parent's, resolved on its first finding.
+	// While conflict is set, 017 owns the listener's Accepted and Programmed False with that reason.
+	var conflict string
+	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string, owner []string) {
 		if !current(u, parent, cs, required, optional, extra) {
 			return
 		}
-		for _, t := range append(slices.Clone(required), optional...) {
-			if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
-				add(u, SeverityError, *cond, extra)
+		for _, ts := range [2][]string{required, optional} {
+			for _, t := range ts {
+				if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
+					if conflict != "" && cond.Reason == conflict && (t == "Accepted" || t == "Programmed") {
+						continue
+					}
+					if owner == nil {
+						owner = in.parentKey(u, parent)
+					}
+					// 013, 014 and 015 own their reasons; 002 takes the rest (D-030).
+					if l := listenerName(parent, owner); parent != (objects.ParentRef{}) || l != "" {
+						if f, ok := in.refsFinding(u, *cond, l, extra, owner); ok {
+							fs = append(fs, f)
+							continue
+						}
+					}
+					if parent != (objects.ParentRef{}) {
+						if f, ok := in.ruleFinding(u, *cond, extra, owner, ctx.WakeAt); ok {
+							fs = append(fs, f)
+							continue
+						}
+					}
+					add(u, SeverityError, *cond, extra, owner)
+				}
 			}
 		}
 	}
+	self := []string{ownerSelf}
 	for _, gc := range in.Owned.GatewayClasses {
-		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "")
+		evaluate(gc, objects.ParentRef{}, objects.Conditions(gc), classRequired, nil, "", self)
 	}
 	// listeners evaluates the listener status of a Gateway or ListenerSet; both
 	// share the listener status shape. With all, every configured listener
 	// needs a status block; otherwise only present blocks are judged.
-	listeners := func(u *unstructured.Unstructured, status []objects.ListenerStatus, all bool) {
+	// A conflict's other side is any listener on the same Gateway (017); built on the first conflict.
+	var sides map[objects.Ref][]listenerSide
+	listeners := func(u *unstructured.Unstructured, gw objects.Ref, spec []objects.Listener, status []objects.ListenerStatus, all bool) {
 		byName := map[string]objects.ListenerStatus{}
 		for _, l := range status {
 			byName[l.Name] = l
@@ -261,37 +341,64 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			l, ok := byName[name]
 			if !ok {
 				if all {
-					pending(u, "no status for listener "+name)
+					pending(u, "No status for listener "+name, FreshnessNeverWritten)
 				}
 				continue
 			}
-			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name)
-			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(u, *cf) {
-				add(u, SeverityError, *cf, "listener "+l.Name)
+			owner := []string{ownerListener, l.Name}
+			// 017 owns a current Conflicted=True and the conditions with its reason; 002 reports none (D-030, R94).
+			cf := objects.FindCondition(l.Conditions, "Conflicted")
+			if cf != nil && (cf.Status != metav1.ConditionTrue || objects.IsStale(u, *cf)) {
+				cf = nil
+			}
+			if cf != nil {
+				conflict = cf.Reason
+			}
+			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name, owner)
+			conflict = ""
+			if cf != nil {
+				if sides == nil {
+					sides = in.gatewayListeners()
+				}
+				i := slices.IndexFunc(spec, func(s objects.Listener) bool { return s.Name == name })
+				sl := objects.Listener{Name: name}
+				if i >= 0 {
+					sl = spec[i]
+				}
+				fs = append(fs, in.conflictFinding(u, sl, *cf, sides[gw], owner))
 			}
 		}
 	}
 	// owned are the Gateways and ListenerSets of this install: the only
 	// ancestors whose policy status counts here.
 	owned := map[objects.Ref]bool{}
-	// ListenerSet status is required like a Gateway's (D-017 §2). A rejected
+	// ListenerSet status is required like a Gateway's (D-017 §2). The CRDs
+	// default top-level conditions, so none at all is never written (§10.1). A rejected
 	// ListenerSet may have no listener status (reason NotAllowed), so while it
 	// is Accepted=False only the listener blocks present are judged.
 	for _, ls := range in.Owned.ListenerSets {
 		owned[objects.RefOf(ls)] = true
 		v := in.views().ListenerSet(ls)
 		cs := v.Conditions
+		if len(cs) == 0 {
+			pending(ls, noControllerStatus, FreshnessNeverWritten)
+			continue
+		}
 		if !current(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "") {
 			continue
 		}
-		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "")
-		listeners(ls, v.ListenerStatus, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
+		evaluate(ls, objects.ParentRef{}, cs, gatewayRequired, nil, "", self)
+		listeners(ls, v.Parent.Ref(), v.Listeners, v.ListenerStatus, objects.FindCondition(cs, "Accepted").Status != metav1.ConditionFalse)
 	}
 	for _, gw := range in.Owned.Gateways {
 		owned[objects.RefOf(gw)] = true
 		v := in.views().Gateway(gw)
-		evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "")
-		listeners(gw, v.ListenerStatus, true)
+		if len(v.Conditions) == 0 {
+			pending(gw, noControllerStatus, FreshnessNeverWritten)
+		} else {
+			evaluate(gw, objects.ParentRef{}, v.Conditions, gatewayRequired, nil, "", self)
+		}
+		listeners(gw, objects.RefOf(gw), v.Listeners, v.ListenerStatus, true)
 	}
 	// Routes: one status block per current parentRef of this install, and per
 	// reported HTTPRoute parent, matched on the full parentRef including section name and port.
@@ -310,10 +417,10 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 				}
 			}
 			if st == nil {
-				pendingFor(r.Obj, p, "no status from the controller for "+extra)
+				pendingFor(r.Obj, p, noControllerStatus+" for "+extra, FreshnessNeverWritten, 0)
 				continue
 			}
-			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra)
+			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, nil)
 		}
 	}
 	// Routes whose parent does not exist. A parent of a kind the cache cannot
@@ -323,7 +430,7 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			continue
 		}
 		notProcessed(u.Route.Obj, u.Parent, "Not attached: parent not found",
-			"parent "+parentDesc(u.Parent)+" does not exist")
+			"Parent "+parentDesc(u.Parent)+" does not exist", in.freshnessEvidence(u.Route.Obj, FreshnessNeverWritten, 0))
 	}
 	// Declared candidates: KGWUI-011's status trigger. Inside its grace the
 	// route is being processed, so this check is pending (design §6.2).
@@ -341,8 +448,12 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	// Policies: ancestors written by this install's controller, for a Gateway
 	// or ListenerSet it owns or for any other kind. Assign drops policies
 	// processed only for another install, so none here means not yet processed;
-	// on v2.3/v2.4 that includes a policy whose target is missing.
+	// on v2.3/v2.4 that includes a policy whose target is missing. A computed
+	// 016 for every target replaces that 003 (design §7.6).
+	targets := in.newPolicyTargets(ctx.State, ctx.WakeAt)
 	for _, p := range in.Owned.Policies {
+		tfs, allMissing := targets.findings(p.Obj)
+		fs = append(fs, tfs...)
 		var mine []objects.AncestorStatus
 		for _, a := range objects.PolicyAncestors(p.Obj) {
 			if !slices.Contains(in.Install.ControllerNames, a.ControllerName) {
@@ -355,11 +466,15 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			}
 		}
 		if len(mine) == 0 {
-			pending(p.Obj, "no status from the controller")
+			if !allMissing {
+				pending(p.Obj, noControllerStatus, FreshnessNoAncestor)
+			}
 			continue
 		}
 		for _, a := range mine {
 			extra := "ancestor " + a.AncestorRef.Kind + " " + a.AncestorRef.Ref().String()
+			owner := append([]string{ownerAncestor}, refKey(a.AncestorRef.Ref())...)
+			owner = append(owner, a.AncestorRef.SectionName, strconv.Itoa(int(a.AncestorRef.Port)))
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
@@ -367,12 +482,29 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 			for _, t := range append(slices.Clone(policyRequired), policyOptional...) {
 				if cond := objects.FindCondition(a.Conditions, t); cond != nil {
 					if sev, report := policySeverity(*cond); report {
-						add(p.Obj, sev, *cond, extra)
+						add(p.Obj, sev, *cond, extra, owner)
 					}
 				}
 			}
 		}
 	}
+	targets.save(ctx.State)
+	// Status-only owners become ranks; 002 then ranks the condition type and a computed 011 its parent.
+	rankOwners(fs, ownerAncestor, ownerAncestor)
+	rankOwners(fs, ownerStatusParent, ownerParent)
+	ordinalKeys(fs, func(f *Finding) (int, bool) {
+		switch {
+		case f.Code == CodeConditionFalse:
+			return len(f.Key) - 1, true
+		case f.Code == CodeRuleReplaced: // the match index is status data
+			return len(f.Key) - 2, true
+		case f.Code == CodeDelegatedNotAttached && len(f.Key) > 0 && f.Key[0] == computedOwner:
+			return 1, true
+		case f.Code == CodeComputedDisagrees: // the policy-target verifier's check key
+			return 0, true
+		}
+		return 0, false
+	})
 	if n := len(inGrace); n > 0 {
 		noun := "resources are"
 		if n == 1 {
@@ -384,39 +516,39 @@ func (c conditionsCheck) Run(in Input) ([]Finding, CheckResult) {
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
 
-// pendingReason returns why a status block of u is not current, or "" when
-// it is: a required condition is missing or Unknown, or a present condition
-// has reason Pending or may describe an older generation (D-006).
-func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string) string {
-	for _, t := range required {
-		if objects.FindCondition(cs, t) == nil {
-			return fmt.Sprintf("no %s condition", t)
-		}
-	}
-	for _, t := range append(slices.Clone(required), optional...) {
-		cond := objects.FindCondition(cs, t)
-		if cond == nil {
-			continue
-		}
-		if cond.Reason == "Pending" {
-			return t + " is Pending"
-		}
-		if objects.IsStale(u, *cond) {
-			return "status describes an older generation"
-		}
-	}
-	for _, t := range required {
-		if objects.FindCondition(cs, t).Status == metav1.ConditionUnknown {
-			return t + " is Unknown"
-		}
+// listenerName returns the listener a status block's owner names, "" for a
+// route parent or any other owner.
+func listenerName(parent objects.ParentRef, owner []string) string {
+	if parent == (objects.ParentRef{}) && len(owner) == 2 && owner[0] == ownerListener {
+		return owner[1]
 	}
 	return ""
+}
+
+// pendingReason returns why a status block of u is not current, or "" when
+// it is (D-006, design §10.1).
+func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required, optional []string) string {
+	why, _, _ := blockFreshness(u, cs, required, optional)
+	return why
 }
 
 // RoutePending returns why one status.parents entry of route u is not
 // current under the rules the resource status check applies, or "" when it is.
 func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 	return pendingReason(u, cs, routeRequired, routeOptional)
+}
+
+// GatewayPending is RoutePending for a Gateway or ListenerSet status block.
+func GatewayPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	if len(cs) == 0 {
+		return noControllerStatus
+	}
+	return pendingReason(u, cs, gatewayRequired, nil)
+}
+
+// PolicyPending is RoutePending for one status.ancestors entry of policy u.
+func PolicyPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
+	return pendingReason(u, cs, policyRequired, policyOptional)
 }
 
 // experimentalKind returns u's served kind when kgateway watches it, at its
@@ -522,23 +654,40 @@ func policySeverity(c metav1.Condition) (Severity, bool) {
 }
 
 // proxyCheck: KGWUI-006. Proxies are Deployments in the Gateway's namespace
-// that match the install's ProxySelector, found by ownerReference first, then
-// by the gateway-name label, which is truncated for names over 63 characters.
+// that match the install's ProxySelector, found by process.ProxyDeployment:
+// by ownerReference first, then by the safe gateway-name label value.
 type proxyCheck struct{}
 
 // Name implements Check.
 func (proxyCheck) Name() string { return "gateway proxies" }
+
+// Inputs implements Check: AllInputs plus the apps Deployments the proxies are
+// found in and the process data its detail quotes.
+func (proxyCheck) Inputs() InputSet {
+	in := AllInputs()
+	in.Kinds = []objects.GroupKind{{Group: "apps", Kind: "Deployment"}}
+	in.Process = true
+	in.Collected = []string{ctrllogs.Key}
+	return in
+}
 
 // Run implements Check. A missing proxy is reported after the grace period;
 // inside it the check is pending, so the install is unknown (D-017 §3). A
 // self-managed Gateway is the exception: KGWUI-010 (info) says the UI cannot
 // see that proxy's readiness, so it never drives the roll-up (D-016). A proxy
 // Deployment that exists is judged the same either way.
-func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	inGrace := 0
 	for _, gw := range in.Owned.Gateways {
-		d := proxyFor(gw, in.Snapshot.Deployments, in.Install.ProxySelector)
+		gwRef := objects.RefOf(gw)
+		d, ambiguous := process.LookupProxyDeployment(gwRef, in.Snapshot.Deployments, in.Install.ProxySelector)
+		if ambiguous {
+			fs = append(fs, Finding{Code: CodeProxyNotReady, Slug: "proxy-not-ready", Severity: SeverityWarning, Install: in.Install.ID(),
+				Resource: ref(gw), Message: proxyAmbiguousMessage})
+			continue
+		}
 		if d == nil {
 			if in.proxyMode(gw) == proxymode.SelfManaged {
 				fs = append(fs, Finding{Code: CodeSelfManagedProxy, Slug: "self-managed-proxy", Severity: SeverityInfo, Install: in.Install.ID(),
@@ -554,7 +703,12 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 			continue
 		}
 		if f, bad := notReady(d, CodeProxyNotReady, "proxy-not-ready", "Proxy", in.Install.ID(), in.workloads()); bad {
-			f.Resource = ref(gw)
+			f.Resource = &gwRef
+			if in.Process != nil {
+				if set, known := in.Process.Proxies[gwRef]; known {
+					addNotReadyFacts(&f, &set, gwRef.Namespace, d.Status.ReadyReplicas, Desired(d))
+				}
+			}
 			// A proxy scaled to zero may be deliberate (D-017 §1).
 			if Desired(d) == 0 {
 				f.Severity = SeverityWarning
@@ -570,70 +724,26 @@ func (c proxyCheck) Run(in Input) ([]Finding, CheckResult) {
 		if inGrace == 1 {
 			msg = "1 proxy not found yet"
 		}
+		addProxyDeployerErrors(ctx, fs)
 		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Snapshot.TakenAt, Error: msg}
 	}
+	addProxyDeployerErrors(ctx, fs)
 	return fs, ok(c.Name(), true, in.Snapshot.TakenAt)
 }
 
-// gatewayNameLabel is the standard Gateway API label on generated proxy resources.
-const gatewayNameLabel = "gateway.networking.k8s.io/gateway-name"
-
-// proxyFor returns gw's proxy Deployment among ds; a nil sel matches none.
-func proxyFor(gw *unstructured.Unstructured, ds []*appsv1.Deployment, sel labels.Selector) *appsv1.Deployment {
-	if sel == nil {
-		return nil
-	}
-	var byLabel *appsv1.Deployment
-	for _, d := range ds {
-		if d.Namespace != gw.GetNamespace() || !sel.Matches(labels.Set(d.Labels)) {
-			continue
-		}
-		for _, o := range d.OwnerReferences {
-			if o.Kind == "Gateway" && o.Name == gw.GetName() {
-				return d
-			}
-		}
-		if byLabel == nil && d.Labels[gatewayNameLabel] == gw.GetName() {
-			byLabel = d
+// addProxyDeployerErrors adds the deployer's errors to each 006 in fs, as a
+// failed apply is often why a proxy Deployment is missing or not ready.
+func addProxyDeployerErrors(ctx RunContext, fs []Finding) {
+	events, logs := installLogs(ctx)
+	for i := range fs {
+		if fs[i].Code == CodeProxyNotReady {
+			addDeployerErrors(ctx, &fs[i], events, logs)
 		}
 	}
-	return byLabel
 }
 
-// xdsCheck: KGWUI-001.
-type xdsCheck struct{}
-
-// Name implements Check.
-func (xdsCheck) Name() string { return "xDS rejects" }
-
-// Run implements Check. Missing, failed or stale metrics, or a scrape without
-// the resources_managed family while Gateways are owned, are KGWUI-008.
-func (c xdsCheck) Run(in Input) ([]Finding, CheckResult) {
-	if !in.HasMetrics {
-		return unavailable(in, c.Name(), "controller metrics not collected yet")
-	}
-	if in.Metrics.Err != "" {
-		return unavailable(in, c.Name(), in.Metrics.Err)
-	}
-	// Recomputing the model must not make an old zero-reject result look fresh.
-	if in.Metrics.Stale(in.Now, in.MetricsMaxAge) {
-		return unavailable(in, c.Name(), fmt.Sprintf("controller metrics are stale (last collected %s ago)", in.Now.Sub(in.Metrics.CollectedAt).Round(time.Second)))
-	}
-	// Every owned Gateway has a resources_managed series (D-012); without the
-	// family the endpoint or metric names are wrong, and zero rejects proves nothing.
-	if n := len(in.Owned.Gateways); n > 0 && !in.Metrics.Metrics.ManagedPresent {
-		return unavailable(in, c.Name(), fmt.Sprintf("%s missing from controller metrics although the install owns %d Gateway(s); check the metrics endpoint",
-			ctrlmetrics.ResourcesManaged, n))
-	}
-	var fs []Finding
-	for _, gw := range in.Owned.Gateways {
-		if n := in.Metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: gw.GetNamespace(), Name: gw.GetName()}]; n > 0 {
-			fs = append(fs, Finding{Code: CodeXDSRejected, Slug: "xds-rejected", Severity: SeverityError, Install: in.Install.ID(),
-				Resource: ref(gw), Message: "Configuration rejected by Envoy", Detail: fmt.Sprintf("%.0f active rejects", n)})
-		}
-	}
-	return fs, ok(c.Name(), true, in.Metrics.CollectedAt)
-}
+// proxyAmbiguousMessage is 006's message when several Deployments carry the Gateway's label.
+const proxyAmbiguousMessage = "More than one proxy Deployment matches this Gateway"
 
 // unwatchedCheck: KGWUI-004.
 type unwatchedCheck struct{}
@@ -641,8 +751,12 @@ type unwatchedCheck struct{}
 // Name implements Check.
 func (unwatchedCheck) Name() string { return "watched namespaces" }
 
+// Inputs implements Check.
+func (unwatchedCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c unwatchedCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c unwatchedCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	for _, u := range in.Assignment.Unwatched {
 		if u.Install != in.Install.ID() {
@@ -650,7 +764,8 @@ func (c unwatchedCheck) Run(in Input) ([]Finding, CheckResult) {
 		}
 		r := u.Route
 		fs = append(fs, Finding{Code: CodeNamespaceNotWatched, Slug: "namespace-not-watched", Severity: SeverityWarning, Install: u.Install,
-			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets " + u.Gateway.Kind + " " + u.Gateway.String()})
+			Resource: &r, Message: "Namespace not watched by the controller", Detail: "targets " + u.Gateway.Kind + " " + u.Gateway.String(),
+			Key: refKey(u.Gateway)})
 	}
 	return fs, ok(c.Name(), false, in.Now)
 }
@@ -661,8 +776,12 @@ type ambiguityCheck struct{}
 // Name implements Check.
 func (ambiguityCheck) Name() string { return "gateway ownership" }
 
+// Inputs implements Check.
+func (ambiguityCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check.
-func (c ambiguityCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c ambiguityCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	var fs []Finding
 	for _, a := range in.Assignment.Ambiguous {
 		if !slices.Contains(a.Installs, in.Install.ID()) {
@@ -681,17 +800,21 @@ type verifyCheck struct{}
 // Name implements Check.
 func (verifyCheck) Name() string { return "scope matches controller" }
 
+// Inputs implements Check.
+func (verifyCheck) Inputs() InputSet { return AllInputs() }
+
 // Run implements Check. It is optional: verification never decides health on its own.
-func (c verifyCheck) Run(in Input) ([]Finding, CheckResult) {
+func (c verifyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
+	in := ctx.Input
 	if !in.Verify.Available {
 		return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
-			Message: "Could not verify scope against the controller", Detail: in.Verify.Reason}}, CheckResult{Name: c.Name(), CollectedAt: in.Now, Error: in.Verify.Reason}
+			Message: "Could not verify scope against the controller", Detail: in.Verify.Reason, Key: []string{c.Name()}}}, CheckResult{Name: c.Name(), CollectedAt: in.Now, Error: in.Verify.Reason}
 	}
 	var fs []Finding
 	for _, m := range in.Verify.Mismatches {
 		s := m.Since
 		fs = append(fs, Finding{Code: CodeScopeMismatch, Slug: "scope-mismatch", Severity: SeverityWarning, Install: in.Install.ID(),
-			Message: "UI scope differs from the controller", Since: &s,
+			Message: "UI scope differs from the controller", Since: &s, Key: []string{m.Namespace, m.Resource},
 			Detail: fmt.Sprintf("namespace %s, %s: UI counts %.0f, controller counts %.0f", m.Namespace, m.Resource, m.UI, m.Controller)})
 	}
 	return fs, ok(c.Name(), false, in.Now)

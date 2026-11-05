@@ -9,11 +9,11 @@ import {
   THEME_PAINT_KEY,
   type Theme,
 } from "../index";
-import { overview, unhealthy } from "../test/fixtures";
+import { diagnostics, overview, unhealthy } from "../test/fixtures";
 import { stubApi, testSWR } from "../test/render";
 import { reservedPathOf } from "./Shell";
 
-// A downstream with its own brand, theme, page, nav entry and finding renderer, registered through the public shell API only.
+// A downstream with its own brand, theme, page, nav entry, finding renderer and install panel, registered through the public shell API only.
 const acmeTheme: Theme = {
   ...controlRoomDark,
   id: "acme",
@@ -27,7 +27,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("a downstream extension contributes brand, theme, page, nav entry and finding renderer", async () => {
+it("a downstream extension contributes brand, theme, page, nav entry, finding renderer and install panel", async () => {
   const now = Date.now();
   stubApi({
     "/api/v1/installs": [
@@ -53,11 +53,12 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
       kinds: [],
     },
     "/api/v1/installs/kgw.kgateway/overview": overview(now),
-    "/api/v1/installs/kgw.kgateway/health": {
-      ...unhealthy(now),
-      findings: [
-        { code: "ACME-001", slug: "demo", severity: "error", install: "kgw.kgateway", message: "Downstream finding" },
-      ],
+    "/api/v1/installs/kgw.kgateway/diagnostics": diagnostics(unhealthy(now)),
+    "/api/v1/installs/kgw.kgateway/findings/f1-acme": {
+      install: "kgw.kgateway",
+      finding: { id: "f1-acme", code: "ACME-001", slug: "demo", severity: "error", message: "Downstream finding" },
+      affected: { install: "kgw.kgateway", items: [], total: 0, collectedAt: new Date(now).toISOString() },
+      collectedAt: new Date(now).toISOString(),
     },
   });
   window.history.pushState({}, "", "/i/kgw.kgateway");
@@ -72,12 +73,13 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
           routes: [{ path: "widgets", element: <p>widgets page</p>, scope: "install" }],
           navEntries: [{ label: "Widgets", to: "widgets", scope: "install" }],
           findingRenderers: { "ACME-": () => <span>acme detail</span> },
+          contributions: { installPanels: [{ id: "acme", title: "Acme panel", render: () => <p>acme panel</p> }] },
         }}
       />
     </SWRConfig>,
   );
   expect(await screen.findByText("Acme Edge")).toBeInTheDocument();
-  expect(await screen.findByText("acme detail")).toBeInTheDocument();
+  expect(await screen.findByText("acme panel")).toBeInTheDocument();
   expect(screen.getByTestId("edition")).toHaveTextContent("acme");
   // The contributed tokens apply: colour, font family, type scale, and the pre-React paint record.
   expect(screen.getByTestId("version")).toHaveStyle({ backgroundColor: "#7A1FA2", fontSize: "13px" });
@@ -88,6 +90,10 @@ it("a downstream extension contributes brand, theme, page, nav entry and finding
   window.history.pushState({}, "", "/i/kgw.kgateway/widgets");
   window.dispatchEvent(new PopStateEvent("popstate"));
   await waitFor(() => expect(screen.getByText("widgets page")).toBeInTheDocument());
+  // The finding renderer shows on the finding's page.
+  window.history.pushState({}, "", "/i/kgw.kgateway/findings/f1-acme");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+  expect(await screen.findByText("acme detail")).toBeInTheDocument();
 });
 
 // A build that predates the explorer slots: only the four Phase 1 pages.

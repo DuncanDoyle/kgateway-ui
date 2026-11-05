@@ -45,3 +45,14 @@ export function pseudoRules(el: Element, pseudo: string): string[] {
     .filter(([, sel = ""]) => sel.includes(pseudo) && classes.some((c) => sel.includes(c)))
     .map(([, , body = ""]) => body);
 }
+
+/** el's href without the trail's `via`, for tests about where a link opens rather than the path taken (D-035). */
+export function hrefPath(el: Element): string | null {
+  const href = el.getAttribute("href");
+  if (href === null || !href.includes("via=")) return href;
+  const [path = "", query = ""] = href.split("?");
+  const q = new URLSearchParams(query);
+  q.delete("via");
+  const rest = q.toString();
+  return rest ? `${path}?${rest}` : path;
+}

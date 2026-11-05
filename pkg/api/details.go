@@ -6,17 +6,23 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
 
 // Detail 404 messages. A denied, absent or unadmitted object gets the same
@@ -44,24 +50,27 @@ type detail struct {
 
 // maxPageUnits bounds the contexts one response materializes (design §7.3).
 // A unit is about 32 bytes of JSON: contexts and path steps cost 4, header
-// and query matches 1, and their text 1 per 32 bytes.
+// and query matches 1, and their text and reasons 1 per 32 bytes, counted
+// after JSON escaping.
 var maxPageUnits = 100_000
 
-// charge adds to the response the cost of a context with parent match pm,
-// path and the effective rules shown with it. It reports false, and charges
-// no further, once the response is past maxPageUnits.
-func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.EffectiveRule) bool {
+// charge adds a context's cost: its parent match, path, rules and reasons.
+// It reports false once the response is past maxPageUnits.
+func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.EffectiveRule, reasons ...string) bool {
 	if d.units > maxPageUnits {
 		return false
 	}
 	n, text := 4, 0
+	for _, r := range reasons {
+		text += escapedLen(r)
+	}
 	add := func(m objects.Match) {
 		k, b := matchSize(m)
 		n, text = n+k, text+b
 	}
 	add(pm)
 	for s := range path.All() {
-		n, text = n+4, text+len(s.Route.Namespace)+len(s.Route.Name)
+		n, text = n+4, text+escapedLen(s.Route.Namespace)+escapedLen(s.Route.Name)
 		if add(s.Match); d.units+n+text/32 > maxPageUnits {
 			d.units = maxPageUnits + 1
 			return false
@@ -78,16 +87,32 @@ func (d *detail) charge(pm objects.Match, path *computed.Path, rules []computed.
 
 // matchSize is m's header and query matches and the bytes of its text.
 func matchSize(m objects.Match) (keys, text int) {
-	text = len(m.Method)
+	text = escapedLen(m.Method)
 	if m.Path != nil {
-		text += len(m.Path.Type) + len(m.Path.Value)
+		text += escapedLen(m.Path.Type) + escapedLen(m.Path.Value)
 	}
 	for _, ks := range [...][]objects.KeyMatch{m.Headers, m.QueryParams} {
 		for _, k := range ks {
-			text += len(k.Type) + len(k.Name) + len(k.Value)
+			text += escapedLen(k.Type) + escapedLen(k.Name) + escapedLen(k.Value)
 		}
 	}
 	return len(m.Headers) + len(m.QueryParams), text
+}
+
+// escapedLen is the bytes s takes in a JSON string as writeJSON encodes it.
+func escapedLen(s string) int {
+	n := 0
+	for _, r := range s {
+		switch {
+		case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t':
+			n += 2
+		case r < 0x20 || r == '<' || r == '>' || r == '&' || r == '\u2028' || r == '\u2029' || r == utf8.RuneError:
+			n += 6
+		default:
+			n += utf8.RuneLen(r)
+		}
+	}
+	return n
 }
 
 // startDetail finds the install, or writes 503 or 404.
@@ -164,7 +189,7 @@ func (d *detail) routeCounts(parent objects.Ref) RouteCounts {
 
 // condition is c of object u on the wire.
 func condition(u *unstructured.Unstructured, c metav1.Condition) Condition {
-	return Condition{Type: c.Type, Status: string(c.Status), Reason: c.Reason, Message: c.Message, ObservedGeneration: c.ObservedGeneration,
+	return Condition{Type: c.Type, Status: string(c.Status), Reason: c.Reason, Message: computed.ClipDisplay(c.Message, computed.MaxStatusBytes), ObservedGeneration: c.ObservedGeneration,
 		LastTransitionTime: wireTime(c.LastTransitionTime.Time), Stale: objects.IsStale(u, c)}
 }
 
@@ -224,10 +249,116 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 	} else {
 		v, st = objects.DecodeGateway(u), explore.RowState(ref, d.i.Health)
 	}
-	writeJSON(w, GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
+	out := GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
 		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
 		Listeners: d.listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
-		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)})
+		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
+	if cand == nil {
+		out.DataPlane, out.Proxies = d.dataPlane(ref)
+	}
+	writeJSON(w, out)
+}
+
+// proxyStatsCheckName is a proxy stats check; its result says whether the stats run.
+const proxyStatsCheckName = "proxy connection"
+
+// dataPlane is owned Gateway gw's data plane and proxies for the caller (design §13.3).
+func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
+	ps, set := newProcSummary(d.v, d.i), &process.Set{}
+	if d.i.Process != nil {
+		if s, ok := d.i.Process.Proxies[gw]; ok {
+			set = &s
+		}
+	}
+	proxies := ps.set(set, gw.Namespace, ps.facts[gw], true)
+	fs := d.i.Health.Findings
+	on := func(code string) int {
+		return slices.IndexFunc(fs, func(f health.Finding) bool { return f.Code == code && f.Resource != nil && *f.Resource == gw })
+	}
+	dp := &DataPlaneDTO{Rejects: []DataPlaneTypes{}, NextSteps: []NextStep{}, RecentlyChanged: []LinkedRef{}, Snapshot: d.snapshot(gw),
+		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, gw, on(health.CodeSelfManagedProxy) >= 0),
+		ControllerLogs: health.LogsNotRead}
+	dp.Withheld, dp.ControllerLogs = withheldOn(d.i.Health.Checks, gw)
+	k := on(health.CodeXDSRejected)
+	if k < 0 {
+		return dp, &proxies
+	}
+	f := &fs[k]
+	dp.Rejecting = true
+	dp.NextSteps = append(dp.NextSteps, nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(d.p.Model, d.i), d.h.commands, d.v.visible()))...)
+	ev, ok := f.Facts.(*health.XDSRejectsEvidence)
+	if !ok {
+		return dp, &proxies
+	}
+	dp.StatusSaysHealthy = ev.StatusSaysHealthy
+	if !d.v.allOf(f.Evidence) {
+		dp.EvidenceRestricted = true
+		return dp, &proxies
+	}
+	for _, t := range ev.Types {
+		dp.Rejects = append(dp.Rejects, DataPlaneTypes{TypeURL: t.TypeURL, Streams: t.Streams, FirstSeen: wireTime(t.FirstSeen)})
+	}
+	slices.SortFunc(dp.Rejects, func(a, b DataPlaneTypes) int { return strings.Compare(a.TypeURL, b.TypeURL) })
+	// Each recently changed object is authorized on its own and left out without a count (§14 rule 14).
+	for _, r := range ev.RecentlyChanged {
+		if d.v.can(r) {
+			dp.RecentlyChanged = append(dp.RecentlyChanged, d.l.linked(r))
+		}
+	}
+	return dp, &proxies
+}
+
+// withheldOn is gw's withheld config from the xDS rejects check, nil when
+// there is none, and whether the controller log was read: not read without the check.
+func withheldOn(checks []health.CheckResult, gw objects.Ref) (*WithheldDTO, string) {
+	for _, c := range checks {
+		if c.Name != xdsCheckName || c.ControllerLogs == "" {
+			continue
+		}
+		for _, w := range c.Withheld {
+			if w.Gateway == gw {
+				return &WithheldDTO{Message: health.WithheldMessage, First: wireTime(w.First), Last: wireTime(w.Last)}, c.ControllerLogs
+			}
+		}
+		return nil, c.ControllerLogs
+	}
+	return nil, health.LogsNotRead
+}
+
+// snapshot is gw's xDS snapshot from the install's last complete metrics read; nil without one.
+func (d *detail) snapshot(gw objects.Ref) *SnapshotDTO {
+	for _, r := range d.p.Model.MetricsRead {
+		if r.ID != d.i.Resolved.ID() || !r.Present || r.Result.Err != "" {
+			continue
+		}
+		if s, ok := r.Result.Metrics.Snapshot[ctrlmetrics.GatewayKey{Namespace: gw.Namespace, Name: gw.Name}]; ok {
+			return &SnapshotDTO{By: "controller", Listeners: s.Listeners, Routes: s.Routes, Clusters: s.Clusters, Endpoints: s.Endpoints, Secrets: s.Secrets}
+		}
+	}
+	return nil
+}
+
+// proxyStats says whether proxy stats feed Gateway gw: off or denied first, then
+// not observed for a self-managed one (KGWUI-010), then a failing collector or gw's own gap.
+func proxyStats(checks []health.CheckResult, gw objects.Ref, selfManaged bool) ProxyStatsDTO {
+	var c health.CheckResult
+	if j := slices.IndexFunc(checks, func(c health.CheckResult) bool { return c.Name == proxyStatsCheckName }); j >= 0 {
+		c = checks[j]
+	} else {
+		c.Unavailable = health.AvailFailing
+	}
+	switch {
+	case c.Unavailable == health.AvailOff || c.Unavailable == health.AvailDenied:
+		return ProxyStatsDTO{Unavailable: c.Unavailable, Reason: c.Error}
+	case selfManaged:
+		return ProxyStatsDTO{Unavailable: health.AvailNotObserved}
+	case c.Unavailable != "":
+		return ProxyStatsDTO{Unavailable: c.Unavailable, Reason: c.Error}
+	}
+	if j := slices.IndexFunc(c.Gaps, func(g health.GatewayGap) bool { return g.Gateway == gw }); j >= 0 {
+		return ProxyStatsDTO{Unavailable: c.Gaps[j].Unavailable, Reason: c.Gaps[j].Reason}
+	}
+	return ProxyStatsDTO{Available: true}
 }
 
 // listenerSetCount is the total of the ListenerSets list for parent gw:
@@ -253,6 +384,25 @@ func servedListenerSet(m *engine.Model, group, kind string) (kinds.Served, bool)
 		}
 	}
 	return kinds.Served{}, false
+}
+
+// gatewayCRDField fills a's CRD fields from the watched Gateway CRD's channel
+// and bundle, when they tell whether it defines allowedListeners (§9.4).
+func gatewayCRDField(a *AllowedListenersDTO, snap *cache.Snapshot) {
+	if snap == nil || !snap.Access[cache.CRDsGVR].OK {
+		return
+	}
+	for _, c := range snap.CRDs {
+		if c.Name != "gateways."+objects.GatewayAPIGroup {
+			continue
+		}
+		if has, known := rulesets.GatewayCRDHasAllowedListeners(c.Channel, c.BundleVersion); known {
+			a.CRDField, a.CRDChannel, a.CRDBundleVersion = "missing", c.Channel, c.BundleVersion
+			if has {
+				a.CRDField = "defined"
+			}
+		}
+	}
 }
 
 // experimentalHint is D-018's hint as a sentence, for a ListenerSet with no
@@ -306,6 +456,9 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 			al = objects.DecodeGateway(pu).AllowedListeners
 		}
 		out.ParentAllowedListeners = &AllowedListenersDTO{Set: al != nil, Value: al, CRDHint: al == nil}
+		if al == nil {
+			gatewayCRDField(out.ParentAllowedListeners, d.p.Model.Snapshot)
+		}
 	}
 	writeJSON(w, out)
 }
@@ -673,14 +826,19 @@ func (d *detail) effective(route objects.Ref, inherit bool) ([]EffectiveDTO, boo
 				continue
 			}
 			c := &ed.Contexts[x]
-			if !d.charge(c.ParentMatch, nil, c.Rules) {
+			// Charge before building: a refused context must not materialize its matches.
+			reasons := make([]string, 0, len(c.Rules))
+			for _, er := range c.Rules {
+				reasons = append(reasons, explainFit(er.Reason))
+			}
+			if !d.charge(c.ParentMatch, nil, c.Rules, reasons...) {
 				dto.ContextsTruncated = true
 				break
 			}
 			pm := matchDTO(c.ParentMatch)
 			ec := EffectiveContext{ParentMatch: &pm, Rules: make([]EffectiveRuleDTO, 0, len(c.Rules))}
-			for _, er := range c.Rules {
-				ec.Rules = append(ec.Rules, EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: explainFit(er.Reason)})
+			for k, er := range c.Rules {
+				ec.Rules = append(ec.Rules, EffectiveRuleDTO{Index: er.Index, Kept: er.Kept, Matches: matchList(er.Matches), Reason: reasons[k]})
 			}
 			dto.Contexts = append(dto.Contexts, ec)
 		}
@@ -777,6 +935,7 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 	shown := out.Computed.State != string(computed.StateRestricted)
 	if shown {
 		out.Outcome, out.Reason = string(r.Outcome), explainRow(r.Outcome, r.Reason, r.Unresolved)
+		d.units += escapedLen(out.Reason) / 32
 		out.Observed.ParentCondition = d.parentCondition(pu, pv, r.Reporters)
 	}
 	if child := r.Key.Child; child != (objects.Ref{}) {
@@ -788,7 +947,8 @@ func (d *detail) delegationRow(r *explore.DelegRow, pu *unstructured.Unstructure
 		if !d.v.allowDeps(d.ix, r.ContextDeps[j]) {
 			continue
 		}
-		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil) {
+		// Charge before building: a refused context must not materialize its path.
+		if c := &r.Contexts[j]; !d.charge(c.ParentMatch, c.Path, nil, contextReason(r, j)) {
 			out.ContextsTruncated = true
 			break
 		}
@@ -814,24 +974,32 @@ func (d *detail) selectionRow(r *explore.DelegRow) DelegationRow {
 // none for a hidden one, and never restrict it (design §7.4 rule 4b, D-024).
 func (d *detail) delegationContext(r *explore.DelegRow, j int) DelegationContext {
 	c := &r.Contexts[j]
-	o := c.Outcome
-	if o == "" {
-		o = computed.OutcomeUnknown // an empty outcome counts as unknown
-	}
 	pm := matchDTO(c.ParentMatch)
-	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, c.Path.Len()), Outcome: string(o)}
-	// An unknown context's reason is its unknown code, as Computed.Reason is.
-	if o == computed.OutcomeUnknown {
-		out.Reason = string(c.Unknown)
-	} else {
-		out.Reason = explainRow(o, c.Reason, r.Unresolved)
-	}
+	out := DelegationContext{ParentMatch: &pm, Path: make([]PathStepDTO, c.Path.Len()), Outcome: string(contextOutcome(c)), Reason: contextReason(r, j)}
 	i := len(out.Path)
 	for s := range c.Path.All() { // last step first
 		i--
 		out.Path[i] = PathStepDTO{Ref: d.cachedLink(s.Route), Match: matchDTO(s.Match)}
 	}
 	return out
+}
+
+// contextOutcome is c's outcome; an empty one counts as unknown.
+func contextOutcome(c *computed.Context) computed.RowOutcome {
+	if c.Outcome == "" {
+		return computed.OutcomeUnknown
+	}
+	return c.Outcome
+}
+
+// contextReason is the reason text of context j of r. An unknown context's
+// reason is its unknown code, as Computed.Reason is.
+func contextReason(r *explore.DelegRow, j int) string {
+	c := &r.Contexts[j]
+	if o := contextOutcome(c); o != computed.OutcomeUnknown {
+		return explainRow(o, c.Reason, r.Unresolved)
+	}
+	return string(c.Unknown)
 }
 
 // cachedLink is d.l.linked memoised per request.

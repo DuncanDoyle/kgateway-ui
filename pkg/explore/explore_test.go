@@ -88,7 +88,7 @@ func (w *world) input(t *testing.T) Input {
 	owned := a.PerInstall[res.ID()]
 	rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
 		Metrics:    ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}},
-		HasMetrics: true, MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, FirstSeen: w.firstSeen}, health.Upstream())
+		HasMetrics: true, MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, FirstSeen: w.firstSeen}, health.Upstream(), health.Runtime{})
 	return Input{Install: res, Owned: owned, Assignment: a, Snapshot: snap, Served: served, Health: rep}
 }
 
@@ -248,7 +248,7 @@ func TestAttachmentFromCurrentStatusOnly(t *testing.T) {
 	for _, name := range []string{"stale-true", "stale-false"} {
 		_, r := row(t, ix, "shop", name)
 		p := r.Parents[0]
-		if p.Attachment != AttachmentPending || p.Pending != "status describes an older generation" || p.Cond != nil || r.Flags != FlagPending {
+		if p.Attachment != AttachmentPending || p.Pending != "Status describes an older generation" || p.Cond != nil || r.Flags != FlagPending {
 			t.Errorf("%s: %+v flags %v", name, p, r.Flags.Names())
 		}
 	}
@@ -1255,5 +1255,112 @@ func TestRefScopeEmptyWildcardIsAll(t *testing.T) {
 		if isHTTPRoute(r.Ref.Group, r.Ref.Kind) && r.Ref.Namespace == "shop" && !slices.ContainsFunc(scope, func(i int32) bool { return ix.Ref(i) == r.Ref }) {
 			t.Errorf("%s missing from the label scope", r.Ref)
 		}
+	}
+}
+
+// rejects001 is an active KGWUI-001 on Gateway ref.
+func rejects001(ref objects.Ref) health.Finding {
+	return health.Finding{Code: health.CodeXDSRejected, Severity: health.SeverityError, Resource: &ref, Message: "Proxies reject this Gateway's config"}
+}
+
+// rejectWorld has routes and a ListenerSet on infra/edge and a route on infra/calm.
+func rejectWorld() *world {
+	ls := objects.ParentRef{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}
+	calm := testutil.GwRef("infra", "calm")
+	stale := testutil.HTTPRoute("shop", "stale", []objects.ParentRef{gw}, accepted(gw))
+	stale.SetGeneration(2)
+	return newWorld(
+		testutil.Gateway("infra", "calm", "kgateway", nil),
+		testutil.ListenerSet("infra", "ls", gw, nil),
+		testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}, accepted(gw)),
+		testutil.HTTPRoute("shop", "through", []objects.ParentRef{ls}, accepted(ls)),
+		testutil.HTTPRoute("shop", "erring", []objects.ParentRef{gw}, accepted(gw)),
+		testutil.HTTPRoute("shop", "bad", []objects.ParentRef{gw}, status(gw, cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners", ""), resolved)),
+		stale,
+		testutil.HTTPRoute("shop", "elsewhere", []objects.ParentRef{calm}, accepted(calm)),
+		testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
+			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted")}}),
+	)
+}
+
+// A route or ListenerSet whose current status is True for a Gateway with an
+// active 001 is flagged and at least warning; its own error stays error, a
+// route that is not current or not accepted, or on another Gateway, is not flagged.
+func TestRowNeverHealthyWhileGatewayRejects(t *testing.T) {
+	in := rejectWorld().input(t)
+	erring := routeRef("shop", "erring")
+	in.Health.Findings = append(in.Health.Findings, rejects001(gwObj),
+		health.Finding{Code: health.CodeConditionFalse, Severity: health.SeverityError, Resource: &erring})
+	ix := Build(in)
+	for name, want := range map[string]struct {
+		flagged bool
+		state   health.State
+	}{
+		"cart": {true, health.StateWarning}, "through": {true, health.StateWarning}, "erring": {true, health.StateError},
+		"bad": {false, health.StateError}, "stale": {false, health.StateWarning}, "elsewhere": {false, health.StateHealthy},
+	} {
+		if _, r := row(t, ix, "shop", name); (r.Flags&FlagGatewayRejecting != 0) != want.flagged || r.State != want.state {
+			t.Errorf("%s: flags %v state %s, want flagged %v state %s", name, r.Flags.Names(), r.State, want.flagged, want.state)
+		}
+	}
+	if l := ix.ListenerSets[0]; l.State != health.StateWarning {
+		t.Errorf("listenerset state %s, want warning", l.State)
+	}
+	// The flag creates no finding of its own.
+	if ix.Findings[routeRef("shop", "cart")] != (Worst{}) {
+		t.Errorf("cart has findings %+v", ix.Findings[routeRef("shop", "cart")])
+	}
+	// The data plane group's affected objects are the flagged rows, the ListenerSet and the policy.
+	got := StatusTrueFor(in.Install, in.Owned, nil, map[objects.Ref]bool{gwObj: true})[gwObj]
+	want := []objects.Ref{{Group: objects.GatewayAPIGroup, Kind: "ListenerSet", Namespace: "infra", Name: "ls"}, routeRef("shop", "cart"),
+		routeRef("shop", "erring"), routeRef("shop", "through"), {Group: "gateway.kgateway.dev", Kind: "TrafficPolicy", Namespace: "shop", Name: "tp"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("status True for edge\n got %v\nwant %v", got, want)
+	}
+
+	// Without the 001 nothing is flagged and the rows are as before.
+	in = rejectWorld().input(t)
+	ix = Build(in)
+	for _, r := range ix.Routes {
+		if r.Flags&FlagGatewayRejecting != 0 || r.State != RowState(r.Ref, in.Health) {
+			t.Errorf("%s without a reject: flags %v state %s", r.Ref, r.Flags.Names(), r.State)
+		}
+	}
+	if l := ix.ListenerSets[0]; l.State != health.StateHealthy {
+		t.Errorf("listenerset without a reject %s", l.State)
+	}
+}
+
+// state=gateway-rejecting returns exactly the flagged rows.
+func TestGatewayRejectingFilter(t *testing.T) {
+	in := rejectWorld().input(t)
+	in.Health.Findings = append(in.Health.Findings, rejects001(gwObj))
+	ix := Build(in)
+	f, ok := ParseFlag("gateway-rejecting")
+	if !ok || f != FlagGatewayRejecting {
+		t.Fatalf("ParseFlag: %v %v", f, ok)
+	}
+	p, err := ix.QueryRoutes(Query{States: f}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, id := range p.IDs {
+		got = append(got, ix.Routes[id].Ref.Name)
+	}
+	if !slices.Equal(got, []string{"cart", "erring", "through"}) || p.Total != 3 {
+		t.Errorf("state=gateway-rejecting: %v (total %d)", got, p.Total)
+	}
+}
+
+// A policy whose Attached condition describes an older generation is not current, so not in StatusTrueFor.
+func TestStatusTrueForSkipsStalePolicy(t *testing.T) {
+	stale := testutil.Cond("Attached", metav1.ConditionTrue, "Attached")
+	stale.ObservedGeneration = 0
+	w := newWorld(testutil.TrafficPolicy("shop", "tp", testutil.PolicyAncestor{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), stale}}))
+	in := w.input(t)
+	if got := StatusTrueFor(in.Install, in.Owned, nil, map[objects.Ref]bool{gwObj: true})[gwObj]; len(got) != 0 {
+		t.Errorf("stale policy listed: %v", got)
 	}
 }

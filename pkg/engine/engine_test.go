@@ -300,3 +300,92 @@ func TestComputeSelectsRulesPerInstall(t *testing.T) {
 		t.Fatalf("RulesFor must get the kgateway version and decide: got %q, %s", got, s.Rules.Version())
 	}
 }
+
+// storeCheck counts its runs in its Store and marks each install that writes
+// to it; its finding reports both. It declares Clock, so it runs on every recompute.
+type storeCheck struct{}
+
+func (storeCheck) Name() string            { return "store probe" }
+func (storeCheck) Inputs() health.InputSet { return health.InputSet{Clock: true} }
+func (storeCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	n, _ := health.Load[int](ctx.State, "runs")
+	ctx.State.Set("runs", n+1)
+	ctx.State.Set("install/"+ctx.Install.ID(), true)
+	// A since of its own keeps the engine's first-seen entry out of the Store.
+	now := ctx.Now
+	return []health.Finding{{Code: "ACME-001", Severity: health.SeverityInfo, Install: ctx.Install.ID(), Message: "store", Since: &now,
+		Detail: fmt.Sprintf("runs=%d keys=%d", n+1, ctx.State.Len())}}, health.CheckResult{Name: "store probe", OK: true, CollectedAt: ctx.Now}
+}
+
+// storeState is storeCheck's finding detail for install id in m.
+func storeState(t *testing.T, m *Model, id string) string {
+	t.Helper()
+	for _, im := range m.Installs {
+		if im.Resolved.ID() != id {
+			continue
+		}
+		for _, f := range im.Health.Findings {
+			if f.Code == "ACME-001" {
+				return f.Detail
+			}
+		}
+	}
+	t.Fatalf("no store probe finding for %s", id)
+	return ""
+}
+
+// storeConfig is config with storeCheck appended.
+func storeConfig(snap *cache.Snapshot) Config {
+	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+	cfg.Checks = append(health.Upstream(), storeCheck{})
+	return cfg
+}
+
+// D-032: a check's Store survives recomputes.
+func TestStoreSurvivesRecompute(t *testing.T) {
+	e := New(storeConfig(snapshot(t)))
+	e.Compute()
+	if got := storeState(t, e.Compute(), "kgw.kgateway"); got != "runs=2 keys=2" {
+		t.Fatalf("second compute: %s, want runs=2 keys=2", got)
+	}
+}
+
+// D-032: a new engine over the same cache starts with empty Stores.
+func TestStoreClearedOnEngineRestart(t *testing.T) {
+	snap := snapshot(t)
+	e := New(storeConfig(snap))
+	e.Compute()
+	e.Compute()
+	if got := storeState(t, New(storeConfig(snap)).Compute(), "kgw.kgateway"); got != "runs=1 keys=2" {
+		t.Fatalf("after restart: %s, want runs=1 keys=2", got)
+	}
+}
+
+// Review focus 1: each install has its own Store per check, and a vanished
+// install's Stores are dropped.
+func TestStoresAreIsolatedPerInstall(t *testing.T) {
+	snap := snapshot(t)
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	snap.Deployments = append(snap.Deployments, d2)
+	p2 := testutil.ControllerPod(d2, "p2", true)
+	snap.Pods = append(snap.Pods, p2)
+	e := New(storeConfig(snap))
+	e.Compute()
+	m := e.Compute()
+	for _, id := range []string{"kgw.kgateway", "kgw2.kgateway2"} {
+		if got := storeState(t, m, id); got != "runs=2 keys=2" {
+			t.Fatalf("%s: %s, want runs=2 keys=2 (its own runs and install only)", id, got)
+		}
+	}
+	// kgw2 vanishes for one compute, then returns with a fresh Store.
+	snap.Deployments, snap.Pods = snap.Deployments[:len(snap.Deployments)-1], snap.Pods[:len(snap.Pods)-1]
+	e.Compute()
+	snap.Deployments, snap.Pods = append(snap.Deployments, d2), append(snap.Pods, p2)
+	m = e.Compute()
+	if got := storeState(t, m, "kgw2.kgateway2"); got != "runs=1 keys=2" {
+		t.Fatalf("returning install: %s, want a fresh Store", got)
+	}
+	if got := storeState(t, m, "kgw.kgateway"); got != "runs=4 keys=2" {
+		t.Fatalf("kgw: %s, want runs=4 keys=2", got)
+	}
+}

@@ -69,7 +69,59 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
+        "detail": "Proxy Pods are not watched, so proxies were not checked",
+        "name": "process restarts",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Events are turned off",
+        "name": "probe failures",
+        "ok": false,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "stuck rollouts",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "detail": "Proxy Pods are not watched, so proxies were not checked; Gateway API CRDs are not watched, so their versions were not checked",
+        "name": "version skew",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Proxy stats are not collected yet",
+        "name": "proxy config warming",
+        "ok": false,
+        "required": false,
+        "unavailable": "failing"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Proxy stats are not collected yet",
+        "name": "proxy connection",
+        "ok": false,
+        "required": false,
+        "unavailable": "failing"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "computed views",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "status progress",
         "ok": true,
         "required": false
       }
@@ -81,7 +133,9 @@
     },
     "findings": [
       {
-        "code": "KGWUI-002",
+        "code": "KGWUI-013",
+        "group": "f1-vptc6qogpx6j2mni6gfndp6a4b",
+        "id": "f1-6v7c4acvz7jdqney2mwpwjkxpr",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -93,11 +147,38 @@
         },
         "restricted": true,
         "severity": "error",
-        "slug": "condition-false"
+        "slug": "ref-unresolved"
       },
       {
-        "code": "KGWUI-002",
+        "code": "KGWUI-013",
         "detail": "A delegating rule selects no child route the controller accepted; ResolvedRefs=False, reason BackendNotFound (parent Gateway infra/edge section sel)",
+        "evidence": {
+          "attributed": false,
+          "candidates": [
+            {
+              "path": "spec.rules[0].backendRefs[0]",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute",
+                "name": "c",
+                "namespace": "zoned"
+              }
+            },
+            {
+              "path": "spec.rules[0].backendRefs[1]",
+              "ref": {
+                "group": "gateway.networking.k8s.io",
+                "kind": "HTTPRoute",
+                "name": "d",
+                "namespace": "zoned"
+              }
+            }
+          ],
+          "explanation": "controller",
+          "kind": "refs"
+        },
+        "group": "f1-dishx3pq7yu2lksxzjnafj4hc7",
+        "id": "f1-xklzdd5suosrnq5d5ik2zw3cbr",
         "install": "kgw.kgateway",
         "message": "A delegating rule has no accepted child route",
         "resource": {
@@ -109,11 +190,13 @@
         },
         "severity": "error",
         "since": "2026-10-17T11:00:00Z",
-        "slug": "condition-false"
+        "slug": "ref-unresolved"
       },
       {
         "code": "KGWUI-004",
         "detail": "targets Gateway infra/edge",
+        "group": "f1-b6uspryyolqs7xmxt2y4fu4q3f",
+        "id": "f1-sr3nt34mw3yema4cgo2evzaj7v",
         "install": "kgw.kgateway",
         "message": "Namespace not watched by the controller",
         "resource": {
@@ -124,12 +207,15 @@
           "namespace": "blog"
         },
         "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
         "slug": "namespace-not-watched"
       },
       {
         "code": "KGWUI-011",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
+        "group": "f1-zrzz3vn2pfghzohe5qdcrdniet",
+        "id": "f1-rm2ieyble2gqlpkezyf3tl3bc6",
         "install": "kgw.kgateway",
         "message": "No status for the named parent route",
         "resource": {
@@ -146,6 +232,8 @@
       {
         "code": "KGWUI-012",
         "detail": "Status entry for parent HTTPRoute `shop/hp` at `PathPrefix /rb/hp`: computed no entry, controller reports Accepted=True. Rule set kgateway-2.4.",
+        "group": "f1-ma35s3qjr4piqgb3btgsbbkwye",
+        "id": "f1-nev7q7iqjivmzq73xkj4dsc3iw",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {
@@ -163,6 +251,8 @@
         "code": "KGWUI-012",
         "detail": "Details depend on objects you cannot view",
         "evidenceRestricted": true,
+        "group": "f1-jws2ihkyqb7xq6lpg6yo4pfx4g",
+        "id": "f1-alp7udx5ayjskmykowcko6qp2r",
         "install": "kgw.kgateway",
         "message": "The UI's computed view disagrees with the controller",
         "resource": {

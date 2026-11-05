@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -23,9 +24,11 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/computedtest"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
 
 // Regenerate with: go test ./pkg/api -run Golden -update (never in CI).
@@ -201,7 +204,7 @@ func partialLS() *unstructured.Unstructured {
 // the server that produced it (design §7.1): detail and yaml open, none is a 404.
 func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 	var walked int
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
 		install, _, ok := strings.Cut(strings.TrimPrefix(tc.path, "/api/v1/installs/"), "/")
 		if !ok { // meta and installs: no install segment, and no links
 			continue
@@ -231,7 +234,7 @@ func TestGoldenLinksAgreeWithEndpoints(t *testing.T) {
 		}
 	}
 	// Every link in every golden; update it when a golden gains or loses one.
-	const want = 314
+	const want = 374
 	if walked != want {
 		t.Errorf("walked %d links, want %d", walked, want)
 	}
@@ -253,7 +256,7 @@ func detailPath(r objects.Ref) (string, bool) {
 // TestGoldenFilesHaveCases fails on a golden without a case: an orphan is never compared.
 func TestGoldenFilesHaveCases(t *testing.T) {
 	cased := map[string]bool{}
-	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t)) {
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
 		cased[tc.golden+".json"] = true
 	}
 	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
@@ -382,6 +385,35 @@ func wire(t *testing.T, srv *httptest.Server, path string) []byte {
 		t.Fatal(err)
 	}
 	return out.Bytes()
+}
+
+// TestGoldenFindings pins the findings list and detail bodies (Phase 3
+// design §13.3) over the Phase 1 golden world, for every caller and for one
+// who may not view shop/broken, and the grouped view over the groups world.
+func TestGoldenFindings(t *testing.T) { runGolden(t, findingsCases(t)) }
+
+func findingsCases(t *testing.T) []goldenCase {
+	e, all := findingsWorld(t, nil)
+	_, some := findingsWorld(t, hideBroken)
+	_, groups := groupsWorld(t, nil)
+	_, groupsHidden := groupsWorld(t, hideCart)
+	id := func(name string) string {
+		for _, f := range e.Current().Model.Installs[0].Health.Findings {
+			if f.Resource != nil && f.Resource.Name == name {
+				return f.ID
+			}
+		}
+		t.Fatalf("no finding on %s", name)
+		return ""
+	}
+	return []goldenCase{
+		{"findings", all, findingsBase},
+		{"findings-restricted", some, findingsBase + "?severity=error&sort=since.desc"},
+		{"finding-detail-other", all, findingsBase + "/" + id("denied")},
+		{"finding-detail-restricted", some, findingsBase + "/" + id("broken")},
+		{"findings-groups", groups, findingsBase + "?view=groups"},
+		{"findings-groups-restricted", groupsHidden, findingsBase + "?view=groups&severity=error"},
+	}
 }
 
 // TestGoldenDelegation pins the 2.4 bodies (design §7.6): the delegation
@@ -531,3 +563,116 @@ func evidenceWorld() []runtime.Object {
 var hideEvidence = AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool {
 	return (ref.Kind != "Namespace" || ref.Name != "zoned") && ref != route("shop", "hp")
 })
+
+// D-032, D-028: goldens match the wire byte for byte; ids, first-seen sinces, groups,
+// KGWUI-003 freshness evidence and 013/014 refs evidence are the only additions to the Phase 2
+// bytes, and 013/014 replace 002's code and slug (D-030). It never rewrites a golden, even under -update.
+func TestPhase2GoldensUnchangedOnNewContract(t *testing.T) {
+	compared := map[string]bool{}
+	for _, tc := range slices.Concat(wireCases(t), listCases(t), detailCases(t), delegationCases(t), findingsCases(t), refsCases(t), diagCases(t)) {
+		want, err := os.ReadFile(filepath.Join("testdata", "golden", tc.golden+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := wire(t, tc.srv, tc.path); !bytes.Equal(got, want) {
+			t.Errorf("GET %s differs from golden %s", tc.path, tc.golden)
+		}
+		compared[tc.golden+".json"] = true
+	}
+	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if !compared[f.Name()] {
+			t.Errorf("golden %s was not compared", f.Name())
+		}
+	}
+}
+
+// D-028: every finding in every golden has a well-formed id, unique in its response.
+func TestGoldenFindingIDs(t *testing.T) {
+	format := regexp.MustCompile(`^f1-[a-z2-7]{26}$`)
+	files, err := os.ReadDir(filepath.Join("testdata", "golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, f := range files {
+		seen := map[string]bool{}
+		var walk func(v any)
+		walk = func(v any) {
+			switch x := v.(type) {
+			case map[string]any:
+				if _, ok := x["slug"]; ok && x["code"] != nil {
+					id, _ := x["id"].(string)
+					if !format.MatchString(id) || seen[id] {
+						t.Errorf("%s: finding %v %v has id %q (malformed or repeated)", f.Name(), x["code"], x["resource"], id)
+					}
+					seen[id] = true
+					total++
+				}
+				for _, e := range x {
+					walk(e)
+				}
+			case []any:
+				for _, e := range x {
+					walk(e)
+				}
+			}
+		}
+		walk(readGolden(t, "golden", strings.TrimSuffix(f.Name(), ".json")))
+	}
+	if total == 0 {
+		t.Fatal("no findings in any golden")
+	}
+}
+
+// TestGoldenDiagnostics pins the 3.2 bodies (design §13.3): diagnostics,
+// processes and one finding detail per evidence kind, each with a restricted variant.
+func TestGoldenDiagnostics(t *testing.T) { runGolden(t, diagCases(t)) }
+
+func diagCases(t *testing.T) []goldenCase {
+	rej := diagGoldenWorld(t)
+	procs := procsWorld(t, setup{})
+	restarted := restartedWorld(t)
+	skewed := newHarness(t, setup{proxyPods: true}, skewWorld("v2.3.6", testutil.Old.Time)...)
+	skewed.at(t, testutil.Now)
+	no := false
+	stats := proxyStatsWorld(t, func(p *proxystats.PodStats) { p.Connected = &no })
+	replaced := ruleReplacedWorld(t)
+	targets := policyTargetWorld(t)
+	authPolicy := objects.Ref{Group: "gateway.kgateway.dev", Kind: "TrafficPolicy", Namespace: "shop", Name: "auth"}
+	nack, edge := testutil.GwRef("infra", "nack").Ref(), edgeRef.Ref()
+	id := func(h *harness, code, name string) string {
+		for _, f := range h.e.Current().Model.Installs[0].Health.Findings {
+			if f.Code == code && f.Resource != nil && (name == "" || f.Resource.Name == name) {
+				return f.ID
+			}
+		}
+		t.Fatalf("no %s on %q", code, name)
+		return ""
+	}
+	detail := func(h *harness, code, name string) string { return findingsBase + "/" + id(h, code, name) }
+	return []goldenCase{
+		{"diagnostics", rej.srv, diagPath},
+		{"diagnostics-restricted", authzSrv(t, rej, deny(edge, podRef("kgw", "kgateway-0"), route("shop", "fresh"))), diagPath},
+		{"processes", procs.srv, procsPath},
+		{"processes-restricted", authzSrv(t, procs, deny(podRef("infra", "edge-0"), testutil.GwRef("infra", "calm").Ref(), ctrlDeployment)), procsPath},
+		{"finding-detail-xds-rejects", rej.srv, detail(rej, health.CodeXDSRejected, nack.Name)},
+		{"finding-detail-xds-rejects-restricted", authzSrv(t, rej, deny(podRef("infra", "nack-0"))), detail(rej, health.CodeXDSRejected, nack.Name)},
+		{"finding-detail-process", restarted.srv, detail(restarted, health.CodeProcessRestarting, "")},
+		{"finding-detail-process-restricted", authzSrv(t, restarted, deny(podRef("kgw", "kgateway-0"))), detail(restarted, health.CodeProcessRestarting, "")},
+		{"finding-detail-version-skew", skewed.srv, detail(skewed, health.CodeVersionSkew, "")},
+		{"finding-detail-version-skew-restricted", authzSrv(t, skewed, deny(podRef("infra", "edge-0"))), detail(skewed, health.CodeVersionSkew, "")},
+		{"finding-detail-proxy-stats", stats.srv, detail(stats, health.CodeProxyDisconnected, "")},
+		{"finding-detail-proxy-stats-restricted", authzSrv(t, stats, deny(podRef("infra", "edge-0"))), detail(stats, health.CodeProxyDisconnected, "")},
+		{"finding-detail-rule-replaced", replaced.srv, detail(replaced, health.CodeRuleReplaced, "r")},
+		{"finding-detail-rule-replaced-restricted", authzSrv(t, replaced, deny(authPolicy)), detail(replaced, health.CodeRuleReplaced, "r")},
+		{"finding-detail-policy-target", targets.srv, detail(targets, health.CodePolicyTargetNotFound, "tp-two")},
+		{"gateway-detail-data-plane", rej.srv, nackDetail},
+		{"gateway-detail-data-plane-restricted", authzSrv(t, rej, deny(podRef("kgw", "kgateway-0"), route("shop", "fresh-n"))), nackDetail},
+		{"gateway-detail-proxies", procs.srv, gwDetail},
+		{"gateway-detail-proxies-restricted", authzSrv(t, procs, deny(podRef("infra", "edge-0"))), gwDetail},
+	}
+}

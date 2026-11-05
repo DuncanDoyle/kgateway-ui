@@ -8,6 +8,7 @@
       ],
       "displayName": "Edge one",
       "edition": "kgateway",
+      "groupRows": 1,
       "health": {
         "counts": {
           "warning": 1

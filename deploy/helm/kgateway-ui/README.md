@@ -36,13 +36,25 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `install.pin` | `""` | Pin the UI to one controller install: an install ID (e.g. `kgw.kgateway`) or `namespace/name`. Empty shows all installs. |
 | `delegation.edgeCap` | `0` | Selected delegation edges computed per install, passed as `--delegation-edge-cap`; `0` keeps the binary's default (10000). A higher cap needs a higher `resources.limits.memory`. |
+| `diagnostics.events` | `true` | Watch Warning Events for controller and proxy Pods. Off drops the `events` rule; checks that need it report "not available". |
+| `diagnostics.crds` | `true` | Watch Gateway API CRD metadata (bundle version and channel). Off drops the `customresourcedefinitions` rule. |
+| `diagnostics.proxyStats` | `true` | Read Envoy stats from each proxy Pod on port 9091. Needs no RBAC; the UI Pod must reach proxy Pods on 9091. Off skips the reads. |
+| `diagnostics.endpoints` | `true` | Grants `services` and `endpointslices`. No check reads them yet. Off drops both rules. |
+| `diagnostics.controllerLogs` | `false` | Read controller logs for derived signals. Adds a `pods/log` `get` Role in each namespace below. The UI keeps fixed fields and never stores or shows log text. |
+| `diagnostics.controllerLogsNamespaces` | `[kgateway-system]` | Namespaces that get the `pods/log` Role. Only used when `diagnostics.controllerLogs` is on. |
 | `extraArgs` | `[]` | More flags for the UI binary, appended after the chart's own args, e.g. `--set extraArgs={--poll-interval=10m}`. |
 | `httpRoute.enabled` | `false` | Create an HTTPRoute on an existing Gateway. Read [Security and trust model](#security-and-trust-model) first. |
 | `httpRoute.parentRefs` | `[]` | Gateway parentRefs for the route. See [Security and trust model](#security-and-trust-model). |
 | `httpRoute.hostnames` | `[]` | Hostnames for the route. See [Security and trust model](#security-and-trust-model). |
 | `serviceAccount.create` | `true` | Create the ServiceAccount. |
 | `serviceAccount.name` | `""` | ServiceAccount name; defaults to `<release>-kgateway-ui`. |
-| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. The chart no longer sets `GOMEMLIMIT`: the binary uses 90 % of the pod's memory limit unless `GOMEMLIMIT` is set. |
+| `rbac.extraRules` | `[]` | PolicyRules appended to the ClusterRole. The operator's choice: they can widen RBAC beyond the read-only default. |
+| `extraEnv` | `[]` | Extra env vars for the UI container, after the chart's own. |
+| `extraVolumes` | `[]` | Extra pod volumes. |
+| `extraVolumeMounts` | `[]` | Extra volume mounts for the UI container. |
+| `extraContainers` | `[]` | Extra containers (sidecars) in the pod. Bind add-ons to the UI's identity through `serviceAccount.name`. |
+| `memoryLimit` | `""` | Opt-in Go soft memory limit, set as `GOMEMLIMIT` (for example `300MiB`). Empty sets none, so the binary uses 90 % of the pod's memory limit. |
+| `resources` | 50m CPU / 128Mi requested, 512Mi memory limit | Container resources. The chart sets `GOMEMLIMIT` only from `memoryLimit`: the binary uses 90 % of the pod's memory limit unless `GOMEMLIMIT` is set. |
 | `podSecurityContext` | `runAsNonRoot`, `RuntimeDefault` seccomp | Pod security context. |
 | `securityContext` | no privilege escalation, read-only root FS, all capabilities dropped | Container security context. |
 
@@ -58,11 +70,12 @@ The ClusterRole grants only `get`, `list` and `watch`:
 - `gateway.networking.x-k8s.io`: xlistenersets.
 - `gateway.kgateway.dev`: all resources.
 - Core: namespaces, pods. `apps`: deployments.
+- Core `events`, `apiextensions.k8s.io` `customresourcedefinitions` (metadata only) and core `services` with `discovery.k8s.io` `endpointslices`, each under its `diagnostics` toggle.
 
-No Secrets, no ConfigMaps and no `*/proxy` access. Pods and Deployments are only listed and watched through the controller detectors' label selectors. RBAC cannot express a label restriction, so the grant itself is cluster-wide.
+No Secrets, no ConfigMaps, no `*/proxy` and no `pods/portforward` access. `pods/log` is granted only with `diagnostics.controllerLogs`, in the listed namespaces. Pods and Deployments are only listed and watched through the controller detectors' label selectors. RBAC cannot express a label restriction, so the grant itself is cluster-wide.
 
 Kinds added downstream through `extension.WithKinds` need matching rules in this ClusterRole.
 
 ## NetworkPolicy
 
-In-cluster, the UI scrapes controller metrics directly from the controller pods on port 9092. If a NetworkPolicy blocks that traffic, the UI reports the signal as unavailable (KGWUI-008) instead of showing it green. Allow ingress from the UI pod to the controller pods on 9092 to get metrics-based checks.
+In-cluster, the UI scrapes controller metrics directly from the controller pods on port 9092. If a NetworkPolicy blocks that traffic, the UI reports the signal as unavailable (KGWUI-008) instead of showing it green. Allow ingress from the UI pod to the controller pods on 9092 to get metrics-based checks. Proxy stats need the UI Pod to reach port 9091 on proxy Pods.

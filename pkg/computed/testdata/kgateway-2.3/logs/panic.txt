@@ -1,0 +1,21 @@
+# Synthetic: two crashes of a previous container in the layout of a Go 1.26 runtime panic, checked
+# against go1.26.10 output (kgateway v2.3.11 builds with go 1.26.9). The frames name functions at v2.3.11.
+{"time":"2026-11-05T09:10:00.000000001Z","level":"info","msg":"sync complete","component":"proxy_syncer"}
+panic: assignment to entry in nil map
+
+goroutine 412 [running]:
+github.com/kgateway-dev/kgateway/v2/pkg/kgateway/proxy_syncer.snapshotPerClient.func3({0x40001a2b40, 0x3b})
+	github.com/kgateway-dev/kgateway/v2/pkg/kgateway/proxy_syncer/perclient.go:170 +0x2a4
+istio.io/istio/pkg/kube/krt.(*manyCollection[...]).onPrimaryInputEventLocked(0x4000a1c000, {0x4001c2e000, 0x1, 0x1})
+	istio.io/istio@v0.0.0-20260605182440-f18fd540c0e8/pkg/kube/krt/collection.go:402 +0x5c8
+created by istio.io/istio/pkg/kube/krt.newManyCollection[...] in goroutine 1
+	istio.io/istio@v0.0.0-20260605182440-f18fd540c0e8/pkg/kube/krt/collection.go:688 +0x86c
+# A nil dereference: the runtime adds a column-0 signal line (layout from go1.26.10 output).
+panic: runtime error: invalid memory address or nil pointer dereference
+[signal SIGSEGV: segmentation violation code=0x2 addr=0x0 pc=0x10441cbc4]
+
+goroutine 377 [running]:
+github.com/kgateway-dev/kgateway/v2/pkg/deployer.(*Deployer).DeployObjs(0x4000b2c1e0?, {0x2a1f3c0, 0x4001a8e5a0}, {0x4000f1c000, 0x7, 0x8})
+	github.com/kgateway-dev/kgateway/v2/pkg/deployer/deployer.go:322 +0x4
+github.com/kgateway-dev/kgateway/v2/pkg/kgateway/controller.(*gatewayReconciler).Reconcile(0x4000a1c000, {{0x4000f0a2a0, 0x5}, {0x4000f0a2a6, 0x4}})
+	github.com/kgateway-dev/kgateway/v2/pkg/kgateway/controller/gw_controller.go:332 +0x8c4

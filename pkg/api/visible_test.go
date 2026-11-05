@@ -79,6 +79,7 @@ var endpoints = []string{
 	base + "/gateways", base + "/gateways?sort=routes.desc", base + "/listenersets",
 	gwDetail, lsDetail + "infra/ls1", routeDetail + "shop/api", routeDetail + "shop/backends", routeDetail + "shop/secret",
 	base + "/resources/gateway.networking.k8s.io/HTTPRoute/shop/cart",
+	base + "/diagnostics", base + "/processes", base + "/processes?q=edge&skew=false",
 }
 
 // Rule 10: an Authorizer that admits everything is never called, and the
@@ -330,8 +331,16 @@ func TestEvidenceRestrictedFinding(t *testing.T) {
 	e, some, _ := startWith(t, setup{authz: hideAPI}, objs...)
 	_, all, _ := startWith(t, setup{}, objs...)
 	f, full := finding(get[HealthResponse](t, some, base+"/health", 200)), finding(get[HealthResponse](t, all, base+"/health", 200))
-	if !f.EvidenceRestricted || f.Restricted || f.Detail != restrictedEvidence || f.Message != full.Message || f.Severity != full.Severity || f.Since != nil || full.Since != nil {
+	// The status trigger first appeared with the child, so both sinces are its first compute.
+	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
+	if !f.EvidenceRestricted || f.Restricted || f.Detail != restrictedEvidence || f.Message != full.Message || f.Severity != full.Severity ||
+		f.ID != full.ID || f.Group != full.Group || full.Since == nil || !full.Since.Equal(childSeen) || f.Since == nil || !f.Since.Equal(childSeen) {
 		t.Fatalf("restricted %+v, all %+v", f, full)
+	}
+
+	// The group's cause is the child itself, never the hidden parent (rule 13).
+	if want := health.GroupID("kgw.kgateway", "Other", &objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: "shop", Name: "c"}, nil); f.Group != want {
+		t.Errorf("group %q, want the child's own %q", f.Group, want)
 	}
 
 	// A since from the parent is replaced by the child's own clock.
@@ -341,13 +350,13 @@ func TestEvidenceRestrictedFinding(t *testing.T) {
 	if f := finding(get[HealthResponse](t, open, base+"/health", 200)); f.Since == nil || !f.Since.Equal(parentSeen) {
 		t.Fatalf("allow-all since %v, want %v", f.Since, parentSeen)
 	}
-	childSeen := testutil.Now.Add(-health.Grace - time.Second).UTC()
 	if f := finding(get[HealthResponse](t, srv, base+"/health", 200)); f.Since == nil || !f.Since.Equal(childSeen) || f.Since.Location() != time.UTC {
 		t.Fatalf("restricted since %v, want the child's first-seen %v", f.Since, childSeen)
 	}
 }
 
-// Rule 9: health, row states and counts cover every finding under any Authorizer.
+// Rule 9: health, row states and counts cover every finding under any Authorizer;
+// restricted rows keep their id and group.
 func TestHealthUnchangedUnderRestriction(t *testing.T) {
 	_, some, _ := startWith(t, setup{authz: AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return !hiddenSome(ref) })}, visWorld()...)
 	_, all, _ := startWith(t, setup{}, visWorld()...)
@@ -361,7 +370,7 @@ func TestHealthUnchangedUnderRestriction(t *testing.T) {
 		}
 	}
 	for i, f := range h.Findings {
-		if f.Code != fh.Findings[i].Code || f.Severity != fh.Findings[i].Severity {
+		if f.Code != fh.Findings[i].Code || f.Severity != fh.Findings[i].Severity || f.ID != fh.Findings[i].ID || f.Group != fh.Findings[i].Group {
 			t.Errorf("finding %d: %+v vs %+v", i, f, fh.Findings[i])
 		}
 	}

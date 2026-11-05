@@ -65,14 +65,16 @@ func Diff(watched, now []Served) Change {
 }
 
 // Monitor re-resolves the served kinds and keeps how they differ from the
-// watched set. The UI does not re-watch: a change asks for a restart.
+// watched set. The UI does not re-watch: a change asks for a restart. It also
+// publishes the Catalog of every served kind.
 type Monitor struct {
 	dc      DiscoveryClient
 	descs   []Descriptor
 	watched []Served
 	mu      sync.RWMutex
 	cur     Change
-	// OnChange, if set, is notified when a Refresh yields a Change that
+	catalog Catalog
+	// OnChange, if set, is notified when a Refresh yields a Change or Catalog that
 	// differs from the previous one.
 	OnChange *trigger.Signal
 }
@@ -82,16 +84,22 @@ func NewMonitor(dc DiscoveryClient, descs []Descriptor, watched []Served) *Monit
 	return &Monitor{dc: dc, descs: descs, watched: watched}
 }
 
-// Refresh resolves the served kinds once. On error the last Change is kept.
+// Refresh resolves the served kinds and the Catalog once. On error the last
+// Change is kept; a Catalog that cannot be listed keeps the last one.
 func (m *Monitor) Refresh() error {
 	now, err := Resolve(m.dc, m.descs)
 	if err != nil {
 		return err
 	}
 	c := Diff(m.watched, now)
+	cat, catOK := discoverCatalog(m.dc)
 	m.mu.Lock()
 	changed := c.String() != m.cur.String()
 	m.cur = c
+	if catOK {
+		changed = changed || cat.Key() != m.catalog.Key()
+		m.catalog = cat
+	}
 	m.mu.Unlock()
 	if changed {
 		m.OnChange.Notify()
@@ -104,6 +112,13 @@ func (m *Monitor) Change() Change {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.cur
+}
+
+// Catalog returns the latest Catalog; it is the zero Catalog until a Refresh lists one.
+func (m *Monitor) Catalog() Catalog {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.catalog
 }
 
 // Run refreshes every interval until ctx is done.

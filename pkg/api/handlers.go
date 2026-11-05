@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -31,12 +32,19 @@ type ModelSource interface {
 
 // NewHandler returns the HTTP handler for the API, the probes and the SPA in ui.
 // Every response with resources, findings or counts goes through authz; a nil
-// authz means AllowAll (D-013).
-func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
+// authz means AllowAll (D-013). Options add extension endpoints.
+func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOption) http.Handler {
+	var cfg handlerConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	if authz == nil {
 		authz = AllowAll{}
 	}
-	h := &handler{src: src, authz: authz}
+	if cfg.commands == nil {
+		cfg.commands = diagnose.Kubectl{}
+	}
+	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -44,6 +52,10 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
 	mux.HandleFunc("GET /api/v1/installs", h.installs)
 	mux.HandleFunc("GET /api/v1/installs/{id}/overview", h.overview)
 	mux.HandleFunc("GET /api/v1/installs/{id}/health", h.health)
+	mux.HandleFunc("GET /api/v1/installs/{id}/findings", h.findings)
+	mux.HandleFunc("GET /api/v1/installs/{id}/findings/{findingId}", h.findingDetail)
+	mux.HandleFunc("GET /api/v1/installs/{id}/diagnostics", h.diagnostics)
+	mux.HandleFunc("GET /api/v1/installs/{id}/processes", h.processes)
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes", h.routes)
 	mux.HandleFunc("GET /api/v1/installs/{id}/gateways", h.gateways)
 	mux.HandleFunc("GET /api/v1/installs/{id}/listenersets", h.listenerSets)
@@ -52,14 +64,20 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer) http.Handler {
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}", h.routeDetail)
 	mux.HandleFunc("GET /api/v1/installs/{id}/routes/{group}/{kind}/{ns}/{name}/delegation", h.routeDelegation)
 	mux.HandleFunc("GET /api/v1/installs/{id}/resources/{group}/{kind}/{rns}/{rname}", h.resource)
+	mux.HandleFunc("GET /api/v1/installs/{id}/refs", h.refs)
+	mountExts(mux, cfg.ext)
+	// Unknown /api/ paths, extension ones included, get a JSON 404, never the SPA.
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	mux.Handle("/", spa(ui))
 	return mux
 }
 
 type handler struct {
-	src   ModelSource
-	authz Authorizer
+	src        ModelSource
+	authz      Authorizer
+	capSources []func() []Capability
+	coreSource func() []Capability
+	commands   diagnose.Commands
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -134,12 +152,13 @@ func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 		resp.Views = explore.DetailKinds(m.Served)
 	}
 	resp.Filters = addedFilters
+	addCapabilities(&resp, plat.Capabilities, h.coreSource, h.capSources)
 	writeJSON(w, resp)
 }
 
 // visibleHealth returns the install's report as the caller of v may see it
 // (D-013). A finding on a denied resource keeps its code, severity and ref but
-// is restricted: message, detail and since are emptied. State and counts still
+// is restricted: message, detail, since and evidence are emptied. State and counts still
 // cover every finding, so partial visibility never makes an install look
 // healthier, and the findings keep the order health returned.
 func visibleHealth(v *view, i *engine.InstallModel) health.Report {
@@ -150,7 +169,7 @@ func visibleHealth(v *view, i *engine.InstallModel) health.Report {
 	rep.Findings = make([]health.Finding, 0, len(i.Health.Findings))
 	for _, f := range i.Health.Findings {
 		if f.Resource != nil && !v.can(*f.Resource) {
-			f.Message, f.Detail, f.Since, f.Restricted = "", "", nil, true
+			f.Message, f.Detail, f.Since, f.Facts, f.Restricted = "", "", nil, nil, true
 		}
 		rep.Findings = append(rep.Findings, f)
 	}
@@ -206,7 +225,8 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		hd, rep := i.Overview.Header, visibleHealth(v, i)
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
-			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
+			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, GroupRows: min(groupTotal(diagnosis(i)), maxGroups),
+			ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
 	}
 	writeJSON(w, out)
 }
@@ -232,8 +252,17 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 		v := h.view(r)
 		ov := h.visibleOverview(v, p.Model, i, visibleHealth(v, i))
 		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), linkerFor(v, p.Model, i)
+		rejecting := rejectingGateways(i)
+		checked := slices.ContainsFunc(i.Health.Checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName && c.OK })
 		for _, g := range ov.Gateways {
-			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref)})
+			// A reject shows even while the check is not OK; without one, only an OK check proves "ok".
+			dp := DataPlaneUnknown
+			if rejecting[g.Ref] {
+				dp = DataPlaneRejects
+			} else if checked {
+				dp = DataPlaneOK
+			}
+			rows = append(rows, OverviewGatewayRow{GatewayRow: g, Link: l.link(g.Ref), DataPlane: dp})
 		}
 		writeJSON(w, OverviewResponse{Overview: ov, Gateways: rows, CollectedAt: wireTime(p.ConfirmedAt)})
 	}
@@ -255,9 +284,8 @@ func wireHealth(rep health.Report, confirmedAt time.Time) health.Report {
 			rep.Findings[i].Since = &at
 		}
 	}
-	rep.Checks = slices.Clone(rep.Checks)
-	for i := range rep.Checks {
-		rep.Checks[i].CollectedAt = wireTime(rep.Checks[i].CollectedAt)
+	if rep.Checks != nil {
+		rep.Checks = wireChecks(rep.Checks)
 	}
 	return rep
 }
@@ -270,21 +298,22 @@ func (h *handler) health(w http.ResponseWriter, r *http.Request) {
 
 // healthResponse is the caller's report in wire form: each finding's resource
 // carries its link. A visible finding whose evidence the caller may not view
-// all of has its detail replaced, and a since it has is replaced by the
-// resource's own (design §7.4 rule 7). State, counts and severities stay.
+// all of has its detail replaced and no typed evidence, and a since it has is
+// replaced by the resource's own (design §7.4 rule 7, Phase 3 §14 rule 12).
+// Typed evidence is in wire form (§14 rule 14). State, counts and severities stay.
 func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedAt time.Time) HealthResponse {
 	rep := wireHealth(visibleHealth(v, i), confirmedAt)
 	out := HealthResponse{Report: rep, Findings: make([]FindingDTO, 0, len(rep.Findings))}
 	out.Report.Findings = nil // shadowed by out.Findings
 	l := linkerFor(v, m, i)
-	for _, f := range rep.Findings {
+	for k, f := range rep.Findings {
 		d := FindingDTO{Finding: f}
 		if f.Resource != nil {
 			lr := l.linked(*f.Resource)
 			d.Resource = &lr
 		}
 		if !f.Restricted && !v.allOf(f.Evidence) {
-			d.Detail, d.EvidenceRestricted = restrictedEvidence, true
+			d.Detail, d.Facts, d.EvidenceRestricted = restrictedDetail(&rep.Findings[k]), nil, true
 			if f.Since != nil {
 				d.Since = nil
 				if f.ResourceSince != nil {
@@ -292,6 +321,9 @@ func healthResponse(v *view, m *engine.Model, i *engine.InstallModel, confirmedA
 					d.Since = &at
 				}
 			}
+		}
+		if d.Facts != nil {
+			d.Facts = wireEvidence(v, l, d.Facts)
 		}
 		out.Findings = append(out.Findings, d)
 	}

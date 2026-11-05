@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 )
 
 // reasonMessages turns condition reasons into operator language.
@@ -41,7 +43,7 @@ func message(c metav1.Condition) string {
 func detail(c metav1.Condition, extra string) string {
 	d := fmt.Sprintf("%s=%s, reason %s", c.Type, c.Status, c.Reason)
 	if c.Message != "" {
-		d += ": " + c.Message
+		d += ": " + computed.ClipDisplay(c.Message, computed.MaxStatusBytes)
 	}
 	if extra != "" {
 		d += " (" + extra + ")"

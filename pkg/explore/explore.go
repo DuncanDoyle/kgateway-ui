@@ -53,6 +53,9 @@ const (
 	// FlagDropped: a view B row of an owned parent selects the route and is
 	// dropped, forbidden or rejected-hostnames (2.4).
 	FlagDropped
+	// FlagGatewayRejecting: the row's current status is True for a Gateway
+	// with an active KGWUI-001 (design §8.4).
+	FlagGatewayRejecting
 )
 
 // flagNames are the wire names of design §6.1, in bit order.
@@ -70,6 +73,7 @@ var flagNames = []struct {
 	{FlagDisagrees, "disagrees"},
 	{FlagListenerUnknown, "listener-unknown"},
 	{FlagDropped, "dropped"},
+	{FlagGatewayRejecting, "gateway-rejecting"},
 }
 
 // ParseFlag returns the flag with wire name s.

@@ -1,6 +1,7 @@
 // Package scale builds deterministic worlds of the scale tiers of design §9.6
-// for benchmarks and scale tests. It returns unstructured objects only; typed
-// Namespaces and Deployments come from package testutil.
+// for benchmarks and scale tests. World returns unstructured objects only;
+// typed Namespaces and Deployments come from package testutil. The Scale*
+// functions return the typed Phase 3 shapes.
 package scale
 
 import (
@@ -45,6 +46,36 @@ type Tier struct {
 	// child entry and makes delegating parents ResolvedRefs=False, so view B's
 	// checks contradict too (PF2).
 	Contradict bool
+
+	// Phase 3 shapes. World ignores them; the Scale* functions use them.
+	// Services is the total and ReferencedServices those LivePhase3's routes name
+	// in backendRefs; every Service has at least one EndpointSlice.
+	Services, ReferencedServices, EndpointSlices int
+	// ProxyPodsPerGateway is the proxy Pod count of each Gateway.
+	ProxyPodsPerGateway int
+	// WarningEvents is the number of Warning Events on proxy Pods.
+	WarningEvents int
+	// GatewayAPICRDs is the number of Gateway API CRDs with metadata.
+	GatewayAPICRDs int
+	// IsWorst adds long-named Gateways, makes every Gateway reject, 5 % of
+	// referenced Services lack a ready endpoint and every proxy Pod restart.
+	// World adds the analyzer's codes 013–018 (see IssueEvery).
+	IsWorst bool
+}
+
+// Shape is the part of t the typed Phase 3 generators in package testutil need.
+func (t Tier) Shape() testutil.ScaleShape {
+	return testutil.ScaleShape{Gateways: t.Gateways, Namespaces: t.Namespaces, Services: t.Services, ReferencedServices: t.ReferencedServices,
+		EndpointSlices: t.EndpointSlices, ProxyPodsPerGateway: t.ProxyPodsPerGateway, WarningEvents: t.WarningEvents,
+		GatewayAPICRDs: t.GatewayAPICRDs, Worst: t.IsWorst}
+}
+
+// Worst is t with every Gateway rejecting, 5 % of referenced Services without
+// a ready endpoint and every proxy Pod restarted once, plus long-named Gateways.
+func (t Tier) Worst() Tier {
+	t.Name += "-worst"
+	t.IsWorst = true
+	return t
 }
 
 // Contradicting is t with every view A check contradicting its status.
@@ -57,11 +88,14 @@ func (t Tier) Contradicting() Tier {
 // The tiers of design §9.6, at their benchmark sizes.
 var (
 	Typical = Tier{Name: "typical", Gateways: 30, ListenersPerGateway: 3, HTTPRoutes: 500, ParentRefsMean: 1.2, ListenerSets: 10,
-		DelegatedPct: 10, MaxDepth: 2, MaxFanOut: 10, ParentMatches: 1, Namespaces: 20, Backends: 50}
+		DelegatedPct: 10, MaxDepth: 2, MaxFanOut: 10, ParentMatches: 1, Namespaces: 20, Backends: 50,
+		Services: 600, ReferencedServices: 300, EndpointSlices: 700, ProxyPodsPerGateway: 2, WarningEvents: 50, GatewayAPICRDs: 10}
 	Large = Tier{Name: "large", Gateways: 100, ListenersPerGateway: 4, HTTPRoutes: 2000, ParentRefsMean: 1.3, ListenerSets: 200,
-		DelegatedPct: 10, MaxDepth: 3, MaxFanOut: 50, ParentMatches: 2, Namespaces: 100, Backends: 200}
+		DelegatedPct: 10, MaxDepth: 3, MaxFanOut: 50, ParentMatches: 2, Namespaces: 100, Backends: 200,
+		Services: 5000, ReferencedServices: 2000, EndpointSlices: 6000, ProxyPodsPerGateway: 2, WarningEvents: 1000, GatewayAPICRDs: 10}
 	Extreme = Tier{Name: "extreme", Gateways: 500, ListenersPerGateway: 4, HTTPRoutes: 5000, ParentRefsMean: 1.5, ListenerSets: 2000,
-		DelegatedPct: 10, MaxDepth: 4, MaxFanOut: 100, ParentMatches: 4, Namespaces: 500, Backends: 1000, LatticeDepth: 8}
+		DelegatedPct: 10, MaxDepth: 4, MaxFanOut: 100, ParentMatches: 4, Namespaces: 500, Backends: 1000, LatticeDepth: 8,
+		Services: 25000, ReferencedServices: 10000, EndpointSlices: 30000, ProxyPodsPerGateway: 3, WarningEvents: 10000, GatewayAPICRDs: 10}
 )
 
 // Tiers lists Typical, Large and Extreme.
@@ -84,6 +118,37 @@ const FailedEvery = 20
 // listener, the parents of TCPRoutes and TLSRoutes.
 const MixedEvery = 10
 
+// The worst case's analyzer findings (sub-phase 3.3). Top-level leaf
+// HTTPRoutes are counted in generation order: the 0th of every IssueEvery
+// names a missing Backend (013), the 10th one in another namespace without a
+// grant (014), the 5th of every StaleEvery has stale status (003, which feeds
+// 018) and the 15th of every ReplacedEvery a dropped rule naming a policy (015).
+// Gateway ConflictAt of every ConflictEvery has a conflicted listener (017), and
+// every PolicyEvery-th namespace a TrafficPolicy whose target is missing (016).
+const (
+	IssueEvery    = 20
+	StaleEvery    = 40
+	ReplacedEvery = 100
+	ConflictEvery = 10
+	ConflictAt    = 4
+	PolicyEvery   = 5
+	// MissingBackend is the Backend a 013 route names; GonePolicy the policy in each
+	// PolicyEvery-th namespace, whose only target is Gateway GoneGateway.
+	MissingBackend = "be-missing"
+	GonePolicy     = "tp-gone"
+	GoneGateway    = "gw-gone"
+)
+
+// issue is a worst-case route's analyzer shape; zero is none.
+type issue int
+
+const (
+	issueMissing issue = iota + 1
+	issueNotPermitted
+	issueStale
+	issueReplaced
+)
+
 const (
 	gwAPI      = "gateway.networking.k8s.io/v1"
 	backendAPI = "gateway.kgateway.dev/v1alpha1"
@@ -101,6 +166,8 @@ type route struct {
 	explicit       bool                // a child naming its parents in spec.parentRefs
 	segment        string              // path segment of a lattice node, shared by its layer; else its name
 	backend        string              // Backend name of a leaf rule
+	backendNS      string              // its namespace when not the route's
+	issue          issue               // the worst case's analyzer shape
 }
 
 // world carries generation state.
@@ -117,7 +184,7 @@ type world struct {
 	paths    map[*route][]string
 }
 
-func gwName(i int) string { return fmt.Sprintf("gw-%03d", i) }
+func gwName(i int) string { return testutil.ScaleGateway(i) }
 func lsName(i int) string { return fmt.Sprintf("ls-%04d", i) }
 func beName(i int) string { return fmt.Sprintf("be-%04d", i) }
 
@@ -145,7 +212,31 @@ func World(t Tier, seed int64) []*unstructured.Unstructured {
 		w.nsBE[i%t.Namespaces] = append(w.nsBE[i%t.Namespaces], beName(i))
 	}
 	w.genRoutes()
+	if t.IsWorst {
+		w.issues()
+	}
 	return w.objects()
+}
+
+// issues gives the worst case's top-level leaf HTTPRoutes their analyzer shapes (IssueEvery).
+func (w *world) issues() {
+	k := 0
+	for _, r := range w.routes {
+		if r.kind != "HTTPRoute" || len(r.parents) == 0 || len(r.children) > 0 {
+			continue
+		}
+		switch {
+		case k%IssueEvery == 0:
+			r.issue, r.backend = issueMissing, MissingBackend
+		case k%IssueEvery == IssueEvery/2:
+			r.issue, r.backendNS = issueNotPermitted, testutil.ScaleNamespace((nsIndex(r.ns)+1)%w.t.Namespaces)
+		case k%StaleEvery == 5:
+			r.issue = issueStale
+		case k%ReplacedEvery == 15:
+			r.issue = issueReplaced
+		}
+		k++
+	}
 }
 
 // genRoutes draws every route: top-level HTTPRoutes, delegated children,
@@ -417,21 +508,32 @@ func (w *world) objects() []*unstructured.Unstructured {
 	for i := range t.Gateways {
 		var ls []testutil.Listener
 		var spec []any
+		var gwConds []metav1.Condition
 		counts := gwAttached[w.gwNS[i]+"/"+gwName(i)]
+		// A conflicted Gateway's l1 shares l0's port and hostname, and kgateway rejects it.
+		conflicted := t.IsWorst && i%ConflictEvery == ConflictAt
+		if conflicted {
+			gwConds = []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "ListenersNotValid"), ok[1]}
+		}
 		for j, l := range listeners {
-			ls = append(ls, testutil.Listener{Name: l, Attached: int32(counts[j] + extra), Conds: ok}) //nolint:gosec // small counts
+			lc, port := ok, int64(8080+j)
+			if conflicted && j == 1 {
+				lc, port = []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "HostnameConflict"),
+					testutil.Cond("Programmed", metav1.ConditionFalse, "HostnameConflict"), testutil.Cond("Conflicted", metav1.ConditionTrue, "HostnameConflict")}, 8080
+			}
+			ls = append(ls, testutil.Listener{Name: l, Attached: int32(counts[j] + extra), Conds: lc}) //nolint:gosec // small counts
 			from := map[string]any{"namespaces": map[string]any{"from": "All"}}
 			if l == SelectorListener {
 				from = map[string]any{"namespaces": map[string]any{"from": "Selector",
 					"selector": map[string]any{"matchLabels": map[string]any{"team": testutil.ScaleTeamLabel["team"]}}}}
 			}
-			ln := map[string]any{"name": l, "port": int64(8080 + j), "protocol": w.protocol(i, j), "allowedRoutes": from}
+			ln := map[string]any{"name": l, "port": port, "protocol": w.protocol(i, j), "allowedRoutes": from}
 			if ln["protocol"] == "TLS" {
 				ln["tls"] = map[string]any{"mode": "Passthrough"}
 			}
 			spec = append(spec, ln)
 		}
-		gw := testutil.Gateway(w.gwNS[i], gwName(i), Class, nil, ls...)
+		gw := testutil.Gateway(w.gwNS[i], gwName(i), Class, gwConds, ls...)
 		gw.Object["spec"].(map[string]any)["listeners"] = spec
 		gw.Object["spec"].(map[string]any)["allowedListeners"] = map[string]any{"namespaces": map[string]any{"from": "Same"}}
 		out = append(out, gw)
@@ -447,6 +549,13 @@ func (w *world) objects() []*unstructured.Unstructured {
 	}
 	for _, r := range w.routes {
 		out = append(out, w.render(r))
+	}
+	if t.IsWorst {
+		for i := 0; i < t.Namespaces; i += PolicyEvery {
+			tp := testutil.TrafficPolicy(testutil.ScaleNamespace(i), GonePolicy)
+			tp.Object["spec"] = map[string]any{"targetRefs": []any{map[string]any{"group": objects.GatewayAPIGroup, "kind": "Gateway", "name": GoneGateway}}}
+			out = append(out, tp)
+		}
 	}
 	for _, o := range out {
 		o.SetResourceVersion("1")
@@ -464,11 +573,25 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 	if w.t.Contradict && len(r.children) > 0 {
 		resolved = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
 	}
+	var extra []metav1.Condition
+	switch r.issue {
+	case issueMissing:
+		resolved = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")
+		resolved.Message = fmt.Sprintf("Backend %s/%s not found", r.ns, r.backend)
+	case issueNotPermitted:
+		resolved = testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "RefNotPermitted")
+		resolved.Message = fmt.Sprintf("backendRef %s/%s not permitted by any ReferenceGrant", r.backendNS, r.backend)
+	case issueReplaced:
+		c := testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleDropped")
+		pns := testutil.ScaleNamespace(nsIndex(r.ns) / PolicyEvery * PolicyEvery)
+		c.Message = fmt.Sprintf("Dropped Rule (0): %s/TrafficPolicy/%s/%s: invalid", kinds.KgatewayGroup, pns, GonePolicy)
+		extra = []metav1.Condition{c}
+	}
 	for k, p := range r.parents {
 		spec = append(spec, p)
 		if r.failed[k] != w.t.Contradict {
-			status = append(status, testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: []metav1.Condition{
-				testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), resolved}})
+			status = append(status, testutil.RouteParent{Ref: p, Controller: testutil.Controller, Conds: append([]metav1.Condition{
+				testutil.Cond("Accepted", metav1.ConditionFalse, "NotAllowedByListeners"), resolved}, extra...)})
 			continue
 		}
 		st := testutil.AcceptedBy(p, testutil.Controller)
@@ -477,6 +600,7 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 				st.Conds[i] = resolved
 			}
 		}
+		st.Conds = append(st.Conds, extra...)
 		status = append(status, st)
 	}
 	for _, d := range r.delegators {
@@ -490,6 +614,9 @@ func (w *world) render(r *route) *unstructured.Unstructured {
 		}
 	}
 	u := testutil.HTTPRoute(r.ns, r.name, spec, status...)
+	if r.issue == issueStale {
+		u.SetGeneration(2) // the status observed generation 1
+	}
 	u.SetAPIVersion(gwAPI)
 	u.SetKind(r.kind)
 	u.SetUID(types.UID(r.kind + "/" + r.ns + "/" + r.name))
@@ -563,7 +690,7 @@ func (w *world) pathsOf(r *route) []string {
 }
 
 func backendRef(r *route) map[string]any {
-	return map[string]any{"group": kinds.KgatewayGroup, "kind": "Backend", "name": r.backend, "namespace": r.ns}
+	return map[string]any{"group": kinds.KgatewayGroup, "kind": "Backend", "name": r.backend, "namespace": cmp.Or(r.backendNS, r.ns)}
 }
 
 // backend builds a static kgateway Backend.

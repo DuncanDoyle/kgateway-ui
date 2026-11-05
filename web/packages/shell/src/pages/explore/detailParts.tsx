@@ -1,6 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import type { ApiError } from "../../api/client";
 import { useNow } from "../../api/clock";
 import { isStale } from "../../api/hooks";
@@ -10,12 +10,15 @@ import { CandidateBanner } from "../../explore/CandidateBanner";
 import { CopyCommandButton } from "../../explore/CopyCommandButton";
 import { DetailTabs } from "../../explore/DetailTabs";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
-import { HealthBadge } from "../../health/HealthBadge";
 import { StaleView } from "../../health/staleView";
 import { CopyNameButton } from "../../resource/CopyNameButton";
 import { ResourceName } from "../../resource/ResourceName";
 import { ResourceYaml } from "../../resource/ResourceYaml";
+import { TrailRefsProvider, useReportTrailRefs, useTrailRefsCollector } from "../../shell/Breadcrumbs";
+import { Slot, useDetailTabContributions, useSideSectionContributions } from "../../shell/contributions";
 import { useVocabulary } from "../../shell/extension";
+import { DetailColumns, layout, useTwoColumns } from "../../shell/layout";
+import { OBJECT_HEADER_H, ObjectHeader } from "../../shell/ObjectHeader";
 import { installPath } from "../../shell/paths";
 import { useUrlParams } from "../../shell/urlParams";
 import { BackLink } from "../../states/controls";
@@ -23,44 +26,16 @@ import { PageNotice } from "../../states/PageNotice";
 import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import type { HealthState } from "../../theme/tokens";
-import { DataAge } from "../DataAge";
 import { useShownPage } from "./listParts";
 
 // region Styles
-/** Height of the header row, fixed from the first render: the name comes from the URL, the rest fills in. */
-export const HEADER_H = 40;
+/** Height of the detail header, fixed from the first render: the name comes from the URL, the rest fills in. */
+export const HEADER_H = OBJECT_HEADER_H;
 
 const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
-  max-width: 1400px;
+  max-width: ${layout.maxWidth}px;
   margin: 0 auto;
   padding: ${(p) => p.theme.space(4)};
-  header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: ${(p) => p.theme.space(2)};
-    min-height: ${HEADER_H}px;
-    margin-bottom: ${(p) => p.theme.space(2)};
-  }
-  h1 {
-    display: inline-flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: ${(p) => p.theme.space(2)};
-    min-width: 0;
-    margin: 0;
-    font-size: ${(p) => p.theme.font.size.lg};
-    font-weight: ${(p) => p.theme.font.weight.semibold};
-    overflow-wrap: anywhere;
-  }
-  .kind {
-    color: ${(p) => p.theme.color.textMuted};
-    font-size: ${(p) => p.theme.font.size.base};
-    font-weight: ${(p) => p.theme.font.weight.regular};
-  }
-  .spacer {
-    flex: 1;
-  }
   ${(p) => p.stylesOverride}
 `;
 export const Section = styled.section`
@@ -96,7 +71,7 @@ export const Facts = styled.dl`
     overflow-wrap: anywhere;
   }
 `;
-const Skeleton = styled.div`
+const Stack = styled.div`
   display: grid;
   gap: ${(p) => p.theme.space(3)};
 `;
@@ -106,6 +81,8 @@ const TABS = [
   { id: "overview", label: detailCopy.overview },
   { id: "yaml", label: detailCopy.yaml },
 ];
+// Page tab ids are reserved even where a page omits its tab, so a contribution never takes one over.
+const CORE_TAB_IDS = [...TABS.map((t) => t.id), "delegation"];
 
 /** A page's own tab after Overview and YAML, e.g. the route's Delegation tab (`?tab=delegation`). */
 export interface ExtraTab {
@@ -126,10 +103,16 @@ interface DetailFrameProps {
   noun: string;
   data?: { health: HealthState; candidate?: Candidate; collectedAt: string };
   error?: ApiError;
-  /** The Overview tab; rendered only once data has loaded. */
+  /** The Overview tab's main column; rendered only once data has loaded. */
   children: ReactNode;
+  /** The Overview tab's side column, e.g. conditions and related objects from 1600 px. Contributed sections follow it. */
+  side?: ReactNode;
+  /** The page fills the side column from 1600 px ({@link useTwoColumns}), so the skeleton holds a place for it there. */
+  sideWhenWide?: boolean;
   /** Tabs after YAML; a ?tab= naming none of them shows Overview. */
   extraTabs?: ExtraTab[];
+  /** Refs the page's data links, for the trail above the header. */
+  trailRefs?: readonly LinkedRef[];
   stylesOverride?: SerializedStyles;
 }
 
@@ -141,19 +124,37 @@ export function DetailFrame({
   data,
   error,
   children,
+  side,
+  sideWhenWide,
   extraTabs,
+  trailRefs,
   stylesOverride,
 }: DetailFrameProps) {
+  const wide = useTwoColumns();
   const vocab = useVocabulary();
   const [params, update] = useUrlParams();
-  const tabs = useMemo(() => [...TABS, ...(extraTabs ?? []).map(({ id, label }) => ({ id, label }))], [extraTabs]);
+  const coreIds = useMemo(() => [...CORE_TAB_IDS, ...(extraTabs ?? []).map((t) => t.id)], [extraTabs]);
+  const contributed = useDetailTabContributions(refValue, coreIds);
+  const sections = useSideSectionContributions(refValue);
+  const tabs = useMemo(
+    () => [...TABS, ...[...(extraTabs ?? []), ...contributed].map(({ id, label }) => ({ id, label }))],
+    [extraTabs, contributed],
+  );
   const asked = params.get("tab");
   const tab = tabs.find((t) => t.id === asked)?.id ?? "overview";
   const extra = extraTabs?.find((t) => t.id === tab);
+  const own = contributed.find((t) => t.id === tab);
+  const ctx = { installId, ref: refValue };
+  const sideId = useId();
+  const objectKey = `${installId}|${refParam(refValue)}`;
   const errorTitle = listCopy.cannotLoad(noun);
   const now = useNow();
   // Stale data or a failed poll turns every state on the page unknown, as on the lists (design §6.3).
   const stale = !!data && (!!error || isStale(data.collectedAt, now));
+  // The trail resolves crumbs through refs the page holds and refs its sub-tables report.
+  const by = data?.candidate?.by;
+  const heldRefs = useMemo(() => [...(trailRefs ?? []), ...(by ? [by] : [])], [trailRefs, by]);
+  const [pageRefs, reportRefs] = useTrailRefsCollector(heldRefs);
   // A hidden object 404s as an absent one does (D-013).
   if (error?.status === 404 && !data)
     return (
@@ -170,43 +171,84 @@ export function DetailFrame({
       />
     );
   const overview = data ? (
-    (extra?.content ?? children)
+    extra ? (
+      extra.content
+    ) : own ? (
+      <Slot key={own.id} id={`detail-tab:${own.id}`} resetKey={objectKey} render={() => own.render(ctx)} />
+    ) : (
+      <DetailColumns
+        main={children}
+        side={
+          side || sections.length ? (
+            <>
+              {side}
+              {sections.map((s) => (
+                <Slot
+                  key={s.id}
+                  id={`side-section:${s.id}`}
+                  resetKey={objectKey}
+                  render={() => (
+                    <Section aria-labelledby={`${sideId}-${s.id}`} data-slot="side-section">
+                      <h2 id={`${sideId}-${s.id}`}>{s.title}</h2>
+                      {s.render(ctx)}
+                    </Section>
+                  )}
+                />
+              ))}
+            </>
+          ) : null
+        }
+      />
+    )
   ) : error?.status === 503 ? (
     <PageState kind="connecting" title={vocab.connecting} message={error.message} />
   ) : error ? (
     <PageState kind="error" title={errorTitle} message={error.message} copyText={error.message} />
   ) : (
-    <Skeleton aria-busy="true" data-testid="detail-skeleton">
-      <Shimmer h={20} />
-      <Shimmer h={120} />
-      <Shimmer h={200} />
-    </Skeleton>
+    <div aria-busy="true" data-testid="detail-skeleton">
+      <DetailColumns
+        main={
+          <Stack>
+            <Shimmer h={20} />
+            <Shimmer h={200} />
+          </Stack>
+        }
+        // The same split as the loaded page, so nothing moves when data arrives.
+        side={(sections.length || (wide && sideWhenWide)) && tab === "overview" ? <Shimmer h={120} /> : null}
+      />
+    </div>
   );
   return (
     <StaleView.Provider value={stale}>
-      <Frame stylesOverride={stylesOverride}>
-        {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
-        {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
-        <header data-testid="detail-header">
-          <h1>
-            <span className="kind">{refValue.kind}</span>
-            <ResourceName namespace={refValue.namespace} name={refValue.name} />
-          </h1>
-          <CopyNameButton resource={refValue} />
-          <CopyCommandButton refValue={refValue} />
-          {data ? <HealthBadge state={data.health} /> : null}
-          <span className="spacer" />
-          {data ? <DataAge collectedAt={data.collectedAt} /> : null}
-        </header>
-        <DetailTabs
-          label={detailCopy.views(refValue.kind)}
-          tabs={tabs}
-          selected={tab}
-          onSelect={(t) => update({ tab: t === "overview" ? null : t })}
-        >
-          {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
-        </DetailTabs>
-      </Frame>
+      <TrailRefsProvider value={reportRefs}>
+        <Frame data-testid="page-frame" stylesOverride={stylesOverride}>
+          {data && error ? <PageNotice error={error} title={errorTitle} /> : null}
+          {data?.candidate ? <CandidateBanner candidate={data.candidate} installId={installId} /> : null}
+          <ObjectHeader
+            kind={{ group: refValue.group, kind: refValue.kind, label: refValue.kind }}
+            name={refValue.name}
+            namespace={refValue.namespace}
+            state={data?.health}
+            collectedAt={data?.collectedAt}
+            trailRefs={pageRefs}
+            current={data ? "shown" : "pending"}
+            actions={
+              <>
+                <CopyNameButton resource={refValue} />
+                <CopyCommandButton refValue={refValue} />
+              </>
+            }
+          />
+          <DetailTabs
+            label={detailCopy.views(refValue.kind)}
+            tabs={tabs}
+            selected={tab}
+            onSelect={(t) => update({ tab: t === "overview" ? null : t })}
+          >
+            {tab === "yaml" ? <ResourceYaml installId={installId} refValue={refValue} /> : overview}
+          </DetailTabs>
+        </Frame>
+      </TrailRefsProvider>
     </StaleView.Provider>
   );
 }
@@ -263,6 +305,8 @@ export function SubList<T extends { health: HealthState }>({
     if (l.cursorRejected) setCursor(undefined);
   }, [l.cursorRejected]);
   const page = useShownPage(l.data, !!l.error);
+  // Rows from the previous query are not this page's refs while it reloads.
+  useReportTrailRefs(useMemo(() => (l.isLaggy ? undefined : page?.items.map(rowRef)), [l.isLaggy, page, rowRef]));
   return (
     <>
       {l.error ? <PageNotice error={l.error} title={listCopy.cannotLoad(noun[1])} /> : null}

@@ -126,7 +126,7 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	worst, unknown := severities(owned.Gateways, rep)
 	for _, g := range owned.Gateways {
 		ref := objects.RefOf(g)
-		row := GatewayRow{Ref: ref, Class: objects.GatewayClassName(g), Addresses: objects.GatewayAddresses(g), State: rowState(worst[ref], unknown)}
+		row := GatewayRow{Ref: ref, Class: objects.GatewayClassName(g), Addresses: objects.GatewayAddresses(g), State: RowState(worst[ref], unknown)}
 		if row.Addresses == nil {
 			row.Addresses = []string{}
 		}
@@ -189,9 +189,9 @@ func severities(gws []*unstructured.Unstructured, rep health.Report) (map[object
 	return worst, unknown
 }
 
-// rowState is a gateway's state from its worst finding; if a required signal
-// is missing and there is no error, the row is unknown, never green (D-006).
-func rowState(worst health.State, unknown bool) health.State {
+// RowState is a state from the worst finding; if a required signal is missing
+// and there is no error, it is unknown, never green (D-006).
+func RowState(worst health.State, unknown bool) health.State {
 	switch {
 	case worst == health.StateError:
 		return health.StateError

@@ -1,0 +1,151 @@
+{
+  "body": {
+    "affected": {
+      "collectedAt": "2026-10-17T12:00:10Z",
+      "install": "kgw.kgateway",
+      "items": [],
+      "total": 0
+    },
+    "collectedAt": "2026-10-17T12:00:10Z",
+    "evidence": {
+      "controllerLogs": "not-read",
+      "kind": "xds-rejects",
+      "proxies": {
+        "desired": 2,
+        "ready": 2
+      },
+      "proxyStats": [
+        {
+          "pod": "nack-0",
+          "types": [
+            {
+              "rejecting": true,
+              "rejectingSince": "2026-10-17T12:00:10Z",
+              "typeUrl": "envoy.config.listener.v3.Listener"
+            },
+            {
+              "rejecting": false,
+              "typeUrl": "envoy.config.cluster.v3.Cluster"
+            },
+            {
+              "envoyResources": [
+                "listener~8080"
+              ],
+              "rejecting": true,
+              "typeUrl": "envoy.config.route.v3.RouteConfiguration"
+            },
+            {
+              "envoyResources": [
+                "kube_shop_cart_8080"
+              ],
+              "rejecting": true,
+              "typeUrl": "envoy.config.endpoint.v3.ClusterLoadAssignment"
+            }
+          ]
+        },
+        {
+          "pod": "nack-1",
+          "types": [
+            {
+              "rejecting": false,
+              "typeUrl": "envoy.config.listener.v3.Listener"
+            },
+            {
+              "rejecting": false,
+              "typeUrl": "envoy.config.cluster.v3.Cluster"
+            },
+            {
+              "rejecting": false,
+              "typeUrl": "envoy.config.route.v3.RouteConfiguration"
+            },
+            {
+              "rejecting": false,
+              "typeUrl": "envoy.config.endpoint.v3.ClusterLoadAssignment"
+            }
+          ]
+        }
+      ],
+      "recentlyChanged": [
+        {
+          "group": "gateway.networking.k8s.io",
+          "kind": "HTTPRoute",
+          "link": "detail",
+          "name": "fresh-n",
+          "namespace": "shop"
+        }
+      ],
+      "statusSaysHealthy": false,
+      "types": [
+        {
+          "firstSeen": "2026-10-17T12:00:10Z",
+          "reportedBy": [
+            "kgateway-0",
+            "kgateway-1"
+          ],
+          "streams": 2,
+          "totalSinceFirstSeen": 0,
+          "typeUrl": "envoy.config.cluster.v3.Cluster"
+        },
+        {
+          "firstSeen": "2026-10-17T12:00:10Z",
+          "reportedBy": [
+            "kgateway-0",
+            "kgateway-1"
+          ],
+          "streams": 2,
+          "totalSinceFirstSeen": 0,
+          "typeUrl": "envoy.config.route.v3.RouteConfiguration"
+        }
+      ]
+    },
+    "finding": {
+      "code": "KGWUI-001",
+      "detail": "Cluster rejected on 2 streams. RouteConfiguration rejected on 2 streams.",
+      "group": "f1-pvlyyrq3x3fyb2klyeoiddhzs5",
+      "id": "f1-yyqurhzvuvrtf4nk6icaeoc2sr",
+      "message": "Proxies reject this Gateway's config",
+      "resource": {
+        "group": "gateway.networking.k8s.io",
+        "kind": "Gateway",
+        "link": "detail",
+        "name": "nack",
+        "namespace": "infra"
+      },
+      "severity": "error",
+      "since": "2026-10-17T12:00:10Z",
+      "slug": "xds-rejected"
+    },
+    "install": "kgw.kgateway",
+    "nextSteps": [
+      {
+        "command": "kubectl logs -n kgw kgateway-0 --since=1h | grep 'xds error' | grep nack",
+        "needs": [
+          "pods/log"
+        ],
+        "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+        "title": "See the reason in the controller log"
+      },
+      {
+        "command": "kubectl logs -n infra deploy/nack --since=1h | grep -i rejected",
+        "needs": [
+          "pods/log"
+        ],
+        "note": "Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+        "title": "See the reject in the proxy log"
+      },
+      {
+        "command": "kubectl port-forward -n infra deploy/nack 19000:19000\ncurl -s localhost:19000/stats | grep -E 'update_(rejected|success)'",
+        "needs": [
+          "pods/portforward"
+        ],
+        "note": "This command opens a connection to the proxy's admin port. Log lines and admin output can contain configuration values, including secrets. Share them with care.",
+        "title": "Read the proxy's update counters"
+      }
+    ]
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}

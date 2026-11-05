@@ -2,9 +2,16 @@ package health
 
 import (
 	"cmp"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"reflect"
 	"slices"
 	"strings"
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -20,6 +27,7 @@ func rank(s Severity) int {
 }
 
 // RollUp computes the state: error > unknown > warning > healthy (design §5.3).
+// A not-available check result never makes the state unknown.
 func RollUp(fs []Finding, cs []CheckResult) State {
 	for _, f := range fs {
 		if f.Severity == SeverityError {
@@ -27,7 +35,7 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 		}
 	}
 	for _, c := range cs {
-		if c.Required && !c.OK {
+		if c.Required && !c.OK && c.Unavailable == "" {
 			return StateUnknown
 		}
 	}
@@ -44,29 +52,66 @@ func RollUp(fs []Finding, cs []CheckResult) State {
 // does not reorder between polls. A finding with a severity outside error,
 // warning and info becomes a warning whose detail names the original, so a
 // check can neither hide a problem from the roll-up nor invent a severity.
-func Evaluate(in Input, checks []Check) Report {
+// Checks run in order, each with its Store from rt.States; a grace read
+// inside the grace period wakes the report at the grace end (Report.Next).
+// A check without Clock reuses its memo while its input print holds and its wake time is not due (§16.2).
+// Every finding gets its ID; one without Since gets its first-seen time from its check's Store (design §5.1).
+// When every check returns the same findings slice as in the last Evaluate (a memo hit,
+// or a rerun with equal findings), the findings are that report's slice, shared and
+// with the Group values diagnose.Build set on it.
+func Evaluate(in Input, checks []Check, rt Runtime) Report {
 	r := Report{Install: in.Install.ID(), Counts: map[Severity]int{}, CollectedAt: in.Now}
+	memoize := rt.Print != nil && rt.States != nil
+	var outputs map[string]CheckOutput
+	var outPrints map[string]uint64 // output prints of the checks a later check reads
+	inputs := make([]InputSet, len(checks))
+	for i, c := range checks {
+		if inputs[i] = c.Inputs(); len(inputs[i].Checks) > 0 && outputs == nil {
+			outputs = make(map[string]CheckOutput, len(checks))
+		}
+		if memoize && len(inputs[i].Checks) > 0 {
+			if outPrints == nil {
+				outPrints = map[string]uint64{}
+			}
+			for _, dep := range inputs[i].Checks {
+				outPrints[dep] = 0
+			}
+		}
+	}
 	// Run every check first so the findings are allocated once.
 	runs := make([][]Finding, len(checks))
+	held := memoize // every run is its check's memo findings, read-only and kept by the memo
 	n := 0
 	for i, c := range checks {
-		fs, cr := c.Run(in)
+		fs, cr, wake, out := evaluateOne(in, c, inputs[i], rt, memoize, outputs, outPrints)
+		if held {
+			m := rt.States.memos[c.Name()]
+			held = m != nil && sameSlice(m.findings, fs)
+		}
 		runs[i] = fs
 		n += len(fs)
 		r.Checks = append(r.Checks, cr)
-	}
-	r.Findings = make([]Finding, 0, n)
-	for _, fs := range runs {
-		for _, f := range fs {
-			if _, known := sevRank[f.Severity]; !known {
-				note := fmt.Sprintf("unrecognised severity %q", f.Severity)
-				f.Detail = strings.TrimSuffix(note+": "+f.Detail, ": ")
-				f.Severity = SeverityWarning
-			}
-			r.Findings = append(r.Findings, f)
+		if outputs != nil {
+			outputs[c.Name()] = CheckOutput{Findings: fs, Result: cr}
+		}
+		if _, read := outPrints[c.Name()]; read {
+			outPrints[c.Name()] = out
+		}
+		if !wake.IsZero() && (r.Next.IsZero() || wake.Before(r.Next)) {
+			r.Next = wake
 		}
 	}
-	r.Findings = sortFindings(r.Findings)
+	if held && sameRuns(runs, rt.States.merged.runs) {
+		r.Findings = rt.States.merged.findings
+	} else {
+		r.Findings = merge(runs, n)
+		if memoize {
+			rt.States.merged = merged{findings: r.Findings}
+			if held { // runs are memos' findings, held anyway; a Clock check's slice is never kept alive
+				rt.States.merged.runs = runs
+			}
+		}
+	}
 	for _, f := range r.Findings {
 		r.Counts[f.Severity]++
 	}
@@ -74,19 +119,147 @@ func Evaluate(in Input, checks []Check) Report {
 	return r
 }
 
-// sortFindings returns fs sorted stably by compareFindings. It sorts
-// pointers, as moving a whole Finding per swap dominated a large report's sort.
+// sameRuns reports whether every run is the same slice as in last: memo findings are
+// read-only, so the same slice means the same findings. An empty run matches an empty one.
+func sameRuns(runs, last [][]Finding) bool {
+	if len(runs) != len(last) {
+		return false
+	}
+	for i, fs := range runs {
+		if !sameSlice(fs, last[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameSlice reports whether a and b are the same slice; two empty ones are.
+func sameSlice(a, b []Finding) bool {
+	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
+}
+
+// merge returns runs' n findings in one sorted slice, an unknown severity made a warning.
+func merge(runs [][]Finding, n int) []Finding {
+	all := make([]Finding, 0, n)
+	for _, fs := range runs {
+		for _, f := range fs {
+			if _, known := sevRank[f.Severity]; !known {
+				note := fmt.Sprintf("unrecognised severity %q", f.Severity)
+				f.Detail = strings.TrimSuffix(note+": "+f.Detail, ": ")
+				f.Severity = SeverityWarning
+			}
+			all = append(all, f)
+		}
+	}
+	return sortFindings(all)
+}
+
+// evaluateOne runs c, or reuses its memo, and returns its findings, result,
+// wake time and, when a later check reads it (outPrints has its name), its
+// output print. A rerun whose findings equal its memo's returns the memo's slice.
+func evaluateOne(in Input, c Check, set InputSet, rt Runtime, memoize bool, outputs map[string]CheckOutput,
+	outPrints map[string]uint64,
+) (fs []Finding, cr CheckResult, wake time.Time, out uint64) {
+	var key uint64
+	keyed := false
+	if memoize && !set.Clock {
+		if key, keyed = rt.Print(set); keyed {
+			for _, dep := range set.Checks {
+				key = mix(key, outPrints[dep])
+			}
+		}
+	}
+	if keyed {
+		if m := rt.States.memos[c.Name()]; m != nil && m.print == key && (m.wake.IsZero() || m.wake.After(in.Now) && m.times == timesPrint(in, set, rt.Collected)) {
+			if at, fresh := m.stamp.restamp(in, set, rt.Collected, m.result.CollectedAt); fresh {
+				cr = m.result
+				cr.CollectedAt = at
+				// Run did not execute, so the memo's kept IDs stand in for its Retain calls.
+				pruneSince(rt.States.stores[c.Name()], m.keep)
+				if _, read := outPrints[c.Name()]; read {
+					out = stampPrint(m.out, at)
+				}
+				return m.findings, cr, m.wake, out
+			}
+		}
+	}
+	ctx := runContext(in, c, set, rt, outputs)
+	fs, cr = c.Run(ctx)
+	wake = ctx.sink.wake
+	sinces := identify(in.Install.ID(), in.Now, fs, ctx.State, rt.States.checkIDs(c.Name()))
+	var keep map[string]bool
+	// When every since entry was just read and none is retained, none is stale.
+	if keyed || len(ctx.sink.retained) > 0 || sinceEntries(ctx.State) != sinces {
+		keep = keepOf(fs, ctx.sink.retained)
+		pruneSince(ctx.State, keep)
+	}
+	if keyed {
+		if m := rt.States.memos[c.Name()]; m != nil && len(m.findings) == len(fs) && reflect.DeepEqual(m.findings, fs) {
+			fs = m.findings // equal findings keep their slice, so the merged report and diagnosis stay reused
+		}
+	}
+	var base uint64
+	if _, read := outPrints[c.Name()]; read {
+		base = outputPrint(fs, cr)
+		out = stampPrint(base, cr.CollectedAt)
+	}
+	if keyed {
+		m := &memo{print: key, findings: fs, result: cr, wake: wake, stamp: stampOf(in, set, rt.Collected, cr.CollectedAt), out: base, keep: keep}
+		if !wake.IsZero() {
+			m.times = timesPrint(in, set, rt.Collected)
+		}
+		rt.States.memos[c.Name()] = m
+	} else if memoize {
+		delete(rt.States.memos, c.Name())
+	}
+	return fs, cr, wake, out
+}
+
+// runContext returns c's RunContext: its Store, a fresh sink, and in with
+// FirstSeen wrapped so a read inside the grace period wakes at its end.
+func runContext(in Input, c Check, inputs InputSet, rt Runtime, outputs map[string]CheckOutput) RunContext {
+	var st *Store
+	if rt.States != nil {
+		st = rt.States.store(c.Name())
+	} else {
+		st = NewStore()
+	}
+	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: inputs, outputs: outputs, collected: rt.Collected}
+	sink, base := ctx.sink, in
+	ctx.FirstSeen = func(u *unstructured.Unstructured) time.Time {
+		t := base.firstSeen(u)
+		if end := t.Add(Grace); in.Now.Before(end) { // in grace while now − t < Grace
+			if sink.wake.IsZero() || end.Before(sink.wake) {
+				sink.wake = end
+			}
+		}
+		return t
+	}
+	return ctx
+}
+
+// sortFindings sorts fs stably by compareFindings, in place. It sorts indexes
+// and then moves each Finding once, as moving whole Findings per swap dominated a large report's sort.
 func sortFindings(fs []Finding) []Finding {
-	ps := make([]*Finding, len(fs))
-	for i := range fs {
-		ps[i] = &fs[i]
+	perm := make([]int32, len(fs))
+	for i := range perm {
+		perm[i] = int32(i) // #nosec G115 -- a finding count fits in int32
 	}
-	slices.SortStableFunc(ps, func(a, b *Finding) int { return compareFindings(*a, *b) })
-	sorted := make([]Finding, len(fs))
-	for i, p := range ps {
-		sorted[i] = *p
+	slices.SortStableFunc(perm, func(a, b int32) int { return compareFindings(fs[a], fs[b]) })
+	// Apply perm one cycle at a time: fs[k] takes fs[perm[k]].
+	for k := range perm {
+		if perm[k] < 0 {
+			continue
+		}
+		tmp, j := fs[k], k
+		for int(perm[j]) != k {
+			next := int(perm[j])
+			fs[j], perm[j] = fs[next], -1
+			j = next
+		}
+		fs[j], perm[j] = tmp, -1
 	}
-	return sorted
+	return fs
 }
 
 // compareFindings orders by severity, code, resource, parentRef, message and
@@ -139,4 +312,104 @@ func compareParents(pa, pb *objects.ParentRef) int {
 		b = *pb
 	}
 	return cmp.Or(compareRefs(a.Ref(), b.Ref()), cmp.Compare(a.SectionName, b.SectionName), cmp.Compare(a.Port, b.Port))
+}
+
+// mix folds v into h: an FNV-1a step, then the splitmix64 finaliser.
+func mix(h, v uint64) uint64 {
+	x := (h^v)*1099511628211 + 0x9e3779b97f4a7c15
+	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+	return x ^ (x >> 31)
+}
+
+// stampPrint folds CollectedAt into an output print, so a restamp reruns the checks that read it.
+func stampPrint(base uint64, at time.Time) uint64 {
+	return mix(mix(base, uint64(at.UnixNano())), fnvString(at.Location().String())) //nolint:gosec // hashed bits
+}
+
+// fnvString is FNV-64a of s.
+func fnvString(s string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
+}
+
+// outputPrint is FNV-64a over every field of fs and of cr but CollectedAt,
+// which stampPrint adds so a memo can restamp it.
+func outputPrint(fs []Finding, cr CheckResult) uint64 {
+	h := fnv.New64a()
+	var b [8]byte
+	u64 := func(v uint64) {
+		binary.LittleEndian.PutUint64(b[:], v)
+		_, _ = h.Write(b[:])
+	}
+	str := func(s string) {
+		u64(uint64(len(s))) // length prefix keeps adjacent strings apart
+		_, _ = h.Write([]byte(s))
+	}
+	flag := func(v bool) {
+		if v {
+			u64(1)
+		} else {
+			u64(0)
+		}
+	}
+	ref := func(r objects.Ref) { str(r.Group); str(r.Kind); str(r.Namespace); str(r.Name) }
+	at := func(t *time.Time) {
+		if flag(t != nil); t != nil {
+			u64(uint64(t.UnixNano()))
+			str(t.Location().String())
+		}
+	}
+	u64(uint64(len(fs)))
+	for _, f := range fs {
+		str(f.ID)
+		str(f.Group)
+		str(f.Code)
+		str(f.Slug)
+		str(string(f.Severity))
+		str(f.Install)
+		if flag(f.Resource != nil); f.Resource != nil {
+			ref(*f.Resource)
+		}
+		str(f.Message)
+		str(f.Detail)
+		at(f.Since)
+		flag(f.Restricted)
+		u64(uint64(len(f.Evidence)))
+		for _, e := range f.Evidence {
+			ref(e)
+		}
+		at(f.ResourceSince)
+		if flag(f.Facts != nil); f.Facts != nil {
+			js, _ := json.Marshal(f.Facts) // evidence types marshal without error
+			str(string(js))
+		}
+		if flag(f.parent != nil); f.parent != nil {
+			ref(f.parent.Ref())
+			str(f.parent.SectionName)
+			u64(uint64(f.parent.Port)) //nolint:gosec // hashed bits; the sign does not matter
+		}
+	}
+	str(cr.Name)
+	flag(cr.OK)
+	flag(cr.Required)
+	str(cr.Error)
+	str(cr.Detail)
+	flag(cr.Pending)
+	str(string(cr.Unavailable))
+	u64(uint64(len(cr.Gaps)))
+	for _, g := range cr.Gaps {
+		ref(g.Gateway)
+		str(string(g.Unavailable))
+		str(g.Reason)
+	}
+	u64(uint64(len(cr.Withheld)))
+	for _, w := range cr.Withheld {
+		ref(w.Gateway)
+		at(&w.First)
+		at(&w.Last)
+	}
+	str(cr.ControllerLogs)
+	return h.Sum64()
 }

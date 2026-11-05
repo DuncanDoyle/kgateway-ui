@@ -10,13 +10,16 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
@@ -591,10 +594,23 @@ func TestMetricsIdentityCoversContent(t *testing.T) {
 	if enc(later, true) != enc(res(1), true) {
 		t.Fatal("CollectedAt is not part of the identity")
 	}
+	pod := func(n float64, present bool) ctrlmetrics.Result {
+		r := res(1)
+		r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u", Name: "p", StatusSyncs: n, StatusSyncsPresent: present}}
+		return r
+	}
+	if enc(pod(2, true), true) == enc(pod(3, true), true) || enc(pod(0, true), true) == enc(pod(0, false), true) {
+		t.Fatal("status_syncs_total and its presence must be part of the identity")
+	}
 	errRes := res(0)
 	errRes.Err = "no ready controller pod to scrape"
 	if enc(errRes, true) == enc(res(0), true) {
 		t.Fatal("Err must be part of the identity")
+	}
+	snap := res(0)
+	snap.Metrics.Snapshot = map[ctrlmetrics.GatewayKey]ctrlmetrics.SnapshotResources{{Namespace: "infra", Name: "edge"}: {Routes: 1}}
+	if enc(snap, true) == enc(res(0), true) {
+		t.Fatal("the snapshot must be part of the identity")
 	}
 }
 
@@ -1128,4 +1144,108 @@ func TestDeclaredCandidateMaturesAtItsGraceInstant(t *testing.T) {
 	if h.runs != 2 {
 		t.Fatalf("runs = %d, want 2", h.runs)
 	}
+}
+
+// collectedCheck records the value of acme/k each run reads.
+type collectedCheck struct{ seen *atomic.Value }
+
+func (collectedCheck) Name() string            { return "collected" }
+func (collectedCheck) Inputs() health.InputSet { return health.InputSet{Collected: []string{"acme/k"}} }
+func (c collectedCheck) Run(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+	v, _ := ctx.Collected("acme/k")
+	c.seen.Store(v)
+	return nil, health.CheckResult{Name: "collected", OK: true}
+}
+
+// collectedHarness wires a collector store that does not notify, so only the
+// confirm tick and deadlines see its changes.
+func collectedHarness(t *testing.T) (*harness, *collect.Store, *atomic.Value) {
+	t.Helper()
+	var s *collect.Store
+	seen := &atomic.Value{}
+	h := newHarness(t, func(cfg *Config) {
+		s = collect.New(nil, cfg.Clock.Now)
+		cfg.Collected = s.Snapshot
+		cfg.Checks = append(cfg.Checks, collectedCheck{seen})
+	})
+	return h, s, seen
+}
+
+// D-019: a value published after a computation blocks the confirm tick.
+func TestConfirmRefusesStaleCollectedValue(t *testing.T) {
+	h, s, seen := collectedHarness(t)
+	s.Publish("acme/k", "old", 1, 0)
+	h.start(time.Hour)
+	p1 := h.e.Current()
+	if p1.Source.Collected != s.Snapshot().Print {
+		t.Fatal("the published source must carry the collected print")
+	}
+	h.tickIdle()
+	s.Publish("acme/k", "new", 2, 0) // no trigger: the store's signal is nil
+	h.c.Step(ConfirmEvery)
+	h.await(EvConfirmRefused)
+	if p := h.e.Current(); p.Model != p1.Model {
+		t.Fatal("a refused tick must not publish")
+	}
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	e := h.await(EvPublished)
+	if e.Published.Source.Collected != s.Snapshot().Print || e.Published.Source.Equal(p1.Source) {
+		t.Fatal("the run must publish the new collected print")
+	}
+	if v := seen.Load().(collect.Value); v.Data != "new" {
+		t.Fatalf("the run's checks must read the new value: %+v", v)
+	}
+	h.await(EvArmed)
+	h.tickIdle()
+	if h.runs != 1 {
+		t.Fatalf("runs = %d, want 1", h.runs)
+	}
+}
+
+// A collected value's expiry is a deadline: the run at it reads the value unavailable.
+func TestCollectedExpiryIsADeadline(t *testing.T) {
+	h, s, seen := collectedHarness(t)
+	s.Publish("acme/k", "v", 1, 30*time.Second)
+	h.start(time.Hour)
+	if next := h.e.Current().Model.Next; next.Strict || !next.At.Equal(testutil.Now.Add(30*time.Second)) {
+		t.Fatalf("the expiry must be the next deadline: %+v", next)
+	}
+	h.c.Step(30*time.Second - time.Second)
+	h.await(EvConfirmed)
+	h.await(EvArmed)
+	if h.runs != 0 {
+		t.Fatal("no run before the expiry")
+	}
+	h.c.Step(time.Second)
+	e := h.await(EvPublished)
+	if !e.At.Equal(testutil.Now.Add(30*time.Second)) || e.Published.Source.Collected != s.Snapshot().Print {
+		t.Fatalf("a run at the expiry: at %v", e.At)
+	}
+	if v := seen.Load().(collect.Value); v.State != collect.Unavailable || v.Data != nil {
+		t.Fatalf("the expired value must read unavailable: %+v", v)
+	}
+}
+
+// A Catalog change whose trigger was lost is caught by the confirm tick: no
+// confirmation, then one recompute that publishes the new key.
+func TestConfirmTickCatchesCatalogChange(t *testing.T) {
+	var cat atomic.Pointer[kinds.Catalog]
+	first := kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}}, nil)
+	cat.Store(&first)
+	h := newHarness(t, func(c *Config) { c.Catalog = func() kinds.Catalog { return *cat.Load() } })
+	h.start(time.Hour)
+	p1 := h.e.Current()
+	next := kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: "acme.example", Kind: "Widget"}}, nil)
+	cat.Store(&next) // no Notify
+	h.c.Step(ConfirmEvery)
+	h.await(EvConfirmRefused)
+	if p := h.e.Current(); p != p1 {
+		t.Fatal("a Catalog change must not confirm")
+	}
+	awaitThenStep(t, h.ev, EvArmed, h.c, Quiet)
+	if got := h.await(EvPublished).Published.Source.Catalog; got != next.Key() {
+		t.Fatalf("published Catalog %q, want %q", got, next.Key())
+	}
+	h.await(EvArmed)
+	h.tickIdle()
 }

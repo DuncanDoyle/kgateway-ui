@@ -90,16 +90,19 @@ func has(h api.HealthResponse, code, res string, msg ...string) bool {
 }
 
 // tpMissingTarget is the finding expected for tp-missing-target. Only kgateway
-// main reports TargetNotFound; v2.3.x and v2.4.x write no status for a policy
-// whose target is missing, so after the grace period it is "not yet processed" (finding 7).
+// main reports TargetNotFound; on v2.3.x and v2.4.x the UI computes it, and the
+// computed 016 replaces "not yet processed" after the grace and the hold (design §7.6).
 func tpMissingTarget() (code, msg string) {
 	if os.Getenv("KGW_MAIN") == "1" {
-		return health.CodeConditionFalse, "Policy target not found"
+		return health.CodeConditionFalse, health.PolicyTargetNotFoundMessage
 	}
-	return health.CodeRouteUnattached, "Not yet processed by the controller"
+	return health.CodePolicyTargetNotFound, health.PolicyTargetNotFoundMessage
 }
 
 func secondInstall() bool { return os.Getenv("SECOND_INSTALL") == "1" }
+
+// nack reports whether setup.sh applied fixtures/nack.yaml (NACK=1).
+func nack() bool { return os.Getenv("NACK") == "1" }
 
 func TestRealCluster(t *testing.T) {
 	var meta api.MetaResponse
@@ -133,7 +136,10 @@ func TestRealCluster(t *testing.T) {
 	// Gateways edge and self; posts in the unlabelled blog namespace must not count. An in-scope
 	// HTTPRoute is owned, so counted, when a parentRef names one of the install's Gateways or
 	// ListenerSets (denied ones included), or once the settled controller wrote it an entry (design §4.2).
-	routes := 0
+	routes, gateways := 0, 2
+	if nack() {
+		gateways++ // infra/nack
+	}
 	w := settledWorld(t)
 	for _, r := range w.routes {
 		parent := slices.ContainsFunc(r.Spec.ParentRefs, func(p kref) bool {
@@ -154,8 +160,8 @@ func TestRealCluster(t *testing.T) {
 		for _, c := range o.Counts {
 			counts[c.Kind] = c.Count
 		}
-		if counts["Gateway"] != 2 || counts["HTTPRoute"] != routes {
-			return fmt.Errorf("counts: want Gateway 2, HTTPRoute %d; got %+v", routes, counts)
+		if counts["Gateway"] != gateways || counts["HTTPRoute"] != routes {
+			return fmt.Errorf("counts: want Gateway %d, HTTPRoute %d; got %+v", gateways, routes, counts)
 		}
 		return nil
 	})
@@ -188,12 +194,14 @@ func TestRealCluster(t *testing.T) {
 
 	// Findings settle once kgateway has written status and metrics were scraped.
 	tpCode, tpMsg := tpMissingTarget()
-	deadline := time.Now().Add(3 * time.Minute) // covers health.Grace for the policy
+	deadline := time.Now().Add(3 * time.Minute) // covers health.Grace and health.TargetHold for the policy
 	for {
 		var h api.HealthResponse
 		get(t, "/api/v1/installs/kgw-a.kgateway/health", &h)
-		ok := has(h, health.CodeConditionFalse, "shop/broken") && has(h, health.CodeNamespaceNotWatched, "blog/posts") &&
-			has(h, tpCode, "shop/tp-missing-target", tpMsg) && has(h, health.CodeSelfManagedProxy, "infra/self") &&
+		// shop/broken's missing Service is 013 now, never also 002 (D-030).
+		ok := has(h, health.CodeRefUnresolved, "shop/broken") && !has(h, health.CodeConditionFalse, "shop/broken") && has(h, health.CodeNamespaceNotWatched, "blog/posts") &&
+			has(h, tpCode, "shop/tp-missing-target", tpMsg) && !has(h, health.CodeRouteUnattached, "shop/tp-missing-target") &&
+			has(h, health.CodeSelfManagedProxy, "infra/self") &&
 			!has(h, health.CodeConditionFalse, "shop/good")
 		xds := slices.ContainsFunc(h.Checks, func(c health.CheckResult) bool {
 			return c.Name == "xDS rejects" && c.OK // in-cluster metrics scraping works
@@ -811,22 +819,38 @@ func TestExplorerShowsControllerStatus(t *testing.T) {
 	})
 
 	t.Run("not-programmed", func(t *testing.T) {
-		want := map[string]bool{}
+		want, rules := map[string]bool{}, map[string]bool{}
+		ruleReason := func(c *kcond) bool {
+			return c != nil && c.Status == "False" && (c.Reason == "RouteRuleReplaced" || c.Reason == "RouteRuleDropped")
+		}
 		for id, r := range w.routes {
 			for _, e := range r.Status.Parents {
 				p, a := findCond(e.Conditions, programmed), findCond(e.Conditions, "Accepted")
-				if e.ControllerName == ours && (p != nil && p.Status == "False" ||
-					a != nil && a.Status == "False" && (a.Reason == "RouteRuleReplaced" || a.Reason == "RouteRuleDropped")) {
+				if e.ControllerName == ours && (p != nil && p.Status == "False" || ruleReason(a)) {
 					want[id] = true
+				}
+				if e.ControllerName == ours && (ruleReason(p) || ruleReason(a)) {
+					rules[id] = true
 				}
 			}
 		}
-		if !want["shop/replaced"] {
+		if !want["shop/replaced"] || !rules["shop/replaced"] {
 			t.Errorf("fixture: shop/replaced has no replaced rule")
 		}
 		eventually(t, func() error {
 			if got := rowIDs(routeList(t, "state=not-programmed")); !slices.Equal(got, sortedKeys(want)) {
 				return fmt.Errorf("state=not-programmed: API %v, controller %v", got, sortedKeys(want))
+			}
+			return nil
+		})
+		// A replaced or dropped rule is 015 on every version, never also 002 (D-030).
+		eventually(t, func() error {
+			var h api.HealthResponse
+			get(t, install+"/health", &h)
+			for _, id := range sortedKeys(rules) {
+				if !has(h, health.CodeRuleReplaced, id) || has(h, health.CodeConditionFalse, id) {
+					return fmt.Errorf("%s: want 015 and no 002: %+v", id, h.Findings)
+				}
 			}
 			return nil
 		})

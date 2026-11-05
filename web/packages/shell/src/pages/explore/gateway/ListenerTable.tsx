@@ -207,14 +207,14 @@ export function ListenerTable({ listeners, generation, stylesOverride }: Listene
         <colgroup>
           <col style={{ width: "40px" }} />
           <col style={{ width: "120px" }} />
-          <col />
+          <col style={{ width: narrow ? "96px" : "130px" }} />
           <col style={{ width: "64px" }} />
           <col style={{ width: "88px" }} />
           {narrow ? null : <col style={{ width: computed ? "12%" : "15%" }} />}
           {narrow ? null : <col style={{ width: computed ? "12%" : "15%" }} />}
           {narrow ? null : <col style={{ width: computed ? "13%" : "18%" }} />}
           <col style={{ width: computed ? "116px" : "130px" }} />
-          {computed ? <col style={{ width: narrow ? "172px" : "18%" }} /> : null}
+          {computed ? <col style={{ width: "172px" }} /> : null}
         </colgroup>
         <thead>
           <tr>

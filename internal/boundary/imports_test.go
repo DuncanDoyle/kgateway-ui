@@ -29,13 +29,19 @@ var allowed = map[string]string{
 	"pkg/api/handlers.go":           "serves Deployments that findings reference",
 	"pkg/app/app.go":                "builds the Kubernetes clients and resolves served kinds",
 	"pkg/cache/cache.go":            "the Kubernetes informers",
+	"pkg/cache/crds.go":             "Gateway API CRD metadata through the metadata client",
+	"pkg/cache/events.go":           "Warning Events on controller and proxy Pods",
+	"pkg/ctrllogs/stream.go":        "follows controller Pod logs",
 	"pkg/ctrlmetrics/scrape.go":     "scrapes controller Pods",
 	"pkg/health/checks.go":          "controller and proxy Deployment readiness",
 	"pkg/install/assign.go":         "Namespace objects for scope",
 	"pkg/install/install.go":        "Install carries the controller Deployment and Pods",
 	"pkg/install/scope.go":          "scope from Pod env and Namespace labels",
 	"pkg/install/upstream.go":       "detects controller Deployments",
+	"pkg/process/kube.go":           "process facts from Pods, Deployments and Events",
+	"pkg/proxystats/kube.go":        "the Kubernetes proxy stats source: proxy Pod targets and transport",
 	"pkg/scopeverify/verify.go":     "Namespace objects for scope",
+	"pkg/setup/setup.go":            "builds cache and engine config from the Kubernetes clients",
 }
 
 // violations walks the Go files under root. bad lists non-test files outside

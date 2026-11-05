@@ -2,6 +2,7 @@ import { css, ThemeProvider as EmotionThemeProvider, Global } from "@emotion/rea
 import "@fontsource-variable/figtree";
 import "@fontsource-variable/jetbrains-mono";
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useState } from "react";
+import { fontFallbackActive, withFallbackFonts } from "./fontFallback";
 import { readStoredTheme, storePaint, storeTheme } from "./themeStorage";
 import { defaultThemeIdFor } from "./themes";
 import type { Theme } from "./tokens";
@@ -42,6 +43,9 @@ interface ThemeProviderProps {
 export function ThemeProvider({ themes, defaultThemeId, children }: ThemeProviderProps) {
   const [id, setId] = useState(() => readStoredTheme(themes) ?? defaultThemeIdFor(themes, defaultThemeId));
   const current = themes.find((t) => t.id === id) ?? (themes[0] as Theme);
+  // Once the font wait was cut short, the fallback fonts stay so a late font load never reflows.
+  const [fallback] = useState(fontFallbackActive);
+  const painted = useMemo(() => (fallback ? withFallbackFonts(current) : current), [fallback, current]);
   // Native controls and scrollbars follow the theme, matching what index.html set before React loaded.
   useLayoutEffect(() => {
     document.documentElement.style.colorScheme = current.mode;
@@ -61,8 +65,8 @@ export function ThemeProvider({ themes, defaultThemeId, children }: ThemeProvide
   );
   return (
     <ThemeSwitchContext.Provider value={value}>
-      <EmotionThemeProvider theme={current}>
-        <Global styles={globalStyles(current)} />
+      <EmotionThemeProvider theme={painted}>
+        <Global styles={globalStyles(painted)} />
         {children}
       </EmotionThemeProvider>
     </ThemeSwitchContext.Provider>

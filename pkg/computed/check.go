@@ -34,6 +34,10 @@ const (
 	KindOrphan               CheckKind = "orphan-not-attached"
 )
 
+// KindPolicyTarget is the policy targets verifier: a current ancestor for a
+// target the rule called missing (design §7.6).
+const KindPolicyTarget CheckKind = "policy-target"
+
 // Identity is a check's identity: a rule set change gives a new one (rules §9.1).
 type Identity struct {
 	Install, RuleSet string

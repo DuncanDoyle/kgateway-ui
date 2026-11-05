@@ -15,6 +15,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
@@ -265,6 +267,26 @@ func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	testutil.Recv(t, c.OnResult.C(), "the notification for changed content")
 }
 
+// A scrape whose only change is status_syncs_total notifies, so 018's syncs
+// evidence never waits for the staleness deadline.
+func TestCollectorNotifiesOnStatusSyncsChange(t *testing.T) {
+	syncs := func(n string) *string {
+		b := sample + "# TYPE " + StatusSyncsTotal + " counter\n" + StatusSyncsTotal + `{name="gw",namespace="app-a",result="success",syncer="GatewayStatusSyncer"} ` + n + "\n"
+		return &b
+	}
+	var body atomic.Pointer[string]
+	body.Store(syncs("2"))
+	c, clk, acks := runHooked(t, &body, time.Hour)
+	ack(t, acks, clk.Now())
+	testutil.Recv(t, c.OnResult.C(), "the first notification")
+	body.Store(syncs("3"))
+	clk.Step(10 * time.Second)
+	if s := ack(t, acks, clk.Now()); !s.notified {
+		t.Fatal("a changed status_syncs_total must notify")
+	}
+	testutil.Recv(t, c.OnResult.C(), "the notification for changed syncs")
+}
+
 // Codex 1: a result that follows a stale one notifies even with equal content.
 func TestCollectorNotifiesAfterStaleResult(t *testing.T) {
 	var body atomic.Pointer[string]
@@ -311,5 +333,99 @@ func TestSameContentIgnoresCollectedAt(t *testing.T) {
 	nan := Result{Metrics: Metrics{Rejects: map[GatewayKey]float64{{"infra", "edge"}: math.NaN()}}}
 	if !nan.SameContent(nan) {
 		t.Fatal("a NaN sample must equal itself")
+	}
+}
+
+func TestSameContentSeesPerPodChange(t *testing.T) {
+	mk := func(d float64) Result {
+		return Result{Metrics: Metrics{PerPod: []PodMetrics{{UID: "u", Name: "p", Dropped: d, DroppedPresent: true}}}}
+	}
+	if !mk(0).SameContent(mk(0)) || mk(0).SameContent(mk(1)) {
+		t.Fatal("a changed per-Pod value is a content change")
+	}
+}
+
+// Neither scraper follows a redirect: the target sees no request.
+func TestScrapersNeverFollowRedirects(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(w, "kgateway_build_info 1\n")
+	}))
+	t.Cleanup(target.Close)
+	redirect := httptest.NewServer(http.RedirectHandler(target.URL+"/metrics", http.StatusFound))
+	t.Cleanup(redirect.Close)
+	host, port, _ := net.SplitHostPort(redirect.Listener.Addr().String())
+	p, _ := strconv.Atoi(port)
+	pod := &corev1.Pod{}
+	pod.Namespace, pod.Name, pod.Status.PodIP = "kgw", "kgateway-0", host
+	kc, err := kubernetes.NewForConfig(&rest.Config{Host: redirect.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, s := range map[string]Scraper{"default client": HTTPScraper{}, "supplied client": HTTPScraper{Client: &http.Client{}}, "pods/proxy": PodProxyScraper{Kube: kc}} {
+		if _, err := s.Scrape(context.Background(), pod, int32(p)); err == nil || !strings.Contains(err.Error(), "302") {
+			t.Errorf("%s: want a 302 error, got %v", name, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("the redirect target saw %d requests", n)
+	}
+	if tr, ok := NewHTTPClient().Transport.(*http.Transport); !ok || tr.Proxy != nil {
+		t.Fatal("Pod-IP scrapes never go through an environment proxy")
+	}
+}
+
+// pods/proxy errors are closed unread and never retried: an oversized 500
+// and a 429 with Retry-After each fail once, without the body in the error.
+func TestPodProxyScrapeErrorsAreBoundedAndNotRetried(t *testing.T) {
+	for _, tc := range []struct {
+		code int
+		hdr  string
+	}{{http.StatusInternalServerError, ""}, {http.StatusTooManyRequests, "1"}} {
+		t.Run(strconv.Itoa(tc.code), func(t *testing.T) {
+			var hits atomic.Int32
+			var path string
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				path = r.URL.Path
+				if tc.hdr != "" {
+					w.Header().Set("Retry-After", tc.hdr)
+				}
+				w.WriteHeader(tc.code)
+				chunk := []byte(strings.Repeat("secret ", 1<<14))
+				for range 128 { // far over maxBodyBytes
+					if _, err := w.Write(chunk); err != nil {
+						return
+					}
+				}
+			}))
+			t.Cleanup(api.Close)
+			kc, err := kubernetes.NewForConfig(&rest.Config{Host: api.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod := &corev1.Pod{}
+			pod.Namespace, pod.Name = "kgw", "kgateway-0"
+			_, err = PodProxyScraper{Kube: kc}.Scrape(context.Background(), pod, 9092)
+			if err == nil || !strings.Contains(err.Error(), strconv.Itoa(tc.code)) || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("want a %d error without the body, got %v", tc.code, err)
+			}
+			if n := hits.Load(); n != 1 {
+				t.Fatalf("%d requests, want 1 (no retry)", n)
+			}
+			if path != "/api/v1/namespaces/kgw/pods/http:kgateway-0:9092/proxy/metrics" {
+				t.Fatalf("path %s", path)
+			}
+		})
+	}
+}
+
+func TestSameContentSeesSnapshotChange(t *testing.T) {
+	mk := func(n int) Result {
+		return Result{Metrics: Metrics{Snapshot: map[GatewayKey]SnapshotResources{{"infra", "edge"}: {Routes: n}}}}
+	}
+	if !mk(1).SameContent(mk(1)) || mk(1).SameContent(mk(2)) {
+		t.Fatal("a changed snapshot is a content change")
 	}
 }

@@ -30,7 +30,8 @@ export function HealthBadge({ state: given, label, stylesOverride }: HealthBadge
   return (
     <Badge state={state} stylesOverride={stylesOverride}>
       <HealthIcon state={state} />
-      {label ?? stateLabel(state)}
+      {/* A stale view replaces the state, so a label naming the old one goes too. */}
+      {state === given ? (label ?? stateLabel(state)) : stateLabel(state)}
     </Badge>
   );
 }

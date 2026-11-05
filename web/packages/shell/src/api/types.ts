@@ -1,6 +1,8 @@
 import type { HealthState } from "../theme/tokens";
+import type { Evidence, OtherEvidence } from "./diagTypes";
 import type { Link, LinkedRef } from "./exploreTypes";
 
+export * from "./diagTypes";
 export * from "./exploreTypes";
 
 /** Mirrors pkg/api, pkg/overview, pkg/health JSON as built (sub-phase 1.1). */
@@ -23,8 +25,12 @@ export interface Ref {
 /**
  * restricted: the caller may not view the resource; message is "" and detail/since are absent (D-013).
  * evidenceRestricted: the detail was replaced because it quotes an object the caller may not view.
+ * id opens the finding's page; group is its cause's group (both from sub-phase 3.1).
+ * evidence is the typed evidence (sub-phase 3.2); absent when restricted or evidence-restricted.
  */
 export interface Finding {
+  id?: string;
+  group?: string;
   code: string;
   slug: string;
   severity: Severity;
@@ -35,6 +41,7 @@ export interface Finding {
   since?: string;
   restricted?: boolean;
   evidenceRestricted?: boolean;
+  evidence?: Evidence | OtherEvidence;
 }
 /** detail: context for an OK check (e.g. scope source); pending: not OK only because of the grace period. */
 export interface CheckResult {
@@ -45,6 +52,8 @@ export interface CheckResult {
   error?: string;
   detail?: string;
   pending?: boolean;
+  /** Why an optional input is missing; such a check never makes the install unknown (D-034). */
+  unavailable?: "off" | "denied" | "failing" | "not-on-version" | "not-observed";
 }
 /** Health as sent on the wire: checks is null when no check ran. */
 export type RawHealthReport = Omit<HealthReport, "checks"> & { checks: CheckResult[] | null };
@@ -100,6 +109,8 @@ export interface InstallHeader {
  */
 export interface InstallSummary extends InstallHeader {
   health: { state: HealthState; counts: Partial<Record<Severity, number>> };
+  /** The number of groups diagnostics lists: the install page reserves that many Needs attention rows while they load. */
+  groupRows: number;
   computedAt: string;
   confirmedAt?: string;
 }
@@ -123,6 +134,8 @@ export interface GatewayRow {
   attachedRoutes: number;
   addresses: string[];
   link?: Link;
+  /** The Data plane column, from the server: unknown while the xDS rejects check is not OK (design §6). */
+  dataPlane?: "ok" | "rejects" | "unknown";
 }
 export interface OverviewResponse {
   header: InstallHeader;
@@ -152,6 +165,14 @@ export interface MetaResponse {
   views?: { group: string; kind: string }[];
   /** Filters added after v1, per list (2.3: routes has listener). */
   filters?: Record<string, string[]>;
+  /** Extension capabilities with their state, by name; omitted when there are none. */
+  capabilityStates?: Capability[];
+}
+/** One extension capability; reason says why it is not on. Only "on" ones are also in MetaResponse.capabilities. */
+export interface Capability {
+  name: string;
+  state: "on" | "off" | "denied" | "failing";
+  reason?: string;
 }
 export interface ErrorResponse {
   error: string;

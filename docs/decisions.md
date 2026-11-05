@@ -562,3 +562,424 @@ quirk 2 (prefix /q):
 **Consequences:** These are the 2.5 acceptance rows for Q1, Q4 and Q7. Each reuses an existing rule, so no new behaviour is introduced.
 
 **Alternatives:** n/a.
+
+## D-028 — Stable finding identity, groups and ranking (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** Phase 2 findings have no id, so the SPA cannot link, page or track a finding across recomputes (phase-2 review finding 8).
+
+**Decision:** Every finding gets a stable `id` from its code and identity key, and a `group` when it shares a cause with others. Groups are ranked by severity, blast radius and class (design §5).
+
+**Consequences:** `id` and `group` are optional API fields. Findings page on the server by rank.
+
+**Alternatives:** n/a.
+
+## D-029 — Process health through `process.Source` (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** Phase 3 reports controller and proxy process health (D-016) without reading admin ports or Pod output.
+
+**Decision:** Process facts come through `process.Source`, with one allowlisted Kubernetes source. Proxy Pods, Warning Events and Gateway API CRD metadata are watched. Termination messages and probe output are never read (design §9, §18). This reverses D-017 §5 for CRD metadata only, behind a toggle.
+
+**Consequences:** New watches and RBAC rows, each with a capability that degrades to "not available".
+
+**Alternatives:** n/a.
+
+## D-030 — Specific codes replace KGWUI-002 for their reasons (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** KGWUI-002 covers every `False` condition, so its message cannot say what to fix.
+
+**Decision:** Specific codes (013, 014, 015, 016) replace 002 for their reasons; 002 stays the fallback. KGWUI-001 is re-specified rather than adding a "status says healthy" code. A row whose Gateway rejects config is never healthy (design §7.1, §8.3, §8.4).
+
+**Consequences:** A listed exception to the additive golden test: only the `code` and `slug` of the named findings change. API v1 has no release yet.
+
+**Alternatives:** n/a.
+
+## D-031 — Backend readiness from Services and EndpointSlices (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user approved the Phase 3 design and plan)
+
+**Context:** A route can be accepted while its backend has no ready endpoints.
+
+**Decision:** KGWUI-023 reads Services and EndpointSlices, limited to Service refs the controller resolved (design §11).
+
+**Consequences:** New watches with transforms and an `endpoints` capability, in 3.4.
+
+**Alternatives:** n/a.
+
+## D-032 — The `health.Check` contract changes to `Name`, `Inputs`, `Run(RunContext)` (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Context:** Checks recompute on every change, and downstream checks cannot declare new inputs.
+
+**Decision:** A breaking change to `Name`, `Inputs`, `Run(RunContext)`, with an engine-owned Store per (install, check) and memoization on the declared inputs (design §16.2).
+
+**Consequences:** Every core, example and downstream check migrates in 3.1. README upgrade notes. The last planned break of the Go extension API.
+
+**Alternatives:** n/a.
+
+## D-033 — kgateway 2.5 joins the support matrix at GA (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Decision:** kgateway 2.5 is supported in 3.4, once 2.5.0 GA ships. Before GA it runs on the 2.4 rule set (design §7.6, §8.6, §23).
+
+**Consequences:** If GA is not out at 3.4, its 2.5 tasks wait and the rest ships.
+
+**Alternatives:** n/a.
+
+## D-034 — No Phase 3 check is required (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (our call, approved with the design)
+
+**Decision:** A check whose input is off, denied, failing or absent returns "not available" with a reason. It never raises KGWUI-008 and never turns the install unknown. `since` is the controller's time for status findings and the UI's first-seen time for UI-derived ones (design §5.1, §7.1).
+
+**Consequences:** Existing required checks keep their flag.
+
+**Alternatives:** n/a.
+
+## D-035 — Path-based breadcrumbs, a shared object header and a fluid layout (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Decision:** Breadcrumbs follow the path the user took, carried in the URL (`via`). Every detail page has an object header. The layout is fluid up to 2400 px, with two columns on detail pages from 1600 px (design §17.6).
+
+**Alternatives:** n/a.
+
+## D-036 — Deterministic suggested fixes (2026-11-01, phase 3)
+**Status:** accepted 2026-10-29 (user)
+
+**Decision:** A fix is suggested only where exactly one change follows from the spec, discovery or a watched object. It is a fragment with its location for existing objects. It is never applied and never derived from translation logic (design §7.7).
+
+**Consequences:** AI-assisted diagnosis is a later phase (roadmap Phase 11).
+
+**Alternatives:** n/a.
+
+## D-037 — Envoy stats from the proxies; controller logs opt-in (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user)
+
+**Decision:** Envoy stats are read from each proxy's stats listener, with no new RBAC. Controller logs are opt-in and limited to the install namespace; only fixed fields are kept, and log text is never stored or shown. Proxy logs, `/config_dump` and admin ports stay out until per-user identity (Phase 10) and Phase 9 (design §8.8, §8.9, §12, §18).
+
+**Alternatives:** n/a.
+
+## D-038 — Extension seams for downstream features, as sub-phase 3.0 (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user)
+
+**Context:** A downstream build could add checks, but not a whole feature, without forking.
+
+**Decision:** Seven seams: endpoints, collectors, open check inputs, capabilities, a built shell package, in-page slots and chart extension values (design §4.1). They ship as sub-phase 3.0. `examples/downstream` in CI is the standing proof.
+
+**Alternatives:** n/a.
+
+## D-039 — Dense memory gate on retained heap and bytes per recompute (2026-11-01, phase 3)
+**Status:** accepted 2026-11-01 (user); D-044 adds the analyzer stage's allocations to the deterministic gates
+
+**Context:** `TestBudgetDenseMemory` gated the median peak heap of five runs at ≤ 432 MiB (D-025). Peak heap depends on when the GC runs: on the same code, medians ranged 427–440 MiB, and the 2.4 code (`3eceda6`) failed it too. The heap retained and the bytes allocated were identical in every run, before and after 3.0.
+
+**Decision:** The gate checks three medians at the default edge cap: the heap retained after warm recomputes (≤ 176 MiB), the bytes allocated by the cold recompute (≤ 246 MiB) and per warm recompute (≤ 185 MiB). Each is the 2.4 measurement (160, 210 and 168 MiB; the cold allocation is 224 MiB on the linux/amd64 CI runner) plus about 10 % of the larger value. The cold budget went from 231 to 246 MiB on 2026-11-02 so CI keeps the same headroom (user). Peak heap and RSS stay logged, not gated. The binary's soft memory limit (90 % of the pod limit, D-025) makes the GC work harder near the limit; it does not guarantee the pod stays under it.
+
+**Consequences:** A regression in what the engine keeps or allocates fails the gate deterministically. A change that only moves GC timing does not. A change that holds more memory at once without allocating more is not gated; peak heap is logged for it (tracked in `phase-status.md`).
+
+**Alternatives:** Raise the peak-heap budget; rejected, since the 2.4 code already sits at it and noise stays.
+
+## D-027 — Keep the immutable full recompute; no KRT (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (decision rule of design §16.1, written before the spike)
+
+**Context:** Recompute cost grows with analyzers and cluster size, and Phase 2 ended near its CPU budget. Istio's KRT collections recompute incrementally. Sub-phase 3.1 rebuilt view A on KRT in a throwaway spike and measured it at Large against the current engine (`bench/3.1-krt-spike.txt`).
+
+**Decision:** Keep the immutable full recompute. Add per-check memoization (design §16.2). The spike failed two of five criteria:
+
+| Criterion | Measured | Pass |
+|---|---|---|
+| Spec-edit stream CPU at least 40 % lower | 14.2 % against 10.9 % of one core: 30 % higher | no |
+| Retained heap no more than +16 MiB | +16.5 to +19.4 MiB | no |
+| One immutable published value per request | yes, only through a hand-built three-step barrier (KRT has no flush call) | yes |
+| No `replace` directives | none | yes |
+| Apache-2.0 compatible licences | Apache-2.0, MIT, BSD, MPL-2.0 | yes |
+
+Other costs: binary +7.9 MB (+27 %), module graph 318 → 1,429 lines, Go floor 1.27.1, a forced Kubernetes client upgrade, and `istio.io/istio` has only pseudo-versions.
+
+**Consequences:** Phase 3 continues with declared check inputs and memoization (Task 18), which an incremental engine could feed later. The spike rebuilt view A only, which is 3.6 % of recompute CPU, so it could not show a 40 % gain on its own. A future proposal would have to move all views and checks, at the dependency costs above.
+
+**Alternatives:** Adopt KRT for views and analyzers in a follow-up phase; rejected by the rule.
+
+## D-040 — Finding ids hash only data a restricted row shows (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (user, Codex 3.1 review #3); replaces ruling R24
+
+**Context:** A restricted row shows a finding's `id`, code and resource. The hash scheme is public. KGWUI-002 hashed the condition type into its id, so a caller could hash `Accepted` and `Programmed` and learn which hidden condition failed. A low-entropy value is not hidden by hashing it.
+
+**Decision:** An id hashes only the install, the code, the resource and data the resource's spec shows. Hidden parts of the discriminator become ordinals (`#n`): a rank in a stable order among the resource's findings of that code. This covers KGWUI-002 condition types, KGWUI-011 computed parents, KGWUI-012 subjects and status-only owners (policy ancestors, status-reported route parents; ruling R33). Design §5.1 lists the discriminators; §14 rule 11 states the rule.
+
+**Consequences:** A restricted id reveals nothing a restricted row does not. An id can shift when a sibling finding on the same owner appears or clears, and the UI-derived `since` moves with it. Clients compare ids and never parse them.
+
+**Alternatives:** Hash the hidden values (R24); rejected, since a guessed value can be confirmed.
+
+## D-041 — Breadcrumbs resolve through the Authorizer (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (user, Codex 3.1 review #4); replaces ruling R31
+
+**Context:** The breadcrumb trail lives in the URL (`via`, D-035). A crumb the page did not hold showed its URL name and linked to it, so a deleted object stayed clickable and a hidden object's name showed.
+
+**Decision:** `GET /api/v1/installs/{id}/refs` takes 1–6 `ref` values and returns each as a `LinkedRef`, through the Authorizer. The shell resolves the last 12 object crumbs, in at most two requests (ruling R34); older crumbs get the restricted label without a link. Until the answer arrives, a crumb, the current one included, shows a neutral placeholder, never its URL name. A `none` link shows the restricted label, since hidden and absent read the same (D-013). A network failure retries; only a final answer restricts a crumb.
+
+**Consequences:** No crumb shows a name the caller may not see. A page view costs up to two extra small requests. Very long trails lose links on their oldest crumbs.
+
+**Alternatives:** Trust names held by the page and let the target say "not in scope" (R31); rejected, since the trail then shows names it never checked.
+
+## D-042 — Side column from 1600 px on detail pages (2026-11-02, phase 3)
+**Status:** accepted 2026-11-02 (user, Codex 3.1 review #5); replaces ruling R30
+
+**Context:** D-035 asks for two columns on detail pages at wide widths. Under R30, core pages stayed one column, because only contributed sections went to the side.
+
+**Decision:** From 1600 px, conditions and related objects (Gateway conditions, a ListenerSet's parent and conditions, a route's ancestry and parent conditions) sit in a side column beside the structure. Below 1600 px they sit at the top of the main column. The page switches what it renders at the breakpoint, not the CSS order, so tab order follows what is visible. The first render reads the media query, and the skeleton reserves the same split (design §17.6).
+
+**Consequences:** Wide screens show conditions and related objects beside the structure. The browser tests check the column split at 720, 1280, 1600 and 3008 px.
+
+**Alternatives:** CSS `order` or grid placement; rejected, since tab order would then differ from the visual order.
+
+## D-043 — Median-of-five OS-memory gate at a measured value; opt-in chart memory limit (2026-11-03, phase 3)
+**Status:** accepted 2026-11-03 (user, Task 46 interim measurement); amends D-022's and design §16.3's 256 MiB OS-memory gate; D-044 makes the 288 MiB gate a reference-machine budget, reported in CI
+
+**Context:**
+- The 3.2 measurement world broke the OS-memory gate (≤ 256 MiB). Memory from the OS follows the GC goal: a GC during a maturation compute marks about 115 MB live, so the goal reaches about 230 MB.
+- One run per world is noisy: runs on the same code differed by up to 45 MiB.
+- A 224 MiB default soft limit passed the stream gate, but thrashed the dense Extreme world (100 × 1000, default edge cap): warm recompute 110 → 312 ms, GC cycles 12 → 395, GC CPU 0.6 → 20.9 s. 90 % of the 512Mi limit (460 MiB) matched no limit. A fixed default would also stop a raised `limits.memory` from raising the target.
+- Retained heap broke by 0.5 MiB. The world's routes carried a Service backendRef per referenced Service, seeded for 3.4, which no 3.2 check reads; they cost 1.6 MB.
+
+**Decision:**
+1. No default soft limit beyond D-025: the binary sets 90 % of the pod's memory limit, `GOMEMLIMIT` wins, and no pod limit sets none. The chart's `memoryLimit` is opt-in and renders `GOMEMLIMIT`; empty renders nothing.
+2. The stream OS-memory gate reads the median of five runs per world, like the heap and dense gates, and is 288 MiB: the worst median of the spec-edit and annotation streams plus about 10 %, rounded up to 8 MiB (256.1 MiB, spec-edit in the measurement world). CPU stays gated in every run.
+3. The Service backendRefs leave the 3.2 measurement world. 3.4 seeds them again with the Services and EndpointSlices.
+
+**Consequences:** The gate keeps OS memory inside the 512Mi pod limit with headroom, but no longer at half of it. A stream test takes five times as long.
+
+**Alternatives:** A 224 MiB default soft limit (rejected: the dense thrash above); a lower GOGC (rejected: it costs CPU at every heap size); cutting per-recompute garbage, mostly Phase 2 views and the explorer index (deferred: a larger refactor).
+
+## D-044 — Bench gates split by what they measure (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user); amends D-039 and D-043
+
+**Context:** GitHub-hosted runners are shared VMs with variable CPU. On identical code, 3.1's warm recompute ranged 102.9–151.3 ms on CI. The 3.2 memoized analyzer stage with a new scrape each run is 1.14 ms locally and 2.31 ms on CI run 41718646271, against a 2 ms gate. D-039 already moved dense memory to deterministic measures for the same reason.
+
+**Decision:** Three classes of gate.
+1. **Deterministic**, gated everywhere, CI included: retained heap (over the 2.1 and 3.1 baselines), dense retained heap and cold and warm allocation (D-039), recompute counts (idle 10 min, burst, stream rate), the matcher page allocation, and the analyzer stage's allocations per run. The stage budgets are the 3.2 measurement plus about 10 %, the same on darwin/arm64 and amd64:
+
+   | World / §16.3-scope mode | Measured | Budget |
+   |---|---|---|
+   | Large, warm | 173,864 B, 642 allocs | 192,000 B, 710 |
+   | Large, memoized | 28,904 B, 491 | 32,000 B, 540 |
+   | Large, memoized, new scrape each run | 31,480 B, 503 | 35,000 B, 555 |
+   | Measurement world, warm | 5,061,760 B, 18,837 | 5,570,000 B, 20,700 |
+   | Measurement world, memoized | 80,024 B, 1,471 | 88,000 B, 1,620 |
+   | Measurement world, memoized, new scrape each run | 933,136 B, 5,335 | 1,027,000 B, 5,870 |
+
+2. **Timing regression**, gated in CI: base and head run in the same job, interleaved, five runs each (`make bench-ab`, `internal/benchab`). The gate fails when head's median ns/op is more than 15 % above base's. It covers warm recompute (Large, contradicting, unchanged views, measurement world), cold recompute, the confirm tick at Large and the analyzer stage's three §16.3-scope modes. A benchmark base lacks is reported "new", not gated. The base is the PR's base commit, or the `base` input of a manual run (default `main`). Stream CPU stays reported in CI: five 60 s runs per world and variant take about 20 min a side.
+3. **Reference**, absolute time budgets: warm ≤ 150 ms, cold ≤ 1 s, analyzer ≤ 20 / 2 ms, confirm tick ≤ 5 ms, burst p95 ≤ 1.2 s, endpoints p95 < 50 / p99 < 100 / 20 clients p95 < 100 ms, stream CPU ≤ 15 / 25 %, OS memory median ≤ 288 MiB. They gate on the reference machine, an Apple M5 Max at the default GOMAXPROCS (all 18 CPUs), in `make bench`. `KGWUI_BENCH_TIMING=report`, which the workflow sets, logs a miss instead of failing; unset or `reference` gates.
+
+**Consequences:** CI fails on what changes deterministically or on a measured slowdown against the base on the same VM, not on runner speed. The §16.3 time budgets hold only as measured on the reference machine; each sub-phase's local `make bench` record carries them. The workflow runs about twice the engine benchmarks. A PR from a long-lived phase branch compares against `main`, so its A/B reports the whole phase's change.
+
+**Alternatives:** Raise the CI time budgets (rejected: runner speed varies more than the headroom); retry flaky timing gates (rejected: it hides real regressions).
+
+## D-045 — Install page reserves Needs attention from the summary; fallback fonts after the font cap (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user, Codex 3.2 review #5 and #6)
+
+**Context:**
+- The install page skeleton reserved no Needs attention block, so an unhealthy install pushed Processes and the inventory down when diagnostics arrived (§17.4). A fixed reservation would show an empty box on healthy installs (§6), and the SPA derives no state (ruling R62).
+- The first render waits up to 3 s for the bundled fonts. They load with `font-display: swap`, so a font that arrived after the cap still swapped in and could rewrap text.
+
+**Decision:**
+1. `InstallSummary` gains `groupRows`: the number of groups `…/diagnostics` lists for the same caller (at most 10). A group with a hidden cause counts, as its restricted row shows.
+2. When the summary arrives before diagnostics, the skeleton reserves the loaded block: the heading, `groupRows` rows at the collapsed row height and the "Show all" footer. `groupRows: 0` reserves nothing. Below 720 px a collapsed row is 88 px, so both layouts keep a fixed height.
+3. The 3 s font cap stays. When it fires, `renderWhenFontsReady` sets `font-fallback` on the root element, and the theme drops the leading web font from its UI and mono stacks for the session.
+
+**Consequences:** Loading to loaded shifts nothing when the summary is cached, as it is once the header has loaded. A first visit with a slow font request stays on the fallback fonts until reload. A theme's font stacks must lead with their web font.
+
+**Alternatives:** Reserve one row for every install (rejected: healthy installs shift, and others still move); derive the rows from the summary's finding counts (rejected: R62, and groups ≤ findings); amend §17.4 to exempt the loading swap; `font-display: optional` (rejected: a cold load may use the fallback even when the font is fast); no font cap (rejected: a hung request blocks the page).
+
+## D-046 — The 3.2 watches' retained state is its own heap part (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user, Codex 3.2 review #7; ruling R75); adds to design §16.3's retained-heap gate
+
+**Context:** The retained-heap gate stops the measurement world's live cache before it measures, so the snapshot's copies count but the proxy Pod, Event and CRD informer stores, the Pod UID index and the Event delta histories do not. Keeping the whole cache would also count the Phase 2 stores and the fake clients' trackers, which no baseline counted.
+
+**Decision:**
+1. Each heap child builds a fresh measurement world for its tier and measures the HeapAlloc freed by stopping only the proxy Pod, Event and CRD watches. They run under their own context in `cache.Start`; a `bench`-tagged hook stops them and drops their state.
+2. The part is gated on its median of five, deterministic class (D-044): ≤ 1,600,000 B in every world, the measurement world's median plus about 10 %. Measured on darwin/arm64:
+
+   | World | Median | Min–max |
+   |---|---|---|
+   | large | 1,392,888 B | 1,392,840–1,393,000 |
+   | large-contradicting | 1,392,984 B | 1,392,872–1,393,000 |
+   | large-contradicting-worst (measurement) | 1,450,216 B | 1,450,136–1,450,344 |
+
+3. The retained-heap gates (≤ 32 MiB over 2.1, ≤ +24 MiB over 3.1) and their baselines are unchanged.
+
+**Consequences:** Growth in the new watches' state fails the heap test on its own, even while the main gate has headroom. The worst world's histories cost about 57 KB. Each heap child builds one more world.
+
+**Alternatives:** Re-baseline the whole retained heap with the live cache kept (rejected: it counts Phase 2 stores and fake trackers); bound the stores by their caps and log them (rejected: R75 asks for a measured gate).
+
+## D-047 — The spec-edit stream gates edit-driven recomputes; grace deadlines are logged (2026-11-04, phase 3)
+**Status:** accepted 2026-11-04 (user, Codex 3.2 review #4); amends D-044's "stream rate" for the spec-edit variant
+
+**Context:** The spec-edit stream totals 1.25–1.38 recomputes/s over 10 min, against ≤ 1/s. Each edit leaves the route's status stale, so KGWUI-003 turns from info to warning at first-seen + 60 s (`health.Grace`). D-019 runs that grace deadline without debounce. A deadline run stamps the edits since the last run, so it schedules another run 60 s later. In a 150 s run, all 47 deadline runs raised KGWUI-003 warnings, so these runs are needed.
+
+**Decision:**
+1. The stream counts each run by cause in the harness: deadline when the last published `Model.Next` is due at its start, safety 30 s after the last publication, edit-driven otherwise. The engine records no cause.
+2. Edit-driven runs are gated ≤ 1/s in the spec-edit stream, 60 s and 10 min, deterministic (D-044). This uses its own flag. Deadline and total rates are logged only. KGWUI-012 assertions stay off for spec-edit.
+3. The annotation stream keeps its ≤ 1/s gate on the total.
+
+Measured on the reference machine, 5 runs per world:
+
+| Run | Edit-driven | Deadline | Total |
+|---|---|---|---|
+| 60 s (`make bench`) | 0.93–0.95/s | 0 | 0.93–0.95/s |
+| 10 min (`make bench-specedit`) | 0.51–0.60/s | 0.70–0.81/s | 1.25–1.38/s |
+
+**Consequences:** The 60 s gate has 5–7 % headroom. This is structural: under a steady stream, the debounce runs once per `MaxDelay` (1 s) plus the wait for the next edit. Any change to the debounce or the edit cadence moves that number. Over 10 min, deadline runs absorb pending bursts, so the edit-driven rate falls. Grace deadlines are not bounded by a gate.
+
+**Alternatives:** Gate the 10 min total at a measured value (rejected by the user); let a grace deadline wait for a pending burst (rejected: it amends D-019, and a warning could appear up to 1 s late); have a fake controller catch status up (rejected: it changes what the variant measures).
+
+## D-048 — Proxy stats evidence carries flags and names, not counts (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (rulings R48, R49, R52, R53, R55); recorded at the 3.2 close. Amends design §8.8 and §13.3
+
+**Context:**
+- §13.3 gave KGWUI-001 a per-Pod `rejectsSinceLastScrape` count. While a proxy rejects, its `update_rejected` counter grows by hundreds a minute, because the controller pushes again and again.
+- A published count changes the collector's fingerprint on every scrape. Every dependent check would then rerun on every scrape, against the D-044 recompute-count gates.
+- §8.8 pairs `cluster.<name>.update_rejected` with CDS. In Envoy it is the per-cluster EDS subscription counter.
+- §8.8 gates 025 and 026 on a Ready proxy. A downstream stats source can report a Pod the process data does not know.
+- §13.3 gives 025 and 026 evidence for one Pod, but each is one finding per Gateway.
+
+**Decision:**
+1. Per Pod and xDS type, proxy stats publish `rejecting` (the counter grew since the previous scrape) and `rejectingSince`, plus the Envoy names whose counters grew (`envoyResources`, capped, with `envoyResourcesTruncated`). Never a raw count (R49).
+2. Names from `cluster.<name>.update_rejected` are listed under `ClusterLoadAssignment`. CDS rejects carry no names (R53).
+3. A stats Pod the process data does not know counts as Ready when Envoy reports `server.state` `live`, which is what Envoy's `/ready` checks. Unknown readiness is not Ready (R52).
+4. 025 and 026 evidence is `{kind: "proxy-stats", pods: [{pod, connected?, warmingListeners?, warmingClusters?, serverState?}]}`. A missing field was not reported.
+5. On `xds-rejects` evidence, `proxies` and `recentlyChanged` are omitted when empty. A self-managed Gateway has no proxies the UI knows (R48, R55).
+
+**Consequences:** The evidence shows "New rejects, started …", never a number. A growing counter no longer changes the fingerprint on every scrape. A Cluster reject shows `rejecting` on the Cluster type only.
+
+**Alternatives:** The per-Pod count of §13.3, which Codex 3.2 review #3 asked for (rejected: R49, the fingerprint churn above).
+
+## D-049 — Probe type from the whole Pod; skew rules for CRDs and ListenerSets (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (rulings R41, R45); recorded at the 3.2 close. Amends design §9.2 and §9.4
+
+**Context:**
+- §9.2 names a probe type when "the container" defines one. The cache keeps no Event `fieldPath`, so the UI cannot tell which container's probe failed.
+- §9.4 says a standard-channel Gateway CRD decides the ListenerSet hint. Gateway API v1.5 and later standard CRDs define `allowedListeners`, so the channel alone is not enough.
+- §7.1 suppresses all of 022 during a controller rollout; §9.4 states it for proxies only.
+
+**Decision:**
+1. The probe type is the one type the Pod's containers define together, else "a probe" (R41).
+2. The ListenerSet hint decides from channel and bundle version. Standard before v1.5 and experimental before v1.3 lack `allowedListeners`; a CRD that defines it drops the hint (R45).
+3. Every 022 finding, the CRD ones included, is suppressed during a controller rollout and for 10 min after (R45, §7.1).
+
+**Consequences:** A Pod with a sidecar that has its own probe reads "a probe". A CRD skew warning waits for the controller rollout to settle.
+
+**Alternatives:** n/a.
+
+## D-050 — Diagnostics are built per request; summary shapes (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (Task 45 and 49 reviews, ruling R62); recorded at the 3.2 close. Amends design §6, §13.1, §13.3 and §20
+
+**Context:**
+- §20 precomputes the diagnostics summary per Model. Retained heap had about 4 MiB headroom at the 3.2 start (3.1 record), and 3.2 watches add to it.
+- §13.3 names `ProcessSummary` and `ProxySummary` but gives no fields. The SPA must not derive health (R62).
+- §6 shows the controller's restarts in 15 min. The restart check keeps its window per Pod but names one Pod per subject, so a sum over Pods undercounts.
+
+**Decision:**
+1. `GET …/diagnostics` is built per request from the published Model and the caller's view. Nothing per caller is retained.
+2. `ProcessSummary` is `{state, observed, ready?, desired?, version?, restricted?}`. `state` is the worst controller finding, 005 included; unknown when not observed and none fired (R62).
+3. `ProxySummary` is `{state, gateways, ready, rejecting, skew, restarting, notObserved}`, over visible Gateways. `state` is the worst known Gateway health in the row-state order; a healthy Gateway with unobserved proxies counts as unknown.
+4. `ProcessSummary` has no `restartsRecent`. A recent restart shows as a 019 group and on the Processes page, where `ProcessDTO.restartsRecent` is the named Pod's count.
+5. `dataPlane` is `{gateways, rejecting, unavailable?}`. `rejecting` counts Gateways with a 001 over every finding (§14 rule 18). `gateways` counts visible Gateways plus hidden ones a restricted 001 already names, so `rejecting` never exceeds it and no hidden count leaks. `withheld` waits for 024 (3.4).
+6. `DataPlaneDTO` on the Gateway page adds `rejecting`, `unavailable` (the xDS rejects check is not OK, so `rejecting: false` means unknown), `evidenceRestricted` and `proxyStats {available, unavailable?, reason?}` per Gateway. `snapshot` gains `by: "controller"`.
+7. `GroupRow` adds `code`, the top member's code, which restricted rows show. `Verdict` adds `counts` per severity. `ProcessSetDTO` adds `restricted`.
+8. `OverviewGatewayRow` gains `dataPlane`: `ok`, `rejects` or `unknown`, computed on the server.
+
+**Consequences:** The worst-case diagnostics request takes p95 0.86 ms sequential and 4.85 ms with 20 clients (restricted, measurement world; `bench/3.2.txt`). The controller line shows no restart count until the restart check exposes every Pod's window.
+
+**Alternatives:** Precompute per Model, as §20 planned (not taken: retained heap headroom).
+
+## D-051 — Next-step commands from a Go seam; the evidence view owns finding renderers (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (rulings R39, R64); recorded at the 3.2 close. Amends design §8.5 and §17.2
+
+**Context:**
+- §8.5 takes commands from the SPA `Vocabulary`. Next steps are built on the server, per caller, so that rule 15 hides commands that name hidden objects.
+- The install page no longer lists single findings, so finding renderers and actions lost their place there. Two components rendering the same renderer gave it two owners.
+
+**Decision:**
+1. Commands come from `diagnose.Commands`, default `diagnose.Kubectl`. A downstream replaces them with `extension.WithCommands`, for a platform without kubectl (R39).
+2. `EvidenceView` is the only owner of `findingRenderers`. It renders the code's renderer for an evidence kind the shell does not know, or for a finding with no evidence; a restricted finding renders none (R64).
+3. `findingActions` render on the finding page. `FindingRow` still renders both.
+
+**Consequences:** A downstream that changes commands ships Go, not only an SPA build. The README upgrade notes say where renderers and actions moved.
+
+**Alternatives:** n/a.
+
+## D-052 — A memo with a wake time reuses only while scrape times hold (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, from rulings made during 3.2 execution (Task 52, rulings R69 and R70); recorded at the 3.2 close. Amends design §16.2
+
+**Context:**
+- A memo hit returned the wake time of the run that stored it. The xDS rejects check wakes at `Metrics.CollectedAt` + max age, which the input print leaves out. Idle scrapes then kept an old wake and forced a recompute every 45 s: 29 idle recomputes in 10 min against 20.
+- Fixing that reruns xDS rejects after every scrape. Its fresh findings slice then made health re-merge the report and the engine rebuild the diagnosis: the memoized analyzer stage took 3.11 ms against 2 ms (R70).
+
+**Decision:**
+1. A memo whose result set a wake time is reused only while the times of the metrics and the declared collector values are unchanged (`timesPrint`).
+2. A rerun whose findings equal the memo's returns the memo's slice. The merged report and the diagnosis are reused when every check's findings slice is the same.
+3. The diagnosis is built only from the inputs its memo key covers: findings, the install, Owned, the views of Owned's objects and the group ids. Next steps read the snapshot per request.
+
+**Consequences:** Idle 10 min is back to 20 recomputes. The memoized stage with a new scrape each run is 1.14 ms on the reference machine (measurement world).
+
+**Alternatives:** Drop the xDS rejects wake time (rejected: the declared-input guard needs it).
+
+## D-053 — An exported config helper and a static metrics source for one-shot callers (2026-11-04, phase 3)
+**Status:** accepted by the user on 2026-11-04, for program edge E8 ([#13](https://github.com/DuncanDoyle/kgateway-ui/issues/13)); planned as Task 71a in sub-phase 3.3. Adds to the plan; no design section changes
+
+**Context:**
+- kgwctl's `check` runs `engine.New(cfg).Compute()` once over a settled cache, with controller metrics from one `Collect` call (program edge E8).
+- `cache.Config` and `engine.Config` are built in `pkg/app/app.go`. `pkg/app` is the UI's wiring, not a library, so a second caller copies the scope, detector, selector and verifier setup and drifts from it.
+- `ctrlmetrics.Source` is exported, so a caller can wrap a `Collect` result itself, but its staleness handling can then differ from the UI's.
+- #13 asks whether the helper should take the time-based checks into account (restart hold, grace periods, `Report.Next`).
+
+**Decision:**
+1. A new package under `pkg/` (`pkg/setup`) builds `cache.Config` and `engine.Config` from the Kubernetes clients, the options and an `*extension.Registry`, the way `pkg/app` does. `pkg/app` builds its own config through it, so the two cannot drift. `pkg/app` keeps its exported names.
+2. `ctrlmetrics.Static` is an optional `ctrlmetrics.Source` over one `Collect` result per install. Staleness is the engine's, through `MetricsMaxAge`, the same as in the UI.
+3. Time-based waiting stays with the caller. Neither the helper nor the static source waits. A single pass reads the restart hold, grace periods, scope-verifier persistence and metric staleness as pending, and `Report.Next` says when to compute again. The Go doc says so. This answers #13's open question.
+4. This is an addition to the versioned `pkg/` API (D-003): new names only, no existing signature changes.
+
+**Consequences:** kgwctl drops its copy of the wiring. `pkg/setup/setup.go` gets an import-boundary allowlist entry (D-016), since it names the client-go interfaces. Task 71a touches 6 files (⚠ guardrail, approved here). Its one-shot test also serves as the E3 acceptance test: an external module runs the analyzer over a cache snapshot.
+
+**Alternatives:** A helper that waits for the time-based checks (rejected: a CLI picks its own timeout and output, and a library that sleeps hides latency). Leave the wiring to each caller (rejected: drift).
+
+## D-054 — Retained heap over 2.1 raised to 40 MiB (2026-11-05, phase 3)
+**Status:** accepted by the user on 2026-11-05 (sub-phase 3.3, Task 71). Changes design §16.3's retained-heap gate
+
+**Context:**
+- The gate holds the median retained heap at Large to ≤ 32 MiB above the 2.1 baseline. The 32 MiB is our own number (D-022); every sub-phase adds findings and state to it.
+- 3.3 measures +34.8 MiB (3.2: +30.8). The growth is the 3.3 checks' findings and state, plus about 1 MiB of derived log events; no regression was found.
+- The gates that guard the pod limit pass: OS memory during the stream 210.2 MiB (≤ 288 MiB, D-043; pod limit 512 Mi), and +10.4 MiB above the 3.1 baseline (≤ +24 MiB).
+
+**Decision:** The retained-heap gate over the 2.1 baseline is ≤ 40 MiB. The ≤ +24 MiB gate over the 3.1 baseline and every other gate are unchanged.
+
+**Consequences:** 5.2 MiB of headroom for 3.4. `TestBudgetHeap` gates 40 MiB.
+
+**Alternatives:** Cut retained state to fit 32 MiB (not taken: about 0.2 MiB of savings found; the other gates already bound the pod's memory).
+
+## D-055 — Sub-phase 3.3 as built: deviations from the design (2026-11-05, phase 3)
+**Status:** accepted by the user on 2026-11-05; rulings R79, R88, R94, R95, R101, R102, R105 and R108 and the 3.3 task reviews. Amends design §5.2, §5.3, §7.5, §7.7, §8.9, §13.3, §17.2, §17.4 and the 3.3 row of §23
+
+**Context:**
+- 3.3 shipped with the choices below, made while building it. Each is verified against the code.
+
+**Decision:**
+1. §7.7, R88: `Finding.Fix` is dropped. `diagnose.Fix(f)` builds the suggested fix per request from the finding's evidence alone.
+2. §5.3, Task 64: a group's class is its lowest-numbered member class, so its rank follows its most severe member.
+3. §5.2, Task 64: the "Not permitted" group key is (from namespace, to namespace, to group and kind).
+4. §7.5, R94, R95: rule names are "listener port and hostname" and "listener port and protocol". The condition's reason picks the other side, from listeners kgateway kept only. Other reasons list none.
+5. §8.9, R101: the previous-container read asks for the last 200 lines with a 4 MiB client cap and sends no byte limit, which would cut the end of the tail.
+6. §8.9, Task 68: KGWUI-001's `since` survives a UI restart only within the 15-minute log backfill.
+7. §8.9, Task 72: Envoy never creates a rejected cluster or listener, so CDS and LDS reject names never appear in proxy stats. On real clusters those rejects keep only the error class. Unit tests cover the name-keeping path.
+8. §13.3, R108: `GroupRow` gains `grant`, the shape of a "Not permitted" group, which has no cause object.
+9. §17.2, Task 69: the web component is `SuggestedFixView`. The type `SuggestedFix` keeps its name.
+10. §8.9, Tasks 65 and 66: the log parser types (`LogParser`, `LogWindow`, `DeployerLogClass`) live in `pkg/computed`.
+11. §8.9, R105: "withheld" evidence expires 15 minutes after the last qualifying line.
+12. §17.4, Task 69: the grouped findings view drops the flat view's filters, and browser Back does not restore them.
+13. §23 (3.3 row), R79: `analyze -f` over files is not in 3.3. 3.3 delivers the analyzer over a cache snapshot, proven by the one-shot test (D-053, program edge E3).
+14. §8.9, R102: the newest panic keeps a reserved slot in the 1,000-event cap. When that panic is the oldest event, the next oldest is dropped instead, so newer events never evict it.
+
+**Consequences:** The design states the as-built behaviour. Offline snapshot semantics for `analyze -f` (served kinds, discovery, access, install) need a design before they are built. Changing the previous-container read is one constant.
+
+**Alternatives:** n/a.

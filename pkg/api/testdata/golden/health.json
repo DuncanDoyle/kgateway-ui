@@ -71,7 +71,59 @@
       },
       {
         "collectedAt": "2026-10-17T12:00:00Z",
+        "detail": "Proxy Pods are not watched, so proxies were not checked",
+        "name": "process restarts",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Events are turned off",
+        "name": "probe failures",
+        "ok": false,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "stuck rollouts",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "detail": "Proxy Pods are not watched, so proxies were not checked; Gateway API CRDs are not watched, so their versions were not checked",
+        "name": "version skew",
+        "ok": true,
+        "required": false,
+        "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Proxy stats are not collected yet",
+        "name": "proxy config warming",
+        "ok": false,
+        "required": false,
+        "unavailable": "failing"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Proxy stats are not collected yet",
+        "name": "proxy connection",
+        "ok": false,
+        "required": false,
+        "unavailable": "failing"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
         "name": "computed views",
+        "ok": true,
+        "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "status progress",
         "ok": true,
         "required": false
       }
@@ -84,7 +136,9 @@
     },
     "findings": [
       {
-        "code": "KGWUI-002",
+        "code": "KGWUI-013",
+        "group": "f1-m3avf5j3o3sffhbx2es63r2nf3",
+        "id": "f1-mvx3oc6sg55xmltbfspi7tgxtj",
         "install": "kgw.kgateway",
         "message": "",
         "resource": {
@@ -96,11 +150,18 @@
         },
         "restricted": true,
         "severity": "error",
-        "slug": "condition-false"
+        "slug": "ref-unresolved"
       },
       {
-        "code": "KGWUI-002",
+        "code": "KGWUI-014",
         "detail": "ResolvedRefs=False, reason RefNotPermitted (parent Gateway infra/edge)",
+        "evidence": {
+          "attributed": false,
+          "explanation": "controller",
+          "kind": "refs"
+        },
+        "group": "f1-mvg6d2emebndncdtexypelvglv",
+        "id": "f1-n5yxfgmniicf4ryima4zdmprah",
         "install": "kgw.kgateway",
         "message": "Reference not permitted (missing ReferenceGrant)",
         "resource": {
@@ -112,11 +173,13 @@
         },
         "severity": "error",
         "since": "2026-10-17T11:00:00Z",
-        "slug": "condition-false"
+        "slug": "ref-not-permitted"
       },
       {
         "code": "KGWUI-004",
         "detail": "targets Gateway infra/edge",
+        "group": "f1-b6uspryyolqs7xmxt2y4fu4q3f",
+        "id": "f1-sr3nt34mw3yema4cgo2evzaj7v",
         "install": "kgw.kgateway",
         "message": "Namespace not watched by the controller",
         "resource": {
@@ -127,11 +190,18 @@
           "namespace": "blog"
         },
         "severity": "warning",
+        "since": "2026-10-17T11:58:59Z",
         "slug": "namespace-not-watched"
       },
       {
         "code": "KGWUI-003",
         "detail": "no status from the controller for parent Gateway infra/edge",
+        "evidence": {
+          "freshness": "never-written",
+          "kind": "freshness"
+        },
+        "group": "f1-6rs7xu5krjcminsp33q3ojjxnk",
+        "id": "f1-25xcevxfbsh3ekqknmbjwgacwg",
         "install": "kgw.kgateway",
         "message": "Being processed by the controller",
         "resource": {
@@ -142,6 +212,7 @@
           "namespace": "shop"
         },
         "severity": "info",
+        "since": "2026-10-17T12:00:00Z",
         "slug": "route-unattached"
       }
     ],

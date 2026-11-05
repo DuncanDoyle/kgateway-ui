@@ -1,0 +1,59 @@
+{
+  "body": {
+    "collectedAt": "2026-10-17T12:00:00Z",
+    "controller": {
+      "desired": 1,
+      "observed": true,
+      "processes": [],
+      "ready": 1,
+      "restricted": true
+    },
+    "install": "kgw.kgateway",
+    "proxies": {
+      "collectedAt": "2026-10-17T12:00:00Z",
+      "deniedInInstall": 1,
+      "install": "kgw.kgateway",
+      "items": [
+        {
+          "gateway": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "edge",
+            "namespace": "infra"
+          },
+          "health": "warning",
+          "set": {
+            "desired": 1,
+            "observed": true,
+            "processes": [],
+            "ready": 1,
+            "rollout": {
+              "progressing": false
+            }
+          }
+        },
+        {
+          "gateway": {
+            "group": "gateway.networking.k8s.io",
+            "kind": "Gateway",
+            "link": "detail",
+            "name": "lone",
+            "namespace": "infra"
+          },
+          "health": "unknown",
+          "set": {
+            "observed": false,
+            "processes": []
+          }
+        }
+      ],
+      "total": 2
+    }
+  },
+  "headers": {
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json"
+  },
+  "status": 200
+}
