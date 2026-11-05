@@ -163,6 +163,38 @@ func TestStatusNotProgressingMatures(t *testing.T) {
 	}
 }
 
+// Design §10.2: 018 needs an object whose 003 warning lasted 5 min, not only
+// a count over the threshold: objects that recover and are replaced restart it.
+func TestStatusNotProgressingNeedsAPersistentObject(t *testing.T) {
+	w := progressWorld(22, 10, 0)
+	rt := Runtime{States: NewStates()}
+	run := func(off time.Duration) Report {
+		in := w.input(t)
+		in.Now = testutil.Now.Add(off)
+		return Evaluate(in, Upstream(), rt)
+	}
+	run(0)
+	// At 4 min the first ten recover and the other ten go stale.
+	for i, o := range w.objs[2:] {
+		gen := int64(1)
+		if i >= 10 {
+			gen = 2
+		}
+		o.SetGeneration(gen)
+	}
+	run(4 * time.Minute)
+	r := run(5*time.Minute + time.Second)
+	if fs := notProgressing(r); len(fs) != 0 {
+		t.Fatalf("018 with no object stuck for 5 min: %+v", fs)
+	}
+	if want := testutil.Now.Add(4*time.Minute + progressHold); !r.Next.Equal(want) {
+		t.Errorf("next %v, want %v", r.Next, want)
+	}
+	if fs := notProgressing(run(9*time.Minute + time.Second)); len(fs) != 1 {
+		t.Fatalf("want 018 once the second ten are stuck for 5 min, got %+v", fs)
+	}
+}
+
 // Design §10.2: at least 10 objects, or 10 % of objects with status with a
 // minimum of 3.
 func TestStatusNotProgressingThreshold(t *testing.T) {

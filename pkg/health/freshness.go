@@ -147,10 +147,34 @@ func (progressCheck) Inputs() InputSet {
 }
 
 // progressState is the check's Store value while the condition holds: its
-// start, and status_syncs_total per Pod UID at each metrics collection since.
+// start, when each stuck object was first seen stuck, and status_syncs_total
+// per Pod UID at each metrics collection since.
 type progressState struct {
 	start   time.Time
+	stuck   map[objects.Ref]time.Time
 	samples []syncSample
+}
+
+// longest keeps the first-seen time of each object in kinds, drops the others,
+// and returns the earliest: when the longest-stuck object became stuck.
+func (s *progressState) longest(kinds map[objects.Ref]string, now time.Time) time.Time {
+	for r := range s.stuck {
+		if _, ok := kinds[r]; !ok {
+			delete(s.stuck, r)
+		}
+	}
+	first := now
+	for r := range kinds {
+		at, ok := s.stuck[r]
+		if !ok {
+			at = now
+			s.stuck[r] = at
+		}
+		if at.Before(first) {
+			first = at
+		}
+	}
+	return first
 }
 
 // syncSample is status_syncs_total per Pod UID, collected at at.
@@ -178,11 +202,12 @@ func (c progressCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	st, _ := Load[*progressState](ctx.State, progressKey)
 	if st == nil {
-		st = &progressState{start: in.Now}
+		st = &progressState{start: in.Now, stuck: map[objects.Ref]time.Time{}}
 		ctx.State.Set(progressKey, st)
 	}
 	fresh := st.record(in)
-	if due := st.start.Add(progressHold); in.Now.Before(due) {
+	// Design §10.2: one object must have stayed stuck for the hold, not only the count.
+	if due := st.longest(kinds, in.Now).Add(progressHold); in.Now.Before(due) {
 		ctx.WakeAt(due)
 		return nil, res
 	}
