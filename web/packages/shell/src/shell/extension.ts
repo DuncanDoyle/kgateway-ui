@@ -46,6 +46,8 @@ export interface ShellExtension {
   vocabulary?: Partial<Vocabulary>;
   /** In-page slots: detail tabs, side sections, finding actions and install panels. */
   contributions?: Contributions;
+  /** Base URL of the findings reference "Learn more" opens, e.g. a build's own copy of docs/findings.md; "#kgwui-0nn" is appended. */
+  findingsDocUrl?: string;
 }
 
 /**
@@ -84,7 +86,10 @@ export const CorePagesContext = createContext<Partial<CorePages>>({});
 export const defaultBrand: Brand = { productName: "kgateway", logo: null };
 
 /** The extension merged with the upstream defaults; the vocabulary is complete. */
-export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary">> & { vocabulary: Vocabulary };
+export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary" | "findingsDocUrl">> & {
+  vocabulary: Vocabulary;
+  findingsDocUrl?: string;
+};
 
 export const ShellExtensionContext = createContext<ResolvedShellExtension>({
   brand: defaultBrand,

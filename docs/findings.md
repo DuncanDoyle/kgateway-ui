@@ -10,7 +10,7 @@ Each entry says:
 
 Some findings, or parts of their evidence, are computed by the UI, not reported by the controller. The entry says so, and the finding page labels them "Computed". The controller's status always wins: a computed finding is a hint you can check.
 
-Severities: an error turns the install red, a warning turns it yellow, and info never changes its state on its own.
+Severities: an error turns the install red, a warning turns it yellow, and info never changes its state on its own. A check that is still pending can make the install unknown, as the KGWUI-003 and KGWUI-008 entries say.
 
 **Since.** A finding from a status condition takes the condition's `lastTransitionTime`. For every other finding, `since` is when the UI first saw it. The UI keeps that time in memory, so it resets when the UI restarts. The [README upgrade notes](../README.md#upgrade-notes) say the same. KGWUI-001 is the one exception: with controller logs on, its `since` can come from the log.
 
@@ -239,7 +239,9 @@ A route that delegates, or is a delegation child, gets no suggested fix: the con
 
 Create it with `kubectl create -f`. The UI does not read ReferenceGrants, so if one already exists, compare its `from` and `to` with the suggested one.
 
-There is no suggested grant for a route that delegates or is a delegation child, because a delegation cycle also reads `RefNotPermitted`. Nor is there one for a listener whose CA refs may come from a ListenerPolicy. For kgateway's own ref fields, such as policy and extension refs, follow the controller's message.
+When that one ref's group serves no such kind, the page suggests the corrected group instead, as for KGWUI-013. If discovery is incomplete, or several groups serve the kind, it suggests nothing.
+
+There is no suggested grant for a route that delegates or is a delegation child, because a delegation cycle also reads `RefNotPermitted`. Nor is there one for a listener whose CA refs may come from a ListenerPolicy, or for a ListenerSet listener whose Gateway is not in this install or sets CA refs. For kgateway's own ref fields, such as policy and extension refs, follow the controller's message.
 
 ## KGWUI-015
 
@@ -252,7 +254,7 @@ There is no suggested grant for a route that delegates or is a delegation child,
 - The reason and the controller's message.
 - The match index from the message, as "match N". It counts matches, not rules, so the UI does not map it to a rule.
 - The policy the message names, as a link, when it names exactly one served policy kind.
-- After a rule has been replaced for 10 minutes, a hint: some versions keep the rule replaced until the controller restarts.
+- After a rule has been replaced (not dropped) for 10 minutes, a hint: some versions keep the rule replaced until the controller restarts.
 
 **Fix.** Fix what the message names, often a policy the rule uses. If the cause was temporary, such as an identity provider outage, and the rule stays replaced, restart the controller.
 
@@ -260,13 +262,13 @@ There is no suggested grant for a route that delegates or is a delegation child,
 
 `policy-target-not-found` · warning · computed by the UI
 
-**Cause.** A policy targets an object that does not exist. On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It covers three cases:
+**Cause.** A policy targets an object that does not exist. On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It judges five target kinds: Gateway, ListenerSet, XListenerSet, HTTPRoute and GRPCRoute. A missing target of any other kind, such as a TCPRoute or a Service, raises nothing, so no finding does not mean such a target exists. It covers three cases:
 
 - a `targetRef` names no object of that kind in the policy's namespace;
 - a `sectionName` names no listener of the Gateway or ListenerSet, or no rule of the route;
-- a `targetSelector` matches no object of its kind in the policy's namespace, or is empty.
+- a `targetSelector` matches no object of its kind in the policy's namespace, or is empty. A policy in the controller's global policy namespace (`KGW_GLOBAL_POLICY_NAMESPACE`) matches in every namespace. When the UI cannot read that setting, a selector raises nothing.
 
-It is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A target kind the UI does not watch raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
+It is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A judged kind that the cluster does not serve, or the UI cannot read, raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
 
 **Evidence.** The target as written, such as "targetRefs[0] Gateway `edge`", and what is missing. Most of these findings say "Not verified: the controller's status cannot confirm this." The UI can check only a policy with one targetRef: a missing Gateway, or a missing section of a Gateway or route. For those, a current ancestor the controller writes for that target raises KGWUI-012.
 

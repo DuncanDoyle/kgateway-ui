@@ -59,6 +59,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
       findingRenderers: extension.findingRenderers ?? {},
       contributions: extension.contributions ?? {},
       vocabulary: { ...kubernetesVocabulary, ...extension.vocabulary },
+      findingsDocUrl: extension.findingsDocUrl,
     };
   }, [extension]);
   // A contribution at or below a reserved path is ignored, with one warning, so it cannot shadow an explorer page.

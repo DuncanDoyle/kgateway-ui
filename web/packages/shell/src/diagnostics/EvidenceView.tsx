@@ -3,6 +3,7 @@ import styled from "@emotion/styled";
 import { ExternalLink } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { useNow } from "../api/clock";
+import { useMeta } from "../api/hooks";
 import type {
   Evidence,
   Finding,
@@ -71,12 +72,20 @@ const DocLink = styled.a<{ stylesOverride?: SerializedStyles }>`
 `;
 
 // region Helpers
-/** Where docs/findings.md is published; the design names no docs site, so it is the file on main. */
-export const FINDINGS_DOC_URL = "https://github.com/DuncanDoyle/kgateway-ui/blob/main/docs/findings.md";
+/** Where this repository's files are published; docs/findings.md is read at a release tag or on main. */
+const REPO_BLOB = "https://github.com/DuncanDoyle/kgateway-ui/blob";
+/** A version /meta reports for a tagged release build; dev and other builds link main. */
+const RELEASE_TAG = /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
-/** The findings reference entry for code, e.g. "#kgwui-001"; undefined for a code it does not cover, such as a downstream prefix. */
-export const findingDocUrl = (code: string) =>
-  /^KGWUI-\d{3}$/.test(code) ? `${FINDINGS_DOC_URL}#${code.toLowerCase()}` : undefined;
+/**
+ * The findings reference entry for code, e.g. "#kgwui-001": at the release tag of version, else on main, or at base
+ * when a downstream sets one. Undefined for a code the reference does not cover, such as a downstream prefix.
+ */
+export function findingDocUrl(code: string, version?: string, base?: string) {
+  if (!/^KGWUI-\d{3}$/.test(code)) return undefined;
+  const doc = base ?? `${REPO_BLOB}/${version && RELEASE_TAG.test(version) ? version : "main"}/docs/findings.md`;
+  return `${doc}#${code.toLowerCase()}`;
+}
 
 /** The type's message name, e.g. "Cluster" for envoy.config.cluster.v3.Cluster. */
 export const shortType = (typeUrl: string) => typeUrl.split(/[./]/).pop() || typeUrl;
@@ -327,7 +336,9 @@ interface LearnMoreProps {
 
 /** "Learn more": the code's entry in docs/findings.md, in a new tab; nothing for a code the reference does not cover. */
 export function LearnMore({ code, stylesOverride }: LearnMoreProps) {
-  const href = findingDocUrl(code);
+  const { data: meta } = useMeta();
+  const { findingsDocUrl } = useShellExtension();
+  const href = findingDocUrl(code, meta?.version, findingsDocUrl);
   if (!href) return null;
   return (
     <DocLink

@@ -106,6 +106,9 @@ func TestEveryCodeHasAFindingsDocAnchor(t *testing.T) {
 		case !ok:
 			t.Errorf("no entry for %s", code)
 		case raised[code]:
+			if strings.Contains(body, notRaisedYet) {
+				t.Errorf("%s is raised, but its entry still says %q", code, notRaisedYet)
+			}
 			for _, part := range []string{"**Cause.**", "**Evidence.**", "**Fix.**"} {
 				if !strings.Contains(body, part) {
 					t.Errorf("%s has no %s", code, part)

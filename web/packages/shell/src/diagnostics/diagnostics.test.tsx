@@ -209,14 +209,63 @@ describe("EvidenceView", () => {
 });
 
 describe("LearnMore", () => {
+  const REPO = "https://github.com/DuncanDoyle/kgateway-ui/blob";
+  const meta = (version: string) => ({
+    "/api/v1/meta": { version, synced: true, platform: "kubernetes", capabilities: [], kinds: [] },
+  });
+
   it("builds the findings reference anchor from the code", () => {
-    expect(findingDocUrl("KGWUI-014")).toBe(
-      "https://github.com/DuncanDoyle/kgateway-ui/blob/main/docs/findings.md#kgwui-014",
-    );
+    expect(findingDocUrl("KGWUI-014")).toBe(`${REPO}/main/docs/findings.md#kgwui-014`);
     expect(findingDocUrl("KGWUI-001")).toMatch(/#kgwui-001$/);
     // The reference covers only the UI's own codes, not a downstream prefix.
     expect(findingDocUrl("ACME-001")).toBeUndefined();
     expect(findingDocUrl("KGWUI-1")).toBeUndefined();
+  });
+
+  it("a release version links that tag's reference; dev and other versions link main", () => {
+    expect(findingDocUrl("KGWUI-014", "v0.2.0")).toBe(`${REPO}/v0.2.0/docs/findings.md#kgwui-014`);
+    expect(findingDocUrl("KGWUI-014", "v1.3.0-rc.1")).toBe(`${REPO}/v1.3.0-rc.1/docs/findings.md#kgwui-014`);
+    expect(findingDocUrl("KGWUI-014", "dev")).toBe(`${REPO}/main/docs/findings.md#kgwui-014`);
+    for (const v of ["0.2.0", "v0.2", "abc1234", "v0.2.0+build.5", ""])
+      expect(findingDocUrl("KGWUI-014", v)).toBe(`${REPO}/main/docs/findings.md#kgwui-014`);
+  });
+
+  it("a downstream docs URL replaces the reference, whatever the version", () => {
+    const base = "https://docs.acme.example/findings";
+    expect(findingDocUrl("KGWUI-014", "v0.2.0", base)).toBe(`${base}#kgwui-014`);
+    expect(findingDocUrl("ACME-001", "v0.2.0", base)).toBeUndefined();
+  });
+
+  it("links the tag of the version /meta reports", async () => {
+    stubApi(meta("v0.2.0"));
+    renderWithTheme(<LearnMore code="KGWUI-014" />);
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: diagnosticsCopy.learnMoreLabel("KGWUI-014") })).toHaveAttribute(
+        "href",
+        `${REPO}/v0.2.0/docs/findings.md#kgwui-014`,
+      ),
+    );
+  });
+
+  it("links the extension's docs URL when a downstream sets one", async () => {
+    stubApi(meta("v9.9.9"));
+    function WithDocs({ children }: { children: ReactNode }) {
+      const ext = useShellExtension();
+      return (
+        <ShellExtensionContext.Provider value={{ ...ext, findingsDocUrl: "https://docs.acme.example/findings" }}>
+          {children}
+        </ShellExtensionContext.Provider>
+      );
+    }
+    renderWithTheme(
+      <WithDocs>
+        <LearnMore code="KGWUI-014" />
+      </WithDocs>,
+    );
+    expect(screen.getByRole("link", { name: diagnosticsCopy.learnMoreLabel("KGWUI-014") })).toHaveAttribute(
+      "href",
+      "https://docs.acme.example/findings#kgwui-014",
+    );
   });
 
   it("a downstream code gets no link", () => {
