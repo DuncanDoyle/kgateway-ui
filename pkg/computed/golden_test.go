@@ -3,6 +3,7 @@ package computed_test
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -633,9 +634,14 @@ func upstreamServed(gk objects.GroupKind) bool {
 	return slices.ContainsFunc(kinds.Upstream(), func(d kinds.Descriptor) bool { return d.Group == gk.Group && d.Kind == gk.Kind })
 }
 
+// globalPolicyEnv is the controller env var naming the global policy namespace.
+const globalPolicyEnv = "KGW_GLOBAL_POLICY_NAMESPACE"
+
 // targetInputs builds one TargetInput per policy of a case: its
-// gateway.kgateway.dev objects with targets. Every object is in the cache.
+// gateway.kgateway.dev objects with targets. Every object is in the cache;
+// the global policy namespace is read from the case's settings.
 func targetInputs(c testutil.RuleCase, scopeKnown bool, served func(objects.GroupKind) bool) []computed.TargetInput {
+	global, globalKnown := c.Settings[globalPolicyEnv], c.Settings[globalPolicyEnv] != testutil.SettingValueFrom
 	lookup := func(gk objects.GroupKind, ns, name string) (*unstructured.Unstructured, bool) {
 		i := slices.IndexFunc(c.Objects, func(u *unstructured.Unstructured) bool {
 			return gkOf(u) == gk && u.GetNamespace() == ns && u.GetName() == name
@@ -647,7 +653,7 @@ func targetInputs(c testutil.RuleCase, scopeKnown bool, served func(objects.Grou
 	}
 	labelled := func(gk objects.GroupKind, ns string, sel map[string]string) bool {
 		return slices.ContainsFunc(c.Objects, func(u *unstructured.Unstructured) bool {
-			if gkOf(u) != gk || u.GetNamespace() != ns {
+			if gkOf(u) != gk || (ns != "" && u.GetNamespace() != ns) {
 				return false
 			}
 			for k, v := range sel {
@@ -665,7 +671,8 @@ func targetInputs(c testutil.RuleCase, scopeKnown bool, served func(objects.Grou
 		}
 		refs, sels := computed.DecodeTargets(u)
 		ins = append(ins, computed.TargetInput{Policy: objects.RefOf(u), TargetRefs: refs, Selectors: sels,
-			Lookup: lookup, Labelled: labelled, Served: served, ScopeKnown: scopeKnown})
+			Lookup: lookup, Labelled: labelled, Served: served, ScopeKnown: scopeKnown,
+			GlobalPolicyNamespace: global, GlobalPolicyNamespaceKnown: globalKnown})
 	}
 	return ins
 }
@@ -687,6 +694,7 @@ func policyTargets(t *testing.T, pt computed.PolicyTargeter, ins []computed.Targ
 }
 
 // comparePolicyTargets checks a policy-targets case: every target of every policy is written.
+// policyTargetsUnread lists the results that differ when the global policy namespace is unread.
 func comparePolicyTargets(t *testing.T, c testutil.RuleCase, rules computed.Rules) {
 	t.Helper()
 	pt, ok := rules.(computed.PolicyTargeter)
@@ -701,12 +709,25 @@ func comparePolicyTargets(t *testing.T, c testutil.RuleCase, rules computed.Rule
 	dec.DisallowUnknownFields()
 	var want struct {
 		PolicyTargets map[string]targetExpect `json:"policyTargets"`
+		Unread        map[string]targetExpect `json:"policyTargetsUnread"`
 	}
 	if err := dec.Decode(&want); err != nil {
 		t.Fatalf("expect: %v", err)
 	}
-	if got := policyTargets(t, pt, targetInputs(c, scope(c).Mode != install.ScopeUnknown, upstreamServed)); !reflect.DeepEqual(got, want.PolicyTargets) {
+	known := scope(c).Mode != install.ScopeUnknown
+	if got := policyTargets(t, pt, targetInputs(c, known, upstreamServed)); !reflect.DeepEqual(got, want.PolicyTargets) {
 		t.Errorf("policyTargets:\n got %v\nwant %v", got, want.PolicyTargets)
+	}
+	if want.Unread == nil {
+		return
+	}
+	unread := c
+	unread.Settings = maps.Clone(c.Settings)
+	unread.Settings[globalPolicyEnv] = testutil.SettingValueFrom
+	wantUnread := maps.Clone(want.PolicyTargets)
+	maps.Copy(wantUnread, want.Unread)
+	if got := policyTargets(t, pt, targetInputs(unread, known, upstreamServed)); !reflect.DeepEqual(got, wantUnread) {
+		t.Errorf("policyTargets, global policy namespace unread:\n got %v\nwant %v", got, wantUnread)
 	}
 }
 

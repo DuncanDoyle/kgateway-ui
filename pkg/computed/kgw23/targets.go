@@ -67,10 +67,20 @@ func selectorOutcome(in computed.TargetInput, s computed.TargetSelector) string 
 		return computed.TargetUnknown
 	}
 	// An empty matchLabels selects nothing (istio labels.Instance.Match; policy.go V3:830).
-	if len(s.MatchLabels) == 0 || !in.Labelled(gk, in.Policy.Namespace, s.MatchLabels) {
+	ns := in.Policy.Namespace
+	switch {
+	case len(s.MatchLabels) == 0:
 		return computed.TargetMatchesNothing
+	case in.Labelled(gk, ns, s.MatchLabels):
+		return computed.TargetFound
+	case !in.GlobalPolicyNamespaceKnown:
+		// The policy may be in the global policy namespace, whose selectors match everywhere.
+		return computed.TargetUnknown
+	case in.GlobalPolicyNamespace != "" && ns == in.GlobalPolicyNamespace && in.Labelled(gk, "", s.MatchLabels):
+		// A policy in the global policy namespace selects in every namespace (policy.go V3:909-913).
+		return computed.TargetFound
 	}
-	return computed.TargetFound
+	return computed.TargetMatchesNothing
 }
 
 // sections returns the listener names or the rule names of u; unnamed rules are no section.

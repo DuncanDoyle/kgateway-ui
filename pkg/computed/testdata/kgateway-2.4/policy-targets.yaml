@@ -4,7 +4,8 @@
 provenance: computed-rules §Policy targets (phase 3), observed on v2.4.7
 controllerVersion: v2.4.7
 ruleOnly: true
-namespaces: {pt: {}, other: {}, shop: {}}
+settings: {KGW_GLOBAL_POLICY_NAMESPACE: global}
+namespaces: {pt: {}, other: {}, shop: {}, global: {}}
 objects:
 - apiVersion: gateway.networking.k8s.io/v1
   kind: Gateway
@@ -44,6 +45,19 @@ objects:
   spec:
     parentRef: {name: gw}
     listeners: [{name: extra, protocol: HTTP, port: 8082}]
+# GRPCRoute sections are rule names (krtcollections/grpc_route.go); XListenerSet sections are listener names.
+- apiVersion: gateway.networking.k8s.io/v1
+  kind: GRPCRoute
+  metadata: {name: g1, namespace: pt}
+  spec:
+    parentRefs: [{name: gw}]
+    rules: [{name: rule-g, matches: [{method: {service: echo.Echo}}]}]
+- apiVersion: gateway.networking.x-k8s.io/v1alpha1
+  kind: XListenerSet
+  metadata: {name: xls, namespace: pt}
+  spec:
+    parentRef: {name: gw}
+    listeners: [{name: xextra, protocol: HTTP, port: 8083}]
 - apiVersion: v1
   kind: Service
   metadata: {name: httpbin, namespace: pt}
@@ -89,6 +103,20 @@ objects:
   spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: ListenerSet, name: nope}]}}
 - {apiVersion: gateway.kgateway.dev/v1alpha1, kind: BackendConfigPolicy, metadata: {name: service-target, namespace: pt},
   spec: {targetRefs: [{group: "", kind: Service, name: httpbin}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: grpc-route, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: GRPCRoute, name: g1}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: grpc-route-section, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: GRPCRoute, name: g1, sectionName: rule-g}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: xlistenerset, namespace: pt},
+  spec: {targetRefs: [{group: gateway.networking.x-k8s.io, kind: XListenerSet, name: xls, sectionName: xextra}]}}
+# The global policy namespace (KGW_GLOBAL_POLICY_NAMESPACE=global): its selectors match in every
+# namespace (krtcollections/policy.go label lookup); its targetRefs stay local.
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: global-selector, namespace: global},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: "yes"}}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: global-selector-none, namespace: global},
+  spec: {targetSelectors: [{group: gateway.networking.k8s.io, kind: HTTPRoute, matchLabels: {pick: never}}]}}
+- {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: global-ref, namespace: global},
+  spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw}]}}
 # Local refs (GEP-713): pt's objects are not in other.
 - {apiVersion: gateway.kgateway.dev/v1alpha1, kind: TrafficPolicy, metadata: {name: other-namespace, namespace: other},
   spec: {targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: gw}]}}
@@ -120,3 +148,17 @@ expect:
     "pt/service-target #0": {outcome: unknown}
     "other/other-namespace #0": {outcome: not-found, verifiable: true}
     "other/other-namespace-selector #0": {outcome: matches-nothing}
+    "pt/grpc-route #0": {outcome: found, verifiable: true}
+    "pt/grpc-route-section #0": {outcome: found, verifiable: true}
+    "pt/xlistenerset #0": {outcome: found}
+    "global/global-selector #0": {outcome: found}
+    "global/global-selector-none #0": {outcome: matches-nothing}
+    "global/global-ref #0": {outcome: not-found, verifiable: true}
+  # With KGW_GLOBAL_POLICY_NAMESPACE unread, any policy may be in it: a selector with no match
+  # in its own namespace is unknown. Results not listed are as in policyTargets.
+  policyTargetsUnread:
+    "pt/selector-none #0": {outcome: unknown}
+    "pt/ref-and-selector #1": {outcome: unknown}
+    "other/other-namespace-selector #0": {outcome: unknown}
+    "global/global-selector #0": {outcome: unknown}
+    "global/global-selector-none #0": {outcome: unknown}

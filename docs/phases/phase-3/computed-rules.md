@@ -31,10 +31,10 @@ Each target gets one result, in order: every `targetRef`, then every `targetSele
 2. **Known kinds.** The rule judges `Gateway`, `ListenerSet`, `HTTPRoute` and `GRPCRoute` in `gateway.networking.k8s.io`, and `XListenerSet` in `gateway.networking.x-k8s.io`. Any other kind is `unknown`, so a Service or Backend target raises nothing **(our call)**.
 3. **Served and watched.** A known kind that the API server does not serve, or that the UI does not watch, is `unknown`.
 4. **targetRef.** `not-found` when no object with that name is in the policy's namespace. With a `sectionName`, `section-not-found` when the object has no listener (Gateway, ListenerSet) or no named rule (HTTPRoute, GRPCRoute) with that name. Otherwise `found`.
-5. **targetSelector.** `matches-nothing` when `matchLabels` is empty, or no object of its kind in the policy's namespace has every label. Otherwise `found`. A selector's `sectionName` is not judged: the UI does not know which objects matched, so it never calls a section missing **(our call)**.
+5. **targetSelector.** `matches-nothing` when `matchLabels` is empty. `found` when an object of its kind in the policy's namespace has every label. Otherwise it depends on the global policy namespace (below): `unknown` when the UI cannot read the setting, `found` when the policy is in that namespace and an object in any namespace has every label, and `matches-nothing` in every other case. A selector's `sectionName` is not judged: the UI does not know which objects matched, so it never calls a section missing **(our call)**.
 6. **Verifiable.** A result is verifiable only when the policy has exactly one target, that target is a `targetRef` to a Gateway, HTTPRoute or GRPCRoute, and its outcome is not `unknown`. Every other shape is "not verified" (design §7.6). A ListenerSet target is not verifiable: its ancestor was not observed **(our call)**.
 
-**Limit: the global policy namespace.** A policy in the controller's global policy namespace (`KGW_GLOBAL_POLICY_NAMESPACE`, `api/settings/settings.go` V3:293-295, V4:303-305) also selects labelled objects in every namespace (`krtcollections/policy.go` V3:909-913, V4:918-922). The rule asks only about the policy's own namespace. KGWUI-016's input builder must treat such a policy's selectors as `unknown`, or search every namespace.
+**The global policy namespace.** A policy in the controller's global policy namespace (`KGW_GLOBAL_POLICY_NAMESPACE`, `api/settings/settings.go` V3:293-295, V4:303-305) also selects labelled objects in every namespace (`krtcollections/policy.go` V3:909-913, V4:918-922). Its `targetRefs` stay local. The input carries the setting and whether the UI could read it (`TargetInput.GlobalPolicyNamespace`, `GlobalPolicyNamespaceKnown`); unset means no global namespace. The rule set judges it, so a minor that changes it gets a new rule set, not an input change.
 
 ### Observed ancestors (Task 60 Step 0)
 
@@ -54,7 +54,7 @@ Observed 2026-11-05 on kind with kgateway v2.3.11 (Gateway API v1.5.1) and v2.4.
 | Missing listener | `missing-listener` → `gw`, section `nope` | none; `status` absent | — |
 | Missing route section | `missing-route-section` → `r1`, section `nope` | none; `status` absent | — |
 | Selector that matches nothing | `selector-none` → `pick: "never"` | none; `status` absent | — |
-| Target deleted after attaching | `target-deleted` → HTTPRoute `gone` on `gw2`, then `gone` deleted | `gw2`, then `status.ancestors: []` within 15 s | — |
+| Target deleted after attaching | `target-deleted` → HTTPRoute `gone` on `gw2`; `gone` deleted by hand once the ancestor appears | `gw2`, then `status.ancestors: []` within 15 s | — |
 
 What this settles:
 - An ancestor is always a Gateway: the target for a Gateway target, the route's Gateways for a route target. It never names the targetRef or the section it came from.

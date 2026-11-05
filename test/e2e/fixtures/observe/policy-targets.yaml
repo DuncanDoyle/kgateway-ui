@@ -141,3 +141,20 @@ spec:
     - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: r1 }
     - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: nope }
   timeouts: { request: 10s }
+---
+# Deleted target: once target-deleted reports ancestor gw2, run
+#   kubectl -n pt delete httproute gone
+# and record target-deleted's status.ancestors again.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: gone, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  parentRefs: [{ name: gw2 }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /gone } }], backendRefs: [{ name: httpbin, namespace: shop, port: 8000 }] }]
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata: { name: target-deleted, namespace: pt, labels: { observe: policy-targets } }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: gone }]
+  timeouts: { request: 10s }

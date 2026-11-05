@@ -29,12 +29,17 @@ type TargetInput struct {
 	Selectors  []TargetSelector
 	// Lookup returns the cached object of a kind by namespace and name.
 	Lookup func(gk objects.GroupKind, ns, name string) (*unstructured.Unstructured, bool)
-	// Labelled reports whether some cached object of a kind in ns has every label in sel.
+	// Labelled reports whether some cached object of a kind in ns has every label in sel;
+	// an empty ns means every namespace.
 	Labelled func(gk objects.GroupKind, ns string, sel map[string]string) bool
 	// Served reports whether a kind is served by the API server and watched by the UI.
 	Served func(gk objects.GroupKind) bool
 	// ScopeKnown is false when the install's discovery scope is unknown (D-024).
 	ScopeKnown bool
+	// GlobalPolicyNamespace is the controller's KGW_GLOBAL_POLICY_NAMESPACE, empty when unset.
+	// GlobalPolicyNamespaceKnown is false when the UI cannot read it.
+	GlobalPolicyNamespace      string
+	GlobalPolicyNamespaceKnown bool
 }
 
 // Target outcomes, as TargetResult.Outcome carries them.
