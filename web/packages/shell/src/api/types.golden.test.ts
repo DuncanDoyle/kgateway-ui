@@ -319,15 +319,21 @@ const evidenceShapes = {
       kind: "!",
       listener: "!",
       port: "!",
+      protocol: "?",
       hostname: "?",
       reason: "!",
       message: "!",
-      rule: "!",
+      rule: "?",
       others: "?",
       othersTotal: "!",
     },
-    { others: shape<ConflictingListener>({ owner: "!", name: "!", hostname: "?" }, { owner: linkedRef }) },
-    { kind: { "listener-conflict": 1 } },
+    {
+      others: shape<ConflictingListener>({ owner: "!", name: "!", protocol: "?", hostname: "?" }, { owner: linkedRef }),
+    },
+    {
+      kind: { "listener-conflict": 1 },
+      rule: { "listener port and hostname overlap": 1, "listener port and protocol": 1 },
+    },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

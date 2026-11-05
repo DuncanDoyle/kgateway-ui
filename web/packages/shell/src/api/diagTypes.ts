@@ -173,24 +173,27 @@ export interface RuleReplacedEvidence {
   message: string;
   policy?: LinkedRef;
 }
-/** Another listener on the same Gateway and port with an overlapping hostname; owner is its Gateway or ListenerSet. */
+/** Another listener on the same Gateway that the rule finds; owner is its Gateway or ListenerSet. */
 export interface ConflictingListener {
   owner: LinkedRef;
   name: string;
+  protocol?: string;
   hostname?: string;
 }
 /**
  * Why KGWUI-017 reports a listener (design §7.5): the controller's Conflicted condition, and the other listeners
- * the UI computes overlap it by rule. others holds the first few; othersTotal counts them all.
+ * the UI computes by rule, chosen by reason. rule is absent for a reason no rule covers, such as a reserved port.
+ * others holds the first few; othersTotal counts them all.
  */
 export interface ListenerConflictEvidence {
   kind: "listener-conflict";
   listener: string;
   port: number;
+  protocol?: string;
   hostname?: string;
   reason: string;
   message: string;
-  rule: string;
+  rule?: "listener port and hostname overlap" | "listener port and protocol";
   others?: ConflictingListener[];
   othersTotal: number;
 }

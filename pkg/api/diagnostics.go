@@ -86,6 +86,7 @@ type ConflictEvidence struct {
 type ConflictListener struct {
 	Owner    LinkedRef `json:"owner"`
 	Name     string    `json:"name"`
+	Protocol string    `json:"protocol,omitempty"`
 	Hostname string    `json:"hostname,omitempty"`
 }
 
@@ -190,7 +191,7 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 		out := &ConflictEvidence{conflictPlain: conflictPlain(*ev)}
 		out.conflictPlain.Others = nil
 		for _, o := range ev.Others {
-			out.Others = append(out.Others, ConflictListener{Owner: l.linked(o.Owner), Name: o.Name, Hostname: o.Hostname})
+			out.Others = append(out.Others, ConflictListener{Owner: l.linked(o.Owner), Name: o.Name, Protocol: o.Protocol, Hostname: o.Hostname})
 		}
 		return out
 	}

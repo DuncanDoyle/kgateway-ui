@@ -289,6 +289,8 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// evaluate reports every present condition of a current block that is False;
 	// current() has already turned a required Unknown into "not processed".
 	// A nil owner is a route parent's, resolved on its first finding.
+	// While conflict is set, 017 owns the listener's Accepted and Programmed False with that reason.
+	var conflict string
 	evaluate := func(u *unstructured.Unstructured, parent objects.ParentRef, cs []metav1.Condition, required, optional []string, extra string, owner []string) {
 		if !current(u, parent, cs, required, optional, extra) {
 			return
@@ -296,6 +298,9 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		for _, ts := range [2][]string{required, optional} {
 			for _, t := range ts {
 				if cond := objects.FindCondition(cs, t); cond != nil && cond.Status == metav1.ConditionFalse {
+					if conflict != "" && cond.Reason == conflict && (t == "Accepted" || t == "Programmed") {
+						continue
+					}
 					if owner == nil {
 						owner = in.parentKey(u, parent)
 					}
@@ -340,9 +345,17 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				continue
 			}
 			owner := []string{ownerListener, l.Name}
+			// 017 owns a current Conflicted=True and the conditions with its reason; 002 reports none (D-030, R94).
+			cf := objects.FindCondition(l.Conditions, "Conflicted")
+			if cf != nil && (cf.Status != metav1.ConditionTrue || objects.IsStale(u, *cf)) {
+				cf = nil
+			}
+			if cf != nil {
+				conflict = cf.Reason
+			}
 			evaluate(u, objects.ParentRef{}, l.Conditions, listenerRequired, listenerOptional, "listener "+l.Name, owner)
-			// 017 owns the Conflicted condition; 002 never reports it (D-030).
-			if cf := objects.FindCondition(l.Conditions, "Conflicted"); cf != nil && cf.Status == metav1.ConditionTrue && !objects.IsStale(u, *cf) {
+			conflict = ""
+			if cf != nil {
 				if sides == nil {
 					sides = in.gatewayListeners()
 				}
