@@ -136,14 +136,36 @@ func TestFindingsGroupsView(t *testing.T) {
 	if rows := filtered("code=KGWUI-013&q=two"); len(rows) != 1 || rows[0].Cause == nil || rows[0].Cause.Name != "two" {
 		t.Errorf("q filter %+v", rows)
 	}
-	for _, r := range filtered("severity=info") {
-		if r.Severity == health.SeverityError {
-			t.Errorf("severity=info row %+v", r)
-		}
-	}
 	// q matches a group by its cause's identity too.
 	if rows := filtered("q=shop/cart&code=KGWUI-013"); len(rows) != 1 || rows[0].ID != mb.ID {
 		t.Errorf("cause identity %+v", rows)
+	}
+}
+
+// R98: the grouped view lists the groups of the findings the flat view shows.
+// shop/mixed has a 013 error and a 003 warning in one "Other" group: a filter
+// on the 003 lists the group, and the row keeps its top member's code and severity.
+func TestFindingsGroupsMatchNonTopMember(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	unreported := gw
+	unreported.SectionName = "nope" // no status entry: a 003 warning past grace
+	mixed := testutil.HTTPRoute("shop", "mixed", []objects.ParentRef{gw, unreported}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
+		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
+	mixed = testutil.WithRules(mixed, map[string]any{"backendRefs": []any{map[string]any{"name": "a"}, map[string]any{"name": "b"}}})
+	_, srv, _ := startWith(t, setup{catalog: fixCatalog(nil), rulesFor: computedtest.NoViews}, world(mixed)...)
+	flat := get[Page[FindingRow]](t, srv, findingsBase+"?namespace=shop&code=KGWUI-003&code=KGWUI-013", http.StatusOK).Items
+	if len(flat) != 2 || flat[0].Group != flat[1].Group {
+		t.Fatalf("want a 013 and a 003 on shop/mixed in one group, got %+v", flat)
+	}
+	for _, q := range []string{"code=KGWUI-003", "severity=warning"} {
+		rows := get[Page[GroupRow]](t, srv, findingsBase+"?view=groups&"+q, http.StatusOK).Items
+		j := slices.IndexFunc(rows, func(r GroupRow) bool { return r.ID == flat[0].Group })
+		if j < 0 {
+			t.Fatalf("%s: group of shop/mixed not listed in %+v", q, rows)
+		}
+		if r := rows[j]; r.Code != health.CodeRefUnresolved || r.Severity != health.SeverityError || r.Members != 2 {
+			t.Errorf("%s: row %+v, want the top member's code KGWUI-013 and severity error", q, r)
+		}
 	}
 }
 
