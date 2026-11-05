@@ -9,6 +9,7 @@ import (
 
 // FindingRow is one finding of GET …/findings (design §13.3); restricted rows
 // keep identity only (§14 rule 11), EvidenceRestricted hides the detail (rule 12).
+// It has no docs link: the SPA builds the docs/findings.md anchor from Code.
 type FindingRow struct {
 	ID                 string          `json:"id"`
 	Code               string          `json:"code"`

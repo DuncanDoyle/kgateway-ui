@@ -1,5 +1,6 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
+import { ExternalLink } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { useNow } from "../api/clock";
 import type {
@@ -46,7 +47,37 @@ const Frame = styled.div<{ stylesOverride?: SerializedStyles }>`
   ${(p) => p.stylesOverride}
 `;
 
+const DocLink = styled.a<{ stylesOverride?: SerializedStyles }>`
+  display: inline-flex;
+  align-items: center;
+  gap: ${(p) => p.theme.space(1)};
+  font-size: ${(p) => p.theme.font.size.sm};
+  color: ${(p) => p.theme.color.accentText};
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  border-radius: ${(p) => p.theme.radius.sm};
+  &:hover {
+    color: ${(p) => p.theme.color.text};
+    text-decoration-thickness: 2px;
+  }
+  &:active {
+    color: ${(p) => p.theme.color.textMuted};
+  }
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
+  ${(p) => p.stylesOverride}
+`;
+
 // region Helpers
+/** Where docs/findings.md is published; the design names no docs site, so it is the file on main. */
+export const FINDINGS_DOC_URL = "https://github.com/DuncanDoyle/kgateway-ui/blob/main/docs/findings.md";
+
+/** The findings reference entry for code, e.g. "#kgwui-001"; undefined for a code it does not cover, such as a downstream prefix. */
+export const findingDocUrl = (code: string) =>
+  /^KGWUI-\d{3}$/.test(code) ? `${FINDINGS_DOC_URL}#${code.toLowerCase()}` : undefined;
+
 /** The type's message name, e.g. "Cluster" for envoy.config.cluster.v3.Cluster. */
 export const shortType = (typeUrl: string) => typeUrl.split(/[./]/).pop() || typeUrl;
 
@@ -289,6 +320,29 @@ function ProxyStats({ e }: { e: ProxyStatsEvidence }) {
 }
 
 // region Component
+interface LearnMoreProps {
+  code: string;
+  stylesOverride?: SerializedStyles;
+}
+
+/** "Learn more": the code's entry in docs/findings.md, in a new tab; nothing for a code the reference does not cover. */
+export function LearnMore({ code, stylesOverride }: LearnMoreProps) {
+  const href = findingDocUrl(code);
+  if (!href) return null;
+  return (
+    <DocLink
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={diagnosticsCopy.learnMoreLabel(code)}
+      stylesOverride={stylesOverride}
+    >
+      {diagnosticsCopy.learnMore}
+      <ExternalLink size={12} aria-hidden="true" />
+    </DocLink>
+  );
+}
+
 interface EvidenceViewProps {
   /** Absent when the finding has none: its code's renderer still applies (the 3.0 renderer contract). */
   evidence?: Evidence | OtherEvidence;

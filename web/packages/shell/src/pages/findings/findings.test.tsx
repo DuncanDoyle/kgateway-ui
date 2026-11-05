@@ -390,3 +390,21 @@ it("the finding page shows built-in evidence", async () => {
   mount(`/i/${ID}/findings/${xds}`);
   expect(await screen.findByRole("table", { name: diagnosticsCopy.rejectedTypes })).toBeInTheDocument();
 });
+
+it("the finding page links its code's entry in the findings reference, restricted findings too", async () => {
+  const id = detailRestrictedGolden.body.finding.id;
+  serve((u) => {
+    if (u.pathname.endsWith(`/findings/${FINDING}`)) return detail();
+    if (u.pathname.endsWith(`/findings/${id}`)) return { ...detailRestrictedGolden.body, collectedAt: now() };
+    return undefined;
+  });
+  const { unmount } = mount(`/i/${ID}/findings/${FINDING}`);
+  const link = await screen.findByRole("link", { name: diagnosticsCopy.learnMoreLabel("KGWUI-014") });
+  expect(link).toHaveAttribute("href", expect.stringMatching(/\/docs\/findings\.md#kgwui-014$/));
+  unmount();
+  mount(`/i/${ID}/findings/${id}`);
+  expect(await screen.findByRole("link", { name: diagnosticsCopy.learnMoreLabel("KGWUI-013") })).toHaveAttribute(
+    "href",
+    expect.stringMatching(/#kgwui-013$/),
+  );
+});

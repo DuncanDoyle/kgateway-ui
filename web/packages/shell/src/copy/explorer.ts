@@ -498,6 +498,9 @@ export const diagnosticsCopy = {
   rejects: "Rejects", // S390
   problems: (n: number) => plural(n, ["problem", "problems"]), // S383
   oldestProblem: (ago: string) => `Oldest problem ${ago}`, // S384
+  // 3.3 drafts (Task 68); ids come with the 3.3 wording pass.
+  learnMore: "Learn more",
+  learnMoreLabel: (code: string) => `Learn more about ${code} (opens in a new tab)`,
 };
 
 /** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */

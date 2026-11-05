@@ -14,7 +14,8 @@ import { type FindingRenderer, ShellExtensionContext, useShellExtension } from "
 import { renderWhenFontsReady } from "../shell/renderWhenFontsReady";
 import { pseudoRules, renderWithTheme, stubApi } from "../test/render";
 import { FONT_FALLBACK_CLASS } from "../theme/fontFallback";
-import { EvidenceView } from "./EvidenceView";
+import { controlRoomDark, controlRoomLight } from "../theme/themes";
+import { EvidenceView, findingDocUrl, LearnMore } from "./EvidenceView";
 import { DiagnosticsGroupRow, GROUP_ROW_H } from "./GroupRow";
 import { NextSteps } from "./NextSteps";
 import { ProcessLine } from "./ProcessLine";
@@ -204,6 +205,37 @@ describe("EvidenceView", () => {
   it("an unknown kind without a renderer shows nothing", () => {
     const { container } = renderWithTheme(<EvidenceView evidence={{ kind: "acme-quota" }} />);
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("LearnMore", () => {
+  it("builds the findings reference anchor from the code", () => {
+    expect(findingDocUrl("KGWUI-014")).toBe(
+      "https://github.com/DuncanDoyle/kgateway-ui/blob/main/docs/findings.md#kgwui-014",
+    );
+    expect(findingDocUrl("KGWUI-001")).toMatch(/#kgwui-001$/);
+    // The reference covers only the UI's own codes, not a downstream prefix.
+    expect(findingDocUrl("ACME-001")).toBeUndefined();
+    expect(findingDocUrl("KGWUI-1")).toBeUndefined();
+  });
+
+  it("a downstream code gets no link", () => {
+    const { container } = renderWithTheme(<LearnMore code="ACME-001" />);
+    expect(container.textContent).toBe("");
+  });
+
+  describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => {
+    it("opens the code's entry in a new tab, with hover, active and focus-visible styles", () => {
+      renderWithTheme(<LearnMore code="KGWUI-017" />, { themeId: t.id });
+      const link = screen.getByRole("link", { name: diagnosticsCopy.learnMoreLabel("KGWUI-017") });
+      expect(link).toHaveTextContent(diagnosticsCopy.learnMore);
+      expect(link).toHaveAttribute("href", findingDocUrl("KGWUI-017"));
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      expect(pseudoRules(link, ":hover").join()).toContain(t.color.text);
+      expect(pseudoRules(link, ":active").join()).toContain(t.color.textMuted);
+      expect(pseudoRules(link, ":focus-visible").join()).toContain(t.color.focus);
+    });
   });
 });
 

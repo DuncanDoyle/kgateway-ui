@@ -8,7 +8,7 @@ import { useFindingDetail } from "../../api/diagHooks";
 import { isStale } from "../../api/hooks";
 import type { LinkedRef, NextStep, SuggestedFix } from "../../api/types";
 import { columnCopy, findingsCopy, listCopy } from "../../copy/explorer";
-import { EvidenceView } from "../../diagnostics/EvidenceView";
+import { EvidenceView, LearnMore } from "../../diagnostics/EvidenceView";
 import { NextSteps } from "../../diagnostics/NextSteps";
 import { LinkedName } from "../../explore/LinkedName";
 import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
@@ -199,6 +199,7 @@ export function FindingPage({ stylesOverride }: FindingPageProps = {}) {
           <div className="meta">
             {f ? <SeverityBadge severity={f.severity} /> : null}
             {f ? <span className="code">{f.code}</span> : null}
+            {f ? <LearnMore code={f.code} /> : null}
             <span className="spacer" />
             {data ? <DataAge collectedAt={data.collectedAt} /> : null}
           </div>
