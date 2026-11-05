@@ -810,6 +810,8 @@ func TestSuggestedFixes(t *testing.T) {
 		{"014 local wrong group beside a cross-namespace ref", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typo, crossNS), fixCatalog(nil),
 			&SuggestedFix{Title: "Set the group to `core`", Target: LinkedRef{Ref: route}, Path: "spec.rules[0].backendRefs[0]",
 				Basis: groupBasis}, groupYAML("shop")},
+		// Review Focus 2: an unknown group may be a wrong group, so no grant.
+		{"014 served state unknown", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog(nil, "delegation.gateway.example"), nil, nil},
 		{"014 wrong group, two served", health.CodeRefNotPermitted, "shop", "r", refsRoute("RefNotPermitted", typoCross), fixCatalog([]string{"other.example"}), nil, nil},
 	}
 	for _, tc := range cases {
@@ -835,6 +837,19 @@ func TestSuggestedFixes(t *testing.T) {
 				t.Fatalf("YAML %v, want %v", m, tc.yaml)
 			}
 		})
+	}
+}
+
+// Review Focus 2: a 014 whose group has an unknown served state keeps the
+// controller's explanation and its one candidate, with no fix.
+func TestUnknownServedStateKeepsController(t *testing.T) {
+	typoCross := map[string]any{"group": "delegation.gateway.example", "kind": "Service", "name": "cart", "namespace": "store"}
+	_, srv, _ := startWith(t, setup{catalog: fixCatalog(nil, "delegation.gateway.example"), rulesFor: computedtest.NoViews},
+		world(refsRoute("RefNotPermitted", typoCross))...)
+	d := fixDetail(t, srv, health.CodeRefNotPermitted, "shop", "r")
+	ev, ok := d.Evidence.(*health.RefsEvidence)
+	if !ok || ev.Explanation != health.RefExplainController || !ev.Attributed || len(ev.Candidates) != 1 || d.SuggestedFix != nil {
+		t.Fatalf("evidence %#v fix %+v", d.Evidence, d.SuggestedFix)
 	}
 }
 

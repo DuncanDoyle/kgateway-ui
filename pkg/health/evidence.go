@@ -288,6 +288,9 @@ type RefsEvidence struct {
 	// only for an attributed kind-not-served explanation under complete
 	// discovery. Never serialised.
 	Group *string `json:"-"`
+	// Unknown marks a candidate whose group's served state discovery does not
+	// know; it may be a wrong group, so no grant is suggested. Never serialised.
+	Unknown bool `json:"-"`
 }
 
 // EvidenceKind implements Evidence.

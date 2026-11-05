@@ -296,6 +296,7 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 		}
 	}
 	ev.Attributed = attributable && len(ev.Candidates) == 1
+	ev.Unknown = slices.ContainsFunc(ev.Candidates, func(c RefLocation) bool { return !in.Catalog.Known(c.Ref.Group) })
 	if ev.Attributed && len(bad) > 0 && in.Catalog.Complete() {
 		if gs := in.Catalog.GroupsWithKind(bad[0].Ref.Kind); len(gs) == 1 {
 			ev.Group = &gs[0]

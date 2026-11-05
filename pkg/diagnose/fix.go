@@ -46,7 +46,8 @@ const maxName = 253
 
 // Fix returns f's suggested fix from its evidence alone, or nil. Only an
 // attributed KGWUI-013 or 014 has one: the corrected group when discovery
-// left one group with the kind, else for 014 the ReferenceGrant the spec requires.
+// left one group with the kind, else for 014 the ReferenceGrant the spec
+// requires, unless the ref's group has an unknown served state.
 func Fix(f *health.Finding) *SuggestedFix {
 	ev, ok := f.Facts.(*health.RefsEvidence)
 	if !ok || f.Resource == nil || !ev.Attributed || len(ev.Candidates) != 1 ||
@@ -60,7 +61,7 @@ func Fix(f *health.Finding) *SuggestedFix {
 			return nil
 		}
 		return groupFix(*f.Resource, c, *ev.Group)
-	case ev.Explanation == health.RefExplainController && f.Code == health.CodeRefNotPermitted && grantFields.MatchString(c.Path):
+	case ev.Explanation == health.RefExplainController && f.Code == health.CodeRefNotPermitted && !ev.Unknown && grantFields.MatchString(c.Path):
 		return grantFix(*f.Resource, c.Ref)
 	}
 	return nil
