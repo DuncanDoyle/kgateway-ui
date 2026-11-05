@@ -654,6 +654,8 @@ spec:
 // computes 016 once the target stayed missing for the grace and the hold, and it replaces the 003.
 func testPolicyTargetNotFound(t *testing.T) {
 	const fixture = "fixtures/analyzer.yaml"
+	// Applied again on any exit, so a failure leaves the fixture whole for the next tests.
+	t.Cleanup(func() { must(t, "apply", "-f", fixture) })
 	must(t, "-n", "shop", "delete", "trafficpolicy/tp-missing-gateway", "--wait=true")
 	waitHealth(t, 2*time.Minute, "no finding on "+tpGatewayID+" after the delete", func(h api.HealthResponse) bool {
 		return !slices.ContainsFunc(h.Findings, func(f api.FindingDTO) bool { return f.Resource != nil && f.Resource.String() == tpGatewayID })
@@ -785,6 +787,11 @@ func TestControllerLogSignals(t *testing.T) {
 		t.Errorf("001 on %s: controllerLogs %q, want %q", nackID, ev.ControllerLogs, health.LogsRead)
 	}
 	names := proxyStatNames(t)
+	if !slices.ContainsFunc(ev.LogEvents, func(le health.XDSLogEvent) bool { return len(le.EnvoyResources) > 0 }) {
+		// A CDS reject never grows cluster.<name>.update_rejected (an EDS counter) and nack's RDS message names
+		// no route config, so no name can be kept here; pkg/ctrllogs unit tests cover the keep path.
+		t.Log("derived Envoy names: the keep path is not exercised on kind; only classes are checked")
+	}
 	for _, le := range ev.LogEvents {
 		t.Logf("log event %s: classes %v, Envoy names %v", le.TypeURL, le.Classes, le.EnvoyResources)
 		if want, ok := classes[le.TypeURL]; !ok || !slices.Equal(le.Classes, []string{want}) {
@@ -880,10 +887,18 @@ func apiPaths(t *testing.T) []string {
 	for _, s := range sets.Items {
 		add(s.Ref, "/listenersets/"+s.Ref.Group+"/"+s.Ref.Kind+"/"+s.Ref.String())
 	}
+	var trail []string
 	for _, r := range routeList(t, "") {
 		add(r.Ref, "/routes/"+r.Ref.Group+"/"+r.Ref.Kind+"/"+r.Ref.String())
+		if r.Ref.Link == api.LinkDetail && r.Ref.Kind == "HTTPRoute" {
+			paths = append(paths, install+"/routes/"+r.Ref.Group+"/"+r.Ref.Kind+"/"+r.Ref.String()+"/delegation?limit=200")
+		}
 	}
-	return paths
+	// The breadcrumb labels of nack's objects, the ones the log lines are about.
+	for _, r := range []objects.Ref{{Group: gwGroup, Kind: "Gateway", Namespace: "infra", Name: "nack"}, routeRef("shop/nack-regex"), routeRef("shop/nack-cluster")} {
+		trail = append(trail, "ref="+refParam(r))
+	}
+	return append(paths, install+"/refs?"+strings.Join(trail, "&"))
 }
 
 // body is one 200 response body of path.
