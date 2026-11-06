@@ -330,6 +330,7 @@ describe("EvidenceView", () => {
       expect(screen.getByRole("link", { name: /cart/ })).toBeInTheDocument();
       expect(screen.getByText("8080 (http)")).toBeInTheDocument();
       expect(screen.getByText(diagnosticsCopy.readyEndpoints(0, 3))).toBeInTheDocument();
+      expect(diagnosticsCopy.readyEndpoints(0, 0)).toBe("No endpoints");
       expect(screen.getByText(diagnosticsCopy.endpointSlices).nextElementSibling).toHaveTextContent("2");
     });
 
