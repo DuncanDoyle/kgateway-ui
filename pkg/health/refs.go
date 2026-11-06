@@ -3,8 +3,6 @@ package health
 import (
 	"fmt"
 	"slices"
-	"strconv"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,8 +21,8 @@ const (
 	coreGroup = "core"
 	// refServiceMissingMessage is explanation 2: namespace/name.
 	refServiceMissingMessage = "Service `%s` does not exist."
-	// refServicePortMessage is explanation 3: namespace/name, the port, the Service's ports.
-	refServicePortMessage = "Service `%s` has no port %d (ports: %s)."
+	// refServicePortMessage is explanation 3: namespace/name and the port; the Service's ports are in the evidence.
+	refServicePortMessage = "Service `%s` has no port %d."
 )
 
 // refRule is how a ResolvedRefs=False condition maps to 013 or 014.
@@ -335,9 +333,11 @@ func kindNotServedMessage(bad []RefLocation) string {
 	return fmt.Sprintf(refKindNotServedMessage, first.Kind, group)
 }
 
-// serviceExplanation applies explanations 2 and 3 to f when exactly one core
-// Service ref of field has a Service the cache lacks or a port it lacks. It
-// needs the Services watch OK: absence from a cache that is not synced says nothing.
+// serviceExplanation applies explanations 2 and 3 to f when exactly one ref of
+// field is a core Service ref with a Service the cache lacks or a port it
+// lacks, and every other ref is a core Service ref the cache shows resolving.
+// A ref the UI cannot check may be the cause, so it leaves the finding as is.
+// It needs the Services watch OK: absence from a cache that is not synced says nothing.
 func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []writtenRef) {
 	if in.Snapshot == nil || !in.Snapshot.Access[cache.ServicesGVR].OK {
 		return
@@ -346,7 +346,7 @@ func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []written
 	var hitSvc *cache.ServiceFact
 	for i, r := range field {
 		if r.delegation || r.Ref.Group != "" || r.Ref.Kind != "Service" {
-			continue
+			return
 		}
 		svc := in.service(r.Ref)
 		// A ref with no port has no port to explain.
@@ -365,17 +365,13 @@ func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []written
 	ev.Candidates = []RefLocation{hit.RefLocation}
 	f.Evidence = append(f.Evidence, hit.Ref)
 	if hitSvc == nil {
-		ev.Explanation = RefExplainServiceMissing
-		f.Detail = fmt.Sprintf(refServiceMissingMessage, name) + " " + f.Detail
+		ev.Explanation, f.Message = RefExplainServiceMissing, fmt.Sprintf(refServiceMissingMessage, name)
 		return
 	}
-	ports := make([]string, len(hitSvc.Ports))
-	for i, p := range hitSvc.Ports {
-		ports[i] = strconv.Itoa(int(p.Port))
+	for _, p := range hitSvc.Ports {
 		ev.Ports = append(ev.Ports, p.Port)
 	}
-	ev.Explanation = RefExplainServicePort
-	f.Detail = fmt.Sprintf(refServicePortMessage, name, hit.port, strings.Join(ports, ", ")) + " " + f.Detail
+	ev.Explanation, f.Message = RefExplainServicePort, fmt.Sprintf(refServicePortMessage, name, hit.port)
 }
 
 // service returns the cached Service r names, or nil.

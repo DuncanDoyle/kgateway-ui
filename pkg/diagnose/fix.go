@@ -34,11 +34,11 @@ const (
 	// FixGroupTitle names the group to use.
 	FixGroupTitle = "Set the group to `%s`"
 	// FixGroupBasis names the group and the kind.
+	FixGroupBasis = "API discovery: only group `%s` serves kind `%s`. This sets only group, kind, name and namespace; keep the port and other fields."
 	// FixPortTitle names the port to use.
 	FixPortTitle = "Set the port to `%d`"
 	// FixPortBasis names the Service.
-	FixPortBasis  = "Service `%s` has exactly one port. This sets only group, kind, name, namespace and port; keep the other fields."
-	FixGroupBasis = "API discovery: only group `%s` serves kind `%s`. This sets only group, kind, name and namespace; keep the port and other fields."
+	FixPortBasis = "Service `%s` has exactly one port. This sets only group, kind, name, namespace and port; keep the other fields."
 )
 
 // grantFields are the refs the Gateway API spec requires a ReferenceGrant for

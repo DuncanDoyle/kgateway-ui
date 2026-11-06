@@ -214,7 +214,7 @@ The UI computes delegation with the rules of the controller's version. While the
 **Evidence.**
 
 - The refs the condition can be about, each with its location, such as `spec.rules[2].backendRefs[0]`.
-- For a route, an explanation computed by the UI. When discovery says a ref's group serves no such kind, the message reads, for example, "No kind `Service` in group `delegation.gateway.example`. Check the group." Next, when the Services watch is healthy and exactly one core Service ref can be the cause: the detail says "Service `shop/cart` does not exist.", or "Service `shop/cart` has no port 8080 (ports: 80, 443)." Otherwise the message is the controller's reason. Without a healthy Services watch the UI never says a Service is missing.
+- For a route, an explanation computed by the UI. When discovery says a ref's group serves no such kind, the message reads, for example, "No kind `Service` in group `delegation.gateway.example`. Check the group." Next, when the Services watch is healthy and exactly one core Service ref can be the cause: the message says "Service `shop/cart` does not exist.", or "Service `shop/cart` has no port 8080." The Service's ports are in the evidence. A ref the UI cannot check, such as a Backend, on the same parent leaves the finding unattributed with the controller's reason. Otherwise the message is the controller's reason. Without a healthy Services watch the UI never says a Service is missing.
 - For a listener, the controller's message. The UI cannot read Secrets, so it never says whether a certificate Secret exists.
 
 **Fix.** Correct the ref the explanation names. The finding page suggests a fix, the ref with the corrected group, when both of these hold:
