@@ -143,7 +143,7 @@ func parseFile(t *testing.T, f string) Metrics {
 func TestParsePerTypeAndPod(t *testing.T) {
 	cds, rds := "envoy.config.cluster.v3.Cluster", "envoy.config.route.v3.RouteConfiguration"
 	nack, edge := GatewayKey{"infra", "nack"}, GatewayKey{"infra", "edge"}
-	for _, tag := range []string{"v2.3.11", "v2.4.7"} {
+	for _, tag := range []string{"v2.3.11", "v2.4.7", "v2.5.0"} {
 		a := parseFile(t, "testdata/"+tag+"-rejects-a.txt")
 		b := parseFile(t, "testdata/"+tag+"-rejects-b.txt")
 		if len(a.PerPod) != 1 || len(b.PerPod) != 1 {
@@ -172,6 +172,59 @@ func TestParsePerTypeAndPod(t *testing.T) {
 		agg := Aggregate([]Metrics{a, b})
 		if len(agg.PerPod) != 2 || agg.Rejects[nack] != 4 {
 			t.Errorf("%s: aggregate keeps both Pods and sums Rejects: %+v", tag, agg)
+		}
+	}
+}
+
+// Contract on the 2.5.0 GA captures: the families the UI reads keep their
+// labels; v2.5.0.txt is healthy, so it has no reject series.
+func TestCaptured250Contract(t *testing.T) {
+	read := func(f string) string {
+		b, err := os.ReadFile("testdata/" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	healthy := read("v2.5.0.txt")
+	m := parseFile(t, "testdata/v2.5.0.txt")
+	if !m.ManagedPresent || len(m.Rejects) != 0 || len(m.PerPod) != 1 || !m.PerPod[0].DroppedPresent {
+		t.Errorf("healthy capture: %+v", m)
+	}
+	if got := m.Snapshot[GatewayKey{"infra", "edge"}]; got != (SnapshotResources{Listeners: 1, Routes: 1, Clusters: 4, Endpoints: 5}) {
+		t.Errorf("edge snapshot %+v", got)
+	}
+	// 2.5 drops status_syncs_total (kgateway #14519), so 018 has no sync count there.
+	if m.PerPod[0].StatusSyncsPresent {
+		t.Errorf("status_syncs_total is not exported on 2.5.0")
+	}
+	want := map[string]string{
+		"kgateway_build_info":                          "goarch,goos,goversion,revision,version",
+		"kgateway_xds_snapshot_perclient_defers_total": "gateway,namespace,reason",
+		"kgateway_xds_snapshot_deferred_clients":       "gateway,namespace",
+		ResourcesManaged:                               "namespace,parent,resource",
+	}
+	for name, ls := range want {
+		got := labelNames(t, healthy, name)
+		if len(got) == 0 {
+			t.Errorf("%s: no series", name)
+		}
+		for _, l := range got {
+			if strings.Join(l, ",") != ls {
+				t.Errorf("%s labels %v, want %s", name, l, ls)
+			}
+		}
+	}
+	if !strings.Contains(healthy, `kgateway_build_info{goarch="arm64",goos="linux",goversion="go1.27.3",revision="f858390fdb26e65fdd9e2f954febcc9c68a4cc1b",version="v2.5.0"} 1`) {
+		t.Error("build_info carries the version in its version label")
+	}
+	for _, f := range []string{"v2.5.0-rejects-a.txt", "v2.5.0-rejects-b.txt"} {
+		for _, fam := range []string{XDSRejectsActive, XDSRejectsTotal} {
+			for _, l := range labelNames(t, read(f), fam) {
+				if strings.Join(l, ",") != "gateway_name,gateway_namespace,type_url" {
+					t.Errorf("%s: %s labels %v", f, fam, l)
+				}
+			}
 		}
 	}
 }

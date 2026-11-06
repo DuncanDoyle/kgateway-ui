@@ -91,6 +91,25 @@ A route can be Accepted with `ResolvedRefs=True` while its Service has no ready 
 
 If Task 83 finds the GA family names, labels, `TargetNotFound`, `EnableStatsRoute` default or the Gateway API pin differ from the design, it stops and reports.
 
+#### GA re-check (Task 83, 2026-11-06)
+
+Tag `v2.5.0` = `f858390fdb26`, released 2026-11-02. Paths are at the tag.
+
+| Item | At `v2.5.0` | Result |
+|---|---|---|
+| Per-client families (§8.6) | `kgateway_xds_snapshot_perclient_withheld_clients{gateway,namespace,state}`, states `within_budget`, `warm_withheld`; `..._bounded_publishes_total{gateway,namespace,mode}`, modes `first_publish`, `warm_truth`, `flip_release`, `warm_release`, `carry_expired`, `reference_ahead` (`pkg/kgateway/proxy_syncer/perclient_publication_metrics.go:14-72`; labels `proxy_syncer/metrics.go:11,13`) | matches |
+| `kgateway_build_info` | labels `version`, `revision`, `goversion`, `goos`, `goarch`; `version` carries the controller version, value 1 (`pkg/version/metrics.go:9-32`) | matches |
+| `TargetNotFound` (#14709, in the tag) | `Accepted=False` and `Attached=False`, reason `TargetNotFound`, on the synthetic ancestor `gateway.kgateway.dev/StatusSummary` (`pkg/kgateway/proxy_syncer/policy_target_status.go:294-307`, `pkg/pluginsdk/reporter/types.go:178-184`). Every policy kind; target kinds Gateway, ListenerSet, HTTPRoute, GRPCRoute, TCPRoute, TLSRoute, Service, Backend and backend alias kinds (`policy_target_status.go:61-124`). A missing `sectionName` on Gateway, ListenerSet, HTTPRoute or GRPCRoute counts too; selectors never do (`:243-258`) | matches |
+| `EnableStatsRoute` default | `true` in the default GatewayParameters (`pkg/deployer/gateway_parameters.go:153`); `/stats` route on 9091 (`pkg/kgateway/helm/envoy/templates/configmap.yaml:156,190-192`) | matches |
+| Gateway API pin | `sigs.k8s.io/gateway-api v1.7.0` (`go.mod:72`) | matches |
+
+Captures on kind (`v2.5.0`, Gateway API `v1.7.0`, setup.sh unchanged):
+1. `NACK=1` rejects as on 2.4.7: replica a `nack` 1 + 1 and `edge` Cluster 1, replica b `nack` 1 + 1. Gateways stay `Programmed=True`.
+2. Proxy stats: 2.5 backs off re-sends, so `update_rejected` stays near 8, not hundreds. The RDS stat prefix is `http.http_8080.`, not `http.http.`. A Pod whose first CDS was rejected has no `cds.update_success`.
+3. `kgateway_status_syncer_status_syncs_total` is gone on 2.5 (#14519); 018 shows no sync count there. `kgateway_status_writes_total{kind,result}` is new.
+4. No withheld capture. A client is withheld only while routes name a cluster missing from CDS, which v2.5.0 builds by construction, so only translation lag after a restart or under load leaves one. No steady-state fixture produced `withheld_clients` or `bounded_publishes_total` series.
+5. RC → GA: of the files above, only `go.mod` changed (`v1.7.0-rc.3` → `v1.7.0`). `kgateway_envoy_xds_reconnect_responses_total{type_url}` has series on GA after a reconnect; rc.1 defines it too.
+
 ## Budgets (§16.3)
 
 No gate changes without the user. A broken gate stops the work, and the numbers go to the user. Start from `bench/3.3.txt` (reference machine, D-044). Task 81 measures the Large tier with 5,000 Services and 6,000 EndpointSlices, 5 % empty in the worst case, and re-seeds the measurement world with them (R57).
