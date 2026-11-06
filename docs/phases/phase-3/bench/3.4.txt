@@ -1,5 +1,5 @@
 # Sub-phase 3.4 budgets at the close (Codex fixes: 013-only Service explanations, attribution evidence, list-only kinds out of readiness), make -i bench under caffeinate -s (AC power)
-# commit: aaa59e0ac63b0802b1a8941f1be62b427d11abd6
+# commit: 31e97db3f2c2155c9752cef624e73c661f5b5ad7
 # cpu: Apple M5 Max, 18 CPUs
 # load before: 20:31  up 2 days, 11:41, 2 users, load averages: 2.11 2.83 2.61
 go version go1.27.3 darwin/arm64
