@@ -56,7 +56,7 @@ Severity is error, with three exceptions:
 - a policy ancestor with reason `Overridden` is info;
 - a Backend whose `Accepted=False` has no `observedGeneration`, as kgateway 2.3 writes it, is a warning.
 
-On kgateway 2.5 a policy's `TargetNotFound` is KGWUI-016, not this finding. A rule set that does not read it from status, such as 2.4's, shows it here as "Policy target not found". On kgateway 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
+kgateway 2.5 controllers write `TargetNotFound` for a missing policy target, and the UI shows it as KGWUI-016, not here. Only a 2.5 controller whose version the UI cannot read, and so runs on the 2.4 rules, shows it here as "Policy target not found". On 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
 
 **Evidence.** The message is the condition's reason in plain words. The detail quotes the condition as written: type, status, reason and message, and the listener, parent or ancestor it belongs to. A parent route whose backendRefs all delegate reads "A delegating rule has no accepted child route" in place of "Backend not found".
 
@@ -274,7 +274,7 @@ On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so th
 - a `sectionName` names no listener of the Gateway or ListenerSet, or no rule of the route;
 - a `targetSelector` matches no object of its kind in the policy's namespace, or is empty. A policy in the controller's global policy namespace (`KGW_GLOBAL_POLICY_NAMESPACE`) matches in every namespace. When the UI cannot read that setting, a selector raises nothing.
 
-It is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A judged kind that the cluster does not serve, or the UI cannot read, raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
+On 2.3 and 2.4 it is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A judged kind that the cluster does not serve, or the UI cannot read, raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
 
 **Evidence.** On 2.5, the controller's condition: its message lists the missing targets. On 2.3 and 2.4, the target as written, such as "targetRefs[0] Gateway `edge`", and what is missing. Most of these findings say "Not verified: the controller's status cannot confirm this." The UI can check only a policy with one targetRef: a missing Gateway, or a missing section of a Gateway or route. For those, a current ancestor the controller writes for that target raises KGWUI-012.
 

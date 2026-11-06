@@ -1845,9 +1845,8 @@ func TestNewerThanTestedUsesNewestSet(t *testing.T) {
 	}
 }
 
-// Design §7.6 (D-033): a 2.5 controller selects kgateway-2.5 with no note. A
-// TargetNotFound ancestor is one 016 error from status; a missing target the
-// controller has not reported raises no computed 016, only its 003.
+// D-033: a 2.5 controller gets kgateway-2.5 with no note and a status 016 error;
+// an unreported missing target raises no computed 016, only its 003.
 func TestKgateway25PolicyTargetFromStatus(t *testing.T) {
 	objs := withControllerVersion("v2.5.0", world(missingTargetPolicy("infra", "tp-status", targetNotFound()), missingTargetPolicy("infra", "tp-bare")))
 	h := newHarness(t, setup{}, objs...)

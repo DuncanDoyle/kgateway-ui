@@ -454,8 +454,8 @@ func summary(gen int64) testutil.PolicyAncestor {
 		Controller: testutil.Controller, Conds: []metav1.Condition{acc, att}}
 }
 
-// Design §7.6, D-020 rule 5: on kgateway-2.5 a current TargetNotFound ancestor is one
-// 016 error from status, at once, with no 002 or 003; the computed rule is off.
+// D-020 rule 5: on kgateway-2.5 a current TargetNotFound ancestor is one 016 error, at once.
+// No 002 or 003 beside it.
 func TestPolicyTargetNotFoundFromStatus(t *testing.T) {
 	tp := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, summary(1))
 	r := targetsRun(t, rules25, []*unstructured.Unstructured{tp}, 0)
@@ -481,8 +481,7 @@ func TestPolicyTargetNotFoundFromStatus(t *testing.T) {
 	}
 }
 
-// On kgateway-2.5 a missing target the controller has not reported raises no computed
-// 016; a stale or foreign TargetNotFound is no 016 either.
+// kgateway-2.5 computes no 016; a stale or foreign TargetNotFound raises none either.
 func TestPolicyTargetComputedOffOn25(t *testing.T) {
 	if rules25.PolicyTargeter() != nil {
 		t.Fatalf("%s has a PolicyTargeter", rules25.Rules.Version())
@@ -529,5 +528,23 @@ func TestPolicyTargetStatusOn24Unchanged(t *testing.T) {
 	r := targetsRun(t, rules24, []*unstructured.Unstructured{tp}, time.Hour)
 	if fs := findingsFor(r, CodeConditionFalse, "infra/tp"); len(fs) != 2 || has(r, CodePolicyTargetNotFound, "", "") {
 		t.Fatalf("2.4: want two 002, no 016: %+v", r.Findings)
+	}
+}
+
+// D-040: the status 016 id hashes the ancestor only, so Accepted vs Attached cannot change it.
+func TestPolicyTargetStatusIDFromAncestor(t *testing.T) {
+	attachedOnly := summary(1)
+	attachedOnly.Conds[0] = testutil.Cond("Accepted", metav1.ConditionTrue, "Valid")
+	var ids []string
+	for _, a := range []testutil.PolicyAncestor{summary(1), attachedOnly} {
+		tp := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, a)
+		fs := targetFindings(targetsRun(t, rules25, []*unstructured.Unstructured{tp}, 0), "infra/tp")
+		if len(fs) != 1 {
+			t.Fatalf("want one 016: %+v", fs)
+		}
+		ids = append(ids, fs[0].ID)
+	}
+	if ids[0] != ids[1] {
+		t.Fatalf("id depends on the condition type: %v", ids)
 	}
 }

@@ -284,9 +284,8 @@ func targetNotFoundReason(cs []metav1.Condition) bool {
 // targetStatusRules is a rule set whose controller reports TargetNotFound itself, as kgw25 does.
 type targetStatusRules interface{ ReportsTargetNotFound() bool }
 
-// statusTargetFinding is the KGWUI-016 error for a current policy ancestor whose
-// condition is False with reason TargetNotFound, on a rule set that reads it from
-// status (design §7.6, D-020 rule 5). It replaces that ancestor's 002s (D-030).
+// statusTargetFinding is the KGWUI-016 error for an ancestor's False/TargetNotFound,
+// on a rule set that reads it from status (D-020 rule 5); it replaces the 002s (D-030).
 func (in Input) statusTargetFinding(u *unstructured.Unstructured, cs []metav1.Condition, extra string, owner []string) (Finding, bool) {
 	if r, ok := in.Rules.Rules.(targetStatusRules); !ok || !r.ReportsTargetNotFound() {
 		return Finding{}, false
@@ -296,7 +295,7 @@ func (in Input) statusTargetFinding(u *unstructured.Unstructured, cs []metav1.Co
 		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse && c.Reason == "TargetNotFound" {
 			return Finding{Code: CodePolicyTargetNotFound, Slug: "policy-target-not-found", Severity: SeverityError, Install: in.Install.ID(),
 				Resource: ref(u), Message: PolicyTargetNotFoundMessage, Detail: detail(*c, extra), Since: since(*c),
-				Key: append(slices.Clip(owner), c.Type)}, true
+				Key: slices.Clip(owner)}, true // the ancestor only (D-040)
 		}
 	}
 	return Finding{}, false
