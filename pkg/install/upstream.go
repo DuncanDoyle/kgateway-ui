@@ -89,3 +89,12 @@ func (i Install) KgatewayVersion() string {
 	}
 	return cmp.Or(i.ReportedVersion, i.Version)
 }
+
+// ControllerVersion is the version the UI shows for the controller: for
+// kgateway, KgatewayVersion; a downstream build shows its own Version.
+func (i Install) ControllerVersion() string {
+	if i.Edition != "kgateway" {
+		return i.Version
+	}
+	return i.KgatewayVersion()
+}

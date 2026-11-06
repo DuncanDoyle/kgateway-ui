@@ -100,3 +100,20 @@ func TestConfigWithheldEvidenceRestricted(t *testing.T) {
 		t.Fatalf("hidden controller Pods: %+v", f)
 	}
 }
+
+// With build_info v2.5.0 beside a Deployment on 2.4.7, the install header, 022's
+// controller version and the rule set all name 2.5 (R134).
+func TestOneEffectiveVersionAtTheAPI(t *testing.T) {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", withoutRejects(ctrlCapture(t, "v2.5.0", "kgw", "kgateway-0")))
+	h := xdsHarness(t, setup{proxyPods: true}, lm, skewWorld("v2.4.7", testutil.Old.Time)...)
+	r := h.at(t, testutil.Now)
+	f := findingOf(r, health.CodeVersionSkew)
+	if f == nil || skewFacts(t, f).Controller != "2.5.0" {
+		t.Fatalf("022 %+v", f)
+	}
+	insts := get[[]InstallSummary](t, h.srv, "/api/v1/installs", 200)
+	if rules := h.e.Current().Model.Installs[0].Rules.Rules.Version(); len(insts) != 1 || insts[0].Version != "2.5.0" || rules != "kgateway-2.5" {
+		t.Fatalf("header %+v, rules %s", insts, rules)
+	}
+}

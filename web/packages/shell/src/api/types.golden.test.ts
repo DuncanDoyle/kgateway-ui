@@ -115,7 +115,6 @@ import type {
   Match,
   MetaResponse,
   Mirror,
-  ModeCount,
   NextStep,
   OverviewResponse,
   Page,
@@ -137,6 +136,7 @@ import type {
   Ref,
   RefLocation,
   RefsEvidence,
+  ReleaseModeCount,
   RouteAttachment,
   RouteCounts,
   RouteDetail,
@@ -379,7 +379,7 @@ const evidenceShapes = {
   ),
   withheld: shape<WithheldEvidence>(
     { kind: "!", withheld: "?", releases: "?", reportedBy: "!" },
-    { releases: shape<ModeCount>({ mode: "!", count: "!" }) },
+    { releases: shape<ReleaseModeCount>({ mode: "!", count: "!" }) },
     { kind: { withheld: 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;

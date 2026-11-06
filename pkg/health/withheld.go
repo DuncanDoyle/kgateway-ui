@@ -49,13 +49,13 @@ type WithheldEvidence struct {
 	// Withheld counts the Gateway's warm proxies still withheld after the publish budget.
 	Withheld int `json:"withheld,omitempty"`
 	// Releases are the alerting bounded publishes in the last 15 minutes, by mode.
-	Releases []ModeCount `json:"releases,omitempty"`
+	Releases []ReleaseModeCount `json:"releases,omitempty"`
 	// ReportedBy are the controller Pods behind Withheld and Releases, sorted.
 	ReportedBy []string `json:"reportedBy"`
 }
 
-// ModeCount is how many bounded publishes of one mode a Gateway had.
-type ModeCount struct {
+// ReleaseModeCount is how many bounded publishes of one mode a Gateway had.
+type ReleaseModeCount struct {
 	Mode  string `json:"mode"`
 	Count int    `json:"count"`
 }
@@ -139,28 +139,19 @@ func (c withheldCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	for _, gw := range gws {
 		key := ctrlmetrics.GatewayKey{Namespace: gw.GetNamespace(), Name: gw.GetName()}
-		ev, first := cur.evidence(key, pods)
-		if ev == nil {
-			continue
-		}
 		r := ref(gw)
-		// The Pod names are the controller Pods' data, so a caller who may not view them gets no evidence.
-		var podRefs []objects.Ref
-		for _, p := range ev.ReportedBy {
-			podRefs = append(podRefs, process.PodRef(in.Install.Namespace, process.Process{Name: p}))
-		}
-		if ev.Withheld > 0 {
+		if ev := withheldEvidence(key, pods); ev != nil {
 			d := withheldDetailOne
 			if ev.Withheld != 1 {
 				d = fmt.Sprintf(withheldDetail, ev.Withheld)
 			}
 			fs = append(fs, Finding{Code: CodeConfigWithheld, Slug: "xds-config-withheld", Severity: SeverityError, Install: in.Install.ID(), Resource: r,
-				Message: withheldMessage, Detail: d, Key: []string{"withheld"}, Evidence: podRefs, Facts: ev})
+				Message: withheldMessage, Detail: d, Key: []string{"withheld"}, Evidence: podRefs(in, ev.ReportedBy), Facts: ev})
 		}
-		if len(ev.Releases) > 0 {
+		if ev, first := cur.releasedEvidence(key); ev != nil {
 			ctx.WakeAt(first.Add(WithheldReleaseWindow))
 			fs = append(fs, Finding{Code: CodeConfigWithheld, Slug: "xds-config-withheld", Severity: SeverityWarning, Install: in.Install.ID(), Resource: r,
-				Message: releasedMessage, Detail: releasedText(ev.Releases), Key: []string{"released"}, Evidence: podRefs, Facts: ev})
+				Message: releasedMessage, Detail: releasedText(ev.Releases), Key: []string{"released"}, Evidence: podRefs(in, ev.ReportedBy), Facts: ev})
 		}
 	}
 	res := ok(c.Name(), false, in.Metrics.CollectedAt)
@@ -170,26 +161,20 @@ func (c withheldCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 
 // track records the alerting releases since prev at now and returns the totals for next time.
 func (s *withheldState) track(now time.Time, prev ctrlmetrics.PodBounded, pods []ctrlmetrics.PodMetrics) ctrlmetrics.PodBounded {
-	next := ctrlmetrics.PodBounded{}
+	growth, next := ctrlmetrics.BoundedGrowth(prev, pods)
 	for _, p := range pods {
-		last, seen := prev[p.UID]
-		next[p.UID] = maps.Clone(p.Bounded)
-		if !seen {
-			continue // a Pod first seen is a baseline
-		}
-		growth, _ := ctrlmetrics.BoundedGrowth(ctrlmetrics.PodBounded{p.UID: last}, []ctrlmetrics.PodMetrics{p})
-		for _, k := range slices.SortedFunc(maps.Keys(growth), compareModeKey) {
+		g := growth[p.UID]
+		for _, k := range slices.SortedFunc(maps.Keys(g), compareModeKey) {
 			if slices.Contains(releaseModes, k.Mode) {
-				s.releases = append(s.releases, release{at: now, key: k, pod: p.Name, n: growth[k]})
+				s.releases = append(s.releases, release{at: now, key: k, pod: p.Name, n: g[k]})
 			}
 		}
 	}
 	return next
 }
 
-// evidence is gw's withheld proxies and windowed releases, and the first
-// release's time; nil when it has neither.
-func (s *withheldState) evidence(gw ctrlmetrics.GatewayKey, pods []ctrlmetrics.PodMetrics) (*WithheldEvidence, time.Time) {
+// withheldEvidence is gw's withheld proxies and the Pods reporting them; nil when none.
+func withheldEvidence(gw ctrlmetrics.GatewayKey, pods []ctrlmetrics.PodMetrics) *WithheldEvidence {
 	ev := &WithheldEvidence{}
 	withheld := 0.0
 	for _, p := range pods {
@@ -198,7 +183,17 @@ func (s *withheldState) evidence(gw ctrlmetrics.GatewayKey, pods []ctrlmetrics.P
 			ev.ReportedBy = append(ev.ReportedBy, p.Name)
 		}
 	}
-	ev.Withheld = int(math.Round(withheld))
+	if ev.Withheld = int(math.Round(withheld)); ev.Withheld == 0 {
+		return nil
+	}
+	slices.Sort(ev.ReportedBy)
+	return ev
+}
+
+// releasedEvidence is gw's windowed releases and the Pods behind them, and the
+// first release's time; nil when none.
+func (s *withheldState) releasedEvidence(gw ctrlmetrics.GatewayKey) (*WithheldEvidence, time.Time) {
+	ev := &WithheldEvidence{}
 	counts := map[string]float64{}
 	var first time.Time
 	for _, r := range s.releases {
@@ -211,15 +206,24 @@ func (s *withheldState) evidence(gw ctrlmetrics.GatewayKey, pods []ctrlmetrics.P
 		}
 		ev.ReportedBy = append(ev.ReportedBy, r.pod)
 	}
-	for _, m := range slices.Sorted(maps.Keys(counts)) {
-		ev.Releases = append(ev.Releases, ModeCount{Mode: m, Count: int(math.Round(counts[m]))})
-	}
-	if ev.Withheld == 0 && len(ev.Releases) == 0 {
+	if len(counts) == 0 {
 		return nil, time.Time{}
+	}
+	for _, m := range slices.Sorted(maps.Keys(counts)) {
+		ev.Releases = append(ev.Releases, ReleaseModeCount{Mode: m, Count: int(math.Round(counts[m]))})
 	}
 	slices.Sort(ev.ReportedBy)
 	ev.ReportedBy = slices.Compact(ev.ReportedBy)
 	return ev, first
+}
+
+// podRefs are the refs of the named controller Pods: their data, so a caller who may not view them gets no evidence.
+func podRefs(in Input, names []string) []objects.Ref {
+	out := make([]objects.Ref, 0, len(names))
+	for _, n := range names {
+		out = append(out, process.PodRef(in.Install.Namespace, process.Process{Name: n}))
+	}
+	return out
 }
 
 func compareModeKey(a, b ctrlmetrics.ModeKey) int {
@@ -227,7 +231,7 @@ func compareModeKey(a, b ctrlmetrics.ModeKey) int {
 }
 
 // releasedText is the warning's detail: the total and each mode with its count.
-func releasedText(rs []ModeCount) string {
+func releasedText(rs []ReleaseModeCount) string {
 	total := 0
 	parts := make([]string, 0, len(rs))
 	for _, r := range rs {

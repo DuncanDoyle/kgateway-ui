@@ -407,14 +407,19 @@ func (e *Engine) compute() *Published {
 }
 
 // reportedVersion is the build_info version of install id without a leading
-// "v": from a collected result, else the last one while scrapes fail.
+// "v". The last one is kept while scrapes fail or replicas disagree, so the rule
+// set does not flip; a value that is not a version, such as "undefined", is none.
 func (e *Engine) reportedVersion(id string, met ctrlmetrics.Result, has bool) string {
-	if has && met.Err == "" {
-		if v := strings.TrimPrefix(met.Metrics.BuildVersion(), "v"); v != "" {
-			e.reported[id] = v
-		} else {
-			delete(e.reported, id)
-		}
+	if !has || met.Err != "" {
+		return e.reported[id]
+	}
+	v, agreed := met.Metrics.BuildVersion()
+	switch v = strings.TrimPrefix(v, "v"); {
+	case !agreed:
+	case rulesets.IsVersion(v):
+		e.reported[id] = v
+	default:
+		delete(e.reported, id)
 	}
 	return e.reported[id]
 }

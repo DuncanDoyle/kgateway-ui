@@ -15,6 +15,9 @@ import (
 
 var minorRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.+-]|$)`)
 
+// IsVersion reports whether Select reads v as a version, not as unknown.
+func IsVersion(v string) bool { return minorRE.MatchString(v) }
+
 // Select returns the rule set for a kgateway controller version. An unknown,
 // newer or older version gets the nearest set, labelled in Note.
 func Select(controllerVersion string) computed.Selection {

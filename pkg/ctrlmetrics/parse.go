@@ -197,19 +197,18 @@ func parsePerClient(fams map[string]*dto.MetricFamily, pod *PodMetrics) {
 }
 
 // BuildVersion is the build_info version every reporting Pod shares; "" when
-// no Pod reports one or two Pods disagree, as during a rollout.
-func (m Metrics) BuildVersion() string {
-	v := ""
+// no Pod reports one. agreed is false when two Pods disagree, as during a rollout.
+func (m Metrics) BuildVersion() (v string, agreed bool) {
 	for _, p := range m.PerPod {
 		switch {
 		case p.BuildVersion == "":
 		case v == "":
 			v = p.BuildVersion
 		case v != p.BuildVersion:
-			return ""
+			return "", false
 		}
 	}
-	return v
+	return v, true
 }
 
 // field is r's count for a snapshot resource label value; nil for another value.
@@ -275,21 +274,29 @@ type PodTotals map[string]map[TypeKey]float64
 // absent from cur is forgotten, so callers skip Err results (an empty cur
 // forgets every UID). A series new under a seen UID counts its full value.
 func TotalGrowth(prev PodTotals, cur []PodMetrics) (growth map[TypeKey]float64, next PodTotals) {
-	return counterGrowth(prev, cur, func(p PodMetrics) map[TypeKey]float64 { return p.Total })
+	perPod, next := counterGrowth(prev, cur, func(p PodMetrics) map[TypeKey]float64 { return p.Total })
+	growth = map[TypeKey]float64{}
+	for _, g := range perPod {
+		for k, v := range g {
+			growth[k] += v
+		}
+	}
+	return growth, next
 }
 
 // PodBounded is the last seen bounded_publishes_total per Pod UID.
 type PodBounded map[string]map[ModeKey]float64
 
-// BoundedGrowth is TotalGrowth for bounded_publishes_total: per Pod UID, a
-// first sight is a baseline and a lower value a reset, so neither is growth.
-func BoundedGrowth(prev PodBounded, cur []PodMetrics) (growth map[ModeKey]float64, next PodBounded) {
+// BoundedGrowth is TotalGrowth for bounded_publishes_total, kept per Pod UID
+// so callers can name the Pods: a first sight is a baseline and a lower value a reset.
+func BoundedGrowth(prev PodBounded, cur []PodMetrics) (growth, next PodBounded) {
 	return counterGrowth(prev, cur, func(p PodMetrics) map[ModeKey]float64 { return p.Bounded })
 }
 
-// counterGrowth is the per-UID counter growth behind TotalGrowth and BoundedGrowth.
-func counterGrowth[K comparable, M ~map[string]map[K]float64](prev M, cur []PodMetrics, series func(PodMetrics) map[K]float64) (map[K]float64, M) {
-	growth, next := map[K]float64{}, M{}
+// counterGrowth is the growth per Pod UID behind TotalGrowth and BoundedGrowth;
+// a UID first seen or without growth has no entry.
+func counterGrowth[K comparable, M ~map[string]map[K]float64](prev M, cur []PodMetrics, series func(PodMetrics) map[K]float64) (growth, next M) {
+	growth, next = M{}, M{}
 	for _, p := range cur {
 		last, seen := prev[p.UID]
 		next[p.UID] = maps.Clone(series(p))
@@ -298,7 +305,10 @@ func counterGrowth[K comparable, M ~map[string]map[K]float64](prev M, cur []PodM
 		}
 		for k, v := range series(p) {
 			if d := v - last[k]; d > 0 {
-				growth[k] += d
+				if growth[p.UID] == nil {
+					growth[p.UID] = map[K]float64{}
+				}
+				growth[p.UID][k] += d
 			}
 		}
 	}

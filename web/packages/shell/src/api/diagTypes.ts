@@ -272,11 +272,11 @@ export interface EndpointsEvidence {
 export interface WithheldEvidence {
   kind: "withheld";
   withheld?: number;
-  releases?: ModeCount[];
+  releases?: ReleaseModeCount[];
   reportedBy: string[];
 }
 /** How many bounded publishes of one mode a Gateway had. */
-export interface ModeCount {
+export interface ReleaseModeCount {
   mode: string;
   count: number;
 }

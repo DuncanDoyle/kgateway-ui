@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
 )
 
 // withheldWorld is healthyWorld with Gateway infra/nack and one controller Pod
@@ -94,7 +95,7 @@ func TestBoundedPublishIncreaseWarns(t *testing.T) {
 		t.Fatalf("findings %+v", r.Findings)
 	}
 	ev, _ := f.Facts.(*WithheldEvidence)
-	want := []ModeCount{{Mode: "flip_release", Count: 1}, {Mode: "warm_release", Count: 2}}
+	want := []ReleaseModeCount{{Mode: "flip_release", Count: 1}, {Mode: "warm_release", Count: 2}}
 	if f.Message != "Some routes fail: config was released before every cluster was ready" || ev == nil || ev.Withheld != 0 ||
 		!slices.Equal(ev.Releases, want) || !slices.Equal(ev.ReportedBy, []string{"p"}) {
 		t.Errorf("finding %+v, evidence %+v", f, f.Facts)
@@ -221,5 +222,29 @@ func TestBoundedPublishWakesAtWindowEnd(t *testing.T) {
 	}
 	if n, wake := run("v2.5.0-released-synth", at.Add(10*time.Minute)); n != 1 || !wake.Equal(at.Add(WithheldReleaseWindow)) {
 		t.Errorf("unchanged counters: %d findings, wake %v", n, wake)
+	}
+}
+
+// Withheld proxies and releases on one Gateway each carry only their own facts and Pods.
+func TestWithheldEvidencePerSignal(t *testing.T) {
+	st := NewStates()
+	w := withheldWorld(t, "v2.5.0-withheld-synth")
+	w.metrics = resultAt(testutil.Now, capture(t, "v2.5.0-withheld-synth", "pod/kgw/a", "a"), capture(t, "v2.5.0-released-synth", "pod/kgw/b", "b"))
+	withheldAt(t, w, st, testutil.Now)
+	// Replica b releases once more; replica a still withholds.
+	b := capture(t, "v2.5.0-released-synth", "pod/kgw/b", "b")
+	b.PerPod[0].Bounded[ctrlmetrics.ModeKey{Gateway: ctrlmetrics.GatewayKey{Namespace: "infra", Name: "nack"}, Mode: "warm_release"}]++
+	w.metrics = resultAt(testutil.Now, capture(t, "v2.5.0-withheld-synth", "pod/kgw/a", "a"), b)
+	r := withheldAt(t, w, st, testutil.Now.Add(time.Minute))
+	e, wn := withheldOn(r, "nack", SeverityError), withheldOn(r, "nack", SeverityWarning)
+	if e == nil || wn == nil {
+		t.Fatalf("findings %+v", r.Findings)
+	}
+	if ev := e.Facts.(*WithheldEvidence); ev.Withheld != 2 || ev.Releases != nil || !slices.Equal(ev.ReportedBy, []string{"a"}) || len(e.Evidence) != 1 {
+		t.Errorf("error evidence %+v", ev)
+	}
+	if ev := wn.Facts.(*WithheldEvidence); ev.Withheld != 0 || !slices.Equal(ev.Releases, []ReleaseModeCount{{Mode: "warm_release", Count: 1}}) ||
+		!slices.Equal(ev.ReportedBy, []string{"b"}) || len(wn.Evidence) != 1 {
+		t.Errorf("warning evidence %+v", ev)
 	}
 }

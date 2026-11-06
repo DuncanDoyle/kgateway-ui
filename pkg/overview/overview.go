@@ -140,7 +140,7 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 }
 
 func header(res install.Resolved, snap *cache.Snapshot, plat platform.Info) Header {
-	h := Header{ID: res.ID(), DisplayName: res.Display(), Namespace: res.Namespace, Name: res.Name, Version: res.Version, Edition: res.Edition,
+	h := Header{ID: res.ID(), DisplayName: res.Display(), Namespace: res.Namespace, Name: res.Name, Version: res.ControllerVersion(), Edition: res.Edition,
 		ControllerNames: res.ControllerNames, Readiness: Readiness{State: ReadinessNotObserved}}
 	if h.ControllerNames == nil {
 		h.ControllerNames = []string{}

@@ -420,3 +420,32 @@ func TestRuleSetFromBuildInfo(t *testing.T) {
 	scrapeErr = ""
 	check("scrape without build_info", "kgateway-2.4", "")
 }
+
+// A build_info version that is not a version ("undefined" from a build without
+// ldflags) is ignored: the v2.5.0 tag picks kgw25 and is the version shown (R132).
+// Replicas that disagree keep the last agreed version, so the rule set does not flip (R133).
+func TestBuildInfoGuards(t *testing.T) {
+	snap := snapshot(t)
+	d := snap.Deployments[0].DeepCopy()
+	delete(d.Labels, "app.kubernetes.io/version")
+	d.Spec.Template.Spec.Containers[0].Image = "cr.kgateway.dev/kgateway-dev/kgateway:v2.5.0"
+	snap.Deployments[0] = d
+	var pods []ctrlmetrics.PodMetrics
+	cfg := config(snap, metricsFunc(func(string) (ctrlmetrics.Result, bool) {
+		return ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true, PerPod: pods}}, true
+	}), func() time.Time { return testutil.Now })
+	e := New(cfg)
+	pods = []ctrlmetrics.PodMetrics{{UID: "pod/kgw/p", Name: "p", BuildVersion: "undefined"}}
+	m := e.Compute().Installs[0]
+	if m.Rules.Rules.Version() != "kgateway-2.5" || m.Resolved.ReportedVersion != "" || m.Overview.Header.Version != "2.5.0" {
+		t.Errorf("undefined: rules %s, reported %q, header %q", m.Rules.Rules.Version(), m.Resolved.ReportedVersion, m.Overview.Header.Version)
+	}
+	// The tag is unreadable now, so only build_info can pick kgw25.
+	d.Spec.Template.Spec.Containers[0].Image = "cr.kgateway.dev/kgateway-dev/kgateway:latest"
+	pods = []ctrlmetrics.PodMetrics{{UID: "pod/kgw/p", Name: "p", BuildVersion: "v2.5.0"}}
+	e.Compute()
+	pods = []ctrlmetrics.PodMetrics{{UID: "pod/kgw/p", Name: "p", BuildVersion: "v2.5.0"}, {UID: "pod/kgw/q", Name: "q", BuildVersion: "v2.5.1"}}
+	if m := e.Compute().Installs[0]; m.Rules.Rules.Version() != "kgateway-2.5" || m.Resolved.ReportedVersion != "2.5.0" || m.Overview.Header.Version != "2.5.0" {
+		t.Errorf("disagreeing replicas: rules %s, reported %q, header %q", m.Rules.Rules.Version(), m.Resolved.ReportedVersion, m.Overview.Header.Version)
+	}
+}

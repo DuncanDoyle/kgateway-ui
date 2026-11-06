@@ -389,7 +389,7 @@ func TestCaptured250PerClient(t *testing.T) {
 	if got := sampleValues(t, mustRead(t, "testdata/v2.5.0-rc.1-perclient.txt"), BuildInfo); len(got) != 1 {
 		t.Errorf("rc.1 build_info: %v", got)
 	}
-	if v := parseFile(t, "testdata/v2.5.0-rc.1-perclient.txt").BuildVersion(); v != "v2.5.0-rc.1" {
+	if v, ok := parseFile(t, "testdata/v2.5.0-rc.1-perclient.txt").BuildVersion(); v != "v2.5.0-rc.1" || !ok {
 		t.Errorf("rc.1 version %q", v)
 	}
 }
@@ -407,7 +407,7 @@ func mustRead(t *testing.T, f string) string {
 func TestPerClientAbsentBefore25(t *testing.T) {
 	for _, f := range []string{"v2.3.11.txt", "v2.3.11-rejects-a.txt", "v2.4.7.txt", "v2.4.7-rejects-a.txt", "v2.4.7-restart.txt"} {
 		m := parseFile(t, "testdata/"+f)
-		if p := m.PerPod[0]; p.BuildVersion != "" || p.PerClientPresent || p.Withheld != nil || p.Bounded != nil || m.BuildVersion() != "" {
+		if p := m.PerPod[0]; p.BuildVersion != "" || p.PerClientPresent || p.Withheld != nil || p.Bounded != nil || m.PerPod[0].BuildVersion != "" {
 			t.Errorf("%s: %+v", f, p)
 		}
 	}
@@ -440,7 +440,7 @@ func TestParsePerClientSynthesised(t *testing.T) {
 	}
 }
 
-// BuildVersion is the version the reporting Pods share; Pods that disagree give "".
+// BuildVersion is the version the reporting Pods share; Pods that disagree are not agreed.
 func TestBuildVersionAcrossPods(t *testing.T) {
 	mk := func(vs ...string) Metrics {
 		var ms []Metrics
@@ -450,11 +450,13 @@ func TestBuildVersionAcrossPods(t *testing.T) {
 		return Aggregate(ms)
 	}
 	for _, tc := range []struct {
-		vs   []string
-		want string
-	}{{nil, ""}, {[]string{"v2.5.0"}, "v2.5.0"}, {[]string{"v2.5.0", ""}, "v2.5.0"}, {[]string{"v2.5.0", "v2.5.0"}, "v2.5.0"}, {[]string{"v2.5.0", "v2.5.1"}, ""}} {
-		if got := mk(tc.vs...).BuildVersion(); got != tc.want {
-			t.Errorf("%v: %q, want %q", tc.vs, got, tc.want)
+		vs     []string
+		want   string
+		agreed bool
+	}{{nil, "", true}, {[]string{"v2.5.0"}, "v2.5.0", true}, {[]string{"v2.5.0", ""}, "v2.5.0", true}, {[]string{"v2.5.0", "v2.5.0"}, "v2.5.0", true},
+		{[]string{"v2.5.0", "v2.5.1"}, "", false}} {
+		if got, agreed := mk(tc.vs...).BuildVersion(); got != tc.want || agreed != tc.agreed {
+			t.Errorf("%v: %q %v, want %q %v", tc.vs, got, agreed, tc.want, tc.agreed)
 		}
 	}
 }
@@ -473,12 +475,12 @@ func TestBoundedGrowthPerPodUID(t *testing.T) {
 		t.Fatalf("first sight is a baseline: %v", g)
 	}
 	g, prev = BoundedGrowth(prev, []PodMetrics{pod("u1", "v2.5.0-released-synth.txt")})
-	if g[warm] != 2 || g[flip] != 1 || g[ModeKey{GatewayKey{"infra", "edge"}, "first_publish"}] != 1 {
+	if g["u1"][warm] != 2 || g["u1"][flip] != 1 || g["u1"][ModeKey{GatewayKey{"infra", "edge"}, "first_publish"}] != 1 {
 		t.Errorf("growth %v", g)
 	}
 	// The container restarts under the same UID: counters reset, which is not growth.
 	g, prev = BoundedGrowth(prev, []PodMetrics{pod("u1", "v2.5.0-withheld-synth.txt")})
-	if g[warm] != 0 || g[flip] != 0 {
+	if len(g) != 0 {
 		t.Errorf("reset read as growth: %v", g)
 	}
 	// A new Pod is a baseline; the vanished UID is forgotten.
