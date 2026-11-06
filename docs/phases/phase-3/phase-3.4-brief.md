@@ -23,7 +23,7 @@ A route can be Accepted with `ResolvedRefs=True` while its Service has no ready 
 
 | Input / action | Expected |
 |---|---|
-| `diagnostics.endpoints` on (the default **(inferred)**), both watches list and watch | `/meta` capability `endpoints` is `on` |
+| `diagnostics.endpoints` on (the default), both watches list and watch | `/meta` capability `endpoints` is `on` |
 | Toggle off | No Service or EndpointSlice watch starts. 023 is "not available", reason `off`. No KGWUI-008; the install is not unknown |
 | RBAC denies Services or EndpointSlices | 023 is "not available", reason `denied`. No KGWUI-008; the install is not unknown |
 | A watch errors after it worked, then recovers | 023 is `failing` while it errors, and runs again after recovery |
@@ -70,10 +70,10 @@ A route can be Accepted with `ResolvedRefs=True` while its Service has no ready 
 |---|---|
 | A cluster serving DirectResponse, GatewayExtension (`gateway.kgateway.dev/v1alpha1`) and ReferenceGrant | All three are listed and described through `kinds`, the cache and the API, like any other kind. API v1 kind lists gain them at the end, so existing order is unchanged |
 | A cluster that does not serve one of them | That kind is absent, as for any unserved kind. No error |
-| Categories | DirectResponse `policy`, GatewayExtension `parameters`, ReferenceGrant a new `referencegrant` category **(inferred)** |
+| Categories | DirectResponse `policy`, GatewayExtension `parameters`, ReferenceGrant a new `referencegrant` category |
 | ReferenceGrants in the cache | Listed and shown. Nothing reads them to decide resolution: 013 and 014 are unchanged (Phase 2 anti-goal) |
 | `cache.Start(ctx)`, cancel `ctx`, then `Wait` | `Wait` returns once every goroutine `Start` launched has exited. A test with a goroutine-leak check passes |
-| `Wait` before `Start`, or called twice | Returns at once **(inferred)** |
+| `Wait` before `Start`, or called twice | Returns at once |
 
 ### kgateway 2.5 (Tasks 83–86)
 
@@ -85,7 +85,7 @@ A route can be Accepted with `ResolvedRefs=True` while its Service has no ready 
 | `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"} > 0` | 024 error: "Proxies get no config updates, because referenced clusters are missing" |
 | `bounded_publishes_total{mode=~"flip_release\|warm_release\|carry_expired"}` increased in the last 15 min (per Pod UID) | 024 warning: "Some routes fail: config was released before every cluster was ready" |
 | The family absent (2.3, 2.4) | 024 "not available on this version" (`AvailNotOnVersion`) in "What was checked". The install is healthy, never unknown |
-| `kgateway_build_info` present | The controller version comes from it **(inferred: over the image tag)**. Absent: the image tag, as today |
+| `kgateway_build_info` present | The controller version comes from it, over the image tag; when they disagree, the evidence shows both. Absent: the image tag, as today |
 | The 2.5 e2e row (`v2.5.0`, Gateway API `v1.7.0`) | The full suite passes, with 016 from `TargetNotFound` and a withheld-config case for 024 |
 | The TCPRoute fixture | On `gateway.networking.k8s.io/v1` when every row serves it; otherwise one fixture per served version |
 
@@ -101,7 +101,7 @@ No gate changes without the user. A broken gate stops the work, and the numbers 
 | Cold recompute median | ≤ 1 s | 52 / 56 / 62 ms |
 | Retained heap over 2.1, measurement world | ≤ 40 MiB (D-054), and ≤ +24 MiB over 3.1 | +34.6 MiB ⚠ |
 | 3.2 watches' retained state | ≤ 1,600,000 B (D-046) | 1,450,520 B |
-| 3.4 watches' retained state (Services, EndpointSlices, the three #17 kinds) | reported **(inferred)** | — |
+| 3.4 watches' retained state (Services, EndpointSlices, the three #17 kinds) | reported | — |
 | Dense: retained / cold / per warm | 176 / 246 / 185 MiB | 160 / 207 / 166 MiB |
 | Analyzer stage, §16.3 scope: warm / memoized / new scrape | ≤ 20 / 2 / 2 ms | 6.00 / 0.20 / 1.28 ms |
 | Stream CPU, annotation-only / spec-edit | ≤ 15 % / ≤ 25 % | 9.5 % / 13.9 % |
@@ -118,7 +118,7 @@ Retained heap has 5.4 MiB of headroom, and the new watches add to it. Task 81 st
 | R57: Services and EndpointSlices in the measurement world | Re-seeded with the 3.4 watches | 81 |
 | R96: a sync-only scrape publishes a new model (0.10/s idle) | Measured with the 3.4 inputs; a fix only if it costs a gate, else stays (user, 2026-11-05) | 81 |
 | Task 77 port fix and Service explanations; 023 and 024 entries in `docs/findings.md` | In 3.4 | 76, 77, 85 |
-| R59: proxy Pod ownership by UID needs a ReplicaSet watch | Not in Tasks 74–87. Goes to the phase review **(our call)** | — |
+| R59: proxy Pod ownership by UID needs a ReplicaSet watch | Not in Tasks 74–87. Goes to the phase review (user, 2026-11-06) | — |
 | Program block in `phase-status.md` | Updated in this commit | 74 |
 
 ## Root cause (if known)
@@ -168,8 +168,8 @@ These are five input classes that no 3.4 task tests and that are most likely to 
 
 | # | Input class | Why it bites | Expected | Owner |
 |---|---|---|---|---|
-| 1 | A backendRef port that names a Service port by number, where the EndpointSlice port is named and the target port differs (`port: 80`, `targetPort: http` → 8080) | Slices carry the target port and the Service port's name, not the Service port number. Matching by number gives a false 023 on every named-port Service | The ref's port maps to the Service port, then to the slice port by name (unnamed: the only port). No 023 while a ready endpoint serves it **(inferred)** | 75, 76 |
-| 2 | A Service with several EndpointSlices, some for other address types (IPv4 and IPv6), or a slice briefly orphaned during a rollout | Counting one slice, or a slice from the wrong address family, gives a false zero | Ready counts sum over every slice labelled for the Service, per port **(inferred)** | 75, 76 |
+| 1 | A backendRef port that names a Service port by number, where the EndpointSlice port is named and the target port differs (`port: 80`, `targetPort: http` → 8080) | Slices carry the target port and the Service port's name, not the Service port number. Matching by number gives a false 023 on every named-port Service | The ref's port maps to the Service port, then to the slice port by name (unnamed: the only port). No 023 while a ready endpoint serves it | 75, 76 |
+| 2 | A Service with several EndpointSlices, some for other address types (IPv4 and IPv6), or a slice briefly orphaned during a rollout | Counting one slice, or a slice from the wrong address family, gives a false zero | Ready counts sum over every slice labelled for the Service, per port | 75, 76 |
 | 3 | A deliberate scale-to-zero (KEDA, nightly) | A warning that never clears trains users to ignore it | 023 stays a warning; it clears within one recompute after an endpoint turns ready | 76 |
 | 4 | A 2.5 controller whose rule set says `TargetNotFound`, while another install in the same UI still runs 2.4 | Per-install rule sets must not leak: one install's status path must not turn off the other's computed rule | Each install uses its own rule set | 84 |
 | 5 | A cluster without the ReferenceGrant CRD, or with only `v1beta1` served | A hard-coded version breaks listing on older bundles | The kind lists on whichever served version the catalog prefers; absent when not served | 78a |
@@ -183,7 +183,7 @@ These are five input classes that no 3.4 task tests and that are most likely to 
 Plan points to settle in the owning task:
 1. Task 75 names `pkg/cache/services.go` as one new allowlisted file. The ClusterRole also needs `list`/`watch` on the three #17 kinds; Task 78a adds those rules.
 2. Task 86 says Gateway API `v1.7.x`; the GA tag pins `v1.7.0`. Task 83 confirms.
-3. Task 85 changes `pkg/install/upstream.go`. If `kgateway_build_info` disagrees with the image tag, the evidence shows both **(inferred)**.
+3. Task 85 changes `pkg/install/upstream.go`. If `kgateway_build_info` disagrees with the image tag, the evidence shows both.
 
 Reminders for the user (not blocking): the open item in design §25 (filing the reject-status draft), and the upstream scope-endpoint issue (carry-over P3). Filing both stays the user's call.
 
@@ -192,13 +192,14 @@ Reminders for the user (not blocking): the open item in design §25 (filing the 
 - [ ] standard gates pass; the 3.4 budgets above hold (`bench/3.4.txt`), or the numbers went to the user
 - [ ] kind e2e passes on v2.3.11, v2.4.7 and v2.5.0; `/ui-loop` on 023
 - [ ] wording pass recorded in `phase-3.4-wording.md`
-- [ ] the `(inferred)` outputs below confirmed by the user, or recorded in `decisions.md`, before their task
+- [x] the `(inferred)` outputs below confirmed by the user (2026-11-06)
 - [ ] Codex review of `git diff 8342a38..HEAD` + triage (`reviews/3.4-codex.md`)
 - [ ] phase-3.4-complete.md written (bench table vs 3.3); phase-status.md and roadmap.md updated; README upgrade notes (023, Services and EndpointSlices read, the `endpoints` toggle, the three kinds, `cache.Wait`, 2.5 support)
 - [ ] #17 and #20 closed with the commit; #18 and #19 commented; tag, program file and kgwctl notice proposed to the user
 
 ## Inferred outputs to confirm
-1. `diagnostics.endpoints` is on by default (Task 75).
+All eight confirmed by the user on 2026-11-06:
+1. `diagnostics.endpoints` is on by default (Task 75). The watches stay cluster-wide: a watch cannot filter by "referenced", and the cut-down objects cost about 2 MiB at Large.
 2. Categories: DirectResponse `policy`, GatewayExtension `parameters`, ReferenceGrant a new `referencegrant` category (Task 78a).
 3. `Wait` before `Start`, or a second `Wait`, returns at once (Task 78b).
 4. `kgateway_build_info` wins over the image tag for the controller version; when they disagree, the evidence shows both (Task 85).
