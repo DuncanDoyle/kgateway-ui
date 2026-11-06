@@ -416,7 +416,7 @@ func TestEveryFamilyExclusive(t *testing.T) {
 	for _, f := range diagnose.Families() {
 		names = append(names, f.Name())
 	}
-	if want := []string{"Data plane rejects", "Missing backend", "Not permitted", "Replaced by policy", "Status not progressing", "Process", "Other"}; !slices.Equal(names, want) {
+	if want := []string{"Data plane rejects", "Missing backend", "Not permitted", "Replaced by policy", "Status not progressing", "Empty backend", "Process", "Other"}; !slices.Equal(names, want) {
 		t.Fatalf("families %v, want %v", names, want)
 	}
 	deploy := &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: "kgw", Name: "kgateway"}
@@ -449,6 +449,7 @@ func TestEveryFamilyExclusive(t *testing.T) {
 		{plain("progress", health.CodeStatusNotProgressing, health.SeverityWarning, deploy), "Status not progressing", diagnose.ClassHygiene},
 		{plain("pending", health.CodeRouteUnattached, health.SeverityWarning, ref("HTTPRoute", "pending")), "Status not progressing", diagnose.ClassTraffic},
 		{plain("in-grace", health.CodeRouteUnattached, health.SeverityInfo, ref("HTTPRoute", "in-grace")), "Other", diagnose.ClassHygiene},
+		{empty("empty", 8080, ref("HTTPRoute", "web")), "Empty backend", diagnose.ClassTraffic},
 		{plain("ctrl", health.CodeControllerNotReady, health.SeverityError, deploy), "Process", diagnose.ClassProcesses},
 		{plain("proxy", health.CodeProxyNotReady, health.SeverityWarning, gw), "Process", diagnose.ClassProcesses},
 		{plain("restart", health.CodeProcessRestarting, health.SeverityWarning, deploy), "Process", diagnose.ClassProcesses},
@@ -564,5 +565,37 @@ func TestNotPermittedFamily(t *testing.T) {
 	}
 	if a := got["web+api"].Affected; !slices.Equal(a, []objects.Ref{*ref("HTTPRoute", "api"), *ref("HTTPRoute", "web")}) {
 		t.Errorf("affected %v", a)
+	}
+}
+
+var cartService = objects.Ref{Kind: "Service", Namespace: "shop", Name: "cart"}
+
+// empty is a 023 on Service shop/cart port, naming routes.
+func empty(name string, port int32, routes ...*objects.Ref) health.Finding {
+	f := finding(name, health.CodeBackendNoReadyEndpoints, health.SeverityWarning, &cartService, nil)
+	ev := &health.EndpointsEvidence{Service: "cart", Port: port}
+	for _, r := range routes {
+		ev.Routes = append(ev.Routes, *r)
+	}
+	f.Facts = ev
+	return f
+}
+
+// Design §5.2: a Service's 023s, one per port, form one "Empty backend" group
+// caused by the Service; the routes naming any of its ports are affected.
+func TestEmptyBackendFamily(t *testing.T) {
+	rep := &health.Report{Findings: []health.Finding{
+		empty("http", 8080, ref("HTTPRoute", "web"), ref("HTTPRoute", "api")),
+		empty("grpc", 9000, ref("HTTPRoute", "web"), ref("GRPCRoute", "rpc")),
+	}}
+	d := diagnose.Build(rep, in, diagnose.Families())
+	if len(d.Groups) != 1 {
+		t.Fatalf("groups %+v", d.Groups)
+	}
+	g := d.Groups[0]
+	want := []objects.Ref{*ref("GRPCRoute", "rpc"), *ref("HTTPRoute", "api"), *ref("HTTPRoute", "web")}
+	if g.Family != "Empty backend" || g.Cause == nil || *g.Cause != cartService || len(g.Members) != 2 || g.Class != diagnose.ClassTraffic ||
+		g.ID != health.GroupID(in.Install.ID(), g.Family, &cartService, nil) || !slices.Equal(g.Affected, want) {
+		t.Fatalf("group %+v", g)
 	}
 }

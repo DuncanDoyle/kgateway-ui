@@ -32,7 +32,7 @@ var classes = map[string]Class{
 	health.CodeControllerNotReady: ClassProcesses, health.CodeProxyNotReady: ClassProcesses,
 	"KGWUI-019": ClassProcesses, "KGWUI-020": ClassProcesses, "KGWUI-021": ClassProcesses,
 	"KGWUI-013": ClassTraffic, "KGWUI-014": ClassTraffic, health.CodeRuleReplaced: ClassTraffic, "KGWUI-016": ClassTraffic,
-	health.CodeListenerConflicted: ClassTraffic, "KGWUI-023": ClassTraffic, health.CodeDelegatedNotAttached: ClassTraffic,
+	health.CodeListenerConflicted: ClassTraffic, health.CodeBackendNoReadyEndpoints: ClassTraffic, health.CodeDelegatedNotAttached: ClassTraffic,
 }
 
 // ClassOf returns f's class (design §5.3): KGWUI-003 is traffic once a
@@ -234,7 +234,7 @@ func claim(f health.Finding, in Input, families []Family) (int, *objects.Ref, []
 
 // Families returns the families in design §5.2 table order; "Other" is last.
 func Families() []Family {
-	return []Family{dataPlane{}, missingBackend{}, notPermitted{}, replacedByPolicy{}, statusNotProgressing{}, processFamily{}, other{}}
+	return []Family{dataPlane{}, missingBackend{}, notPermitted{}, replacedByPolicy{}, statusNotProgressing{}, emptyBackend{}, processFamily{}, other{}}
 }
 
 // dataPlane groups a Gateway's KGWUI-001. Its affected objects have a current
@@ -375,6 +375,30 @@ func (statusNotProgressing) Affected(gs []Claimed, fs []health.Finding, _ Input)
 			}
 		}
 		slices.SortFunc(out[k], objects.Ref.Compare)
+	}
+	return out
+}
+
+// emptyBackend groups a Service's KGWUI-023, one per port, on the Service
+// (design §5.2, §11). The routes naming any of its ports are affected.
+type emptyBackend struct{}
+
+func (emptyBackend) Name() string { return "Empty backend" }
+
+func (emptyBackend) Claim(f health.Finding, _ Input) (*objects.Ref, []string, bool) {
+	return f.Resource, nil, f.Code == health.CodeBackendNoReadyEndpoints && f.Resource != nil
+}
+
+func (emptyBackend) Affected(gs []Claimed, fs []health.Finding, _ Input) [][]objects.Ref {
+	out := make([][]objects.Ref, len(gs))
+	for k, g := range gs {
+		for _, i := range g.Members {
+			if ev, ok := fs[i].Facts.(*health.EndpointsEvidence); ok {
+				out[k] = append(out[k], ev.Routes...)
+			}
+		}
+		slices.SortFunc(out[k], objects.Ref.Compare)
+		out[k] = slices.Compact(out[k])
 	}
 	return out
 }

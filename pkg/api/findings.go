@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,11 +15,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
 
 // Findings list parameters (design §13.1); findingsSingle may appear once. The
@@ -314,6 +318,9 @@ func (h *handler) findingDetail(w http.ResponseWriter, r *http.Request) {
 		if !row.EvidenceRestricted && f.Facts != nil {
 			out.Evidence = wireEvidence(v, l, f.Facts)
 			out.SuggestedFix = wireFix(v, l, diagnose.Fix(f))
+			if ev, ok := out.Evidence.(*health.EndpointsEvidence); ok && f.Resource != nil {
+				out.Evidence = h.withMembership(r.Context(), v, p.Model.Snapshot, i, *f.Resource, ev)
+			}
 		}
 		out.NextSteps = nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(p.Model, i), h.commands, v.visible()))
 	}
@@ -436,3 +443,66 @@ func pageRefs(refs []objects.Ref, c string, limit int, tag string) (affectedPage
 
 // badCursorErr is explore.ErrBadCursor with why.
 func badCursorErr(why string) error { return fmt.Errorf("%w: %s", explore.ErrBadCursor, why) }
+
+// membershipUnavailable is the reason a 023 detail has no membership.
+const membershipUnavailable = "The proxies' view of this backend is not available"
+
+// MembershipFunc asks one Ready proxy of each of gws what its Envoy cluster for
+// Service svc's port holds (design §8.8). It is evidence only, never a trigger.
+type MembershipFunc func(ctx context.Context, in install.Resolved, snap *cache.Snapshot, svc objects.Ref, port int32, gws []objects.Ref) health.EndpointsMembership
+
+// WithMembership sets how a KGWUI-023 detail asks for proxy membership; without
+// it the evidence says membership is not available.
+func WithMembership(f MembershipFunc) HandlerOption {
+	return func(c *handlerConfig) { c.membership = f }
+}
+
+// withMembership is a copy of ev with membership for the Gateways of its
+// routes; a Gateway or proxy Pod the caller of v may not view is left out.
+func (h *handler) withMembership(ctx context.Context, v *view, snap *cache.Snapshot, i *engine.InstallModel, svc objects.Ref, ev *health.EndpointsEvidence) *health.EndpointsEvidence {
+	out := *ev
+	if h.membership == nil {
+		out.Membership = &health.EndpointsMembership{Reason: membershipUnavailable}
+		return &out
+	}
+	m := h.membership(ctx, i.Resolved, snap, svc, ev.Port, routeGateways(i.Owned, ev.Routes))
+	shown := m
+	shown.Gateways = nil
+	for _, g := range m.Gateways {
+		if v.can(g.Gateway) && (g.Pod == "" || v.can(process.PodRef(g.Gateway.Namespace, process.Process{Name: g.Pod}))) {
+			shown.Gateways = append(shown.Gateways, g)
+		}
+	}
+	out.Membership = &shown
+	return &out
+}
+
+// routeGateways are the Gateways routes attach to through owned parents,
+// directly or through a ListenerSet, sorted.
+func routeGateways(o *install.Owned, routes []objects.Ref) []objects.Ref {
+	if o == nil {
+		return nil
+	}
+	sets := map[objects.Ref]objects.Ref{}
+	for _, ls := range o.ListenerSets {
+		sets[objects.RefOf(ls)] = objects.ListenerSetParent(ls).Ref()
+	}
+	var out []objects.Ref
+	for _, r := range routes {
+		or, ok := o.Route(r)
+		if !ok {
+			continue
+		}
+		for _, p := range or.Parents {
+			gw, isSet := sets[p.Ref()]
+			if !isSet {
+				gw = p.Ref()
+			}
+			if gw.Kind == "Gateway" && !slices.Contains(out, gw) {
+				out = append(out, gw)
+			}
+		}
+	}
+	slices.SortFunc(out, objects.Ref.Compare)
+	return out
+}

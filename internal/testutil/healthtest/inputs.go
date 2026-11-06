@@ -120,6 +120,10 @@ func dropUndeclaredKinds(in health.Input, set health.InputSet) *cache.Snapshot {
 			return declared(cache.EventsKind)
 		case cache.CRDsGVR:
 			return declared(cache.CRDsKind)
+		case cache.ServicesGVR:
+			return declared(cache.ServicesKind)
+		case cache.EndpointSlicesGVR:
+			return declared(cache.EndpointSlicesKind)
 		}
 		gk, served := gks[gvr]
 		return set.Owned || (served && declared(gk))
@@ -172,6 +176,26 @@ func perturbOptional(out, in *cache.Snapshot, set health.InputSet, seed int64) {
 	if !slices.Contains(set.Kinds, cache.CRDsKind) {
 		out.Access[cache.CRDsGVR] = why
 		out.CRDs = []cache.CRDMeta{{Name: fmt.Sprintf("perturbed%d.gateway.networking.k8s.io", seed), Group: "gateway.networking.k8s.io", BundleVersion: "v0.0.1"}}
+	}
+	if !slices.Contains(set.Kinds, cache.ServicesKind) {
+		out.Access[cache.ServicesGVR] = why
+		out.Services = nil
+		if len(in.Services) == 0 {
+			out.Services = []cache.ServiceFact{{Namespace: "perturbed", Name: fmt.Sprintf("svc%d", seed), Ports: []cache.ServicePort{{Port: 80}}}}
+		}
+	}
+	if !slices.Contains(set.Kinds, cache.EndpointSlicesKind) {
+		out.Access[cache.EndpointSlicesGVR] = why
+		// Ready flips between none and some, so a read of either shows.
+		out.EndpointSlices = []cache.SliceFact{{Namespace: "perturbed", Service: fmt.Sprintf("svc%d", seed), Ready: map[string]int{"": 1}, Total: 1}}
+		for _, s := range in.EndpointSlices {
+			ready := map[string]int{}
+			for name, n := range s.Ready {
+				ready[name] = 1 - min(n, 1)
+			}
+			s.Ready = ready
+			out.EndpointSlices = append(out.EndpointSlices, s)
+		}
 	}
 }
 

@@ -1,10 +1,15 @@
 package proxystats
 
 import (
+	"bufio"
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
+	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -75,6 +80,9 @@ type Collector struct {
 	// mu serialises rounds; pods holds the last counters per install and Pod UID.
 	mu   sync.Mutex
 	pods map[podKey]*podState
+	// memberMu guards members, the membership answers of the last MembershipTTL.
+	memberMu sync.Mutex
+	members  map[memberKey]memberAnswer
 }
 
 type podKey struct{ install, uid string }
@@ -94,7 +102,7 @@ func New(cfg Config) *Collector {
 	if cfg.Clock == nil {
 		cfg.Clock = clock.RealClock{}
 	}
-	return &Collector{cfg: cfg, pods: map[podKey]*podState{}}
+	return &Collector{cfg: cfg, pods: map[podKey]*podState{}, members: map[memberKey]memberAnswer{}}
 }
 
 // Run scrapes now and every interval until ctx is done, publishing under
@@ -353,4 +361,155 @@ func names(reset bool, old map[string]int64, oldCut bool, cur map[string]int64) 
 	}
 	slices.Sort(grew)
 	return kept, grew, truncated
+}
+
+// MembershipTTL is how long a membership answer is reused (design §8.8).
+const MembershipTTL = 10 * time.Second
+
+// Fixed-text reasons a Gateway has no membership answer.
+const (
+	ErrNotObserved  = "no proxies known"
+	ErrNoReadyProxy = "no Ready proxy"
+	ErrNoMembership = "the stats source cannot read cluster membership"
+)
+
+// FilteredFetcher is a Source that fetches stats with another /stats filter;
+// membership on demand needs it. Errors follow Fetch's rules.
+type FilteredFetcher interface {
+	FetchFiltered(ctx context.Context, t Target, filter string) ([]byte, error)
+}
+
+// Membership is a cluster's membership_healthy and membership_total; nil was not reported.
+type Membership struct {
+	Healthy, Total *int64
+}
+
+// GatewayMembership is the asked clusters' membership on one Ready proxy of a
+// Gateway, by Envoy cluster name; Err is a fixed-text reason when there is none.
+type GatewayMembership struct {
+	Gateway  objects.Ref
+	Pod      string
+	Clusters map[string]Membership
+	Err      string
+}
+
+type memberKey struct{ install, gateway, clusters string }
+
+type memberAnswer struct {
+	at time.Time
+	gm GatewayMembership
+}
+
+// MembershipFilter is the /stats filter naming only clusters' membership stats.
+func MembershipFilter(clusters []string) string {
+	quoted := make([]string, len(clusters))
+	for i, c := range clusters {
+		quoted[i] = regexp.QuoteMeta(c)
+	}
+	return `^cluster\.(` + strings.Join(quoted, "|") + `)\.membership_(healthy|total)$`
+}
+
+// Membership asks one Ready proxy of each of gws, the first in name order that
+// ready accepts (nil accepts any), for clusters' membership stats. Answers are
+// reused for MembershipTTL per install, Gateway and cluster set. It is evidence only.
+func (c *Collector) Membership(ctx context.Context, in install.Resolved, snap *cache.Snapshot, gws []objects.Ref, clusters []string, ready func(Target) bool) []GatewayMembership {
+	clusters = slices.Compact(slices.Sorted(slices.Values(clusters)))
+	out := make([]GatewayMembership, 0, len(gws))
+	for _, gw := range gws {
+		key := memberKey{in.ID(), gw.String(), strings.Join(clusters, "\x00")}
+		now := c.cfg.Clock.Now()
+		c.memberMu.Lock()
+		a, hit := c.members[key]
+		c.memberMu.Unlock()
+		if hit && now.Sub(a.at) < MembershipTTL {
+			out = append(out, a.gm)
+			continue
+		}
+		gm := c.membership(ctx, in, snap, gw, clusters, ready)
+		c.memberMu.Lock()
+		for k, old := range c.members {
+			if now.Sub(old.at) >= MembershipTTL {
+				delete(c.members, k)
+			}
+		}
+		c.members[key] = memberAnswer{at: now, gm: gm}
+		c.memberMu.Unlock()
+		out = append(out, gm)
+	}
+	return out
+}
+
+// membership asks gw's first Ready proxy, under the scrape timeout and body bound.
+func (c *Collector) membership(ctx context.Context, in install.Resolved, snap *cache.Snapshot, gw objects.Ref, clusters []string, ready func(Target) bool) GatewayMembership {
+	gm := GatewayMembership{Gateway: gw}
+	ff, ok := c.cfg.Source.(FilteredFetcher)
+	if !ok {
+		gm.Err = ErrNoMembership
+		return gm
+	}
+	ts, observed := c.cfg.Source.Targets(in, gw, snap)
+	if !observed {
+		gm.Err = ErrNotObserved
+		return gm
+	}
+	ts = slices.Clone(ts)
+	slices.SortFunc(ts, func(a, b Target) int { return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID)) })
+	i := slices.IndexFunc(ts, func(t Target) bool { return ready == nil || ready(t) })
+	if i < 0 {
+		gm.Err = ErrNoReadyProxy
+		return gm
+	}
+	gm.Pod = ts[i].Name
+	fctx, cancel := context.WithTimeout(ctx, maxFetchTimeout)
+	defer cancel()
+	b, err := ff.FetchFiltered(fctx, ts[i], MembershipFilter(clusters))
+	switch {
+	case err != nil && errors.Is(fctx.Err(), context.DeadlineExceeded):
+		gm.Err = errTimedOut
+	case err != nil:
+		gm.Err = cut(err.Error(), maxErrLen)
+	case len(b) > MaxBody:
+		gm.Err = "response over 1 MiB"
+	default:
+		gm.Clusters = parseMembership(b, clusters)
+	}
+	return gm
+}
+
+// parseMembership reads the membership stats of the asked clusters from an
+// Envoy /stats body; other names and non-integer values are ignored.
+func parseMembership(body []byte, clusters []string) map[string]Membership {
+	out := map[string]Membership{}
+	sc := bufio.NewScanner(bytes.NewReader(body))
+	sc.Buffer(make([]byte, 0, 4096), MaxBody+1)
+	for sc.Scan() {
+		name, val, ok := strings.Cut(sc.Text(), ": ")
+		if !ok {
+			continue
+		}
+		v, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		if err != nil {
+			continue
+		}
+		for _, cl := range clusters {
+			stat, ok := strings.CutPrefix(name, "cluster."+cl+".")
+			if !ok {
+				continue
+			}
+			m := out[cl]
+			switch stat {
+			case "membership_healthy":
+				m.Healthy = &v
+			case "membership_total":
+				m.Total = &v
+			default:
+				continue
+			}
+			out[cl] = m
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

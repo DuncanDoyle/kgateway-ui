@@ -126,6 +126,14 @@
         "name": "status progress",
         "ok": true,
         "required": false
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "error": "Services and EndpointSlices are not watched",
+        "name": "backend endpoints",
+        "ok": false,
+        "required": false,
+        "unavailable": "off"
       }
     ],
     "collectedAt": "2026-10-17T12:00:00Z",

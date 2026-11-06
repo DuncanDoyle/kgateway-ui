@@ -97,7 +97,9 @@ type setup struct {
 	bounds computed.Bounds
 	// optional turns on the Events and CRD watches, CRDs over a fake metadata
 	// client that prepareMeta, when set, prepares before the cache starts.
-	optional    bool
+	optional bool
+	// endpoints turns on the Service and EndpointSlice watches.
+	endpoints   bool
 	prepareMeta func(*metadatafake.FakeMetadataClient)
 	// checks run after the upstream checks.
 	checks []health.Check
@@ -232,7 +234,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		s.prepareMeta(meta)
 	}
 	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
-		Events: s.optional, CRDs: s.optional, Metadata: meta})
+		Events: s.optional, CRDs: s.optional, Metadata: meta, Endpoints: s.endpoints})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)

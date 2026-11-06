@@ -64,13 +64,16 @@ func (m *memoSource) setAccess(g schema.GroupVersionResource, a cache.Access) {
 // sourceOf fingerprints s by (uid, resourceVersion) per kind, as the cache does.
 func sourceOf(s *cache.Snapshot) cache.Fingerprint {
 	f := cache.Fingerprint{Kinds: map[string]cache.KindPrint{}, Access: map[string]cache.Access{}}
-	add := func(g schema.GroupVersionResource, o metav1.Object) {
+	addKey := func(g schema.GroupVersionResource, key string) {
 		h := fnv.New64a()
-		_, _ = fmt.Fprintf(h, "%s\x00%s", o.GetUID(), o.GetResourceVersion())
+		_, _ = h.Write([]byte(key))
 		k := f.Kinds[g.String()]
 		k.Count++
 		k.Hash += h.Sum64()
 		f.Kinds[g.String()] = k
+	}
+	add := func(g schema.GroupVersionResource, o metav1.Object) {
+		addKey(g, fmt.Sprintf("%s\x00%s", o.GetUID(), o.GetResourceVersion()))
 	}
 	for g, a := range s.Access {
 		f.Access[g.String()], f.Kinds[g.String()] = a, cache.KindPrint{}
@@ -88,6 +91,13 @@ func sourceOf(s *cache.Snapshot) cache.Fingerprint {
 	}
 	for _, d := range s.Deployments {
 		add(cache.DeploymentsGVR, d)
+	}
+	// Service and slice facts carry no resourceVersion; their content stands in for it.
+	for _, v := range s.Services {
+		addKey(cache.ServicesGVR, fmt.Sprintf("%+v", v))
+	}
+	for _, v := range s.EndpointSlices {
+		addKey(cache.EndpointSlicesGVR, fmt.Sprintf("%+v", v))
 	}
 	return f
 }
@@ -633,5 +643,44 @@ func TestCatalogChangeRerunsCheck(t *testing.T) {
 	cat = kinds.NewCatalog([]schema.GroupKind{{Kind: "Service"}, {Group: "acme.example", Kind: "Widget"}}, nil)
 	if got := detailOf(report(t, e.Compute()), "catalog probe"); runs != 2 || got != cat.Key() {
 		t.Fatalf("a changed Catalog must run the check: %d runs, detail %q", runs, got)
+	}
+}
+
+// The backend endpoints check is memoized on Services and EndpointSlices: it
+// skips unchanged ones and reruns when either changes.
+func TestEndpointsChangeRerunsCheck(t *testing.T) {
+	var runs int
+	checks := health.Upstream()
+	i := slices.IndexFunc(checks, func(c health.Check) bool { return c.Name() == "backend endpoints" })
+	if i < 0 {
+		t.Fatal("no backend endpoints check")
+	}
+	checks[i] = counted{checks[i], &runs}
+	e, src, _ := memoEngine(t, checks...)
+	set := func(f func(s *cache.Snapshot)) {
+		s := *src.base
+		s.Access = maps.Clone(s.Access)
+		f(&s)
+		src.base = &s
+	}
+	set(func(s *cache.Snapshot) {
+		s.Access[cache.ServicesGVR], s.Access[cache.EndpointSlicesGVR] = cache.Access{OK: true}, cache.Access{OK: true}
+		s.Services = []cache.ServiceFact{{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Port: 80, Target: 80}}}}
+		s.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Port: 80}}, Ready: map[string]int{"": 1}, Total: 1}}
+	})
+	e.Compute()
+	e.Compute()
+	if runs != 1 {
+		t.Fatalf("unchanged Services and EndpointSlices ran the check: %d runs, want 1", runs)
+	}
+	set(func(s *cache.Snapshot) {
+		s.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Port: 80}}, Ready: map[string]int{"": 0}, Total: 1}}
+	})
+	if e.Compute(); runs != 2 {
+		t.Fatalf("a changed EndpointSlice must run the check: %d runs, want 2", runs)
+	}
+	set(func(s *cache.Snapshot) { s.Services = append(s.Services, cache.ServiceFact{Namespace: "shop", Name: "other", Type: "ClusterIP"}) })
+	if e.Compute(); runs != 3 {
+		t.Fatalf("a changed Service must run the check: %d runs, want 3", runs)
 	}
 }

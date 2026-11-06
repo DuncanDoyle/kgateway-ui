@@ -116,16 +116,16 @@ func TestSliceFactsCountReadyPerPortName(t *testing.T) {
 	w := newEndpointsWorld(t, true, []runtime.Object{a, b, c, empty}, nil)
 	got := w.c.Snapshot().EndpointSlices
 	want := []SliceFact{
-		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 2, "grpc": 2}},
-		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 0, "grpc": 0}},
+		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 2, "grpc": 2}, Total: 3},
+		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 0, "grpc": 0}, Total: 1},
 		{Namespace: "shop", Service: "none", Ports: []SlicePort{{"http", 80}}, Ready: map[string]int{"http": 0}},
-		{Namespace: "shop", Service: "single", Ports: []SlicePort{{"", 8080}}, Ready: map[string]int{"": 1}},
+		{Namespace: "shop", Service: "single", Ports: []SlicePort{{"", 8080}}, Ready: map[string]int{"": 1}, Total: 1},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("EndpointSlices %+v, want %+v", got, want)
 	}
 	for i := range want {
-		if got[i].Namespace != want[i].Namespace || got[i].Service != want[i].Service || !slices.Equal(got[i].Ports, want[i].Ports) || !equalReady(got[i].Ready, want[i].Ready) {
+		if got[i].Namespace != want[i].Namespace || got[i].Service != want[i].Service || !slices.Equal(got[i].Ports, want[i].Ports) || !equalReady(got[i].Ready, want[i].Ready) || got[i].Total != want[i].Total {
 			t.Errorf("slice %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}

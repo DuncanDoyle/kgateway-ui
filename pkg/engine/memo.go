@@ -44,6 +44,7 @@ func kindKeys(served []kinds.Served) (map[objects.GroupKind]kindKey, []kindKey) 
 	for gk, gvr := range map[objects.GroupKind]schema.GroupVersionResource{
 		{Kind: "Namespace"}: cache.NamespacesGVR, {Kind: "Pod"}: cache.PodsGVR, {Group: "apps", Kind: "Deployment"}: cache.DeploymentsGVR,
 		cache.ProxyPodsKind: cache.ProxyPodsGVR, cache.EventsKind: cache.EventsGVR, cache.CRDsKind: cache.CRDsGVR,
+		cache.ServicesKind: cache.ServicesGVR, cache.EndpointSlicesKind: cache.EndpointSlicesGVR,
 	} {
 		byGK[gk] = kindKey{gvr, gvr.String()}
 	}

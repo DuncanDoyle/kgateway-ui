@@ -11,12 +11,20 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
 // Access keys of the Service and EndpointSlice watches.
 var (
 	ServicesGVR       = schema.GroupVersionResource{Version: "v1", Resource: "services"}
 	EndpointSlicesGVR = schema.GroupVersionResource{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}
+)
+
+// The kinds a check declares in its InputSet to read Snapshot.Services and Snapshot.EndpointSlices.
+var (
+	ServicesKind       = objects.GroupKind{Kind: "Service"}
+	EndpointSlicesKind = objects.GroupKind{Group: "discovery.k8s.io", Kind: "EndpointSlice"}
 )
 
 // ServiceFact is what the cache keeps of a Service.
@@ -41,10 +49,12 @@ type SlicePort struct {
 // SliceFact is what the cache keeps of an EndpointSlice. A Service may have
 // several, so slices are never merged. Ready counts the slice's ready
 // endpoints per port name; an endpoint with ready unset counts as ready.
+// Total counts every endpoint, ready or not.
 type SliceFact struct {
 	Namespace, Service string
 	Ports              []SlicePort
 	Ready              map[string]int
+	Total              int
 }
 
 // stripService keeps only the identity, type and ports of a Service.
@@ -106,7 +116,7 @@ func sliceFact(es *discoveryv1.EndpointSlice) SliceFact {
 			ready++
 		}
 	}
-	f := SliceFact{Namespace: es.Namespace, Service: es.Labels[discoveryv1.LabelServiceName], Ready: make(map[string]int, len(es.Ports))}
+	f := SliceFact{Namespace: es.Namespace, Service: es.Labels[discoveryv1.LabelServiceName], Ready: make(map[string]int, len(es.Ports)), Total: len(es.Endpoints)}
 	for _, p := range es.Ports {
 		var name string
 		if p.Name != nil {
