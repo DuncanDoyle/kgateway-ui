@@ -3,6 +3,8 @@ package health
 import (
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -21,8 +23,8 @@ const (
 	coreGroup = "core"
 	// refServiceMissingMessage is explanation 2: namespace/name.
 	refServiceMissingMessage = "Service `%s` does not exist."
-	// refServicePortMessage is explanation 3: namespace/name and the port; the Service's ports are in the evidence.
-	refServicePortMessage = "Service `%s` has no port %d."
+	// refServicePortMessage is explanation 3: namespace/name, the port, the Service's ports.
+	refServicePortMessage = "Service `%s` has no port %d (ports: %s)."
 )
 
 // refRule is how a ResolvedRefs=False condition maps to 013 or 014.
@@ -365,13 +367,15 @@ func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []written
 	ev.Candidates = []RefLocation{hit.RefLocation}
 	f.Evidence = append(f.Evidence, hit.Ref)
 	if hitSvc == nil {
-		ev.Explanation, f.Message = RefExplainServiceMissing, fmt.Sprintf(refServiceMissingMessage, name)
+		ev.Explanation, f.Detail = RefExplainServiceMissing, fmt.Sprintf(refServiceMissingMessage, name)+" "+f.Detail
 		return
 	}
-	for _, p := range hitSvc.Ports {
+	ports := make([]string, len(hitSvc.Ports))
+	for i, p := range hitSvc.Ports {
+		ports[i] = strconv.Itoa(int(p.Port))
 		ev.Ports = append(ev.Ports, p.Port)
 	}
-	ev.Explanation, f.Message = RefExplainServicePort, fmt.Sprintf(refServicePortMessage, name, hit.port)
+	ev.Explanation, f.Detail = RefExplainServicePort, fmt.Sprintf(refServicePortMessage, name, hit.port, strings.Join(ports, ", "))+" "+f.Detail
 }
 
 // service returns the cached Service r names, or nil.

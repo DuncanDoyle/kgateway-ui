@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1518,8 +1520,8 @@ func TestServiceExplanationsAndPortFixAtTheAPI(t *testing.T) {
 		hidden      bool
 	}{
 		{"missing", nil, nil, health.RefExplainServiceMissing, "Service `shop/cart` does not exist.", false, false},
-		{"two ports", cartService(80, 443), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080.", false, false},
-		{"one port", cartService(80), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080.", true, false},
+		{"two ports", cartService(80, 443), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80, 443).", false, false},
+		{"one port", cartService(80), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80).", true, false},
 		{"hidden Service", cartService(80), hideServices, "", "", false, true},
 	}
 	for _, tc := range cases {
@@ -1535,13 +1537,17 @@ func TestServiceExplanationsAndPortFixAtTheAPI(t *testing.T) {
 			h.at(t, testutil.Now)
 			d := fixDetail(t, h.srv, health.CodeRefUnresolved, "shop", "r")
 			if tc.hidden {
-				if !d.Finding.EvidenceRestricted || d.Evidence != nil || d.SuggestedFix != nil || strings.Contains(d.Finding.Detail, "Service `") || strings.Contains(d.Finding.Message, "ports") {
+				if !d.Finding.EvidenceRestricted || d.Evidence != nil || d.SuggestedFix != nil || strings.Contains(d.Finding.Detail, "has no port") || strings.Contains(d.Finding.Message, "has no port") || strings.Contains(d.Finding.Message, "does not exist") || strings.Contains(d.Finding.Detail, "does not exist") {
 					t.Fatalf("want evidenceRestricted without evidence or fix: %+v", d)
+				}
+				rows, _ := json.Marshal(get[Page[FindingRow]](t, h.srv, findingsBase+"?code="+health.CodeRefUnresolved+"&namespace=shop", http.StatusOK))
+				if bytes.Contains(rows, []byte("does not exist")) || bytes.Contains(rows, []byte("has no port")) {
+					t.Fatalf("row leaks the Service explanation: %s", rows)
 				}
 				return
 			}
 			ev, ok := d.Evidence.(*health.RefsEvidence)
-			if !ok || ev.Explanation != tc.explanation || d.Finding.Message != tc.detail || (d.SuggestedFix != nil) != tc.fix {
+			if !ok || ev.Explanation != tc.explanation || !strings.HasPrefix(d.Finding.Detail, tc.detail) || d.Finding.Message != "Backend not found" || (d.SuggestedFix != nil) != tc.fix {
 				t.Fatalf("evidence %#v detail %q fix %+v", d.Evidence, d.Finding.Detail, d.SuggestedFix)
 			}
 			if tc.fix {

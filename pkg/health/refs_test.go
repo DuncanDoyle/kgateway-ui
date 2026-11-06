@@ -459,8 +459,8 @@ func TestRouteRefServiceExplanations(t *testing.T) {
 		ports       []int32
 	}{
 		{"missing", nil, &ok, []map[string]any{ref(80)}, RefExplainServiceMissing, "Service `shop/cart` does not exist.", nil},
-		{"no such port", []cache.ServiceFact{two}, &ok, []map[string]any{ref(8080)}, RefExplainServicePort, "Service `shop/cart` has no port 8080.", []int32{80, 443}},
-		{"one-port Service", []cache.ServiceFact{one}, &ok, []map[string]any{ref(8080)}, RefExplainServicePort, "Service `shop/cart` has no port 8080.", []int32{80}},
+		{"no such port", []cache.ServiceFact{two}, &ok, []map[string]any{ref(8080)}, RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80, 443).", []int32{80, 443}},
+		{"one-port Service", []cache.ServiceFact{one}, &ok, []map[string]any{ref(8080)}, RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80).", []int32{80}},
 		{"port exists", []cache.ServiceFact{two}, &ok, []map[string]any{ref(80)}, RefExplainController, "", nil},
 		{"no port written", []cache.ServiceFact{two}, &ok, []map[string]any{{"name": "cart"}}, RefExplainController, "", nil},
 		{"missing, no port written", nil, &ok, []map[string]any{{"name": "cart"}}, RefExplainServiceMissing, "Service `shop/cart` does not exist.", nil},
@@ -488,12 +488,12 @@ func TestRouteRefServiceExplanations(t *testing.T) {
 				t.Fatalf("explanation %q ports %v, want %q %v", ev.Explanation, ev.Ports, tc.explanation, tc.ports)
 			}
 			if tc.detail == "" {
-				if len(f.Evidence) != 0 || strings.Contains(f.Message, "Service `") || ev.Attributed && tc.name == "missing beside a Backend ref" {
+				if len(f.Evidence) != 0 || strings.Contains(f.Detail, "Service `") || ev.Attributed && tc.name == "missing beside a Backend ref" {
 					t.Fatalf("controller explanation names the Service: %+v", f)
 				}
 				return
 			}
-			if f.Message != tc.detail || strings.Contains(f.Detail, "Service `") || !ev.Attributed ||
+			if !strings.HasPrefix(f.Detail, tc.detail) || f.Message != "Backend not found" || !ev.Attributed ||
 				!reflect.DeepEqual(f.Evidence, []objects.Ref{svc("shop", "cart")}) {
 				t.Fatalf("detail %q message %q evidence %+v attributed %v", f.Detail, f.Message, f.Evidence, ev.Attributed)
 			}
