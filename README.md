@@ -49,7 +49,7 @@ Flags:
 
 ## What it reads
 
-- **Read-only RBAC.** The ClusterRole grants only `get`, `list` and `watch`: Gateway API kinds, all `gateway.kgateway.dev` kinds, namespaces, pods, Deployments, Warning Events, Gateway API CRD metadata, and Services and EndpointSlices. Each of the last three has a chart toggle. `diagnostics.controllerLogs` (off by default) adds `get` on `pods/log` in the controller namespace.
+- **Read-only RBAC.** The ClusterRole grants only `get`, `list` and `watch`: Gateway API kinds, all `gateway.kgateway.dev` kinds, namespaces, pods, Deployments, Warning Events, Gateway API CRD metadata, ReferenceGrants, and Services and EndpointSlices. Each of the last three has a chart toggle. `diagnostics.controllerLogs` (off by default) adds `get` on `pods/log` in the controller namespace.
 - **No Secrets, no ConfigMaps, no `*/proxy`, no `pods/portforward`.**
 - **Controller metrics on port 9092.** In-cluster, the UI scrapes the controller pods directly. If a NetworkPolicy blocks that, the UI reports the signal as unavailable instead of green. Locally, it goes through the pods/proxy API with your kubeconfig's permissions.
 
@@ -170,6 +170,22 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntrie
 
 ## Upgrade notes
 
+### Backends and kgateway 2.5 (sub-phase 3.4)
+
+- New finding codes:
+  - KGWUI-023 `backend-no-ready-endpoints` (warning): a route's core Service backend has no ready endpoint on the port it names for 30 s. Only refs the controller resolved count.
+  - KGWUI-024 `xds-config-withheld` (kgateway 2.5 only): proxies withheld from config updates (error), or config released before every cluster was ready (warning). On 2.3 and 2.4 it reads "Not available on this version".
+- KGWUI-013 explains a missing Service or a missing port, and suggests the port when the Service has exactly one. KGWUI-014 keeps the ReferenceGrant explanation.
+- The UI now reads Services and EndpointSlices (`diagnostics.endpoints`, on by default). Both watches are cluster-wide and keep about 250 bytes per object. When the toggle is off, denied or failing, 023 reads "not available".
+- kgateway 2.5 has its own rule set. Policy targets come from the controller's `TargetNotFound`, so the UI's computed 016 is off there. The controller version comes from `kgateway_build_info` when it reports one.
+- DirectResponse, GatewayExtension and ReferenceGrant are listed and shown. The UI does not judge them, and denied access to them does not affect the install's state. The ClusterRole gains `referencegrants`.
+- `pkg/cache` gains `Cache.Wait()`, which returns once every goroutine `Start` launched has exited. `pkg/setup.Options` gains `NoEndpoints`.
+
+For downstream builds:
+
+- A rule set that wraps the 2.5 rule set must forward `computed.TargetStatusReporter`, or 016 falls back to the controller's 002s.
+- A process provider that observes no Pods now reports its checks as "Not observed".
+
 ### Health overview (sub-phase 3.2)
 
 - KGWUI-001 is re-specified. It is one finding per Gateway, with the rejected xDS types as evidence. Only the controller's `rejects_active` gauge raises it; proxy stats add evidence. When a reject disappears during a controller restart, the `xDS rejects` check stays pending for 60 s, so the install reads unknown, not healthy.
@@ -183,7 +199,7 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntrie
   - KGWUI-026 `proxy-disconnected`: a Ready proxy lost its controller connection for 60 s.
 - New watches: proxy Pods, Warning Events on controller and proxy Pods, and Gateway API CRD metadata. The UI also reads Envoy stats from each proxy Pod on port 9091, so the UI Pod must reach that port.
 - Each input has a chart toggle and a flag: `diagnostics.events` (`--diagnostics-events`), `diagnostics.crds` (`--diagnostics-crds`) and `diagnostics.proxyStats` (`--diagnostics-proxy-stats`), all on by default. When one is off, denied or failing, its checks read "not available" with the reason, and the install state does not change. `/meta` lists each running input under `capabilities`.
-- `diagnostics.endpoints` (on) grants Services and EndpointSlices; no check reads them until a later release. `diagnostics.controllerLogs` (off) adds a `pods/log` Role in each of `diagnostics.controllerLogsNamespaces`; the UI then reads controller logs for derived signals (see [docs/findings.md](docs/findings.md)). It keeps fixed fields only and never stores or shows log text.
+- `diagnostics.endpoints` (on) grants Services and EndpointSlices; KGWUI-023 reads them from 3.4. `diagnostics.controllerLogs` (off) adds a `pods/log` Role in each of `diagnostics.controllerLogsNamespaces`; the UI then reads controller logs for derived signals (see [docs/findings.md](docs/findings.md)). It keeps fixed fields only and never stores or shows log text.
 - A `since` the UI derives, for KGWUI-001 and the new codes, is when the UI first saw the problem. It resets when the UI restarts, except that with controller logs on, KGWUI-001 keeps a `since` from the last 15 minutes of logs.
 - New endpoints: `GET /api/v1/installs/{id}/diagnostics` (the verdict, up to 10 ranked groups, the process and data-plane summaries) and `GET /api/v1/installs/{id}/processes` (the controller's processes and a page of Gateways' proxies). The Gateway detail gains `dataPlane` and `proxies`; overview Gateway rows gain `dataPlane`.
 
