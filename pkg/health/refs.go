@@ -306,7 +306,8 @@ func (in Input) refsFinding(u *unstructured.Unstructured, cond metav1.Condition,
 			delegationCondition(&f, u, cond)
 		}
 	}
-	if len(bad) == 0 && listener == "" && attributable {
+	// Explanations 2 and 3 are 013's: a 014 keeps the grant diagnosis (§7.3).
+	if len(bad) == 0 && listener == "" && attributable && rule == refUnresolved {
 		in.serviceExplanation(&f, ev, field)
 	}
 	ev.Attributed = attributable && len(ev.Candidates) == 1

@@ -1558,3 +1558,34 @@ func TestServiceExplanationsAndPortFixAtTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// Codex 3.4 #1: Service explanations are 013's only. A 014 keeps the grant
+// explanation and fix whether the Service is missing or has another port.
+func TestRefNotPermittedKeepsGrantBesideServices(t *testing.T) {
+	crossNS := map[string]any{"name": "cart", "namespace": "store", "port": int64(8080)}
+	storeCart := cartService(80)
+	storeCart.Namespace, storeCart.UID = "store", "svc-store-cart"
+	for _, tc := range []struct {
+		name string
+		svc  *corev1.Service
+	}{{"missing", nil}, {"one other port", storeCart}} {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := world(refsRoute("RefNotPermitted", crossNS))
+			want := 0
+			if tc.svc != nil {
+				objs, want = append(objs, tc.svc), 1
+			}
+			h := newHarness(t, setup{endpoints: true, catalog: fixCatalog(nil), rulesFor: computedtest.NoViews}, objs...)
+			h.awaitCache(t, "Services", func(s *cache.Snapshot) bool { return s.Access[cache.ServicesGVR].OK && len(s.Services) == want })
+			h.at(t, testutil.Now)
+			d := fixDetail(t, h.srv, health.CodeRefNotPermitted, "shop", "r")
+			ev, ok := d.Evidence.(*health.RefsEvidence)
+			if !ok || ev.Explanation != health.RefExplainController || strings.Contains(d.Finding.Detail, "Service `store/cart`") {
+				t.Fatalf("want the grant explanation: evidence %#v detail %q", d.Evidence, d.Finding.Detail)
+			}
+			if d.SuggestedFix == nil || !d.SuggestedFix.Create || d.SuggestedFix.Target.Kind != "ReferenceGrant" {
+				t.Fatalf("want the grant fix, got %+v", d.SuggestedFix)
+			}
+		})
+	}
+}

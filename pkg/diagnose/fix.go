@@ -65,7 +65,7 @@ func Fix(f *health.Finding) *SuggestedFix {
 			return nil
 		}
 		return groupFix(*f.Resource, c, *ev.Group)
-	case ev.Explanation == health.RefExplainServicePort:
+	case ev.Explanation == health.RefExplainServicePort && f.Code == health.CodeRefUnresolved:
 		if len(ev.Ports) != 1 {
 			return nil
 		}
