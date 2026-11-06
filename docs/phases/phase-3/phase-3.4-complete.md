@@ -49,7 +49,7 @@ None.
   - the forbidden-terms check over the added lines.
 - The Codex fixes ([`83ef10d`](https://github.com/DuncanDoyle/kgateway-ui/commit/83ef10d) … [`5e88ef9`](https://github.com/DuncanDoyle/kgateway-ui/commit/5e88ef9)) passed vet, race tests and lint.
 - `make bench` on [`31e97db`](https://github.com/DuncanDoyle/kgateway-ui/commit/31e97db) (the final code), reference mode, under `caffeinate -s` with no sleep in the run: all gates pass. Record: `bench/3.4.txt`. An earlier run was void: the Mac slept with the lid closed (`caffeinate -i` does not stop that).
-- kind e2e on [`ded2bef`](https://github.com/DuncanDoyle/kgateway-ui/commit/ded2bef): v2.5.0 / v1.7.0, v2.4.7 / v1.6.1 and v2.3.11 / v1.5.1 all pass, Go ok and Playwright 64 passed each. The Codex fixes came after this run and are covered by unit and API tests only.
+- kind e2e on [`3d7698e`](https://github.com/DuncanDoyle/kgateway-ui/commit/3d7698e) (the final code, Codex fixes included): v2.5.0 / v1.7.0, v2.4.7 / v1.6.1 and v2.3.11 / v1.5.1 all pass, Go ok and Playwright 64 passed each, no reruns.
 - A real 2.5.0 `flip_release` capture under `REFERENCED` xDS scoping ([`acd3e7a`](https://github.com/DuncanDoyle/kgateway-ui/commit/acd3e7a)); the 024 warning is tested on it.
 - `/ui-loop` on the 023 finding page, on kind v2.4.7, in both themes.
 
