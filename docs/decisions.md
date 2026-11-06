@@ -1005,3 +1005,25 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** `TestBudgetHeap` gates at 48 MiB. The 3.4 bench is re-run after the shrink. OS memory (275.5 of 288 MiB) is also tight and benefits from the shrink.
 
 **Alternatives:** Shrink only and keep 40 MiB; raise the gate without shrinking.
+
+## D-058 — Sub-phase 3.4 as built: deviations from the design (2026-11-06, phase 3)
+**Status:** proposed 2026-11-06, for the user's confirmation
+
+**Context:** 3.4 (brief `phases/phase-3/phase-3.4-brief.md`) shipped with these differences from design and plan. Each was ruled during the work (ledger rulings in brackets).
+
+**Decision:**
+1. KGWUI-023 has no proxy membership evidence (plan Task 76) [R118]. It needs a forward Service-port-to-Envoy-cluster mapping, which mirrors controller naming. It comes back once a verified, port-aware reverse mapping exists (xdsview `origin`, UI Phase 9).
+2. KGWUI-024 is tested on synthesised fixtures in the GA metric format (names and labels confirmed at the `v2.5.0` tag). The 2.5 e2e row checks that 024 is available with no finding; it has no withheld case (plan Task 86) [R130]. kind cannot produce the translation lag a withheld client needs.
+3. 024's availability marker is any series of a 2.5 per-client family or of `kgateway_build_info`, not the withheld and bounded families themselves: a healthy 2.5 controller exports none of those (§8.6). Each signal has its own evidence.
+4. `kgateway_build_info`'s `version`, when it parses as a version, is the controller version for the install header, 022 and rule-set selection. A value that does not parse ("undefined") is ignored. Replicas that disagree keep the last agreed version [R132–R134].
+5. ReferenceGrant read access returns to the ClusterRole, reversing D-017 item 5 for that kind (D-056). The CRD read stays off.
+6. DirectResponse, GatewayExtension and ReferenceGrant are list-only: listed and shown, never judged, and outside `cluster access`, `Synced` and `Settled` [R124, R125]. kgateway writes status on an attached DirectResponse; judging it belongs to Phase 5 (Policies).
+7. On 2.5, a `targetSelector` that matches nothing shows 003, not 016 (§7.6). kgateway calls an empty selector valid and never judges selectors.
+8. 023 evidence counts the larger address family of a dual-stack Service, and a port number on both TCP and UDP matches the TCP port.
+9. New exported API: `computed.TargetStatusReporter` and `Selection.TargetStatusReporter()` (user, 2026-11-06). A rule set that wraps `kgw25` must forward it.
+10. On 2.5, KGWUI-018 has no status-sync count: the controller no longer exports `status_syncs_total` (kgateway #14519). 018 already treats the family as absent.
+11. A controller whose version cannot be read, from the tag or from build_info, still selects the 2.4 rule set, as before 3.4.
+
+**Consequences:** design §7.6, §8.6 and plan Task 76 state the as-built behaviour. Items 1 and 6 are carried to the phase review.
+
+**Alternatives:** n/a.

@@ -294,7 +294,7 @@ Until 2.5.0 GA ships and 3.4 adds its rule set, a 2.5 controller runs on the 2.4
   - Every other shape (several targets, selectors, ancestors shared by several targets) is "not verified": the computed 016 is still shown, labelled, and no KGWUI-012 is raised.
   - What ancestors kgateway writes per target kind is observed on 2.3.11 and 2.4.7 and recorded in the `computed-rules.md` section before the rule is implemented.
 - An unknown discovery scope makes the rule unknown, as in D-024.
-- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5).
+- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5). The controller never judges `targetSelectors`, so on 2.5 a selector that matches nothing shows 003, not 016 (D-058). A rule set that wraps `kgw25` forwards `computed.TargetStatusReporter`.
 
 ### 7.7 Suggested fixes (user, 2026-10-29)
 
@@ -386,8 +386,8 @@ The copy also says: "Log lines and admin output can contain configuration values
 kgateway `main` and `v2.5.0-rc.1` export per-client publication metrics with labels `gateway` and `namespace` (`main` metrics doc, "Per-client xDS publication metrics"). Where present **(our call)**:
 - `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"} > 0` → KGWUI-024 **error**: "Proxies get no config updates, because referenced clusters are missing". The doc says a withheld client gets no updates at all, certificate rotations included.
 - An increase of `kgateway_xds_snapshot_perclient_bounded_publishes_total{mode=~"flip_release|warm_release|carry_expired"}` in the last 15 min → KGWUI-024 **warning**: "Some routes fail: config was released before every cluster was ready". The doc calls these the modes to alert on.
-- The family's presence decides availability, not the version string. On 2.3 and 2.4 the check reports "not available on this version" in "What was checked" and never turns the install unknown (the check is not required, §7.1).
-- kgateway 2.5 joins the support matrix at GA, and 024 ships in 3.4 once 2.5.0 GA is out **(user, 2026-10-29)**. The family names and labels are re-checked against the GA tag before 3.4 ships.
+- Presence decides availability, not the version string: any series of a 2.5 per-client family or of `kgateway_build_info` (D-058). A healthy 2.5 controller exports no withheld or bounded-publish series. On 2.3 and 2.4 the check reports "not available on this version" in "What was checked" and never turns the install unknown (the check is not required, §7.1).
+- kgateway 2.5 joins the support matrix at GA, and 024 ships in 3.4 once 2.5.0 GA is out **(user, 2026-10-29)**. The family names and labels are re-checked against the GA tag before 3.4 ships (done, Task 83). Each of the two signals has its own evidence. When present and parseable, `kgateway_build_info`'s `version` is the controller version for the header, 022 and rule-set selection (D-058).
 
 ### 8.7 Upstream proposal
 

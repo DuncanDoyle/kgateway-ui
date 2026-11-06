@@ -1029,7 +1029,7 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 
 **Files:** Create `pkg/health/endpoints.go`, `pkg/health/endpoints_test.go`; Modify `pkg/diagnose/group.go` ("Empty backend"), `pkg/proxystats/collector.go` (membership on demand), `pkg/api/findings.go` (evidence).
 
-**Interfaces:** `CodeBackendNoReadyEndpoints = "KGWUI-023"` (warning) on the Service, Key the port as the backendRef wrote it; rule of §11 (core Service, weight > 0 with unset = 1, a current `ResolvedRefs=True` from this install on that parent, not `ExternalName`, no ready endpoint for that port), held 30 s per Service port in the Store; `EndpointsEvidence{Service, Port, Ready, Total, Slices}`. Membership on demand: one Ready proxy per Gateway, regex naming only the needed clusters, cached 10 s; shown as evidence only.
+**Interfaces:** `CodeBackendNoReadyEndpoints = "KGWUI-023"` (warning) on the Service, Key the port as the backendRef wrote it; rule of §11 (core Service, weight > 0 with unset = 1, a current `ResolvedRefs=True` from this install on that parent, not `ExternalName`, no ready endpoint for that port), held 30 s per Service port in the Store; `EndpointsEvidence{Service, Port, Ready, Total, Slices}`. Membership on demand was removed in 3.4 (D-058): it needs a forward Service-to-cluster name mapping.
 
 - [ ] **Step 1: Failing tests** zero ready; unset ready; `ExternalName`; weight 0; `ResolvedRefs=False`; delegation and mirror refs (none); 29 s and 31 s; endpoints off → not available, install not unknown. **Step 2: Implement, run, commit** `feat(health): backends with no ready endpoints`.
 
