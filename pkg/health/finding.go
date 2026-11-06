@@ -212,7 +212,9 @@ func (in Input) routeParents(u *unstructured.Unstructured) []objects.RouteParent
 }
 
 // firstSeen returns when the grace period for u's current generation started.
-func (in Input) firstSeen(u *unstructured.Unstructured) time.Time { return firstSeenBy(in.FirstSeen, u) }
+func (in Input) firstSeen(u *unstructured.Unstructured) time.Time {
+	return firstSeenBy(in.FirstSeen, u)
+}
 
 // firstSeenBy is seen(u), or u's creation time when seen is nil.
 func firstSeenBy(seen func(*unstructured.Unstructured) time.Time, u *unstructured.Unstructured) time.Time {
