@@ -225,10 +225,11 @@ func runContext(in Input, c Check, inputs InputSet, rt Runtime, outputs map[stri
 		st = NewStore()
 	}
 	ctx := RunContext{Input: in, State: st, sink: &runSink{}, inputs: inputs, outputs: outputs, collected: rt.Collected}
-	sink, base := ctx.sink, in
+	// The closure captures only what it reads, not a heap copy of in.
+	sink, seen, now := ctx.sink, in.FirstSeen, in.Now
 	ctx.FirstSeen = func(u *unstructured.Unstructured) time.Time {
-		t := base.firstSeen(u)
-		if end := t.Add(Grace); in.Now.Before(end) { // in grace while now − t < Grace
+		t := firstSeenBy(seen, u)
+		if end := t.Add(Grace); now.Before(end) { // in grace while now − t < Grace
 			if sink.wake.IsZero() || end.Before(sink.wake) {
 				sink.wake = end
 			}
