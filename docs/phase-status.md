@@ -15,12 +15,19 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) — closed 2026-11-04, phases/phase-3/phase-3.2-complete.md
 - [x] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73, 71a) — closed 2026-11-05, phases/phase-3/phase-3.3-complete.md
 - [x] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87, 78a, 78b) — closed 2026-11-06, phases/phase-3/phase-3.4-complete.md
-- [ ] Q9 Phase review (Codex, `reviews/phase-codex.md`) and stabilization ← NEXT
+- [x] Q9 Phase review (Codex) — `reviews/phase-codex.md`, triaged 2026-11-06: 5 accepted, 1 for the user
+- [ ] Q10 Stabilization 3.5 (proposed; the user starts it) ← NEXT
+  - [ ] S1 (P2) Proxy-stat Envoy names reach restricted viewers through the namer seam — src: reviews/phase-codex.md#2
+  - [ ] S2 (P2) A list-only kind change raises KGWUI-008 through `kinds/monitor.go` — src: reviews/phase-codex.md#3
+  - [ ] S3 (P2) KGWUI-024 missing from the processes and data-plane summaries — src: reviews/phase-codex.md#4
+  - [ ] S4 (P3) The resource-status check reads Services without declaring them — src: reviews/phase-codex.md#5
+  - [ ] S5 (P4) 023 attribution is quadratic in backend fan-in — src: reviews/phase-codex.md#6
+  - [ ] S6 (P3) 015 group ID names the policy for restricted viewers: ordinal grouping or a rule 11 amendment (user decides) — src: reviews/phase-codex.md#1
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
 - [x] design+plan cross-model review + triage: docs/phases/phase-3/reviews/design-codex.md
-- [ ] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
+- [x] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
