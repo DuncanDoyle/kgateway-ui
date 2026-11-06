@@ -161,12 +161,16 @@ func TestClusterRoleCoversBackends(t *testing.T) {
 	}
 }
 
-// TestClusterRoleOmitsUnreadKinds: nothing reads ReferenceGrants (D-017 §5).
-func TestClusterRoleOmitsUnreadKinds(t *testing.T) {
+// TestClusterRoleCoversListOnlyKinds: ReferenceGrants, DirectResponses and
+// GatewayExtensions are listed and shown, so they are readable (D-056).
+func TestClusterRoleCoversListOnlyKinds(t *testing.T) {
 	cr := clusterRole(t)
-	for _, v := range []string{"get", "list", "watch"} {
-		if grants(cr.Rules, "gateway.networking.k8s.io", "referencegrants", v) {
-			t.Errorf("ClusterRole must not grant %s on referencegrants", v)
+	for _, g := range []schema.GroupResource{{Group: "gateway.networking.k8s.io", Resource: "referencegrants"},
+		{Group: "gateway.kgateway.dev", Resource: "directresponses"}, {Group: "gateway.kgateway.dev", Resource: "gatewayextensions"}} {
+		for _, v := range []string{"get", "list", "watch"} {
+			if !grants(cr.Rules, g.Group, g.Resource, v) {
+				t.Errorf("ClusterRole does not grant %s on %s", v, g)
+			}
 		}
 	}
 }

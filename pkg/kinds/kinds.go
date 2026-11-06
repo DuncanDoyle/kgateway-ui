@@ -34,6 +34,9 @@ const (
 	// shows. They are neither attributed to Gateways nor counted by the
 	// controller's managed-resource gauge.
 	CategoryBackend Category = "backend"
+	// CategoryReferenceGrant marks ReferenceGrants: listed and shown, never
+	// evaluated to decide whether a reference resolves.
+	CategoryReferenceGrant Category = "referencegrant"
 )
 
 // Descriptor describes a kind the UI can watch. Versions are in preference order.
@@ -45,6 +48,9 @@ type Descriptor struct {
 	Namespaced  bool     `json:"namespaced"`
 	Category    Category `json:"category"`
 	DisplayName string   `json:"displayName"`
+	// ListOnly kinds are listed and shown per install scope. No install owns
+	// them and no check expects controller status on them.
+	ListOnly bool `json:"-"`
 }
 
 // Served is a Descriptor resolved to the version the cluster serves.

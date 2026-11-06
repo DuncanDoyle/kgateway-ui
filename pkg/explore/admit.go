@@ -6,6 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
 
@@ -71,8 +72,10 @@ func (b *builder) admit(ix *Index) map[objects.Ref]Admission {
 				m[objects.RefOf(u)] = Admission{Owned: true}
 			}
 		}
-		for _, p := range o.Policies {
-			m[objects.RefOf(p.Obj)] = Admission{Owned: true}
+		for _, ps := range [][]install.OwnedObject{o.Policies, o.Listed} {
+			for _, p := range ps {
+				m[objects.RefOf(p.Obj)] = Admission{Owned: true}
+			}
 		}
 	}
 	ownedRoute := func(ref objects.Ref) bool { id, ok := ix.Row(ref); return ok && ix.Routes[id].Owned }

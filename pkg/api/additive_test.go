@@ -21,8 +21,8 @@ var appended = map[string]struct {
 	Values []string
 }{
 	"body.checks": {"name", []string{"backend status", "process restarts", "probe failures", "stuck rollouts", "version skew", "proxy config warming", "proxy connection", "computed views", "status progress", "backend endpoints"}},
-	"body.counts": {"kind", []string{"Backend"}},
-	"body.kinds":  {"kind", []string{"Backend"}},
+	"body.counts": {"kind", []string{"Backend", "DirectResponse", "ReferenceGrant"}},
+	"body.kinds":  {"kind", []string{"Backend", "DirectResponse", "GatewayExtension", "ReferenceGrant"}},
 }
 
 // additiveExceptions are the scalar changes D-030 permits, per fixture and

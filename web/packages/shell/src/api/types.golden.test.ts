@@ -202,6 +202,7 @@ const category = {
     workload: 1,
     parameters: 1,
     backend: 1,
+    referencegrant: 1,
   },
 } as const;
 const delegationRefEnums = {

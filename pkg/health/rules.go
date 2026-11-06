@@ -119,7 +119,7 @@ func (in Input) namedPolicy(text string) *objects.Ref {
 // policyKind reports whether group and kind are a policy kind this UI serves.
 func (in Input) policyKind(group, kind string) bool {
 	for _, s := range kinds.ByCategory(in.Served, kinds.CategoryPolicy) {
-		if s.Group == group && s.Kind == kind {
+		if s.Group == group && s.Kind == kind && !s.ListOnly {
 			return true
 		}
 	}

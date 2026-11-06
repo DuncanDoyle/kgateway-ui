@@ -128,3 +128,33 @@ func TestUpstreamHasBackend(t *testing.T) {
 	}
 	t.Fatalf("upstream kinds have no %s/%s", want.Group, want.Kind)
 }
+
+// DirectResponse, GatewayExtension and ReferenceGrant come after Backend, so
+// existing kind lists only gain them at the end. They are listed, never
+// judged for controller status. Versions are the ones served by kgateway
+// v2.3.11, v2.4.7 and v2.5.0 and Gateway API v1.5.1, v1.6.1 and v1.7.0.
+func TestUpstreamHasListOnlyKinds(t *testing.T) {
+	want := []Descriptor{
+		{Group: "gateway.kgateway.dev", Kind: "DirectResponse", Resource: "directresponses", Versions: []string{"v1alpha1"},
+			Namespaced: true, Category: CategoryPolicy, DisplayName: "DirectResponses", ListOnly: true},
+		{Group: "gateway.kgateway.dev", Kind: "GatewayExtension", Resource: "gatewayextensions", Versions: []string{"v1alpha1"},
+			Namespaced: true, Category: CategoryParameters, DisplayName: "GatewayExtensions", ListOnly: true},
+		{Group: "gateway.networking.k8s.io", Kind: "ReferenceGrant", Resource: "referencegrants", Versions: []string{"v1", "v1beta1"},
+			Namespaced: true, Category: CategoryReferenceGrant, DisplayName: "ReferenceGrants", ListOnly: true},
+	}
+	got := Upstream()
+	if !reflect.DeepEqual(got[len(got)-len(want):], want) {
+		t.Fatalf("the last upstream kinds are %+v, want %+v", got[len(got)-len(want):], want)
+	}
+	if got[len(got)-len(want)-1].Kind != "Backend" {
+		t.Fatalf("Backend must precede them, got %s", got[len(got)-len(want)-1].Kind)
+	}
+	for _, d := range got[:len(got)-len(want)] {
+		if d.ListOnly {
+			t.Errorf("%s is list-only", d.Kind)
+		}
+	}
+	if CategoryReferenceGrant != "referencegrant" {
+		t.Fatalf("category %q", CategoryReferenceGrant)
+	}
+}

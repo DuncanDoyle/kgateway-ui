@@ -32,6 +32,11 @@ func Upstream() []Descriptor {
 		{Group: kgwGroup, Kind: "GatewayParameters", Resource: "gatewayparameters", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryParameters, DisplayName: "GatewayParameters"},
 		// Added after API v1: kept last so v1 kind lists only gain it at the end.
 		{Group: kgwGroup, Kind: "Backend", Resource: "backends", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryBackend, DisplayName: "Backends"},
+		// Also added after API v1. kgateway v2.3.11, v2.4.7 and v2.5.0 serve DirectResponse and GatewayExtension at
+		// v1alpha1 only; Gateway API v1.5.1, v1.6.1 and v1.7.0 serve ReferenceGrant at v1 and v1beta1.
+		{Group: kgwGroup, Kind: "DirectResponse", Resource: "directresponses", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryPolicy, DisplayName: "DirectResponses", ListOnly: true},
+		{Group: kgwGroup, Kind: "GatewayExtension", Resource: "gatewayextensions", Versions: []string{"v1alpha1"}, Namespaced: true, Category: CategoryParameters, DisplayName: "GatewayExtensions", ListOnly: true},
+		{Group: gwGroup, Kind: "ReferenceGrant", Resource: "referencegrants", Versions: []string{"v1", "v1beta1"}, Namespaced: true, Category: CategoryReferenceGrant, DisplayName: "ReferenceGrants", ListOnly: true},
 	}
 }
 

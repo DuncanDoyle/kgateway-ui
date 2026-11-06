@@ -218,6 +218,43 @@
         "versions": [
           "v1alpha1"
         ]
+      },
+      {
+        "category": "policy",
+        "displayName": "DirectResponses",
+        "group": "gateway.kgateway.dev",
+        "kind": "DirectResponse",
+        "namespaced": true,
+        "resource": "directresponses",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "parameters",
+        "displayName": "GatewayExtensions",
+        "group": "gateway.kgateway.dev",
+        "kind": "GatewayExtension",
+        "namespaced": true,
+        "resource": "gatewayextensions",
+        "version": "v1alpha1",
+        "versions": [
+          "v1alpha1"
+        ]
+      },
+      {
+        "category": "referencegrant",
+        "displayName": "ReferenceGrants",
+        "group": "gateway.networking.k8s.io",
+        "kind": "ReferenceGrant",
+        "namespaced": true,
+        "resource": "referencegrants",
+        "version": "v1",
+        "versions": [
+          "v1",
+          "v1beta1"
+        ]
       }
     ],
     "platform": "Kubernetes",

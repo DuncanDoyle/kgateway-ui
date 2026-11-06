@@ -15,7 +15,8 @@ export type Category =
   | "policy"
   | "workload"
   | "parameters"
-  | "backend";
+  | "backend"
+  | "referencegrant";
 export interface Ref {
   group: string;
   kind: string;

@@ -83,7 +83,12 @@ var deploymentKind = kinds.Served{Descriptor: kinds.Descriptor{Group: "apps", Ki
 
 // addedAfterV1 lists the served kinds registered after API v1. Meta lists them
 // after Deployment, so v1's kind list only gains elements at its end (D-016 H11).
-var addedAfterV1 = map[string]bool{kinds.KgatewayGroup + "/Backend": true}
+var addedAfterV1 = map[string]bool{
+	kinds.KgatewayGroup + "/Backend":           true,
+	kinds.KgatewayGroup + "/DirectResponse":    true,
+	kinds.KgatewayGroup + "/GatewayExtension":  true,
+	"gateway.networking.k8s.io/ReferenceGrant": true,
+}
 
 func isAddedAfterV1(k kinds.Served) bool { return addedAfterV1[k.Group+"/"+k.Kind] }
 

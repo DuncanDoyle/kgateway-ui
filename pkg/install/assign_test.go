@@ -271,3 +271,19 @@ func TestPolicyBelongsToTheInstallOwningItsAncestor(t *testing.T) {
 		t.Fatalf("b: want only the unprocessed policy and the status summary, got %v", got)
 	}
 }
+
+// List-only kinds are listed per install scope, never claimed as policies, so
+// no check expects controller status on them.
+func TestListOnlyKindsAreListedNotOwned(t *testing.T) {
+	nss := []*corev1.Namespace{testutil.Namespace("shop", map[string]string{"team": "a"}), testutil.Namespace("blog", nil)}
+	snap := snapshot(t, nss, testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.Gateway("shop", "edge", "kgateway", nil),
+		testutil.DirectResponse("shop", "dr"), testutil.DirectResponse("blog", "dr-out"),
+		testutil.GatewayExtension("shop", "ext"), testutil.ReferenceGrant("shop", "grant", "blog"), testutil.TrafficPolicy("shop", "tp"))
+	o := Assign(snap, testutil.ServedUpstream(), []Resolved{resolved("kgw/kgateway", teamA)}, nil).PerInstall["kgw.kgateway"]
+	if got := names(o.Policies); len(got) != 1 || got[0] != "shop/tp" {
+		t.Fatalf("policies: %v", got)
+	}
+	if got := names(o.Listed); len(got) != 3 {
+		t.Fatalf("listed: %v, want the in-scope DirectResponse, GatewayExtension and ReferenceGrant", got)
+	}
+}

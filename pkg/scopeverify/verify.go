@@ -156,7 +156,7 @@ func resourceLabel(k kinds.Served) string {
 		return k.Kind
 	case k.Category == kinds.CategoryListenerSet:
 		return "XListenerSet" // both ListenerSet flavours are reported under this value
-	case k.Category == kinds.CategoryPolicy && k.Group == kinds.KgatewayGroup:
+	case k.Category == kinds.CategoryPolicy && k.Group == kinds.KgatewayGroup && !k.ListOnly:
 		return k.Kind
 	}
 	return ""

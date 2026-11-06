@@ -6,7 +6,7 @@ metadata:
   labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
 rules:
   - apiGroups: [gateway.networking.k8s.io]
-    resources: [gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, backendtlspolicies, listenersets]
+    resources: [gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, backendtlspolicies, listenersets, referencegrants]
     verbs: [get, list, watch]
   - apiGroups: [gateway.networking.x-k8s.io]
     resources: [xlistenersets]

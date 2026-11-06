@@ -460,6 +460,31 @@ func Backend(ns, name string, cs []metav1.Condition) *unstructured.Unstructured 
 	return u
 }
 
+// DirectResponse builds a kgateway DirectResponse with no status.
+func DirectResponse(ns, name string) *unstructured.Unstructured {
+	u := obj("gateway.kgateway.dev/v1alpha1", "DirectResponse", ns, name)
+	u.Object["spec"] = map[string]any{"status": int64(503)}
+	return u
+}
+
+// GatewayExtension builds a kgateway GatewayExtension with no status.
+func GatewayExtension(ns, name string) *unstructured.Unstructured {
+	u := obj("gateway.kgateway.dev/v1alpha1", "GatewayExtension", ns, name)
+	u.Object["spec"] = map[string]any{"type": "ExtAuth"}
+	return u
+}
+
+// ReferenceGrant builds a ReferenceGrant that lets HTTPRoutes of fromNS use
+// Services in ns. It has no status.
+func ReferenceGrant(ns, name, fromNS string) *unstructured.Unstructured {
+	u := obj("gateway.networking.k8s.io/v1beta1", "ReferenceGrant", ns, name)
+	u.Object["spec"] = map[string]any{
+		"from": []any{map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": fromNS}},
+		"to":   []any{map[string]any{"group": "", "kind": "Service"}},
+	}
+	return u
+}
+
 // SafeGatewayLabelValue is the gateway-name label value kgateway writes: the
 // name, or for one over 63 characters its first 50 (trailing "-" trimmed), "-"
 // and the first 12 hex digits of its SHA-256.

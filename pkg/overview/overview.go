@@ -106,7 +106,7 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 				add(u)
 			}
 		}
-		for _, os := range [][]install.OwnedObject{owned.Routes, owned.Policies} {
+		for _, os := range [][]install.OwnedObject{owned.Routes, owned.Policies, owned.Listed} {
 			for _, x := range os {
 				add(x.Obj)
 			}
