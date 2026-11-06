@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import type {
   Diagnostics,
+  EndpointsEvidence,
   FindingDetail,
   FindingList,
   GatewayDetail,
@@ -20,8 +21,8 @@ import {
   processesCopy,
 } from "../packages/shell/src/copy/explorer";
 
-// The 3.2 health pages over test/e2e/fixtures/nack.yaml (Task 53) and the 3.3 analyzer pages over
-// fixtures/analyzer.yaml (Task 72). Every value asserted comes from the API response the page renders
+// The 3.2 health pages over test/e2e/fixtures/nack.yaml (Task 53), the 3.3 analyzer pages over
+// fixtures/analyzer.yaml (Task 72) and the 3.4 backend pages over fixtures/backends.yaml (Task 82). Every value asserted comes from the API response the page renders
 // (R62): the SPA shows the server's states and derives none.
 const install = "/i/kgw-a.kgateway";
 const api = "/api/v1/installs/kgw-a.kgateway";
@@ -314,5 +315,69 @@ for (const theme of themes) {
       await expect(cells.nth(2)).toHaveText((l.envoyResources ?? []).join(", "));
     }
     await shot(page, theme, "finding-logs");
+  });
+}
+
+for (const theme of themes) {
+  test(`finding page: 023 on a scaled-to-zero backend shows its Service, port and ready count (${theme.name})`, async ({
+    page,
+  }) => {
+    // setup.sh applies backends.yaml minutes before this runs, well past the 30 s hold.
+    const f = await findingOn(page, "KGWUI-023", "shop/idle");
+    const d = await fetchJSON<FindingDetail>(page, `/findings/${encodeURIComponent(f.id)}`);
+    const ev = d.evidence as EndpointsEvidence;
+    expect(ev.kind).toBe("endpoints");
+    await page.goto(`${install}/findings/${encodeURIComponent(f.id)}`);
+    await pickTheme(page, theme);
+
+    const details = page.getByRole("region", { name: listCopy.details });
+    await expect(details).toContainText((f.detail ?? "").replaceAll("`", ""));
+    // The Service opens only when the server links it; otherwise its name shows as text.
+    const svcValue = factValue(details, diagnosticsCopy.service);
+    await expect(svcValue).toHaveText("shop/idle");
+    const linked = f.resource?.link !== undefined && f.resource.link !== "none";
+    await expect(svcValue.getByRole("link")).toHaveCount(linked ? 1 : 0);
+    await expect(factValue(details, diagnosticsCopy.servicePort)).toHaveText(
+      ev.portName ? `${ev.port} (${ev.portName})` : String(ev.port),
+    );
+    await expect(factValue(details, diagnosticsCopy.ready)).toHaveText(
+      diagnosticsCopy.readyEndpoints(ev.ready, ev.total),
+    );
+    await expect(factValue(details, diagnosticsCopy.endpointSlices)).toHaveText(String(ev.slices));
+    // The affected list is the route that names the Service port.
+    const affected = page.getByRole("table", { name: findingsCopy.affected });
+    await expect(affected.getByRole("link", { name: "shop/idle", exact: true })).toHaveCount(1);
+    if (linked) {
+      const svc = svcValue.getByRole("link");
+      await svc.hover();
+      await shot(page, theme, "endpoints-link-hover", details);
+      await keyboardFocus(page, svc);
+    }
+    await shot(page, theme, "finding-endpoints");
+  });
+
+  test(`finding page: 013's one-port fix names the port and its location (${theme.name})`, async ({ page }) => {
+    const f = await findingOn(page, "KGWUI-013", "shop/wrong-port");
+    const d = await fetchJSON<FindingDetail>(page, `/findings/${encodeURIComponent(f.id)}`);
+    const fix = d.suggestedFix;
+    expect(fix?.create, "the server's fix changes the route in place").toBe(false);
+    if (!fix) return;
+    await page.goto(`${install}/findings/${encodeURIComponent(f.id)}`);
+    await pickTheme(page, theme);
+
+    const details = page.getByRole("region", { name: listCopy.details });
+    await expect(details).toContainText((f.detail ?? "").replaceAll("`", ""));
+    const section = page.getByRole("region", { name: findingsCopy.suggestedFix });
+    await expect(section).toContainText(fix.title.replaceAll("`", ""));
+    await expect(factValue(section, fixCopy.location)).toContainText(fix.path ?? "");
+    await expect(factValue(section, fixCopy.basis)).toHaveText(fix.basis.replaceAll("`", ""));
+    expect(await section.locator("pre").first().textContent()).toBe(fix.yaml);
+    // A fragment has no create command.
+    await expect(section.locator("pre")).toHaveCount(1);
+    const copy = section.getByRole("button", { name: fixCopy.copyLabel(fix.title), exact: true });
+    await copy.hover();
+    await shot(page, theme, "port-fix-hover", section);
+    await keyboardFocus(page, copy);
+    await shot(page, theme, "finding-port-fix");
   });
 }

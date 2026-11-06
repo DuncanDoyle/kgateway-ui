@@ -554,8 +554,8 @@ func TestAnalyzer(t *testing.T) {
 	t.Run("listener conflicted", testListenerConflicted)
 }
 
-// testRefUnresolved: a backendRef to a missing Service port is 013 with the controller's reason and
-// message, attributed to its one ref, with no suggested fix; it joins that Service's Missing backend group.
+// testRefUnresolved: a backendRef to a missing Service port is 013 with explanation 3 (the Service's ports)
+// before the controller's reason, attributed to its one ref, with the one-port fix; it joins that Service's Missing backend group.
 func testRefUnresolved(t *testing.T) {
 	h, f := waitFinding(t, 3*time.Minute, health.CodeRefUnresolved, "HTTPRoute", wrongPortID)
 	c := parentCond(t, wrongPortID, "ResolvedRefs")
@@ -563,25 +563,37 @@ func testRefUnresolved(t *testing.T) {
 		t.Fatalf("%s: controller wrote ResolvedRefs %+v, want False", wrongPortID, c)
 	}
 	t.Logf("controller: ResolvedRefs=False, reason %s: %s", c.Reason, c.Message)
-	if want := fmt.Sprintf("ResolvedRefs=False, reason %s: %s", c.Reason, c.Message); f.Severity != health.SeverityError || !strings.HasPrefix(f.Detail, want) {
-		t.Errorf("013 on %s: severity %s, detail %q; want error quoting %q", wrongPortID, f.Severity, f.Detail, want)
+	want := fmt.Sprintf("Service `shop/httpbin` has no port 9999 (ports: 8000). ResolvedRefs=False, reason %s: %s", c.Reason, c.Message)
+	if f.Severity != health.SeverityError || !strings.HasPrefix(f.Detail, want) {
+		t.Errorf("013 on %s: severity %s, detail %q; want error starting %q", wrongPortID, f.Severity, f.Detail, want)
 	}
 	if has(h, health.CodeConditionFalse, wrongPortID) {
 		t.Errorf("013 and 002 both on %s (D-030)", wrongPortID)
 	}
 	ev := refsOf(t, f)
 	httpbin := objects.Ref{Kind: "Service", Namespace: "shop", Name: "httpbin"}
-	want := []health.RefLocation{{Path: "spec.rules[0].backendRefs[0]", Ref: httpbin}}
-	if ev.Explanation != health.RefExplainController || !ev.Attributed || !slices.Equal(ev.Candidates, want) {
-		t.Errorf("013 on %s: evidence %+v; want the controller's explanation attributed to %+v", wrongPortID, ev, want)
+	loc := []health.RefLocation{{Path: "spec.rules[0].backendRefs[0]", Ref: httpbin}}
+	if ev.Explanation != health.RefExplainServicePort || !ev.Attributed || !slices.Equal(ev.Candidates, loc) || !slices.Equal(ev.Ports, []int32{8000}) {
+		t.Errorf("013 on %s: evidence %+v; want explanation 3 with ports [8000], attributed to %+v", wrongPortID, ev, loc)
 	}
-	// A fix comes only from the UI's own check (a group discovery serves); this one quotes the controller.
-	if d := detailOf(t, f); d.SuggestedFix != nil {
-		t.Errorf("013 on %s: fix %+v; want none", wrongPortID, d.SuggestedFix)
+	const wantYAML = "group: \"\"\nkind: Service\nname: httpbin\nnamespace: shop\nport: 8000\n"
+	fx := detailOf(t, f).SuggestedFix
+	if fx == nil || fx.Title != "Set the port to `8000`" || fx.Target.Ref != routeRef(wrongPortID) || fx.Create ||
+		fx.Path != loc[0].Path || fx.YAML != wantYAML || fx.Basis != fmt.Sprintf(diagnose.FixPortBasis, "httpbin") {
+		t.Errorf("013 on %s: fix %+v; want port 8000 at %s with YAML\n%s", wrongPortID, fx, loc[0].Path, wantYAML)
 	}
 	g := groupOf(t, f.Group)
 	if g.Code != health.CodeRefUnresolved || g.Cause == nil || g.Cause.Ref != httpbin || !affects(g, routeRef(wrongPortID)) {
 		t.Errorf("013 on %s: group %+v; want the Missing backend group of Service shop/httpbin", wrongPortID, g)
+	}
+
+	// base.yaml's shop/broken names a Service that does not exist: explanation 2, and no fix.
+	_, b := waitFinding(t, 3*time.Minute, health.CodeRefUnresolved, "HTTPRoute", "shop/broken")
+	if ev := refsOf(t, b); ev.Explanation != health.RefExplainServiceMissing || !strings.HasPrefix(b.Detail, "Service `shop/missing` does not exist. ") {
+		t.Errorf("013 on shop/broken: explanation %q, detail %q; want explanation 2", ev.Explanation, b.Detail)
+	}
+	if fx := detailOf(t, b).SuggestedFix; fx != nil {
+		t.Errorf("013 on shop/broken: fix %+v; want none", fx)
 	}
 }
 
@@ -751,6 +763,71 @@ func groupOf(t *testing.T, id string) api.GroupRow {
 // affects reports whether g lists r as affected.
 func affects(g api.GroupRow, r objects.Ref) bool {
 	return slices.ContainsFunc(g.Affected, func(a api.LinkedRef) bool { return a.Ref == r })
+}
+
+// region Backends (fixtures/backends.yaml)
+
+const idleID = "shop/idle"
+
+// idle023 is the 023 on Service shop/idle port 8000 in h, or nil.
+func idle023(h api.HealthResponse) *api.FindingDTO {
+	f := finding(h, health.CodeBackendNoReadyEndpoints, "Service", idleID)
+	if ev, _ := factsOf(f).(*health.EndpointsEvidence); ev == nil || ev.Port != 8000 {
+		return nil
+	}
+	return f
+}
+
+// scaleIdle scales shop/idle to n replicas and waits until they all roll out.
+func scaleIdle(t *testing.T, n int) {
+	t.Helper()
+	must(t, "-n", "shop", "scale", "deploy/idle", fmt.Sprintf("--replicas=%d", n))
+	waitDeployReady(t, "shop", "idle")
+}
+
+// TestBackendReadiness checks KGWUI-023 on fixtures/backends.yaml (design §11): a resolved route to a
+// Service with no ready endpoint is a warning after the hold; a ready endpoint clears it, and the hold restarts.
+func TestBackendReadiness(t *testing.T) {
+	var meta api.MetaResponse
+	get(t, "/api/v1/meta", &meta)
+	if !slices.Contains(meta.CapabilityStates, api.Capability{Name: "endpoints", State: api.CapOn}) {
+		t.Fatalf("meta: endpoints %+v, want on", meta.CapabilityStates)
+	}
+	t.Cleanup(func() { scaleIdle(t, 0) })
+
+	h := waitHealth(t, 3*time.Minute, "023 on "+idleID, func(h api.HealthResponse) bool { return idle023(h) != nil })
+	if c := parentCond(t, idleID, "ResolvedRefs"); c == nil || c.Status != "True" {
+		t.Fatalf("%s: controller wrote ResolvedRefs %+v, want True", idleID, c)
+	}
+	f := idle023(h)
+	ev := f.Facts.(*health.EndpointsEvidence)
+	if f.Severity != health.SeverityWarning || f.Message != "Requests to this backend get 503" ||
+		f.Detail != "Service `shop/idle` has no ready endpoints for port 8000." || ev.Service != "idle" || ev.Ready != 0 || ev.Total != 0 {
+		t.Errorf("023 on %s: severity %s, message %q, detail %q, evidence %+v", idleID, f.Severity, f.Message, f.Detail, ev)
+	}
+	if c := checkResult(h, "backend endpoints"); c == nil || !c.OK || c.Unavailable != "" {
+		t.Errorf("backend endpoints check %+v, want OK", c)
+	}
+	if g := groupOf(t, f.Group); g.Code != health.CodeBackendNoReadyEndpoints || !affects(g, routeRef(idleID)) {
+		t.Errorf("023 on %s: group %+v; want the Empty backend group with route %s", idleID, g, idleID)
+	}
+
+	// One ready endpoint clears it within a recompute (Review Focus 3).
+	scaleIdle(t, 1)
+	waitHealth(t, 2*time.Minute, "023 on "+idleID+" cleared", func(h api.HealthResponse) bool { return idle023(h) == nil })
+
+	// Back to zero: the hold restarts, so 023 returns no sooner than EndpointsHold after the scale-down.
+	scaled := time.Now()
+	scaleIdle(t, 0)
+	due := scaled.Add(health.EndpointsHold - time.Second)
+	waitHealth(t, 2*time.Minute, "023 on "+idleID+" after the scale-down", func(h api.HealthResponse) bool {
+		f := idle023(h)
+		if f != nil && time.Now().Before(due) {
+			t.Fatalf("023 on %s %s after the scale-down, before the hold", idleID, time.Since(scaled))
+		}
+		return f != nil
+	})
+	t.Logf("023 on %s %s after the scale-down", idleID, time.Since(scaled).Round(time.Second))
 }
 
 // region Controller log signals

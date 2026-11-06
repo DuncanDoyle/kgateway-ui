@@ -3,7 +3,7 @@
 # port-forwards the UI to 127.0.0.1:18080. Usage:
 #   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] [NACK=1] [CONTROLLER_LOGS=1] [UI_EXTRA_ARGS=...] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
-# EXPLORER=0 skips fixtures/explorer.yaml and fixtures/analyzer.yaml (the D-021 observations need a cluster without them).
+# EXPLORER=0 skips fixtures/explorer.yaml, analyzer.yaml and backends.yaml (the D-021 observations need a cluster without them).
 # NACK=1 applies fixtures/nack.yaml: Gateway infra/nack, whose proxies reject a route config and a cluster.
 # CONTROLLER_LOGS=1 installs the UI with diagnostics.controllerLogs on and its pods/log Role in kgw-a.
 # UI_EXTRA_ARGS are space-separated UI flags for the chart's extraArgs, e.g. --poll-interval=10m;
@@ -77,6 +77,7 @@ if [[ "${EXPLORER:-1}" == 1 ]]; then
   rm -rf "$d"
   kubectl apply -f test/e2e/fixtures/explorer.yaml
   kubectl apply -f test/e2e/fixtures/analyzer.yaml
+  kubectl apply -f test/e2e/fixtures/backends.yaml
 fi
 if [[ "${NACK:-}" == 1 ]]; then
   kubectl apply -f test/e2e/fixtures/nack.yaml

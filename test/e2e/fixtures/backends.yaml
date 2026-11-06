@@ -1,0 +1,23 @@
+# Backend readiness scenario (design §11), applied after analyzer.yaml. Every object carries e2e=backends.
+# 023: a route to a Service whose only Deployment is scaled to zero. TestBackendReadiness scales it up and down.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: idle, namespace: shop, labels: { e2e: backends } }
+spec:
+  replicas: 0
+  selector: { matchLabels: { app: idle } }
+  template:
+    metadata: { labels: { app: idle } }
+    spec: { containers: [{ name: httpbin, image: mccutchen/go-httpbin:v2.15.0, ports: [{ containerPort: 8080 }] }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: idle, namespace: shop, labels: { e2e: backends } }
+spec: { selector: { app: idle }, ports: [{ port: 8000, targetPort: 8080 }] }
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: idle, namespace: shop, labels: { e2e: backends } }
+spec:
+  parentRefs: [{ name: edge, namespace: infra }]
+  rules: [{ matches: [{ path: { type: PathPrefix, value: /idle } }], backendRefs: [{ name: idle, port: 8000 }] }]
