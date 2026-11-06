@@ -13,6 +13,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -436,5 +437,97 @@ func TestPolicyTargetVerifierWindow(t *testing.T) {
 				t.Fatalf("grace + %s: since %v, want %v", s.at, got[0].Since, start)
 			}
 		}
+	}
+}
+
+// rules25 is the selection a 2.5 controller gets.
+var rules25 = rulesets.Select("v2.5.0")
+
+// summary is the StatusSummary ancestor a 2.5 controller writes for a missing targetRef
+// (policy_target_status.go:294-307 at v2.5.0), with the conditions' observedGeneration.
+func summary(gen int64) testutil.PolicyAncestor {
+	acc := testutil.Cond("Accepted", metav1.ConditionFalse, "TargetNotFound")
+	acc.Message, acc.ObservedGeneration = "Gateway infra/nope not found", gen
+	att := testutil.Cond("Attached", metav1.ConditionFalse, "TargetNotFound")
+	att.Message, att.ObservedGeneration = "policy target not found", gen
+	return testutil.PolicyAncestor{Ref: objects.ParentRef{Group: "gateway.kgateway.dev", Kind: "StatusSummary", Name: "StatusSummary"},
+		Controller: testutil.Controller, Conds: []metav1.Condition{acc, att}}
+}
+
+// Design §7.6, D-020 rule 5: on kgateway-2.5 a current TargetNotFound ancestor is one
+// 016 error from status, at once, with no 002 or 003; the computed rule is off.
+func TestPolicyTargetNotFoundFromStatus(t *testing.T) {
+	tp := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, summary(1))
+	r := targetsRun(t, rules25, []*unstructured.Unstructured{tp}, 0)
+	fs := targetFindings(r, "infra/tp")
+	if len(fs) != 1 {
+		t.Fatalf("want one 016, got %+v", r.Findings)
+	}
+	f := fs[0]
+	if f.Severity != SeverityError || f.Slug != "policy-target-not-found" || f.Message != PolicyTargetNotFoundMessage ||
+		f.Since == nil || !f.Since.Equal(testutil.Old.Time) {
+		t.Fatalf("016 %+v", f)
+	}
+	for _, s := range []string{"reason TargetNotFound", "Gateway infra/nope not found", "ancestor StatusSummary"} {
+		if !strings.Contains(f.Detail, s) {
+			t.Errorf("detail %q lacks %q", f.Detail, s)
+		}
+	}
+	if strings.Contains(f.Detail, "Computed by the UI") {
+		t.Errorf("a status 016 is not computed: %q", f.Detail)
+	}
+	if has(r, CodeConditionFalse, "", "infra/tp") || has(r, CodeRouteUnattached, "", "infra/tp") {
+		t.Fatalf("016 replaces 002 and 003: %+v", r.Findings)
+	}
+}
+
+// On kgateway-2.5 a missing target the controller has not reported raises no computed
+// 016; a stale or foreign TargetNotFound is no 016 either.
+func TestPolicyTargetComputedOffOn25(t *testing.T) {
+	if rules25.PolicyTargeter() != nil {
+		t.Fatalf("%s has a PolicyTargeter", rules25.Rules.Version())
+	}
+	bare := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil)
+	r := targetsRun(t, rules25, []*unstructured.Unstructured{bare}, -Grace+time.Second, time.Hour)
+	if has(r, CodePolicyTargetNotFound, "", "") || !has(r, CodeRouteUnattached, SeverityWarning, "infra/tp") {
+		t.Fatalf("no status: want 003 only: %+v", r.Findings)
+	}
+	stale := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, summary(0))
+	stale.SetGeneration(2)
+	r = targetsRun(t, rules25, []*unstructured.Unstructured{stale}, time.Hour)
+	if has(r, CodePolicyTargetNotFound, "", "") || !has(r, CodeRouteUnattached, "", "infra/tp") {
+		t.Fatalf("stale: want 003 only: %+v", r.Findings)
+	}
+	foreign := summary(1)
+	foreign.Controller = "example.com/other"
+	r = targetsRun(t, rules25, []*unstructured.Unstructured{targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, foreign)}, time.Hour)
+	if has(r, CodePolicyTargetNotFound, "", "") {
+		t.Fatalf("foreign controller: %+v", r.Findings)
+	}
+}
+
+// One target found, one missing: the found one's ancestor stays healthy, the
+// summary is one 016, and nothing else is raised.
+func TestPolicyTargetPartlyMissingFromStatus(t *testing.T) {
+	tp := targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", ""), tRef("Gateway", "nope", "")}, nil,
+		accepted(testutil.GwRef("infra", "edge")), summary(1))
+	r := targetsRun(t, rules25, []*unstructured.Unstructured{tp}, 0)
+	var other []Finding
+	for _, f := range r.Findings {
+		if f.Resource != nil && f.Resource.String() == "infra/tp" && f.Code != CodePolicyTargetNotFound {
+			other = append(other, f)
+		}
+	}
+	if len(targetFindings(r, "infra/tp")) != 1 || len(other) != 0 {
+		t.Fatalf("want one 016 only: %+v", r.Findings)
+	}
+}
+
+// kgw24 is unchanged: the same TargetNotFound ancestor stays a 002 per condition.
+func TestPolicyTargetStatusOn24Unchanged(t *testing.T) {
+	tp := targetPolicy("infra", []map[string]any{tRef("Gateway", "edge", "")}, nil, summary(1))
+	r := targetsRun(t, rules24, []*unstructured.Unstructured{tp}, time.Hour)
+	if fs := findingsFor(r, CodeConditionFalse, "infra/tp"); len(fs) != 2 || has(r, CodePolicyTargetNotFound, "", "") {
+		t.Fatalf("2.4: want two 002, no 016: %+v", r.Findings)
 	}
 }

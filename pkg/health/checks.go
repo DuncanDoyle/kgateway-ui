@@ -480,9 +480,14 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
+			// 016 owns TargetNotFound where the rule set reads it from status (D-030).
+			tnf, fromStatus := in.statusTargetFinding(p.Obj, a.Conditions, extra, owner)
+			if fromStatus {
+				fs = append(fs, tnf)
+			}
 			// Only the freshness-checked types are judged; others may be stale.
 			for _, t := range append(slices.Clone(policyRequired), policyOptional...) {
-				if cond := objects.FindCondition(a.Conditions, t); cond != nil {
+				if cond := objects.FindCondition(a.Conditions, t); cond != nil && (!fromStatus || cond.Reason != "TargetNotFound") {
 					if sev, report := policySeverity(*cond); report {
 						add(p.Obj, sev, *cond, extra, owner)
 					}

@@ -56,7 +56,7 @@ Severity is error, with three exceptions:
 - a policy ancestor with reason `Overridden` is info;
 - a Backend whose `Accepted=False` has no `observedGeneration`, as kgateway 2.3 writes it, is a warning.
 
-A policy whose controller reports `TargetNotFound`, as kgateway `main` does, shows here as "Policy target not found". On kgateway 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
+On kgateway 2.5 a policy's `TargetNotFound` is KGWUI-016, not this finding. A rule set that does not read it from status, such as 2.4's, shows it here as "Policy target not found". On kgateway 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
 
 **Evidence.** The message is the condition's reason in plain words. The detail quotes the condition as written: type, status, reason and message, and the listener, parent or ancestor it belongs to. A parent route whose backendRefs all delegate reads "A delegating rule has no accepted child route" in place of "Backend not found".
 
@@ -262,9 +262,13 @@ There is no suggested grant for a route that delegates or is a delegation child,
 
 ## KGWUI-016
 
-`policy-target-not-found` · warning · computed by the UI
+`policy-target-not-found` · error from status on kgateway 2.5 · warning, computed by the UI, on 2.3 and 2.4
 
-**Cause.** A policy targets an object that does not exist. On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It judges five target kinds: Gateway, ListenerSet, XListenerSet, HTTPRoute and GRPCRoute. A missing target of any other kind, such as a TCPRoute or a Service, raises nothing, so no finding does not mean such a target exists. It covers three cases:
+**Cause.** A policy targets an object that does not exist.
+
+On kgateway 2.5 the controller reports it: a current ancestor `StatusSummary` with reason `TargetNotFound`. That is one error per policy, raised at once, in place of KGWUI-002. The controller checks targetRefs to Gateways, ListenerSets, routes, Services and Backends, and the `sectionName` of a Gateway, ListenerSet, HTTPRoute or GRPCRoute. It does not check selectors, so a selector that matches nothing raises no finding on 2.5. The UI computes nothing on 2.5.
+
+On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It judges five target kinds: Gateway, ListenerSet, XListenerSet, HTTPRoute and GRPCRoute. A missing target of any other kind, such as a TCPRoute or a Service, raises nothing, so no finding does not mean such a target exists. It covers three cases:
 
 - a `targetRef` names no object of that kind in the policy's namespace;
 - a `sectionName` names no listener of the Gateway or ListenerSet, or no rule of the route;
@@ -272,7 +276,7 @@ There is no suggested grant for a route that delegates or is a delegation child,
 
 It is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A judged kind that the cluster does not serve, or the UI cannot read, raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
 
-**Evidence.** The target as written, such as "targetRefs[0] Gateway `edge`", and what is missing. Most of these findings say "Not verified: the controller's status cannot confirm this." The UI can check only a policy with one targetRef: a missing Gateway, or a missing section of a Gateway or route. For those, a current ancestor the controller writes for that target raises KGWUI-012.
+**Evidence.** On 2.5, the controller's condition: its message lists the missing targets. On 2.3 and 2.4, the target as written, such as "targetRefs[0] Gateway `edge`", and what is missing. Most of these findings say "Not verified: the controller's status cannot confirm this." The UI can check only a policy with one targetRef: a missing Gateway, or a missing section of a Gateway or route. For those, a current ancestor the controller writes for that target raises KGWUI-012.
 
 **Fix.** Correct the policy's `targetRefs` or `targetSelectors`, or create the target. Check the namespace: a targetRef always looks in the policy's own namespace.
 

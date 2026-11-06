@@ -10,6 +10,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw25"
 )
 
 var minorRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.+-]|$)`)
@@ -29,8 +30,10 @@ func Select(controllerVersion string) computed.Selection {
 		return computed.Selection{Rules: kgw23.New()}
 	case major == 2 && minor == 4:
 		return computed.Selection{Rules: kgw24.New()}
-	case major > 2 || major == 2 && minor > 4:
-		return computed.Selection{Rules: kgw24.New(), Note: unverified}
+	case major == 2 && minor == 5:
+		return computed.Selection{Rules: kgw25.New()}
+	case major > 2 || major == 2 && minor > 5:
+		return computed.Selection{Rules: kgw25.New(), Note: unverified}
 	default:
 		return computed.Selection{Rules: kgw23.New(), Note: unverified}
 	}

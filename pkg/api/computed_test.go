@@ -756,7 +756,7 @@ func TestViewAMatrixThroughAPI(t *testing.T) {
 	}
 	// Every fixture that is not rule-only: rules §11.1 and §11.4 (view A),
 	// and three of §11.2 per rule set, whose view A is checked here.
-	if want := 47; ran != want {
+	if want := 70; ran != want {
 		t.Errorf("ran %d cases, want %d", ran, want)
 	}
 }
@@ -967,7 +967,7 @@ func TestDelegationMatrixThroughAPI(t *testing.T) {
 	}
 	// Three per rule set: a cut after a dropping context, a row with no
 	// contexts kept at the install cap, and a root behind a Selector.
-	if want := 6; ran != want {
+	if want := 9; ran != want {
 		t.Errorf("ran %d cases, want %d", ran, want)
 	}
 }
@@ -1799,51 +1799,110 @@ func TestComputedChildOutsideBucketsKeepsSince(t *testing.T) {
 	}
 }
 
-// Review Focus 4 (design §7.6): a v2.5.0-rc.1 controller runs on the 2.4 rule
-// set with the "newer than tested" note, and the computed 016 applies there:
-// none at grace + 29 s, then a 016 that names the rule set and the note, with no 003.
-func TestNewerThanTestedUsesComputed016(t *testing.T) {
-	const note = "Rules not yet verified for 2.5"
-	tp := testutil.TrafficPolicy("infra", "tp-missing-target")
+// missingTargetPolicy is TrafficPolicy ns/name whose one targetRef names Gateway nope.
+func missingTargetPolicy(ns, name string, ancestors ...testutil.PolicyAncestor) *unstructured.Unstructured {
+	tp := testutil.TrafficPolicy(ns, name, ancestors...)
 	if err := unstructured.SetNestedSlice(tp.Object, []any{map[string]any{
 		"group": objects.GatewayAPIGroup, "kind": "Gateway", "name": "nope"}}, "spec", "targetRefs"); err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
-	h := newHarness(t, setup{}, withControllerVersion("v2.5.0-rc.1", world(tp))...)
-	if g := get[GatewayDetail](t, h.srv, gwDetail, 200); g.RuleSet != "kgateway-2.4" {
-		t.Fatalf("ruleSet %q, want kgateway-2.4", g.RuleSet)
-	}
-	// The seeded policy's grace ended at testutil.Now - 1 s.
-	graceEnd := testutil.Now.Add(-time.Second)
-	find := func(code string) []FindingDTO {
-		var out []FindingDTO
-		for _, f := range get[HealthResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/health", 200).Findings {
-			if f.Code == code && f.Resource != nil && f.Resource.String() == "infra/tp-missing-target" {
-				out = append(out, f)
-			}
+	return tp
+}
+
+// targetNotFound is the StatusSummary ancestor a 2.5 controller writes for a missing target.
+func targetNotFound() testutil.PolicyAncestor {
+	acc := testutil.Cond("Accepted", metav1.ConditionFalse, "TargetNotFound")
+	acc.Message = "Gateway nope not found"
+	return testutil.PolicyAncestor{Ref: objects.ParentRef{Group: "gateway.kgateway.dev", Kind: "StatusSummary", Name: "StatusSummary"},
+		Controller: testutil.Controller, Conds: []metav1.Condition{acc, testutil.Cond("Attached", metav1.ConditionFalse, "TargetNotFound")}}
+}
+
+// policyFindings returns the install's findings with code on resource res.
+func policyFindings(t *testing.T, srv *httptest.Server, id, code, res string) []FindingDTO {
+	t.Helper()
+	var out []FindingDTO
+	for _, f := range get[HealthResponse](t, srv, "/api/v1/installs/"+id+"/health", 200).Findings {
+		if f.Code == code && f.Resource != nil && f.Resource.String() == res {
+			out = append(out, f)
 		}
-		return out
 	}
-	h.clk.set(graceEnd.Add(29 * time.Second))
-	h.e.Compute()
-	if fs := find(health.CodePolicyTargetNotFound); len(fs) != 0 {
-		t.Fatalf("016 at grace + 29 s: %+v", fs)
+	return out
+}
+
+// A controller newer than 2.5 runs on the 2.5 rule set with the "newer than
+// tested" note; its listeners carry the note.
+func TestNewerThanTestedUsesNewestSet(t *testing.T) {
+	const note = "Rules not yet verified for 2.6"
+	h := newHarness(t, setup{}, withControllerVersion("v2.6.0-rc.1", world())...)
+	g := get[GatewayDetail](t, h.srv, gwDetail, 200)
+	if g.RuleSet != "kgateway-2.5" {
+		t.Fatalf("ruleSet %q, want kgateway-2.5", g.RuleSet)
 	}
-	if len(find(health.CodeRouteUnattached)) != 1 {
-		t.Fatal("003 expected until 016 matures")
-	}
-	h.clk.set(graceEnd.Add(31 * time.Second))
-	h.e.Compute()
-	fs := find(health.CodePolicyTargetNotFound)
-	if len(fs) != 1 || fs[0].Severity != health.SeverityWarning || !strings.Contains(fs[0].Detail, "Rule set kgateway-2.4. "+note+".") {
-		t.Fatalf("016 %+v", fs)
-	}
-	if n := len(find(health.CodeRouteUnattached)); n != 0 {
-		t.Fatalf("016 replaces 003, got %d", n)
-	}
-	for _, l := range get[GatewayDetail](t, h.srv, gwDetail, 200).Listeners {
+	for _, l := range g.Listeners {
 		if l.Computed != nil && l.Computed.Note != note {
 			t.Errorf("listener note %q, want %q", l.Computed.Note, note)
 		}
+	}
+}
+
+// Design §7.6 (D-033): a 2.5 controller selects kgateway-2.5 with no note. A
+// TargetNotFound ancestor is one 016 error from status; a missing target the
+// controller has not reported raises no computed 016, only its 003.
+func TestKgateway25PolicyTargetFromStatus(t *testing.T) {
+	objs := withControllerVersion("v2.5.0", world(missingTargetPolicy("infra", "tp-status", targetNotFound()), missingTargetPolicy("infra", "tp-bare")))
+	h := newHarness(t, setup{}, objs...)
+	g := get[GatewayDetail](t, h.srv, gwDetail, 200)
+	if g.RuleSet != "kgateway-2.5" {
+		t.Fatalf("ruleSet %q, want kgateway-2.5", g.RuleSet)
+	}
+	for _, l := range g.Listeners {
+		if l.Computed != nil && l.Computed.Note != "" {
+			t.Errorf("listener note %q, want none", l.Computed.Note)
+		}
+	}
+	h.clk.set(testutil.Now.Add(time.Hour))
+	h.e.Compute()
+	fs := policyFindings(t, h.srv, "kgw.kgateway", health.CodePolicyTargetNotFound, "infra/tp-status")
+	if len(fs) != 1 || fs[0].Severity != health.SeverityError || !strings.Contains(fs[0].Detail, "Gateway nope not found") {
+		t.Fatalf("016 from status: %+v", fs)
+	}
+	for _, code := range []string{health.CodeConditionFalse, health.CodeRouteUnattached} {
+		if n := len(policyFindings(t, h.srv, "kgw.kgateway", code, "infra/tp-status")); n != 0 {
+			t.Errorf("%s beside the status 016: %d", code, n)
+		}
+	}
+	if n := len(policyFindings(t, h.srv, "kgw.kgateway", health.CodePolicyTargetNotFound, "infra/tp-bare")); n != 0 {
+		t.Fatalf("computed 016 on kgateway-2.5: %d", n)
+	}
+	if n := len(policyFindings(t, h.srv, "kgw.kgateway", health.CodeRouteUnattached, "infra/tp-bare")); n != 1 {
+		t.Fatalf("003 on the unreported policy: %d", n)
+	}
+}
+
+// Review Focus 4: rule sets are per install. A 2.5 install reads 016 from
+// status while a 2.4 install in the same UI still computes it.
+func TestPolicyTargetRuleSetPerInstall(t *testing.T) {
+	d2 := testutil.ControllerDeployment("kgw2", "kgateway2", img, 1, 1, testutil.Env(install.DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"b"}}]`))
+	objs := withControllerVersion("v2.5.0", world(testutil.Namespace("kgw2", nil), testutil.Namespace("infra-b", map[string]string{"team": "b"}),
+		d2, testutil.ControllerPod(d2, "kgateway2-0", true), testutil.Gateway("infra-b", "edge", "kgateway", nil), testutil.ProxyDeployment("infra-b", "edge", 1, 1),
+		missingTargetPolicy("infra", "tp-a", targetNotFound()), missingTargetPolicy("infra", "tp-a-bare"),
+		missingTargetPolicy("infra-b", "tp-b"), missingTargetPolicy("infra-b", "tp-b-summary", targetNotFound())))
+	h := newHarness(t, setup{metrics: okMetrics("kgw.kgateway", "kgw2.kgateway2")}, objs...)
+	// The seeded policies' grace ended at testutil.Now - 1 s; the computed hold is 30 s.
+	h.clk.set(testutil.Now.Add(31 * time.Second))
+	h.e.Compute()
+	if fs := policyFindings(t, h.srv, "kgw.kgateway", health.CodePolicyTargetNotFound, "infra/tp-a"); len(fs) != 1 || fs[0].Severity != health.SeverityError {
+		t.Fatalf("2.5 install, status 016: %+v", fs)
+	}
+	if n := len(policyFindings(t, h.srv, "kgw.kgateway", health.CodePolicyTargetNotFound, "infra/tp-a-bare")); n != 0 {
+		t.Fatalf("2.5 install computed a 016: %d", n)
+	}
+	fs := policyFindings(t, h.srv, "kgw2.kgateway2", health.CodePolicyTargetNotFound, "infra-b/tp-b")
+	if len(fs) != 1 || fs[0].Severity != health.SeverityWarning || !strings.Contains(fs[0].Detail, "Rule set kgateway-2.4.") {
+		t.Fatalf("2.4 install, computed 016: %+v", fs)
+	}
+	// 2.4 reads no 016 from status: the summary stays a 002 per condition.
+	if n := len(policyFindings(t, h.srv, "kgw2.kgateway2", health.CodeConditionFalse, "infra-b/tp-b-summary")); n != 2 {
+		t.Fatalf("2.4 install, summary: %d 002, want 2", n)
 	}
 }

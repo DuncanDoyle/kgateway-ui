@@ -281,6 +281,27 @@ func targetNotFoundReason(cs []metav1.Condition) bool {
 	return slices.ContainsFunc(cs, func(c metav1.Condition) bool { return c.Reason == "TargetNotFound" })
 }
 
+// targetStatusRules is a rule set whose controller reports TargetNotFound itself, as kgw25 does.
+type targetStatusRules interface{ ReportsTargetNotFound() bool }
+
+// statusTargetFinding is the KGWUI-016 error for a current policy ancestor whose
+// condition is False with reason TargetNotFound, on a rule set that reads it from
+// status (design §7.6, D-020 rule 5). It replaces that ancestor's 002s (D-030).
+func (in Input) statusTargetFinding(u *unstructured.Unstructured, cs []metav1.Condition, extra string, owner []string) (Finding, bool) {
+	if r, ok := in.Rules.Rules.(targetStatusRules); !ok || !r.ReportsTargetNotFound() {
+		return Finding{}, false
+	}
+	// Accepted comes first: it carries the controller's list of missing targets.
+	for _, t := range append(slices.Clone(policyRequired), policyOptional...) {
+		if c := objects.FindCondition(cs, t); c != nil && c.Status == metav1.ConditionFalse && c.Reason == "TargetNotFound" {
+			return Finding{Code: CodePolicyTargetNotFound, Slug: "policy-target-not-found", Severity: SeverityError, Install: in.Install.ID(),
+				Resource: ref(u), Message: PolicyTargetNotFoundMessage, Detail: detail(*c, extra), Since: since(*c),
+				Key: append(slices.Clip(owner), c.Type)}, true
+		}
+	}
+	return Finding{}, false
+}
+
 // targetDesc names a target as written: "targetRefs[0] Gateway `edge`" or
 // "targetSelectors[0] HTTPRoute `app=web`".
 func targetDesc(r computed.TargetResult, refs int, selector bool, labels map[string]string) string {
