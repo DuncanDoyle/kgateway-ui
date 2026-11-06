@@ -1021,7 +1021,7 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 
 **Files:** Create `pkg/cache/services.go`, `pkg/cache/services_test.go`; Modify `pkg/cache/cache.go` (optional, not in `cluster access`, Task 35), `pkg/app/app.go` (toggle, capability `endpoints`), `deploy/helm/kgateway-ui/templates/clusterrole.yaml`, `deploy/helm/chart_test.go`, `internal/boundary/imports_test.go` (`pkg/cache/services.go`). **⚠ guardrail** (7 files).
 
-**Interfaces:** `type ServiceFact struct { Namespace, Name, Type string; Ports []ServicePort }` (`ServicePort{Name string; Port, Target int32}`); `type SliceFact struct { Namespace, Service string; Ports []SlicePort; Ready map[string]int /* port name → ready endpoints, ready unset counts as ready */ }`; `Snapshot.Services`, `Snapshot.EndpointSlices`; transforms keep only these fields (about 200 bytes each). Capability `endpoints` `on` only when both watches run.
+**Interfaces:** `type ServiceFact struct { Namespace, Name, Type string; Ports []ServicePort }` (`ServicePort{Name string; Port, Target int32}`); `type SliceFact struct { Namespace, Service string; Ports []SlicePort; Ready []int /* ready endpoints per entry of Ports, ready unset counts as ready (compact form, D-057) */ }`; `Snapshot.Services`, `Snapshot.EndpointSlices`; transforms keep only these fields (about 200 bytes each). Capability `endpoints` `on` only when both watches run.
 
 - [ ] **Step 1: Failing tests** transform shape; unset `ready` counts; toggle off (no watch, no rule); denied (no KGWUI-008, install not unknown). **Step 2: Implement, run, commit** `feat(cache): Services and EndpointSlices, cut down at the informer (D-031)`.
 

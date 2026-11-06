@@ -12,7 +12,7 @@ The rule tells the UI when a kgateway policy's `targetRefs` or `targetSelectors`
 
 ### `kgateway-2.5`: from status, rule off
 
-On `kgateway-2.5` the computed rule is off and 016 comes from status (design §7.6, D-020 rule 5). `kgw25` has no `PolicyTargeter`. It implements `ReportsTargetNotFound`, which `pkg/health` checks before it reads 016 from status.
+On `kgateway-2.5` the computed rule is off and 016 comes from status (design §7.6, D-020 rule 5). `kgw25` has no `PolicyTargeter`. It implements `computed.TargetStatusReporter`, which `pkg/health` checks before it reads 016 from status. A rule set that wraps `kgw25` must forward it, or 016 falls back to the controller's 002s.
 
 - The controller writes the ancestor `gateway.kgateway.dev/StatusSummary` with `Accepted=False` and `Attached=False`, reason `TargetNotFound`, for every policy kind (`kgateway/proxy_syncer/policy_target_status.go` V5:294-307). The `Accepted` message lists the missing refs.
 - A current ancestor of that shape from this install is one 016 error, quoting `Accepted`. It replaces both conditions' 002 (D-030). The policy has an ancestor, so no 003 is raised.
