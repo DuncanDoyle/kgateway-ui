@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Creates a kind cluster with kgateway, the fixtures and the UI, then
 # port-forwards the UI to 127.0.0.1:18080. Usage:
-#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] [NACK=1] [CONTROLLER_LOGS=1] [UI_EXTRA_ARGS=...] test/e2e/setup.sh
+#   KGW_VERSION=v2.4.7 GWAPI_VERSION=v1.6.1 [SECOND_INSTALL=1] [OBSERVE_XLISTENERSET=1] [EXPLORER=0] [NACK=1] [CONTROLLER_LOGS=1] [UI_EXTRA_ARGS=...] [KGW_HELM_ARGS=...] test/e2e/setup.sh
 #   test/e2e/setup.sh down    # stop the port-forward and delete the cluster
 # EXPLORER=0 skips fixtures/explorer.yaml, analyzer.yaml and backends.yaml (the D-021 observations need a cluster without them).
 # NACK=1 applies fixtures/nack.yaml: Gateway infra/nack, whose proxies reject a route config and a cluster.
 # CONTROLLER_LOGS=1 installs the UI with diagnostics.controllerLogs on and its pods/log Role in kgw-a.
 # UI_EXTRA_ARGS are space-separated UI flags for the chart's extraArgs, e.g. --poll-interval=10m;
 # a value must not contain a comma (helm's --set list syntax splits on it).
+# KGW_HELM_ARGS are space-separated extra helm flags for install A, e.g. --set controller.xds.scoping.mode=REFERENCED.
 # The cluster's kubeconfig is written to $E2E_DIR/kubeconfig; the current
 # kubeconfig context is left alone.
 set -euo pipefail
@@ -64,8 +65,12 @@ if [[ "${OBSERVE_XLISTENERSET:-}" == 1 ]]; then
 fi
 helm install kgateway-crds oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds --version "$KGW_VERSION" -n kgw-a --create-namespace
 # Release "kgateway" in each namespace: the controller Deployment is <ns>/kgateway (kgateway.fullname).
+kgw_args=()
+if [[ -n "${KGW_HELM_ARGS:-}" ]]; then
+  read -ra kgw_args <<<"$KGW_HELM_ARGS"
+fi
 helm install kgateway oci://cr.kgateway.dev/kgateway-dev/charts/kgateway --version "$KGW_VERSION" -n kgw-a \
-  --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"a"}}]' --wait
+  --set-json 'discoveryNamespaceSelectors=[{"matchLabels":{"team":"a"}}]' ${kgw_args[@]+"${kgw_args[@]}"} --wait
 kubectl -n kgw-a rollout status deploy/kgateway --timeout=180s # fails fast if the rendered name changes
 kubectl apply -f test/e2e/fixtures/base.yaml
 if [[ "${EXPLORER:-1}" == 1 ]]; then

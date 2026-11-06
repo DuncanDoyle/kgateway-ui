@@ -70,6 +70,24 @@ func TestConfigWithheldAtTheAPI(t *testing.T) {
 	}
 }
 
+// KGWUI-024 from the real 2.5.0 pair: flip_release 0 -> 15 on infra/withheld
+// between two scrapes is a warning on that Gateway only.
+func TestConfigReleasedRealCaptureAtTheAPI(t *testing.T) {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-released-a", "kgw", "kgateway-0"), ctrlCapture(t, "v2.5.0", "kgw", "kgateway-1"))
+	h := xdsHarness(t, setup{}, lm, nackWorld(testutil.Gateway("infra", "withheld", "kgateway", nil), testutil.ProxyDeployment("infra", "withheld", 1, 1))...)
+	if r := h.at(t, testutil.Now); slices.ContainsFunc(r.Findings, func(f FindingDTO) bool { return f.Code == health.CodeConfigWithheld }) {
+		t.Fatalf("before: %+v", r.Findings)
+	}
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-released-b", "kgw", "kgateway-0"), ctrlCapture(t, "v2.5.0", "kgw", "kgateway-1"))
+	r := h.at(t, testutil.Now.Add(time.Minute))
+	w := withheldFinding(r, "infra", "withheld", health.SeverityWarning)
+	if w == nil || withheldFinding(r, "infra", "withheld", health.SeverityError) != nil || withheldFinding(r, "infra", "edge", health.SeverityWarning) != nil ||
+		w.Detail != "15 releases in the last 15 minutes (flip_release 15)." {
+		t.Fatalf("after: %+v", r.Findings)
+	}
+}
+
 // On 2.3 and 2.4 the check is not available on this version, raises no
 // KGWUI-008 and leaves the install healthy.
 func TestConfigWithheldNotOnVersionAtTheAPI(t *testing.T) {

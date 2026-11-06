@@ -248,3 +248,29 @@ func TestWithheldEvidencePerSignal(t *testing.T) {
 		t.Errorf("warning evidence %+v", ev)
 	}
 }
+
+// The real 2.5.0 before/after pair (REFERENCED scoping, route retargets under
+// lag): flip_release 0 -> 15 on infra/withheld is a warning, never an error.
+func TestRealReleaseCaptureWarns(t *testing.T) {
+	world := func(file string) *world {
+		w := healthyWorld()
+		w.objs = append(w.objs, testutil.Gateway("infra", "withheld", "kgateway", nil))
+		w.deploys = append(w.deploys, testutil.ProxyDeployment("infra", "withheld", 1, 1))
+		w.metrics = resultAt(testutil.Now, capture(t, file, "pod/kgw/p", "p"))
+		return w
+	}
+	st := NewStates()
+	if r := withheldAt(t, world("v2.5.0-released-a"), st, testutil.Now); withheldCodes(r) != 0 {
+		t.Fatalf("before: %+v", r.Findings)
+	}
+	r := withheldAt(t, world("v2.5.0-released-b"), st, testutil.Now.Add(time.Minute))
+	f := withheldOn(r, "withheld", SeverityWarning)
+	if f == nil || withheldCodes(r) != 1 || r.State != StateWarning {
+		t.Fatalf("after: %+v", r.Findings)
+	}
+	ev, _ := f.Facts.(*WithheldEvidence)
+	if f.Detail != "15 releases in the last 15 minutes (flip_release 15)." || ev == nil || ev.Withheld != 0 ||
+		!slices.Equal(ev.Releases, []ReleaseModeCount{{Mode: "flip_release", Count: 15}}) {
+		t.Errorf("finding %+v, evidence %+v", f, f.Facts)
+	}
+}
