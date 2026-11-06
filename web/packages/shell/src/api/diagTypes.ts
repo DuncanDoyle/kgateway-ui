@@ -62,7 +62,8 @@ export type Evidence =
   | RefsEvidence
   | RuleReplacedEvidence
   | ListenerConflictEvidence
-  | StatusProgressEvidence;
+  | StatusProgressEvidence
+  | EndpointsEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -247,6 +248,20 @@ export interface StatusProgressEvidence {
   kinds: FreshnessCount[];
   oldest: string;
   syncs?: number;
+}
+
+/**
+ * Why KGWUI-023 reports a Service port (design §11): the port as the backendRef writes it, with its Service port name,
+ * and the ready and total endpoints of the larger address family across `slices` EndpointSlices.
+ */
+export interface EndpointsEvidence {
+  kind: "endpoints";
+  service: string;
+  port: number;
+  portName?: string;
+  ready: number;
+  total: number;
+  slices: number;
 }
 
 /**

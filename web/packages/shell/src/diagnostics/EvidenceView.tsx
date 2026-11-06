@@ -6,6 +6,7 @@ import { useNow } from "../api/clock";
 import { useMeta } from "../api/hooks";
 import type {
   ControllerLogs,
+  EndpointsEvidence,
   Evidence,
   Finding,
   FreshnessEvidence,
@@ -532,6 +533,23 @@ function StatusProgress({ e, now }: { e: StatusProgressEvidence; now: number }) 
   );
 }
 
+function Endpoints({ e, finding, installId }: { e: EndpointsEvidence; finding?: Finding; installId: string }) {
+  // The finding's resource is the Service; its server-computed link decides whether the name opens.
+  const svc = finding?.resource?.kind === "Service" ? finding.resource : undefined;
+  return (
+    <Facts>
+      <dt>{diagnosticsCopy.service}</dt>
+      <dd>{svc ? <LinkedName refValue={svc} installId={installId} /> : <span className="mono">{e.service}</span>}</dd>
+      <dt>{diagnosticsCopy.servicePort}</dt>
+      <dd className="mono">{e.portName ? `${e.port} (${e.portName})` : e.port}</dd>
+      <dt>{diagnosticsCopy.ready}</dt>
+      <dd>{diagnosticsCopy.readyEndpoints(e.ready, e.total)}</dd>
+      <dt>{diagnosticsCopy.endpointSlices}</dt>
+      <dd>{e.slices}</dd>
+    </Facts>
+  );
+}
+
 function Versions({ title, list }: { title: string; list?: VersionPods[] }) {
   if (!list?.length) return null;
   return (
@@ -697,6 +715,9 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
       break;
     case "status-progress":
       body = <StatusProgress e={e} now={now} />;
+      break;
+    case "endpoints":
+      body = <Endpoints e={e} finding={finding} installId={installId} />;
       break;
     default: {
       // A restricted finding shows only its identity, so no renderer runs for it.

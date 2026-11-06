@@ -80,6 +80,7 @@ import type {
   EffectiveContext,
   EffectiveEdge,
   EffectiveRule,
+  EndpointsEvidence,
   ErrorResponse,
   Evidence,
   Filter,
@@ -368,6 +369,11 @@ const evidenceShapes = {
       ),
     },
     { kind: { "status-progress": 1 } },
+  ),
+  endpoints: shape<EndpointsEvidence>(
+    { kind: "!", service: "!", port: "!", portName: "?", ready: "!", total: "!", slices: "!" },
+    {},
+    { kind: { endpoints: 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

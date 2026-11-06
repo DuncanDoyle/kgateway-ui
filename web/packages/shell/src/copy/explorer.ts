@@ -459,6 +459,11 @@ export const diagnosticsCopy = {
   warmingClusters: "Warming clusters",
   serverState: "Server state", // S450
   notReported: "Not reported", // S365
+  // Endpoints evidence (Task 79, draft wording for Task 80)
+  service: "Service", // S564
+  servicePort: "Port", // S565
+  readyEndpoints: (ready: number, total: number) => `${ready} of ${total} ready`, // S566
+  endpointSlices: "EndpointSlices", // S567
   // Processes
   controller: "Controller", // S391
   readyOf: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393

@@ -161,6 +161,7 @@ it("keeps the public export surface", () => {
         "EffectiveContext",
         "EffectiveEdge",
         "EffectiveRule",
+        "EndpointsEvidence",
         "ErrorResponse",
         "Evidence",
         "Filter",

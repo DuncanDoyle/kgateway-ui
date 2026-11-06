@@ -306,6 +306,60 @@ describe("EvidenceView", () => {
     expect(screen.queryByText(diagnosticsCopy.generation)).toBeNull();
   });
 
+  describe("endpoints", () => {
+    const svc = { group: "", kind: "Service", namespace: "shop", name: "cart", link: "detail" } as const;
+    const finding = {
+      id: "f1",
+      code: "KGWUI-023",
+      slug: "backend-no-ready-endpoints",
+      severity: "warning",
+      resource: svc,
+    };
+    const ev: Evidence = {
+      kind: "endpoints",
+      service: "cart",
+      port: 8080,
+      portName: "http",
+      ready: 0,
+      total: 3,
+      slices: 2,
+    };
+
+    it("renders the Service link, port with its name, ready of total and the slice count", () => {
+      show(ev, finding as Finding);
+      expect(screen.getByRole("link", { name: /cart/ })).toBeInTheDocument();
+      expect(screen.getByText("8080 (http)")).toBeInTheDocument();
+      expect(screen.getByText(diagnosticsCopy.readyEndpoints(0, 3))).toBeInTheDocument();
+      expect(screen.getByText(diagnosticsCopy.endpointSlices).nextElementSibling).toHaveTextContent("2");
+    });
+
+    it("an unnamed port shows the number alone, and a Service the viewer cannot open stays text", () => {
+      show({ ...ev, portName: undefined } as Evidence, { ...finding, resource: { ...svc, link: "none" } } as Finding);
+      expect(screen.getByText("8080")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.getByText(/cart/)).toBeInTheDocument();
+    });
+
+    it("without the finding it names the Service as text", () => {
+      show(ev);
+      expect(screen.getByText("cart")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+
+    describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => {
+      it("the Service link has hover, active and focus-visible styles", () => {
+        renderWithTheme(<EvidenceView evidence={ev} finding={finding as Finding} />, {
+          path: "/i/kgw.kgateway",
+          themeId: t.id,
+        });
+        const link = screen.getByRole("link", { name: /cart/ });
+        expect(styled(link)).toBe(true);
+        expect(pseudoRules(link, ":focus-visible").join()).toContain(t.color.focus);
+        expect(pseudoRules(link, ":active").join()).toContain(t.color.accentText);
+      });
+    });
+  });
+
   it("renders listener-conflict: the listener, the computed rule and the listeners kept", () => {
     show({
       kind: "listener-conflict",
