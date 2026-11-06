@@ -61,7 +61,7 @@ func TestAnalyzerWithoutPodsEventsServicesOrCRDs(t *testing.T) {
 	full.Access[cache.EventsGVR], full.Access[cache.CRDsGVR] = cache.Access{OK: true}, cache.Access{OK: true}
 	full.Access[cache.ServicesGVR], full.Access[cache.EndpointSlicesGVR] = cache.Access{OK: true}, cache.Access{OK: true}
 	full.Services = []cache.ServiceFact{{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Name: "http", Port: 8080, Target: 8080}}}}
-	full.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 0}, Total: 1}}
+	full.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{0}, Total: 1}}
 	full.CRDs = []cache.CRDMeta{{Name: "gateways.gateway.networking.k8s.io", Group: "gateway.networking.k8s.io", BundleVersion: "v1.4.1", Channel: "standard"}}
 
 	bare := snapshot(t, unattached, cart, broken)

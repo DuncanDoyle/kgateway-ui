@@ -214,7 +214,8 @@ func sliceCounts(ss []*cache.SliceFact, name string) (ev *EndpointsEvidence, any
 	type counts struct{ ready, total int }
 	fams := map[string]counts{}
 	for _, s := range ss {
-		if n, ok := s.Ready[name]; ok {
+		if i := slices.IndexFunc(s.Ports, func(p cache.SlicePort) bool { return p.Name == name }); i >= 0 && i < len(s.Ready) {
+			n := s.Ready[i]
 			anyReady = anyReady || n > 0
 			c := fams[s.AddressType]
 			c.ready, c.total = c.ready+n, c.total+s.Total

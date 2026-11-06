@@ -69,7 +69,7 @@ func GuardWorlds(t *testing.T) map[string]Input {
 	}
 	for name, ready := range map[string]int{"endpoints empty": 0, "endpoints ready": 1} {
 		e := newEndpointsWorld()
-		e.slices[0].Ready["http"] = ready
+		e.slices[0].Ready[0] = ready
 		out[name] = e.input(t, testutil.Now)
 	}
 	return out

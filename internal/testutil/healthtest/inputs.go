@@ -187,11 +187,11 @@ func perturbOptional(out, in *cache.Snapshot, set health.InputSet, seed int64) {
 	if !slices.Contains(set.Kinds, cache.EndpointSlicesKind) {
 		out.Access[cache.EndpointSlicesGVR] = why
 		// Ready flips between none and some, so a read of either shows.
-		out.EndpointSlices = []cache.SliceFact{{Namespace: "perturbed", Service: fmt.Sprintf("svc%d", seed), Ready: map[string]int{"": 1}, Total: 1}}
+		out.EndpointSlices = []cache.SliceFact{{Namespace: "perturbed", Service: fmt.Sprintf("svc%d", seed), Ports: []cache.SlicePort{{Port: 80}}, Ready: []int{1}, Total: 1}}
 		for _, s := range in.EndpointSlices {
-			ready := map[string]int{}
-			for name, n := range s.Ready {
-				ready[name] = 1 - min(n, 1)
+			ready := make([]int, len(s.Ready))
+			for i, n := range s.Ready {
+				ready[i] = 1 - min(n, 1)
 			}
 			s.Ready = ready
 			out.EndpointSlices = append(out.EndpointSlices, s)

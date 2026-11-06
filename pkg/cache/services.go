@@ -49,34 +49,68 @@ type SlicePort struct {
 }
 
 // SliceFact is what the cache keeps of an EndpointSlice. A Service may have
-// several, so slices are never merged. Ready counts the slice's ready
-// endpoints per port name; an endpoint with ready unset counts as ready.
+// several, so slices are never merged. Ready[i] counts the slice's ready
+// endpoints for Ports[i]; an endpoint with ready unset counts as ready.
 // Total counts every endpoint, ready or not. AddressType is the slice's
 // family, such as "IPv4"; a dual-stack Service has a slice per family.
 type SliceFact struct {
 	Namespace, Service string
 	Ports              []SlicePort
-	Ready              map[string]int
+	Ready              []int
 	Total              int
 	AddressType        string
 }
 
-// stripService keeps only the identity, type and ports of a Service.
+// serviceEntry is what a Service store holds: the fact, the resource version
+// the informer compares, and the fingerprint hash of (uid, resourceVersion).
+type serviceEntry struct {
+	print uint64
+	rv    string
+	fact  ServiceFact
+}
+
+// sliceEntry is serviceEntry for an EndpointSlice, with the slice's own name.
+type sliceEntry struct {
+	print    uint64
+	rv, name string
+	fact     SliceFact
+}
+
+// GetObjectMeta gives the informer the key and resource version it reads; it has no UID.
+func (e *serviceEntry) GetObjectMeta() metav1.Object {
+	return &metav1.ObjectMeta{Namespace: e.fact.Namespace, Name: e.fact.Name, ResourceVersion: e.rv}
+}
+
+// GetObjectMeta gives the informer the key and resource version it reads; it has no UID.
+func (e *sliceEntry) GetObjectMeta() metav1.Object {
+	return &metav1.ObjectMeta{Namespace: e.fact.Namespace, Name: e.name, ResourceVersion: e.rv}
+}
+
+func (e *serviceEntry) objPrint() uint64 { return e.print }
+func (e *sliceEntry) objPrint() uint64   { return e.print }
+
+// known returns the constant for a common enum value, so entries share its bytes.
+func known(s string, consts ...string) string {
+	for _, c := range consts {
+		if s == c {
+			return c
+		}
+	}
+	return s
+}
+
+// stripService keeps only a Service's fact; labels, selector and IPs never reach the store.
 func stripService(o any) (any, error) {
 	svc, ok := o.(*corev1.Service)
 	if !ok {
 		return o, nil
 	}
-	out := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: svc.Namespace, Name: svc.Name, UID: svc.UID, ResourceVersion: svc.ResourceVersion},
-		Spec: corev1.ServiceSpec{Type: svc.Spec.Type}}
-	for _, p := range svc.Spec.Ports {
-		out.Spec.Ports = append(out.Spec.Ports, corev1.ServicePort{Name: p.Name, Port: p.Port, TargetPort: p.TargetPort, Protocol: p.Protocol})
-	}
-	return out, nil
+	return &serviceEntry{print: objHash(svc.UID, svc.ResourceVersion), rv: svc.ResourceVersion, fact: serviceFact(svc)}, nil
 }
 
 func serviceFact(svc *corev1.Service) ServiceFact {
-	f := ServiceFact{Namespace: svc.Namespace, Name: svc.Name, Type: string(svc.Spec.Type)}
+	f := ServiceFact{Namespace: svc.Namespace, Name: svc.Name,
+		Type: known(string(svc.Spec.Type), "ClusterIP", "NodePort", "LoadBalancer", "ExternalName"), Ports: make([]ServicePort, 0, len(svc.Spec.Ports))}
 	for _, p := range svc.Spec.Ports {
 		var target int32
 		switch tp := p.TargetPort; {
@@ -87,7 +121,7 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 		default:
 			target = tp.IntVal
 		}
-		proto := string(p.Protocol)
+		proto := known(string(p.Protocol), "TCP", "UDP", "SCTP")
 		if proto == "" {
 			proto = string(corev1.ProtocolTCP)
 		}
@@ -96,26 +130,13 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 	return f
 }
 
-// stripSlice keeps the owning Service, the ports and each endpoint's ready
-// condition; addresses, nodes and targets never reach the store.
+// stripSlice keeps only an EndpointSlice's fact; addresses, nodes and targets never reach the store.
 func stripSlice(o any) (any, error) {
 	es, ok := o.(*discoveryv1.EndpointSlice)
 	if !ok {
 		return o, nil
 	}
-	out := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: es.Namespace, Name: es.Name, UID: es.UID, ResourceVersion: es.ResourceVersion},
-		AddressType: es.AddressType}
-	if svc, ok := es.Labels[discoveryv1.LabelServiceName]; ok {
-		out.Labels = map[string]string{discoveryv1.LabelServiceName: svc}
-	}
-	for _, p := range es.Ports {
-		out.Ports = append(out.Ports, discoveryv1.EndpointPort{Name: p.Name, Port: p.Port})
-	}
-	out.Endpoints = make([]discoveryv1.Endpoint, len(es.Endpoints))
-	for i, e := range es.Endpoints {
-		out.Endpoints[i].Conditions.Ready = e.Conditions.Ready
-	}
-	return out, nil
+	return &sliceEntry{print: objHash(es.UID, es.ResourceVersion), rv: es.ResourceVersion, name: es.Name, fact: sliceFact(es)}, nil
 }
 
 func sliceFact(es *discoveryv1.EndpointSlice) SliceFact {
@@ -125,18 +146,17 @@ func sliceFact(es *discoveryv1.EndpointSlice) SliceFact {
 			ready++
 		}
 	}
-	f := SliceFact{Namespace: es.Namespace, Service: es.Labels[discoveryv1.LabelServiceName], Ready: make(map[string]int, len(es.Ports)), Total: len(es.Endpoints), AddressType: string(es.AddressType)}
-	for _, p := range es.Ports {
-		var name string
+	f := SliceFact{Namespace: es.Namespace, Service: es.Labels[discoveryv1.LabelServiceName], Ports: make([]SlicePort, len(es.Ports)),
+		Ready: make([]int, len(es.Ports)), Total: len(es.Endpoints), AddressType: known(string(es.AddressType), "IPv4", "IPv6", "FQDN")}
+	for i, p := range es.Ports {
 		if p.Name != nil {
-			name = *p.Name
+			f.Ports[i].Name = *p.Name
 		}
-		var port int32
 		if p.Port != nil {
-			port = *p.Port
+			f.Ports[i].Port = *p.Port
 		}
-		f.Ports = append(f.Ports, SlicePort{Name: name, Port: port})
-		f.Ready[name] = ready
+		// Every endpoint of a slice serves all its ports.
+		f.Ready[i] = ready
 	}
 	return f
 }

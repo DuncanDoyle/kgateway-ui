@@ -666,7 +666,7 @@ func TestEndpointsChangeRerunsCheck(t *testing.T) {
 	set(func(s *cache.Snapshot) {
 		s.Access[cache.ServicesGVR], s.Access[cache.EndpointSlicesGVR] = cache.Access{OK: true}, cache.Access{OK: true}
 		s.Services = []cache.ServiceFact{{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Port: 80, Target: 80}}}}
-		s.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Port: 80}}, Ready: map[string]int{"": 1}, Total: 1}}
+		s.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Port: 80}}, Ready: []int{1}, Total: 1}}
 	})
 	e.Compute()
 	e.Compute()
@@ -674,7 +674,7 @@ func TestEndpointsChangeRerunsCheck(t *testing.T) {
 		t.Fatalf("unchanged Services and EndpointSlices ran the check: %d runs, want 1", runs)
 	}
 	set(func(s *cache.Snapshot) {
-		s.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Port: 80}}, Ready: map[string]int{"": 0}, Total: 1}}
+		s.EndpointSlices = []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Port: 80}}, Ready: []int{0}, Total: 1}}
 	})
 	if e.Compute(); runs != 2 {
 		t.Fatalf("a changed EndpointSlice must run the check: %d runs, want 2", runs)

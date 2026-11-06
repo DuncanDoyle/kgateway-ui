@@ -51,7 +51,7 @@ func newEndpointsWorld() *endpointsWorld {
 	return &endpointsWorld{
 		w:      w,
 		svcs:   []cache.ServiceFact{{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Name: "http", Port: 8080, Target: 8080}}}},
-		slices: []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 0}, Total: 2}},
+		slices: []cache.SliceFact{{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{0}, Total: 2}},
 		access: cache.Access{OK: true},
 	}
 }
@@ -120,9 +120,9 @@ func TestBackendNoReadyEndpointsAfterHold(t *testing.T) {
 func TestBackendReadyEndpointResetsHold(t *testing.T) {
 	e, st := newEndpointsWorld(), NewStates()
 	e.run(t, st, 0)
-	e.slices[0].Ready = map[string]int{"http": 1}
+	e.slices[0].Ready = []int{1}
 	e.run(t, st, 20*time.Second)
-	e.slices[0].Ready = map[string]int{"http": 0}
+	e.slices[0].Ready = []int{0}
 	if fs := endpointFindings(e.run(t, st, 25*time.Second, 31*time.Second, 54*time.Second)); len(fs) != 0 {
 		t.Fatalf("29 s after the second drop: %+v", fs)
 	}
@@ -145,19 +145,19 @@ func TestBackendNoReadyEndpointsExclusions(t *testing.T) {
 		name   string
 		mutate func(e *endpointsWorld)
 	}{
-		{"one ready endpoint", func(e *endpointsWorld) { e.slices[0].Ready = map[string]int{"http": 1} }},
+		{"one ready endpoint", func(e *endpointsWorld) { e.slices[0].Ready = []int{1} }},
 		{"ready in the other address family", func(e *endpointsWorld) {
 			e.slices[0].AddressType = "IPv4"
 			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}},
-				Ready: map[string]int{"http": 1}, Total: 1, AddressType: "IPv6"})
+				Ready: []int{1}, Total: 1, AddressType: "IPv6"})
 		}},
 		{"TCP port ready, UDP port of the same number empty", func(e *endpointsWorld) {
 			e.svcs[0].Ports = []cache.ServicePort{{Name: "dns-udp", Port: 8080, Target: 8080, Protocol: "UDP"}, {Name: "http", Port: 8080, Target: 8080, Protocol: "TCP"}}
 			e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "dns-udp", Port: 8080})
-			e.slices[0].Ready = map[string]int{"http": 1, "dns-udp": 0}
+			e.slices[0].Ready = []int{1, 0}
 		}},
 		{"ready summed over slices", func(e *endpointsWorld) {
-			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 1}, Total: 1})
+			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{1}, Total: 1})
 		}},
 		{"ExternalName", func(e *endpointsWorld) { e.svcs[0].Type = "ExternalName" }},
 		{"Service missing", func(e *endpointsWorld) { e.svcs = nil }},
@@ -187,7 +187,7 @@ func TestBackendNoReadyEndpointsExclusions(t *testing.T) {
 		}},
 		{"mirror target", func(e *endpointsWorld) {
 			e.svcs = append(e.svcs, cache.ServiceFact{Namespace: "shop", Name: "main", Type: "ClusterIP", Ports: []cache.ServicePort{{Port: 80, Target: 80}}})
-			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "main", Ports: []cache.SlicePort{{Port: 80}}, Ready: map[string]int{"": 1}, Total: 1})
+			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "main", Ports: []cache.SlicePort{{Port: 80}}, Ready: []int{1}, Total: 1})
 			mirror := map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": backendRef("cart", 8080, nil)}}
 			main := backendRef("main", 80, map[string]any{"filters": []any{mirror}})
 			e.w.objs[2] = withRefs(e.w.objs[2], main)
@@ -214,14 +214,14 @@ func TestBackendEndpointsMatchPortByName(t *testing.T) {
 	e := newEndpointsWorld()
 	e.svcs[0].Ports = append(e.svcs[0].Ports, cache.ServicePort{Name: "grpc", Port: 9000, Target: 9000})
 	e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "grpc", Port: 9000})
-	e.slices[0].Ready = map[string]int{"http": 0, "grpc": 3}
+	e.slices[0].Ready = []int{0, 3}
 	if fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second)); len(fs) != 1 || fs[0].Facts.(*EndpointsEvidence).Port != 8080 {
 		t.Fatalf("findings %+v", fs)
 	}
 	// An unnamed single-port Service matches the slice port named "".
 	e = newEndpointsWorld()
 	e.svcs[0].Ports[0].Name = ""
-	e.slices[0].Ports[0].Name, e.slices[0].Ready = "", map[string]int{"": 0}
+	e.slices[0].Ports[0].Name, e.slices[0].Ready = "", []int{0}
 	if fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second)); len(fs) != 1 {
 		t.Fatalf("unnamed port: %+v", fs)
 	}
@@ -245,7 +245,7 @@ func TestBackendEndpointsOnePerServicePort(t *testing.T) {
 	e = newEndpointsWorld()
 	e.svcs[0].Ports = append(e.svcs[0].Ports, cache.ServicePort{Name: "grpc", Port: 9000, Target: 9000})
 	e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "grpc", Port: 9000})
-	e.slices[0].Ready["grpc"] = 0
+	e.slices[0].Ready = append(e.slices[0].Ready, 0)
 	e.w.objs[2] = withRefs(e.w.objs[2], backendRef("cart", 8080, nil), backendRef("cart", 9000, nil))
 	fs = endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
 	if len(fs) != 2 || fs[0].ID == fs[1].ID {
@@ -298,8 +298,8 @@ func TestBackendEndpointsDualStackEvidence(t *testing.T) {
 	e := newEndpointsWorld()
 	e.slices[0].AddressType = "IPv4"
 	e.slices = append(e.slices,
-		cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 0}, Total: 2, AddressType: "IPv6"},
-		cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 0}, Total: 1, AddressType: "IPv4"})
+		cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{0}, Total: 2, AddressType: "IPv6"},
+		cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: []int{0}, Total: 1, AddressType: "IPv4"})
 	fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
 	if len(fs) != 1 {
 		t.Fatalf("findings %+v", fs)
@@ -314,7 +314,7 @@ func TestBackendEndpointsPreferTCPPort(t *testing.T) {
 	e := newEndpointsWorld()
 	e.svcs[0].Ports = []cache.ServicePort{{Name: "dns-udp", Port: 8080, Target: 8080, Protocol: "UDP"}, {Name: "http", Port: 8080, Target: 8080, Protocol: "TCP"}}
 	e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "dns-udp", Port: 8080})
-	e.slices[0].Ready = map[string]int{"http": 0, "dns-udp": 3}
+	e.slices[0].Ready = []int{0, 3}
 	fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
 	if len(fs) != 1 || fs[0].Facts.(*EndpointsEvidence).PortName != "http" {
 		t.Fatalf("findings %+v", fs)

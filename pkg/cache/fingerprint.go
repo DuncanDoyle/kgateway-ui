@@ -40,7 +40,7 @@ type Fingerprinter interface{ Fingerprint() Fingerprint }
 // anything, so it equals the Source of a snapshot taken from the same data.
 func (c *Cache) Fingerprint() Fingerprint {
 	var p printer
-	access, _ := c.walk(func(gvr schema.GroupVersionResource, o any) { p.add(gvr, o.(metav1.Object)) })
+	access, _ := c.walk(func(gvr schema.GroupVersionResource, o any) { p.add(gvr, o) })
 	return p.finish(access)
 }
 
@@ -76,7 +76,8 @@ type printer struct {
 	cur   *KindPrint
 }
 
-func (p *printer) add(gvr schema.GroupVersionResource, o metav1.Object) {
+// add counts o, a metav1.Object or a store entry that carries its hash.
+func (p *printer) add(gvr schema.GroupVersionResource, o any) {
 	if p.cur == nil || gvr != p.last {
 		if p.kinds == nil {
 			p.kinds = map[schema.GroupVersionResource]*KindPrint{}
@@ -87,7 +88,13 @@ func (p *printer) add(gvr schema.GroupVersionResource, o metav1.Object) {
 		}
 		p.last = gvr
 	}
-	p.cur.add(o.GetUID(), o.GetResourceVersion())
+	if e, ok := o.(interface{ objPrint() uint64 }); ok {
+		p.cur.Count++
+		p.cur.Hash += e.objPrint()
+		return
+	}
+	m := o.(metav1.Object)
+	p.cur.add(m.GetUID(), m.GetResourceVersion())
 }
 
 // finish keys the result by GVR.String() and gives every kind in access an entry.

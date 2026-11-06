@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strings"
@@ -12,7 +13,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -606,11 +606,11 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 // pass, exactly what it copied.
 func (c *Cache) Snapshot() *Snapshot {
 	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now()}
-	var svcs []*corev1.Service
-	var eps []*discoveryv1.EndpointSlice
+	var svcs []*serviceEntry
+	var eps []*sliceEntry
 	var p printer
 	s.Access, s.Synced = c.walk(func(gvr schema.GroupVersionResource, o any) {
-		p.add(gvr, o.(metav1.Object))
+		p.add(gvr, o)
 		if gvr == ProxyPodsGVR {
 			s.ProxyPods = append(s.ProxyPods, o.(*corev1.Pod))
 			return
@@ -628,9 +628,9 @@ func (c *Cache) Snapshot() *Snapshot {
 			s.Events = append(s.Events, eventFact(v))
 		case *metav1.PartialObjectMetadata:
 			s.CRDs = append(s.CRDs, crdMeta(v))
-		case *corev1.Service:
+		case *serviceEntry:
 			svcs = append(svcs, v)
-		case *discoveryv1.EndpointSlice:
+		case *sliceEntry:
 			eps = append(eps, v)
 		}
 	})
@@ -639,15 +639,20 @@ func (c *Cache) Snapshot() *Snapshot {
 	}
 	slices.SortFunc(s.Events, func(a, b EventFact) int { return strings.Compare(string(a.UID), string(b.UID)) })
 	slices.SortFunc(s.CRDs, func(a, b CRDMeta) int { return strings.Compare(a.Name, b.Name) })
-	slices.SortFunc(svcs, func(a, b *corev1.Service) int { return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name) })
-	slices.SortFunc(eps, func(a, b *discoveryv1.EndpointSlice) int {
-		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
-	})
-	for _, v := range svcs {
-		s.Services = append(s.Services, serviceFact(v))
+	slices.SortFunc(svcs, func(a, b *serviceEntry) int { return compareKey(a.fact.Namespace, a.fact.Name, b.fact.Namespace, b.fact.Name) })
+	slices.SortFunc(eps, func(a, b *sliceEntry) int { return compareKey(a.fact.Namespace, a.name, b.fact.Namespace, b.name) })
+	// The facts' ports and ready counts are shared with the stores, which replace an entry rather than change it.
+	if len(svcs) > 0 {
+		s.Services = make([]ServiceFact, len(svcs))
+		for i, v := range svcs {
+			s.Services[i] = v.fact
+		}
 	}
-	for _, v := range eps {
-		s.EndpointSlices = append(s.EndpointSlices, sliceFact(v))
+	if len(eps) > 0 {
+		s.EndpointSlices = make([]SliceFact, len(eps))
+		for i, v := range eps {
+			s.EndpointSlices[i] = v.fact
+		}
 	}
 	if c.evf != nil {
 		s.EventDeltas, s.EventHistoryUnknown, s.EventsCapped = c.evf.view(s.TakenAt)
@@ -657,6 +662,23 @@ func (c *Cache) Snapshot() *Snapshot {
 }
 
 func key(u *unstructured.Unstructured) string { return u.GetNamespace() + "/" + u.GetName() }
+
+// compareKey orders as strings.Compare(ans+"/"+an, bns+"/"+bn) without building
+// the keys; a namespace never contains "/".
+func compareKey(ans, an, bns, bn string) int {
+	if ans == bns {
+		return strings.Compare(an, bn)
+	}
+	for i := range min(len(ans), len(bns)) {
+		if ans[i] != bns[i] {
+			return cmp.Compare(ans[i], bns[i])
+		}
+	}
+	if len(ans) < len(bns) {
+		return cmp.Compare('/', bns[len(ans)])
+	}
+	return cmp.Compare(ans[len(bns)], '/')
+}
 
 // sortByKey orders objs by key, computing each key once: reading it from the
 // object's maps on every comparison dominated a snapshot.

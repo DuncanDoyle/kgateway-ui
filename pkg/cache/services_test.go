@@ -94,9 +94,8 @@ func TestServiceTransformShape(t *testing.T) {
 		}
 	}
 	for _, o := range w.c.services.inf.GetStore().List() {
-		st := o.(*corev1.Service)
-		if len(st.Labels)+len(st.Annotations) != 0 || st.Spec.ClusterIP != "" || len(st.Spec.Selector) != 0 || st.Spec.ExternalName != "" {
-			t.Fatalf("stored Service %s kept more than the plan's fields: %+v", st.Name, st)
+		if _, ok := o.(*serviceEntry); !ok {
+			t.Fatalf("stored Service %T, want only its fact", o)
 		}
 	}
 	if !s.Access[ServicesGVR].OK || !s.Access[EndpointSlicesGVR].OK {
@@ -104,7 +103,7 @@ func TestServiceTransformShape(t *testing.T) {
 	}
 }
 
-// Ready counts per EndpointSlice port name, an unset ready counts as ready, a
+// Ready counts per EndpointSlice port, an unset ready counts as ready, a
 // false one does not, an unnamed port has the name "", and slices of one
 // Service stay separate.
 func TestSliceFactsCountReadyPerPortName(t *testing.T) {
@@ -117,38 +116,24 @@ func TestSliceFactsCountReadyPerPortName(t *testing.T) {
 	w := newEndpointsWorld(t, true, []runtime.Object{a, b, c, empty}, nil)
 	got := w.c.Snapshot().EndpointSlices
 	want := []SliceFact{
-		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 2, "grpc": 2}, Total: 3, AddressType: "IPv4"},
-		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 0, "grpc": 0}, Total: 1, AddressType: "IPv6"},
-		{Namespace: "shop", Service: "none", Ports: []SlicePort{{"http", 80}}, Ready: map[string]int{"http": 0}, AddressType: "IPv4"},
-		{Namespace: "shop", Service: "single", Ports: []SlicePort{{"", 8080}}, Ready: map[string]int{"": 1}, Total: 1, AddressType: "IPv4"},
+		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: []int{2, 2}, Total: 3, AddressType: "IPv4"},
+		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: []int{0, 0}, Total: 1, AddressType: "IPv6"},
+		{Namespace: "shop", Service: "none", Ports: []SlicePort{{"http", 80}}, Ready: []int{0}, AddressType: "IPv4"},
+		{Namespace: "shop", Service: "single", Ports: []SlicePort{{"", 8080}}, Ready: []int{1}, Total: 1, AddressType: "IPv4"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("EndpointSlices %+v, want %+v", got, want)
 	}
 	for i := range want {
-		if got[i].Namespace != want[i].Namespace || got[i].Service != want[i].Service || !slices.Equal(got[i].Ports, want[i].Ports) || !equalReady(got[i].Ready, want[i].Ready) || got[i].Total != want[i].Total || got[i].AddressType != want[i].AddressType {
+		if got[i].Namespace != want[i].Namespace || got[i].Service != want[i].Service || !slices.Equal(got[i].Ports, want[i].Ports) || !slices.Equal(got[i].Ready, want[i].Ready) || got[i].Total != want[i].Total || got[i].AddressType != want[i].AddressType {
 			t.Errorf("slice %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}
 	for _, o := range w.c.slices.inf.GetStore().List() {
-		for _, ep := range o.(*discoveryv1.EndpointSlice).Endpoints {
-			if len(ep.Addresses) != 0 || ep.NodeName != nil {
-				t.Fatalf("stored endpoint kept addresses or a node: %+v", ep)
-			}
+		if _, ok := o.(*sliceEntry); !ok {
+			t.Fatalf("stored EndpointSlice %T, want only its fact", o)
 		}
 	}
-}
-
-func equalReady(a, b map[string]int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || w != v {
-			return false
-		}
-	}
-	return true
 }
 
 // A slice update changes the Ready counts and the fingerprint matches the snapshot's source.
@@ -168,7 +153,7 @@ func TestSliceUpdateAndFingerprint(t *testing.T) {
 	if _, err := w.kube.DiscoveryV1().EndpointSlices("shop").Update(context.Background(), up, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the slice update", func() bool { return w.c.Snapshot().EndpointSlices[0].Ready["http"] == 1 })
+	waitFor(t, "the slice update", func() bool { return w.c.Snapshot().EndpointSlices[0].Ready[0] == 1 })
 	if w.c.Snapshot().Source.Equal(s.Source) {
 		t.Fatal("the fingerprint did not change with the slice")
 	}
@@ -243,5 +228,17 @@ func TestEndpointsWatchRecoversAfterError(t *testing.T) {
 			testutil.Recv(t, watchers, "the next successful Watch call")
 			waitFor(t, "recovery", func() bool { return w.c.Snapshot().Access[gvr].OK })
 		})
+	}
+}
+
+// Facts sort by "namespace/name", also when one namespace prefixes another.
+func TestCompareKeyMatchesJoinedKeys(t *testing.T) {
+	keys := [][2]string{{"ns", "b"}, {"ns-1", "a"}, {"ns", "a"}, {"n", "z"}, {"ns.x", "a"}, {"ns0", "a"}, {"a", "ns"}}
+	for _, a := range keys {
+		for _, b := range keys {
+			if got, want := compareKey(a[0], a[1], b[0], b[1]), strings.Compare(a[0]+"/"+a[1], b[0]+"/"+b[1]); got != want {
+				t.Errorf("compareKey(%v, %v) = %d, want %d", a, b, got, want)
+			}
+		}
 	}
 }
