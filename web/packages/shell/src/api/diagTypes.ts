@@ -63,7 +63,8 @@ export type Evidence =
   | RuleReplacedEvidence
   | ListenerConflictEvidence
   | StatusProgressEvidence
-  | EndpointsEvidence;
+  | EndpointsEvidence
+  | WithheldEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -262,6 +263,22 @@ export interface EndpointsEvidence {
   ready: number;
   total: number;
   slices: number;
+}
+
+/**
+ * A Gateway's kgateway 2.5 per-client metrics behind KGWUI-024 (design §8.6), summed over controller Pods:
+ * its withheld proxies, and the alerting bounded publishes of the last 15 minutes by mode.
+ */
+export interface WithheldEvidence {
+  kind: "withheld";
+  withheld?: number;
+  releases?: ModeCount[];
+  reportedBy: string[];
+}
+/** How many bounded publishes of one mode a Gateway had. */
+export interface ModeCount {
+  mode: string;
+  count: number;
 }
 
 /**

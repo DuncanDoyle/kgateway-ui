@@ -360,6 +360,62 @@ describe("EvidenceView", () => {
     });
   });
 
+  describe("withheld", () => {
+    const withheld: Evidence = { kind: "withheld", withheld: 2, reportedBy: ["kgateway-0", "kgateway-1"] };
+    const released: Evidence = {
+      kind: "withheld",
+      releases: [
+        { mode: "flip_release", count: 1 },
+        { mode: "warm_release", count: 2 },
+      ],
+      reportedBy: ["kgateway-0"],
+    };
+
+    it("withheld proxies: the count and the reporting Pods, no release table", () => {
+      show(withheld);
+      expect(screen.getByText(diagnosticsCopy.withheldProxies).nextElementSibling).toHaveTextContent("2");
+      expect(screen.getByText(diagnosticsCopy.reportedBy).nextElementSibling).toHaveTextContent(
+        "kgateway-0, kgateway-1",
+      );
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("released config: one row per mode with its label, mode and count, no withheld count", () => {
+      show(released);
+      expect(screen.queryByText(diagnosticsCopy.withheldProxies)).toBeNull();
+      const rows = within(screen.getByRole("table", { name: diagnosticsCopy.releasedRecently })).getAllByRole("row");
+      expect(rows).toHaveLength(3);
+      expect(rows[1]).toHaveTextContent(`${diagnosticsCopy.releaseModes.flip_release} flip_release1`);
+      expect(rows[2]).toHaveTextContent(`${diagnosticsCopy.releaseModes.warm_release} warm_release2`);
+    });
+
+    it("both signals together, and a mode without a label shows the mode alone", () => {
+      show({
+        ...withheld,
+        releases: [
+          { mode: "carry_expired", count: 1 },
+          { mode: "new_mode", count: 4 },
+        ],
+      } as Evidence);
+      expect(screen.getByText(diagnosticsCopy.withheldProxies)).toBeInTheDocument();
+      const rows = within(screen.getByRole("table")).getAllByRole("row");
+      expect(rows[1]).toHaveTextContent(`${diagnosticsCopy.releaseModes.carry_expired} carry_expired1`);
+      expect(rows[2]).toHaveTextContent(/^new_mode4$/);
+    });
+
+    describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => {
+      it("renders without interactive elements, so it adds no hover, active or focus targets", () => {
+        renderWithTheme(<EvidenceView evidence={{ ...withheld, ...released, withheld: 1 } as Evidence} />, {
+          path: "/i/kgw.kgateway",
+          themeId: t.id,
+        });
+        expect(screen.getByRole("table")).toBeInTheDocument();
+        expect(screen.queryByRole("link")).toBeNull();
+        expect(screen.queryByRole("button")).toBeNull();
+      });
+    });
+  });
+
   it("renders listener-conflict: the listener, the computed rule and the listeners kept", () => {
     show({
       kind: "listener-conflict",

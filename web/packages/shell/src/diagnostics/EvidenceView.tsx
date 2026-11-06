@@ -20,6 +20,7 @@ import type {
   StatusProgressEvidence,
   VersionPods,
   VersionSkewEvidence,
+  WithheldEvidence,
   XDSRejectsEvidence,
 } from "../api/types";
 import { diagnosticsCopy } from "../copy/explorer";
@@ -550,6 +551,50 @@ function Endpoints({ e, finding, installId }: { e: EndpointsEvidence; finding?: 
   );
 }
 
+function Withheld({ e }: { e: WithheldEvidence }) {
+  return (
+    <>
+      <Facts>
+        {e.withheld ? (
+          <>
+            <dt>{diagnosticsCopy.withheldProxies}</dt>
+            <dd>{e.withheld}</dd>
+          </>
+        ) : null}
+        <dt>{diagnosticsCopy.reportedBy}</dt>
+        <dd className="mono">{e.reportedBy.join(", ")}</dd>
+      </Facts>
+      {e.releases?.length ? (
+        <DiagTable>
+          <table aria-label={diagnosticsCopy.releasedRecently}>
+            <thead>
+              <tr>
+                <th scope="col">{diagnosticsCopy.releaseMode}</th>
+                <th scope="col">{diagnosticsCopy.releaseCount}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {e.releases.map((r) => {
+                // A mode this build has no label for shows as the metric writes it.
+                const label = diagnosticsCopy.releaseModes[r.mode];
+                return (
+                  <tr key={r.mode}>
+                    <td>
+                      {label ? <span>{label} </span> : null}
+                      <span className={label ? "mono muted" : "mono"}>{r.mode}</span>
+                    </td>
+                    <td>{r.count}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </DiagTable>
+      ) : null}
+    </>
+  );
+}
+
 function Versions({ title, list }: { title: string; list?: VersionPods[] }) {
   if (!list?.length) return null;
   return (
@@ -718,6 +763,9 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
       break;
     case "endpoints":
       body = <Endpoints e={e} finding={finding} installId={installId} />;
+      break;
+    case "withheld":
+      body = <Withheld e={e} />;
       break;
     default: {
       // A restricted finding shows only its identity, so no renderer runs for it.

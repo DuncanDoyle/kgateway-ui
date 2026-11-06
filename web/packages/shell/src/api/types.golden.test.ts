@@ -115,6 +115,7 @@ import type {
   Match,
   MetaResponse,
   Mirror,
+  ModeCount,
   NextStep,
   OverviewResponse,
   Page,
@@ -151,6 +152,7 @@ import type {
   TrailRefs,
   VersionPods,
   VersionSkewEvidence,
+  WithheldEvidence,
   XDSLogEvent,
   XDSRejectsEvidence,
   XDSTypeRejects,
@@ -374,6 +376,11 @@ const evidenceShapes = {
     { kind: "!", service: "!", port: "!", portName: "?", ready: "!", total: "!", slices: "!" },
     {},
     { kind: { endpoints: 1 } },
+  ),
+  withheld: shape<WithheldEvidence>(
+    { kind: "!", withheld: "?", releases: "?", reportedBy: "!" },
+    { releases: shape<ModeCount>({ mode: "!", count: "!" }) },
+    { kind: { withheld: 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {
