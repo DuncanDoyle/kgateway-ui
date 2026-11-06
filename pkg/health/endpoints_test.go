@@ -209,6 +209,22 @@ func TestBackendNoReadyEndpointsExclusions(t *testing.T) {
 	}
 }
 
+// Slices list a Service's ports in different orders: ready sums per port, not per index.
+func TestBackendEndpointsPortOrderAcrossSlices(t *testing.T) {
+	e := newEndpointsWorld()
+	http, grpc := cache.SlicePort{Name: "http", Port: 8080}, cache.SlicePort{Name: "grpc", Port: 9000}
+	e.svcs[0].Ports = append(e.svcs[0].Ports, cache.ServicePort{Name: "grpc", Port: 9000, Target: 9000})
+	e.slices = []cache.SliceFact{
+		{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{http, grpc}, Ready: []int{1, 0}, Total: 1},
+		{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{grpc, http}, Ready: []int{0, 1}, Total: 1},
+	}
+	e.w.objs[2] = withRefs(e.w.objs[2], backendRef("cart", 8080, nil), backendRef("cart", 9000, nil))
+	fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
+	if len(fs) != 1 || fs[0].Facts.(*EndpointsEvidence).Port != 9000 {
+		t.Fatalf("want one 023, for grpc only: %+v", fs)
+	}
+}
+
 // Ports match by name: ready endpoints on another port name leave this one empty.
 func TestBackendEndpointsMatchPortByName(t *testing.T) {
 	e := newEndpointsWorld()

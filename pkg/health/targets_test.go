@@ -535,6 +535,10 @@ func TestPolicyTargetFromStatusThroughWrapper(t *testing.T) {
 	if has(r, CodePolicyTargetNotFound, "", "infra/tp") {
 		t.Fatalf("bare wrapper: a status 016: %+v", r.Findings)
 	}
+	// Without the hook the controller's TargetNotFound condition shows as 002.
+	if !has(r, CodeConditionFalse, "", "infra/tp") {
+		t.Fatalf("bare wrapper: want a 002 for TargetNotFound: %+v", r.Findings)
+	}
 }
 
 // One target found, one missing: the found one's ancestor stays healthy, the
