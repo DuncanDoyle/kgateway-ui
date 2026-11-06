@@ -613,7 +613,7 @@ type heapPart struct {
 }
 
 // TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
-// and five runs, the median retained heap at Large ≤ 40 MiB (D-054) above it, for the
+// and five runs, the median retained heap at Large ≤ 48 MiB (D-057) above it, for the
 // consistent world and the worst case. Each part is then dropped in turn; its
 // freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part; the 3.4 watches' is reported.
 func TestBudgetHeap(t *testing.T) {
@@ -663,7 +663,7 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 	slices.SortFunc(runs, func(a, b heapRun) int { return cmp.Compare(a.Retained, b.Retained) })
 	med := runs[len(runs)/2]
 	over := int64(med.Retained) - heapBaseline
-	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 40 MiB); %+.1f MiB over the 3.1 baseline's %+.1f (budget ≤ +24 MiB)",
+	t.Logf("median retained %d B (%.1f MiB); %+.1f MiB over the 2.1 baseline %d B (budget ≤ 48 MiB); %+.1f MiB over the 3.1 baseline's %+.1f (budget ≤ +24 MiB)",
 		med.Retained, float64(med.Retained)/mib, float64(over)/mib, heapBaseline, float64(over)/mib-heap31[tier.Name], heap31[tier.Name])
 	for _, p := range med.Parts {
 		t.Logf("  %-28s %7.2f MiB", p.Name, float64(p.Freed)/mib)
@@ -682,8 +682,8 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 	if wm > watchesHeapBudget {
 		t.Errorf("3.2 watches' retained state %d B, budget ≤ %d B", wm, watchesHeapBudget)
 	}
-	if over > 40*mib {
-		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 40 MiB", float64(over)/mib)
+	if over > 48*mib {
+		t.Errorf("retained heap %.1f MiB above the baseline, budget ≤ 48 MiB", float64(over)/mib)
 	}
 	if d := float64(over)/mib - heap31[tier.Name]; d > 24 {
 		t.Errorf("retained heap %+.1f MiB above the 3.1 baseline, budget ≤ +24 MiB", d)
