@@ -89,9 +89,9 @@ func has(h api.HealthResponse, code, res string, msg ...string) bool {
 	})
 }
 
-// tpMissingTarget is the finding expected for tp-missing-target. Only kgateway
-// main reports TargetNotFound; on v2.3.x and v2.4.x the UI computes it, and the
-// computed 016 replaces "not yet processed" after the grace and the hold (design §7.6).
+// tpMissingTarget is the finding expected for tp-missing-target. On v2.3.x and
+// v2.4.x the UI computes it, and the computed 016 replaces "not yet processed"
+// after the grace and the hold (design §7.6); v2.5.x reports TargetNotFound, read as 016.
 func tpMissingTarget() (code, msg string) {
 	if os.Getenv("KGW_MAIN") == "1" {
 		return health.CodeConditionFalse, health.PolicyTargetNotFoundMessage

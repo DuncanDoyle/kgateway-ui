@@ -19,6 +19,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 )
@@ -662,10 +663,12 @@ spec:
 	}
 }
 
-// testPolicyTargetNotFound re-creates a TrafficPolicy whose only target is a missing Gateway: the UI
-// computes 016 once the target stayed missing for the grace and the hold, and it replaces the 003.
+// testPolicyTargetNotFound re-creates a TrafficPolicy whose only target is a missing Gateway. On 2.3 and 2.4
+// the UI computes 016 once the target stayed missing for the grace and the hold, and it replaces the 003.
+// kgateway 2.5 writes TargetNotFound itself, so 016 is an error from status and nothing is computed.
 func testPolicyTargetNotFound(t *testing.T) {
 	const fixture = "fixtures/analyzer.yaml"
+	minor := kgwMinor(t)
 	// Applied again on any exit, so a failure leaves the fixture whole for the next tests.
 	t.Cleanup(func() { must(t, "apply", "-f", fixture) })
 	must(t, "-n", "shop", "delete", "trafficpolicy/tp-missing-gateway", "--wait=true")
@@ -674,26 +677,67 @@ func testPolicyTargetNotFound(t *testing.T) {
 	})
 	applied := time.Now()
 	must(t, "apply", "-f", fixture)
-	// The UI first sees the policy after the apply; the creation time is cut to the second.
-	due := applied.Add(health.Grace + health.TargetHold - time.Second)
-	h := waitHealth(t, 4*time.Minute, "016 on "+tpGatewayID, func(h api.HealthResponse) bool {
-		f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
-		if f != nil && time.Now().Before(due) {
-			t.Fatalf("016 on %s %s after the apply, before the grace and the hold", tpGatewayID, time.Since(applied))
+	var h api.HealthResponse
+	if fromStatus(minor) {
+		h = waitHealth(t, 3*time.Minute, "016 from status on "+tpGatewayID, func(h api.HealthResponse) bool {
+			return finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID) != nil
+		})
+		c := targetNotFound(t, tpGatewayID)
+		if c == nil {
+			t.Fatalf("%s: kgateway %s wrote no Accepted=False/TargetNotFound", tpGatewayID, minor)
 		}
-		return f != nil
-	})
-	t.Logf("016 on %s %s after the apply", tpGatewayID, time.Since(applied).Round(time.Second))
-	f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
-	want := fmt.Sprintf("targetRefs[0] Gateway `nope`: not found in namespace shop. Computed by the UI's policy targets rule. Rule set kgateway-%s.", kgwMinor(t))
-	if f.Severity != health.SeverityWarning || f.Message != health.PolicyTargetNotFoundMessage || f.Detail != want {
-		t.Errorf("016 on %s: severity %s, message %q, detail %q; want a warning with %q", tpGatewayID, f.Severity, f.Message, f.Detail, want)
+		f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
+		want := fmt.Sprintf("Accepted=False, reason TargetNotFound: %s", c.Message)
+		if f.Severity != health.SeverityError || f.Message != health.PolicyTargetNotFoundMessage || !strings.HasPrefix(f.Detail, want) ||
+			strings.Contains(f.Detail, "Computed by the UI") {
+			t.Errorf("016 on %s: severity %s, message %q, detail %q; want an error from status starting %q", tpGatewayID, f.Severity, f.Message, f.Detail, want)
+		}
+	} else {
+		// The UI first sees the policy after the apply; the creation time is cut to the second.
+		due := applied.Add(health.Grace + health.TargetHold - time.Second)
+		h = waitHealth(t, 4*time.Minute, "016 on "+tpGatewayID, func(h api.HealthResponse) bool {
+			f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
+			if f != nil && time.Now().Before(due) {
+				t.Fatalf("016 on %s %s after the apply, before the grace and the hold", tpGatewayID, time.Since(applied))
+			}
+			return f != nil
+		})
+		f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
+		want := fmt.Sprintf("targetRefs[0] Gateway `nope`: not found in namespace shop. Computed by the UI's policy targets rule. Rule set kgateway-%s.", minor)
+		if f.Severity != health.SeverityWarning || f.Message != health.PolicyTargetNotFoundMessage || f.Detail != want {
+			t.Errorf("016 on %s: severity %s, message %q, detail %q; want a warning with %q", tpGatewayID, f.Severity, f.Message, f.Detail, want)
+		}
 	}
-	for _, code := range []string{health.CodeRouteUnattached, health.CodeComputedDisagrees} {
+	t.Logf("016 on %s %s after the apply", tpGatewayID, time.Since(applied).Round(time.Second))
+	for _, code := range []string{health.CodeRouteUnattached, health.CodeComputedDisagrees, health.CodeConditionFalse} {
 		if finding(h, code, "TrafficPolicy", tpGatewayID) != nil {
 			t.Errorf("%s beside 016 on %s", code, tpGatewayID)
 		}
 	}
+}
+
+// fromStatus reports whether kgateway minor writes TargetNotFound, so the UI reads 016 from status (D-020 rule 5).
+func fromStatus(minor string) bool { return minor != "2.3" && minor != "2.4" }
+
+// targetNotFound is the Accepted=False/TargetNotFound condition kgateway wrote on TrafficPolicy id, or nil.
+func targetNotFound(t *testing.T, id string) *kcond {
+	t.Helper()
+	var p struct {
+		Status struct {
+			Ancestors []struct {
+				ControllerName string  `json:"controllerName"`
+				Conditions     []kcond `json:"conditions"`
+			} `json:"ancestors"`
+		} `json:"status"`
+	}
+	ns, name, _ := strings.Cut(id, "/")
+	kubectl(t, &p, "-n", ns, "get", "trafficpolicies.gateway.kgateway.dev/"+name, "-o", "json")
+	for _, a := range p.Status.Ancestors {
+		if c := findCond(a.Conditions, "Accepted"); a.ControllerName == ours && c != nil && c.Status == "False" && c.Reason == "TargetNotFound" {
+			return c
+		}
+	}
+	return nil
 }
 
 // testListenerConflicted: kgateway marks edge's ListenerSet listeners conflicted, and 017 names only the
@@ -828,6 +872,80 @@ func TestBackendReadiness(t *testing.T) {
 		return f != nil
 	})
 	t.Logf("023 on %s %s after the scale-down", idleID, time.Since(scaled).Round(time.Second))
+}
+
+// region kgateway version (Task 86)
+
+// kgwTag is install A's controller image tag, such as "v2.5.0".
+func kgwTag(t *testing.T) string {
+	t.Helper()
+	out, err := kubectlRun(t, "-n", "kgw-a", "get", "deploy/kgateway", "-o", "jsonpath={.spec.template.spec.containers[0].image}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := string(out)
+	return img[strings.LastIndex(img, ":")+1:]
+}
+
+// TestKgatewayVersion checks the version-dependent parts on each CI row: the install's version and
+// rule set, and KGWUI-024, which reads 2.5's per-client metrics and is not on version before it.
+func TestKgatewayVersion(t *testing.T) {
+	minor, tag := kgwMinor(t), kgwTag(t)
+	t.Logf("kgateway %s (minor %s)", tag, minor)
+	var insts []api.InstallSummary
+	get(t, "/api/v1/installs", &insts)
+	if len(insts) == 0 || strings.TrimPrefix(insts[0].Version, "v") != strings.TrimPrefix(tag, "v") {
+		t.Errorf("install version %+v, want %s", insts, tag)
+	}
+	var gw api.GatewayDetail
+	get(t, install+"/gateways/infra/edge", &gw)
+	if want := "kgateway-" + minor; gw.RuleSet != want {
+		t.Errorf("Gateway infra/edge rule set %q, want %q", gw.RuleSet, want)
+	}
+
+	// The check settles once controller metrics are scraped.
+	h := waitHealth(t, 2*time.Minute, "withheld config check with metrics", func(h api.HealthResponse) bool {
+		c := checkResult(h, "withheld config")
+		return c != nil && c.Unavailable != health.AvailFailing
+	})
+	c := checkResult(h, "withheld config")
+	if h.State == health.StateUnknown {
+		t.Errorf("install unknown: checks %+v", h.Checks)
+	}
+	if slices.ContainsFunc(h.Findings, func(f api.FindingDTO) bool { return f.Code == health.CodeConfigWithheld }) {
+		t.Errorf("024 on kind, which has no translation lag: %s", codes(h))
+	}
+	if fromStatus(minor) {
+		// R130: available with no finding; a version note would mean build_info and the tag disagree.
+		if !c.OK || c.Unavailable != "" || c.Detail != "" {
+			t.Errorf("withheld config on %s: %+v, want available and OK", tag, c)
+		}
+	} else if c.Unavailable != health.AvailNotOnVersion {
+		t.Errorf("withheld config on %s: %+v, want not on version", tag, c)
+	}
+}
+
+// TestListOnlyKinds: DirectResponse, GatewayExtension and ReferenceGrant are served kinds; explorer.yaml's
+// ReferenceGrant is listed and shown, and raises nothing (it never decides resolution).
+func TestListOnlyKinds(t *testing.T) {
+	var meta api.MetaResponse
+	get(t, "/api/v1/meta", &meta)
+	for _, k := range []string{"gateway.kgateway.dev/DirectResponse", "gateway.kgateway.dev/GatewayExtension", "gateway.networking.k8s.io/ReferenceGrant"} {
+		if !slices.ContainsFunc(meta.Kinds, func(s kinds.Served) bool { return s.Group+"/"+s.Kind == k }) {
+			t.Errorf("meta kinds lack %s", k)
+		}
+	}
+	const grant = "shop/explorer-httpbin"
+	var u map[string]any
+	get(t, install+"/resources/gateway.networking.k8s.io/ReferenceGrant/"+grant, &u)
+	if md, _ := u["metadata"].(map[string]any); md["name"] != "explorer-httpbin" {
+		t.Errorf("ReferenceGrant %s: metadata %+v", grant, u["metadata"])
+	}
+	for _, f := range healthNow(t).Findings {
+		if f.Resource != nil && f.Resource.Kind == "ReferenceGrant" {
+			t.Errorf("%s on ReferenceGrant %s", f.Code, f.Resource)
+		}
+	}
 }
 
 // region Controller log signals

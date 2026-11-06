@@ -25,6 +25,8 @@ jobs:
           # A 10 min safety timer lets TestForcedDisagreementRaisesKGWUI012 run: only its deadline can mature the check.
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", ui_args: "--poll-interval=10m" }
           - { kgw: v2.3.11, gwapi: v1.5.1, second: "0" }
+          # kgateway v2.5.0 pins Gateway API v1.7.0 (go.mod at the tag).
+          - { kgw: v2.5.0, gwapi: v1.7.0, second: "0" }
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "1" }
           # The log row: diagnostics.controllerLogs on, with its pods/log Role in kgw-a, for TestControllerLogSignals.
           - { kgw: v2.4.7, gwapi: v1.6.1, second: "0", logs: "1" }

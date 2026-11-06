@@ -76,6 +76,12 @@ if [[ "${EXPLORER:-1}" == 1 ]]; then
   kubectl -n infra create secret tls edge-tls --cert "$d/tls.crt" --key "$d/tls.key" >/dev/null
   rm -rf "$d"
   kubectl apply -f test/e2e/fixtures/explorer.yaml
+  # The TCPRoute on v1 where the bundle serves it, else v1alpha2.
+  tcp=v1alpha2
+  if kubectl get crd tcproutes.gateway.networking.k8s.io -o jsonpath='{.spec.versions[?(@.served==true)].name}' | tr ' ' '\n' | grep -qx v1; then
+    tcp=v1
+  fi
+  kubectl apply -f "test/e2e/fixtures/explorer-tcproute-$tcp.yaml"
   kubectl apply -f test/e2e/fixtures/analyzer.yaml
   kubectl apply -f test/e2e/fixtures/backends.yaml
 fi

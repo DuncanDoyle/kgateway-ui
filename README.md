@@ -297,7 +297,7 @@ Pages now retry a failed request every 5 seconds, so they recover within one pol
 
 ## Supported versions
 
-kgateway v2.3.11 and v2.4.7, tested on kind in CI. On these versions a policy whose target is missing gets no status, so the UI reports it as "not yet processed". Only kgateway `main` sets `TargetNotFound`, which the UI shows as "Policy target not found".
+kgateway v2.3.11, v2.4.7 and v2.5.0, tested on kind in CI. On 2.3 and 2.4 a policy whose target is missing gets no status, so the UI computes "Policy target not found" itself. kgateway 2.5 sets `TargetNotFound`, and the UI reads it from status. The withheld-config check (KGWUI-024) reads metrics that only 2.5 has; on 2.3 and 2.4 it is "Not available on this version".
 
 ## Contributing
 
