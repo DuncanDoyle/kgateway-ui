@@ -77,6 +77,7 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	// Each empty Service port with the routes naming it, in first-seen order.
 	var order []servicePort
 	evidence := map[servicePort]*EndpointsEvidence{}
+	ready := map[servicePort]bool{}
 	for _, r := range in.Owned.Routes {
 		if in.ignored(r.Obj) || !in.resolvedHere(r.Obj, slices.Concat(r.Parents, r.RouteParents)) {
 			continue
@@ -87,13 +88,13 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			if svc == nil || svc.Type == "ExternalName" {
 				continue
 			}
-			i := slices.IndexFunc(svc.Ports, func(p cache.ServicePort) bool { return p.Port == sp.port })
+			i := servicePortIndex(svc.Ports, sp.port)
 			if i < 0 {
 				continue // a port the Service lacks is KGWUI-013's
 			}
 			ev := evidence[sp]
 			if ev == nil {
-				ev = sliceCounts(byService[sp.ns+"/"+sp.name], svc.Ports[i].Name)
+				ev, ready[sp] = sliceCounts(byService[sp.ns+"/"+sp.name], svc.Ports[i].Name)
 				ev.Service, ev.Port = sp.name, sp.port
 				evidence[sp] = ev
 				order = append(order, sp)
@@ -108,7 +109,7 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	var fs []Finding
 	for _, sp := range order {
 		ev := evidence[sp]
-		if ev.Ready > 0 {
+		if ready[sp] {
 			continue // a ready endpoint ends the hold
 		}
 		t, seen := old[sp.key()]
@@ -197,15 +198,34 @@ func serviceRefs(u *unstructured.Unstructured) []servicePort {
 	return out
 }
 
-// sliceCounts sums ready and total endpoints for port name over a Service's
-// slices; a slice without that port adds nothing but is counted.
-func sliceCounts(ss []*cache.SliceFact, name string) *EndpointsEvidence {
-	ev := &EndpointsEvidence{PortName: name, Slices: len(ss)}
+// servicePortIndex is the index of the TCP Service port numbered port (route
+// backends are TCP), else of any port with that number; -1 for none.
+func servicePortIndex(ps []cache.ServicePort, port int32) int {
+	if i := slices.IndexFunc(ps, func(p cache.ServicePort) bool { return p.Port == port && (p.Protocol == "" || p.Protocol == "TCP") }); i >= 0 {
+		return i
+	}
+	return slices.IndexFunc(ps, func(p cache.ServicePort) bool { return p.Port == port })
+}
+
+// sliceCounts counts ready and total endpoints for port name per address
+// family and reports the larger family, since a dual-stack Service lists its
+// Pods once per family. Slices counts every slice of the Service.
+func sliceCounts(ss []*cache.SliceFact, name string) (ev *EndpointsEvidence, anyReady bool) {
+	type counts struct{ ready, total int }
+	fams := map[string]counts{}
 	for _, s := range ss {
 		if n, ok := s.Ready[name]; ok {
-			ev.Ready += n
-			ev.Total += s.Total
+			anyReady = anyReady || n > 0
+			c := fams[s.AddressType]
+			c.ready, c.total = c.ready+n, c.total+s.Total
+			fams[s.AddressType] = c
 		}
 	}
-	return ev
+	ev = &EndpointsEvidence{PortName: name, Slices: len(ss)}
+	for _, c := range fams {
+		if c.total > ev.Total || c.total == ev.Total && c.ready > ev.Ready {
+			ev.Ready, ev.Total = c.ready, c.total
+		}
+	}
+	return ev, anyReady
 }

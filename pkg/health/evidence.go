@@ -318,30 +318,8 @@ type EndpointsEvidence struct {
 	Ready    int    `json:"ready"`
 	Total    int    `json:"total"`
 	Slices   int    `json:"slices"`
-	// Membership is what the Gateways' proxies hold of the port's cluster, asked
-	// on demand by the finding detail; evidence only, it never decides 023.
-	Membership *EndpointsMembership `json:"membership,omitempty"`
 	// Routes are the routes naming the port, the group's affected list. Never serialised.
 	Routes []objects.Ref `json:"-"`
-}
-
-// EndpointsMembership is the proxies' view of a Service port's Envoy cluster,
-// from one Ready proxy per Gateway. Reason says why it is not available.
-type EndpointsMembership struct {
-	Available bool                `json:"available"`
-	Reason    string              `json:"reason,omitempty"`
-	Gateways  []GatewayMembership `json:"gateways,omitempty"`
-}
-
-// GatewayMembership is one Gateway's proxy and the endpoints its Envoy cluster
-// holds; Err is a fixed-text reason when that proxy could not be read.
-type GatewayMembership struct {
-	Gateway objects.Ref `json:"gateway"`
-	Pod     string      `json:"pod,omitempty"`
-	Cluster string      `json:"cluster,omitempty"`
-	Healthy *int64      `json:"healthy,omitempty"`
-	Total   *int64      `json:"total,omitempty"`
-	Err     string      `json:"error,omitempty"`
 }
 
 // EvidenceKind implements Evidence.

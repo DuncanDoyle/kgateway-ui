@@ -34,10 +34,12 @@ type ServiceFact struct {
 }
 
 // ServicePort is one Service port. Target is the numeric target port, the
-// port itself when unset, and 0 when the target port is a name.
+// port itself when unset, and 0 when the target port is a name. Protocol
+// is "TCP" when unset.
 type ServicePort struct {
 	Name         string
 	Port, Target int32
+	Protocol     string
 }
 
 // SlicePort is one EndpointSlice port; an unnamed port has the name "".
@@ -49,12 +51,14 @@ type SlicePort struct {
 // SliceFact is what the cache keeps of an EndpointSlice. A Service may have
 // several, so slices are never merged. Ready counts the slice's ready
 // endpoints per port name; an endpoint with ready unset counts as ready.
-// Total counts every endpoint, ready or not.
+// Total counts every endpoint, ready or not. AddressType is the slice's
+// family, such as "IPv4"; a dual-stack Service has a slice per family.
 type SliceFact struct {
 	Namespace, Service string
 	Ports              []SlicePort
 	Ready              map[string]int
 	Total              int
+	AddressType        string
 }
 
 // stripService keeps only the identity, type and ports of a Service.
@@ -66,7 +70,7 @@ func stripService(o any) (any, error) {
 	out := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: svc.Namespace, Name: svc.Name, UID: svc.UID, ResourceVersion: svc.ResourceVersion},
 		Spec: corev1.ServiceSpec{Type: svc.Spec.Type}}
 	for _, p := range svc.Spec.Ports {
-		out.Spec.Ports = append(out.Spec.Ports, corev1.ServicePort{Name: p.Name, Port: p.Port, TargetPort: p.TargetPort})
+		out.Spec.Ports = append(out.Spec.Ports, corev1.ServicePort{Name: p.Name, Port: p.Port, TargetPort: p.TargetPort, Protocol: p.Protocol})
 	}
 	return out, nil
 }
@@ -83,7 +87,11 @@ func serviceFact(svc *corev1.Service) ServiceFact {
 		default:
 			target = tp.IntVal
 		}
-		f.Ports = append(f.Ports, ServicePort{Name: p.Name, Port: p.Port, Target: target})
+		proto := string(p.Protocol)
+		if proto == "" {
+			proto = string(corev1.ProtocolTCP)
+		}
+		f.Ports = append(f.Ports, ServicePort{Name: p.Name, Port: p.Port, Target: target, Protocol: proto})
 	}
 	return f
 }
@@ -95,7 +103,8 @@ func stripSlice(o any) (any, error) {
 	if !ok {
 		return o, nil
 	}
-	out := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: es.Namespace, Name: es.Name, UID: es.UID, ResourceVersion: es.ResourceVersion}}
+	out := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Namespace: es.Namespace, Name: es.Name, UID: es.UID, ResourceVersion: es.ResourceVersion},
+		AddressType: es.AddressType}
 	if svc, ok := es.Labels[discoveryv1.LabelServiceName]; ok {
 		out.Labels = map[string]string{discoveryv1.LabelServiceName: svc}
 	}
@@ -116,7 +125,7 @@ func sliceFact(es *discoveryv1.EndpointSlice) SliceFact {
 			ready++
 		}
 	}
-	f := SliceFact{Namespace: es.Namespace, Service: es.Labels[discoveryv1.LabelServiceName], Ready: make(map[string]int, len(es.Ports)), Total: len(es.Endpoints)}
+	f := SliceFact{Namespace: es.Namespace, Service: es.Labels[discoveryv1.LabelServiceName], Ready: make(map[string]int, len(es.Ports)), Total: len(es.Endpoints), AddressType: string(es.AddressType)}
 	for _, p := range es.Ports {
 		var name string
 		if p.Name != nil {

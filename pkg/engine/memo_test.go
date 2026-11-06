@@ -679,7 +679,9 @@ func TestEndpointsChangeRerunsCheck(t *testing.T) {
 	if e.Compute(); runs != 2 {
 		t.Fatalf("a changed EndpointSlice must run the check: %d runs, want 2", runs)
 	}
-	set(func(s *cache.Snapshot) { s.Services = append(s.Services, cache.ServiceFact{Namespace: "shop", Name: "other", Type: "ClusterIP"}) })
+	set(func(s *cache.Snapshot) {
+		s.Services = append(s.Services, cache.ServiceFact{Namespace: "shop", Name: "other", Type: "ClusterIP"})
+	})
 	if e.Compute(); runs != 3 {
 		t.Fatalf("a changed Service must run the check: %d runs, want 3", runs)
 	}

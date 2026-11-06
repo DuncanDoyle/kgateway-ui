@@ -30,7 +30,6 @@ type handlerConfig struct {
 	capSources []func() []Capability
 	coreSource func() []Capability
 	commands   diagnose.Commands
-	membership MembershipFunc
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

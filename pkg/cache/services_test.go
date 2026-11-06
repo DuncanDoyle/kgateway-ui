@@ -73,7 +73,7 @@ func TestServiceTransformShape(t *testing.T) {
 	svc.Spec.Type, svc.Spec.ClusterIP = corev1.ServiceTypeClusterIP, "10.0.0.7"
 	svc.Spec.Ports = []corev1.ServicePort{
 		{Name: "http", Port: 80, TargetPort: intstr.FromString("web")},
-		{Name: "metrics", Port: 9090, TargetPort: intstr.FromInt32(9091)},
+		{Name: "metrics", Port: 9090, TargetPort: intstr.FromInt32(9091), Protocol: corev1.ProtocolUDP},
 	}
 	ext := testutil.Service("shop", "ext", nil)
 	ext.Spec.Type = corev1.ServiceTypeExternalName
@@ -81,8 +81,8 @@ func TestServiceTransformShape(t *testing.T) {
 	w := newEndpointsWorld(t, true, []runtime.Object{svc, ext}, nil)
 	s := w.c.Snapshot()
 	want := []ServiceFact{
-		{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []ServicePort{{"http", 80, 0}, {"metrics", 9090, 9091}}},
-		{Namespace: "shop", Name: "ext", Type: "ExternalName", Ports: []ServicePort{{"http", 80, 80}}},
+		{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []ServicePort{{"http", 80, 0, "TCP"}, {"metrics", 9090, 9091, "UDP"}}},
+		{Namespace: "shop", Name: "ext", Type: "ExternalName", Ports: []ServicePort{{"http", 80, 80, "TCP"}}},
 	}
 	if len(s.Services) != 2 {
 		t.Fatalf("Services %+v, want %+v", s.Services, want)
@@ -111,21 +111,22 @@ func TestSliceFactsCountReadyPerPortName(t *testing.T) {
 	named := []discoveryv1.EndpointPort{{Name: strp("http"), Port: i32p(8080)}, {Name: strp("grpc"), Port: i32p(9000)}}
 	a := slice("shop", "cart-a", "cart", named, nil, boolp(true), boolp(false))
 	b := slice("shop", "cart-b", "cart", named, boolp(false))
+	b.AddressType = discoveryv1.AddressTypeIPv6
 	c := slice("shop", "single-c", "single", []discoveryv1.EndpointPort{{Port: i32p(8080)}}, nil)
 	empty := slice("shop", "none-d", "none", []discoveryv1.EndpointPort{{Name: strp("http"), Port: i32p(80)}})
 	w := newEndpointsWorld(t, true, []runtime.Object{a, b, c, empty}, nil)
 	got := w.c.Snapshot().EndpointSlices
 	want := []SliceFact{
-		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 2, "grpc": 2}, Total: 3},
-		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 0, "grpc": 0}, Total: 1},
-		{Namespace: "shop", Service: "none", Ports: []SlicePort{{"http", 80}}, Ready: map[string]int{"http": 0}},
-		{Namespace: "shop", Service: "single", Ports: []SlicePort{{"", 8080}}, Ready: map[string]int{"": 1}, Total: 1},
+		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 2, "grpc": 2}, Total: 3, AddressType: "IPv4"},
+		{Namespace: "shop", Service: "cart", Ports: []SlicePort{{"http", 8080}, {"grpc", 9000}}, Ready: map[string]int{"http": 0, "grpc": 0}, Total: 1, AddressType: "IPv6"},
+		{Namespace: "shop", Service: "none", Ports: []SlicePort{{"http", 80}}, Ready: map[string]int{"http": 0}, AddressType: "IPv4"},
+		{Namespace: "shop", Service: "single", Ports: []SlicePort{{"", 8080}}, Ready: map[string]int{"": 1}, Total: 1, AddressType: "IPv4"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("EndpointSlices %+v, want %+v", got, want)
 	}
 	for i := range want {
-		if got[i].Namespace != want[i].Namespace || got[i].Service != want[i].Service || !slices.Equal(got[i].Ports, want[i].Ports) || !equalReady(got[i].Ready, want[i].Ready) || got[i].Total != want[i].Total {
+		if got[i].Namespace != want[i].Namespace || got[i].Service != want[i].Service || !slices.Equal(got[i].Ports, want[i].Ports) || !equalReady(got[i].Ready, want[i].Ready) || got[i].Total != want[i].Total || got[i].AddressType != want[i].AddressType {
 			t.Errorf("slice %d: %+v, want %+v", i, got[i], want[i])
 		}
 	}

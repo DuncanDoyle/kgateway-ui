@@ -145,7 +145,17 @@ func TestBackendNoReadyEndpointsExclusions(t *testing.T) {
 		name   string
 		mutate func(e *endpointsWorld)
 	}{
-		{"ready unset counts as ready", func(e *endpointsWorld) { e.slices[0].Ready = map[string]int{"http": 1} }},
+		{"one ready endpoint", func(e *endpointsWorld) { e.slices[0].Ready = map[string]int{"http": 1} }},
+		{"ready in the other address family", func(e *endpointsWorld) {
+			e.slices[0].AddressType = "IPv4"
+			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}},
+				Ready: map[string]int{"http": 1}, Total: 1, AddressType: "IPv6"})
+		}},
+		{"TCP port ready, UDP port of the same number empty", func(e *endpointsWorld) {
+			e.svcs[0].Ports = []cache.ServicePort{{Name: "dns-udp", Port: 8080, Target: 8080, Protocol: "UDP"}, {Name: "http", Port: 8080, Target: 8080, Protocol: "TCP"}}
+			e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "dns-udp", Port: 8080})
+			e.slices[0].Ready = map[string]int{"http": 1, "dns-udp": 0}
+		}},
 		{"ready summed over slices", func(e *endpointsWorld) {
 			e.slices = append(e.slices, cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 1}, Total: 1})
 		}},
@@ -279,5 +289,34 @@ func TestBackendEndpointsNotAvailable(t *testing.T) {
 				t.Fatalf("state %s findings %+v", r.State, r.Findings)
 			}
 		})
+	}
+}
+
+// A dual-stack Service has a slice per family for the same Pods: the evidence
+// reports the larger family's counts, and Slices counts every slice.
+func TestBackendEndpointsDualStackEvidence(t *testing.T) {
+	e := newEndpointsWorld()
+	e.slices[0].AddressType = "IPv4"
+	e.slices = append(e.slices,
+		cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 0}, Total: 2, AddressType: "IPv6"},
+		cache.SliceFact{Namespace: "shop", Service: "cart", Ports: []cache.SlicePort{{Name: "http", Port: 8080}}, Ready: map[string]int{"http": 0}, Total: 1, AddressType: "IPv4"})
+	fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
+	if len(fs) != 1 {
+		t.Fatalf("findings %+v", fs)
+	}
+	if ev := fs[0].Facts.(*EndpointsEvidence); ev.Ready != 0 || ev.Total != 3 || ev.Slices != 3 {
+		t.Fatalf("evidence %+v, want IPv4's total 3 of 3 slices", ev)
+	}
+}
+
+// The ref port matches the TCP Service port when a UDP port has the same number.
+func TestBackendEndpointsPreferTCPPort(t *testing.T) {
+	e := newEndpointsWorld()
+	e.svcs[0].Ports = []cache.ServicePort{{Name: "dns-udp", Port: 8080, Target: 8080, Protocol: "UDP"}, {Name: "http", Port: 8080, Target: 8080, Protocol: "TCP"}}
+	e.slices[0].Ports = append(e.slices[0].Ports, cache.SlicePort{Name: "dns-udp", Port: 8080})
+	e.slices[0].Ready = map[string]int{"http": 0, "dns-udp": 3}
+	fs := endpointFindings(e.run(t, NewStates(), 0, 31*time.Second))
+	if len(fs) != 1 || fs[0].Facts.(*EndpointsEvidence).PortName != "http" {
+		t.Fatalf("findings %+v", fs)
 	}
 }

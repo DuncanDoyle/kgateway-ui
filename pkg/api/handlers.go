@@ -44,7 +44,7 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	if cfg.commands == nil {
 		cfg.commands = diagnose.Kubectl{}
 	}
-	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, membership: cfg.membership}
+	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -78,7 +78,6 @@ type handler struct {
 	capSources []func() []Capability
 	coreSource func() []Capability
 	commands   diagnose.Commands
-	membership MembershipFunc
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
