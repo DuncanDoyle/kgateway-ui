@@ -529,8 +529,19 @@ func TestLivePhase3Seeds(t *testing.T) {
 	if len(w.CRDs) != Typical.GatewayAPICRDs || len(w.Metrics) == 0 {
 		t.Fatalf("crds %d metrics %d", len(w.CRDs), len(w.Metrics))
 	}
-	if got := serviceRefs(w.Routes); len(got) != 0 {
-		t.Fatalf("the 3.2 world names %d Services", len(got))
+	if got, want := serviceRefs(w.Routes), referencedSet(Typical); !reflect.DeepEqual(got, want) {
+		t.Fatalf("the routes name %d Services, referenced %d", len(got), len(want))
+	}
+	snap := w.Cache.Snapshot()
+	listed := 0
+	for gvr, objs := range snap.Objects {
+		if gvr.Resource == "referencegrants" || gvr.Resource == "directresponses" || gvr.Resource == "gatewayextensions" {
+			listed += len(objs)
+		}
+	}
+	if len(snap.Services) != Typical.Services || len(snap.EndpointSlices) != Typical.EndpointSlices || len(w.Slices) != Typical.EndpointSlices ||
+		listed != len(ListOnlyObjects(Typical)) {
+		t.Fatalf("services %d slices %d list-only %d", len(snap.Services), len(snap.EndpointSlices), listed)
 	}
 	if Live(t, Typical, func() time.Time { return testutil.Now }).Metrics != nil {
 		t.Fatal("Live seeds Phase 3")

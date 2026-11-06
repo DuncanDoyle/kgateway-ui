@@ -48,7 +48,10 @@ type world struct {
 // newWorld is scale.Live under the names these tests use.
 func newWorld(tb testing.TB, tier scale.Tier, now func() time.Time) *world {
 	tb.Helper()
-	l := scale.Live(tb, tier, now)
+	return fromLive(scale.Live(tb, tier, now))
+}
+
+func fromLive(l *scale.LiveWorld) *world {
 	return &world{c: l.Cache, update: l.Update, sig: l.Signal, routes: l.Routes, gvr: l.RouteGVR}
 }
 
@@ -224,14 +227,29 @@ func syncsBody(n int) string {
 }
 
 // TestBudgetSyncOnlyScrapes reports what scrapes that change only
-// status_syncs_total cost an idle cluster (Task 63): on fake clocks, 600
+// status_syncs_total cost an idle cluster (Task 63, R96): on fake clocks, 600
 // one-second steps with a scrape every 10 s, each with 7 more syncs, at Large
-// with no 018. It counts the recomputes, the publications and those whose
-// findings differ from the last publication's; nothing is gated.
+// with no 018, without and with the 3.4 inputs. It counts the recomputes, the
+// publications and those whose findings differ from the last publication's; nothing is gated.
 func TestBudgetSyncOnlyScrapes(t *testing.T) {
+	for _, phase3 := range []bool{false, true} {
+		name := "large"
+		if phase3 {
+			name = "large with the 3.4 inputs"
+		}
+		t.Run(name, func(t *testing.T) {
+			clk := testutil.FakeClock()
+			w := newWorld(t, scale.Large, clk.Now)
+			if phase3 {
+				w = fromLive(scale.LivePhase3(t, scale.Large, clk.Now))
+			}
+			syncOnlyScrapes(t, name, w, clk)
+		})
+	}
+}
+
+func syncOnlyScrapes(t *testing.T, name string, w *world, clk *clocktesting.FakeClock) {
 	const safety, every, maxAge = 30 * time.Second, 10 * time.Second, 45 * time.Second
-	clk := testutil.FakeClock()
-	w := newWorld(t, scale.Large, clk.Now)
 	syncs := 0
 	s := newScraping(syncsBody(syncs), maxAge)
 	s.col.OnResult = w.sig
@@ -279,8 +297,8 @@ func TestBudgetSyncOnlyScrapes(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("sync-only scrapes, 10 min idle at Large: %d scrapes, %d triggers, %d recomputes and publications (%.2f/s), %d with findings that differ from the last (reported)",
-		scrapes, triggers, runs, float64(runs)/600, changed)
+	t.Logf("sync-only scrapes, 10 min idle at %s: %d scrapes, %d triggers, %d recomputes and publications (%.2f/s), %d with findings that differ from the last (reported)",
+		name, scrapes, triggers, runs, float64(runs)/600, changed)
 	if scrapes != 60 {
 		t.Errorf("%d scrapes, want 60", scrapes)
 	}
@@ -584,8 +602,9 @@ const heapChildEnv = "KGWUI_HEAP_CHILD"
 type heapRun struct {
 	Start, Snapshot, Retained uint64
 	Parts                     []heapPart
-	// Watches is the HeapAlloc freed by stopping a fresh measurement world's proxy Pod, Event and CRD watches.
-	Watches int64
+	// Watches is the HeapAlloc freed by stopping a fresh measurement world's proxy Pod, Event and CRD watches;
+	// Watches34 by then dropping its Service, EndpointSlice and list-only kind informers.
+	Watches, Watches34 int64
 }
 
 type heapPart struct {
@@ -596,7 +615,7 @@ type heapPart struct {
 // TestBudgetHeap: measured as the 2.1 baseline was, one fresh process per run
 // and five runs, the median retained heap at Large ≤ 40 MiB (D-054) above it, for the
 // consistent world and the worst case. Each part is then dropped in turn; its
-// freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part.
+// freed HeapAlloc is reported per kind. The 3.2 watches' state is gated as its own part; the 3.4 watches' is reported.
 func TestBudgetHeap(t *testing.T) {
 	cases := append(slices.Clone(largeCases), measuredTier)
 	if name := os.Getenv(heapChildEnv); name != "" {
@@ -649,14 +668,17 @@ func heapBudget(t *testing.T, tier scale.Tier) {
 	for _, p := range med.Parts {
 		t.Logf("  %-28s %7.2f MiB", p.Name, float64(p.Freed)/mib)
 	}
-	watches := make([]int64, len(runs))
+	watches, watches34 := make([]int64, len(runs)), make([]int64, len(runs))
 	for i, r := range runs {
-		watches[i] = r.Watches
+		watches[i], watches34[i] = r.Watches, r.Watches34
 	}
 	slices.Sort(watches)
-	wm := watches[len(watches)/2]
+	slices.Sort(watches34)
+	wm, wm34 := watches[len(watches)/2], watches34[len(watches34)/2]
 	t.Logf("3.2 watches' retained state: median %d B (%.2f MiB), min %d, max %d (budget median ≤ %d B)",
 		wm, float64(wm)/mib, watches[0], watches[len(watches)-1], watchesHeapBudget)
+	t.Logf("3.4 watches' retained state (Services, EndpointSlices, list-only kinds): median %d B (%.2f MiB), min %d, max %d (reported)",
+		wm34, float64(wm34)/mib, watches34[0], watches34[len(watches34)-1])
 	if wm > watchesHeapBudget {
 		t.Errorf("3.2 watches' retained state %d B, budget ≤ %d B", wm, watchesHeapBudget)
 	}
@@ -751,7 +773,7 @@ func heapChild(t *testing.T, tier scale.Tier) {
 	drop("decode: Backend views", func() { e.decode.backends = viewCache[objects.BackendView]{} })
 	// What the engine and model still hold above the snapshot: the rest of health, overview, first-seen.
 	r.Parts = append(r.Parts, heapPart{"rest of engine and model", int64(prev) - int64(snapAlloc)})
-	r.Watches = watchesHeap(t, tier)
+	r.Watches, r.Watches34 = watchesHeap(t, tier)
 	runtime.KeepAlive(e)
 	runtime.KeepAlive(m)
 	runtime.KeepAlive(snap)
@@ -764,10 +786,10 @@ func heapChild(t *testing.T, tier scale.Tier) {
 // measurement world's 1,450,216 B plus about 10 % (D-046).
 const watchesHeapBudget = 1_600_000
 
-// watchesHeap builds tier's measurement world, so its cache runs the proxy Pod, Event and CRD
-// watches, and returns the HeapAlloc freed by stopping those watches alone. The fake clients'
-// objects and the other informers stay, so they do not count.
-func watchesHeap(t *testing.T, tier scale.Tier) int64 {
+// watchesHeap builds tier's measurement world and returns the HeapAlloc freed by stopping its
+// proxy Pod, Event and CRD watches alone, then, once the cache has stopped, by dropping its Service,
+// EndpointSlice and list-only kind informers. The fake clients' objects do not count.
+func watchesHeap(t *testing.T, tier scale.Tier) (w32, w34 int64) {
 	alloc := func() int64 {
 		runtime.GC()
 		runtime.GC()
@@ -777,23 +799,37 @@ func watchesHeap(t *testing.T, tier scale.Tier) int64 {
 	}
 	w := measure.New(t, tier, testutil.FakeClock())
 	defer w.Live.Stop()
-	before := alloc()
-	g := runtime.NumGoroutine()
-	cache.StopOptional(w.Live.Cache)
 	// A stopped watch's filter goroutine returns once its source closes; wait until the count holds.
-	for deadline, n, same := time.Now().Add(time.Minute), g, 0; same < 3; time.Sleep(20 * time.Millisecond) {
-		if c := runtime.NumGoroutine(); c == n {
-			same++
-		} else {
-			n, same = c, 0
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("goroutines did not settle after the watches stopped")
+	settle := func() {
+		for deadline, n, same := time.Now().Add(time.Minute), runtime.NumGoroutine(), 0; same < 3; time.Sleep(20 * time.Millisecond) {
+			if c := runtime.NumGoroutine(); c == n {
+				same++
+			} else {
+				n, same = c, 0
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("goroutines did not settle after the watches stopped")
+			}
 		}
 	}
-	freed := before - alloc()
+	before := alloc()
+	cache.StopOptional(w.Live.Cache)
+	settle()
+	mid := alloc()
+	w.Live.Stop()
+	w.Live.Cache.Wait()
+	settle()
+	stopped := alloc()
+	var listed []schema.GroupVersionResource
+	for _, s := range testutil.ServedUpstream() {
+		if s.ListOnly {
+			listed = append(listed, s.GVR())
+		}
+	}
+	cache.DropListed(w.Live.Cache, listed...)
+	w34 = stopped - alloc()
 	runtime.KeepAlive(w)
-	return freed
+	return before - mid, w34
 }
 
 // The 2.4 dense-memory budget (D-025): the edge cap keeps the densest

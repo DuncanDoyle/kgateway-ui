@@ -726,7 +726,7 @@ func ScaleServices(t ScaleShape, _ int64) []*corev1.Service {
 }
 
 // ScaleEndpointSlices returns one slice per Service plus second slices of
-// referenced ones. Under Worst every ScaleNoReadyEvery-th referenced Service has no ready endpoint.
+// referenced ones, each with the Service's port. Under Worst every ScaleNoReadyEvery-th referenced Service has no ready endpoint.
 func ScaleEndpointSlices(t ScaleShape, seed int64) []*discoveryv1.EndpointSlice {
 	r := scaleRand(seed, 0x511ce)
 	out := make([]*discoveryv1.EndpointSlice, 0, t.EndpointSlices)
@@ -741,7 +741,11 @@ func ScaleEndpointSlices(t ScaleShape, seed int64) []*discoveryv1.EndpointSlice 
 		for j := range rs {
 			rs[j] = ready
 		}
-		out = append(out, EndpointSlice(scaleSvcNS(t, i), fmt.Sprintf("%s-%d", ScaleServiceName(t, i), k), ScaleServiceName(t, i), rs...))
+		es := EndpointSlice(scaleSvcNS(t, i), fmt.Sprintf("%s-%d", ScaleServiceName(t, i), k), ScaleServiceName(t, i), rs...)
+		// The Service's port, as the EndpointSlice controller writes it.
+		name, port := "http", int32(80)
+		es.Ports = []discoveryv1.EndpointPort{{Name: &name, Port: &port}}
+		out = append(out, es)
 	}
 	return out
 }

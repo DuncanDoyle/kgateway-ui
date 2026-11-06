@@ -25,6 +25,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	discoveryv1 "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -513,8 +515,9 @@ func TestBudgetSustainedStream(t *testing.T) {
 	})
 }
 
-// TestBudgetSpecEditStream is the sustained stream at Large and in the 3.2
-// measurement world with route spec edits instead of annotations: process CPU
+// TestBudgetSpecEditStream is the sustained stream at Large and in the
+// measurement world with route spec edits instead of annotations, the latter with
+// EndpointSlice churn (churnSlice): process CPU
 // ≤ 25 % of one core in every run, edit-driven recomputes ≤ 1/s (D-047) and the
 // median memory from the OS ≤ 288 MiB (design §16.3, D-043).
 func TestBudgetSpecEditStream(t *testing.T) {
@@ -642,12 +645,12 @@ func togglePath(u *unstructured.Unstructured, _, pass int) error {
 var measuredCodes = []string{health.CodeXDSRejected, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck,
 	health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
 
-// analyzerCodes are the 3.3 codes it raises 5 min after maturing; streamCodes
+// analyzerCodes are the 3.3 and 3.4 codes it raises 5 min after maturing; streamCodes
 // those a stream waits for, as 018 holds for 5 min first.
 var (
 	analyzerCodes = append(slices.Clone(streamCodes), health.CodeStatusNotProgressing)
 	streamCodes   = []string{health.CodeRefUnresolved, health.CodeRefNotPermitted, health.CodeRuleReplaced, health.CodePolicyTargetNotFound,
-		health.CodeListenerConflicted}
+		health.CodeListenerConflicted, health.CodeBackendNoReadyEndpoints}
 )
 
 // hasCodes reports whether m's install raises every code of codes.
@@ -860,13 +863,21 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 			}
 		})
 	}
-	updates := 0
+	updates, sliceUpdates := 0, 0
 	// The live heap after a full GC, at the first minute mark and at the end: growth would be a leak.
 	var heap60 uint64
-	tick := time.NewTicker(100 * time.Millisecond)
-	for deadline := start.Add(dur); time.Now().Before(deadline); <-tick.C {
+	// Routes change every 100 ms; a world with EndpointSlices churns one 50 ms after each (D-047).
+	tick := time.NewTicker(50 * time.Millisecond)
+	for deadline, half := start.Add(dur), false; time.Now().Before(deadline); <-tick.C {
 		if heap60 == 0 && dur > time.Minute && time.Since(start) >= time.Minute {
 			heap60 = liveHeap()
+		}
+		if half = !half; !half {
+			if len(w.Slices) > 0 {
+				sliceUpdates++
+				churnSlice(t, w, sliceUpdates)
+			}
+			continue
 		}
 		ref := routes[updates%len(routes)]
 		u, err := w.GetRoute(context.Background(), ref.Namespace, ref.Name)
@@ -899,8 +910,8 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	bursts := runs - deadlineRuns - safetyRuns
 	burstRate := float64(bursts) / wall.Seconds()
 	share := cpu.Seconds() / wall.Seconds()
-	t.Logf("%sstream %v: %d updates, %d recomputes (%.2f/s%s), %d publications; process CPU %v = %.1f %% of one core%s; recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
-		v.name, wall.Round(time.Millisecond), updates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, fmt.Sprintf(" (budget ≤ %.0f %%)", 100*v.cpu), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
+	t.Logf("%sstream %v: %d updates and %d EndpointSlice updates, %d recomputes (%.2f/s%s), %d publications; process CPU %v = %.1f %% of one core%s; recompute wall %v = %.1f %%; GC share %.1f %% of used CPU (%.1f %% of one core)",
+		v.name, wall.Round(time.Millisecond), updates, sliceUpdates, runs, rate, v.budget(", budget ≤ 1/s"), pubs, cpu.Round(time.Millisecond), 100*share, fmt.Sprintf(" (budget ≤ %.0f %%)", 100*v.cpu), busy.Round(time.Millisecond), 100*busy.Seconds()/wall.Seconds(), 100*(gc1-gc0)/(tot1-tot0), 100*(gc1-gc0)/wall.Seconds())
 	if v.burstGated {
 		t.Logf("%srecomputes by cause: %d edit-driven (%.2f/s, budget ≤ 1/s), %d deadline (%.2f/s), %d safety; total %.2f/s (deadlines and total logged)",
 			v.name, bursts, burstRate, deadlineRuns, float64(deadlineRuns)/wall.Seconds(), safetyRuns, rate)
@@ -942,6 +953,29 @@ func sustainedStream(t *testing.T, tier scale.Tier, v streamVariant) {
 	if rate > 1 {
 		t.Errorf("%.2f recomputes per s, budget ≤ 1", rate)
 	}
+}
+
+// churnSlice is EndpointSlice update n of w's: on its first pass over the slices
+// it adds a not-ready endpoint, on the next removes it, so no Service's readiness changes.
+func churnSlice(t *testing.T, w *scale.LiveWorld, n int) {
+	ref := w.Slices[(n-1)%len(w.Slices)]
+	ctx := context.Background()
+	c := w.Kube.DiscoveryV1().EndpointSlices(ref.Namespace)
+	es, err := c.Get(ctx, ref.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ((n-1)/len(w.Slices))%2 == 0 {
+		no := false
+		es.Endpoints = append(es.Endpoints, discoveryv1.Endpoint{Addresses: []string{"10.4.0.1"}, Conditions: discoveryv1.EndpointConditions{Ready: &no}})
+	} else {
+		es.Endpoints = es.Endpoints[:len(es.Endpoints)-1]
+	}
+	es.ResourceVersion = strconv.Itoa(2_000_000 + n)
+	if _, err := c.Update(ctx, es, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	w.Kube.ClearActions()
 }
 
 // chainShape is an inherit chain world: edge → shop/api, then depth-1

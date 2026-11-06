@@ -308,7 +308,7 @@ var progressAt = matureAt.Add(5 * time.Minute)
 // prodMaxAge is the binary's metrics max age: 3 × the default 10 s interval (R70).
 const prodMaxAge = 30 * time.Second
 
-// measuredTier is the tier of the 3.2 measurement world (Task 46).
+// measuredTier is the tier of the measurement world (Task 46), with the 3.4 inputs since Task 81.
 var measuredTier = scale.Large.Contradicting().Worst()
 
 // measureEngine is an engine over the 3.2 measurement world on a fake clock:
@@ -406,11 +406,11 @@ func statsInstalls(p *Published) ([]proxystats.Install, *cache.Snapshot) {
 var measuredCodes = []string{health.CodeXDSRejected, health.CodeProcessRestarting, health.CodeProbeFailing, health.CodeRolloutStuck,
 	health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
 
-// analyzerCodes are the 3.3 codes the measurement world must raise; the
+// analyzerCodes are the 3.3 and 3.4 codes the measurement world must raise; the
 // families in sharedGroups must each hold a group with two or more findings.
 var (
 	analyzerCodes = []string{health.CodeRefUnresolved, health.CodeRefNotPermitted, health.CodeRuleReplaced, health.CodePolicyTargetNotFound,
-		health.CodeListenerConflicted, health.CodeStatusNotProgressing}
+		health.CodeListenerConflicted, health.CodeStatusNotProgressing, health.CodeBackendNoReadyEndpoints}
 	sharedGroups = []string{"Missing backend", "Not permitted", "Replaced by policy", "Status not progressing"}
 )
 
@@ -445,6 +445,10 @@ func measuredSanity(tb testing.TB, m *Model, w *measure.World) {
 		tb.Fatalf("001 with proxy stats on %d of %d Gateways; %d KGWUI-012", withStats, gws, byCode[health.CodeComputedDisagrees])
 	}
 	for _, c := range in.Health.Checks {
+		// KGWUI-024 reads kgateway 2.5 metrics; the world runs v2.4.7.
+		if c.Name == "withheld config" && c.Unavailable == health.AvailNotOnVersion {
+			continue
+		}
 		if c.Unavailable != "" || !c.OK && c.Name != "xDS rejects" {
 			tb.Fatalf("check %+v", c)
 		}
