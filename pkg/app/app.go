@@ -238,7 +238,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	sc, err := setup.Build(setup.Clients{Dynamic: c.Dynamic, Kube: c.Kube, Discovery: c.Discovery, Metadata: c.Metadata},
 		setup.Options{Pinned: o.Pinned, MetricsInterval: o.MetricsInterval, DelegationEdgeCap: o.DelegationEdgeCap,
-			NoEvents: o.Diagnostics.NoEvents, NoCRDs: o.Diagnostics.NoCRDs, Clock: o.Clock}, reg)
+			NoEvents: o.Diagnostics.NoEvents, NoCRDs: o.Diagnostics.NoCRDs, NoEndpoints: o.Diagnostics.NoEndpoints, Clock: o.Clock}, reg)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,6 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.Clock != nil {
 		now = o.Clock.Now
 	}
-	sc.Cache.Endpoints = !o.Diagnostics.NoEndpoints
 	ca := cache.New(sc.Cache)
 	scraper := c.Scraper
 	switch {

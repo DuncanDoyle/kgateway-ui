@@ -254,7 +254,7 @@ func newRunning(t *testing.T, ctx context.Context, objs []runtime.Object) *runni
 }
 
 // optional are the optional watches a single pass waits for.
-var optional = []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.CRDsGVR, cache.EventsGVR}
+var optional = []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.CRDsGVR, cache.EventsGVR, cache.ServicesGVR, cache.EndpointSlicesGVR}
 
 // optionalSettled is whether each optional watch in snap is OK or failed.
 func optionalSettled(snap *cache.Snapshot) bool {
@@ -476,5 +476,20 @@ func TestBuildSetsTheUITimings(t *testing.T) {
 	}
 	if _, has := e.Metrics.Get("any"); has {
 		t.Error("the default metrics source must hold no result")
+	}
+}
+
+// The Service and EndpointSlice watches are on by default and off with NoEndpoints.
+func TestBuildEndpointsToggle(t *testing.T) {
+	for _, off := range []bool{false, true} {
+		dyn, kube := fakeClients(t, nil)
+		cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()},
+			setup.Options{MetricsInterval: 10 * time.Second, NoEndpoints: off}, extension.New())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Cache.Endpoints == off {
+			t.Errorf("NoEndpoints=%v: Cache.Endpoints=%v", off, cfg.Cache.Endpoints)
+		}
 	}
 }

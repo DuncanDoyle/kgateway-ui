@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/watch"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
@@ -216,5 +217,30 @@ func TestEndpointsDeniedAndFailing(t *testing.T) {
 	}
 	if !s.Synced {
 		t.Error("an optional watch held the snapshot back")
+	}
+}
+
+// A Service or EndpointSlice watch that errors after it worked reads as failing,
+// then OK again on the next successful watch.
+func TestEndpointsWatchRecoversAfterError(t *testing.T) {
+	for _, gvr := range []schema.GroupVersionResource{ServicesGVR, EndpointSlicesGVR} {
+		t.Run(gvr.Resource, func(t *testing.T) {
+			watchers := make(chan *watch.FakeWatcher, 64)
+			w := newEndpointsWorld(t, true, nil, func(kube *kubefake.Clientset) {
+				kube.PrependWatchReactor(gvr.Resource, func(clienttesting.Action) (bool, watch.Interface, error) {
+					fw := watch.NewFake()
+					watchers <- fw
+					return true, fw, nil
+				})
+			})
+			if !w.c.Snapshot().Access[gvr].OK {
+				t.Fatalf("access %+v, want OK", w.c.Snapshot().Access[gvr])
+			}
+			status := metav1.Status{Status: metav1.StatusFailure, Code: 429, Reason: metav1.StatusReasonTooManyRequests, Message: "slow down"}
+			testutil.Recv(t, watchers, "the established watch").Error(&status)
+			waitFor(t, "the error to make the watch fail", func() bool { return w.c.Snapshot().Access[gvr].Err != "" })
+			testutil.Recv(t, watchers, "the next successful Watch call")
+			waitFor(t, "recovery", func() bool { return w.c.Snapshot().Access[gvr].OK })
+		})
 	}
 }
