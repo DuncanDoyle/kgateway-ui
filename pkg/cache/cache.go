@@ -299,6 +299,8 @@ type Cache struct {
 	// stopOptional cancels the optional watches' context; optional tracks their goroutines.
 	stopOptional func()
 	optional     sync.WaitGroup
+	// running tracks every goroutine Start launches, for Wait.
+	running sync.WaitGroup
 	// settled is set once every informer has settled, after the settle notify.
 	settled atomic.Bool
 	// handlerHook, if set, runs in each event handler before it notifies (tests).
@@ -410,29 +412,29 @@ const syncPoll = 50 * time.Millisecond
 // Start runs all informers until ctx is cancelled. With Config.Changes it
 // notifies once when every informer has settled: its handler has received the
 // initial list, or its List or Watch failed. Later failures and recoveries
-// notify on their own.
+// notify on their own. Wait returns once the goroutines Start launched have exited.
 func (c *Cache) Start(ctx context.Context) {
 	all := c.all()
 	for _, t := range all {
-		go t.inf.RunWithContext(ctx)
+		c.run(false, func() { t.inf.RunWithContext(ctx) })
 	}
 	octx, cancel := context.WithCancel(ctx)
 	c.stopOptional = func() { cancel() }
 	for _, t := range c.proxyPods {
-		c.optional.Go(func() { t.inf.RunWithContext(octx) })
+		c.run(true, func() { t.inf.RunWithContext(octx) })
 	}
 	if c.crds != nil {
-		c.optional.Go(func() { c.crds.inf.RunWithContext(octx) })
+		c.run(true, func() { c.crds.inf.RunWithContext(octx) })
 	}
 	if c.events != nil {
-		c.optional.Go(func() { c.runEvents(octx) })
+		c.run(true, func() { c.runEvents(octx) })
 	}
 	for _, t := range []*tracked{c.services, c.slices} {
 		if t != nil {
-			c.optional.Go(func() { t.inf.RunWithContext(octx) })
+			c.run(true, func() { t.inf.RunWithContext(octx) })
 		}
 	}
-	go func() {
+	c.run(false, func() {
 		settled := func(context.Context) (bool, error) {
 			for _, t := range all {
 				if !t.synced() && access(t).Err == "" {
@@ -445,6 +447,27 @@ func (c *Cache) Start(ctx context.Context) {
 			c.changes.Notify() // a nil Signal ignores it
 			c.settled.Store(true)
 		}
+	})
+}
+
+// Wait blocks until every goroutine Start launched has exited, which they do
+// once Start's context is cancelled. Before Start, or after the goroutines
+// have exited, it returns at once. Call it after Start has returned.
+func (c *Cache) Wait() { c.running.Wait() }
+
+// run starts f in a goroutine that Wait joins; an optional one is also
+// tracked by c.optional.
+func (c *Cache) run(optional bool, f func()) {
+	c.running.Add(1)
+	if optional {
+		c.optional.Add(1)
+	}
+	go func() {
+		defer c.running.Done()
+		if optional {
+			defer c.optional.Done()
+		}
+		f()
 	}()
 }
 

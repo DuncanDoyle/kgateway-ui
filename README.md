@@ -136,6 +136,8 @@ The other options are `WithDetectors`, `WithScopeProvider`, `WithScopeVerifier` 
 
 Kinds added with `WithKinds`, and anything a collector reads, need matching rules in the chart's ClusterRole. Add them with `rbac.extraRules`, as [values-acme.yaml](examples/downstream/chart/values-acme.yaml) does. The chart also takes `extraEnv`, `extraVolumes`, `extraVolumeMounts` and `extraContainers`.
 
+A one-shot caller, such as a CLI or a test, builds its own configuration with `pkg/setup` and runs `cache.Start(ctx)` itself. Cancel `ctx` when done, then call `Cache.Wait()`: it returns once every goroutine `Start` launched has exited. Called before `Start` or a second time, it returns at once.
+
 The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx

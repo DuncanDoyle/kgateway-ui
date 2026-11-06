@@ -14,6 +14,9 @@
 // [cache.EventsGVR], [cache.ServicesGVR], [cache.EndpointSlicesGVR], when present) is OK or has an Err. Otherwise a pass can
 // read them as not yet read, and the output varies between runs.
 //
+// To stop, cancel the context passed to [cache.Cache.Start], then call
+// [cache.Cache.Wait], which returns once every goroutine Start launched has exited.
+//
 // Controller logs and proxy stats come from long-running collectors that
 // pkg/app runs and this package does not. A caller without them gets those
 // inputs as not read, never as healthy (D-006): controllerLogs reads as not
