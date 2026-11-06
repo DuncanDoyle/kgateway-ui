@@ -983,3 +983,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** The design states the as-built behaviour. Offline snapshot semantics for `analyze -f` (served kinds, discovery, access, install) need a design before they are built. Changing the previous-container read is one constant.
 
 **Alternatives:** n/a.
+
+## D-056 — Two kgwctl E2 requests join sub-phase 3.4 (2026-11-06, phase 3)
+**Status:** accepted 2026-11-06 (user)
+
+**Context:** kgwctl filed four non-blocking E2 requests after `v0.3.0`: three missing kinds (#17), a list-only snapshot (#18), namespace-scoped listing (#19) and a way to wait for the cache's goroutines (#20).
+
+**Decision:** #17 and #20 ship in 3.4 as Tasks 78a and 78b. DirectResponse, GatewayExtension and ReferenceGrant get descriptors, appended after the v1 kinds; ReferenceGrants are listed and shown, never evaluated. `pkg/cache` gains a call that returns once every goroutine `Start` launched has exited. #18 and #19 go to Phase 4 planning, because they change how the cache handles access and scope.
+
+**Consequences:** Two more watches' worth of RBAC and memory in 3.4, measured in Task 81. A minor tag after 3.4 carries the new exported API.
+
+**Alternatives:** None of the four in 3.4; all four in 3.4 (a design change to the cache's access model).
