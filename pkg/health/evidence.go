@@ -266,6 +266,10 @@ const EvidenceRefs = "refs"
 const (
 	// RefExplainKindNotServed: discovery says the ref's group serves no such kind.
 	RefExplainKindNotServed = "kind-not-served"
+	// RefExplainServiceMissing: a core Service ref names a Service that does not exist.
+	RefExplainServiceMissing = "service-missing"
+	// RefExplainServicePort: the Service exists and has no port the ref names.
+	RefExplainServicePort = "service-port"
 	// RefExplainController: the controller's reason and message, as written.
 	RefExplainController = "controller"
 )
@@ -284,6 +288,8 @@ type RefsEvidence struct {
 	Explanation string        `json:"explanation"`
 	Candidates  []RefLocation `json:"candidates,omitempty"`
 	Attributed  bool          `json:"attributed"`
+	// Ports are the Service's ports, set for a service-port explanation.
+	Ports []int32 `json:"ports,omitempty"`
 	// Group is the one group discovery says serves the candidate's kind, set
 	// only for an attributed kind-not-served explanation under complete
 	// discovery. Never serialised.

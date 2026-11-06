@@ -34,6 +34,10 @@ const (
 	// FixGroupTitle names the group to use.
 	FixGroupTitle = "Set the group to `%s`"
 	// FixGroupBasis names the group and the kind.
+	// FixPortTitle names the port to use.
+	FixPortTitle = "Set the port to `%d`"
+	// FixPortBasis names the Service.
+	FixPortBasis  = "Service `%s` has exactly one port. This sets only group, kind, name, namespace and port; keep the other fields."
 	FixGroupBasis = "API discovery: only group `%s` serves kind `%s`. This sets only group, kind, name and namespace; keep the port and other fields."
 )
 
@@ -61,6 +65,11 @@ func Fix(f *health.Finding) *SuggestedFix {
 			return nil
 		}
 		return groupFix(*f.Resource, c, *ev.Group)
+	case ev.Explanation == health.RefExplainServicePort:
+		if len(ev.Ports) != 1 {
+			return nil
+		}
+		return portFix(*f.Resource, c, ev.Ports[0])
 	case ev.Explanation == health.RefExplainController && f.Code == health.CodeRefNotPermitted && !ev.Unknown && grantFields.MatchString(c.Path):
 		return grantFix(*f.Resource, c.Ref)
 	}
@@ -74,6 +83,13 @@ func groupFix(referrer objects.Ref, c health.RefLocation, group string) *Suggest
 	frag := map[string]any{"group": group, "kind": to.Kind, "name": to.Name, "namespace": to.Namespace}
 	return &SuggestedFix{Title: fmt.Sprintf(FixGroupTitle, groupName(group)), Target: referrer, Path: c.Path, YAML: mustYAML(frag),
 		Basis: fmt.Sprintf(FixGroupBasis, groupName(group), to.Kind), Names: []objects.Ref{referrer, to}}
+}
+
+// portFix is the fragment at c.Path of referrer that sets the Service's only port.
+func portFix(referrer objects.Ref, c health.RefLocation, port int32) *SuggestedFix {
+	frag := map[string]any{"group": c.Ref.Group, "kind": c.Ref.Kind, "name": c.Ref.Name, "namespace": c.Ref.Namespace, "port": port}
+	return &SuggestedFix{Title: fmt.Sprintf(FixPortTitle, port), Target: referrer, Path: c.Path, YAML: mustYAML(frag),
+		Basis: fmt.Sprintf(FixPortBasis, c.Ref.Name), Names: []objects.Ref{referrer, c.Ref}}
 }
 
 // grantFix is the ReferenceGrant in to's namespace that lets referrer name to;

@@ -1492,3 +1492,61 @@ func TestDeployerErrorsOn006AtTheAPI(t *testing.T) {
 		}
 	})
 }
+
+// cartService is shop/cart with the given ports.
+func cartService(ports ...int32) *corev1.Service {
+	s := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "cart", UID: "svc-cart"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}}
+	for _, p := range ports {
+		s.Spec.Ports = append(s.Spec.Ports, corev1.ServicePort{Port: p})
+	}
+	return s
+}
+
+// Design §7.3 explanations 2 and 3 and §7.7 at the API: Services in the cache
+// explain BackendNotFound; a one-port Service gives the port fix, two give
+// none; a viewer who cannot see the Service gets evidenceRestricted and no fix.
+func TestServiceExplanationsAndPortFixAtTheAPI(t *testing.T) {
+	ref := map[string]any{"name": "cart", "port": int64(8080)}
+	hideServices := AuthorizerFunc(func(_ *http.Request, r objects.Ref) bool { return r.Kind != "Service" })
+	cases := []struct {
+		name        string
+		svc         *corev1.Service
+		authz       Authorizer
+		explanation string
+		detail      string
+		fix         bool
+		hidden      bool
+	}{
+		{"missing", nil, nil, health.RefExplainServiceMissing, "Service `shop/cart` does not exist.", false, false},
+		{"two ports", cartService(80, 443), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80, 443).", false, false},
+		{"one port", cartService(80), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80).", true, false},
+		{"hidden Service", cartService(80), hideServices, "", "", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := world(refsRoute("BackendNotFound", ref))
+			if tc.svc != nil {
+				objs = append(objs, tc.svc)
+			}
+			h := newHarness(t, setup{endpoints: true, authz: tc.authz, catalog: fixCatalog(nil), rulesFor: computedtest.NoViews}, objs...)
+			h.awaitCache(t, "Services", func(s *cache.Snapshot) bool { return s.Access[cache.ServicesGVR].OK && len(s.Services) == len(objs)-len(world(refsRoute("BackendNotFound", ref))) })
+			h.at(t, testutil.Now)
+			d := fixDetail(t, h.srv, health.CodeRefUnresolved, "shop", "r")
+			if tc.hidden {
+				if !d.Finding.EvidenceRestricted || d.Evidence != nil || d.SuggestedFix != nil || strings.Contains(d.Finding.Detail, "Service `") {
+					t.Fatalf("want evidenceRestricted without evidence or fix: %+v", d)
+				}
+				return
+			}
+			ev, ok := d.Evidence.(*health.RefsEvidence)
+			if !ok || ev.Explanation != tc.explanation || !strings.HasPrefix(d.Finding.Detail, tc.detail) || (d.SuggestedFix != nil) != tc.fix {
+				t.Fatalf("evidence %#v detail %q fix %+v", d.Evidence, d.Finding.Detail, d.SuggestedFix)
+			}
+			if tc.fix {
+				if m := roundTrip(t, d.SuggestedFix.YAML); m["port"] != float64(80) || d.SuggestedFix.Path != "spec.rules[0].backendRefs[0]" {
+					t.Fatalf("fix %+v YAML %v", d.SuggestedFix, m)
+				}
+			}
+		})
+	}
+}
