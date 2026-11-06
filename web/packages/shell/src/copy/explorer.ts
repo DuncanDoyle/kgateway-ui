@@ -460,10 +460,10 @@ export const diagnosticsCopy = {
   serverState: "Server state", // S450
   notReported: "Not reported", // S365
   // Endpoints evidence (Task 79, draft wording for Task 80)
-  service: "Service", // S564
-  servicePort: "Port", // S565
-  readyEndpoints: (ready: number, total: number) => `${ready} of ${total} ready`, // S566
-  endpointSlices: "EndpointSlices", // S567
+  service: "Service", // S568
+  servicePort: "Port", // S569
+  readyEndpoints: (ready: number, total: number) => `${ready} of ${total} ready`, // S570
+  endpointSlices: "EndpointSlices", // S571
   // Processes
   controller: "Controller", // S391
   readyOf: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393
