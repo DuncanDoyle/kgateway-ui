@@ -375,9 +375,19 @@ Nothing is compared during a controller rollout and for 10 minutes after it, so 
 
 ## KGWUI-024
 
-`xds-config-withheld` · reserved
+`xds-config-withheld` · error or warning · controller metrics · kgateway 2.5 and later
 
-This version of the UI does not raise it yet. The code is reserved for proxies that get no config updates, from metrics that kgateway 2.5 exports.
+**Cause.** kgateway 2.5 holds back a proxy's config while its routes name a cluster that is not in CDS yet. Two signals, one finding each per Gateway:
+- **Error**, "Proxies get no config updates, because referenced clusters are missing": `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"}` is above 0. A withheld proxy gets no updates at all, certificate rotations included, until the clusters appear or the warm withhold bound releases it.
+- **Warning**, "Some routes fail: config was released before every cluster was ready": `kgateway_xds_snapshot_perclient_bounded_publishes_total` grew for mode `flip_release`, `warm_release` or `carry_expired` in the last 15 minutes. The UI tracks the counter per controller Pod; a Pod's first scrape and a counter reset after a restart are not an increase.
+
+**Evidence.** The withheld proxies, the releases per mode in the last 15 minutes, and the controller Pods that report them, summed over replicas.
+
+**Since.** When the UI first saw the finding. It resets when the UI restarts.
+
+**Fix.** Find the route or backend that names the missing cluster: check the Gateway's routes for a backend that was just added or renamed, and the controller log for snapshot deferrals. A short spike after a controller restart can be translation lag; a lasting one is not.
+
+On kgateway 2.3 and 2.4 the metrics do not exist, so "What was checked" shows this check as "not available on this version". The install stays healthy. Presence of the metrics decides availability, not the version string: the 2.5 per-client families or `kgateway_build_info`. When `kgateway_build_info` reports a version, the UI uses it over the Deployment's version label or image tag, and "What was checked" names both when they differ.
 
 On kgateway 2.3 and 2.4 with controller logs on, the Gateway's Data plane section shows "Proxies may not be getting config updates" when the controller keeps logging a snapshot deferral for the Gateway. That is evidence on the Gateway page, not a finding.
 

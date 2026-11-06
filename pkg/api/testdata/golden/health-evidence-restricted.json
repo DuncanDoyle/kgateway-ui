@@ -132,6 +132,13 @@
         "ok": false,
         "required": false,
         "unavailable": "off"
+      },
+      {
+        "collectedAt": "2026-10-17T12:00:00Z",
+        "name": "withheld config",
+        "ok": false,
+        "required": false,
+        "unavailable": "not-on-version"
       }
     ],
     "collectedAt": "2026-10-17T12:00:00Z",

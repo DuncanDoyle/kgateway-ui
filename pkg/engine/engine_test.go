@@ -389,3 +389,34 @@ func TestStoresAreIsolatedPerInstall(t *testing.T) {
 		t.Fatalf("kgw: %s, want runs=4 keys=2", got)
 	}
 }
+
+// kgateway_build_info's version picks the rule set over the Deployment's
+// version, and is kept while a scrape fails; a scrape without it falls back.
+func TestRuleSetFromBuildInfo(t *testing.T) {
+	snap := snapshot(t)
+	d := snap.Deployments[0].DeepCopy()
+	delete(d.Labels, "app.kubernetes.io/version")
+	d.Spec.Template.Spec.Containers[0].Image = "cr.kgateway.dev/kgateway-dev/kgateway:latest"
+	snap.Deployments[0] = d
+	build := ""
+	scrapeErr := ""
+	cfg := config(snap, metricsFunc(func(string) (ctrlmetrics.Result, bool) {
+		return ctrlmetrics.Result{CollectedAt: testutil.Now, Err: scrapeErr, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true,
+			PerPod: []ctrlmetrics.PodMetrics{{UID: "pod/kgw/p", Name: "p", BuildVersion: build}}}}, true
+	}), func() time.Time { return testutil.Now })
+	e := New(cfg)
+	check := func(step, rules, reported string) {
+		t.Helper()
+		m := e.Compute().Installs[0]
+		if m.Rules.Rules.Version() != rules || m.Resolved.ReportedVersion != reported || m.Resolved.Version != "latest" {
+			t.Errorf("%s: rules %s, reported %q, version %q", step, m.Rules.Rules.Version(), m.Resolved.ReportedVersion, m.Resolved.Version)
+		}
+	}
+	check("no build_info", "kgateway-2.4", "")
+	build = "v2.5.0"
+	check("build_info", "kgateway-2.5", "2.5.0")
+	scrapeErr, build = "connection refused", ""
+	check("scrape failed", "kgateway-2.5", "2.5.0")
+	scrapeErr = ""
+	check("scrape without build_info", "kgateway-2.4", "")
+}

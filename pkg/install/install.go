@@ -26,7 +26,11 @@ type Install struct {
 	Version     string
 	// BaseVersion is the kgateway version a downstream build is based on, set by
 	// its detector; empty means unknown. Rule-set selection reads it.
-	BaseVersion     string
+	BaseVersion string
+	// ReportedVersion is the version the controller reports in
+	// kgateway_build_info, without a leading "v"; empty when not reported.
+	// The engine sets it from the controller metrics.
+	ReportedVersion string
 	Edition         string
 	ControllerNames []string
 	// Container is the name of the controller container (the source of the env-based settings).

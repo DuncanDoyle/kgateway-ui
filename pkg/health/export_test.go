@@ -38,6 +38,10 @@ func GuardWorlds(t *testing.T) map[string]Input {
 					Active: map[ctrlmetrics.TypeKey]float64{k: 1}, Total: map[ctrlmetrics.TypeKey]float64{k: 4}})
 			}
 		},
+		"config withheld": func(w *world) {
+			w.metrics.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "pod/kgw/p", Name: "p", PerClientPresent: true, BuildVersion: "v2.5.0",
+				Withheld: map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}}}
+		},
 		"route not processed":   func(w *world) { w.objs[2] = testutil.HTTPRoute("shop", "cart", []objects.ParentRef{gw}) },
 		"namespace not watched": func(w *world) { w.scope = `[{"matchLabels":{"team":"a"}}]` },
 		"scope unknown":         func(w *world) { w.scope = "[{" },

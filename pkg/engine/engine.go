@@ -5,6 +5,7 @@ package engine
 import (
 	"log/slog"
 	"maps"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -150,6 +151,9 @@ type Engine struct {
 	views map[string]*viewsMemo
 	// states holds each install's check Stores, keyed by install ID; only touched under computeMu.
 	states map[string]*health.States
+	// reported holds each install's last kgateway_build_info version, kept while
+	// a scrape fails so the rule set does not flip; only touched under computeMu.
+	reported map[string]string
 	// diags holds each install's last diagnosis; only touched under computeMu.
 	diags map[string]*diagMemo
 	// kindKeys and ownedKeys name the kinds input prints read; see kindKeys.
@@ -191,7 +195,7 @@ func New(cfg Config) *Engine {
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
 	}
-	e := &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{},
+	e := &Engine{cfg: cfg, seen: map[generation]time.Time{}, rejected: map[string]bool{}, caps: map[string]bool{}, reported: map[string]string{},
 		decode: newDecodeCache(), persist: newPersistence(), diags: map[string]*diagMemo{}}
 	e.kindKeys, e.ownedKeys = kindKeys(cfg.Served)
 	return e
@@ -320,6 +324,8 @@ func (e *Engine) compute() *Published {
 		res   install.Resolved
 		owned *install.Owned
 		sel   computed.Selection
+		met   ctrlmetrics.Result
+		has   bool
 	}
 	var runs []run
 	var views []*computed.Views
@@ -328,7 +334,10 @@ func (e *Engine) compute() *Published {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
-		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion())}
+		// Read once: the version, the verifier, health and the source fingerprint share this evidence.
+		met, has := e.cfg.Metrics.Get(res.ID())
+		res.ReportedVersion = e.reportedVersion(res.ID(), met, has)
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion()), met: met, has: has}
 		runs = append(runs, r)
 		m := e.views[res.ID()]
 		if m == nil {
@@ -344,6 +353,7 @@ func (e *Engine) compute() *Published {
 		}
 	}
 	e.views = memos // a vanished install's memo is dropped
+	maps.DeleteFunc(e.reported, func(id string, _ string) bool { return memos[id] == nil })
 	states := make(map[string]*health.States, len(runs))
 	for _, r := range runs {
 		st := e.states[r.res.ID()]
@@ -358,8 +368,7 @@ func (e *Engine) compute() *Published {
 	}
 	for i, r := range runs {
 		res, owned := r.res, r.owned
-		// Read once: the verifier, health and the source fingerprint share this evidence.
-		met, has := e.cfg.Metrics.Get(res.ID())
+		met, has := r.met, r.has
 		m.MetricsRead = append(m.MetricsRead, MetricsRead{ID: res.ID(), Result: met, Present: has})
 		if has && e.cfg.MetricsMaxAge > 0 {
 			next.add(met.CollectedAt.Add(e.cfg.MetricsMaxAge), true) // stale when age > max
@@ -395,6 +404,19 @@ func (e *Engine) compute() *Published {
 	p := &Published{Model: m, Source: Source{Cache: snap.Source, Metrics: encodeMetrics(m.MetricsRead, now, e.cfg.MetricsMaxAge), Kinds: kc.String(), Catalog: cat.Key(),
 		Collected: col.Print}, ConfirmedAt: snap.TakenAt}
 	return p
+}
+
+// reportedVersion is the build_info version of install id without a leading
+// "v": from a collected result, else the last one while scrapes fail.
+func (e *Engine) reportedVersion(id string, met ctrlmetrics.Result, has bool) string {
+	if has && met.Err == "" {
+		if v := strings.TrimPrefix(met.Metrics.BuildVersion(), "v"); v != "" {
+			e.reported[id] = v
+		} else {
+			delete(e.reported, id)
+		}
+	}
+	return e.reported[id]
 }
 
 // gatewayAPI is sel's Gateway API table, else the upstream one.

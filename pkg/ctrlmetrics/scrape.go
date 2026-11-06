@@ -142,7 +142,9 @@ func (r Result) SameContent(o Result) bool {
 func samePod(a, b PodMetrics) bool {
 	return a.UID == b.UID && a.Name == b.Name && a.DroppedPresent == b.DroppedPresent && sameBits(a.Dropped, b.Dropped) &&
 		a.StatusSyncsPresent == b.StatusSyncsPresent && sameBits(a.StatusSyncs, b.StatusSyncs) &&
-		maps.EqualFunc(a.Active, b.Active, sameBits) && maps.EqualFunc(a.Total, b.Total, sameBits)
+		maps.EqualFunc(a.Active, b.Active, sameBits) && maps.EqualFunc(a.Total, b.Total, sameBits) &&
+		a.BuildVersion == b.BuildVersion && a.PerClientPresent == b.PerClientPresent &&
+		maps.EqualFunc(a.Withheld, b.Withheld, sameBits) && maps.EqualFunc(a.Bounded, b.Bounded, sameBits)
 }
 
 // sameBits compares samples by bit pattern, so NaN equals NaN, as the engine's

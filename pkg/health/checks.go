@@ -25,7 +25,8 @@ import (
 // Upstream returns the upstream checks (design §5.2, Phase 3 §9.3).
 func Upstream() []Check {
 	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{},
-		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}, endpointsCheck{}}
+		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}, endpointsCheck{},
+		withheldCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
