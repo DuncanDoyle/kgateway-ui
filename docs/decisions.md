@@ -994,3 +994,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** Two more watches' worth of RBAC and memory in 3.4, measured in Task 81. A minor tag after 3.4 carries the new exported API.
 
 **Alternatives:** None of the four in 3.4; all four in 3.4 (a design change to the cache's access model).
+
+## D-057 — Retained heap over 2.1 raised to 48 MiB; Service and EndpointSlice facts shrunk (2026-11-06, phase 3)
+**Status:** accepted 2026-11-06 (user)
+
+**Context:** The 3.4 bench (`bench/3.4.txt`) measures +41.9 MiB retained heap over 2.1 in the measurement world, against the 40 MiB gate (D-054). Real data grew 4.4 MB (EndpointSlice facts, the snapshot's fact slices and the routes' Service backendRefs). Freed informer stores leave 6–14 MB of fragmentation that varies between runs. The Service and EndpointSlice watches hold about 960 B per object, not the design's 200 B (design §11).
+
+**Decision:** First shrink the facts toward the design's 200 B per object: EndpointSlice ready counts as a slice indexed like the ports, not a map. Then raise the retained-heap gate to 48 MiB over 2.1. The ≤ +24 MiB over 3.1 gate is unchanged.
+
+**Consequences:** `TestBudgetHeap` gates at 48 MiB. The 3.4 bench is re-run after the shrink. OS memory (275.5 of 288 MiB) is also tight and benefits from the shrink.
+
+**Alternatives:** Shrink only and keep 40 MiB; raise the gate without shrinking.

@@ -118,7 +118,7 @@ No gate changes without the user. A broken gate stops the work, and the numbers 
 |---|---|---|
 | Warm recompute median, consistent / contradicting / worst | ≤ 150 ms | 35.5 / 46.7 / 51.3 ms |
 | Cold recompute median | ≤ 1 s | 52 / 56 / 62 ms |
-| Retained heap over 2.1, measurement world | ≤ 40 MiB (D-054), and ≤ +24 MiB over 3.1 | +34.6 MiB ⚠ |
+| Retained heap over 2.1, measurement world | ≤ 48 MiB (D-057; 40 MiB before, D-054), and ≤ +24 MiB over 3.1 | +34.6 MiB ⚠ |
 | 3.2 watches' retained state | ≤ 1,600,000 B (D-046) | 1,450,520 B |
 | 3.4 watches' retained state (Services, EndpointSlices, the three #17 kinds) | reported | — |
 | Dense: retained / cold / per warm | 176 / 246 / 185 MiB | 160 / 207 / 166 MiB |

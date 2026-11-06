@@ -788,7 +788,7 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Analyzer stage alone (identity, groups, rank, every Phase 3 check) | ≤ 20 ms warm; ≤ 2 ms when memoized inputs are unchanged | 3.2–3.4 |
 | Stream CPU, annotation-only | ≤ 15 % of one core, unchanged | 3.1–3.4 |
 | Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core. If the baseline already exceeds 22 %, the numbers go to the user before a gate is set | 3.1–3.4 |
-| Retained heap | the Phase 2 gate of 32 MiB, raised to 40 MiB in 3.3 **(user, 2026-11-05; D-054)**; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
+| Retained heap | the Phase 2 gate of 32 MiB, raised to 40 MiB in 3.3 **(user, 2026-11-05; D-054)** and to 48 MiB in 3.4 **(user, 2026-11-06; D-057)**; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
 | Dense memory | at the default edge cap, medians of: retained heap ≤ 176 MiB, bytes allocated by the cold recompute ≤ 246 MiB and per warm recompute ≤ 185 MiB; peak heap and RSS logged, not gated (D-039) | 3.0–3.4 |
 | OS memory during the stream | median of five ≤ 288 MiB (D-043; was ≤ 256 MiB, D-022) | 3.2–3.4 |
 | `GET …/diagnostics`, `GET …/findings` (each filter mix), `GET …/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 3.1–3.4 |
