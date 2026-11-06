@@ -5,7 +5,12 @@ import (
 	"slices"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	kubefake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
@@ -123,6 +128,27 @@ func TestReferenceGrantsDoNotChangeRefFindings(t *testing.T) {
 	for i := range a {
 		if a[i].Code != b[i].Code || a[i].ID != b[i].ID || a[i].Message != b[i].Message || a[i].Detail != b[i].Detail {
 			t.Fatalf("finding %d differs: %+v vs %+v", i, a[i], b[i])
+		}
+	}
+}
+
+// A denied ReferenceGrant list is optional input (D-034): no KGWUI-008, the
+// install stays known, and the tile still shows the denied access.
+func TestDeniedListOnlyKindRaisesNoSignalUnavailable(t *testing.T) {
+	deny := func(dyn *dynamicfake.FakeDynamicClient, _ *kubefake.Clientset) {
+		dyn.PrependReactor("list", "referencegrants", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "gateway.networking.k8s.io", Resource: "referencegrants"}, "", nil)
+		})
+	}
+	_, srv, _ := startWith(t, setup{prepare: deny}, isolated(testutil.ReferenceGrant("shop", "grant", "blog"))...)
+	h := get[HealthResponse](t, srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+	if hasFinding(h, health.CodeSignalUnavailable, "") || h.State != health.StateHealthy {
+		t.Fatalf("state %s: %+v", h.State, h.Findings)
+	}
+	o := get[OverviewResponse](t, srv, "/api/v1/installs/kgw.kgateway/overview", http.StatusOK)
+	for _, c := range o.Counts {
+		if c.Kind == "ReferenceGrant" && (c.Access.OK || !c.Access.Denied) {
+			t.Fatalf("tile access %+v, want denied", c.Access)
 		}
 	}
 }

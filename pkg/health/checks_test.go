@@ -608,8 +608,10 @@ func TestFindingsOrderIsDeterministic(t *testing.T) {
 		"warning KGWUI-003 shop/c gone-4 a",
 		"warning KGWUI-003 shop/c gone-4 z",
 	}
-	for range kinds.ByCategory(testutil.ServedUpstream(), kinds.CategoryPolicy) {
-		want = append(want, "info KGWUI-008")
+	for _, k := range kinds.ByCategory(testutil.ServedUpstream(), kinds.CategoryPolicy) {
+		if !k.ListOnly { // a denied list-only kind raises no KGWUI-008
+			want = append(want, "info KGWUI-008")
+		}
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order:\n got %q\nwant %q", got, want)

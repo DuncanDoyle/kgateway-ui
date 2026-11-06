@@ -12,7 +12,9 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 )
 
 // neutralFindings returns "code resource" for each finding of rep whose code
@@ -67,15 +69,19 @@ func TestAnalyzerWithoutPodsEventsServicesOrCRDs(t *testing.T) {
 	delete(bare.Access, cache.PodsGVR)
 
 	now := testutil.Now
-	run := func(s *cache.Snapshot) *InstallModel {
-		e := New(config(s, metricsAt(testutil.Now), func() time.Time { return now }))
+	run := func(s *cache.Snapshot, src process.Source) *InstallModel {
+		cfg := config(s, metricsAt(testutil.Now), func() time.Time { return now })
+		cfg.Process = src
+		e := New(cfg)
 		e.Compute()
 		now = now.Add(health.EndpointsHold + health.Grace + time.Second) // past every hold and grace
 		return &e.Compute().Installs[0]
 	}
-	fullM := run(full)
+	fullM := run(full, process.Kube{})
 	now = testutil.Now
-	bareM := run(bare)
+	offM := run(bare, process.Kube{})
+	now = testutil.Now
+	bareM := run(bare, notObserving{}) // a provider that observes no process
 
 	has := func(rep health.Report, code string) bool {
 		for _, f := range rep.Findings {
@@ -88,27 +94,51 @@ func TestAnalyzerWithoutPodsEventsServicesOrCRDs(t *testing.T) {
 	if !has(fullM.Health, health.CodeProcessRestarting) || !has(fullM.Health, health.CodeBackendNoReadyEndpoints) {
 		t.Fatalf("the full snapshot must raise 019 and 023: %v", neutralFindings(fullM.Health))
 	}
-	if has(bareM.Health, health.CodeProcessRestarting) || has(bareM.Health, health.CodeBackendNoReadyEndpoints) {
-		t.Fatalf("the bare snapshot raised a cluster-only finding: %v", neutralFindings(bareM.Health))
-	}
-	got, want := neutralFindings(bareM.Health), neutralFindings(fullM.Health, health.CodeProcessRestarting, health.CodeBackendNoReadyEndpoints, health.CodeVersionSkew)
-	if len(got) != len(want) {
-		t.Fatalf("findings differ:\n bare %v\n full %v", got, want)
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Fatalf("findings differ:\n bare %v\n full %v", got, want)
+	skip := []string{health.CodeProcessRestarting, health.CodeBackendNoReadyEndpoints, health.CodeVersionSkew}
+	want := neutralFindings(fullM.Health, skip...)
+	for name, m := range map[string]*InstallModel{"not observing": bareM, "watches off": offM} {
+		if has(m.Health, health.CodeProcessRestarting) || has(m.Health, health.CodeBackendNoReadyEndpoints) {
+			t.Fatalf("%s: a cluster-only finding: %v", name, neutralFindings(m.Health))
+		}
+		if got := neutralFindings(m.Health); !slices.Equal(got, want) {
+			t.Fatalf("%s: findings differ:\n got %v\n full %v", name, got, want)
 		}
 	}
-	// The checks that read the missing inputs report "not available"; none errors out.
+	// A provider without processes reports "not observed"; a Kubernetes install with the watch off reports "off".
+	for _, c := range []struct {
+		m    *InstallModel
+		why  health.Availability
+		name []string
+	}{
+		{bareM, health.AvailNotObserved, []string{"process restarts", "version skew"}},
+		{bareM, health.AvailOff, []string{"probe failures"}}, // Events are off
+		{offM, health.AvailOff, []string{"process restarts", "probe failures", "version skew"}},
+	} {
+		for _, name := range c.name {
+			if r := checkNamed(c.m.Health, name); r == nil || r.Unavailable != c.why {
+				t.Fatalf("check %q: %+v, want %q", name, r, c.why)
+			}
+		}
+	}
+	// 023 is not available without Services and EndpointSlices, and available with them.
+	for _, m := range []*InstallModel{bareM, offM} {
+		if r := checkNamed(m.Health, "backend endpoints"); r == nil || r.Unavailable != health.AvailOff {
+			t.Fatalf("backend endpoints: %+v", r)
+		}
+	}
 	for _, name := range []string{"process restarts", "probe failures", "version skew", "backend endpoints"} {
-		if c := checkNamed(bareM.Health, name); c == nil || c.Unavailable != health.AvailOff {
-			t.Fatalf("check %q on the bare snapshot: %+v", name, c)
-		}
-		if c := checkNamed(fullM.Health, name); c == nil || c.Unavailable != "" {
-			t.Fatalf("check %q on the full snapshot: %+v", name, c)
+		if r := checkNamed(fullM.Health, name); r == nil || r.Unavailable != "" {
+			t.Fatalf("check %q on the full snapshot: %+v", name, r)
 		}
 	}
+}
+
+// notObserving is a process.Source whose sets are never observed.
+type notObserving struct{}
+
+func (notObserving) Controller(install.Resolved, *cache.Snapshot) process.Set { return process.Set{} }
+func (notObserving) Proxies(install.Resolved, objects.Ref, *cache.Snapshot) process.Set {
+	return process.Set{}
 }
 
 func checkNamed(rep health.Report, name string) *health.CheckResult {

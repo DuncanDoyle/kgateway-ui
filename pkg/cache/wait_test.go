@@ -6,10 +6,12 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 )
@@ -114,5 +116,36 @@ func TestWaitBlocksUntilCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("Wait did not return after cancel")
+	}
+}
+
+// The watch wrappers' loops are joined: the group stays busy until the watch stops.
+func TestWatchWrapperLoopsAreJoined(t *testing.T) {
+	for name, wrap := range map[string]func(watch.Interface, *sync.WaitGroup) watch.Interface{
+		"observe": func(w watch.Interface, wg *sync.WaitGroup) watch.Interface {
+			return observe(w, wg, func(watch.Event) {})
+		},
+		"filter": func(w watch.Interface, wg *sync.WaitGroup) watch.Interface {
+			return newFilterWatch(w, wg, func(e watch.Event) []watch.Event { return []watch.Event{e} })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var wg sync.WaitGroup
+			in := watch.NewFake()
+			w := wrap(in, &wg)
+			done := make(chan struct{})
+			go func() { defer close(done); wg.Wait() }()
+			select {
+			case <-done:
+				t.Fatal("joined before the watch stopped")
+			case <-time.After(100 * time.Millisecond):
+			}
+			w.Stop()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the loop outlived Stop")
+			}
+		})
 	}
 }

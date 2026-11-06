@@ -69,7 +69,9 @@ func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	var fs []Finding
 	core := []schema.GroupVersionResource{cache.NamespacesGVR, cache.PodsGVR, cache.DeploymentsGVR}
 	for _, s := range in.Served {
-		core = append(core, s.GVR())
+		if !s.ListOnly { // list-only kinds are optional (D-034); the overview tile shows their access
+			core = append(core, s.GVR())
+		}
 	}
 	for _, gvr := range core {
 		if a, known := in.Snapshot.Access[gvr]; known && !a.OK {

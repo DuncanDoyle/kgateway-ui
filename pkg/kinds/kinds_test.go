@@ -129,10 +129,7 @@ func TestUpstreamHasBackend(t *testing.T) {
 	t.Fatalf("upstream kinds have no %s/%s", want.Group, want.Kind)
 }
 
-// DirectResponse, GatewayExtension and ReferenceGrant come after Backend, so
-// existing kind lists only gain them at the end. They are listed, never
-// judged for controller status. Versions are the ones served by kgateway
-// v2.3.11, v2.4.7 and v2.5.0 and Gateway API v1.5.1, v1.6.1 and v1.7.0.
+// The list-only kinds come after Backend, so kind lists only gain them at the end.
 func TestUpstreamHasListOnlyKinds(t *testing.T) {
 	want := []Descriptor{
 		{Group: "gateway.kgateway.dev", Kind: "DirectResponse", Resource: "directresponses", Versions: []string{"v1alpha1"},

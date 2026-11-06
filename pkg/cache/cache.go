@@ -132,10 +132,11 @@ type Config struct {
 // opened before the failure never recover it.
 type progress struct {
 	mu       sync.Mutex
-	err      string // failure not yet recovered from; "" when none
-	denied   bool   // err is a 403
-	failures uint64 // failures so far; a watch-list stream remembers the count it was opened at
-	onChange func() // called when err turns empty or non-empty; may be nil
+	err      string          // failure not yet recovered from; "" when none
+	denied   bool            // err is a 403
+	failures uint64          // failures so far; a watch-list stream remembers the count it was opened at
+	onChange func()          // called when err turns empty or non-empty; may be nil
+	loops    *sync.WaitGroup // joins the watch wrappers' goroutines; may be nil
 }
 
 func (p *progress) failure(err error) {
@@ -227,7 +228,7 @@ func instrument(p *progress, list toolscache.ListWithContextFunc, watchFn toolsc
 			if !watchList {
 				p.recover(openedAt) // a working classic watch recovers the kind
 			}
-			return observe(w, func(e watch.Event) { p.event(e, watchList, openedAt) }), nil
+			return observe(w, p.loops, func(e watch.Event) { p.event(e, watchList, openedAt) }), nil
 		},
 	}
 }
@@ -241,9 +242,9 @@ type observed struct {
 	once sync.Once
 }
 
-func observe(in watch.Interface, f func(watch.Event)) watch.Interface {
+func observe(in watch.Interface, loops *sync.WaitGroup, f func(watch.Event)) watch.Interface {
 	w := &observed{in: in, out: make(chan watch.Event), stop: make(chan struct{})}
-	go w.loop(f)
+	goTracked(loops, func() { w.loop(f) })
 	return w
 }
 
@@ -318,7 +319,7 @@ func (c *Cache) handled() {
 // informer builds an informer over an instrumented ListerWatcher. client tells
 // the reflector whether the client supports watch-list semantics (fakes do not).
 func (c *Cache) informer(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
-	p := &progress{onChange: c.changes.Notify}
+	p := &progress{onChange: c.changes.Notify, loops: &c.running}
 	lw := toolscache.ToListWatcherWithWatchListSemantics(instrument(p, list, watchFn), client)
 	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
 	if c.changes != nil {
@@ -450,10 +451,18 @@ func (c *Cache) Start(ctx context.Context) {
 	})
 }
 
-// Wait blocks until every goroutine Start launched has exited, which they do
-// once Start's context is cancelled. Before Start, or after the goroutines
-// have exited, it returns at once. Call it after Start has returned.
+// Wait returns once every goroutine Start launched, watch loops included, has
+// exited after ctx is cancelled. Call it after Start; before Start it returns at once.
 func (c *Cache) Wait() { c.running.Wait() }
+
+// goTracked runs f in a goroutine that wg joins; a nil wg joins nothing.
+func goTracked(wg *sync.WaitGroup, f func()) {
+	if wg == nil {
+		go f()
+		return
+	}
+	wg.Go(f)
+}
 
 // run starts f in a goroutine that Wait joins; an optional one is also
 // tracked by c.optional.

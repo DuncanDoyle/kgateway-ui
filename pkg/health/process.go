@@ -35,23 +35,24 @@ const (
 
 // Wording of the process findings (design §9.3), from the wording pass (Task 51).
 const (
-	restartedMessage   = "%s restarted in the last 15 minutes"
-	restartedTimes     = "Pod %s restarted %s in the last 15 minutes."
-	restartedOnce      = "Pod %s restarted in the last 15 minutes."
-	lastExitReason     = " Last exit: %s (exit code %d)."
-	lastExitCode       = " Last exit code %d."
-	panicNote          = " A Go panic exits with code 2. The stack trace is in the previous container's log."
-	probeMessage       = "%s probes failing"
-	probeDetail        = "Events show Pod %s failed %s %d times in the last 15 minutes."
-	probeUncounted     = " Earlier failures were not counted."
-	rolloutMessage     = "%s rollout stuck"
-	rolloutDetail      = "The rollout passed its progress deadline (ProgressDeadlineExceeded)."
-	rolloutWaiting     = " Pod %s is waiting: %s."
-	notReadyFacts      = "%d/%d ready: %s"
-	eventsOffDetail    = "Events are turned off"
-	eventsSyncDetail   = "The Events watch has not synced yet"
-	eventsCappedDetail = "More than 10,000 Events, so some were dropped"
-	proxiesUnchecked   = "Proxy Pods are not watched, so proxies were not checked"
+	restartedMessage    = "%s restarted in the last 15 minutes"
+	restartedTimes      = "Pod %s restarted %s in the last 15 minutes."
+	restartedOnce       = "Pod %s restarted in the last 15 minutes."
+	lastExitReason      = " Last exit: %s (exit code %d)."
+	lastExitCode        = " Last exit code %d."
+	panicNote           = " A Go panic exits with code 2. The stack trace is in the previous container's log."
+	probeMessage        = "%s probes failing"
+	probeDetail         = "Events show Pod %s failed %s %d times in the last 15 minutes."
+	probeUncounted      = " Earlier failures were not counted."
+	rolloutMessage      = "%s rollout stuck"
+	rolloutDetail       = "The rollout passed its progress deadline (ProgressDeadlineExceeded)."
+	rolloutWaiting      = " Pod %s is waiting: %s."
+	notReadyFacts       = "%d/%d ready: %s"
+	eventsOffDetail     = "Events are turned off"
+	eventsSyncDetail    = "The Events watch has not synced yet"
+	eventsCappedDetail  = "More than 10,000 Events, so some were dropped"
+	providerNotObserved = "The platform does not report processes"
+	proxiesUnchecked    = "Proxy Pods are not watched, so proxies were not checked"
 )
 
 // stuckWaiting are the waiting reasons KGWUI-021 quotes as evidence.
@@ -91,11 +92,29 @@ func processFinding(in Input, s subject, code, slug, msg, detail string, ev *Pro
 		Message: fmt.Sprintf(msg, s.what), Detail: detail, Evidence: []objects.Ref{process.PodRef(s.podNS, *p)}, Facts: ev}
 }
 
+// known reports whether the provider says anything about any process: a
+// workload it manages or processes it observed. When it does not, the
+// processes are not observed, which differs from a watch that is off.
+func (d *ProcessData) known() bool {
+	if d.Controller.Observed || d.Controller.Desired != nil {
+		return true
+	}
+	for _, s := range d.Proxies {
+		if s.Observed || s.Desired != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // proxyGap is the result detail and reason when proxy Pods are not watched
 // although a Gateway has a proxy Deployment; "" when every proxy was checked.
 func proxyGap(in Input) (string, Availability) {
 	if in.Process == nil {
 		return "", ""
+	}
+	if !in.Process.known() {
+		return providerNotObserved, AvailNotObserved
 	}
 	a, running := in.Snapshot.Access[cache.ProxyPodsGVR]
 	if running && a.OK {
