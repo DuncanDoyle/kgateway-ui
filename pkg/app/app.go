@@ -111,6 +111,11 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 			out = append(out, api.Capability{Name: in.name, State: api.CapFailing, Reason: reasonFailing})
 		}
 	}
+	if d.NoEndpoints {
+		out = append(out, api.Capability{Name: "endpoints", State: api.CapOff})
+	} else if c, ok := endpointsCapability(snap); ok {
+		out = append(out, c)
+	}
 	// Per-Gateway failures stay in the value; only a stopped or stuck collector is failing here.
 	switch v, ok := collected.Get(proxystats.Key); {
 	case d.NoProxyStats:
@@ -146,6 +151,37 @@ func CoreCapabilities(snap *cache.Snapshot, d Diagnostics, collected collect.Sna
 		c.Reason = reasonLogsFailing
 	}
 	return append(out, c)
+}
+
+// endpointsCapability merges the Service and EndpointSlice watches: on only when
+// both run, denied when either is, else failing. ok is false while either is
+// missing or syncing.
+func endpointsCapability(snap *cache.Snapshot) (api.Capability, bool) {
+	if snap == nil {
+		return api.Capability{}, false
+	}
+	var failing, denied bool
+	for _, gvr := range []schema.GroupVersionResource{cache.ServicesGVR, cache.EndpointSlicesGVR} {
+		a, running := snap.Access[gvr]
+		switch why := health.AccessAvailability(a); {
+		case !running:
+			return api.Capability{}, false
+		case a.OK:
+		case why == health.AvailDenied:
+			denied = true
+		case why == health.AvailFailing:
+			failing = true
+		default:
+			return api.Capability{}, false
+		}
+	}
+	switch {
+	case denied:
+		return api.Capability{Name: "endpoints", State: api.CapDenied, Reason: reasonDenied}, true
+	case failing:
+		return api.Capability{Name: "endpoints", State: api.CapFailing, Reason: reasonFailing}, true
+	}
+	return api.Capability{Name: "endpoints", State: api.CapOn}, true
 }
 
 // /api/v1/meta is not gated, so its reasons are fixed text; the raw error stays in check results.
@@ -211,6 +247,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if o.Clock != nil {
 		now = o.Clock.Now
 	}
+	sc.Cache.Endpoints = !o.Diagnostics.NoEndpoints
 	ca := cache.New(sc.Cache)
 	scraper := c.Scraper
 	switch {

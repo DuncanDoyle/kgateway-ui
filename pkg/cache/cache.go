@@ -12,6 +12,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -80,6 +81,10 @@ type Snapshot struct {
 	EventsCapped bool
 	// CRDs are the Gateway API CRDs, by name.
 	CRDs []CRDMeta
+	// Services and EndpointSlices are the cut-down objects of the Service and
+	// EndpointSlice watches, by namespace and name.
+	Services       []ServiceFact
+	EndpointSlices []SliceFact
 	// Synced is true once every core informer (served kinds, Namespaces,
 	// Pods and Deployments) has synced or failed. Optional watches never hold it back.
 	Synced  bool
@@ -106,6 +111,8 @@ type Config struct {
 	// CRDs watches Gateway API CRD metadata through Metadata; a nil Metadata means no watch.
 	CRDs     bool
 	Metadata metadata.Interface
+	// Endpoints watches Services and EndpointSlices cluster-wide, cut down at the informer.
+	Endpoints bool
 	// Now stamps snapshots; nil means time.Now.
 	Now func() time.Time
 	// Changes is notified on every informer event (initial-list adds
@@ -284,6 +291,8 @@ type Cache struct {
 	// Optional watches; nil or empty when off.
 	proxyPods    []tracked
 	events, crds *tracked
+	services     *tracked
+	slices       *tracked
 	evf          *eventFilter
 	uids         *podSet
 	uidRegs      []toolscache.ResourceEventHandlerRegistration
@@ -379,6 +388,10 @@ func New(cfg Config) *Cache {
 		t := c.crdInformer(cfg.Metadata)
 		c.crds = &t
 	}
+	if cfg.Endpoints {
+		svcs, es := c.serviceInformer(cfg.Kube), c.sliceInformer(cfg.Kube)
+		c.services, c.slices = &svcs, &es
+	}
 	return c
 }
 
@@ -413,6 +426,11 @@ func (c *Cache) Start(ctx context.Context) {
 	}
 	if c.events != nil {
 		c.optional.Go(func() { c.runEvents(octx) })
+	}
+	for _, t := range []*tracked{c.services, c.slices} {
+		if t != nil {
+			c.optional.Go(func() { t.inf.RunWithContext(octx) })
+		}
 	}
 	go func() {
 		settled := func(context.Context) (bool, error) {
@@ -537,7 +555,7 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 			}
 		}
 	}
-	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds} {
+	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds, ServicesGVR: c.services, EndpointSlicesGVR: c.slices} {
 		if t == nil {
 			continue
 		}
@@ -556,6 +574,8 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 // pass, exactly what it copied.
 func (c *Cache) Snapshot() *Snapshot {
 	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now()}
+	var svcs []*corev1.Service
+	var eps []*discoveryv1.EndpointSlice
 	var p printer
 	s.Access, s.Synced = c.walk(func(gvr schema.GroupVersionResource, o any) {
 		p.add(gvr, o.(metav1.Object))
@@ -576,6 +596,10 @@ func (c *Cache) Snapshot() *Snapshot {
 			s.Events = append(s.Events, eventFact(v))
 		case *metav1.PartialObjectMetadata:
 			s.CRDs = append(s.CRDs, crdMeta(v))
+		case *corev1.Service:
+			svcs = append(svcs, v)
+		case *discoveryv1.EndpointSlice:
+			eps = append(eps, v)
 		}
 	})
 	for _, objs := range s.Objects {
@@ -583,6 +607,16 @@ func (c *Cache) Snapshot() *Snapshot {
 	}
 	slices.SortFunc(s.Events, func(a, b EventFact) int { return strings.Compare(string(a.UID), string(b.UID)) })
 	slices.SortFunc(s.CRDs, func(a, b CRDMeta) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(svcs, func(a, b *corev1.Service) int { return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name) })
+	slices.SortFunc(eps, func(a, b *discoveryv1.EndpointSlice) int {
+		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
+	})
+	for _, v := range svcs {
+		s.Services = append(s.Services, serviceFact(v))
+	}
+	for _, v := range eps {
+		s.EndpointSlices = append(s.EndpointSlices, sliceFact(v))
+	}
 	if c.evf != nil {
 		s.EventDeltas, s.EventHistoryUnknown, s.EventsCapped = c.evf.view(s.TakenAt)
 	}
