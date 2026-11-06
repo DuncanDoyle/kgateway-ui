@@ -16,6 +16,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
 
@@ -153,6 +154,12 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 			}
 		}
 	}
+	// Settled leaves out the list-only kinds; each must be running too.
+	for deadline := time.Now().Add(time.Minute); !listOnlySynced(w.Cache.Snapshot(), served); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			tb.Fatal("the list-only kinds did not settle")
+		}
+	}
 	testutil.Drain(w.Signal.C()) // the settle notify precedes Settled
 	return w
 }
@@ -161,6 +168,16 @@ func live(tb testing.TB, tier Tier, now func() time.Time, phase3 bool) *LiveWorl
 func optionalSynced(s *cache.Snapshot) bool {
 	for _, g := range []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.EventsGVR, cache.CRDsGVR, cache.ServicesGVR, cache.EndpointSlicesGVR} {
 		if !s.Access[g].OK {
+			return false
+		}
+	}
+	return true
+}
+
+// listOnlySynced reports whether every list-only kind of served is OK.
+func listOnlySynced(s *cache.Snapshot, served []kinds.Served) bool {
+	for _, k := range served {
+		if k.ListOnly && !s.Access[k.GVR()].OK {
 			return false
 		}
 	}

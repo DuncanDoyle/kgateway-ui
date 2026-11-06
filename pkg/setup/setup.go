@@ -11,8 +11,9 @@
 // Before a single pass, wait with [cache.Cache.Settled], not by receiving on
 // Changes. Settled covers the required informers only. Then wait until each
 // optional watch in Snapshot().Access ([cache.ProxyPodsGVR], [cache.CRDsGVR],
-// [cache.EventsGVR], [cache.ServicesGVR], [cache.EndpointSlicesGVR], when present) is OK or has an Err. Otherwise a pass can
-// read them as not yet read, and the output varies between runs.
+// [cache.EventsGVR], [cache.ServicesGVR], [cache.EndpointSlicesGVR], when present)
+// and each list-only served kind ([kinds.Descriptor.ListOnly]) is OK or has an Err.
+// Otherwise a pass can read them as not yet read, and the output varies between runs.
 //
 // To stop, cancel the context passed to [cache.Cache.Start], then call
 // [cache.Cache.Wait], which returns once every goroutine Start launched has exited.
@@ -87,7 +88,7 @@ type Config struct {
 	Kinds *kinds.Monitor
 	// Changes is the one coalescing recompute signal the cache, the kinds
 	// monitor and the engine share (D-019). A one-shot caller waits with
-	// Cache.Settled and the optional Access entries, not on Changes.
+	// Cache.Settled and the optional and list-only Access entries, not on Changes.
 	Changes *trigger.Signal
 }
 

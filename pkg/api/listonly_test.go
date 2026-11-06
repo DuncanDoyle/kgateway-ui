@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
@@ -150,5 +153,64 @@ func TestDeniedListOnlyKindRaisesNoSignalUnavailable(t *testing.T) {
 		if c.Kind == "ReferenceGrant" && (c.Access.OK || !c.Access.Denied) {
 			t.Fatalf("tile access %+v, want denied", c.Access)
 		}
+	}
+}
+
+// stalledList is a dynamic client whose List of resource blocks until its
+// context ends; the fake client cannot block one resource alone.
+type stalledList struct {
+	dynamic.Interface
+	resource string
+}
+
+// IsWatchListSemanticsUnSupported keeps the fake's list-then-watch reflector path.
+func (stalledList) IsWatchListSemanticsUnSupported() bool { return true }
+
+func (s stalledList) Resource(gvr schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+	ri := s.Interface.Resource(gvr)
+	if gvr.Resource != s.resource {
+		return ri
+	}
+	return stalledResource{ri}
+}
+
+type stalledResource struct {
+	dynamic.NamespaceableResourceInterface
+}
+
+func (stalledResource) List(ctx context.Context, _ metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// Codex 3.4 #3: a ReferenceGrant list that never completes does not hold back
+// Synced or Settled: no KGWUI-008, the install stays known, the tile shows syncing.
+func TestPendingListOnlyKindDoesNotGateReadiness(t *testing.T) {
+	stall := func(d dynamic.Interface) dynamic.Interface { return stalledList{d, "referencegrants"} }
+	h := newHarness(t, setup{wrapDynamic: stall}, isolated(testutil.ReferenceGrant("shop", "grant", "blog"))...)
+	waitUntil(t, "settled", h.cache.Settled)
+	s := h.cache.Snapshot()
+	var gvr schema.GroupVersionResource
+	for _, k := range testutil.ServedUpstream() {
+		if k.Kind == "ReferenceGrant" {
+			gvr = k.GVR()
+		}
+	}
+	if a, known := s.Access[gvr]; !known || !s.Synced || a.OK || a.Err != "" {
+		t.Fatalf("synced %v, ReferenceGrant access %+v; want synced with ReferenceGrants syncing", s.Synced, a)
+	}
+	hr := get[HealthResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/health", http.StatusOK)
+	if hasFinding(hr, health.CodeSignalUnavailable, "") || hr.State != health.StateHealthy {
+		t.Fatalf("state %s: %+v", hr.State, hr.Findings)
+	}
+	o := get[OverviewResponse](t, h.srv, "/api/v1/installs/kgw.kgateway/overview", http.StatusOK)
+	tile := false
+	for _, c := range o.Counts {
+		if c.Kind == "ReferenceGrant" {
+			tile = !c.Access.OK && c.Access.Err == ""
+		}
+	}
+	if !tile {
+		t.Fatalf("ReferenceGrant tile %+v, want syncing", o.Counts)
 	}
 }

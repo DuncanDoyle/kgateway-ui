@@ -86,7 +86,8 @@ type Snapshot struct {
 	Services       []ServiceFact
 	EndpointSlices []SliceFact
 	// Synced is true once every core informer (served kinds, Namespaces,
-	// Pods and Deployments) has synced or failed. Optional watches never hold it back.
+	// Pods and Deployments) has synced or failed. Optional watches and
+	// list-only kinds never hold it back.
 	Synced  bool
 	TakenAt time.Time
 	// Source is the fingerprint of exactly the objects and access states copied.
@@ -286,9 +287,11 @@ type Cache struct {
 	now     func() time.Time
 	changes *trigger.Signal
 	dyn     map[schema.GroupVersionResource]tracked
-	ns      tracked
-	pods    []tracked
-	deploys []tracked
+	// listOnly are the dyn kinds that never hold back Synced or Settled (D-034).
+	listOnly map[schema.GroupVersionResource]bool
+	ns       tracked
+	pods     []tracked
+	deploys  []tracked
 	// Optional watches; nil or empty when off.
 	proxyPods    []tracked
 	events, crds *tracked
@@ -334,12 +337,13 @@ func (c *Cache) informer(client any, example runtime.Object, list toolscache.Lis
 
 // New creates the informers. Nothing runs until Start.
 func New(cfg Config) *Cache {
-	c := &Cache{now: cfg.Now, changes: cfg.Changes, dyn: map[schema.GroupVersionResource]tracked{}}
+	c := &Cache{now: cfg.Now, changes: cfg.Changes, dyn: map[schema.GroupVersionResource]tracked{}, listOnly: map[schema.GroupVersionResource]bool{}}
 	if c.now == nil {
 		c.now = time.Now
 	}
 	for _, s := range cfg.Served {
 		ri := cfg.Dynamic.Resource(s.GVR())
+		c.listOnly[s.GVR()] = s.ListOnly
 		c.dyn[s.GVR()] = c.informer(cfg.Dynamic, &unstructured.Unstructured{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
 			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) })
@@ -398,11 +402,14 @@ func New(cfg Config) *Cache {
 	return c
 }
 
-// all returns the core informers: Namespaces, served kinds, Pods and Deployments.
+// all returns the core informers: Namespaces, served kinds other than
+// list-only ones, Pods and Deployments.
 func (c *Cache) all() []tracked {
 	out := []tracked{c.ns}
-	for _, t := range c.dyn {
-		out = append(out, t)
+	for gvr, t := range c.dyn {
+		if !c.listOnly[gvr] {
+			out = append(out, t)
+		}
 	}
 	return append(append(out, c.pods...), c.deploys...)
 }
@@ -418,6 +425,11 @@ func (c *Cache) Start(ctx context.Context) {
 	all := c.all()
 	for _, t := range all {
 		c.run(false, func() { t.inf.RunWithContext(ctx) })
+	}
+	for gvr, t := range c.dyn {
+		if c.listOnly[gvr] {
+			c.run(false, func() { t.inf.RunWithContext(ctx) })
+		}
 	}
 	octx, cancel := context.WithCancel(ctx)
 	c.stopOptional = func() { cancel() }
@@ -542,7 +554,7 @@ func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[sc
 	for gvr, t := range c.dyn {
 		a := access(t)
 		acc[gvr] = a
-		synced = synced && settled(a)
+		synced = synced && (c.listOnly[gvr] || settled(a))
 		for _, o := range t.inf.GetStore().List() {
 			visit(gvr, o)
 		}
@@ -639,7 +651,9 @@ func (c *Cache) Snapshot() *Snapshot {
 	}
 	slices.SortFunc(s.Events, func(a, b EventFact) int { return strings.Compare(string(a.UID), string(b.UID)) })
 	slices.SortFunc(s.CRDs, func(a, b CRDMeta) int { return strings.Compare(a.Name, b.Name) })
-	slices.SortFunc(svcs, func(a, b *serviceEntry) int { return compareKey(a.fact.Namespace, a.fact.Name, b.fact.Namespace, b.fact.Name) })
+	slices.SortFunc(svcs, func(a, b *serviceEntry) int {
+		return compareKey(a.fact.Namespace, a.fact.Name, b.fact.Namespace, b.fact.Name)
+	})
 	slices.SortFunc(eps, func(a, b *sliceEntry) int { return compareKey(a.fact.Namespace, a.name, b.fact.Namespace, b.name) })
 	// The facts' ports and ready counts are shared with the stores, which replace an entry rather than change it.
 	if len(svcs) > 0 {
