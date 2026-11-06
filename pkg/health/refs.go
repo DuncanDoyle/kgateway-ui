@@ -366,7 +366,10 @@ func (in Input) serviceExplanation(f *Finding, ev *RefsEvidence, field []written
 	}
 	name := hit.Ref.Namespace + "/" + hit.Ref.Name
 	ev.Candidates = []RefLocation{hit.RefLocation}
-	f.Evidence = append(f.Evidence, hit.Ref)
+	// Every Service inspected attributes the failure, so each is evidence (§14 rule 12).
+	for _, r := range field {
+		f.Evidence = append(f.Evidence, r.Ref)
+	}
 	if hitSvc == nil {
 		ev.Explanation, f.Detail = RefExplainServiceMissing, fmt.Sprintf(refServiceMissingMessage, name)+" "+f.Detail
 		return
