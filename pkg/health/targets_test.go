@@ -505,6 +505,38 @@ func TestPolicyTargetComputedOffOn25(t *testing.T) {
 	}
 }
 
+// wrapped25 wraps kgw25 as a downstream rule set does and forwards the status hook.
+type wrapped25 struct{ computed.Rules }
+
+func (w wrapped25) ReportsTargetNotFound() bool {
+	r := computed.Selection{Rules: w.Rules}.TargetStatusReporter()
+	return r != nil && r.ReportsTargetNotFound()
+}
+
+// A wrapped kgw25 that forwards computed.TargetStatusReporter keeps the 016 from
+// status; one that only embeds computed.Rules loses it.
+func TestPolicyTargetFromStatusThroughWrapper(t *testing.T) {
+	tp := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, summary(1))
+	fwd := rules25
+	fwd.Rules = wrapped25{rules25.Rules}
+	if fwd.TargetStatusReporter() == nil {
+		t.Fatal("the forwarding wrapper is no TargetStatusReporter")
+	}
+	r := targetsRun(t, fwd, []*unstructured.Unstructured{tp}, 0)
+	if fs := targetFindings(r, "infra/tp"); len(fs) != 1 || has(r, CodeConditionFalse, "", "infra/tp") {
+		t.Fatalf("forwarding wrapper: want one 016 and no 002: %+v", r.Findings)
+	}
+	bare := rules25
+	bare.Rules = struct{ computed.Rules }{rules25.Rules}
+	if bare.TargetStatusReporter() != nil {
+		t.Fatal("a bare embedding offers the hook")
+	}
+	r = targetsRun(t, bare, []*unstructured.Unstructured{tp}, 0)
+	if has(r, CodePolicyTargetNotFound, "", "infra/tp") {
+		t.Fatalf("bare wrapper: a status 016: %+v", r.Findings)
+	}
+}
+
 // One target found, one missing: the found one's ancestor stays healthy, the
 // summary is one 016, and nothing else is raised.
 func TestPolicyTargetPartlyMissingFromStatus(t *testing.T) {

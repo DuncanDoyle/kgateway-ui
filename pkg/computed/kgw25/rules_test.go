@@ -15,7 +15,7 @@ func TestRuleSetReadsTargetsFromStatus(t *testing.T) {
 	if (computed.Selection{Rules: r}).PolicyTargeter() != nil {
 		t.Fatal("kgw25 has a PolicyTargeter")
 	}
-	if s, ok := r.(interface{ ReportsTargetNotFound() bool }); !ok || !s.ReportsTargetNotFound() {
+	if s := (computed.Selection{Rules: r}).TargetStatusReporter(); s == nil || !s.ReportsTargetNotFound() {
 		t.Fatal("kgw25 does not report TargetNotFound from status")
 	}
 }

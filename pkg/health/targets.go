@@ -281,13 +281,10 @@ func targetNotFoundReason(cs []metav1.Condition) bool {
 	return slices.ContainsFunc(cs, func(c metav1.Condition) bool { return c.Reason == "TargetNotFound" })
 }
 
-// targetStatusRules is a rule set whose controller reports TargetNotFound itself, as kgw25 does.
-type targetStatusRules interface{ ReportsTargetNotFound() bool }
-
 // statusTargetFinding is the KGWUI-016 error for an ancestor's False/TargetNotFound,
 // on a rule set that reads it from status (D-020 rule 5); it replaces the 002s (D-030).
 func (in Input) statusTargetFinding(u *unstructured.Unstructured, cs []metav1.Condition, extra string, owner []string) (Finding, bool) {
-	if r, ok := in.Rules.Rules.(targetStatusRules); !ok || !r.ReportsTargetNotFound() {
+	if r := in.Rules.TargetStatusReporter(); r == nil || !r.ReportsTargetNotFound() {
 		return Finding{}, false
 	}
 	// Accepted comes first: it carries the controller's list of missing targets.

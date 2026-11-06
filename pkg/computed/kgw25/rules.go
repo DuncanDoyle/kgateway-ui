@@ -13,8 +13,8 @@ func New() computed.Rules { return rules{} }
 // Version implements computed.Rules.
 func (rules) Version() string { return "kgateway-2.5" }
 
-// ReportsTargetNotFound reports that 2.5 controllers write TargetNotFound on
-// policy ancestors (#14709), so KGWUI-016 comes from status.
+// ReportsTargetNotFound implements computed.TargetStatusReporter: 2.5 controllers
+// write TargetNotFound on policy ancestors (#14709), so KGWUI-016 comes from status.
 func (rules) ReportsTargetNotFound() bool { return true }
 
 // Attachment implements computed.Rules: 2.3's view A plus the isolation note.
