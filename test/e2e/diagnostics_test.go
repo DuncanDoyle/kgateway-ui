@@ -686,6 +686,12 @@ func testPolicyTargetNotFound(t *testing.T) {
 		if c == nil {
 			t.Fatalf("%s: kgateway %s wrote no Accepted=False/TargetNotFound", tpGatewayID, minor)
 		}
+		// One 016 from status: a computed one beside it would be a duplicate (D-020 rule 5).
+		if n := len(slices.DeleteFunc(slices.Clone(h.Findings), func(f api.FindingDTO) bool {
+			return f.Code != health.CodePolicyTargetNotFound || f.Resource == nil || f.Resource.String() != tpGatewayID
+		})); n != 1 {
+			t.Errorf("%d 016 findings on %s, want 1: %s", n, tpGatewayID, codes(h))
+		}
 		f := finding(h, health.CodePolicyTargetNotFound, "TrafficPolicy", tpGatewayID)
 		want := fmt.Sprintf("Accepted=False, reason TargetNotFound: %s", c.Message)
 		if f.Severity != health.SeverityError || f.Message != health.PolicyTargetNotFoundMessage || !strings.HasPrefix(f.Detail, want) ||

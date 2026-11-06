@@ -74,8 +74,8 @@ jobs:
           kubectl logs -n kgateway-ui deploy/ui-kgateway-ui --tail=200 || true
           for ns in kgw-a kgw-b; do kubectl logs -n "$ns" deploy/kgateway --tail=200 || true; done
           kubectl get gateways,httproutes -A -o wide || true
-  # Optional and manual: only kgateway main reports TargetNotFound (finding 7).
-  # The main-build chart source is unverified; main's go.mod pins Gateway API v1.6.2.
+  # Optional and manual: a kgateway main build, ahead of the tagged rows (2.5 covers TargetNotFound now).
+  # The main-build chart source is unverified, and GWAPI_VERSION v1.6.2 may lag main's go.mod pin.
   kind-main:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.kgw_main_version != '' }}
     continue-on-error: true

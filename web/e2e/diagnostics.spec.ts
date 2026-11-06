@@ -322,8 +322,12 @@ for (const theme of themes) {
   test(`finding page: 023 on a scaled-to-zero backend shows its Service, port and ready count (${theme.name})`, async ({
     page,
   }) => {
-    // setup.sh applies backends.yaml minutes before this runs, well past the 30 s hold.
-    const f = await findingOn(page, "KGWUI-023", "shop/idle");
+    // 023 needs a 30 s hold, so poll until the server raises it.
+    let found: Awaited<ReturnType<typeof findingOn>> | undefined;
+    await expect(async () => {
+      found = await findingOn(page, "KGWUI-023", "shop/idle");
+    }).toPass({ timeout: 90_000 });
+    const f = found as NonNullable<typeof found>;
     const d = await fetchJSON<FindingDetail>(page, `/findings/${encodeURIComponent(f.id)}`);
     const ev = d.evidence as EndpointsEvidence;
     expect(ev.kind).toBe("endpoints");
@@ -332,11 +336,11 @@ for (const theme of themes) {
 
     const details = page.getByRole("region", { name: listCopy.details });
     await expect(details).toContainText((f.detail ?? "").replaceAll("`", ""));
-    // The Service opens only when the server links it; otherwise its name shows as text.
     const svcValue = factValue(details, diagnosticsCopy.service);
     await expect(svcValue).toHaveText("shop/idle");
-    const linked = f.resource?.link !== undefined && f.resource.link !== "none";
-    await expect(svcValue.getByRole("link")).toHaveCount(linked ? 1 : 0);
+    // Services are watched for 023 but never served, so the ref has no page: link "none".
+    expect(f.resource?.link).toBe("none");
+    await expect(svcValue.getByRole("link")).toHaveCount(0);
     await expect(factValue(details, diagnosticsCopy.servicePort)).toHaveText(
       ev.portName ? `${ev.port} (${ev.portName})` : String(ev.port),
     );
@@ -347,12 +351,6 @@ for (const theme of themes) {
     // The affected list is the route that names the Service port.
     const affected = page.getByRole("table", { name: findingsCopy.affected });
     await expect(affected.getByRole("link", { name: "shop/idle", exact: true })).toHaveCount(1);
-    if (linked) {
-      const svc = svcValue.getByRole("link");
-      await svc.hover();
-      await shot(page, theme, "endpoints-link-hover", details);
-      await keyboardFocus(page, svc);
-    }
     await shot(page, theme, "finding-endpoints");
   });
 

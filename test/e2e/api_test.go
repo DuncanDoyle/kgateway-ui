@@ -94,6 +94,7 @@ func has(h api.HealthResponse, code, res string, msg ...string) bool {
 // after the grace and the hold (design §7.6); v2.5.x reports TargetNotFound, read as 016.
 func tpMissingTarget() (code, msg string) {
 	if os.Getenv("KGW_MAIN") == "1" {
+		// Unverified since 2.5: a main build whose version selects no TargetNotFound rule set keeps the status 002.
 		return health.CodeConditionFalse, health.PolicyTargetNotFoundMessage
 	}
 	return health.CodePolicyTargetNotFound, health.PolicyTargetNotFoundMessage
