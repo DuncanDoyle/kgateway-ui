@@ -65,3 +65,17 @@ func TestPlaceholderPaintsDark(t *testing.T) {
 		}
 	}
 }
+
+// The placeholder names the product, so a fresh checkout's tab reads Snellius.
+func TestPlaceholderTitledSnellius(t *testing.T) {
+	b, err := fs.ReadFile(placeholder, "placeholder/index.html")
+	if err != nil {
+		t.Fatalf("placeholder not embedded: %v", err)
+	}
+	if !strings.Contains(string(b), "<title>Snellius</title>") {
+		t.Errorf("placeholder title is not Snellius: %s", b)
+	}
+	if strings.Contains(string(b), "kgateway") {
+		t.Errorf("placeholder still names kgateway: %s", b)
+	}
+}

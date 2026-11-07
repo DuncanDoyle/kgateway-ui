@@ -67,7 +67,7 @@ export function resetContributionWarnings() {
 }
 
 function warnFailed(id: string, err: unknown) {
-  warnOnce(`failed:${id}`, `kgateway-ui: hiding contribution "${id}": it threw ${String(err)}`);
+  warnOnce(`failed:${id}`, `snellius: hiding contribution "${id}": it threw ${String(err)}`);
 }
 
 /** Drops entries whose id repeats an earlier one, with a warning. */
@@ -75,10 +75,7 @@ function unique<T extends { id: string }>(all: T[], slot: string): T[] {
   const seen = new Set<string>();
   return all.filter((c) => {
     if (seen.has(c.id)) {
-      warnOnce(
-        `taken:${slot}:${c.id}`,
-        `kgateway-ui: ignoring contributed ${slot} "${c.id}": the id is already taken.`,
-      );
+      warnOnce(`taken:${slot}:${c.id}`, `snellius: ignoring contributed ${slot} "${c.id}": the id is already taken.`);
       return false;
     }
     seen.add(c.id);
@@ -130,7 +127,7 @@ export function useDetailTabContributions(ref: Ref, coreIds: readonly string[]):
     const taken = new Set(core.split("\n"));
     return all.filter((t) => {
       if (taken.has(t.id)) {
-        warnOnce(`taken:tab:${t.id}`, `kgateway-ui: ignoring contributed tab "${t.id}": the id is already taken.`);
+        warnOnce(`taken:tab:${t.id}`, `snellius: ignoring contributed tab "${t.id}": the id is already taken.`);
         return false;
       }
       taken.add(t.id);

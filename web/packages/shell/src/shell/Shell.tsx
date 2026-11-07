@@ -69,7 +69,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
         const reserved = reservedPathOf(r);
         if (reserved)
           console.warn(
-            `kgateway-ui: ignoring contributed route "${r.path}": "${reserved}" is reserved; use its CorePages slot.`,
+            `snellius: ignoring contributed route "${r.path}": "${reserved}" is reserved; use its CorePages slot.`,
           );
         return !reserved;
       }),

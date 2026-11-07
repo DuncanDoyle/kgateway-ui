@@ -1,8 +1,8 @@
 import type { Brand } from "@snellius/shell";
-import logoUrl from "./assets/kgateway-icon-white.svg";
+import logoUrl from "./assets/snellius/snellius-symbol-dark.svg";
 
-/** The kgateway project identity: the CNCF artwork icon (white variant for the ink header), identifying the project this UI is for. */
-export const kgatewayBrand: Brand = {
-  productName: "kgateway",
+/** The Snellius identity: the prism symbol (dark variant, white outline, for the ink header) and the lowercase wordmark. */
+export const snelliusBrand: Brand = {
+  productName: "snellius",
   logo: <img src={logoUrl} alt="" width={24} height={24} />,
 };

@@ -609,7 +609,7 @@ describe("EvidenceView", () => {
 });
 
 describe("LearnMore", () => {
-  const REPO = "https://github.com/DuncanDoyle/kgateway-ui/blob";
+  const REPO = "https://github.com/DuncanDoyle/snellius/blob";
   const meta = (version: string) => ({
     "/api/v1/meta": { version, synced: true, platform: "kubernetes", capabilities: [], kinds: [] },
   });

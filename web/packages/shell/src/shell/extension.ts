@@ -83,7 +83,7 @@ export interface DiagnosticsSectionProps {
 /** The CorePages the Shell was given, for slots that sit inside a page rather than at a route. */
 export const CorePagesContext = createContext<Partial<CorePages>>({});
 
-export const defaultBrand: Brand = { productName: "kgateway", logo: null };
+export const defaultBrand: Brand = { productName: "snellius", logo: null };
 
 /** The extension merged with the upstream defaults; the vocabulary is complete. */
 export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary" | "findingsDocUrl">> & {

@@ -82,7 +82,7 @@ const DocLink = styled.a<{ stylesOverride?: SerializedStyles }>`
 
 // region Helpers
 /** Where this repository's files are published; docs/findings.md is read at a release tag or on main. */
-const REPO_BLOB = "https://github.com/DuncanDoyle/kgateway-ui/blob";
+const REPO_BLOB = "https://github.com/DuncanDoyle/snellius/blob";
 /** A version /meta reports for a tagged release build; dev and other builds link main. */
 const RELEASE_TAG = /^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 

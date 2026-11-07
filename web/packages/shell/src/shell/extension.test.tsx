@@ -178,7 +178,7 @@ it("a dropped contribution warns once, naming its path and the reserved path", a
   await waitFor(() => expect(screen.getByRole("heading", { name: "Routes", level: 1 })).toBeInTheDocument());
   const ours = warn.mock.calls.filter((c) => String(c[0]).includes("routes/stats"));
   expect(ours).toHaveLength(1);
-  expect(String(ours[0]?.[0])).toContain('"routes"');
+  expect(String(ours[0]?.[0])).toMatch(/^snellius: .*"routes"/);
   expect(warn.mock.calls.some((c) => String(c[0]).includes("widgets"))).toBe(false);
   warn.mockRestore();
 });

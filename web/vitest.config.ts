@@ -1,3 +1,3 @@
 import { defineConfig } from "vitest/config";
 
-export default defineConfig({ test: { projects: ["packages/shell"] } });
+export default defineConfig({ test: { projects: ["packages/shell", "app"] } });
