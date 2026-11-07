@@ -2,12 +2,12 @@
 
 ## Phase
 Phase: 4 — Snellius rebrand
-Base:
+Base: 966be065833aaab4ce9cbce5525a5248ea732761
 Docs: docs/phases/phase-4/
-Status: not started (pre-approved by the user 2026-11-07); Phase 3 closed 2026-11-07 (phases/phase-3/phase-3-complete.md)
+Status: design and plan drafted, Codex review next (phase pre-approved by the user 2026-11-07); Phase 3 closed 2026-11-07 (phases/phase-3/phase-3-complete.md)
 
 ### Queue
-(empty; filled from the Phase 4 design and plan)
+- [ ] Q1 Sub-phase 4.1 Snellius rebrand (plan Tasks 1–6) ← NEXT
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
