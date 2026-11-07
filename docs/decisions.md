@@ -1007,7 +1007,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Shrink only and keep 40 MiB; raise the gate without shrinking.
 
 ## D-058 — Sub-phase 3.4 as built: deviations from the design (2026-11-06, phase 3)
-**Status:** proposed 2026-11-06, for the user's confirmation
+**Status:** items 1–7 confirmed by the user (2026-11-06/07; item 7 revised); items 8–11 proposed
 
 **Context:** 3.4 (brief `phases/phase-3/phase-3.4-brief.md`) shipped with these differences from design and plan. Each was ruled during the work (ledger rulings in brackets).
 
@@ -1018,7 +1018,7 @@ Measured on the reference machine, 5 runs per world:
 4. `kgateway_build_info`'s `version`, when it parses as a version, is the controller version for the install header, 022 and rule-set selection. A value that does not parse ("undefined") is ignored. Replicas that disagree keep the last agreed version [R132–R134].
 5. ReferenceGrant read access returns to the ClusterRole, reversing D-017 item 5 for that kind (D-056). The CRD read stays off.
 6. DirectResponse, GatewayExtension and ReferenceGrant are list-only: listed and shown, never judged, and outside `cluster access`, `Synced` and `Settled` [R124, R125]. kgateway writes status on an attached DirectResponse; judging it belongs to Phase 5 (Policies).
-7. On 2.5, a `targetSelector` that matches nothing shows 003, not 016 (§7.6). kgateway calls an empty selector valid and never judges selectors.
+7. On 2.5, a `targetSelector` that matches nothing shows 003, not 016 (§7.6). kgateway calls an empty selector valid and never judges selectors. Revised (user, 2026-11-07): 003's "no status from the controller" misreads a processed policy, so 3.5 brings back the computed 016 for this one case on 2.5, labelled UI-computed (queue S7). Exit: kgateway#14998 asks the controller to report it; the UI reads that status once it ships.
 8. 023 evidence counts the larger address family of a dual-stack Service, and a port number on both TCP and UDP matches the TCP port.
 9. New exported API: `computed.TargetStatusReporter` and `Selection.TargetStatusReporter()` (user, 2026-11-06). A rule set that wraps `kgw25` must forward it.
 10. On 2.5, KGWUI-018 has no status-sync count: the controller no longer exports `status_syncs_total` (kgateway #14519). 018 already treats the family as absent.

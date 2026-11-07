@@ -22,6 +22,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
   - [ ] S3 (P2) KGWUI-024 missing from the processes and data-plane summaries — src: reviews/phase-codex.md#4
   - [ ] S4 (P3) The resource-status check reads Services without declaring them — src: reviews/phase-codex.md#5
   - [ ] S5 (P4) 023 attribution is quadratic in backend fan-in — src: reviews/phase-codex.md#6
+  - [ ] S7 (P3) On 2.5, a selector that matches nothing shows 003 instead of 016: computed 016 for this case, labelled UI-computed — src: D-058 item 7 (user, 2026-11-07); exit kgateway#14998
   - [ ] S6 (P3) 015 group ID names the policy for restricted viewers: ordinal grouping or a rule 11 amendment (user decides) — src: reviews/phase-codex.md#1
 ### Exit gates
 - [ ] tests/vet pass (observed)
