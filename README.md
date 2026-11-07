@@ -1,8 +1,20 @@
-# kgateway UI
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/snellius-logo-horizontal-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/snellius-logo-horizontal-light.svg">
+    <img alt="Snellius" src="docs/assets/snellius-logo-horizontal-light.svg" width="360">
+  </picture>
+</h1>
 
-A read-only web UI for kgateway. It shows the health of each controller install at a glance, why an install is unhealthy, and an inventory of what it manages: GatewayClasses, Gateways, routes and policies.
+<p align="center"><strong>See the whole picture.</strong><br>Kubernetes Gateway Management &amp; Observability</p>
+
+Snellius is a read-only UI for Kubernetes Gateway API, built for kgateway. It shows the health of each controller install at a glance, why an install is unhealthy, and an inventory of what it manages: GatewayClasses, Gateways, routes and policies.
 
 Kubernetes is the only provider today. The API and the SPA are built so other platforms can be added later.
+
+Snellius is the new name of kgateway-ui. Releases up to v0.4.0, and the install commands below, still use the kgateway-ui names; the next release switches to the new ones.
+
+**Naming.** The name Snellius is not trademark-cleared. SURF's Dutch national supercomputer is also named Snellius.
 
 ## Security and trust model
 
