@@ -16,35 +16,35 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73, 71a) — closed 2026-11-05, phases/phase-3/phase-3.3-complete.md
 - [x] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87, 78a, 78b) — closed 2026-11-06, phases/phase-3/phase-3.4-complete.md
 - [x] Q9 Phase review (Codex) — `reviews/phase-codex.md`, triaged 2026-11-06: 5 accepted, 1 for the user
-- [ ] Q10 Stabilization 3.5 — started 2026-11-07, `phases/phase-3/phase-3.5-brief.md` ← CURRENT
-  - [ ] S1 (P2) Proxy-stat Envoy names reach restricted viewers through the namer seam — src: reviews/phase-codex.md#2
-  - [ ] S2 (P2) A list-only kind change raises KGWUI-008 through `kinds/monitor.go` — src: reviews/phase-codex.md#3
-  - [ ] S3 (P2) KGWUI-024 missing from the processes and data-plane summaries — src: reviews/phase-codex.md#4
-  - [ ] S4 (P3) The resource-status check reads Services without declaring them — src: reviews/phase-codex.md#5
-  - [ ] S5 (P4) 023 attribution is quadratic in backend fan-in — src: reviews/phase-codex.md#6
-  - [ ] S7 (P3) On 2.5, a selector that matches nothing shows 003 instead of 016: computed 016 for this case, labelled UI-computed — src: D-058 item 7 (user, 2026-11-07); exit kgateway#14998
-  - [ ] S8 (P3) Remove the status-sync count (`status_syncs_total`) from KGWUI-018 and the UI on every version — src: D-058 item 10 (user, 2026-11-07)
-  - [ ] S9 (P3) An unreadable controller version selects the 2.5 rule set, not 2.4 — src: D-058 item 11 (user, 2026-11-07)
+- [x] Q10 Stabilization 3.5 — closed 2026-11-07 (local, not pushed), phases/phase-3/phase-3.5-complete.md
+  - [x] S1 (P2) Proxy-stat Envoy names reach restricted viewers through the namer seam — 87b38f3: names now filtered as their mapped objects
+  - [x] S2 (P2) A list-only kind change raises KGWUI-008 through `kinds/monitor.go` — 7be3980: `kinds.Change` splits list-only kinds; a note on the OK check
+  - [x] S3 (P2) KGWUI-024 missing from the processes and data-plane summaries — ed4625b, 97e7e90: processes, diagnostics, overview cell and Gateway headline
+  - [x] S4 (P3) The resource-status check reads Services without declaring them — c7fb8a1: declared; guard worlds added
+  - [x] S5 (P4) 023 attribution is quadratic in backend fan-in — 92c928e: linear, 251 → 44 ms at 10,000 routes
+  - [x] S7 (P3) On 2.5, a selector that matches nothing shows 003 instead of 016 — 7f6336d: kgw25 judges selectors only; exit kgateway#14998
+  - [x] S8 (P3) Remove the status-sync count (`status_syncs_total`) from KGWUI-018 and the UI on every version — 5a2253e
+  - [x] S9 (P3) An unreadable controller version selects the 2.5 rule set, not 2.4 — c3034b8
   - [x] S6 (P3) 015 group ID names the policy for restricted viewers — no code: §14 rule 11 amended (D-059, user 2026-11-07)
 ### Exit gates
-- [ ] tests/vet pass (observed)
-- [ ] all queue items done or deferred
+- [x] tests/vet pass (observed) — 3.5 gates on 97e7e90, 2026-11-07
+- [x] all queue items done or deferred
 - [x] design+plan cross-model review + triage: docs/phases/phase-3/reviews/design-codex.md
 - [x] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 3.5 — Stabilization
-Kind: stabilization
-Status: implementing (started 2026-11-07; user go: "Do all of those things in the background")
-Base: 662ecc5dc4399ff0c896744d8459145facdd01a9
-Brief: docs/phases/phase-3/phase-3.5-brief.md
+Sub-phase: none (3.5 closed 2026-11-07 on `duncandoyle/stab35`, not pushed; the Phase 3 close is next, with the user's go)
+Kind: n/a
+Status: n/a
+Base: n/a
+Brief: n/a
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
 Waiting on: none
-Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3). kgwctl's E2 requests: #17 and #20 in 3.4 (D-056); #18 and #19 for Phase 4 planning. E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 5.
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3) and updated in `v0.4.0` (2026-11-07, kgwctl#4). kgwctl's E2 requests: #17 and #20 shipped in `v0.4.0` and closed; #18 and #19 commented as moving to the Traffic Flow & Backends phase (currently Phase 4) (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 5.
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 9; 3.4 does not consume them.
 
 ## Carry-over (deferred to later phases)
