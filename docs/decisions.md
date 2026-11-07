@@ -1040,7 +1040,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** ordinal grouping: rejected, since a per-route ordinal cannot group routes across the policy, and a cross-route ordinal encodes the policy anyway.
 
 ## D-060 — Sub-phase 3.5 as built (2026-11-07, phase 3)
-**Status:** proposed 2026-11-07, for the user's confirmation (rulings made while the user was away)
+**Status:** confirmed by the user (2026-11-07); the rulings were made while the user was away
 
 **Context:** Stabilization 3.5 (brief `phases/phase-3/phase-3.5-brief.md`) closes phase-review findings #2–#6 and D-058 items 7, 10 and 11. These choices were not fixed by the review or the decisions.
 
