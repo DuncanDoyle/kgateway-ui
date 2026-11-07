@@ -16,7 +16,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73, 71a) — closed 2026-11-05, phases/phase-3/phase-3.3-complete.md
 - [x] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87, 78a, 78b) — closed 2026-11-06, phases/phase-3/phase-3.4-complete.md
 - [x] Q9 Phase review (Codex) — `reviews/phase-codex.md`, triaged 2026-11-06: 5 accepted, 1 for the user
-- [ ] Q10 Stabilization 3.5 (proposed; the user starts it) ← NEXT
+- [ ] Q10 Stabilization 3.5 — started 2026-11-07, `phases/phase-3/phase-3.5-brief.md` ← CURRENT
   - [ ] S1 (P2) Proxy-stat Envoy names reach restricted viewers through the namer seam — src: reviews/phase-codex.md#2
   - [ ] S2 (P2) A list-only kind change raises KGWUI-008 through `kinds/monitor.go` — src: reviews/phase-codex.md#3
   - [ ] S3 (P2) KGWUI-024 missing from the processes and data-plane summaries — src: reviews/phase-codex.md#4
@@ -35,11 +35,11 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: none (3.4 closed 2026-11-06; the phase review is next)
-Kind: n/a
-Status: n/a
-Base: n/a
-Brief: n/a
+Sub-phase: 3.5 — Stabilization
+Kind: stabilization
+Status: implementing (started 2026-11-07; user go: "Do all of those things in the background")
+Base: 662ecc5dc4399ff0c896744d8459145facdd01a9
+Brief: docs/phases/phase-3/phase-3.5-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
