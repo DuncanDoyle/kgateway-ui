@@ -8,7 +8,7 @@ Status: implemented and closed locally 2026-11-07; waiting for the user's review
 
 ### Queue
 - [x] Q1 Sub-phase 4.1 Snellius rebrand (plan Tasks 1–6) — phases/phase-4/phase-4-complete.md
-- [ ] Q2 Sub-phase 4.2 User-testing follow-ups (D-063): stale banner, row status tooltips, About page ← CURRENT
+- [x] Q2 Sub-phase 4.2 User-testing follow-ups (D-063): stale banner, row status tooltips, About page — phases/phase-4/phase-4.2-complete.md
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
