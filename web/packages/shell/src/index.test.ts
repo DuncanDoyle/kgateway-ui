@@ -240,6 +240,7 @@ it("keeps the public export surface", () => {
         "RouteDetail",
         "RouteList",
         "RouteRow",
+        "RowReason",
         "Rule",
         "RuleReplacedEvidence",
         "ScopeSummary",

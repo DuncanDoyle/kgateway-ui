@@ -205,9 +205,11 @@ type ListenerSetRow struct {
 	Disagreements int
 }
 
-// Worst is the first error and the first warning finding on one object.
+// Worst is the first error and the first warning finding on one object, and
+// N counts all of its findings, info included.
 type Worst struct {
 	Error, Warning *health.Finding
+	N              int
 }
 
 // Index is the explorer's view of one install. It is immutable.
@@ -233,7 +235,7 @@ type Index struct {
 	// ParentRoutes maps a route to the HTTPRoutes of its reported edges.
 	ParentRoutes map[objects.Ref][]objects.Ref
 	NoParent     []RowID
-	// Findings holds the worst error and warning finding per object.
+	// Findings holds the worst error and warning finding and the finding count per object.
 	Findings map[objects.Ref]Worst
 	// Refs is the install's dependency table; a DepSet indexes it (design §7.4 rule 10).
 	// Refs[i] for i < len(Routes) is route row i's ref.
@@ -386,14 +388,15 @@ func RowState(ref objects.Ref, rep health.Report) health.State {
 	var w Worst
 	for i := range rep.Findings {
 		if f := &rep.Findings[i]; f.Resource != nil && *f.Resource == ref {
-			w = w.add(f)
+			w = w.Add(f)
 		}
 	}
-	return w.state(requiredNotOK(rep))
+	return w.State(requiredNotOK(rep))
 }
 
-// add records f if it is the first of its severity.
-func (w Worst) add(f *health.Finding) Worst {
+// Add counts f and records it if it is the first error or warning.
+func (w Worst) Add(f *health.Finding) Worst {
+	w.N++
 	switch {
 	case f.Severity == health.SeverityError && w.Error == nil:
 		w.Error = f
@@ -403,8 +406,30 @@ func (w Worst) add(f *health.Finding) Worst {
 	return w
 }
 
-// state applies the row rule; unknown is set when a required check is not OK.
-func (w Worst) state(unknown bool) health.State {
+// Reason says why a row in state st with these findings is not healthy: its
+// deciding finding, the install-wide unknown, or else a rejecting Gateway,
+// the only other way to warning (D-063). It is nil for a healthy row.
+func (w Worst) Reason(st health.State) *health.RowReason {
+	var f *health.Finding
+	switch st {
+	case health.StateError:
+		f = w.Error
+	case health.StateWarning:
+		if f = w.Warning; f == nil {
+			return &health.RowReason{Kind: health.ReasonGatewayRejecting}
+		}
+	case health.StateUnknown:
+		return &health.RowReason{Kind: health.ReasonUnknown}
+	}
+	if f == nil {
+		return nil
+	}
+	// The deciding finding is the object's most severe, so the rest are at its severity or lower.
+	return &health.RowReason{Kind: health.ReasonFinding, Code: f.Code, Message: f.Message, More: w.N - 1}
+}
+
+// State applies the row rule; unknown is set when a required check is not OK.
+func (w Worst) State(unknown bool) health.State {
 	switch {
 	case w.Error != nil:
 		return health.StateError

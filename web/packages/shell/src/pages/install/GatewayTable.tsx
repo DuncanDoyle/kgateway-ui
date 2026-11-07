@@ -177,7 +177,7 @@ function columns(installId: string) {
   return [
     col.accessor("state", {
       header: "Status",
-      cell: (c) => <HealthBadge state={c.getValue()} />,
+      cell: (c) => <HealthBadge state={c.getValue()} reason={c.row.original.reason} />,
       sortingFn: (a, b) => rank[a.original.state] - rank[b.original.state],
     }),
     col.accessor((r) => r.dataPlane ?? "unknown", {

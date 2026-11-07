@@ -83,6 +83,13 @@ export const routeStateDataPlaneCopy = {
   "gateway-rejecting": "Gateway rejects config", // S457
 };
 
+/** A list row's status tooltip (D-063). */
+export const rowReasonCopy = {
+  finding: (code: string, message: string, more?: number) => `${code}: ${message}${more ? ` (+${more} more)` : ""}`,
+  unknown: "A required check is not OK, so the state is unknown.",
+  "gateway-rejecting": "The parent Gateway rejects config.",
+};
+
 /** View B's computed flag (2.4); offered only when /meta advertises filters.delegation. */
 export const routeStateDelegationCopy = {
   dropped: "Selected but not attached", // S189

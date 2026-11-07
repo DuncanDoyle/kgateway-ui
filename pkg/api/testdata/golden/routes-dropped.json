@@ -13,6 +13,11 @@
         "hostnames": [],
         "parentRoutes": [],
         "parents": [],
+        "reason": {
+          "code": "KGWUI-011",
+          "kind": "finding",
+          "message": "A parent route does not attach this route"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
@@ -43,6 +48,12 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-003",
+          "kind": "finding",
+          "message": "Not attached: parent not found",
+          "more": 1
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
@@ -84,6 +95,11 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-002",
+          "kind": "finding",
+          "message": "Unsupported value in the route"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",

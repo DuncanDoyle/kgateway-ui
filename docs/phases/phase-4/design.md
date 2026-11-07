@@ -127,3 +127,7 @@ One sub-phase, 4.1, planned. It is a mechanical change across many files, review
 ## 11. Open items
 
 None. The repo rename and the kgwctl notice are outward actions queued for the user.
+
+## 12. Sub-phase 4.2
+
+**Row reasons (D-063).** Rows of the Routes, Gateways and ListenerSets lists and the overview's Gateway rows gain an optional `reason` (API v1, additive), absent on a healthy row. `{kind: "finding", code, message, more}` names the deciding finding and counts the object's other findings, which are all at its severity or lower; `{kind: "unknown"}` means a required check is not OK, and `{kind: "gateway-rejecting"}` means the row is warning only because its Gateway rejects config. The reason carries code and message only, never Detail or evidence (design §7.4 rule 7), and follows the row's state, which is not filtered per caller (rule 9). The UI shows it as a tooltip on the status, on hover and keyboard focus.

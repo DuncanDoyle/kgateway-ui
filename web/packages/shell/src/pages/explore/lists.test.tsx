@@ -643,3 +643,69 @@ it("a server before 2.3 gets no Routes column, not No count in every row", async
   await screen.findByText("partial");
   await waitFor(() => expect(screen.queryAllByTestId("routes-cell")).toHaveLength(0));
 });
+
+describe("a row's Error or Warning explains itself in a tooltip (D-063)", () => {
+  const finding = { kind: "finding", code: "KGWUI-002", message: "Unsupported value in the route", more: 1 } as const;
+  const cases = [
+    {
+      list: "routes",
+      name: "rejected",
+      body: () => routes(),
+      tip: "KGWUI-002: Unsupported value in the route (+1 more)",
+      patch: (b: RouteList) => ({
+        ...b,
+        items: b.items.map((r) =>
+          r.ref.name === "rejected"
+            ? { ...r, reason: finding }
+            : r.ref.name === "cart"
+              ? { ...r, health: "warning" as const, reason: { kind: "gateway-rejecting" as const } }
+              : r,
+        ),
+      }),
+      second: ["cart", "The parent Gateway rejects config."],
+    },
+    {
+      list: "gateways",
+      name: "edge",
+      body: () => fresh(gatewaysGolden.body as GatewayList),
+      tip: "A required check is not OK, so the state is unknown.",
+      patch: (b: GatewayList) => ({
+        ...b,
+        items: b.items.map((r) => ({ ...r, health: "unknown" as const, reason: { kind: "unknown" as const } })),
+      }),
+    },
+    {
+      list: "listenersets",
+      name: "partial",
+      body: () => fresh(listenersetsGolden.body as ListenerSetList),
+      tip: "KGWUI-002: Listener port unavailable",
+      patch: (b: ListenerSetList) => b,
+    },
+  ] as const;
+
+  it.each(cases)("$list: hover and keyboard focus show the reason; healthy rows have none", async (c) => {
+    const body = (c.patch as (b: unknown) => unknown)(c.body());
+    serve((u) => (u.pathname.endsWith(`/${c.list}`) ? body : undefined));
+    mount(`/i/${ID}/${c.list}`);
+    await screen.findByText(c.name);
+    const trigger = within(rowOf(c.name)).getByTestId("health-reason");
+    await userEvent.hover(trigger);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(c.tip);
+    await userEvent.unhover(trigger);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    if ("second" in c) {
+      const [name, tip] = c.second;
+      const other = within(rowOf(name)).getByTestId("health-reason");
+      await userEvent.hover(other);
+      expect(screen.getByRole("tooltip")).toHaveTextContent(tip);
+      await userEvent.unhover(other);
+    }
+    for (let i = 0; i < 80 && document.activeElement !== trigger; i++) await userEvent.tab();
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(c.tip);
+    // Healthy rows carry no reason, so no tooltip trigger.
+    for (const row of screen.getAllByRole("row")) {
+      if (within(row).queryByText("Healthy")) expect(within(row).queryByTestId("health-reason")).toBeNull();
+    }
+  });
+});

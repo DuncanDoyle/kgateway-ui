@@ -127,10 +127,19 @@ export interface Count {
   count: number;
   access: Access;
 }
+/**
+ * Why a list or overview row is not healthy (D-063); healthy rows have none. A finding is the row's deciding
+ * finding, code and message only, and more counts the object's other findings. The other kinds carry nothing else.
+ */
+export type RowReason =
+  | { kind: "finding"; code: string; message: string; more?: number }
+  | { kind: "unknown" }
+  | { kind: "gateway-rejecting" };
 export interface GatewayRow {
   ref: Ref;
   class: string;
   state: HealthState;
+  reason?: RowReason;
   listeners: number;
   attachedRoutes: number;
   addresses: string[];

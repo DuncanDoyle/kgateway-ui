@@ -1048,3 +1048,25 @@ it("below 900 px the Gateway table keeps Status, Data plane, the name and routes
       .map((h) => h.textContent),
   ).toEqual(["Status", "Data plane", "Gateway", "Routes"]);
 });
+
+it("a Gateway row's Error explains itself in a tooltip on hover and focus (D-063)", async () => {
+  const ov = overview();
+  const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
+  mount(healthy(), "/i/kgw.kgateway", {
+    ...ov,
+    gateways: [
+      { ...edge, reason: { kind: "finding", code: "KGWUI-001", message: "Configuration rejected by Envoy", more: 3 } },
+      internal,
+    ],
+  });
+  await screen.findByRole("table", { name: "Gateways" });
+  const row = (name: string) => gatewayRows().find((r) => r.textContent?.includes(`prod/${name}`)) as HTMLElement;
+  const trigger = within(row("edge")).getByTestId("health-reason");
+  await userEvent.hover(trigger);
+  expect(screen.getByRole("tooltip")).toHaveTextContent("KGWUI-001: Configuration rejected by Envoy (+3 more)");
+  await userEvent.unhover(trigger);
+  for (let i = 0; i < 80 && document.activeElement !== trigger; i++) await userEvent.tab();
+  expect(trigger).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent("KGWUI-001: Configuration rejected by Envoy (+3 more)");
+  expect(within(row("internal")).queryByTestId("health-reason")).toBeNull();
+});

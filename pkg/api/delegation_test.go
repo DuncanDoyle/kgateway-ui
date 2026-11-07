@@ -453,8 +453,8 @@ func restrictedComputed(string) Computed {
 	return Computed{By: ComputedBy, Rules: "kgateway-2.4", State: "restricted"}
 }
 
-// withoutHealth is GET path's canonical JSON without any "health" field or
-// "disagrees" flag, which cover every finding (design §7.4 rule 9), and
+// withoutHealth is GET path's canonical JSON without any "health" field, its
+// "reason" or "disagrees" flag, which cover every finding (design §7.4 rule 9), and
 // without deniedInInstall, the one hidden count a list sends (rule 2).
 func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
 	t.Helper()
@@ -463,6 +463,7 @@ func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
 		switch x := v.(type) {
 		case map[string]any:
 			delete(x, "health")
+			delete(x, "reason")
 			delete(x, "deniedInInstall")
 			if fs, ok := x["flags"].([]any); ok {
 				x["flags"] = slices.DeleteFunc(fs, func(f any) bool { return f == "disagrees" })

@@ -86,7 +86,8 @@ func (h *handler) routes(w http.ResponseWriter, r *http.Request) {
 func (ls *list) routeRow(id explore.RowID) RouteRow {
 	r := &ls.ix.Routes[id]
 	out := RouteRow{Ref: ls.l.linked(r.Ref), Hostnames: r.Hostnames, Parents: make([]ParentSummary, 0, len(r.Parents)),
-		ParentRoutes: make([]LinkedRef, 0, len(r.ParentRoutes)), Children: r.Children, Flags: ls.ix.RowFlags(id, ls.v.visible()).Names(), Health: r.State}
+		ParentRoutes: make([]LinkedRef, 0, len(r.ParentRoutes)), Children: r.Children, Flags: ls.ix.RowFlags(id, ls.v.visible()).Names(), Health: r.State,
+		Reason: ls.ix.Findings[r.Ref].Reason(r.State)}
 	if out.Hostnames == nil {
 		out.Hostnames = []string{}
 	}
@@ -168,7 +169,7 @@ func (h *handler) gateways(w http.ResponseWriter, r *http.Request) {
 	items := make([]GatewayListRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
 		g := &ls.ix.Gateways[id]
-		row := GatewayListRow{Ref: ls.l.linked(g.Ref), Health: g.State, AttachedRoutes: g.AttachedRoutes,
+		row := GatewayListRow{Ref: ls.l.linked(g.Ref), Health: g.State, Reason: ls.ix.Findings[g.Ref].Reason(g.State), AttachedRoutes: g.AttachedRoutes,
 			NotAccepted: ls.notAccepted(g), ListenerSets: ls.v.recount(g.ListenerSets, ls.lsRef), Disagreements: g.Disagreements, Addresses: []string{}}
 		if v := g.View; v != nil {
 			row.Class, row.Listeners = v.Class, len(v.Listeners)
@@ -210,7 +211,7 @@ func (h *handler) listenerSets(w http.ResponseWriter, r *http.Request) {
 	items := make([]ListenerSetRow, 0, len(pg.IDs))
 	for _, id := range pg.IDs {
 		s := &ls.ix.ListenerSets[id]
-		row := ListenerSetRow{Ref: ls.l.linked(s.Ref), Parent: ls.l.linked(s.Parent), Health: s.State, AcceptedReason: s.AcceptedReason,
+		row := ListenerSetRow{Ref: ls.l.linked(s.Ref), Parent: ls.l.linked(s.Parent), Health: s.State, Reason: ls.ix.Findings[s.Ref].Reason(s.State), AcceptedReason: s.AcceptedReason,
 			Disagreements: s.Disagreements}
 		if s.View != nil {
 			row.Listeners = len(s.View.Listeners)

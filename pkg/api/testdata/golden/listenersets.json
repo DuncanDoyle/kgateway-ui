@@ -32,6 +32,11 @@
           "name": "edge",
           "namespace": "infra"
         },
+        "reason": {
+          "code": "KGWUI-002",
+          "kind": "finding",
+          "message": "Listener port unavailable"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "ListenerSet",

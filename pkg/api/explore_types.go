@@ -176,19 +176,23 @@ type RouteRow struct {
 	Children     int             `json:"children"`
 	Flags        []string        `json:"flags"`
 	Health       health.State    `json:"health"`
-	Mirror       bool            `json:"mirror,omitempty"`
+	// Reason says why Health is not healthy (D-063).
+	Reason *health.RowReason `json:"reason,omitempty"`
+	Mirror bool              `json:"mirror,omitempty"`
 }
 
 // GatewayListRow is one row of the Gateways list (the design's GatewayRow2).
 // AttachedRoutes is the status sum as written; NotAccepted and ListenerSets
 // count visible rows only.
 type GatewayListRow struct {
-	Ref            LinkedRef    `json:"ref"`
-	Class          string       `json:"class"`
-	Health         health.State `json:"health"`
-	Listeners      int          `json:"listeners"`
-	AttachedRoutes int32        `json:"attachedRoutes"`
-	NotAccepted    int          `json:"notAccepted"`
+	Ref    LinkedRef    `json:"ref"`
+	Class  string       `json:"class"`
+	Health health.State `json:"health"`
+	// Reason is as on RouteRow.
+	Reason         *health.RowReason `json:"reason,omitempty"`
+	Listeners      int               `json:"listeners"`
+	AttachedRoutes int32             `json:"attachedRoutes"`
+	NotAccepted    int               `json:"notAccepted"`
 	// Routes is view A's distinct routes on the Gateway's own listeners,
 	// hidden ones too; nil when a count is unknown (rule 5).
 	Routes       *int `json:"routes,omitempty"`
@@ -201,11 +205,13 @@ type GatewayListRow struct {
 
 // ListenerSetRow is one row of the ListenerSets list.
 type ListenerSetRow struct {
-	Ref            LinkedRef    `json:"ref"`
-	Parent         LinkedRef    `json:"parent"`
-	Health         health.State `json:"health"`
-	Listeners      int          `json:"listeners"`
-	AcceptedReason string       `json:"acceptedReason,omitempty"`
+	Ref    LinkedRef    `json:"ref"`
+	Parent LinkedRef    `json:"parent"`
+	Health health.State `json:"health"`
+	// Reason is as on RouteRow.
+	Reason         *health.RowReason `json:"reason,omitempty"`
+	Listeners      int               `json:"listeners"`
+	AcceptedReason string            `json:"acceptedReason,omitempty"`
 	// Routes and Disagreements are as on GatewayListRow.
 	Routes        *int `json:"routes,omitempty"`
 	Disagreements int  `json:"disagreements,omitempty"`

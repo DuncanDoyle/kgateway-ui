@@ -21,7 +21,7 @@ function columns(installId: string, viewA: boolean): ObjectColumn<ListenerSetRow
       header: columnCopy.status,
       width: "120px",
       sortKey: "health",
-      cell: (r) => <HealthBadge state={r.health} />,
+      cell: (r) => <HealthBadge state={r.health} reason={r.reason} />,
     },
     {
       id: "name",
