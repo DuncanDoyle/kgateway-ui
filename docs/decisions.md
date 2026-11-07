@@ -1108,3 +1108,18 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:**
 - `brand.productName` and the default brand read `snellius`.
 - Nothing in the UI uses the kgateway icon after Phase 4; the file stays for factual use.
+
+## D-063 — Phase 4 gains user-testing follow-ups (2026-11-07, phase 4)
+**Status:** accepted (user, 2026-11-07)
+
+**Context:** The user tried Snellius on minikube with kgateway 2.5.0 and asked for three changes.
+
+**Decision:** sub-phase 4.2 (planned) adds:
+1. The stale banner waits for the first poll after a hidden tab is shown again.
+2. A tooltip on a row's Error or Warning in the Gateways, Routes and ListenerSets lists and the overview, showing the deciding finding's code and message and how many more there are. Row DTOs gain a small optional reason; no extra request on hover. Detail and evidence never appear.
+3. An About page: product name, descriptor, tagline, UI version, watched installs, and links.
+
+**Consequences:** the row DTOs grow by an optional field (API v1, additive). Phase 4 design §12.
+
+**Alternatives:** fetch the reason on hover: rejected, it costs a request per hover for data the backend already has.
+
