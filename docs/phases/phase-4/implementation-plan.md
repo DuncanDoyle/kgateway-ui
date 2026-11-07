@@ -35,7 +35,7 @@
 
 **Interfaces:** Produces the module path `github.com/DuncanDoyle/snellius` for every later task.
 
-- [ ] **Step 1: Failing test** `TestMemoryLimitEnvFallback` in `pkg/app`: with only `KGWUI_MEMORY_LIMIT=64Mi` set, the limit is 64 MiB and a deprecation line is logged; with both set, `SNELLIUS_MEMORY_LIMIT` wins; with neither, the default applies.
+- [ ] **Step 1: Failing test** `TestMemoryLimitEnvFallback` in `pkg/app`, keeping today's semantics (decimal bytes, 90 % target, `GOMEMLIMIT` wins): with only `KGWUI_MEMORY_LIMIT=67108864` set, the target is 90 % of it and a deprecation line is logged; with both set, `SNELLIUS_MEMORY_LIMIT` wins; with `GOMEMLIMIT` set, neither applies; with neither, the Go default stays.
 - [ ] **Step 2:** Run it; it fails (no `SNELLIUS_` name).
 - [ ] **Step 3:** Rewrite the module path (`go mod edit -module`, then imports with `gofmt -r` or a scripted replace limited to the import path), move `cmd/kgateway-ui` to `cmd/snellius`, rename the env vars with the fallback, the ldflags path, and the log line.
 - [ ] **Step 4:** `go build ./... && go vet ./... && go test ./...` pass, and the bench and e2e build tags vet.
@@ -43,7 +43,7 @@
 
 ### Task 2: Image, chart, CI and e2e harness
 
-**Files:** `Dockerfile`; `deploy/helm/kgateway-ui/` → `deploy/helm/snellius/` (Chart.yaml, values.yaml, `_helpers.tpl`, templates, NOTES.txt, README.md); `deploy/helm/chart_test.go`; `.github/workflows/{ci,e2e,release}.yaml`; `test/e2e/setup.sh`; `test/e2e/api_test.go` (names only); `Makefile` targets.
+**Files:** `Dockerfile`; `deploy/helm/kgateway-ui/` → `deploy/helm/snellius/` (Chart.yaml, values.yaml, `_helpers.tpl`, templates, NOTES.txt, README.md); `deploy/helm/chart_test.go`; `.github/workflows/{ci,e2e,release}.yaml`; `test/e2e/setup.sh`; `test/e2e/api_test.go` (names only); `examples/downstream/main_test.go:259` (chart path and namespace) and `examples/downstream/chart/values-acme.yaml:2`; `Makefile` targets.
 
 **Interfaces:** Consumes Task 1's binary name. Produces chart `snellius`, objects named `<release>-snellius`, namespace `snellius` in the harness.
 
@@ -64,15 +64,18 @@
 
 ### Task 4: Visual identity
 
-**Files:** `web/app/src/assets/snellius/` (new: symbol dark/light and mono SVGs); `web/app/public/` (favicon.svg, favicon.ico, favicon PNGs, apple touch 180, app icons 192/512, `site.webmanifest`); `web/app/src/brand.tsx`; `web/app/src/main.tsx`; `web/app/index.html`; `web/packages/shell/src/theme/themeStorage.ts`; `web/packages/shell/src/shell/Shell.tsx` and `contributions.tsx` (console prefix); `web/packages/shell/src/explore/EvidenceView.tsx` (`REPO_BLOB`); tests beside each.
+**Files:** `web/app/src/assets/snellius/` (new: symbol dark/light and mono SVGs); `web/app/public/` (favicon.svg, favicon.ico, favicon PNGs, apple touch 180, app icons 192/512, `site.webmanifest`); `web/app/src/brand.tsx`; `web/app/src/main.tsx`; `web/app/index.html`; `web/packages/shell/src/theme/themeStorage.ts`; `web/packages/shell/src/shell/Shell.tsx` and `contributions.tsx` (console prefix); `web/packages/shell/src/diagnostics/EvidenceView.tsx` (`REPO_BLOB`) and `diagnostics/diagnostics.test.tsx:612`; `web/packages/shell/src/shell/extension.ts:86` (`defaultBrand.productName`); `internal/webui/placeholder/index.html` (title and text); tests beside each.
 
 **Interfaces:** Consumes `@snellius/shell`. `Brand` and `ShellExtension` are unchanged.
 
 - [ ] **Step 1: Failing tests:**
   - the default app header shows an `img` from the Snellius symbol and the text `snellius`; `document.title` is `snellius` on the landing page;
   - a downstream brand (`productName: "acme"`) still shows `acme` and its logo, and the title follows it;
+  - the published shell with no `extension.brand` shows `snellius` (the `defaultBrand`), not kgateway;
+  - the embedded placeholder page (`internal/webui`) is titled Snellius;
   - `themeStorage`: only the old key set → the theme is read and moved to the new key, the old key removed; only the new key → read; both → new wins;
-  - a static test reads `index.html`: every `href` for icons and the manifest names a file that exists in `web/app/public/`, and the pre-paint script reads `snellius.theme.paint` with a fallback to `kgateway-ui.theme.paint`.
+  - a static test reads `index.html`: every `href` for icons and the manifest names a file that exists in `web/app/public/`;
+  - the pre-paint harness (`theme/indexHtml.test.ts`, which runs the inline script) is extended with a full storage stub: old key only, new key only, both (new wins), and a store whose writes throw. In each case the root background and `color-scheme` before React match the saved theme.
 - [ ] **Step 2:** Run them; they fail.
 - [ ] **Step 3:** Copy the assets from `snellius-branding/assets/` (the refined set; SVGs optimised, transparent), switch the brand to `snelliusBrand`, update `index.html` (title, icon links, apple touch icon, manifest) keeping the pre-paint script's behaviour, add the storage migration, rename the console prefix and `REPO_BLOB`. `kgateway-icon-white.svg` and its attribution README stay.
 - [ ] **Step 4:** Tests, typecheck, lint, build pass.

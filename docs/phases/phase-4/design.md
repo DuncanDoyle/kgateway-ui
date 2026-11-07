@@ -58,7 +58,7 @@ Sentence pattern for docs: "Snellius is a read-only UI for Kubernetes Gateway AP
 ### 4.1 Go
 - Module `github.com/DuncanDoyle/kgateway-ui` becomes `github.com/DuncanDoyle/snellius` (all imports, `examples/downstream`, ldflags in `Makefile` and `Dockerfile`).
 - `cmd/kgateway-ui` becomes `cmd/snellius`; the binary is `snellius`.
-- `KGWUI_MEMORY_LIMIT` becomes `SNELLIUS_MEMORY_LIMIT`. The old name is still read when the new one is unset, with a deprecation log line, for one minor release (our call: someone may set it by hand outside the chart). `KGWUI_BENCH_TIMING` (internal) becomes `SNELLIUS_BENCH_TIMING`.
+- `KGWUI_MEMORY_LIMIT` becomes `SNELLIUS_MEMORY_LIMIT`, with unchanged semantics (decimal bytes, 90 % target, `GOMEMLIMIT` wins). The old name is still read when the new one is unset, with a deprecation log line, for one minor release (our call: someone may set it by hand outside the chart). `KGWUI_BENCH_TIMING` (internal) becomes `SNELLIUS_BENCH_TIMING`.
 - The listen log line says "snellius listening".
 - `KGWUI-` codes and `UpstreamPrefix` are unchanged.
 
@@ -74,6 +74,7 @@ Sentence pattern for docs: "Snellius is a read-only UI for Kubernetes Gateway AP
 ### 4.4 Web
 - npm scope `@snellius/shell`; workspaces `snellius-web`, `snellius-app`; source condition `@snellius/source`.
 - `brand.tsx` exports `snelliusBrand`; `<title>snellius</title>` in `index.html`.
+- The published shell's `defaultBrand` (used when a consumer gives no brand) is `snellius`, without a logo, as today. The embedded placeholder page shown before `make web` says Snellius.
 - Storage keys `snellius.theme` and `snellius.theme.paint`. On first read, if a new key is missing and the old key exists, copy it and remove the old one. The pre-paint script in `index.html` does the same for the paint key, so the first paint is right.
 - Console warning prefix `snellius:`.
 - `REPO_BLOB` points at the new repo.
