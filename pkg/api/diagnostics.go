@@ -138,6 +138,18 @@ func (d *FindingDetail) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// visibleNames is names without those whose mapped object v may not view (§14); nil when none is left.
+func visibleNames(v *view, names []string, objs map[string]objects.Ref) []string {
+	out := slices.DeleteFunc(slices.Clone(names), func(n string) bool {
+		o, mapped := objs[n]
+		return mapped && !v.can(o)
+	})
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // wireEvidence is e for the caller of v, times in UTC: KGWUI-001 keeps the
 // recently changed objects v may view; KGWUI-015 links its policy and KGWUI-017
 // its other listeners' owners. The model's evidence is never changed.
@@ -155,6 +167,8 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 			ts := slices.Clone(out.ProxyStats[i].Types)
 			for j := range ts {
 				ts[j].RejectingSince = wirePtr(ts[j].RejectingSince)
+				ts[j].EnvoyResources = visibleNames(v, ts[j].EnvoyResources, ts[j].Objects)
+				ts[j].Objects = nil
 			}
 			out.ProxyStats[i].Types = ts
 		}
@@ -163,18 +177,11 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 				out.RecentlyChanged = append(out.RecentlyChanged, l.linked(r))
 			}
 		}
-		// A name the rule set maps to an object is filtered as that object (§14).
 		out.LogEvents = slices.Clone(ev.LogEvents)
 		for i := range out.LogEvents {
 			le := &out.LogEvents[i]
 			le.Since = wireTime(le.Since)
-			le.EnvoyResources = slices.DeleteFunc(slices.Clone(le.EnvoyResources), func(n string) bool {
-				o, mapped := le.Objects[n]
-				return mapped && !v.can(o)
-			})
-			if len(le.EnvoyResources) == 0 {
-				le.EnvoyResources = nil
-			}
+			le.EnvoyResources = visibleNames(v, le.EnvoyResources, le.Objects)
 			le.Objects = nil
 		}
 		return out
@@ -396,15 +403,15 @@ func (h *handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// dataPlane counts i's rejecting Gateways over every finding; a hidden Gateway
-// counts only when its restricted 001 row already names it.
+// dataPlane counts i's rejecting and withheld Gateways over every finding; a
+// hidden Gateway counts only when its restricted 001 or 024 row already names it.
 func dataPlane(v *view, i *engine.InstallModel) DataPlaneSummary {
 	var out DataPlaneSummary
-	rejecting := rejectingGateways(i)
-	out.Rejecting = len(rejecting)
+	rejecting, withheld := rejectingGateways(i), withheldGateways(i)
+	out.Rejecting, out.Withheld = len(rejecting), len(withheld)
 	if i.Owned != nil {
 		for _, u := range i.Owned.Gateways {
-			if ref := objects.RefOf(u); rejecting[ref] || v.can(ref) {
+			if ref := objects.RefOf(u); rejecting[ref] || withheld[ref] || v.can(ref) {
 				out.Gateways++
 			}
 		}
@@ -415,9 +422,20 @@ func dataPlane(v *view, i *engine.InstallModel) DataPlaneSummary {
 
 // rejectingGateways is the set of i's Gateways with a KGWUI-001.
 func rejectingGateways(i *engine.InstallModel) map[objects.Ref]bool {
+	return gatewaysWith(i, health.CodeXDSRejected, "")
+}
+
+// withheldGateways is the set of i's Gateways with a KGWUI-024 error; its
+// warning (config released early) still updates the proxies.
+func withheldGateways(i *engine.InstallModel) map[objects.Ref]bool {
+	return gatewaysWith(i, health.CodeConfigWithheld, health.SeverityError)
+}
+
+// gatewaysWith is the set of resources of i's findings with code, of severity sev unless it is "".
+func gatewaysWith(i *engine.InstallModel, code string, sev health.Severity) map[objects.Ref]bool {
 	out := map[objects.Ref]bool{}
 	for k := range i.Health.Findings {
-		if f := &i.Health.Findings[k]; f.Code == health.CodeXDSRejected && f.Resource != nil {
+		if f := &i.Health.Findings[k]; f.Code == code && f.Resource != nil && (sev == "" || f.Severity == sev) {
 			out[*f.Resource] = true
 		}
 	}

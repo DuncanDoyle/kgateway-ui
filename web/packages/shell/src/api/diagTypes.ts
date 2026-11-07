@@ -240,15 +240,11 @@ export interface FreshnessCount {
   freshness: FreshnessEvidence["freshness"];
   objects: number;
 }
-/**
- * Why KGWUI-018 reports the controller (design §10.2): stuck objects per kind, the oldest KGWUI-003 warning's since,
- * and the status syncs in the last 5 min. syncs is absent when unknown, which never means zero.
- */
+/** Why KGWUI-018 reports the controller (design §10.2): stuck objects per kind and the oldest KGWUI-003 warning's since. */
 export interface StatusProgressEvidence {
   kind: "status-progress";
   kinds: FreshnessCount[];
   oldest: string;
-  syncs?: number;
 }
 
 /**
@@ -339,6 +335,8 @@ export interface ProxySummary {
 export interface DataPlaneSummary {
   gateways: number;
   rejecting: number;
+  /** Gateways with a KGWUI-024 error: their proxies get no config updates. */
+  withheld?: number;
   unavailable?: boolean;
 }
 /** GET …/diagnostics: groups are the first 10 of groupTotal. */
@@ -394,6 +392,8 @@ export interface ProcessesResponse {
  */
 export interface DataPlane {
   rejecting: boolean;
+  /** A KGWUI-024 error: the proxies get no config updates. */
+  configWithheld?: boolean;
   rejects: { typeUrl: string; streams: number; firstSeen: string }[];
   statusSaysHealthy: boolean;
   /** The controller's xDS snapshot: what it built, not what proxies accepted; never a finding. */

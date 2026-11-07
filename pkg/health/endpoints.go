@@ -99,7 +99,8 @@ func (c endpointsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				evidence[sp] = ev
 				order = append(order, sp)
 			}
-			if !slices.Contains(ev.Routes, route) {
+			// A ready port is never reported; routes come one at a time, so a repeat is the last entry.
+			if n := len(ev.Routes); !ready[sp] && (n == 0 || ev.Routes[n-1] != route) {
 				ev.Routes = append(ev.Routes, route)
 			}
 		}

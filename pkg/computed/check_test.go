@@ -348,11 +348,11 @@ func TestNoteCarriesSelection(t *testing.T) {
 		t.Fatalf("want 3 checks, got %d", len(cs))
 	}
 	for _, c := range cs {
-		if !strings.Contains(c.Note, "Controller version unknown; using the 2.4 rules") {
+		if !strings.Contains(c.Note, "Controller version unknown; using the 2.5 rules") {
 			t.Errorf("note %q on %+v", c.Note, c.ID)
 		}
 	}
-	if c := countCheck(t, cs, g, "a"); c.Note != "Controller version unknown; using the 2.4 rules" {
+	if c := countCheck(t, cs, g, "a"); c.Note != "Controller version unknown; using the 2.5 rules" {
 		t.Errorf("note %q", c.Note)
 	}
 }

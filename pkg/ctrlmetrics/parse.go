@@ -26,9 +26,6 @@ const (
 	// XDSSnapshotResources is the controller's xDS snapshot per Gateway and
 	// resource type: what it built, not what proxies accepted.
 	XDSSnapshotResources = "kgateway_xds_snapshot_resources"
-	// StatusSyncsTotal counts status syncs per syncer, object and result
-	// (labels name, namespace, syncer, result; proxy_syncer/metrics.go:23-30 on v2.3.11 and v2.4.7).
-	StatusSyncsTotal = "kgateway_status_syncer_status_syncs_total"
 	// BuildInfo carries the controller version in its version label (v2.5 and later; pkg/version/metrics.go at v2.5.0).
 	BuildInfo = "kgateway_build_info"
 	// PerClientWithheld counts withheld clients per Gateway and state (v2.5 and later).
@@ -79,10 +76,6 @@ type PodMetrics struct {
 	// family is absent, which never means zero.
 	Dropped        float64
 	DroppedPresent bool
-	// StatusSyncs is status_syncs_total summed over its series; StatusSyncsPresent
-	// is false when the family is absent, which never means zero.
-	StatusSyncs        float64
-	StatusSyncsPresent bool
 	// BuildVersion is build_info's version label, such as "v2.5.0"; "" when absent.
 	BuildVersion string
 	// PerClientPresent is true when the scrape has a per-client family or
@@ -138,12 +131,6 @@ func Parse(r io.Reader) (Metrics, error) {
 		pod.DroppedPresent = len(f.GetMetric()) > 0
 		for _, s := range f.GetMetric() {
 			pod.Dropped += s.GetCounter().GetValue()
-		}
-	}
-	if f, ok := fams[StatusSyncsTotal]; ok {
-		pod.StatusSyncsPresent = len(f.GetMetric()) > 0
-		for _, s := range f.GetMetric() {
-			pod.StatusSyncs += s.GetCounter().GetValue()
 		}
 	}
 	parsePerClient(fams, &pod)

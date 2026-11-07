@@ -27,7 +27,7 @@ const sortProcesses = "processes"
 
 // processCodes are the codes behind a process set's health: process and data-plane findings.
 var processCodes = []string{health.CodeXDSRejected, health.CodeControllerNotReady, health.CodeProxyNotReady, health.CodeProcessRestarting,
-	health.CodeProbeFailing, health.CodeRolloutStuck, health.CodeVersionSkew, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
+	health.CodeProbeFailing, health.CodeRolloutStuck, health.CodeVersionSkew, health.CodeConfigWithheld, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
 
 // subjectFacts are what an install's findings say about one process subject.
 type subjectFacts struct {

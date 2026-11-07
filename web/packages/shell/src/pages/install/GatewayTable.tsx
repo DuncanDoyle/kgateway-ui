@@ -163,12 +163,13 @@ function shownState(r: GatewayRow, stale: boolean, signalsMissing: boolean): Hea
 }
 
 type DataPlane = NonNullable<GatewayRow["dataPlane"]>;
-const dataPlaneRank: Record<DataPlane, number> = { rejects: 0, unknown: 1, ok: 2 };
+const dataPlaneRank: Record<DataPlane, number> = { rejects: 0, withheld: 1, unknown: 2, ok: 3 };
 
 /** The Data plane cell: the server's value, unknown when stale or absent (an older server); never a tick on old data. */
 function DataPlaneBadge({ value }: { value: DataPlane }) {
   if (value === "ok") return <HealthBadge state="healthy" label={diagnosticsCopy.noRejects} />;
   if (value === "rejects") return <HealthBadge state="error" label={diagnosticsCopy.rejects} />;
+  if (value === "withheld") return <HealthBadge state="error" label={diagnosticsCopy.configWithheld} />;
   return <HealthBadge state="unknown" />;
 }
 

@@ -511,6 +511,7 @@ export const diagnosticsCopy = {
   dataPlane: "Data plane", // S388
   noRejects: "No rejects", // S389
   rejects: "Rejects", // S390
+  configWithheld: "Config withheld", // S597
   problems: (n: number) => plural(n, ["problem", "problems"]), // S383
   oldestProblem: (ago: string) => `Oldest problem ${ago}`, // S384
   // Phase 3.3: Learn more, and evidence of 003, 013–015, 017, 018 and the controller log.
@@ -550,7 +551,6 @@ export const diagnosticsCopy = {
   stuckObjects: "Objects with a stuck status", // S530
   objects: "Objects", // S530
   oldest: "Oldest", // S530
-  syncs: "Status syncs, last 5 min", // S531
   notKnown: "Not known", // S532
   controllerLog: "Controller log", // S552, equal to dataPlaneCopy.controllerLog
   logState: { read: "Read", "not-read": "Not read" } as Record<string, string>, // S553

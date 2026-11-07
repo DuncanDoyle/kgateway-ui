@@ -412,13 +412,13 @@ func TestRuleSetFromBuildInfo(t *testing.T) {
 			t.Errorf("%s: rules %s, reported %q, version %q", step, m.Rules.Rules.Version(), m.Resolved.ReportedVersion, m.Resolved.Version)
 		}
 	}
-	check("no build_info", "kgateway-2.4", "")
+	check("no build_info", "kgateway-2.5", "")
 	build = "v2.5.0"
 	check("build_info", "kgateway-2.5", "2.5.0")
 	scrapeErr, build = "connection refused", ""
 	check("scrape failed", "kgateway-2.5", "2.5.0")
 	scrapeErr = ""
-	check("scrape without build_info", "kgateway-2.4", "")
+	check("scrape without build_info", "kgateway-2.5", "")
 }
 
 // A build_info version that is not a version ("undefined" from a build without

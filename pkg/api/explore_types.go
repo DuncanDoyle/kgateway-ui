@@ -86,6 +86,8 @@ const (
 	DataPlaneOK = "ok"
 	// DataPlaneRejects: the Gateway has a KGWUI-001.
 	DataPlaneRejects = "rejects"
+	// DataPlaneWithheld: no KGWUI-001, but a KGWUI-024 error: the proxies get no config updates.
+	DataPlaneWithheld = "withheld"
 	// DataPlaneUnknown: no reject, but the xDS rejects check is not OK or did not run.
 	DataPlaneUnknown = "unknown"
 )

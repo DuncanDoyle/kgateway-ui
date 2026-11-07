@@ -186,6 +186,20 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntrie
 
 ## Upgrade notes
 
+### Stabilization (sub-phase 3.5)
+
+- On kgateway 2.5, a policy selector that matches nothing is a computed KGWUI-016 warning again; named targets still come from the controller's `TargetNotFound`.
+- A controller whose version the UI cannot read now runs on the 2.5 rules ("Controller version unknown; using the 2.5 rules").
+- KGWUI-018 no longer shows a status-sync count.
+- A KGWUI-024 error shows as "Config withheld" in the overview's Data plane column and the Gateway page's Data plane headline, counts in `diagnostics.dataPlane.withheld`, and makes the Gateway's proxies an error on the Processes page.
+- Adding or removing only DirectResponse, GatewayExtension or ReferenceGrant CRDs no longer raises KGWUI-008.
+
+For downstream builds:
+
+- `pkg/ctrlmetrics` drops `StatusSyncsTotal` and `PodMetrics.StatusSyncs` / `StatusSyncsPresent`.
+- `kinds.Change` gains `ListOnlyAdded`, `ListOnlyRemoved` and `Judged()`; `Added` and `Removed` hold judged kinds only.
+- With a rule set that maps Envoy names to objects (`computed.EnvoyNamer`), proxy-stat names in KGWUI-001's evidence are filtered as those objects, as log names are.
+
 ### Backends and kgateway 2.5 (sub-phase 3.4)
 
 - New finding codes:

@@ -241,7 +241,7 @@ func TestRuleSetFromBaseVersion(t *testing.T) {
 		acmeExp, upstreamExp       bool
 	}{
 		{"base set", "v2.4.7", "", "v2.3.4", false, true},
-		{"base unset", "", "Controller version unknown; using the 2.4 rules", "v2.4.7", true, false},
+		{"base unset", "", "Controller version unknown; using the 2.5 rules", "v2.4.7", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// An unreadable experimental setting makes only an experimental-only TCPRoute unknown.
@@ -291,8 +291,10 @@ func TestRuleSetFromBaseVersion(t *testing.T) {
 				return false
 			}
 			acme := routes("acme-system.controller", 2)
-			if c := acme["HTTPRoute"].Computed; c.Rules != "kgateway-2.4" || c.Note != tc.note {
-				t.Fatalf("rules %q note %q, want kgateway-2.4 %q", c.Rules, c.Note, tc.note)
+			// An unknown version runs on the newest set (D-058).
+			want := map[bool]string{true: "kgateway-2.4", false: "kgateway-2.5"}[tc.base != ""]
+			if c := acme["HTTPRoute"].Computed; c.Rules != want || c.Note != tc.note {
+				t.Fatalf("rules %q note %q, want %s %q", c.Rules, c.Note, want, tc.note)
 			}
 			if got := experimentalOnly("acme", acme["TCPRoute"]); got != tc.acmeExp {
 				t.Fatalf("acme TCPRoute experimental-only = %v, want %v", got, tc.acmeExp)

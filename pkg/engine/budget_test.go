@@ -28,8 +28,6 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
 )
@@ -219,105 +217,6 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	if n.runs != 20 || n.onSafety != 20 || n.confirms != 600 || n.scrapes != 60 {
 		t.Errorf("idle 10 min: %+v; want 20 recomputes, all on the safety timer, 600 confirmations, 60 scrapes", n)
 	}
-}
-
-// syncsBody is managedBody with status_syncs_total at n.
-func syncsBody(n int) string {
-	return managedBody + fmt.Sprintf("# TYPE %s counter\n%s{syncer=\"HTTPRoute\",result=\"success\"} %d\n", ctrlmetrics.StatusSyncsTotal, ctrlmetrics.StatusSyncsTotal, n)
-}
-
-// TestBudgetSyncOnlyScrapes reports what scrapes that change only
-// status_syncs_total cost an idle cluster (Task 63, R96): on fake clocks, 600
-// one-second steps with a scrape every 10 s, each with 7 more syncs, at Large
-// with no 018, without and with the 3.4 inputs. It counts the recomputes, the
-// publications and those whose findings differ from the last publication's; nothing is gated.
-func TestBudgetSyncOnlyScrapes(t *testing.T) {
-	for _, phase3 := range []bool{false, true} {
-		name := "large"
-		if phase3 {
-			name = "large with the 3.4 inputs"
-		}
-		t.Run(name, func(t *testing.T) {
-			clk := testutil.FakeClock()
-			w := newWorld(t, scale.Large, clk.Now)
-			if phase3 {
-				w = fromLive(scale.LivePhase3(t, scale.Large, clk.Now))
-			}
-			syncOnlyScrapes(t, name, w, clk)
-		})
-	}
-}
-
-func syncOnlyScrapes(t *testing.T, name string, w *world, clk *clocktesting.FakeClock) {
-	const safety, every, maxAge = 30 * time.Second, 10 * time.Second, 45 * time.Second
-	syncs := 0
-	s := newScraping(syncsBody(syncs), maxAge)
-	s.col.OnResult = w.sig
-	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge })
-	runLoop(t, e, safety)
-	awaitKind(t, ev, EvPublished)
-	awaitKind(t, ev, EvArmed)
-	s.start(t, every, e.Installs)
-	awaitKind(t, ev, EvTriggered)
-	awaitKind(t, ev, EvArmed)
-	s.cc.Step(time.Second)
-	clk.Step(time.Second)
-	prev := awaitKind(t, ev, EvPublished).Published.Model
-	awaitKind(t, ev, EvArmed)
-	var scrapes, runs, changed, triggers int
-	for range 600 {
-		if next := s.cc.Now().Add(time.Second); next.Sub(testutil.Now)%every == 0 {
-			syncs += 7
-			b := syncsBody(syncs)
-			s.sc.body.Store(&b)
-		}
-		s.cc.Step(time.Second)
-		if s.cc.Now().Sub(testutil.Now)%every == 0 {
-			s.wait(t, s.cc.Now())
-			scrapes++
-		}
-		clk.Step(time.Second)
-		for inFlight := false; ; {
-			x := testutil.Recv(t, ev, "loop event")
-			switch x.Kind {
-			case EvTriggered:
-				triggers++
-			case EvRunStarted:
-				inFlight = true
-			case EvPublished:
-				inFlight = false
-				runs++
-				if m := x.Published.Model; !sameFindings(prev, m) {
-					changed++
-				}
-				prev = x.Published.Model
-			}
-			if x.Kind == EvArmed && !inFlight {
-				break
-			}
-		}
-	}
-	t.Logf("sync-only scrapes, 10 min idle at %s: %d scrapes, %d triggers, %d recomputes and publications (%.2f/s), %d with findings that differ from the last (reported)",
-		name, scrapes, triggers, runs, float64(runs)/600, changed)
-	if scrapes != 60 {
-		t.Errorf("%d scrapes, want 60", scrapes)
-	}
-}
-
-// sameFindings reports whether a and b's installs have the same findings by ID, severity, detail and since.
-func sameFindings(a, b *Model) bool {
-	if len(a.Installs) != len(b.Installs) {
-		return false
-	}
-	for i := range a.Installs {
-		fa, fb := a.Installs[i].Health.Findings, b.Installs[i].Health.Findings
-		if !slices.EqualFunc(fa, fb, func(x, y health.Finding) bool {
-			return x.ID == y.ID && x.Severity == y.Severity && x.Detail == y.Detail && (x.Since == nil) == (y.Since == nil) && (x.Since == nil || x.Since.Equal(*y.Since))
-		}) {
-			return false
-		}
-	}
-	return true
 }
 
 // tick is the confirm tick's work on an idle loop: the live source,

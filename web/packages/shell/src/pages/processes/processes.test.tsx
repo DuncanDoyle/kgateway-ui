@@ -263,6 +263,26 @@ describe("Gateway page sections", () => {
     expect(within(dp).getByText(dataPlaneCopy.snapshotNote)).toBeInTheDocument();
   });
 
+  it("Data plane headline says config withheld for a 024 error without rejects, never No rejects", async () => {
+    serve((u) =>
+      u.pathname === `${API}/gateways/infra/nack`
+        ? gateway(dataPlaneGolden, {
+            dataPlane: {
+              ...(dataPlaneGolden.body.dataPlane as GatewayDetail["dataPlane"] & object),
+              rejecting: false,
+              rejects: [],
+              configWithheld: true,
+            },
+          })
+        : undefined,
+    );
+    mount(GW("nack"));
+    await screen.findByRole("region", { name: dataPlaneCopy.title });
+    const dp = dataPlane();
+    expect(within(dp).getByText(diagnosticsCopy.configWithheld)).toBeInTheDocument();
+    expect(within(dp).queryByText(diagnosticsCopy.noRejects)).toBeNull();
+  });
+
   it("Data plane without the contradiction says proxies reject; hidden evidence leaves no names", async () => {
     serve((u) => (u.pathname === `${API}/gateways/infra/nack` ? gateway(dataPlaneRestrictedGolden) : undefined));
     const { container } = mount(GW("nack"));

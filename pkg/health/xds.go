@@ -273,7 +273,7 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 		f.Evidence = append(f.Evidence, process.PodRef(in.Install.Namespace, process.Process{Name: p}))
 	}
 	var proxyPods []objects.Ref
-	ev.ProxyStats, proxyPods = proxyRejects(proxies[*r])
+	ev.ProxyStats, proxyPods = proxyRejects(proxies[*r], in.Rules.EnvoyNamer())
 	f.Evidence = append(f.Evidence, proxyPods...)
 	onset := first
 	for _, t := range ev.Types {

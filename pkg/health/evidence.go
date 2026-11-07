@@ -175,6 +175,8 @@ type ProxyTypeRejects struct {
 	// EnvoyResources are Envoy names, never Gateway API objects.
 	EnvoyResources          []string `json:"envoyResources,omitempty"`
 	EnvoyResourcesTruncated bool     `json:"envoyResourcesTruncated,omitempty"`
+	// Objects are the objects the rule set maps names to; each name is filtered as its object (§14). Never serialised.
+	Objects map[string]objects.Ref `json:"-"`
 }
 
 // XDSTypeRejects is one rejected xDS type: rejecting streams summed over the

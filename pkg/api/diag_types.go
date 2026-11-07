@@ -142,8 +142,10 @@ type ProxySummary struct {
 // DataPlaneSummary counts Gateways with a KGWUI-001 over every finding, beside the visible Gateways
 // and those a rejecting row names; Unavailable is set while the xDS rejects check is not OK.
 type DataPlaneSummary struct {
-	Gateways    int  `json:"gateways"`
-	Rejecting   int  `json:"rejecting"`
+	Gateways  int `json:"gateways"`
+	Rejecting int `json:"rejecting"`
+	// Withheld counts Gateways with a KGWUI-024 error: their proxies get no config updates.
+	Withheld    int  `json:"withheld,omitempty"`
 	Unavailable bool `json:"unavailable,omitempty"`
 }
 
@@ -212,6 +214,8 @@ type DataPlaneDTO struct {
 	ProxyStats  ProxyStatsDTO `json:"proxyStats"`
 	// Withheld is set when the controller log shows the Gateway's proxies may get no config updates (R105).
 	Withheld *WithheldDTO `json:"withheld,omitempty"`
+	// ConfigWithheld is set while the Gateway has a KGWUI-024 error: its proxies get no config updates.
+	ConfigWithheld bool `json:"configWithheld,omitempty"`
 	// ControllerLogs says whether the install's controller log was read; without it, no withheld means unobserved (D-006).
 	ControllerLogs string `json:"controllerLogs"`
 }

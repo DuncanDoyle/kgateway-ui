@@ -19,11 +19,11 @@ var minorRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.+-]|$)`)
 func IsVersion(v string) bool { return minorRE.MatchString(v) }
 
 // Select returns the rule set for a kgateway controller version. An unknown,
-// newer or older version gets the nearest set, labelled in Note.
+// newer or older version gets the nearest set, labelled in Note; an unknown one gets the newest (D-058).
 func Select(controllerVersion string) computed.Selection {
 	m := minorRE.FindStringSubmatch(controllerVersion)
 	if m == nil {
-		return computed.Selection{Rules: kgw24.New(), Note: "Controller version unknown; using the 2.4 rules"}
+		return computed.Selection{Rules: kgw25.New(), Note: "Controller version unknown; using the 2.5 rules"}
 	}
 	major, _ := strconv.Atoi(m[1])
 	minor, _ := strconv.Atoi(m[2])

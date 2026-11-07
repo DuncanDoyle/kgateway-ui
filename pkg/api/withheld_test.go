@@ -70,6 +70,69 @@ func TestConfigWithheldAtTheAPI(t *testing.T) {
 	}
 }
 
+// A 024 error reaches the 3.2 summaries (phase review #4): the Gateway's proxy
+// set on /processes is an error, the diagnostics data plane counts it as
+// withheld, and its overview row reads "withheld" while it has no 001.
+func TestConfigWithheldInSummaries(t *testing.T) {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-withheld-synth", "kgw", "kgateway-0"), ctrlCapture(t, "v2.5.0", "kgw", "kgateway-1"))
+	h := xdsHarness(t, setup{}, lm, nackWorld()...)
+	r := h.at(t, testutil.Now)
+	if withheldFinding(r, "infra", "nack", health.SeverityError) == nil || xdsFinding(r, "infra", "nack") != nil {
+		t.Fatalf("want a 024 error and no 001 on nack: %+v", r.Findings)
+	}
+	p := get[ProcessesResponse](t, h.srv, procsPath+"?health=error", 200).Proxies
+	if got := gatewayNames(p); !slices.Contains(got, "nack") {
+		t.Fatalf("health=error: %v, want nack", got)
+	}
+	if d := get[Diagnostics](t, h.srv, diagPath, 200).DataPlane; d.Withheld != 1 {
+		t.Fatalf("data plane %+v, want withheld 1", d)
+	}
+	if got := overviewDataPlane(t, h); got["nack"] != DataPlaneWithheld {
+		t.Fatalf("overview data plane %v, want nack withheld", got)
+	}
+	if dp := get[GatewayDetail](t, h.srv, nackDetail, 200).DataPlane; dp == nil || !dp.ConfigWithheld || dp.Rejecting {
+		t.Fatalf("gateway data plane %+v, want config withheld", dp)
+	}
+}
+
+// D-060 item 1: a 024 warning (config released early) is no withheld Gateway
+// anywhere, and a 001 beside a 024 error wins the Data plane cell.
+func TestConfigWithheldWarningAndRejectPrecedence(t *testing.T) {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-withheld-synth", "kgw", "kgateway-0"), ctrlCapture(t, "v2.5.0", "kgw", "kgateway-1"))
+	h := xdsHarness(t, setup{}, lm, nackWorld()...)
+	h.at(t, testutil.Now)
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-released-synth", "kgw", "kgateway-0"), ctrlCapture(t, "v2.5.0", "kgw", "kgateway-1"))
+	r := h.at(t, testutil.Now.Add(time.Minute))
+	if withheldFinding(r, "infra", "nack", health.SeverityWarning) == nil || withheldFinding(r, "infra", "nack", health.SeverityError) != nil {
+		t.Fatalf("want a 024 warning only on nack: %+v", r.Findings)
+	}
+	if got := overviewDataPlane(t, h); got["nack"] == DataPlaneWithheld {
+		t.Fatalf("warning: overview data plane %v", got)
+	}
+	if d := get[Diagnostics](t, h.srv, diagPath, 200).DataPlane; d.Withheld != 0 {
+		t.Fatalf("warning: data plane %+v, want withheld 0", d)
+	}
+	if dp := get[GatewayDetail](t, h.srv, nackDetail, 200).DataPlane; dp == nil || dp.ConfigWithheld {
+		t.Fatalf("warning: gateway data plane %+v", dp)
+	}
+
+	lm = newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-withheld-synth", "kgw", "kgateway-0"), ctrlCapture(t, "v2.4.7-rejects-b", "kgw", "kgateway-1"))
+	h = xdsHarness(t, setup{}, lm, nackWorld()...)
+	r = h.at(t, testutil.Now)
+	if withheldFinding(r, "infra", "nack", health.SeverityError) == nil || xdsFinding(r, "infra", "nack") == nil {
+		t.Fatalf("want 001 and a 024 error on nack: %+v", r.Findings)
+	}
+	if got := overviewDataPlane(t, h); got["nack"] != DataPlaneRejects {
+		t.Fatalf("001 and 024: overview data plane %v, want rejects", got)
+	}
+	if dp := get[GatewayDetail](t, h.srv, nackDetail, 200).DataPlane; dp == nil || !dp.Rejecting || !dp.ConfigWithheld {
+		t.Fatalf("001 and 024: gateway data plane %+v", dp)
+	}
+}
+
 // KGWUI-024 from the real 2.5.0 pair: flip_release 0 -> 15 on infra/withheld
 // between two scrapes is a warning on that Gateway only.
 func TestConfigReleasedRealCaptureAtTheAPI(t *testing.T) {

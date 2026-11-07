@@ -788,7 +788,7 @@ func targetKinds(in computed.TargetInput) []objects.GroupKind {
 
 // TestRuleSetWithoutPolicyTargeterRaisesNo016: PolicyTargeter is optional, so
 // a downstream rule set that wraps kgw24 has none and gets no target results.
-// 2.3 and 2.4 have one; 2.5, and 2.5's set chosen for a newer controller, read 016 from status (D-020 rule 5).
+// Every upstream set has one; 2.5's judges selectors only (D-058 item 7).
 func TestRuleSetWithoutPolicyTargeterRaisesNo016(t *testing.T) {
 	wrapped := computed.Selection{Rules: struct{ computed.Rules }{rulesets.Select("v2.4.7").Rules}}
 	if wrapped.Rules.Version() != "kgateway-2.4" {
@@ -797,7 +797,7 @@ func TestRuleSetWithoutPolicyTargeterRaisesNo016(t *testing.T) {
 	if pt := wrapped.PolicyTargeter(); pt != nil {
 		t.Fatalf("a rule set without PolicyTargets has a targeter: %T", pt)
 	}
-	for v, want := range map[string]bool{"v2.3.11": true, "v2.4.7": true, "v2.5.0-rc.1": false, "v2.5.0": false, "v2.6.0": false} {
+	for v, want := range map[string]bool{"v2.3.11": true, "v2.4.7": true, "v2.5.0-rc.1": true, "v2.5.0": true, "v2.6.0": true} {
 		if got := rulesets.Select(v).PolicyTargeter() != nil; got != want {
 			t.Errorf("%s: PolicyTargeter %v, want %v", v, got, want)
 		}

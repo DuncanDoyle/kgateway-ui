@@ -1,9 +1,12 @@
 package health
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,8 +198,8 @@ func TestStatusNotProgressingNeedsAPersistentObject(t *testing.T) {
 	}
 }
 
-// While stuck objects keep rotating, 018 never matures, and the syncs history
-// still keeps only the samples its 5-min window needs.
+// While stuck objects keep rotating, 018 never matures, and the state keeps
+// only the objects stuck now.
 func TestStatusNotProgressingBoundsHistoryWhileObjectsRotate(t *testing.T) {
 	w := progressWorld(22, 10, 0)
 	rt := Runtime{States: NewStates()}
@@ -211,7 +214,7 @@ func TestStatusNotProgressingBoundsHistoryWhileObjectsRotate(t *testing.T) {
 			}
 			o.SetGeneration(gen)
 		}
-		w.metrics = syncs(off, map[string]float64{"a": float64(off / time.Second)})
+		w.metrics = syncsScrape(t, off, int(off/time.Second))
 		in := w.input(t)
 		in.Now = testutil.Now.Add(off)
 		if fs := notProgressing(Evaluate(in, Upstream(), rt)); len(fs) != 0 {
@@ -222,8 +225,8 @@ func TestStatusNotProgressingBoundsHistoryWhileObjectsRotate(t *testing.T) {
 	if st == nil {
 		t.Fatal("no 018 state while the condition holds")
 	}
-	if max := int(progressHold/every) + 2; len(st.samples) > max {
-		t.Fatalf("kept %d samples after 30 min, want at most %d", len(st.samples), max)
+	if len(st.stuck) != 10 {
+		t.Fatalf("kept %d stuck objects after 30 min, want the 10 stuck now", len(st.stuck))
 	}
 }
 
@@ -264,78 +267,31 @@ func TestStatusNotProgressingNeedsAReadyController(t *testing.T) {
 	}
 }
 
-// syncs is a metrics result collected at off with each Pod UID's status_syncs_total.
-func syncs(off time.Duration, pods map[string]float64) *ctrlmetrics.Result {
-	r := &ctrlmetrics.Result{CollectedAt: testutil.Now.Add(off), Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{},
-		Managed: map[ctrlmetrics.ManagedKey]float64{}, ManagedPresent: true}}
-	for uid, v := range pods {
-		r.Metrics.PerPod = append(r.Metrics.PerPod, ctrlmetrics.PodMetrics{UID: uid, Name: uid, StatusSyncs: v, StatusSyncsPresent: true})
+// syncsScrape is a parsed 2.4 scrape at off whose status_syncs_total is n.
+func syncsScrape(t *testing.T, off time.Duration, n int) *ctrlmetrics.Result {
+	t.Helper()
+	body := fmt.Sprintf("# TYPE kgateway_status_syncer_status_syncs_total counter\n"+
+		"kgateway_status_syncer_status_syncs_total{name=\"r\",namespace=\"shop\",result=\"success\",syncer=\"HTTPRouteStatusSyncer\"} %d\n", n)
+	m, err := ctrlmetrics.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return r
+	m.Rejects, m.Managed, m.ManagedPresent = map[ctrlmetrics.GatewayKey]float64{}, map[ctrlmetrics.ManagedKey]float64{}, true
+	return &ctrlmetrics.Result{CollectedAt: testutil.Now.Add(off), Metrics: m}
 }
 
-// The evidence quotes status_syncs_total's growth over the last 5 min, per
-// Pod UID: a reset counts the counter's new value, never a negative delta,
-// and a Pod seen for the first time sets a baseline.
-func TestStatusNotProgressingSyncs(t *testing.T) {
-	samples := map[time.Duration]map[string]float64{
-		0:                             {"a": 100},
-		150 * time.Second:             {"a": 103},
-		5*time.Minute + time.Second:   {"a": 2, "b": 50}, // a restarted; b is new
-		5*time.Minute + 2*time.Second: {"a": 2, "b": 50},
+// 018 quotes no status-sync count, even from a controller that exports
+// status_syncs_total and syncs throughout (D-058 item 10).
+func TestStatusNotProgressingNoSyncCount(t *testing.T) {
+	at := func(off time.Duration) *ctrlmetrics.Result { return syncsScrape(t, off, int(off/time.Second)) }
+	rs := progressRuns(t, progressWorld(20, 10, 0), at, 0, 150*time.Second, 5*time.Minute+time.Second)
+	fs := notProgressing(rs[2])
+	if len(fs) != 1 || fs[0].Detail != "10 stale" {
+		t.Fatalf("want 018 with detail %q, got %+v", "10 stale", fs)
 	}
-	at := func(off time.Duration) *ctrlmetrics.Result { return syncs(off, samples[off]) }
-	rs := progressRuns(t, progressWorld(20, 10, 0), at, 0, 150*time.Second, 5*time.Minute+time.Second, 5*time.Minute+2*time.Second)
-	for i, want := range map[int]int64{2: 5, 3: 5} {
-		fs := notProgressing(rs[i])
-		if len(fs) != 1 {
-			t.Fatalf("run %d: want 018, got %+v", i, fs)
-		}
-		ev := fs[0].Facts.(*StatusProgressEvidence)
-		if ev.Syncs == nil || *ev.Syncs != want {
-			t.Errorf("run %d: syncs %v, want %d", i, ev.Syncs, want)
-		}
-		if fs[0].Detail != "10 stale. Status syncs in the last 5 min: 5" {
-			t.Errorf("run %d: detail %q", i, fs[0].Detail)
-		}
-	}
-}
-
-// Without the family, or with metrics stale, missing or failing, the growth is
-// not known and the evidence has none: it never reads as zero (D-006).
-func TestStatusNotProgressingSyncsUnknown(t *testing.T) {
-	offsets := []time.Duration{0, 5*time.Minute + time.Second}
-	present := func(off time.Duration) *ctrlmetrics.Result { return syncs(off, map[string]float64{"a": 7}) }
-	for name, at := range map[string]func(time.Duration) *ctrlmetrics.Result{
-		"absent": func(off time.Duration) *ctrlmetrics.Result {
-			r := syncs(off, map[string]float64{"a": 0})
-			r.Metrics.PerPod[0].StatusSyncsPresent = false
-			return r
-		},
-		"stale at the end": func(time.Duration) *ctrlmetrics.Result { return present(0) },
-		"failing at the end": func(off time.Duration) *ctrlmetrics.Result {
-			r := present(off)
-			if off > 0 {
-				r.Err = "scrape failed"
-			}
-			return r
-		},
-		"window not covered": func(off time.Duration) *ctrlmetrics.Result {
-			if off == 0 {
-				return &ctrlmetrics.Result{CollectedAt: testutil.Now, Err: "not yet"}
-			}
-			return present(off)
-		},
-	} {
-		fs := notProgressing(progressRuns(t, progressWorld(20, 10, 0), at, offsets...)[1])
-		if len(fs) != 1 || fs[0].Facts.(*StatusProgressEvidence).Syncs != nil || fs[0].Detail != "10 stale" {
-			t.Errorf("%s: want 018 without syncs, got %+v", name, fs)
-		}
-	}
-	// No growth over a covered window is a known zero.
-	fs := notProgressing(progressRuns(t, progressWorld(20, 10, 0), present, offsets...)[1])
-	if len(fs) != 1 || fs[0].Facts.(*StatusProgressEvidence).Syncs == nil || *fs[0].Facts.(*StatusProgressEvidence).Syncs != 0 {
-		t.Fatalf("want syncs 0, got %+v", fs)
+	b, err := json.Marshal(fs[0].Facts)
+	if err != nil || bytes.Contains(b, []byte("syncs")) {
+		t.Fatalf("evidence %s (%v): want no syncs", b, err)
 	}
 }
 

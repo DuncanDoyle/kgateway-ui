@@ -201,11 +201,12 @@ func TestRuleSetFromBaseVersion(t *testing.T) {
 	for _, tc := range []struct {
 		base, note string
 		tcpExp     bool
-	}{{"v2.4.7", "", false}, {"", "Controller version unknown; using the 2.4 rules", true}} {
+	}{{"v2.4.7", "", false}, {"", "Controller version unknown; using the 2.5 rules", true}} {
 		cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
 		cfg.Detectors = []install.Detector{acmeDetector{base: tc.base}}
 		m := New(cfg).Compute().Installs[0]
-		if m.Resolved.Edition != "acme" || m.Rules.Rules.Version() != "kgateway-2.4" || m.Rules.Note != tc.note {
+		want := map[bool]string{true: "kgateway-2.4", false: "kgateway-2.5"}[tc.base != ""] // unknown: the newest set (D-058)
+		if m.Resolved.Edition != "acme" || m.Rules.Rules.Version() != want || m.Rules.Note != tc.note {
 			t.Errorf("base %q: got %s %s %q", tc.base, m.Resolved.Edition, m.Rules.Rules.Version(), m.Rules.Note)
 		}
 		in := attachmentInput(m.Resolved, m.Owned, snap, testutil.ServedUpstream(), newDecodeCache())

@@ -38,7 +38,7 @@ import (
 const (
 	edgeParent  = "parent=gateway.networking.k8s.io/Gateway/infra/edge"
 	underEdge   = listBase + "/routes?" + edgeParent
-	unknownNote = "Controller version unknown; using the 2.4 rules"
+	unknownNote = "Controller version unknown; using the 2.5 rules"
 )
 
 // lst is a plain HTTP listener admitting routes from every namespace.
@@ -470,7 +470,7 @@ func TestNoteOnUnknownVersion(t *testing.T) {
 		t.Fatalf("only %d computed labels", len(cs))
 	}
 	for _, c := range cs {
-		if c.Note != unknownNote || c.Rules != "kgateway-2.4" {
+		if c.Note != unknownNote || c.Rules != "kgateway-2.5" {
 			t.Errorf("computed %+v", c)
 		}
 	}
