@@ -550,7 +550,6 @@ export const diagnosticsCopy = {
   stuckObjects: "Objects with a stuck status", // S530
   objects: "Objects", // S530
   oldest: "Oldest", // S530
-  syncs: "Status syncs, last 5 min", // S531
   notKnown: "Not known", // S532
   controllerLog: "Controller log", // S552, equal to dataPlaneCopy.controllerLog
   logState: { read: "Read", "not-read": "Not read" } as Record<string, string>, // S553

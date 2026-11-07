@@ -459,7 +459,7 @@ describe("EvidenceView", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("renders status-progress: stuck objects per kind; unknown syncs read Not known, never 0", () => {
+  it("renders status-progress: stuck objects per kind and no status-sync count", () => {
     const ev: Evidence = {
       kind: "status-progress",
       kinds: [
@@ -473,11 +473,8 @@ describe("EvidenceView", () => {
     const table = screen.getByRole("table", { name: diagnosticsCopy.stuckObjects });
     expect(within(table).getByText(diagnosticsCopy.freshness.stale as string)).toBeInTheDocument();
     expect(within(table).getByText("4")).toBeInTheDocument();
-    expect(screen.getByText(diagnosticsCopy.notKnown)).toBeInTheDocument();
+    expect(screen.queryByText(/status syncs/i)).toBeNull();
     unmount();
-    show({ ...ev, syncs: 0 } as Evidence);
-    expect(screen.queryByText(diagnosticsCopy.notKnown)).toBeNull();
-    expect(screen.getByText("0")).toBeInTheDocument();
   });
 
   it("renders process from the controller log only: no Pod row, the panic and deployer errors", () => {

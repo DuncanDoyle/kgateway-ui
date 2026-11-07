@@ -85,8 +85,7 @@ func (in Input) freshnessEvidence(u *unstructured.Unstructured, kind string, obs
 // CodeStatusNotProgressing is KGWUI-018: status as a whole stopped moving (design §10.2).
 const CodeStatusNotProgressing = "KGWUI-018"
 
-// progressHold is how long the 018 condition holds before it matures; it is
-// also the window of the status syncs the evidence quotes.
+// progressHold is how long the 018 condition holds before it matures.
 const progressHold = 5 * time.Minute
 
 // Thresholds of 018: progressObjects stuck objects, or progressShare percent of
@@ -104,12 +103,10 @@ const progressKey = "progress"
 const EvidenceStatusProgress = "status-progress"
 
 // StatusProgressEvidence is what KGWUI-018 quotes: the stuck objects per §10.1
-// kind, the oldest KGWUI-003 warning's since, and the status syncs over the
-// last 5 min. Syncs is nil when unknown, which never means zero (D-006).
+// kind and the oldest KGWUI-003 warning's since.
 type StatusProgressEvidence struct {
 	Kinds  []FreshnessCount `json:"kinds"`
 	Oldest time.Time        `json:"oldest"`
-	Syncs  *int64           `json:"syncs,omitempty"`
 }
 
 // FreshnessCount is how many stuck objects have one §10.1 kind; an object
@@ -135,24 +132,22 @@ func (e *StatusProgressEvidence) MarshalJSON() ([]byte, error) {
 var freshnessLabel = map[string]string{FreshnessNeverWritten: "never written", FreshnessStale: "stale", FreshnessPending: "pending", FreshnessNoAncestor: "no ancestor"}
 
 // progressCheck: KGWUI-018. It reads the resource status check's 003 warnings,
-// so it runs after it; Clock, as the syncs window moves with Now.
+// so it runs after it; Clock, as each object's hold starts at Now.
 type progressCheck struct{}
 
 // Name implements Check.
 func (progressCheck) Name() string { return "status progress" }
 
-// Inputs implements Check: the 003s, Owned for the objects with status, and the syncs metric.
+// Inputs implements Check: the 003s and Owned for the objects with status.
 func (progressCheck) Inputs() InputSet {
-	return InputSet{Owned: true, Metrics: true, Clock: true, Checks: []string{conditionsCheck{}.Name()}}
+	return InputSet{Owned: true, Clock: true, Checks: []string{conditionsCheck{}.Name()}}
 }
 
 // progressState is the check's Store value while the condition holds: its
-// start, when each stuck object was first seen stuck, and status_syncs_total
-// per Pod UID at each metrics collection since.
+// start and when each stuck object was first seen stuck.
 type progressState struct {
-	start   time.Time
-	stuck   map[objects.Ref]time.Time
-	samples []syncSample
+	start time.Time
+	stuck map[objects.Ref]time.Time
 }
 
 // longest keeps the first-seen time of each object in kinds, drops the others,
@@ -177,12 +172,6 @@ func (s *progressState) longest(kinds map[objects.Ref]string, now time.Time) tim
 	return first
 }
 
-// syncSample is status_syncs_total per Pod UID, collected at at.
-type syncSample struct {
-	at   time.Time
-	pods map[string]float64
-}
-
 // Run implements Check.
 func (c progressCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
@@ -205,16 +194,12 @@ func (c progressCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		st = &progressState{start: in.Now, stuck: map[objects.Ref]time.Time{}}
 		ctx.State.Set(progressKey, st)
 	}
-	fresh := st.record(in)
 	// Design §10.2: one object must have stayed stuck for the hold, not only the count.
 	if due := st.longest(kinds, in.Now).Add(progressHold); in.Now.Before(due) {
 		ctx.WakeAt(due)
 		return nil, res
 	}
 	ev := &StatusProgressEvidence{Kinds: countKinds(kinds), Oldest: oldest}
-	if fresh {
-		ev.Syncs = st.syncs()
-	}
 	start := st.start
 	return []Finding{{Code: CodeStatusNotProgressing, Slug: "status-not-progressing", Severity: SeverityWarning, Install: in.Install.ID(),
 		Resource: &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name},
@@ -284,78 +269,11 @@ func overThreshold(stuck, total int) bool {
 	return stuck >= progressObjects || stuck >= progressMin && stuck*100 >= progressShare*max(total, stuck)
 }
 
-// progressDetail is 018's detail: the counts per kind, then the syncs when known.
+// progressDetail is 018's detail: the counts per kind.
 func progressDetail(ev *StatusProgressEvidence) string {
 	parts := make([]string, 0, len(ev.Kinds))
 	for _, k := range ev.Kinds {
 		parts = append(parts, fmt.Sprintf("%d %s", k.Objects, freshnessLabel[k.Freshness]))
 	}
-	d := strings.Join(parts, ", ")
-	if ev.Syncs != nil {
-		d += fmt.Sprintf(". Status syncs in the last 5 min: %d", *ev.Syncs)
-	}
-	return d
-}
-
-// record keeps in's status_syncs_total per Pod UID as a sample and reports
-// whether in's metrics are current and carry the family.
-func (s *progressState) record(in Input) bool {
-	m := in.Metrics
-	if !in.HasMetrics || m.Err != "" || m.Stale(in.Now, in.MetricsMaxAge) {
-		return false
-	}
-	pods := map[string]float64{}
-	for _, p := range m.Metrics.PerPod {
-		if p.StatusSyncsPresent {
-			pods[p.UID] = p.StatusSyncs
-		}
-	}
-	if len(pods) == 0 {
-		return false
-	}
-	if n := len(s.samples); n == 0 || !s.samples[n-1].at.Equal(m.CollectedAt) {
-		s.samples = append(s.samples, syncSample{at: m.CollectedAt, pods: pods})
-	}
-	// Pruned on every record, so the history stays bounded while 018 is not due.
-	if base := s.base(); base > 0 {
-		s.samples = slices.Delete(s.samples, 0, base)
-	}
-	return true
-}
-
-// base is the index of the newest sample at least progressHold older than the
-// newest one, or -1 when none is that old.
-func (s *progressState) base() int {
-	last := s.samples[len(s.samples)-1].at
-	base := -1
-	for i, x := range s.samples {
-		if !x.at.After(last.Add(-progressHold)) {
-			base = i
-		}
-	}
-	return base
-}
-
-// syncs returns the status syncs over the progressHold before the newest
-// sample, which record keeps pruned to that window. It is nil when no sample
-// is that old. Growth is per Pod UID: a counter that went down was reset and
-// counts its new value; a UID seen for the first time sets a baseline.
-func (s *progressState) syncs() *int64 {
-	if s.base() < 0 {
-		return nil
-	}
-	var g float64
-	for i := 1; i < len(s.samples); i++ {
-		for uid, v := range s.samples[i].pods {
-			if p, seen := s.samples[i-1].pods[uid]; seen {
-				if v >= p {
-					g += v - p
-				} else {
-					g += v
-				}
-			}
-		}
-	}
-	n := int64(g)
-	return &n
+	return strings.Join(parts, ", ")
 }

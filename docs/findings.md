@@ -308,7 +308,6 @@ It is raised when the controller is ready and objects have KGWUI-003 warnings fo
 **Evidence.**
 
 - The stuck objects per freshness kind (see KGWUI-003), and the oldest one's age.
-- When the controller exports `kgateway_status_syncer_status_syncs_total`, the status syncs in the last 5 minutes. Without the metric the count is unknown, never zero.
 
 **Since.** When the UI first saw the condition. It resets when the UI restarts.
 

@@ -526,9 +526,6 @@ function StatusProgress({ e, now }: { e: StatusProgressEvidence; now: number }) 
       <Facts>
         <dt>{diagnosticsCopy.oldest}</dt>
         <dd>{ago(e.oldest, now)}</dd>
-        <dt>{diagnosticsCopy.syncs}</dt>
-        {/* Absent means unknown, never zero (D-006). */}
-        <dd className={e.syncs === undefined ? "muted" : undefined}>{e.syncs ?? diagnosticsCopy.notKnown}</dd>
       </Facts>
     </>
   );

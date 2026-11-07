@@ -240,15 +240,11 @@ export interface FreshnessCount {
   freshness: FreshnessEvidence["freshness"];
   objects: number;
 }
-/**
- * Why KGWUI-018 reports the controller (design §10.2): stuck objects per kind, the oldest KGWUI-003 warning's since,
- * and the status syncs in the last 5 min. syncs is absent when unknown, which never means zero.
- */
+/** Why KGWUI-018 reports the controller (design §10.2): stuck objects per kind and the oldest KGWUI-003 warning's since. */
 export interface StatusProgressEvidence {
   kind: "status-progress";
   kinds: FreshnessCount[];
   oldest: string;
-  syncs?: number;
 }
 
 /**

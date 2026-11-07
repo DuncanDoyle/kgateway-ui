@@ -362,7 +362,7 @@ const evidenceShapes = {
     },
   ),
   "status-progress": shape<StatusProgressEvidence>(
-    { kind: "!", kinds: "!", oldest: "!", syncs: "?" },
+    { kind: "!", kinds: "!", oldest: "!" },
     {
       kinds: shape<FreshnessCount>(
         { freshness: "!", objects: "!" },

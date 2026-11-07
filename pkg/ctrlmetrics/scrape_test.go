@@ -267,11 +267,12 @@ func TestCollectorNotifiesOnContentChange(t *testing.T) {
 	testutil.Recv(t, c.OnResult.C(), "the notification for changed content")
 }
 
-// A scrape whose only change is status_syncs_total notifies, so 018's syncs
-// evidence never waits for the staleness deadline.
-func TestCollectorNotifiesOnStatusSyncsChange(t *testing.T) {
+// A scrape whose only change is status_syncs_total does not notify: no
+// check reads that family (D-058 item 10).
+func TestCollectorIgnoresStatusSyncsChange(t *testing.T) {
+	const fam = "kgateway_status_syncer_status_syncs_total"
 	syncs := func(n string) *string {
-		b := sample + "# TYPE " + StatusSyncsTotal + " counter\n" + StatusSyncsTotal + `{name="gw",namespace="app-a",result="success",syncer="GatewayStatusSyncer"} ` + n + "\n"
+		b := sample + "# TYPE " + fam + " counter\n" + fam + `{name="gw",namespace="app-a",result="success",syncer="GatewayStatusSyncer"} ` + n + "\n"
 		return &b
 	}
 	var body atomic.Pointer[string]
@@ -281,10 +282,9 @@ func TestCollectorNotifiesOnStatusSyncsChange(t *testing.T) {
 	testutil.Recv(t, c.OnResult.C(), "the first notification")
 	body.Store(syncs("3"))
 	clk.Step(10 * time.Second)
-	if s := ack(t, acks, clk.Now()); !s.notified {
-		t.Fatal("a changed status_syncs_total must notify")
+	if s := ack(t, acks, clk.Now()); s.notified {
+		t.Fatal("a change only in status_syncs_total must not notify")
 	}
-	testutil.Recv(t, c.OnResult.C(), "the notification for changed syncs")
 }
 
 // Codex 1: a result that follows a stale one notifies even with equal content.
