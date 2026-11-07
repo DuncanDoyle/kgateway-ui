@@ -65,7 +65,7 @@ Flags:
 
 ## About page
 
-Click the product name in the header to open the About page. It shows the UI version, each watched install with its version and controller, and links to the source, docs and licence. A downstream `Brand` can set `descriptor` and `tagline` for the lines under its name.
+Click the info icon left of the theme button in the header to open the About page. It shows the UI version, each watched install with its version and controller, and links to the source, docs and licence. A downstream `Brand` can set `descriptor` and `tagline` for the lines under its name.
 
 ## Scope
 

@@ -37,15 +37,16 @@ function mount(path: string, ext: ShellExtension = {}) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("the header brand opens the About page", async () => {
+it("the header About button opens the About page", async () => {
   stubApi({ "/api/v1/installs": [install, { ...install, id: "b.two" }], "/api/v1/meta": meta });
   mount("/");
   const brand = await screen.findByRole("link", { name: "snellius" });
-  expect(brand).toHaveAttribute("href", "/about");
-  expect(pseudoRules(brand, ":hover")).not.toEqual([]);
-  expect(pseudoRules(brand, ":active")).not.toEqual([]);
-  expect(pseudoRules(brand, ":focus-visible")).not.toEqual([]);
-  await userEvent.click(brand);
+  expect(brand).toHaveAttribute("href", "/");
+  const about = screen.getByRole("link", { name: "About" });
+  expect(about).toHaveAttribute("href", "/about");
+  expect(pseudoRules(about, ":hover")).not.toEqual([]);
+  expect(pseudoRules(about, ":active")).not.toEqual([]);
+  await userEvent.click(about);
   expect(await screen.findByRole("heading", { level: 1, name: "snellius" })).toBeInTheDocument();
   await waitFor(() => expect(document.title).toBe("About snellius"));
 });

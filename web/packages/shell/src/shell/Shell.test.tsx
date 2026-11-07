@@ -443,8 +443,28 @@ it("the published shell with no brand shows snellius in the header", async () =>
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
   mount("/");
   const home = await screen.findByRole("link", { name: "snellius" });
-  expect(home).toHaveAttribute("href", "/about");
+  expect(home).toHaveAttribute("href", "/");
   expect(screen.queryByText("kgateway")).toBeNull();
+});
+
+it.each(["/", "/i/a.one"])("the About link sits left of the theme button on %s and opens /about", async (path) => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount(path);
+  const about = await screen.findByRole("link", { name: "About" });
+  expect(about).toHaveAttribute("href", "/about");
+  const theme = screen.getByRole("button", { name: /^Theme:/ });
+  expect(about.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await userEvent.click(about);
+  expect(await screen.findByRole("heading", { name: /snellius/i })).toBeInTheDocument();
+});
+
+it("keyboard focus on the About link shows its tooltip", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/");
+  const about = await screen.findByRole("link", { name: "About" });
+  const user = userEvent.setup();
+  while (document.activeElement !== about) await user.tab();
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("About");
 });
 
 it("a downstream brand keeps its own name, logo and title", async () => {
