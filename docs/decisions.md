@@ -1007,7 +1007,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** Shrink only and keep 40 MiB; raise the gate without shrinking.
 
 ## D-058 — Sub-phase 3.4 as built: deviations from the design (2026-11-06, phase 3)
-**Status:** items 1–7 confirmed by the user (2026-11-06/07; item 7 revised); items 8–11 proposed
+**Status:** confirmed by the user (2026-11-06/07); items 7, 10 and 11 revised
 
 **Context:** 3.4 (brief `phases/phase-3/phase-3.4-brief.md`) shipped with these differences from design and plan. Each was ruled during the work (ledger rulings in brackets).
 
@@ -1021,8 +1021,8 @@ Measured on the reference machine, 5 runs per world:
 7. On 2.5, a `targetSelector` that matches nothing shows 003, not 016 (§7.6). kgateway calls an empty selector valid and never judges selectors. Revised (user, 2026-11-07): 003's "no status from the controller" misreads a processed policy, so 3.5 brings back the computed 016 for this one case on 2.5, labelled UI-computed (queue S7). Exit: kgateway#14998 asks the controller to report it; the UI reads that status once it ships.
 8. 023 evidence counts the larger address family of a dual-stack Service, and a port number on both TCP and UDP matches the TCP port.
 9. New exported API: `computed.TargetStatusReporter` and `Selection.TargetStatusReporter()` (user, 2026-11-06). A rule set that wraps `kgw25` must forward it.
-10. On 2.5, KGWUI-018 has no status-sync count: the controller no longer exports `status_syncs_total` (kgateway #14519). 018 already treats the family as absent.
-11. A controller whose version cannot be read, from the tag or from build_info, still selects the 2.4 rule set, as before 3.4.
+10. On 2.5, KGWUI-018 has no status-sync count: the controller no longer exports `status_syncs_total` (kgateway #14519). 018 already treats the family as absent. Revised (user, 2026-11-07): the status-sync count goes from the UI on every version; it is not useful (queue S8).
+11. A controller whose version cannot be read, from the tag or from build_info, still selects the 2.4 rule set, as before 3.4. Revised (user, 2026-11-07): it selects the 2.5 rule set, the version the UI is positioned on (queue S9). Cost: an older controller whose version cannot be read gets no computed 016, since 2.5 relies on the controller's `TargetNotFound`.
 
 **Consequences:** design §7.6, §8.6 and plan Task 76 state the as-built behaviour. Items 1 and 6 are carried to the phase review.
 
