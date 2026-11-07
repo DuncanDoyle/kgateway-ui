@@ -294,7 +294,7 @@ Until 2.5.0 GA ships and 3.4 adds its rule set, a 2.5 controller runs on the 2.4
   - Every other shape (several targets, selectors, ancestors shared by several targets) is "not verified": the computed 016 is still shown, labelled, and no KGWUI-012 is raised.
   - What ancestors kgateway writes per target kind is observed on 2.3.11 and 2.4.7 and recorded in the `computed-rules.md` section before the rule is implemented.
 - An unknown discovery scope makes the rule unknown, as in D-024.
-- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5).
+- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5). The controller never judges `targetSelectors`, so on 2.5 a selector that matches nothing shows 003, not 016 (D-058). A rule set that wraps `kgw25` forwards `computed.TargetStatusReporter`.
 
 ### 7.7 Suggested fixes (user, 2026-10-29)
 
@@ -386,8 +386,8 @@ The copy also says: "Log lines and admin output can contain configuration values
 kgateway `main` and `v2.5.0-rc.1` export per-client publication metrics with labels `gateway` and `namespace` (`main` metrics doc, "Per-client xDS publication metrics"). Where present **(our call)**:
 - `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"} > 0` → KGWUI-024 **error**: "Proxies get no config updates, because referenced clusters are missing". The doc says a withheld client gets no updates at all, certificate rotations included.
 - An increase of `kgateway_xds_snapshot_perclient_bounded_publishes_total{mode=~"flip_release|warm_release|carry_expired"}` in the last 15 min → KGWUI-024 **warning**: "Some routes fail: config was released before every cluster was ready". The doc calls these the modes to alert on.
-- The family's presence decides availability, not the version string. On 2.3 and 2.4 the check reports "not available on this version" in "What was checked" and never turns the install unknown (the check is not required, §7.1).
-- kgateway 2.5 joins the support matrix at GA, and 024 ships in 3.4 once 2.5.0 GA is out **(user, 2026-10-29)**. The family names and labels are re-checked against the GA tag before 3.4 ships.
+- Presence decides availability, not the version string: any series of a 2.5 per-client family or of `kgateway_build_info` (D-058). A healthy 2.5 controller exports no withheld or bounded-publish series. On 2.3 and 2.4 the check reports "not available on this version" in "What was checked" and never turns the install unknown (the check is not required, §7.1).
+- kgateway 2.5 joins the support matrix at GA, and 024 ships in 3.4 once 2.5.0 GA is out **(user, 2026-10-29)**. The family names and labels are re-checked against the GA tag before 3.4 ships (done, Task 83). Each of the two signals has its own evidence. When present and parseable, `kgateway_build_info`'s `version` is the controller version for the header, 022 and rule-set selection (D-058).
 
 ### 8.7 Upstream proposal
 
@@ -677,7 +677,7 @@ DataPlaneDTO   { rejecting, rejects: { typeUrl, streams, firstSeen }[], statusSa
 
 Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 
-11. **Finding identity.** `id` and `group` are shown on restricted findings too. They hash only data a restricted finding already shows (code, resource identity, D-013) or spec fields of that resource. Status and computed values become ordinals (§5.1), so an `id` reveals nothing else; it can shift when a sibling finding on the same owner appears or clears (D-040).
+11. **Finding identity.** `id` and `group` are shown on restricted findings too. They hash only data a restricted finding already shows (code, resource identity, D-013) or spec fields of that resource. Status and computed values become ordinals (§5.1), so an `id` reveals nothing else; it can shift when a sibling finding on the same owner appears or clears (D-040). A `group` may also hash a value the grouped resource's own status already serves to the caller (Phase 2 rule 8), such as the policy a KGWUI-015 route rule names (D-059).
 12. **Evidence dependencies.** Every finding carries its evidence's dependency set in `Finding.Evidence` (it exists, `pkg/health/finding.go:76-78`). A caller who may view the resource but not every dependency gets `evidenceRestricted: true` and no evidence (Phase 2 rule 7). Dependencies per code:
 
 | Code | Resource | Evidence dependencies |
@@ -788,7 +788,7 @@ Phase 2 ended with thin headroom: warm recompute 104–125 ms against 150 ms on 
 | Analyzer stage alone (identity, groups, rank, every Phase 3 check) | ≤ 20 ms warm; ≤ 2 ms when memoized inputs are unchanged | 3.2–3.4 |
 | Stream CPU, annotation-only | ≤ 15 % of one core, unchanged | 3.1–3.4 |
 | Stream CPU, spec-edit (one route spec change per 100 ms for 10 min, 20 polling clients) | reported in 3.1 on Phase 2 code; gated from 3.2 at ≤ 25 % of one core. If the baseline already exceeds 22 %, the numbers go to the user before a gate is set | 3.1–3.4 |
-| Retained heap | the Phase 2 gate of 32 MiB, raised to 40 MiB in 3.3 **(user, 2026-11-05; D-054)**; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
+| Retained heap | the Phase 2 gate of 32 MiB, raised to 40 MiB in 3.3 **(user, 2026-11-05; D-054)** and to 48 MiB in 3.4 **(user, 2026-11-06; D-057)**; and ≤ +24 MiB above the 3.1 baseline, including the new watches (proxy Pods, Events, CRD metadata, Services, EndpointSlices), proxy stats, derived log events (with `diagnostics.controllerLogs` on), finding identities and check Stores | 3.1–3.4 |
 | Dense memory | at the default edge cap, medians of: retained heap ≤ 176 MiB, bytes allocated by the cold recompute ≤ 246 MiB and per warm recompute ≤ 185 MiB; peak heap and RSS logged, not gated (D-039) | 3.0–3.4 |
 | OS memory during the stream | median of five ≤ 288 MiB (D-043; was ≤ 256 MiB, D-022) | 3.2–3.4 |
 | `GET …/diagnostics`, `GET …/findings` (each filter mix), `GET …/processes` | p95 < 50 ms, p99 < 100 ms; p95 < 100 ms with 20 concurrent clients | 3.1–3.4 |

@@ -3,6 +3,7 @@
 package cache
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"strings"
@@ -80,8 +81,13 @@ type Snapshot struct {
 	EventsCapped bool
 	// CRDs are the Gateway API CRDs, by name.
 	CRDs []CRDMeta
+	// Services and EndpointSlices are the cut-down objects of the Service and
+	// EndpointSlice watches, by namespace and name.
+	Services       []ServiceFact
+	EndpointSlices []SliceFact
 	// Synced is true once every core informer (served kinds, Namespaces,
-	// Pods and Deployments) has synced or failed. Optional watches never hold it back.
+	// Pods and Deployments) has synced or failed. Optional watches and
+	// list-only kinds never hold it back.
 	Synced  bool
 	TakenAt time.Time
 	// Source is the fingerprint of exactly the objects and access states copied.
@@ -106,6 +112,8 @@ type Config struct {
 	// CRDs watches Gateway API CRD metadata through Metadata; a nil Metadata means no watch.
 	CRDs     bool
 	Metadata metadata.Interface
+	// Endpoints watches Services and EndpointSlices cluster-wide, cut down at the informer.
+	Endpoints bool
 	// Now stamps snapshots; nil means time.Now.
 	Now func() time.Time
 	// Changes is notified on every informer event (initial-list adds
@@ -125,10 +133,11 @@ type Config struct {
 // opened before the failure never recover it.
 type progress struct {
 	mu       sync.Mutex
-	err      string // failure not yet recovered from; "" when none
-	denied   bool   // err is a 403
-	failures uint64 // failures so far; a watch-list stream remembers the count it was opened at
-	onChange func() // called when err turns empty or non-empty; may be nil
+	err      string          // failure not yet recovered from; "" when none
+	denied   bool            // err is a 403
+	failures uint64          // failures so far; a watch-list stream remembers the count it was opened at
+	onChange func()          // called when err turns empty or non-empty; may be nil
+	loops    *sync.WaitGroup // joins the watch wrappers' goroutines; may be nil
 }
 
 func (p *progress) failure(err error) {
@@ -220,7 +229,7 @@ func instrument(p *progress, list toolscache.ListWithContextFunc, watchFn toolsc
 			if !watchList {
 				p.recover(openedAt) // a working classic watch recovers the kind
 			}
-			return observe(w, func(e watch.Event) { p.event(e, watchList, openedAt) }), nil
+			return observe(w, p.loops, func(e watch.Event) { p.event(e, watchList, openedAt) }), nil
 		},
 	}
 }
@@ -234,9 +243,9 @@ type observed struct {
 	once sync.Once
 }
 
-func observe(in watch.Interface, f func(watch.Event)) watch.Interface {
+func observe(in watch.Interface, loops *sync.WaitGroup, f func(watch.Event)) watch.Interface {
 	w := &observed{in: in, out: make(chan watch.Event), stop: make(chan struct{})}
-	go w.loop(f)
+	goTracked(loops, func() { w.loop(f) })
 	return w
 }
 
@@ -278,18 +287,24 @@ type Cache struct {
 	now     func() time.Time
 	changes *trigger.Signal
 	dyn     map[schema.GroupVersionResource]tracked
-	ns      tracked
-	pods    []tracked
-	deploys []tracked
+	// listOnly are the dyn kinds that never hold back Synced or Settled (D-034).
+	listOnly map[schema.GroupVersionResource]bool
+	ns       tracked
+	pods     []tracked
+	deploys  []tracked
 	// Optional watches; nil or empty when off.
 	proxyPods    []tracked
 	events, crds *tracked
+	services     *tracked
+	slices       *tracked
 	evf          *eventFilter
 	uids         *podSet
 	uidRegs      []toolscache.ResourceEventHandlerRegistration
 	// stopOptional cancels the optional watches' context; optional tracks their goroutines.
 	stopOptional func()
 	optional     sync.WaitGroup
+	// running tracks every goroutine Start launches, for Wait.
+	running sync.WaitGroup
 	// settled is set once every informer has settled, after the settle notify.
 	settled atomic.Bool
 	// handlerHook, if set, runs in each event handler before it notifies (tests).
@@ -307,7 +322,7 @@ func (c *Cache) handled() {
 // informer builds an informer over an instrumented ListerWatcher. client tells
 // the reflector whether the client supports watch-list semantics (fakes do not).
 func (c *Cache) informer(client any, example runtime.Object, list toolscache.ListWithContextFunc, watchFn toolscache.WatchFuncWithContext) tracked {
-	p := &progress{onChange: c.changes.Notify}
+	p := &progress{onChange: c.changes.Notify, loops: &c.running}
 	lw := toolscache.ToListWatcherWithWatchListSemantics(instrument(p, list, watchFn), client)
 	t := tracked{inf: toolscache.NewSharedIndexInformer(lw, example, 0, toolscache.Indexers{}), progress: p}
 	if c.changes != nil {
@@ -322,12 +337,13 @@ func (c *Cache) informer(client any, example runtime.Object, list toolscache.Lis
 
 // New creates the informers. Nothing runs until Start.
 func New(cfg Config) *Cache {
-	c := &Cache{now: cfg.Now, changes: cfg.Changes, dyn: map[schema.GroupVersionResource]tracked{}}
+	c := &Cache{now: cfg.Now, changes: cfg.Changes, dyn: map[schema.GroupVersionResource]tracked{}, listOnly: map[schema.GroupVersionResource]bool{}}
 	if c.now == nil {
 		c.now = time.Now
 	}
 	for _, s := range cfg.Served {
 		ri := cfg.Dynamic.Resource(s.GVR())
+		c.listOnly[s.GVR()] = s.ListOnly
 		c.dyn[s.GVR()] = c.informer(cfg.Dynamic, &unstructured.Unstructured{},
 			func(ctx context.Context, o metav1.ListOptions) (runtime.Object, error) { return ri.List(ctx, o) },
 			func(ctx context.Context, o metav1.ListOptions) (watch.Interface, error) { return ri.Watch(ctx, o) })
@@ -379,14 +395,21 @@ func New(cfg Config) *Cache {
 		t := c.crdInformer(cfg.Metadata)
 		c.crds = &t
 	}
+	if cfg.Endpoints {
+		svcs, es := c.serviceInformer(cfg.Kube), c.sliceInformer(cfg.Kube)
+		c.services, c.slices = &svcs, &es
+	}
 	return c
 }
 
-// all returns the core informers: Namespaces, served kinds, Pods and Deployments.
+// all returns the core informers: Namespaces, served kinds other than
+// list-only ones, Pods and Deployments.
 func (c *Cache) all() []tracked {
 	out := []tracked{c.ns}
-	for _, t := range c.dyn {
-		out = append(out, t)
+	for gvr, t := range c.dyn {
+		if !c.listOnly[gvr] {
+			out = append(out, t)
+		}
 	}
 	return append(append(out, c.pods...), c.deploys...)
 }
@@ -397,24 +420,34 @@ const syncPoll = 50 * time.Millisecond
 // Start runs all informers until ctx is cancelled. With Config.Changes it
 // notifies once when every informer has settled: its handler has received the
 // initial list, or its List or Watch failed. Later failures and recoveries
-// notify on their own.
+// notify on their own. Wait returns once the goroutines Start launched have exited.
 func (c *Cache) Start(ctx context.Context) {
 	all := c.all()
 	for _, t := range all {
-		go t.inf.RunWithContext(ctx)
+		c.run(false, func() { t.inf.RunWithContext(ctx) })
+	}
+	for gvr, t := range c.dyn {
+		if c.listOnly[gvr] {
+			c.run(false, func() { t.inf.RunWithContext(ctx) })
+		}
 	}
 	octx, cancel := context.WithCancel(ctx)
 	c.stopOptional = func() { cancel() }
 	for _, t := range c.proxyPods {
-		c.optional.Go(func() { t.inf.RunWithContext(octx) })
+		c.run(true, func() { t.inf.RunWithContext(octx) })
 	}
 	if c.crds != nil {
-		c.optional.Go(func() { c.crds.inf.RunWithContext(octx) })
+		c.run(true, func() { c.crds.inf.RunWithContext(octx) })
 	}
 	if c.events != nil {
-		c.optional.Go(func() { c.runEvents(octx) })
+		c.run(true, func() { c.runEvents(octx) })
 	}
-	go func() {
+	for _, t := range []*tracked{c.services, c.slices} {
+		if t != nil {
+			c.run(true, func() { t.inf.RunWithContext(octx) })
+		}
+	}
+	c.run(false, func() {
 		settled := func(context.Context) (bool, error) {
 			for _, t := range all {
 				if !t.synced() && access(t).Err == "" {
@@ -427,6 +460,35 @@ func (c *Cache) Start(ctx context.Context) {
 			c.changes.Notify() // a nil Signal ignores it
 			c.settled.Store(true)
 		}
+	})
+}
+
+// Wait returns once every goroutine Start launched, watch loops included, has
+// exited after ctx is cancelled. Call it after Start; before Start it returns at once.
+func (c *Cache) Wait() { c.running.Wait() }
+
+// goTracked runs f in a goroutine that wg joins; a nil wg joins nothing.
+func goTracked(wg *sync.WaitGroup, f func()) {
+	if wg == nil {
+		go f()
+		return
+	}
+	wg.Go(f)
+}
+
+// run starts f in a goroutine that Wait joins; an optional one is also
+// tracked by c.optional.
+func (c *Cache) run(optional bool, f func()) {
+	c.running.Add(1)
+	if optional {
+		c.optional.Add(1)
+	}
+	go func() {
+		defer c.running.Done()
+		if optional {
+			defer c.optional.Done()
+		}
+		f()
 	}()
 }
 
@@ -492,7 +554,7 @@ func (c *Cache) walk(visit func(gvr schema.GroupVersionResource, o any)) (map[sc
 	for gvr, t := range c.dyn {
 		a := access(t)
 		acc[gvr] = a
-		synced = synced && settled(a)
+		synced = synced && (c.listOnly[gvr] || settled(a))
 		for _, o := range t.inf.GetStore().List() {
 			visit(gvr, o)
 		}
@@ -537,7 +599,7 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 			}
 		}
 	}
-	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds} {
+	for gvr, t := range map[schema.GroupVersionResource]*tracked{EventsGVR: c.events, CRDsGVR: c.crds, ServicesGVR: c.services, EndpointSlicesGVR: c.slices} {
 		if t == nil {
 			continue
 		}
@@ -556,9 +618,11 @@ func (c *Cache) walkOptional(acc map[schema.GroupVersionResource]Access, visit f
 // pass, exactly what it copied.
 func (c *Cache) Snapshot() *Snapshot {
 	s := &Snapshot{Objects: map[schema.GroupVersionResource][]*unstructured.Unstructured{}, TakenAt: c.now()}
+	var svcs []*serviceEntry
+	var eps []*sliceEntry
 	var p printer
 	s.Access, s.Synced = c.walk(func(gvr schema.GroupVersionResource, o any) {
-		p.add(gvr, o.(metav1.Object))
+		p.add(gvr, o)
 		if gvr == ProxyPodsGVR {
 			s.ProxyPods = append(s.ProxyPods, o.(*corev1.Pod))
 			return
@@ -576,6 +640,10 @@ func (c *Cache) Snapshot() *Snapshot {
 			s.Events = append(s.Events, eventFact(v))
 		case *metav1.PartialObjectMetadata:
 			s.CRDs = append(s.CRDs, crdMeta(v))
+		case *serviceEntry:
+			svcs = append(svcs, v)
+		case *sliceEntry:
+			eps = append(eps, v)
 		}
 	})
 	for _, objs := range s.Objects {
@@ -583,6 +651,23 @@ func (c *Cache) Snapshot() *Snapshot {
 	}
 	slices.SortFunc(s.Events, func(a, b EventFact) int { return strings.Compare(string(a.UID), string(b.UID)) })
 	slices.SortFunc(s.CRDs, func(a, b CRDMeta) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(svcs, func(a, b *serviceEntry) int {
+		return compareKey(a.fact.Namespace, a.fact.Name, b.fact.Namespace, b.fact.Name)
+	})
+	slices.SortFunc(eps, func(a, b *sliceEntry) int { return compareKey(a.fact.Namespace, a.name, b.fact.Namespace, b.name) })
+	// The facts' ports and ready counts are shared with the stores, which replace an entry rather than change it.
+	if len(svcs) > 0 {
+		s.Services = make([]ServiceFact, len(svcs))
+		for i, v := range svcs {
+			s.Services[i] = v.fact
+		}
+	}
+	if len(eps) > 0 {
+		s.EndpointSlices = make([]SliceFact, len(eps))
+		for i, v := range eps {
+			s.EndpointSlices[i] = v.fact
+		}
+	}
 	if c.evf != nil {
 		s.EventDeltas, s.EventHistoryUnknown, s.EventsCapped = c.evf.view(s.TakenAt)
 	}
@@ -591,6 +676,23 @@ func (c *Cache) Snapshot() *Snapshot {
 }
 
 func key(u *unstructured.Unstructured) string { return u.GetNamespace() + "/" + u.GetName() }
+
+// compareKey orders as strings.Compare(ans+"/"+an, bns+"/"+bn) without building
+// the keys; a namespace never contains "/".
+func compareKey(ans, an, bns, bn string) int {
+	if ans == bns {
+		return strings.Compare(an, bn)
+	}
+	for i := range min(len(ans), len(bns)) {
+		if ans[i] != bns[i] {
+			return cmp.Compare(ans[i], bns[i])
+		}
+	}
+	if len(ans) < len(bns) {
+		return cmp.Compare('/', bns[len(ans)])
+	}
+	return cmp.Compare(ans[len(bns)], '/')
+}
 
 // sortByKey orders objs by key, computing each key once: reading it from the
 // object's maps on every comparison dominated a snapshot.

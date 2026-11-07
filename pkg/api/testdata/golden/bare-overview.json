@@ -141,6 +141,26 @@
         "displayName": "Backends",
         "group": "gateway.kgateway.dev",
         "kind": "Backend"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "policy",
+        "count": 0,
+        "displayName": "DirectResponses",
+        "group": "gateway.kgateway.dev",
+        "kind": "DirectResponse"
+      },
+      {
+        "access": {
+          "ok": true
+        },
+        "category": "referencegrant",
+        "count": 0,
+        "displayName": "ReferenceGrants",
+        "group": "gateway.networking.k8s.io",
+        "kind": "ReferenceGrant"
       }
     ],
     "gateways": [

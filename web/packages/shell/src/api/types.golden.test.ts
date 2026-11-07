@@ -80,6 +80,7 @@ import type {
   EffectiveContext,
   EffectiveEdge,
   EffectiveRule,
+  EndpointsEvidence,
   ErrorResponse,
   Evidence,
   Filter,
@@ -135,6 +136,7 @@ import type {
   Ref,
   RefLocation,
   RefsEvidence,
+  ReleaseModeCount,
   RouteAttachment,
   RouteCounts,
   RouteDetail,
@@ -150,6 +152,7 @@ import type {
   TrailRefs,
   VersionPods,
   VersionSkewEvidence,
+  WithheldEvidence,
   XDSLogEvent,
   XDSRejectsEvidence,
   XDSTypeRejects,
@@ -202,6 +205,7 @@ const category = {
     workload: 1,
     parameters: 1,
     backend: 1,
+    referencegrant: 1,
   },
 } as const;
 const delegationRefEnums = {
@@ -367,6 +371,16 @@ const evidenceShapes = {
       ),
     },
     { kind: { "status-progress": 1 } },
+  ),
+  endpoints: shape<EndpointsEvidence>(
+    { kind: "!", service: "!", port: "!", portName: "?", ready: "!", total: "!", slices: "!" },
+    {},
+    { kind: { endpoints: 1 } },
+  ),
+  withheld: shape<WithheldEvidence>(
+    { kind: "!", withheld: "?", releases: "?", reportedBy: "!" },
+    { releases: shape<ReleaseModeCount>({ mode: "!", count: "!" }) },
+    { kind: { withheld: 1 } },
   ),
 } satisfies Record<Evidence["kind"], Shape>;
 const evidence: Shape = {

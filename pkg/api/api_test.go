@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
@@ -75,6 +76,8 @@ type setup struct {
 	authz     Authorizer         // nil: AllowAll
 	// prepare runs on the fake clients before the cache starts (failure injection).
 	prepare func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset)
+	// wrapDynamic, when set, wraps the dynamic client the cache reads.
+	wrapDynamic func(dynamic.Interface) dynamic.Interface
 	// late objects are created after the engine has first seen the rest, so their
 	// generation is first seen at testutil.Now: inside the grace period.
 	late []*unstructured.Unstructured
@@ -97,7 +100,9 @@ type setup struct {
 	bounds computed.Bounds
 	// optional turns on the Events and CRD watches, CRDs over a fake metadata
 	// client that prepareMeta, when set, prepares before the cache starts.
-	optional    bool
+	optional bool
+	// endpoints turns on the Service and EndpointSlice watches.
+	endpoints   bool
 	prepareMeta func(*metadatafake.FakeMetadataClient)
 	// checks run after the upstream checks.
 	checks []health.Check
@@ -231,8 +236,11 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if s.prepareMeta != nil {
 		s.prepareMeta(meta)
 	}
+	if s.wrapDynamic != nil {
+		dyn = s.wrapDynamic(dyn)
+	}
 	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
-		Events: s.optional, CRDs: s.optional, Metadata: meta})
+		Events: s.optional, CRDs: s.optional, Metadata: meta, Endpoints: s.endpoints})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	c.Start(ctx)

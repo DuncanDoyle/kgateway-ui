@@ -1,0 +1,8 @@
+cluster_manager.cds.update_rejected: 8
+cluster_manager.warming_clusters: 0
+control_plane.connected_state: 1
+http.http_8080.rds.listener~8080.update_rejected: 8
+listener_manager.lds.update_success: 1
+listener_manager.total_listeners_warming: 0
+server.state: 0
+server.uptime: 120

@@ -56,7 +56,7 @@ Severity is error, with three exceptions:
 - a policy ancestor with reason `Overridden` is info;
 - a Backend whose `Accepted=False` has no `observedGeneration`, as kgateway 2.3 writes it, is a warning.
 
-A policy whose controller reports `TargetNotFound`, as kgateway `main` does, shows here as "Policy target not found". On kgateway 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
+kgateway 2.5 controllers write `TargetNotFound` for a missing policy target, and the UI shows it as KGWUI-016, not here. Only a 2.5 controller whose version the UI cannot read, and so runs on the 2.4 rules, shows it here as "Policy target not found". On 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
 
 **Evidence.** The message is the condition's reason in plain words. The detail quotes the condition as written: type, status, reason and message, and the listener, parent or ancestor it belongs to. A parent route whose backendRefs all delegate reads "A delegating rule has no accepted child route" in place of "Backend not found".
 
@@ -214,13 +214,15 @@ The UI computes delegation with the rules of the controller's version. While the
 **Evidence.**
 
 - The refs the condition can be about, each with its location, such as `spec.rules[2].backendRefs[0]`.
-- For a route, an explanation computed by the UI. When discovery says a ref's group serves no such kind, the message reads, for example, "No kind `Service` in group `delegation.gateway.example`. Check the group." Otherwise the message is the controller's reason.
+- For a route, an explanation computed by the UI. When discovery says a ref's group serves no such kind, the message reads, for example, "No kind `Service` in group `delegation.gateway.example`. Check the group." Next, when the Services watch is healthy and exactly one core Service ref can be the cause: the detail line says "Service `shop/cart` does not exist.", or "Service `shop/cart` has no port 8080 (ports: 80, 443)." These come from the Service, so they are hidden, with the evidence and the fix, when you cannot view it. A ref the UI cannot check, such as a Backend, on the same parent leaves the finding unattributed with the controller's reason. Otherwise the message is the controller's reason. Without a healthy Services watch the UI never says a Service is missing.
 - For a listener, the controller's message. The UI cannot read Secrets, so it never says whether a certificate Secret exists.
 
 **Fix.** Correct the ref the explanation names. The finding page suggests a fix, the ref with the corrected group, when both of these hold:
 
 - the condition can be about only one ref;
 - discovery is complete, and exactly one served group has a kind of that name.
+
+When the Service exists and has exactly one port, the page suggests the ref with that port. A Service with several ports, or a ref with no port, gets no fix. If you cannot view the Service, the explanation and fix are withheld.
 
 A route that delegates, or is a delegation child, gets no suggested fix: the condition cannot be tied to one of its refs. The fix sets only group, kind, name and namespace; keep the port and other fields. The UI never applies it.
 
@@ -260,17 +262,21 @@ There is no suggested grant for a route that delegates or is a delegation child,
 
 ## KGWUI-016
 
-`policy-target-not-found` · warning · computed by the UI
+`policy-target-not-found` · error from status on kgateway 2.5 · warning, computed by the UI, on 2.3 and 2.4
 
-**Cause.** A policy targets an object that does not exist. On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It judges five target kinds: Gateway, ListenerSet, XListenerSet, HTTPRoute and GRPCRoute. A missing target of any other kind, such as a TCPRoute or a Service, raises nothing, so no finding does not mean such a target exists. It covers three cases:
+**Cause.** A policy targets an object that does not exist.
+
+On kgateway 2.5 the controller reports it: a current ancestor `StatusSummary` with reason `TargetNotFound`. That is one error per policy, raised at once, in place of KGWUI-002. The controller checks targetRefs to Gateways, ListenerSets, routes, Services and Backends, and the `sectionName` of a Gateway, ListenerSet, HTTPRoute or GRPCRoute. It does not check selectors, so a selector that matches nothing raises no finding on 2.5. The UI computes nothing on 2.5.
+
+On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It judges five target kinds: Gateway, ListenerSet, XListenerSet, HTTPRoute and GRPCRoute. A missing target of any other kind, such as a TCPRoute or a Service, raises nothing, so no finding does not mean such a target exists. It covers three cases:
 
 - a `targetRef` names no object of that kind in the policy's namespace;
 - a `sectionName` names no listener of the Gateway or ListenerSet, or no rule of the route;
 - a `targetSelector` matches no object of its kind in the policy's namespace, or is empty. A policy in the controller's global policy namespace (`KGW_GLOBAL_POLICY_NAMESPACE`) matches in every namespace. When the UI cannot read that setting, a selector raises nothing.
 
-It is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A judged kind that the cluster does not serve, or the UI cannot read, raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
+On 2.3 and 2.4 it is raised only after the policy's 60 s grace and after the result held for 30 s more. When every target is missing, it replaces the policy's KGWUI-003. A judged kind that the cluster does not serve, or the UI cannot read, raises nothing. While the install's discovery scope is unknown, the rule raises nothing.
 
-**Evidence.** The target as written, such as "targetRefs[0] Gateway `edge`", and what is missing. Most of these findings say "Not verified: the controller's status cannot confirm this." The UI can check only a policy with one targetRef: a missing Gateway, or a missing section of a Gateway or route. For those, a current ancestor the controller writes for that target raises KGWUI-012.
+**Evidence.** On 2.5, the controller's condition: its message lists the missing targets. On 2.3 and 2.4, the target as written, such as "targetRefs[0] Gateway `edge`", and what is missing. Most of these findings say "Not verified: the controller's status cannot confirm this." The UI can check only a policy with one targetRef: a missing Gateway, or a missing section of a Gateway or route. For those, a current ancestor the controller writes for that target raises KGWUI-012.
 
 **Fix.** Correct the policy's `targetRefs` or `targetSelectors`, or create the target. Check the namespace: a targetRef always looks in the policy's own namespace.
 
@@ -357,15 +363,31 @@ Nothing is compared during a controller rollout and for 10 minutes after it, so 
 
 ## KGWUI-023
 
-`backend-no-ready-endpoints` · reserved
+`backend-no-ready-endpoints` · warning · Services, EndpointSlices
 
-This version of the UI does not raise it yet. The code is reserved for a backend Service with no ready endpoints.
+**Cause.** A route sends traffic to a Service port that has had no ready endpoint for 30 s, so requests to it get 503. The UI checks only a rule `backendRef` to a core `Service` with a weight above 0, on a parent where the controller reports `ResolvedRefs=True` for the route's current generation. The Service must exist and not be `ExternalName`. The UI sums ready endpoints for that port over all the Service's EndpointSlices; an endpoint with `ready` unset counts as ready. One ready endpoint restarts the 30 s. Delegation refs, mirror targets, `Backend` refs and Hostname refs are never checked. There is one finding per Service port; the routes that use it are the affected objects. Scaling to zero can be deliberate, so this is a warning.
+
+**Evidence.** The Service, the port, its ready and total endpoints, and how many EndpointSlices the Service has. A dual-stack Service lists its Pods once per address family, so the counts are those of the larger family.
+
+**Since.** When the port's endpoints first read zero. It resets when the UI restarts.
+
+**Fix.** Check the Service's Pods with `kubectl get endpointslices -l kubernetes.io/service-name=<name>` and `kubectl describe pod`: they may be scaled to zero, not Ready, or not matched by the Service's selector. With Services and EndpointSlices off (`diagnostics.endpoints`), denied or failing, this check reads "not available".
 
 ## KGWUI-024
 
-`xds-config-withheld` · reserved
+`xds-config-withheld` · error or warning · controller metrics · kgateway 2.5 and later
 
-This version of the UI does not raise it yet. The code is reserved for proxies that get no config updates, from metrics that kgateway 2.5 exports.
+**Cause.** kgateway 2.5 holds back a proxy's config while its routes name a cluster that is not in CDS yet. Two signals, one finding each per Gateway:
+- **Error**, "Proxies get no config updates, because referenced clusters are missing": `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"}` is above 0. A withheld proxy gets no updates at all, certificate rotations included, until the clusters appear or the warm withhold bound releases it.
+- **Warning**, "Some routes fail: config was released before every cluster was ready": `kgateway_xds_snapshot_perclient_bounded_publishes_total` grew for mode `flip_release`, `warm_release` or `carry_expired` in the last 15 minutes. The UI tracks the counter per controller Pod; a Pod's first scrape and a counter reset after a restart are not an increase.
+
+**Evidence.** Per signal, summed over replicas: the error lists the withheld proxies and the controller Pods reporting them; the warning lists the releases per mode in the last 15 minutes and the Pods behind them.
+
+**Since.** When the UI first saw the finding. It resets when the UI restarts.
+
+**Fix.** Find the route or backend that names the missing cluster: check the Gateway's routes for a backend that was just added or renamed, and the controller log for snapshot deferrals. A short spike after a controller restart can be translation lag; a lasting one is not.
+
+On kgateway 2.3 and 2.4 the metrics do not exist, so "What was checked" shows this check as "not available on this version". The install stays healthy. Presence of the metrics decides availability, not the version string: the 2.5 per-client families or `kgateway_build_info`. When `kgateway_build_info` reports a version, the UI uses it over the Deployment's version label or image tag for the rule set, the install header and KGWUI-022, and "What was checked" names both when they differ. A value that is not a version, such as `undefined` from a build without version flags, is ignored.
 
 On kgateway 2.3 and 2.4 with controller logs on, the Gateway's Data plane section shows "Proxies may not be getting config updates" when the controller keeps logging a snapshot deferral for the Gateway. That is evidence on the Gateway page, not a finding.
 

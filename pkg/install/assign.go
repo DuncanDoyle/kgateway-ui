@@ -48,7 +48,9 @@ type Owned struct {
 	ListenerSets   []*unstructured.Unstructured
 	Routes         []OwnedObject
 	Policies       []OwnedObject
-	Unattached     []UnattachedRoute
+	// Listed are the in-scope objects of list-only kinds: counted and shown, never judged.
+	Listed     []OwnedObject
+	Unattached []UnattachedRoute
 	// Declared holds one candidate per (route, parent HTTPRoute).
 	Declared []DeclaredCandidate
 	// NoParent are in-scope HTTPRoutes with empty spec.parentRefs and no
@@ -266,8 +268,26 @@ func Assign(snap *cache.Snapshot, served []kinds.Served, insts []Resolved, dec o
 		ownerOf[lref] = gwOwner[gref]
 	}
 
+	// List-only kinds: in scope, but claimed by no install.
+	for _, k := range served {
+		if !k.ListOnly {
+			continue
+		}
+		for _, o := range snap.Objects[k.GVR()] {
+			for _, in := range insts {
+				if inScope(in, o.GetNamespace()) {
+					p := a.PerInstall[in.ID()]
+					p.Listed = append(p.Listed, OwnedObject{Kind: k, Obj: o})
+				}
+			}
+		}
+	}
+
 	// Policies.
 	for _, p := range list(kinds.CategoryPolicy) {
+		if p.Kind.ListOnly {
+			continue
+		}
 		for i, in := range insts {
 			if !inScope(in, p.Obj.GetNamespace()) {
 				continue

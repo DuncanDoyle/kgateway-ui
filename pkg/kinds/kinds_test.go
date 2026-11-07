@@ -128,3 +128,30 @@ func TestUpstreamHasBackend(t *testing.T) {
 	}
 	t.Fatalf("upstream kinds have no %s/%s", want.Group, want.Kind)
 }
+
+// The list-only kinds come after Backend, so kind lists only gain them at the end.
+func TestUpstreamHasListOnlyKinds(t *testing.T) {
+	want := []Descriptor{
+		{Group: "gateway.kgateway.dev", Kind: "DirectResponse", Resource: "directresponses", Versions: []string{"v1alpha1"},
+			Namespaced: true, Category: CategoryPolicy, DisplayName: "DirectResponses", ListOnly: true},
+		{Group: "gateway.kgateway.dev", Kind: "GatewayExtension", Resource: "gatewayextensions", Versions: []string{"v1alpha1"},
+			Namespaced: true, Category: CategoryParameters, DisplayName: "GatewayExtensions", ListOnly: true},
+		{Group: "gateway.networking.k8s.io", Kind: "ReferenceGrant", Resource: "referencegrants", Versions: []string{"v1", "v1beta1"},
+			Namespaced: true, Category: CategoryReferenceGrant, DisplayName: "ReferenceGrants", ListOnly: true},
+	}
+	got := Upstream()
+	if !reflect.DeepEqual(got[len(got)-len(want):], want) {
+		t.Fatalf("the last upstream kinds are %+v, want %+v", got[len(got)-len(want):], want)
+	}
+	if got[len(got)-len(want)-1].Kind != "Backend" {
+		t.Fatalf("Backend must precede them, got %s", got[len(got)-len(want)-1].Kind)
+	}
+	for _, d := range got[:len(got)-len(want)] {
+		if d.ListOnly {
+			t.Errorf("%s is list-only", d.Kind)
+		}
+	}
+	if CategoryReferenceGrant != "referencegrant" {
+		t.Fatalf("category %q", CategoryReferenceGrant)
+	}
+}

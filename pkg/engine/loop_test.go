@@ -602,6 +602,26 @@ func TestMetricsIdentityCoversContent(t *testing.T) {
 	if enc(pod(2, true), true) == enc(pod(3, true), true) || enc(pod(0, true), true) == enc(pod(0, false), true) {
 		t.Fatal("status_syncs_total and its presence must be part of the identity")
 	}
+	perClient := func(mutate func(p *ctrlmetrics.PodMetrics)) uint64 {
+		r := res(1)
+		r.Metrics.PerPod = []ctrlmetrics.PodMetrics{{UID: "u", Name: "p"}}
+		mutate(&r.Metrics.PerPod[0])
+		return enc(r, true)
+	}
+	nack := ctrlmetrics.GatewayKey{Namespace: "infra", Name: "nack"}
+	plain := perClient(func(*ctrlmetrics.PodMetrics) {})
+	for name, mutate := range map[string]func(p *ctrlmetrics.PodMetrics){
+		"build version": func(p *ctrlmetrics.PodMetrics) { p.BuildVersion = "v2.5.0" },
+		"presence":      func(p *ctrlmetrics.PodMetrics) { p.PerClientPresent = true },
+		"withheld":      func(p *ctrlmetrics.PodMetrics) { p.Withheld = map[ctrlmetrics.GatewayKey]float64{nack: 1} },
+		"bounded": func(p *ctrlmetrics.PodMetrics) {
+			p.Bounded = map[ctrlmetrics.ModeKey]float64{{Gateway: nack, Mode: "warm_release"}: 1}
+		},
+	} {
+		if perClient(mutate) == plain {
+			t.Errorf("%s must be part of the identity", name)
+		}
+	}
 	errRes := res(0)
 	errRes.Err = "no ready controller pod to scrape"
 	if enc(errRes, true) == enc(res(0), true) {

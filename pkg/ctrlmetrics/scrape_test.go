@@ -429,3 +429,23 @@ func TestSameContentSeesSnapshotChange(t *testing.T) {
 		t.Fatal("a changed snapshot is a content change")
 	}
 }
+
+// The per-client fields are content: a change in any of them notifies the engine.
+func TestSameContentCoversPerClient(t *testing.T) {
+	gw := GatewayKey{"infra", "nack"}
+	base := func() Result {
+		return Result{Metrics: Metrics{PerPod: []PodMetrics{{UID: "u", PerClientPresent: true}}}}
+	}
+	for name, mutate := range map[string]func(p *PodMetrics){
+		"build version": func(p *PodMetrics) { p.BuildVersion = "v2.5.0" },
+		"presence":      func(p *PodMetrics) { p.PerClientPresent = false },
+		"withheld":      func(p *PodMetrics) { p.Withheld = map[GatewayKey]float64{gw: 1} },
+		"bounded":       func(p *PodMetrics) { p.Bounded = map[ModeKey]float64{{gw, "warm_release"}: 1} },
+	} {
+		r := base()
+		mutate(&r.Metrics.PerPod[0])
+		if r.SameContent(base()) {
+			t.Errorf("%s: a change is not content", name)
+		}
+	}
+}

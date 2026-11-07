@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-// gatewayAPIBundles is each kgateway minor's Gateway API minor, from its go.mod; 2.5 is re-read at GA.
+// gatewayAPIBundles is each kgateway minor's Gateway API minor, from its go.mod (2.5: v1.7.0 at v2.5.0).
 var gatewayAPIBundles = map[string]string{"2.3": "v1.5", "2.4": "v1.6", "2.5": "v1.7"}
 
 // ExpectedGatewayAPI returns the Gateway API bundle minor ("v1.6") kgateway

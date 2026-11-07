@@ -306,6 +306,117 @@ describe("EvidenceView", () => {
     expect(screen.queryByText(diagnosticsCopy.generation)).toBeNull();
   });
 
+  describe("endpoints", () => {
+    const svc = { group: "", kind: "Service", namespace: "shop", name: "cart", link: "detail" } as const;
+    const finding = {
+      id: "f1",
+      code: "KGWUI-023",
+      slug: "backend-no-ready-endpoints",
+      severity: "warning",
+      resource: svc,
+    };
+    const ev: Evidence = {
+      kind: "endpoints",
+      service: "cart",
+      port: 8080,
+      portName: "http",
+      ready: 0,
+      total: 3,
+      slices: 2,
+    };
+
+    it("renders the Service link, port with its name, ready of total and the slice count", () => {
+      show(ev, finding as Finding);
+      expect(screen.getByRole("link", { name: /cart/ })).toBeInTheDocument();
+      expect(screen.getByText("8080 (http)")).toBeInTheDocument();
+      expect(screen.getByText(diagnosticsCopy.readyEndpoints(0, 3))).toBeInTheDocument();
+      expect(diagnosticsCopy.readyEndpoints(0, 0)).toBe("No endpoints");
+      expect(screen.getByText(diagnosticsCopy.endpointSlices).nextElementSibling).toHaveTextContent("2");
+    });
+
+    it("an unnamed port shows the number alone, and a Service the viewer cannot open stays text", () => {
+      show({ ...ev, portName: undefined } as Evidence, { ...finding, resource: { ...svc, link: "none" } } as Finding);
+      expect(screen.getByText("8080")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.getByText(/cart/)).toBeInTheDocument();
+    });
+
+    it("without the finding it names the Service as text", () => {
+      show(ev);
+      expect(screen.getByText("cart")).toBeInTheDocument();
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+
+    describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => {
+      it("the Service link has hover, active and focus-visible styles", () => {
+        renderWithTheme(<EvidenceView evidence={ev} finding={finding as Finding} />, {
+          path: "/i/kgw.kgateway",
+          themeId: t.id,
+        });
+        const link = screen.getByRole("link", { name: /cart/ });
+        expect(styled(link)).toBe(true);
+        expect(pseudoRules(link, ":focus-visible").join()).toContain(t.color.focus);
+        expect(pseudoRules(link, ":active").join()).toContain(t.color.accentText);
+      });
+    });
+  });
+
+  describe("withheld", () => {
+    const withheld: Evidence = { kind: "withheld", withheld: 2, reportedBy: ["kgateway-0", "kgateway-1"] };
+    const released: Evidence = {
+      kind: "withheld",
+      releases: [
+        { mode: "flip_release", count: 1 },
+        { mode: "warm_release", count: 2 },
+      ],
+      reportedBy: ["kgateway-0"],
+    };
+
+    it("withheld proxies: the count and the reporting Pods, no release table", () => {
+      show(withheld);
+      expect(screen.getByText(diagnosticsCopy.withheldProxies).nextElementSibling).toHaveTextContent("2");
+      expect(screen.getByText(diagnosticsCopy.reportedBy).nextElementSibling).toHaveTextContent(
+        "kgateway-0, kgateway-1",
+      );
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("released config: one row per mode with its label, mode and count, no withheld count", () => {
+      show(released);
+      expect(screen.queryByText(diagnosticsCopy.withheldProxies)).toBeNull();
+      const rows = within(screen.getByRole("table", { name: diagnosticsCopy.releasedRecently })).getAllByRole("row");
+      expect(rows).toHaveLength(3);
+      expect(rows[1]).toHaveTextContent(`${diagnosticsCopy.releaseModes.flip_release} flip_release1`);
+      expect(rows[2]).toHaveTextContent(`${diagnosticsCopy.releaseModes.warm_release} warm_release2`);
+    });
+
+    it("both signals together, and a mode without a label shows the mode alone", () => {
+      show({
+        ...withheld,
+        releases: [
+          { mode: "carry_expired", count: 1 },
+          { mode: "new_mode", count: 4 },
+        ],
+      } as Evidence);
+      expect(screen.getByText(diagnosticsCopy.withheldProxies)).toBeInTheDocument();
+      const rows = within(screen.getByRole("table")).getAllByRole("row");
+      expect(rows[1]).toHaveTextContent(`${diagnosticsCopy.releaseModes.carry_expired} carry_expired1`);
+      expect(rows[2]).toHaveTextContent(/^new_mode4$/);
+    });
+
+    describe.each([controlRoomDark, controlRoomLight])("in the $name theme", (t) => {
+      it("renders without interactive elements, so it adds no hover, active or focus targets", () => {
+        renderWithTheme(<EvidenceView evidence={{ ...withheld, ...released, withheld: 1 } as Evidence} />, {
+          path: "/i/kgw.kgateway",
+          themeId: t.id,
+        });
+        expect(screen.getByRole("table")).toBeInTheDocument();
+        expect(screen.queryByRole("link")).toBeNull();
+        expect(screen.queryByRole("button")).toBeNull();
+      });
+    });
+  });
+
   it("renders listener-conflict: the listener, the computed rule and the listeners kept", () => {
     show({
       kind: "listener-conflict",

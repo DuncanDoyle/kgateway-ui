@@ -33,7 +33,7 @@
 - **Go style.** Go Doc Comments on every exported name. Code comments 1–2 lines, grouped, describing the code as it is (no history). Match the surrounding idiom.
 - **Deterministic tests.** Fake clock and `testutil.Recv`; no `time.Sleep` in new unit tests; holds and maturations are proven by stepping the clock to `deadline − 1 s` and `deadline + 1 s`. Only `bench`-tagged budget tests use a real clock.
 - **Behavioural boundary (AGENTS.md §7).** Every code ships with an API boundary test, cluster objects and metrics in, API JSON out, positive and negative, plus isolation (a second install) where the code reads per-install data. Helper tests supplement, never replace.
-- **Budgets (§16.3; user, 2026-10-29).** Warm recompute ≤ 150 ms; stream CPU (annotation-only) ≤ 15 % of one core; dense memory medians of 5: retained heap ≤ 176 MiB, allocated by the cold recompute ≤ 246 MiB and per warm recompute ≤ 185 MiB (D-039); retained heap ≤ 40 MiB (D-054; 32 MiB before 3.3) and ≤ +24 MiB above `bench/3.1-baseline.txt`; analyzer stage ≤ 20 ms warm and ≤ 2 ms memoized (from 3.2); spec-edit stream ≤ 25 % (from 3.2); OS memory during the stream: median of five ≤ 288 MiB (from 3.2, D-043); `…/diagnostics`, `…/findings`, `…/processes` p95 < 50 ms, p99 < 100 ms, p95 < 100 ms with 20 clients; burst, idle and cold gates unchanged. **No gate changes without the user. A broken gate stops the work; the numbers go to the user.**
+- **Budgets (§16.3; user, 2026-10-29).** Warm recompute ≤ 150 ms; stream CPU (annotation-only) ≤ 15 % of one core; dense memory medians of 5: retained heap ≤ 176 MiB, allocated by the cold recompute ≤ 246 MiB and per warm recompute ≤ 185 MiB (D-039); retained heap ≤ 48 MiB (D-057; 40 MiB in 3.3, D-054; 32 MiB before 3.3) and ≤ +24 MiB above `bench/3.1-baseline.txt`; analyzer stage ≤ 20 ms warm and ≤ 2 ms memoized (from 3.2); spec-edit stream ≤ 25 % (from 3.2); OS memory during the stream: median of five ≤ 288 MiB (from 3.2, D-043); `…/diagnostics`, `…/findings`, `…/processes` p95 < 50 ms, p99 < 100 ms, p95 < 100 ms with 20 clients; burst, idle and cold gates unchanged. **No gate changes without the user. A broken gate stops the work; the numbers go to the user.**
 - **Frontend quality.** Every interactive element has hover, active and focus-visible styles in both themes; state is icon + colour + text at WCAG AA, checked by `web/packages/shell/src/theme/themes.test.ts`; skeletons and slots keep their final size from the first render (no layout shift); no horizontal page scroll at 720, 1280, 1600 and 3008 px. `SHELL_API_VERSION` stays 1.
 - **Wording pass (§17.5).** Every new user-facing string: short sentences, plain English, active voice. Per string, a separate sub-agent receives five accurate options and picks the one that sounds least machine-written and is most accurate. Drafts in the design are placeholders. Choices are recorded in `phase-3.N-wording.md`.
 - **e2e.** Only the kind cluster `kgwui-e2e`, created by `test/e2e/setup.sh` with its own kubeconfig `$E2E_DIR/kubeconfig`. Manual commands pass `--kubeconfig "$E2E_DIR/kubeconfig" --context kind-kgwui-e2e` (Helm: `--kube-context kind-kgwui-e2e`). Never touch another cluster or the global context.
@@ -61,7 +61,7 @@ Each sub-phase starts with a brief (`docs/phases/phase-3/phase-3.N-brief.md`, ag
 | **3.1 Foundations, performance and the KRT decision** | Same pages, easier to read; findings with ids, paged on the server | 12–33 | Baseline on `544dcd5` recorded (local and CI); spec-edit variant reported; KRT spike and D-027; D-032 contract, Store and memoization; every check migrated; README upgrade notes; delegation memory carry-over; captures and per-Pod metrics; ids, `since`, groups and rank; findings endpoints and pages; scale tiers; ObjectHeader, fluid layout, breadcrumbs; wording pass; 3.1 budgets; Codex review triaged |
 | **3.2 Data plane, processes and the overview** | The ranked health overview with xDS rejects and process health | 34–54 | Watches and toggles; `pkg/process`; 001 re-specified; 019–022, 025, 026; proxy stats; diagnostics and processes endpoints; install page, Processes page, Gateway sections; RBAC and README fix; `renderWhenFontsReady`; wording pass; all §16.3 gates incl. analyzer stage and spec-edit; kind e2e on 2.3.11 and 2.4.7; Codex review triaged |
 | **3.3 Analyzer** | The analyzer floor and freshness, with suggested fixes | 55–73, 71a | 003 kinds; 013 (no Service data), 014, 015, 016 computed with rules section and verifier, 017, 018; four groups and the grouped view; fixes for 013 and 014; opt-in log signals; `docs/findings.md`; wording pass; the one-shot config helper and static metrics source (D-053); budgets with the log reader; kind e2e; Codex review triaged |
-| **3.4 Backends and kgateway 2.5** | Empty backends; 2.5 supported at GA | 74–87 | Service and EndpointSlice watches; 023; 013 Service explanations and port fix; platform-neutral test; wording pass; budgets; kind e2e. After 2.5.0 GA (D-033): `kgw25`, 016 from status, 024, `kgateway_build_info`, the 2.5 e2e row with the TCPRoute fixture on v1; Codex review triaged. If GA is not out, Tasks 83–86 wait and the rest ships |
+| **3.4 Backends and kgateway 2.5** | Empty backends; 2.5 supported at GA | 74–87, 78a, 78b | Service and EndpointSlice watches; 023; 013 Service explanations and port fix; platform-neutral test; wording pass; budgets; kind e2e. After 2.5.0 GA (D-033): `kgw25`, 016 from status, 024, `kgateway_build_info`, the 2.5 e2e row with the TCPRoute fixture on v1; Codex review triaged. If GA is not out, Tasks 83–86 wait and the rest ships. kgwctl #17 (three kinds) and #20 (`cache.Wait`) by D-056 |
 
 **Lifecycle.** A sub-phase's first task records it in `docs/phase-status.md` under `## Sub-phase` (`3.N <name>`, `Status: active`, `Base: <git rev-parse HEAD>` before its first commit). Its review diffs from that base: `BASE=$(awk '/^## Sub-phase/{f=1} f && /^Base:/{print $2; exit}' docs/phase-status.md)`. Its close task writes the README upgrade notes, updates `docs/roadmap.md` and resets `## Sub-phase`. Each brief reminds the user of the open item in §25 and the scope-endpoint issue (carry-over P3); filing stays the user's call.
 
@@ -117,10 +117,11 @@ pkg/ctrlmetrics/parse.go, scrape.go per Pod and type; rejects_total, updates_dro
 pkg/ctrlmetrics/static.go           static Source over one Collect result, for one-shot callers (3.3, D-053)
 pkg/setup/setup.go                  cache.Config and engine.Config as pkg/app builds them (3.3, D-053; allowlisted)
 pkg/scopeverify/verify.go           dropped updates → KGWUI-008 (3.1)
-pkg/cache/cache.go, events.go, crds.go, services.go   proxy Pods, Events, CRD metadata (3.2); Services, EndpointSlices (3.4); new files allowlisted
+pkg/cache/cache.go, events.go, crds.go, services.go   proxy Pods, Events, CRD metadata (3.2); Services, EndpointSlices, `Wait` (3.4); new files allowlisted
 pkg/engine/engine.go, memo.go       States per install, memo, Diagnosis in InstallModel (3.1); process data (3.2)
 pkg/explore/rows.go, query.go       gateway-rejecting flag and filter (3.2)
 pkg/kinds/catalog.go                served group/kinds from discovery for 013 (3.3)
+pkg/kinds/upstream.go               DirectResponse, GatewayExtension, ReferenceGrant descriptors (3.4, D-056)
 pkg/app/app.go, cmd/kgateway-ui/main.go   seams wiring (3.0); diagnostics toggles and collectors (3.2, 3.3, 3.4); config through pkg/setup (3.3)
 internal/testutil/scale/scale.go    Phase 3 tier fields and worst case (3.1)
 internal/boundary/imports_test.go   seven allowlist entries (3.2, 3.3, 3.4; Global Constraints)
@@ -1020,7 +1021,7 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 
 **Files:** Create `pkg/cache/services.go`, `pkg/cache/services_test.go`; Modify `pkg/cache/cache.go` (optional, not in `cluster access`, Task 35), `pkg/app/app.go` (toggle, capability `endpoints`), `deploy/helm/kgateway-ui/templates/clusterrole.yaml`, `deploy/helm/chart_test.go`, `internal/boundary/imports_test.go` (`pkg/cache/services.go`). **⚠ guardrail** (7 files).
 
-**Interfaces:** `type ServiceFact struct { Namespace, Name, Type string; Ports []ServicePort }` (`ServicePort{Name string; Port, Target int32}`); `type SliceFact struct { Namespace, Service string; Ports []SlicePort; Ready map[string]int /* port name → ready endpoints, ready unset counts as ready */ }`; `Snapshot.Services`, `Snapshot.EndpointSlices`; transforms keep only these fields (about 200 bytes each). Capability `endpoints` `on` only when both watches run.
+**Interfaces:** `type ServiceFact struct { Namespace, Name, Type string; Ports []ServicePort }` (`ServicePort{Name string; Port, Target int32}`); `type SliceFact struct { Namespace, Service string; Ports []SlicePort; Ready []int /* ready endpoints per entry of Ports, ready unset counts as ready (compact form, D-057) */ }`; `Snapshot.Services`, `Snapshot.EndpointSlices`; transforms keep only these fields (about 200 bytes each). Capability `endpoints` `on` only when both watches run.
 
 - [ ] **Step 1: Failing tests** transform shape; unset `ready` counts; toggle off (no watch, no rule); denied (no KGWUI-008, install not unknown). **Step 2: Implement, run, commit** `feat(cache): Services and EndpointSlices, cut down at the informer (D-031)`.
 
@@ -1028,7 +1029,7 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 
 **Files:** Create `pkg/health/endpoints.go`, `pkg/health/endpoints_test.go`; Modify `pkg/diagnose/group.go` ("Empty backend"), `pkg/proxystats/collector.go` (membership on demand), `pkg/api/findings.go` (evidence).
 
-**Interfaces:** `CodeBackendNoReadyEndpoints = "KGWUI-023"` (warning) on the Service, Key the port as the backendRef wrote it; rule of §11 (core Service, weight > 0 with unset = 1, a current `ResolvedRefs=True` from this install on that parent, not `ExternalName`, no ready endpoint for that port), held 30 s per Service port in the Store; `EndpointsEvidence{Service, Port, Ready, Total, Slices}`. Membership on demand: one Ready proxy per Gateway, regex naming only the needed clusters, cached 10 s; shown as evidence only.
+**Interfaces:** `CodeBackendNoReadyEndpoints = "KGWUI-023"` (warning) on the Service, Key the port as the backendRef wrote it; rule of §11 (core Service, weight > 0 with unset = 1, a current `ResolvedRefs=True` from this install on that parent, not `ExternalName`, no ready endpoint for that port), held 30 s per Service port in the Store; `EndpointsEvidence{Service, Port, Ready, Total, Slices}`. Membership on demand was removed in 3.4 (D-058): it needs a forward Service-to-cluster name mapping.
 
 - [ ] **Step 1: Failing tests** zero ready; unset ready; `ExternalName`; weight 0; `ResolvedRefs=False`; delegation and mirror refs (none); 29 s and 31 s; endpoints off → not available, install not unknown. **Step 2: Implement, run, commit** `feat(health): backends with no ready endpoints`.
 
@@ -1043,6 +1044,18 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 **Files:** Create `pkg/engine/neutral_test.go`.
 
 - [ ] **Step 1: `TestAnalyzerWithoutPodsEventsServicesOrCRDs`** (§19): a snapshot with none of them: process findings "not observed", 023 "not available", every other code equal to the full-snapshot run. **Commit** `test(engine): analyzer stage on a platform without Pods, Events, Services or CRDs`.
+
+### Task 78a: DirectResponse, GatewayExtension and ReferenceGrant (#17, D-056)
+
+**Files:** Modify `pkg/kinds/upstream.go` (three descriptors, appended last), `pkg/kinds/kinds.go` (category `referencegrant`), `deploy/helm/kgateway-ui/templates/clusterrole.yaml`, `deploy/helm/chart_test.go`, `pkg/api` goldens; web nav only if a new category needs a label.
+
+- [ ] **Step 1: Failing tests** the three kinds listed and described through `/api` when served; absent when not served; v1 kind-list order unchanged; ReferenceGrant on whichever version is served; 013 and 014 goldens unchanged with ReferenceGrants present. **Step 2: Implement, run, commit** `feat(kinds): DirectResponse, GatewayExtension and ReferenceGrant (#17)`.
+
+### Task 78b: `cache.Wait` (#20, D-056)
+
+**Files:** Modify `pkg/cache/cache.go`, `pkg/cache/cache_test.go`; README (one-shot use).
+
+- [ ] **Step 1: Failing tests** Start, cancel, `Wait`, then a goroutine-leak check; `Wait` before `Start` and a second `Wait` return at once. **Step 2: Implement, run, commit** `feat(cache): Wait for the goroutines Start launched (#20)`.
 
 ### Task 79: SPA for 3.4
 
@@ -1092,7 +1105,7 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 
 ### Task 87: Close sub-phase 3.4
 
-- [ ] Standard gates; Codex review against §7.6, §8.6, §11, §19, §21 and D-031, D-033 (focus: 023 stays within resolved Service refs; Service data never decides resolution; not-on-version never unknown; `kgw25` is a copy plus the status path); triage; record (bench vs 3.3; whether the 2.5 part shipped); README upgrade notes (023, Services and EndpointSlices read, the `endpoints` toggle; 2.5 support at GA); status (next: the phase review and stabilization) and roadmap. **Commit** `docs: close sub-phase 3.4`.
+- [ ] Standard gates; Codex review against §7.6, §8.6, §11, §19, §21 and D-031, D-033, D-056 (focus: 023 stays within resolved Service refs; Service data never decides resolution; not-on-version never unknown; `kgw25` is a copy plus the status path); triage; record (bench vs 3.3; whether the 2.5 part shipped); README upgrade notes (023, Services and EndpointSlices read, the `endpoints` toggle; 2.5 support at GA); status (next: the phase review and stabilization) and roadmap. **Commit** `docs: close sub-phase 3.4`.
 
 ---
 

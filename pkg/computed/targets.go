@@ -73,6 +73,19 @@ func (s Selection) PolicyTargeter() PolicyTargeter {
 	return t
 }
 
+// TargetStatusReporter is an optional interface of a Rules. ReportsTargetNotFound true means the
+// controller writes TargetNotFound on policy ancestors, so KGWUI-016 comes from status, not PolicyTargeter.
+type TargetStatusReporter interface {
+	ReportsTargetNotFound() bool
+}
+
+// TargetStatusReporter returns the selected rule set's reporter, or nil when it has none.
+// A wrapping rule set forwards it to keep the status 016.
+func (s Selection) TargetStatusReporter() TargetStatusReporter {
+	r, _ := s.Rules.(TargetStatusReporter)
+	return r
+}
+
 // DecodeTargets returns a policy's spec.targetRefs and spec.targetSelectors as written.
 // Entries that are not objects are skipped.
 func DecodeTargets(u *unstructured.Unstructured) ([]TargetRef, []TargetSelector) {

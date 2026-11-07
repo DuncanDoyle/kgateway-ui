@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 )
@@ -437,5 +438,77 @@ func TestListenerPolicyCARefNeverAttributed(t *testing.T) {
 				t.Fatalf("ListenerSet: attributed %v, want %v", ev.Attributed, tc.attributed)
 			}
 		})
+	}
+}
+
+// Design §7.3 explanations 2 and 3: a Service the cache lacks, or a port it
+// lacks, explains a controller-reported BackendNotFound, only while the
+// Services watch is OK.
+func TestRouteRefServiceExplanations(t *testing.T) {
+	two := cache.ServiceFact{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Port: 80, Target: 80}, {Port: 443, Target: 443}}}
+	one := cache.ServiceFact{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Port: 80, Target: 80}}}
+	ok, off := cache.Access{OK: true}, cache.Access{}
+	ref := func(port int64) map[string]any { return map[string]any{"name": "cart", "port": port} }
+	cases := []struct {
+		name        string
+		svcs        []cache.ServiceFact
+		access      *cache.Access // nil: Services not watched
+		refs        []map[string]any
+		explanation string
+		detail      string
+		ports       []int32
+	}{
+		{"missing", nil, &ok, []map[string]any{ref(80)}, RefExplainServiceMissing, "Service `shop/cart` does not exist.", nil},
+		{"no such port", []cache.ServiceFact{two}, &ok, []map[string]any{ref(8080)}, RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80, 443).", []int32{80, 443}},
+		{"one-port Service", []cache.ServiceFact{one}, &ok, []map[string]any{ref(8080)}, RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80).", []int32{80}},
+		{"port exists", []cache.ServiceFact{two}, &ok, []map[string]any{ref(80)}, RefExplainController, "", nil},
+		{"no port written", []cache.ServiceFact{two}, &ok, []map[string]any{{"name": "cart"}}, RefExplainController, "", nil},
+		{"missing, no port written", nil, &ok, []map[string]any{{"name": "cart"}}, RefExplainServiceMissing, "Service `shop/cart` does not exist.", nil},
+		{"not watched", nil, nil, []map[string]any{ref(80)}, RefExplainController, "", nil},
+		{"watch syncing", nil, &off, []map[string]any{ref(80)}, RefExplainController, "", nil},
+		{"watch failing", nil, &cache.Access{Err: "boom"}, []map[string]any{ref(80)}, RefExplainController, "", nil},
+		{"watch denied", nil, &cache.Access{Err: "forbidden", Denied: true}, []map[string]any{ref(80)}, RefExplainController, "", nil},
+		{"two refs may fail", nil, &ok, []map[string]any{ref(80), {"name": "pay", "port": int64(80)}}, RefExplainController, "", nil},
+		{"missing beside a Backend ref", nil, &ok, []map[string]any{ref(80), {"group": "gateway.kgateway.dev", "kind": "Backend", "name": "be"}}, RefExplainController, "", nil},
+		{"non-core kind", nil, &ok, []map[string]any{{"group": "gateway.kgateway.dev", "kind": "Backend", "name": "cart"}}, RefExplainController, "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := healthyWorld()
+			w.objs[2] = refRoute("BackendNotFound", "", tc.refs...)
+			in := w.input(t)
+			in.Catalog = served()
+			delete(in.Snapshot.Access, cache.ServicesGVR)
+			if tc.access != nil {
+				in.Snapshot.Access[cache.ServicesGVR] = *tc.access
+			}
+			in.Snapshot.Services = tc.svcs
+			f, ev := only(t, Evaluate(in, Upstream(), Runtime{}), CodeRefUnresolved, "shop/cart")
+			if ev.Explanation != tc.explanation || !reflect.DeepEqual(ev.Ports, tc.ports) {
+				t.Fatalf("explanation %q ports %v, want %q %v", ev.Explanation, ev.Ports, tc.explanation, tc.ports)
+			}
+			if tc.detail == "" {
+				if len(f.Evidence) != 0 || strings.Contains(f.Detail, "Service `") || ev.Attributed && tc.name == "missing beside a Backend ref" {
+					t.Fatalf("controller explanation names the Service: %+v", f)
+				}
+				return
+			}
+			if !strings.HasPrefix(f.Detail, tc.detail) || f.Message != "Backend not found" || !ev.Attributed ||
+				!reflect.DeepEqual(f.Evidence, []objects.Ref{svc("shop", "cart")}) {
+				t.Fatalf("detail %q message %q evidence %+v attributed %v", f.Detail, f.Message, f.Evidence, ev.Attributed)
+			}
+		})
+	}
+}
+
+// Explanation 1 wins over a missing Service, as the order says.
+func TestKindNotServedBeatsMissingService(t *testing.T) {
+	w := healthyWorld()
+	w.objs[2] = refRoute("BackendNotFound", "", map[string]any{"group": "delegation.gateway.example", "kind": "Service", "name": "cart", "port": int64(80)})
+	in := w.input(t)
+	in.Catalog = served()
+	in.Snapshot.Access[cache.ServicesGVR] = cache.Access{OK: true}
+	if _, ev := only(t, Evaluate(in, Upstream(), Runtime{}), CodeRefUnresolved, "shop/cart"); ev.Explanation != RefExplainKindNotServed {
+		t.Fatalf("explanation %q", ev.Explanation)
 	}
 }

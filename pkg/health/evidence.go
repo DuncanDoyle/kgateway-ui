@@ -266,6 +266,10 @@ const EvidenceRefs = "refs"
 const (
 	// RefExplainKindNotServed: discovery says the ref's group serves no such kind.
 	RefExplainKindNotServed = "kind-not-served"
+	// RefExplainServiceMissing: a core Service ref names a Service that does not exist.
+	RefExplainServiceMissing = "service-missing"
+	// RefExplainServicePort: the Service exists and has no port the ref names.
+	RefExplainServicePort = "service-port"
 	// RefExplainController: the controller's reason and message, as written.
 	RefExplainController = "controller"
 )
@@ -284,6 +288,8 @@ type RefsEvidence struct {
 	Explanation string        `json:"explanation"`
 	Candidates  []RefLocation `json:"candidates,omitempty"`
 	Attributed  bool          `json:"attributed"`
+	// Ports are the Service's ports, set for a service-port explanation.
+	Ports []int32 `json:"ports,omitempty"`
 	// Group is the one group discovery says serves the candidate's kind, set
 	// only for an attributed kind-not-served explanation under complete
 	// discovery. Never serialised.
@@ -303,6 +309,35 @@ func (e *RefsEvidence) MarshalJSON() ([]byte, error) {
 		Kind string `json:"kind"`
 		*plain
 	}{EvidenceRefs, (*plain)(e)})
+}
+
+// EvidenceEndpoints is the kind of EndpointsEvidence.
+const EvidenceEndpoints = "endpoints"
+
+// EndpointsEvidence is a Service port behind KGWUI-023: its ready and total
+// endpoints summed over the Service's EndpointSlices, and how many slices.
+type EndpointsEvidence struct {
+	// Service is the Service's name; Port the port as the backendRef writes it, PortName its Service port name.
+	Service  string `json:"service"`
+	Port     int32  `json:"port"`
+	PortName string `json:"portName,omitempty"`
+	Ready    int    `json:"ready"`
+	Total    int    `json:"total"`
+	Slices   int    `json:"slices"`
+	// Routes are the routes naming the port, the group's affected list. Never serialised.
+	Routes []objects.Ref `json:"-"`
+}
+
+// EvidenceKind implements Evidence.
+func (*EndpointsEvidence) EvidenceKind() string { return EvidenceEndpoints }
+
+// MarshalJSON adds the kind tag.
+func (e *EndpointsEvidence) MarshalJSON() ([]byte, error) {
+	type plain EndpointsEvidence
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		*plain
+	}{EvidenceEndpoints, (*plain)(e)})
 }
 
 // RawEvidence is evidence of a kind this build does not know, kept as sent.
@@ -355,6 +390,12 @@ func DecodeEvidence(b []byte) (Evidence, error) {
 		return e, json.Unmarshal(b, e)
 	case EvidenceStatusProgress:
 		e := &StatusProgressEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceEndpoints:
+		e := &EndpointsEvidence{}
+		return e, json.Unmarshal(b, e)
+	case EvidenceWithheld:
+		e := &WithheldEvidence{}
 		return e, json.Unmarshal(b, e)
 	}
 	return &RawEvidence{Kind: tag.Kind, JSON: append(json.RawMessage(nil), b...)}, nil

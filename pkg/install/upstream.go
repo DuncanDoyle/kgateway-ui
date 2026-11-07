@@ -1,6 +1,7 @@
 package install
 
 import (
+	"cmp"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -79,11 +80,21 @@ func splitImage(image string) (repo, tag string) {
 }
 
 // KgatewayVersion returns the kgateway version the controller runs, or ""
-// when unknown. Other distributions number their own releases (D-018 §3), so
-// they report BaseVersion, which their detector may leave empty.
+// when unknown: ReportedVersion when the controller reports one, else Version.
+// Other distributions number their own releases (D-018 §3), so they report
+// BaseVersion, which their detector may leave empty.
 func (i Install) KgatewayVersion() string {
 	if i.Edition != "kgateway" {
 		return i.BaseVersion
 	}
-	return i.Version
+	return cmp.Or(i.ReportedVersion, i.Version)
+}
+
+// ControllerVersion is the version the UI shows for the controller: for
+// kgateway, KgatewayVersion; a downstream build shows its own Version.
+func (i Install) ControllerVersion() string {
+	if i.Edition != "kgateway" {
+		return i.Version
+	}
+	return i.KgatewayVersion()
 }

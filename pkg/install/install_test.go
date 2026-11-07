@@ -125,3 +125,20 @@ func TestKgatewayVersionUsesBaseVersion(t *testing.T) {
 		t.Errorf("upstream ignores base: got %q", v)
 	}
 }
+
+// The version the controller reports wins over the Deployment's for kgateway;
+// a downstream build keeps its BaseVersion.
+func TestKgatewayVersionPrefersReported(t *testing.T) {
+	for _, tc := range []struct {
+		in   Install
+		want string
+	}{
+		{Install{Edition: "kgateway", Version: "2.4.7"}, "2.4.7"},
+		{Install{Edition: "kgateway", Version: "latest", ReportedVersion: "2.5.0"}, "2.5.0"},
+		{Install{Edition: "acme", Version: "9.9.9", BaseVersion: "2.4.7", ReportedVersion: "2.5.0"}, "2.4.7"},
+	} {
+		if got := tc.in.KgatewayVersion(); got != tc.want {
+			t.Errorf("%+v: %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

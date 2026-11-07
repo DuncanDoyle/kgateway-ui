@@ -460,7 +460,7 @@ func (c *Cache) eventInformer(kube kubernetes.Interface, f *eventFilter) tracked
 			if o.SendInitialEvents != nil && *o.SendInitialEvents {
 				f.reset()
 			}
-			return newFilterWatch(w, f.event), nil
+			return newFilterWatch(w, &c.running, f.event), nil
 		})
 	_ = t.inf.SetTransform(stripEvent) // fails only on a started informer
 	return t
@@ -474,9 +474,9 @@ type filterWatch struct {
 	once sync.Once
 }
 
-func newFilterWatch(in watch.Interface, fn func(watch.Event) []watch.Event) watch.Interface {
+func newFilterWatch(in watch.Interface, loops *sync.WaitGroup, fn func(watch.Event) []watch.Event) watch.Interface {
 	w := &filterWatch{in: in, out: make(chan watch.Event), done: make(chan struct{})}
-	go func() {
+	goTracked(loops, func() {
 		defer close(w.out)
 		for e := range in.ResultChan() {
 			for _, o := range fn(e) {
@@ -487,7 +487,7 @@ func newFilterWatch(in watch.Interface, fn func(watch.Event) []watch.Event) watc
 				}
 			}
 		}
-	}()
+	})
 	return w
 }
 

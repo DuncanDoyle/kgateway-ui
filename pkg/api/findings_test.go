@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1491,4 +1493,132 @@ func TestDeployerErrorsOn006AtTheAPI(t *testing.T) {
 			t.Fatalf("006 evidence %+v", ev)
 		}
 	})
+}
+
+// cartService is shop/cart with the given ports.
+func cartService(ports ...int32) *corev1.Service {
+	s := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "shop", Name: "cart", UID: "svc-cart"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}}
+	for _, p := range ports {
+		s.Spec.Ports = append(s.Spec.Ports, corev1.ServicePort{Port: p})
+	}
+	return s
+}
+
+// Design §7.3 explanations 2 and 3 and §7.7 at the API: Services in the cache
+// explain BackendNotFound; a one-port Service gives the port fix, two give
+// none; a viewer who cannot see the Service gets evidenceRestricted and no fix.
+func TestServiceExplanationsAndPortFixAtTheAPI(t *testing.T) {
+	ref := map[string]any{"name": "cart", "port": int64(8080)}
+	hideServices := AuthorizerFunc(func(_ *http.Request, r objects.Ref) bool { return r.Kind != "Service" })
+	cases := []struct {
+		name        string
+		svc         *corev1.Service
+		authz       Authorizer
+		explanation string
+		detail      string
+		fix         bool
+		hidden      bool
+	}{
+		{"missing", nil, nil, health.RefExplainServiceMissing, "Service `shop/cart` does not exist.", false, false},
+		{"two ports", cartService(80, 443), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80, 443).", false, false},
+		{"one port", cartService(80), nil, health.RefExplainServicePort, "Service `shop/cart` has no port 8080 (ports: 80).", true, false},
+		{"hidden Service", cartService(80), hideServices, "", "", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := world(refsRoute("BackendNotFound", ref))
+			if tc.svc != nil {
+				objs = append(objs, tc.svc)
+			}
+			h := newHarness(t, setup{endpoints: true, authz: tc.authz, catalog: fixCatalog(nil), rulesFor: computedtest.NoViews}, objs...)
+			h.awaitCache(t, "Services", func(s *cache.Snapshot) bool {
+				return s.Access[cache.ServicesGVR].OK && len(s.Services) == len(objs)-len(world(refsRoute("BackendNotFound", ref)))
+			})
+			h.at(t, testutil.Now)
+			d := fixDetail(t, h.srv, health.CodeRefUnresolved, "shop", "r")
+			if tc.hidden {
+				if !d.Finding.EvidenceRestricted || d.Evidence != nil || d.SuggestedFix != nil || strings.Contains(d.Finding.Detail, "has no port") || strings.Contains(d.Finding.Message, "has no port") || strings.Contains(d.Finding.Message, "does not exist") || strings.Contains(d.Finding.Detail, "does not exist") {
+					t.Fatalf("want evidenceRestricted without evidence or fix: %+v", d)
+				}
+				rows, _ := json.Marshal(get[Page[FindingRow]](t, h.srv, findingsBase+"?code="+health.CodeRefUnresolved+"&namespace=shop", http.StatusOK))
+				if bytes.Contains(rows, []byte("does not exist")) || bytes.Contains(rows, []byte("has no port")) {
+					t.Fatalf("row leaks the Service explanation: %s", rows)
+				}
+				return
+			}
+			ev, ok := d.Evidence.(*health.RefsEvidence)
+			if !ok || ev.Explanation != tc.explanation || !strings.HasPrefix(d.Finding.Detail, tc.detail) || d.Finding.Message != "Backend not found" || (d.SuggestedFix != nil) != tc.fix {
+				t.Fatalf("evidence %#v detail %q fix %+v", d.Evidence, d.Finding.Detail, d.SuggestedFix)
+			}
+			if tc.fix {
+				if m := roundTrip(t, d.SuggestedFix.YAML); m["port"] != float64(80) || d.SuggestedFix.Path != "spec.rules[0].backendRefs[0]" {
+					t.Fatalf("fix %+v YAML %v", d.SuggestedFix, m)
+				}
+			}
+		})
+	}
+}
+
+// Codex 3.4 #1: Service explanations are 013's only. A 014 keeps the grant
+// explanation and fix whether the Service is missing or has another port.
+func TestRefNotPermittedKeepsGrantBesideServices(t *testing.T) {
+	crossNS := map[string]any{"name": "cart", "namespace": "store", "port": int64(8080)}
+	storeCart := cartService(80)
+	storeCart.Namespace, storeCart.UID = "store", "svc-store-cart"
+	for _, tc := range []struct {
+		name string
+		svc  *corev1.Service
+	}{{"missing", nil}, {"one other port", storeCart}} {
+		t.Run(tc.name, func(t *testing.T) {
+			objs := world(refsRoute("RefNotPermitted", crossNS))
+			want := 0
+			if tc.svc != nil {
+				objs, want = append(objs, tc.svc), 1
+			}
+			h := newHarness(t, setup{endpoints: true, catalog: fixCatalog(nil), rulesFor: computedtest.NoViews}, objs...)
+			h.awaitCache(t, "Services", func(s *cache.Snapshot) bool { return s.Access[cache.ServicesGVR].OK && len(s.Services) == want })
+			h.at(t, testutil.Now)
+			d := fixDetail(t, h.srv, health.CodeRefNotPermitted, "shop", "r")
+			ev, ok := d.Evidence.(*health.RefsEvidence)
+			if !ok || ev.Explanation != health.RefExplainController || strings.Contains(d.Finding.Detail, "Service `store/cart`") {
+				t.Fatalf("want the grant explanation: evidence %#v detail %q", d.Evidence, d.Finding.Detail)
+			}
+			if d.SuggestedFix == nil || !d.SuggestedFix.Create || d.SuggestedFix.Target.Kind != "ReferenceGrant" {
+				t.Fatalf("want the grant fix, got %+v", d.SuggestedFix)
+			}
+		})
+	}
+}
+
+// Codex 3.4 #2: every Service that attributes the failure is evidence. A
+// viewer who cannot see the resolving one gets evidenceRestricted and no fix.
+func TestAttributionServicesAreEvidence(t *testing.T) {
+	cart := map[string]any{"name": "cart", "port": int64(8080)}
+	pay := map[string]any{"name": "pay", "port": int64(9090)}
+	payService := cartService(9090)
+	payService.Name, payService.UID = "pay", "svc-pay"
+	hidePay := AuthorizerFunc(func(_ *http.Request, r objects.Ref) bool { return r.Kind != "Service" || r.Name != "pay" })
+	for _, tc := range []struct {
+		name   string
+		authz  Authorizer
+		hidden bool
+	}{{"sees both", nil, false}, {"resolving Service hidden", hidePay, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, setup{endpoints: true, authz: tc.authz, catalog: fixCatalog(nil), rulesFor: computedtest.NoViews},
+				append(world(refsRoute("BackendNotFound", cart, pay)), cartService(80), payService)...)
+			h.awaitCache(t, "Services", func(s *cache.Snapshot) bool { return s.Access[cache.ServicesGVR].OK && len(s.Services) == 2 })
+			h.at(t, testutil.Now)
+			d := fixDetail(t, h.srv, health.CodeRefUnresolved, "shop", "r")
+			if tc.hidden {
+				if !d.Finding.EvidenceRestricted || d.Evidence != nil || d.SuggestedFix != nil || strings.Contains(d.Finding.Detail, "has no port") {
+					t.Fatalf("want evidenceRestricted without explanation 3 or fix: %+v", d)
+				}
+				return
+			}
+			ev, ok := d.Evidence.(*health.RefsEvidence)
+			if !ok || ev.Explanation != health.RefExplainServicePort || d.Finding.EvidenceRestricted || d.SuggestedFix == nil {
+				t.Fatalf("want explanation 3 and the port fix: evidence %#v fix %+v", d.Evidence, d.SuggestedFix)
+			}
+		})
+	}
 }

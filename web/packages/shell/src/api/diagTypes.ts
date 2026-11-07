@@ -62,7 +62,9 @@ export type Evidence =
   | RefsEvidence
   | RuleReplacedEvidence
   | ListenerConflictEvidence
-  | StatusProgressEvidence;
+  | StatusProgressEvidence
+  | EndpointsEvidence
+  | WithheldEvidence;
 /** Evidence of a kind this build does not know, e.g. a downstream's; its finding renderer shows it. */
 export interface OtherEvidence {
   kind: string;
@@ -247,6 +249,36 @@ export interface StatusProgressEvidence {
   kinds: FreshnessCount[];
   oldest: string;
   syncs?: number;
+}
+
+/**
+ * Why KGWUI-023 reports a Service port (design §11): the port as the backendRef writes it, with its Service port name,
+ * and the ready and total endpoints of the larger address family across `slices` EndpointSlices.
+ */
+export interface EndpointsEvidence {
+  kind: "endpoints";
+  service: string;
+  port: number;
+  portName?: string;
+  ready: number;
+  total: number;
+  slices: number;
+}
+
+/**
+ * A Gateway's kgateway 2.5 per-client metrics behind KGWUI-024 (design §8.6), summed over controller Pods:
+ * its withheld proxies, and the alerting bounded publishes of the last 15 minutes by mode.
+ */
+export interface WithheldEvidence {
+  kind: "withheld";
+  withheld?: number;
+  releases?: ReleaseModeCount[];
+  reportedBy: string[];
+}
+/** How many bounded publishes of one mode a Gateway had. */
+export interface ReleaseModeCount {
+  mode: string;
+  count: number;
 }
 
 /**

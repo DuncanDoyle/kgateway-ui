@@ -203,7 +203,7 @@ func (h *handler) visibleOverview(v *view, m *engine.Model, i *engine.InstallMod
 	}
 	o := i.Owned
 	owned := &install.Owned{GatewayClasses: keep(o.GatewayClasses), Gateways: keep(o.Gateways), ListenerSets: keep(o.ListenerSets),
-		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Unattached: o.Unattached, Backends: keep(o.Backends)}
+		Routes: keepObjs(o.Routes), Policies: keepObjs(o.Policies), Listed: keepObjs(o.Listed), Unattached: o.Unattached, Backends: keep(o.Backends)}
 	return overview.Build(i.Resolved, owned, m.Snapshot, m.Served, rep, h.src.Platform())
 }
 

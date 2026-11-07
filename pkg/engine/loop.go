@@ -153,6 +153,27 @@ func encodeMetrics(reads []MetricsRead, now time.Time, maxAge time.Duration) uin
 					u64(math.Float64bits(series[k]))
 				}
 			}
+			str(p.BuildVersion)
+			flag(p.PerClientPresent)
+			withheld := sortedKeys(p.Withheld, func(a, b ctrlmetrics.GatewayKey) int {
+				return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+			})
+			u64(uint64(len(withheld)))
+			for _, k := range withheld {
+				str(k.Namespace)
+				str(k.Name)
+				u64(math.Float64bits(p.Withheld[k]))
+			}
+			bounded := sortedKeys(p.Bounded, func(a, b ctrlmetrics.ModeKey) int {
+				return cmp.Or(cmp.Compare(a.Gateway.Namespace, b.Gateway.Namespace), cmp.Compare(a.Gateway.Name, b.Gateway.Name), cmp.Compare(a.Mode, b.Mode))
+			})
+			u64(uint64(len(bounded)))
+			for _, k := range bounded {
+				str(k.Gateway.Namespace)
+				str(k.Gateway.Name)
+				str(k.Mode)
+				u64(math.Float64bits(p.Bounded[k]))
+			}
 		}
 	}
 	return h.Sum64()

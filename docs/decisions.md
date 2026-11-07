@@ -983,3 +983,58 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** The design states the as-built behaviour. Offline snapshot semantics for `analyze -f` (served kinds, discovery, access, install) need a design before they are built. Changing the previous-container read is one constant.
 
 **Alternatives:** n/a.
+
+## D-056 — Two kgwctl E2 requests join sub-phase 3.4 (2026-11-06, phase 3)
+**Status:** accepted 2026-11-06 (user)
+
+**Context:** kgwctl filed four non-blocking E2 requests after `v0.3.0`: three missing kinds (#17), a list-only snapshot (#18), namespace-scoped listing (#19) and a way to wait for the cache's goroutines (#20).
+
+**Decision:** #17 and #20 ship in 3.4 as Tasks 78a and 78b. DirectResponse, GatewayExtension and ReferenceGrant get descriptors, appended after the v1 kinds; ReferenceGrants are listed and shown, never evaluated. `pkg/cache` gains a call that returns once every goroutine `Start` launched has exited. #18 and #19 go to Phase 4 planning, because they change how the cache handles access and scope.
+
+**Consequences:** Two more watches' worth of RBAC and memory in 3.4, measured in Task 81. A minor tag after 3.4 carries the new exported API.
+
+**Alternatives:** None of the four in 3.4; all four in 3.4 (a design change to the cache's access model).
+
+## D-057 — Retained heap over 2.1 raised to 48 MiB; Service and EndpointSlice facts shrunk (2026-11-06, phase 3)
+**Status:** accepted 2026-11-06 (user)
+
+**Context:** The 3.4 bench (`bench/3.4.txt`) measures +41.9 MiB retained heap over 2.1 in the measurement world, against the 40 MiB gate (D-054). Real data grew 4.4 MB (EndpointSlice facts, the snapshot's fact slices and the routes' Service backendRefs). Freed informer stores leave 6–14 MB of fragmentation that varies between runs. The Service and EndpointSlice watches hold about 960 B per object, not the design's 200 B (design §11).
+
+**Decision:** First shrink the facts toward the design's 200 B per object: EndpointSlice ready counts as a slice indexed like the ports, not a map. Then raise the retained-heap gate to 48 MiB over 2.1. The ≤ +24 MiB over 3.1 gate is unchanged.
+
+**Consequences:** `TestBudgetHeap` gates at 48 MiB. The 3.4 bench is re-run after the shrink. OS memory (275.5 of 288 MiB) is also tight and benefits from the shrink.
+
+**Alternatives:** Shrink only and keep 40 MiB; raise the gate without shrinking.
+
+## D-058 — Sub-phase 3.4 as built: deviations from the design (2026-11-06, phase 3)
+**Status:** confirmed by the user (2026-11-06/07); items 7, 10 and 11 revised
+
+**Context:** 3.4 (brief `phases/phase-3/phase-3.4-brief.md`) shipped with these differences from design and plan. Each was ruled during the work (ledger rulings in brackets).
+
+**Decision:**
+1. KGWUI-023 has no proxy membership evidence (plan Task 76) [R118]. It needs a forward Service-port-to-Envoy-cluster mapping, which mirrors controller naming. It comes back once a verified, port-aware reverse mapping exists (xdsview `origin`, UI Phase 9).
+2. KGWUI-024's warning is tested on a real 2.5.0 capture: a `flip_release` before/after pair from kind with `REFERENCED` xDS scoping, a 20 ms publish budget and a CPU-capped controller (`pkg/ctrlmetrics/testdata/v2.5.0-released-a/-b.txt`). Its error (`warm_withheld`) is tested only on a fixture synthesised in the GA format [R130]. On kind a referenced cluster is missing from CDS for tens of milliseconds at most, so the gauge never outlasts a scrape. The 2.5 e2e row checks that 024 is available with no finding; the release trigger needs settings that would change the whole row, so it is not an e2e case (plan Task 86).
+3. 024's availability marker is any series of a 2.5 per-client family or of `kgateway_build_info`, not the withheld and bounded families themselves: a healthy 2.5 controller exports none of those (§8.6). Each signal has its own evidence.
+4. `kgateway_build_info`'s `version`, when it parses as a version, is the controller version for the install header, 022 and rule-set selection. A value that does not parse ("undefined") is ignored. Replicas that disagree keep the last agreed version [R132–R134].
+5. ReferenceGrant read access returns to the ClusterRole, reversing D-017 item 5 for that kind (D-056). The CRD read stays off.
+6. DirectResponse, GatewayExtension and ReferenceGrant are list-only: listed and shown, never judged, and outside `cluster access`, `Synced` and `Settled` [R124, R125]. kgateway writes status on an attached DirectResponse; judging it belongs to Phase 5 (Policies).
+7. On 2.5, a `targetSelector` that matches nothing shows 003, not 016 (§7.6). kgateway calls an empty selector valid and never judges selectors. Revised (user, 2026-11-07): 003's "no status from the controller" misreads a processed policy, so 3.5 brings back the computed 016 for this one case on 2.5, labelled UI-computed (queue S7). Exit: kgateway#14998 asks the controller to report it; the UI reads that status once it ships.
+8. 023 evidence counts the larger address family of a dual-stack Service, and a port number on both TCP and UDP matches the TCP port.
+9. New exported API: `computed.TargetStatusReporter` and `Selection.TargetStatusReporter()` (user, 2026-11-06). A rule set that wraps `kgw25` must forward it.
+10. On 2.5, KGWUI-018 has no status-sync count: the controller no longer exports `status_syncs_total` (kgateway #14519). 018 already treats the family as absent. Revised (user, 2026-11-07): the status-sync count goes from the UI on every version; it is not useful (queue S8).
+11. A controller whose version cannot be read, from the tag or from build_info, still selects the 2.4 rule set, as before 3.4. Revised (user, 2026-11-07): it selects the 2.5 rule set, the version the UI is positioned on (queue S9). Cost: an older controller whose version cannot be read gets no computed 016, since 2.5 relies on the controller's `TargetNotFound`.
+
+**Consequences:** design §7.6, §8.6 and plan Task 76 state the as-built behaviour. Items 1 and 6 are carried to the phase review.
+
+**Alternatives:** n/a.
+
+## D-059 — Group IDs may hash values the resource's own status serves (2026-11-07, phase 3)
+**Status:** accepted (user, 2026-11-07)
+
+**Context:** The phase review (`phases/phase-3/reviews/phase-codex.md` #1) found that KGWUI-015's group ID hashes the replacing policy's name, which §14 rule 11 does not allow for a viewer who may not see that policy. The route's own status message already names the policy, and Phase 2 rule 8 serves that status to the same viewer.
+
+**Decision:** amend §14 rule 11: a `group` may also hash a value the grouped resource's own status already serves to the caller. No code change.
+
+**Consequences:** queue S6 closes without code. Rule 11 now depends on Phase 2 rule 8: if route status stops reaching restricted viewers, 015's group ID must change with it.
+
+**Alternatives:** ordinal grouping: rejected, since a per-route ordinal cannot group routes across the policy, and a cross-route ordinal encodes the policy anyway.

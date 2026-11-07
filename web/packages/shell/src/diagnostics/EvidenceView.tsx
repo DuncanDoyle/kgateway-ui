@@ -6,6 +6,7 @@ import { useNow } from "../api/clock";
 import { useMeta } from "../api/hooks";
 import type {
   ControllerLogs,
+  EndpointsEvidence,
   Evidence,
   Finding,
   FreshnessEvidence,
@@ -19,6 +20,7 @@ import type {
   StatusProgressEvidence,
   VersionPods,
   VersionSkewEvidence,
+  WithheldEvidence,
   XDSRejectsEvidence,
 } from "../api/types";
 import { diagnosticsCopy } from "../copy/explorer";
@@ -532,6 +534,67 @@ function StatusProgress({ e, now }: { e: StatusProgressEvidence; now: number }) 
   );
 }
 
+function Endpoints({ e, finding, installId }: { e: EndpointsEvidence; finding?: Finding; installId: string }) {
+  // The finding's resource is the Service; its server-computed link decides whether the name opens.
+  const svc = finding?.resource?.kind === "Service" ? finding.resource : undefined;
+  return (
+    <Facts>
+      <dt>{diagnosticsCopy.service}</dt>
+      <dd>{svc ? <LinkedName refValue={svc} installId={installId} /> : <span className="mono">{e.service}</span>}</dd>
+      <dt>{diagnosticsCopy.servicePort}</dt>
+      <dd className="mono">{e.portName ? `${e.port} (${e.portName})` : e.port}</dd>
+      <dt>{diagnosticsCopy.ready}</dt>
+      <dd>{diagnosticsCopy.readyEndpoints(e.ready, e.total)}</dd>
+      <dt>{diagnosticsCopy.endpointSlices}</dt>
+      <dd>{e.slices}</dd>
+    </Facts>
+  );
+}
+
+function Withheld({ e }: { e: WithheldEvidence }) {
+  return (
+    <>
+      <Facts>
+        {e.withheld ? (
+          <>
+            <dt>{diagnosticsCopy.withheldProxies}</dt>
+            <dd>{e.withheld}</dd>
+          </>
+        ) : null}
+        <dt>{diagnosticsCopy.reportedBy}</dt>
+        <dd className="mono">{e.reportedBy.join(", ")}</dd>
+      </Facts>
+      {e.releases?.length ? (
+        <DiagTable>
+          <table aria-label={diagnosticsCopy.releasedRecently}>
+            <thead>
+              <tr>
+                <th scope="col">{diagnosticsCopy.releaseMode}</th>
+                <th scope="col">{diagnosticsCopy.releaseCount}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {e.releases.map((r) => {
+                // A mode this build has no label for shows as the metric writes it.
+                const label = diagnosticsCopy.releaseModes[r.mode];
+                return (
+                  <tr key={r.mode}>
+                    <td>
+                      {label ? <span>{label} </span> : null}
+                      <span className={label ? "mono muted" : "mono"}>{r.mode}</span>
+                    </td>
+                    <td>{r.count}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </DiagTable>
+      ) : null}
+    </>
+  );
+}
+
 function Versions({ title, list }: { title: string; list?: VersionPods[] }) {
   if (!list?.length) return null;
   return (
@@ -697,6 +760,12 @@ export function EvidenceView({ evidence, finding, stylesOverride }: EvidenceView
       break;
     case "status-progress":
       body = <StatusProgress e={e} now={now} />;
+      break;
+    case "endpoints":
+      body = <Endpoints e={e} finding={finding} installId={installId} />;
+      break;
+    case "withheld":
+      body = <Withheld e={e} />;
       break;
     default: {
       // A restricted finding shows only its identity, so no renderer runs for it.

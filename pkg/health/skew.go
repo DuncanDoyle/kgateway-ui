@@ -165,8 +165,9 @@ func (skewCheck) settle(ctx RunContext) (until time.Time, quiet, stuck bool) {
 	return until, !cur.settled.IsZero() && in.Now.Before(until), false
 }
 
-// controllerVersion is the version the controller's running Pods share, else
-// the Deployment's; unknown is true when a running Pod's tag is not a version.
+// controllerVersion is the version the controller reports, as rule-set
+// selection reads it; else the one its running Pods share, else the
+// Deployment's. unknown is true when a running Pod's tag is not a version.
 func controllerVersion(in Input) (v string, unknown bool) {
 	var vs []string
 	if in.Process != nil {
@@ -180,6 +181,9 @@ func controllerVersion(in Input) (v string, unknown bool) {
 				vs = append(vs, p.Version)
 			}
 		}
+	}
+	if in.Install.Edition == "kgateway" && in.Install.ReportedVersion != "" {
+		return in.Install.ReportedVersion, unknown
 	}
 	if len(vs) == 1 {
 		return vs[0], unknown
@@ -235,7 +239,7 @@ func replicaSkew(in Input) (Finding, bool) {
 	r := objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
 	return Finding{Code: CodeVersionSkew, Slug: "version-skew", Severity: SeverityWarning, Install: in.Install.ID(), Resource: &r,
 		Message: skewReplicasMessage, Detail: fmt.Sprintf(skewReplicasDetail, strings.Join(versions, " and ")), Key: []string{"controller"},
-		Evidence: refs, Facts: &VersionSkewEvidence{Controller: in.Install.Version, Replicas: groups}}, true
+		Evidence: refs, Facts: &VersionSkewEvidence{Controller: in.Install.ControllerVersion(), Replicas: groups}}, true
 }
 
 // proxySkew is 022 on gw when one of its running proxies is on another minor

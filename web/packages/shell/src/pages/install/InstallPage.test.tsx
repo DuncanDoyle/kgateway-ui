@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { POLL_MS, useInstalls } from "../../api/hooks";
 import type {
+  CheckResult,
   Diagnostics,
   GatewayRow,
   HealthReport,
@@ -345,6 +346,28 @@ it("not available checks show their reason", async () => {
   const denied = items.find((li) => li.textContent?.includes("version skew")) as HTMLElement;
   expect(denied).toHaveTextContent(/^Not available: version skew\s*No permission to read its input$/);
 });
+
+it.each(Object.entries(diagnosticsCopy.unavailableReason))(
+  "What was checked names the reason %s when the server gives no message",
+  async (reason, text) => {
+    const h = healthy();
+    h.checks.push({
+      name: "backend endpoints",
+      ok: false,
+      required: false,
+      collectedAt: h.collectedAt,
+      unavailable: reason as CheckResult["unavailable"],
+    });
+    mount(h);
+    await screen.findByTestId("health-strip");
+    const li = within(screen.getByRole("list", { name: "Checks" }))
+      .getAllByRole("listitem")
+      .find((i) => i.textContent?.includes("backend endpoints")) as HTMLElement;
+    expect(li).toHaveTextContent(new RegExp(`^Not available: backend endpoints\\s*${text}$`));
+    expect(within(li).getByTestId("check-unavailable")).toBeInTheDocument();
+    expect(within(li).queryByTestId("health-icon-unknown")).toBeNull();
+  },
+);
 
 it("Processes shows the controller and proxies lines and links to the Processes page", async () => {
   const d = diagnostics(unhealthy());

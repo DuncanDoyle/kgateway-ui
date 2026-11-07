@@ -1,0 +1,7 @@
+# explorer.yaml's TCPRoute for bundles that do not serve v1 (Gateway API v1.5).
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata: { name: tcp, namespace: infra, labels: { e2e: explorer } }
+spec:
+  parentRefs: [{ name: edge, sectionName: tcp }]
+  rules: [{ backendRefs: [{ name: tcp, port: 9000 }] }]

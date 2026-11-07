@@ -54,7 +54,7 @@ func capture(t *testing.T, name string) []byte {
 	return b
 }
 
-// The Task 20 captures, unfiltered, read into the stats of the §8.8 table only.
+// The Task 20 (unfiltered) and Task 83 captures, read into the stats of the §8.8 table only.
 func TestParseCaptures(t *testing.T) {
 	cases := []struct {
 		file string
@@ -66,6 +66,10 @@ func TestParseCaptures(t *testing.T) {
 		{"v2.4.7-stats-ok.txt", proxystats.PodStats{LDS: proxystats.Pair{Success: 1}, CDS: proxystats.Pair{Success: 1}, Uptime: 20}},
 		{"v2.4.7-stats-rejecting.txt", proxystats.PodStats{LDS: proxystats.Pair{Success: 1}, CDS: proxystats.Pair{Rejected: 712, Success: 1},
 			RDS: map[string]int64{"listener~8080": 812}, Uptime: 165}},
+		// 2.5.0, filtered: the RDS prefix is http_8080, and a Pod whose first CDS was rejected has no cds.update_success.
+		{"v2.5.0-stats-ok.txt", proxystats.PodStats{LDS: proxystats.Pair{Success: 2}, CDS: proxystats.Pair{Success: 2}, Uptime: 115}},
+		{"v2.5.0-stats-rejecting.txt", proxystats.PodStats{LDS: proxystats.Pair{Success: 1}, CDS: proxystats.Pair{Rejected: 8},
+			RDS: map[string]int64{"listener~8080": 8}, Uptime: 120}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.file, func(t *testing.T) {

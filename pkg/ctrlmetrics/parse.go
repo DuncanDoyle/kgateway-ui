@@ -29,7 +29,28 @@ const (
 	// StatusSyncsTotal counts status syncs per syncer, object and result
 	// (labels name, namespace, syncer, result; proxy_syncer/metrics.go:23-30 on v2.3.11 and v2.4.7).
 	StatusSyncsTotal = "kgateway_status_syncer_status_syncs_total"
+	// BuildInfo carries the controller version in its version label (v2.5 and later; pkg/version/metrics.go at v2.5.0).
+	BuildInfo = "kgateway_build_info"
+	// PerClientWithheld counts withheld clients per Gateway and state (v2.5 and later).
+	PerClientWithheld = "kgateway_xds_snapshot_perclient_withheld_clients"
+	// PerClientBounded counts publications a time bound released before every cluster was ready, per Gateway and mode.
+	PerClientBounded = "kgateway_xds_snapshot_perclient_bounded_publishes_total"
+	// PerClientDefers counts per-client snapshots built while a referenced cluster was not ready, per Gateway and reason.
+	PerClientDefers = "kgateway_xds_snapshot_perclient_defers_total"
+	// DeferredClients counts connected clients without a snapshot yet, per Gateway.
+	DeferredClients = "kgateway_xds_snapshot_deferred_clients"
+	// WarmWithheld is the PerClientWithheld state of a warm client withheld past the publish budget.
+	WarmWithheld = "warm_withheld"
 )
+
+// perClientFamilies are the per-client publication families of kgateway 2.5.
+var perClientFamilies = []string{PerClientWithheld, PerClientBounded, PerClientDefers, DeferredClients, "kgateway_xds_snapshot_perclient_reclaimed_total"}
+
+// ModeKey identifies a bounded-publish series: one Gateway and one mode.
+type ModeKey struct {
+	Gateway GatewayKey
+	Mode    string
+}
 
 // GatewayKey identifies a Gateway in metric labels.
 type GatewayKey struct{ Namespace, Name string }
@@ -62,6 +83,16 @@ type PodMetrics struct {
 	// is false when the family is absent, which never means zero.
 	StatusSyncs        float64
 	StatusSyncsPresent bool
+	// BuildVersion is build_info's version label, such as "v2.5.0"; "" when absent.
+	BuildVersion string
+	// PerClientPresent is true when the scrape has a per-client family or
+	// build_info (both kgateway 2.5). Withheld and bounded series exist only
+	// while a client is held, so their absence alone proves nothing.
+	PerClientPresent bool
+	// Withheld is the warm_withheld client count per Gateway; nil when none.
+	Withheld map[GatewayKey]float64
+	// Bounded is bounded_publishes_total per Gateway and mode; nil when none.
+	Bounded map[ModeKey]float64
 }
 
 // Metrics is the interpreted subset of one or more controller scrapes.
@@ -115,6 +146,7 @@ func Parse(r io.Reader) (Metrics, error) {
 			pod.StatusSyncs += s.GetCounter().GetValue()
 		}
 	}
+	parsePerClient(fams, &pod)
 	m.PerPod = []PodMetrics{pod}
 	if f, ok := fams[XDSSnapshotResources]; ok {
 		m.Snapshot = map[GatewayKey]SnapshotResources{}
@@ -136,6 +168,47 @@ func Parse(r io.Reader) (Metrics, error) {
 		}
 	}
 	return m, nil
+}
+
+// parsePerClient reads build_info and the per-client families into pod.
+func parsePerClient(fams map[string]*dto.MetricFamily, pod *PodMetrics) {
+	if f, ok := fams[BuildInfo]; ok && len(f.GetMetric()) > 0 {
+		pod.BuildVersion = lbls(f.GetMetric()[0])["version"]
+		pod.PerClientPresent = true
+	}
+	for _, name := range perClientFamilies {
+		pod.PerClientPresent = pod.PerClientPresent || len(fams[name].GetMetric()) > 0
+	}
+	for _, s := range fams[PerClientWithheld].GetMetric() {
+		if l := lbls(s); l["state"] == WarmWithheld && s.GetGauge().GetValue() > 0 {
+			if pod.Withheld == nil {
+				pod.Withheld = map[GatewayKey]float64{}
+			}
+			pod.Withheld[GatewayKey{l["namespace"], l["gateway"]}] += s.GetGauge().GetValue()
+		}
+	}
+	for _, s := range fams[PerClientBounded].GetMetric() {
+		l := lbls(s)
+		if pod.Bounded == nil {
+			pod.Bounded = map[ModeKey]float64{}
+		}
+		pod.Bounded[ModeKey{GatewayKey{l["namespace"], l["gateway"]}, l["mode"]}] += s.GetCounter().GetValue()
+	}
+}
+
+// BuildVersion is the build_info version every reporting Pod shares; "" when
+// no Pod reports one. agreed is false when two Pods disagree, as during a rollout.
+func (m Metrics) BuildVersion() (v string, agreed bool) {
+	for _, p := range m.PerPod {
+		switch {
+		case p.BuildVersion == "":
+		case v == "":
+			v = p.BuildVersion
+		case v != p.BuildVersion:
+			return "", false
+		}
+	}
+	return v, true
 }
 
 // field is r's count for a snapshot resource label value; nil for another value.
@@ -201,16 +274,41 @@ type PodTotals map[string]map[TypeKey]float64
 // absent from cur is forgotten, so callers skip Err results (an empty cur
 // forgets every UID). A series new under a seen UID counts its full value.
 func TotalGrowth(prev PodTotals, cur []PodMetrics) (growth map[TypeKey]float64, next PodTotals) {
-	growth, next = map[TypeKey]float64{}, PodTotals{}
+	perPod, next := counterGrowth(prev, cur, func(p PodMetrics) map[TypeKey]float64 { return p.Total })
+	growth = map[TypeKey]float64{}
+	for _, g := range perPod {
+		for k, v := range g {
+			growth[k] += v
+		}
+	}
+	return growth, next
+}
+
+// PodBounded is the last seen bounded_publishes_total per Pod UID.
+type PodBounded map[string]map[ModeKey]float64
+
+// BoundedGrowth is TotalGrowth for bounded_publishes_total, kept per Pod UID
+// so callers can name the Pods: a first sight is a baseline and a lower value a reset.
+func BoundedGrowth(prev PodBounded, cur []PodMetrics) (growth, next PodBounded) {
+	return counterGrowth(prev, cur, func(p PodMetrics) map[ModeKey]float64 { return p.Bounded })
+}
+
+// counterGrowth is the growth per Pod UID behind TotalGrowth and BoundedGrowth;
+// a UID first seen or without growth has no entry.
+func counterGrowth[K comparable, M ~map[string]map[K]float64](prev M, cur []PodMetrics, series func(PodMetrics) map[K]float64) (growth, next M) {
+	growth, next = M{}, M{}
 	for _, p := range cur {
 		last, seen := prev[p.UID]
-		next[p.UID] = maps.Clone(p.Total)
+		next[p.UID] = maps.Clone(series(p))
 		if !seen {
 			continue
 		}
-		for k, v := range p.Total {
+		for k, v := range series(p) {
 			if d := v - last[k]; d > 0 {
-				growth[k] += d
+				if growth[p.UID] == nil {
+					growth[p.UID] = map[K]float64{}
+				}
+				growth[p.UID][k] += d
 			}
 		}
 	}

@@ -24,7 +24,7 @@ import (
 )
 
 // tags are the kgateway tags each rule set's kgateway provenance must cite.
-var tags = map[string]string{"kgateway-2.3": "v2.3.11", "kgateway-2.4": "v2.4.7"}
+var tags = map[string]string{"kgateway-2.3": "v2.3.11", "kgateway-2.4": "v2.4.7", "kgateway-2.5": "v2.5.0"}
 
 // listenerExpect is a listener count. Every field is compared; absent means zero.
 type listenerExpect struct {
@@ -113,7 +113,7 @@ var (
 		"child_rule_matcher", "cyclic1", "cyclic2", "discard_invalid_child_matches", "inherit_parentref",
 		"invalid_child_valid_standalone", "label_based", "multiple_children", "multiple_parents",
 		"multi_level_multiple_parents", "nested_absolute_relative", "relative_paths", "unresolved_ref"}
-	delegationOutputsOf = map[string][]string{"kgateway-2.4": {"basic_parentref_match_same_namespace"}}
+	delegationOutputsOf = map[string][]string{"kgateway-2.4": {"basic_parentref_match_same_namespace"}, "kgateway-2.5": {"basic_parentref_match_same_namespace"}}
 )
 
 // TestDelegationGoldensCiteKgateway requires a views B and C case for each of
@@ -734,7 +734,10 @@ func comparePolicyTargets(t *testing.T, c testutil.RuleCase, rules computed.Rule
 // An unknown scope makes every target unknown (D-024), and a kind that is not
 // served or watched is unknown while the other targets keep their outcome.
 func TestPolicyTargetsUnknown(t *testing.T) {
-	for dir := range tags {
+	for dir, tag := range tags {
+		if rulesets.Select(tag).PolicyTargeter() == nil {
+			continue // 016 comes from status on this set
+		}
 		t.Run(dir, func(t *testing.T) {
 			c := testutil.LoadRuleCase(t, filepath.Join("testdata", dir, "policy-targets.yaml"))
 			pt := rulesets.Select(c.ControllerVersion).PolicyTargeter()
@@ -784,8 +787,8 @@ func targetKinds(in computed.TargetInput) []objects.GroupKind {
 }
 
 // TestRuleSetWithoutPolicyTargeterRaisesNo016: PolicyTargeter is optional, so
-// a downstream rule set that wraps kgw24 has none and gets no target results;
-// the shipped sets, and 2.4's set chosen for a newer controller, have one.
+// a downstream rule set that wraps kgw24 has none and gets no target results.
+// 2.3 and 2.4 have one; 2.5, and 2.5's set chosen for a newer controller, read 016 from status (D-020 rule 5).
 func TestRuleSetWithoutPolicyTargeterRaisesNo016(t *testing.T) {
 	wrapped := computed.Selection{Rules: struct{ computed.Rules }{rulesets.Select("v2.4.7").Rules}}
 	if wrapped.Rules.Version() != "kgateway-2.4" {
@@ -794,9 +797,9 @@ func TestRuleSetWithoutPolicyTargeterRaisesNo016(t *testing.T) {
 	if pt := wrapped.PolicyTargeter(); pt != nil {
 		t.Fatalf("a rule set without PolicyTargets has a targeter: %T", pt)
 	}
-	for _, v := range []string{"v2.3.11", "v2.4.7", "v2.5.0-rc.1"} {
-		if rulesets.Select(v).PolicyTargeter() == nil {
-			t.Errorf("%s: the selected rule set has no PolicyTargeter", v)
+	for v, want := range map[string]bool{"v2.3.11": true, "v2.4.7": true, "v2.5.0-rc.1": false, "v2.5.0": false, "v2.6.0": false} {
+		if got := rulesets.Select(v).PolicyTargeter() != nil; got != want {
+			t.Errorf("%s: PolicyTargeter %v, want %v", v, got, want)
 		}
 	}
 }

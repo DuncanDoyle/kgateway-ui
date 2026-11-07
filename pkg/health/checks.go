@@ -25,7 +25,8 @@ import (
 // Upstream returns the upstream checks (design §5.2, Phase 3 §9.3).
 func Upstream() []Check {
 	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{},
-		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}}
+		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}, endpointsCheck{},
+		withheldCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }
@@ -69,7 +70,9 @@ func (c cacheCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	var fs []Finding
 	core := []schema.GroupVersionResource{cache.NamespacesGVR, cache.PodsGVR, cache.DeploymentsGVR}
 	for _, s := range in.Served {
-		core = append(core, s.GVR())
+		if !s.ListOnly { // list-only kinds are optional (D-034); the overview tile shows their access
+			core = append(core, s.GVR())
+		}
 	}
 	for _, gvr := range core {
 		if a, known := in.Snapshot.Access[gvr]; known && !a.OK {
@@ -478,9 +481,14 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 			if !current(p.Obj, objects.ParentRef{}, a.Conditions, policyRequired, policyOptional, extra) {
 				continue
 			}
+			// 016 owns TargetNotFound where the rule set reads it from status (D-030).
+			tnf, fromStatus := in.statusTargetFinding(p.Obj, a.Conditions, extra, owner)
+			if fromStatus {
+				fs = append(fs, tnf)
+			}
 			// Only the freshness-checked types are judged; others may be stale.
 			for _, t := range append(slices.Clone(policyRequired), policyOptional...) {
-				if cond := objects.FindCondition(a.Conditions, t); cond != nil {
+				if cond := objects.FindCondition(a.Conditions, t); cond != nil && (!fromStatus || cond.Reason != "TargetNotFound") {
 					if sev, report := policySeverity(*cond); report {
 						add(p.Obj, sev, *cond, extra, owner)
 					}

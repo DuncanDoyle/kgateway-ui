@@ -128,3 +128,30 @@ func TestFixFromComputeResult(t *testing.T) {
 		t.Fatalf("fragment %v (%v):\n%s", frag, err, fx.YAML)
 	}
 }
+
+// Design §7.7: a service-port explanation gives the port fix only for a
+// one-port Service; two or more ports leave no single answer.
+func TestPortFixNeedsOnePort(t *testing.T) {
+	cart := objects.Ref{Kind: "Service", Namespace: "shop", Name: "cart"}
+	const path = "spec.rules[1].backendRefs[2]"
+	f := refsFinding(health.CodeRefUnresolved, health.RefExplainServicePort, path, cart, nil)
+	f.Facts.(*health.RefsEvidence).Ports = []int32{80}
+	fx := diagnose.Fix(&f)
+	if fx == nil || fx.Path != path || fx.Create || fx.Title != "Set the port to `80`" || len(fx.Names) != 2 || fx.Names[1] != cart {
+		t.Fatalf("fix %+v", fx)
+	}
+	var frag map[string]any
+	if err := yaml.Unmarshal([]byte(fx.YAML), &frag); err != nil || frag["port"] != float64(80) || frag["name"] != "cart" || frag["namespace"] != "shop" || frag["kind"] != "Service" {
+		t.Fatalf("YAML %q: %v", fx.YAML, err)
+	}
+	for name, ports := range map[string][]int32{"two ports": {80, 443}, "no ports": nil} {
+		f.Facts.(*health.RefsEvidence).Ports = ports
+		if fx := diagnose.Fix(&f); fx != nil {
+			t.Errorf("%s: want no fix, got %+v", name, fx)
+		}
+	}
+	missing := refsFinding(health.CodeRefUnresolved, health.RefExplainServiceMissing, path, cart, nil)
+	if fx := diagnose.Fix(&missing); fx != nil {
+		t.Errorf("missing Service: want no fix, got %+v", fx)
+	}
+}

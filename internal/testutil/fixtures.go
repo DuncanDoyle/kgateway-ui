@@ -460,6 +460,31 @@ func Backend(ns, name string, cs []metav1.Condition) *unstructured.Unstructured 
 	return u
 }
 
+// DirectResponse builds a kgateway DirectResponse with no status.
+func DirectResponse(ns, name string) *unstructured.Unstructured {
+	u := obj("gateway.kgateway.dev/v1alpha1", "DirectResponse", ns, name)
+	u.Object["spec"] = map[string]any{"status": int64(503)}
+	return u
+}
+
+// GatewayExtension builds a kgateway GatewayExtension with no status.
+func GatewayExtension(ns, name string) *unstructured.Unstructured {
+	u := obj("gateway.kgateway.dev/v1alpha1", "GatewayExtension", ns, name)
+	u.Object["spec"] = map[string]any{"type": "ExtAuth"}
+	return u
+}
+
+// ReferenceGrant builds a ReferenceGrant that lets HTTPRoutes of fromNS use
+// Services in ns. It has no status.
+func ReferenceGrant(ns, name, fromNS string) *unstructured.Unstructured {
+	u := obj("gateway.networking.k8s.io/v1beta1", "ReferenceGrant", ns, name)
+	u.Object["spec"] = map[string]any{
+		"from": []any{map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "namespace": fromNS}},
+		"to":   []any{map[string]any{"group": "", "kind": "Service"}},
+	}
+	return u
+}
+
 // SafeGatewayLabelValue is the gateway-name label value kgateway writes: the
 // name, or for one over 63 characters its first 50 (trailing "-" trimmed), "-"
 // and the first 12 hex digits of its SHA-256.
@@ -701,7 +726,7 @@ func ScaleServices(t ScaleShape, _ int64) []*corev1.Service {
 }
 
 // ScaleEndpointSlices returns one slice per Service plus second slices of
-// referenced ones. Under Worst every ScaleNoReadyEvery-th referenced Service has no ready endpoint.
+// referenced ones, each with the Service's port. Under Worst every ScaleNoReadyEvery-th referenced Service has no ready endpoint.
 func ScaleEndpointSlices(t ScaleShape, seed int64) []*discoveryv1.EndpointSlice {
 	r := scaleRand(seed, 0x511ce)
 	out := make([]*discoveryv1.EndpointSlice, 0, t.EndpointSlices)
@@ -716,7 +741,11 @@ func ScaleEndpointSlices(t ScaleShape, seed int64) []*discoveryv1.EndpointSlice 
 		for j := range rs {
 			rs[j] = ready
 		}
-		out = append(out, EndpointSlice(scaleSvcNS(t, i), fmt.Sprintf("%s-%d", ScaleServiceName(t, i), k), ScaleServiceName(t, i), rs...))
+		es := EndpointSlice(scaleSvcNS(t, i), fmt.Sprintf("%s-%d", ScaleServiceName(t, i), k), ScaleServiceName(t, i), rs...)
+		// The Service's port, as the EndpointSlice controller writes it.
+		name, port := "http", int32(80)
+		es.Ports = []discoveryv1.EndpointPort{{Name: &name, Port: &port}}
+		out = append(out, es)
 	}
 	return out
 }

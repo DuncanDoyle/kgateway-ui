@@ -11,8 +11,12 @@
 // Before a single pass, wait with [cache.Cache.Settled], not by receiving on
 // Changes. Settled covers the required informers only. Then wait until each
 // optional watch in Snapshot().Access ([cache.ProxyPodsGVR], [cache.CRDsGVR],
-// [cache.EventsGVR], when present) is OK or has an Err. Otherwise a pass can
-// read them as not yet read, and the output varies between runs.
+// [cache.EventsGVR], [cache.ServicesGVR], [cache.EndpointSlicesGVR], when present)
+// and each list-only served kind ([kinds.Descriptor.ListOnly]) is OK or has an Err.
+// Otherwise a pass can read them as not yet read, and the output varies between runs.
+//
+// To stop, cancel the context passed to [cache.Cache.Start], then call
+// [cache.Cache.Wait], which returns once every goroutine Start launched has exited.
 //
 // Controller logs and proxy stats come from long-running collectors that
 // pkg/app runs and this package does not. A caller without them gets those
@@ -68,6 +72,8 @@ type Options struct {
 	DelegationEdgeCap int
 	// NoEvents and NoCRDs turn off the Warning Event and CRD metadata watches.
 	NoEvents, NoCRDs bool
+	// NoEndpoints turns off the Service and EndpointSlice watches; the zero value keeps them on.
+	NoEndpoints bool
 	// Clock drives the engine and stamps snapshots; nil means the real clock.
 	Clock clock.WithTicker
 }
@@ -82,7 +88,7 @@ type Config struct {
 	Kinds *kinds.Monitor
 	// Changes is the one coalescing recompute signal the cache, the kinds
 	// monitor and the engine share (D-019). A one-shot caller waits with
-	// Cache.Settled and the optional Access entries, not on Changes.
+	// Cache.Settled and the optional and list-only Access entries, not on Changes.
 	Changes *trigger.Signal
 }
 
@@ -151,7 +157,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 	}
 	return Config{
 		Cache: cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel,
-			ProxyPodSelectors: proxySel, Events: !o.NoEvents, CRDs: !o.NoCRDs, Metadata: c.Metadata, Changes: changes, Now: now},
+			ProxyPodSelectors: proxySel, Events: !o.NoEvents, CRDs: !o.NoCRDs, Endpoints: !o.NoEndpoints, Metadata: c.Metadata, Changes: changes, Now: now},
 		Engine: engine.Config{Served: served, KindsChange: mon.Change, Catalog: mon.Catalog, Detectors: reg.Detectors, Scope: reg.Scope,
 			Verifier: verifier, Metrics: ctrlmetrics.Static{}, Checks: reg.Checks, Pinned: pinned, Platform: plat,
 			MetricsMaxAge: MetricsMaxAge(o.MetricsInterval), ProxyMode: reg.ProxyMode, RulesFor: reg.RulesFor, Process: reg.Process,

@@ -12,3 +12,10 @@ Topics the user-facing documentation must cover when it is written. Each entry s
 - **Known limits.** Very long inherited path segments across deep chains, and very long header values in failure reasons, can use a lot of memory; tracked for a later phase.
 - **How to raise it.** The cap is configurable (binary flag and chart value; see the chart README). Raising it lets the UI compute denser delegation, but memory grows with it: during a recompute the old and new models are both in memory. Users who raise the cap must also raise the pod's memory limit. The binary sets its Go memory target to 90 % of the pod limit unless `GOMEMLIMIT` is set, so the two move together.
 - **Sizing guidance.** Give measured numbers (peak RSS per cap value on the dense benchmark, `docs/phases/phase-2/bench/`) rather than a formula. Measured on the densest benchmark (100 wildcard parents × 1,000 routes, no `GOMEMLIMIT`; `bench/2.4-dense-memory.txt`): the default 10,000 peaks at about 425–465 MiB RSS, inside the default 512Mi limit; 20,000 at about 510–565 MiB; 50,000 at about 700–760 MiB. Less dense installs use less at the same cap.
+
+## Scalability: what the UI watches and holds (2026-11-06, D-031)
+
+- **Cluster-wide watches.** Services and EndpointSlices are watched across the cluster, not only the ones routes reference. A Kubernetes watch can filter by namespace, label or field, never by "referenced by a route"; watching per Service would put far more load on the API server.
+- **Cut down on arrival.** Each object is reduced to about 200 bytes at the informer (Service: name, type, ports; EndpointSlice: ports and ready counts). At 5,000 Services and 6,000 EndpointSlices this is about 2 MiB. Checks look only at Services a route references.
+- **Turning it off.** The `diagnostics.endpoints` chart value turns both watches off; KGWUI-023 then reads "not available".
+- **Sizing guidance.** Give measured numbers per scale tier from the Phase 3 bench records, not a formula.

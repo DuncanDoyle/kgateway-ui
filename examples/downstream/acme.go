@@ -161,8 +161,8 @@ func (acmeProxyStats) Interpret(t proxystats.Target, body []byte) (proxystats.Po
 }
 
 // acmeRules is acme's computed rule set: kgateway 2.4's views under acme's name.
-// Embedding computed.Rules promotes only its methods, so kgw24's optional
-// PolicyTargeter is not offered and no computed KGWUI-016 is raised.
+// Embedding computed.Rules drops optional methods: kgw24's PolicyTargeter, so no
+// computed KGWUI-016, and the TargetStatusReporter a kgw25 wrapper must forward.
 type acmeRules struct{ computed.Rules }
 
 func (acmeRules) Version() string { return "acme-2.4" }

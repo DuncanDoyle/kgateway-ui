@@ -44,6 +44,7 @@ func kindKeys(served []kinds.Served) (map[objects.GroupKind]kindKey, []kindKey) 
 	for gk, gvr := range map[objects.GroupKind]schema.GroupVersionResource{
 		{Kind: "Namespace"}: cache.NamespacesGVR, {Kind: "Pod"}: cache.PodsGVR, {Group: "apps", Kind: "Deployment"}: cache.DeploymentsGVR,
 		cache.ProxyPodsKind: cache.ProxyPodsGVR, cache.EventsKind: cache.EventsGVR, cache.CRDsKind: cache.CRDsGVR,
+		cache.ServicesKind: cache.ServicesGVR, cache.EndpointSlicesKind: cache.EndpointSlicesGVR,
 	} {
 		byGK[gk] = kindKey{gvr, gvr.String()}
 	}
@@ -218,7 +219,7 @@ func eventsPrint(p *printer, snap *cache.Snapshot) {
 // Deployment and Pods by (uid, resourceVersion), scope and settings.
 func installPrint(r install.Resolved) uint64 {
 	p := newPrinter()
-	for _, s := range []string{r.ID(), r.Namespace, r.Name, r.DisplayName, r.Version, r.BaseVersion, r.Edition, r.Container} {
+	for _, s := range []string{r.ID(), r.Namespace, r.Name, r.DisplayName, r.Version, r.BaseVersion, r.ReportedVersion, r.Edition, r.Container} {
 		p.str(s)
 	}
 	p.u64(uint64(len(r.ControllerNames)))

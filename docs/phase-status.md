@@ -14,17 +14,28 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] Q5 Sub-phase 3.1 Foundations, performance and the KRT decision (Tasks 12–33) — closed 2026-11-02, phases/phase-3/phase-3.1-complete.md
 - [x] Q6 Sub-phase 3.2 Data plane, processes and the overview (Tasks 34–54) — closed 2026-11-04, phases/phase-3/phase-3.2-complete.md
 - [x] Q7 Sub-phase 3.3 Analyzer (Tasks 55–73, 71a) — closed 2026-11-05, phases/phase-3/phase-3.3-complete.md
-- [ ] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87) ← NEXT (land 3.3 on main and tag first, #16)
+- [x] Q8 Sub-phase 3.4 Backends and kgateway 2.5 (Tasks 74–87, 78a, 78b) — closed 2026-11-06, phases/phase-3/phase-3.4-complete.md
+- [x] Q9 Phase review (Codex) — `reviews/phase-codex.md`, triaged 2026-11-06: 5 accepted, 1 for the user
+- [ ] Q10 Stabilization 3.5 (proposed; the user starts it) ← NEXT
+  - [ ] S1 (P2) Proxy-stat Envoy names reach restricted viewers through the namer seam — src: reviews/phase-codex.md#2
+  - [ ] S2 (P2) A list-only kind change raises KGWUI-008 through `kinds/monitor.go` — src: reviews/phase-codex.md#3
+  - [ ] S3 (P2) KGWUI-024 missing from the processes and data-plane summaries — src: reviews/phase-codex.md#4
+  - [ ] S4 (P3) The resource-status check reads Services without declaring them — src: reviews/phase-codex.md#5
+  - [ ] S5 (P4) 023 attribution is quadratic in backend fan-in — src: reviews/phase-codex.md#6
+  - [ ] S7 (P3) On 2.5, a selector that matches nothing shows 003 instead of 016: computed 016 for this case, labelled UI-computed — src: D-058 item 7 (user, 2026-11-07); exit kgateway#14998
+  - [ ] S8 (P3) Remove the status-sync count (`status_syncs_total`) from KGWUI-018 and the UI on every version — src: D-058 item 10 (user, 2026-11-07)
+  - [ ] S9 (P3) An unreadable controller version selects the 2.5 rule set, not 2.4 — src: D-058 item 11 (user, 2026-11-07)
+  - [x] S6 (P3) 015 group ID names the policy for restricted viewers — no code: §14 rule 11 amended (D-059, user 2026-11-07)
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
 - [x] design+plan cross-model review + triage: docs/phases/phase-3/reviews/design-codex.md
-- [ ] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
+- [x] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-3-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: none (3.3 closed 2026-11-05; 3.4 next)
+Sub-phase: none (3.4 closed 2026-11-06; the phase review is next)
 Kind: n/a
 Status: n/a
 Base: n/a
@@ -33,8 +44,8 @@ Brief: n/a
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
 Waiting on: none
-Consumers: E2 (kgwctl Phase 1, available with caveats). E3 (kgwctl Phase 4, the analyzer as a package under `pkg/`) and E8 (kgwctl Phase 2, #13, `pkg/setup` and `ctrlmetrics.Static`, D-053): built in 3.3 on `duncandoyle/phase3Seams`; delivered once landed on `main` and tagged (#16, user: after the 3.3 close). E7 (kgwctl Phase 5, policy model under `pkg/`) is UI Phase 5.
-Provided to this repo: E4 (#15, krp `v0.1.0`) is for UI Phase 9; 3.3 does not consume it. The long-running backend must not use krp `pkg/envoy/source/kube` until krp#25 is fixed.
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3). kgwctl's E2 requests: #17 and #20 in 3.4 (D-056); #18 and #19 for Phase 4 planning. E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 5.
+Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 9; 3.4 does not consume them.
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
@@ -52,13 +63,18 @@ Provided to this repo: E4 (#15, krp `v0.1.0`) is for UI Phase 9; 3.3 does not co
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified — src: phases/phase-1/phase-1.4-complete.md
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039); a regression that holds more at once without allocating more passes. Candidate: a child with the production soft limit, gating peak RSS against the pod limit — src: phases/phase-3/reviews/3.0-gate-codex.md#2
 - (P3) The 3.2 memoized analyzer gate (≤ 2 ms) needs narrower inputs: memoized runs 8.1 ms at the worst case, because Phase 1–2 checks declare `Clock` (ruling R20) — src: phases/phase-3/phase-3.1-complete.md — done in 3.2 (§16.3 scope, R35; measurement world 0.21 ms, 1.14 ms with a scrape per run, D-052)
-- (P3) Retained heap headroom is 1.2 MiB in the 3.2 measurement world (+30.8 of 32 MiB); 3.3 and 3.4 add to it — src: phases/phase-3/phase-3.2-complete.md — gate raised to 40 MiB in 3.3 (D-054); 3.3 measures +34.6, 5.4 MiB headroom for 3.4
-- (P3) R96: a sync-only scrape publishes a new model (0.10/s idle) with no finding change — src: phases/phase-3/phase-3.3-complete.md — revisit in 3.4
-- (P3) R57: re-seed Services and EndpointSlices in the measurement world with the 3.4 watches — src: phases/phase-3/phase-3.2-complete.md — for 3.4
-- (P3) R59: proxy Pod ownership by UID needs a ReplicaSet watch; the name check (R50) stays until then — src: phases/phase-3/phase-3.2-complete.md — for 3.4
+- (P3) Retained heap headroom is 1.2 MiB in the 3.2 measurement world (+30.8 of 32 MiB); 3.3 and 3.4 add to it — src: phases/phase-3/phase-3.2-complete.md — gate 40 MiB in 3.3 (D-054), 48 MiB in 3.4 after shrinking the endpoint facts (D-057); 3.4 measures +39.3
+- (P3) R96: a sync-only scrape publishes a new model (0.10/s idle) with no finding change — src: phases/phase-3/phase-3.3-complete.md — measured in 3.4 (0.10/s, costs no gate); stays
+- (P3) R57: re-seed Services and EndpointSlices in the measurement world with the 3.4 watches — src: phases/phase-3/phase-3.2-complete.md — done in 3.4 (bench/3.4.txt)
+- (P3) R59: proxy Pod ownership by UID needs a ReplicaSet watch; the name check (R50) stays until then — src: phases/phase-3/phase-3.2-complete.md — not in 3.4's tasks; for the phase review
+- (P3) D-058 items 1 and 6: 023 proxy membership evidence (needs a port-aware reverse mapping, Phase 9); DirectResponse status not judged (Phase 5) — src: phases/phase-3/phase-3.4-complete.md
+- (P3) A live `warm_withheld` capture for KGWUI-024's error; on kind the gauge never outlasts a scrape — src: phases/phase-3/phase-3.4-complete.md
+- (P4) 2.5 controller log captures; 2.5 TLSRoute SNI conflict handling in view A; an unreadable controller version selects the 2.4 rule set — src: phases/phase-3/phase-3.4-complete.md
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-06: Sub-phase 3.4 closed (phases/phase-3/phase-3.4-complete.md). Two Codex rounds triaged (3 P1, all reproduced and fixed; the re-review clean). The user decided D-056 and D-057 and the export of `computed.TargetStatusReporter`; D-058 records the deviations (item 6 confirmed, the rest pending). Standard gates pass on 8fa399b; `make bench` passes on 31e97db under `caffeinate -s`; kind e2e passes on all three pairs at 3d7698e. The unpushed branch was rewritten to drop a forbidden word from one test fixture. Next: land on `main` and tag `v0.4.0` (user), then the phase review.
+- 2026-11-06: Sub-phase 3.4 started at base 8342a38 (3.0–3.3 merged in PR #22, tagged `v0.3.0`). Branch `duncandoyle/backends`. kgateway 2.5.0 GA is out (2026-11-02), so Tasks 83–86 run now. The user added kgwctl #17 and #20 (D-056). The brief's `(inferred)` outputs go to the user before their tasks.
 - 2026-11-05: Sub-phase 3.3 closed (phases/phase-3/phase-3.3-complete.md). Three Codex rounds triaged (6 + 2 findings, all fixed; the last round clean). The user raised the retained-heap gate to 40 MiB (D-054) and confirmed the 3.3 rulings; D-055 records the deviations (all confirmed). Standard gates and `make bench` pass on c97c3eb; kind e2e passes on both pairs. Next: land on `main` and tag for kgwctl (#16), then 3.4.
 - 2026-11-04: Sub-phase 3.3 started at base 79a5307. Brief phases/phase-3/phase-3.3-brief.md; its `(inferred)` outputs and six plan points go to the user before their tasks. The user added E8 to 3.3 (Task 71a, D-053). Retained heap headroom is 1.2 MiB in the measurement world.
 - 2026-11-04: Sub-phase 3.2 closed (phases/phase-3/phase-3.2-complete.md). Codex review and re-review triaged; the user decided D-045, D-046 and D-047, and D-048 … D-052 record the design deviations. Standard gates pass on e4416b8; `make bench` passes on ce9983b. CI on fd4fe3c (bench32): kind e2e passed on all three rows with NACK=1 and the bench passed with the D-046 and D-047 gates. 3.3 is next; the user starts it.

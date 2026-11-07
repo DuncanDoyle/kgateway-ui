@@ -83,7 +83,7 @@ func (c *Cache) crdInformer(md metadata.Interface) tracked {
 			if err != nil {
 				return nil, err
 			}
-			return newFilterWatch(w, func(e watch.Event) []watch.Event {
+			return newFilterWatch(w, &c.running, func(e watch.Event) []watch.Event {
 				if m, ok := e.Object.(*metav1.PartialObjectMetadata); ok && e.Type != watch.Bookmark && e.Type != watch.Error && !gatewayCRD(m.Name) {
 					return nil
 				}

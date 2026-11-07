@@ -459,6 +459,21 @@ export const diagnosticsCopy = {
   warmingClusters: "Warming clusters",
   serverState: "Server state", // S450
   notReported: "Not reported", // S365
+  // Endpoints evidence (Task 79, draft wording for Task 80)
+  service: "Service", // S568
+  servicePort: "Port", // S569
+  readyEndpoints: (ready: number, total: number) => (total === 0 ? "No endpoints" : `${ready} of ${total}`), // S570
+  endpointSlices: "EndpointSlices", // S571
+  // Withheld config evidence, KGWUI-024 (Task 85, draft wording)
+  withheldProxies: "Withheld proxies", // S572
+  releasedRecently: "Releases in the last 15 minutes", // S573
+  releaseMode: "Mode", // S574
+  releaseCount: "Releases", // S575
+  releaseModes: {
+    flip_release: "Held route change released", // S576
+    warm_release: "Withheld proxy released", // S577
+    carry_expired: "Missing cluster dropped", // S578
+  } as Record<string, string>,
   // Processes
   controller: "Controller", // S391
   readyOf: (ready: number, desired: number) => `${ready}/${desired} ready`, // S393

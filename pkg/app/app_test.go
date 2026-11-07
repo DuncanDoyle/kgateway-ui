@@ -1349,7 +1349,7 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 		listedOn bool
 	}{
 		{name: "on", want: api.CapOn, listedOn: true},
-		{name: "off", d: Diagnostics{NoEvents: true, NoCRDs: true}, want: api.CapOff},
+		{name: "off", d: Diagnostics{NoEvents: true, NoCRDs: true, NoEndpoints: true}, want: api.CapOff},
 		{name: "denied", events: refuse(schema.GroupResource{Resource: "events"}), crds: refuse(crdGR), want: api.CapDenied, reason: reasonDenied},
 		{name: "failing", events: broken, crds: broken, want: api.CapFailing, reason: reasonFailing},
 	}
@@ -1363,6 +1363,8 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 			md := metadatafake.NewSimpleMetadataClient(scheme)
 			if tc.events != nil {
 				kube.PrependReactor("list", "events", tc.events)
+				kube.PrependReactor("list", "services", tc.events)
+				kube.PrependReactor("list", "endpointslices", tc.events)
 				md.PrependReactor("list", "customresourcedefinitions", tc.crds)
 			}
 			o := Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui, Diagnostics: tc.d}
@@ -1377,15 +1379,15 @@ func TestMetaCapabilityStatesFromToggles(t *testing.T) {
 			t.Cleanup(srv.Close)
 			var meta api.MetaResponse
 			states := map[string]api.Capability{}
-			eventually(t, fmt.Sprintf("events and crds %s, processes on", tc.want), func() bool {
+			eventually(t, fmt.Sprintf("events, crds and endpoints %s, processes on", tc.want), func() bool {
 				meta, states = api.MetaResponse{}, map[string]api.Capability{}
 				getJSON(t, srv, "/api/v1/meta", &meta)
 				for _, c := range meta.CapabilityStates {
 					states[c.Name] = c
 				}
-				return states["events"].State == tc.want && states["crds"].State == tc.want && states["processes"].State == api.CapOn
+				return states["events"].State == tc.want && states["crds"].State == tc.want && states["endpoints"].State == tc.want && states["processes"].State == api.CapOn
 			})
-			for _, name := range []string{"events", "crds"} {
+			for _, name := range []string{"events", "crds", "endpoints"} {
 				c := states[name]
 				if c.Reason != tc.reason || strings.Contains(c.Reason, "no role") || strings.Contains(c.Reason, "etcd") {
 					t.Errorf("%s reason %q, want %q and never the raw error", name, c.Reason, tc.reason)
@@ -1622,4 +1624,55 @@ func TestCRDInstallRefreshesCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "the CRD install to refresh the Catalog", func() bool { return a.kinds.Catalog().Served(group, "XMesh") })
+}
+
+// A refused or failing Service or EndpointSlice watch reads denied or failing in
+// /meta and is never a KGWUI-008 and never makes the install unknown (design §11).
+func TestEndpointsWatchFailureIsNotSignalUnavailable(t *testing.T) {
+	cases := []struct {
+		name string
+		fail clienttesting.ReactionFunc
+		want api.CapabilityState
+	}{
+		{"denied", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "services"}, "", errors.New("no role"))
+		}, api.CapDenied},
+		{"failing", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
+		}, api.CapFailing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+			dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+			kube.PrependReactor("list", "services", tc.fail)
+			kube.PrependReactor("list", "endpointslices", tc.fail)
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, extension.New())
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			eventually(t, "endpoints "+string(tc.want), func() bool {
+				var meta api.MetaResponse
+				getJSON(t, srv, "/api/v1/meta", &meta)
+				return slices.ContainsFunc(meta.CapabilityStates, func(c api.Capability) bool { return c.Name == "endpoints" && c.State == tc.want })
+			})
+			// Unrelated checks (metrics) may still report; cluster access must not mention the watches.
+			var h api.HealthResponse
+			eventually(t, "the cluster access check", func() bool {
+				getJSON(t, srv, "/api/v1/installs/kgw.kgateway/health", &h)
+				return slices.ContainsFunc(h.Checks, func(c health.CheckResult) bool { return c.Name == "cluster access" && c.OK })
+			})
+			for _, f := range h.Findings {
+				if f.Code == health.CodeSignalUnavailable && (strings.Contains(f.Message, "services") || strings.Contains(f.Message, "endpointslices")) {
+					t.Errorf("unexpected KGWUI-008: %+v", f)
+				}
+			}
+		})
+	}
 }

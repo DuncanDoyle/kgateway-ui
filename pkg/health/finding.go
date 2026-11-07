@@ -42,26 +42,27 @@ const (
 
 // Stable finding codes. Never reuse a code (design §5.1).
 const (
-	CodeXDSRejected          = "KGWUI-001"
-	CodeConditionFalse       = "KGWUI-002"
-	CodeRouteUnattached      = "KGWUI-003"
-	CodeNamespaceNotWatched  = "KGWUI-004"
-	CodeControllerNotReady   = "KGWUI-005"
-	CodeProxyNotReady        = "KGWUI-006"
-	CodeScopeMismatch        = "KGWUI-007"
-	CodeSignalUnavailable    = "KGWUI-008"
-	CodeAmbiguousOwnership   = "KGWUI-009"
-	CodeSelfManagedProxy     = "KGWUI-010"
-	CodeDelegatedNotAttached = "KGWUI-011"
-	CodeComputedDisagrees    = "KGWUI-012"
-	CodeRefUnresolved        = "KGWUI-013"
-	CodeRefNotPermitted      = "KGWUI-014"
-	CodeProcessRestarting    = "KGWUI-019"
-	CodeProbeFailing         = "KGWUI-020"
-	CodeRolloutStuck         = "KGWUI-021"
-	CodeVersionSkew          = "KGWUI-022"
-	CodeProxyConfigWarming   = "KGWUI-025"
-	CodeProxyDisconnected    = "KGWUI-026"
+	CodeXDSRejected             = "KGWUI-001"
+	CodeConditionFalse          = "KGWUI-002"
+	CodeRouteUnattached         = "KGWUI-003"
+	CodeNamespaceNotWatched     = "KGWUI-004"
+	CodeControllerNotReady      = "KGWUI-005"
+	CodeProxyNotReady           = "KGWUI-006"
+	CodeScopeMismatch           = "KGWUI-007"
+	CodeSignalUnavailable       = "KGWUI-008"
+	CodeAmbiguousOwnership      = "KGWUI-009"
+	CodeSelfManagedProxy        = "KGWUI-010"
+	CodeDelegatedNotAttached    = "KGWUI-011"
+	CodeComputedDisagrees       = "KGWUI-012"
+	CodeRefUnresolved           = "KGWUI-013"
+	CodeRefNotPermitted         = "KGWUI-014"
+	CodeProcessRestarting       = "KGWUI-019"
+	CodeProbeFailing            = "KGWUI-020"
+	CodeRolloutStuck            = "KGWUI-021"
+	CodeVersionSkew             = "KGWUI-022"
+	CodeBackendNoReadyEndpoints = "KGWUI-023"
+	CodeProxyConfigWarming      = "KGWUI-025"
+	CodeProxyDisconnected       = "KGWUI-026"
 )
 
 // Grace is how long a resource may lack current status before it is reported
@@ -212,8 +213,13 @@ func (in Input) routeParents(u *unstructured.Unstructured) []objects.RouteParent
 
 // firstSeen returns when the grace period for u's current generation started.
 func (in Input) firstSeen(u *unstructured.Unstructured) time.Time {
-	if in.FirstSeen != nil {
-		return in.FirstSeen(u)
+	return firstSeenBy(in.FirstSeen, u)
+}
+
+// firstSeenBy is seen(u), or u's creation time when seen is nil.
+func firstSeenBy(seen func(*unstructured.Unstructured) time.Time, u *unstructured.Unstructured) time.Time {
+	if seen != nil {
+		return seen(u)
 	}
 	return u.GetCreationTimestamp().Time
 }
