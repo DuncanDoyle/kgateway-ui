@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // DelegRoute is an in-scope HTTPRoute as views B and C read it.

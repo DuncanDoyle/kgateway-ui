@@ -12,9 +12,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/process"
 )
 
 // CodeConfigWithheld is KGWUI-024: kgateway 2.5's per-client metrics show

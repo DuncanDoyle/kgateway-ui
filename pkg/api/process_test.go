@@ -22,11 +22,11 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 const healthPath = "/api/v1/installs/kgw.kgateway/health"

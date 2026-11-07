@@ -21,6 +21,11 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-004",
+          "kind": "finding",
+          "message": "Namespace not watched by the controller"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
@@ -47,6 +52,11 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-004",
+          "kind": "finding",
+          "message": "Namespace not watched by the controller"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
@@ -297,6 +307,11 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-011",
+          "kind": "finding",
+          "message": "No status for the named parent route"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
@@ -418,6 +433,11 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-003",
+          "kind": "finding",
+          "message": "Not yet processed by the controller"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",
@@ -483,6 +503,11 @@
             }
           }
         ],
+        "reason": {
+          "code": "KGWUI-002",
+          "kind": "finding",
+          "message": "Unsupported value in the route"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "HTTPRoute",

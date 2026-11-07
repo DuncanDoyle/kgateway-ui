@@ -1,13 +1,13 @@
 {
-  "name": "kgateway-ui-web",
+  "name": "snellius-web",
   "private": true,
   "workspaces": [
     "packages/*",
     "app"
   ],
   "scripts": {
-    "build": "npm run build -w kgateway-ui-app",
-    "dev": "npm run dev -w kgateway-ui-app",
+    "build": "npm run build -w snellius-app",
+    "dev": "npm run dev -w snellius-app",
     "test": "vitest run",
     "lint": "biome check .",
     "typecheck": "tsc -p packages/shell && tsc -p app && tsc -p e2e"

@@ -1,10 +1,11 @@
 import { useEffect } from "react";
 import { matchPath, useLocation } from "react-router-dom";
 import { useInstalls } from "../api/hooks";
+import { aboutCopy } from "../copy/about";
 import { navCopy } from "../copy/explorer";
 import { useShellExtension } from "./extension";
 import { installLabel } from "./InstallName";
-import { decodeInstallId } from "./paths";
+import { ABOUT_PATH, decodeInstallId } from "./paths";
 
 // region Helpers
 const CORE_INSTALL = "/i/:id";
@@ -63,7 +64,8 @@ export function DocumentTitle() {
     const i = data?.find((x) => x.id === id);
     return i ? installLabel(i) : id;
   };
-  const page = pageTitle(pathname, { routes, navEntries }, label);
+  const page =
+    pathname === ABOUT_PATH ? aboutCopy.title(brand.productName) : pageTitle(pathname, { routes, navEntries }, label);
   const title = page ?? brand.productName;
   useEffect(() => {
     document.title = title;

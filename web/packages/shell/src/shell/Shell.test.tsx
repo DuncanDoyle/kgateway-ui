@@ -229,7 +229,7 @@ it("shows the install's version and controller readiness in the header", async (
 
 it("shows no edition tag when the edition repeats the product name", async () => {
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway")], "/api/v1/meta": meta });
-  mount("/i/kgw.kgateway");
+  mount("/i/kgw.kgateway", { brand: { productName: "kgateway", logo: null } });
   await screen.findByTestId("version");
   expect(screen.queryByTestId("edition")).toBeNull();
 });
@@ -423,7 +423,7 @@ it("switcher items name each install's state", async () => {
 });
 
 it.each([
-  ["/", "kgateway"],
+  ["/", "snellius"],
   ["/i/kgw.kgateway", "kgw/kgateway"],
   ["/i/kgw.kgateway/findings", "Findings: kgw/kgateway"],
   ["/i/kgw.kgateway/findings/f1-3cse5bxnvkqhgyfsdetkz57k6d", "Finding: kgw/kgateway"],
@@ -437,6 +437,44 @@ it.each([
   stubApi({ "/api/v1/installs": [inst("kgw/kgateway"), inst("b/two")], "/api/v1/meta": meta });
   mount(path);
   await waitFor(() => expect(document.title).toBe(title));
+});
+
+it("the published shell with no brand shows snellius in the header", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/");
+  const home = await screen.findByRole("link", { name: "snellius" });
+  expect(home).toHaveAttribute("href", "/");
+  expect(screen.queryByText("kgateway")).toBeNull();
+});
+
+it.each(["/", "/i/a.one"])("the About link sits left of the theme button on %s and opens /about", async (path) => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount(path);
+  const about = await screen.findByRole("link", { name: "About" });
+  expect(about).toHaveAttribute("href", "/about");
+  const theme = screen.getByRole("button", { name: /^Theme:/ });
+  expect(about.compareDocumentPosition(theme) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await userEvent.click(about);
+  expect(await screen.findByRole("heading", { name: /snellius/i })).toBeInTheDocument();
+});
+
+it("keyboard focus on the About link shows its tooltip", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/");
+  const about = await screen.findByRole("link", { name: "About" });
+  const user = userEvent.setup();
+  while (document.activeElement !== about) await user.tab();
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("About");
+});
+
+it("a downstream brand keeps its own name, logo and title", async () => {
+  stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
+  mount("/", { brand: { productName: "acme", logo: <img src="/acme.svg" alt="acme logo" /> } });
+  const home = await screen.findByRole("link", { name: /acme/ });
+  expect(within(home).getByRole("img", { name: "acme logo" })).toHaveAttribute("src", "/acme.svg");
+  expect(within(home).getByText("acme")).toBeInTheDocument();
+  expect(screen.queryByText("snellius")).toBeNull();
+  await waitFor(() => expect(document.title).toBe("acme"));
 });
 
 it("titles an extension page with its nav label", async () => {

@@ -26,15 +26,15 @@ import (
 	metadatafake "k8s.io/client-go/metadata/fake"
 	clocktesting "k8s.io/utils/clock/testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/setup"
+	"github.com/DuncanDoyle/snellius/pkg/app"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/extension"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
 
 // The test imports only pkg/ packages, as a module outside this repo would (E3).

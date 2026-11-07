@@ -8,7 +8,10 @@ import (
 )
 
 // MemoryLimitEnv holds the pod's memory limit in bytes; the chart sets it from limits.memory.
-const MemoryLimitEnv = "KGWUI_MEMORY_LIMIT"
+const MemoryLimitEnv = "SNELLIUS_MEMORY_LIMIT"
+
+// legacyMemoryLimitEnv is the pre-rename name, still read when MemoryLimitEnv is unset.
+const legacyMemoryLimitEnv = "KGWUI_MEMORY_LIMIT"
 
 // ApplyMemoryLimit sets the Go memory target to 90 % of the limit in
 // MemoryLimitEnv (D-025). An explicit GOMEMLIMIT wins; a missing, zero or
@@ -23,6 +26,10 @@ func applyMemoryLimit(getenv func(string) string, set func(int64) int64) int64 {
 		return 0
 	}
 	raw := getenv(MemoryLimitEnv)
+	if raw == "" && getenv(legacyMemoryLimitEnv) != "" {
+		raw = getenv(legacyMemoryLimitEnv)
+		slog.Warn("deprecated environment variable; use the new name", "env", legacyMemoryLimitEnv, "use", MemoryLimitEnv)
+	}
 	limit, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || limit <= 0 {
 		slog.Info("no usable memory limit; keeping the Go default", "env", MemoryLimitEnv, "value", raw)

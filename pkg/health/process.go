@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/process"
 )
 
 // Check names of the process findings (design §9.3).

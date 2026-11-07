@@ -26,14 +26,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/overview"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/app"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/extension"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/overview"
+	"github.com/DuncanDoyle/snellius/pkg/platform"
 )
 
 var base = func() string {
@@ -1043,7 +1043,7 @@ func uiArgs(t *testing.T) []string {
 			}
 		}
 	}
-	kubectl(t, &d, "-n", "kgateway-ui", "get", "deploy/ui-kgateway-ui", "-o", "json")
+	kubectl(t, &d, "-n", "snellius", "get", "deploy/ui-snellius", "-o", "json")
 	return d.Spec.Template.Spec.Containers[0].Args
 }
 

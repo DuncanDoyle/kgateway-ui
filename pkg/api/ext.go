@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // ExtMount is one extension endpoint (design §4.1 gap 1). Pattern is

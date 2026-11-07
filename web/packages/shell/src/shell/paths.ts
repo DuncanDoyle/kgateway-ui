@@ -1,4 +1,7 @@
 // region Helpers
+/** The About page, opened from the header brand (D-063). */
+export const ABOUT_PATH = "/about";
+
 /** Path of an install page, or of `rest` under it. The ID is encoded, never parsed (D-016). */
 export function installPath(id: string, rest = ""): string {
   const base = `/i/${encodeURIComponent(id)}`;

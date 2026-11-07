@@ -8,12 +8,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/platform"
 )
 
 // ReadinessState is the controller readiness a provider reports (D-016).
@@ -73,12 +74,14 @@ type Count struct {
 
 // GatewayRow is one row of the gateway table.
 type GatewayRow struct {
-	Ref            objects.Ref  `json:"ref"`
-	Class          string       `json:"class"`
-	State          health.State `json:"state"`
-	Listeners      int          `json:"listeners"`
-	AttachedRoutes int32        `json:"attachedRoutes"`
-	Addresses      []string     `json:"addresses"`
+	Ref   objects.Ref  `json:"ref"`
+	Class string       `json:"class"`
+	State health.State `json:"state"`
+	// Reason says why State is not healthy (D-063).
+	Reason         *health.RowReason `json:"reason,omitempty"`
+	Listeners      int               `json:"listeners"`
+	AttachedRoutes int32             `json:"attachedRoutes"`
+	Addresses      []string          `json:"addresses"`
 }
 
 // Overview is the install page model.
@@ -126,7 +129,8 @@ func Build(res install.Resolved, owned *install.Owned, snap *cache.Snapshot, ser
 	worst, unknown := severities(owned.Gateways, rep)
 	for _, g := range owned.Gateways {
 		ref := objects.RefOf(g)
-		row := GatewayRow{Ref: ref, Class: objects.GatewayClassName(g), Addresses: objects.GatewayAddresses(g), State: RowState(worst[ref], unknown)}
+		row := GatewayRow{Ref: ref, Class: objects.GatewayClassName(g), Addresses: objects.GatewayAddresses(g), State: worst[ref].State(unknown)}
+		row.Reason = worst[ref].Reason(row.State)
 		if row.Addresses == nil {
 			row.Addresses = []string{}
 		}
@@ -165,24 +169,20 @@ func header(res install.Resolved, snap *cache.Snapshot, plat platform.Info) Head
 	return h
 }
 
-// severities maps each of gws to its worst finding state, error, warning or
-// none; unknown is whether a required signal is missing.
-func severities(gws []*unstructured.Unstructured, rep health.Report) (map[objects.Ref]health.State, bool) {
-	worst := make(map[objects.Ref]health.State, len(gws))
+// severities maps each of gws to its findings; unknown is whether a
+// required signal is missing.
+func severities(gws []*unstructured.Unstructured, rep health.Report) (map[objects.Ref]explore.Worst, bool) {
+	worst := make(map[objects.Ref]explore.Worst, len(gws))
 	for _, g := range gws {
-		worst[objects.RefOf(g)] = ""
+		worst[objects.RefOf(g)] = explore.Worst{}
 	}
-	for _, f := range rep.Findings {
+	for i := range rep.Findings {
+		f := &rep.Findings[i]
 		if f.Resource == nil {
 			continue
 		}
-		cur, ok := worst[*f.Resource]
-		switch {
-		case !ok:
-		case f.Severity == health.SeverityError:
-			worst[*f.Resource] = health.StateError
-		case f.Severity == health.SeverityWarning && cur != health.StateError:
-			worst[*f.Resource] = health.StateWarning
+		if w, ok := worst[*f.Resource]; ok {
+			worst[*f.Resource] = w.Add(f)
 		}
 	}
 	unknown := slices.ContainsFunc(rep.Checks, func(c health.CheckResult) bool { return c.Required && !c.OK })

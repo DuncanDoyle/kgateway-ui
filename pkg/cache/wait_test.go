@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/watch"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
 )
 
 var goroutineHeader = regexp.MustCompile(`(?m)^goroutine (\d+) \[`)

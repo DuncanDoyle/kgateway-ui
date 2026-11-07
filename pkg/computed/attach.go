@@ -1,8 +1,8 @@
 package computed
 
 import (
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // Acceptance is a listener-bearing resource's own acceptance (rules §3.1).

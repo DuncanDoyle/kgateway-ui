@@ -8,11 +8,11 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil/scale"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 func gw(ns, name string, ls ...objects.Listener) computed.Resource {

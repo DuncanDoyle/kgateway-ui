@@ -1,9 +1,9 @@
 package api
 
 import (
-	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // linker labels references for one request against one model (design

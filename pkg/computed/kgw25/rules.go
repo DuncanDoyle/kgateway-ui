@@ -2,7 +2,7 @@
 // kgw24's set; cited source lines (V4) are v2.4.7, unchanged in behaviour at v2.5.0.
 package kgw25
 
-import "github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+import "github.com/DuncanDoyle/snellius/pkg/computed"
 
 type rules struct{}
 

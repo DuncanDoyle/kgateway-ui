@@ -1,6 +1,6 @@
 package computed
 
-import "github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+import "github.com/DuncanDoyle/snellius/pkg/objects"
 
 // EnvoyNamer maps an Envoy resource name, such as a cluster or route config
 // name from proxy stats, back to its Gateway API object (design §8.8). It is

@@ -173,6 +173,9 @@
         "dataPlane": "ok",
         "link": "detail",
         "listeners": 1,
+        "reason": {
+          "kind": "unknown"
+        },
         "ref": {
           "group": "gateway.networking.k8s.io",
           "kind": "Gateway",

@@ -25,16 +25,16 @@ import (
 	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/yaml"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/healthtest"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil/healthtest"
+	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/app"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/extension"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 // The README's extension example is this program, so the build compiles it.
@@ -256,7 +256,7 @@ func TestChartOverlayRendersExtraRule(t *testing.T) {
 		}
 		t.Skip("helm not on PATH")
 	}
-	out, err := exec.Command("helm", "template", "ui", "../../deploy/helm/kgateway-ui", "-n", "kgateway-ui", "-f", "chart/values-acme.yaml").CombinedOutput()
+	out, err := exec.Command("helm", "template", "ui", "../../deploy/helm/snellius", "-n", "snellius", "-f", "chart/values-acme.yaml").CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}

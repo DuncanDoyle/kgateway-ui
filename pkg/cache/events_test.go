@@ -24,7 +24,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 	clocktesting "k8s.io/utils/clock/testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
 )
 
 var proxySel = labels.SelectorFromSet(labels.Set{"kgateway": "kube-gateway", "app.kubernetes.io/component": "proxy"})

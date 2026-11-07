@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // No 2.5 log captures yet: the parser is 2.4's, read against 2.4's lines.

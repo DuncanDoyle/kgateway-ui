@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // fanInWorld is the endpoints world with n more routes on Service shop/cart port 8080.

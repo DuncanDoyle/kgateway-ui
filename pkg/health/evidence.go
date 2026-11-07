@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // Evidence is a finding's typed evidence (design §13.3), tagged by its JSON

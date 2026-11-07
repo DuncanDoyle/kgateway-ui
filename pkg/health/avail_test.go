@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 )
 
 func TestNotAvailableResult(t *testing.T) {

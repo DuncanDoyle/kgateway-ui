@@ -31,22 +31,22 @@ import (
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/benchgate"
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale"
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/scale/measure"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil/benchgate"
+	"github.com/DuncanDoyle/snellius/internal/testutil/scale"
+	"github.com/DuncanDoyle/snellius/internal/testutil/scale/measure"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/proxystats"
+	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
 
 // The request and stream budgets of design §9.6 at Large (2.2–2.4).
@@ -587,7 +587,7 @@ func inChild(t *testing.T, test string, tiers []scale.Tier, run func(*testing.T,
 }
 
 // streamChildEnv makes a stream test run one world in this process.
-const streamChildEnv = "KGWUI_STREAM_CHILD"
+const streamChildEnv = "SNELLIUS_STREAM_CHILD"
 
 // streamVariant is what each stream update changes, and whether the budgets gate it.
 type streamVariant struct {

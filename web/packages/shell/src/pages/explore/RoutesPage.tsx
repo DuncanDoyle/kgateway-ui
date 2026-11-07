@@ -91,7 +91,7 @@ function columns(installId: string): ObjectColumn<RouteRow>[] {
       header: columnCopy.status,
       width: "120px",
       sortKey: "health",
-      cell: (r) => <HealthBadge state={r.health} />,
+      cell: (r) => <HealthBadge state={r.health} reason={r.reason} />,
     },
     {
       id: "name",

@@ -141,6 +141,7 @@ import type {
   RouteCounts,
   RouteDetail,
   RouteRow,
+  RowReason,
   Rule,
   RuleReplacedEvidence,
   ScopeSummary,
@@ -473,9 +474,41 @@ const count = shape<Count>(
   { access },
   category,
 );
+// A row's reason (D-063): one shape per kind.
+const rowReason: Shape = {
+  keys: {},
+  nested: {},
+  enums: {},
+  tagged: {
+    key: "kind",
+    by: {
+      finding: shape<Extract<RowReason, { kind: "finding" }>>(
+        { kind: "!", code: "!", message: "!", more: "?" },
+        {},
+        { kind: { finding: 1 } },
+      ),
+      unknown: shape<Extract<RowReason, { kind: "unknown" }>>({ kind: "!" }, {}, { kind: { unknown: 1 } }),
+      "gateway-rejecting": shape<Extract<RowReason, { kind: "gateway-rejecting" }>>(
+        { kind: "!" },
+        {},
+        { kind: { "gateway-rejecting": 1 } },
+      ),
+    } satisfies Record<RowReason["kind"], Shape>,
+  },
+};
 const row = shape<GatewayRow>(
-  { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?", dataPlane: "?" },
-  { ref },
+  {
+    ref: "!",
+    class: "!",
+    state: "!",
+    reason: "?",
+    listeners: "!",
+    attachedRoutes: "!",
+    addresses: "!",
+    link: "?",
+    dataPlane: "?",
+  },
+  { ref, reason: rowReason },
   { state: healthState, ...link, dataPlane: { ok: 1, rejects: 1, withheld: 1, unknown: 1 } },
 );
 const overviewShape = shape<OverviewResponse>(
@@ -575,9 +608,10 @@ const routeRow = shape<RouteRow>(
     children: "!",
     flags: "!",
     health: "!",
+    reason: "?",
     mirror: "?",
   },
-  { ref: linkedRef, parents: parentSummary, parentRoutes: linkedRef },
+  { ref: linkedRef, reason: rowReason, parents: parentSummary, parentRoutes: linkedRef },
   { health: healthState },
 );
 const gatewayListRow = shape<GatewayListRow>(
@@ -585,6 +619,7 @@ const gatewayListRow = shape<GatewayListRow>(
     ref: "!",
     class: "!",
     health: "!",
+    reason: "?",
     listeners: "!",
     attachedRoutes: "!",
     notAccepted: "!",
@@ -593,12 +628,21 @@ const gatewayListRow = shape<GatewayListRow>(
     routes: "?",
     disagreements: "?",
   },
-  { ref: linkedRef },
+  { ref: linkedRef, reason: rowReason },
   { health: healthState },
 );
 const listenerSetRow = shape<ListenerSetRow>(
-  { ref: "!", parent: "!", health: "!", listeners: "!", acceptedReason: "?", routes: "?", disagreements: "?" },
-  { ref: linkedRef, parent: linkedRef },
+  {
+    ref: "!",
+    parent: "!",
+    health: "!",
+    reason: "?",
+    listeners: "!",
+    acceptedReason: "?",
+    routes: "?",
+    disagreements: "?",
+  },
+  { ref: linkedRef, parent: linkedRef, reason: rowReason },
   { health: healthState },
 );
 const condition = shape<Condition>({

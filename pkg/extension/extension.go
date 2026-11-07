@@ -17,17 +17,17 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/process"
+	"github.com/DuncanDoyle/snellius/pkg/proxymode"
+	"github.com/DuncanDoyle/snellius/pkg/proxystats"
+	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
 
 // Registry holds everything the backend is built from.

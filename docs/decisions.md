@@ -1040,7 +1040,7 @@ Measured on the reference machine, 5 runs per world:
 **Alternatives:** ordinal grouping: rejected, since a per-route ordinal cannot group routes across the policy, and a cross-route ordinal encodes the policy anyway.
 
 ## D-060 — Sub-phase 3.5 as built (2026-11-07, phase 3)
-**Status:** proposed 2026-11-07, for the user's confirmation (rulings made while the user was away)
+**Status:** confirmed by the user (2026-11-07); the rulings were made while the user was away
 
 **Context:** Stabilization 3.5 (brief `phases/phase-3/phase-3.5-brief.md`) closes phase-review findings #2–#6 and D-058 items 7, 10 and 11. These choices were not fixed by the review or the decisions.
 
@@ -1094,3 +1094,32 @@ Measured on the reference machine, 5 runs per world:
 - The refactor costs no measurable performance if hooks run per install or per stage, not per object.
 - Memory is the tight budget (+39.3 of 48 MiB retained heap, D-057), so the core must own the shared cache.
 - `roadmap.md` and `phase-status.md` use the new numbers.
+
+## D-062 — Snellius identity supersedes the kgateway default identity (2026-11-07, phase 4)
+**Status:** accepted (user pre-approval, 2026-11-07)
+
+**Context:** D-008 gave the default theme the kgateway identity, so the header presented the UI as the gateway it observes. D-061 renames the product to Snellius.
+
+**Decision:** The default theme and brand carry the Snellius identity. D-008's mechanism is unchanged: a downstream build supplies its own brand and tokens. The kgateway icon stays vendored with its attribution for factual use.
+
+**Alternatives:**
+- Keep the kgateway identity as the default: rejected, since the product is not the gateway.
+
+**Consequences:**
+- `brand.productName` and the default brand read `snellius`.
+- Nothing in the UI uses the kgateway icon after Phase 4; the file stays for factual use.
+
+## D-063 — Phase 4 gains user-testing follow-ups (2026-11-07, phase 4)
+**Status:** accepted (user, 2026-11-07)
+
+**Context:** The user tried Snellius on minikube with kgateway 2.5.0 and asked for three changes.
+
+**Decision:** sub-phase 4.2 (planned) adds:
+1. The stale banner waits for the first poll after a hidden tab is shown again.
+2. A tooltip on a row's Error or Warning in the Gateways, Routes and ListenerSets lists and the overview, showing the deciding finding's code and message and how many more there are. Row DTOs gain a small optional reason; no extra request on hover. Detail and evidence never appear.
+3. An About page: product name, descriptor, tagline, UI version, watched installs, and links.
+
+**Consequences:** the row DTOs grow by an optional field (API v1, additive). Phase 4 design §12.
+
+**Alternatives:** fetch the reason on hover: rejected, it costs a request per hover for data the backend already has.
+

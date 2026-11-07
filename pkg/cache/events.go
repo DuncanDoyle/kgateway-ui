@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	toolscache "k8s.io/client-go/tools/cache"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // EventsGVR is the Access key of the Warning Events watch.

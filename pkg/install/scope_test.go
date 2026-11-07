@@ -6,7 +6,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
 )
 
 func ns(name string, l map[string]string) *corev1.Namespace { return testutil.Namespace(name, l) }

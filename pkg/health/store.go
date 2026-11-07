@@ -5,8 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // InputSet names what a check reads; the engine fingerprints exactly these.

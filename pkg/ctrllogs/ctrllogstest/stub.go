@@ -10,8 +10,8 @@ import (
 
 	"k8s.io/utils/clock"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
+	"github.com/DuncanDoyle/snellius/pkg/install"
 )
 
 // chunk bounds the bytes a stream prepares per read.

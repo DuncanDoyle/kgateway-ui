@@ -13,16 +13,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clocktesting "k8s.io/utils/clock/testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 // fakeSource is a snapshotter and fingerprinter whose store can change

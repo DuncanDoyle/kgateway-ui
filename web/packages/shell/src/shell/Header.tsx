@@ -1,5 +1,6 @@
 import { css, useTheme } from "@emotion/react";
 import styled from "@emotion/styled";
+import { Info } from "lucide-react";
 import type { ReactElement } from "react";
 import { Link, NavLink, useMatch } from "react-router-dom";
 import { useNow } from "../api/clock";
@@ -16,7 +17,8 @@ import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerResourceName, headerTint } fr
 import { InstallName } from "./InstallName";
 import { InstallNav } from "./InstallNav";
 import { InstallSwitcher } from "./InstallSwitcher";
-import { installPath } from "./paths";
+import { MenuButton } from "./menu";
+import { ABOUT_PATH, installPath } from "./paths";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Tooltip } from "./Tooltip";
 import { useMedia } from "./useMedia";
@@ -50,7 +52,13 @@ const Brand = styled(Link)`
   img, svg { height: 24px; width: auto; }
   &:hover { background: ${(p) => headerTint(p.theme, HEADER_HOVER_PCT)}; }
   &:active { background: ${(p) => headerTint(p.theme, HEADER_PRESS_PCT)}; }
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
 `;
+// Same box and states as the theme button, rendered as a link.
+const AboutLink = MenuButton.withComponent(Link);
 const Identity = styled.div`
   display: flex;
   align-items: center;
@@ -222,6 +230,11 @@ export function Header({ installPaths }: { installPaths: readonly string[] }) {
           ))}
         </Nav>
       ) : null}
+      <Tooltip label="About" placement="end">
+        <AboutLink to={ABOUT_PATH} aria-label="About">
+          <Info size={14} aria-hidden="true" />
+        </AboutLink>
+      </Tooltip>
       <ThemeSwitcher />
     </Bar>
   );

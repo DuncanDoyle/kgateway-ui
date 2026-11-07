@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 const refsBase = "/api/v1/installs/kgw.kgateway/refs?"

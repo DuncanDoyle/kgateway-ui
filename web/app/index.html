@@ -3,7 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>kgateway</title>
+    <title>snellius</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <script>
       // Paint the last applied theme before React loads, so there is no colour flash.
       // The theme provider writes this record; anything missing or invalid paints dark.
@@ -11,7 +17,20 @@
         var bg = "#0F1220";
         var scheme = "dark";
         try {
-          const paint = JSON.parse(localStorage.getItem("kgateway-ui.theme.paint"));
+          let raw = localStorage.getItem("snellius.theme.paint");
+          if (raw === null) {
+            // Saved before the rename: paint it, and move it to the new key when storage allows.
+            raw = localStorage.getItem("kgateway-ui.theme.paint");
+            try {
+              if (raw !== null) {
+                localStorage.setItem("snellius.theme.paint", raw);
+                localStorage.removeItem("kgateway-ui.theme.paint");
+              }
+            } catch {
+              // storage read-only: the old key stays and still paints
+            }
+          }
+          const paint = JSON.parse(raw);
           if (paint && /^#[0-9a-f]{6}$/i.test(paint.bg) && (paint.scheme === "light" || paint.scheme === "dark")) {
             bg = paint.bg;
             scheme = paint.scheme;

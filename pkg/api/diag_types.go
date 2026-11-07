@@ -3,8 +3,8 @@ package api
 import (
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/diagnose"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 )
 
 // FindingRow is one finding of GET …/findings (design §13.3); restricted rows

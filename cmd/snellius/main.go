@@ -1,4 +1,4 @@
-// Command kgateway-ui serves the read-only kgateway UI.
+// Command snellius serves the read-only Snellius UI for Kubernetes Gateway API.
 package main
 
 import (
@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/webui"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/app"
+	"github.com/DuncanDoyle/snellius/internal/webui"
+	"github.com/DuncanDoyle/snellius/pkg/app"
 )
 
 func main() {

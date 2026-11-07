@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // Authorizer decides, per request, which objects the caller may see (D-013).

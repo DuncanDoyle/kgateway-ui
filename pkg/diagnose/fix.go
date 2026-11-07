@@ -9,8 +9,8 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // SuggestedFix is the one change a finding's evidence leaves (design §7.7).

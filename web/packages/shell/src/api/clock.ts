@@ -7,9 +7,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 
 function subscribe(onTick: () => void): () => void {
   listeners.add(onTick);
-  timer ??= setInterval(() => {
-    for (const l of listeners) l();
-  }, 1000);
+  timer ??= setInterval(notify, 1000);
   return () => {
     listeners.delete(onTick);
     if (listeners.size === 0 && timer !== undefined) {
@@ -19,13 +17,72 @@ function subscribe(onTick: () => void): () => void {
   };
 }
 
+function notify() {
+  for (const l of listeners) l();
+}
+
 // Whole seconds, so the snapshot is stable between ticks (useSyncExternalStore requires it).
-function snapshot(): number {
+function wallClock(): number {
   return Math.floor(Date.now() / 1000) * 1000;
 }
 
+// region Hidden tab
+// Polls stop while the tab is hidden (D-063). The clock holds at the moment it was hidden until the first
+// requests after it is shown settle, so time spent hidden never counts as staleness on its own.
+let heldAt: number | undefined;
+let waiting = false;
+let inFlight = 0;
+let cap: ReturnType<typeof setTimeout> | undefined;
+/** The longest the clock holds after the tab is shown when no request settles: two poll intervals. */
+const HOLD_MAX_MS = 10_000;
+
+function resume() {
+  clearTimeout(cap);
+  heldAt = undefined;
+  waiting = false;
+  notify();
+}
+
+function onVisibility() {
+  if (document.visibilityState === "hidden") {
+    clearTimeout(cap);
+    waiting = false;
+    heldAt ??= wallClock();
+  } else if (heldAt !== undefined) {
+    waiting = true;
+    cap = setTimeout(resume, HOLD_MAX_MS);
+  }
+}
+
+if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
+
+/** Counts one API request; call the returned function when it settles. The clock resumes once none are left. */
+export function trackRequest(): () => void {
+  inFlight++;
+  return () => {
+    inFlight--;
+    // A macrotask later, so SWR has stored the answer before the clock moves on.
+    if (waiting && inFlight === 0) setTimeout(() => waiting && inFlight === 0 && resume(), 0);
+  };
+}
+
+/** Test hook: back to a running clock with no requests counted. */
+export function resetClockForTests(): void {
+  clearTimeout(cap);
+  heldAt = undefined;
+  waiting = false;
+  inFlight = 0;
+}
+
+function snapshot(): number {
+  return heldAt ?? wallClock();
+}
+
 // region Component
-/** The current time at 1 s resolution. Renders with it re-run every second, so staleness is re-evaluated even when data is unchanged. */
+/**
+ * The current time at 1 s resolution. Renders with it re-run every second, so staleness is re-evaluated even when
+ * data is unchanged. After a hidden tab is shown it holds at the hiding time until the first poll answers.
+ */
 export function useNow(): number {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

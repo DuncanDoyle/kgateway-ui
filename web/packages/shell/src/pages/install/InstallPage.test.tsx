@@ -610,6 +610,19 @@ it("stale overview alone also turns the page unknown", async () => {
   expect(await screen.findByTestId("health-strip")).toHaveTextContent("Data is stale. Last checked 1m ago");
 });
 
+it("a stale overview row shows Unknown without its old finding (D-063)", async () => {
+  const ov = overview(Date.now() - 75_000);
+  const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
+  const reason = { kind: "finding", code: "KGWUI-001", message: "Configuration rejected by Envoy" } as const;
+  mount(healthy(), "/i/kgw.kgateway", { ...ov, gateways: [{ ...edge, state: "error", reason }, internal] });
+  await screen.findByRole("table", { name: "Gateways" });
+  const row = gatewayRows().find((r) => r.textContent?.includes("prod/edge")) as HTMLElement;
+  expect(row).toHaveTextContent("Unknown");
+  expect(within(row).queryByTestId("health-reason")).toBeNull();
+  await userEvent.hover(within(row).getAllByText("Unknown")[0] as HTMLElement);
+  expect(screen.queryByText(/KGWUI-001/)).toBeNull();
+});
+
 it("count tiles, GatewayClass tile first, no-access tile and scope tile", async () => {
   mount(healthy());
   expect(await screen.findByText("142")).toBeInTheDocument();
@@ -1047,4 +1060,26 @@ it("below 900 px the Gateway table keeps Status, Data plane, the name and routes
       .getAllByRole("columnheader")
       .map((h) => h.textContent),
   ).toEqual(["Status", "Data plane", "Gateway", "Routes"]);
+});
+
+it("a Gateway row's Error explains itself in a tooltip on hover and focus (D-063)", async () => {
+  const ov = overview();
+  const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
+  mount(healthy(), "/i/kgw.kgateway", {
+    ...ov,
+    gateways: [
+      { ...edge, reason: { kind: "finding", code: "KGWUI-001", message: "Configuration rejected by Envoy", more: 3 } },
+      internal,
+    ],
+  });
+  await screen.findByRole("table", { name: "Gateways" });
+  const row = (name: string) => gatewayRows().find((r) => r.textContent?.includes(`prod/${name}`)) as HTMLElement;
+  const trigger = within(row("edge")).getByTestId("health-reason");
+  await userEvent.hover(trigger);
+  expect(screen.getByRole("tooltip")).toHaveTextContent("KGWUI-001: Configuration rejected by Envoy (+3 more)");
+  await userEvent.unhover(trigger);
+  for (let i = 0; i < 80 && document.activeElement !== trigger; i++) await userEvent.tab();
+  expect(trigger).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent("KGWUI-001: Configuration rejected by Envoy (+3 more)");
+  expect(within(row("internal")).queryByTestId("health-reason")).toBeNull();
 });

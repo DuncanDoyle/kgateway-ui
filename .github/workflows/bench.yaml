@@ -23,7 +23,7 @@ jobs:
       - name: make bench
         shell: bash
         env:
-          KGWUI_BENCH_TIMING: report
+          SNELLIUS_BENCH_TIMING: report
         run: |
           set -o pipefail
           {

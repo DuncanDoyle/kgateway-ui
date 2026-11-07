@@ -6,7 +6,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 func TestDiffReportsAddedAndRemovedVersions(t *testing.T) {

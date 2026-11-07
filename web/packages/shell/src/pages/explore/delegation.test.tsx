@@ -590,7 +590,7 @@ it("a delegation ref shows selected and attached counts with a ComputedBadge", a
   expect(declared.textContent).not.toMatch(/this ref names/i);
   const counts = within(declared).getByTestId("ref-counts");
   await userEvent.hover(within(counts).getByText(computedCopy.chip));
-  expect(within(counts).getByRole("tooltip")).toHaveTextContent(delegationCopy.selectedHint);
+  expect(screen.getByRole("tooltip")).toHaveTextContent(delegationCopy.selectedHint);
 });
 
 it("a restricted delegation ref shows its badge hidden and no attached count", async () => {

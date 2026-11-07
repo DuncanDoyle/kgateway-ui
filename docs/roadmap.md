@@ -1,4 +1,4 @@
-# kgateway UI — Roadmap
+# Snellius — Roadmap
 
 **Last updated:** 2026-11-07
 
@@ -77,7 +77,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier. Decided in 3.1 (2026-11-02): keep the immutable full recompute, with per-check memoization (D-027).
 
 ### Phase 4 — Snellius rebrand
-**Status:** Not started (pre-approved by the user 2026-11-07)
+**Status:** Complete (2026-11-07, v0.5.0)
 **Docs:** `docs/phases/phase-4/`
 
 The UI product is renamed Snellius: "See the whole picture.", "Kubernetes Gateway Management & Observability" (D-061).
@@ -108,6 +108,7 @@ Why now: about 60% of the code is already generic, and the refactor is cheaper b
 
 - Where a route actually sends traffic: Services and Backends, weights, endpoint health and endpoint discovery status.
 - A scoped flow diagram centred on a single gateway or route.
+- A Backends list (kgateway `Backend` objects, Kubernetes Services and any other kind a route sends traffic to). Selecting one shows every route that routes to it, through which Gateways, listeners and hostnames: how this backend is exposed. It is the inverse of the route page's "other routes using this backend" (user, 2026-11-07).
 - Must work with `Backend` and Envoy cluster health alone; Services and EndpointSlices are optional (D-016).
 
 ### Phase 7 — Policies & Filters
@@ -158,7 +159,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 - The actual Envoy HTTP filter chain and filter order per route, mapped back to the Gateway API and policy resources that produced it.
 - Intended configuration (the controller's xDS snapshot) compared with the configuration Envoy accepted.
-- Builds on the `pkg/envoy` library of [krp](https://github.com/DuncanDoyle/krp) (krp Phase 4, v0.1.0). krp owns the mapping from Envoy names to Gateway API refs, and `computed.EnvoyNamer` delegates to it (program P-001, edges E4/E5).
+- Builds on the `pkg/envoy` library of [xdsview](https://github.com/DuncanDoyle/xdsview) (xdsview Phase 4, v0.1.0). xdsview owns the mapping from Envoy names to Gateway API refs, and `computed.EnvoyNamer` delegates to it (program P-001, edges E4/E5).
 - Easier standalone, because the admin server (9095) and Envoy admin are local (D-016).
 
 ### Phase 12 — App-Team Views

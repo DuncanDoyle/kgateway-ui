@@ -1,3 +1,4 @@
+import { trackRequest } from "./clock";
 /** Error thrown for non-2xx API responses. */
 export class ApiError extends Error {
   constructor(
@@ -15,6 +16,15 @@ export async function apiFetch<T>(path: string): Promise<T> {
 
 /** apiFetch, plus the response headers. */
 export async function apiFetchWithHeaders<T>(path: string): Promise<{ body: T; headers: Headers }> {
+  const settled = trackRequest();
+  try {
+    return await request<T>(path);
+  } finally {
+    settled();
+  }
+}
+
+async function request<T>(path: string): Promise<{ body: T; headers: Headers }> {
   let res: Response;
   try {
     res = await fetch(path, { headers: { Accept: "application/json" } });

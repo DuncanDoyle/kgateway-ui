@@ -9,7 +9,7 @@ import (
 )
 
 // Env selects the timing mode: "reference" (the default) gates, "report" logs.
-const Env = "KGWUI_BENCH_TIMING"
+const Env = "SNELLIUS_BENCH_TIMING"
 
 // Reference reports whether absolute time budgets gate in this run.
 func Reference(tb testing.TB) bool {

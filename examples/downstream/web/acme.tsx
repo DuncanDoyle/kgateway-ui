@@ -1,4 +1,4 @@
-import { apiFetch, PageState, POLL_MS, ResourceName, type ShellExtension } from "@kgateway-ui/shell";
+import { apiFetch, PageState, POLL_MS, ResourceName, type ShellExtension } from "@snellius/shell";
 import useSWR from "swr";
 
 /** The body of GET /api/ext/acme/widgets, served by acme.go. */

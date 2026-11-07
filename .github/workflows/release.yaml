@@ -24,7 +24,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           build-args: VERSION=${{ github.ref_name }}
-          tags: ghcr.io/duncandoyle/kgateway-ui:${{ steps.v.outputs.version }}
+          tags: ghcr.io/duncandoyle/snellius:${{ steps.v.outputs.version }}
   chart:
     runs-on: ubuntu-latest
     needs: image
@@ -39,9 +39,9 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           v="${GITHUB_REF_NAME#v}"
-          helm package deploy/helm/kgateway-ui --version "$v" --app-version "$v"
+          helm package deploy/helm/snellius --version "$v" --app-version "$v"
           echo "$REGISTRY_TOKEN" | helm registry login ghcr.io -u "$REGISTRY_USER" --password-stdin
-          helm push "kgateway-ui-$v.tgz" oci://ghcr.io/duncandoyle/charts
+          helm push "snellius-$v.tgz" oci://ghcr.io/duncandoyle/charts
   github-release:
     runs-on: ubuntu-latest
     needs: chart
@@ -54,8 +54,8 @@ jobs:
       # The shell package is attached to the release, not published to a registry (private stays true).
       - name: shell package
         run: |
-          (cd web && npm ci && npm pkg set version="${GITHUB_REF_NAME#v}" -w @kgateway-ui/shell)
+          (cd web && npm ci && npm pkg set version="${GITHUB_REF_NAME#v}" -w @snellius/shell)
           make shell-pack
       # Packed first, so the release is created with the shell package attached.
-      - run: gh release create "$GITHUB_REF_NAME" --generate-notes "web/packages/shell/kgateway-ui-shell-${GITHUB_REF_NAME#v}.tgz"
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes "web/packages/shell/snellius-shell-${GITHUB_REF_NAME#v}.tgz"
         env: { GH_TOKEN: "${{ github.token }}" }

@@ -16,12 +16,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // delegRule is a rule matching each path as a PathPrefix, delegating to refs.
@@ -453,8 +453,8 @@ func restrictedComputed(string) Computed {
 	return Computed{By: ComputedBy, Rules: "kgateway-2.4", State: "restricted"}
 }
 
-// withoutHealth is GET path's canonical JSON without any "health" field or
-// "disagrees" flag, which cover every finding (design §7.4 rule 9), and
+// withoutHealth is GET path's canonical JSON without any "health" field, its
+// "reason" or "disagrees" flag, which cover every finding (design §7.4 rule 9), and
 // without deniedInInstall, the one hidden count a list sends (rule 2).
 func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
 	t.Helper()
@@ -463,6 +463,7 @@ func withoutHealth(t *testing.T, srv *httptest.Server, path string) []byte {
 		switch x := v.(type) {
 		case map[string]any:
 			delete(x, "health")
+			delete(x, "reason")
 			delete(x, "deniedInInstall")
 			if fs, ok := x["flags"].([]any); ok {
 				x["flags"] = slices.DeleteFunc(fs, func(f any) bool { return f == "disagrees" })

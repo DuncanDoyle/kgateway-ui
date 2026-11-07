@@ -1,7 +1,8 @@
 import { act, screen, waitFor } from "@testing-library/react";
+import { DataAge } from "../pages/DataAge";
 import { renderWithTheme, stubApi } from "../test/render";
 import { ApiError, apiFetch } from "./client";
-import { useNow } from "./clock";
+import { resetClockForTests, useNow } from "./clock";
 import {
   isLinkable,
   isStale,
@@ -290,4 +291,136 @@ it("useCapabilityState reads capabilityStates", async () => {
   renderWithTheme(<CapabilityProbe name="acme-widgets" />);
   await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
   expect(screen.getByText("none")).toBeInTheDocument();
+});
+
+// region Hidden tab (D-063)
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+function AgeProbe() {
+  const { data } = useInstalls();
+  return data?.[0] ? <DataAge collectedAt={data[0].computedAt} /> : <p>loading</p>;
+}
+
+/** Serves installs collected at `collectedAt()` (now by default); the request after `hold()` waits until released. */
+function gatedInstalls(collectedAt: () => string = () => new Date().toISOString()) {
+  let gate: Promise<void> | undefined;
+  let open = () => {};
+  let fail = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      if (gate) await gate;
+      if (fail) return new Response(JSON.stringify({ error: "down" }), { status: 503 });
+      return new Response(JSON.stringify([{ id: "a.one", computedAt: collectedAt() }]), { status: 200 });
+    }),
+  );
+  return {
+    hold(failing = false) {
+      fail = failing;
+      gate = new Promise<void>((r) => {
+        open = r;
+      });
+    },
+    release: () => open(),
+  };
+}
+
+async function hideFor(ms: number) {
+  act(() => setVisibility("hidden"));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+describe("after a hidden tab is shown again", () => {
+  afterEach(() => {
+    act(() => setVisibility("visible"));
+    resetClockForTests();
+  });
+
+  it("data stays fresh until the first poll answers", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = gatedInstalls();
+    renderWithTheme(<AgeProbe />);
+    expect(await screen.findByText(/^Last checked/)).toBeInTheDocument();
+    await hideFor(9 * 60_000);
+    api.hold();
+    const before = vi.mocked(fetch).mock.calls.length;
+    act(() => setVisibility("visible"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    // The revalidation is in flight; the 9 minutes hidden do not count yet.
+    expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(before);
+    expect(screen.queryByText(/stale/)).toBeNull();
+    api.release();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(screen.getByText(/^Last checked/)).toBeInTheDocument();
+    expect(screen.queryByText(/stale/)).toBeNull();
+  });
+
+  it("a failing first poll shows the data as stale", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = gatedInstalls();
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    await hideFor(9 * 60_000);
+    api.hold(true);
+    act(() => setVisibility("visible"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.queryByText(/stale/)).toBeNull();
+    api.release();
+    expect(await screen.findByText(/^Data is stale\. Last checked 9m ago/)).toBeInTheDocument();
+  });
+
+  it("a first poll with data older than the stale limit shows it as stale", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const t0 = new Date().toISOString();
+    const api = gatedInstalls(() => t0);
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    await hideFor(9 * 60_000);
+    api.hold();
+    act(() => setVisibility("visible"));
+    api.release();
+    expect(await screen.findByText(/^Data is stale/)).toBeInTheDocument();
+  });
+
+  it("a first poll that never answers shows the data as stale within 10 s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = gatedInstalls();
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    await hideFor(9 * 60_000);
+    api.hold();
+    act(() => setVisibility("visible"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+    expect(screen.queryByText(/stale/)).toBeNull();
+    // The revalidation stays pending; the hold cap alone releases the clock.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByText(/^Data is stale\. Last checked 9m ago/)).toBeInTheDocument();
+  });
+
+  it("a visible tab whose backend stops answering still turns stale after two intervals", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = gatedInstalls();
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    api.hold(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * POLL_MS + 1000);
+    });
+    expect(screen.getByText(/^Data is stale/)).toBeInTheDocument();
+  });
 });

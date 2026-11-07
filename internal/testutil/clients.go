@@ -14,7 +14,7 @@ import (
 	"k8s.io/client-go/metadata"
 	metadatafake "k8s.io/client-go/metadata/fake"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 // ServedUpstream resolves every upstream descriptor to its first version.

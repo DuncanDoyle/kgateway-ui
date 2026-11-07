@@ -1,6 +1,6 @@
 import type { HealthState } from "../theme/tokens";
 import type { DataPlane, ProcessSet } from "./diagTypes";
-import type { LabelSelector, Ref } from "./types";
+import type { LabelSelector, Ref, RowReason } from "./types";
 
 /** Mirrors the explorer DTOs of pkg/api/explore_types.go as built (sub-phases 2.2 and 2.3, design §7.3). */
 
@@ -102,6 +102,7 @@ export interface RouteRow {
   children: number;
   flags: string[];
   health: HealthState;
+  reason?: RowReason;
   mirror?: boolean;
 }
 /** One row of the Gateways list. */
@@ -109,6 +110,7 @@ export interface GatewayListRow {
   ref: LinkedRef;
   class: string;
   health: HealthState;
+  reason?: RowReason;
   listeners: number;
   attachedRoutes: number;
   notAccepted: number;
@@ -122,6 +124,7 @@ export interface ListenerSetRow {
   ref: LinkedRef;
   parent: LinkedRef;
   health: HealthState;
+  reason?: RowReason;
   listeners: number;
   acceptedReason?: string;
   routes?: number;

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 // A served set that differs from the watched one only in list-only kinds is no

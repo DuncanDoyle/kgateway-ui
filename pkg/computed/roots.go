@@ -3,7 +3,7 @@ package computed
 import (
 	"slices"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // StatusTarget finds a route's status root (rules §5.1): the target and report

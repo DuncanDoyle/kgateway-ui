@@ -208,7 +208,7 @@ it("a contribution colliding with a core tab is ignored", async () => {
     "Mine extra",
   ]);
   expect(screen.getByRole("tabpanel")).toHaveTextContent("core delegation");
-  expect(warn).toHaveBeenCalledWith(expect.stringContaining('"yaml"'));
+  expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^snellius: .*"yaml"/));
   expect(warn).toHaveBeenCalledWith(expect.stringContaining('"delegation"'));
 });
 
@@ -266,7 +266,8 @@ const boom = (): never => {
 function quiet() {
   vi.spyOn(console, "error").mockImplementation(() => {});
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  return (id: string) => warn.mock.calls.filter((c) => String(c[0]).includes(`"${id}"`)).length;
+  return (id: string) =>
+    warn.mock.calls.filter((c) => String(c[0]).startsWith(`snellius: hiding contribution "${id}"`)).length;
 }
 
 it("a throwing detail tab or side section leaves the Gateway page up and its slot empty", async () => {
@@ -371,7 +372,7 @@ it("a repeated contribution id renders once", async () => {
   expect(screen.getAllByRole("group", { name: "A1" })).toHaveLength(1);
   expect(screen.queryByRole("group", { name: "A2" })).not.toBeInTheDocument();
   for (const id of ["dup-side", "dup-panel", "dup-action"])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`"${id}"`));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^snellius: .*"${id}"`)));
 });
 
 it("a contribution that threw for one object renders for the next", async () => {

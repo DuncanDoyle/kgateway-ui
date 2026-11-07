@@ -11,8 +11,8 @@ import (
 
 	"k8s.io/utils/clock"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 )
 
 // Source is the source fingerprint of a model (D-019 §2): the cache data it

@@ -1,7 +1,7 @@
-import { defaultPages, renderWhenFontsReady, Shell } from "@kgateway-ui/shell";
-import { kgatewayBrand } from "./brand";
+import { defaultPages, renderWhenFontsReady, Shell } from "@snellius/shell";
+import { snelliusBrand } from "./brand";
 
-const extension = { brand: kgatewayBrand };
+const extension = { brand: snelliusBrand };
 
 // The shell waits for the bundled fonts: a later swap reflows the page, e.g. wraps a long name in a detail header.
 void renderWhenFontsReady(

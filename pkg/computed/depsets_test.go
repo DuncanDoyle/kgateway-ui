@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 func dep(n string) objects.Ref { return objects.Ref{Kind: "Gateway", Namespace: "infra", Name: n} }

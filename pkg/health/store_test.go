@@ -7,7 +7,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 )
 
 // funcCheck is a check whose Run and Inputs are funcs.

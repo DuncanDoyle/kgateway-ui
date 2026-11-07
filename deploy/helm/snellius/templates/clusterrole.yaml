@@ -2,8 +2,8 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "kgateway-ui.fullname" . }}
-  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+  name: {{ include "snellius.fullname" . }}
+  labels: {{- include "snellius.labels" . | nindent 4 }}
 rules:
   - apiGroups: [gateway.networking.k8s.io]
     resources: [gatewayclasses, gateways, httproutes, grpcroutes, tcproutes, tlsroutes, backendtlspolicies, listenersets, referencegrants]

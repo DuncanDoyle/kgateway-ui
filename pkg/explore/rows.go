@@ -11,11 +11,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // Pending reasons that do not come from a status entry.
@@ -106,10 +106,13 @@ func (b *builder) findings() {
 	fs := b.in.Health.Findings
 	for i := range fs {
 		f := &fs[i]
-		if f.Resource == nil || (f.Severity != health.SeverityError && f.Severity != health.SeverityWarning) {
+		if f.Resource == nil {
 			continue
 		}
-		b.worst[*f.Resource] = b.worst[*f.Resource].add(f)
+		b.worst[*f.Resource] = b.worst[*f.Resource].Add(f)
+		if f.Severity != health.SeverityError && f.Severity != health.SeverityWarning {
+			continue
+		}
 		if f.Code == health.CodeXDSRejected {
 			if b.rejecting == nil {
 				b.rejecting = map[objects.Ref]bool{}
@@ -126,7 +129,7 @@ func (b *builder) findings() {
 	b.unknown = requiredNotOK(b.in.Health)
 }
 
-func (b *builder) state(ref objects.Ref) health.State { return b.worst[ref].state(b.unknown) }
+func (b *builder) state(ref objects.Ref) health.State { return b.worst[ref].State(b.unknown) }
 
 // lifted is st raised to warning when the row's Gateway rejects config (design §8.4).
 func lifted(st health.State, rejecting bool) health.State {

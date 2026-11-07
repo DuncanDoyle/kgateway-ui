@@ -1,5 +1,5 @@
 VERSION ?= dev
-LDFLAGS := -s -w -X github.com/DuncanDoyle/kgateway-ui/pkg/version.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/DuncanDoyle/snellius/pkg/version.Version=$(VERSION)
 GOLANGCI_LINT_VERSION := v2.15.0
 KGW_VERSION ?= v2.4.7
 GWAPI_VERSION ?= v1.6.1
@@ -17,14 +17,14 @@ help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
 	@echo "make bench  run the scale benchmarks and budget tests, after the Go version, machine and host load"
-	@echo "           KGWUI_BENCH_TIMING=report logs the absolute time budgets instead of failing (CI; D-044)"
+	@echo "           SNELLIUS_BENCH_TIMING=report logs the absolute time budgets instead of failing (CI; D-044)"
 	@echo "make bench-ab BASE_DIR=<checkout>  run the timing benchmarks of BASE_DIR and this tree interleaved; fail when one is > 15 % slower"
 	@echo "make bench-stream  run the 10-minute sustained-stream budget, 5 runs per world, about 105 min (make bench runs the 60 s -short one)"
 	@echo "make bench-specedit  run the 10-minute spec-edit stream, 5 runs per world, about 105 min (make bench runs the 60 s -short one)"
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
-	@echo "make build  make web, then build bin/kgateway-ui with the SPA embedded"
-	@echo "make shell-pack  build the shell package into web/packages/shell/kgateway-ui-shell-<version>.tgz"
+	@echo "make build  make web, then build bin/snellius with the SPA embedded"
+	@echo "make shell-pack  build the shell package into web/packages/shell/snellius-shell-<version>.tgz"
 	@echo "make example-web  typecheck and test examples/downstream/web against the packed shell"
 	@echo "make run    run the server from source (placeholder page unless make web ran)"
 	@echo "make e2e    kind cluster with kgateway KGW_VERSION, then the API and Playwright tests (installs web deps and Chromium if needed)"
@@ -37,7 +37,7 @@ bench:
 	@go version
 	@echo "machine: $$(uname -sm), $$(getconf _NPROCESSORS_ONLN) CPUs"
 	@echo "load: $$(uptime)"
-	@echo "timing budgets: $${KGWUI_BENCH_TIMING:-reference} (D-044)"
+	@echo "timing budgets: $${SNELLIUS_BENCH_TIMING:-reference} (D-044)"
 	@# -short shortens only the API stream; no engine or cache budget may read testing.Short().
 	@# The budget tests run once; the benchmarks five times.
 	go test -tags bench -v -short -run 'Budget' -count 1 ./pkg/engine ./pkg/cache
@@ -65,20 +65,20 @@ web:
 shell-pack:
 	cd web && { [ -d node_modules ] || npm ci; }
 	rm -rf web/packages/shell/dist web/packages/shell/*.tgz
-	cd web && npm run build -w @kgateway-ui/shell
-	@# Packs a staged copy without the @kgateway-ui/source condition: the tarball ships dist only.
+	cd web && npm run build -w @snellius/shell
+	@# Packs a staged copy without the @snellius/source condition: the tarball ships dist only.
 	d=$$(mktemp -d) && cp -r web/packages/shell/dist "$$d/" && \
-	  node -e 'const fs=require("fs"),[src,dst]=process.argv.slice(1),p=JSON.parse(fs.readFileSync(src));delete p.exports["."]["@kgateway-ui/source"];fs.writeFileSync(dst,JSON.stringify(p,null,2)+"\n")' web/packages/shell/package.json "$$d/package.json" && \
+	  node -e 'const fs=require("fs"),[src,dst]=process.argv.slice(1),p=JSON.parse(fs.readFileSync(src));delete p.exports["."]["@snellius/source"];fs.writeFileSync(dst,JSON.stringify(p,null,2)+"\n")' web/packages/shell/package.json "$$d/package.json" && \
 	  (cd "$$d" && npm pack --pack-destination "$(CURDIR)/web/packages/shell") && rm -rf "$$d"
 example-web: shell-pack
 	@# Installs the tarball, not the workspace source; peers are listed in its package.json, so npm need not resolve optional peer chains.
-	rm -rf examples/downstream/web/node_modules/@kgateway-ui
-	npm --prefix examples/downstream/web install --no-save --no-package-lock --legacy-peer-deps $$(ls web/packages/shell/kgateway-ui-shell-*.tgz)
+	rm -rf examples/downstream/web/node_modules/@snellius
+	npm --prefix examples/downstream/web install --no-save --no-package-lock --legacy-peer-deps $$(ls web/packages/shell/snellius-shell-*.tgz)
 	cd examples/downstream/web && npx tsc --noEmit && npx vitest run
 build: web
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/kgateway-ui ./cmd/kgateway-ui
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/snellius ./cmd/snellius
 run:
-	go run ./cmd/kgateway-ui --kubeconfig $${KUBECONFIG:-$$HOME/.kube/config}
+	go run ./cmd/snellius --kubeconfig $${KUBECONFIG:-$$HOME/.kube/config}
 e2e:
 	KGW_VERSION=$(KGW_VERSION) GWAPI_VERSION=$(GWAPI_VERSION) SECOND_INSTALL=$(SECOND_INSTALL) PORT=$(PORT) UI_EXTRA_ARGS="$(UI_EXTRA_ARGS)" bash test/e2e/setup.sh
 	SECOND_INSTALL=$(SECOND_INSTALL) UI_URL=$(UI_URL) go test -tags e2e ./test/e2e/... -v -count=1

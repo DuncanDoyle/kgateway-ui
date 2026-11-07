@@ -109,8 +109,8 @@ if [[ "${NACK:-}" == 1 ]]; then
 fi
 kubectl -n shop rollout status deploy/httpbin --timeout=180s
 
-docker build -t kgateway-ui:e2e --build-arg VERSION=e2e .
-kind load docker-image kgateway-ui:e2e --name "$CLUSTER"
+docker build -t snellius:e2e --build-arg VERSION=e2e .
+kind load docker-image snellius:e2e --name "$CLUSTER"
 ui_args=()
 if [[ -n "${UI_EXTRA_ARGS:-}" ]]; then
   read -ra extra <<<"$UI_EXTRA_ARGS"
@@ -120,11 +120,11 @@ if [[ "${CONTROLLER_LOGS:-}" == 1 ]]; then
   ui_args+=(--set diagnostics.controllerLogs=true --set "diagnostics.controllerLogsNamespaces={kgw-a}")
 fi
 # ${a[@]+...} keeps an empty array safe under set -u on bash 3.
-helm install ui deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
-  --set image.repository=kgateway-ui --set image.tag=e2e --set image.pullPolicy=Never ${ui_args[@]+"${ui_args[@]}"} --wait
-kubectl -n kgateway-ui rollout status deploy/ui-kgateway-ui --timeout=120s
+helm install ui deploy/helm/snellius -n snellius --create-namespace \
+  --set image.repository=snellius --set image.tag=e2e --set image.pullPolicy=Never ${ui_args[@]+"${ui_args[@]}"} --wait
+kubectl -n snellius rollout status deploy/ui-snellius --timeout=120s
 
-nohup kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui "$PORT:80" >"$E2E_DIR/port-forward.log" 2>&1 &
+nohup kubectl -n snellius port-forward svc/ui-snellius "$PORT:80" >"$E2E_DIR/port-forward.log" 2>&1 &
 echo $! >"$E2E_DIR/port-forward.pid"
 if ! poll 60 curl -fsS "http://127.0.0.1:$PORT/readyz"; then
   cat "$E2E_DIR/port-forward.log" >&2

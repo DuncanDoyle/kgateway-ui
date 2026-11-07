@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 // State is a value's availability.
