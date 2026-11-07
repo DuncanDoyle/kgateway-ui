@@ -18,7 +18,7 @@ Snellius is the new name of kgateway-ui. Releases up to v0.4.0, and the install 
 
 ## Why Snellius?
 
-Snellius is named after Willebrord Snellius (1580–1626), a Dutch mathematician and astronomer known for Snell's law of refraction and his pioneering work in triangulation and navigation. Just as Snellius used observations from multiple points to understand and map the physical world, this project brings together Kubernetes Gateway API resources, controller state, Envoy configuration, and runtime telemetry to provide a coherent picture of gateway infrastructure. The connection to refraction is equally fitting: understanding how traffic is directed and transformed as it flows through different layers of the system. Snellius helps operators see the whole picture, from configuration intent to actual dataplane behavior.
+Snellius is named after [Willebrord Snellius](https://en.wikipedia.org/wiki/Willebrord_Snellius) (1580–1626), a Dutch mathematician and astronomer known for Snell's law of refraction and his pioneering work in triangulation and navigation. Just as Snellius used observations from multiple points to understand and map the physical world, this project brings together Kubernetes Gateway API resources, controller state, Envoy configuration, and runtime telemetry to provide a coherent picture of gateway infrastructure. The connection to refraction is equally fitting: understanding how traffic is directed and transformed as it flows through different layers of the system. Snellius helps operators see the whole picture, from configuration intent to actual dataplane behavior.
 
 ## Security and trust model
 
