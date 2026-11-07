@@ -587,7 +587,7 @@ func inChild(t *testing.T, test string, tiers []scale.Tier, run func(*testing.T,
 }
 
 // streamChildEnv makes a stream test run one world in this process.
-const streamChildEnv = "KGWUI_STREAM_CHILD"
+const streamChildEnv = "SNELLIUS_STREAM_CHILD"
 
 // streamVariant is what each stream update changes, and whether the budgets gate it.
 type streamVariant struct {

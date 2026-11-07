@@ -494,7 +494,7 @@ func TestBudgetAnalyzerStage(t *testing.T) {
 const heapBaseline = 25411584
 
 // heapChildEnv makes TestBudgetHeap measure in this process and print one line.
-const heapChildEnv = "KGWUI_HEAP_CHILD"
+const heapChildEnv = "SNELLIUS_HEAP_CHILD"
 
 // heapRun is one child's measurement: HeapInuse at the baseline's three
 // points, and the HeapAlloc freed by dropping each part in order.
@@ -735,7 +735,7 @@ func watchesHeap(t *testing.T, tier scale.Tier) (w32, w34 int64) {
 // delegation inside the chart's 512Mi memory limit.
 
 // denseMemChildEnv makes TestBudgetDenseMemory measure one edge cap in this process.
-const denseMemChildEnv = "KGWUI_DENSE_MEM_CHILD"
+const denseMemChildEnv = "SNELLIUS_DENSE_MEM_CHILD"
 
 // The dense budgets at the default edge cap (D-039): the 2.4 measurement
 // (160 MiB retained, 210 MiB cold, 224 on linux/amd64, 168 MiB per warm Compute)
