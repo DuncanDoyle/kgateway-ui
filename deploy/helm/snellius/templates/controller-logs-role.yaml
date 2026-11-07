@@ -5,9 +5,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "kgateway-ui.fullname" $ }}-logs
+  name: {{ include "snellius.fullname" $ }}-logs
   namespace: {{ . }}
-  labels: {{- include "kgateway-ui.labels" $ | nindent 4 }}
+  labels: {{- include "snellius.labels" $ | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [pods/log]
@@ -16,11 +16,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "kgateway-ui.fullname" $ }}-logs
+  name: {{ include "snellius.fullname" $ }}-logs
   namespace: {{ . }}
-  labels: {{- include "kgateway-ui.labels" $ | nindent 4 }}
-roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "kgateway-ui.fullname" $ }}-logs }
+  labels: {{- include "snellius.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "snellius.fullname" $ }}-logs }
 subjects:
-  - { kind: ServiceAccount, name: {{ include "kgateway-ui.sa" $ }}, namespace: {{ $.Release.Namespace }} }
+  - { kind: ServiceAccount, name: {{ include "snellius.sa" $ }}, namespace: {{ $.Release.Namespace }} }
 {{- end }}
 {{- end }}

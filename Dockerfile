@@ -21,14 +21,14 @@ COPY --from=web /src/web/app/dist internal/webui/dist
 RUN find internal/webui/dist -name '*.map' -delete
 ARG TARGETOS TARGETARCH VERSION=dev
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-    -ldflags "-s -w -X github.com/DuncanDoyle/snellius/pkg/version.Version=${VERSION}" -o /out/kgateway-ui ./cmd/kgateway-ui
+    -ldflags "-s -w -X github.com/DuncanDoyle/snellius/pkg/version.Version=${VERSION}" -o /out/snellius ./cmd/snellius
 
 FROM gcr.io/distroless/static:nonroot
 # image.source links the ghcr package to the repo.
-LABEL org.opencontainers.image.source="https://github.com/DuncanDoyle/kgateway-ui" \
-      org.opencontainers.image.description="Read-only web UI for kgateway" \
+LABEL org.opencontainers.image.source="https://github.com/DuncanDoyle/snellius" \
+      org.opencontainers.image.description="Read-only UI for Kubernetes Gateway API, built for kgateway" \
       org.opencontainers.image.licenses="Apache-2.0"
-COPY --from=go /out/kgateway-ui /kgateway-ui
+COPY --from=go /out/snellius /snellius
 USER 65532:65532
 EXPOSE 8080
-ENTRYPOINT ["/kgateway-ui"]
+ENTRYPOINT ["/snellius"]

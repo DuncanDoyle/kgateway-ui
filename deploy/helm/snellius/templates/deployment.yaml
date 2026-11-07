@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "kgateway-ui.fullname" . }}
-  labels: {{- include "kgateway-ui.labels" . | nindent 4 }}
+  name: {{ include "snellius.fullname" . }}
+  labels: {{- include "snellius.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
-    matchLabels: {{- include "kgateway-ui.selector" . | nindent 6 }}
+    matchLabels: {{- include "snellius.selector" . | nindent 6 }}
   template:
     metadata:
-      labels: {{- include "kgateway-ui.selector" . | nindent 8 }}
+      labels: {{- include "snellius.selector" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "kgateway-ui.sa" . }}
+      serviceAccountName: {{ include "snellius.sa" . }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: kgateway-ui
+        - name: snellius
           image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
@@ -47,9 +47,9 @@ spec:
           env:
             {{- if dig "limits" "memory" "" .Values.resources }}
             # The container's memory limit in bytes; the binary sets the Go memory target to 90 % of it (D-025).
-            - name: KGWUI_MEMORY_LIMIT
+            - name: SNELLIUS_MEMORY_LIMIT
               valueFrom:
-                resourceFieldRef: { containerName: kgateway-ui, resource: limits.memory, divisor: "1" }
+                resourceFieldRef: { containerName: snellius, resource: limits.memory, divisor: "1" }
             {{- end }}
             {{- with .Values.memoryLimit }}
             - name: GOMEMLIMIT

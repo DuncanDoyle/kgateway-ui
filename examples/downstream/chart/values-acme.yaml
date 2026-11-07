@@ -1,5 +1,5 @@
 # Chart overlay for the example build: lets the UI read acme's policy kind.
-#   helm install ui deploy/helm/kgateway-ui -f examples/downstream/chart/values-acme.yaml
+#   helm install ui deploy/helm/snellius -f examples/downstream/chart/values-acme.yaml
 rbac:
   extraRules:
     - apiGroups: [acme.example.com]

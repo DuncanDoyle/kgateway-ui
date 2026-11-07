@@ -1,10 +1,10 @@
 apiVersion: v2
-name: kgateway-ui
-description: Read-only web UI for kgateway
+name: snellius
+description: Read-only UI for Kubernetes Gateway API, built for kgateway
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
-home: https://github.com/DuncanDoyle/kgateway-ui
+home: https://github.com/DuncanDoyle/snellius
 # helm push turns sources[0] into the OCI image.source annotation, which links the ghcr package to the repo.
 sources:
-  - https://github.com/DuncanDoyle/kgateway-ui
+  - https://github.com/DuncanDoyle/snellius

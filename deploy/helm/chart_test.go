@@ -28,7 +28,7 @@ func render(t *testing.T, args ...string) []map[string]any {
 		}
 		t.Skip("helm not on PATH")
 	}
-	out, err := exec.Command("helm", append([]string{"template", "ui", "./kgateway-ui", "-n", "kgateway-ui"}, args...)...).CombinedOutput()
+	out, err := exec.Command("helm", append([]string{"template", "ui", "./snellius", "-n", "snellius"}, args...)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}
@@ -268,10 +268,10 @@ func TestControllerLogsRoleIsOptInAndNamespaced(t *testing.T) {
 		if err := yaml.Unmarshal(b, &rb); err != nil {
 			t.Fatal(err)
 		}
-		if rb.RoleRef.Kind != "Role" || rb.RoleRef.Name != "ui-kgateway-ui-logs" {
+		if rb.RoleRef.Kind != "Role" || rb.RoleRef.Name != "ui-snellius-logs" {
 			t.Errorf("RoleBinding %s/%s must bind the logs Role: %+v", rb.Namespace, rb.Name, rb.RoleRef)
 		}
-		if want := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "ui-kgateway-ui", Namespace: "kgateway-ui"}}; !slices.Equal(rb.Subjects, want) {
+		if want := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "ui-snellius", Namespace: "snellius"}}; !slices.Equal(rb.Subjects, want) {
 			t.Errorf("RoleBinding %s/%s subjects = %+v", rb.Namespace, rb.Name, rb.Subjects)
 		}
 		bound = append(bound, rb.Namespace)
@@ -293,7 +293,7 @@ func TestHTTPRouteIsOptIn(t *testing.T) {
 		t.Fatalf("want HTTPRoute when enabled, got %d", len(routes))
 	}
 	b, _ := yaml.Marshal(routes[0])
-	for _, want := range []string{"name: edge", "namespace: infra", "ui.example.com", "name: ui-kgateway-ui", "port: 80"} {
+	for _, want := range []string{"name: edge", "namespace: infra", "ui.example.com", "name: ui-snellius", "port: 80"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("HTTPRoute lacks %q:\n%s", want, b)
 		}
@@ -302,7 +302,7 @@ func TestHTTPRouteIsOptIn(t *testing.T) {
 
 func TestHTTPRouteRequiresParentRefs(t *testing.T) {
 	render(t) // skips without helm
-	out, err := exec.Command("helm", "template", "ui", "./kgateway-ui", "-n", "kgateway-ui", "--set", "httpRoute.enabled=true").CombinedOutput()
+	out, err := exec.Command("helm", "template", "ui", "./snellius", "-n", "snellius", "--set", "httpRoute.enabled=true").CombinedOutput()
 	if err == nil {
 		t.Fatalf("want render failure without parentRefs, got:\n%s", out)
 	}
@@ -313,7 +313,7 @@ func TestHTTPRouteRequiresParentRefs(t *testing.T) {
 
 func TestExistingServiceAccountRequiresName(t *testing.T) {
 	render(t) // skips without helm
-	out, err := exec.Command("helm", "template", "ui", "./kgateway-ui", "-n", "kgateway-ui", "--set", "serviceAccount.create=false").CombinedOutput()
+	out, err := exec.Command("helm", "template", "ui", "./snellius", "-n", "snellius", "--set", "serviceAccount.create=false").CombinedOutput()
 	if err == nil {
 		t.Fatalf("want render failure without serviceAccount.name, got:\n%s", out)
 	}
@@ -416,26 +416,26 @@ func containerEnv(t *testing.T, args ...string) []corev1.EnvVar {
 	return d.Spec.Template.Spec.Containers[0].Env
 }
 
-// The container's memory limit reaches the binary as KGWUI_MEMORY_LIMIT, and
+// The container's memory limit reaches the binary as SNELLIUS_MEMORY_LIMIT, and
 // the chart sets GOMEMLIMIT only from the opt-in memoryLimit (D-025, D-043).
 func TestMemoryLimitEnv(t *testing.T) {
 	named := func(n string) func(corev1.EnvVar) bool { return func(e corev1.EnvVar) bool { return e.Name == n } }
 	env := containerEnv(t)
-	i := slices.IndexFunc(env, named("KGWUI_MEMORY_LIMIT"))
+	i := slices.IndexFunc(env, named("SNELLIUS_MEMORY_LIMIT"))
 	if i < 0 {
-		t.Fatalf("no KGWUI_MEMORY_LIMIT with the default 512Mi limit: %+v", env)
+		t.Fatalf("no SNELLIUS_MEMORY_LIMIT with the default 512Mi limit: %+v", env)
 	}
 	f := env[i].ValueFrom
 	if env[i].Value != "" || f == nil || f.ResourceFieldRef == nil || f.ResourceFieldRef.Resource != "limits.memory" ||
-		f.ResourceFieldRef.ContainerName != "kgateway-ui" || f.ResourceFieldRef.Divisor.String() != "1" {
-		t.Fatalf("KGWUI_MEMORY_LIMIT must be the container's limits.memory in bytes: %+v", env[i])
+		f.ResourceFieldRef.ContainerName != "snellius" || f.ResourceFieldRef.Divisor.String() != "1" {
+		t.Fatalf("SNELLIUS_MEMORY_LIMIT must be the container's limits.memory in bytes: %+v", env[i])
 	}
 	if slices.ContainsFunc(env, named("GOMEMLIMIT")) {
 		t.Fatalf("the chart must not set GOMEMLIMIT: %+v", env)
 	}
 	env = containerEnv(t, "--set", "resources.limits.memory=null")
-	if slices.ContainsFunc(env, named("KGWUI_MEMORY_LIMIT")) {
-		t.Fatalf("KGWUI_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
+	if slices.ContainsFunc(env, named("SNELLIUS_MEMORY_LIMIT")) {
+		t.Fatalf("SNELLIUS_MEMORY_LIMIT must be absent without a memory limit: %+v", env)
 	}
 	for _, args := range [][]string{{"--set", "memoryLimit=300MiB"}, {"--set", "memoryLimit=300MiB", "--set", "resources.limits.memory=null"}} {
 		env = containerEnv(t, args...)
@@ -491,7 +491,7 @@ func TestExtraEnvVolumesAndContainers(t *testing.T) {
 		"--set-json", `extraVolumeMounts=[{"name":"data","mountPath":"/data"}]`,
 		"--set-json", `extraContainers=[{"name":"addon","image":"example/addon:1"}]`,
 	).Spec.Template.Spec
-	if len(d.Containers) != 2 || d.Containers[0].Name != "kgateway-ui" || d.Containers[1].Name != "addon" {
+	if len(d.Containers) != 2 || d.Containers[0].Name != "snellius" || d.Containers[1].Name != "addon" {
 		t.Fatalf("containers = %+v", d.Containers)
 	}
 	if len(d.Containers[1].VolumeMounts) != 0 {
@@ -499,7 +499,7 @@ func TestExtraEnvVolumesAndContainers(t *testing.T) {
 	}
 	ui := d.Containers[0]
 	if !slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "ADDON" && e.Value == "1" }) ||
-		!slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "KGWUI_MEMORY_LIMIT" }) {
+		!slices.ContainsFunc(ui.Env, func(e corev1.EnvVar) bool { return e.Name == "SNELLIUS_MEMORY_LIMIT" }) {
 		t.Errorf("extraEnv must join the memory-limit env: %+v", ui.Env)
 	}
 	if len(ui.VolumeMounts) != 1 || ui.VolumeMounts[0].MountPath != "/data" {

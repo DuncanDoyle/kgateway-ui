@@ -1043,7 +1043,7 @@ func uiArgs(t *testing.T) []string {
 			}
 		}
 	}
-	kubectl(t, &d, "-n", "kgateway-ui", "get", "deploy/ui-kgateway-ui", "-o", "json")
+	kubectl(t, &d, "-n", "snellius", "get", "deploy/ui-snellius", "-o", "json")
 	return d.Spec.Template.Spec.Containers[0].Args
 }
 

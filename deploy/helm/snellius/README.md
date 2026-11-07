@@ -1,6 +1,6 @@
-# kgateway-ui Helm chart
+# Snellius Helm chart
 
-Installs the read-only kgateway UI: a Deployment, a ClusterIP Service, a ServiceAccount, a ClusterRole and its binding, and optionally an HTTPRoute.
+Installs Snellius, a read-only UI for Kubernetes Gateway API, built for kgateway. It installs a Deployment, a ClusterIP Service, a ServiceAccount, a ClusterRole and its binding, and optionally an HTTPRoute.
 
 ## Security and trust model
 
@@ -15,15 +15,15 @@ The UI has no login. Whoever reaches it sees everything its ServiceAccount can r
 
 ```sh
 # Install a released chart; --version picks the chart and the matching image
-helm install ui oci://ghcr.io/duncandoyle/charts/kgateway-ui --version 0.1.0 \
-  -n kgateway-ui --create-namespace
-kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui 8080:80
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.1.0 \
+  -n snellius --create-namespace
+kubectl -n snellius port-forward svc/ui-snellius 8080:80
 ```
 
 To install from a checkout, set the image tag to a released version. The in-repo `appVersion` is not bumped on release, so without it the templates from your checkout run an older image.
 
 ```sh
-helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
+helm install ui ./deploy/helm/snellius -n snellius --create-namespace \
   --set image.tag=<version>
 ```
 
@@ -31,7 +31,7 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 
 | Key | Default | Description |
 |---|---|---|
-| `image.repository` | `ghcr.io/duncandoyle/kgateway-ui` | Image repository. |
+| `image.repository` | `ghcr.io/duncandoyle/snellius` | Image repository. |
 | `image.tag` | `""` | Image tag; defaults to the chart `appVersion`. Required for a local-path install. |
 | `image.pullPolicy` | `IfNotPresent` | Image pull policy. |
 | `install.pin` | `""` | Pin the UI to one controller install: an install ID (e.g. `kgw.kgateway`) or `namespace/name`. Empty shows all installs. |
@@ -47,7 +47,7 @@ helm install ui ./deploy/helm/kgateway-ui -n kgateway-ui --create-namespace \
 | `httpRoute.parentRefs` | `[]` | Gateway parentRefs for the route. See [Security and trust model](#security-and-trust-model). |
 | `httpRoute.hostnames` | `[]` | Hostnames for the route. See [Security and trust model](#security-and-trust-model). |
 | `serviceAccount.create` | `true` | Create the ServiceAccount. |
-| `serviceAccount.name` | `""` | ServiceAccount name; defaults to `<release>-kgateway-ui`. |
+| `serviceAccount.name` | `""` | ServiceAccount name; defaults to `<release>-snellius`. |
 | `rbac.extraRules` | `[]` | PolicyRules appended to the ClusterRole. The operator's choice: they can widen RBAC beyond the read-only default. |
 | `extraEnv` | `[]` | Extra env vars for the UI container, after the chart's own. |
 | `extraVolumes` | `[]` | Extra pod volumes. |

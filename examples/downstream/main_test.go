@@ -256,7 +256,7 @@ func TestChartOverlayRendersExtraRule(t *testing.T) {
 		}
 		t.Skip("helm not on PATH")
 	}
-	out, err := exec.Command("helm", "template", "ui", "../../deploy/helm/kgateway-ui", "-n", "kgateway-ui", "-f", "chart/values-acme.yaml").CombinedOutput()
+	out, err := exec.Command("helm", "template", "ui", "../../deploy/helm/snellius", "-n", "snellius", "-f", "chart/values-acme.yaml").CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}
