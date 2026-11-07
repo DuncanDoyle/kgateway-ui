@@ -54,8 +54,8 @@ jobs:
       # The shell package is attached to the release, not published to a registry (private stays true).
       - name: shell package
         run: |
-          (cd web && npm ci && npm pkg set version="${GITHUB_REF_NAME#v}" -w @kgateway-ui/shell)
+          (cd web && npm ci && npm pkg set version="${GITHUB_REF_NAME#v}" -w @snellius/shell)
           make shell-pack
       # Packed first, so the release is created with the shell package attached.
-      - run: gh release create "$GITHUB_REF_NAME" --generate-notes "web/packages/shell/kgateway-ui-shell-${GITHUB_REF_NAME#v}.tgz"
+      - run: gh release create "$GITHUB_REF_NAME" --generate-notes "web/packages/shell/snellius-shell-${GITHUB_REF_NAME#v}.tgz"
         env: { GH_TOKEN: "${{ github.token }}" }

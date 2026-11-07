@@ -76,11 +76,11 @@ jobs:
       - name: shell package
         run: |
           make -C .. shell-pack
-          tgz=$(ls packages/shell/kgateway-ui-shell-*.tgz)
+          tgz=$(ls packages/shell/snellius-shell-*.tgz)
           contents=$(tar tzf "$tgz")
           grep -q '^package/dist/index.d.ts$' <<<"$contents"
           if grep -q '^package/src/' <<<"$contents"; then echo "::error::packed shell contains src"; exit 1; fi
-          if tar xzOf "$tgz" package/package.json | grep -q 'kgateway-ui/source'; then
+          if tar xzOf "$tgz" package/package.json | grep -q 'snellius/source'; then
             echo "::error::packed package.json names the source condition"; exit 1
           fi
       # The downstream example's frontend typechecks and tests against the packed shell.

@@ -1,4 +1,4 @@
-import { defaultPages, renderWhenFontsReady, Shell } from "@kgateway-ui/shell";
+import { defaultPages, renderWhenFontsReady, Shell } from "@snellius/shell";
 import { kgatewayBrand } from "./brand";
 
 const extension = { brand: kgatewayBrand };

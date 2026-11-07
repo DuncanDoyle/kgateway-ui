@@ -1,4 +1,4 @@
-import type { Brand } from "@kgateway-ui/shell";
+import type { Brand } from "@snellius/shell";
 import logoUrl from "./assets/kgateway-icon-white.svg";
 
 /** The kgateway project identity: the CNCF artwork icon (white variant for the ink header), identifying the project this UI is for. */

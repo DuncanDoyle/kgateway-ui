@@ -1,5 +1,5 @@
 {
-  "name": "kgateway-ui-app",
+  "name": "snellius-app",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
   "dependencies": {
     "@emotion/react": "^11",
     "@emotion/styled": "^11",
-    "@kgateway-ui/shell": "*",
+    "@snellius/shell": "*",
     "lucide-react": "^1",
     "react": "^19",
     "react-dom": "^19",

@@ -1,4 +1,4 @@
-import { defaultPages, Shell } from "@kgateway-ui/shell";
+import { defaultPages, Shell } from "@snellius/shell";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
