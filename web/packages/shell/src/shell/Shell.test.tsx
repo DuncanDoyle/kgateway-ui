@@ -443,7 +443,7 @@ it("the published shell with no brand shows snellius in the header", async () =>
   stubApi({ "/api/v1/installs": [inst("a/one"), inst("b/two")], "/api/v1/meta": meta });
   mount("/");
   const home = await screen.findByRole("link", { name: "snellius" });
-  expect(home).toHaveAttribute("href", "/");
+  expect(home).toHaveAttribute("href", "/about");
   expect(screen.queryByText("kgateway")).toBeNull();
 });
 

@@ -2,6 +2,7 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { type ComponentType, useMemo } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { AboutPage } from "../pages/AboutPage";
 import { defaultPages } from "../pages/defaultPages";
 import { PageState } from "../states/PageState";
 import { ThemeProvider } from "../theme/ThemeProvider";
@@ -17,6 +18,7 @@ import {
   ShellExtensionContext,
 } from "./extension";
 import { Header } from "./Header";
+import { ABOUT_PATH } from "./paths";
 import { RootRedirect } from "./RootRedirect";
 import { kubernetesVocabulary } from "./vocabulary";
 
@@ -111,6 +113,7 @@ export function Shell({ extension = noExtension, pages, stylesOverride }: ShellP
               <main>
                 <Routes>
                   <Route path="/" element={<RootRedirect ClusterLanding={ClusterLanding} />} />
+                  <Route path={ABOUT_PATH} element={<AboutPage />} />
                   {installRoutes.map(([path, Page]) => (
                     <Route key={path} path={path ? `/i/:id/${path}` : "/i/:id"} element={<Page />} />
                   ))}

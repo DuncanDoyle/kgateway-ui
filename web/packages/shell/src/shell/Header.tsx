@@ -16,7 +16,7 @@ import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerResourceName, headerTint } fr
 import { InstallName } from "./InstallName";
 import { InstallNav } from "./InstallNav";
 import { InstallSwitcher } from "./InstallSwitcher";
-import { installPath } from "./paths";
+import { ABOUT_PATH, installPath } from "./paths";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Tooltip } from "./Tooltip";
 import { useMedia } from "./useMedia";
@@ -50,6 +50,10 @@ const Brand = styled(Link)`
   img, svg { height: 24px; width: auto; }
   &:hover { background: ${(p) => headerTint(p.theme, HEADER_HOVER_PCT)}; }
   &:active { background: ${(p) => headerTint(p.theme, HEADER_PRESS_PCT)}; }
+  &:focus-visible {
+    outline: 2px solid ${(p) => p.theme.color.focus};
+    outline-offset: 2px;
+  }
 `;
 const Identity = styled.div`
   display: flex;
@@ -167,7 +171,7 @@ export function Header({ installPaths }: { installPaths: readonly string[] }) {
   const nav = navEntries.filter((n) => n.scope === "top" || id);
   return (
     <Bar>
-      <Brand to="/">
+      <Brand to={ABOUT_PATH}>
         {brand.logo}
         <span>{brand.productName}</span>
       </Brand>

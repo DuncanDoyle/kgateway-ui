@@ -6,10 +6,14 @@ import type { Theme } from "../theme/tokens";
 import type { Contributions } from "./contributions";
 import { kubernetesVocabulary, type Vocabulary } from "./vocabulary";
 
-/** Product identity shown in the header (D-008). */
+/** Product identity shown in the header and on the About page (D-008). */
 export interface Brand {
   productName: string;
   logo: ReactNode;
+  /** One line under the name on the About page, e.g. what the product is; left out, the page shows none. */
+  descriptor?: string;
+  /** A short line after the descriptor on the About page; left out, the page shows none. */
+  tagline?: string;
 }
 
 /**
@@ -83,7 +87,12 @@ export interface DiagnosticsSectionProps {
 /** The CorePages the Shell was given, for slots that sit inside a page rather than at a route. */
 export const CorePagesContext = createContext<Partial<CorePages>>({});
 
-export const defaultBrand: Brand = { productName: "snellius", logo: null };
+export const defaultBrand: Brand = {
+  productName: "snellius",
+  logo: null,
+  descriptor: "Kubernetes Gateway Management & Observability",
+  tagline: "See the whole picture.",
+};
 
 /** The extension merged with the upstream defaults; the vocabulary is complete. */
 export type ResolvedShellExtension = Required<Omit<ShellExtension, "vocabulary" | "findingsDocUrl">> & {

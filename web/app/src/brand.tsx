@@ -5,4 +5,7 @@ import logoUrl from "./assets/snellius/snellius-symbol-dark.svg";
 export const snelliusBrand: Brand = {
   productName: "snellius",
   logo: <img src={logoUrl} alt="" width={24} height={24} />,
+  // Shown on the About page only for this brand; a downstream brand sets its own or none.
+  descriptor: "Kubernetes Gateway Management & Observability",
+  tagline: "See the whole picture.",
 };
