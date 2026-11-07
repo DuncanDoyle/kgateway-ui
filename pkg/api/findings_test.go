@@ -40,6 +40,7 @@ import (
 	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
 )
 
@@ -1248,6 +1249,55 @@ func TestXDSLogNamesFilteredAsTheirObjects(t *testing.T) {
 			}
 			detail := string(wire(t, h.srv, findingsBase+"/"+f.ID))
 			if strings.Contains(detail, knownName) != (tc.names != nil) {
+				t.Fatalf("finding detail %s", detail)
+			}
+		})
+	}
+}
+
+// A proxy-stat name the rule set maps to an object is filtered as that object,
+// as log names are (phase review #2): a caller who may not view the Service
+// loses the cluster name; the reject itself and the rest of the evidence stay.
+func TestProxyStatNamesFilteredAsTheirObjects(t *testing.T) {
+	svc := objects.Ref{Kind: "Service", Namespace: "shop", Name: "httpbin-nack"}
+	rules := func(v string) computed.Selection {
+		s := rulesets.Select(v)
+		s.Rules = namerRules{Rules: s.Rules, m: map[string]objects.Ref{knownName: svc}}
+		return s
+	}
+	const other = "kube_shop_unmapped_8000"
+	for _, tc := range []struct {
+		name  string
+		authz Authorizer
+		names []string
+	}{
+		{"visible", nil, []string{knownName, other}},
+		{"hidden", AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref != svc }), []string{other}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sh := newStatsHarness(t, setup{rulesFor: rules, authz: tc.authz}, rejectCaptures(t, "v2.4.7"), nackWorld()...)
+			stats := func(n int64) {
+				sh.src.set(gwRef("infra", "nack"), pod("nack-0", func(p *proxystats.PodStats) { p.Clusters = map[string]int64{knownName: n, other: n} }))
+			}
+			stats(0)
+			sh.at(t, testutil.Now)
+			stats(1)
+			f := xdsFinding(sh.at(t, testutil.Now.Add(10*time.Second)), "infra", "nack")
+			if f == nil || f.EvidenceRestricted {
+				t.Fatalf("finding %+v: want 001 with evidence", f)
+			}
+			var got []string
+			for _, p := range xdsFacts(t, f).ProxyStats {
+				for _, ty := range p.Types {
+					got = append(got, ty.EnvoyResources...)
+				}
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, tc.names) {
+				t.Fatalf("proxy-stat names %v, want %v", got, tc.names)
+			}
+			detail := string(wire(t, sh.srv, findingsBase+"/"+f.ID))
+			if strings.Contains(detail, knownName) != (len(tc.names) == 2) {
 				t.Fatalf("finding detail %s", detail)
 			}
 		})

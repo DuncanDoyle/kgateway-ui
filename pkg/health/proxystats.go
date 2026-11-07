@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
+	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
 	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
@@ -235,9 +236,10 @@ const (
 	endpointTypeURL = "envoy.config.endpoint.v3.ClusterLoadAssignment"
 )
 
-// proxyRejects is 001's evidence from gw's scraped proxy Pods, and their refs.
+// proxyRejects is 001's evidence from gw's scraped proxy Pods, and their refs;
+// namer, when set, maps each name to the object it is filtered as.
 // cluster.<name>.update_rejected counts that cluster's EDS updates.
-func proxyRejects(gw *proxystats.Gateway) ([]ProxyRejects, []objects.Ref) {
+func proxyRejects(gw *proxystats.Gateway, namer computed.EnvoyNamer) ([]ProxyRejects, []objects.Ref) {
 	if gw == nil {
 		return nil, nil
 	}
@@ -250,12 +252,30 @@ func proxyRejects(gw *proxystats.Gateway) ([]ProxyRejects, []objects.Ref) {
 		out = append(out, ProxyRejects{Pod: p.Name, Types: []ProxyTypeRejects{
 			typeRejects(listenerTypeURL, p.LDS),
 			typeRejects(clusterTypeURL, p.CDS),
-			{TypeURL: routeTypeURL, Rejecting: len(p.RDS) > 0, EnvoyResources: p.RDS, EnvoyResourcesTruncated: p.RDSTruncated},
-			{TypeURL: endpointTypeURL, Rejecting: len(p.Clusters) > 0, EnvoyResources: p.Clusters, EnvoyResourcesTruncated: p.ClustersTruncated},
+			{TypeURL: routeTypeURL, Rejecting: len(p.RDS) > 0, EnvoyResources: p.RDS, EnvoyResourcesTruncated: p.RDSTruncated, Objects: mapNames(namer, p.RDS)},
+			{TypeURL: endpointTypeURL, Rejecting: len(p.Clusters) > 0, EnvoyResources: p.Clusters, EnvoyResourcesTruncated: p.ClustersTruncated,
+				Objects: mapNames(namer, p.Clusters)},
 		}})
 		refs = append(refs, process.PodRef(gw.Gateway.Namespace, process.Process{Name: p.Name}))
 	}
 	return out, refs
+}
+
+// mapNames is each of names the namer maps to an object; nil when none is.
+func mapNames(namer computed.EnvoyNamer, names []string) map[string]objects.Ref {
+	if namer == nil {
+		return nil
+	}
+	var out map[string]objects.Ref
+	for _, n := range names {
+		if o, ok := namer.Object(n); ok {
+			if out == nil {
+				out = map[string]objects.Ref{}
+			}
+			out[n] = o
+		}
+	}
+	return out
 }
 
 func typeRejects(url string, r proxystats.Rejects) ProxyTypeRejects {

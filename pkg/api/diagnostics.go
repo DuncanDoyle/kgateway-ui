@@ -138,6 +138,18 @@ func (d *FindingDetail) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// visibleNames is names without those whose mapped object v may not view (§14); nil when none is left.
+func visibleNames(v *view, names []string, objs map[string]objects.Ref) []string {
+	out := slices.DeleteFunc(slices.Clone(names), func(n string) bool {
+		o, mapped := objs[n]
+		return mapped && !v.can(o)
+	})
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // wireEvidence is e for the caller of v, times in UTC: KGWUI-001 keeps the
 // recently changed objects v may view; KGWUI-015 links its policy and KGWUI-017
 // its other listeners' owners. The model's evidence is never changed.
@@ -155,6 +167,8 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 			ts := slices.Clone(out.ProxyStats[i].Types)
 			for j := range ts {
 				ts[j].RejectingSince = wirePtr(ts[j].RejectingSince)
+				ts[j].EnvoyResources = visibleNames(v, ts[j].EnvoyResources, ts[j].Objects)
+				ts[j].Objects = nil
 			}
 			out.ProxyStats[i].Types = ts
 		}
@@ -163,18 +177,11 @@ func wireEvidence(v *view, l linker, e health.Evidence) health.Evidence {
 				out.RecentlyChanged = append(out.RecentlyChanged, l.linked(r))
 			}
 		}
-		// A name the rule set maps to an object is filtered as that object (§14).
 		out.LogEvents = slices.Clone(ev.LogEvents)
 		for i := range out.LogEvents {
 			le := &out.LogEvents[i]
 			le.Since = wireTime(le.Since)
-			le.EnvoyResources = slices.DeleteFunc(slices.Clone(le.EnvoyResources), func(n string) bool {
-				o, mapped := le.Objects[n]
-				return mapped && !v.can(o)
-			})
-			if len(le.EnvoyResources) == 0 {
-				le.EnvoyResources = nil
-			}
+			le.EnvoyResources = visibleNames(v, le.EnvoyResources, le.Objects)
 			le.Objects = nil
 		}
 		return out
