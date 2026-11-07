@@ -225,7 +225,8 @@ func (conditionsCheck) Name() string { return "resource status" }
 // Inputs implements Check.
 func (conditionsCheck) Inputs() InputSet {
 	s := AllInputs()
-	s.Catalog = true // 013 and 014 explanation 1
+	s.Catalog = true                                  // 013 and 014 explanation 1
+	s.Kinds = []objects.GroupKind{cache.ServicesKind} // 013 explanations 2 and 3
 	return s
 }
 

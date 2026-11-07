@@ -67,6 +67,17 @@ func GuardWorlds(t *testing.T) map[string]Input {
 	for name, in := range processWorlds(t) {
 		out[name] = in
 	}
+	// 013's Service explanations (phase review #5): a Service the cache lacks, and a port it lacks.
+	for name, svcs := range map[string][]cache.ServiceFact{"service missing": nil,
+		"service port missing": {{Namespace: "shop", Name: "cart", Type: "ClusterIP", Ports: []cache.ServicePort{{Port: 80, Target: 80}}}}} {
+		w := healthyWorld()
+		w.objs[2] = refRoute("BackendNotFound", "", map[string]any{"name": "cart", "port": int64(8080)})
+		in := w.input(t)
+		in.Catalog = served()
+		in.Snapshot.Access[cache.ServicesGVR] = cache.Access{OK: true}
+		in.Snapshot.Services = svcs
+		out[name] = in
+	}
 	for name, ready := range map[string]int{"endpoints empty": 0, "endpoints ready": 1} {
 		e := newEndpointsWorld()
 		e.slices[0].Ready[0] = ready
