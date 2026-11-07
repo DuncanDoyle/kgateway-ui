@@ -6,8 +6,8 @@ import "testing"
 func TestSelect(t *testing.T) {
 	for v, want := range map[string]struct{ set, note string }{
 		"2.3.11": {"kgateway-2.3", ""}, "v2.3.0": {"kgateway-2.3", ""}, "2.4.7": {"kgateway-2.4", ""},
-		"":       {"kgateway-2.4", "Controller version unknown; using the 2.4 rules"},
-		"banana": {"kgateway-2.4", "Controller version unknown; using the 2.4 rules"},
+		"":       {"kgateway-2.5", "Controller version unknown; using the 2.5 rules"},
+		"banana": {"kgateway-2.5", "Controller version unknown; using the 2.5 rules"},
 		"2.5.0":  {"kgateway-2.5", ""}, "v2.5.0-rc.1": {"kgateway-2.5", ""},
 		"2.6.0": {"kgateway-2.5", "Rules not yet verified for 2.6"},
 		"3.0.1": {"kgateway-2.5", "Rules not yet verified for 3.0"},

@@ -117,7 +117,7 @@ it("names no rule for a restricted fact, which the server sends without one", ()
 });
 
 it("shows the selection note", () => {
-  const note = "Controller version unknown; using the 2.4 rules";
+  const note = "Controller version unknown; using the 2.5 rules";
   renderWithTheme(<ComputedBadge computed={{ ...base, coverage: ["count-agrees"], note }} />);
   expect(within(badge()).getByText(note)).toBeInTheDocument();
 });
@@ -134,7 +134,7 @@ function StalePage({ collectedAt, computed }: { collectedAt: string; computed: C
 
 it("stale data turns the badge unknown", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  const note = "Controller version unknown; using the 2.4 rules";
+  const note = "Controller version unknown; using the 2.5 rules";
   renderWithTheme(
     <StalePage collectedAt={new Date().toISOString()} computed={{ ...base, coverage: ["count-agrees"], note }} />,
   );
