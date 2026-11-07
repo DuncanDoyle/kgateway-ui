@@ -11,6 +11,7 @@ export const aboutCopy = {
   source: "Source code",
   docs: "Documentation",
   licence: "Apache License 2.0",
+  builtOn: "Built on Snellius",
 };
 
 /** The upstream project's links; the licence name matches the repository's LICENSE file. */

@@ -415,6 +415,26 @@ describe("shows each list state", () => {
     expect(within(rowOf("edge")).queryByText("Healthy")).toBeNull();
     expect(screen.getByTestId("data-age")).toHaveTextContent("stale");
   });
+
+  it("a stale row drops the reason for its old state (D-063)", async () => {
+    const body = gatewaysGolden.body as GatewayList;
+    const reason = { kind: "finding", code: "KGWUI-002", message: "Listener port unavailable" } as const;
+    serve((u) =>
+      u.pathname.endsWith("/gateways")
+        ? {
+            ...body,
+            collectedAt: "2020-01-01T00:00:00Z",
+            items: body.items.map((r) => (r.ref.name === "edge" ? { ...r, health: "error" as const, reason } : r)),
+          }
+        : undefined,
+    );
+    mount(`/i/${ID}/gateways`);
+    await screen.findByText("edge");
+    expect(within(rowOf("edge")).getByText("Unknown")).toBeInTheDocument();
+    expect(within(rowOf("edge")).queryByTestId("health-reason")).toBeNull();
+    await userEvent.hover(within(rowOf("edge")).getByText("Unknown"));
+    expect(screen.queryByText(/KGWUI-002/)).toBeNull();
+  });
 });
 
 const routesRestricted = () => fresh(routesRestrictedGolden.body as RouteList);

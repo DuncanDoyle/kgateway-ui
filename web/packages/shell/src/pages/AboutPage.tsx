@@ -122,6 +122,12 @@ const ProjectLink = styled.a`
     outline-offset: 2px;
   }
 `;
+// A small credit under the cards, for a brand without its own Project links.
+const Credit = styled.p`
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: ${(p) => p.theme.font.size.sm};
+`;
 const nameStyle = (size: string) => css`
   font-size: ${size};
 `;
@@ -194,18 +200,29 @@ export function AboutPage({ stylesOverride }: AboutPageProps = {}) {
           <Shimmer h={20} />
         )}
       </Card>
-      <Card>
-        <h2>{aboutCopy.project}</h2>
-        <ul>
-          <LinkItem href={aboutLinks.source} label={aboutCopy.source} />
-          <LinkItem href={aboutLinks.docs} label={aboutCopy.docs} />
-          <LinkItem href={aboutLinks.licence} label={aboutCopy.licence} />
-        </ul>
-      </Card>
+      {brand.links?.length ? (
+        <Card>
+          <h2>{aboutCopy.project}</h2>
+          <ul>
+            {brand.links.map((l) => (
+              <LinkItem key={l.href} href={l.href} label={l.label} />
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       <Card $wide>
         <h2>{aboutCopy.installs}</h2>
         <Installs />
       </Card>
+      {/* A brand without its own links credits the upstream project. */}
+      {brand.links?.length ? null : (
+        <Credit>
+          <ProjectLink href={aboutLinks.source} target="_blank" rel="noopener noreferrer">
+            {aboutCopy.builtOn}
+            <ExternalLink size={12} aria-hidden="true" />
+          </ProjectLink>
+        </Credit>
+      )}
     </Page>
   );
 }

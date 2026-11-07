@@ -1,6 +1,7 @@
 import { type ComponentType, createContext, type ReactNode, useContext } from "react";
 import { useParams } from "react-router-dom";
 import type { Diagnostics, Finding } from "../api/types";
+import { aboutCopy, aboutLinks } from "../copy/about";
 import { defaultThemeIdFor, defaultThemes } from "../theme/themes";
 import type { Theme } from "../theme/tokens";
 import type { Contributions } from "./contributions";
@@ -14,6 +15,8 @@ export interface Brand {
   descriptor?: string;
   /** A short line after the descriptor on the About page; left out, the page shows none. */
   tagline?: string;
+  /** The About page's Project links, e.g. source, docs and licence; left out, it shows a "Built on Snellius" credit instead. */
+  links?: { label: string; href: string }[];
 }
 
 /**
@@ -92,6 +95,11 @@ export const defaultBrand: Brand = {
   logo: null,
   descriptor: "Kubernetes Gateway Management & Observability",
   tagline: "See the whole picture.",
+  links: [
+    { label: aboutCopy.source, href: aboutLinks.source },
+    { label: aboutCopy.docs, href: aboutLinks.docs },
+    { label: aboutCopy.licence, href: aboutLinks.licence },
+  ],
 };
 
 /** The extension merged with the upstream defaults; the vocabulary is complete. */

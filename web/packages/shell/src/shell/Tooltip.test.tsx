@@ -34,3 +34,40 @@ it("centres the tip by default", async () => {
   expect(tipStyle()).toContain("left:50%");
   expect(tipStyle()).toContain("transform:translateX(-50%)");
 });
+
+describe("inside an overflow container", () => {
+  const rect = (top: number, left: number) =>
+    ({ top, left, bottom: top + 20, right: left + 80, width: 80, height: 20, x: left, y: top }) as DOMRect;
+
+  async function openIn(top: number) {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect(top, 40));
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(40);
+    renderWithTheme(
+      <div data-testid="scroll" style={{ overflow: "auto" }}>
+        <Tooltip label="tip">
+          <button type="button">trigger</button>
+        </Tooltip>
+      </div>,
+    );
+    await userEvent.setup().tab();
+    return screen.getByRole("tooltip");
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders the tip outside the container, positioned from the trigger", async () => {
+    const tip = await openIn(100);
+    expect(screen.getByTestId("scroll")).not.toContainElement(tip);
+    expect(document.body).toContainElement(tip);
+    // The fixed anchor covers the trigger's rect; the tip hangs below it.
+    const anchor = tip.parentElement as HTMLElement;
+    const { top, left, width } = anchor.style;
+    expect({ top, left, width }).toEqual({ top: "100px", left: "40px", width: "80px" });
+    expect(tip).toHaveAttribute("data-side", "below");
+    expect(screen.getByRole("button")).toHaveAttribute("aria-describedby", tip.id);
+  });
+
+  it("flips above the trigger when there is no room below", async () => {
+    const tip = await openIn(window.innerHeight - 30);
+    expect(tip).toHaveAttribute("data-side", "above");
+  });
+});

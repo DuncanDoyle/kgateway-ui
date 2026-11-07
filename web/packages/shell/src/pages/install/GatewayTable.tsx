@@ -11,7 +11,7 @@ import {
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { type MouseEvent, memo, useDeferredValue, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { GatewayRow } from "../../api/types";
+import type { GatewayRow, RowReason } from "../../api/types";
 import { diagnosticsCopy } from "../../copy/explorer";
 import { objectPath } from "../../explore/objectPath";
 import { HealthBadge } from "../../health/HealthBadge";
@@ -162,6 +162,12 @@ function shownState(r: GatewayRow, stale: boolean, signalsMissing: boolean): Hea
   return signalsMissing && r.state !== "error" ? "unknown" : r.state;
 }
 
+/** The reason for the shown state: none on stale data, the unknown wording when a missing signal overrides the row. */
+function shownReason(r: GatewayRow, stale: boolean, signalsMissing: boolean): RowReason | undefined {
+  if (stale) return undefined;
+  return shownState(r, false, signalsMissing) === r.state ? r.reason : { kind: "unknown" };
+}
+
 type DataPlane = NonNullable<GatewayRow["dataPlane"]>;
 const dataPlaneRank: Record<DataPlane, number> = { rejects: 0, withheld: 1, unknown: 2, ok: 3 };
 
@@ -237,6 +243,7 @@ export const GatewayTable = memo(function GatewayTable({
       filterRows(rows, q).map((r) => ({
         ...r,
         state: shownState(r, stale, signalsMissing),
+        reason: shownReason(r, stale, signalsMissing),
         dataPlane: stale ? ("unknown" as const) : r.dataPlane,
       })),
     [rows, q, stale, signalsMissing],

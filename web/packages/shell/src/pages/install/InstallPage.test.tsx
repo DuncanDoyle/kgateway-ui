@@ -610,6 +610,19 @@ it("stale overview alone also turns the page unknown", async () => {
   expect(await screen.findByTestId("health-strip")).toHaveTextContent("Data is stale. Last checked 1m ago");
 });
 
+it("a stale overview row shows Unknown without its old finding (D-063)", async () => {
+  const ov = overview(Date.now() - 75_000);
+  const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
+  const reason = { kind: "finding", code: "KGWUI-001", message: "Configuration rejected by Envoy" } as const;
+  mount(healthy(), "/i/kgw.kgateway", { ...ov, gateways: [{ ...edge, state: "error", reason }, internal] });
+  await screen.findByRole("table", { name: "Gateways" });
+  const row = gatewayRows().find((r) => r.textContent?.includes("prod/edge")) as HTMLElement;
+  expect(row).toHaveTextContent("Unknown");
+  expect(within(row).queryByTestId("health-reason")).toBeNull();
+  await userEvent.hover(within(row).getAllByText("Unknown")[0] as HTMLElement);
+  expect(screen.queryByText(/KGWUI-001/)).toBeNull();
+});
+
 it("count tiles, GatewayClass tile first, no-access tile and scope tile", async () => {
   mount(healthy());
   expect(await screen.findByText("142")).toBeInTheDocument();

@@ -88,7 +88,8 @@ export function useShownPage<T extends { health: HealthState }>(
 ): Page<T> | undefined {
   const now = useNow();
   if (!page || (!failed && !isStale(page.collectedAt, now))) return page;
-  return { ...page, items: page.items.map((r) => ({ ...r, health: "unknown" as const })) };
+  // The reason explained the row's own state, so it goes with it.
+  return { ...page, items: page.items.map((r) => ({ ...r, health: "unknown" as const, reason: undefined })) };
 }
 
 /** Table cells hold one line: content is cut with an ellipsis and the full text is in a Tooltip (design §8.7). */

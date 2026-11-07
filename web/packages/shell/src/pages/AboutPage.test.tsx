@@ -74,6 +74,7 @@ it("shows the Snellius name, descriptor, tagline, UI version, watched installs a
     "href",
     "https://github.com/DuncanDoyle/snellius/blob/main/LICENSE",
   );
+  expect(screen.queryByRole("link", { name: /built on snellius/i })).toBeNull();
 });
 
 it("a downstream brand shows its own name and logo, without the Snellius descriptor and tagline", async () => {
@@ -85,11 +86,29 @@ it("a downstream brand shows its own name and logo, without the Snellius descrip
   expect(screen.queryByText("See the whole picture.")).toBeNull();
   expect(screen.queryByText(/snellius/)).toBeNull();
   expect(await screen.findByText("kgateway 2.5.0")).toBeInTheDocument();
+  // No upstream project links; a small credit links the upstream project instead.
+  for (const name of [/source code/i, /documentation/i, /apache license/i]) {
+    expect(screen.queryByRole("link", { name })).toBeNull();
+  }
+  expect(screen.getByRole("link", { name: /built on snellius/i })).toHaveAttribute(
+    "href",
+    "https://github.com/DuncanDoyle/snellius",
+  );
+});
+
+it("a downstream brand's own links fill the Project section", async () => {
+  stubApi({ "/api/v1/installs": [install], "/api/v1/meta": meta });
+  const links = [{ label: "Acme docs", href: "https://acme.example/docs" }];
+  mount("/about", { brand: { productName: "acme", logo: null, links } });
+  expect(await screen.findByRole("link", { name: /acme docs/i })).toHaveAttribute("href", "https://acme.example/docs");
+  expect(screen.queryByRole("link", { name: /source code/i })).toBeNull();
+  expect(screen.queryByRole("link", { name: /built on snellius/i })).toBeNull();
 });
 
 it("the default brand carries the Snellius descriptor and tagline", () => {
   expect(defaultBrand.descriptor).toBe("Kubernetes Gateway Management & Observability");
   expect(defaultBrand.tagline).toBe("See the whole picture.");
+  expect(defaultBrand.links?.map((l) => l.label)).toEqual(["Source code", "Documentation", "Apache License 2.0"]);
 });
 
 it("says so when no install is watched", async () => {

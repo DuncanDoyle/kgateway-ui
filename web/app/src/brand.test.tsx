@@ -25,3 +25,11 @@ it("the app header shows the Snellius symbol and wordmark, and titles the landin
   expect(within(home).getByText("snellius")).toBeInTheDocument();
   await waitFor(() => expect(document.title).toBe("snellius"));
 });
+
+it("the Snellius brand carries the upstream project links for the About page", () => {
+  expect(snelliusBrand.links).toEqual([
+    { label: "Source code", href: "https://github.com/DuncanDoyle/snellius" },
+    { label: "Documentation", href: "https://github.com/DuncanDoyle/snellius#readme" },
+    { label: "Apache License 2.0", href: "https://github.com/DuncanDoyle/snellius/blob/main/LICENSE" },
+  ]);
+});

@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -169,19 +172,50 @@ func TestRowReasons(t *testing.T) {
 	}
 }
 
-// A caller who cannot view every object gets the same code and message on the
-// rows it can see, since row health is not filtered (rule 9).
+// A caller who cannot view a finding's evidence gets the same code, message and
+// count on the row it can see, and no list or overview response quotes the
+// evidence's Detail (rules 7 and 9).
 func TestRowReasonForRestrictedCaller(t *testing.T) {
-	gw := edgeRef
-	broken := testutil.HTTPRoute("shop", "broken", []objects.ParentRef{gw}, testutil.RouteParent{Ref: gw, Controller: testutil.Controller,
-		Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionFalse, "BackendNotFound")}})
-	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != "child" })
-	_, all, _ := startWith(t, setup{}, explorerWorld(broken)...)
-	_, some, _ := startWith(t, setup{authz: hide}, explorerWorld(broken)...)
-	a := routeByName(t, get[Page[RouteRow]](t, all, listBase+"/routes?limit=200", 200), "shop/broken").Reason
-	s := routeByName(t, get[Page[RouteRow]](t, some, listBase+"/routes?limit=200", 200), "shop/broken").Reason
-	if a == nil || s == nil || *a != *s {
+	const secret = "vault-9f2c"
+	parent := testutil.HTTPRouteRef("shop", secret)
+	// shop/claims names the hidden parent, which does not select it: KGWUI-011 with the parent as evidence.
+	objs := explorerWorld(
+		testutil.HTTPRoute("shop", secret, []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		testutil.HTTPRoute("shop", "claims", []objects.ParentRef{parent}),
+	)
+	hide := AuthorizerFunc(func(_ *http.Request, ref objects.Ref) bool { return ref.Name != secret })
+	_, all, _ := startWith(t, setup{}, objs...)
+	_, some, _ := startWith(t, setup{authz: hide}, objs...)
+
+	detail := fmt.Sprintf(health.DelegatedNotAttachedDetail, "shop/"+secret)
+	fs := findingsOn(get[HealthResponse](t, all, listBase+"/health", 200), "shop/claims")
+	if len(fs) != 1 || fs[0].Code != health.CodeDelegatedNotAttached || fs[0].Detail != detail {
+		t.Fatalf("want one KGWUI-011 quoting the parent on shop/claims: %+v", fs)
+	}
+	a := routeByName(t, get[Page[RouteRow]](t, all, listBase+"/routes?limit=200", 200), "shop/claims").Reason
+	s := routeByName(t, get[Page[RouteRow]](t, some, listBase+"/routes?limit=200", 200), "shop/claims").Reason
+	if a == nil || s == nil || a.Code != health.CodeDelegatedNotAttached || *a != *s {
 		t.Errorf("reasons differ: all %+v, restricted %+v", a, s)
 	}
+	for _, path := range []string{"/routes?limit=200", "/gateways", "/listenersets", "/overview"} {
+		if body := rawGet(t, some, listBase+path); strings.Contains(body, detail) {
+			t.Errorf("%s quotes the hidden evidence's detail", path)
+		}
+	}
 	reasonKeys(t, some)
+}
+
+// rawGet returns the body of a 200 GET of path on srv.
+func rawGet(t *testing.T, srv *httptest.Server, path string) string {
+	t.Helper()
+	resp, err := http.Get(srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s: %d %v", path, resp.StatusCode, err)
+	}
+	return string(b)
 }

@@ -393,6 +393,25 @@ describe("after a hidden tab is shown again", () => {
     expect(await screen.findByText(/^Data is stale/)).toBeInTheDocument();
   });
 
+  it("a first poll that never answers shows the data as stale within 10 s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = gatedInstalls();
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    await hideFor(9 * 60_000);
+    api.hold();
+    act(() => setVisibility("visible"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+    expect(screen.queryByText(/stale/)).toBeNull();
+    // The revalidation stays pending; the hold cap alone releases the clock.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByText(/^Data is stale\. Last checked 9m ago/)).toBeInTheDocument();
+  });
+
   it("a visible tab whose backend stops answering still turns stale after two intervals", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const api = gatedInstalls();
