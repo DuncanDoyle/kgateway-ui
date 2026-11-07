@@ -98,7 +98,7 @@ func resourceName(gvr schema.GroupVersionResource) string {
 }
 
 // kindsListOnlyDetail is the served kinds check's note on a list-only change.
-const kindsListOnlyDetail = "Listed kinds changed (%s); restart the UI to list them"
+const kindsListOnlyDetail = "Kinds the UI only lists changed (%s); restart the UI to list them"
 
 // kindsCheck: the cluster still serves exactly the watched kinds (design §10).
 type kindsCheck struct{}

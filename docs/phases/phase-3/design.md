@@ -195,7 +195,7 @@ The URL stays `/i/:id`. Layout A (D-011) keeps its order with two sections added
 | Needs attention | up to 10 groups by rank (§5.3). Each row: state (icon, colour, text), title, subject as a link, blast radius ("37 routes"), age, code, and a "Next step" expander with the group's commands (§12). "Show all" opens the findings page grouped | `diagnostics.groups` |
 | Processes | one line for the controller (state, ready/desired, version; a recent restart shows as a 019 group, D-050) and one for proxies (Gateways with every proxy ready, with a reject, with skew, with restarts). Links to `/i/:id/processes` | `diagnostics.processes` |
 | What was checked | unchanged; collapsed when unhealthy | `checks[]` |
-| Count tiles, Gateway table | unchanged; the Gateway table gains a "Data plane" column: ✓, "Rejects" or "Unknown" | overview rows' `dataPlane` (D-050) |
+| Count tiles, Gateway table | unchanged; the Gateway table gains a "Data plane" column: ✓, "Rejects", "Config withheld" (a 024 error, 3.5) or "Unknown" | overview rows' `dataPlane` (D-050) |
 
 - Healthy installs keep the slim green strip and show "What was checked", never an empty "Needs attention" box. While diagnostics load, the skeleton reserves the summary's `groupRows` rows, so a healthy install reserves none (D-045).
 - A group whose cause the caller cannot view shows its severity, code and "Restricted: ask the owning team", as findings do today (D-013).
@@ -231,7 +231,7 @@ Phase 1 and 2 use KGWUI-001 to KGWUI-012. Phase 3 adds KGWUI-013 to KGWUI-026 an
 022, 023, 025 and 026 are warnings, so none turns an install red on its own **(our call)**. A disconnected proxy keeps serving its last config, and warming can be legitimately slow; both say so in their message.
 
 **Availability and roll-up (our call, 2.4 builder check).** Phase 1 design §5.3 says a required check that is not OK makes the install unknown. No Phase 3 check is required: each sets `Required: false`, so none can turn the install unknown. Existing required checks keep their flag; the re-specified KGWUI-001 keeps the existing `xDS rejects` check's flag, including its restart hold (§8.3). Today's `unavailable` helper (`pkg/health/checks.go:42-46`) always sets `Required: true` and raises KGWUI-008; Phase 3 checks use a variant that does neither.
-- **Required and optional inputs** **(our call, Codex review 2026-11-01)**. The required `cluster access` check covers the core kinds only: served kinds, Namespaces, controller Pods and Deployments. A Phase 3 watch (proxy Pods, Events, CRD metadata, Services, EndpointSlices) that is denied or failing never reaches `cluster access` and never raises KGWUI-008; it reports through its own checks' not-available result.
+- **Required and optional inputs** **(our call, Codex review 2026-11-01)**. The required `cluster access` check covers the core kinds only: served kinds, Namespaces, controller Pods and Deployments. A Phase 3 watch (proxy Pods, Events, CRD metadata, Services, EndpointSlices) that is denied or failing never reaches `cluster access` and never raises KGWUI-008; it reports through its own checks' not-available result. A served-kinds change limited to list-only kinds (D-058 item 6) is a note on the OK `served kinds` check, not KGWUI-008 (3.5).
 - A check whose input is missing returns an unavailable `CheckResult` with its reason: `denied` (RBAC refused the watch), `failing` (the watch or scrape errors), or `off` (its chart toggle is off). "What was checked" shows it as "not available", in the wording it uses for unreachable metrics today.
 - A missing metric family on an older version is `not-on-version`, shown as "not available on this version" (§8.6).
 - A not-available Phase 3 check raises no KGWUI-008 and never turns the verdict unknown. Its findings are simply absent, and "What was checked" says why.
@@ -294,7 +294,7 @@ Until 2.5.0 GA ships and 3.4 adds its rule set, a 2.5 controller runs on the 2.4
   - Every other shape (several targets, selectors, ancestors shared by several targets) is "not verified": the computed 016 is still shown, labelled, and no KGWUI-012 is raised.
   - What ancestors kgateway writes per target kind is observed on 2.3.11 and 2.4.7 and recorded in the `computed-rules.md` section before the rule is implemented.
 - An unknown discovery scope makes the rule unknown, as in D-024.
-- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5). The controller never judges `targetSelectors`, so on 2.5 a selector that matches nothing shows 003, not 016 (D-058). A rule set that wraps `kgw25` forwards `computed.TargetStatusReporter`.
+- On a rule set whose controller reports `TargetNotFound` (the 2.5 rule set, 3.4), the computed rule is off and the status source wins (D-020 rule 5). The controller never judges `targetSelectors` (kgateway#14998), so on 2.5 the UI still computes a selector that matches nothing as a 016 warning, labelled computed; named targetRefs stay unknown to the computed rule (D-058 item 7, 3.5). A rule set that wraps `kgw25` forwards `computed.TargetStatusReporter`.
 
 ### 7.7 Suggested fixes (user, 2026-10-29)
 
@@ -558,7 +558,7 @@ The trigger, severity and grace stay as in Phase 1 design §5.2. The evidence ga
 
 One finding per install, on the controller Deployment, when status as a whole stops moving. It groups the many KGWUI-003 warnings that a single cause explains, such as a status patch failing every reconcile, a stuck translation, or a CRD whose schema rejects the status (§5.2).
 - **Trigger:** the controller is ready, at least one owned object has had a KGWUI-003 warning for 5 min, and at least 10 objects, or 10 % of objects with status (minimum 3), are in that state. Matures through a deadline; the start of the condition is kept in the check's state store (§16.2).
-- **Evidence:** counts per §10.1 kind, the oldest age, and, when the family is present, the increase of `kgateway_status_syncer_status_syncs_total` over the window (2.3 and 2.4, `proxy_syncer/metrics.go:25-27`), quoted as "status syncs in the last 5 min: 0".
+- **Evidence:** counts per §10.1 kind and the oldest age. No status-sync count (D-058 item 10).
 - **Next step:** the controller log command, grepping for `status`.
 - A not-ready controller raises KGWUI-005 instead.
 
@@ -615,7 +615,7 @@ Existing payloads gain:
 - every finding, everywhere: optional `id`, `group` and `evidence`;
 - `GatewayDetail`: optional `dataPlane` (§8) and `proxies`;
 - route rows: the flag `gateway-rejecting` (§8.4);
-- overview Gateway rows: `dataPlane`, `ok`, `rejects` or `unknown`, computed on the server (D-050);
+- overview Gateway rows: `dataPlane`, `ok`, `rejects`, `withheld` or `unknown`, computed on the server (D-050; `withheld` is a 024 error without a 001, 3.5);
 - `InstallSummary`: `groupRows`, the number of groups `…/diagnostics` lists for the same caller (D-045);
 - `/meta` `capabilities`: `processes`, `events`, `crds`, `endpoints`, `proxyStats`, `controllerLogs`, each present only when its input runs; and `filters.findings`, listing the findings filters.
 
@@ -656,8 +656,8 @@ GroupRow       { id, title, code, severity, class, cause?: LinkedRef, members: n
                  grant?: { fromNamespace, toNamespace, toGroup, toKind } }   // "Not permitted" groups only (D-055)
 Diagnostics    { install, verdict: { state, problems, counts, oldestSince?, reason? }, groups: GroupRow[], groupTotal,
                  processes: { controller: ProcessSummary, proxies: ProxySummary },
-                 dataPlane: { gateways, rejecting, unavailable? }, checks: CheckResult[], collectedAt }
-                                                                // withheld? arrives with 024 (3.4); D-050
+                 dataPlane: { gateways, rejecting, withheld?, unavailable? }, checks: CheckResult[], collectedAt }
+                                                                // withheld: Gateways with a 024 error (3.5); D-050
 ProcessSummary { state, observed, ready?, desired?, version?, restricted? }            // no restart count (D-050)
 ProxySummary   { state, gateways, ready, rejecting, skew, restarting, notObserved }
 ProcessSetDTO  { observed, desired?, ready?, processes: ProcessDTO[], rollout?: { progressing, reason? }, restricted? }

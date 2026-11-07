@@ -30,7 +30,7 @@
 
 **Selection.** The rule set follows the controller minor, as `kinds.ExperimentalOnly` does (`pkg/kinds/upstream.go:55-94`).
 - Selection returns `Selection{Rules, Note}` from `pkg/computed/rulesets`. The factory lives there, not in `pkg/computed`, so the rule-set packages can import `pkg/computed` without an import cycle **(our call)**.
-- An unknown version uses the newest set, labelled "Controller version unknown; using the 2.4 rules".
+- An unknown version uses the newest set, labelled "Controller version unknown; using the 2.5 rules" (Phase 3 D-058 item 11).
 - A minor newer than the newest set uses the newest set, labelled "Rules not yet verified for 2.5".
 - A controller older than 2.3 uses the 2.3 set, labelled "Rules not yet verified for <major.minor>", for example "2.2" **(our call)**.
 - The cross-check runs in both cases. The label is part of every result's check note.

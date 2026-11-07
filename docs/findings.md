@@ -56,7 +56,7 @@ Severity is error, with three exceptions:
 - a policy ancestor with reason `Overridden` is info;
 - a Backend whose `Accepted=False` has no `observedGeneration`, as kgateway 2.3 writes it, is a warning.
 
-kgateway 2.5 controllers write `TargetNotFound` for a missing policy target, and the UI shows it as KGWUI-016, not here. Only a 2.5 controller whose version the UI cannot read, and so runs on the 2.4 rules, shows it here as "Policy target not found". On 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
+kgateway 2.5 controllers write `TargetNotFound` for a missing policy target, and the UI shows it as KGWUI-016, not here. A controller whose version the UI cannot read runs on the 2.5 rules, so it is shown as KGWUI-016 too. On 2.3 and 2.4 the UI computes a missing target instead: see KGWUI-016.
 
 **Evidence.** The message is the condition's reason in plain words. The detail quotes the condition as written: type, status, reason and message, and the listener, parent or ancestor it belongs to. A parent route whose backendRefs all delegate reads "A delegating rule has no accepted child route" in place of "Backend not found".
 
@@ -141,7 +141,7 @@ A self-managed Gateway raises KGWUI-010 instead.
 
 - "No access to `<resource>`": the UI's ServiceAccount cannot list or watch a core kind.
 - "Could not check cluster access": the cache has not synced yet.
-- "Served kinds changed; restart the UI to watch them": a CRD was added or removed.
+- "Served kinds changed; restart the UI to watch them": a CRD was added or removed. A change limited to DirectResponse, GatewayExtension or ReferenceGrant, which the UI lists but never judges, is no finding: "What was checked" notes it on the served kinds check.
 - "Could not check controller scope": the controller's namespace selectors could not be read, for example when they come from `valueFrom`.
 - "Could not check xDS rejects": controller metrics are missing, failing or stale, or lack `kgateway_resources_managed` while the install owns Gateways.
 - "Could not verify scope against the controller": scope verification could not run. This one is optional and never makes the install unknown.
@@ -266,7 +266,7 @@ There is no suggested grant for a route that delegates or is a delegation child,
 
 **Cause.** A policy targets an object that does not exist.
 
-On kgateway 2.5 the controller reports it: a current ancestor `StatusSummary` with reason `TargetNotFound`. That is one error per policy, raised at once, in place of KGWUI-002. The controller checks targetRefs to Gateways, ListenerSets, routes, Services and Backends, and the `sectionName` of a Gateway, ListenerSet, HTTPRoute or GRPCRoute. It does not check selectors, so a selector that matches nothing raises no finding on 2.5. The UI computes nothing on 2.5.
+On kgateway 2.5 the controller reports it: a current ancestor `StatusSummary` with reason `TargetNotFound`. That is one error per policy, raised at once, in place of KGWUI-002. The controller checks targetRefs to Gateways, ListenerSets, routes, Services and Backends, and the `sectionName` of a Gateway, ListenerSet, HTTPRoute or GRPCRoute. It does not check selectors, so on 2.5 the UI computes a selector that matches nothing, or an empty one, as below: a warning labelled "Computed by the UI's policy targets rule". The UI computes no named target on 2.5.
 
 On kgateway 2.3 and 2.4 the controller writes no status for such a policy, so the UI computes it with the rule set for the controller's version. The finding page labels it "Computed by the UI's policy targets rule". It judges five target kinds: Gateway, ListenerSet, XListenerSet, HTTPRoute and GRPCRoute. A missing target of any other kind, such as a TCPRoute or a Service, raises nothing, so no finding does not mean such a target exists. It covers three cases:
 
@@ -380,7 +380,7 @@ Nothing is compared during a controller rollout and for 10 minutes after it, so 
 - **Error**, "Proxies get no config updates, because referenced clusters are missing": `kgateway_xds_snapshot_perclient_withheld_clients{state="warm_withheld"}` is above 0. A withheld proxy gets no updates at all, certificate rotations included, until the clusters appear or the warm withhold bound releases it.
 - **Warning**, "Some routes fail: config was released before every cluster was ready": `kgateway_xds_snapshot_perclient_bounded_publishes_total` grew for mode `flip_release`, `warm_release` or `carry_expired` in the last 15 minutes. The UI tracks the counter per controller Pod; a Pod's first scrape and a counter reset after a restart are not an increase.
 
-**Evidence.** Per signal, summed over replicas: the error lists the withheld proxies and the controller Pods reporting them; the warning lists the releases per mode in the last 15 minutes and the Pods behind them.
+**Evidence.** Per signal, summed over replicas: the error lists the withheld proxies and the controller Pods reporting them; the warning lists the releases per mode in the last 15 minutes and the Pods behind them. The error also shows as "Config withheld" in the overview's Data plane column and makes the Gateway's proxies an error on the Processes page.
 
 **Since.** When the UI first saw the finding. It resets when the UI restarts.
 

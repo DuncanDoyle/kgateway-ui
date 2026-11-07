@@ -1038,3 +1038,20 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** queue S6 closes without code. Rule 11 now depends on Phase 2 rule 8: if route status stops reaching restricted viewers, 015's group ID must change with it.
 
 **Alternatives:** ordinal grouping: rejected, since a per-route ordinal cannot group routes across the policy, and a cross-route ordinal encodes the policy anyway.
+
+## D-060 — Sub-phase 3.5 as built (2026-11-07, phase 3)
+**Status:** proposed 2026-11-07, for the user's confirmation (rulings made while the user was away)
+
+**Context:** Stabilization 3.5 (brief `phases/phase-3/phase-3.5-brief.md`) closes phase-review findings #2–#6 and D-058 items 7, 10 and 11. These choices were not fixed by the review or the decisions.
+
+**Decision:**
+1. S3: `withheld` (diagnostics) and the overview row's `dataPlane: "withheld"` count a KGWUI-024 **error** only. Its warning (config released early) still updates proxies, so the Data plane cell keeps ✓ or Rejects; the warning shows in the Gateway's state. 001 wins over 024 in the cell.
+2. S2: `kinds.Change` splits list-only kinds into their own fields; the served kinds check stays OK with a note "Kinds the UI only lists changed (…); restart the UI to list them".
+3. S7: `kgw25` gets a `PolicyTargeter` that judges selectors only (as kgw24's selector rule) and leaves every named targetRef unknown.
+4. S8: the status-sync count leaves the exported `pkg/ctrlmetrics` API too, not only the UI; no consumer used it (kgwctl checked).
+5. S5: no gated budget; the recorded benchmark (`BenchmarkEndpointsFanIn`) shows 251 → 44 ms at 10,000 routes on one Service port.
+
+**Consequences:** README upgrade notes list the API changes. Design §7.6, §10, §13 and §10.2 state the as-built behaviour.
+
+**Alternatives:** n/a.
+
