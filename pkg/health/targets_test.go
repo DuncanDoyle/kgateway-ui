@@ -481,11 +481,9 @@ func TestPolicyTargetNotFoundFromStatus(t *testing.T) {
 	}
 }
 
-// kgateway-2.5 computes no 016; a stale or foreign TargetNotFound raises none either.
+// kgateway-2.5 computes no 016 for a named targetRef; a stale or foreign
+// TargetNotFound raises none either.
 func TestPolicyTargetComputedOffOn25(t *testing.T) {
-	if rules25.PolicyTargeter() != nil {
-		t.Fatalf("%s has a PolicyTargeter", rules25.Rules.Version())
-	}
 	bare := targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil)
 	r := targetsRun(t, rules25, []*unstructured.Unstructured{bare}, -Grace+time.Second, time.Hour)
 	if has(r, CodePolicyTargetNotFound, "", "") || !has(r, CodeRouteUnattached, SeverityWarning, "infra/tp") {
@@ -502,6 +500,35 @@ func TestPolicyTargetComputedOffOn25(t *testing.T) {
 	r = targetsRun(t, rules25, []*unstructured.Unstructured{targetPolicy("infra", []map[string]any{tRef("Gateway", "nope", "")}, nil, foreign)}, time.Hour)
 	if has(r, CodePolicyTargetNotFound, "", "") {
 		t.Fatalf("foreign controller: %+v", r.Findings)
+	}
+}
+
+// kgateway-2.5 never judges selectors, so the UI computes a selector that
+// matches nothing (D-058 item 7): a labelled one and an empty one each give a
+// computed 016 warning that replaces 003. A named ref beside it is not computed.
+func TestPolicyTargetSelectorOn25(t *testing.T) {
+	none := &install.Setting{Known: true}
+	never := targetPolicy("shop", nil, []map[string]any{tSel("HTTPRoute", map[string]any{"pick": "never"})})
+	r := targetsRunWith(t, rules25, none, []*unstructured.Unstructured{never}, 0, 31*time.Second)
+	fs := targetFindings(r, "shop/tp")
+	if len(fs) != 1 || fs[0].Severity != SeverityWarning ||
+		!strings.Contains(fs[0].Detail, "targetSelectors[0] HTTPRoute `pick=never`: matches nothing in namespace shop") ||
+		!strings.Contains(fs[0].Detail, "Computed by the UI") || !strings.Contains(fs[0].Detail, "Rule set kgateway-2.5.") {
+		t.Fatalf("labelled selector on 2.5: %+v", r.Findings)
+	}
+	if has(r, CodeRouteUnattached, "", "shop/tp") {
+		t.Fatalf("016 replaces 003: %+v", r.Findings)
+	}
+	empty := targetPolicy("shop", nil, []map[string]any{tSel("HTTPRoute", map[string]any{})})
+	r = targetsRunWith(t, rules25, none, []*unstructured.Unstructured{empty}, 0, 31*time.Second)
+	if fs := targetFindings(r, "shop/tp"); len(fs) != 1 || !strings.Contains(fs[0].Detail, "an empty selector matches nothing") {
+		t.Fatalf("empty selector on 2.5: %+v", r.Findings)
+	}
+	mixed := targetPolicy("shop", []map[string]any{tRef("Gateway", "nope", "")}, []map[string]any{tSel("HTTPRoute", map[string]any{})})
+	r = targetsRunWith(t, rules25, none, []*unstructured.Unstructured{mixed}, 0, 31*time.Second)
+	fs = targetFindings(r, "shop/tp")
+	if len(fs) != 1 || !strings.Contains(fs[0].Detail, "targetSelectors[0]") {
+		t.Fatalf("mixed on 2.5: only the selector is computed: %+v", r.Findings)
 	}
 }
 

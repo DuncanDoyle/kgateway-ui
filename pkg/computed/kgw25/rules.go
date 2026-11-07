@@ -6,8 +6,8 @@ import "github.com/DuncanDoyle/kgateway-ui/pkg/computed"
 
 type rules struct{}
 
-// New returns the kgateway 2.5 rule set. It has no computed.PolicyTargeter:
-// the controller reports TargetNotFound itself (D-020 rule 5).
+// New returns the kgateway 2.5 rule set. The controller reports a missing
+// targetRef itself (D-020 rule 5); its computed.PolicyTargeter judges selectors only.
 func New() computed.Rules { return rules{} }
 
 // Version implements computed.Rules.
