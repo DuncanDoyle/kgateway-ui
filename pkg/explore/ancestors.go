@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // Up-chain bounds (design §5.3).

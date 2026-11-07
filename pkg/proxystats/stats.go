@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // The collected key checks declare (design §8.8).

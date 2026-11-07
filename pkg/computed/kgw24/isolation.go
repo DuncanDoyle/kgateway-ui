@@ -3,8 +3,8 @@ package kgw24
 import (
 	"strings"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // portKey is one port of one Gateway, with its allowed ListenerSets merged in.

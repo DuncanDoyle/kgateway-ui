@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 )
 
 // Finding list sort keys (design §13.1). Rank has no descending form.

@@ -3,7 +3,7 @@ package computed
 import (
 	"slices"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // Completeness says which aggregates of a delegation result are complete

@@ -1,7 +1,7 @@
 // Package computedtest has test doubles for the computed views.
 package computedtest
 
-import "github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+import "github.com/DuncanDoyle/snellius/pkg/computed"
 
 // noRules is a computed rule set that computes nothing.
 type noRules struct{}

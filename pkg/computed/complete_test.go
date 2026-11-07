@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 func cRef(name string) objects.Ref {

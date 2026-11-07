@@ -19,7 +19,7 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
 )
 
 // endpointsWorld is a cache with the Service and EndpointSlice watches over a fake client.

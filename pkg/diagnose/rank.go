@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 )
 
 // sevRank orders severities worst first; one outside the known set ranks last.

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/explore"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // view is what the caller of one request may see (design §7.4). Every

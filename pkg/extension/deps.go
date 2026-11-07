@@ -10,9 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
 )
 
 // Deps is what the app gives an extension's handlers (design §4.1 gap 1).

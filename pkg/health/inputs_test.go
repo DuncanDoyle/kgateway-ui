@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil/healthtest"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/snellius/internal/testutil/healthtest"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 )
 
 // guardSeeds are the seeds the guard perturbs with.

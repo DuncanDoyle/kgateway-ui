@@ -3,7 +3,7 @@ package install
 import (
 	"strconv"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 )
 
 // ExperimentalEnv is the controller env var that enables experimental Gateway API features.

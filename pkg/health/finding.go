@@ -7,16 +7,16 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/process"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxymode"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/scopeverify"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/platform"
+	"github.com/DuncanDoyle/snellius/pkg/process"
+	"github.com/DuncanDoyle/snellius/pkg/proxymode"
+	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
 
 // Severity of a finding.

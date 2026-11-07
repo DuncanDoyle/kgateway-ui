@@ -21,7 +21,7 @@ COPY --from=web /src/web/app/dist internal/webui/dist
 RUN find internal/webui/dist -name '*.map' -delete
 ARG TARGETOS TARGETARCH VERSION=dev
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-    -ldflags "-s -w -X github.com/DuncanDoyle/kgateway-ui/pkg/version.Version=${VERSION}" -o /out/kgateway-ui ./cmd/kgateway-ui
+    -ldflags "-s -w -X github.com/DuncanDoyle/snellius/pkg/version.Version=${VERSION}" -o /out/kgateway-ui ./cmd/kgateway-ui
 
 FROM gcr.io/distroless/static:nonroot
 # image.source links the ghcr package to the repo.

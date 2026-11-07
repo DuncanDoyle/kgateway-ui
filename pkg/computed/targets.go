@@ -3,7 +3,7 @@ package computed
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // TargetRef is a policy's spec.targetRefs entry as written. Its namespace is the policy's (GEP-713).

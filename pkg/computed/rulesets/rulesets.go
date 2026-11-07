@@ -7,10 +7,10 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw25"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/kgw23"
+	"github.com/DuncanDoyle/snellius/pkg/computed/kgw24"
+	"github.com/DuncanDoyle/snellius/pkg/computed/kgw25"
 )
 
 var minorRE = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:[.+-]|$)`)

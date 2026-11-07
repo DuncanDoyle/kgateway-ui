@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/platform"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/platform"
 )
 
 // maxTrailRefs is the most refs one GET …/refs resolves: the breadcrumb trail's limit (design §17.6).

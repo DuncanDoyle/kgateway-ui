@@ -1,7 +1,7 @@
 // Package kgw24 is the rule set for kgateway 2.4 controllers (rules §2).
 package kgw24
 
-import "github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+import "github.com/DuncanDoyle/snellius/pkg/computed"
 
 type rules struct{}
 

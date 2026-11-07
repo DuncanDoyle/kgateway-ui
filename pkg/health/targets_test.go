@@ -9,13 +9,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw23"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/kgw24"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed/rulesets"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/kgw23"
+	"github.com/DuncanDoyle/snellius/pkg/computed/kgw24"
+	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // t0 is when every object's current generation was first seen; grace ends at t0 + Grace.

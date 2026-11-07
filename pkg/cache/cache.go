@@ -28,9 +28,9 @@ import (
 	"k8s.io/client-go/metadata"
 	toolscache "k8s.io/client-go/tools/cache"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 // Access reports whether a kind can currently be read.

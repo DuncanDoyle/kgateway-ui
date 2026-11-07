@@ -5,7 +5,7 @@ import (
 	"hash/maphash"
 	"slices"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // DepSets hash-conses the finished dependency sets of one delegation run, so

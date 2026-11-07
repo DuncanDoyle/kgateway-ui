@@ -20,8 +20,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 // Scraper fetches the /metrics payload of one controller pod.

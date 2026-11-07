@@ -21,7 +21,7 @@ func TestMiss(t *testing.T) {
 		mode, out string
 		fails     bool
 	}{{"", "warm median 151 ms, budget ≤ 150 ms", true}, {"reference", "warm median 151 ms", true},
-		{"report", "over budget, reported only (KGWUI_BENCH_TIMING=report): warm median 151 ms", false}, {"fast", `KGWUI_BENCH_TIMING="fast"`, true}} {
+		{"report", "over budget, reported only (SNELLIUS_BENCH_TIMING=report): warm median 151 ms", false}, {"fast", `SNELLIUS_BENCH_TIMING="fast"`, true}} {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestMiss$", "-test.v")
 		cmd.Env = append(os.Environ(), childEnv+"=1", Env+"="+c.mode)
 		out, err := cmd.CombinedOutput()

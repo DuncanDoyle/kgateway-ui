@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 // Change is how the kinds the cluster serves now differ from the watched kinds.

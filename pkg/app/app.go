@@ -25,18 +25,18 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/clock"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/api"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/collect"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrllogs"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/ctrlmetrics"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/engine"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/extension"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/proxystats"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/setup"
+	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
+	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/extension"
+	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/proxystats"
+	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
 
 // Options are the runtime settings.
@@ -450,7 +450,7 @@ func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Op
 	if err != nil {
 		return err
 	}
-	return serve(ctx, a, o.Listen, func(addr net.Addr) { slog.Info("kgateway UI listening", "addr", addr.String(), "inCluster", inCluster) })
+	return serve(ctx, a, o.Listen, func(addr net.Addr) { slog.Info("snellius listening", "addr", addr.String(), "inCluster", inCluster) })
 }
 
 // serve listens on addr, starts a and serves its handler until ctx is done,

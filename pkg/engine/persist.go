@@ -3,7 +3,7 @@ package engine
 import (
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
 )
 
 // Window is how long a computed disagreement must hold unchanged before it

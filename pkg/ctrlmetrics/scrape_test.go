@@ -19,9 +19,9 @@ import (
 	"k8s.io/client-go/rest"
 	clocktesting "k8s.io/utils/clock/testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/install"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/trigger"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
 
 type fakeScraper map[string]string // pod name → body; missing → error

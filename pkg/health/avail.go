@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 )
 
 // Availability says why a check's optional input is missing (D-034).

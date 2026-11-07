@@ -1,9 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +30,37 @@ func TestApplyMemoryLimit(t *testing.T) {
 			got := applyMemoryLimit(func(k string) string { return tc.env[k] }, func(n int64) int64 { set = n; return 0 })
 			if got != tc.want || set != tc.want {
 				t.Errorf("target %d, set %d, want %d", got, set, tc.want)
+			}
+		})
+	}
+}
+
+// The old KGWUI_MEMORY_LIMIT name still caps memory when the new one is unset.
+func TestMemoryLimitEnvFallback(t *testing.T) {
+	const limit = "67108864"
+	for _, tc := range []struct {
+		name       string
+		env        map[string]string
+		want       int64
+		deprecated bool
+	}{
+		{"legacy only", map[string]string{"KGWUI_MEMORY_LIMIT": limit}, 67108864 / 10 * 9, true},
+		{"new wins over legacy", map[string]string{"SNELLIUS_MEMORY_LIMIT": "134217728", "KGWUI_MEMORY_LIMIT": limit}, 134217728 / 10 * 9, false},
+		{"GOMEMLIMIT beats both", map[string]string{"GOMEMLIMIT": "1GiB", "SNELLIUS_MEMORY_LIMIT": limit, "KGWUI_MEMORY_LIMIT": limit}, 0, false},
+		{"neither keeps the default", map[string]string{}, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			t.Cleanup(func() { slog.SetDefault(old) })
+			var set int64
+			got := applyMemoryLimit(func(k string) string { return tc.env[k] }, func(n int64) int64 { set = n; return 0 })
+			if got != tc.want || set != tc.want {
+				t.Errorf("target %d, set %d, want %d", got, set, tc.want)
+			}
+			if has := strings.Contains(buf.String(), "deprecated"); has != tc.deprecated {
+				t.Errorf("deprecation logged = %v, want %v: %s", has, tc.deprecated, buf.String())
 			}
 		})
 	}

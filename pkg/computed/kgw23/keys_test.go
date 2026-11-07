@@ -3,8 +3,8 @@ package kgw23
 import (
 	"testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // TestChildKeys is the 2.3 half of rules §11.3 (moved here from Task 59, PF3).

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/computed"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // defaultMatch is the CRD default of an omitted matches list (rules §3.2).

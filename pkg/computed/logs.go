@@ -3,7 +3,7 @@ package computed
 import (
 	"time"
 
-	"github.com/DuncanDoyle/kgateway-ui/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
 // LogFields are the fixed fields one controller log line yields (design §8.9).

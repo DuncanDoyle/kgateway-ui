@@ -16,7 +16,7 @@ import (
 // forbidden are the import path prefixes core code must not use (D-016 decision 4).
 var forbidden = []string{"k8s.io/api/core/v1", "k8s.io/api/apps/v1", "k8s.io/client-go"}
 
-const kindsPath = "github.com/DuncanDoyle/kgateway-ui/pkg/kinds"
+const kindsPath = "github.com/DuncanDoyle/snellius/pkg/kinds"
 
 // discovery are the pkg/kinds identifiers that reach the discovery API.
 var discovery = []string{"DiscoveryClient", "Resolve", "NewMonitor", "Monitor"}

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/DuncanDoyle/kgateway-ui/internal/testutil"
-	"github.com/DuncanDoyle/kgateway-ui/pkg/health"
+	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 )
 
 // storeCheck runs run with its Store; it declares no inputs.

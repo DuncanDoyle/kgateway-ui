@@ -1,4 +1,4 @@
-module github.com/DuncanDoyle/kgateway-ui
+module github.com/DuncanDoyle/snellius
 
 go 1.26.0
 
