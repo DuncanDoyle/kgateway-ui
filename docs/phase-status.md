@@ -1,22 +1,21 @@
 # Phase status
 
 ## Phase
-Phase: 4 — Snellius rebrand
-Base: 966be065833aaab4ce9cbce5525a5248ea732761
-Docs: docs/phases/phase-4/
-Status: implemented and closed locally 2026-11-07; waiting for the user's review, the GitHub repo rename, then push and CI (kind e2e, image build)
+Phase: 5 — Generic Gateway API core
+Base:
+Docs: docs/phases/phase-5/
+Status: not started; Phase 4 closed 2026-11-07 (phases/phase-4/phase-4-complete.md, released as v0.5.0)
 
 ### Queue
-- [x] Q1 Sub-phase 4.1 Snellius rebrand (plan Tasks 1–6) — phases/phase-4/phase-4-complete.md
-- [x] Q2 Sub-phase 4.2 User-testing follow-ups (D-063): stale banner, row status tooltips, About page — phases/phase-4/phase-4.2-complete.md
+(empty; filled from the Phase 5 design and plan)
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
-- [x] design+plan cross-model review + triage: docs/phases/phase-4/reviews/design-codex.md
-- [x] phase cross-model review + triage: docs/phases/phase-4/reviews/phase-codex.md
+- [ ] design+plan cross-model review + triage: docs/phases/phase-5/reviews/design-codex.md
+- [ ] phase cross-model review + triage: docs/phases/phase-5/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
-- [ ] phase-4-complete.md written, roadmap updated, tracked items closed
+- [ ] phase-5-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
 none
@@ -29,8 +28,6 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 
 ## Carry-over (deferred to later phases)
 - (P3) REMIND USER at the start of each phase: file the upstream kgateway issue "Expose the controller's effective discovery scope through a read-only endpoint" (H9, D-009 §7). User chose to file it in a later phase (2026-10-20). Draft kept outside the repo (public repo). Before filing: confirm on a cluster that status stays after a namespace is deselected, and re-verify the file:line refs against kgateway main.
-- (P3) D-060 (3.5 as built) awaits the user's confirmation — src: phases/phase-3/phase-3.5-complete.md
-- (P3) Push, PR and merge of `duncandoyle/stab35` (3.5 and the Phase 3 close) need the user's go
 - (P3) Scope verification for experimental Gateway API kinds: switch KGWUI-007 to the controller's enabled kinds once the upstream scope endpoint exists (D-017 §4) — src: phases/phase-1/reviews/phase-codex.md#5
 - (P3) Watch CRDs added or removed after startup without a restart — https://github.com/DuncanDoyle/kgateway-ui/issues/1
 - (P3) Per-user AuthN/AuthZ behind `api.Authorizer` (D-013) — roadmap — src: phases/phase-1/phase-1.4-complete.md

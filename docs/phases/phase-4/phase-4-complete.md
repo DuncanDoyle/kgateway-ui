@@ -1,6 +1,6 @@
 # Phase 4 — Snellius rebrand (Complete)
 
-**Completed:** 2026-11-07 (local; closes for good once the PR's CI runs kind e2e and the image build)
+**Completed:** 2026-11-07 (sub-phases 4.1 and 4.2; kind e2e and the image build run in CI on the Phase 4 PR; released as v0.5.0)
 **Range:** 966be06..HEAD (branch `duncandoyle/snellius`)
 
 ## Summary

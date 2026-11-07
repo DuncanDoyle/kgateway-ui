@@ -77,7 +77,7 @@ It also delivers the build foundation: the Go binary with the embedded SPA, a co
 Open design question (raised 2026-10-28, decide during Phase 3 planning): should the engine move from full recomputes to incremental ones, for example with Istio's KRT collections, which kgateway itself uses? The gain is cheaper recomputes as clusters and analyzers grow. Phase 2 ended near its CPU budget, at 104–125 ms per full recompute on CI. The costs are a heavy, unversioned dependency, harder per-request consistency, and no reuse of kgateway's own code, because Go cannot link kgateway 2.3 and 2.4 into one binary. Before deciding, spike view A as KRT collections and measure CPU and memory against the current engine on the Large tier. Decided in 3.1 (2026-11-02): keep the immutable full recompute, with per-check memoization (D-027).
 
 ### Phase 4 — Snellius rebrand
-**Status:** Not started (pre-approved by the user 2026-11-07)
+**Status:** Complete (2026-11-07, v0.5.0)
 **Docs:** `docs/phases/phase-4/`
 
 The UI product is renamed Snellius: "See the whole picture.", "Kubernetes Gateway Management & Observability" (D-061).
