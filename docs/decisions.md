@@ -1027,3 +1027,14 @@ Measured on the reference machine, 5 runs per world:
 **Consequences:** design §7.6, §8.6 and plan Task 76 state the as-built behaviour. Items 1 and 6 are carried to the phase review.
 
 **Alternatives:** n/a.
+
+## D-059 — Group IDs may hash values the resource's own status serves (2026-11-07, phase 3)
+**Status:** accepted (user, 2026-11-07)
+
+**Context:** The phase review (`phases/phase-3/reviews/phase-codex.md` #1) found that KGWUI-015's group ID hashes the replacing policy's name, which §14 rule 11 does not allow for a viewer who may not see that policy. The route's own status message already names the policy, and Phase 2 rule 8 serves that status to the same viewer.
+
+**Decision:** amend §14 rule 11: a `group` may also hash a value the grouped resource's own status already serves to the caller. No code change.
+
+**Consequences:** queue S6 closes without code. Rule 11 now depends on Phase 2 rule 8: if route status stops reaching restricted viewers, 015's group ID must change with it.
+
+**Alternatives:** ordinal grouping: rejected, since a per-route ordinal cannot group routes across the policy, and a cross-route ordinal encodes the policy anyway.

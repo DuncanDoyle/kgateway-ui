@@ -25,7 +25,7 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
   - [ ] S7 (P3) On 2.5, a selector that matches nothing shows 003 instead of 016: computed 016 for this case, labelled UI-computed — src: D-058 item 7 (user, 2026-11-07); exit kgateway#14998
   - [ ] S8 (P3) Remove the status-sync count (`status_syncs_total`) from KGWUI-018 and the UI on every version — src: D-058 item 10 (user, 2026-11-07)
   - [ ] S9 (P3) An unreadable controller version selects the 2.5 rule set, not 2.4 — src: D-058 item 11 (user, 2026-11-07)
-  - [ ] S6 (P3) 015 group ID names the policy for restricted viewers: ordinal grouping or a rule 11 amendment (user decides) — src: reviews/phase-codex.md#1
+  - [x] S6 (P3) 015 group ID names the policy for restricted viewers — no code: §14 rule 11 amended (D-059, user 2026-11-07)
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred

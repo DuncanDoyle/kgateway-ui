@@ -677,7 +677,7 @@ DataPlaneDTO   { rejecting, rejects: { typeUrl, streams, firstSeen }[], statusSa
 
 Phase 2 design §7.4 rules 1–10 hold. Phase 3 adds these **(our call)**:
 
-11. **Finding identity.** `id` and `group` are shown on restricted findings too. They hash only data a restricted finding already shows (code, resource identity, D-013) or spec fields of that resource. Status and computed values become ordinals (§5.1), so an `id` reveals nothing else; it can shift when a sibling finding on the same owner appears or clears (D-040).
+11. **Finding identity.** `id` and `group` are shown on restricted findings too. They hash only data a restricted finding already shows (code, resource identity, D-013) or spec fields of that resource. Status and computed values become ordinals (§5.1), so an `id` reveals nothing else; it can shift when a sibling finding on the same owner appears or clears (D-040). A `group` may also hash a value the grouped resource's own status already serves to the caller (Phase 2 rule 8), such as the policy a KGWUI-015 route rule names (D-059).
 12. **Evidence dependencies.** Every finding carries its evidence's dependency set in `Finding.Evidence` (it exists, `pkg/health/finding.go:76-78`). A caller who may view the resource but not every dependency gets `evidenceRestricted: true` and no evidence (Phase 2 rule 7). Dependencies per code:
 
 | Code | Resource | Evidence dependencies |

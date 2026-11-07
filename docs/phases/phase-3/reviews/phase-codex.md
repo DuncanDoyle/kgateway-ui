@@ -44,7 +44,7 @@ No files edited or tests run. Test results remain author-reported. The linked pr
 ## Triage
 | # | Finding | Source | Decision | Note |
 |---|---|---|---|---|
-| 1 | Group IDs disclose the hidden policy behind KGWUI-015 (P1) | reviewer | user decides | Partly confirmed, P3. The group ID and the restricted row's `cause` name the policy, but the route's own status message already names it, and Phase 2 rule 8 serves that status to the caller. Either group 015 by an ordinal, or amend §14 rule 11 |
+| 1 | Group IDs disclose the hidden policy behind KGWUI-015 (P1) | reviewer | reject: §14 rule 11 amended (D-059, user 2026-11-07) | Partly confirmed, P3. The group ID and the restricted row's `cause` name the policy, but the route's own status message already names it, and Phase 2 rule 8 serves that status to the caller. Either group 015 by an ordinal, or amend §14 rule 11 |
 | 2 | Proxy-stat evidence bypasses authorization of mapped Envoy names (P1) | reviewer | accept (P2) | Confirmed through the extension seam only: no shipped rule set registers an `EnvoyNamer`. Map and filter as `LogEvents` are. Stabilization 3.5 |
 | 3 | List-only kind changes raise KGWUI-008 (P1) | reviewer | accept (P2) | Confirmed: `kinds/monitor.go` compares every served descriptor. A list-only change gives a note, not a failed required check. Stabilization 3.5 |
 | 4 | KGWUI-024 does not reach the processes and data-plane summaries (P1) | reviewer | accept (P2) | Confirmed. Add 024 to the process codes and the data-plane value. Stabilization 3.5 |
