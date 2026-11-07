@@ -108,6 +108,7 @@ Why now: about 60% of the code is already generic, and the refactor is cheaper b
 
 - Where a route actually sends traffic: Services and Backends, weights, endpoint health and endpoint discovery status.
 - A scoped flow diagram centred on a single gateway or route.
+- A Backends list (kgateway `Backend` objects, Kubernetes Services and any other kind a route sends traffic to). Selecting one shows every route that routes to it, through which Gateways, listeners and hostnames: how this backend is exposed. It is the inverse of the route page's "other routes using this backend" (user, 2026-11-07).
 - Must work with `Backend` and Envoy cluster health alone; Services and EndpointSlices are optional (D-016).
 
 ### Phase 7 — Policies & Filters
