@@ -142,8 +142,10 @@ type ProxySummary struct {
 // DataPlaneSummary counts Gateways with a KGWUI-001 over every finding, beside the visible Gateways
 // and those a rejecting row names; Unavailable is set while the xDS rejects check is not OK.
 type DataPlaneSummary struct {
-	Gateways    int  `json:"gateways"`
-	Rejecting   int  `json:"rejecting"`
+	Gateways  int `json:"gateways"`
+	Rejecting int `json:"rejecting"`
+	// Withheld counts Gateways with a KGWUI-024 error: their proxies get no config updates.
+	Withheld    int  `json:"withheld,omitempty"`
 	Unavailable bool `json:"unavailable,omitempty"`
 }
 

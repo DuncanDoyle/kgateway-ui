@@ -335,6 +335,8 @@ export interface ProxySummary {
 export interface DataPlaneSummary {
   gateways: number;
   rejecting: number;
+  /** Gateways with a KGWUI-024 error: their proxies get no config updates. */
+  withheld?: number;
   unavailable?: boolean;
 }
 /** GET …/diagnostics: groups are the first 10 of groupTotal. */

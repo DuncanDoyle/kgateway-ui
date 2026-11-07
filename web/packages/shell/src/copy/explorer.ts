@@ -511,6 +511,7 @@ export const diagnosticsCopy = {
   dataPlane: "Data plane", // S388
   noRejects: "No rejects", // S389
   rejects: "Rejects", // S390
+  configWithheld: "Config withheld", // S597
   problems: (n: number) => plural(n, ["problem", "problems"]), // S383
   oldestProblem: (ago: string) => `Oldest problem ${ago}`, // S384
   // Phase 3.3: Learn more, and evidence of 003, 013–015, 017, 018 and the controller log.

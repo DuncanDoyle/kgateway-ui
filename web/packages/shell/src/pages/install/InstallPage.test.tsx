@@ -284,7 +284,7 @@ it("stale data turns every group unknown", async () => {
   expect(screen.queryAllByTestId("health-icon-healthy")).toHaveLength(0);
 });
 
-it("Data plane column shows ✓, Rejects or Unknown", async () => {
+it("Data plane column shows ✓, Rejects, Config withheld or Unknown", async () => {
   const ov = overview();
   const [edge, internal] = ov.gateways as [GatewayRow, GatewayRow];
   const lab = (name: string, dataPlane?: GatewayRow["dataPlane"]): GatewayRow => ({
@@ -294,7 +294,7 @@ it("Data plane column shows ✓, Rejects or Unknown", async () => {
   });
   mount(healthy(), "/i/kgw.kgateway?sort=gateway.asc", {
     ...ov,
-    gateways: [edge, internal, lab("lab", "unknown"), lab("old")],
+    gateways: [edge, internal, lab("lab", "unknown"), lab("old"), lab("held", "withheld")],
   });
   const table = await screen.findByRole("table", { name: "Gateways" });
   const col = within(table)
@@ -310,6 +310,8 @@ it("Data plane column shows ✓, Rejects or Unknown", async () => {
   expect(cell("internal")).toHaveTextContent(/^No rejects$/);
   expect(within(cell("internal")).getByTestId("health-icon-healthy")).toBeInTheDocument();
   expect(cell("lab")).toHaveTextContent(/^Unknown$/);
+  expect(cell("held")).toHaveTextContent(/^Config withheld$/);
+  expect(within(cell("held")).getByTestId("health-icon-error")).toBeInTheDocument();
   // An older server sends no value: unknown, never a tick.
   expect(cell("old")).toHaveTextContent(/^Unknown$/);
   expect(within(cell("old")).getByTestId("health-icon-unknown")).toBeInTheDocument();

@@ -476,7 +476,7 @@ const count = shape<Count>(
 const row = shape<GatewayRow>(
   { ref: "!", class: "!", state: "!", listeners: "!", attachedRoutes: "!", addresses: "!", link: "?", dataPlane: "?" },
   { ref },
-  { state: healthState, ...link, dataPlane: { ok: 1, rejects: 1, unknown: 1 } },
+  { state: healthState, ...link, dataPlane: { ok: 1, rejects: 1, withheld: 1, unknown: 1 } },
 );
 const overviewShape = shape<OverviewResponse>(
   { header: "!", counts: "!", gateways: "!", collectedAt: "!" },
@@ -941,6 +941,7 @@ const diagnostics = shape<Diagnostics>(
     dataPlane: shape<Diagnostics["dataPlane"]>({
       gateways: "!",
       rejecting: "!",
+      withheld: "?",
       unavailable: "?",
     }),
     checks: check,

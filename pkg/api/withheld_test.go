@@ -70,6 +70,29 @@ func TestConfigWithheldAtTheAPI(t *testing.T) {
 	}
 }
 
+// A 024 error reaches the 3.2 summaries (phase review #4): the Gateway's proxy
+// set on /processes is an error, the diagnostics data plane counts it as
+// withheld, and its overview row reads "withheld" while it has no 001.
+func TestConfigWithheldInSummaries(t *testing.T) {
+	lm := newLiveMetrics()
+	lm.set("kgw.kgateway", ctrlCapture(t, "v2.5.0-withheld-synth", "kgw", "kgateway-0"), ctrlCapture(t, "v2.5.0", "kgw", "kgateway-1"))
+	h := xdsHarness(t, setup{}, lm, nackWorld()...)
+	r := h.at(t, testutil.Now)
+	if withheldFinding(r, "infra", "nack", health.SeverityError) == nil || xdsFinding(r, "infra", "nack") != nil {
+		t.Fatalf("want a 024 error and no 001 on nack: %+v", r.Findings)
+	}
+	p := get[ProcessesResponse](t, h.srv, procsPath+"?health=error", 200).Proxies
+	if got := gatewayNames(p); !slices.Contains(got, "nack") {
+		t.Fatalf("health=error: %v, want nack", got)
+	}
+	if d := get[Diagnostics](t, h.srv, diagPath, 200).DataPlane; d.Withheld != 1 {
+		t.Fatalf("data plane %+v, want withheld 1", d)
+	}
+	if got := overviewDataPlane(t, h); got["nack"] != DataPlaneWithheld {
+		t.Fatalf("overview data plane %v, want nack withheld", got)
+	}
+}
+
 // KGWUI-024 from the real 2.5.0 pair: flip_release 0 -> 15 on infra/withheld
 // between two scrapes is a warning on that Gateway only.
 func TestConfigReleasedRealCaptureAtTheAPI(t *testing.T) {
