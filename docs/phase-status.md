@@ -4,7 +4,7 @@
 Phase: 3 — Health & Diagnostics
 Base: 544dcd5db3196cffd077267bca364ba8a8cd6d24
 Docs: docs/phases/phase-3/
-Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-10-29 (phases/phase-2/phase-2-complete.md)
+Status: complete (2026-11-07, phases/phase-3/phase-3-complete.md)
 
 ### Queue
 - [x] Q1 Phase 3 design (`design.md`) — approved by the user 2026-11-01
@@ -31,8 +31,8 @@ Status: implementing (design and plan approved 2026-11-01); Phase 2 closed 2026-
 - [x] all queue items done or deferred
 - [x] design+plan cross-model review + triage: docs/phases/phase-3/reviews/design-codex.md
 - [x] phase cross-model review + triage: docs/phases/phase-3/reviews/phase-codex.md
-- [ ] decisions.md / design / plan in sync with code
-- [ ] phase-3-complete.md written, roadmap updated, tracked items closed
+- [x] decisions.md / design / plan in sync with code — design updated through 3.5 (D-060 consequences)
+- [x] phase-3-complete.md written, roadmap updated, tracked items closed — 2026-11-07
 
 ## Sub-phase
 Sub-phase: none (3.5 closed 2026-11-07 on `duncandoyle/stab35`, not pushed; the Phase 3 close is next, with the user's go)
@@ -73,6 +73,7 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - Smaller Phase 2 items (parked Tasks 57 and 58, test gaps, P4 polish) — src: phases/phase-2/phase-2-complete.md, Deferred / open
 
 ## Notes
+- 2026-11-07: Phase 3 closed (phases/phase-3/phase-3-complete.md), pre-approved by the user. `go vet ./...` and `go test ./...` pass on 4184c20 (35 packages); 3.5 gates on 97e7e90, later commits docs only. No waivers. D-060 awaits the user.
 - 2026-11-06: Sub-phase 3.4 closed (phases/phase-3/phase-3.4-complete.md). Two Codex rounds triaged (3 P1, all reproduced and fixed; the re-review clean). The user decided D-056 and D-057 and the export of `computed.TargetStatusReporter`; D-058 records the deviations (item 6 confirmed, the rest pending). Standard gates pass on 8fa399b; `make bench` passes on 31e97db under `caffeinate -s`; kind e2e passes on all three pairs at 3d7698e. The unpushed branch was rewritten to drop a forbidden word from one test fixture. Next: land on `main` and tag `v0.4.0` (user), then the phase review.
 - 2026-11-06: Sub-phase 3.4 started at base 8342a38 (3.0–3.3 merged in PR #22, tagged `v0.3.0`). Branch `duncandoyle/backends`. kgateway 2.5.0 GA is out (2026-11-02), so Tasks 83–86 run now. The user added kgwctl #17 and #20 (D-056). The brief's `(inferred)` outputs go to the user before their tasks.
 - 2026-11-05: Sub-phase 3.3 closed (phases/phase-3/phase-3.3-complete.md). Three Codex rounds triaged (6 + 2 findings, all fixed; the last round clean). The user raised the retained-heap gate to 40 MiB (D-054) and confirmed the 3.3 rulings; D-055 records the deviations (all confirmed). Standard gates and `make bench` pass on c97c3eb; kind e2e passes on both pairs. Next: land on `main` and tag for kgwctl (#16), then 3.4.
