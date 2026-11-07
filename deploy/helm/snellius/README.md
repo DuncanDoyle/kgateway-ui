@@ -15,7 +15,7 @@ The UI has no login. Whoever reaches it sees everything its ServiceAccount can r
 
 ```sh
 # Install a released chart; --version picks the chart and the matching image
-helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.1.0 \
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version <version> \
   -n snellius --create-namespace
 kubectl -n snellius port-forward svc/ui-snellius 8080:80
 ```

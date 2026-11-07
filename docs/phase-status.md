@@ -4,16 +4,16 @@
 Phase: 4 — Snellius rebrand
 Base: 966be065833aaab4ce9cbce5525a5248ea732761
 Docs: docs/phases/phase-4/
-Status: implementing (design and plan reviewed by Codex 2026-11-07; phase pre-approved by the user 2026-11-07, final approval on return); Phase 3 closed 2026-11-07 (phases/phase-3/phase-3-complete.md)
+Status: implemented and closed locally 2026-11-07; waiting for the user's review, the GitHub repo rename, then push and CI (kind e2e, image build)
 
 ### Queue
-- [ ] Q1 Sub-phase 4.1 Snellius rebrand (plan Tasks 1–6) ← NEXT
+- [x] Q1 Sub-phase 4.1 Snellius rebrand (plan Tasks 1–6) — phases/phase-4/phase-4-complete.md
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
 - [x] design+plan cross-model review + triage: docs/phases/phase-4/reviews/design-codex.md
-- [ ] phase cross-model review + triage: docs/phases/phase-4/reviews/phase-codex.md
+- [x] phase cross-model review + triage: docs/phases/phase-4/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-4-complete.md written, roadmap updated, tracked items closed
 

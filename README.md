@@ -26,8 +26,8 @@ Read this before you expose the UI.
 ## Install
 
 ```sh
-# Install the chart from ghcr (pick a released version)
-helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.1.0 \
+# Install the chart from ghcr (v0.5.0 or later; see Upgrading from kgateway-ui)
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version <version> \
   -n snellius --create-namespace
 
 # Open the UI on http://localhost:8080
@@ -182,12 +182,13 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntrie
 
 Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new names. v0.4.0 stays available under the old names. The UI holds no state, so a reinstall is cheap.
 
-1. Run `helm uninstall <release> -n kgateway-ui`. The selector is immutable and every object name changes, so `helm upgrade` cannot work.
-2. Install the new chart: `helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version <version> -n snellius --create-namespace`.
-3. Move image and chart pins to `ghcr.io/duncandoyle/snellius` and `oci://ghcr.io/duncandoyle/charts/snellius`. The old paths get no further releases.
-4. Go importers switch to `github.com/DuncanDoyle/snellius` at the first tag on the new path. Old tags still resolve under the old path through the module proxy.
-5. npm consumers switch from `@kgateway-ui/shell` to `@snellius/shell`.
-6. Rename `KGWUI_MEMORY_LIMIT` to `SNELLIUS_MEMORY_LIMIT`. The old name works for one more minor release and logs a deprecation line.
+1. Save your values: `helm get values <release> -n kgateway-ui -o yaml > snellius-values.yaml`. Change any `kgateway-ui` name in it, such as an `image.repository` pin, to `snellius`.
+2. Run `helm uninstall <release> -n kgateway-ui`. The selector is immutable and every object name changes, so `helm upgrade` cannot work.
+3. Install the new chart with your values: `helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version <version> -n snellius --create-namespace -f snellius-values.yaml`. Settings such as `install.pin`, `httpRoute` and extra RBAC carry over this way.
+4. Move image and chart pins to `ghcr.io/duncandoyle/snellius` and `oci://ghcr.io/duncandoyle/charts/snellius`. The old paths get no further releases.
+5. Go importers switch to `github.com/DuncanDoyle/snellius` at the first tag on the new path. Old tags still resolve under the old path through the module proxy.
+6. npm consumers switch from `@kgateway-ui/shell` to `@snellius/shell`.
+7. Rename `KGWUI_MEMORY_LIMIT` to `SNELLIUS_MEMORY_LIMIT`. The old name works for one more minor release and logs a deprecation line.
 
 Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v1 and the finding anchors do not change.
 
