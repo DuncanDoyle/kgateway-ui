@@ -13,24 +13,40 @@ import (
 
 // Change is how the kinds the cluster serves now differ from the watched kinds.
 // Entries are "resource.group/version" ("resource/version" for the core group), sorted.
+// Added and Removed are judged kinds; list-only kinds ([Descriptor.ListOnly]) have their own fields.
 type Change struct {
-	Added   []string `json:"added,omitempty"`
-	Removed []string `json:"removed,omitempty"`
+	Added           []string `json:"added,omitempty"`
+	Removed         []string `json:"removed,omitempty"`
+	ListOnlyAdded   []string `json:"listOnlyAdded,omitempty"`
+	ListOnlyRemoved []string `json:"listOnlyRemoved,omitempty"`
 }
 
 // Empty reports whether the served kinds match the watched kinds.
-func (c Change) Empty() bool { return len(c.Added) == 0 && len(c.Removed) == 0 }
+func (c Change) Empty() bool {
+	return !c.Judged() && len(c.ListOnlyAdded) == 0 && len(c.ListOnlyRemoved) == 0
+}
 
-// String returns "added a, b; removed c", omitting an empty half.
+// Judged reports whether a judged kind changed; a list-only change alone is not one.
+func (c Change) Judged() bool { return len(c.Added) > 0 || len(c.Removed) > 0 }
+
+// String returns "added a, b; removed c", omitting an empty half; list-only
+// changes follow as "list-only added d; list-only removed e".
 func (c Change) String() string {
 	var parts []string
-	if len(c.Added) > 0 {
-		parts = append(parts, "added "+strings.Join(c.Added, ", "))
-	}
-	if len(c.Removed) > 0 {
-		parts = append(parts, "removed "+strings.Join(c.Removed, ", "))
+	for _, p := range []struct {
+		label string
+		keys  []string
+	}{{"added ", c.Added}, {"removed ", c.Removed}, {"list-only added ", c.ListOnlyAdded}, {"list-only removed ", c.ListOnlyRemoved}} {
+		if len(p.keys) > 0 {
+			parts = append(parts, p.label+strings.Join(p.keys, ", "))
+		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+// ListOnly returns c's list-only half as "added a; removed b".
+func (c Change) ListOnly() string {
+	return Change{Added: c.ListOnlyAdded, Removed: c.ListOnlyRemoved}.String()
 }
 
 // Diff compares the served kinds now with the watched ones by group, version and resource.
@@ -41,26 +57,36 @@ func Diff(watched, now []Served) Change {
 		}
 		return s.Resource + "." + s.Group + "/" + s.Version
 	}
+	// Each key maps to whether its kind is list-only.
 	w, n := map[string]bool{}, map[string]bool{}
 	for _, s := range watched {
-		w[key(s)] = true
+		w[key(s)] = s.ListOnly
 	}
 	for _, s := range now {
-		n[key(s)] = true
+		n[key(s)] = s.ListOnly
 	}
 	var c Change
-	for k := range n {
-		if !w[k] {
-			c.Added = append(c.Added, k)
+	for k, listOnly := range n {
+		if _, ok := w[k]; !ok {
+			if listOnly {
+				c.ListOnlyAdded = append(c.ListOnlyAdded, k)
+			} else {
+				c.Added = append(c.Added, k)
+			}
 		}
 	}
-	for k := range w {
-		if !n[k] {
-			c.Removed = append(c.Removed, k)
+	for k, listOnly := range w {
+		if _, ok := n[k]; !ok {
+			if listOnly {
+				c.ListOnlyRemoved = append(c.ListOnlyRemoved, k)
+			} else {
+				c.Removed = append(c.Removed, k)
+			}
 		}
 	}
-	slices.Sort(c.Added)
-	slices.Sort(c.Removed)
+	for _, s := range [][]string{c.Added, c.Removed, c.ListOnlyAdded, c.ListOnlyRemoved} {
+		slices.Sort(s)
+	}
 	return c
 }
 

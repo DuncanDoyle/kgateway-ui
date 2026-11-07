@@ -97,6 +97,9 @@ func resourceName(gvr schema.GroupVersionResource) string {
 	return gvr.Resource + "." + gvr.Group
 }
 
+// kindsListOnlyDetail is the served kinds check's note on a list-only change.
+const kindsListOnlyDetail = "Listed kinds changed (%s); restart the UI to list them"
+
 // kindsCheck: the cluster still serves exactly the watched kinds (design §10).
 type kindsCheck struct{}
 
@@ -106,12 +109,17 @@ func (kindsCheck) Name() string { return "served kinds" }
 // Inputs implements Check.
 func (kindsCheck) Inputs() InputSet { return InputSet{KindsChange: true} }
 
-// Run implements Check: a served-kinds change is KGWUI-008 until the UI restarts
-// or the served set matches again, since the cache does not re-watch.
+// Run implements Check: a judged kind's change is KGWUI-008 until the UI restarts
+// or the served set matches again, since the cache does not re-watch. A
+// list-only kind's change alone is a note on an OK check (D-034).
 func (c kindsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
-	if in.KindsChange.Empty() {
-		return nil, ok(c.Name(), true, in.Now)
+	if !in.KindsChange.Judged() {
+		r := ok(c.Name(), true, in.Now)
+		if lo := in.KindsChange.ListOnly(); lo != "" {
+			r.Detail = fmt.Sprintf(kindsListOnlyDetail, lo)
+		}
+		return nil, r
 	}
 	why := "served kinds changed: " + in.KindsChange.String()
 	return []Finding{{Code: CodeSignalUnavailable, Slug: "signal-unavailable", Severity: SeverityInfo, Install: in.Install.ID(),
