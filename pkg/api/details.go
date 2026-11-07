@@ -279,6 +279,7 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 		Unavailable: xdsUnavailable(d.i.Health.Checks), ProxyStats: proxyStats(d.i.Health.Checks, gw, on(health.CodeSelfManagedProxy) >= 0),
 		ControllerLogs: health.LogsNotRead}
 	dp.Withheld, dp.ControllerLogs = withheldOn(d.i.Health.Checks, gw)
+	dp.ConfigWithheld = withheldGateways(d.i)[gw]
 	k := on(health.CodeXDSRejected)
 	if k < 0 {
 		return dp, &proxies

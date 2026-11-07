@@ -995,6 +995,7 @@ const processes = shape<ProcessesResponse>(
 const dataPlane = shape<DataPlane>(
   {
     rejecting: "!",
+    configWithheld: "?",
     rejects: "!",
     statusSaysHealthy: "!",
     snapshot: "?",

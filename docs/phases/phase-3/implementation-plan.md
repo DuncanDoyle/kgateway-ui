@@ -113,7 +113,7 @@ pkg/computed/kgw23/, kgw24/         PolicyTargeter and log parsers as optional i
 pkg/computed/kgw25/                 copy of kgw24 plus TargetNotFound (3.4)
 pkg/computed/rulesets/gatewayapi.go expected Gateway API bundle per minor (3.2; 2.5 entry 3.4)
 pkg/computed/bound.go               MaxPathBytes, ClipDisplay (3.1)
-pkg/ctrlmetrics/parse.go, scrape.go per Pod and type; rejects_total, updates_dropped (3.1); snapshot_resources (3.2); status_syncs (3.3); per-client and build_info (3.4)
+pkg/ctrlmetrics/parse.go, scrape.go per Pod and type; rejects_total, updates_dropped (3.1); snapshot_resources (3.2); status_syncs (3.3, removed in 3.5); per-client and build_info (3.4)
 pkg/ctrlmetrics/static.go           static Source over one Collect result, for one-shot callers (3.3, D-053)
 pkg/setup/setup.go                  cache.Config and engine.Config as pkg/app builds them (3.3, D-053; allowlisted)
 pkg/scopeverify/verify.go           dropped updates → KGWUI-008 (3.1)
@@ -923,9 +923,9 @@ func Steps(g Group, findings []health.Finding, in Input, c Commands) []NextStep
 
 ### Task 63: KGWUI-018 status not progressing
 
-**Files:** Modify `pkg/health/freshness.go`, `pkg/ctrlmetrics/parse.go` (`kgateway_status_syncer_status_syncs_total` per Pod), `pkg/diagnose/group.go` ("Status not progressing"); Test `pkg/health/freshness_test.go`.
+**Files:** Modify `pkg/health/freshness.go`, `pkg/ctrlmetrics/parse.go` (`kgateway_status_syncer_status_syncs_total` per Pod; removed in 3.5), `pkg/diagnose/group.go` ("Status not progressing"); Test `pkg/health/freshness_test.go`.
 
-**Interfaces:** `CodeStatusNotProgressing = "KGWUI-018"` (warning) on the controller Deployment: controller ready, ≥ 1 owned object with a 003 warning for 5 min, and ≥ 10 objects or ≥ 10 % of objects with status (minimum 3) in that state; start in the Store, `WakeAt(start + 5 min)`; evidence counts per kind, oldest age, syncs in the window when present; next step the log command grepping `status`. Not-ready controller → 005 only.
+**Interfaces:** `CodeStatusNotProgressing = "KGWUI-018"` (warning) on the controller Deployment: controller ready, ≥ 1 owned object with a 003 warning for 5 min, and ≥ 10 objects or ≥ 10 % of objects with status (minimum 3) in that state; start in the Store, `WakeAt(start + 5 min)`; evidence counts per kind and oldest age (the status-sync count is removed, D-058 item 10, 3.5); next step the log command grepping `status`. Not-ready controller → 005 only.
 
 - [ ] **Step 1: Failing tests** threshold edges (9 and 10; 2, 3 at 10 %), maturation at 4:59 and 5:01, 005 instead. **Step 2: Implement, run, commit** `feat(health): status not progressing`.
 
@@ -1084,9 +1084,9 @@ Added by the user on 2026-11-04 for program edge E8 ([#13](https://github.com/Du
 
 ### Task 84: The `kgateway-2.5` rule set
 
-**Files:** Create `pkg/computed/kgw25/` (copy of `kgw24`), `pkg/computed/testdata/kgateway-2.5/`; Modify `pkg/computed/rulesets/rulesets.go` (2.5 selects `kgw25`), `pkg/computed/rulesets/gatewayapi.go` (2.5 row from the GA `go.mod`), `pkg/health/targets.go` (status path: ancestor reason `TargetNotFound` → 016 error; computed off on this set, D-020 rule 5). **⚠ guardrail** (copied package, > 400 lines).
+**Files:** Create `pkg/computed/kgw25/` (copy of `kgw24`), `pkg/computed/testdata/kgateway-2.5/`; Modify `pkg/computed/rulesets/rulesets.go` (2.5 selects `kgw25`), `pkg/computed/rulesets/gatewayapi.go` (2.5 row from the GA `go.mod`), `pkg/health/targets.go` (status path: ancestor reason `TargetNotFound` → 016 error; computed off for named targets on this set, D-020 rule 5; selectors stay computed, D-058 item 7, 3.5). **⚠ guardrail** (copied package, > 400 lines).
 
-- [ ] **Step 1: Failing tests** 016 from status on `kgw25`; no computed 016 there; `kgw24` unchanged; version table. **Step 2: Implement, run, commit** `feat(computed): kgateway 2.5 rule set; policy targets from status (D-033)`.
+- [ ] **Step 1: Failing tests** 016 from status on `kgw25`; no computed 016 for a named target there (3.5: a selector that matches nothing is computed); `kgw24` unchanged; version table. **Step 2: Implement, run, commit** `feat(computed): kgateway 2.5 rule set; policy targets from status (D-033)`.
 
 ### Task 85: KGWUI-024 and `kgateway_build_info`
 

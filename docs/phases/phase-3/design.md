@@ -665,7 +665,7 @@ ProcessDTO     { name, ready?, restarts?, restartsRecent?, lastStart?, terminati
 GatewayProcesses { gateway: LinkedRef, health, set: ProcessSetDTO, rejects?: number, skew?: boolean }
 DataPlaneDTO   { rejecting, rejects: { typeUrl, streams, firstSeen }[], statusSaysHealthy,
                  snapshot?: { by, listeners, routes, clusters, endpoints, secrets }, nextSteps: NextStep[],
-                 recentlyChanged: LinkedRef[], evidenceRestricted?, unavailable?,
+                 recentlyChanged: LinkedRef[], evidenceRestricted?, unavailable?, configWithheld?,  // configWithheld: a 024 error (3.5)
                  proxyStats: { available, unavailable?, reason? } }               // D-050
 ```
 

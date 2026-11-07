@@ -1045,7 +1045,7 @@ Measured on the reference machine, 5 runs per world:
 **Context:** Stabilization 3.5 (brief `phases/phase-3/phase-3.5-brief.md`) closes phase-review findings #2–#6 and D-058 items 7, 10 and 11. These choices were not fixed by the review or the decisions.
 
 **Decision:**
-1. S3: `withheld` (diagnostics) and the overview row's `dataPlane: "withheld"` count a KGWUI-024 **error** only. Its warning (config released early) still updates proxies, so the Data plane cell keeps ✓ or Rejects; the warning shows in the Gateway's state. 001 wins over 024 in the cell.
+1. S3: `withheld` (diagnostics), the overview row's `dataPlane: "withheld"` and the Gateway page's `dataPlane.configWithheld` (headline "Config withheld") count a KGWUI-024 **error** only. Its warning (config released early) still updates proxies, so the Data plane cell keeps ✓ or Rejects; the warning shows in the Gateway's state. 001 wins over 024 in the cell.
 2. S2: `kinds.Change` splits list-only kinds into their own fields; the served kinds check stays OK with a note "Kinds the UI only lists changed (…); restart the UI to list them".
 3. S7: `kgw25` gets a `PolicyTargeter` that judges selectors only (as kgw24's selector rule) and leaves every named targetRef unknown.
 4. S8: the status-sync count leaves the exported `pkg/ctrlmetrics` API too, not only the UI; no consumer used it (kgwctl checked).

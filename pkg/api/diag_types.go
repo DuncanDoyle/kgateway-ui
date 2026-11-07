@@ -214,6 +214,8 @@ type DataPlaneDTO struct {
 	ProxyStats  ProxyStatsDTO `json:"proxyStats"`
 	// Withheld is set when the controller log shows the Gateway's proxies may get no config updates (R105).
 	Withheld *WithheldDTO `json:"withheld,omitempty"`
+	// ConfigWithheld is set while the Gateway has a KGWUI-024 error: its proxies get no config updates.
+	ConfigWithheld bool `json:"configWithheld,omitempty"`
 	// ControllerLogs says whether the install's controller log was read; without it, no withheld means unobserved (D-006).
 	ControllerLogs string `json:"controllerLogs"`
 }

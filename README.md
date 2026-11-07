@@ -175,7 +175,7 @@ A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntrie
 - On kgateway 2.5, a policy selector that matches nothing is a computed KGWUI-016 warning again; named targets still come from the controller's `TargetNotFound`.
 - A controller whose version the UI cannot read now runs on the 2.5 rules ("Controller version unknown; using the 2.5 rules").
 - KGWUI-018 no longer shows a status-sync count.
-- A KGWUI-024 error shows as "Config withheld" in the overview's Data plane column, counts in `diagnostics.dataPlane.withheld`, and makes the Gateway's proxies an error on the Processes page.
+- A KGWUI-024 error shows as "Config withheld" in the overview's Data plane column and the Gateway page's Data plane headline, counts in `diagnostics.dataPlane.withheld`, and makes the Gateway's proxies an error on the Processes page.
 - Adding or removing only DirectResponse, GatewayExtension or ReferenceGrant CRDs no longer raises KGWUI-008.
 
 For downstream builds:
