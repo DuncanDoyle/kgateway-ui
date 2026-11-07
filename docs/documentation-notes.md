@@ -1,4 +1,4 @@
-# Notes for the user documentation
+# Notes for the Snellius user documentation
 
 Topics the user-facing documentation must cover when it is written. Each entry says what to explain and why. Add an entry whenever a decision creates something an operator needs to know.
 

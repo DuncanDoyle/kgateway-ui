@@ -1094,3 +1094,17 @@ Measured on the reference machine, 5 runs per world:
 - The refactor costs no measurable performance if hooks run per install or per stage, not per object.
 - Memory is the tight budget (+39.3 of 48 MiB retained heap, D-057), so the core must own the shared cache.
 - `roadmap.md` and `phase-status.md` use the new numbers.
+
+## D-062 — Snellius identity supersedes the kgateway default identity (2026-11-07, phase 4)
+**Status:** accepted (user pre-approval, 2026-11-07)
+
+**Context:** D-008 gave the default theme the kgateway identity, so the header presented the UI as the gateway it observes. D-061 renames the product to Snellius.
+
+**Decision:** The default theme and brand carry the Snellius identity. D-008's mechanism is unchanged: a downstream build supplies its own brand and tokens. The kgateway icon stays vendored with its attribution for factual use.
+
+**Alternatives:**
+- Keep the kgateway identity as the default: rejected, since the product is not the gateway.
+
+**Consequences:**
+- `brand.productName` and the default brand read `snellius`.
+- Nothing in the UI uses the kgateway icon after Phase 4; the file stays for factual use.

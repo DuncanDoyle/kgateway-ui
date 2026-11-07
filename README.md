@@ -1,8 +1,18 @@
-# kgateway UI
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/snellius-logo-horizontal-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/snellius-logo-horizontal-light.svg">
+    <img alt="Snellius" src="docs/assets/snellius-logo-horizontal-light.svg" width="360">
+  </picture>
+</h1>
 
-A read-only web UI for kgateway. It shows the health of each controller install at a glance, why an install is unhealthy, and an inventory of what it manages: GatewayClasses, Gateways, routes and policies.
+<p align="center"><strong>See the whole picture.</strong><br>Kubernetes Gateway Management &amp; Observability</p>
+
+Snellius is a read-only UI for Kubernetes Gateway API, built for kgateway. It shows the health of each controller install at a glance, why an install is unhealthy, and an inventory of what it manages: GatewayClasses, Gateways, routes and policies.
 
 Kubernetes is the only provider today. The API and the SPA are built so other platforms can be added later.
+
+**Naming.** The name Snellius is not trademark-cleared. SURF's Dutch national supercomputer is also named Snellius.
 
 ## Security and trust model
 
@@ -17,14 +27,14 @@ Read this before you expose the UI.
 
 ```sh
 # Install the chart from ghcr (pick a released version)
-helm install ui oci://ghcr.io/duncandoyle/charts/kgateway-ui --version 0.1.0 \
-  -n kgateway-ui --create-namespace
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.1.0 \
+  -n snellius --create-namespace
 
 # Open the UI on http://localhost:8080
-kubectl -n kgateway-ui port-forward svc/ui-kgateway-ui 8080:80
+kubectl -n snellius port-forward svc/ui-snellius 8080:80
 ```
 
-The image is `ghcr.io/duncandoyle/kgateway-ui`. Installing from a checkout needs `--set image.tag=<version>`; see the [chart README](deploy/helm/kgateway-ui/README.md#install). To pin the UI to one install, set `install.pin`. To expose it through a Gateway, read [Security and trust model](#security-and-trust-model) first, then set `httpRoute.enabled`, `httpRoute.parentRefs` and `httpRoute.hostnames`. The [chart README](deploy/helm/kgateway-ui/README.md) lists every value.
+The image is `ghcr.io/duncandoyle/snellius`. Installing from a checkout needs `--set image.tag=<version>`; see the [chart README](deploy/helm/snellius/README.md#install). To pin the UI to one install, set `install.pin`. To expose it through a Gateway, read [Security and trust model](#security-and-trust-model) first, then set `httpRoute.enabled`, `httpRoute.parentRefs` and `httpRoute.hostnames`. The [chart README](deploy/helm/snellius/README.md) lists every value.
 
 ## Run locally
 
@@ -33,7 +43,7 @@ The image is `ghcr.io/duncandoyle/kgateway-ui`. Installing from a checkout needs
 make build
 
 # Serve on http://127.0.0.1:8080 against your current cluster
-./bin/kgateway-ui --kubeconfig ~/.kube/config
+./bin/snellius --kubeconfig ~/.kube/config
 ```
 
 Flags:
@@ -138,10 +148,10 @@ Kinds added with `WithKinds`, and anything a collector reads, need matching rule
 
 A one-shot caller, such as a CLI or a test, builds its own configuration with `pkg/setup` and runs `cache.Start(ctx)` itself. Cancel `ctx` when done, then call `Cache.Wait()`: it returns once every goroutine `Start` launched has exited. Called before `Start` or a second time, it returns at once.
 
-The frontend renders `Shell` from `@kgateway-ui/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
+The frontend renders `Shell` from `@snellius/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
-import { defaultPages, renderWhenFontsReady, Shell, type ShellExtension } from "@kgateway-ui/shell";
+import { defaultPages, renderWhenFontsReady, Shell, type ShellExtension } from "@snellius/shell";
 
 const acme: ShellExtension = {
   // Product identity in the header
@@ -167,6 +177,19 @@ void renderWhenFontsReady(document.getElementById("root") as HTMLElement, <Shell
 An app that embeds `Shell` must render it with `renderWhenFontsReady(root, element)`. If its themes use other fonts, pass them as the third argument.
 
 A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntries` and `findingsDocUrl`. "Learn more" on a finding links the release tag's [docs/findings.md](docs/findings.md) when `/api/v1/meta` reports a release version, else `main`; a build with its own version sets `findingsDocUrl` to its own copy. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing. `CorePages.DiagnosticsSection` replaces the install page's Needs attention and Processes block; it gets the install ID, the diagnostics and whether they are stale.
+
+## Upgrading from kgateway-ui
+
+Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new names. v0.4.0 stays available under the old names. The UI holds no state, so a reinstall is cheap.
+
+1. Run `helm uninstall <release> -n kgateway-ui`. The selector is immutable and every object name changes, so `helm upgrade` cannot work.
+2. Install the new chart: `helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version <version> -n snellius --create-namespace`.
+3. Move image and chart pins to `ghcr.io/duncandoyle/snellius` and `oci://ghcr.io/duncandoyle/charts/snellius`. The old paths get no further releases.
+4. Go importers switch to `github.com/DuncanDoyle/snellius` at the first tag on the new path. Old tags still resolve under the old path through the module proxy.
+5. npm consumers switch from `@kgateway-ui/shell` to `@snellius/shell`.
+6. Rename `KGWUI_MEMORY_LIMIT` to `SNELLIUS_MEMORY_LIMIT`. The old name works for one more minor release and logs a deprecation line.
+
+Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v1 and the finding anchors do not change.
 
 ## Upgrade notes
 
@@ -282,7 +305,7 @@ The UI now computes route delegation, using kgateway 2.3's or 2.4's own rules, a
 - When the install's discovery scope is unknown, delegation rows and effective matches read "Unknown" too.
 - A child you can see shows its hidden ancestor routes by name and delegated match only.
 - Delegation work is capped at 10,000 selected edges per install. Past the cap, parents read "too large to compute". Raise it with `--delegation-edge-cap` or the chart's `delegation.edgeCap`; a higher cap needs more memory.
-- The binary sets its Go memory limit to 90 % of the pod's memory limit, unless `GOMEMLIMIT` is set. The chart passes the limit in `KGWUI_MEMORY_LIMIT`.
+- The binary sets its Go memory limit to 90 % of the pod's memory limit, unless `GOMEMLIMIT` is set. The chart passes the limit in `SNELLIUS_MEMORY_LIMIT`. The old name `KGWUI_MEMORY_LIMIT` is still read when the new one is unset.
 
 For downstream builds:
 
@@ -337,15 +360,15 @@ CI's `hygiene` job reads its term list from the repository secret `FORBIDDEN_TER
 
 ### Releasing
 
-Push a semver tag (`vX.Y.Z`). The release workflow publishes the image `ghcr.io/duncandoyle/kgateway-ui:X.Y.Z` and the chart `oci://ghcr.io/duncandoyle/charts/kgateway-ui` version `X.Y.Z`, then creates the GitHub release.
+Push a semver tag (`vX.Y.Z`). The release workflow publishes the image `ghcr.io/duncandoyle/snellius:X.Y.Z` and the chart `oci://ghcr.io/duncandoyle/charts/snellius` version `X.Y.Z`, then creates the GitHub release.
 
-ghcr creates both packages as private on their first push. After the first tag, make them public once: open each package's settings (`kgateway-ui` and `charts/kgateway-ui`) and set its visibility to public. Then check that an anonymous pull works:
+ghcr creates both packages as private on their first push. After the first tag, make them public once: open each package's settings (`snellius` and `charts/snellius`) and set its visibility to public. Then check that an anonymous pull works:
 
 ```sh
 # Run logged out of ghcr.io
 docker logout ghcr.io; helm registry logout ghcr.io
-docker pull ghcr.io/duncandoyle/kgateway-ui:X.Y.Z
-helm show chart oci://ghcr.io/duncandoyle/charts/kgateway-ui --version X.Y.Z
+docker pull ghcr.io/duncandoyle/snellius:X.Y.Z
+helm show chart oci://ghcr.io/duncandoyle/charts/snellius --version X.Y.Z
 ```
 
 ## Licence

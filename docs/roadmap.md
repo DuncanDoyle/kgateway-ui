@@ -1,4 +1,4 @@
-# kgateway UI — Roadmap
+# Snellius — Roadmap
 
 **Last updated:** 2026-11-07
 
@@ -158,7 +158,7 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 
 - The actual Envoy HTTP filter chain and filter order per route, mapped back to the Gateway API and policy resources that produced it.
 - Intended configuration (the controller's xDS snapshot) compared with the configuration Envoy accepted.
-- Builds on the `pkg/envoy` library of [krp](https://github.com/DuncanDoyle/krp) (krp Phase 4, v0.1.0). krp owns the mapping from Envoy names to Gateway API refs, and `computed.EnvoyNamer` delegates to it (program P-001, edges E4/E5).
+- Builds on the `pkg/envoy` library of [xdsview](https://github.com/DuncanDoyle/xdsview) (xdsview Phase 4, v0.1.0). xdsview owns the mapping from Envoy names to Gateway API refs, and `computed.EnvoyNamer` delegates to it (program P-001, edges E4/E5).
 - Easier standalone, because the admin server (9095) and Envoy admin are local (D-016).
 
 ### Phase 12 — App-Team Views

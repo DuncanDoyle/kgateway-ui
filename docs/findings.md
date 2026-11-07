@@ -1,6 +1,6 @@
 # Finding reference
 
-Every finding the UI raises has a code, such as `KGWUI-001`. This page has one entry per code. "Learn more" on a finding's page opens its entry here.
+Every finding Snellius raises has a code, such as `KGWUI-001`. This page has one entry per code. "Learn more" on a finding's page opens its entry here.
 
 Each entry says:
 
