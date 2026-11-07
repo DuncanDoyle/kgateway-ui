@@ -1055,3 +1055,42 @@ Measured on the reference machine, 5 runs per world:
 
 **Alternatives:** n/a.
 
+
+## D-061 — Two new phases: the Snellius rebrand and a generic Gateway API core (2026-11-07, roadmap)
+**Status:** accepted (user, 2026-11-07)
+
+**Context:** Phase 3 is complete. About 60% of the code is already generic Gateway API. The Policies phase will add kgateway policy semantics, which makes a later split more expensive. The product also needs a name of its own that is not the name of one implementation.
+
+**Decision:**
+1. **New Phase 4 — Snellius rebrand.** The UI product is renamed Snellius, tagline "See the whole picture.", descriptor "Kubernetes Gateway Management & Observability". Scope is the UI identity plus the artifacts: GitHub repo, Go module path, container image, Helm chart and binary names.
+   - kgateway stays the name of the observed implementation in all content about it.
+   - Finding codes keep the `KGWUI-` prefix, so the API does not break.
+   - This supersedes one bullet of D-008: "The default theme carries the kgateway identity" becomes "The default theme carries the Snellius identity". The rest of D-008 stands: all identity flows from theme tokens, and downstreams override them. The roadmap's UX requirement 3 ("kgateway identity") changes the same way.
+2. **New Phase 5 — Generic Gateway API core.** The base becomes implementation-independent Kubernetes Gateway API. kgateway is plugin #1, on the same extension seam later editions use. No multi-implementation support is claimed. A core-only build gets a CI smoke test against Envoy Gateway on kind, as proof the seam holds. Rough sub-phases:
+   - G1: a neutral install and detector, and a default scope.
+   - G2: controller metrics behind the collector seam; kgateway-only checks move into a kgateway pack.
+   - G3: dedupe the kgw23, kgw24 and kgw25 rule sets; extract a generic view A; delegation becomes optional.
+   - G4: a kgateway pack for checks, kinds and condition types.
+   - G5: web vocabulary and the delegation tab as contributions.
+   - G6: the Envoy Gateway smoke test in CI.
+3. **Renumbering.** The old Phases 4–11 become 6–13. Closed records (Phase 1–3 designs, plans, complete files, reviews, and D-001 … D-060) keep the old numbers. Read them with this map:
+
+| Old | New | Phase |
+|---|---|---|
+| 4 | 6 | Traffic Flow & Backends |
+| 5 | 7 | Policies & Filters |
+| 6 | 8 | Search & Route Tester |
+| 7 | 9 | Security Posture |
+| 8 | 10 | Metrics & Insights |
+| 9 | 11 | Runtime Filter Chain |
+| 10 | 12 | App-Team Views |
+| 11 | 13 | AI-Assisted Diagnosis |
+
+**Alternatives:**
+- Keep the kgateway-only base and split later: rejected, since the Policies phase would add kgateway semantics to the core first.
+- Rename the finding codes: rejected, since `KGWUI-` codes are API v1.
+
+**Consequences:**
+- The refactor costs no measurable performance if hooks run per install or per stage, not per object.
+- Memory is the tight budget (+39.3 of 48 MiB retained heap, D-057), so the core must own the shared cache.
+- `roadmap.md` and `phase-status.md` use the new numbers.
