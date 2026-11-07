@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/snellius-logo-horizontal-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/snellius-logo-horizontal-light.svg">
-    <img alt="Snellius" src="docs/assets/snellius-logo-horizontal-light.svg" width="360">
+    <img alt="Snellius" src="docs/assets/snellius-logo-horizontal-light.svg" width="720">
   </picture>
 </h1>
 
@@ -13,6 +13,10 @@ Snellius is a read-only UI for Kubernetes Gateway API, built for kgateway. It sh
 Kubernetes is the only provider today. The API and the SPA are built so other platforms can be added later.
 
 **Naming.** The name Snellius is not trademark-cleared. SURF's Dutch national supercomputer is also named Snellius.
+
+## Why Snellius?
+
+Snellius is named after [Willebrord Snellius](https://en.wikipedia.org/wiki/Willebrord_Snellius) (1580–1626), a Dutch mathematician and astronomer known for Snell's law of refraction and his pioneering work in triangulation and navigation. Just as Snellius used observations from multiple points to understand and map the physical world, this project brings together Kubernetes Gateway API resources, controller state, proxy configuration, and runtime telemetry to provide a coherent picture of gateway infrastructure. The connection to refraction is equally fitting: understanding how traffic is directed and transformed as it flows through different layers of the system. Snellius helps operators see the whole picture, from configuration intent to actual dataplane behavior.
 
 ## Security and trust model
 
@@ -26,8 +30,8 @@ Read this before you expose the UI.
 ## Install
 
 ```sh
-# Install the chart from ghcr (v0.5.0 or later; see Upgrading from kgateway-ui)
-helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version <version> \
+# Install the chart from ghcr
+helm install ui oci://ghcr.io/duncandoyle/charts/snellius --version 0.5.0 \
   -n snellius --create-namespace
 
 # Open the UI on http://localhost:8080
