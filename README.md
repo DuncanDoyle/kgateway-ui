@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/snellius-logo-horizontal-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/snellius-logo-horizontal-light.svg">
-    <img alt="Snellius" src="docs/assets/snellius-logo-horizontal-light.svg" width="360">
+    <img alt="Snellius" src="docs/assets/snellius-logo-horizontal-light.svg" width="720">
   </picture>
 </h1>
 
