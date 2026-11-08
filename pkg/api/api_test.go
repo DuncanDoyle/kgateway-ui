@@ -277,10 +277,12 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	}
 	// Every detected install is kgateway's, as in extension.New; with class-only installs, only the stamped ones.
 	features := func(install.Install) []string { return kgateway.Features() }
+	base := []HandlerOption{WithPacks(kgateway.Name)}
 	if s.classOnly {
 		features = packFeatures
+		base = append(base, WithInstallKinds(packKinds))
 	}
-	opts := append([]HandlerOption{WithInstallFeatures(features)}, s.opts...)
+	opts := append(append(base, WithInstallFeatures(features)), s.opts...)
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, opts...))
 	t.Cleanup(srv.Close)
 	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, meta: meta, clk: clk}

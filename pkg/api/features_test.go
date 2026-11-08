@@ -12,6 +12,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -95,5 +96,42 @@ func TestComputedFactsCarryTheRuleSetLabel(t *testing.T) {
 	raw := get[json.RawMessage](t, h.srv, base+"/routes/gateway.networking.k8s.io/HTTPRoute/shop/r", 200)
 	if n, m := bytes.Count(raw, []byte(`"rules":"kgateway-2.4"`)), bytes.Count(raw, []byte(`"label":"kgateway 2.4"`)); n == 0 || n != m {
 		t.Errorf("%d computed facts, %d labelled: %s", n, m, raw)
+	}
+}
+
+// packKinds applies kgateway kinds only to kgateway installs, as the app does.
+func packKinds(i install.Install, gk objects.GroupKind) bool {
+	return gk.Group != kinds.KgatewayGroup || i.Impl == kgateway.Name
+}
+
+// Overview counts list only the kinds that apply to the install: a class-only
+// install gets no kgateway kind tiles, the kgateway install keeps them.
+func TestOverviewCountsFollowTheInstall(t *testing.T) {
+	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true,
+		opts: []HandlerOption{WithInstallKinds(packKinds)}}, world()...)
+	groups := func(id string) map[string]int {
+		out := map[string]int{}
+		for _, c := range get[OverviewResponse](t, h.srv, "/api/v1/installs/"+id+"/overview", 200).Counts {
+			out[c.Group]++
+		}
+		return out
+	}
+	if co := groups("example.com~2Fother"); co[kinds.KgatewayGroup] != 0 || co["gateway.networking.k8s.io"] == 0 {
+		t.Errorf("class-only counts by group %v, want Gateway API kinds only", co)
+	}
+	if k := groups("kgw.kgateway"); k[kinds.KgatewayGroup] == 0 || k["gateway.networking.k8s.io"] == 0 {
+		t.Errorf("kgateway counts by group %v, want both", k)
+	}
+}
+
+// /meta names the packs the server runs; none is an empty list, not an absent one.
+func TestMetaListsPacks(t *testing.T) {
+	_, srv, _ := startWith(t, setup{opts: []HandlerOption{WithPacks("kgateway")}}, world()...)
+	if got := get[MetaResponse](t, srv, "/api/v1/meta", 200).Packs; !slices.Equal(got, []string{"kgateway"}) {
+		t.Errorf("packs %v", got)
+	}
+	_, core, _ := startWith(t, setup{opts: []HandlerOption{WithPacks()}}, world()...)
+	if raw := get[json.RawMessage](t, core, "/api/v1/meta", 200); !bytes.Contains(raw, []byte(`"packs":[]`)) {
+		t.Errorf("a server without packs must send an empty list: %s", raw)
 	}
 }

@@ -281,10 +281,11 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		}
 		return CoreCapabilities(snap, o.Diagnostics, collected.Snapshot())
 	}
-	// Each install's next steps and UI features come from its pack.
+	// Each install's next steps, UI features and counted kinds come from its pack.
 	commands := func(i install.Install) diagnose.Commands { return reg.ImplFor(i).Commands }
 	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates),
-		api.WithCommands(reg.Commands), api.WithInstallCommands(commands), api.WithInstallFeatures(reg.FeaturesFor))
+		api.WithCommands(reg.Commands), api.WithInstallCommands(commands), api.WithInstallFeatures(reg.FeaturesFor),
+		api.WithPacks(reg.Packs()...), api.WithInstallKinds(reg.KindAppliesTo))
 	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, kinds: mon, opts: o, discovered: discovered, reg: reg,
 		packs: extension.NewCore(extension.WithCollectors(packCols...)), collectors: packCols, collected: collected, deps: deps}, nil
 }

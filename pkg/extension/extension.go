@@ -24,6 +24,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
@@ -72,6 +73,9 @@ type Registry struct {
 	impls map[string]Impl
 	// features are each pack's UI features, by pack name.
 	features map[string][]string
+	// packs are the pack names in registration order; kindPack names the pack that owns a kind.
+	packs    []string
+	kindPack map[objects.GroupKind]string
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
@@ -215,6 +219,7 @@ func NewCore(opts ...Option) *Registry {
 		Commands:   diagnose.Kubectl{},
 		impls:      map[string]Impl{},
 		features:   map[string][]string{},
+		kindPack:   map[objects.GroupKind]string{},
 		checkPack:  map[string]string{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}

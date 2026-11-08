@@ -45,7 +45,7 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 		cfg.commands = diagnose.Kubectl{}
 	}
 	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor,
-		featuresFor: cfg.featuresFor}
+		featuresFor: cfg.featuresFor, packs: cfg.packs, kindFor: cfg.kindFor}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -83,6 +83,8 @@ type handler struct {
 	commandsFor func(install.Install) diagnose.Commands
 	// featuresFor, if set, gives an install's pack features.
 	featuresFor func(install.Install) []string
+	packs       []string
+	kindFor     func(install.Install, objects.GroupKind) bool
 }
 
 // commandsOf is i's next-step commands: its own, else the handler's.
@@ -145,7 +147,8 @@ func (h *handler) readyz(w http.ResponseWriter, _ *http.Request) {
 
 func (h *handler) meta(w http.ResponseWriter, _ *http.Request) {
 	m, plat := h.current(), h.src.Platform()
-	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{}}
+	resp := MetaResponse{Version: version.Version, Platform: plat.Name, Capabilities: append([]string{}, plat.Capabilities...), Kinds: []kinds.Served{},
+		Packs: append([]string{}, h.packs...)}
 	if m != nil {
 		resp.Pinned, resp.Synced = m.Pinned, synced(m)
 		for _, k := range m.Served {
@@ -266,6 +269,7 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if p, i := h.find(w, r); i != nil {
 		v := h.view(r)
 		ov := h.visibleOverview(v, p.Model, i, visibleHealth(v, i))
+		ov.Counts = h.applicableCounts(i, ov.Counts)
 		rows, l := make([]OverviewGatewayRow, 0, len(ov.Gateways)), linkerFor(v, p.Model, i)
 		rejecting, withheld := rejectingGateways(i), withheldGateways(i)
 		checked := slices.ContainsFunc(i.Health.Checks, func(c health.CheckResult) bool { return c.Name == xdsCheckName && c.OK })

@@ -18,6 +18,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
@@ -112,7 +113,14 @@ func WithPack(p Pack) Option {
 		} else {
 			r.impls[p.Name] = p.Impl
 		}
+		for _, k := range p.Kinds {
+			gk := objects.GroupKind{Group: k.Group, Kind: k.Kind}
+			if _, owned := r.kindPack[gk]; !owned && !slices.ContainsFunc(r.Kinds, func(d kinds.Descriptor) bool { return d.Group == k.Group && d.Kind == k.Kind }) {
+				r.kindPack[gk] = p.Name // a kind the core or an earlier pack registered stays theirs
+			}
+		}
 		r.Kinds = kinds.Dedupe(append(r.Kinds, p.Kinds...))
+		r.packs = append(r.packs, p.Name)
 		r.Detectors = append(stamp(p.Name, p.Detectors), r.Detectors...)
 		r.Checks = append(r.Checks, p.Checks...)
 		r.features[p.Name] = slices.Clone(p.Features)
@@ -172,6 +180,16 @@ func (r *Registry) ImplFor(i install.Install) Impl {
 		return r.currentImpl() // no pack yet: the fields are the core's
 	}
 	return r.impls[""]
+}
+
+// Packs returns the registered pack names, the default pack first.
+func (r *Registry) Packs() []string { return append([]string{}, r.packs...) }
+
+// KindAppliesTo reports whether served kind gk applies to install i: a pack's
+// own kind applies only to that pack's installs, every other kind to all.
+func (r *Registry) KindAppliesTo(i install.Install, gk objects.GroupKind) bool {
+	owner, ok := r.kindPack[gk]
+	return !ok || owner == i.Impl
 }
 
 // FeaturesFor returns the UI features of the pack that claimed i; none for the core.

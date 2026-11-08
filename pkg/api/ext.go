@@ -35,6 +35,9 @@ type handlerConfig struct {
 	commandsFor func(install.Install) diagnose.Commands
 	// featuresFor, if set, gives an install's pack features.
 	featuresFor func(install.Install) []string
+	// packs are the server's pack names; kindFor, if set, filters overview counts per install.
+	packs   []string
+	kindFor func(install.Install, objects.GroupKind) bool
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

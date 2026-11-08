@@ -17,6 +17,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 )
@@ -275,6 +276,32 @@ func TestFeaturesFollowThePack(t *testing.T) {
 	} {
 		if got := tc.r.FeaturesFor(install.Install{Impl: tc.impl}); !slices.Equal(got, tc.want) {
 			t.Errorf("%q: %v, want %v", tc.impl, got, tc.want)
+		}
+	}
+}
+
+// Packs names the registered packs; a pack's kinds apply only to its own
+// installs, Gateway API kinds to every install (Phase 5 design §10).
+func TestPacksAndKindApplicability(t *testing.T) {
+	r := New(WithPack(Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}},
+		Kinds: []kinds.Descriptor{{Group: "acme.example.com", Kind: "Pool", Resource: "pools", Versions: []string{"v1"}, Namespaced: true}}}))
+	if got := r.Packs(); !slices.Equal(got, []string{kgateway.Name, "acme"}) {
+		t.Errorf("packs %v", got)
+	}
+	if got := NewCore().Packs(); got == nil || len(got) != 0 {
+		t.Errorf("core packs %#v, want an empty list", got)
+	}
+	tp := objects.GroupKind{Group: kinds.KgatewayGroup, Kind: "TrafficPolicy"}
+	gw := objects.GroupKind{Group: "gateway.networking.k8s.io", Kind: "Gateway"}
+	pool := objects.GroupKind{Group: "acme.example.com", Kind: "Pool"}
+	kgw, acme, co := install.Install{Impl: kgateway.Name}, install.Install{Impl: "acme"}, install.Install{}
+	for _, tc := range []struct {
+		i    install.Install
+		gk   objects.GroupKind
+		want bool
+	}{{kgw, tp, true}, {co, tp, false}, {acme, tp, false}, {co, gw, true}, {acme, pool, true}, {kgw, pool, false}, {co, pool, false}} {
+		if got := r.KindAppliesTo(tc.i, tc.gk); got != tc.want {
+			t.Errorf("%q %v: %v, want %v", tc.i.Impl, tc.gk, got, tc.want)
 		}
 	}
 }

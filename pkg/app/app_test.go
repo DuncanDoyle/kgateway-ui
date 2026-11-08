@@ -50,6 +50,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/overview"
 	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
@@ -1814,5 +1815,47 @@ func TestInstallFeaturesReachTheAPI(t *testing.T) {
 	want := []string{api.FeatureDelegation, api.FeatureComputed, api.FeatureDataPlane, api.FeatureProcesses}
 	if co, k := insts[0], insts[1]; co.ID != "example.com~2Fgateway" || len(co.Features) != 0 || !slices.Equal(k.Features, want) {
 		t.Fatalf("installs %+v, want class-only without features and kgateway with %v", insts, want)
+	}
+}
+
+// The app's /meta names its packs, and a class-only install's overview has
+// no kgateway kind tiles; NewCore's /meta names none (Phase 5 design §10).
+func TestPacksAndInstallKindsReachTheAPI(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reg   *extension.Registry
+		packs []string
+	}{{"default", extension.New(), []string{"kgateway"}}, {"core", extension.NewCore(), []string{}}} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+			dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true),
+				testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/gateway", true))
+			a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, ClassOnlyInstalls: true}, tc.reg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			a.Start(ctx)
+			srv := httptest.NewServer(a.Handler)
+			t.Cleanup(srv.Close)
+			var meta api.MetaResponse
+			eventually(t, "meta never synced", func() bool {
+				meta = api.MetaResponse{}
+				return getJSON(t, srv, "/api/v1/meta", &meta) == http.StatusOK && meta.Synced
+			})
+			if !slices.Equal(meta.Packs, tc.packs) || meta.Packs == nil {
+				t.Fatalf("packs %#v, want %v", meta.Packs, tc.packs)
+			}
+			var ov api.OverviewResponse
+			eventually(t, "class-only overview", func() bool {
+				ov = api.OverviewResponse{}
+				return getJSON(t, srv, "/api/v1/installs/example.com~2Fgateway/overview", &ov) == http.StatusOK && len(ov.Counts) > 0
+			})
+			if slices.ContainsFunc(ov.Counts, func(c overview.Count) bool { return c.Group == kinds.KgatewayGroup }) {
+				t.Errorf("class-only counts %+v carry kgateway kinds", ov.Counts)
+			}
+		})
 	}
 }
