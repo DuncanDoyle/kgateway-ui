@@ -9,6 +9,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 
+	"github.com/DuncanDoyle/snellius/pkg/api"
 	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
@@ -99,7 +100,8 @@ type CollectorEnv struct {
 // registered) and its checks. The first pack added becomes the default pack
 // (kgateway in New): the old hook options, WithDetectors and the Registry hook
 // fields set its hooks, whatever their order. A later pack keeps p.Impl. A pack
-// name that is empty or already registered adds nothing and Registry.Err reports it.
+// name that is empty or already registered adds nothing, and a collector whose
+// name is invalid or another pack's is dropped; Registry.Err reports both.
 func WithPack(p Pack) Option {
 	return func(r *Registry) {
 		if _, dup := r.impls[p.Name]; p.Name == "" || dup || p.Name == r.pack {
@@ -128,15 +130,25 @@ func WithPack(p Pack) Option {
 			r.checkPack[c.Name()] = p.Name
 		}
 		for _, f := range p.Collectors {
-			r.packCollectors = append(r.packCollectors, packCollector{pack: p.Name, build: f})
+			// A zero env only tells the name; the app builds the real collector.
+			name := f(CollectorEnv{}).Name()
+			if err := api.CheckExtName(name); err != nil {
+				r.fail("pack %q collector: %w", p.Name, err)
+				continue
+			}
+			if i := slices.IndexFunc(r.packCollectors, func(c packCollector) bool { return c.name == name }); i >= 0 {
+				r.fail("pack %q collector name %q is already taken by pack %q", p.Name, name, r.packCollectors[i].pack)
+				continue
+			}
+			r.packCollectors = append(r.packCollectors, packCollector{pack: p.Name, name: name, build: f})
 		}
 	}
 }
 
 // packCollector is one pack's collector factory.
 type packCollector struct {
-	pack  string
-	build func(CollectorEnv) Collector
+	pack, name string
+	build      func(CollectorEnv) Collector
 }
 
 // ChecksFor returns the checks that run on installs of pack impl, in

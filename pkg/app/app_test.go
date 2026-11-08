@@ -1859,3 +1859,32 @@ func TestPacksAndInstallKindsReachTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// Build rejects pack collectors it could not start: an invalid name, or a
+// name two packs share (only one of them would run).
+func TestBuildRejectsBadPackCollectors(t *testing.T) {
+	col := func(name string) func(extension.CollectorEnv) extension.Collector {
+		return func(extension.CollectorEnv) extension.Collector { return &fakeCollector{name: name} }
+	}
+	pack := func(name, collector string) extension.Pack {
+		return extension.Pack{Name: name, Collectors: []func(extension.CollectorEnv) extension.Collector{col(collector)}}
+	}
+	for _, tc := range []struct {
+		name string
+		reg  *extension.Registry
+		want string
+	}{
+		{"shared name", extension.NewCore(extension.WithPack(pack("one", "widgets")), extension.WithPack(pack("two", "widgets"))), `"widgets"`},
+		{"invalid name", extension.NewCore(extension.WithPack(pack("one", "Bad Name"))), `"Bad Name"`},
+		{"a kgateway collector's name", extension.New(extension.WithPack(pack("two", "controller-metrics"))), `"controller-metrics"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dyn, kube := testutil.ClientsWith(t, nil)
+			_, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+				Options{PollInterval: time.Second, MetricsInterval: time.Hour, UI: ui}, tc.reg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Build error %v, want one naming %s", err, tc.want)
+			}
+		})
+	}
+}
