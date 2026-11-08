@@ -155,3 +155,33 @@ func TestUpstreamHasListOnlyKinds(t *testing.T) {
 		t.Fatalf("category %q", CategoryReferenceGrant)
 	}
 }
+
+// Upstream keeps the base order, which API v1 kind lists keep: v1 kinds
+// first, then the kinds added after v1.
+func TestUpstreamKeepsTheBaseOrder(t *testing.T) {
+	want := []string{gwGroup + "/GatewayClass", gwGroup + "/Gateway", gwGroup + "/ListenerSet", gwxGroup + "/XListenerSet", gwGroup + "/HTTPRoute",
+		gwGroup + "/GRPCRoute", gwGroup + "/TCPRoute", gwGroup + "/TLSRoute", gwGroup + "/BackendTLSPolicy", kgwGroup + "/TrafficPolicy",
+		kgwGroup + "/ListenerPolicy", kgwGroup + "/HTTPListenerPolicy", kgwGroup + "/BackendConfigPolicy", kgwGroup + "/GatewayParameters",
+		kgwGroup + "/Backend", kgwGroup + "/DirectResponse", kgwGroup + "/GatewayExtension", gwGroup + "/ReferenceGrant"}
+	var got []string
+	for _, d := range Upstream() {
+		got = append(got, d.Group+"/"+d.Kind)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Upstream order\n got %v\nwant %v", got, want)
+	}
+}
+
+// GatewayAPI is Upstream without kgateway's kinds, in the same order.
+func TestGatewayAPIHasNoKgatewayKind(t *testing.T) {
+	var want []Descriptor
+	for _, d := range Upstream() {
+		if d.Group != KgatewayGroup {
+			want = append(want, d)
+		}
+	}
+	got := GatewayAPI()
+	if len(got) != 10 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("GatewayAPI %+v, want the 10 Gateway API kinds of Upstream", got)
+	}
+}

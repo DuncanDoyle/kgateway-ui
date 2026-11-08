@@ -12,7 +12,8 @@ const (
 	kgwGroup = "gateway.kgateway.dev"
 )
 
-// Upstream returns the kinds of Gateway API and kgateway that the UI understands.
+// Upstream returns the kinds of Gateway API and kgateway that the UI understands:
+// GatewayAPI plus kgateway's own kinds, in the API v1 order.
 // Secrets and ConfigMaps are deliberately absent (design §11).
 func Upstream() []Descriptor {
 	return []Descriptor{
@@ -53,6 +54,7 @@ const KgatewayGroup = kgwGroup
 // Gateway API features on (pluginsdk/collections/setup.go), with the versions
 // each supported controller minor watches regardless. Only the controller
 // knows the flag (D-017 §4); the classification depends on its version (D-018 §3).
+// It is kgateway-pack data: the core reads it only through the kgateway pack's hook.
 var experimentalOnly = []struct {
 	group, kind string
 	stable      map[string][]string // controller minor → versions watched regardless
