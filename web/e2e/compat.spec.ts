@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import type { InstallSummary } from "../packages/shell/src/api/types";
-import { delegationCopy } from "../packages/shell/src/copy/explorer";
+import { delegationCopy, diagnosticsCopy, navCopy } from "../packages/shell/src/copy/explorer";
 
 // Smoke test of the core-only build against any Gateway API controller (Phase 5 design §12.1).
 // Runs only with COMPAT_UI_URL set (playwright.config.ts); inputs as for test/compat.
@@ -23,9 +23,14 @@ async function installPath(page: Page): Promise<string> {
   return `/i/${(inst as InstallSummary).id}`;
 }
 
-test("install page lists the Gateway with no error panel", async ({ page }) => {
+test("install page lists the Gateway, with no process surfaces and no error panel", async ({ page }) => {
   await page.goto(await installPath(page));
   await expect(page.getByRole("table", { name: "Gateways" })).toContainText(gateway.split("/")[1] ?? gateway);
+  // No processes feature: neither the Processes block nor its nav entry.
+  await expect(page.getByRole("heading", { name: diagnosticsCopy.processesTitle })).toHaveCount(0);
+  await expect(
+    page.getByRole("navigation", { name: navCopy.label }).getByRole("link", { name: navCopy.processes }),
+  ).toHaveCount(0);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 

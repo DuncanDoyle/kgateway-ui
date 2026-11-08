@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -106,6 +107,10 @@ func TestCheckCatchesEachBreak(t *testing.T) {
 			return v
 		}, "verdict"},
 		{"a pack feature", "/api/v1/installs", func(v any) any { first(v)["features"] = []any{"delegation"}; return v }, "delegation"},
+		{"the processes feature", "/api/v1/installs", func(v any) any { first(v)["features"] = []any{"processes"}; return v }, "processes"},
+		{"no features list", "/api/v1/installs", func(v any) any { delete(first(v), "features"); return v }, "features"},
+		{"a pack listed", "/api/v1/meta", func(v any) any { v.(map[string]any)["packs"] = []any{"kgateway"}; return v }, "packs"},
+		{"no packs list", "/api/v1/meta", func(v any) any { delete(v.(map[string]any), "packs"); return v }, "packs"},
 		{"a kgateway kind", "/api/v1/meta", func(v any) any {
 			m := v.(map[string]any)
 			m["kinds"] = append(m["kinds"].([]any), map[string]any{"group": "gateway.kgateway.dev", "kind": "Backend"})
@@ -142,6 +147,35 @@ func TestCheckCatchesEachBreak(t *testing.T) {
 			t.Fatalf("errors %v, want one naming the default build", errs)
 		}
 	})
+}
+
+// The default build must be synced before its empty install list counts: one
+// that answers empty during startup and claims the controller later fails (review #4).
+func TestCheckWaitsForASyncedDefaultBuild(t *testing.T) {
+	core, def := serve(t, extension.NewCore(), true), serve(t, extension.New(), true)
+	var calls atomic.Int32
+	// The default build's first answers: not synced, no installs; then the real, claiming ones.
+	starting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= 4 {
+			switch r.URL.Path {
+			case "/api/v1/meta":
+				_, _ = w.Write([]byte(`{"synced":false,"kinds":[],"packs":["kgateway"]}`))
+				return
+			case "/api/v1/installs":
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+		}
+		http.Redirect(w, r, def+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(starting.Close)
+	errs := Settle(context.Background(), http.DefaultClient, env(core, starting.URL), 3*time.Second, 50*time.Millisecond)
+	if !mentions(errs, "default build claims") {
+		t.Fatalf("errors %v, want the default build's later claim", errs)
+	}
+	if calls.Load() <= 4 {
+		t.Fatal("Settle stopped while the default build was still starting")
+	}
 }
 
 // Env reads every input from the environment and rejects a missing one.

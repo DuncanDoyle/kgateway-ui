@@ -119,17 +119,20 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 	}) {
 		fail("route %s is not accepted by Gateway %s: %+v", e.Route, e.Gateway, routes.Items[j].Parents)
 	}
-	// 3. No kgateway kind, and no pack feature.
+	// 3. No kgateway kind, no pack, and no feature. Both lists are sent empty: an absent one means an older server.
 	var meta api.MetaResponse
 	if err := get(ctx, c, e.UIURL+"/api/v1/meta", &meta); err != nil {
 		fail("%v", err)
-	} else if k := slices.IndexFunc(meta.Kinds, func(k kinds.Served) bool { return k.Group == kinds.KgatewayGroup }); k >= 0 {
-		fail("/meta lists %s/%s", meta.Kinds[k].Group, meta.Kinds[k].Kind)
-	}
-	for _, f := range []string{api.FeatureDelegation, api.FeatureComputed, api.FeatureDataPlane} {
-		if slices.Contains(inst.Features, f) {
-			fail("install has feature %s", f)
+	} else {
+		if k := slices.IndexFunc(meta.Kinds, func(k kinds.Served) bool { return k.Group == kinds.KgatewayGroup }); k >= 0 {
+			fail("/meta lists %s/%s", meta.Kinds[k].Group, meta.Kinds[k].Kind)
 		}
+		if meta.Packs == nil || len(meta.Packs) > 0 {
+			fail("/meta packs %v, want present and empty", meta.Packs)
+		}
+	}
+	if inst.Features == nil || len(inst.Features) > 0 {
+		fail("install features %v, want present and empty (no delegation, computed, dataplane or processes)", inst.Features)
 	}
 	// 4. No finding with a kgateway pack code.
 	var h api.HealthResponse
@@ -141,9 +144,14 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 			fail("pack finding %s on %v: %s", f.Code, ref(f.Resource), f.Message)
 		}
 	}
-	// 5. The default build, class-only installs off, does not claim the controller.
+	// 5. The default build, class-only installs off, does not claim the controller once it has synced.
+	var defMeta api.MetaResponse
 	var def []api.InstallSummary
-	if err := get(ctx, c, e.DefaultUIURL+"/api/v1/installs", &def); err != nil {
+	if err := get(ctx, c, e.DefaultUIURL+"/api/v1/meta", &defMeta); err != nil {
+		fail("default build: %v", err)
+	} else if !defMeta.Synced {
+		fail("default build has not synced yet")
+	} else if err := get(ctx, c, e.DefaultUIURL+"/api/v1/installs", &def); err != nil {
 		fail("default build: %v", err)
 	}
 	for _, s := range def {
