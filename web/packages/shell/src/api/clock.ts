@@ -64,7 +64,8 @@ function onVisibility() {
   if (document.visibilityState === "hidden") {
     clearTimeout(cap);
     waiting = false;
-    heldAt ??= wallClock();
+    // Held on the server's clock, so a skew learnt during the hold does not move it.
+    heldAt ??= wallClock() + offset;
   } else if (heldAt !== undefined) {
     waiting = true;
     cap = setTimeout(resume, HOLD_MAX_MS);
@@ -93,7 +94,7 @@ export function resetClockForTests(): void {
 }
 
 function snapshot(): number {
-  return (heldAt ?? wallClock()) + offset;
+  return heldAt ?? wallClock() + offset;
 }
 
 // region Component
