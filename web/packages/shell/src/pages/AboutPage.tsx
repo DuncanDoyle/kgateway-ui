@@ -133,9 +133,9 @@ const nameStyle = (size: string) => css`
 `;
 
 // region Helpers
-/** "kgateway 2.5.0": the edition and its version as the install reports them. */
+/** The edition and its version as the install reports them; a class-only install has neither. */
 function productText(i: InstallSummary): string {
-  return [i.edition, i.version].filter(Boolean).join(" ");
+  return [i.edition, i.version].filter(Boolean).join(" ") || aboutCopy.genericController;
 }
 
 // region Component

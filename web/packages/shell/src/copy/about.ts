@@ -7,6 +7,8 @@ export const aboutCopy = {
   noInstalls: "No installs found.",
   installsError: "Cannot load installs.",
   controller: "Controller",
+  /** An install without an edition or version: a class-only install. */
+  genericController: "Gateway API controller",
   project: "Project",
   source: "Source code",
   docs: "Documentation",

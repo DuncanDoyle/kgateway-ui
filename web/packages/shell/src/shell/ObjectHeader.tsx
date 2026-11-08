@@ -2,7 +2,8 @@ import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { Box, Layers, Network, Route, Server } from "lucide-react";
 import type { ReactNode } from "react";
-import type { LinkedRef } from "../api/types";
+import { useKindCategory } from "../api/hooks";
+import type { Category, LinkedRef } from "../api/types";
 import { objectHeaderCopy } from "../copy/navigation";
 import { HealthBadge } from "../health/HealthBadge";
 import { DataAge } from "../pages/DataAge";
@@ -82,11 +83,10 @@ const Header = styled.header<{ stylesOverride?: SerializedStyles }>`
 `;
 
 // region Helpers
-const KGW = "gateway.kgateway.dev";
 const GW = "gateway.networking.k8s.io";
 
-/** The default icon for a kind; a downstream kind passes its own. */
-function defaultIcon({ group, kind }: { group: string; kind: string }): ReactNode {
+/** The default icon for a kind, a backend by its /meta category; a downstream kind passes its own. */
+function defaultIcon({ group, kind }: { group: string; kind: string }, category?: Category): ReactNode {
   const Icon =
     group === GW && kind === "Gateway"
       ? Network
@@ -94,7 +94,7 @@ function defaultIcon({ group, kind }: { group: string; kind: string }): ReactNod
         ? Route
         : kind.endsWith("ListenerSet")
           ? Layers
-          : group === KGW && kind === "Backend"
+          : category === "backend"
             ? Server
             : Box;
   return <Icon size={14} aria-hidden="true" />;
@@ -136,13 +136,14 @@ export function ObjectHeader({
   current,
   stylesOverride,
 }: ObjectHeaderProps) {
+  const category = useKindCategory(kind);
   return (
     <>
       <Breadcrumbs refs={trailRefs} current={current} />
       <Header data-testid="detail-header" data-object-header="" stylesOverride={stylesOverride}>
         {/* The heading reads "Kind namespace/name"; the visible kind and namespace repeat it, so they are hidden from readers. */}
         <span className="kind" aria-hidden="true">
-          {kind.icon ?? defaultIcon(kind)}
+          {kind.icon ?? defaultIcon(kind, category)}
           {kind.label}
         </span>
         <span className="state">{state ? <HealthBadge state={state} /> : null}</span>

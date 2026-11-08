@@ -3,6 +3,7 @@ import useSWR, { type SWRConfiguration } from "swr";
 import { ApiError, apiFetch, apiFetchWithHeaders } from "./client";
 import type {
   Capability,
+  Category,
   HealthReport,
   InstallSummary,
   MetaResponse,
@@ -97,6 +98,12 @@ export function useCapabilities(): ReadonlySet<string> | undefined {
 export function useCapabilityState(name: string): Capability | undefined {
   const { data } = useMeta();
   return data?.capabilityStates?.find((c) => c.name === name);
+}
+
+/** The /meta category of r's kind, e.g. "backend"; undefined until meta loads or when the kind is not served. */
+export function useKindCategory(r: { group: string; kind: string }): Category | undefined {
+  const { data } = useMeta();
+  return data?.kinds.find((k) => k.group === r.group && k.kind === r.kind)?.category;
 }
 
 /** True when /meta advertises the post-v1 filter on list (2.3: routes has listener); false for an older server. */

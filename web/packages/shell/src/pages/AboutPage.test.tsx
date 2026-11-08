@@ -116,3 +116,23 @@ it("says so when no install is watched", async () => {
   mount("/about");
   expect(await screen.findByText("No installs found.")).toBeInTheDocument();
 });
+
+it("a class-only install, with no edition or version, reads Gateway API controller", async () => {
+  const classOnly = {
+    ...install,
+    id: "example.com~2Fgateway",
+    displayName: "Gateway API controller example.com/gateway",
+    namespace: undefined,
+    name: undefined,
+    version: "",
+    edition: "",
+    controllerNames: ["example.com/gateway"],
+    readiness: { state: "not-observed" },
+    features: [],
+  };
+  stubApi({ "/api/v1/installs": [install, classOnly], "/api/v1/meta": meta });
+  mount("/about");
+  const row = (await screen.findByText("Gateway API controller")).closest("li") as HTMLElement;
+  expect(within(row).getByText("example.com/gateway")).toBeInTheDocument();
+  expect(await screen.findByText("kgateway 2.5.0")).toBeInTheDocument();
+});

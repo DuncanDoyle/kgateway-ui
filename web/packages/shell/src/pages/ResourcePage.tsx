@@ -1,7 +1,7 @@
 import type { SerializedStyles } from "@emotion/react";
 import styled from "@emotion/styled";
 import { useParams } from "react-router-dom";
-import { useResource } from "../api/hooks";
+import { useKindCategory, useResource } from "../api/hooks";
 import { detailCopy, listCopy } from "../copy/explorer";
 import { CopyNameButton } from "../resource/CopyNameButton";
 import { ResourceName } from "../resource/ResourceName";
@@ -30,7 +30,6 @@ const Page = styled.div<{ stylesOverride?: SerializedStyles }>`
 `;
 
 // region Helpers
-const isBackend = (r: { group: string; kind: string }) => r.group === "gateway.kgateway.dev" && r.kind === "Backend";
 
 // region Component
 interface ResourcePageProps {
@@ -44,6 +43,8 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
   const { group = "-", kind = "", rns = "-", rname = "" } = useParams();
   const ref = { group: group === "-" ? "" : group, kind, namespace: rns === "-" ? undefined : rns, name: rname };
   const { data, error, collectedAt } = useResource(id, ref);
+  // Backend kinds come from /meta's descriptors, whichever pack serves them.
+  const backend = useKindCategory(ref) === "backend";
   const y = useYaml(data);
   // The backend answers 404 alike for objects outside the install and objects the caller may not view (D-013).
   if (error?.status === 404)
@@ -90,7 +91,7 @@ export function ResourcePage({ stylesOverride }: ResourcePageProps = {}) {
           <>
             <CopyNameButton resource={ref} />
             {/* The resource endpoint serves only admitted Backends (design §7.1); Services have no YAML view. */}
-            {isBackend(ref) ? (
+            {backend ? (
               <InlineLink to={`${installPath(id, "routes")}?${new URLSearchParams({ backend: backendParam(ref) })}`}>
                 {detailCopy.backendLookup}
               </InlineLink>

@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
 import type { Readiness } from "../api/types";
+import { kgatewayWebPack } from "../kgateway/webPack";
 import { stubApi, testSWR } from "../test/render";
 import { useThemeSwitch } from "../theme/ThemeProvider";
 import { THEME_PAINT_KEY } from "../theme/themeStorage";
@@ -101,13 +102,14 @@ it("closes a menu on a click outside it", async () => {
 it("shows a designed empty state when no install is found", async () => {
   stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
   mount("/");
-  await waitFor(() => expect(screen.getByText("No kgateway install found")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("No Gateway API controller found")).toBeInTheDocument());
   expect(screen.getByText(/To always open one install, start the UI with/)).toBeInTheDocument();
 });
 
 it("says when the pinned install was not found", async () => {
   stubApi({ "/api/v1/installs": [], "/api/v1/meta": { ...meta, pinned: "kgw/gone" } });
-  mount("/");
+  // The default app's copy: the kgateway web pack adds its label hint.
+  mount("/", kgatewayWebPack);
   const state = await screen.findByRole("status");
   await waitFor(() => expect(state).toHaveTextContent("--install kgw/gone was set, but that install was not found."));
   expect(state).toHaveTextContent(

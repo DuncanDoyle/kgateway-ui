@@ -27,13 +27,8 @@ export interface Vocabulary {
 export const kubernetesVocabulary: Vocabulary = {
   connecting: "Waiting for the cluster",
   landingTitle: "Installs in this cluster",
-  noInstallsTitle: "No kgateway install found",
-  noInstallsHelp: (
-    <>
-      An install is a controller Deployment with the labels <code>kgateway=kgateway</code> and{" "}
-      <code>app.kubernetes.io/component=controller</code>.
-    </>
-  ),
+  noInstallsTitle: "No Gateway API controller found",
+  noInstallsHelp: "An install is a Gateway API controller found in the cluster.",
   pinHint: (pinned) =>
     pinned ? (
       <>

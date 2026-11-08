@@ -79,17 +79,11 @@ const Note = styled.span`
 // View A's rules (rules §4); other views name their own family when they arrive.
 const attachmentRules = new Set(["allowed-routes", "section-and-port", "hostname-intersection", "listener-count"]);
 
-/** "kgateway-2.4" reads "kgateway 2.4"; any other id is shown as sent. */
-function ruleSetLabel(rules: string): string {
-  const m = /^kgateway-(\d+\.\d+)$/.exec(rules);
-  return m ? `kgateway ${m[1]}` : rules;
-}
-
 /** The chip's tooltip: which rule of which rule set computed the fact (design §8.4); a restricted fact names none. */
 export function computedTooltip(c: Computed): string {
   if (c.state === "restricted" || c.rule === undefined) return computedCopy.restricted;
   const family = attachmentRules.has(c.rule) ? computedCopy.attachmentRules : computedCopy.otherRules;
-  return computedCopy.tooltip(ruleSetLabel(c.rules), family, computedCopy.ruleNames[c.rule] ?? c.rule);
+  return computedCopy.tooltip(c.label ?? c.rules, family, computedCopy.ruleNames[c.rule] ?? c.rule);
 }
 
 /** Parts as sentences ending in one period: a part's own trailing period is dropped, so the join never shows "..". */
