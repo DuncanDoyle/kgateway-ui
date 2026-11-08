@@ -46,6 +46,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/platform"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
@@ -179,9 +180,9 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 		// A mismatch must outlast two collections before it is reported (design §4.4).
 		verifier = scopeverify.NewManagedCountVerifier(2 * o.MetricsInterval)
 	}
-	// The default verifier is the default pack's; the core and other packs keep their own.
+	// The interval-sized default is the kgateway pack's; any other pack without a verifier gets none.
 	verifierFor := func(i install.Install, im extension.Impl) scopeverify.Verifier {
-		if im.Verifier == nil && i.Impl != "" && i.Impl == reg.DefaultPack() {
+		if im.Verifier == nil && i.Impl == kgateway.Name {
 			return verifier
 		}
 		return im.Verifier

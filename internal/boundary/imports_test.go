@@ -211,7 +211,7 @@ var packAllowed = map[string]string{
 	"pkg/health/proxystats.go":   "pack checks housed in pkg/health: KGWUI-025 and 026",
 	"pkg/health/withheld.go":     "pack checks housed in pkg/health: KGWUI-024",
 	"pkg/health/xds.go":          "pack checks housed in pkg/health: KGWUI-001",
-	"pkg/setup/setup.go":         "wiring: the default pack's scope verifier",
+	"pkg/setup/setup.go":         "wiring: the kgateway pack's interval-sized scope verifier",
 }
 
 // packImports lists the pack packages a core file under pkg/ imports.

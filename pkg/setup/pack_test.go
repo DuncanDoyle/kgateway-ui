@@ -215,3 +215,44 @@ func TestPackRuntimeHooksArePerInstall(t *testing.T) {
 		}
 	}
 }
+
+// A second pack without a verifier or process source gets neither, though
+// the default pack's are set: no calls for its install, empty process sets.
+func TestSecondPackWithoutRuntimeHooks(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &hookCalls{got: map[string]bool{}}
+	acme := extension.Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}}}
+	reg := extension.New(extension.WithPack(acme), extension.WithScopeVerifier(recVerifier{"kgateway", c}),
+		extension.WithProcessSource(recProcess{"kgateway", 3, c}))
+	m := oneShotSequence(t, ctx, append(world(), acmeDeployment()), reg, emptyScraper{}, true, false).at(t0)
+	if got, want := slices.Sorted(maps.Keys(c.got)), []string{"kgateway process kgw.kgateway", "kgateway verifier kgw.kgateway"}; !slices.Equal(got, want) {
+		t.Errorf("hook calls:\n%q\nwant:\n%q", got, want)
+	}
+	p := installOf(t, m, "acme-system.acme").Process
+	if p == nil || p.Controller.Observed || p.Controller.Desired != nil || len(p.Controller.Processes) != 0 {
+		t.Errorf("acme controller processes %+v, want none", p)
+	}
+}
+
+// Only the kgateway pack gets the interval-sized default verifier; a pack
+// without a verifier gets none, also as NewCore's first and default pack.
+func TestDefaultVerifierIsKgatewaysOnly(t *testing.T) {
+	acme := extension.Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}}}
+	for _, tc := range []struct {
+		name     string
+		reg      *extension.Registry
+		impl     string
+		verifier bool
+	}{{"New, kgateway", extension.New(extension.WithPack(acme)), "kgateway", true}, {"New, second pack", extension.New(extension.WithPack(acme)), "acme", false},
+		{"NewCore, default pack", extension.NewCore(extension.WithPack(acme)), "acme", false}, {"NewCore, class-only", extension.NewCore(), "", false}} {
+		dyn, kube := fakeClients(t, nil)
+		cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()}, setup.Options{MetricsInterval: 10 * time.Second}, tc.reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Engine.HooksFor(install.Install{Impl: tc.impl}).Verifier != nil; got != tc.verifier {
+			t.Errorf("%s: verifier set %v, want %v", tc.name, got, tc.verifier)
+		}
+	}
+}
