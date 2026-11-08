@@ -1,6 +1,4 @@
-// Port of kgw24 for v2.5.0; keep in sync.
-
-package kgw25
+package viewa
 
 import (
 	"reflect"

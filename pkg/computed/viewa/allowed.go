@@ -1,6 +1,4 @@
-// Port of kgw23 for v2.4.7; keep in sync.
-
-package kgw24
+package viewa
 
 import (
 	"errors"
@@ -14,32 +12,8 @@ import (
 
 // allowedKinds returns the route kinds a listener accepts: the protocol
 // defaults, narrowed by allowedRoutes.kinds (rules §4.2).
-func allowedKinds(l objects.Listener) []objects.GroupKind {
-	gwKinds := func(kinds ...string) []objects.GroupKind {
-		out := make([]objects.GroupKind, 0, len(kinds))
-		for _, k := range kinds {
-			out = append(out, objects.GroupKind{Group: objects.GatewayAPIGroup, Kind: k})
-		}
-		return out
-	}
-	var defaults []objects.GroupKind
-	switch l.Protocol {
-	case "HTTP", "HTTPS":
-		defaults = gwKinds("HTTPRoute", "GRPCRoute")
-	case "TLS":
-		// A TLS listener without a tls block is not Terminate.
-		if l.TLS != nil && l.TLS.Mode == "Terminate" {
-			defaults = gwKinds("TLSRoute", "TCPRoute")
-		} else {
-			defaults = gwKinds("TLSRoute")
-		}
-	case "TCP":
-		defaults = gwKinds("TCPRoute")
-	case "UDP":
-		return nil
-	default:
-		defaults = gwKinds("HTTPRoute")
-	}
+func allowedKinds(l objects.Listener, protocolKinds func(objects.Listener) []objects.GroupKind) []objects.GroupKind {
+	defaults := protocolKinds(l)
 	// An explicit empty list allows no kinds; only nil keeps the defaults.
 	if l.AllowedRoutes.Kinds == nil {
 		return defaults

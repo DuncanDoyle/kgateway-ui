@@ -1,4 +1,4 @@
-package kgw23
+package viewa
 
 import (
 	"reflect"
@@ -12,27 +12,6 @@ import (
 
 func gk(kind string) objects.GroupKind {
 	return objects.GroupKind{Group: objects.GatewayAPIGroup, Kind: kind}
-}
-
-func TestAllowedKindsDefaults(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		l    objects.Listener
-		want []objects.GroupKind
-	}{
-		{"http", objects.Listener{Protocol: "HTTP"}, []objects.GroupKind{gk("HTTPRoute"), gk("GRPCRoute")}},
-		{"https", objects.Listener{Protocol: "HTTPS"}, []objects.GroupKind{gk("HTTPRoute"), gk("GRPCRoute")}},
-		{"tls terminate", objects.Listener{Protocol: "TLS", TLS: &objects.ListenerTLS{Mode: "Terminate"}}, []objects.GroupKind{gk("TLSRoute"), gk("TCPRoute")}},
-		{"tls passthrough", objects.Listener{Protocol: "TLS", TLS: &objects.ListenerTLS{Mode: "Passthrough"}}, []objects.GroupKind{gk("TLSRoute")}},
-		{"tls without block", objects.Listener{Protocol: "TLS"}, []objects.GroupKind{gk("TLSRoute")}},
-		{"tcp", objects.Listener{Protocol: "TCP"}, []objects.GroupKind{gk("TCPRoute")}},
-		{"udp", objects.Listener{Protocol: "UDP"}, nil},
-		{"other", objects.Listener{Protocol: "FOO"}, []objects.GroupKind{gk("HTTPRoute")}},
-	} {
-		if got := allowedKinds(c.l); !reflect.DeepEqual(got, c.want) && (len(got) != 0 || len(c.want) != 0) {
-			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
-		}
-	}
 }
 
 func TestAllowedKindsIntersection(t *testing.T) {
@@ -55,7 +34,7 @@ func TestAllowedKindsIntersection(t *testing.T) {
 		l := https
 		l.Protocol = c.proto
 		l.AllowedRoutes.Kinds = c.kinds
-		if got := allowedKinds(l); !reflect.DeepEqual(got, c.want) && (len(got) != 0 || len(c.want) != 0) {
+		if got := allowedKinds(l, testKinds); !reflect.DeepEqual(got, c.want) && (len(got) != 0 || len(c.want) != 0) {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}

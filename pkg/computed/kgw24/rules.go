@@ -1,7 +1,10 @@
 // Package kgw24 is the rule set for kgateway 2.4 controllers (rules §2).
 package kgw24
 
-import "github.com/DuncanDoyle/snellius/pkg/computed"
+import (
+	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/computed/viewa"
+)
 
 type rules struct{}
 
@@ -11,9 +14,9 @@ func New() computed.Rules { return rules{} }
 // Version implements computed.Rules.
 func (rules) Version() string { return "kgateway-2.4" }
 
-// Attachment implements computed.Rules: 2.3's view A plus the isolation note.
+// Attachment implements computed.Rules: the shared view A plus the isolation note.
 func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
-	res := attach(in)
+	res := viewa.Attach(in, viewA)
 	isolationNotes(in, &res)
 	return res
 }

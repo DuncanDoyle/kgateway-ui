@@ -1,4 +1,4 @@
-package kgw23
+package viewa
 
 import (
 	"math/rand/v2"
@@ -66,7 +66,7 @@ func expSetting(v string, known bool) install.Setting {
 
 func run(in computed.AttachmentInput) computed.AttachmentResult {
 	in.NamespacesOK = in.NamespacesOK || in.NamespaceLabels != nil
-	return New().Attachment(in)
+	return testSet().Attachment(in)
 }
 
 // members returns "resource-name/listener" of route's members, in order.
@@ -188,7 +188,7 @@ func TestAttachNamespaceLabelsUnavailable(t *testing.T) {
 		lis("same", "HTTP", 81),
 	)
 	rt := route("HTTPRoute", "shop", "a", pref(g, ""))
-	res := New().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}, NamespacesOK: false})
+	res := testSet().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}, NamespacesOK: false})
 	if c := count(t, res, g, "sel"); c.Unknown != computed.UnknownNamespaceLabels {
 		t.Errorf("sel count: %+v", c)
 	}
@@ -485,7 +485,7 @@ func BenchmarkAttachLarge(b *testing.B) {
 	in := largeInput(b)
 	b.ReportAllocs()
 	for b.Loop() {
-		New().Attachment(in)
+		testSet().Attachment(in)
 	}
 }
 
@@ -496,7 +496,7 @@ func TestAttachUnknownCountsNarrowed(t *testing.T) {
 		lis("same", "HTTP", 81),
 	)
 	rt := route("HTTPRoute", "shop", "a", pref(g, "same"))
-	res := New().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}})
+	res := testSet().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}})
 	if c := count(t, res, g, "sel"); c.Unknown != "" || c.Count != 0 {
 		t.Errorf("sel count: %+v", c)
 	}
@@ -540,7 +540,7 @@ func TestAttachSettingUnknownBeforeLabels(t *testing.T) {
 	g := gw("infra", "edge", withFrom(lis("tcp", "TCP", 9000), "Selector", map[string]string{"team": "web"}))
 	tcp := route("TCPRoute", "infra", "t", pref(g, ""))
 	tcp.ExperimentalOnly = true
-	res := New().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{tcp}, Experimental: expSetting("", false)})
+	res := testSet().Attachment(computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{tcp}, Experimental: expSetting("", false)})
 	if o := outcome(t, res, tcp, 0); o.Unknown != computed.UnknownSetting {
 		t.Errorf("outcome %+v", o)
 	}
@@ -598,7 +598,7 @@ func TestAttachScopeUnknown(t *testing.T) {
 	tcp := route("TCPRoute", "infra", "t", pref(g, "tcp"))
 	tcp.ExperimentalOnly = true
 	in := computed.AttachmentInput{Resources: []computed.Resource{g, ls}, Routes: []computed.Route{web, tcp}, Experimental: expSetting("", false), ScopeUnknown: true}
-	res := New().Attachment(in)
+	res := testSet().Attachment(in)
 	if len(res.Members) != 0 || len(res.Outcomes) != 3 || len(res.Counts) != 4 {
 		t.Fatalf("members %d outcomes %d counts %d", len(res.Members), len(res.Outcomes), len(res.Counts))
 	}
@@ -612,7 +612,7 @@ func TestAttachScopeUnknown(t *testing.T) {
 			t.Errorf("count %+v", c)
 		}
 	}
-	for _, c := range computed.CheckAttachment("i", computed.Selection{Rules: New()}, in, res) {
+	for _, c := range computed.CheckAttachment("i", computed.Selection{Rules: testSet()}, in, res) {
 		if c.Class != computed.ClassUnknown || c.Candidate() {
 			t.Errorf("check %+v", c)
 		}

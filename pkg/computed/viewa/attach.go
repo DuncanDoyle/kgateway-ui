@@ -1,6 +1,4 @@
-// Port of kgw24 for v2.5.0; keep in sync.
-
-package kgw25
+package viewa
 
 import (
 	"cmp"
@@ -39,11 +37,11 @@ type listenerState struct {
 }
 
 // newListenerStates parses each listener's allowed kinds and selector once.
-func newListenerStates(r *computed.Resource) []listenerState {
+func newListenerStates(r *computed.Resource, o Options) []listenerState {
 	ls := make([]listenerState, len(r.Listeners))
 	for j, l := range r.Listeners {
 		st := &ls[j]
-		st.kinds = allowedKinds(l)
+		st.kinds = allowedKinds(l, o.AllowedKinds)
 		names := make([]string, len(st.kinds))
 		for i, k := range st.kinds {
 			names[i] = k.Kind
@@ -73,11 +71,12 @@ func (s *memberBuf) Swap(i, j int) {
 	s.idx[i], s.idx[j] = s.idx[j], s.idx[i]
 }
 
-// attach computes view A (rules §4). Routes are indexed by the resource their
-// parentRefs name, so each resource sees only its candidates.
+// Attach computes view A (rules §4) with the rule set's options o. Routes are
+// indexed by the resource their parentRefs name, so each resource sees only
+// its candidates.
 //
 // Deps slices are shared between results and are never mutated after sharing.
-func attach(in computed.AttachmentInput) computed.AttachmentResult {
+func Attach(in computed.AttachmentInput, o Options) computed.AttachmentResult {
 	expOn, expKnown := in.Experimental.Bool()
 
 	// A denied ListenerSet is never evaluated (rules §3.1). On a duplicate
@@ -124,7 +123,7 @@ func attach(in computed.AttachmentInput) computed.AttachmentResult {
 		if byRef[r.Ref] != k {
 			continue
 		}
-		states[k] = newListenerStates(r)
+		states[k] = newListenerStates(r, o)
 		nCands += len(cands[k])
 		nListeners += len(r.Listeners)
 		if blanketUnknown(in, r) == "" {
