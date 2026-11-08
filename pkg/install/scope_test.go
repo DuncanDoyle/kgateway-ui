@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 func ns(name string, l map[string]string) *corev1.Namespace { return testutil.Namespace(name, l) }
@@ -194,5 +195,21 @@ func TestResolveWithPerInstall(t *testing.T) {
 		if s.Known || s.Reason != "not read for this controller" || s.Value != "" {
 			t.Fatalf("class-only setting %+v, want unknown, not read", s)
 		}
+	}
+}
+
+// Generic resolution gives no experimental advice without a hook; Resolve,
+// the kgateway path, classifies with kgateway's table explicitly.
+func TestExperimentalOnlyNilIsNone(t *testing.T) {
+	tcp := kinds.Served{Descriptor: kinds.Descriptor{Group: "gateway.networking.k8s.io", Kind: "TCPRoute"}, Version: "v1"}
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.3.11", 1, 1)
+	d.Labels["app.kubernetes.io/version"] = "2.3.11"
+	kgw, _ := UpstreamDetector{}.Detect(d)
+	if !Resolve([]Install{kgw}, NamespaceSelectorScope{})[0].Experimental(tcp) {
+		t.Fatal("Resolve must classify TCPRoute v1 on kgateway 2.3 as experimental-only")
+	}
+	co := ResolveWith([]Install{kgw}, func(Install) (ScopeProvider, func(Install) Settings) { return nil, nil })[0]
+	if co.Experimental(tcp) || (Resolved{Install: kgw}).Experimental(tcp) {
+		t.Fatal("without a hook no kind is experimental-only")
 	}
 }

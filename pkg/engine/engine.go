@@ -212,7 +212,7 @@ func New(cfg Config) *Engine {
 	}
 	if cfg.HooksFor == nil {
 		legacy := Hooks{Scope: cfg.Scope, Settings: install.ReadSettings, RulesFor: cfg.RulesFor, Version: install.Install.KgatewayVersion,
-			ExperimentalOnly: func(k kinds.Served, i install.Install) bool { return k.ExperimentalOnly(i.KgatewayVersion()) }}
+			ExperimentalOnly: install.UpstreamExperimentalOnly}
 		cfg.HooksFor = func(install.Install) Hooks { return legacy }
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
@@ -341,9 +341,7 @@ func (e *Engine) compute() *Published {
 		return h.Scope, h.Settings
 	})
 	for i := range all {
-		if all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly; all[i].ExperimentalOnly == nil {
-			all[i].ExperimentalOnly = noExperimental
-		}
+		all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly
 	}
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all, e.decode)
@@ -462,9 +460,6 @@ func (e *Engine) reportedVersion(id string, met ctrlmetrics.Result, has bool) st
 	}
 	return e.reported[id]
 }
-
-// noExperimental marks no kind experimental-only: an install whose pack has no table.
-func noExperimental(kinds.Served, install.Install) bool { return false }
 
 // rulesFor selects i's rule set with its pack's hooks.
 func (e *Engine) rulesFor(i install.Install) computed.Selection {

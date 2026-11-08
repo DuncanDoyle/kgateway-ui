@@ -78,7 +78,7 @@ func (w *world) input(t *testing.T) Input {
 	}
 	in, _ := install.UpstreamDetector{}.Detect(w.ctrl)
 	in.Pods = w.pods
-	res := install.Resolved{Install: in, Scope: install.ParseSelectors(w.scope)}
+	res := install.Resolved{Install: in, Scope: install.ParseSelectors(w.scope), ExperimentalOnly: install.UpstreamExperimentalOnly}
 	if w.fromPod {
 		res.Scope = install.NamespaceSelectorScope{}.Scope(in)
 	}

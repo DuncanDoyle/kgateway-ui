@@ -36,7 +36,7 @@ func Version(i install.Install) string { return i.KgatewayVersion() }
 // ExperimentalOnly reports whether the install's controller watches k only
 // with experimental Gateway API features on, from the table in pkg/kinds.
 func ExperimentalOnly(k kinds.Served, i install.Install) bool {
-	return k.ExperimentalOnly(i.KgatewayVersion())
+	return install.UpstreamExperimentalOnly(k, i)
 }
 
 // ProxyMode returns the GatewayParameters resolution of self-managed proxies.

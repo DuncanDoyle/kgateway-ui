@@ -17,7 +17,6 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/snellius/pkg/install"
-	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
 
@@ -28,7 +27,7 @@ func resolved(id, version string, scope install.Scope, pod *corev1.Pod, controll
 	if pod != nil {
 		in.Pods = []*corev1.Pod{pod}
 	}
-	return install.Resolved{Install: in, Scope: scope, Settings: install.ReadSettings(in)}
+	return install.Resolved{Install: in, Scope: scope, Settings: install.ReadSettings(in), ExperimentalOnly: install.UpstreamExperimentalOnly}
 }
 
 // viewSnapshot is a synced snapshot of objs with readable Namespaces nss.
@@ -218,7 +217,7 @@ func TestRuleSetFromBaseVersion(t *testing.T) {
 }
 
 // The experimental classification is the install's pack hook: an install
-// whose hook marks no kind gets none, at any controller version.
+// without one gets no experimental-only kind, at any controller version.
 func TestAttachmentInputExperimentalPerInstall(t *testing.T) {
 	ref := testutil.GwRef("infra", "a")
 	listener := []objects.Listener{{Name: "tcp", Port: 9000, Protocol: "TCP", AllowedRoutes: objects.AllowedRoutes{Namespaces: objects.RouteNamespaces{From: "All"}}}}
@@ -228,7 +227,7 @@ func TestAttachmentInputExperimentalPerInstall(t *testing.T) {
 	for _, never := range []bool{false, true} {
 		a := resolved("a", "v2.3.11", install.Scope{Mode: install.ScopeAll}, nil, testutil.Controller)
 		if never {
-			a.ExperimentalOnly = func(kinds.Served, install.Install) bool { return false }
+			a.ExperimentalOnly = nil
 		}
 		asg := install.Assign(snap, served, []install.Resolved{a}, objects.Direct{})
 		in := attachmentInput(a, asg.PerInstall["a"], snap, served, newDecodeCache())
