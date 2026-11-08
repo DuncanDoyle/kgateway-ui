@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
 	clienttesting "k8s.io/client-go/testing"
@@ -78,6 +79,8 @@ type setup struct {
 	prepare func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset)
 	// wrapDynamic, when set, wraps the dynamic client the cache reads.
 	wrapDynamic func(dynamic.Interface) dynamic.Interface
+	// wrapKube, when set, wraps the typed client the cache reads.
+	wrapKube func(kubernetes.Interface) kubernetes.Interface
 	// late objects are created after the engine has first seen the rest, so their
 	// generation is first seen at testutil.Now: inside the grace period.
 	late []*unstructured.Unstructured
@@ -243,7 +246,11 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if s.wrapDynamic != nil {
 		dyn = s.wrapDynamic(dyn)
 	}
-	c := cache.New(cache.Config{Dynamic: dyn, Kube: kube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
+	var cacheKube kubernetes.Interface = kube
+	if s.wrapKube != nil {
+		cacheKube = s.wrapKube(kube)
+	}
+	c := cache.New(cache.Config{Dynamic: dyn, Kube: cacheKube, Served: s.served, PodSelectors: podSel, DeploymentSelectors: depSel, ProxyPodSelectors: proxySel, Now: now,
 		Events: s.optional, CRDs: s.optional, Metadata: meta, Endpoints: s.endpoints})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -253,7 +260,8 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
 		DelegationBounds: s.bounds, Collected: s.collected, Catalog: s.catalog, HooksFor: s.hooks, ClassOnly: s.classOnly})
 	deadline := time.Now().Add(5 * time.Second)
-	for !e.Compute().Snapshot.Synced {
+	// Optional watches do not hold back Synced; each must also have read or failed (setup Go doc).
+	for snap := e.Compute().Snapshot; !snap.Synced || !optionalRead(snap); snap = e.Compute().Snapshot {
 		if time.Now().After(deadline) {
 			t.Fatal("not synced")
 		}
@@ -269,6 +277,16 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, s.opts...))
 	t.Cleanup(srv.Close)
 	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, meta: meta, clk: clk}
+}
+
+// optionalRead reports whether every optional watch in snap has read or failed.
+func optionalRead(snap *cache.Snapshot) bool {
+	for _, gvr := range []schema.GroupVersionResource{cache.ProxyPodsGVR, cache.EventsGVR, cache.CRDsGVR, cache.ServicesGVR, cache.EndpointSlicesGVR} {
+		if a, ok := snap.Access[gvr]; ok && !a.OK && a.Err == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // createAndWait creates u through the fake dynamic client and waits until the cache holds it.
