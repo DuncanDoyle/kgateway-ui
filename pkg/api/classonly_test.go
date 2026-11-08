@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/overview"
 )
 
@@ -89,5 +92,31 @@ func TestClassOnlyGetsNoExperimentalAdvice(t *testing.T) {
 	}
 	if !kept {
 		t.Error("the kgateway install must keep its experimental advice")
+	}
+}
+
+// A class-only install has no rule set (Phase 5 design §8.2, user 2026-11-08):
+// its pages carry status attachment only, and no computed fact anywhere. The
+// kgateway install in the same model keeps its computed facts.
+func TestClassOnlyShowsStatusAttachmentOnly(t *testing.T) {
+	foreign := testutil.GwRef("infra", "foreign")
+	r := testutil.HTTPRoute("shop", "co", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other"))
+	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true}, world(r)...)
+	const co = "/api/v1/installs/example.com~2Fother"
+	gw := get[GatewayDetail](t, h.srv, co+"/gateways/infra/foreign", 200)
+	if gw.RuleSet != "" || len(gw.Listeners) != 1 || gw.Listeners[0].Status == nil {
+		t.Fatalf("class-only Gateway: rule set %q listeners %+v", gw.RuleSet, gw.Listeners)
+	}
+	rt := get[RouteDetail](t, h.srv, co+"/routes/gateway.networking.k8s.io/HTTPRoute/shop/co", 200)
+	if rt.RuleSet != "" || len(rt.Attachments) != 0 || len(rt.Parents) != 1 || len(rt.Parents[0].Conditions) == 0 {
+		t.Fatalf("class-only route: rule set %q attachments %+v parents %+v", rt.RuleSet, rt.Attachments, rt.Parents)
+	}
+	for _, p := range []string{"/gateways/infra/foreign", "/routes/gateway.networking.k8s.io/HTTPRoute/shop/co", "/gateways", "/routes"} {
+		if body := get[json.RawMessage](t, h.srv, co+p, 200); bytes.Contains(body, []byte(`"computed`)) || bytes.Contains(body, []byte(`"ruleSet"`)) {
+			t.Errorf("%s carries a computed fact: %s", p, body)
+		}
+	}
+	if k := get[GatewayDetail](t, h.srv, base+"/gateways/infra/edge", 200); k.RuleSet == "" || k.Listeners[0].Computed == nil {
+		t.Errorf("the kgateway install must keep its computed facts: %+v", k)
 	}
 }

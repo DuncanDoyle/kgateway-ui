@@ -98,7 +98,8 @@ type Config struct {
 // none, nil ExperimentalOnly marks no kind, nil RulesFor is Config.RulesFor and
 // nil Checks is Config.Checks. A RulesFor that returns no Rules gives the
 // install no rule set: no computed views. One without a computed.Delegator
-// gives it no delegation (install.Resolved.NoDelegation).
+// gives it no delegation (install.Resolved.NoDelegation). A class-only
+// install never has a rule set.
 type Hooks struct {
 	Scope    install.ScopeProvider
 	Settings func(install.Install) install.Settings
@@ -331,12 +332,17 @@ func (e *Engine) compute() *Published {
 			e.cfg.Logger.Error("install rejected", "err", err)
 		}
 	}
+	classOnly := map[string]bool{}
 	if e.cfg.ClassOnly {
 		var classes []*unstructured.Unstructured
 		for _, k := range kinds.ByCategory(served, kinds.CategoryGatewayClass) {
 			classes = append(classes, snap.Objects[k.GVR()]...)
 		}
-		found = append(found, install.ClassOnly(classes, found)...)
+		co := install.ClassOnly(classes, found)
+		for _, i := range co {
+			classOnly[i.ID()] = true
+		}
+		found = append(found, co...)
 		slices.SortFunc(found, func(a, b install.Install) int { return strings.Compare(a.ID(), b.ID()) })
 	}
 	all := install.ResolveWith(found, func(i install.Install) (install.ScopeProvider, func(install.Install) install.Settings) {
@@ -355,12 +361,15 @@ func (e *Engine) compute() *Published {
 		}
 	}
 	m.Collected = col
-	// The rule set decides delegation, so it is chosen before assignment.
+	// The rule set decides delegation, so it is chosen before assignment. A
+	// class-only install has none, whatever its hooks (design §8.2).
 	sels := make([]computed.Selection, len(all))
 	for i := range all {
 		all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly
 		all[i].ReportedVersion = e.reportedVersion(all[i].Install, col)
-		sels[i] = e.rulesFor(all[i].Install)
+		if !classOnly[all[i].ID()] {
+			sels[i] = e.rulesFor(all[i].Install)
+		}
 		all[i].NoDelegation = sels[i].Delegator() == nil
 	}
 	// Assignment runs over all installs so ambiguity is detected even when pinned.

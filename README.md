@@ -211,13 +211,14 @@ Nothing changes in the UI or API v1 for kgateway installs. For Go callers:
 
 ```go
 // Before: res := rules.Delegation(in)
+var res computed.DelegationResult
 if d, ok := rules.(computed.Delegator); ok {
-	res := d.Delegation(in)
-	_ = res
+	res = d.Delegation(in)
 }
 ```
 
 - A rule set without `Delegator` keeps view A, its cross-check and KGWUI-012. It has no views B and C, no KGWUI-011, and `GET …/delegation` answers 404. A backendRef to an HTTPRoute is then an ordinary ref, and `install.Resolved.NoDelegation` is set.
+- A class-only install never has a rule set, whatever its hooks: status attachment only, no computed facts.
 - A rule set that wraps a kgateway set must forward `Delegation` to keep delegation, as it forwards `ReportsTargetNotFound`.
 - View A is shared in `pkg/computed/viewa`; `viewa.Attach` takes the set's route kinds per listener protocol.
 
