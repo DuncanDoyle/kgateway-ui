@@ -23,11 +23,11 @@ Status: implementing (design and plan approved by the user 2026-11-08; branch du
 - [ ] phase-5-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 5.2 (G2) metrics and checks into the pack
+Sub-phase: 5.3 (G3) rule sets, view A, delegation
 Kind: planned
 Status: planned
-Base: 98807aa
-Brief: docs/phases/phase-5/phase-5.2-brief.md
+Base: 0ca585e
+Brief: docs/phases/phase-5/phase-5.3-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
