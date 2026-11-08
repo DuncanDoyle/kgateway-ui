@@ -2,6 +2,7 @@ package setup_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
+	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
@@ -82,3 +84,37 @@ type named string
 
 func (n named) Name() string                              { return string(n) }
 func (named) Start(context.Context, extension.Deps) error { return nil }
+
+// bodyScraper serves body, or fails when body is empty.
+type bodyScraper struct{ body string }
+
+func (s bodyScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser, error) {
+	if s.body == "" {
+		return nil, errors.New("connection refused")
+	}
+	return io.NopCloser(strings.NewReader(s.body)), nil
+}
+
+// Review 5.2 #4: through extension.New and setup.Build, the kgateway pack's
+// Reported hook picks the rule set from kgateway_build_info, keeps it while a
+// scrape fails, and falls back to the Deployment's version when a scrape has none.
+func TestReportedVersionThroughThePack(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	one := oneShotSequence(t, ctx, world(), extension.New(), emptyScraper{}, false, false)
+	insts, _ := install.Discover(one.cfg.Engine.Snapshots.Snapshot(), one.cfg.Engine.Detectors)
+	managed := "# TYPE kgateway_resources_managed gauge\nkgateway_resources_managed{namespace=\"infra\",parent=\"edge\",resource=\"Gateway\"} 1\n"
+	for _, step := range []struct {
+		name, body, rules, reported string
+	}{
+		{"build_info", managed + "# TYPE kgateway_build_info gauge\nkgateway_build_info{version=\"v2.5.0\"} 1\n", "kgateway-2.5", "2.5.0"},
+		{"failed scrape", "", "kgateway-2.5", "2.5.0"},
+		{"no build_info", managed, "kgateway-2.4", ""},
+	} {
+		ctrlmetrics.Publish(one.cfg.Collected, ctrlmetrics.CollectOnce(ctx, bodyScraper{step.body}, insts, time.Hour))
+		im := one.at(t0).Installs[0]
+		if im.Rules.Rules.Version() != step.rules || im.Resolved.ReportedVersion != step.reported {
+			t.Errorf("%s: rules %s, reported %q; want %s, %q", step.name, im.Rules.Rules.Version(), im.Resolved.ReportedVersion, step.rules, step.reported)
+		}
+	}
+}
