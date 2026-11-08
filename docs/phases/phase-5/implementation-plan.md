@@ -143,6 +143,8 @@ Removed (design §7.2): `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, 
 - [ ] **Step 3:** E8 one-shot fixture test (`pkg/setup`): the design §7.3 sequence, including the full wait and a fixed `Snapshots`, over a fixture with a rejecting controller gives the same KGWUI-001 as Step 2; without `Publish`, 001 is "not available".
 - [ ] **Step 4:** Implement; Go doc on `ctrlmetrics` with the one-shot sequence; README upgrade note listing each removed name and its replacement; bench; commit.
 
+Deviation (5.2): `Impl.Version` keeps its signature; `Impl.Reported(install, snapshot) (string, bool)` reads `kgateway_build_info`, and the engine keeps the last reported version while it does not tell (design §4.2).
+
 ### Task 6a: tell the program and kgwctl (after Task 6 merges)
 
 - [ ] **Step 1:** In `DuncanDoyle/kgateway-tooling` `program.md`, a small commit of its own: the Contracts row for `ctrlmetrics`, the E8 row and the "E8 `check` MVP" steps name the new path (`ctrlmetrics.CollectOnce`, `Publish`, `setup.Config.Collected`) and drop `Static`, `cfg.Metrics` and `ctrlmetrics.Source`. Approved like any commit.
@@ -157,6 +159,8 @@ Removed (design §7.2): `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, 
 - [ ] **Step 1:** Failing engine test: a class-only install with a NACK-shaped status, a `kgateway.dev/Programmed=False` route condition, a route that names a missing policy target, a backendRef to an HTTPRoute and Envoy-looking proxy Pods raises no 001, 007, 010, 011, 012, 015, 016, 022, 024, 025, 026; the kgateway install's findings (IDs and order) are byte-equal to the base. The `conditionsCheck` branches for 011, 012, 015, 016 run through the install's `Delegator`, `PolicyTargeter` and `ConditionTypes` (design §6).
 - [ ] **Step 2:** Behaviour test: core checks on a class-only install give equal findings with and without metrics, controller-log events and proxy stats in the input, across a memoized recompute. Restart and rollout checks keep their optional log enrichment for kgateway installs.
 - [ ] **Step 3:** Implement; bench; commit.
+
+Note (5.2): `Impl` also gains `Conditions` (from Task 11's interface) for `conditionsCheck` and 015, and a pack without `RulesFor` gives its installs no rule set: no views, no delegation candidates (Tasks 9–10 build on it).
 
 ---
 

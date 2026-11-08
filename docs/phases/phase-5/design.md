@@ -145,7 +145,9 @@ type Pack struct {
 }
 ```
 
-`Impl` holds the per-install hooks that the registry holds globally today: `Scope`, `Verifier`, `Settings`, `RulesFor`, `ProxyMode`, `Process`, `ProxyStats`, `Commands`, `ConditionTypes`, `Version` (the install's implementation version for rule-set choice). The existing global `With…` options still work: they set the hook for installs of the pack that is being built (the default pack in `New`), so a downstream that calls `WithComputedRules` today keeps its behaviour.
+`Impl` holds the per-install hooks that the registry holds globally today: `Scope`, `Verifier`, `Settings`, `RulesFor`, `ProxyMode`, `Process`, `ProxyStats`, `Commands`, `ConditionTypes`, `Version` (the install's implementation version for rule-set choice).
+
+**Deviation (5.2).** `Version` keeps `func(install.Install) string`; a separate `Reported func(install.Install, collect.Snapshot) (string, bool)` reads the version the controller reports from the collected values (§7.2). The engine keeps the last reported version while `Reported` does not tell, as it did before, which a stateless `Version(install, snapshot)` could not. The existing global `With…` options still work: they set the hook for installs of the pack that is being built (the default pack in `New`), so a downstream that calls `WithComputedRules` today keeps its behaviour.
 
 **Old callers (our call).** Detectors added with `WithDetectors`, and hooks set by the old `With…` options or by assigning `Registry` fields, belong to the default pack: `kgateway` in `New`, `core` in `NewCore`. `ImplFor` reads those fields when the app is built. So a downstream detector keeps today's scope, rule sets, checks and process hooks, and `examples/downstream` proves it through engine output.
 
