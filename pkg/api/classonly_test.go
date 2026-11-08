@@ -3,10 +3,12 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
@@ -32,7 +34,7 @@ func packHooks(i install.Install) engine.Hooks {
 		return engine.Hooks{}
 	}
 	return engine.Hooks{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version,
-		ExperimentalOnly: kgateway.ExperimentalOnly}
+		ExperimentalOnly: kgateway.ExperimentalOnly, Conditions: kgateway.Conditions()}
 }
 
 // A class-only install has no edition, version or readiness, and its scope
@@ -143,6 +145,36 @@ func TestClassOnlyRaisesNoComputedFindings(t *testing.T) {
 			if got := hasSev(hr, code, "", ""); got != tc.want {
 				t.Errorf("%s: %s raised %v, want %v", tc.install, code, got, tc.want)
 			}
+		}
+	}
+}
+
+// The route list judges kgateway.dev/Programmed only for an install whose pack
+// declares it: a class-only route with it False is not "not programmed"; a
+// kgateway route is, as before (Phase 5 design §9).
+func TestClassOnlyRouteIgnoresKgatewayConditions(t *testing.T) {
+	replaced := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"), testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"),
+		testutil.Cond("kgateway.dev/Programmed", metav1.ConditionFalse, "RouteRuleReplaced")}
+	foreign := testutil.GwRef("infra", "foreign")
+	objs := world(testutil.HTTPRoute("shop", "co", []objects.ParentRef{foreign}, testutil.RouteParent{Ref: foreign, Controller: "example.com/other", Conds: replaced}),
+		testutil.HTTPRoute("shop", "kr", []objects.ParentRef{edgeRef}, testutil.RouteParent{Ref: edgeRef, Controller: testutil.Controller, Conds: replaced}))
+	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true}, objs...)
+	for _, tc := range []struct {
+		install, route string
+		judged         bool
+	}{{"/api/v1/installs/example.com~2Fother", "co", false}, {base, "kr", true}} {
+		var row *RouteRow
+		for _, r := range get[Page[RouteRow]](t, h.srv, tc.install+"/routes", 200).Items {
+			if r.Ref.Name == tc.route {
+				row = &r
+			}
+		}
+		if row == nil || len(row.Parents) != 1 {
+			t.Fatalf("%s: row %+v", tc.route, row)
+		}
+		flagged, cond := slices.Contains(row.Flags, "not-programmed"), row.Parents[0].ConditionType == "kgateway.dev/Programmed"
+		if flagged != tc.judged || cond != tc.judged {
+			t.Errorf("%s: not-programmed %v, deciding condition %q; want judged by kgateway.dev/Programmed %v", tc.route, flagged, row.Parents[0].ConditionType, tc.judged)
 		}
 	}
 }

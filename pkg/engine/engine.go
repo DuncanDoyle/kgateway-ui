@@ -448,7 +448,7 @@ func (e *Engine) compute() *Published {
 		diag := e.diagnosis(&rep, diagnose.Input{Install: res, Owned: owned, Snapshot: snap, Served: served, Views: e.decode, IDs: rt.States.GroupIDs()}, pc)
 		// The index decodes through the cache, so it runs here under computeMu.
 		ix := explore.Build(explore.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, Health: rep, Views: e.decode,
-			Computed: views[i]})
+			Computed: views[i], Conditions: &r.conds})
 		m.Installs = append(m.Installs, InstallModel{Resolved: res, Owned: owned, Health: rep, Diagnosis: diag, Index: ix, Overview: overview.Build(res, owned, snap, served, rep, e.cfg.Platform),
 			Rules: r.sel, Computed: views[i], Process: proc})
 	}
