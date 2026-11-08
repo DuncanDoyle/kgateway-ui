@@ -1,7 +1,7 @@
 import type { RouteDetail } from "../api/types";
 import { delegationCopy } from "../copy/explorer";
 import type { DetailTabContribution } from "../shell/contributions";
-import type { ShellExtension } from "../shell/extension";
+import type { WebPack } from "../shell/extension";
 import { DelegationContribution, hasDelegationRefs } from "./DelegationContribution";
 
 // region Helpers
@@ -23,8 +23,9 @@ const delegationTab: DetailTabContribution = {
 };
 
 // region Component
-/** The kgateway pack's web half (Phase 5 design §10): its copy and contributions, merged into the default app. */
-export const kgatewayWebPack: ShellExtension = {
-  vocabulary: { noInstallsHelp },
+/** The kgateway pack's web half (Phase 5 design §10): its copy and contributions, on where /meta lists "kgateway". */
+export const kgatewayWebPack: WebPack = {
+  name: "kgateway",
+  vocabulary: { noInstallsTitle: "No kgateway install found", noInstallsHelp },
   contributions: { detailTabs: { "gateway.networking.k8s.io/HTTPRoute": [delegationTab] } },
 };

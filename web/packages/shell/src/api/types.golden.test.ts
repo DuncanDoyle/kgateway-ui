@@ -545,6 +545,7 @@ const metaShape = shape<MetaResponse>(
     kinds: "!",
     views: "?",
     filters: "?",
+    packs: "?",
     capabilityStates: "?",
   },
   { kinds: kind, views: groupKind, capabilityStates: capability },

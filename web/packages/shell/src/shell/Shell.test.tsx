@@ -107,9 +107,9 @@ it("shows a designed empty state when no install is found", async () => {
 });
 
 it("says when the pinned install was not found", async () => {
-  stubApi({ "/api/v1/installs": [], "/api/v1/meta": { ...meta, pinned: "kgw/gone" } });
+  stubApi({ "/api/v1/installs": [], "/api/v1/meta": { ...meta, pinned: "kgw/gone", packs: ["kgateway"] } });
   // The default app's copy: the kgateway web pack adds its label hint.
-  mount("/", kgatewayWebPack);
+  mount("/", { packs: [kgatewayWebPack] });
   const state = await screen.findByRole("status");
   await waitFor(() => expect(state).toHaveTextContent("--install kgw/gone was set, but that install was not found."));
   expect(state).toHaveTextContent(

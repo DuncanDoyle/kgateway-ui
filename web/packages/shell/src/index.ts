@@ -74,6 +74,7 @@ export type {
   NavEntry,
   RouteContribution,
   ShellExtension,
+  WebPack,
 } from "./shell/extension";
 export { useInstallId, useShellExtension, useVocabulary } from "./shell/extension";
 export { DetailColumns, layout } from "./shell/layout";

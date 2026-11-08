@@ -261,6 +261,7 @@ it("keeps the public export surface", () => {
         "VersionPods",
         "VersionSkewEvidence",
         "Vocabulary",
+        "WebPack",
         "WithheldEvidence",
         "XDSLogEvent",
         "XDSRejectsEvidence",

@@ -47,7 +47,7 @@ function serve(features: string[] | undefined) {
   );
 }
 
-function mount(path: string, ext: ShellExtension = kgatewayWebPack) {
+function mount(path: string, ext: ShellExtension = { packs: [kgatewayWebPack] }) {
   window.history.pushState({}, "", path);
   return render(
     <SWRConfig value={testSWR()}>

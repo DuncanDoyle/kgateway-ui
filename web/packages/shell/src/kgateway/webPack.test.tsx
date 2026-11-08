@@ -45,11 +45,18 @@ it("without the kgateway web pack the empty state has no kgateway label hint", a
   expect(document.body.textContent).not.toMatch(/kgateway/);
 });
 
-it("with the kgateway web pack the empty state keeps today's label hint", async () => {
-  stubApi({ "/api/v1/installs": [], "/api/v1/meta": meta });
-  mount(kgatewayWebPack);
-  expect(await screen.findByText("No Gateway API controller found")).toBeInTheDocument();
+it("with the kgateway web pack on a server that runs it, the empty state is today's kgateway copy", async () => {
+  stubApi({ "/api/v1/installs": [], "/api/v1/meta": { ...meta, packs: ["kgateway"] } });
+  mount({ packs: [kgatewayWebPack] });
+  expect(await screen.findByText("No kgateway install found")).toBeInTheDocument();
   expect(screen.getByText("kgateway=kgateway")).toBeInTheDocument();
   expect(screen.getByText("app.kubernetes.io/component=controller")).toBeInTheDocument();
   expect(screen.getByText(/To always open one install, start the UI with/)).toBeInTheDocument();
+});
+
+it("with the kgateway web pack on a server that does not run it, the copy and tabs stay off", async () => {
+  stubApi({ "/api/v1/installs": [], "/api/v1/meta": { ...meta, packs: [] } });
+  mount({ packs: [kgatewayWebPack] });
+  expect(await screen.findByText("No Gateway API controller found")).toBeInTheDocument();
+  expect(document.body.textContent).not.toMatch(/kgateway/);
 });

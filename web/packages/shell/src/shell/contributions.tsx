@@ -58,6 +58,21 @@ export interface Contributions {
 
 // region Helpers
 const NONE: never[] = [];
+
+/** The slots of all, in order: per-kind lists and the flat lists are concatenated. */
+export function mergeContributions(all: (Contributions | undefined)[]): Contributions {
+  const keyed = <T,>(pick: (c: Contributions) => Record<string, T[]> | undefined) => {
+    const out: Record<string, T[]> = {};
+    for (const c of all) for (const [k, v] of Object.entries((c && pick(c)) ?? {})) out[k] = [...(out[k] ?? []), ...v];
+    return out;
+  };
+  return {
+    detailTabs: keyed((c) => c.detailTabs),
+    sideSections: keyed((c) => c.sideSections),
+    findingActions: all.flatMap((c) => c?.findingActions ?? []),
+    installPanels: all.flatMap((c) => c?.installPanels ?? []),
+  };
+}
 const kindKey = (r: Ref) => `${r.group}/${r.kind}`;
 const warned = new Set<string>();
 
