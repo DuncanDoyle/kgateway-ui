@@ -205,6 +205,13 @@ func newOneShot(t *testing.T, ctx context.Context, objs []runtime.Object) *oneSh
 // newOneShotWith is newOneShot over reg.
 func newOneShotWith(t *testing.T, ctx context.Context, objs []runtime.Object, reg *extension.Registry) *oneShot {
 	t.Helper()
+	return oneShotSequence(t, ctx, objs, reg, emptyScraper{}, true)
+}
+
+// oneShotSequence is the ctrlmetrics package's one-shot sequence over objs and
+// reg, scraping with s; without publish, no metrics reach the engine.
+func oneShotSequence(t *testing.T, ctx context.Context, objs []runtime.Object, reg *extension.Registry, s ctrlmetrics.Scraper, publish bool) *oneShot {
+	t.Helper()
 	dyn, kube := fakeClients(t, objs)
 	clk := clocktesting.NewFakeClock(t0)
 	cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t)},
@@ -220,17 +227,16 @@ func newOneShotWith(t *testing.T, ctx context.Context, objs []runtime.Object, re
 			t.Fatalf("optional watch %v: %+v; want it read", gvr, a)
 		}
 	}
-	cfg.Engine.Snapshots = ca
-	installs, errs := install.Discover(ca.Snapshot(), cfg.Engine.Detectors)
+	snap := ca.Snapshot()
+	installs, errs := install.Discover(snap, reg.Detectors)
+	installs = slices.DeleteFunc(installs, func(i install.Install) bool { return i.Impl != "kgateway" })
 	if len(installs) == 0 || len(errs) > 0 {
 		t.Fatalf("installs %v, errors %v", installs, errs)
 	}
-	col := ctrlmetrics.NewCollector(emptyScraper{}, ctrlmetrics.WithClock(clk))
-	met := ctrlmetrics.Static{}
-	for _, in := range installs {
-		met[in.ID()] = col.Collect(ctx, in)
+	if publish {
+		ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, s, installs, setup.MetricsMaxAge(time.Hour)))
 	}
-	cfg.Engine.Metrics = met
+	cfg.Engine.Snapshots = fixed{snap}
 	return &oneShot{eng: engine.New(cfg.Engine), clk: clk}
 }
 
@@ -238,6 +244,11 @@ func (o *oneShot) at(now time.Time) *engine.Model {
 	o.clk.SetTime(now)
 	return o.eng.Compute()
 }
+
+// fixed returns one snapshot, as the one-shot sequence's step 4 says.
+type fixed struct{ s *cache.Snapshot }
+
+func (f fixed) Snapshot() *cache.Snapshot { return f.s }
 
 // running is pkg/app over its own fakes, read through its loop's events.
 type running struct {
@@ -247,9 +258,15 @@ type running struct {
 
 func newRunning(t *testing.T, ctx context.Context, objs []runtime.Object) *running {
 	t.Helper()
+	return newRunningWith(t, ctx, objs, emptyScraper{})
+}
+
+// newRunningWith is newRunning scraping with s.
+func newRunningWith(t *testing.T, ctx context.Context, objs []runtime.Object, s ctrlmetrics.Scraper) *running {
+	t.Helper()
 	dyn, kube := fakeClients(t, objs)
 	r := &running{clk: clocktesting.NewFakeClock(t0), events: make(chan engine.LoopEvent, 4096)}
-	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t), Scraper: emptyScraper{}},
+	a, err := app.Build(app.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t), Scraper: s},
 		app.Options{PollInterval: time.Hour, MetricsInterval: time.Hour, ConfirmEvery: time.Hour, UI: fstest.MapFS{"index.html": {Data: []byte("x")}},
 			Clock: r.clk, Diagnostics: app.Diagnostics{NoProxyStats: true}, OnLoop: func(e engine.LoopEvent) {
 				if e.Kind == engine.EvPublished || e.Kind == engine.EvArmed {
@@ -279,7 +296,12 @@ func optionalSettled(snap *cache.Snapshot) bool {
 // settledModel is whether m is over a settled cache, optional watches
 // included, with metrics read.
 func settledModel(m *engine.Model) bool {
-	return m.Snapshot.Synced && optionalSettled(m.Snapshot) && len(m.Installs) == 1 && len(m.MetricsRead) == 1 && m.MetricsRead[0].Present
+	if !m.Snapshot.Synced || !optionalSettled(m.Snapshot) || len(m.Installs) != 1 {
+		return false
+	}
+	v, _ := m.Collected.Get(ctrlmetrics.Key)
+	_, _, read := ctrlmetrics.Lookup(v, m.Installs[0].Resolved.ID())
+	return read
 }
 
 // fakeMetadata serves no CRDs, so the CRD metadata watch runs and reads empty.
@@ -475,17 +497,17 @@ func TestBuildSetsTheUITimings(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := cfg.Engine
-	if e.MetricsMaxAge != 30*time.Second || setup.MetricsMaxAge(10*time.Second) != 30*time.Second {
-		t.Errorf("metrics max age %v", e.MetricsMaxAge)
+	if setup.MetricsMaxAge(10*time.Second) != 30*time.Second {
+		t.Errorf("metrics max age %v", setup.MetricsMaxAge(10*time.Second))
 	}
-	if e.Verifier == nil || e.RulesFor == nil || e.Catalog == nil || e.KindsChange == nil || e.Metrics == nil || e.Triggers != cfg.Changes {
+	if e.Verifier == nil || e.RulesFor == nil || e.Catalog == nil || e.KindsChange == nil || e.Collected == nil || cfg.Collected == nil || e.Triggers != cfg.Changes {
 		t.Errorf("engine config incomplete: %+v", e)
 	}
 	if cfg.Cache.Events || !cfg.Cache.CRDs || len(cfg.Cache.PodSelectors) == 0 || len(cfg.Cache.ProxyPodSelectors) == 0 || cfg.Cache.Changes != cfg.Changes {
 		t.Errorf("cache config %+v", cfg.Cache)
 	}
-	if _, has := e.Metrics.Get("any"); has {
-		t.Error("the default metrics source must hold no result")
+	if vs := e.Collected().Values; len(vs) != 0 {
+		t.Errorf("the store must start empty: %v", vs)
 	}
 }
 

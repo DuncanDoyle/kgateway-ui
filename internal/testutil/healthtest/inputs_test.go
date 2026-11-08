@@ -28,7 +28,7 @@ type recorder struct {
 
 func (r *recorder) Errorf(string, ...any) { r.failed = true }
 
-// guardFails reports whether the guard fails c over a world with no metrics.
+// guardFails reports whether the guard fails c over an empty world.
 func guardFails(t *testing.T, c health.Check) bool {
 	r := &recorder{TB: t}
 	CheckDeclaredInputs(r, c, health.Input{Now: testutil.Now}, health.Runtime{}, 1)
@@ -39,15 +39,15 @@ func guardFails(t *testing.T, c health.Check) bool {
 // each evaluation starts from a fresh Store.
 func TestGuardCatchesReplayedUndeclaredRead(t *testing.T) {
 	replay := storeCheck{func(ctx health.RunContext) string {
-		if v, ok := health.Load[string](ctx.State, "metrics"); ok {
+		if v, ok := health.Load[string](ctx.State, "verify"); ok {
 			return v
 		}
-		v := fmt.Sprint(ctx.HasMetrics, ctx.Metrics.Err)
-		ctx.State.Set("metrics", v)
+		v := fmt.Sprint(ctx.Verify.Available, ctx.Verify.Reason)
+		ctx.State.Set("verify", v)
 		return v
 	}}
 	if !guardFails(t, replay) {
-		t.Fatal("a check replaying an undeclared metrics read passed the guard")
+		t.Fatal("a check replaying an undeclared verify read passed the guard")
 	}
 }
 

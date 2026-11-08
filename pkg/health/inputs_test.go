@@ -19,9 +19,9 @@ var guardSeeds = []int64{1, 2, 3, 7, 42}
 func TestChecksReadOnlyDeclaredInputs(t *testing.T) {
 	worlds := health.GuardWorlds(t)
 	for _, c := range health.Upstream() {
-		for name, in := range worlds {
+		for name, w := range worlds {
 			for _, seed := range guardSeeds {
-				t.Run(fmt.Sprintf("%s/%s/seed%d", c.Name(), name, seed), func(t *testing.T) { healthtest.CheckDeclaredInputs(t, c, in, health.Runtime{}, seed) })
+				t.Run(fmt.Sprintf("%s/%s/seed%d", c.Name(), name, seed), func(t *testing.T) { healthtest.CheckDeclaredInputs(t, c, w.In, w.RT, seed) })
 			}
 		}
 		for name, w := range health.GuardCollectedWorlds(t) {

@@ -326,15 +326,16 @@ func withheldOn(checks []health.CheckResult, gw objects.Ref) (*WithheldDTO, stri
 	return nil, health.LogsNotRead
 }
 
-// snapshot is gw's xDS snapshot from the install's last complete metrics read; nil without one.
+// snapshot is gw's xDS snapshot from the install's complete metrics entry in
+// the values the model read, stale or not; nil without one.
 func (d *detail) snapshot(gw objects.Ref) *SnapshotDTO {
-	for _, r := range d.p.Model.MetricsRead {
-		if r.ID != d.i.Resolved.ID() || !r.Present || r.Result.Err != "" {
-			continue
-		}
-		if s, ok := r.Result.Metrics.Snapshot[ctrlmetrics.GatewayKey{Namespace: gw.Namespace, Name: gw.Name}]; ok {
-			return &SnapshotDTO{By: "controller", Listeners: s.Listeners, Routes: s.Routes, Clusters: s.Clusters, Endpoints: s.Endpoints, Secrets: s.Secrets}
-		}
+	v, _ := d.p.Model.Collected.Get(ctrlmetrics.Key)
+	r, _, ok := ctrlmetrics.Lookup(v, d.i.Resolved.ID())
+	if !ok || r.Err != "" {
+		return nil
+	}
+	if s, ok := r.Metrics.Snapshot[ctrlmetrics.GatewayKey{Namespace: gw.Namespace, Name: gw.Name}]; ok {
+		return &SnapshotDTO{By: "controller", Listeners: s.Listeners, Routes: s.Routes, Clusters: s.Clusters, Endpoints: s.Endpoints, Secrets: s.Secrets}
 	}
 	return nil
 }

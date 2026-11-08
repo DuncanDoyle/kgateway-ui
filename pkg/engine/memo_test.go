@@ -139,7 +139,7 @@ func memoEngine(t *testing.T, checks ...health.Check) (*Engine, *memoSource, *ti
 	now := testutil.Now
 	src := &memoSource{base: snapshot(t), now: &now}
 	cfg := config(nil, metricsAt(testutil.Now), func() time.Time { return now })
-	cfg.Snapshots, cfg.MetricsMaxAge = src, 0
+	cfg.Snapshots, cfg.Collected = src, served(metricsAt(testutil.Now), 0)
 	if len(checks) > 0 {
 		cfg.Checks = checks
 	}
@@ -261,9 +261,11 @@ func TestMemoNeverOutlivesStaleness(t *testing.T) {
 	}
 	const maxAge = 30 * time.Second
 	stale := testutil.Now.Add(maxAge) // metricsAt collects at testutil.Now
-	narrow := counted{probe{"narrow metrics", health.InputSet{Metrics: true}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
-		at := ctx.Metrics.CollectedAt.Add(maxAge)
-		if !ctx.HasMetrics || !ctx.Now.Before(at) {
+	narrow := counted{probe{"narrow metrics", health.InputSet{Collected: []string{ctrlmetrics.Key}}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		v, _ := ctx.Collected(ctrlmetrics.Key)
+		r, _, has := ctrlmetrics.Lookup(v, ctx.Install.ID())
+		at := r.CollectedAt.Add(maxAge)
+		if !has || !ctx.Now.Before(at) {
 			return okRun("narrow metrics", "unavailable")(ctx)
 		}
 		ctx.WakeAt(at)
@@ -401,7 +403,7 @@ func TestRecentlyChangedThroughTheMemo(t *testing.T) {
 	on := false
 	src := &memoSource{base: snapshot(t, r, s), now: &now}
 	cfg := config(nil, rejectsAt{testutil.Now, &on}, func() time.Time { return now })
-	cfg.Snapshots, cfg.MetricsMaxAge, cfg.Checks = src, 0, []health.Check{xds}
+	cfg.Snapshots, cfg.Collected, cfg.Checks = src, served(rejectsAt{testutil.Now, &on}, 0), []health.Check{xds}
 	e := New(cfg)
 	bump := func(u *unstructured.Unstructured, rv string) {
 		c := u.DeepCopy()
@@ -498,8 +500,10 @@ func TestUnchangedChecksReuseReportAndDiagnosis(t *testing.T) {
 // content (R70). Its equal findings keep the report's findings and the diagnosis,
 // and each step equals an uncached compute.
 func TestRerunWithEqualFindingsReusesDiagnosis(t *testing.T) {
-	scraper := probe{"scrape probe", health.InputSet{Metrics: true}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
-		ctx.WakeAt(ctx.Metrics.CollectedAt.Add(time.Minute))
+	scraper := probe{"scrape probe", health.InputSet{Collected: []string{ctrlmetrics.Key}}, func(ctx health.RunContext) ([]health.Finding, health.CheckResult) {
+		v, _ := ctx.Collected(ctrlmetrics.Key)
+		r, _, _ := ctrlmetrics.Lookup(v, ctx.Install.ID())
+		ctx.WakeAt(r.CollectedAt.Add(time.Minute))
 		return okRun("scrape probe", "")(ctx)
 	}}
 	var runs int
@@ -556,7 +560,7 @@ func scrapeEngine(t *testing.T) (e *Engine, now, col *time.Time) {
 	t.Helper()
 	n, c := testutil.Now, testutil.Now
 	cfg := config(nil, scrapedAt{&c}, func() time.Time { return n })
-	cfg.Snapshots, cfg.MetricsMaxAge = &memoSource{base: snapshot(t), now: &n}, 45*time.Second
+	cfg.Snapshots, cfg.Collected = &memoSource{base: snapshot(t), now: &n}, served(scrapedAt{&c}, 45*time.Second)
 	return New(cfg), &n, &c
 }
 
@@ -592,8 +596,8 @@ func TestIdleFreshScrapesAddNoDeadline(t *testing.T) {
 	}
 }
 
-// When scrapes stop, xDS rejects stays OK through C+max age and turns
-// stale on the first recompute after it, which the model's deadline schedules.
+// When scrapes stop, xDS rejects stays OK through C+max age and turns stale
+// on the first recompute after it, which the check's wake time schedules.
 func TestStoppedScrapesTurnXDSStaleOnTime(t *testing.T) {
 	e, now, col := scrapeEngine(t)
 	const maxAge = 45 * time.Second
@@ -604,7 +608,7 @@ func TestStoppedScrapesTurnXDSStaleOnTime(t *testing.T) {
 		m = e.Compute()
 	}
 	last := *col
-	if want := (Deadline{At: last.Add(maxAge), Strict: true}); m.Next != want {
+	if want := (Deadline{At: last.Add(maxAge + time.Nanosecond)}); m.Next != want {
 		t.Fatalf("after the last scrape: next %+v, want its staleness deadline %+v", m.Next, want)
 	}
 	*now = last.Add(maxAge)
@@ -612,7 +616,7 @@ func TestStoppedScrapesTurnXDSStaleOnTime(t *testing.T) {
 	if r := xdsResult(t, m); !r.OK {
 		t.Fatalf("at C+max age: %+v; want OK", r)
 	}
-	if want := (Deadline{At: last.Add(maxAge), Strict: true}); m.Next != want {
+	if want := (Deadline{At: last.Add(maxAge + time.Nanosecond)}); m.Next != want {
 		t.Fatalf("at C+max age: next %+v, want %+v", m.Next, want)
 	}
 	*now = last.Add(maxAge + time.Nanosecond)
@@ -632,7 +636,7 @@ func TestCatalogChangeRerunsCheck(t *testing.T) {
 	now := testutil.Now
 	src := &memoSource{base: snapshot(t), now: &now}
 	cfg := config(nil, metricsAt(testutil.Now), func() time.Time { return now })
-	cfg.Snapshots, cfg.MetricsMaxAge, cfg.Checks = src, 0, append(health.Upstream(), c)
+	cfg.Snapshots, cfg.Collected, cfg.Checks = src, served(metricsAt(testutil.Now), 0), append(health.Upstream(), c)
 	cfg.Catalog = func() kinds.Catalog { return cat }
 	e := New(cfg)
 	e.Compute()

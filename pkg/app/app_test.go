@@ -65,6 +65,13 @@ func (s *stubScraper) Scrape(context.Context, *corev1.Pod, int32) (io.ReadCloser
 
 var ui = fstest.MapFS{"index.html": {Data: []byte("x")}}
 
+// metrics is install id's entry in the published controller metrics value.
+func (a *App) metrics(id string) (ctrlmetrics.Result, bool) {
+	v, _ := a.collected.Snapshot().Get(ctrlmetrics.Key)
+	r, _, ok := ctrlmetrics.Lookup(v, id)
+	return r, ok
+}
+
 // start builds and starts the app over fake clients and serves its handler.
 func start(t *testing.T, objs []runtime.Object, extra []kinds.Descriptor, o Options, sc *stubScraper, opts ...extension.Option) (*App, *httptest.Server) {
 	t.Helper()
@@ -404,7 +411,7 @@ func TestFirstMetricsCollectionFollowsDiscovery(t *testing.T) {
 	a, _ := start(t, []runtime.Object{testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true)}, nil,
 		Options{PollInterval: 20 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, sc)
 	eventually(t, "the controller was never scraped after discovery", func() bool { return sc.calls.Load() > 0 })
-	eventually(t, "no metrics result for the install", func() bool { _, ok := a.collector.Get("kgw.kgateway"); return ok })
+	eventually(t, "no metrics result for the install", func() bool { _, ok := a.metrics("kgw.kgateway"); return ok })
 }
 
 // slowPods holds the Pod list until release closes, so the Deployment is
@@ -486,7 +493,7 @@ func TestMetricsCollectionWaitsForASettledDiscovery(t *testing.T) {
 		t.Fatal("no model with the install was published before the Pods were listed")
 	}
 	var r ctrlmetrics.Result
-	eventually(t, "no metrics result for the install", func() bool { var ok bool; r, ok = a.collector.Get("kgw.kgateway"); return ok })
+	eventually(t, "no metrics result for the install", func() bool { var ok bool; r, ok = a.metrics("kgw.kgateway"); return ok })
 	if r.Err != "" || sc.calls.Load() == 0 {
 		t.Fatalf("the first collection must scrape the install's pod: err=%q calls=%d", r.Err, sc.calls.Load())
 	}
@@ -495,14 +502,25 @@ func TestMetricsCollectionWaitsForASettledDiscovery(t *testing.T) {
 // The scope verifier must wait 2 × and metrics expire after 3 × the metrics
 // interval (design §4.4); zero would disable either guard.
 func TestBuildDerivesMetricsTimingsFromTheInterval(t *testing.T) {
-	dyn, kube := testutil.Clients(t)
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
 	c := Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}}
-	a, err := Build(c, Options{PollInterval: time.Second, MetricsInterval: 7 * time.Second, UI: ui}, extension.New())
+	a, err := Build(c, Options{PollInterval: 20 * time.Millisecond, MetricsInterval: 7 * time.Second, UI: ui}, extension.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.cfg.MetricsMaxAge != 21*time.Second {
-		t.Fatalf("MetricsMaxAge must be 3 × the metrics interval, got %v", a.cfg.MetricsMaxAge)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	var res ctrlmetrics.Results
+	eventually(t, "no metrics value", func() bool {
+		v, _ := a.collected.Snapshot().Get(ctrlmetrics.Key)
+		var ok bool
+		res, ok = v.Data.(ctrlmetrics.Results)
+		return ok
+	})
+	if res.MaxAge != 21*time.Second {
+		t.Fatalf("the metrics max age must be 3 × the metrics interval, got %v", res.MaxAge)
 	}
 	v, ok := a.cfg.Verifier.(*scopeverify.ManagedCountVerifier)
 	if !ok || v.Persist() != 14*time.Second {
@@ -866,7 +884,7 @@ func TestAppRecomputesOnObjectChange(t *testing.T) {
 	// wait for them, then for a quiet loop.
 	eventually(t, "never synced and scraped", func() bool {
 		p := a.Engine.Current()
-		_, scraped := a.collector.Get("kgw.kgateway")
+		_, scraped := a.metrics("kgw.kgateway")
 		return a.cache.Settled() && p != nil && p.Model.Snapshot.Synced && scraped
 	})
 	for quiet := false; !quiet; {
@@ -1243,9 +1261,12 @@ func TestCollectedFreshnessAtTheAPI(t *testing.T) {
 		}
 		// Settled: two ticks in a row confirm a model with the install, its metrics and v1.
 		ready := func(p *engine.Published) bool {
-			reads := p.Model.MetricsRead
-			return p.Model.Snapshot.Synced && len(p.Model.Installs) == 1 && len(reads) > 0 &&
-				!slices.ContainsFunc(reads, func(r engine.MetricsRead) bool { return !r.Present }) && p.Source.Collected == a.collected.Snapshot().Print
+			if !p.Model.Snapshot.Synced || len(p.Model.Installs) != 1 {
+				return false
+			}
+			v, _ := p.Model.Collected.Get(ctrlmetrics.Key)
+			_, _, read := ctrlmetrics.Lookup(v, p.Model.Installs[0].Resolved.ID())
+			return read && p.Source.Collected == a.collected.Snapshot().Print
 		}
 		for confirmed := 0; confirmed < 2; {
 			f.await(engine.EvArmed)

@@ -38,7 +38,7 @@ func scaleEngine(tier scale.Tier) *Engine { return snapshotEngine(scale.Snapshot
 func snapshotEngine(snap *cache.Snapshot, tier scale.Tier) *Engine {
 	now := testutil.Now
 	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return now })
-	cfg.MetricsMaxAge = 0
+	cfg.Collected = served(metricsAt(testutil.Now), 0)
 	e := New(cfg)
 	if tier.Contradict {
 		e.Compute()
@@ -128,10 +128,14 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape t
 	found, _ := install.Discover(snap, e.cfg.Detectors)
 	all := install.Resolve(found, e.cfg.Scope)
 	asg := install.Assign(snap, served, all, e.decode)
-	if len(m.Installs) != 1 || len(m.MetricsRead) != 1 {
-		tb.Fatalf("installs %d, metrics reads %d", len(m.Installs), len(m.MetricsRead))
+	if len(m.Installs) != 1 {
+		tb.Fatalf("installs %d", len(m.Installs))
 	}
-	im, read := m.Installs[0], m.MetricsRead[0]
+	im := m.Installs[0]
+	read, ok := metricsOf(m, im.Resolved.ID())
+	if !ok {
+		tb.Fatal("no metrics read")
+	}
 	var kc kinds.Change
 	if e.cfg.KindsChange != nil {
 		kc = e.cfg.KindsChange()
@@ -145,15 +149,14 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape t
 		cat = e.cfg.Catalog()
 	}
 	res := im.Resolved
-	maxAge, scrapes := e.cfg.MetricsMaxAge, 0
+	scrapes := 0
 	if scrape > 0 {
-		maxAge = scrape
-		read.Result.CollectedAt = now.Add(-time.Second) // fresh under maxAge
+		read.CollectedAt = now.Add(-time.Second) // fresh under scrape as the max age
+		col = withScrape(col, res.ID(), read, scrape)
 	}
-	ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Metrics: read.Result, HasMetrics: read.Present,
-		MetricsMaxAge: maxAge, Now: now, Views: e.decode})
-	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Metrics: read.Result,
-		HasMetrics: read.Present, MetricsMaxAge: maxAge, FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
+	ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Collected: col, Now: now, Views: e.decode})
+	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc,
+		FirstSeen: e.firstSeen(now), Verify: ver, Now: now, Platform: e.cfg.Platform,
 		ProxyMode: e.cfg.ProxyMode, Computed: im.Computed, Views: e.decode, Catalog: cat}
 	in.Process, in.GatewayAPI, in.Rules = im.Process, gatewayAPI(im.Rules), im.Rules
 	checks := e.cfg.Checks
@@ -164,14 +167,13 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape t
 		if scrape > 0 {
 			// A new scrape, 1 or 2 s old, so each run's CollectedAt differs from the last.
 			scrapes++
-			read.Result.CollectedAt = now.Add(-time.Duration(scrapes%2+1) * time.Second)
-			in.Metrics = read.Result
+			read.CollectedAt = now.Add(-time.Duration(scrapes%2+1) * time.Second)
+			col = withScrape(col, res.ID(), read, scrape)
 		}
 		rt := health.Runtime{States: e.states[res.ID()], Collected: col}
 		var pc *printCtx
 		if memo {
-			pc = &printCtx{snap: snap, res: res, all: all, read: read, now: now, maxAge: maxAge, ver: &ver, views: im.Computed, kc: kc, cat: cat, col: col,
-				proc: im.Process}
+			pc = &printCtx{snap: snap, res: res, all: all, ver: &ver, views: im.Computed, kc: kc, cat: cat, col: col, proc: im.Process}
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
 		rep := health.Evaluate(in, checks, rt)
@@ -364,8 +366,8 @@ func withTypoRef(tb testing.TB, snap *cache.Snapshot) *cache.Snapshot {
 func measuredEngine(tb testing.TB, w *measure.World, fc *clocktesting.FakeClock, snap *cache.Snapshot) *Engine {
 	tb.Helper()
 	snap = withTypoRef(tb, snap)
-	cfg := config(snap, w.Metrics, fc.Now)
-	cfg.MetricsMaxAge, cfg.Collected = 0, w.Store.Snapshot
+	cfg := config(snap, metricsAt(testutil.Now), fc.Now)
+	cfg.Collected = w.Store.Snapshot
 	cat := benchCatalog(cfg.Served)
 	cfg.Catalog = func() kinds.Catalog { return cat }
 	e := New(cfg)

@@ -48,7 +48,7 @@ func edgeStats(pods ...proxystats.Pod) proxystats.Gateway {
 func statsInput(t *testing.T, now time.Time) Input {
 	t.Helper()
 	in := healthyWorld().input(t)
-	in.Now, in.MetricsMaxAge = now, 0
+	in.Now = now
 	yes, no := true, false
 	edge := objects.RefOf(in.Owned.Gateways[0])
 	in.Process = &ProcessData{Controller: process.Set{Observed: true}, Proxies: map[objects.Ref]process.Set{edge: {Observed: true,
@@ -90,7 +90,7 @@ func TestProxyConditionsMatureAfter60s(t *testing.T) {
 			st := NewStates()
 			col := collected(testutil.Now, edgeStats(statsPod("edge-0", c.apply), statsPod("edge-1", c.apply)))
 			run := func(at time.Time) Report {
-				return Evaluate(statsInput(t, at), Upstream(), Runtime{States: st, Collected: col})
+				return Evaluate(statsInput(t, at), Upstream(), freshMetrics(Runtime{States: st, Collected: col}))
 			}
 			r := run(testutil.Now)
 			if f := findingOn(r, c.code); f != nil || !checkNamed(r, c.check).OK || !r.Next.Equal(testutil.Now.Add(60*time.Second)) {
@@ -132,7 +132,7 @@ func TestProxyDisconnectedDetailNumber(t *testing.T) {
 			for _, ps := range in.Process.Proxies {
 				*ps.Processes[1].Ready = tc.ready2
 			}
-			return Evaluate(in, Upstream(), Runtime{States: st, Collected: col})
+			return Evaluate(in, Upstream(), freshMetrics(Runtime{States: st, Collected: col}))
 		}
 		run(testutil.Now)
 		f := findingOn(run(testutil.Now.Add(61*time.Second)), CodeProxyDisconnected)
@@ -149,7 +149,7 @@ func ptr[T any](v T) *T { return &v }
 func TestProxyConditionNeedsAReadyProxy(t *testing.T) {
 	st := NewStates()
 	run := func(at time.Time, pods ...proxystats.Pod) Report {
-		return Evaluate(statsInput(t, at), Upstream(), Runtime{States: st, Collected: collected(testutil.Now, edgeStats(pods...))})
+		return Evaluate(statsInput(t, at), Upstream(), freshMetrics(Runtime{States: st, Collected: collected(testutil.Now, edgeStats(pods...))}))
 	}
 	draining := func(p *proxystats.Pod) { disconnected(p); p.ServerState = "draining" }
 	run(testutil.Now, statsPod("edge-1", disconnected), statsPod("edge-9", draining), statsPod("edge-7", disconnected))
@@ -187,7 +187,7 @@ func TestProxyStatsAvailability(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := Evaluate(statsInput(t, testutil.Now), Upstream(), Runtime{Collected: c.col})
+			r := Evaluate(statsInput(t, testutil.Now), Upstream(), freshMetrics(Runtime{Collected: c.col}))
 			for _, name := range []string{"proxy connection", "proxy config warming"} {
 				cr := checkNamed(r, name)
 				text := cr.Error
@@ -210,7 +210,7 @@ func TestProxyStatsAvailability(t *testing.T) {
 func TestProxyScrapeErrorKeepsTheStart(t *testing.T) {
 	st := NewStates()
 	run := func(at time.Time, p proxystats.Pod) Report {
-		return Evaluate(statsInput(t, at), Upstream(), Runtime{States: st, Collected: collected(testutil.Now, edgeStats(p))})
+		return Evaluate(statsInput(t, at), Upstream(), freshMetrics(Runtime{States: st, Collected: collected(testutil.Now, edgeStats(p))}))
 	}
 	run(testutil.Now, statsPod("edge-0", disconnected))
 	if f := findingOn(run(testutil.Now.Add(30*time.Second), proxystats.Pod{UID: "pod/infra/edge-0", Name: "edge-0", Err: "timed out"}), CodeProxyDisconnected); f != nil {
@@ -232,12 +232,13 @@ func TestXDSEvidenceFromProxyStats(t *testing.T) {
 	}
 	gw := edgeStats(statsPod("edge-0", rejecting), statsPod("edge-1", nil), proxystats.Pod{UID: "u", Name: "edge-2", Err: "timed out"})
 	in := statsInput(t, testutil.Now)
-	r := Evaluate(in, Upstream(), Runtime{Collected: collected(testutil.Now, gw)})
+	r := Evaluate(in, Upstream(), freshMetrics(Runtime{Collected: collected(testutil.Now, gw)}))
 	if f := findingOn(r, CodeXDSRejected); f != nil {
 		t.Fatalf("proxy stats alone raised 001: %+v", f)
 	}
-	in.Metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
-	f := findingOn(Evaluate(in, Upstream(), Runtime{Collected: collected(testutil.Now, gw)}), CodeXDSRejected)
+	met := healthyWorld().metrics
+	met.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
+	f := findingOn(Evaluate(in, Upstream(), withMetrics(Runtime{Collected: collected(testutil.Now, gw)}, in.Install.ID(), met, 0)), CodeXDSRejected)
 	if f == nil {
 		t.Fatal("no 001")
 	}
@@ -272,7 +273,7 @@ func slicesContains(rs []objects.Ref, r objects.Ref) bool {
 func TestProxyStatsStayInTheirInstall(t *testing.T) {
 	st := NewStates()
 	for _, at := range []time.Duration{0, 61 * time.Second} {
-		r := Evaluate(statsInput(t, testutil.Now.Add(at)), Upstream(), Runtime{States: st, Collected: collected(testutil.Now, edgeStats(statsPod("edge-0", nil)))})
+		r := Evaluate(statsInput(t, testutil.Now.Add(at)), Upstream(), freshMetrics(Runtime{States: st, Collected: collected(testutil.Now, edgeStats(statsPod("edge-0", nil)))}))
 		if f := findingOn(r, CodeProxyDisconnected); f != nil {
 			t.Fatalf("other install's proxy: %+v", f)
 		}
@@ -285,7 +286,7 @@ func TestProxyStatsOutageRestartsTheAge(t *testing.T) {
 	stats := collected(testutil.Now, edgeStats(statsPod("edge-0", disconnected)))
 	off := collect.Snapshot{Values: map[string]collect.Value{proxystats.Key: {State: collect.Failing, Reason: "collector stopped"}}}
 	run := func(at time.Duration, col collect.Snapshot) *Finding {
-		return findingOn(Evaluate(statsInput(t, testutil.Now.Add(at)), Upstream(), Runtime{States: st, Collected: col}), CodeProxyDisconnected)
+		return findingOn(Evaluate(statsInput(t, testutil.Now.Add(at)), Upstream(), freshMetrics(Runtime{States: st, Collected: col})), CodeProxyDisconnected)
 	}
 	run(0, stats)
 	run(30*time.Second, off)

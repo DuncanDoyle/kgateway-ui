@@ -34,7 +34,7 @@ var allowed = map[string]string{
 	"pkg/cache/services.go":         "Services and EndpointSlices, cut down at the informer",
 	"pkg/ctrllogs/stream.go":        "follows controller Pod logs",
 	"pkg/ctrlmetrics/scrape.go":     "scrapes controller Pods",
-	"pkg/extension/pack.go":         "wraps detectors, which detect controller Deployments",
+	"pkg/extension/pack.go":         "wraps detectors, which detect controller Deployments; gives pack collectors the client",
 	"pkg/health/checks.go":          "controller and proxy Deployment readiness",
 	"pkg/install/assign.go":         "Namespace objects for scope",
 	"pkg/install/install.go":        "Install carries the controller Deployment and Pods",

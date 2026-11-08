@@ -60,7 +60,7 @@ func (w *world) engine(tb testing.TB, clk *clocktesting.FakeClock, mut ...func(*
 	ev := make(chan LoopEvent, 1<<16)
 	cfg := config(nil, metricsAt(testutil.Now), nil)
 	// Static metrics never go stale here, as a scraped cluster's do not.
-	cfg.Snapshots, cfg.Triggers, cfg.MetricsMaxAge = w.c, w.sig, 0
+	cfg.Snapshots, cfg.Triggers, cfg.Collected = w.c, w.sig, served(metricsAt(testutil.Now), 0)
 	if clk != nil {
 		cfg.Clock = clk
 	}
@@ -198,8 +198,7 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 	clk := testutil.FakeClock()
 	w := newWorld(t, scale.Large, clk.Now)
 	s := newScraping(managedBody, maxAge)
-	s.col.OnResult = w.sig
-	e, ev := w.engine(t, clk, func(c *Config) { c.Metrics, c.MetricsMaxAge = s.col, maxAge })
+	e, ev := w.engine(t, clk, s.wire)
 	runLoop(t, e, safety)
 	awaitKind(t, ev, EvPublished) // the start-up publication, before any scrape
 	awaitKind(t, ev, EvArmed)
@@ -220,10 +219,10 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 }
 
 // tick is the confirm tick's work on an idle loop: the live source,
-// fingerprint, metrics identity and kinds, compared and swapped in.
+// fingerprint, collected print and kinds, compared and swapped in.
 func tick(tb testing.TB, e *Engine) {
 	p := e.Current()
-	if !e.liveSource(p, time.Now()).Equal(p.Source) || !e.confirm(p, p.ConfirmedAt) {
+	if !e.liveSource().Equal(p.Source) || !e.confirm(p, p.ConfirmedAt) {
 		tb.Fatal("the idle tick did not confirm")
 	}
 }
@@ -279,7 +278,7 @@ func largeEngine(snap *cache.Snapshot, tier scale.Tier) (*Engine, *time.Time) {
 	now := new(time.Time)
 	*now = testutil.Now
 	cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return *now })
-	cfg.MetricsMaxAge = 0
+	cfg.Collected = served(metricsAt(testutil.Now), 0)
 	e := New(cfg)
 	if tier.Contradict {
 		e.Compute()
@@ -307,8 +306,8 @@ func TestBudgetWarmRecompute(t *testing.T) {
 				e, w, fc = measureEngine(t)
 				snap, *now = e.cfg.Snapshots.Snapshot(), fc.Now()
 				fresh = func() *Engine {
-					cfg := config(snap, w.Metrics, func() time.Time { return testutil.Now })
-					cfg.MetricsMaxAge, cfg.Collected = 0, w.Store.Snapshot
+					cfg := config(snap, metricsAt(testutil.Now), func() time.Time { return testutil.Now })
+					cfg.Collected = w.Store.Snapshot
 					return New(cfg)
 				}
 			} else {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
@@ -92,7 +91,7 @@ func TestClassOnlyInstallsAtTheEngine(t *testing.T) {
 // available for this controller, before any other reason, and raise nothing.
 func TestChecksOnAClassOnlyInstall(t *testing.T) {
 	cfg := classOnlyConfig(twoControllers(t), true)
-	cfg.Metrics = ctrlmetrics.Static{}
+	cfg.Collected = nil // no controller metrics
 	cfg.Pinned = "example.com~2Fgateway"
 	m := New(cfg).Compute()
 	if len(m.Installs) != 1 {

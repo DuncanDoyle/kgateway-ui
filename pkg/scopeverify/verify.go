@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
@@ -20,14 +21,13 @@ import (
 
 // Input is what a Verifier needs for one install.
 type Input struct {
-	Install    install.Resolved
-	Snapshot   *cache.Snapshot
-	Served     []kinds.Served
-	Metrics    ctrlmetrics.Result
-	HasMetrics bool
-	// MetricsMaxAge is the age beyond which Metrics is stale; zero means no limit.
-	MetricsMaxAge time.Duration
-	Now           time.Time
+	Install  install.Resolved
+	Snapshot *cache.Snapshot
+	Served   []kinds.Served
+	// Collected are the collector values this computation read; a verifier
+	// reads its controller's data from them, such as ctrlmetrics.Key.
+	Collected collect.Snapshot
+	Now       time.Time
 	// Views decodes routes to count their parentRefs; nil decodes directly.
 	Views objects.Decoder
 }
@@ -88,20 +88,22 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 		delete(v.first, id)
 		return Result{Reason: why}
 	}
+	cv, _ := in.Collected.Get(ctrlmetrics.Key)
+	met, maxAge, has := ctrlmetrics.Lookup(cv, id)
 	switch {
-	case !in.HasMetrics || in.Metrics.Err != "":
+	case !has || met.Err != "":
 		return unavailable("controller metrics unavailable")
-	case in.Metrics.Stale(in.Now, in.MetricsMaxAge):
+	case met.Stale(in.Now, maxAge):
 		return unavailable("controller metrics are stale")
 	case in.Install.Scope.Mode == install.ScopeUnknown:
 		return unavailable("controller scope unknown")
-	case slices.ContainsFunc(in.Metrics.Metrics.PerPod, func(p ctrlmetrics.PodMetrics) bool { return p.Dropped > 0 }):
+	case slices.ContainsFunc(met.Metrics.PerPod, func(p ctrlmetrics.PodMetrics) bool { return p.Dropped > 0 }):
 		// Once updates were dropped, resources_managed is invalid until a restart (design §8.1).
 		return unavailable("scope verification unavailable: the controller dropped metric updates")
 	}
 	ui, skip := uiCounts(in)
 	// An absent family means 0 (D-012); it is unavailable only when the UI expects more.
-	if !in.Metrics.Metrics.ManagedPresent {
+	if !met.Metrics.ManagedPresent {
 		if len(ui) > 0 {
 			return unavailable(ctrlmetrics.ResourcesManaged + " not found in controller metrics")
 		}
@@ -113,7 +115,7 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 		keys[k] = true
 	}
 	exp := experimentalLabels(in)
-	for k := range in.Metrics.Metrics.Managed {
+	for k := range met.Metrics.Managed {
 		if counted(k.Resource, in.Served) && !skip[k] && !exp[k.Resource] {
 			keys[k] = true
 		}
@@ -122,7 +124,7 @@ func (v *ManagedCountVerifier) Verify(in Input) Result {
 	next := map[ctrlmetrics.ManagedKey]time.Time{}
 	res := Result{Available: true}
 	for k := range keys {
-		u, c := ui[k], in.Metrics.Metrics.Managed[k]
+		u, c := ui[k], met.Metrics.Managed[k]
 		if u == c {
 			continue
 		}

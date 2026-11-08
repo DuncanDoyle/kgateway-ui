@@ -1,5 +1,23 @@
 // Package ctrlmetrics scrapes and interprets the kgateway controller's
 // Prometheus metrics. All metric names the UI depends on are declared here.
+//
+// The metrics are a kgateway-pack collector value: one [Results] under [Key]
+// in the collected store. Checks, the scope verifier and the reported version
+// read it from there; nothing else carries metrics.
+//
+// A one-shot caller, such as a CLI built on pkg/setup, collects once:
+//
+//  1. Build with setup.Build, start the cache and wait as the setup package
+//     says: Settled, then each optional watch and list-only kind OK or failed.
+//     Take one Snapshot.
+//  2. install.Discover(snap, reg.Detectors), keeping the installs whose Impl
+//     is "kgateway".
+//  3. Publish(cfg.Collected, CollectOnce(ctx, PodProxyScraper{Kube: kube},
+//     insts, setup.MetricsMaxAge(interval))).
+//  4. Set cfg.Engine.Snapshots to return that snapshot, then
+//     engine.New(cfg.Engine).Compute().
+//
+// Without step 3 the checks that read metrics report them not collected.
 package ctrlmetrics
 
 import (

@@ -1,11 +1,18 @@
 package extension
 
 import (
+	"time"
+
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/clock"
 
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
+	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
@@ -26,6 +33,9 @@ type Impl struct {
 	RulesFor func(version string) computed.Selection
 	// Version is the install's implementation version, the input of RulesFor.
 	Version func(install.Install) string
+	// Reported reads the version the controller reports from the collected
+	// values; false keeps the last one (engine.Hooks.Reported).
+	Reported func(install.Install, collect.Snapshot) (string, bool)
 	// ExperimentalOnly reports whether the controller watches served kind k only
 	// with experimental Gateway API features on.
 	ExperimentalOnly func(k kinds.Served, inst install.Install) bool
@@ -43,6 +53,37 @@ type Pack struct {
 	Detectors []install.Detector
 	Impl      Impl
 	Checks    []health.Check
+	// Collectors build the pack's collectors when the app is built. Their names
+	// are reserved: a WithCollectors collector cannot take them.
+	Collectors []func(CollectorEnv) Collector
+}
+
+// CollectorEnv is what the app builds a pack's collectors with (Phase 5 design
+// §7.1). A factory only builds, so it may get a zero CollectorEnv to tell its
+// name; the collector starts in Start.
+type CollectorEnv struct {
+	// Kube reads Pods, their logs and, outside the cluster, pods/proxy.
+	Kube kubernetes.Interface
+	// InCluster reads Pod IPs directly; otherwise through pods/proxy.
+	InCluster bool
+	// Scraper replaces the controller metrics scraper InCluster selects; nil keeps it.
+	Scraper ctrlmetrics.Scraper
+	// Interval is the collection interval; MaxAge, 3 × Interval, is when a value is stale.
+	Interval, MaxAge time.Duration
+	// Clock drives the collectors; nil means the real clock.
+	Clock clock.WithTicker
+	// Installs and Current return the published model's installs and the model.
+	Installs func() []install.Install
+	Current  func() *engine.Published
+	// Discovered is closed after the first model with an install over a settled cache.
+	Discovered <-chan struct{}
+	// Collected is the store the collectors publish to; one may read another's values.
+	Collected *collect.Store
+	// NoProxyStats turns proxy stats off; ControllerLogs turns log reading on.
+	NoProxyStats, ControllerLogs bool
+	// Pack is the pack's name and Impl its hooks, read when the app is built.
+	Pack string
+	Impl Impl
 }
 
 // WithPack adds p: its kinds, its detectors (tried before those already
@@ -66,7 +107,28 @@ func WithPack(p Pack) Option {
 		r.Kinds = kinds.Dedupe(append(r.Kinds, p.Kinds...))
 		r.Detectors = append(stamp(p.Name, p.Detectors), r.Detectors...)
 		r.Checks = append(r.Checks, p.Checks...)
+		for _, f := range p.Collectors {
+			r.packCollectors = append(r.packCollectors, packCollector{pack: p.Name, build: f})
+		}
 	}
+}
+
+// packCollector is one pack's collector factory.
+type packCollector struct {
+	pack  string
+	build func(CollectorEnv) Collector
+}
+
+// PackCollectors builds every pack's collectors with env, in registration
+// order, each with its pack's name and hooks.
+func (r *Registry) PackCollectors(env CollectorEnv) []Collector {
+	out := make([]Collector, 0, len(r.packCollectors))
+	for _, pc := range r.packCollectors {
+		e := env
+		e.Pack, e.Impl = pc.pack, r.ImplFor(install.Install{Impl: pc.pack})
+		out = append(out, pc.build(e))
+	}
+	return out
 }
 
 // ImplFor returns the hooks of the pack that claimed i, read from the Registry
@@ -86,21 +148,22 @@ func (r *Registry) ImplFor(i install.Install) Impl {
 
 // currentImpl is the default pack's hooks, held in the Registry fields.
 func (r *Registry) currentImpl() Impl {
-	return Impl{Scope: r.Scope, Verifier: r.Verifier, Settings: r.settings, RulesFor: r.RulesFor, Version: r.version,
+	return Impl{Scope: r.Scope, Verifier: r.Verifier, Settings: r.settings, RulesFor: r.RulesFor, Version: r.version, Reported: r.reported,
 		ExperimentalOnly: r.experimentalOnly, ProxyMode: r.ProxyMode, Process: r.Process, ProxyStats: r.ProxyStats, Commands: r.Commands}
 }
 
 // setImpl makes im the default pack's hooks.
 func (r *Registry) setImpl(im Impl) {
-	r.Scope, r.Verifier, r.settings, r.RulesFor, r.version = im.Scope, im.Verifier, im.Settings, im.RulesFor, im.Version
+	r.Scope, r.Verifier, r.settings, r.RulesFor, r.version, r.reported = im.Scope, im.Verifier, im.Settings, im.RulesFor, im.Version, im.Reported
 	r.experimentalOnly, r.ProxyMode, r.Process, r.ProxyStats, r.Commands = im.ExperimentalOnly, im.ProxyMode, im.Process, im.ProxyStats, im.Commands
 }
 
 // kgatewayPack is pack #1, built from pkg/kgateway.
 func kgatewayPack() Pack {
 	return Pack{Name: kgateway.Name, Kinds: kgateway.Kinds(), Detectors: []install.Detector{kgateway.Detector()}, Checks: kgateway.Checks(),
-		Impl: Impl{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version,
-			ExperimentalOnly: kgateway.ExperimentalOnly, ProxyMode: kgateway.ProxyMode(), Process: process.Kube{}, Commands: diagnose.Kubectl{}}}
+		Impl: Impl{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version, Reported: kgateway.Reported,
+			ExperimentalOnly: kgateway.ExperimentalOnly, ProxyMode: kgateway.ProxyMode(), Process: process.Kube{}, Commands: diagnose.Kubectl{}},
+		Collectors: []func(CollectorEnv) Collector{metricsCollector, proxyStatsCollector, controllerLogsCollector}}
 }
 
 // stamp wraps ds so the installs they claim carry pack, unless a detector sets

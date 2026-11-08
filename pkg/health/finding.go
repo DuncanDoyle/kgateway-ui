@@ -9,7 +9,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -159,12 +158,7 @@ type Input struct {
 	// KindsChange is how the kinds served now differ from Served, which the cache watches.
 	KindsChange kinds.Change
 	// Catalog is every kind the API server serves; the zero Catalog knows none.
-	Catalog    kinds.Catalog
-	Metrics    ctrlmetrics.Result
-	HasMetrics bool
-	// MetricsMaxAge is the age beyond which Metrics is stale (3 × the metrics
-	// interval); zero means no limit.
-	MetricsMaxAge time.Duration
+	Catalog kinds.Catalog
 	// FirstSeen returns when the engine first saw u's current generation; the
 	// grace period runs from it. Nil means u's creation time.
 	FirstSeen func(u *unstructured.Unstructured) time.Time

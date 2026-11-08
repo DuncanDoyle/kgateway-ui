@@ -11,7 +11,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -20,9 +19,6 @@ import (
 )
 
 // noMetrics has no result for any install.
-type noMetrics struct{}
-
-func (noMetrics) Get(string) (ctrlmetrics.Result, bool) { return ctrlmetrics.Result{}, false }
 
 // Codex 3: with the real informer handler blocked after the store took an
 // update, the confirm tick refuses on the store fingerprint, and the
@@ -53,7 +49,7 @@ func TestBlockedHandlerStillRefusesAndPublishes(t *testing.T) {
 
 	ev := make(chan engine.LoopEvent, 256)
 	e := engine.New(engine.Config{Snapshots: c, Served: served, Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: noMetrics{},
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
 		Checks: health.Upstream(), Triggers: sig, Clock: clk, OnLoop: func(l engine.LoopEvent) { ev <- l }})
 	stopped := make(chan struct{})
 	go func() {

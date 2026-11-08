@@ -18,7 +18,6 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -37,7 +36,6 @@ var (
 // an undeclared optional watch gets other data and a failing access.
 // Install, Platform, ProxyMode, Synced and TakenAt stay; ShiftNow moves Now.
 func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.Input {
-	rng := rand.New(rand.NewSource(seed)) // nolint:gosec // seeded test data, not security
 	out := in
 	if in.Snapshot != nil {
 		out.Snapshot = dropUndeclaredKinds(in, set)
@@ -47,10 +45,6 @@ func PerturbUndeclared(in health.Input, set health.InputSet, seed int64) health.
 		out.Owned = nil
 		out.Assignment = in.Assignment
 		out.Assignment.PerInstall, out.Assignment.Ambiguous, out.Assignment.Unwatched = nil, nil, nil
-	}
-	if !set.Metrics {
-		out.Metrics = ctrlmetrics.Result{CollectedAt: in.Now.Add(-time.Duration(1+rng.Intn(1000)) * time.Hour), Err: fmt.Sprintf("perturbed %d", seed)}
-		out.HasMetrics = !in.HasMetrics
 	}
 	if !set.Verify {
 		out.Verify = scopeverify.Result{Available: !in.Verify.Available, Reason: fmt.Sprintf("perturbed %d", seed),

@@ -4,7 +4,9 @@
 //
 // Nothing here waits. The time-based checks (restart hold, grace periods,
 // scope-verifier persistence) read as pending in a single pass. A fresh
-// metrics result reads OK, and Next marks when it goes stale.
+// metrics result reads OK, and Next marks when it goes stale. Controller
+// metrics reach the engine only through Config.Collected; the ctrlmetrics
+// package documents the one-shot sequence (CollectOnce, then Publish).
 // [engine.Model.Next] and each [health.Report.Next] say when computing again
 // can change the result. Waiting, and for how long, is the caller's.
 //
@@ -21,7 +23,7 @@
 // Controller logs and proxy stats come from long-running collectors that
 // pkg/app runs and this package does not. A caller without them gets those
 // inputs as not read, never as healthy (D-006): controllerLogs reads as not
-// read, and the checks over proxy stats report them not collected.
+// read, and the checks over proxy stats or controller metrics report them not collected.
 package setup
 
 import (
@@ -37,16 +39,14 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
-	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/platform"
-	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 	"github.com/DuncanDoyle/snellius/pkg/trigger"
 )
@@ -81,11 +81,14 @@ type Options struct {
 	Clock clock.WithTicker
 }
 
-// Config is what Build returns. The caller creates the cache from Cache, sets
-// Engine.Snapshots to it and, to read controller metrics, Engine.Metrics.
+// Config is what Build returns. The caller creates the cache from Cache and
+// sets Engine.Snapshots to it.
 type Config struct {
 	Cache  cache.Config
 	Engine engine.Config
+	// Collected is the store Engine.Collected reads. pkg/app's collectors
+	// publish to it; a one-shot caller publishes controller metrics with ctrlmetrics.Publish.
+	Collected *collect.Store
 	// Kinds re-resolves the served kinds and the Catalog; Build has refreshed it
 	// once. A long-running caller runs it; a one-shot caller can ignore it.
 	Kinds *kinds.Monitor
@@ -101,7 +104,6 @@ func MetricsMaxAge(interval time.Duration) time.Duration { return 3 * interval }
 
 // Build validates o and reg, resolves the served kinds and lists the Catalog
 // once, and returns the cache and engine configuration pkg/app runs on.
-// Engine.Metrics is an empty [ctrlmetrics.Static] until the caller sets it;
 // Engine.Snapshots is the caller's to set.
 func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 	if o.MetricsInterval <= 0 {
@@ -124,10 +126,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	// Core collectors publish under these names; an extension must not take them.
-	for _, name := range []string{proxystats.CollectorName, ctrllogs.CollectorName} {
-		if slices.ContainsFunc(reg.Collectors(), func(c extension.Collector) bool { return c.Name() == name }) {
-			return Config{}, fmt.Errorf("collector name %q is reserved for a core collector", name)
+	// Pack collectors publish under their names; an extension must not take them.
+	for _, pc := range reg.PackCollectors(extension.CollectorEnv{}) {
+		if slices.ContainsFunc(reg.Collectors(), func(c extension.Collector) bool { return c.Name() == pc.Name() }) {
+			return Config{}, fmt.Errorf("collector name %q is reserved for a pack collector", pc.Name())
 		}
 	}
 	plat := platform.Kubernetes()
@@ -153,6 +155,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 	if o.Clock != nil {
 		now = o.Clock.Now
 	}
+	collected := collect.New(changes, now)
 	verifier := reg.Verifier
 	if verifier == nil {
 		// A mismatch must outlast two collections before it is reported (design §4.4).
@@ -162,16 +165,18 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 		Cache: cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel,
 			ProxyPodSelectors: proxySel, Events: !o.NoEvents, CRDs: !o.NoCRDs, Endpoints: !o.NoEndpoints, Metadata: c.Metadata, Changes: changes, Now: now},
 		Engine: engine.Config{Served: served, KindsChange: mon.Change, Catalog: mon.Catalog, Detectors: reg.Detectors, Scope: reg.Scope,
-			Verifier: verifier, Metrics: ctrlmetrics.Static{}, Checks: reg.Checks, Pinned: pinned, Platform: plat,
-			MetricsMaxAge: MetricsMaxAge(o.MetricsInterval), ProxyMode: reg.ProxyMode, RulesFor: reg.RulesFor, Process: reg.Process,
+			Verifier: verifier, Checks: reg.Checks, Pinned: pinned, Platform: plat,
+			ProxyMode: reg.ProxyMode, RulesFor: reg.RulesFor, Process: reg.Process, Collected: collected.Snapshot,
 			HooksFor: func(i install.Install) engine.Hooks {
 				im := reg.ImplFor(i)
-				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version, ExperimentalOnly: im.ExperimentalOnly}
+				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version, Reported: im.Reported,
+					ExperimentalOnly: im.ExperimentalOnly}
 			},
 			Triggers: changes, Clock: o.Clock, ClassOnly: o.ClassOnlyInstalls,
 			// The other bounds stay zero: the walker gives each its default.
 			DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap}},
-		Kinds:   mon,
-		Changes: changes,
+		Kinds:     mon,
+		Changes:   changes,
+		Collected: collected,
 	}, nil
 }

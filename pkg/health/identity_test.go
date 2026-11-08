@@ -42,7 +42,7 @@ func busyWorld(t *testing.T) Input {
 			Conds: []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionFalse, "Invalid")}}),
 		testutil.TrafficPolicy("shop", "lonely"),
 		testutil.TrafficPolicy("shop", "ports", portAncestor(gw, 80), portAncestor(gw, 443)))
-	w.metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
+	w.metrics = busyMetrics()
 	w.deploys[1] = testutil.ProxyDeployment("infra", "edge", 2, 1)
 	w.access = map[schema.GroupVersionResource]cache.Access{cache.PodsGVR: {Err: "denied"}, cache.DeploymentsGVR: {Err: "denied"}}
 	w.computed = &computed.Views{RuleSet: "kgateway-2.4", Checks: []computed.CheckResult{
@@ -51,6 +51,18 @@ func busyWorld(t *testing.T) Input {
 	in.Verify = scopeverify.Result{Available: true, Mismatches: []scopeverify.Mismatch{
 		{Namespace: "shop", Resource: "HTTPRoute", UI: 2, Controller: 1}, {Namespace: "shop", Resource: "GRPCRoute", UI: 2, Controller: 1}}}
 	return in
+}
+
+// busyMetrics are busyWorld's controller metrics: infra/edge rejects.
+func busyMetrics() *ctrlmetrics.Result {
+	m := healthyWorld().metrics
+	m.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
+	return m
+}
+
+// busyRuntime is rt with busyMetrics for busyWorld's install.
+func busyRuntime(rt Runtime) Runtime {
+	return withMetrics(rt, "kgw.kgateway", busyMetrics(), testMaxAge)
 }
 
 // portAncestor is a rejecting ancestor entry for gw at port.
@@ -106,13 +118,13 @@ func TestIDStableAcrossRecomputesAndRestart(t *testing.T) {
 		}
 		return out
 	}
-	in := busyWorld(t)
+	in, met := busyWorld(t), busyMetrics()
 	states := NewStates()
-	first := ids(Evaluate(in, Upstream(), Runtime{States: states}))
+	first := ids(Evaluate(in, Upstream(), withMetrics(Runtime{States: states}, in.Install.ID(), met, testMaxAge)))
 	in.Now = in.Now.Add(time.Minute)
-	in.Metrics.CollectedAt, in.Snapshot.TakenAt = in.Now, in.Now
-	again := ids(Evaluate(in, Upstream(), Runtime{States: states}))
-	restarted := ids(Evaluate(busyWorld(t), Upstream(), Runtime{States: NewStates()}))
+	met.CollectedAt, in.Snapshot.TakenAt = in.Now, in.Now
+	again := ids(Evaluate(in, Upstream(), withMetrics(Runtime{States: states}, in.Install.ID(), met, testMaxAge)))
+	restarted := ids(Evaluate(busyWorld(t), Upstream(), withMetrics(Runtime{States: NewStates()}, in.Install.ID(), busyMetrics(), testMaxAge)))
 	if len(first) == 0 {
 		t.Fatal("busy world has no findings")
 	}
@@ -285,9 +297,11 @@ func droppedBy(parent string) *world {
 // No two findings of one install share an id, in any fixture world.
 func TestIDUniqueWithinInstall(t *testing.T) {
 	worlds := GuardWorlds(t)
-	worlds["busy"] = busyWorld(t)
-	for name, in := range worlds {
-		rep := Evaluate(in, Upstream(), Runtime{States: NewStates()})
+	worlds["busy"] = GuardWorld{In: busyWorld(t), RT: busyRuntime(Runtime{})}
+	for name, w := range worlds {
+		rt := w.RT
+		rt.States = NewStates()
+		rep := Evaluate(w.In, Upstream(), rt)
 		seen := map[string]Finding{}
 		for _, f := range rep.Findings {
 			if prev, dup := seen[f.ID]; dup {
@@ -296,7 +310,7 @@ func TestIDUniqueWithinInstall(t *testing.T) {
 			seen[f.ID] = f
 		}
 	}
-	if n := len(Evaluate(worlds["busy"], Upstream(), Runtime{}).Findings); n < 15 {
+	if n := len(Evaluate(worlds["busy"].In, Upstream(), worlds["busy"].RT).Findings); n < 15 {
 		t.Fatalf("busy world has %d findings; it must raise most codes", n)
 	}
 }
@@ -306,7 +320,8 @@ func TestIDUniqueWithinInstall(t *testing.T) {
 func TestUIDerivedSinceSurvivesRecomputeAndResetsOnRestart(t *testing.T) {
 	w := healthyWorld()
 	w.metrics.Metrics.Rejects[ctrlmetrics.GatewayKey{Namespace: "infra", Name: "edge"}] = 1
-	in := w.input(t)
+	in, met := w.input(t), w.metrics
+	rt := func(st *States) Runtime { return withMetrics(Runtime{States: st}, in.Install.ID(), met, testMaxAge) }
 	xds := func(rep Report) *Finding {
 		for i := range rep.Findings {
 			if rep.Findings[i].Code == CodeXDSRejected {
@@ -317,31 +332,31 @@ func TestUIDerivedSinceSurvivesRecomputeAndResetsOnRestart(t *testing.T) {
 	}
 	states := NewStates()
 	t0 := in.Now
-	first := xds(Evaluate(in, Upstream(), Runtime{States: states}))
+	first := xds(Evaluate(in, Upstream(), rt(states)))
 	if first == nil || first.Since == nil || !first.Since.Equal(t0) {
 		t.Fatalf("first KGWUI-001 %+v, want since %v", first, t0)
 	}
-	in.Now, in.Metrics.CollectedAt = t0.Add(time.Minute), t0.Add(time.Minute)
-	if f := xds(Evaluate(in, Upstream(), Runtime{States: states})); f == nil || !f.Since.Equal(t0) || f.ID != first.ID {
+	in.Now, met.CollectedAt = t0.Add(time.Minute), t0.Add(time.Minute)
+	if f := xds(Evaluate(in, Upstream(), rt(states))); f == nil || !f.Since.Equal(t0) || f.ID != first.ID {
 		t.Fatalf("recomputed KGWUI-001 %+v, want since %v", f, t0)
 	}
 	// Cleared: the entry is pruned, so a later reject starts again.
-	in.Metrics.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{}
-	in.Now, in.Metrics.CollectedAt = t0.Add(2*time.Minute), t0.Add(2*time.Minute)
-	Evaluate(in, Upstream(), Runtime{States: states})
+	met.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{}
+	in.Now, met.CollectedAt = t0.Add(2*time.Minute), t0.Add(2*time.Minute)
+	Evaluate(in, Upstream(), rt(states))
 	if _, kept := sinceOf(states, "xDS rejects", first.ID); kept {
 		t.Fatal("since entry of a finding no longer returned must be pruned")
 	}
-	in.Metrics.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
+	met.Metrics.Rejects = map[ctrlmetrics.GatewayKey]float64{{Namespace: "infra", Name: "edge"}: 1}
 	t3 := t0.Add(3 * time.Minute)
-	in.Now, in.Metrics.CollectedAt = t3, t3
-	if f := xds(Evaluate(in, Upstream(), Runtime{States: states})); f == nil || !f.Since.Equal(t3) {
+	in.Now, met.CollectedAt = t3, t3
+	if f := xds(Evaluate(in, Upstream(), rt(states))); f == nil || !f.Since.Equal(t3) {
 		t.Fatalf("returned KGWUI-001 %+v, want since %v", f, t3)
 	}
 	// A restart is a new States.
 	t4 := t0.Add(4 * time.Minute)
-	in.Now, in.Metrics.CollectedAt = t4, t4
-	if f := xds(Evaluate(in, Upstream(), Runtime{States: NewStates()})); f == nil || !f.Since.Equal(t4) {
+	in.Now, met.CollectedAt = t4, t4
+	if f := xds(Evaluate(in, Upstream(), rt(NewStates()))); f == nil || !f.Since.Equal(t4) {
 		t.Fatalf("KGWUI-001 after a restart %+v, want since %v", f, t4)
 	}
 

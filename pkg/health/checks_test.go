@@ -84,17 +84,19 @@ func (w *world) input(t *testing.T) Input {
 	}
 	a := install.Assign(snap, served, []install.Resolved{res}, nil)
 	hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
-		MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, Platform: w.platform}
-	if w.metrics != nil {
-		hi.Metrics, hi.HasMetrics = *w.metrics, true
-	}
+		Verify: scopeverify.Result{Available: true}, Platform: w.platform}
 	hi.FirstSeen, hi.Computed = w.firstSeen, w.computed
 	return hi
 }
 
 func (w *world) report(t *testing.T) Report {
 	t.Helper()
-	return Evaluate(w.input(t), Upstream(), Runtime{})
+	return Evaluate(w.input(t), Upstream(), w.runtime(Runtime{}))
+}
+
+// runtime is rt with w's controller metrics for its install.
+func (w *world) runtime(rt Runtime) Runtime {
+	return withMetrics(rt, "kgw.kgateway", w.metrics, testMaxAge)
 }
 
 // has reports whether r has a finding with code on res; an empty sev or res matches any.
@@ -517,9 +519,9 @@ func TestPolicyOfSharedControllerNameIsAbsentFromOtherInstall(t *testing.T) {
 	a := install.Assign(snap, served, insts, nil)
 	for _, res := range insts {
 		hi := Input{Install: res, Owned: a.PerInstall[res.ID()], Assignment: a, Snapshot: snap, Served: served, Now: testutil.Now,
-			MetricsMaxAge: 30 * time.Second, Verify: scopeverify.Result{Available: true}, HasMetrics: true,
-			Metrics: ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}}
-		r := Evaluate(hi, Upstream(), Runtime{})
+			Verify: scopeverify.Result{Available: true}}
+		met := ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
+		r := Evaluate(hi, Upstream(), withMetrics(Runtime{}, res.ID(), &met, testMaxAge))
 		if r.State != StateHealthy || len(r.Findings) != 0 {
 			t.Fatalf("%s: state=%s findings=%+v", res.ID(), r.State, r.Findings)
 		}

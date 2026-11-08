@@ -120,8 +120,9 @@ func newStepper(t *testing.T, w pworld) *stepper {
 	s := &stepper{t: t, now: testutil.Now}
 	s.met = ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
 	s.src = &fakeSource{base: w.snapshot(t), print: w.print(), now: func() time.Time { return s.now }}
-	cfg := config(nil, metricsFunc(func(string) (ctrlmetrics.Result, bool) { return s.met, true }), func() time.Time { return s.now })
-	cfg.Snapshots, cfg.MetricsMaxAge = s.src, 0
+	met := metricsFunc(func(string) (ctrlmetrics.Result, bool) { return s.met, true })
+	cfg := config(nil, met, func() time.Time { return s.now })
+	cfg.Snapshots, cfg.Collected = s.src, served(met, 0)
 	s.e = New(cfg)
 	return s
 }
@@ -484,8 +485,9 @@ func newDStepper(t *testing.T, mut func(*Config)) *stepper {
 	s := &stepper{t: t, now: testutil.Now}
 	s.met = ctrlmetrics.Result{CollectedAt: testutil.Now, Metrics: ctrlmetrics.Metrics{Rejects: map[ctrlmetrics.GatewayKey]float64{}, ManagedPresent: true}}
 	s.src = &fakeSource{base: dworld{}.snapshot(t), print: fprint(1, accessOK), now: func() time.Time { return s.now }}
-	cfg := config(nil, metricsFunc(func(string) (ctrlmetrics.Result, bool) { return s.met, true }), func() time.Time { return s.now })
-	cfg.Snapshots, cfg.MetricsMaxAge = s.src, 0
+	met := metricsFunc(func(string) (ctrlmetrics.Result, bool) { return s.met, true })
+	cfg := config(nil, met, func() time.Time { return s.now })
+	cfg.Snapshots, cfg.Collected = s.src, served(met, 0)
 	if mut != nil {
 		mut(&cfg)
 	}

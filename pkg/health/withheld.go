@@ -98,27 +98,30 @@ type withheldCheck struct{}
 func (withheldCheck) Name() string { return "withheld config" }
 
 // Inputs implements Check: the window and staleness end through WakeAt.
-func (withheldCheck) Inputs() InputSet { return InputSet{Owned: true, Metrics: true} }
+func (withheldCheck) Inputs() InputSet {
+	return InputSet{Owned: true, Collected: []string{ctrlmetrics.Key}}
+}
 
 // Run implements Check. Missing, failed or stale metrics are not available and
 // leave the Store as it is; a scrape without the 2.5 families is not on version.
 func (c withheldCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	met, maxAge, has := controllerMetrics(ctx)
 	switch {
-	case !in.HasMetrics:
+	case !has:
 		return nil, NotAvailable(c.Name(), AvailFailing, withheldNotCollected, in.Now)
-	case in.Metrics.Err != "":
-		return nil, NotAvailable(c.Name(), AvailFailing, in.Metrics.Err, in.Now)
-	case in.Metrics.Stale(in.Now, in.MetricsMaxAge):
-		return nil, NotAvailable(c.Name(), AvailFailing, fmt.Sprintf(xdsStaleError, in.Metrics.CollectedAt.UTC().Format(time.RFC3339)), in.Now)
+	case met.Err != "":
+		return nil, NotAvailable(c.Name(), AvailFailing, met.Err, in.Now)
+	case met.Stale(in.Now, maxAge):
+		return nil, NotAvailable(c.Name(), AvailFailing, fmt.Sprintf(xdsStaleError, met.CollectedAt.UTC().Format(time.RFC3339)), in.Now)
 	}
-	if in.MetricsMaxAge > 0 {
-		ctx.WakeAt(in.Metrics.CollectedAt.Add(in.MetricsMaxAge + time.Nanosecond))
+	if maxAge > 0 {
+		ctx.WakeAt(met.CollectedAt.Add(maxAge + time.Nanosecond))
 	}
-	pods := in.Metrics.Metrics.PerPod
+	pods := met.Metrics.PerPod
 	if !slices.ContainsFunc(pods, func(p ctrlmetrics.PodMetrics) bool { return p.PerClientPresent }) {
 		ctx.State.Delete(withheldKey)
-		return nil, NotAvailable(c.Name(), AvailNotOnVersion, "", in.Metrics.CollectedAt)
+		return nil, NotAvailable(c.Name(), AvailNotOnVersion, "", met.CollectedAt)
 	}
 	old, _ := Load[*withheldState](ctx.State, withheldKey)
 	if old == nil {
@@ -154,7 +157,7 @@ func (c withheldCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				Message: releasedMessage, Detail: releasedText(ev.Releases), Key: []string{"released"}, Evidence: podRefs(in, ev.ReportedBy), Facts: ev})
 		}
 	}
-	res := ok(c.Name(), false, in.Metrics.CollectedAt)
+	res := ok(c.Name(), false, met.CollectedAt)
 	res.Detail = versionDisagreement(in)
 	return fs, res
 }

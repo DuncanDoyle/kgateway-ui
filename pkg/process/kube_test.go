@@ -24,7 +24,6 @@ import (
 	"github.com/DuncanDoyle/snellius/internal/testutil/scale"
 	"github.com/DuncanDoyle/snellius/pkg/api"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
-	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -106,10 +105,6 @@ type staticSnap struct{ s *cache.Snapshot }
 
 func (s staticSnap) Snapshot() *cache.Snapshot { return s.s }
 
-type noMetrics struct{}
-
-func (noMetrics) Get(string) (ctrlmetrics.Result, bool) { return ctrlmetrics.Result{}, false }
-
 // world is a synced snapshot of kgw/kgateway, its class, objs, deps and Pods;
 // events adds a running Events watch.
 func world(t *testing.T, objs []*unstructured.Unstructured, deps []*appsv1.Deployment, ctrlPods, proxyPods []*corev1.Pod, events bool) *cache.Snapshot {
@@ -140,7 +135,7 @@ func newEngine(snap *cache.Snapshot, checks []health.Check, detectors ...install
 		checks = health.Upstream()
 	}
 	return engine.New(engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: detectors,
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: noMetrics{},
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
 		Checks: checks, Now: func() time.Time { return testutil.Now }})
 }
 
@@ -466,7 +461,7 @@ func TestProcessDataKeysTheMemo(t *testing.T) {
 	runs := 0
 	src := &staticSnapPtr{s: snap}
 	e := engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: noMetrics{},
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
 		Checks: []health.Check{processCheck{declare: true, runs: &runs}}, Now: func() time.Time { return testutil.Now }})
 	first := e.Compute()
 	e.Compute()
@@ -534,7 +529,7 @@ func TestProcessOrderIsDeterministic(t *testing.T) {
 	runs := 0
 	src := &staticSnapPtr{s: fwd}
 	e := engine.New(engine.Config{Snapshots: src, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: noMetrics{},
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
 		Checks: []health.Check{processCheck{declare: true, runs: &runs}}, Now: func() time.Time { return testutil.Now }})
 	a := modelOf(t, e.Compute(), "kgw.kgateway").Process
 	src.s = &rev

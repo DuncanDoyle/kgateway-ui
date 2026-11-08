@@ -70,11 +70,11 @@ func okMetrics(ids ...string) fakeMetrics {
 
 // setup configures startWith. Zero values are the defaults.
 type setup struct {
-	served    []kinds.Served     // nil: every upstream kind
-	pinned    string             // pinned install ID
-	metrics   ctrlmetrics.Source // nil: okMetrics("kgw.kgateway")
-	immediate bool               // report scope mismatches on the second computation (persistence 0, not 1 h)
-	authz     Authorizer         // nil: AllowAll
+	served    []kinds.Served // nil: every upstream kind
+	pinned    string         // pinned install ID
+	metrics   metricsSource  // nil: okMetrics("kgw.kgateway")
+	immediate bool           // report scope mismatches on the second computation (persistence 0, not 1 h)
+	authz     Authorizer     // nil: AllowAll
 	// prepare runs on the fake clients before the cache starts (failure injection).
 	prepare func(dyn *dynamicfake.FakeDynamicClient, kube *kubefake.Clientset)
 	// wrapDynamic, when set, wraps the dynamic client the cache reads.
@@ -256,9 +256,9 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	t.Cleanup(cancel)
 	c.Start(ctx)
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
-		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
-		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
-		DelegationBounds: s.bounds, Collected: s.collected, Catalog: s.catalog, HooksFor: s.hooks, ClassOnly: s.classOnly})
+		Verifier: scopeverify.NewManagedCountVerifier(persist), Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
+		Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
+		DelegationBounds: s.bounds, Collected: served(s.metrics, 30*time.Second, s.collected), Catalog: s.catalog, HooksFor: s.hooks, ClassOnly: s.classOnly})
 	deadline := time.Now().Add(5 * time.Second)
 	// Optional watches do not hold back Synced; each must also have read or failed (setup Go doc).
 	for snap := e.Compute().Snapshot; !snap.Synced || !optionalRead(snap); snap = e.Compute().Snapshot {
@@ -329,9 +329,9 @@ func startWith(t *testing.T, s setup, objs ...runtime.Object) (*engine.Engine, *
 }
 
 // start is startWith with the common settings.
-func start(t *testing.T, served []kinds.Served, pinned string, m ctrlmetrics.Source, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
+func start(t *testing.T, kinds []kinds.Served, pinned string, m metricsSource, objs ...runtime.Object) (*engine.Engine, *httptest.Server, func(*corev1.Namespace)) {
 	t.Helper()
-	return startWith(t, setup{served: served, pinned: pinned, metrics: m}, objs...)
+	return startWith(t, setup{served: kinds, pinned: pinned, metrics: m}, objs...)
 }
 
 func get[T any](t *testing.T, srv *httptest.Server, path string, wantStatus int) T {

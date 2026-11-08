@@ -10,13 +10,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -34,7 +32,6 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
-	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
@@ -215,17 +212,17 @@ type Clients struct {
 
 // App is a built, not yet started, backend.
 type App struct {
-	Engine    *engine.Engine
-	Handler   http.Handler
-	cfg       engine.Config
-	cache     *cache.Cache
-	collector *ctrlmetrics.Collector
-	kinds     *kinds.Monitor
-	opts      Options
-	// reg and core start the extension and core collectors; collected is their store.
-	reg, core *extension.Registry
-	collected *collect.Store
-	deps      extension.Deps
+	Engine  *engine.Engine
+	Handler http.Handler
+	cfg     engine.Config
+	cache   *cache.Cache
+	kinds   *kinds.Monitor
+	opts    Options
+	// reg starts the extension collectors; packs runs the pack collectors; collected is their store.
+	reg, packs *extension.Registry
+	collectors []extension.Collector
+	collected  *collect.Store
+	deps       extension.Deps
 	// discovered is closed after the first model with an install over a settled cache.
 	discovered chan struct{}
 }
@@ -246,27 +243,13 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	changes, mon := sc.Changes, sc.Kinds
-	now := time.Now
-	if o.Clock != nil {
-		now = o.Clock.Now
-	}
+	mon, collected := sc.Kinds, sc.Collected
 	ca := cache.New(sc.Cache)
-	scraper := c.Scraper
-	switch {
-	case scraper != nil:
-	case c.InCluster:
-		scraper = ctrlmetrics.HTTPScraper{Client: ctrlmetrics.NewHTTPClient()}
-	default:
-		scraper = ctrlmetrics.PodProxyScraper{Kube: c.Kube}
-	}
-	col := ctrlmetrics.NewCollector(scraper, ctrlmetrics.WithMaxAge(sc.Engine.MetricsMaxAge))
-	col.OnResult = changes
 	discovered := make(chan struct{})
 	var once sync.Once
 	crds := crdRefresher{mon: mon}
 	cfg := sc.Engine
-	cfg.Snapshots, cfg.Metrics = ca, col
+	cfg.Snapshots = ca
 	cfg.ConfirmEvery, cfg.OnLoop = o.ConfirmEvery, o.OnLoop
 	cfg.OnCompute = func(m *engine.Model) {
 		// An unsettled cache can hold a Deployment without its Pods; scraping
@@ -276,11 +259,14 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		}
 		crds.observe(m.Snapshot.CRDs)
 	}
-	// The proxy stats collector is core, so the engine always reads the store.
-	collected := collect.New(changes, now)
-	cfg.Collected = collected.Snapshot
 	eng := engine.New(cfg)
-	stats := proxyStatsCollector(c, o, reg, eng)
+	env := extension.CollectorEnv{Kube: c.Kube, InCluster: c.InCluster, Scraper: c.Scraper, Interval: o.MetricsInterval,
+		MaxAge: setup.MetricsMaxAge(o.MetricsInterval), Installs: eng.Installs, Current: eng.Current, Discovered: discovered,
+		Collected: collected, NoProxyStats: o.Diagnostics.NoProxyStats, ControllerLogs: o.Diagnostics.ControllerLogs}
+	if o.Clock != nil {
+		env.Clock = o.Clock
+	}
+	packCols := reg.PackCollectors(env)
 	deps := extension.Deps{Current: eng.Current, Authorizer: reg.Authorizer, Capabilities: reg.CapabilityStates, Logger: slog.Default()}
 	mounts, err := reg.Mounts(deps)
 	if err != nil {
@@ -294,134 +280,20 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 		return CoreCapabilities(snap, o.Diagnostics, collected.Snapshot())
 	}
 	h := api.NewHandler(eng, o.UI, reg.Authorizer, api.WithExtMounts(mounts...), api.WithCoreCapabilities(core), api.WithCapabilitySources(reg.CapabilityStates), api.WithCommands(reg.Commands))
-	cores := []extension.Collector{stats}
-	if o.Diagnostics.ControllerLogs {
-		cores = append(cores, controllerLogsCollector(c, o, eng, collected))
-	}
-	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, collector: col, kinds: mon, opts: o,
-		discovered: discovered, reg: reg, core: extension.New(extension.WithCollectors(cores...)), collected: collected, deps: deps}, nil
+	return &App{Engine: eng, Handler: h, cfg: cfg, cache: ca, kinds: mon, opts: o, discovered: discovered, reg: reg,
+		packs: extension.NewCore(extension.WithCollectors(packCols...)), collectors: packCols, collected: collected, deps: deps}, nil
 }
 
-// controllerLogsCollector reads each install's controller logs through pods/log
-// with the UI's Role, and names only from the latest proxy stats (D-037).
-func controllerLogsCollector(c Clients, o Options, eng *engine.Engine, collected *collect.Store) logsCollector {
-	installs := func() ([]ctrllogs.Install, bool) {
-		p := eng.Current()
-		if p == nil || p.Model == nil || p.Model.Snapshot == nil || !p.Model.Snapshot.Synced {
-			return nil, false
-		}
-		snap := p.Model.Snapshot
-		out := make([]ctrllogs.Install, 0, len(p.Model.Installs))
-		for _, im := range p.Model.Installs {
-			in := ctrllogs.Install{Resolved: im.Resolved, Parser: im.Rules.LogParser()}
-			if im.Owned != nil {
-				for _, g := range im.Owned.Gateways {
-					in.Gateways = append(in.Gateways, objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: g.GetNamespace(), Name: g.GetName()})
-				}
-			}
-			gws := in.Gateways
-			// A deployer error keeps its object only when it is a Gateway of the install or a Deployment the UI sees.
-			in.Known = func(r objects.Ref) bool {
-				if r.Kind == "Deployment" && (r.Group == "" || r.Group == "apps") {
-					return slices.ContainsFunc(snap.Deployments, func(d *appsv1.Deployment) bool { return d.Namespace == r.Namespace && d.Name == r.Name })
-				}
-				return slices.ContainsFunc(gws, func(g objects.Ref) bool { return g == r })
-			}
-			out = append(out, in)
-		}
-		return out, true
-	}
-	// Until the first proxy stats value lands, streams wait, so the backfill meets its names.
-	stats := func() (proxystats.Stats, ctrllogs.StatsState) {
-		v, ok := collected.Snapshot().Get(proxystats.Key)
-		if !ok {
-			return nil, ctrllogs.StatsPending
-		}
-		if s, isStats := v.Data.(proxystats.Stats); v.State == collect.OK && isStats {
-			return s, ctrllogs.StatsReady
-		}
-		return nil, ctrllogs.StatsUnavailable
-	}
-	var clk clock.WithTicker
-	if o.Clock != nil {
-		clk = o.Clock
-	}
-	return logsCollector{ctrllogs.New(ctrllogs.Config{Source: ctrllogs.Kube{Client: c.Kube}, Every: o.MetricsInterval, Clock: clk, Installs: installs, Stats: stats})}
-}
-
-// logsCollector runs the controller log collector on the collector seam.
-type logsCollector struct{ c *ctrllogs.Collector }
-
-func (logsCollector) Name() string { return ctrllogs.CollectorName }
-
-func (lc logsCollector) Start(ctx context.Context, d extension.Deps) error {
-	return lc.c.Run(ctx, d.Publish, d.Fail)
-}
-
-// proxyStatsCollector is the core proxy stats collector over reg's Source, or
-// proxystats.Kube: the Pod IP in-cluster, pods/proxy with the user's rights locally (D-037).
-func proxyStatsCollector(c Clients, o Options, reg *extension.Registry, eng *engine.Engine) coreCollector {
-	src := reg.ProxyStats
-	if src == nil {
-		k := proxystats.Kube{Client: proxystats.NewHTTPClient()}
-		if !c.InCluster {
-			k.Kube = c.Kube
-		}
-		src = k
-	}
-	installs := func() ([]proxystats.Install, *cache.Snapshot) {
-		p := eng.Current()
-		// An unsettled cache can lack proxy Pods; the round waits for a synced one.
-		if p == nil || p.Model == nil || p.Model.Snapshot == nil || !p.Model.Snapshot.Synced {
-			return nil, nil
-		}
-		out := make([]proxystats.Install, 0, len(p.Model.Installs))
-		for _, im := range p.Model.Installs {
-			in := proxystats.Install{Resolved: im.Resolved}
-			if im.Owned != nil {
-				for _, g := range im.Owned.Gateways {
-					in.Gateways = append(in.Gateways, objects.Ref{Group: objects.GatewayAPIGroup, Kind: "Gateway", Namespace: g.GetNamespace(), Name: g.GetName()})
-				}
-			}
-			out = append(out, in)
-		}
-		return out, p.Model.Snapshot
-	}
-	var clk clock.WithTicker
-	if o.Clock != nil {
-		clk = o.Clock
-	}
-	return coreCollector{proxystats.New(proxystats.Config{Source: src, Every: o.MetricsInterval, Clock: clk, Installs: installs, Off: o.Diagnostics.NoProxyStats})}
-}
-
-// coreCollector runs the proxy stats collector on the collector seam.
-type coreCollector struct{ c *proxystats.Collector }
-
-func (coreCollector) Name() string { return proxystats.CollectorName }
-
-func (cc coreCollector) Start(ctx context.Context, d extension.Deps) error {
-	return cc.c.Run(ctx, d.Publish, d.Fail)
-}
-
-// Start runs the cache, the core and extension collectors, the model loop, the
-// served-kinds monitor and the metrics collector until ctx is done. PollInterval is the loop's safety timer. The collector starts as soon as the first install is discovered
-// over a settled cache, so the first metrics do not wait for a collector tick.
+// Start runs the cache, the pack and extension collectors, the model loop and
+// the served-kinds monitor until ctx is done. PollInterval is the loop's
+// safety timer. The controller metrics collector starts as soon as the first
+// install is discovered over a settled cache, so the first metrics do not wait for a tick.
 func (a *App) Start(ctx context.Context) {
 	a.cache.Start(ctx)
-	a.core.RunCollectors(ctx, a.deps, a.collected)
+	a.packs.RunCollectors(ctx, a.deps, a.collected)
 	a.reg.RunCollectors(ctx, a.deps, a.collected)
 	go a.Engine.Run(ctx, a.opts.PollInterval)
 	go a.kinds.Run(ctx, a.opts.KindsInterval)
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-a.discovered:
-		}
-		if err := a.collector.Run(ctx, a.opts.MetricsInterval, a.Engine.Installs); err != nil {
-			slog.Error("metrics collector stopped", "err", err)
-		}
-	}()
 }
 
 // Run is RunWith over extension.New(opts...): the core plus the kgateway pack.

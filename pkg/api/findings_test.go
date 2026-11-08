@@ -109,8 +109,8 @@ func largeContradicting(t *testing.T) (*httptest.Server, *engine.Model) {
 	}
 	now := testutil.Now
 	e := engine.New(engine.Config{Snapshots: largeSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
-		Checks: health.Upstream(), Now: func() time.Time { return now }})
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
+		Collected: served(okMetrics("kgw.kgateway"), 0, nil), Checks: health.Upstream(), Now: func() time.Time { return now }})
 	e.Compute()
 	now = now.Add(max(engine.Window, health.Grace) + time.Second)
 	m := e.Compute()

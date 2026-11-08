@@ -63,7 +63,7 @@ func skewResult(t *testing.T, r Report) CheckResult {
 // A proxy on another minor than the controller raises 022 on its Gateway; the
 // evidence names the Pod, which the finding depends on (§14 rule 16).
 func TestSkewMinor(t *testing.T) {
-	r := Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), Runtime{States: NewStates()})
+	r := Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), freshMetrics(Runtime{States: NewStates()}))
 	fs := skewFindings(r)
 	if len(fs) != 1 || fs[0].Severity != SeverityWarning || fs[0].Resource == nil || fs[0].Resource.Kind != "Gateway" || fs[0].Resource.String() != "infra/edge" {
 		t.Fatalf("want one 022 on infra/edge, got %+v", r.Findings)
@@ -83,7 +83,7 @@ func TestSkewMinor(t *testing.T) {
 
 // A patch difference is evidence only: no finding.
 func TestSkewPatchIsEvidenceOnly(t *testing.T) {
-	r := Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.4.5")), Upstream(), Runtime{States: NewStates()})
+	r := Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.4.5")), Upstream(), freshMetrics(Runtime{States: NewStates()}))
 	if fs := skewFindings(r); len(fs) != 0 {
 		t.Fatalf("patch skew raised %+v", fs)
 	}
@@ -91,7 +91,7 @@ func TestSkewPatchIsEvidenceOnly(t *testing.T) {
 
 // A digest-only proxy image is "version unknown": no finding, and the result says so.
 func TestSkewDigestTag(t *testing.T) {
-	r := Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+"@sha256:0123abcd")), Upstream(), Runtime{States: NewStates()})
+	r := Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+"@sha256:0123abcd")), Upstream(), freshMetrics(Runtime{States: NewStates()}))
 	if fs := skewFindings(r); len(fs) != 0 {
 		t.Fatalf("digest raised %+v", fs)
 	}
@@ -126,7 +126,7 @@ func TestSkewUnparseableAndPrereleaseTags(t *testing.T) {
 			if strings.HasPrefix(tc.proxy, "@") {
 				proxy = wrapper + tc.proxy
 			}
-			r := Evaluate(skewInput(t, w, []cache.CRDMeta{}, skewPod("edge-0", proxy)), Upstream(), Runtime{States: NewStates()})
+			r := Evaluate(skewInput(t, w, []cache.CRDMeta{}, skewPod("edge-0", proxy)), Upstream(), freshMetrics(Runtime{States: NewStates()}))
 			if got := len(skewFindings(r)) > 0; got != tc.skew {
 				t.Fatalf("skew %v, want %v: %+v", got, tc.skew, r.Findings)
 			}
@@ -155,7 +155,7 @@ func TestSkewRolloutSuppression(t *testing.T) {
 	st := NewStates()
 	pod := skewPod("edge-0", wrapper+":v2.3.6")
 	w.ctrl.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue, Reason: "ReplicaSetUpdated"}}
-	r := Evaluate(skewInput(t, w, []cache.CRDMeta{}, pod), Upstream(), Runtime{States: st})
+	r := Evaluate(skewInput(t, w, []cache.CRDMeta{}, pod), Upstream(), freshMetrics(Runtime{States: st}))
 	if fs := skewFindings(r); len(fs) != 0 || !strings.Contains(skewResult(t, r).Detail, skewSuppressedDetail) {
 		t.Fatalf("during the rollout: %+v, %+v", fs, skewResult(t, r))
 	}
@@ -167,7 +167,7 @@ func TestSkewRolloutSuppression(t *testing.T) {
 	}{{9*time.Minute + 59*time.Second, false}, {10*time.Minute + time.Second, true}} {
 		in := skewInput(t, w, []cache.CRDMeta{}, pod)
 		in.Now = done.Add(tc.d)
-		r := Evaluate(in, Upstream(), Runtime{States: st})
+		r := Evaluate(in, Upstream(), freshMetrics(Runtime{States: st}))
 		if got := len(skewFindings(r)) == 1; got != tc.want {
 			t.Fatalf("at settled + %s: 022 %v, want %v", tc.d, got, tc.want)
 		}
@@ -186,7 +186,7 @@ func TestSkewStuckRollout(t *testing.T) {
 	w.ctrl.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded"}}
 	in := skewInput(t, w, []cache.CRDMeta{}, pod)
 	in.Now = testutil.Now.Add(SkewSettle + time.Second)
-	r := Evaluate(in, Upstream(), Runtime{States: st})
+	r := Evaluate(in, Upstream(), freshMetrics(Runtime{States: st}))
 	if fs := skewFindings(r); len(fs) != 0 || !strings.Contains(skewResult(t, r).Detail, skewStuckDetail) {
 		t.Fatalf("stuck rollout: %+v, %+v", fs, skewResult(t, r))
 	}
@@ -198,7 +198,7 @@ func TestSkewStuckRollout(t *testing.T) {
 	}{{9*time.Minute + 59*time.Second, false}, {10*time.Minute + time.Second, true}} {
 		in := skewInput(t, w, []cache.CRDMeta{}, pod)
 		in.Now = done.Add(tc.d)
-		if got := len(skewFindings(Evaluate(in, Upstream(), Runtime{States: st}))) == 1; got != tc.want {
+		if got := len(skewFindings(Evaluate(in, Upstream(), freshMetrics(Runtime{States: st})))) == 1; got != tc.want {
 			t.Fatalf("at recovered + %s: 022 %v, want %v", tc.d, got, tc.want)
 		}
 	}
@@ -219,7 +219,7 @@ func TestSkewExpectedNotes(t *testing.T) {
 			w.ctrl.Labels["app.kubernetes.io/version"] = tc.label
 			w.ctrl.Spec.Template.Spec.Containers[0].Image = tc.image
 			w.pods[0] = testutil.ControllerPod(w.ctrl, "p", true)
-			r := Evaluate(skewInput(t, w, crds), Upstream(), Runtime{States: NewStates()})
+			r := Evaluate(skewInput(t, w, crds), Upstream(), freshMetrics(Runtime{States: NewStates()}))
 			if fs := skewFindings(r); len(fs) != 0 || !strings.Contains(skewResult(t, r).Detail, tc.note) {
 				t.Fatalf("findings %+v, result %+v", fs, skewResult(t, r))
 			}
@@ -233,16 +233,16 @@ func TestSkewRolloutEndWithoutTime(t *testing.T) {
 	st := NewStates()
 	pod := skewPod("edge-0", wrapper+":v2.3.6")
 	w.ctrl.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue, Reason: "ReplicaSetUpdated"}}
-	Evaluate(skewInput(t, w, []cache.CRDMeta{}, pod), Upstream(), Runtime{States: st})
+	Evaluate(skewInput(t, w, []cache.CRDMeta{}, pod), Upstream(), freshMetrics(Runtime{States: st}))
 	w.ctrl.Status.Conditions = nil
 	seen := testutil.Now.Add(time.Minute)
 	in := skewInput(t, w, []cache.CRDMeta{}, pod)
 	in.Now = seen
-	if fs := skewFindings(Evaluate(in, Upstream(), Runtime{States: st})); len(fs) != 0 {
+	if fs := skewFindings(Evaluate(in, Upstream(), freshMetrics(Runtime{States: st}))); len(fs) != 0 {
 		t.Fatalf("right after the rollout: %+v", fs)
 	}
 	in.Now = seen.Add(SkewSettle + time.Second)
-	if fs := skewFindings(Evaluate(in, Upstream(), Runtime{States: st})); len(fs) != 1 {
+	if fs := skewFindings(Evaluate(in, Upstream(), freshMetrics(Runtime{States: st}))); len(fs) != 1 {
 		t.Fatalf("10 min after the rollout: %+v", fs)
 	}
 }
@@ -271,7 +271,7 @@ func TestSkewPinnedImage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := healthyWorld()
 			tc.setup(w)
-			fs := skewFindings(Evaluate(skewInput(t, w, []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), Runtime{States: NewStates()}))
+			fs := skewFindings(Evaluate(skewInput(t, w, []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), freshMetrics(Runtime{States: NewStates()})))
 			if len(fs) != 1 || !strings.Contains(fs[0].Detail, "GatewayParameters "+tc.want.Namespace+"/"+tc.want.Name) {
 				t.Fatalf("findings %+v", fs)
 			}
@@ -284,7 +284,7 @@ func TestSkewPinnedImage(t *testing.T) {
 			}
 		})
 	}
-	fs := skewFindings(Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), Runtime{States: NewStates()}))
+	fs := skewFindings(Evaluate(skewInput(t, healthyWorld(), []cache.CRDMeta{}, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), freshMetrics(Runtime{States: NewStates()})))
 	if len(fs) != 1 || strings.Contains(fs[0].Detail, "GatewayParameters") {
 		t.Fatalf("no pin, yet %+v", fs)
 	}
@@ -299,7 +299,7 @@ func TestSkewControllerReplicas(t *testing.T) {
 	old.Spec.Containers[0].Image = "cr.kgateway.dev/kgateway-dev/kgateway:v2.3.11"
 	w.pods = append(w.pods, old)
 	settledAt(w.ctrl, testutil.Now.Add(-time.Hour))
-	fs := skewFindings(Evaluate(skewInput(t, w, []cache.CRDMeta{}), Upstream(), Runtime{States: NewStates()}))
+	fs := skewFindings(Evaluate(skewInput(t, w, []cache.CRDMeta{}), Upstream(), freshMetrics(Runtime{States: NewStates()})))
 	if len(fs) != 1 || fs[0].Resource == nil || fs[0].Resource.Kind != "Deployment" || fs[0].Resource.Name != "kgateway" {
 		t.Fatalf("want 022 on the controller Deployment, got %+v", fs)
 	}
@@ -308,7 +308,7 @@ func TestSkewControllerReplicas(t *testing.T) {
 		t.Fatalf("evidence %+v, refs %+v", fs[0].Facts, fs[0].Evidence)
 	}
 	w.ctrl.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Status: corev1.ConditionTrue, Reason: "ReplicaSetUpdated"}}
-	if fs := skewFindings(Evaluate(skewInput(t, w, []cache.CRDMeta{}), Upstream(), Runtime{States: NewStates()})); len(fs) != 0 {
+	if fs := skewFindings(Evaluate(skewInput(t, w, []cache.CRDMeta{}), Upstream(), freshMetrics(Runtime{States: NewStates()}))); len(fs) != 0 {
 		t.Fatalf("during the rollout: %+v", fs)
 	}
 }
@@ -322,7 +322,7 @@ func TestSkewCRDBundleAndChannel(t *testing.T) {
 	}
 	old := []cache.CRDMeta{crd("gatewayclasses.gateway.networking.k8s.io", "v1.5.1", "standard"), crd("gateways.gateway.networking.k8s.io", "v1.5.1", "standard"),
 		crd("httproutes.gateway.networking.k8s.io", "v1.5.1", "standard")}
-	fs := skewFindings(Evaluate(skewInput(t, healthyWorld(), old), Upstream(), Runtime{States: NewStates()}))
+	fs := skewFindings(Evaluate(skewInput(t, healthyWorld(), old), Upstream(), freshMetrics(Runtime{States: NewStates()})))
 	if len(fs) != 1 || fs[0].Resource == nil || fs[0].Resource.Name != "gateways.gateway.networking.k8s.io" || fs[0].Resource.Kind != "CustomResourceDefinition" {
 		t.Fatalf("want one 022 on the Gateway CRD, got %+v", fs)
 	}
@@ -332,7 +332,7 @@ func TestSkewCRDBundleAndChannel(t *testing.T) {
 	mixed := []cache.CRDMeta{crd("gatewayclasses.gateway.networking.k8s.io", "v1.6.1", "standard"), crd("gateways.gateway.networking.k8s.io", "v1.6.1", "standard"),
 		crd("httproutes.gateway.networking.k8s.io", "v1.6.1", "experimental"), crd("grpcroutes.gateway.networking.k8s.io", "v1.6.0", "standard"),
 		crd("unannotated.gateway.networking.k8s.io", "", "")}
-	fs = skewFindings(Evaluate(skewInput(t, healthyWorld(), mixed), Upstream(), Runtime{States: NewStates()}))
+	fs = skewFindings(Evaluate(skewInput(t, healthyWorld(), mixed), Upstream(), freshMetrics(Runtime{States: NewStates()})))
 	var names []string
 	for _, f := range fs {
 		names = append(names, f.Resource.Name)
@@ -343,14 +343,14 @@ func TestSkewCRDBundleAndChannel(t *testing.T) {
 	if strings.Join(names, ",") != "grpcroutes.gateway.networking.k8s.io,httproutes.gateway.networking.k8s.io" {
 		t.Fatalf("want 022 on grpcroutes and httproutes, got %v", names)
 	}
-	if fs := skewFindings(Evaluate(skewInput(t, healthyWorld(), mixed[:2]), Upstream(), Runtime{States: NewStates()})); len(fs) != 0 {
+	if fs := skewFindings(Evaluate(skewInput(t, healthyWorld(), mixed[:2]), Upstream(), freshMetrics(Runtime{States: NewStates()}))); len(fs) != 0 {
 		t.Fatalf("matching CRDs raised %+v", fs)
 	}
 }
 
 // CRDs off: the CRD part is not available (D-034), and the process findings stand (R42).
 func TestSkewCRDsOff(t *testing.T) {
-	r := Evaluate(skewInput(t, healthyWorld(), nil, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), Runtime{States: NewStates()})
+	r := Evaluate(skewInput(t, healthyWorld(), nil, skewPod("edge-0", wrapper+":v2.3.6")), Upstream(), freshMetrics(Runtime{States: NewStates()}))
 	res := skewResult(t, r)
 	if res.Unavailable != AvailOff || !strings.Contains(res.Detail, skewCRDsOffDetail) || res.Required {
 		t.Fatalf("result %+v", res)

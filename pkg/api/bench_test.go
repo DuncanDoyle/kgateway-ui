@@ -59,10 +59,10 @@ func tierHandler(b testing.TB, tier scale.Tier, authz Authorizer, mut ...func(*c
 func snapshotHandler(snap *cache.Snapshot, tier scale.Tier, authz Authorizer) (http.Handler, *engine.Model) {
 	now := testutil.Now
 	cfg := engine.Config{Snapshots: staticSnap{snap}, Served: testutil.ServedUpstream(), Detectors: []install.Detector{install.UpstreamDetector{}},
-		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour), Metrics: okMetrics("kgw.kgateway"),
-		Checks: health.Upstream(), MetricsMaxAge: 30 * time.Second, Now: func() time.Time { return now }}
+		Scope: install.NamespaceSelectorScope{}, Verifier: scopeverify.NewManagedCountVerifier(time.Hour),
+		Collected: served(okMetrics("kgw.kgateway"), 30*time.Second, nil), Checks: health.Upstream(), Now: func() time.Time { return now }}
 	if tier.Contradict {
-		cfg.MetricsMaxAge = 0 // the static metrics must not go stale when the clock moves
+		cfg.Collected = served(okMetrics("kgw.kgateway"), 0, nil) // the static metrics must not go stale when the clock moves
 	}
 	e := engine.New(cfg)
 	if tier.Contradict {

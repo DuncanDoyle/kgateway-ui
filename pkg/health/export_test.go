@@ -21,7 +21,8 @@ import (
 
 // GuardWorlds returns the fixture worlds for the declared-input guard, which
 // lives in package health_test so it can import internal/testutil/healthtest.
-func GuardWorlds(t *testing.T) map[string]Input {
+// Each world's Runtime carries its controller metrics.
+func GuardWorlds(t *testing.T) map[string]GuardWorld {
 	t.Helper()
 	gw := testutil.GwRef("infra", "edge")
 	young := func(*unstructured.Unstructured) time.Time { return testutil.Now.Add(-10 * time.Second) }
@@ -55,17 +56,18 @@ func GuardWorlds(t *testing.T) map[string]Input {
 		"inside grace":     func(w *world) { w.firstSeen = young },
 		"computed present": func(w *world) { w.computed = &computed.Views{RuleSet: "kgateway-2.4"} },
 	}
-	out := make(map[string]Input, len(mutations)+1)
+	out := make(map[string]GuardWorld, len(mutations)+1)
 	for name, mutate := range mutations {
 		w := healthyWorld()
 		mutate(w)
-		out[name] = w.input(t)
+		out[name] = GuardWorld{In: w.input(t), RT: w.runtime(Runtime{})}
 	}
-	in := healthyWorld().input(t)
+	healthy := healthyWorld()
+	in := healthy.input(t)
 	in.KindsChange = kinds.Change{Removed: []string{"TCPRoute"}}
-	out["kinds changed"] = in
+	out["kinds changed"] = GuardWorld{In: in, RT: healthy.runtime(Runtime{})}
 	for name, in := range processWorlds(t) {
-		out[name] = in
+		out[name] = GuardWorld{In: in, RT: healthy.runtime(Runtime{})}
 	}
 	// 013's Service explanations (phase review #5): a Service the cache lacks, and a port it lacks.
 	for name, svcs := range map[string][]cache.ServiceFact{"service missing": nil,
@@ -76,12 +78,12 @@ func GuardWorlds(t *testing.T) map[string]Input {
 		in.Catalog = served()
 		in.Snapshot.Access[cache.ServicesGVR] = cache.Access{OK: true}
 		in.Snapshot.Services = svcs
-		out[name] = in
+		out[name] = GuardWorld{In: in, RT: w.runtime(Runtime{})}
 	}
 	for name, ready := range map[string]int{"endpoints empty": 0, "endpoints ready": 1} {
 		e := newEndpointsWorld()
 		e.slices[0].Ready[0] = ready
-		out[name] = e.input(t, testutil.Now)
+		out[name] = GuardWorld{In: e.input(t, testutil.Now), RT: e.w.runtime(Runtime{})}
 	}
 	return out
 }
@@ -193,7 +195,7 @@ func GuardCollectedWorlds(t *testing.T) map[string]GuardWorld {
 			in := w.input(t)
 			in.Process = &ProcessData{Controller: process.Set{Observed: true}, Proxies: map[objects.Ref]process.Set{edge: {Observed: true,
 				Processes: []process.Process{{ID: "pod/infra/edge-0", Name: "edge-0", Ready: &yes}, {ID: "pod/infra/edge-1", Name: "edge-1", Ready: &no}}}}, Print: 2}
-			out[name] = GuardWorld{In: in, RT: Runtime{Collected: col}}
+			out[name] = GuardWorld{In: in, RT: w.runtime(Runtime{Collected: col})}
 		}
 	}
 	return out

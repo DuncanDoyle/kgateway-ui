@@ -18,6 +18,7 @@ import (
 	"regexp"
 
 	"github.com/DuncanDoyle/snellius/pkg/api"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -56,11 +57,12 @@ type Registry struct {
 	// Commands fills in the next-step commands (design §8.5).
 	Commands diagnose.Commands
 
-	// pack names the default pack; "" is the core. settings, version and
-	// experimentalOnly are its hooks that have no exported field.
+	// pack names the default pack; "" is the core. settings, version, reported
+	// and experimentalOnly are its hooks that have no exported field.
 	pack             string
 	settings         func(install.Install) install.Settings
 	version          func(install.Install) string
+	reported         func(install.Install, collect.Snapshot) (string, bool)
 	experimentalOnly func(kinds.Served, install.Install) bool
 	// impls are the hooks of the other packs, and of the core once a default pack is set, by name.
 	impls map[string]Impl
@@ -69,6 +71,8 @@ type Registry struct {
 	handlers []extHandlers
 	// collectors are the WithCollectors registrations, in order.
 	collectors []Collector
+	// packCollectors are the packs' collector factories, in order.
+	packCollectors []packCollector
 	// capSources are the WithCapabilities registrations, in order.
 	capSources []func() []api.Capability
 	// prefixes holds the finding-code prefixes registered so far.

@@ -54,20 +54,17 @@ func kindKeys(served []kinds.Served) (map[objects.GroupKind]kindKey, []kindKey) 
 // printCtx is one install's evidence for its checks' input prints in one
 // compute. Each component print is computed on first use and kept.
 type printCtx struct {
-	snap   *cache.Snapshot
-	res    install.Resolved
-	all    []install.Resolved
-	read   MetricsRead
-	now    time.Time
-	maxAge time.Duration
-	ver    *scopeverify.Result
-	views  *computed.Views
-	kc     kinds.Change
-	cat    kinds.Catalog
-	col    collect.Snapshot
-	proc   *health.ProcessData
+	snap  *cache.Snapshot
+	res   install.Resolved
+	all   []install.Resolved
+	ver   *scopeverify.Result
+	views *computed.Views
+	kc    kinds.Change
+	cat   kinds.Catalog
+	col   collect.Snapshot
+	proc  *health.ProcessData
 
-	install, owned, metrics, verify, computed, change, catalog *uint64
+	install, owned, verify, computed, change, catalog *uint64
 }
 
 // lazy returns *p, computing it with f on first use.
@@ -98,9 +95,6 @@ func (e *Engine) inputPrint(set health.InputSet, ctx *printCtx) (uint64, bool) {
 			return 0, false // not watched: no print can follow it
 		}
 		p = mix(p, kindPrint(ctx.snap, k))
-	}
-	if set.Metrics {
-		p = mix(p, lazy(&ctx.metrics, func() uint64 { return encodeMetrics([]MetricsRead{ctx.read}, ctx.now, ctx.maxAge) }))
 	}
 	if set.Verify {
 		p = mix(p, lazy(&ctx.verify, func() uint64 { return verifyPrint(ctx.ver) }))

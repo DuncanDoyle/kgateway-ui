@@ -65,8 +65,15 @@ func (xdsCheck) Name() string { return "xDS rejects" }
 // WakeAt; Deployments give proxy counts, proxy stats per-Pod evidence and
 // controller logs the rejects' log events.
 func (xdsCheck) Inputs() InputSet {
-	return InputSet{Owned: true, Metrics: true, Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}},
-		Collected: []string{proxyStatsKey, ctrllogs.Key}}
+	return InputSet{Owned: true, Process: true, Kinds: []objects.GroupKind{{Group: "apps", Kind: "Deployment"}},
+		Collected: []string{ctrlmetrics.Key, proxyStatsKey, ctrllogs.Key}}
+}
+
+// controllerMetrics is the install's entry in the controller metrics value and
+// its max age; false when not collected. The check declares ctrlmetrics.Key.
+func controllerMetrics(ctx RunContext) (ctrlmetrics.Result, time.Duration, bool) {
+	v, _ := ctx.Collected(ctrlmetrics.Key)
+	return ctrlmetrics.Lookup(v, ctx.Install.ID())
 }
 
 // xdsState is the check's Store value: controller Pods and their last change,
@@ -115,27 +122,28 @@ func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 	if old == nil {
 		old = &xdsState{}
 	}
-	if !in.HasMetrics {
+	met, maxAge, has := controllerMetrics(ctx)
+	if !has {
 		return old.unavailable(ctx, c.Name(), "controller metrics not collected yet")
 	}
-	if in.Metrics.Err != "" {
-		return old.unavailable(ctx, c.Name(), in.Metrics.Err)
+	if met.Err != "" {
+		return old.unavailable(ctx, c.Name(), met.Err)
 	}
 	// Recomputing the model must not make an old zero-reject result look fresh.
-	if in.Metrics.Stale(in.Now, in.MetricsMaxAge) {
-		return old.unavailable(ctx, c.Name(), fmt.Sprintf(xdsStaleError, in.Metrics.CollectedAt.UTC().Format(time.RFC3339)))
+	if met.Stale(in.Now, maxAge) {
+		return old.unavailable(ctx, c.Name(), fmt.Sprintf(xdsStaleError, met.CollectedAt.UTC().Format(time.RFC3339)))
 	}
-	if in.MetricsMaxAge > 0 {
-		ctx.WakeAt(in.Metrics.CollectedAt.Add(in.MetricsMaxAge + time.Nanosecond))
+	if maxAge > 0 {
+		ctx.WakeAt(met.CollectedAt.Add(maxAge + time.Nanosecond))
 	}
 	// Every owned Gateway has a resources_managed series (D-012); without the
 	// family the endpoint or metric names are wrong, and zero rejects proves nothing.
-	m := &in.Metrics.Metrics
+	m := &met.Metrics
 	if n := len(in.Owned.Gateways); n > 0 && !m.ManagedPresent {
 		return old.unavailable(ctx, c.Name(), fmt.Sprintf("%s missing from controller metrics although the install owns %d Gateway(s); check the metrics endpoint",
 			ctrlmetrics.ResourcesManaged, n))
 	}
-	cur := &xdsState{start: old.start, pods: controllerPods(in), changedAt: old.changedAt}
+	cur := &xdsState{start: old.start, pods: controllerPods(in, m.PerPod), changedAt: old.changedAt}
 	if cur.start.IsZero() {
 		cur.start = in.Now
 	}
@@ -147,7 +155,7 @@ func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 	streams := rejectStreams(m.PerPod)
 	var proxies map[objects.Ref]*proxystats.Gateway
 	var changes map[objects.Ref][]change
-	lg := xdsLogs{start: cur.start, slack: in.MetricsMaxAge, namer: in.Rules.EnvoyNamer()}
+	lg := xdsLogs{start: cur.start, slack: maxAge, namer: in.Rules.EnvoyNamer()}
 	if len(m.Rejects) > 0 {
 		proxies = proxyGateways(ctx)
 		changes = changesOn(in, m.Rejects, cur.start)
@@ -161,7 +169,7 @@ func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 		prev := old.gateways[key]
 		if m.Rejects[key] > 0 {
 			g := &xdsGateway{}
-			fs = append(fs, xdsFinding(ctx, gw, key, prev, g, streams[key], growth, proxies, changes[*ref(gw)], lg))
+			fs = append(fs, xdsFinding(ctx, gw, key, m.Rejects[key], prev, g, streams[key], growth, proxies, changes[*ref(gw)], lg))
 			cur.keep(key, g)
 			continue
 		}
@@ -188,9 +196,9 @@ func (c xdsCheck) rejects(ctx RunContext) ([]Finding, CheckResult) {
 	}
 	ctx.State.Set(xdsKey, cur)
 	if held {
-		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: in.Metrics.CollectedAt, Error: xdsHoldError}
+		return fs, CheckResult{Name: c.Name(), Required: true, Pending: true, CollectedAt: met.CollectedAt, Error: xdsHoldError}
 	}
-	return fs, ok(c.Name(), true, in.Metrics.CollectedAt)
+	return fs, ok(c.Name(), true, met.CollectedAt)
 }
 
 // unavailable is KGWUI-008 for the check; the stored Gateways keep their since
@@ -211,10 +219,10 @@ func (s *xdsState) keep(k ctrlmetrics.GatewayKey, g *xdsGateway) {
 	s.gateways[k] = g
 }
 
-// xdsFinding is 001 on gw. A Gateway first seen now takes its since entry as
+// xdsFinding is 001 on gw, whose active rejects are active. A Gateway first seen now takes its since entry as
 // first seen, so types and the finding's since agree (design §5.1); a log
 // line of the reject lowers both, and the lowered since outlives the line.
-func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.GatewayKey, prev, g *xdsGateway,
+func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.GatewayKey, active float64, prev, g *xdsGateway,
 	types map[string]*xdsStreams, growth map[ctrlmetrics.TypeKey]float64, proxies map[objects.Ref]*proxystats.Gateway, changes []change, lg xdsLogs,
 ) Finding {
 	in := ctx.Input
@@ -263,7 +271,7 @@ func xdsFinding(ctx RunContext, gw *unstructured.Unstructured, key ctrlmetrics.G
 	f := Finding{Code: CodeXDSRejected, Slug: "xds-rejected", Severity: SeverityError, Install: in.Install.ID(), Resource: r,
 		Message: xdsRejectMessage, Detail: detail.String(), Facts: ev}
 	if f.Detail == "" {
-		f.Detail = fmt.Sprintf(xdsActiveRejects, in.Metrics.Metrics.Rejects[key])
+		f.Detail = fmt.Sprintf(xdsActiveRejects, active)
 	}
 	if ev.StatusSaysHealthy {
 		f.Message = xdsStatusHealthyMessage
@@ -569,7 +577,7 @@ func statusSaysHealthy(in Input, gw *unstructured.Unstructured) bool {
 
 // controllerPods are the install's controller Pod IDs and restart counts, from
 // process data and the scraped Pods; a scraped Pod alone has 0 restarts.
-func controllerPods(in Input) map[string]int32 {
+func controllerPods(in Input, scraped []ctrlmetrics.PodMetrics) map[string]int32 {
 	out := map[string]int32{}
 	if in.Process != nil {
 		for _, p := range in.Process.Controller.Processes {
@@ -582,7 +590,7 @@ func controllerPods(in Input) map[string]int32 {
 			}
 		}
 	}
-	for _, p := range in.Metrics.Metrics.PerPod {
+	for _, p := range scraped {
 		if _, known := out[p.UID]; !known && p.UID != "" {
 			out[p.UID] = 0
 		}
