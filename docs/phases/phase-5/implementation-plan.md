@@ -12,7 +12,8 @@
 
 ## Global Constraints
 
-- No package moves. Every exported name kgwctl imports keeps compiling with today's meaning (design §11): `extension.New`, `kinds.Upstream`, `kinds.KgatewayGroup`, `install.UpstreamDetector`, `install.ProxyPodDetector`, `ctrlmetrics.Static`, `engine.Config.Metrics`, `health.Input.Metrics`.
+- No package moves. Every exported name kgwctl imports keeps compiling with today's meaning (design §11): `extension.New`, `kinds.Upstream`, `kinds.KgatewayGroup`, `install.UpstreamDetector`, `install.ProxyPodDetector`.
+- One deliberate Go API break (user, 2026-11-08): controller metrics leave `engine.Config` and `health.Input` (design §7). `computed.Rules` loses `Delegation` (design §8.3). Both get README upgrade notes. Snellius does not wait for kgwctl to adapt.
 - API v1 changes are additive and optional. The `golden-v1` files stay byte-equal for kgateway installs.
 - Finding codes keep `KGWUI-`. No new codes.
 - Per-install or per-stage hooks only; nothing per object. No new informers.
@@ -26,7 +27,7 @@
 2. A class-only install never shows a kgateway-pack finding, the delegation tab, or a data plane section.
 3. A controller with a non-Envoy data plane gets no Envoy-derived output anywhere.
 4. A downstream that uses today's `With…` options keeps its behaviour (`examples/downstream` unchanged).
-5. kgwctl `main` still compiles against this branch.
+5. The one-shot metrics path (design §7.3) gives the same KGWUI-001 as the long-running path.
 
 ---
 
@@ -114,16 +115,34 @@ Flag `--class-only-installs`, chart `installs.classOnly` (default false); `cmd/s
 
 ## Sub-phase 5.2 (G2): metrics and checks into the pack
 
-### Task 6: collectors from packs
+### Task 6: collectors from packs, and the metrics clean break
 
-**Files:** `pkg/app/app.go:255-298`, `pkg/kgateway/collectors.go`, `pkg/app/app_test.go`.
+**Files:** `pkg/app/app.go:255-298`, `pkg/kgateway/collectors.go`, `pkg/app/app_test.go`, `pkg/ctrlmetrics/{scrape,static}.go`, `pkg/engine/{engine,loop,memo}.go`, `pkg/health/{finding,store,xds,withheld}.go`, `pkg/scopeverify/verify.go`, `pkg/api/details.go:331`, `README.md` (upgrade note).
 
 **Files (also):** `pkg/extension/pack.go` (`CollectorEnv`), `pkg/setup/setup.go:120-128`.
 
-**Interfaces:** `CollectorEnv{Clients; Options; Clock; Installs func() []install.Install; Collected *collect.Store; SetMetrics func(ctrlmetrics.Source)}`. The kgateway pack's factories build the metrics collector (wrapping `ctrlmetrics.Collector`, scraping only installs with `Impl == "kgateway"`), the proxy stats collector and the controller-logs collector (when enabled). `engine.Config.Metrics` is fed through `SetMetrics`; its type is unchanged. `setup.Build` builds the same factories; the reserved names stay reserved for the pack.
+**Interfaces:**
+```go
+type CollectorEnv struct{ Clients; Options; Clock; Installs func() []install.Install; Collected *collect.Store }
+// pkg/ctrlmetrics (kgateway pack; path unchanged)
+const Key = "controller-metrics/results"
+type Results map[string]Result
+func CollectOnce(ctx context.Context, s Scraper, insts []install.Install) Results
+func Publish(store *collect.Store, r Results, maxAge time.Duration)
+// pkg/setup
+type Config struct{ …; Collected *collect.Store }
+```
+Removed (design §7.2): `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, `engine.Model.MetricsRead`, `engine.MetricsRead`, `engine.Source.Metrics`, `health.Input.{Metrics,HasMetrics,MetricsMaxAge}`, `health.InputSet.Metrics`, `scopeverify.Input.{Metrics,HasMetrics}`, `ctrlmetrics.Source`, `ctrlmetrics.Static`, `Collector.Get`. The kgateway pack's factories build the metrics collector (scraping only installs with `Impl == "kgateway"`, publishing `Results` under `Key` with the max age as expiry), the proxy stats collector and the controller-logs collector (when enabled). Checks 001 and 024, the kgateway verifier, `Impl.Version` and the gateway data-plane detail read `Key` from the collected snapshot. `setup.Build` builds the same factories; the reserved names stay reserved for the pack.
 
 - [ ] **Step 1:** Test: with `New()`, the scrape set equals the base for kgateway installs; a class-only install is never scraped; with `NewCore()`, no metrics, proxy stats or controller-logs collector starts; `setup.Build` still rejects a downstream collector with a reserved name.
-- [ ] **Step 2:** Implement; commit.
+- [ ] **Step 2:** Failing behaviour tests at the engine and API boundary, written against today's fixtures first: a rejecting controller raises KGWUI-001 with the same id, evidence and `since`; an expired metrics value makes 001 and 024 "not available" with today's stale wording; the scope verifier still raises 007 on a count mismatch; the reported version still comes from `kgateway_build_info`; the gateway data-plane detail is unchanged. `golden` and `golden-v1` responses unchanged.
+- [ ] **Step 3:** E8 one-shot fixture test (`pkg/setup`): the design §7.3 sequence over a fixture with a rejecting controller gives the same KGWUI-001 as Step 2; without `Publish`, 001 is "not available".
+- [ ] **Step 4:** Implement; Go doc on `ctrlmetrics` with the one-shot sequence; README upgrade note listing each removed name and its replacement; bench; commit.
+
+### Task 6a: tell the program and kgwctl (after Task 6 merges)
+
+- [ ] **Step 1:** In `DuncanDoyle/kgateway-tooling` `program.md`, a small commit of its own: the Contracts row for `ctrlmetrics`, the E8 row and the "E8 `check` MVP" steps name the new path (`ctrlmetrics.CollectOnce`, `Publish`, `setup.Config.Collected`) and drop `Static`, `cfg.Metrics` and `ctrlmetrics.Source`. Approved like any commit.
+- [ ] **Step 2:** File a `cross-repo` issue in `DuncanDoyle/kgwctl`, title `[from snellius] E8: controller metrics move to the collector seam`, naming E8, the removed names, the new names, and the exact change: replace any `cfg.Engine.Metrics = …` with steps 2–3 of design §7.3, and drop references to `ctrlmetrics.Static`, `ctrlmetrics.Source`, `engine.Config.MetricsMaxAge` and `health.Input.Metrics`. Ask before the first post (user's rule); do not wait for kgwctl.
 
 ### Task 7: check split and per-install filter
 
@@ -236,7 +255,7 @@ The private repo exists (user, 2026-11-08). Its workflows are written there, nev
 
 ### Task 18: kgwctl compile job, docs, close
 
-**Files:** `.github/workflows/ci.yaml` (job building kgwctl `main` through a generated `go.work`), `README.md` (packs, `NewCore`, class-only installs, upgrade notes), `docs/documentation-notes.md`.
+**Files:** `.github/workflows/ci.yaml` (job building kgwctl `main` through a generated `go.work`, `continue-on-error: true`, not a required check), `README.md` (packs, `NewCore`, class-only installs, upgrade notes), `docs/documentation-notes.md`.
 
-- [ ] **Step 1:** CI job green. A one-shot fixture test (`setup.Build`, `ctrlmetrics.Static`, `engine.Compute`) gives the same findings as at the base (E8).
+- [ ] **Step 1:** The job runs and reports. It may fail by design until kgwctl adapts to the metrics break; it never blocks a merge here, and the job's name says "informational".
 - [ ] **Step 2:** Propose `v0.6.0`; at close, update the program file and send the `cross-repo` issue to kgwctl (E2, E3, E8).

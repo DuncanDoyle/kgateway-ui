@@ -20,18 +20,18 @@
 | 5 | One default binary, with the kgateway pack built in. `extension.New()` keeps meaning "core + kgateway" | (user, 2026-11-07) | §4, §11 |
 | 6 | A pack is a set of per-install implementations, selected by the detector that claimed the install. Registry-wide fields stay as the defaults for old callers | (our call) | §4.2 |
 | 7 | An install no pack claims is a **class-only install**: one per GatewayClass `controllerName`, with an opaque ID derived from it | (our call) | §5 |
-| 8 | A class-only install assumes all namespaces in scope, labelled "assumed", and has no scope verifier | (our call; open question 1) | §5.3 |
+| 8 | A class-only install assumes all namespaces in scope, labelled "assumed", and has no scope verifier | (user, 2026-11-08) | §5.3 |
 | 9 | No package moves. kgateway code stays at its paths; a new `pkg/kgateway` assembles the pack; old exported names stay as wrappers | (our call) | §11 |
-| 10 | Controller metrics become a kgateway-pack collector. `engine.Config.Metrics` and `health.Input.Metrics` keep their types through Phase 5, so kgwctl E8 does not break | (our call; open question 3) | §7 |
+| 10 | Controller metrics become a kgateway-pack collector, a clean break: they leave `engine.Config.Metrics` and `health.Input.Metrics`, and checks read them only through `RunContext.Collected`. The types and the one-shot API stay in `pkg/ctrlmetrics` | (user, 2026-11-08) | §7 |
 | 11 | The three rule sets share one spec-level view A in `pkg/computed/viewa`; each set keeps only its deltas | (our call) | §8.1 |
-| 12 | An install without a rule set gets no computed view: status only, no KGWUI-011/012 | (our call; open question 2) | §8.2 |
+| 12 | An install without a rule set gets no computed view: status only, no KGWUI-011/012 | (user, 2026-11-08) | §8.2 |
 | 13 | Delegation is an optional rule-set capability, detected by type assertion | (our call) | §8.3 |
 | 14 | The Envoy layer (proxy stats, xDS rejects, Envoy names, proxy image detection) belongs to the kgateway pack. The core assumes no Envoy | (our call, D-065) | §4.3 |
 | 15 | Condition types beyond Gateway API (`kgateway.dev/Programmed`) come from the pack, per install | (our call) | §9 |
 | 16 | The SPA stays one bundle. kgateway copy and the delegation tab are contributions, shown per install from server-sent features | (our call) | §10 |
-| 17 | The default binary shows class-only installs of other controllers only behind a flag, off by default | (our call; open question 4) | §5.4 |
+| 17 | The default binary shows class-only installs of other controllers only behind a flag, off by default | (user, 2026-11-08) | §5.4 |
 | 18 | No budget or gate changes. Each sub-phase shows it stays within the Phase 3 gates | (user, 2026-10-29, carried) | §14 |
-| 19 | The next tag is `v0.6.0`, a minor: additive Go API, additive API v1 | (our call) | §11 |
+| 19 | The next tag is `v0.6.0`. It breaks the Go API (metrics, `computed.Rules`), with README upgrade notes; API v1 stays additive | (our call, after the user's metrics decision) | §7, §11 |
 
 ## 1. Intent and why
 
@@ -50,7 +50,7 @@ The coupling audit of 2026-11-07, re-verified at the base:
 | Edition branches | `pkg/install/upstream.go:82-100` | `KgatewayVersion`, `ControllerVersion` branch on `Edition == "kgateway"` |
 | Controller settings | `pkg/install/settings.go:10,35,43`, `scope.go:15,219-225` | `KGW_*` env vars read for every install in `Resolve` |
 | Rule-set choice | `pkg/engine/engine.go:340` | `RulesFor(res.KgatewayVersion())` |
-| Metrics | `pkg/health/finding.go:163`, `pkg/engine/engine.go:51`, `pkg/ctrlmetrics/parse.go:18-44` | `Input.Metrics` is the concrete `ctrlmetrics.Result` of `kgateway_*` families |
+| Metrics | `pkg/health/finding.go:163`, `pkg/engine/engine.go:51,338-389,404,412`, `pkg/engine/loop.go:74-78,222-227`, `pkg/api/details.go:331`, `pkg/setup/setup.go:162` | `Input.Metrics` is the concrete `ctrlmetrics.Result` of `kgateway_*` families; the engine reads it for every install, for the verifier, the reported version and the model's freshness |
 | Condition type | `pkg/explore/rows.go:28`, `pkg/health/checks.go:217`, `pkg/health/rules.go:62` | `kgateway.dev/Programmed` |
 | Proxy detection | `pkg/process/kube.go:22` | proxy Pods found by the `envoy-wrapper` image |
 | Collectors | `pkg/app/app.go:255-298` | the metrics scraper and the Envoy proxy stats collector start for every build |
@@ -179,11 +179,11 @@ After the detectors run, the core groups GatewayClasses by `spec.controllerName`
 
 A pinned install (`--install`) accepts this ID like any other.
 
-### 5.3 Default scope (our call; open question 1)
+### 5.3 Default scope (user, 2026-11-08)
 
 A class-only install has no scope provider, so the core assumes all namespaces. The scope reads `{mode: all, source: "assumed"}`. The scope check says "Scope assumed: all namespaces. Snellius cannot read this controller's discovery settings". No scope verifier runs, so KGWUI-007 is not available for it. The alternative, `unknown`, would force the install's health to unknown and turn view A off; since class-only installs have no view A anyway (§8.2), the cost of "unknown" is the verdict alone. We prefer "assumed": a route outside the controller's real scope then shows as not accepted (003), which is true from the user's side.
 
-### 5.4 The default binary (our call; open question 4)
+### 5.4 The default binary (user, 2026-11-08)
 
 Class-only installs are new install rows. In the default binary they are off unless the chart value `installs.classOnly` (flag `--class-only-installs`) is on, so a kgateway user sees no new installs. The core-only build turns it on. The value is generic and names no implementation.
 
@@ -208,19 +208,56 @@ Most pack codes come from whole checks, which the engine filters by `Impl`. Four
 
 `health.Upstream()` keeps returning every check, in today's order. New `health.Core()` and `health.Kgateway()` return the two halves. The check types stay in `pkg/health`: they share unexported helpers, and moving them would export many helpers for no user gain (our call).
 
-## 7. Controller metrics behind the collector seam (our call; open question 3)
+## 7. Controller metrics behind the collector seam (user, 2026-11-08)
 
-Today `app.go:255-298` builds the metrics scraper for every build, and the engine passes the result into every check as `health.Input.Metrics`.
+Today `app.go:255-298` builds the metrics scraper for every build. The engine reads one `ctrlmetrics.Result` per install (`engine.go:338`) and passes it into every check as `health.Input.Metrics`, into the scope verifier, into the reported version (`engine.go:412`) and into the model's freshness (`Model.MetricsRead`, `Source.Metrics`, `loop.go:74`).
 
-In Phase 5:
-1. The kgateway pack registers a collector that wraps `ctrlmetrics.Collector`. It scrapes only installs the pack claimed. Its results feed `engine.Config.Metrics` as today.
+**The user chose a clean break.** Controller metrics leave the engine and the check input. They are one collector value of the kgateway pack, read only through `RunContext.Collected`.
 
-   **Construction (our call, Codex review).** A pack collector is a factory, `func(CollectorEnv) Collector`. `CollectorEnv` carries what `app.go:251-279` uses today: the clients, the app options, the clock, the installs function, the collected store, and `SetMetrics(ctrlmetrics.Source)` for the one metrics source. `setup.Build` builds the same factories, so one-shot callers get the same collectors. The names `setup.go:125` reserves for core collectors become reserved for the kgateway pack: a downstream collector still cannot take them.
-2. The core-only build registers no metrics collector. `HasMetrics` is false, and no core check reads metrics.
-3. `engine.Config.Metrics` (a `ctrlmetrics.Source`) and `health.Input.Metrics` keep their types. The program's E8 contract documents them (`ctrlmetrics.Static`, `NewCollector(...).Collect`). kgwctl at `980d32d` goes through `setup.Build` and `engine.Compute` only, but the contract is public. A one-shot fixture test covers the E8 path (§13).
-4. A behaviour test runs every core check on a class-only install twice, with and without metrics, logs and proxy stats in the input, and asserts equal findings (memoized recomputes included). That proves the core does not read them, which a check of declared inputs cannot.
+### 7.1 The collector (our call)
 
-The clean cut (metrics read only through `RunContext.Collected`) is a later breaking change, announced to kgwctl with its own tag.
+1. The kgateway pack's collector factory, `func(CollectorEnv) Collector`, wraps `ctrlmetrics.Collector`. `CollectorEnv` carries what `app.go:251-279` uses today: the clients, the app options, the clock, the installs function and the collected store. It scrapes only installs the pack claimed.
+2. It publishes one value under `ctrlmetrics.Key` (`"controller-metrics/results"`): a `ctrlmetrics.Results` map from install ID to `Result`, with the fingerprint of the content and an expiry of the max age (3 × the interval). An expired value reads as unavailable (Phase 3 design §4.1), which replaces `Result.Stale`.
+3. One key for all installs keeps one collector contract. A scrape of one install changes the fingerprint for all, which recomputes only the metric checks of every kgateway install: per stage, not per object.
+4. The collector names that `setup.go:125` reserves move to the pack; a downstream collector still cannot take them.
+
+### 7.2 Readers (our call)
+
+| Reader today | After |
+|---|---|
+| checks 001, 024 (`health/xds.go:118-133`, `withheld.go`) | declare `Collected: [ctrlmetrics.Key]`; read their install's entry |
+| the scope verifier (`scopeverify.Input.Metrics`) | the input carries the collected snapshot; the kgateway verifier reads its entry |
+| the reported version (`engine.go:412`) | the kgateway `Impl.Version` hook reads `BuildVersion()` from the entry |
+| the gateway data-plane detail (`api/details.go:331`) | reads the entry from the published collected snapshot |
+| the model freshness (`Model.MetricsRead`, `Source.Metrics`) | gone; the collected snapshot's own fingerprint already feeds the source key |
+| the memo print (`memo.go:103`) | collected keys, as for every collector |
+
+Removed: `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, `engine.Model.MetricsRead`, `engine.MetricsRead`, `engine.Source.Metrics`, `health.Input.Metrics`, `HasMetrics`, `MetricsMaxAge`, `InputSet.Metrics`, `scopeverify.Input.Metrics`, `HasMetrics`, `ctrlmetrics.Source`, `ctrlmetrics.Static`, `Collector.Get`. The core-only build has no metrics at all.
+
+### 7.3 The one-shot path (E8; our call)
+
+The metric types and the one-shot API stay in `pkg/ctrlmetrics`. No package moves (row 9); the package now belongs to the kgateway pack. Kept: `Metrics`, `Parse`, `Result`, `Scraper`, `HTTPScraper`, `PodProxyScraper`, `NewCollector(...).Collect`. New:
+
+```go
+// Results maps install ID to one scrape; the collector's published value.
+type Results map[string]Result
+// CollectOnce scrapes each kgateway install once, synchronously.
+func CollectOnce(ctx context.Context, s Scraper, insts []install.Install) Results
+// Publish stores r under Key, expiring after maxAge, so the next Compute reads it.
+func Publish(store *collect.Store, r Results, maxAge time.Duration)
+```
+
+`setup.Config` gains `Collected *collect.Store`, already wired to `engine.Config.Collected`. The documented one-shot use:
+1. `setup.Build`, start the cache, wait for `Settled()`, take a `Snapshot()`;
+2. `install.Discover(snap, reg.Detectors)`, keep the installs with `Impl == "kgateway"`;
+3. `ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, ctrlmetrics.PodProxyScraper{Kube: kube}, insts), setup.MetricsMaxAge(interval))`;
+4. `engine.New(cfg.Engine).Compute(snap)`.
+
+Go doc on `ctrlmetrics` and the README carry this sequence. A fixture test runs it (§13).
+
+### 7.4 Core-only
+
+The core-only build registers no metrics collector, and no core check reads `ctrlmetrics.Key`. A behaviour test runs every core check on a class-only install twice, with and without metrics, logs and proxy stats in the collected snapshot, and asserts equal findings (memoized recomputes included). That proves the core does not read them, which a check of declared inputs cannot.
 
 ## 8. Rule sets, view A and delegation
 
@@ -230,7 +267,7 @@ View A is spec-level Gateway API (D-020 (A)): sectionName and port, allowedRoute
 
 New package `pkg/computed/viewa` holds the shared attachment rules, parameterised by the kinds each listener protocol allows. Listener isolation is not in `viewa`: it follows which plain-HTTP listeners kgateway merges onto one port (`kgw24/isolation.go:69`), which is data-plane behaviour. Each kgateway set applies it as an annotation after `viewa`, and keeps its own delegation (views B, C), policy targets and log parser (our call, Codex review). The per-version golden fixtures in `pkg/computed/testdata/kgateway-2.{3,4,5}` stay the acceptance test: they must pass unchanged before and after the move. Expected result: about 2k fewer non-test lines.
 
-### 8.2 View A for unknown implementations (our call; open question 2)
+### 8.2 View A for unknown implementations (user, 2026-11-08)
 
 A class-only install gets no rule set, so no computed view and no KGWUI-011 or 012. This is different from a rule set that only lacks delegation (§8.3): that one keeps view A, its cross-check and 012 from attachment. The SPA shows status only: listener attached-route counts and parentRef conditions, as on a Phase 1 page. Running `viewa` for an unknown controller would claim to know its attachment rules; a disagreement would then raise a warning we cannot stand behind (anti-goal).
 
@@ -291,18 +328,21 @@ Unchanged. Packs add no data the Authorizer does not already filter; class-only 
 
 ## 11. Package moves and kgwctl impact
 
-No package moves (our call). Every name kgwctl imports at `kgwctl` `980d32d` keeps compiling with today's meaning:
+No package moves (our call). Every name kgwctl imports at `kgwctl` `980d32d` keeps compiling, except the metrics names the user chose to break (§7):
 
 | Package | kgwctl uses | Phase 5 | Impact |
 |---|---|---|---|
 | `extension` | `New`, `Registry`, `WithDetectors`, `WithKinds`, `WithCollectors`, `Deps` | `New` = `NewCore(kgateway.Pack(), …)`; `Registry` gains fields | none |
 | `kinds` | `Upstream`, `KgatewayGroup`, categories, `Served`, `Resolve`, `ByCategory`, `Dedupe` | `Upstream()` returns the same list in the same order | none |
 | `install` | `Install`, `Resolved`, `Owned`, `UpstreamDetector`, `ProxyPodDetector`, `ParsePinned` | `Install` gains `Impl`; `Resolved` gains optional fields | none (additive) |
-| `cache`, `objects`, `explore`, `engine`, `setup`, `process`, `health`, `app` | as today | `engine.Config` gains optional fields | none |
-| `ctrlmetrics` | `Static`, `NewCollector`, `PodProxyScraper` (E8) | unchanged | none |
+| `cache`, `objects`, `explore`, `process`, `app` | as today | additive | none |
+| `engine`, `setup`, `health` | `engine.Compute`, `setup.Build`, `health.ValidateOrder` | `engine.Config.Metrics`, `MetricsMaxAge`, `Model.MetricsRead`, `Source.Metrics` and `health.Input.Metrics` removed; `setup.Config.Collected` added | breaks only code that set or read metrics through them |
+| `ctrlmetrics` | not imported at `980d32d`; the E8 contract documents `Static`, `NewCollector`, `PodProxyScraper` | `Source`, `Static`, `Collector.Get` removed; `CollectOnce`, `Publish`, `Results`, `Key` added | to get metrics in `check`: the §7.3 sequence instead of `cfg.Engine.Metrics = ctrlmetrics.Static{…}` |
 | `computed` | not imported | `Rules` loses `Delegation` from the required set | none for kgwctl |
 
-One behaviour change reaches kgwctl: `extension.NewCore()` exists, and a kgwctl that called it would see class-only installs. kgwctl does not call it. The phase close sends a `cross-repo` issue for `v0.6.0` naming E2, E3 and E8, as the program protocol asks.
+One behaviour change reaches kgwctl: `extension.NewCore()` exists, and a kgwctl that called it would see class-only installs. kgwctl does not call it.
+
+**Cross-project communication (user, 2026-11-08).** When the metrics move merges (5.2), a plan task updates the E8 rows of the program file to the new names and files a `cross-repo` issue in kgwctl naming E8, the new names and the exact changes (§7.3). Snellius does not wait for kgwctl. The phase close sends the usual `v0.6.0` notice for E2, E3 and E8.
 
 ## 12. The private compatibility check (D-065)
 
@@ -342,14 +382,14 @@ The private repo exists (user, 2026-11-08); its workflows are a 5.6 task, writte
 |---|---|---|
 | Core boundary (`internal/boundary`) | per file | files that may import pack packages (`ctrlmetrics`, `ctrllogs`, `proxystats`, `scopeverify`, `proxymode`, `computed/kgw*`, `rulesets`, `pkg/kgateway`) are listed with a reason, like today's allowlist; the list only shrinks. The compatibility surface of §7 and §11 is listed explicitly |
 | Core checks ignore pack data | `engine.Compute` on a class-only install | equal findings with and without metrics, logs and proxy stats, including memoized recomputes (§7) |
-| E8 one-shot path | `setup.Build`, `ctrlmetrics.Static`, `engine.Compute` | the documented one-shot use gives the same findings as at the base |
+| E8 one-shot path | the §7.3 sequence over a fixture with a rejecting controller | KGWUI-001 appears with the same identity as the long-running path; without `Publish`, 001 is "not available" |
 | Class-only install | `install.Discover` over a snapshot with two controllers | IDs, display, assumed scope; a controller claimed by a detector gets no class-only twin |
 | Pack dispatch | `engine.Compute` with kgateway and class-only installs | each install runs only its checks; findings for kgateway installs are byte-equal to the base |
 | Golden API v1 | `pkg/api/testdata/golden-v1` (frozen), `testdata/golden` (current) | `golden-v1` untouched and `additive_test.go` passes; current goldens gain only optional fields; new current goldens for a class-only install |
 | Rule-set goldens | `pkg/computed/testdata/kgateway-2.{3,4,5}` | pass unchanged across the `viewa` move |
 | Delegation off | API with a rule set without `Delegator` | 404 on the delegation endpoint; no `delegation` feature |
 | `examples/downstream` | as in Phase 3 | builds and passes with no change to its code |
-| kgwctl compile check | CI job building kgwctl `main` against this branch through a `go.work` | compiles (the E8 fixture above covers behaviour) |
+| kgwctl compile check | CI job building kgwctl `main` against this branch through a `go.work`; informational (`continue-on-error`), not required | reports whether kgwctl compiles. It may fail by design until kgwctl adapts to the metrics break; it never blocks a merge here |
 | e2e kgateway matrix | kind, 2.3, 2.4, 2.5 | unchanged |
 | Compat test compiles | `go vet -tags compat` | §12.2 |
 | SPA | Vitest | delegation tab only with the feature; neutral empty-state copy; backend kind by category |
@@ -369,7 +409,7 @@ Each sub-phase runs the bench gates (warm recompute ≤ 150 ms, stream CPU, reta
 | Sub-phase | Roadmap | Scope | Ends with |
 |---|---|---|---|
 | 5.1 | G1 | `Pack`, `Impl`, `NewCore`, `app.RunWith`; `Install.Impl`; class-only installs, IDs, assumed scope; nil-workload handling; settings and experimental kinds per pack; `kinds` split; `cmd/snellius-core` | kgateway goldens unchanged |
-| 5.2 | G2 | metrics and proxy stats collectors from the pack; checks split; per-install check filter; the metrics boundary test | — |
+| 5.2 | G2 | metrics and proxy stats collectors from the pack; the metrics clean break and one-shot API (§7); checks split; per-install check filter; program file E8 rows and the kgwctl `cross-repo` issue | — |
 | 5.3 | G3 | `viewa`; rule-set dedupe; `Delegator`; delegation off path | rule-set goldens unchanged; bench |
 | 5.4 | G4 | condition types, proxy mode, process proxy discovery, commands and verifier per pack; core boundary test with the string allowlist | — |
 | 5.5 | G5 | install features in API v1; web vocabulary; delegation tab as contribution; badge and backend by descriptor | Vitest, Playwright |
@@ -379,14 +419,11 @@ Each sub-phase runs the bench gates (warm recompute ≤ 150 ms, stream CPU, reta
 
 - **D-066** Packs with per-install dispatch; `extension.New` = core + kgateway (§4.2).
 - **D-067** Class-only installs: ID, display, assumed scope, off by default in the default binary (§5).
-- **D-068** Controller metrics as a kgateway-pack collector; the types stay through Phase 5 (§7).
+- **D-068** Controller metrics as a kgateway-pack collector, read only through `RunContext.Collected`; types and one-shot API in `pkg/ctrlmetrics` (§7; user, 2026-11-08).
 - **D-069** Shared view A; no computed view for an install without a rule set (§8.1, §8.2).
 - **D-070** Delegation as an optional `Delegator` (§8.3).
 - **D-071** The Envoy layer belongs to the kgateway pack (§4.3).
 
 ## 17. Open questions for the user
 
-1. **Scope of a class-only install.** Assume all namespaces, labelled "assumed" (recommended), or report it unknown, which forces the install's verdict to unknown?
-2. **View A for other controllers.** Status only, no computed view (recommended), or run the shared Gateway API rules labelled "not verified for this controller"?
-3. **Metrics types.** Keep `engine.Config.Metrics` and `health.Input.Metrics` as they are through Phase 5, so kgwctl does not break (recommended), or make the clean cut now with a breaking tag?
-4. **Other controllers in the default binary.** Show their class-only installs only behind a chart value, off by default (recommended), or always?
+None. Answered 2026-11-08: class-only scope (row 8), metrics (row 10), view A for other controllers (row 12) and the default binary (row 17).
