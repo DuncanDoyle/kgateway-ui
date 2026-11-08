@@ -11,6 +11,7 @@ import {
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { type MouseEvent, memo, useDeferredValue, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useInstallFeature } from "../../api/hooks";
 import type { GatewayRow, RowReason } from "../../api/types";
 import { diagnosticsCopy } from "../../copy/explorer";
 import { objectPath } from "../../explore/objectPath";
@@ -256,10 +257,16 @@ export const GatewayTable = memo(function GatewayTable({
   }, [sort]);
   const cols = useMemo(() => columns(installId), [installId]);
   const narrow = useMedia(NARROW);
+  // An install without a data plane view has no Data plane column, not a column of Unknown (design §10).
+  const dataPlane = useInstallFeature(installId, "dataplane") !== false;
+  const columnVisibility = useMemo(
+    () => ({ ...(narrow ? narrowHidden : allShown), ...(dataPlane ? {} : { dataPlane: false }) }),
+    [narrow, dataPlane],
+  );
   const table = useReactTable({
     data: visible,
     columns: cols,
-    state: { sorting, columnVisibility: narrow ? narrowHidden : allShown },
+    state: { sorting, columnVisibility },
     getRowId: gatewayKey,
     enableSortingRemoval: false,
     // No pagination or expansion: their auto-resets would only add state updates.

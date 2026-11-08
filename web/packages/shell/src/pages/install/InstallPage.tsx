@@ -4,7 +4,7 @@ import { useContext, useId } from "react";
 import { Link } from "react-router-dom";
 import { useNow } from "../../api/clock";
 import { useDiagnostics } from "../../api/diagHooks";
-import { isStale, useCapabilities, useInstalls, useMeta, useOverview } from "../../api/hooks";
+import { isStale, useCapabilities, useInstallFeature, useInstalls, useMeta, useOverview } from "../../api/hooks";
 import { diagnosticsCopy } from "../../copy/explorer";
 import { plural } from "../../format";
 import { StaleView } from "../../health/staleView";
@@ -76,11 +76,13 @@ const CHECKS_SKELETON_H = 180;
 // region Component
 /** The upstream diagnostics block: Needs attention (only with groups) and Processes; CorePages can replace it. */
 export function DiagnosticsSection({ installId, diagnostics: d, stale }: DiagnosticsSectionProps) {
+  // An install without a process view has no Processes block, not one of Unknown lines (design §10).
+  const processes = useInstallFeature(installId, "processes") !== false;
   // Stale data shows every group and process state as unknown (D-006).
   return (
     <StaleView.Provider value={stale}>
       <NeedsAttention groups={d.groups} groupTotal={d.groupTotal} installId={installId} />
-      <ProcessesSection processes={d.processes} installId={installId} />
+      {processes ? <ProcessesSection processes={d.processes} installId={installId} /> : null}
     </StaleView.Provider>
   );
 }
@@ -101,6 +103,7 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
   const panels = useInstallPanels();
   const Section = useContext(CorePagesContext).DiagnosticsSection ?? DiagnosticsSection;
   const panelId = useId();
+  const processes = useInstallFeature(id, "processes") !== false;
   const now = useNow();
   const err = ov.error ?? d.error;
   // Render only data that belongs to this route's install, never the previous install's (design §6.6).
@@ -119,10 +122,14 @@ export function InstallPage({ stylesOverride }: InstallPageProps = {}) {
         <Shimmer h={STRIP_H} />
         {/* Needs attention reserves the rows the server counted; Processes always shows. */}
         <NeedsAttentionSkeleton rows={installs?.find((s) => s.id === id)?.groupRows ?? 0} />
-        <h2>{diagnosticsCopy.processesTitle}</h2>
-        <div data-testid="processes-shimmer">
-          <Shimmer h={PROCESSES_H} />
-        </div>
+        {processes ? (
+          <>
+            <h2>{diagnosticsCopy.processesTitle}</h2>
+            <div data-testid="processes-shimmer">
+              <Shimmer h={PROCESSES_H} />
+            </div>
+          </>
+        ) : null}
         <Split>
           <div>
             <TileGrid>
