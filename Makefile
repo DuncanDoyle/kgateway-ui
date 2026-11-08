@@ -12,7 +12,7 @@ ACTIONLINT_VERSION := v1.7.12
 BENCH_AB ?= ^Benchmark(Compute|ColdCompute|ConfirmTick|AnalyzerStage)$$/^(large|warm-scope|memoized-scope)
 BENCH_AB_COUNT ?= 5
 
-.PHONY: help test lint actionlint build web shell-pack example-web run e2e e2e-down bench bench-ab bench-stream
+.PHONY: help test lint actionlint build build-core image-core web shell-pack example-web run e2e e2e-down bench bench-ab bench-stream
 help:
 	@echo "make test   run the Go tests"
 	@echo "make lint   run go vet and golangci-lint"
@@ -24,6 +24,8 @@ help:
 	@echo "make actionlint  lint the GitHub workflows (shellcheck on run: blocks when it is on PATH)"
 	@echo "make web    build the SPA and copy it into internal/webui/dist"
 	@echo "make build  make web, then build bin/snellius with the SPA embedded"
+	@echo "make build-core  make web, then build bin/snellius-core: the Gateway API core alone, with class-only installs on"
+	@echo "make image-core  build the core-only image snellius-core:dev (IMAGE_CORE sets the tag)"
 	@echo "make shell-pack  build the shell package into web/packages/shell/snellius-shell-<version>.tgz"
 	@echo "make example-web  typecheck and test examples/downstream/web against the packed shell"
 	@echo "make run    run the server from source (placeholder page unless make web ran)"
@@ -77,6 +79,11 @@ example-web: shell-pack
 	cd examples/downstream/web && npx tsc --noEmit && npx vitest run
 build: web
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/snellius ./cmd/snellius
+build-core: web
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/snellius-core ./cmd/snellius-core
+IMAGE_CORE ?= snellius-core:dev
+image-core:
+	docker build --build-arg CMD=snellius-core -t $(IMAGE_CORE) .
 run:
 	go run ./cmd/snellius --kubeconfig $${KUBECONFIG:-$$HOME/.kube/config}
 e2e:

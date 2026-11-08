@@ -1678,3 +1678,36 @@ func TestEndpointsWatchFailureIsNotSignalUnavailable(t *testing.T) {
 		})
 	}
 }
+
+// A registry from extension.NewCore builds and serves with class-only
+// installs on: the other controller is an install, and /meta lists no
+// kgateway kind (Phase 5 design §12.1).
+func TestCoreRegistryServesClassOnlyInstalls(t *testing.T) {
+	gw := testutil.GwRef("infra", "edge")
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("infra", nil), testutil.Namespace("shop", nil),
+		testutil.GatewayClass("other", "example.com/gateway", true), testutil.Gateway("infra", "edge", "other", nil),
+		testutil.HTTPRoute("shop", "r", []objects.ParentRef{gw}, testutil.AcceptedBy(gw, "example.com/gateway")))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, ClassOnlyInstalls: true}, extension.NewCore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var insts []api.InstallSummary
+	eventually(t, "class-only install never appeared", func() bool {
+		insts = nil
+		return getJSON(t, srv, "/api/v1/installs", &insts) == http.StatusOK && len(insts) == 1
+	})
+	if insts[0].ID != "example.com~2Fgateway" || insts[0].Scope == nil || insts[0].Scope.Source != install.SourceAssumed {
+		t.Fatalf("install %+v", insts[0])
+	}
+	var meta api.MetaResponse
+	getJSON(t, srv, "/api/v1/meta", &meta)
+	if len(meta.Kinds) == 0 || slices.ContainsFunc(meta.Kinds, func(k kinds.Served) bool { return k.Group == kinds.KgatewayGroup }) {
+		t.Fatalf("meta kinds %+v, want Gateway API kinds only", meta.Kinds)
+	}
+}

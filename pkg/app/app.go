@@ -424,9 +424,14 @@ func (a *App) Start(ctx context.Context) {
 	}()
 }
 
-// Run builds clients from kubeconfig (or the in-cluster config when empty and
-// running in a pod), then serves until ctx is done.
+// Run is RunWith over extension.New(opts...): the core plus the kgateway pack.
 func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Option) error {
+	return RunWith(ctx, kubeconfig, o, extension.New(opts...))
+}
+
+// RunWith builds clients from kubeconfig (or the in-cluster config when empty
+// and running in a pod), then serves reg until ctx is done.
+func RunWith(ctx context.Context, kubeconfig string, o Options, reg *extension.Registry) error {
 	ApplyMemoryLimit()
 	cfg, inCluster, err := restConfig(kubeconfig)
 	if err != nil {
@@ -450,7 +455,7 @@ func Run(ctx context.Context, kubeconfig string, o Options, opts ...extension.Op
 	if err != nil {
 		return err
 	}
-	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: md, InCluster: inCluster}, o, extension.New(opts...))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: md, InCluster: inCluster}, o, reg)
 	if err != nil {
 		return err
 	}
