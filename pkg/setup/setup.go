@@ -74,6 +74,9 @@ type Options struct {
 	NoEvents, NoCRDs bool
 	// NoEndpoints turns off the Service and EndpointSlice watches; the zero value keeps them on.
 	NoEndpoints bool
+	// ClassOnlyInstalls adds an install per GatewayClass controllerName no
+	// detector claims (engine.Config.ClassOnly).
+	ClassOnlyInstalls bool
 	// Clock drives the engine and stamps snapshots; nil means the real clock.
 	Clock clock.WithTicker
 }
@@ -165,7 +168,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 				im := reg.ImplFor(i)
 				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version}
 			},
-			Triggers: changes, Clock: o.Clock,
+			Triggers: changes, Clock: o.Clock, ClassOnly: o.ClassOnlyInstalls,
 			// The other bounds stay zero: the walker gives each its default.
 			DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap}},
 		Kinds:   mon,

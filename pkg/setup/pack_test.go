@@ -3,6 +3,7 @@ package setup_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
 
 // renamed is the upstream detector under another name, as a downstream adds it.
@@ -49,5 +51,20 @@ func TestPackHooksArePerInstall(t *testing.T) {
 	m := newOneShotWith(t, ctx, world(), reg).at(t0)
 	if r := m.Installs[0].Rules; r.Note != "" || r.Rules.Version() != "kgateway-2.4" {
 		t.Fatalf("kgateway install rules %s %q, want kgateway-2.4 from rulesets.Select", r.Rules.Version(), r.Note)
+	}
+}
+
+// Class-only installs are off unless asked for.
+func TestBuildClassOnlyInstalls(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		dyn, kube := fakeClients(t, nil)
+		cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery()},
+			setup.Options{MetricsInterval: 10 * time.Second, ClassOnlyInstalls: on}, extension.New())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Engine.ClassOnly != on || cfg.Engine.HooksFor == nil {
+			t.Errorf("ClassOnlyInstalls=%v: engine ClassOnly=%v, hooks set %v", on, cfg.Engine.ClassOnly, cfg.Engine.HooksFor != nil)
+		}
 	}
 }

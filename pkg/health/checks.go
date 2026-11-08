@@ -180,6 +180,9 @@ func (controllerCheck) Inputs() InputSet {
 func (c controllerCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
 	d := in.Install.Deployment
+	if d == nil {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, in.Now)
+	}
 	if f, bad := notReady(d, CodeControllerNotReady, "controller-not-ready", "Controller", in.Install.ID(), in.workloads()); bad {
 		f.Resource = &objects.Ref{Group: "apps", Kind: "Deployment", Namespace: d.Namespace, Name: d.Name}
 		if in.Process != nil {
@@ -708,6 +711,9 @@ func (proxyCheck) Inputs() InputSet {
 // Deployment that exists is judged the same either way.
 func (c proxyCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	in := ctx.Input
+	if in.Install.ProxySelector == nil {
+		return nil, NotAvailable(c.Name(), AvailNotObserved, NotForThisController, in.Snapshot.TakenAt)
+	}
 	var fs []Finding
 	inGrace := 0
 	for _, gw := range in.Owned.Gateways {

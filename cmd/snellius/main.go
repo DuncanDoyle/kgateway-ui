@@ -28,6 +28,7 @@ func main() {
 	flag.BoolVar(&crds, "diagnostics-crds", true, "watch Gateway API CRD metadata")
 	flag.BoolVar(&proxyStats, "diagnostics-proxy-stats", true, "read proxy Envoy stats")
 	flag.BoolVar(&endpoints, "diagnostics-endpoints", true, "watch Services and EndpointSlices")
+	flag.BoolVar(&o.ClassOnlyInstalls, "class-only-installs", false, "also show an install per GatewayClass controllerName that no detector recognises")
 	flag.BoolVar(&o.Diagnostics.ControllerLogs, "diagnostics-controller-logs", false, "read controller logs for derived signals")
 	flag.Parse()
 	o.Diagnostics.NoEvents, o.Diagnostics.NoCRDs, o.Diagnostics.NoProxyStats, o.Diagnostics.NoEndpoints = !events, !crds, !proxyStats, !endpoints

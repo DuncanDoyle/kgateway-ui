@@ -5,6 +5,7 @@ package engine
 import (
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,9 @@ type Config struct {
 	// HooksFor returns the hooks of the pack that claimed an install. Nil gives
 	// every install Scope, RulesFor and kgateway's settings and version.
 	HooksFor func(install.Install) Hooks
+	// ClassOnly adds a class-only install per GatewayClass controllerName no
+	// detected install lists (install.ClassOnly); set HooksFor with it.
+	ClassOnly bool
 	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
 	DelegationBounds computed.Bounds
 	// Logger receives install rejections; nil means slog.Default().
@@ -320,6 +324,14 @@ func (e *Engine) compute() *Published {
 			e.rejected[msg] = true
 			e.cfg.Logger.Error("install rejected", "err", err)
 		}
+	}
+	if e.cfg.ClassOnly {
+		var classes []*unstructured.Unstructured
+		for _, k := range kinds.ByCategory(served, kinds.CategoryGatewayClass) {
+			classes = append(classes, snap.Objects[k.GVR()]...)
+		}
+		found = append(found, install.ClassOnly(classes, found)...)
+		slices.SortFunc(found, func(a, b install.Install) int { return strings.Compare(a.ID(), b.ID()) })
 	}
 	all := install.ResolveWith(found, func(i install.Install) (install.ScopeProvider, func(install.Install) install.Settings) {
 		h := e.cfg.HooksFor(i)

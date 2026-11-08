@@ -6,6 +6,10 @@ install:
   # Pin the UI to one kgateway controller install: an install ID (e.g. kgw.kgateway)
   # or the controller's namespace/name. Empty shows all installs.
   pin: ""
+installs:
+  # Also show one install per GatewayClass controllerName that no detector
+  # recognises, from Gateway API status alone.
+  classOnly: false
 delegation:
   # Selected delegation edges computed per install; 0 keeps the binary's
   # default (10000). A higher cap needs a higher memory limit.

@@ -112,6 +112,10 @@ type setup struct {
 	collected func() collect.Snapshot
 	// catalog is the served-kind catalog; nil knows none.
 	catalog func() kinds.Catalog
+	// hooks are the engine's per-install pack hooks; nil keeps the kgateway hooks for every install.
+	hooks func(install.Install) engine.Hooks
+	// classOnly adds class-only installs.
+	classOnly bool
 }
 
 // scopeViews asserts that unknown scope (user, 2026-10-24) leaves every view A
@@ -247,7 +251,7 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	e := engine.New(engine.Config{Snapshots: c, Served: s.served, Detectors: dets, Scope: install.NamespaceSelectorScope{},
 		Verifier: scopeverify.NewManagedCountVerifier(persist), Metrics: s.metrics, Checks: append(health.Upstream(), s.checks...), Pinned: s.pinned,
 		MetricsMaxAge: 30 * time.Second, Now: now, Platform: s.platform, Logger: s.logger, RulesFor: s.rulesFor,
-		DelegationBounds: s.bounds, Collected: s.collected, Catalog: s.catalog})
+		DelegationBounds: s.bounds, Collected: s.collected, Catalog: s.catalog, HooksFor: s.hooks, ClassOnly: s.classOnly})
 	deadline := time.Now().Add(5 * time.Second)
 	for !e.Compute().Snapshot.Synced {
 		if time.Now().After(deadline) {

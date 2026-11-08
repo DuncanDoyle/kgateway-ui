@@ -68,6 +68,9 @@ type Options struct {
 	Clock clock.WithTicker
 	// Diagnostics toggles the optional inputs; the zero value keeps the defaults.
 	Diagnostics Diagnostics
+	// ClassOnlyInstalls adds an install per GatewayClass controllerName that no
+	// detector claims, known from Gateway API status alone.
+	ClassOnlyInstalls bool
 }
 
 // Diagnostics toggles the optional inputs (design §18.1): No* turns off a
@@ -238,7 +241,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (*App, error) {
 	}
 	sc, err := setup.Build(setup.Clients{Dynamic: c.Dynamic, Kube: c.Kube, Discovery: c.Discovery, Metadata: c.Metadata},
 		setup.Options{Pinned: o.Pinned, MetricsInterval: o.MetricsInterval, DelegationEdgeCap: o.DelegationEdgeCap,
-			NoEvents: o.Diagnostics.NoEvents, NoCRDs: o.Diagnostics.NoCRDs, NoEndpoints: o.Diagnostics.NoEndpoints, Clock: o.Clock}, reg)
+			NoEvents: o.Diagnostics.NoEvents, NoCRDs: o.Diagnostics.NoCRDs, NoEndpoints: o.Diagnostics.NoEndpoints, Clock: o.Clock,
+			ClassOnlyInstalls: o.ClassOnlyInstalls}, reg)
 	if err != nil {
 		return nil, err
 	}

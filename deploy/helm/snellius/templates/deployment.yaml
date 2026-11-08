@@ -22,6 +22,9 @@ spec:
             {{- with .Values.install.pin }}
             - --install={{ . }}
             {{- end }}
+            {{- if .Values.installs.classOnly }}
+            - --class-only-installs=true
+            {{- end }}
             {{- with .Values.delegation.edgeCap }}
             - --delegation-edge-cap={{ . }}
             {{- end }}

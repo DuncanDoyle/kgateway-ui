@@ -24,6 +24,10 @@ const (
 	AvailNotObserved Availability = "not-observed"
 )
 
+// NotForThisController is the detail of a check whose input an install has
+// none of, such as a class-only install's controller workload (Phase 5 design §5.2).
+const NotForThisController = "Not available for this controller"
+
 // NotAvailable returns a not-OK, not-required result with no finding; detail
 // is the reason "What was checked" shows.
 func NotAvailable(name string, why Availability, detail string, at time.Time) CheckResult {
