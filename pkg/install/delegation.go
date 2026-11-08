@@ -250,7 +250,7 @@ func assignBackends(snap *cache.Snapshot, served []kinds.Served, insts []Resolve
 		for _, r := range o.Routes {
 			var ts []objects.BackendTarget
 			if i, ok := h.index(r); ok {
-				ts = objects.BackendTargets(h.views[i])
+				ts = objects.BackendTargetsAs(h.views[i], !in.NoDelegation)
 			} else {
 				ts = dec.Route(r.Obj).Targets
 			}

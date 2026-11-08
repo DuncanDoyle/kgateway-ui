@@ -1,9 +1,11 @@
 package api
 
 import (
+	"slices"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
@@ -38,7 +40,43 @@ func delegatorWorld() []runtime.Object {
 	return append(outcomeWorld(),
 		leaf("shop", "decl", []objects.ParentRef{shopAPI}, "/api/d"),
 		testutil.WithRules(testutil.HTTPRoute("shop", "p", []objects.ParentRef{edgeRef}, failing),
-			map[string]any{"backendRefs": []any{testutil.DelegateTo("shop", "c")}}))
+			map[string]any{"backendRefs": []any{testutil.DelegateTo("shop", "c")}}),
+		mirrored(), testutil.Backend("shop", "be-m", nil))
+}
+
+// mirrored is shop/m, whose one backendRef names shop/kid and mirrors to the Backend shop/be-m.
+func mirrored() *unstructured.Unstructured {
+	ref := testutil.DelegateTo("shop", "kid")
+	ref["filters"] = []any{map[string]any{"type": "RequestMirror", "requestMirror": map[string]any{"backendRef": beRef("be-m")}}}
+	return testutil.WithRules(testutil.HTTPRoute("shop", "m", []objects.ParentRef{edgeRef}, testutil.AcceptedBy(edgeRef, testutil.Controller)),
+		map[string]any{"backendRefs": []any{ref}})
+}
+
+// Without a Delegator a backendRef to an HTTPRoute is an ordinary backend: the
+// backend filter finds its route and its RequestMirror keeps its target.
+func TestOrdinaryHTTPRouteBackend(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rules func(string) computed.Selection
+		kid   []string
+		svc   []string // routes mirroring to shop/be-m
+	}{
+		{"kgateway", nil, []string{}, []string{}},
+		{"attachment only", attachOnlyRules, []string{"shop/api", "shop/m"}, []string{"shop/m"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, srv, _ := startWith(t, setup{disputes: true, rulesFor: tc.rules}, delegatorWorld()...)
+			for q, want := range map[string][]string{"gateway.networking.k8s.io/HTTPRoute/shop/kid": tc.kid, "gateway.kgateway.dev/Backend/shop/be-m": tc.svc} {
+				if got := routeNames(get[Page[RouteRow]](t, srv, listBase+"/routes?backend="+q, 200)); !slices.Equal(got, want) {
+					t.Errorf("backend %s: rows %v, want %v", q, got, want)
+				}
+			}
+			m := get[RouteDetail](t, srv, routeDetail+"shop/m", 200)
+			if l := m.Rules[0].BackendRefs[0].Filters[0].Mirror.BackendRef.Link; (l != LinkNone) != (tc.rules != nil) {
+				t.Errorf("mirror target link %q", l)
+			}
+		})
+	}
 }
 
 // Design §8.3: without a Delegator only delegation is off. The kgateway rule

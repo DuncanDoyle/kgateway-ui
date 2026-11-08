@@ -514,7 +514,7 @@ func (b *builder) index(ix *Index) {
 		uses, targets = uses[:0], targets[:0]
 		a := &b.aux[i]
 		if r.View != nil {
-			a.targets = objects.BackendTargets(r.View)
+			a.targets = objects.BackendTargetsAs(r.View, !b.in.Install.NoDelegation)
 		}
 		for _, t := range a.targets {
 			if j := slices.Index(targets, t.Ref); j >= 0 {
