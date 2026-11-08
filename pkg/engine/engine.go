@@ -60,8 +60,8 @@ type Config struct {
 	Process process.Source
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
-	// HooksFor returns the hooks of the pack that claimed an install. Nil gives every
-	// install Scope, RulesFor and kgateway's settings, version, reported version and experimental kinds.
+	// HooksFor returns the hooks of the pack that claimed an install. Nil gives every install Scope,
+	// RulesFor, Verifier, Process, ProxyMode and kgateway's settings, version, reported version and experimental kinds.
 	HooksFor func(install.Install) Hooks
 	// ClassOnly adds a class-only install per GatewayClass controllerName no
 	// detected install lists (install.ClassOnly); set HooksFor with it.
@@ -97,10 +97,10 @@ type Config struct {
 // namespaces, nil Settings reads none, nil Version is "", nil Reported reports
 // none, nil ExperimentalOnly marks no kind, nil RulesFor is Config.RulesFor and
 // nil Checks is Config.Checks. A nil Verifier runs no verification, nil
-// Process reports no processes and nil ProxyMode treats every proxy as managed. A RulesFor that returns no Rules gives the
-// install no rule set: no computed views. One without a computed.Delegator
-// gives it no delegation (install.Resolved.NoDelegation). A class-only
-// install never has a rule set.
+// Process reports no processes and nil ProxyMode treats every proxy as
+// managed. A RulesFor that returns no Rules gives the install no rule set: no
+// computed views. One without a computed.Delegator gives it no delegation
+// (install.Resolved.NoDelegation). A class-only install never has a rule set.
 type Hooks struct {
 	Scope    install.ScopeProvider
 	Settings func(install.Install) install.Settings
