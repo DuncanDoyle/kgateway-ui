@@ -88,8 +88,8 @@ func TestClassOnlyInstallsAtTheEngine(t *testing.T) {
 }
 
 // Every upstream check runs on a class-only install without a panic. Those
-// that read the controller workload, proxies or processes are not available
-// for it and raise nothing.
+// that read the controller workload, proxies or processes say they are not
+// available for this controller, before any other reason, and raise nothing.
 func TestChecksOnAClassOnlyInstall(t *testing.T) {
 	cfg := classOnlyConfig(twoControllers(t), true)
 	cfg.Metrics = ctrlmetrics.Static{}
@@ -99,7 +99,8 @@ func TestChecksOnAClassOnlyInstall(t *testing.T) {
 		t.Fatalf("pinned: %d installs", len(m.Installs))
 	}
 	h := m.Installs[0].Health
-	for _, name := range []string{"controller pods", "gateway proxies"} {
+	// Events are not watched here: "not for this controller" must win over that.
+	for _, name := range []string{"controller pods", "gateway proxies", "process restarts", "probe failures", "stuck rollouts"} {
 		c, ok := checkResult(h, name)
 		if !ok || c.OK || c.Required || c.Unavailable != health.AvailNotObserved || c.Error != health.NotForThisController {
 			t.Errorf("%s: %+v, want not available for this controller", name, c)
