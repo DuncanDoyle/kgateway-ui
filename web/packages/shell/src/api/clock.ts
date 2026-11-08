@@ -26,6 +26,23 @@ function wallClock(): number {
   return Math.floor(Date.now() / 1000) * 1000;
 }
 
+// region Server clock
+// Server minus browser clock, so data age reads the server's clock even when the cluster's clock drifts (4.3).
+let offset = 0;
+/** Changes within this are ignored: Date has 1 s resolution, plus latency. Keeps equal clocks exact and ages steady. */
+const SKEW_TOLERANCE_MS = 2000;
+
+/** Records the server clock from a response's Date header, read when the response arrives. */
+export function observeServerDate(date: string | null): void {
+  const server = date ? Date.parse(date) : Number.NaN;
+  if (Number.isNaN(server)) return;
+  // Date is cut to the second; +500 ms centres the estimate.
+  const next = server + 500 - Date.now();
+  if (Math.abs(next - offset) <= SKEW_TOLERANCE_MS) return;
+  offset = next;
+  notify();
+}
+
 // region Hidden tab
 // Polls stop while the tab is hidden (D-063). The clock holds at the moment it was hidden until the first
 // requests after it is shown settle, so time spent hidden never counts as staleness on its own.
@@ -72,16 +89,18 @@ export function resetClockForTests(): void {
   heldAt = undefined;
   waiting = false;
   inFlight = 0;
+  offset = 0;
 }
 
 function snapshot(): number {
-  return heldAt ?? wallClock();
+  return (heldAt ?? wallClock()) + offset;
 }
 
 // region Component
 /**
- * The current time at 1 s resolution. Renders with it re-run every second, so staleness is re-evaluated even when
- * data is unchanged. After a hidden tab is shown it holds at the hiding time until the first poll answers.
+ * The current time on the server's clock, at 1 s resolution. Renders with it re-run every second, so staleness is
+ * re-evaluated even when data is unchanged. After a hidden tab is shown it holds at the hiding time until the first
+ * poll answers.
  */
 export function useNow(): number {
   return useSyncExternalStore(subscribe, snapshot, snapshot);

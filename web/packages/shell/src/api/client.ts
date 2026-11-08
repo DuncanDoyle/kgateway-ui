@@ -1,4 +1,4 @@
-import { trackRequest } from "./clock";
+import { observeServerDate, trackRequest } from "./clock";
 /** Error thrown for non-2xx API responses. */
 export class ApiError extends Error {
   constructor(
@@ -40,6 +40,8 @@ async function request<T>(path: string): Promise<{ body: T; headers: Headers }> 
     }
     throw new ApiError(res.status, msg);
   }
+  // Only answers carrying data set the clock their timestamps are read against.
+  observeServerDate(res.headers.get("Date"));
   try {
     return { body: (await res.json()) as T, headers: res.headers };
   } catch {
