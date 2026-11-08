@@ -164,31 +164,58 @@ func (acmeDetector) Detect(d *appsv1.Deployment) (install.Install, bool) {
 	return install.Install{Namespace: d.Namespace, Name: d.Name, Edition: "acme"}, true
 }
 
-// A second pack's detectors are tried first; the old With… options then set
-// that pack's hooks, and the kgateway pack keeps its own.
+// A second pack's detectors are tried first. The old With… options and field
+// assignments set the default (kgateway) pack's hooks whatever their order,
+// and the second pack keeps its own (Phase 5 design §4.2, old callers).
 func TestWithPackOnTopOfKgateway(t *testing.T) {
 	acme := func(string) computed.Selection { return computed.Selection{Rules: kgw23.New(), Note: "acme"} }
 	later := func(string) computed.Selection { return computed.Selection{Rules: kgw23.New(), Note: "later"} }
-	r := New(WithPack(Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}}, Impl: Impl{RulesFor: acme}}), WithComputedRules(later))
+	r := New(WithPack(Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}}, Impl: Impl{RulesFor: acme}}),
+		WithComputedRules(later), WithDetectors(otherDetector{}))
 	if r.Err() != nil {
 		t.Fatal(r.Err())
 	}
-	if r.Detectors[0].Name() != "acme" || r.Detectors[1].Name() != "kgateway" {
-		t.Fatalf("detectors %v, want acme before kgateway", r.Detectors)
+	if r.Detectors[0].Name() != "other" || r.Detectors[1].Name() != "acme" || r.Detectors[2].Name() != "kgateway" {
+		t.Fatalf("detectors %v, want other, acme, kgateway", r.Detectors)
 	}
 	a := detect(t, r, testutil.ControllerDeployment("acme-system", "acme", "acme/controller:1", 1, 1))
 	k := detect(t, r, kgwDeployment())
 	if a.Impl != "acme" || k.Impl != "kgateway" {
-		t.Fatalf("packs %q and %q", a.Impl, k.Impl)
+		t.Fatalf("packs %q and %q; the WithDetectors detector must claim for kgateway", a.Impl, k.Impl)
 	}
-	if got := r.ImplFor(a).RulesFor("1.0"); got.Note != "later" {
-		t.Fatalf("acme rules %+v, want the later option's", got)
+	if got := r.ImplFor(k).RulesFor("2.3.1"); got.Note != "later" {
+		t.Fatalf("kgateway rules %+v, want the later option's", got)
 	}
-	if got := r.ImplFor(k).RulesFor("2.3.1"); got.Rules.Version() != rulesets.Select("2.3.1").Rules.Version() || got.Note != "" {
-		t.Fatalf("kgateway rules %+v, want rulesets.Select", got)
+	if got := r.ImplFor(a).RulesFor("1.0"); got.Note != "acme" {
+		t.Fatalf("acme rules %+v, want acme's own", got)
+	}
+	// A field assigned after New also belongs to the default pack.
+	r.Scope = nil
+	if r.ImplFor(k).Scope != nil {
+		t.Fatal("an assigned Scope must reach the kgateway pack")
+	}
+	if r.ImplFor(a).Scope != nil || r.ImplFor(a).Settings != nil {
+		t.Fatalf("acme must keep its own (nil) hooks, got %+v", r.ImplFor(a))
 	}
 	if im := r.ImplFor(install.Install{}); im.Scope != nil || im.RulesFor != nil {
 		t.Fatalf("an install no pack claims gets the core hooks, got %+v", im)
+	}
+}
+
+// The order of the old options does not matter: f lands on the default pack
+// and the added pack is untouched.
+func TestLegacyOptionsApplyToTheDefaultPack(t *testing.T) {
+	f := func(string) computed.Selection { return computed.Selection{Rules: kgw23.New(), Note: "f"} }
+	other := Pack{Name: "other", Detectors: []install.Detector{acmeDetector{}}, Impl: Impl{Scope: install.NamespaceSelectorScope{}}}
+	for _, r := range []*Registry{New(WithPack(other), WithComputedRules(f)), New(WithComputedRules(f), WithPack(other))} {
+		k := detect(t, r, kgwDeployment())
+		o := detect(t, r, testutil.ControllerDeployment("acme-system", "acme", "acme/controller:1", 1, 1))
+		if got := r.ImplFor(k).RulesFor("2.4.7"); got.Note != "f" {
+			t.Fatalf("kgateway rules %+v, want f", got)
+		}
+		if im := r.ImplFor(o); o.Impl != "other" || im.RulesFor != nil || im.Scope == nil {
+			t.Fatalf("other pack %q hooks %+v, want its own", o.Impl, im)
+		}
 	}
 }
 

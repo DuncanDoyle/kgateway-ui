@@ -31,7 +31,7 @@ import (
 
 // Registry holds everything the backend is built from. Its hook fields (Scope,
 // Verifier, ProxyMode, RulesFor, Process, ProxyStats, Commands) are the hooks
-// of the pack being built: kgateway in New, the core in NewCore (see WithPack).
+// of the default pack: kgateway in New, the core in NewCore (see WithPack).
 type Registry struct {
 	Kinds     []kinds.Descriptor
 	Detectors []install.Detector
@@ -56,13 +56,13 @@ type Registry struct {
 	// Commands fills in the next-step commands (design §8.5).
 	Commands diagnose.Commands
 
-	// pack names the pack being built; "" is the core. settings, version and
+	// pack names the default pack; "" is the core. settings, version and
 	// experimentalOnly are its hooks that have no exported field.
 	pack             string
 	settings         func(install.Install) install.Settings
 	version          func(install.Install) string
 	experimentalOnly func(kinds.Served, install.Install) bool
-	// impls are the hooks of the packs built before the current one, by name.
+	// impls are the hooks of the other packs, and of the core once a default pack is set, by name.
 	impls map[string]Impl
 
 	// handlers are the WithHandlers registrations, in order.
@@ -100,7 +100,7 @@ func WithKinds(d ...kinds.Descriptor) Option {
 	return func(r *Registry) { r.Kinds = kinds.Dedupe(append(r.Kinds, d...)) }
 }
 
-// WithDetectors adds install detectors for the pack being built. They are tried
+// WithDetectors adds install detectors for the default pack. They are tried
 // before the detectors already registered, so a downstream can claim
 // Deployments the upstream one would also match.
 func WithDetectors(d ...install.Detector) Option {
@@ -160,7 +160,7 @@ func WithAuthorizer(a api.Authorizer) Option { return func(r *Registry) { r.Auth
 // WithProxyModeResolver replaces the upstream GatewayParameters resolution.
 func WithProxyModeResolver(p proxymode.Resolver) Option { return func(r *Registry) { r.ProxyMode = p } }
 
-// WithComputedRules sets the rule-set choice of the pack being built (in New,
+// WithComputedRules sets the rule-set choice of the default pack (in New,
 // the kgateway pack's rulesets.Select). A downstream distribution maps its
 // controller to a rule set; a build that is not the kgateway edition receives
 // its BaseVersion, "" when unknown (D-018 §3).

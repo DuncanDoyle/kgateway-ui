@@ -46,18 +46,23 @@ type Pack struct {
 }
 
 // WithPack adds p: its kinds, its detectors (tried before those already
-// registered) and its checks. p becomes the pack being built, so the hook
-// options and Registry hook fields that follow set p's hooks. A pack name that
-// is empty or already registered adds nothing and Registry.Err reports it.
+// registered) and its checks. The first pack added becomes the default pack
+// (kgateway in New): the old hook options, WithDetectors and the Registry hook
+// fields set its hooks, whatever their order. A later pack keeps p.Impl. A pack
+// name that is empty or already registered adds nothing and Registry.Err reports it.
 func WithPack(p Pack) Option {
 	return func(r *Registry) {
 		if _, dup := r.impls[p.Name]; p.Name == "" || dup || p.Name == r.pack {
 			r.fail("pack name %q is empty or already registered", p.Name)
 			return
 		}
-		r.impls[r.pack] = r.currentImpl()
-		r.pack = p.Name
-		r.setImpl(p.Impl)
+		if r.pack == "" {
+			r.impls[""] = r.currentImpl() // the core's hooks, before the default pack takes the fields
+			r.pack = p.Name
+			r.setImpl(p.Impl)
+		} else {
+			r.impls[p.Name] = p.Impl
+		}
 		r.Kinds = kinds.Dedupe(append(r.Kinds, p.Kinds...))
 		r.Detectors = append(stamp(p.Name, p.Detectors), r.Detectors...)
 		r.Checks = append(r.Checks, p.Checks...)
@@ -65,8 +70,8 @@ func WithPack(p Pack) Option {
 }
 
 // ImplFor returns the hooks of the pack that claimed i, read from the Registry
-// fields for the pack being built. An install no registered pack claims, such
-// as a class-only install, gets the core's hooks.
+// fields for the default pack. An install no registered pack claims, such as a
+// class-only install, gets the core's hooks.
 func (r *Registry) ImplFor(i install.Install) Impl {
 	switch im, ok := r.impls[i.Impl]; {
 	case i.Impl == r.pack:
@@ -79,13 +84,13 @@ func (r *Registry) ImplFor(i install.Install) Impl {
 	return r.impls[""]
 }
 
-// currentImpl is the hooks of the pack being built.
+// currentImpl is the default pack's hooks, held in the Registry fields.
 func (r *Registry) currentImpl() Impl {
 	return Impl{Scope: r.Scope, Verifier: r.Verifier, Settings: r.settings, RulesFor: r.RulesFor, Version: r.version,
 		ExperimentalOnly: r.experimentalOnly, ProxyMode: r.ProxyMode, Process: r.Process, ProxyStats: r.ProxyStats, Commands: r.Commands}
 }
 
-// setImpl makes im the hooks of the pack being built.
+// setImpl makes im the default pack's hooks.
 func (r *Registry) setImpl(im Impl) {
 	r.Scope, r.Verifier, r.settings, r.RulesFor, r.version = im.Scope, im.Verifier, im.Settings, im.RulesFor, im.Version
 	r.experimentalOnly, r.ProxyMode, r.Process, r.ProxyStats, r.Commands = im.ExperimentalOnly, im.ProxyMode, im.Process, im.ProxyStats, im.Commands
