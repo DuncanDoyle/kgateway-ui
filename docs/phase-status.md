@@ -23,11 +23,11 @@ Status: implementing (design and plan approved by the user 2026-11-08; branch du
 - [ ] phase-5-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 5.1 (G1) packs, class-only installs, default scope
+Sub-phase: 5.2 (G2) metrics and checks into the pack
 Kind: planned
-Status: implementing
-Base: 9059cfe
-Brief: docs/phases/phase-5/phase-5.1-brief.md
+Status: planned
+Base: 98807aa
+Brief: docs/phases/phase-5/phase-5.2-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
