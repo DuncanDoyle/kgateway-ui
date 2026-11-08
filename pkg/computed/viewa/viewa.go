@@ -11,4 +11,7 @@ type Options struct {
 	// AllowedKinds returns the route kinds a listener admits by its protocol,
 	// before allowedRoutes.kinds narrows them. It must be set.
 	AllowedKinds func(l objects.Listener) []objects.GroupKind
+	// MatchKindOnly matches a route to an allowed kind by kind alone,
+	// ignoring its group. Without it the group must match too.
+	MatchKindOnly bool
 }

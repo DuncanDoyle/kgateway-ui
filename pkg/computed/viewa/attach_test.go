@@ -618,3 +618,18 @@ func TestAttachScopeUnknown(t *testing.T) {
 		}
 	}
 }
+
+// A route of another group whose kind a listener allows is not allowed, unless
+// the options match by kind alone.
+func TestAttachKindNeedsGroup(t *testing.T) {
+	g := gw("infra", "edge", lis("http", "HTTP", 80))
+	rt := route("HTTPRoute", "infra", "x", pref(g, ""))
+	rt.Ref.Group = "example.com"
+	in := computed.AttachmentInput{Resources: []computed.Resource{g}, Routes: []computed.Route{rt}}
+	if o := outcome(t, Attach(in, Options{AllowedKinds: testKinds}), rt, 0); o.Outcome != computed.OutcomeNotAllowed {
+		t.Errorf("full group and kind: %+v", o)
+	}
+	if o := outcome(t, Attach(in, Options{AllowedKinds: testKinds, MatchKindOnly: true}), rt, 0); o.Outcome != computed.OutcomeAccepted {
+		t.Errorf("kind only: %+v", o)
+	}
+}

@@ -99,7 +99,9 @@ func world(bs ...*hr) computed.DelegationInput {
 	return in
 }
 
-func delegate(in computed.DelegationInput) computed.DelegationResult { return New().(computed.Delegator).Delegation(in) }
+func delegate(in computed.DelegationInput) computed.DelegationResult {
+	return New().(computed.Delegator).Delegation(in)
+}
 
 // row finds a row or fails.
 func row(t *testing.T, res computed.DelegationResult, p *hr, rule, ref int, c *hr) computed.Row {

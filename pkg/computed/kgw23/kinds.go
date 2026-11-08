@@ -6,7 +6,8 @@ import (
 )
 
 // viewA is this set's view A: the shared rules with kgateway's route kinds.
-var viewA = viewa.Options{AllowedKinds: routeKinds}
+// kgateway compares a route's kind only, not its group, so view A does too.
+var viewA = viewa.Options{AllowedKinds: routeKinds, MatchKindOnly: true}
 
 // routeKinds returns the route kinds kgateway admits on a listener's protocol,
 // before allowedRoutes.kinds narrows them (rules §4.2).

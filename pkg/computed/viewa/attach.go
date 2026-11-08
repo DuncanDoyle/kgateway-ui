@@ -127,7 +127,7 @@ func Attach(in computed.AttachmentInput, o Options) computed.AttachmentResult {
 		nCands += len(cands[k])
 		nListeners += len(r.Listeners)
 		if blanketUnknown(in, r) == "" {
-			nMembers += memberBound(in, r, states[k], cands[k])
+			nMembers += memberBound(in, o, r, states[k], cands[k])
 		}
 	}
 	res := computed.AttachmentResult{
@@ -140,7 +140,7 @@ func Attach(in computed.AttachmentInput, o Options) computed.AttachmentResult {
 			continue
 		}
 		start := len(ms.m)
-		evalResource(&res, ms, in, &in.Resources[i], states[k], cands[k], !expKnown)
+		evalResource(&res, ms, in, o, &in.Resources[i], states[k], cands[k], !expKnown)
 		// Members are grouped by resource, then listener as written.
 		sort.Stable(&memberBuf{m: ms.m[start:], idx: ms.idx[start:]})
 	}
@@ -152,13 +152,13 @@ func Attach(in computed.AttachmentInput, o Options) computed.AttachmentResult {
 }
 
 // memberBound is an upper bound on a resource's members: every check but hostnames, none of which allocate.
-func memberBound(in computed.AttachmentInput, r *computed.Resource, ls []listenerState, cands []candidate) int {
+func memberBound(in computed.AttachmentInput, o Options, r *computed.Resource, ls []listenerState, cands []candidate) int {
 	n := 0
 	for _, c := range cands {
 		rt := &in.Routes[c.route]
 		for j := range r.Listeners {
 			l, st := &r.Listeners[j], &ls[j]
-			if st.selErr != nil || !kindAllowed(rt.Ref.Kind, st.kinds) {
+			if st.selErr != nil || !o.kindAllowed(rt.Ref, st.kinds) {
 				continue
 			}
 			v := namespacesParsed(*l, st.sel, st.selErr, r.Ref.Namespace, rt.Ref.Namespace, in.NamespaceLabels, in.NamespacesOK)
@@ -184,7 +184,7 @@ func blanketUnknown(in computed.AttachmentInput, r *computed.Resource) computed.
 
 // evalResource runs processRoute for every candidate of one resource and
 // appends its members, outcomes and counts (rules §4.1, §4.4).
-func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.AttachmentInput,
+func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.AttachmentInput, o Options,
 	r *computed.Resource, ls []listenerState, cands []candidate, expUnknown bool,
 ) {
 	if why := blanketUnknown(in, r); why != "" {
@@ -205,7 +205,7 @@ func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.Att
 	}
 
 	for _, c := range cands {
-		res.Outcomes = append(res.Outcomes, evalRef(ms, in, r, ls, c, expUnknown))
+		res.Outcomes = append(res.Outcomes, evalRef(ms, in, o, r, ls, c, expUnknown))
 	}
 
 	for j, l := range r.Listeners {
@@ -223,7 +223,7 @@ func evalResource(res *computed.AttachmentResult, ms *memberBuf, in computed.Att
 
 // evalRef is processRoute's loop for one parentRef, the `allowed` quirk as
 // written: allowed is set before the section and port check (rules §4.1).
-func evalRef(ms *memberBuf, in computed.AttachmentInput, r *computed.Resource, ls []listenerState,
+func evalRef(ms *memberBuf, in computed.AttachmentInput, opt Options, r *computed.Resource, ls []listenerState,
 	c candidate, expUnknown bool,
 ) computed.RefOutcome {
 	rt := &in.Routes[c.route]
@@ -248,7 +248,7 @@ func evalRef(ms *memberBuf, in computed.AttachmentInput, r *computed.Resource, l
 	// A known Selector verdict on any kind-matching listener makes the
 	// Namespace a dep; deps then shares nsDeps, whose Namespace sorts first.
 	for j := range ls {
-		if ls[j].sel != nil && in.NamespacesOK && kindAllowed(rt.Ref.Kind, ls[j].kinds) {
+		if ls[j].sel != nil && in.NamespacesOK && opt.kindAllowed(rt.Ref, ls[j].kinds) {
 			if withNS(); nsDeps[0] == nsRef(rt.Ref.Namespace) {
 				deps = nsDeps[1:3:3]
 			}
@@ -264,7 +264,7 @@ func evalRef(ms *memberBuf, in computed.AttachmentInput, r *computed.Resource, l
 			addFact(computed.Fact{Listener: l.Name, Code: computed.FactSelectorError, Got: st.selErr.Error()})
 			continue
 		}
-		if !kindAllowed(rt.Ref.Kind, st.kinds) {
+		if !opt.kindAllowed(rt.Ref, st.kinds) {
 			addFact(computed.Fact{Listener: l.Name, Code: computed.FactKind, Want: st.kindText, Got: rt.Ref.Kind})
 			continue
 		}
@@ -365,10 +365,11 @@ func nsFact(listener string, st *listenerState, resourceNS, routeNS string, v ns
 	return computed.Fact{Listener: listener, Code: computed.FactNamespace, Want: resourceNS, Got: routeNS}
 }
 
-// kindAllowed compares the kind only, as the controller does.
-func kindAllowed(kind string, allowed []objects.GroupKind) bool {
+// kindAllowed reports whether route's group and kind are in allowed; with
+// MatchKindOnly the kind alone decides.
+func (o Options) kindAllowed(route objects.Ref, allowed []objects.GroupKind) bool {
 	for _, k := range allowed {
-		if k.Kind == kind {
+		if k.Kind == route.Kind && (o.MatchKindOnly || k.Group == route.Group) {
 			return true
 		}
 	}
