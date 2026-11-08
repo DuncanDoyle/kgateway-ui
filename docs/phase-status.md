@@ -23,11 +23,11 @@ Status: implementing (design and plan approved by the user 2026-11-08; branch du
 - [ ] phase-5-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 5.4 (G4) the rest of the kgateway pack
+Sub-phase: 5.5 (G5) web
 Kind: planned
 Status: planned
-Base: 3a96594
-Brief: docs/phases/phase-5/phase-5.4-brief.md
+Base: b4db2ca
+Brief: docs/phases/phase-5/phase-5.5-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
