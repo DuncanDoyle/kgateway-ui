@@ -19,3 +19,11 @@ Topics the user-facing documentation must cover when it is written. Each entry s
 - **Cut down on arrival.** Each object is reduced to about 200 bytes at the informer (Service: name, type, ports; EndpointSlice: ports and ready counts). At 5,000 Services and 6,000 EndpointSlices this is about 2 MiB. Checks look only at Services a route references.
 - **Turning it off.** The `diagnostics.endpoints` chart value turns both watches off; KGWUI-023 then reads "not available".
 - **Sizing guidance.** Give measured numbers per scale tier from the Phase 3 bench records, not a formula.
+
+## Other Gateway API controllers: class-only installs (2026-11-09, Phase 5 design §5)
+
+- **What it is.** With `installs.classOnly` on (flag `--class-only-installs`), each GatewayClass `controllerName` that no pack recognises becomes an install, read from Gateway API status alone. Off by default, so a kgateway user sees no new installs.
+- **What users see.** The install is named "Gateway API controller `<name>`". Its ID escapes each byte outside `A-Z a-z 0-9 . -` as `~` and two hex digits, which shows in URLs. The scope reads "assumed: all namespaces". There is no version, edition, computed badge, Delegation tab, data plane section or Processes block; the Gateway page says "Not available for this controller".
+- **What it does not claim.** Snellius is built for kgateway. A class-only install shows what the controller wrote to status, judged by the core checks only. Explain which finding codes can appear (the core ones, design §6) and which never do.
+- **Assumed scope.** A route outside the controller's real discovery scope shows as not accepted (KGWUI-003). Say this is what the user sees from the cluster, and that Snellius cannot read the controller's settings.
+- **The core-only build.** `cmd/snellius-core` (`make build-core`, `make image-core`) is the core with no pack and class-only installs always on. It is for testing the core's independence, not a supported product build; say so if it is documented at all.

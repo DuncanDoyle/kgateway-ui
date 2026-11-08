@@ -187,6 +187,17 @@ An app that embeds `Shell` must render it with `renderWhenFontsReady(root, eleme
 
 A `ShellExtension` can also add `themes`, `defaultThemeId`, `routes`, `navEntries` and `findingsDocUrl`. "Learn more" on a finding links the release tag's [docs/findings.md](docs/findings.md) when `/api/v1/meta` reports a release version, else `main`; a build with its own version sets `findingsDocUrl` to its own copy. Its `contributions` also take `sideSections` per kind, `findingActions` and `installPanels`. A slot with no contribution renders nothing. `CorePages.DiagnosticsSection` replaces the install page's Needs attention and Processes block; it gets the install ID, the diagnostics and whether they are stale.
 
+### Packs and the core
+
+The backend is a Gateway API core plus implementation packs. A pack (`extension.Pack`) bundles one implementation's kinds, detectors, checks, collectors and per-install hooks (`extension.Impl`). The detector that claims an install picks its pack, and that pack's checks and hooks run only on its installs.
+
+- `extension.New(opts...)` is the core plus the kgateway pack; `app.Run` uses it. The `With…` options above set the kgateway pack's hooks.
+- `extension.NewCore(opts...)` is the core alone: Gateway API kinds, the core checks and no detectors. `extension.WithPack` adds a pack, which must bring every hook it needs. Serve a registry with `app.RunWith(ctx, kubeconfig, opts, reg)`.
+- `cmd/snellius-core` serves the core alone, with class-only installs on. `make build-core` and `make image-core` build it.
+- `go test -tags compat ./test/compat/...` smoke-tests a running core-only build against any controller; [its Go doc](test/compat/compat.go) lists the `COMPAT_*` inputs. `web/e2e/compat.spec.ts` is its Playwright half.
+
+**Class-only installs.** A GatewayClass `controllerName` that no detector claims can become an install of its own. Its ID is the controller name with each byte outside `A-Z a-z 0-9 . -` written as `~` and two hex digits: `example.com/gateway` becomes `example.com~2Fgateway`. It is read from Gateway API status alone. Its scope is all namespaces, assumed, and only the core checks run. It has no version, computed views, delegation, data plane or processes. The default binary shows class-only installs only with `--class-only-installs` (chart value `installs.classOnly`, off by default).
+
 ## Upgrading from kgateway-ui
 
 Snellius is the new name of kgateway-ui. Releases from v0.5.0 use only the new names. v0.4.0 stays available under the old names. The UI holds no state, so a reinstall is cheap.
@@ -203,28 +214,20 @@ Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v
 
 ## Upgrade notes
 
-### Delegation as an optional rule set capability (sub-phase 5.3)
+### v0.6.0: generic Gateway API core (Phase 5)
 
-Nothing changes in the UI or API v1 for kgateway installs. For Go callers:
+Nothing changes in the UI or API v1 for kgateway installs. Go callers meet two deliberate breaks: controller metrics leave `engine.Config` and `health.Input`, and `computed.Rules` loses `Delegation`. Both are below.
 
-- `computed.Rules` no longer has `Delegation`. Views B and C come from the optional `computed.Delegator`. A caller that holds a `computed.Rules` asserts it first, or uses `Selection.Delegator()`, which is nil without one:
+#### Additions
 
-```go
-// Before: res := rules.Delegation(in)
-var res computed.DelegationResult
-if d, ok := rules.(computed.Delegator); ok {
-	res = d.Delegation(in)
-}
-```
+- `extension.NewCore`, `extension.WithPack`, `extension.Pack` and `extension.Impl`, and `app.RunWith` ([Packs and the core](#packs-and-the-core)). `extension.New` keeps its meaning: the core plus the kgateway pack.
+- Class-only installs, behind `--class-only-installs` and the chart value `installs.classOnly` (off by default).
+- API v1, additive: `features` on each install, `packs` in `/api/v1/meta`, and `label` and `ruleSetLabel` beside a computed fact's rule set.
+- The legacy `With…` options set the default pack's hooks. A pack added with `WithPack` must bring the hooks it needs.
 
-- A rule set without `Delegator` keeps view A, its cross-check and KGWUI-012. It has no views B and C, no KGWUI-011, and `GET …/delegation` answers 404. A backendRef to an HTTPRoute is then an ordinary ref, and `install.Resolved.NoDelegation` is set.
-- A class-only install never has a rule set, whatever its hooks: status attachment only, no computed facts.
-- A rule set that wraps a kgateway set must forward `Delegation` to keep delegation, as it forwards `ReportsTargetNotFound`.
-- View A is shared in `pkg/computed/viewa`; `viewa.Attach` takes the set's route kinds per listener protocol.
+#### Controller metrics on the collector seam
 
-### Controller metrics on the collector seam (sub-phase 5.2)
-
-Nothing changes in the UI or API v1. Controller metrics are now a value of the kgateway pack's `controller-metrics` collector, under `ctrlmetrics.Key`. Checks, the scope verifier and the reported version read them from the collected values only.
+Controller metrics are now a value of the kgateway pack's `controller-metrics` collector, under `ctrlmetrics.Key`. Checks, the scope verifier and the reported version read them from the collected values only.
 
 For downstream builds and one-shot callers, these names are removed:
 
@@ -253,6 +256,25 @@ ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, ctrlmetrics.PodP
 cfg.Engine.Snapshots = fixedSnapshot{snap}
 model := engine.New(cfg.Engine).Compute()
 ```
+
+#### Delegation as an optional rule set capability
+
+For Go callers:
+
+- `computed.Rules` no longer has `Delegation`. Views B and C come from the optional `computed.Delegator`. A caller that holds a `computed.Rules` asserts it first, or uses `Selection.Delegator()`, which is nil without one:
+
+```go
+// Before: res := rules.Delegation(in)
+var res computed.DelegationResult
+if d, ok := rules.(computed.Delegator); ok {
+	res = d.Delegation(in)
+}
+```
+
+- A rule set without `Delegator` keeps view A, its cross-check and KGWUI-012. It has no views B and C, no KGWUI-011, and `GET …/delegation` answers 404. A backendRef to an HTTPRoute is then an ordinary ref, and `install.Resolved.NoDelegation` is set.
+- A class-only install never has a rule set, whatever its hooks: status attachment only, no computed facts.
+- A rule set that wraps a kgateway set must forward `Delegation` to keep delegation, as it forwards `ReportsTargetNotFound`.
+- View A is shared in `pkg/computed/viewa`; `viewa.Attach` takes the set's route kinds per listener protocol.
 
 ### Stabilization (sub-phase 3.5)
 
