@@ -71,7 +71,14 @@ export function GatewayPage({ stylesOverride }: GatewayPageProps = {}) {
   // While /meta loads the selector keeps its place (ready false), so the route sections never move.
   const pick: ListenerPick | undefined =
     supported !== false && data
-      ? { listeners: data.listeners, selected, onSelect, ready: !!supported, ruleSet: data.ruleSet ?? "" }
+      ? {
+          listeners: data.listeners,
+          selected,
+          onSelect,
+          ready: !!supported,
+          ruleSet: data.ruleSet ?? "",
+          ruleSetLabel: data.ruleSetLabel,
+        }
       : undefined;
   // From 1600 px the conditions sit beside the structure; below, above it.
   const wide = useTwoColumns();

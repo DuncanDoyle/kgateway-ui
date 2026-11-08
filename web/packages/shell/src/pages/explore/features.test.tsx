@@ -1,11 +1,14 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
+import gatewayGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail.json";
 import dataPlaneGolden from "../../../../../../pkg/api/testdata/golden/gateway-detail-data-plane.json";
 import installsGolden from "../../../../../../pkg/api/testdata/golden/installs.json";
 import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
+import byListenerGolden from "../../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import type { InstallSummary } from "../../api/types";
-import { dataPlaneCopy, delegationCopy, detailCopy, routeCopy } from "../../copy/explorer";
+import { computedCopy, dataPlaneCopy, delegationCopy, detailCopy, routeCopy, viewACopy } from "../../copy/explorer";
 import { kgatewayWebPack } from "../../kgateway/webPack";
 import type { DetailTabContribution } from "../../shell/contributions";
 import type { ShellExtension } from "../../shell/extension";
@@ -38,9 +41,13 @@ function serve(features: string[] | undefined) {
               ? fresh(routeGolden)
               : p === `${API}/gateways/infra/nack`
                 ? fresh(dataPlaneGolden)
-                : p.endsWith("/routes") || p.endsWith("/listenersets") || p.endsWith("/delegation")
-                  ? rows
-                  : undefined;
+                : p === `${API}/gateways/infra/edge`
+                  ? fresh(gatewayGolden)
+                  : p === `${API}/routes` && new URL(url, "http://ui").searchParams.has("listener")
+                    ? fresh(byListenerGolden)
+                    : p.endsWith("/routes") || p.endsWith("/listenersets") || p.endsWith("/delegation")
+                      ? rows
+                      : undefined;
       if (body === undefined) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
       return new Response(JSON.stringify(body), { status: 200 });
     }),
@@ -118,6 +125,15 @@ describe("gateway page", () => {
     expect(screen.queryByRole("region", { name: "Proxies" })).toBeNull();
     expect(screen.queryByText(dataPlaneCopy.rejecting)).toBeNull();
   });
+});
+
+it("the effective-hostnames header names the rule set by the server's label", async () => {
+  serve(ALL);
+  mount(`/i/${ID}/gateways/infra/edge?listener=http`);
+  const header = await screen.findByRole("columnheader", { name: new RegExp(viewACopy.effectiveHostnames) });
+  await userEvent.hover(within(header).getByText(computedCopy.chip));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("kgateway 2.4's attachment rules");
+  expect(screen.getByRole("tooltip")).not.toHaveTextContent("kgateway-2.4");
 });
 
 describe("contributed detail tabs", () => {

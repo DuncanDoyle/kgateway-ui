@@ -153,8 +153,8 @@ function whyColumn(parent: LinkedRef): ObjectColumn<RouteRow> {
 }
 
 /** Each row's effective hostnames on the parent's own listener, computed per (parentRef, listener). */
-function hostnamesColumn(parent: LinkedRef, listener: string, ruleSet: string): ObjectColumn<RouteRow> {
-  const tip = computedTooltip({ by: "ui", rules: ruleSet, rule: "hostname-intersection", state: "checked" });
+function hostnamesColumn(parent: LinkedRef, listener: string, ruleSet: string, label?: string): ObjectColumn<RouteRow> {
+  const tip = computedTooltip({ by: "ui", rules: ruleSet, label, rule: "hostname-intersection", state: "checked" });
   return {
     id: "effective",
     header: viewACopy.effectiveHostnames,
@@ -207,8 +207,9 @@ export interface ListenerPick {
   onSelect: (name?: string) => void;
   /** False while /meta loads: the bar's place is kept, so nothing moves when the chips arrive. */
   ready: boolean;
-  /** The detail's rule set, for the computed columns' header chips. */
+  /** The detail's rule set and its display name, for the computed columns' header chips. */
   ruleSet: string;
+  ruleSetLabel?: string;
 }
 
 interface RouteSectionsProps {
@@ -240,8 +241,8 @@ export function RouteSections({ installId, parent, counts, pick }: RouteSections
         ? base
         : sel === UNPLACED
           ? [...base, notPlacedColumn(parent)]
-          : [...base, hostnamesColumn(parent, sel, pick?.ruleSet ?? "")],
-    [base, parent, sel, pick?.ruleSet],
+          : [...base, hostnamesColumn(parent, sel, pick?.ruleSet ?? "", pick?.ruleSetLabel)],
+    [base, parent, sel, pick?.ruleSet, pick?.ruleSetLabel],
   );
   const title = !sel
     ? gatewayCopy.attachedRoutes

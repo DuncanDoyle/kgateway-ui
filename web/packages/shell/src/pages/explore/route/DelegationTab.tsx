@@ -318,7 +318,7 @@ const Panel = styled.div`
 
 // region Helpers
 /** The column chip's rule: every row of the list is computed by view B's delegation rule. */
-const CHIP = { by: "ui", rules: "kgateway-2.4", rule: "delegation", state: "checked" } as const;
+const CHIP = { by: "ui", rules: "kgateway-2.4", label: "kgateway 2.4", rule: "delegation", state: "checked" } as const;
 const OUTCOMES: DelegationOutcome[] = [
   "attached",
   "partial",
