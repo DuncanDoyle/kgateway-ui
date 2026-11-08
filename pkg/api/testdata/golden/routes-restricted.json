@@ -80,6 +80,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -116,6 +117,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -152,6 +154,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -221,6 +224,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -257,6 +261,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -299,6 +304,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -343,6 +349,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rules": "kgateway-2.4",
                 "state": "restricted"
               },
@@ -384,6 +391,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -396,6 +404,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"

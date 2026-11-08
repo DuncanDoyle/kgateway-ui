@@ -8,12 +8,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
+	"github.com/DuncanDoyle/snellius/pkg/api"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
@@ -252,5 +254,27 @@ func TestChecksForPerPack(t *testing.T) {
 	core := NewCore(WithChecks("ACME-", stubCheck{}))
 	if got, want := names(core.ChecksFor("")), append(names(health.Core()), "stub"); !slices.Equal(got, want) {
 		t.Errorf("NewCore checks %v, want %v", got, want)
+	}
+}
+
+// Each install gets its claiming pack's UI features: kgateway's in New, a
+// second pack's own, and none for the core or in NewCore (Phase 5 design §10).
+func TestFeaturesFollowThePack(t *testing.T) {
+	want := []string{api.FeatureDelegation, api.FeatureComputed, api.FeatureDataPlane, api.FeatureProcesses}
+	r := New(WithPack(Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}}, Features: []string{api.FeatureProcesses}}))
+	for _, tc := range []struct {
+		r    *Registry
+		impl string
+		want []string
+	}{
+		{r, kgateway.Name, want},
+		{r, "acme", []string{api.FeatureProcesses}},
+		{r, "", nil},
+		{NewCore(), kgateway.Name, nil},
+		{NewCore(), "", nil},
+	} {
+		if got := tc.r.FeaturesFor(install.Install{Impl: tc.impl}); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: %v, want %v", tc.impl, got, tc.want)
+		}
 	}
 }

@@ -90,14 +90,14 @@ type facts struct {
 
 // label is a fact of rule in state st, with the rule set's note.
 func (f facts) label(rule string, st computed.State) Computed {
-	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Rule: rule, State: string(st), Note: f.ix.RuleNote}
+	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Label: f.ix.RuleLabel, Rule: rule, State: string(st), Note: f.ix.RuleNote}
 }
 
 // restricted is a fact with a hidden dependency (rule 4). It names no rule,
 // reason or note: the deciding rule can vary with the hidden data. Only the
 // rule set, which is the install's, stays.
 func (f facts) restricted() Computed {
-	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, State: string(computed.StateRestricted)}
+	return Computed{By: ComputedBy, Rules: f.ix.RuleSet, Label: f.ix.RuleLabel, State: string(computed.StateRestricted)}
 }
 
 // unknown is a fact that could not be computed, with why.

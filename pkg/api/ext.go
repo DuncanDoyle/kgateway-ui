@@ -33,6 +33,8 @@ type handlerConfig struct {
 	commands   diagnose.Commands
 	// commandsFor, if set, gives an install's own commands.
 	commandsFor func(install.Install) diagnose.Commands
+	// featuresFor, if set, gives an install's pack features.
+	featuresFor func(install.Install) []string
 }
 
 // WithExtMounts serves m under /api/ext/{name}/. Callers check them with

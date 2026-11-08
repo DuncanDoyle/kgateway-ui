@@ -37,6 +37,7 @@
           "coverage": [
             "count-agrees"
           ],
+          "label": "kgateway 2.4",
           "rule": "listener-count",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -92,7 +93,8 @@
       "pending": 0,
       "unwatched": 0
     },
-    "ruleSet": "kgateway-2.4"
+    "ruleSet": "kgateway-2.4",
+    "ruleSetLabel": "kgateway 2.4"
   },
   "headers": {
     "Cache-Control": "no-store",

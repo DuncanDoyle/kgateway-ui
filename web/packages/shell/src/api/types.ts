@@ -114,6 +114,8 @@ export interface InstallSummary extends InstallHeader {
   groupRows: number;
   computedAt: string;
   confirmedAt?: string;
+  /** The install's UI features, e.g. "delegation"; absent from older servers, which have them all (design §10). */
+  features?: string[];
 }
 export interface Access {
   ok: boolean;

@@ -44,7 +44,8 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	if cfg.commands == nil {
 		cfg.commands = diagnose.Kubectl{}
 	}
-	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor}
+	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor,
+		featuresFor: cfg.featuresFor}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -80,6 +81,8 @@ type handler struct {
 	commands   diagnose.Commands
 	// commandsFor, if set, gives an install's own commands.
 	commandsFor func(install.Install) diagnose.Commands
+	// featuresFor, if set, gives an install's pack features.
+	featuresFor func(install.Install) []string
 }
 
 // commandsOf is i's next-step commands: its own, else the handler's.
@@ -238,7 +241,7 @@ func (h *handler) installs(w http.ResponseWriter, r *http.Request) {
 		out = append(out, InstallSummary{ID: hd.ID, DisplayName: hd.DisplayName, Namespace: hd.Namespace, Name: hd.Name, Version: hd.Version,
 			Edition: hd.Edition, ControllerNames: hd.ControllerNames, Readiness: hd.Readiness, Scope: hd.Scope,
 			Health: HealthSummary{State: rep.State, Counts: rep.Counts}, GroupRows: min(groupTotal(diagnosis(i)), maxGroups),
-			ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed})
+			ComputedAt: wireTime(m.ComputedAt), ConfirmedAt: confirmed, Features: h.features(i)})
 	}
 	writeJSON(w, out)
 }

@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -60,6 +61,9 @@ type Pack struct {
 	// Collectors build the pack's collectors when the app is built. Their names
 	// are reserved: a WithCollectors collector cannot take them.
 	Collectors []func(CollectorEnv) Collector
+	// Features are the UI features the pack's installs support (api.Feature*);
+	// the API drops computed and delegation where the rule set lacks them.
+	Features []string
 }
 
 // CollectorEnv is what the app builds a pack's collectors with (Phase 5 design
@@ -111,6 +115,7 @@ func WithPack(p Pack) Option {
 		r.Kinds = kinds.Dedupe(append(r.Kinds, p.Kinds...))
 		r.Detectors = append(stamp(p.Name, p.Detectors), r.Detectors...)
 		r.Checks = append(r.Checks, p.Checks...)
+		r.features[p.Name] = slices.Clone(p.Features)
 		for _, c := range p.Checks {
 			r.checkPack[c.Name()] = p.Name
 		}
@@ -169,6 +174,9 @@ func (r *Registry) ImplFor(i install.Install) Impl {
 	return r.impls[""]
 }
 
+// FeaturesFor returns the UI features of the pack that claimed i; none for the core.
+func (r *Registry) FeaturesFor(i install.Install) []string { return slices.Clone(r.features[i.Impl]) }
+
 // currentImpl is the default pack's hooks, held in the Registry fields.
 func (r *Registry) currentImpl() Impl {
 	return Impl{Scope: r.Scope, Verifier: r.Verifier, Settings: r.settings, RulesFor: r.RulesFor, Version: r.version, Reported: r.reported,
@@ -189,7 +197,7 @@ func kgatewayPack() Pack {
 		Impl: Impl{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version, Reported: kgateway.Reported,
 			ExperimentalOnly: kgateway.ExperimentalOnly, ProxyMode: kgateway.ProxyMode(), Process: process.Kube{}, Commands: diagnose.Kubectl{},
 			Conditions: kgateway.Conditions()},
-		Collectors: []func(CollectorEnv) Collector{metricsCollector, proxyStatsCollector, controllerLogsCollector}}
+		Collectors: []func(CollectorEnv) Collector{metricsCollector, proxyStatsCollector, controllerLogsCollector}, Features: kgateway.Features()}
 }
 
 // stamp wraps ds so the installs they claim carry pack, unless a detector sets

@@ -17,6 +17,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -148,6 +149,7 @@
       {
         "computed": {
           "by": "ui",
+          "label": "kgateway 2.4",
           "rules": "kgateway-2.4",
           "state": "restricted"
         },
@@ -174,6 +176,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"

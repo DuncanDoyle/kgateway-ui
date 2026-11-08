@@ -16,6 +16,9 @@ func New() computed.Rules { return rules{} }
 // Version implements computed.Rules.
 func (rules) Version() string { return "kgateway-2.5" }
 
+// Label implements computed.Labeler.
+func (rules) Label() string { return "kgateway 2.5" }
+
 // ReportsTargetNotFound implements computed.TargetStatusReporter: 2.5 controllers
 // write TargetNotFound on policy ancestors (#14709), so KGWUI-016 comes from status.
 func (rules) ReportsTargetNotFound() bool { return true }

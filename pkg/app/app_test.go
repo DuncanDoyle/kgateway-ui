@@ -1789,3 +1789,30 @@ func TestCoreRegistryServesClassOnlyInstalls(t *testing.T) {
 		}
 	}
 }
+
+// The app lists each install's pack features: all four for kgateway, none for
+// a class-only install (Phase 5 design §10).
+func TestInstallFeaturesReachTheAPI(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), testutil.Namespace("infra", nil), d, testutil.ControllerPod(d, "kgateway-0", true),
+		testutil.GatewayClass("kgateway", testutil.Controller, true), testutil.GatewayClass("other", "example.com/gateway", true))
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui, ClassOnlyInstalls: true}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var insts []api.InstallSummary
+	eventually(t, "two installs never appeared", func() bool {
+		insts = nil
+		return getJSON(t, srv, "/api/v1/installs", &insts) == http.StatusOK && len(insts) == 2
+	})
+	want := []string{api.FeatureDelegation, api.FeatureComputed, api.FeatureDataPlane, api.FeatureProcesses}
+	if co, k := insts[0], insts[1]; co.ID != "example.com~2Fgateway" || len(co.Features) != 0 || !slices.Equal(k.Features, want) {
+		t.Fatalf("installs %+v, want class-only without features and kgateway with %v", insts, want)
+	}
+}

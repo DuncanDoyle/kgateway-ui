@@ -44,3 +44,6 @@ func ProxyMode() proxymode.Resolver { return proxymode.GatewayParameters{} }
 
 // Conditions are kgateway's route condition types beyond Gateway API's.
 func Conditions() health.ConditionTypes { return health.KgatewayConditions() }
+
+// Features are the kgateway pack's UI features, named as api.Feature* names them.
+func Features() []string { return []string{"delegation", "computed", "dataplane", "processes"} }

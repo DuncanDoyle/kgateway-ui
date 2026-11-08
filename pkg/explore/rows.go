@@ -694,7 +694,7 @@ func (b *builder) views(ix *Index) {
 	if v == nil {
 		return
 	}
-	ix.RuleSet, ix.RuleNote = v.RuleSet, v.Note
+	ix.RuleSet, ix.RuleLabel, ix.RuleNote = v.RuleSet, v.Label, v.Note
 	a := &v.Attachment
 	// Route rows take the first indexes; the map holds resources and Namespaces.
 	n := &interner{ix: ix, routes: map[objects.GroupKind]bool{}, at: map[objects.Ref]int32{}, seen: map[depKey]DepSet{}, offSeen: map[depKey]DepSet{},

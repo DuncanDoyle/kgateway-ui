@@ -51,6 +51,8 @@ export type Attachment = "accepted" | "not-accepted" | "pending" | "unwatched" |
 export interface Computed {
   by: "ui";
   rules: string;
+  /** The rule set's display name, e.g. "kgateway 2.4"; absent from older servers. */
+  label?: string;
   /** Absent on a restricted fact: the deciding rule can depend on hidden objects. */
   rule?: string;
   state: "checked" | "disagrees" | "pending" | "unknown" | "restricted";
@@ -199,6 +201,8 @@ export interface GatewayDetail {
   health: HealthState;
   candidate?: Candidate;
   ruleSet?: string;
+  /** ruleSet's display name; absent from older servers. */
+  ruleSetLabel?: string;
   conditions: Condition[];
   addresses: string[];
   listeners: Listener[];
@@ -230,6 +234,8 @@ export interface ListenerSetDetail {
   health: HealthState;
   candidate?: Candidate;
   ruleSet?: string;
+  /** ruleSet's display name; absent from older servers. */
+  ruleSetLabel?: string;
   parent: LinkedRef;
   parentFound: boolean;
   conditions: Condition[];
@@ -323,6 +329,8 @@ export interface RouteDetail {
   health: HealthState;
   candidate?: Candidate;
   ruleSet?: string;
+  /** ruleSet's display name; absent from older servers. */
+  ruleSetLabel?: string;
   hostnames: string[];
   annotations: { inheritParentMatcher?: boolean };
   parentRefs: SpecParentRef[];

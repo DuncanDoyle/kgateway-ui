@@ -14,6 +14,9 @@ func New() computed.Rules { return rules{} }
 // Version implements computed.Rules.
 func (rules) Version() string { return "kgateway-2.3" }
 
+// Label implements computed.Labeler.
+func (rules) Label() string { return "kgateway 2.3" }
+
 // Attachment implements computed.Rules: the shared view A with kgateway's route kinds.
 func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
 	return viewa.Attach(in, viewA)

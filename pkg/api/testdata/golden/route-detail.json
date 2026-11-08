@@ -170,6 +170,7 @@
             "coverage": [
               "status-compatible"
             ],
+            "label": "kgateway 2.4",
             "rule": "hostname-intersection",
             "rules": "kgateway-2.4",
             "state": "checked"
@@ -182,6 +183,7 @@
                   "count-agrees",
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -217,6 +219,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -272,6 +275,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -327,6 +331,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -382,6 +387,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -437,6 +443,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -492,6 +499,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "effective-matchers",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -971,6 +979,7 @@
       "namespace": "shop"
     },
     "ruleSet": "kgateway-2.4",
+    "ruleSetLabel": "kgateway 2.4",
     "rules": [
       {
         "backendRefs": [
@@ -982,6 +991,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "delegation",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -1011,6 +1021,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "delegation",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -1040,6 +1051,7 @@
                 "coverage": [
                   "not-verified"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "delegation",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -1069,6 +1081,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "delegation",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -1096,6 +1109,7 @@
                 "coverage": [
                   "not-verified"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "delegation",
                 "rules": "kgateway-2.4",
                 "state": "checked"

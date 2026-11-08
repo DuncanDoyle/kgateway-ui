@@ -129,9 +129,11 @@ const ComputedBy = "ui"
 // Computed labels a computed fact with its rule set, rule and check state
 // (design §7.3, rules §8.4). By is always ComputedBy. Reason is the unknown
 // reason; a restricted fact carries no Rule, Reason or Note (design §7.4 rule 4).
+// Label is the rule set's display name, such as "kgateway 2.4".
 type Computed struct {
 	By       string   `json:"by"`
 	Rules    string   `json:"rules"`
+	Label    string   `json:"label,omitempty"`
 	Rule     string   `json:"rule,omitempty"`
 	State    string   `json:"state"`
 	Coverage []string `json:"coverage,omitempty"`
@@ -315,6 +317,7 @@ type GatewayDetail struct {
 	Health               health.State  `json:"health"`
 	Candidate            *Candidate    `json:"candidate,omitempty"`
 	RuleSet              string        `json:"ruleSet,omitempty"`
+	RuleSetLabel         string        `json:"ruleSetLabel,omitempty"`
 	Conditions           []Condition   `json:"conditions"`
 	Addresses            []string      `json:"addresses"`
 	Listeners            []ListenerDTO `json:"listeners"`
@@ -350,6 +353,7 @@ type ListenerSetDetail struct {
 	Health                 health.State         `json:"health"`
 	Candidate              *Candidate           `json:"candidate,omitempty"`
 	RuleSet                string               `json:"ruleSet,omitempty"`
+	RuleSetLabel           string               `json:"ruleSetLabel,omitempty"`
 	Parent                 LinkedRef            `json:"parent"`
 	ParentFound            bool                 `json:"parentFound"`
 	Conditions             []Condition          `json:"conditions"`
@@ -377,6 +381,7 @@ type RouteDetail struct {
 	Health             health.State      `json:"health"`
 	Candidate          *Candidate        `json:"candidate,omitempty"`
 	RuleSet            string            `json:"ruleSet,omitempty"`
+	RuleSetLabel       string            `json:"ruleSetLabel,omitempty"`
 	Hostnames          []string          `json:"hostnames"`
 	Annotations        RouteAnnotations  `json:"annotations"`
 	ParentRefs         []SpecParentRef   `json:"parentRefs"`

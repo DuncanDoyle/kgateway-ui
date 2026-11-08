@@ -247,8 +247,8 @@ type Index struct {
 	ByListener map[ListenerKey][]Member
 	// Listeners holds every computed listener count.
 	Listeners map[ListenerKey]ListenerFacts
-	// RuleSet and RuleNote are view A's rule set and its selection label.
-	RuleSet, RuleNote string
+	// RuleSet, RuleLabel and RuleNote are view A's rule set, its display name and its selection label.
+	RuleSet, RuleLabel, RuleNote string
 	// DelegRows are view B's rows, sorted by (parent, rule, ref, child), each
 	// ref by (namespace, name, group, kind).
 	DelegRows []DelegRow

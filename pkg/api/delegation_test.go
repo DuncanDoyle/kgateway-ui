@@ -222,7 +222,7 @@ func TestDelegationEdgeCapCutRef(t *testing.T) {
 		t.Errorf("rule 3 (charged, unresolved): computed %+v, want checked", c)
 	}
 	for _, rule := range []int{4, 8} {
-		want := Computed{By: ComputedBy, Rules: "kgateway-2.4", Rule: ruleDelegation, State: "unknown", Reason: "too-large"}
+		want := Computed{By: ComputedBy, Rules: "kgateway-2.4", Label: "kgateway 2.4", Rule: ruleDelegation, State: "unknown", Reason: "too-large"}
 		if c := refComputed(d, rule); c == nil || !reflect.DeepEqual(*c, want) {
 			t.Errorf("rule %d (cut): computed %+v, want %+v", rule, c, want)
 		}
@@ -253,7 +253,7 @@ func TestScopeUnknownWinsOverTooLarge(t *testing.T) {
 	cut.Edges = 3
 	objs := unknownScope(outcomeWorld())
 	_, srv, _ := startWith(t, setup{disputes: true, bounds: cut}, objs...)
-	want := Computed{By: ComputedBy, Rules: "kgateway-2.4", Rule: ruleDelegation, State: "unknown", Reason: string(computed.UnknownScope)}
+	want := Computed{By: ComputedBy, Rules: "kgateway-2.4", Label: "kgateway 2.4", Rule: ruleDelegation, State: "unknown", Reason: string(computed.UnknownScope)}
 	for _, route := range []string{"api", "loop"} {
 		d := get[RouteDetail](t, srv, routeDetail+"shop/"+route, 200)
 		for i, r := range d.Rules {
@@ -361,7 +361,7 @@ func TestEffectiveOnRoutePage(t *testing.T) {
 	e, srv, _ := startWith(t, setup{disputes: true}, objs...)
 
 	d := get[RouteDetail](t, srv, routeDetail+"shop/kid", 200)
-	notVerified := Computed{By: ComputedBy, Rules: "kgateway-2.4", Rule: ruleEffective, State: "checked", Coverage: []string{"not-verified"}}
+	notVerified := Computed{By: ComputedBy, Rules: "kgateway-2.4", Label: "kgateway 2.4", Rule: ruleEffective, State: "checked", Coverage: []string{"not-verified"}}
 	want := []EffectiveDTO{{Parent: LinkedRef{Ref: route("shop", "api"), Link: LinkDetail}, Mode: computed.ModeDefault, Computed: notVerified,
 		Contexts: []EffectiveContext{
 			{ParentMatch: ptr(pathMatch("/api")), Rules: []EffectiveRuleDTO{{Index: 0, Kept: true, Matches: []MatchDTO{pathMatch("/api/v1")}}}},
@@ -450,7 +450,7 @@ func selectorRootWorld(zone string) []runtime.Object {
 // restrictedComputed is a fact whose dependency is hidden (design §7.4 rule
 // 4): no rule, reason or note, since each could vary with hidden data.
 func restrictedComputed(string) Computed {
-	return Computed{By: ComputedBy, Rules: "kgateway-2.4", State: "restricted"}
+	return Computed{By: ComputedBy, Rules: "kgateway-2.4", Label: "kgateway 2.4", State: "restricted"}
 }
 
 // withoutHealth is GET path's canonical JSON without any "health" field, its

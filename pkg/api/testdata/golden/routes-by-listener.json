@@ -20,6 +20,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -33,6 +34,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -53,6 +55,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "disagrees"
@@ -103,6 +106,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -116,6 +120,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -136,6 +141,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "disagrees"
@@ -186,6 +192,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -199,6 +206,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -219,6 +227,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "disagrees"
@@ -269,6 +278,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -282,6 +292,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -302,6 +313,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "disagrees"
@@ -349,6 +361,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "pending"
@@ -361,6 +374,7 @@
                       "count-agrees",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "pending"
@@ -380,6 +394,7 @@
                     "coverage": [
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "disagrees"
@@ -436,6 +451,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -449,6 +465,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -469,6 +486,7 @@
                       "status-compatible",
                       "not-verified"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "disagrees"

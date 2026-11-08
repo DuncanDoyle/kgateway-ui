@@ -17,6 +17,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -144,6 +145,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -227,6 +229,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -302,6 +305,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -385,6 +389,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -505,6 +510,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -588,6 +594,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -758,6 +765,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "note": "Status cannot confirm this path",
           "rule": "delegation",
           "rules": "kgateway-2.4",
@@ -880,6 +888,7 @@
           "coverage": [
             "not-verified"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"
@@ -963,6 +972,7 @@
           "coverage": [
             "status-compatible"
           ],
+          "label": "kgateway 2.4",
           "rule": "delegation",
           "rules": "kgateway-2.4",
           "state": "checked"

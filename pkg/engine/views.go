@@ -46,7 +46,7 @@ func computeViews(m *viewsMemo, sel computed.Selection, res install.Resolved, ow
 		}
 		m.din = din
 	}
-	v := &computed.Views{RuleSet: sel.Rules.Version(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
+	v := &computed.Views{RuleSet: sel.Rules.Version(), Label: sel.Label(), Note: sel.Note, Attachment: m.att, Delegation: m.del}
 	v.Checks = append(append(make([]computed.CheckResult, 0, len(m.a)+len(m.d)), m.a...), m.d...)
 	return v
 }

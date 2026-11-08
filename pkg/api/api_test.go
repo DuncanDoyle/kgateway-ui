@@ -45,6 +45,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 	"github.com/DuncanDoyle/snellius/pkg/overview"
@@ -274,7 +275,13 @@ func newHarness(t *testing.T, s setup, objs ...runtime.Object) *harness {
 	if m := e.Compute(); !s.disputes {
 		consistentWithViews(t, m)
 	}
-	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, s.opts...))
+	// Every detected install is kgateway's, as in extension.New; with class-only installs, only the stamped ones.
+	features := func(install.Install) []string { return kgateway.Features() }
+	if s.classOnly {
+		features = packFeatures
+	}
+	opts := append([]HandlerOption{WithInstallFeatures(features)}, s.opts...)
+	srv := httptest.NewServer(NewHandler(e, fstest.MapFS{"index.html": {Data: []byte("<html>spa</html>")}}, s.authz, opts...))
 	t.Cleanup(srv.Close)
 	return &harness{ctx: ctx, cache: c, e: e, srv: srv, dyn: fd, kube: kube, meta: meta, clk: clk}
 }

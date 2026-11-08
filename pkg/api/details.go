@@ -251,7 +251,7 @@ func (h *handler) gatewayDetail(w http.ResponseWriter, r *http.Request) {
 		v, st = objects.DecodeGateway(u), explore.RowState(ref, d.i.Health)
 	}
 	out := GatewayDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Class: v.Class,
-		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
+		Health: st, Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Conditions: conditions(u, v.Conditions), Addresses: append([]string{}, v.StatusAddresses...),
 		Listeners: d.listeners(u, v.Listeners, v.ListenerStatus), AttachedListenerSets: v.AttachedListenerSets,
 		ListenerSets: d.listenerSetCount(ref), RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if cand == nil {
@@ -438,7 +438,7 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	parent := v.Parent.Ref()
 	out := ListenerSetDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, RuleSet: d.ix.RuleSet, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
+		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
 		RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && d.i.Resolved.Experimental(k) {
 		out.ExperimentalHint = experimentalHint(k)
@@ -490,7 +490,7 @@ func (h *handler) routeDetail(w http.ResponseWriter, r *http.Request) {
 		v, st = objects.DecodeHTTPRoute(u), explore.RowState(ref, d.i.Health)
 	}
 	out := RouteDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
-		Candidate: cand, RuleSet: d.ix.RuleSet, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
+		Candidate: cand, RuleSet: d.ix.RuleSet, RuleSetLabel: d.ix.RuleLabel, Hostnames: append([]string{}, v.Hostnames...), ParentRefs: d.specParents(v.ParentRefs),
 		Parents: d.parents(u, v.Parents), Rules: make([]RuleDTO, 0, len(v.Rules)),
 		ChildCount: d.count(d.ix.ByParentRoute[ref]), DeclaredCount: d.count(d.ix.Declared[ref]), CollectedAt: wireTime(d.p.ConfirmedAt)}
 	if _, ok := u.GetAnnotations()[objects.InheritParentMatcherAnnotation]; ok {

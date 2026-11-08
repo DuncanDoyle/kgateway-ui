@@ -116,7 +116,7 @@ func TestRouteListCarriesAttachment(t *testing.T) {
 	got := row["parents"].([]any)[0].(map[string]any)["computed"]
 	want := decode(t, `{"outcome": "NoMatchingListenerHostname", "listeners": [],
 		"explanation": "listener https has *.example.org, route has shop.example.com",
-		"computed": {"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection", "state": "checked", "coverage": ["status-compatible"]}}`)
+		"computed": {"by": "ui", "rules": "kgateway-2.4", "label": "kgateway 2.4", "rule": "hostname-intersection", "state": "checked", "coverage": ["status-compatible"]}}`)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parents[0].computed:\n%v\nwant\n%v", got, want)
 	}
@@ -124,7 +124,7 @@ func TestRouteListCarriesAttachment(t *testing.T) {
 		t.Errorf("flags %v", row["flags"])
 	}
 	inconclusive := items[1].(map[string]any)["parents"].([]any)[0].(map[string]any)["computed"].(map[string]any)["computed"]
-	if want := decode(t, `{"by": "ui", "rules": "kgateway-2.4", "rule": "hostname-intersection", "state": "checked",
+	if want := decode(t, `{"by": "ui", "rules": "kgateway-2.4", "label": "kgateway 2.4", "rule": "hostname-intersection", "state": "checked",
 		"coverage": ["not-verified"], "note": "The controller's status cannot confirm this"}`); !reflect.DeepEqual(inconclusive, want) {
 		t.Errorf("inconclusive computed:\n%v\nwant\n%v", inconclusive, want)
 	}
@@ -343,7 +343,7 @@ func TestSelectorOverHiddenNamespaceIsRestricted(t *testing.T) {
 		}
 		c := h.Parents[0].Computed
 		if c == nil || c.Outcome != "" || len(c.Listeners) != 0 || c.Explanation != "" ||
-			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", State: "restricted"}) {
+			!reflect.DeepEqual(c.Computed, Computed{By: "ui", Rules: "kgateway-2.4", Label: "kgateway 2.4", State: "restricted"}) {
 			t.Errorf("%s restricted: %+v", name, c)
 		}
 		if a.Health != h.Health {
@@ -1237,7 +1237,7 @@ func hiddenDeps(t *testing.T, want matrixExpect) []objects.Ref {
 // its child's effective edge, is restricted for a caller who cannot view dep.
 func checkRestrictedRows(t *testing.T, srv *httptest.Server, rules string, want matrixExpect, dep objects.Ref) {
 	t.Helper()
-	hidden := Computed{By: ComputedBy, Rules: rules, State: string(computed.StateRestricted)}
+	hidden := Computed{By: ComputedBy, Rules: rules, Label: strings.Replace(rules, "-", " ", 1), State: string(computed.StateRestricted)}
 	for _, k := range slices.Sorted(maps.Keys(*want.Rows)) {
 		w := (*want.Rows)[k]
 		if w.Deps == nil || !slices.Contains(*w.Deps, dep.Kind+" "+dep.Namespace+"/"+dep.Name) {

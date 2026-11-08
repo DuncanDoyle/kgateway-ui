@@ -25,6 +25,22 @@ func (s Selection) Delegator() Delegator {
 	return d
 }
 
+// Labeler is an optional interface of a Rules: its display name, such as "kgateway 2.4".
+type Labeler interface {
+	Label() string
+}
+
+// Label is the selected rule set's display name: its Label, else its Version; "" without one.
+func (s Selection) Label() string {
+	if l, ok := s.Rules.(Labeler); ok {
+		return l.Label()
+	}
+	if s.Rules == nil {
+		return ""
+	}
+	return s.Rules.Version()
+}
+
 // Selection is the rule set chosen for a controller, with its label (rules §2).
 type Selection struct {
 	Rules Rules
@@ -74,9 +90,9 @@ const (
 // Views are one install's computed views and their cross-checks (D-020).
 // The engine sets each check's State, Mature and Since.
 type Views struct {
-	// RuleSet is the rule set's Version; Note is its selection label.
-	RuleSet, Note string
-	Attachment    AttachmentResult
+	// RuleSet is the rule set's Version, Label its display name and Note its selection label.
+	RuleSet, Label, Note string
+	Attachment           AttachmentResult
 	// Delegation is views B and C (rules §5, §6).
 	Delegation DelegationResult
 	Checks     []CheckResult

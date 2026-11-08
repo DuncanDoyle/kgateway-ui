@@ -70,6 +70,8 @@ type Registry struct {
 	checkPack map[string]string
 	// impls are the hooks of the other packs, and of the core once a default pack is set, by name.
 	impls map[string]Impl
+	// features are each pack's UI features, by pack name.
+	features map[string][]string
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
@@ -212,6 +214,7 @@ func NewCore(opts ...Option) *Registry {
 		Authorizer: api.AllowAll{},
 		Commands:   diagnose.Kubectl{},
 		impls:      map[string]Impl{},
+		features:   map[string][]string{},
 		checkPack:  map[string]string{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}

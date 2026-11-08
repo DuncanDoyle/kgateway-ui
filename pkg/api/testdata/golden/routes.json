@@ -82,6 +82,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -94,6 +95,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -144,6 +146,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -156,6 +159,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -206,6 +210,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -218,6 +223,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -337,6 +343,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -349,6 +356,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -396,6 +404,7 @@
             "computed": {
               "computed": {
                 "by": "ui",
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "pending"
@@ -407,6 +416,7 @@
                     "coverage": [
                       "count-agrees"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "pending"
@@ -463,6 +473,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -475,6 +486,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
@@ -535,6 +547,7 @@
                 "coverage": [
                   "status-compatible"
                 ],
+                "label": "kgateway 2.4",
                 "rule": "hostname-intersection",
                 "rules": "kgateway-2.4",
                 "state": "checked"
@@ -547,6 +560,7 @@
                       "count-agrees",
                       "status-compatible"
                     ],
+                    "label": "kgateway 2.4",
                     "rule": "hostname-intersection",
                     "rules": "kgateway-2.4",
                     "state": "checked"
