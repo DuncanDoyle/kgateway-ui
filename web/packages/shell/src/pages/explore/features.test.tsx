@@ -8,7 +8,15 @@ import metaGolden from "../../../../../../pkg/api/testdata/golden/meta.json";
 import routeGolden from "../../../../../../pkg/api/testdata/golden/route-detail.json";
 import byListenerGolden from "../../../../../../pkg/api/testdata/golden/routes-by-listener.json";
 import type { InstallSummary } from "../../api/types";
-import { computedCopy, dataPlaneCopy, delegationCopy, detailCopy, routeCopy, viewACopy } from "../../copy/explorer";
+import {
+  computedCopy,
+  dataPlaneCopy,
+  delegationCopy,
+  detailCopy,
+  processesCopy,
+  routeCopy,
+  viewACopy,
+} from "../../copy/explorer";
 import { kgatewayWebPack } from "../../kgateway/webPack";
 import type { DetailTabContribution } from "../../shell/contributions";
 import type { ShellExtension } from "../../shell/extension";
@@ -170,5 +178,26 @@ describe("contributed detail tabs", () => {
     mount(ROUTE, withTab(tab({ applies: () => false })));
     await screen.findByRole("heading", { name: new RegExp(`^${routeCopy.rules}`) });
     expect(screen.queryByRole("tab", { name: "Extra" })).toBeNull();
+  });
+});
+
+describe("processes", () => {
+  const navLink = () => screen.queryByRole("link", { name: "Processes" });
+
+  it("with processes: the nav links the Processes page", async () => {
+    serve(ALL);
+    mount(`/i/${ID}/gateways/infra/nack`);
+    await screen.findByRole("region", { name: dataPlaneCopy.title });
+    expect(navLink()).toBeInTheDocument();
+  });
+
+  it("without processes: no nav entry, and the page by URL says it is not available", async () => {
+    serve([]);
+    const view = mount(`/i/${ID}/gateways/infra/nack`);
+    await screen.findByText(dataPlaneCopy.notAvailable);
+    expect(navLink()).toBeNull();
+    view.unmount();
+    mount(`/i/${ID}/processes`);
+    expect(await screen.findByText(processesCopy.notAvailable)).toBeInTheDocument();
   });
 });

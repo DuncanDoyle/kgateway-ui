@@ -1,6 +1,7 @@
 import styled from "@emotion/styled";
 import { useCallback, useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { useFeatureCheck } from "../api/hooks";
 import { navCopy } from "../copy/explorer";
 import { HEADER_HOVER_PCT, HEADER_PRESS_PCT, headerTint } from "./headerTint";
 import { installPath } from "./paths";
@@ -55,6 +56,8 @@ const Nav = styled.nav`
 export interface InstallNavEntry {
   label: string;
   to: string;
+  /** Shown only where the install has this feature (InstallSummary.features). */
+  feature?: string;
 }
 
 /** The install nav, in order. An entry shows only once its page's route exists. */
@@ -64,7 +67,7 @@ export const installNavEntries: InstallNavEntry[] = [
   { label: navCopy.routes, to: "routes" },
   { label: navCopy.listenerSets, to: "listenersets" },
   { label: navCopy.findings, to: "findings" },
-  { label: navCopy.processes, to: "processes" },
+  { label: navCopy.processes, to: "processes", feature: "processes" },
 ];
 
 // region Component
@@ -77,7 +80,8 @@ interface InstallNavProps {
 
 /** The install-scoped header nav; aria-current marks the active page. */
 export function InstallNav({ installId, paths, entries = installNavEntries }: InstallNavProps) {
-  const shown = entries.filter((e) => paths.includes(e.to));
+  const has = useFeatureCheck(installId);
+  const shown = entries.filter((e) => paths.includes(e.to) && (!e.feature || has(e.feature) !== false));
   const ref = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
   // Marks which edges hide entries; set on the element, so scrolling never re-renders the nav.

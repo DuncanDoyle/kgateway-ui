@@ -3,7 +3,7 @@ import styled from "@emotion/styled";
 import { type ReactNode, useMemo } from "react";
 import { useNow } from "../../api/clock";
 import { useProcesses } from "../../api/diagHooks";
-import { isStale } from "../../api/hooks";
+import { isStale, useInstallFeature } from "../../api/hooks";
 import type { GatewayProcesses, Page, ProcessSet } from "../../api/types";
 import { columnCopy, diagnosticsCopy, listCopy, processesCopy } from "../../copy/explorer";
 import { DIAG_ROW_H, ProcessTable } from "../../diagnostics/ProcessTable";
@@ -13,6 +13,7 @@ import { type ObjectColumn, ObjectTable } from "../../explore/ObjectTable";
 import { StateFilter } from "../../explore/StateFilter";
 import { HealthBadge } from "../../health/HealthBadge";
 import { StaleView } from "../../health/staleView";
+import { PageState } from "../../states/PageState";
 import { Shimmer } from "../../states/Shimmer";
 import { ListFilters, Muted, NameCell, OneLine, useShownPage } from "../explore/listParts";
 
@@ -164,6 +165,8 @@ export function ProcessesPage({ stylesOverride }: ProcessesPageProps = {}) {
   const l = useListPage<GatewayProcesses, ProcessesPageData>("processes", useProcessesList);
   const page = useShownPage(l.data, !!l.error);
   const cols = useMemo(() => columns(l.id), [l.id]);
+  // An install without a process view, reached by URL, gets a plain state (design §10).
+  const available = useInstallFeature(l.id, "processes") !== false;
   const shown = SHOW.filter((s) => l.params.get(s.key) === "true").map((s) => s.key);
   const ctrl = l.data?.controller;
   const counts =
@@ -171,6 +174,7 @@ export function ProcessesPage({ stylesOverride }: ProcessesPageProps = {}) {
     ctrl?.observed && !ctrl.restricted && ctrl.ready !== undefined && ctrl.desired !== undefined
       ? diagnosticsCopy.readyOf(ctrl.ready, ctrl.desired)
       : undefined;
+  if (!available) return <PageState kind="empty" title={processesCopy.notAvailable} />;
   return (
     <StaleWhen collectedAt={l.data?.collectedAt} failed={!!l.error}>
       <ListFrame

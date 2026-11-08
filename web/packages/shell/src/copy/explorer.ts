@@ -606,6 +606,7 @@ export const groupsCopy = {
 
 /** The Processes page and the Gateway page's Data plane and Proxies sections (Phase 3.2). */
 export const processesCopy = {
+  notAvailable: "Not available for this controller",
   title: "Processes", // S412
   search: "Filter Gateways", // S413
   placeholder: "Filter by Gateway name or namespace", // S414
