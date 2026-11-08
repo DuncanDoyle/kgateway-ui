@@ -219,7 +219,7 @@ func eventsPrint(p *printer, snap *cache.Snapshot) {
 // Deployment and Pods by (uid, resourceVersion), scope and settings.
 func installPrint(r install.Resolved) uint64 {
 	p := newPrinter()
-	for _, s := range []string{r.ID(), r.Namespace, r.Name, r.DisplayName, r.Version, r.BaseVersion, r.ReportedVersion, r.Edition, r.Container} {
+	for _, s := range []string{r.ID(), r.Namespace, r.Name, r.DisplayName, r.Version, r.BaseVersion, r.ReportedVersion, r.Edition, r.Container, r.Impl} {
 		p.str(s)
 	}
 	p.u64(uint64(len(r.ControllerNames)))

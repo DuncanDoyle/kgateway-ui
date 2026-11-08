@@ -215,11 +215,35 @@ type Resolved struct {
 	Settings Settings
 }
 
-// Resolve applies p to every install.
+// Resolve applies p and ReadSettings to every install.
 func Resolve(insts []Install, p ScopeProvider) []Resolved {
+	return ResolveWith(insts, func(Install) (ScopeProvider, func(Install) Settings) { return p, ReadSettings })
+}
+
+// SourceAssumed is the Scope.Source of an install without a scope provider.
+const SourceAssumed = "assumed"
+
+// NotRead is the Setting.Reason of an install without a settings reader.
+const NotRead = "not read for this controller"
+
+// ResolveWith resolves each install with the scope provider and settings
+// reader implFor returns for it. A nil provider assumes all namespaces; a nil
+// reader leaves every setting unknown (Phase 5 design §5.3).
+func ResolveWith(insts []Install, implFor func(Install) (ScopeProvider, func(Install) Settings)) []Resolved {
 	out := make([]Resolved, 0, len(insts))
 	for _, in := range insts {
-		out = append(out, Resolved{Install: in, Scope: p.Scope(in), Settings: ReadSettings(in)})
+		p, settings := implFor(in)
+		r := Resolved{Install: in, Scope: Scope{Mode: ScopeAll, Source: SourceAssumed}}
+		if p != nil {
+			r.Scope = p.Scope(in)
+		}
+		if settings != nil {
+			r.Settings = settings(in)
+		} else {
+			s := Setting{Reason: NotRead}
+			r.Settings = Settings{Experimental: s, WildcardNamespace: s, GlobalPolicyNamespace: s}
+		}
+		out = append(out, r)
 	}
 	return out
 }

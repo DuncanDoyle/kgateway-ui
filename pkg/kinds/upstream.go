@@ -40,6 +40,12 @@ func Upstream() []Descriptor {
 	}
 }
 
+// GatewayAPI returns the Gateway API kinds of Upstream, in its order: the
+// kinds the core registers without any pack.
+func GatewayAPI() []Descriptor {
+	return slices.DeleteFunc(Upstream(), func(d Descriptor) bool { return d.Group == kgwGroup })
+}
+
 // KgatewayGroup is the API group of kgateway's own CRDs.
 const KgatewayGroup = kgwGroup
 

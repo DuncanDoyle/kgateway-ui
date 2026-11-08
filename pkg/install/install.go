@@ -41,6 +41,8 @@ type Install struct {
 	// ProxySelector selects this distribution's gateway proxy Deployments; Discover
 	// fills it from the detector when Detect leaves it nil.
 	ProxySelector labels.Selector
+	// Impl names the pack whose detector claimed the install; "" is the core.
+	Impl string
 }
 
 // ID returns the opaque install ID: CustomID, else "<namespace>.<name>".

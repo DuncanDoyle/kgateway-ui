@@ -22,11 +22,24 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 )
 
-// Upstream returns the upstream checks (design §5.2, Phase 3 §9.3).
+// Upstream returns every check, core and kgateway, in their run order (design §5.2, Phase 3 §9.3).
 func Upstream() []Check {
 	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, xdsCheck{}, unwatchedCheck{}, ambiguityCheck{}, verifyCheck{}, backendCheck{},
 		restartsCheck{}, probesCheck{}, rolloutsCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, progressCheck{}, endpointsCheck{},
 		withheldCheck{}}
+}
+
+// Core returns the checks that read only Gateway API status, the cluster and
+// process data, in Upstream's order (Phase 5 design §6).
+func Core() []Check {
+	return []Check{cacheCheck{}, kindsCheck{}, scopeCheck{}, controllerCheck{}, conditionsCheck{}, proxyCheck{}, unwatchedCheck{}, ambiguityCheck{}, backendCheck{},
+		restartsCheck{}, probesCheck{}, rolloutsCheck{}, progressCheck{}, endpointsCheck{}}
+}
+
+// Kgateway returns the checks that read kgateway metrics, proxy stats, version
+// tables or computed views, in Upstream's order (Phase 5 design §6).
+func Kgateway() []Check {
+	return []Check{xdsCheck{}, verifyCheck{}, skewCheck{}, proxyStatsCheck{proxyWarming}, proxyStatsCheck{proxyDisconnected}, computedCheck{}, withheldCheck{}}
 }
 
 func ref(u *unstructured.Unstructured) *objects.Ref { r := objects.RefOf(u); return &r }

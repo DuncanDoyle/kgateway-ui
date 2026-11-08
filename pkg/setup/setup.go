@@ -161,6 +161,10 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 		Engine: engine.Config{Served: served, KindsChange: mon.Change, Catalog: mon.Catalog, Detectors: reg.Detectors, Scope: reg.Scope,
 			Verifier: verifier, Metrics: ctrlmetrics.Static{}, Checks: reg.Checks, Pinned: pinned, Platform: plat,
 			MetricsMaxAge: MetricsMaxAge(o.MetricsInterval), ProxyMode: reg.ProxyMode, RulesFor: reg.RulesFor, Process: reg.Process,
+			HooksFor: func(i install.Install) engine.Hooks {
+				im := reg.ImplFor(i)
+				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version}
+			},
 			Triggers: changes, Clock: o.Clock,
 			// The other bounds stay zero: the walker gives each its default.
 			DelegationBounds: computed.Bounds{Edges: o.DelegationEdgeCap}},

@@ -60,6 +60,9 @@ type Config struct {
 	Process process.Source
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
+	// HooksFor returns the hooks of the pack that claimed an install. Nil gives
+	// every install Scope, RulesFor and kgateway's settings and version.
+	HooksFor func(install.Install) Hooks
 	// DelegationBounds caps views B and C per install; zero means computed.DefaultBounds.
 	DelegationBounds computed.Bounds
 	// Logger receives install rejections; nil means slog.Default().
@@ -88,6 +91,15 @@ type Config struct {
 	// NoMemo turns per-check memoization off, so every check runs on every
 	// recompute (tests compare against it).
 	NoMemo bool
+}
+
+// Hooks are one install's pack hooks (extension.Impl). A nil Scope assumes all
+// namespaces, nil Settings reads none, nil Version is "" and nil RulesFor is Config.RulesFor.
+type Hooks struct {
+	Scope    install.ScopeProvider
+	Settings func(install.Install) install.Settings
+	RulesFor func(version string) computed.Selection
+	Version  func(install.Install) string
 }
 
 // InstallModel is everything the API serves about one install.
@@ -191,6 +203,10 @@ func New(cfg Config) *Engine {
 	}
 	if cfg.Process == nil {
 		cfg.Process = process.Kube{}
+	}
+	if cfg.HooksFor == nil {
+		legacy := Hooks{Scope: cfg.Scope, Settings: install.ReadSettings, RulesFor: cfg.RulesFor, Version: install.Install.KgatewayVersion}
+		cfg.HooksFor = func(install.Install) Hooks { return legacy }
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
 		cfg.DelegationBounds = computed.DefaultBounds
@@ -305,7 +321,10 @@ func (e *Engine) compute() *Published {
 			e.cfg.Logger.Error("install rejected", "err", err)
 		}
 	}
-	all := install.Resolve(found, e.cfg.Scope)
+	all := install.ResolveWith(found, func(i install.Install) (install.ScopeProvider, func(install.Install) install.Settings) {
+		h := e.cfg.HooksFor(i)
+		return h.Scope, h.Settings
+	})
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
@@ -337,7 +356,7 @@ func (e *Engine) compute() *Published {
 		// Read once: the version, the verifier, health and the source fingerprint share this evidence.
 		met, has := e.cfg.Metrics.Get(res.ID())
 		res.ReportedVersion = e.reportedVersion(res.ID(), met, has)
-		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.cfg.RulesFor(res.KgatewayVersion()), met: met, has: has}
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.rulesFor(res.Install), met: met, has: has}
 		runs = append(runs, r)
 		m := e.views[res.ID()]
 		if m == nil {
@@ -422,6 +441,19 @@ func (e *Engine) reportedVersion(id string, met ctrlmetrics.Result, has bool) st
 		delete(e.reported, id)
 	}
 	return e.reported[id]
+}
+
+// rulesFor selects i's rule set with its pack's hooks.
+func (e *Engine) rulesFor(i install.Install) computed.Selection {
+	h := e.cfg.HooksFor(i)
+	var v string
+	if h.Version != nil {
+		v = h.Version(i)
+	}
+	if h.RulesFor == nil {
+		return e.cfg.RulesFor(v)
+	}
+	return h.RulesFor(v)
 }
 
 // gatewayAPI is sel's Gateway API table, else the upstream one.

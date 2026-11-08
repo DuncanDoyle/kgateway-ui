@@ -745,3 +745,34 @@ func TestReadinessWordingFollowsWorkloads(t *testing.T) {
 		})
 	}
 }
+
+// Core and Kgateway split Upstream: together they hold every check once, and
+// each half is in a valid order on its own.
+func TestCoreAndKgatewaySplitUpstream(t *testing.T) {
+	names := func(cs []Check) map[string]bool {
+		out := map[string]bool{}
+		for _, c := range cs {
+			out[c.Name()] = true
+		}
+		return out
+	}
+	core, kgw := Core(), Kgateway()
+	for n := range names(kgw) {
+		if names(core)[n] {
+			t.Errorf("check %q is in both halves", n)
+		}
+	}
+	if !reflect.DeepEqual(names(append(core, kgw...)), names(Upstream())) || len(core)+len(kgw) != len(Upstream()) {
+		t.Fatal("Core and Kgateway together must be Upstream")
+	}
+	for _, cs := range [][]Check{core, append(core, kgw...)} {
+		if err := ValidateOrder(cs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, want := range []string{"xDS rejects", "scope matches controller", "computed views", "withheld config", skewCheckName} {
+		if !names(kgw)[want] {
+			t.Errorf("%q must be a kgateway check", want)
+		}
+	}
+}

@@ -199,10 +199,16 @@ type oneShot struct {
 
 func newOneShot(t *testing.T, ctx context.Context, objs []runtime.Object) *oneShot {
 	t.Helper()
+	return newOneShotWith(t, ctx, objs, extension.New())
+}
+
+// newOneShotWith is newOneShot over reg.
+func newOneShotWith(t *testing.T, ctx context.Context, objs []runtime.Object, reg *extension.Registry) *oneShot {
+	t.Helper()
 	dyn, kube := fakeClients(t, objs)
 	clk := clocktesting.NewFakeClock(t0)
 	cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t)},
-		setup.Options{MetricsInterval: time.Hour, Clock: clk}, extension.New())
+		setup.Options{MetricsInterval: time.Hour, Clock: clk}, reg)
 	if err != nil {
 		t.Fatal(err)
 	}

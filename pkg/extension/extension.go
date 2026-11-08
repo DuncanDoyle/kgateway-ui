@@ -19,7 +19,6 @@ import (
 
 	"github.com/DuncanDoyle/snellius/pkg/api"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
-	"github.com/DuncanDoyle/snellius/pkg/computed/rulesets"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -30,7 +29,9 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 )
 
-// Registry holds everything the backend is built from.
+// Registry holds everything the backend is built from. Its hook fields (Scope,
+// Verifier, ProxyMode, RulesFor, Process, ProxyStats, Commands) are the hooks
+// of the pack being built: kgateway in New, the core in NewCore (see WithPack).
 type Registry struct {
 	Kinds     []kinds.Descriptor
 	Detectors []install.Detector
@@ -54,6 +55,15 @@ type Registry struct {
 	ProxyStats proxystats.Source
 	// Commands fills in the next-step commands (design §8.5).
 	Commands diagnose.Commands
+
+	// pack names the pack being built; "" is the core. settings, version and
+	// experimentalOnly are its hooks that have no exported field.
+	pack             string
+	settings         func(install.Install) install.Settings
+	version          func(install.Install) string
+	experimentalOnly func(kinds.Served, install.Install) bool
+	// impls are the hooks of the packs built before the current one, by name.
+	impls map[string]Impl
 
 	// handlers are the WithHandlers registrations, in order.
 	handlers []extHandlers
@@ -90,10 +100,11 @@ func WithKinds(d ...kinds.Descriptor) Option {
 	return func(r *Registry) { r.Kinds = kinds.Dedupe(append(r.Kinds, d...)) }
 }
 
-// WithDetectors adds install detectors. They are tried before the upstream
-// detector, so a downstream can claim Deployments the upstream one would also match.
+// WithDetectors adds install detectors for the pack being built. They are tried
+// before the detectors already registered, so a downstream can claim
+// Deployments the upstream one would also match.
 func WithDetectors(d ...install.Detector) Option {
-	return func(r *Registry) { r.Detectors = append(append([]install.Detector{}, d...), r.Detectors...) }
+	return func(r *Registry) { r.Detectors = append(stamp(r.pack, d), r.Detectors...) }
 }
 
 // WithScopeProvider replaces the scope provider.
@@ -169,18 +180,25 @@ func WithProxyStatsSource(s proxystats.Source) Option { return func(r *Registry)
 // with its own commands. A method that returns "" hides that step.
 func WithCommands(c diagnose.Commands) Option { return func(r *Registry) { r.Commands = c } }
 
-// New returns the upstream registry with opts applied.
+// New returns the core plus the kgateway pack, with opts applied. The kinds
+// and checks keep the order of kinds.Upstream and health.Upstream.
 func New(opts ...Option) *Registry {
+	return NewCore(append([]Option{WithPack(kgatewayPack()), upstreamOrder}, opts...)...)
+}
+
+// upstreamOrder puts the kinds and checks in the base order, which API v1 kind
+// lists keep; the set is the same core-then-pack set.
+func upstreamOrder(r *Registry) { r.Kinds, r.Checks = kinds.Upstream(), health.Upstream() }
+
+// NewCore returns the core alone, with opts applied: Gateway API kinds, no
+// detectors, the core checks and no pack hooks.
+func NewCore(opts ...Option) *Registry {
 	r := &Registry{
-		Kinds:      kinds.Upstream(),
-		Detectors:  []install.Detector{install.UpstreamDetector{}},
-		Scope:      install.NamespaceSelectorScope{},
-		Checks:     health.Upstream(),
+		Kinds:      kinds.GatewayAPI(),
+		Checks:     health.Core(),
 		Authorizer: api.AllowAll{},
-		ProxyMode:  proxymode.GatewayParameters{},
-		RulesFor:   rulesets.Select,
-		Process:    process.Kube{},
 		Commands:   diagnose.Kubectl{},
+		impls:      map[string]Impl{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}
 	for _, o := range opts {
