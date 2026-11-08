@@ -7,8 +7,8 @@ Docs: docs/phases/phase-5/
 Status: implementing (design and plan approved by the user 2026-11-08; branch duncandoyle/genericCore)
 
 ### Queue
-- [ ] Q1 Sub-phase 5.1 (G1) packs, class-only installs, default scope (plan Tasks 1–5) ← CURRENT
-- [ ] Q2 Sub-phase 5.2 (G2) metrics and checks into the pack (Tasks 6, 6a, 7)
+- [x] Q1 Sub-phase 5.1 (G1) packs, class-only installs, default scope — phases/phase-5/phase-5.1-complete.md
+- [ ] Q2 Sub-phase 5.2 (G2) metrics and checks into the pack (Tasks 6, 6a, 7) ← CURRENT
 - [ ] Q3 Sub-phase 5.3 (G3) rule sets, view A, delegation (Tasks 8–10)
 - [ ] Q4 Sub-phase 5.4 (G4) the rest of the kgateway pack (Tasks 11–12)
 - [ ] Q5 Sub-phase 5.5 (G5) web (Tasks 13–15)
