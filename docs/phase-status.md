@@ -2,9 +2,9 @@
 
 ## Phase
 Phase: 5 — Generic Gateway API core
-Base:
+Base: 169712c8be01e08f8832490df281a81219576174
 Docs: docs/phases/phase-5/
-Status: not started; Phase 4 closed 2026-11-07 (phases/phase-4/phase-4-complete.md, released as v0.5.0)
+Status: design in progress (branch duncandoyle/phase5Design); Phase 4 closed 2026-11-07 (phases/phase-4/phase-4-complete.md, released as v0.5.0)
 
 ### Queue
 (empty; filled from the Phase 5 design and plan)
@@ -22,8 +22,9 @@ none
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
-Waiting on: none
-Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3) updated in `v0.4.0` (2026-11-07, kgwctl#4), and in `v0.5.0` (2026-11-08): the module is now `github.com/DuncanDoyle/snellius` (kgwctl#5). kgwctl's E2 requests: #17 and #20 shipped in `v0.4.0` and closed; #18 and #19 commented as moving to the Traffic Flow & Backends phase (Phase 6; Phase 4 before D-061) (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7.
+Waiting on: none (program file read 2026-11-08; no edge Phase 5 needs is open)
+Consumers: E2 (kgwctl Phase 1), E3 and E8 (kgwctl Phases 5 and 2): delivered in `v0.3.0` (2026-11-05, kgwctl#3) updated in `v0.4.0` (2026-11-07, kgwctl#4), and in `v0.5.0` (2026-11-08): the module is now `github.com/DuncanDoyle/snellius` (kgwctl#5). kgwctl's E2 requests: #17 and #20 shipped in `v0.4.0` and closed; #18 and #19 commented as moving to the Traffic Flow & Backends phase (Phase 6; Phase 4 before D-061) (D-056). E7 (kgwctl Phase 6, policy model under `pkg/`) is UI Phase 7. Phase 5 changes the packages behind E2, E3 and E8 additively: every name kgwctl imports keeps its meaning (design §11); a kgwctl compile job guards it, and the close sends a `cross-repo` issue for `v0.6.0`.
+Open `cross-repo` issues (2026-11-08): here #15, #21 (xdsview E4/E5, for Phase 11), #18, #19 (kgwctl E2, Phase 6); in kgwctl #1–#5 (notices from xdsview and this repo, consumer side).
 Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #21) are for UI Phase 11.
 
 ## Carry-over (deferred to later phases)
@@ -38,6 +39,7 @@ Provided to this repo: E4 and E5 from xdsview `v0.3.0` (renamed from krp; #15, #
 - (P3) Dense memory: peak live memory at the default edge cap is logged, not gated (D-039). Retained heap is +39.3 of 48 MiB (D-057); Phase 5 must keep the shared cache in the core — src: phases/phase-3/reviews/3.0-gate-codex.md#2
 - (P3) A live `warm_withheld` capture for KGWUI-024's error; on kind the gauge never outlasts a scrape — src: phases/phase-3/phase-3.4-complete.md
 - (P4) Neutral `Install` and `Detector` (design §14.4 refactors) — Phase 5 G1 (D-061)
+- (P4) kgateway policy ownership, ListenerPolicy CA refs and Backend judgement stay in core packages, inert without kgateway kinds; move behind pack hooks in Phases 6 and 7 — src: phases/phase-5/design.md §4.1, reviews/design-codex.md#4
 - (P4) Optional `kind-main` e2e job: run on manual dispatch with `kgw_main_version`; chart source unverified. Its 016-from-status expectation (3.5 S9) is unverified too — src: phases/phase-1/phase-1.4-complete.md, phases/phase-3/phase-3.5-complete.md
 - (P4) 2.5 controller log captures; 2.5 TLSRoute SNI conflict handling in view A — src: phases/phase-3/phase-3.4-complete.md
 - Smaller Phase 2 and Phase 3 items (parked tasks, test gaps, layout at 720 px, P4 polish) — src: phases/phase-2/phase-2-complete.md and phases/phase-3/phase-3-complete.md, Deferred / open
