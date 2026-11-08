@@ -44,7 +44,7 @@ func NewHandler(src ModelSource, ui fs.FS, authz Authorizer, opts ...HandlerOpti
 	if cfg.commands == nil {
 		cfg.commands = diagnose.Kubectl{}
 	}
-	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands}
+	h := &handler{src: src, authz: authz, capSources: cfg.capSources, coreSource: cfg.coreSource, commands: cfg.commands, commandsFor: cfg.commandsFor}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /readyz", h.readyz)
@@ -78,6 +78,18 @@ type handler struct {
 	capSources []func() []Capability
 	coreSource func() []Capability
 	commands   diagnose.Commands
+	// commandsFor, if set, gives an install's own commands.
+	commandsFor func(install.Install) diagnose.Commands
+}
+
+// commandsOf is i's next-step commands: its own, else the handler's.
+func (h *handler) commandsOf(i install.Install) diagnose.Commands {
+	if h.commandsFor != nil {
+		if c := h.commandsFor(i); c != nil {
+			return c
+		}
+	}
+	return h.commands
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

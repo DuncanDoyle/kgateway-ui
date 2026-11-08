@@ -287,7 +287,7 @@ func (d *detail) dataPlane(gw objects.Ref) (*DataPlaneDTO, *ProcessSetDTO) {
 	}
 	f := &fs[k]
 	dp.Rejecting = true
-	dp.NextSteps = append(dp.NextSteps, nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(d.p.Model, d.i), d.h.commands, d.v.visible()))...)
+	dp.NextSteps = append(dp.NextSteps, nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(d.p.Model, d.i), d.h.commandsOf(d.i.Resolved.Install), d.v.visible()))...)
 	ev, ok := f.Facts.(*health.XDSRejectsEvidence)
 	if !ok {
 		return dp, &proxies

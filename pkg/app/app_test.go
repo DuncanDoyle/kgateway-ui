@@ -43,12 +43,14 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/computed/kgw24"
 	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
+	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kinds"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/process"
 	"github.com/DuncanDoyle/snellius/pkg/proxymode"
 	"github.com/DuncanDoyle/snellius/pkg/proxystats"
 	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
@@ -1577,6 +1579,54 @@ func TestCommandsSeamReachesTheAPI(t *testing.T) {
 	})
 	if s := dg.Groups[0].NextSteps; len(s) != 1 || s[0].Command != "acme logs kgateway-0" {
 		t.Fatalf("steps %+v", s)
+	}
+}
+
+// packCommands names its own tool in the previous-log step.
+type packCommands struct{ diagnose.Kubectl }
+
+func (packCommands) PreviousLog(pod objects.Ref, _ string) string { return "acme previous " + pod.Name }
+
+// acmeUpstream claims the upstream controller for the pack "acme".
+type acmeUpstream struct{ install.UpstreamDetector }
+
+func (acmeUpstream) Name() string { return "acme" }
+
+// A second pack's Commands reach the next steps of the installs it claims.
+func TestPackCommandsReachTheAPI(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	ctrl := testutil.ControllerPod(d, "kgateway-0", true)
+	// A recent exit with code 2 raises 019 with a previous-log step.
+	crashed := metav1.NewTime(time.Now().Add(-time.Minute))
+	ctrl.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "kgateway", RestartCount: 1, Ready: true,
+		State:                corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: crashed}},
+		LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "Error", ExitCode: 2, FinishedAt: crashed}}}}
+	dyn, kube := testutil.ClientsWith(t, nil, testutil.Namespace("kgw", nil), d, ctrl)
+	acme := extension.Pack{Name: "acme", Detectors: []install.Detector{acmeUpstream{}}, Impl: extension.Impl{Process: process.Kube{}, Commands: packCommands{}}}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: &stubScraper{}},
+		Options{PollInterval: 50 * time.Millisecond, MetricsInterval: time.Hour, UI: ui}, extension.New(extension.WithPack(acme)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	srv := httptest.NewServer(a.Handler)
+	t.Cleanup(srv.Close)
+	var g api.GroupRow
+	eventually(t, "no restart group", func() bool {
+		var dg api.Diagnostics
+		if getJSON(t, srv, "/api/v1/installs/kgw.kgateway/diagnostics", &dg) != http.StatusOK {
+			return false
+		}
+		i := slices.IndexFunc(dg.Groups, func(g api.GroupRow) bool { return g.Code == health.CodeProcessRestarting })
+		if i >= 0 {
+			g = dg.Groups[i]
+		}
+		return i >= 0
+	})
+	if len(g.NextSteps) != 1 || g.NextSteps[0].Command != "acme previous kgateway-0" {
+		t.Fatalf("steps %+v, want the acme pack's command", g.NextSteps)
 	}
 }
 

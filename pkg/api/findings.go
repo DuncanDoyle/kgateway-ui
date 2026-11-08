@@ -315,7 +315,7 @@ func (h *handler) findingDetail(w http.ResponseWriter, r *http.Request) {
 			out.Evidence = wireEvidence(v, l, f.Facts)
 			out.SuggestedFix = wireFix(v, l, diagnose.Fix(f))
 		}
-		out.NextSteps = nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(p.Model, i), h.commands, v.visible()))
+		out.NextSteps = nextSteps(diagnose.Steps(diagnose.Group{Members: []int{k}}, fs, stepsInput(p.Model, i), h.commandsOf(i.Resolved.Install), v.visible()))
 	}
 	out.Affected = Page[LinkedRef]{Install: i.Resolved.ID(), Items: items, Total: len(refs), Next: affected.next, Prev: affected.prev, CollectedAt: at}
 	writeJSON(w, out)
