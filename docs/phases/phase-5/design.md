@@ -217,7 +217,7 @@ Today `app.go:255-298` builds the metrics scraper for every build. The engine re
 ### 7.1 The collector (our call)
 
 1. The kgateway pack's collector factory, `func(CollectorEnv) Collector`, wraps `ctrlmetrics.Collector`. `CollectorEnv` carries what `app.go:251-279` uses today: the clients, the app options, the clock, the installs function and the collected store. It scrapes only installs the pack claimed.
-2. It publishes one value under `ctrlmetrics.Key` (`"controller-metrics/results"`): a `ctrlmetrics.Results` map from install ID to `Result`, with the fingerprint of the content and an expiry of the max age (3 × the interval). An expired value reads as unavailable (Phase 3 design §4.1), which replaces `Result.Stale`.
+2. It publishes one value under `ctrlmetrics.Key` (`"controller-metrics/results"`): a `ctrlmetrics.Results` with one `Result` per install ID and the max age (3 × the interval), with the fingerprint of the content and **no store expiry**. Staleness stays per entry, from each scrape's `CollectedAt` through `Result.Stale` (`scrape.go:129`), as today: staggered scrapes keep their own age, and the API keeps serving the last snapshot after it is stale, as `details.go:331` does now (our call, Codex re-review).
 3. One key for all installs keeps one collector contract. A scrape of one install changes the fingerprint for all, which recomputes only the metric checks of every kgateway install: per stage, not per object.
 4. The collector names that `setup.go:125` reserves move to the pack; a downstream collector still cannot take them.
 
@@ -227,9 +227,9 @@ Today `app.go:255-298` builds the metrics scraper for every build. The engine re
 |---|---|
 | checks 001, 024 (`health/xds.go:118-133`, `withheld.go`) | declare `Collected: [ctrlmetrics.Key]`; read their install's entry |
 | the scope verifier (`scopeverify.Input.Metrics`) | the input carries the collected snapshot; the kgateway verifier reads its entry |
-| the reported version (`engine.go:412`) | the kgateway `Impl.Version` hook reads `BuildVersion()` from the entry |
-| the gateway data-plane detail (`api/details.go:331`) | reads the entry from the published collected snapshot |
-| the model freshness (`Model.MetricsRead`, `Source.Metrics`) | gone; the collected snapshot's own fingerprint already feeds the source key |
+| the reported version (`engine.go:412`) | the kgateway `Impl.Version(install.Install, collect.Snapshot)` hook reads `BuildVersion()` from the entry |
+| the gateway data-plane detail (`api/details.go:331`) | reads the entry from `Model.Collected`, the collected snapshot the computation used, so it shows the same evidence as the checks |
+| the model freshness (`Model.MetricsRead`, `Source.Metrics`) | `Model.Collected` (new) holds the snapshot read once per computation (`engine.go:313`); its fingerprints feed the source key |
 | the memo print (`memo.go:103`) | collected keys, as for every collector |
 
 Removed: `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, `engine.Model.MetricsRead`, `engine.MetricsRead`, `engine.Source.Metrics`, `health.Input.Metrics`, `HasMetrics`, `MetricsMaxAge`, `InputSet.Metrics`, `scopeverify.Input.Metrics`, `HasMetrics`, `ctrlmetrics.Source`, `ctrlmetrics.Static`, `Collector.Get`. The core-only build has no metrics at all.
@@ -239,19 +239,19 @@ Removed: `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, `engine.Model.M
 The metric types and the one-shot API stay in `pkg/ctrlmetrics`. No package moves (row 9); the package now belongs to the kgateway pack. Kept: `Metrics`, `Parse`, `Result`, `Scraper`, `HTTPScraper`, `PodProxyScraper`, `NewCollector(...).Collect`. New:
 
 ```go
-// Results maps install ID to one scrape; the collector's published value.
-type Results map[string]Result
 // CollectOnce scrapes each kgateway install once, synchronously.
-func CollectOnce(ctx context.Context, s Scraper, insts []install.Install) Results
-// Publish stores r under Key, expiring after maxAge, so the next Compute reads it.
-func Publish(store *collect.Store, r Results, maxAge time.Duration)
+func CollectOnce(ctx context.Context, s Scraper, insts []install.Install, maxAge time.Duration) Results
+// Results is one scrape per install ID, with the age beyond which an entry is stale.
+type Results struct { ByInstall map[string]Result; MaxAge time.Duration }
+// Publish stores r under Key, with no store expiry, so the next Compute reads it.
+func Publish(store *collect.Store, r Results)
 ```
 
 `setup.Config` gains `Collected *collect.Store`, already wired to `engine.Config.Collected`. The documented one-shot use:
-1. `setup.Build`, start the cache, wait for `Settled()`, take a `Snapshot()`;
+1. `setup.Build`, start the cache, and wait as the `setup` Go doc says today (`setup.go:11-17`): `Settled()`, then each optional watch and list-only kind OK or failed. Take one `Snapshot()`;
 2. `install.Discover(snap, reg.Detectors)`, keep the installs with `Impl == "kgateway"`;
-3. `ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, ctrlmetrics.PodProxyScraper{Kube: kube}, insts), setup.MetricsMaxAge(interval))`;
-4. `engine.New(cfg.Engine).Compute(snap)`.
+3. `ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, ctrlmetrics.PodProxyScraper{Kube: kube}, insts, setup.MetricsMaxAge(interval)))`;
+4. set `cfg.Engine.Snapshots` to return that same snapshot, then `engine.New(cfg.Engine).Compute()` (it takes no argument, `engine.go:275`).
 
 Go doc on `ctrlmetrics` and the README carry this sequence. A fixture test runs it (§13).
 

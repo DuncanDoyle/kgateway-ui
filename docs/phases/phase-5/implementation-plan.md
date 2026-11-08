@@ -126,17 +126,21 @@ Flag `--class-only-installs`, chart `installs.classOnly` (default false); `cmd/s
 type CollectorEnv struct{ Clients; Options; Clock; Installs func() []install.Install; Collected *collect.Store }
 // pkg/ctrlmetrics (kgateway pack; path unchanged)
 const Key = "controller-metrics/results"
-type Results map[string]Result
-func CollectOnce(ctx context.Context, s Scraper, insts []install.Install) Results
-func Publish(store *collect.Store, r Results, maxAge time.Duration)
+type Results struct{ ByInstall map[string]Result; MaxAge time.Duration }
+func CollectOnce(ctx context.Context, s Scraper, insts []install.Install, maxAge time.Duration) Results
+func Publish(store *collect.Store, r Results) // no store expiry; staleness per entry via Result.Stale
+// pkg/engine
+type Model struct{ …; Collected collect.Snapshot } // the snapshot this computation read
+// pkg/extension
+Impl.Version func(install.Install, collect.Snapshot) string
 // pkg/setup
 type Config struct{ …; Collected *collect.Store }
 ```
-Removed (design §7.2): `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, `engine.Model.MetricsRead`, `engine.MetricsRead`, `engine.Source.Metrics`, `health.Input.{Metrics,HasMetrics,MetricsMaxAge}`, `health.InputSet.Metrics`, `scopeverify.Input.{Metrics,HasMetrics}`, `ctrlmetrics.Source`, `ctrlmetrics.Static`, `Collector.Get`. The kgateway pack's factories build the metrics collector (scraping only installs with `Impl == "kgateway"`, publishing `Results` under `Key` with the max age as expiry), the proxy stats collector and the controller-logs collector (when enabled). Checks 001 and 024, the kgateway verifier, `Impl.Version` and the gateway data-plane detail read `Key` from the collected snapshot. `setup.Build` builds the same factories; the reserved names stay reserved for the pack.
+Removed (design §7.2): `engine.Config.Metrics`, `engine.Config.MetricsMaxAge`, `engine.Model.MetricsRead`, `engine.MetricsRead`, `engine.Source.Metrics`, `health.Input.{Metrics,HasMetrics,MetricsMaxAge}`, `health.InputSet.Metrics`, `scopeverify.Input.{Metrics,HasMetrics}`, `ctrlmetrics.Source`, `ctrlmetrics.Static`, `Collector.Get`. The kgateway pack's factories build the metrics collector (scraping only installs with `Impl == "kgateway"`, publishing `Results` under `Key` with no store expiry), the proxy stats collector and the controller-logs collector (when enabled). Checks 001 and 024 and the kgateway verifier read `Key` through their collected input; `Impl.Version` gets the snapshot as an argument; the gateway data-plane detail reads `Model.Collected`. None reads the live store. `setup.Build` builds the same factories; the reserved names stay reserved for the pack.
 
 - [ ] **Step 1:** Test: with `New()`, the scrape set equals the base for kgateway installs; a class-only install is never scraped; with `NewCore()`, no metrics, proxy stats or controller-logs collector starts; `setup.Build` still rejects a downstream collector with a reserved name.
-- [ ] **Step 2:** Failing behaviour tests at the engine and API boundary, written against today's fixtures first: a rejecting controller raises KGWUI-001 with the same id, evidence and `since`; an expired metrics value makes 001 and 024 "not available" with today's stale wording; the scope verifier still raises 007 on a count mismatch; the reported version still comes from `kgateway_build_info`; the gateway data-plane detail is unchanged. `golden` and `golden-v1` responses unchanged.
-- [ ] **Step 3:** E8 one-shot fixture test (`pkg/setup`): the design §7.3 sequence over a fixture with a rejecting controller gives the same KGWUI-001 as Step 2; without `Publish`, 001 is "not available".
+- [ ] **Step 2:** Failing behaviour tests at the engine and API boundary, written against today's fixtures first: a rejecting controller raises KGWUI-001 with the same id, evidence and `since`; a stale entry (old `CollectedAt`) makes 001 and 024 "not available" with today's stale wording, while the gateway data-plane detail still shows the last snapshot; with two installs scraped at different times, each entry goes stale on its own age; the scope verifier still raises 007 on a count mismatch; the reported version still comes from `kgateway_build_info`; the gateway data-plane detail is unchanged. `golden` and `golden-v1` responses unchanged.
+- [ ] **Step 3:** E8 one-shot fixture test (`pkg/setup`): the design §7.3 sequence, including the full wait and a fixed `Snapshots`, over a fixture with a rejecting controller gives the same KGWUI-001 as Step 2; without `Publish`, 001 is "not available".
 - [ ] **Step 4:** Implement; Go doc on `ctrlmetrics` with the one-shot sequence; README upgrade note listing each removed name and its replacement; bench; commit.
 
 ### Task 6a: tell the program and kgwctl (after Task 6 merges)
