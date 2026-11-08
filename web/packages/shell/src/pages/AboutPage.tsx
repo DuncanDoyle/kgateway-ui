@@ -133,9 +133,9 @@ const nameStyle = (size: string) => css`
 `;
 
 // region Helpers
-/** The edition and its version as the install reports them; a class-only install has neither. */
+/** The edition and its version as the install reports them; empty for a class-only install, which has neither. */
 function productText(i: InstallSummary): string {
-  return [i.edition, i.version].filter(Boolean).join(" ") || aboutCopy.genericController;
+  return [i.edition, i.version].filter(Boolean).join(" ");
 }
 
 // region Component
@@ -146,17 +146,21 @@ function Installs() {
   if (data.length === 0) return <p className="muted">{aboutCopy.noInstalls}</p>;
   return (
     <ul>
-      {data.map((i) => (
-        <InstallRow key={i.id}>
-          <span className="product">{productText(i)}</span>
-          <InstallName install={i} stylesOverride={nameStyle(theme.font.size.code)} />
-          {i.controllerNames.length > 0 ? (
-            <span className="muted">
-              {aboutCopy.controller} <span className="controller">{i.controllerNames.join(", ")}</span>
-            </span>
-          ) : null}
-        </InstallRow>
-      ))}
+      {data.map((i) => {
+        const product = productText(i);
+        return (
+          <InstallRow key={i.id}>
+            {/* Without an edition the row reads "Gateway API controller" and its controller; the name repeats both. */}
+            <span className="product">{product || aboutCopy.genericController}</span>
+            {product ? <InstallName install={i} stylesOverride={nameStyle(theme.font.size.code)} /> : null}
+            {i.controllerNames.length > 0 ? (
+              <span className="muted">
+                {aboutCopy.controller} <span className="controller">{i.controllerNames.join(", ")}</span>
+              </span>
+            ) : null}
+          </InstallRow>
+        );
+      })}
     </ul>
   );
 }

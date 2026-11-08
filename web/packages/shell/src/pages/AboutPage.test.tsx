@@ -133,6 +133,7 @@ it("a class-only install, with no edition or version, reads Gateway API controll
   stubApi({ "/api/v1/installs": [install, classOnly], "/api/v1/meta": meta });
   mount("/about");
   const row = (await screen.findByText("Gateway API controller")).closest("li") as HTMLElement;
-  expect(within(row).getByText("example.com/gateway")).toBeInTheDocument();
+  // The controller is named once: the display name repeats it, so the row leaves that out.
+  expect(row).toHaveTextContent(/^Gateway API controller\s*Controller example\.com\/gateway$/);
   expect(await screen.findByText("kgateway 2.5.0")).toBeInTheDocument();
 });
