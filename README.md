@@ -160,11 +160,13 @@ A one-shot caller, such as a CLI or a test, builds its own configuration with `p
 The frontend renders `Shell` from `@snellius/shell` with a `ShellExtension`. `make shell-pack` builds the package as a tarball, and each release attaches it. Its JS uses extensionless imports, so build the app with a bundler such as Vite. [examples/downstream/web](examples/downstream/web) installs the tarball and tests against it; run it with `make example-web`.
 
 ```tsx
-import { defaultPages, renderWhenFontsReady, Shell, type ShellExtension } from "@snellius/shell";
+import { defaultPages, kgatewayWebPack, renderWhenFontsReady, Shell, type ShellExtension } from "@snellius/shell";
 
 const acme: ShellExtension = {
   // Product identity in the header
   brand: { productName: "acme", logo: null },
+  // The backend serves kgateway (extension.New): its copy and Delegation tab, shown where /meta lists the pack
+  packs: [kgatewayWebPack],
   // Render extra detail for findings from acme's own checks
   findingRenderers: { "ACME-": (f) => <span>{f.message}</span> },
   // Platform copy; entries left out keep the Kubernetes defaults
@@ -224,6 +226,21 @@ Nothing changes in the UI or API v1 for kgateway installs. Go callers meet two d
 - Class-only installs, behind `--class-only-installs` and the chart value `installs.classOnly` (off by default).
 - API v1, additive: `features` on each install, `packs` in `/api/v1/meta`, and `label` and `ruleSetLabel` beside a computed fact's rule set.
 - The legacy `With…` options set the default pack's hooks. A pack added with `WithPack` must bring the hooks it needs.
+
+#### Frontend: register the kgateway web pack
+
+The Delegation tab and the kgateway copy (such as "No kgateway install found") moved out of the shell's defaults into `kgatewayWebPack`. A downstream app whose backend serves kgateway adds it, or its route pages lose the Delegation tab and `?tab=delegation` opens Overview:
+
+```tsx
+import { kgatewayWebPack, type ShellExtension } from "@snellius/shell";
+
+const acme: ShellExtension = {
+  // Shown where /api/v1/meta lists the "kgateway" pack; an older server runs every pack
+  packs: [kgatewayWebPack],
+};
+```
+
+Each install's surfaces now follow its `features` from `/api/v1/installs`: the Delegation tab needs `delegation`, computed badges `computed`, the data plane and Processes sections `dataplane` and `processes`.
 
 #### Controller metrics on the collector seam
 
