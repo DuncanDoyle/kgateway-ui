@@ -222,11 +222,15 @@ func newOneShotWith(t *testing.T, ctx context.Context, objs []runtime.Object, re
 	}
 	cfg.Engine.Snapshots = ca
 	installs, errs := install.Discover(ca.Snapshot(), cfg.Engine.Detectors)
-	if len(installs) != 1 || len(errs) > 0 {
+	if len(installs) == 0 || len(errs) > 0 {
 		t.Fatalf("installs %v, errors %v", installs, errs)
 	}
 	col := ctrlmetrics.NewCollector(emptyScraper{}, ctrlmetrics.WithClock(clk))
-	cfg.Engine.Metrics = ctrlmetrics.Static{installs[0].ID(): col.Collect(ctx, installs[0])}
+	met := ctrlmetrics.Static{}
+	for _, in := range installs {
+		met[in.ID()] = col.Collect(ctx, in)
+	}
+	cfg.Engine.Metrics = met
 	return &oneShot{eng: engine.New(cfg.Engine), clk: clk}
 }
 
