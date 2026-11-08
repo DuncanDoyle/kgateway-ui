@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/api"
@@ -140,4 +141,38 @@ func TestCoreRegistryStartsNoPackCollector(t *testing.T) {
 	if vs := a.collected.Snapshot().Values; len(vs) != 0 || len(sc.scraped()) != 0 {
 		t.Fatalf("collected %v, scraped %v; want nothing", vs, sc.scraped())
 	}
+}
+
+// Review 5.2 #3: the kgateway pack's metrics collector runs on the app's
+// clock: its results carry that clock's time and its ticker follows it.
+func TestMetricsCollectorRunsOnTheAppClock(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1)
+	dyn, kube := testutil.Clients(t, testutil.Namespace("kgw", nil), d, testutil.ControllerPod(d, "kgateway-0", true))
+	clk := clocktesting.NewFakeClock(testutil.Now)
+	sc := &stubScraper{}
+	a, err := Build(Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Scraper: sc},
+		Options{PollInterval: time.Hour, MetricsInterval: time.Minute, UI: ui, Clock: clk}, extension.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	a.Start(ctx)
+	var r ctrlmetrics.Result
+	// The loop debounces on the fake clock, so each poll moves it a second.
+	eventually(t, "no metrics result", func() bool {
+		clk.Step(time.Second)
+		var ok bool
+		r, ok = a.metrics("kgw.kgateway")
+		return ok
+	})
+	if r.CollectedAt.Before(testutil.Now) || r.CollectedAt.After(clk.Now()) {
+		t.Fatalf("collected at %v, want a time of the app's clock in [%v, %v]", r.CollectedAt, testutil.Now, clk.Now())
+	}
+	first, calls := r.CollectedAt, sc.calls.Load()
+	clk.Step(time.Minute)
+	eventually(t, "no scrape on the app clock's next tick", func() bool {
+		r, _ = a.metrics("kgw.kgateway")
+		return sc.calls.Load() > calls && r.CollectedAt.After(first)
+	})
 }

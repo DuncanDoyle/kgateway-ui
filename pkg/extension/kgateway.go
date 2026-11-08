@@ -41,7 +41,11 @@ func (m packMetrics) Start(ctx context.Context, d Deps) error {
 	if s == nil {
 		s = ctrlmetrics.ScraperFor(m.env.Kube, m.env.InCluster)
 	}
-	c := ctrlmetrics.NewCollector(s, ctrlmetrics.WithMaxAge(m.env.MaxAge))
+	opts := []ctrlmetrics.CollectorOption{ctrlmetrics.WithMaxAge(m.env.MaxAge)}
+	if m.env.Clock != nil {
+		opts = append(opts, ctrlmetrics.WithClock(m.env.Clock))
+	}
+	c := ctrlmetrics.NewCollector(s, opts...)
 	installs := func() []install.Install { return kgateway.Claimed(m.env.Installs(), m.env.Pack) }
 	return c.Run(ctx, m.env.Interval, installs, d.Publish)
 }
