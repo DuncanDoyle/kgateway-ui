@@ -23,11 +23,11 @@ Status: implementing (design and plan approved by the user 2026-11-08; branch du
 - [ ] phase-5-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase
-Sub-phase: 5.5 (G5) web
+Sub-phase: 5.6 (G6) the compatibility check and close
 Kind: planned
 Status: planned
-Base: b4db2ca
-Brief: docs/phases/phase-5/phase-5.5-brief.md
+Base: bc65504
+Brief: docs/phases/phase-5/phase-5.6-brief.md
 
 ## Program
 Program file: https://github.com/DuncanDoyle/kgateway-tooling/blob/main/program.md
