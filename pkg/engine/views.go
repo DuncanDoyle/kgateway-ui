@@ -98,11 +98,10 @@ func attachmentInput(res install.Resolved, owned *install.Owned, snap *cache.Sna
 			Listeners: v.Listeners, ListenerStatus: v.ListenerStatus, Acceptance: acceptance(u, v)})
 	}
 
-	// The experimental classification depends only on the kind and controller version.
-	ctrl := res.KgatewayVersion()
+	// The experimental classification depends only on the kind and the install.
 	exp := map[objects.GroupKind]bool{}
 	for _, k := range kinds.ByCategory(served, kinds.CategoryRoute) {
-		exp[objects.GroupKind{Group: k.Group, Kind: k.Kind}] = k.ExperimentalOnly(ctrl)
+		exp[objects.GroupKind{Group: k.Group, Kind: k.Kind}] = res.Experimental(k)
 	}
 	in.Routes = make([]computed.Route, 0, len(owned.Routes))
 	for _, r := range owned.Routes {

@@ -157,8 +157,11 @@ func (c scopeCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 		return unavailable(in, c.Name(), in.Install.Scope.Err)
 	}
 	r := ok(c.Name(), true, in.Now)
-	if in.Install.Scope.Source == install.SourceDeploymentTemplate {
+	switch in.Install.Scope.Source {
+	case install.SourceDeploymentTemplate:
 		r.Detail = "scope from Deployment template; no controller Pod running"
+	case install.SourceAssumed:
+		r.Detail = "Scope assumed: all namespaces. Snellius cannot read this controller's discovery settings"
 	}
 	return nil, r
 }
@@ -584,13 +587,13 @@ func PolicyPending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 	return pendingReason(u, cs, policyRequired, policyOptional)
 }
 
-// experimentalKind returns u's served kind when kgateway watches it, at its
-// served version, only with experimental Gateway API features on (kinds.ExperimentalOnly).
+// experimentalKind returns u's served kind when the install's controller watches
+// it, at its served version, only with experimental Gateway API features on.
 func (in Input) experimentalKind(u *unstructured.Unstructured) (kinds.Served, bool) {
 	gvk := u.GroupVersionKind()
 	for _, k := range in.Served {
 		if k.Group == gvk.Group && k.Kind == gvk.Kind {
-			return k, k.ExperimentalOnly(in.Install.KgatewayVersion())
+			return k, in.Install.Experimental(k)
 		}
 	}
 	return kinds.Served{}, false

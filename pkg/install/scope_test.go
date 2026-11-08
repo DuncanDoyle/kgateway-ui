@@ -166,3 +166,33 @@ func TestScopeSourceOrder(t *testing.T) {
 		}
 	})
 }
+
+// ResolveWith uses each install's own provider and reader. Without them the
+// scope is assumed and no KGW_* env is read; with the kgateway ones the
+// result equals Resolve's.
+func TestResolveWithPerInstall(t *testing.T) {
+	d := testutil.ControllerDeployment("kgw", "kgateway", "cr.kgateway.dev/kgateway-dev/kgateway:v2.4.7", 1, 1,
+		testutil.Env(DiscoveryNamespaceSelectorsEnv, `[{"matchLabels":{"team":"a"}}]`), testutil.Env(ExperimentalEnv, "false"))
+	kgw := Install{Namespace: "kgw", Name: "kgateway", Container: "kgateway", Deployment: d, Impl: "kgateway"}
+	// A class-only install whose controller name matches nothing still must not read d's env.
+	co := Install{CustomID: ClassOnlyID("example.com/gateway"), ControllerNames: []string{"example.com/gateway"}, Deployment: d, Container: "kgateway"}
+	got := ResolveWith([]Install{kgw, co}, func(i Install) (ScopeProvider, func(Install) Settings) {
+		if i.Impl == "kgateway" {
+			return NamespaceSelectorScope{}, ReadSettings
+		}
+		return nil, nil
+	})
+	if want := Resolve([]Install{kgw}, NamespaceSelectorScope{})[0]; got[0].Scope.Mode != want.Scope.Mode || got[0].Scope.Source != want.Scope.Source ||
+		got[0].Settings != want.Settings || got[0].Scope.Mode != ScopeSelectors {
+		t.Fatalf("kgateway install %+v, want Resolve's %+v", got[0], want)
+	}
+	c := got[1]
+	if c.Scope.Mode != ScopeAll || c.Scope.Source != "assumed" || c.Scope.Err != "" {
+		t.Fatalf("class-only scope %+v, want all, assumed", c.Scope)
+	}
+	for _, s := range []Setting{c.Settings.Experimental, c.Settings.WildcardNamespace, c.Settings.GlobalPolicyNamespace} {
+		if s.Known || s.Reason != "not read for this controller" || s.Value != "" {
+			t.Fatalf("class-only setting %+v, want unknown, not read", s)
+		}
+	}
+}

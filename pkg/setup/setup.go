@@ -166,7 +166,7 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 			MetricsMaxAge: MetricsMaxAge(o.MetricsInterval), ProxyMode: reg.ProxyMode, RulesFor: reg.RulesFor, Process: reg.Process,
 			HooksFor: func(i install.Install) engine.Hooks {
 				im := reg.ImplFor(i)
-				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version}
+				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version, ExperimentalOnly: im.ExperimentalOnly}
 			},
 			Triggers: changes, Clock: o.Clock, ClassOnly: o.ClassOnlyInstalls,
 			// The other bounds stay zero: the walker gives each its default.

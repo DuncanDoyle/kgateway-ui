@@ -776,3 +776,13 @@ func TestCoreAndKgatewaySplitUpstream(t *testing.T) {
 		}
 	}
 }
+
+// An assumed scope is OK and says why it is assumed (Phase 5 design §5.3).
+func TestScopeCheckAssumed(t *testing.T) {
+	in := healthyWorld().input(t)
+	in.Install.Scope = install.Scope{Mode: install.ScopeAll, Source: install.SourceAssumed}
+	_, r := scopeCheck{}.Run(RunContext{Input: in})
+	if !r.OK || r.Detail != "Scope assumed: all namespaces. Snellius cannot read this controller's discovery settings" {
+		t.Fatalf("assumed scope: %+v", r)
+	}
+}

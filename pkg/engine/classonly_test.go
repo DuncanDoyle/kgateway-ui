@@ -32,7 +32,8 @@ func packHooks(i install.Install) Hooks {
 	if i.Impl != kgateway.Name {
 		return Hooks{}
 	}
-	return Hooks{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version}
+	return Hooks{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version,
+		ExperimentalOnly: kgateway.ExperimentalOnly}
 }
 
 // twoControllers is snapshot plus the class "other" of example.com/gateway, a

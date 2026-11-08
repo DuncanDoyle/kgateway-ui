@@ -438,7 +438,7 @@ func (h *handler) listenerSetDetail(w http.ResponseWriter, r *http.Request) {
 	out := ListenerSetDetail{Install: d.i.Resolved.ID(), Ref: LinkedRef{Ref: ref, Link: LinkDetail}, Generation: u.GetGeneration(), Health: st,
 		Candidate: cand, RuleSet: d.ix.RuleSet, Parent: d.l.linked(parent), Conditions: conditions(u, v.Conditions), Listeners: d.listeners(u, v.Listeners, v.ListenerStatus),
 		RouteCounts: d.routeCounts(ref), CollectedAt: wireTime(d.p.ConfirmedAt)}
-	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && k.ExperimentalOnly(d.i.Resolved.KgatewayVersion()) {
+	if len(v.Conditions) == 0 && len(v.ListenerStatus) == 0 && d.i.Resolved.Experimental(k) {
 		out.ExperimentalHint = experimentalHint(k)
 	}
 	// The parent is read only when it opens: a hidden, absent or unadmitted

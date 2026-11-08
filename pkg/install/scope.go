@@ -8,6 +8,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+
+	"github.com/DuncanDoyle/snellius/pkg/kinds"
 )
 
 // DiscoveryNamespaceSelectorsEnv is the controller env var rendered from the
@@ -213,6 +215,18 @@ type Resolved struct {
 	Install
 	Scope    Scope
 	Settings Settings
+	// ExperimentalOnly is the install's pack hook for Experimental; nil means the
+	// kgateway table at KgatewayVersion, as for an install resolved before packs.
+	ExperimentalOnly func(k kinds.Served, inst Install) bool
+}
+
+// Experimental reports whether r's controller watches served kind k only with
+// experimental Gateway API features on.
+func (r Resolved) Experimental(k kinds.Served) bool {
+	if r.ExperimentalOnly == nil {
+		return k.ExperimentalOnly(r.KgatewayVersion())
+	}
+	return r.ExperimentalOnly(k, r.Install)
 }
 
 // Resolve applies p and ReadSettings to every install.

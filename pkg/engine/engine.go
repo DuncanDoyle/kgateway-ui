@@ -62,7 +62,7 @@ type Config struct {
 	// RulesFor selects each install's computed rule set from its kgateway version; nil means rulesets.Select.
 	RulesFor func(controllerVersion string) computed.Selection
 	// HooksFor returns the hooks of the pack that claimed an install. Nil gives
-	// every install Scope, RulesFor and kgateway's settings and version.
+	// every install Scope, RulesFor and kgateway's settings, version and experimental kinds.
 	HooksFor func(install.Install) Hooks
 	// ClassOnly adds a class-only install per GatewayClass controllerName no
 	// detected install lists (install.ClassOnly); set HooksFor with it.
@@ -98,12 +98,14 @@ type Config struct {
 }
 
 // Hooks are one install's pack hooks (extension.Impl). A nil Scope assumes all
-// namespaces, nil Settings reads none, nil Version is "" and nil RulesFor is Config.RulesFor.
+// namespaces, nil Settings reads none, nil Version is "", nil ExperimentalOnly
+// marks no kind and nil RulesFor is Config.RulesFor.
 type Hooks struct {
-	Scope    install.ScopeProvider
-	Settings func(install.Install) install.Settings
-	RulesFor func(version string) computed.Selection
-	Version  func(install.Install) string
+	Scope            install.ScopeProvider
+	Settings         func(install.Install) install.Settings
+	RulesFor         func(version string) computed.Selection
+	Version          func(install.Install) string
+	ExperimentalOnly func(kinds.Served, install.Install) bool
 }
 
 // InstallModel is everything the API serves about one install.
@@ -209,7 +211,8 @@ func New(cfg Config) *Engine {
 		cfg.Process = process.Kube{}
 	}
 	if cfg.HooksFor == nil {
-		legacy := Hooks{Scope: cfg.Scope, Settings: install.ReadSettings, RulesFor: cfg.RulesFor, Version: install.Install.KgatewayVersion}
+		legacy := Hooks{Scope: cfg.Scope, Settings: install.ReadSettings, RulesFor: cfg.RulesFor, Version: install.Install.KgatewayVersion,
+			ExperimentalOnly: func(k kinds.Served, i install.Install) bool { return k.ExperimentalOnly(i.KgatewayVersion()) }}
 		cfg.HooksFor = func(install.Install) Hooks { return legacy }
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
@@ -337,6 +340,11 @@ func (e *Engine) compute() *Published {
 		h := e.cfg.HooksFor(i)
 		return h.Scope, h.Settings
 	})
+	for i := range all {
+		if all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly; all[i].ExperimentalOnly == nil {
+			all[i].ExperimentalOnly = noExperimental
+		}
+	}
 	// Assignment runs over all installs so ambiguity is detected even when pinned.
 	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
@@ -454,6 +462,9 @@ func (e *Engine) reportedVersion(id string, met ctrlmetrics.Result, has bool) st
 	}
 	return e.reported[id]
 }
+
+// noExperimental marks no kind experimental-only: an install whose pack has no table.
+func noExperimental(kinds.Served, install.Install) bool { return false }
 
 // rulesFor selects i's rule set with its pack's hooks.
 func (e *Engine) rulesFor(i install.Install) computed.Selection {
