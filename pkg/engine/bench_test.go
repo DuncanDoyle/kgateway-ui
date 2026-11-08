@@ -20,6 +20,7 @@ import (
 	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/ctrllogs"
+	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
@@ -121,6 +122,7 @@ func liveSnapshot(tb testing.TB, tier scale.Tier) *cache.Snapshot {
 // install, with inputs built as compute builds them; memo sets the input prints.
 // A non-nil scope replays every other check's results, so phase3Checks times design §16.3's scope.
 // With scrape > 0 as the metrics max age, each run reads a new scrape of unchanged content.
+// The collector builds each scrape, so the two alternating ones are built before the runs.
 func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape time.Duration) func() *diagnose.Diagnosis {
 	tb.Helper()
 	m := e.Compute()
@@ -150,9 +152,14 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape t
 	}
 	res := im.Resolved
 	scrapes := 0
+	// A new scrape 1 or 2 s old, fresh under scrape as the max age.
+	var published [2]collect.Snapshot
 	if scrape > 0 {
-		read.CollectedAt = now.Add(-time.Second) // fresh under scrape as the max age
-		col = withScrape(col, res.ID(), read, scrape)
+		for k := range published {
+			read.CollectedAt = now.Add(-time.Duration(k+1) * time.Second)
+			published[k] = withScrape(col, res.ID(), read, scrape)
+		}
+		col = published[0]
 	}
 	ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Collected: col, Now: now, Views: e.decode})
 	in := health.Input{Install: res, Owned: im.Owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc,
@@ -163,12 +170,14 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape t
 	if scope != nil {
 		checks = scopedChecks(tb, e, in, col, scope)
 	}
+	if scrape > 0 {
+		newScrapes(tb, res.ID(), published)
+	}
 	run := func() *diagnose.Diagnosis {
 		if scrape > 0 {
-			// A new scrape, 1 or 2 s old, so each run's CollectedAt differs from the last.
+			// Each run's CollectedAt differs from the last.
 			scrapes++
-			read.CollectedAt = now.Add(-time.Duration(scrapes%2+1) * time.Second)
-			col = withScrape(col, res.ID(), read, scrape)
+			col = published[scrapes%2]
 		}
 		rt := health.Runtime{States: e.states[res.ID()], Collected: col}
 		var pc *printCtx
@@ -185,6 +194,24 @@ func analyzerStage(tb testing.TB, e *Engine, memo bool, scope []string, scrape t
 	}
 	run()
 	return run
+}
+
+// newScrapes fails unless the two scrapes time id's metrics entry apart, so a
+// memoized run re-runs the checks whose wake derives from it (health memo times).
+func newScrapes(tb testing.TB, id string, scrapes [2]collect.Snapshot) {
+	tb.Helper()
+	var at [2]time.Time
+	for k, col := range scrapes {
+		v, _ := col.Get(ctrlmetrics.Key)
+		s, ok := v.Data.(collect.Stamped)
+		if !ok {
+			tb.Fatal("no metrics value")
+		}
+		at[k], _ = s.StampFor(id)
+	}
+	if at[0].Equal(at[1]) {
+		tb.Fatalf("both scrapes are from %v: memoized runs would reuse the metric checks", at[0])
+	}
 }
 
 // phase3Checks are the checks of design §16.3's analyzer-stage scope (ruling
