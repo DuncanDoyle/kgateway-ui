@@ -10,6 +10,7 @@ import (
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
@@ -118,5 +119,30 @@ func TestClassOnlyShowsStatusAttachmentOnly(t *testing.T) {
 	}
 	if k := get[GatewayDetail](t, h.srv, base+"/gateways/infra/edge", 200); k.RuleSet == "" || k.Listeners[0].Computed == nil {
 		t.Errorf("the kgateway install must keep its computed facts: %+v", k)
+	}
+}
+
+// With the controller contradicting attachment and a route declaring an
+// HTTPRoute parent, the class-only install raises no KGWUI-011 or 012; the
+// kgateway install, given the same shapes, raises both (design §8.2).
+func TestClassOnlyRaisesNoComputedFindings(t *testing.T) {
+	foreign := testutil.GwRef("infra", "foreign")
+	// infra/foreign reports no attached route, so a computed view would disagree.
+	objs := withEdge(world(
+		testutil.HTTPRoute("shop", "co", []objects.ParentRef{foreign}, testutil.AcceptedBy(foreign, "example.com/other")),
+		testutil.HTTPRoute("shop", "co-child", []objects.ParentRef{testutil.HTTPRouteRef("shop", "co")}),
+		testutil.HTTPRoute("shop", "k-child", []objects.ParentRef{testutil.HTTPRouteRef("shop", "cart")}),
+	), 7)
+	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true, disputes: true}, objs...)
+	for _, tc := range []struct {
+		install string
+		want    bool
+	}{{"/api/v1/installs/example.com~2Fother", false}, {base, true}} {
+		hr := get[HealthResponse](t, h.srv, tc.install+"/health", 200)
+		for _, code := range []string{health.CodeDelegatedNotAttached, health.CodeComputedDisagrees} {
+			if got := hasSev(hr, code, "", ""); got != tc.want {
+				t.Errorf("%s: %s raised %v, want %v", tc.install, code, got, tc.want)
+			}
+		}
 	}
 }
