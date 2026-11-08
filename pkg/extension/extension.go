@@ -38,7 +38,8 @@ type Registry struct {
 	Detectors []install.Detector
 	Scope     install.ScopeProvider
 	// Verifier checks scope against the controller. Nil means the upstream
-	// verifier, which the app sizes from the metrics interval.
+	// verifier for the default pack's installs, which the app sizes from the
+	// metrics interval; the core's installs get none.
 	Verifier scopeverify.Verifier
 	Checks   []health.Check
 	// Authorizer decides per request what the caller may see (D-013).
@@ -88,6 +89,10 @@ type Registry struct {
 const UpstreamPrefix = "KGWUI-"
 
 var prefixPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,15}-$`)
+
+// DefaultPack names the default pack: the first one added, kgateway in New;
+// "" when no pack is added, the core.
+func (r *Registry) DefaultPack() string { return r.pack }
 
 // Err returns the registration errors joined, or nil. app.Build returns it
 // before it starts anything.

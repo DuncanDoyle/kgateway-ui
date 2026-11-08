@@ -25,7 +25,9 @@ import (
 
 // Impl is one pack's per-install hooks, used for the installs its detectors
 // claim (Phase 5 design §4.2). A nil hook is the core's: all namespaces
-// assumed in scope, no settings read, no version, no experimental-only kinds.
+// assumed in scope, no settings read, no version, no experimental-only kinds,
+// no scope verification, no processes, every proxy managed and the API's
+// default commands.
 type Impl struct {
 	Scope    install.ScopeProvider
 	Verifier scopeverify.Verifier

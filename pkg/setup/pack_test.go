@@ -2,6 +2,9 @@ package setup_test
 
 import (
 	"context"
+	"maps"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,10 +13,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"github.com/DuncanDoyle/snellius/pkg/cache"
 	"github.com/DuncanDoyle/snellius/pkg/computed"
 	"github.com/DuncanDoyle/snellius/pkg/computed/kgw23"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/install"
+	"github.com/DuncanDoyle/snellius/pkg/objects"
+	"github.com/DuncanDoyle/snellius/pkg/process"
+	"github.com/DuncanDoyle/snellius/pkg/scopeverify"
 	"github.com/DuncanDoyle/snellius/pkg/setup"
 )
 
@@ -118,6 +125,93 @@ func TestBuildClassOnlyInstalls(t *testing.T) {
 		}
 		if cfg.Engine.ClassOnly != on || cfg.Engine.HooksFor == nil {
 			t.Errorf("ClassOnlyInstalls=%v: engine ClassOnly=%v, hooks set %v", on, cfg.Engine.ClassOnly, cfg.Engine.HooksFor != nil)
+		}
+	}
+}
+
+// acmeDeployment is the controller acmeDetector claims.
+func acmeDeployment() *appsv1.Deployment {
+	replicas := int32(1)
+	return &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "acme-system", Name: "acme", UID: "deploy/acme", Labels: map[string]string{"app": "acme"}},
+		Spec: appsv1.DeploymentSpec{Replicas: &replicas, Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "acme"}},
+			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "acme"}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "acme", Image: "example.com/acme:9.9.0"}}}}},
+		Status: appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1}}
+}
+
+// hookCalls records which pack's hook saw which install, as "pack hook install".
+type hookCalls struct {
+	mu  sync.Mutex
+	got map[string]bool
+}
+
+func (c *hookCalls) add(pack, hook, id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.got[pack+" "+hook+" "+id] = true
+}
+
+type recVerifier struct {
+	pack string
+	c    *hookCalls
+}
+
+func (v recVerifier) Name() string { return v.pack }
+
+func (v recVerifier) Verify(in scopeverify.Input) scopeverify.Result {
+	v.c.add(v.pack, "verifier", in.Install.ID())
+	return scopeverify.Result{Available: true}
+}
+
+// recProcess reports desired replicas so a model shows which source it read.
+type recProcess struct {
+	pack    string
+	desired int32
+	c       *hookCalls
+}
+
+func (p recProcess) Controller(in install.Resolved, _ *cache.Snapshot) process.Set {
+	p.c.add(p.pack, "process", in.ID())
+	return process.Set{Desired: &p.desired}
+}
+
+func (p recProcess) Proxies(in install.Resolved, _ objects.Ref, _ *cache.Snapshot) process.Set {
+	p.c.add(p.pack, "process", in.ID())
+	return process.Set{}
+}
+
+// Through setup.Build, each install reads its own pack's scope verifier and
+// process source; a class-only install reads neither. Without WithScopeVerifier
+// the default verifier still checks the kgateway install (Phase 5 design §4.2).
+func TestPackRuntimeHooksArePerInstall(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &hookCalls{got: map[string]bool{}}
+	acme := extension.Pack{Name: "acme", Detectors: []install.Detector{acmeDetector{}},
+		Impl: extension.Impl{Verifier: recVerifier{"acme", c}, Process: recProcess{"acme", 7, c}}}
+	reg := extension.New(extension.WithPack(acme), extension.WithScopeVerifier(recVerifier{"kgateway", c}),
+		extension.WithProcessSource(recProcess{"kgateway", 3, c}))
+	m := oneShotSequence(t, ctx, append(otherWorld(), acmeDeployment()), reg, emptyScraper{}, true, true).at(t0)
+	if len(m.Installs) != 3 {
+		t.Fatalf("%d installs, want acme, kgateway and a class-only one", len(m.Installs))
+	}
+	want := []string{"acme process acme-system.acme", "acme verifier acme-system.acme", "kgateway process kgw.kgateway", "kgateway verifier kgw.kgateway"}
+	if got := slices.Sorted(maps.Keys(c.got)); !slices.Equal(got, want) {
+		t.Errorf("hook calls:\n%q\nwant:\n%q", got, want)
+	}
+	for id, desired := range map[string]int32{"acme-system.acme": 7, "kgw.kgateway": 3} {
+		if p := installOf(t, m, id).Process; p == nil || p.Controller.Desired == nil || *p.Controller.Desired != desired {
+			t.Errorf("%s: controller processes %+v, want its pack's source", id, p)
+		}
+	}
+	if p := installOf(t, m, classOnlyID).Process; p == nil || p.Controller.Desired != nil {
+		t.Errorf("class-only controller processes %+v, want none", p)
+	}
+	// The default verifier: it reads the kgateway install's metrics and says why it cannot verify.
+	m = newOneShotWith(t, ctx, world(), extension.New()).at(t0)
+	for _, r := range m.Installs[0].Health.Checks {
+		if r.Name == "scope matches controller" && r.Error == "" {
+			t.Errorf("the kgateway install was not verified: %+v", r)
 		}
 	}
 }

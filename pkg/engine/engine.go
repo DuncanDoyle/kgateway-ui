@@ -96,7 +96,8 @@ type Config struct {
 // Hooks are one install's pack hooks (extension.Impl). A nil Scope assumes all
 // namespaces, nil Settings reads none, nil Version is "", nil Reported reports
 // none, nil ExperimentalOnly marks no kind, nil RulesFor is Config.RulesFor and
-// nil Checks is Config.Checks. A RulesFor that returns no Rules gives the
+// nil Checks is Config.Checks. A nil Verifier runs no verification, nil
+// Process reports no processes and nil ProxyMode treats every proxy as managed. A RulesFor that returns no Rules gives the
 // install no rule set: no computed views. One without a computed.Delegator
 // gives it no delegation (install.Resolved.NoDelegation). A class-only
 // install never has a rule set.
@@ -113,6 +114,12 @@ type Hooks struct {
 	Checks []health.Check
 	// Conditions are the install's condition types beyond Gateway API's.
 	Conditions health.ConditionTypes
+	// Verifier checks the install's scope against its controller.
+	Verifier scopeverify.Verifier
+	// Process reports the install's controller and proxy processes.
+	Process process.Source
+	// ProxyMode decides whether one of the install's Gateways is self-managed.
+	ProxyMode proxymode.Resolver
 }
 
 // InstallModel is everything the API serves about one install.
@@ -216,7 +223,11 @@ func New(cfg Config) *Engine {
 			Reported: func(i install.Install, col collect.Snapshot) (string, bool) {
 				return ctrlmetrics.ReportedVersion(col, i.ID())
 			},
-			ExperimentalOnly: install.UpstreamExperimentalOnly, Conditions: health.KgatewayConditions()}
+			ExperimentalOnly: install.UpstreamExperimentalOnly, Conditions: health.KgatewayConditions(),
+			Verifier: cfg.Verifier, Process: cfg.Process, ProxyMode: cfg.ProxyMode}
+		if legacy.ProxyMode == nil {
+			legacy.ProxyMode = proxymode.GatewayParameters{}
+		}
 		cfg.HooksFor = func(install.Install) Hooks { return legacy }
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
@@ -382,6 +393,7 @@ func (e *Engine) compute() *Published {
 		sel    computed.Selection
 		checks []health.Check
 		conds  health.ConditionTypes
+		hooks  Hooks
 	}
 	var runs []run
 	var views []*computed.Views
@@ -391,7 +403,7 @@ func (e *Engine) compute() *Published {
 			continue
 		}
 		h := e.cfg.HooksFor(res.Install)
-		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: sels[i], checks: h.Checks, conds: h.Conditions}
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: sels[i], checks: h.Checks, conds: h.Conditions, hooks: h}
 		if r.checks == nil {
 			r.checks = e.cfg.Checks
 		}
@@ -428,11 +440,18 @@ func (e *Engine) compute() *Published {
 	}
 	for i, r := range runs {
 		res, owned := r.res, r.owned
-		ver := e.cfg.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Collected: col, Now: now, Views: e.decode})
+		var ver scopeverify.Result
+		if r.hooks.Verifier != nil {
+			ver = r.hooks.Verifier.Verify(scopeverify.Input{Install: res, Snapshot: snap, Served: served, Collected: col, Now: now, Views: e.decode})
+		}
 		if !ver.Matures.IsZero() {
 			next.add(ver.Matures, true) // reported once now − since > persist
 		}
-		proc := e.processes(res, owned, snap)
+		proc := processes(r.hooks.Process, res, owned, snap)
+		mode := r.hooks.ProxyMode
+		if mode == nil {
+			mode = managed{}
+		}
 		rt := health.Runtime{States: states[res.ID()], Collected: col}
 		var pc *printCtx
 		if !e.cfg.NoMemo {
@@ -440,7 +459,7 @@ func (e *Engine) compute() *Published {
 			rt.Print = func(set health.InputSet) (uint64, bool) { return e.inputPrint(set, pc) }
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat,
-			FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
+			FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: mode,
 			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel, Conditions: &r.conds}, r.checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
@@ -508,19 +527,36 @@ func gatewayAPI(sel computed.Selection) func(string) (string, bool) {
 	return rulesets.ExpectedGatewayAPI
 }
 
-// processes asks the process source for res's controller and the proxies
-// of each Gateway it owns, and prints the result.
-func (e *Engine) processes(res install.Resolved, owned *install.Owned, snap *cache.Snapshot) *health.ProcessData {
-	d := &health.ProcessData{Controller: e.cfg.Process.Controller(res, snap)}
+// processes asks src for res's controller and the proxies of each Gateway it
+// owns, and prints the result. A nil src reports no processes: every set is
+// empty, not applicable.
+func processes(src process.Source, res install.Resolved, owned *install.Owned, snap *cache.Snapshot) *health.ProcessData {
+	d := &health.ProcessData{}
+	if src != nil {
+		d.Controller = src.Controller(res, snap)
+	}
 	if owned != nil && len(owned.Gateways) > 0 {
 		d.Proxies = make(map[objects.Ref]process.Set, len(owned.Gateways))
 		for _, gw := range owned.Gateways {
 			ref := objects.RefOf(gw)
-			d.Proxies[ref] = e.cfg.Process.Proxies(res, ref, snap)
+			if src != nil {
+				d.Proxies[ref] = src.Proxies(res, ref, snap)
+			} else {
+				d.Proxies[ref] = process.Set{}
+			}
 		}
 	}
 	d.Print = processPrint(d)
 	return d
+}
+
+// managed is the proxy mode of an install whose pack has none: every proxy is
+// run by the controller.
+type managed struct{}
+
+// Resolve implements proxymode.Resolver.
+func (managed) Resolve(*unstructured.Unstructured, *cache.Snapshot, []kinds.Served) proxymode.Mode {
+	return proxymode.Managed
 }
 
 // deadlines collects the earliest deadline not yet due at now.

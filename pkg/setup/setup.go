@@ -179,6 +179,13 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 		// A mismatch must outlast two collections before it is reported (design §4.4).
 		verifier = scopeverify.NewManagedCountVerifier(2 * o.MetricsInterval)
 	}
+	// The default verifier is the default pack's; the core and other packs keep their own.
+	verifierFor := func(i install.Install, im extension.Impl) scopeverify.Verifier {
+		if im.Verifier == nil && i.Impl != "" && i.Impl == reg.DefaultPack() {
+			return verifier
+		}
+		return im.Verifier
+	}
 	return Config{
 		Cache: cache.Config{Dynamic: c.Dynamic, Kube: c.Kube, Served: served, PodSelectors: podSel, DeploymentSelectors: depSel,
 			ProxyPodSelectors: proxySel, Events: !o.NoEvents, CRDs: !o.NoCRDs, Endpoints: !o.NoEndpoints, Metadata: c.Metadata, Changes: changes, Now: now},
@@ -192,7 +199,8 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 					rules = noRuleSet
 				}
 				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: rules, Version: im.Version, Reported: im.Reported,
-					ExperimentalOnly: im.ExperimentalOnly, Checks: checks(i.Impl), Conditions: im.Conditions}
+					ExperimentalOnly: im.ExperimentalOnly, Checks: checks(i.Impl), Conditions: im.Conditions,
+					Verifier: verifierFor(i, im), Process: im.Process, ProxyMode: im.ProxyMode}
 			},
 			Triggers: changes, Clock: o.Clock, ClassOnly: o.ClassOnlyInstalls,
 			// The other bounds stay zero: the walker gives each its default.
