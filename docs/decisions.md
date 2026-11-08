@@ -1123,3 +1123,19 @@ Measured on the reference machine, 5 runs per world:
 
 **Alternatives:** fetch the reason on hover: rejected, it costs a request per hover for data the backend already has.
 
+## D-064 — Read-only means "never changes the cluster"; guarded test requests are allowed (2026-11-08, roadmap)
+**Status:** accepted (user, 2026-11-08)
+
+**Context:** The user wants to send a test request to a Gateway from the UI while debugging, without switching tools. D-001 says the UI never mutates cluster state. Sending traffic changes no cluster object, but it is an active action: the request must come from the backend (a browser cannot set `Host` or reach in-cluster addresses), and a request can have side effects in the application behind the route.
+
+**Decision:** D-001 is read as "the UI never changes the cluster". The UI may send test requests through a Gateway, in the Search & Route Tester phase, with these guardrails:
+1. Off by default; a chart value turns it on.
+2. GET, HEAD and OPTIONS only by default; other methods need a separate chart value, and only once per-user login exists.
+3. Targets are limited to listeners of Gateways the UI watches; no arbitrary URLs.
+4. No redirects followed; fixed timeouts and response size caps.
+5. Every request is audit-logged (who, target, method, path, status).
+
+**Alternatives:** keep the tester prediction-only: rejected by the user, the actual result is what makes it useful. Embed an OSS HTTP client (Hoppscotch, Bruno): rejected, full separate apps for a small form.
+
+**Consequences:** RBAC stays get/list/watch; the new surface is network egress from the UI pod to Gateway addresses. Saved test suites, re-runs and load testing stay out of scope (roadmap, Phase 8).
+

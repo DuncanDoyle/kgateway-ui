@@ -11,7 +11,7 @@ A read-only web UI for kgateway (Envoy data plane) that lets platform operators 
 These apply to every phase. A phase design that breaks one needs a `decisions.md` entry.
 
 1. **Semantics first, not a CR viewer.** Every page answers an operator question: is it healthy, where does this traffic go, what applies here. Raw YAML is a secondary tab, never the primary view.
-2. **Read-only.** The UI never mutates the cluster and stays GitOps-friendly. At most it outputs YAML (D-001).
+2. **Read-only.** The UI never changes the cluster and stays GitOps-friendly. At most it outputs YAML (D-001). It may send test traffic through a Gateway, opt-in and guarded (D-064).
 3. **Health is the home page.** It starts thin in Phase 1, and every later phase feeds new signals into it.
 4. **Speak Gateway API; never re-implement translation.**
    - Gateway API resources and their status are the primary source, presented in the user's language.
@@ -130,6 +130,9 @@ For each feature (CORS, JWT, ext-auth, rate limiting, transformations, …):
 - Search across 100s of hostnames and 1000s of paths.
 - "Why does this request go here?": given a host, path, method and headers, show the winning listener, route and rule, and its backends.
 - Show the rules that lost, and why, and shadowed or conflicting routes.
+- **Send the request (opt-in):** send it to a Gateway listener from the UI and show the prediction next to the actual response (status, timing, Envoy's upstream headers). A mismatch links to the finding that explains it, e.g. KGWUI-023 for a 503 to a backend with no ready endpoints. Guardrails per D-064.
+- **Copy as curl:** a `kubectl port-forward` plus `curl` pair that reproduces the request in a terminal or a ticket.
+- Not in scope: saved test suites, re-runs or load tests. Snellius is an admin's debugging tool, not a testing platform like Postman or JMeter (user, 2026-11-08).
 
 **Design question:** route precedence is defined by the Gateway API spec, so evaluating it over accepted routes is "speaking Gateway API". kgateway-specific behaviour (delegation, rule replacement) is the risk. The design decides whether the controller's xDS snapshot is used as a cross-check.
 
