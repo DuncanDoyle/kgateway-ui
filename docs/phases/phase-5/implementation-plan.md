@@ -220,7 +220,9 @@ Note (5.2): `Impl` also gains `Conditions` (from Task 11's interface) for `condi
 
 **Files:** `pkg/api/types.go:15`, `pkg/api/handlers.go:227`, `web/packages/shell/src/api/types.ts`, current goldens under `pkg/api/testdata/golden`.
 
-**Interfaces:** `InstallSummary.Features []string` (`omitempty`), from the pack's `Features` and the rule set (`delegation` only with a `Delegator`); the rule-set label as `computed.label`.
+**Interfaces:** `InstallSummary.Features []string`, always sent (`[]` when none, so an absent list means an older server), from the pack's `Features` and the rule set (`delegation` only with a `Delegator`); the rule-set label as `computed.label`.
+
+Note (5.5): `MetaResponse.Packs` names the server's packs, also always sent; the SPA switches a pack's web half on from it, and overview counts keep only the kinds that apply to the install.
 
 - [ ] **Step 1:** Test: kgateway installs list `delegation`, `computed`, `dataplane`, `processes`; class-only lists none; current goldens gain only the optional fields; frozen `golden-v1` is untouched and `additive_test.go` passes.
 - [ ] **Step 2:** Implement; commit.
