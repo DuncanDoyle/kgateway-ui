@@ -30,6 +30,7 @@ import (
 const (
 	notFoundInScope = "resource not found in this install's scope"
 	noDetailView    = "no detail view for this kind"
+	noDelegation    = "no delegation for this controller"
 )
 
 // detail is one detail request after its install was found.
@@ -620,9 +621,10 @@ func (d *detail) filters(fs []objects.Filter) []FilterDTO {
 
 // backendRef is b, ref i of rule of route, on the wire. A name delegation
 // ref links its child; wildcard and label refs select, so they never link.
+// Without delegation every ref is an ordinary one.
 func (d *detail) backendRef(route objects.Ref, rule, i int, b objects.BackendRef) BackendRefDTO {
 	out := BackendRefDTO{Ref: LinkedRef{Ref: b.Ref, Link: LinkNone}, Port: b.Port, Weight: b.Weight, WeightDefaulted: b.WeightDefaulted, Filters: d.filters(b.Filters)}
-	if dl := b.Delegation; dl != nil {
+	if dl := b.Delegation; dl != nil && !d.i.Resolved.NoDelegation {
 		out.Delegation = &DelegationRefDTO{Mode: dl.Mode, Namespace: dl.Namespace, Name: dl.Name, Label: dl.Label}
 		if dl.Mode == objects.DelegationName {
 			child := objects.Ref{Group: objects.GatewayAPIGroup, Kind: "HTTPRoute", Namespace: dl.Namespace, Name: dl.Name}
@@ -889,10 +891,15 @@ func (d *detail) unreachedEdges(route objects.Ref, inherit bool, out *[]Effectiv
 // routeDelegation is GET …/routes/{group}/{kind}/{ns}/{name}/delegation:
 // the route's view B rows, filtered and paged in their fixed order (design
 // §7.1, §7.2). It opens like the route's detail page; rows of hidden
-// children are left out before the total (design §7.4 rule 3).
+// children are left out before the total (design §7.4 rule 3). An install
+// without delegation answers 404.
 func (h *handler) routeDelegation(w http.ResponseWriter, r *http.Request) {
 	d := h.startDetail(w, r)
 	if d == nil {
+		return
+	}
+	if d.i.Resolved.NoDelegation {
+		writeErr(w, http.StatusNotFound, noDelegation)
 		return
 	}
 	if r.PathValue("group") != objects.GatewayAPIGroup || r.PathValue("kind") != "HTTPRoute" {

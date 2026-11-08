@@ -33,7 +33,3 @@ func (testRules) Version() string { return "test" }
 func (testRules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
 	return Attach(in, Options{AllowedKinds: testKinds})
 }
-
-func (testRules) Delegation(computed.DelegationInput) computed.DelegationResult {
-	return computed.DelegationResult{}
-}

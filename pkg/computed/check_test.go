@@ -560,7 +560,7 @@ func (w dworld) input() computed.DelegationInput {
 func (w dworld) run(version string) (*computed.DelegationResult, []computed.CheckResult) {
 	in := w.input()
 	sel := rulesets.Select(version)
-	res := sel.Rules.Delegation(in)
+	res := sel.Delegator().Delegation(in)
 	return &res, computed.CheckDelegation("kgw/kgateway", sel, in, &res)
 }
 
@@ -1108,7 +1108,7 @@ func BenchmarkCheckDelegationLarge(b *testing.B) {
 	}
 	in := w.input()
 	sel := rulesets.Select(v24)
-	res := sel.Rules.Delegation(in)
+	res := sel.Delegator().Delegation(in)
 	cs := computed.CheckDelegation("kgw/kgateway", sel, in, &res)
 	b.ReportMetric(float64(len(cs)), "checks")
 	b.ReportAllocs()

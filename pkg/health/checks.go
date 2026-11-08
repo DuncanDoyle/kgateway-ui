@@ -266,7 +266,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 	add := func(u *unstructured.Unstructured, sev Severity, cond metav1.Condition, extra string, owner []string) {
 		f := Finding{Code: CodeConditionFalse, Slug: "condition-false", Severity: sev, Install: id, Resource: ref(u),
 			Message: message(cond), Detail: detail(cond, extra), Since: since(cond), Key: append(slices.Clip(owner), cond.Type)}
-		delegationCondition(&f, u, cond)
+		in.delegationCondition(&f, u, cond)
 		fs = append(fs, f)
 	}
 	// One KGWUI-003 per (resource, parentRef); parent is the zero value for

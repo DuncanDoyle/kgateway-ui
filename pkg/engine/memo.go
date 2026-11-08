@@ -237,6 +237,7 @@ func installPrint(r install.Resolved) uint64 {
 	p.str(r.Scope.Err)
 	p.str(r.Scope.Source)
 	p.str(fmt.Sprintf("%+v|%+v", r.Scope.Selectors, r.Settings))
+	p.flag(r.NoDelegation)
 	return p.h.Sum64()
 }
 

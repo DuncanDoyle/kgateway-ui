@@ -19,7 +19,7 @@ func (rules) Attachment(in computed.AttachmentInput) computed.AttachmentResult {
 	return viewa.Attach(in, viewA)
 }
 
-// Delegation implements computed.Rules.
+// Delegation implements computed.Delegator.
 func (rules) Delegation(in computed.DelegationInput) computed.DelegationResult {
 	return delegation(in)
 }

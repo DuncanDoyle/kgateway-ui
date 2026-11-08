@@ -217,6 +217,10 @@ type Resolved struct {
 	Settings Settings
 	// ExperimentalOnly is the install's pack hook for Experimental; nil marks no kind.
 	ExperimentalOnly func(k kinds.Served, inst Install) bool
+	// NoDelegation is set when the install's rule set computes no delegation:
+	// no route is a delegated child or a declared candidate, and a backendRef
+	// to an HTTPRoute is an ordinary ref (Phase 5 design §8.3).
+	NoDelegation bool
 }
 
 // Experimental reports whether r's controller watches served kind k only with

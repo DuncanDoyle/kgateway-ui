@@ -97,7 +97,8 @@ type Config struct {
 // namespaces, nil Settings reads none, nil Version is "", nil Reported reports
 // none, nil ExperimentalOnly marks no kind, nil RulesFor is Config.RulesFor and
 // nil Checks is Config.Checks. A RulesFor that returns no Rules gives the
-// install no rule set: no computed views and no delegation candidates.
+// install no rule set: no computed views. One without a computed.Delegator
+// gives it no delegation (install.Resolved.NoDelegation).
 type Hooks struct {
 	Scope    install.ScopeProvider
 	Settings func(install.Install) install.Settings
@@ -342,11 +343,6 @@ func (e *Engine) compute() *Published {
 		h := e.cfg.HooksFor(i)
 		return h.Scope, h.Settings
 	})
-	for i := range all {
-		all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly
-	}
-	// Assignment runs over all installs so ambiguity is detected even when pinned.
-	asg := install.Assign(snap, served, all, e.decode)
 	next := deadlines{now: now}
 	// Read once: the version, the verifier, health and the source print share this evidence.
 	var col collect.Snapshot
@@ -359,6 +355,16 @@ func (e *Engine) compute() *Published {
 		}
 	}
 	m.Collected = col
+	// The rule set decides delegation, so it is chosen before assignment.
+	sels := make([]computed.Selection, len(all))
+	for i := range all {
+		all[i].ExperimentalOnly = e.cfg.HooksFor(all[i].Install).ExperimentalOnly
+		all[i].ReportedVersion = e.reportedVersion(all[i].Install, col)
+		sels[i] = e.rulesFor(all[i].Install)
+		all[i].NoDelegation = sels[i].Delegator() == nil
+	}
+	// Assignment runs over all installs so ambiguity is detected even when pinned.
+	asg := install.Assign(snap, served, all, e.decode)
 	firstSeen := e.firstSeen(now)
 	// Views first: one persistence step over every install's checks precedes health.
 	type run struct {
@@ -371,21 +377,14 @@ func (e *Engine) compute() *Published {
 	var runs []run
 	var views []*computed.Views
 	memos := make(map[string]*viewsMemo, len(all))
-	for _, res := range all {
+	for i, res := range all {
 		if e.cfg.Pinned != "" && res.ID() != e.cfg.Pinned {
 			continue
 		}
-		res.ReportedVersion = e.reportedVersion(res.Install, col)
 		h := e.cfg.HooksFor(res.Install)
-		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.rulesFor(res.Install), checks: h.Checks, conds: h.Conditions}
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: sels[i], checks: h.Checks, conds: h.Conditions}
 		if r.checks == nil {
 			r.checks = e.cfg.Checks
-		}
-		if r.sel.Rules == nil && r.owned != nil && len(r.owned.Declared) > 0 {
-			// Delegation is a rule set's semantics: without one there are no candidates.
-			o := *r.owned
-			o.Declared = nil
-			r.owned = &o
 		}
 		runs = append(runs, r)
 		m := e.views[res.ID()]

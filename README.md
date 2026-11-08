@@ -203,6 +203,24 @@ Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v
 
 ## Upgrade notes
 
+### Delegation as an optional rule set capability (sub-phase 5.3)
+
+Nothing changes in the UI or API v1 for kgateway installs. For Go callers:
+
+- `computed.Rules` no longer has `Delegation`. Views B and C come from the optional `computed.Delegator`. A caller that holds a `computed.Rules` asserts it first, or uses `Selection.Delegator()`, which is nil without one:
+
+```go
+// Before: res := rules.Delegation(in)
+if d, ok := rules.(computed.Delegator); ok {
+	res := d.Delegation(in)
+	_ = res
+}
+```
+
+- A rule set without `Delegator` keeps view A, its cross-check and KGWUI-012. It has no views B and C, no KGWUI-011, and `GET …/delegation` answers 404. A backendRef to an HTTPRoute is then an ordinary ref, and `install.Resolved.NoDelegation` is set.
+- A rule set that wraps a kgateway set must forward `Delegation` to keep delegation, as it forwards `ReportsTargetNotFound`.
+- View A is shared in `pkg/computed/viewa`; `viewa.Attach` takes the set's route kinds per listener protocol.
+
 ### Controller metrics on the collector seam (sub-phase 5.2)
 
 Nothing changes in the UI or API v1. Controller metrics are now a value of the kgateway pack's `controller-metrics` collector, under `ctrlmetrics.Key`. Checks, the scope verifier and the reported version read them from the collected values only.

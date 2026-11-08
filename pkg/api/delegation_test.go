@@ -347,7 +347,7 @@ type boundsRules struct {
 
 func (r boundsRules) Delegation(in computed.DelegationInput) computed.DelegationResult {
 	in.Bounds = r.b
-	return r.Rules.Delegation(in)
+	return r.Rules.(computed.Delegator).Delegation(in)
 }
 
 // Rules §5.7, §6 through route detail: view C per parent edge.

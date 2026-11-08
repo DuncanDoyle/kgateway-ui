@@ -3,14 +3,26 @@
 // The version-specific rule sets live in subpackages; rulesets selects one.
 package computed
 
-// Rules computes the views for one controller rule set (design §3.4).
+// Rules computes the views for one controller rule set (design §3.4). A rule
+// set that computes delegation also implements Delegator.
 type Rules interface {
 	// Version names the rule set, such as "kgateway-2.4".
 	Version() string
 	// Attachment computes view A (rules §4).
 	Attachment(in AttachmentInput) AttachmentResult
-	// Delegation computes views B and C (rules §5, §6).
+}
+
+// Delegator is an optional interface of a Rules: it computes views B and C
+// (rules §5, §6). A rule set without it has no delegation; view A stays.
+type Delegator interface {
 	Delegation(in DelegationInput) DelegationResult
+}
+
+// Delegator returns the selected rule set's delegator, or nil when it has none.
+// A wrapping rule set forwards it to keep delegation.
+func (s Selection) Delegator() Delegator {
+	d, _ := s.Rules.(Delegator)
+	return d
 }
 
 // Selection is the rule set chosen for a controller, with its label (rules §2).

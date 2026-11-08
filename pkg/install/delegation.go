@@ -86,7 +86,8 @@ func isHTTPRoute(group, kind string) bool {
 // HTTPRoutes over reported edges only (design §4.2). A breadth-first pass per
 // install walks a reverse index of status entries built once; a visited set
 // stops cycles, so the cost is linear in routes plus edges. A child is owned
-// once, with every reported parent in RouteParents.
+// once, with every reported parent in RouteParents. An install with
+// NoDelegation gets no children.
 func delegate(h *httpRoutes, insts []Resolved, a *Assignment, inScope func(Resolved, string) bool) {
 	if h == nil {
 		return
@@ -112,7 +113,7 @@ func delegate(h *httpRoutes, insts []Resolved, a *Assignment, inScope func(Resol
 		for j, r := range o.Routes {
 			ref := objects.RefOf(r.Obj)
 			o.routeIdx[ref] = j
-			if i, ok := byRef[ref]; ok && r.Kind.Group == k.Group && r.Kind.Kind == k.Kind {
+			if i, ok := byRef[ref]; ok && r.Kind.Group == k.Group && r.Kind.Kind == k.Kind && !in.NoDelegation {
 				visited[i] = true
 				queue = append(queue, i)
 			}
@@ -163,7 +164,8 @@ func ownedHTTPRoute(o *Owned, ref objects.Ref) bool {
 // no-parent rows and the out-of-scope routes that name an owned HTTPRoute
 // (KGWUI-004) of each install (design §4.2; PF10). Out-of-scope routes are
 // never candidates. A route already unwatched for an install through a
-// Gateway or ListenerSet gets no second entry.
+// Gateway or ListenerSet gets no second entry. An install with NoDelegation
+// gets only the no-parent rows: an HTTPRoute is never its routes' parent.
 func candidates(h *httpRoutes, insts []Resolved, a *Assignment, inScope func(Resolved, string) bool) {
 	if h == nil {
 		return
@@ -180,6 +182,9 @@ func candidates(h *httpRoutes, insts []Resolved, a *Assignment, inScope func(Res
 		o := a.PerInstall[id]
 		for i, u := range h.objs {
 			v, ref := h.views[i], objects.RefOf(u)
+			if in.NoDelegation && (len(v.ParentRefs) != 0 || !inScope(in, u.GetNamespace())) {
+				continue
+			}
 			if !inScope(in, u.GetNamespace()) {
 				if unwatched[id][ref] {
 					continue
