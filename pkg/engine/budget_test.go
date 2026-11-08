@@ -222,7 +222,7 @@ func TestBudgetIdleTenMinutes(t *testing.T) {
 // fingerprint, collected print and kinds, compared and swapped in.
 func tick(tb testing.TB, e *Engine) {
 	p := e.Current()
-	if !e.liveSource().Equal(p.Source) || !e.confirm(p, p.ConfirmedAt) {
+	if !e.liveSource(time.Now()).Equal(p.Source) || !e.confirm(p, p.ConfirmedAt) {
 		tb.Fatal("the idle tick did not confirm")
 	}
 }

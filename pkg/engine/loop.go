@@ -11,9 +11,12 @@ import (
 
 // Source is the source fingerprint of a model (D-019 §2): the cache data it
 // was computed from, the served-kinds change it saw and the collector values
-// it read, controller metrics included.
+// it read, controller metrics included, with which of their parts were stale.
 type Source struct {
 	Cache cache.Fingerprint
+	// Stale is the collected values' StalePrint at the source's instant, so
+	// metrics turning stale are never confirmed as current.
+	Stale uint64
 	// Kinds is the served-kinds change as kinds.Change.String().
 	Kinds string
 	// Collected is the collector store's print; zero without collectors.
@@ -24,7 +27,7 @@ type Source struct {
 
 // Equal reports whether s and o describe the same source data.
 func (s Source) Equal(o Source) bool {
-	return s.Kinds == o.Kinds && s.Catalog == o.Catalog && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
+	return s.Kinds == o.Kinds && s.Stale == o.Stale && s.Catalog == o.Catalog && s.Collected == o.Collected && s.Cache.Equal(o.Cache)
 }
 
 // Published is one publication: a Model, the Source it was computed from and
@@ -87,8 +90,8 @@ func (e *Engine) confirm(prev *Published, now time.Time) bool {
 }
 
 // liveSource is the Source the stores, the kinds monitor and the collector
-// store would give a computation now.
-func (e *Engine) liveSource() Source {
+// store would give a computation at now.
+func (e *Engine) liveSource(now time.Time) Source {
 	var src Source
 	if f, ok := e.cfg.Snapshots.(cache.Fingerprinter); ok {
 		src.Cache = f.Fingerprint()
@@ -102,7 +105,8 @@ func (e *Engine) liveSource() Source {
 		src.Catalog = e.cfg.Catalog().Key()
 	}
 	if e.cfg.Collected != nil {
-		src.Collected = e.cfg.Collected().Print
+		col := e.cfg.Collected()
+		src.Collected, src.Stale = col.Print, col.StalePrint(now)
 	}
 	return src
 }
@@ -214,7 +218,7 @@ func (e *Engine) confirmTick(s *sched) {
 		e.emit(EvConfirmRefused, now, p)
 		return
 	}
-	if !e.liveSource().Equal(p.Source) {
+	if !e.liveSource(now).Equal(p.Source) {
 		s.trigger(now)
 		e.emit(EvConfirmRefused, now, p)
 		return

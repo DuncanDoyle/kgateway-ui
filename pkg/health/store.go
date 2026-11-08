@@ -157,16 +157,26 @@ type memo struct {
 type stamp uint64
 
 // eachRef calls f with each reference time a check declaring set may stamp:
-// Now, TakenAt and each declared collected value's time. Bit 1<<2 is unused.
+// Now, TakenAt, the install's part of the first declared collected.Stamped
+// value, and each declared collected value's time.
 func eachRef(in Input, set InputSet, col collect.Snapshot, f func(bit stamp, t time.Time)) {
 	f(1, in.Now)
 	if in.Snapshot != nil {
 		f(1<<1, in.Snapshot.TakenAt)
 	}
+	stamped := false
 	for i, k := range set.Collected[:min(len(set.Collected), MaxStampedCollected)] {
-		if v, ok := col.Get(k); ok {
-			f(1<<(3+i), v.At)
+		v, ok := col.Get(k)
+		if !ok {
+			continue
 		}
+		if s, isStamped := v.Data.(collect.Stamped); isStamped && !stamped && v.State == collect.OK {
+			if at, has := s.StampFor(in.Install.ID()); has {
+				f(1<<2, at)
+				stamped = true
+			}
+		}
+		f(1<<(3+i), v.At)
 	}
 }
 

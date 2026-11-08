@@ -899,8 +899,7 @@ func TestIdleScrapesRecomputeOnlyOnDeadlines(t *testing.T) {
 }
 
 // Minor 2: once the collector stops, the first run after the last scrape's
-// max-age boundary shows metrics stale. Staleness is the checks' wake time,
-// not part of the source, so the tick at that step confirms and the run follows.
+// max-age boundary shows metrics stale; the tick at that step is refused.
 func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
 	s := newScraping(managedBody, 30*time.Second)
 	h := newHarness(t, s.wire)
@@ -911,11 +910,40 @@ func TestStoppedCollectorGoesStaleAtBoundary(t *testing.T) {
 	stop()
 	d.s, d.allowStale = nil, true
 	m, p2 := d.run(t, p, 31) // to +52 s: runs at +31 s (reads +20 s) and +51 s
-	if n.runs != 0 || m.runs != 2 || m.onDeadline != 2 || m.stale != 1 || m.refused != 0 {
-		t.Fatalf("scraping %+v, stopped %+v; want no run, then two deadline runs, the second stale, no tick refused", n, m)
+	if n.runs != 0 || m.runs != 2 || m.onDeadline != 2 || m.stale != 1 || m.refused != 1 {
+		t.Fatalf("scraping %+v, stopped %+v; want no run, then two deadline runs, the second stale, its tick refused", n, m)
 	}
 	if want := testutil.Now.Add(20*time.Second + 30*time.Second + time.Second); !p2.At.Equal(want) || !stale(p2.Published) {
 		t.Fatalf("stale run at +%v, want +%v: the first step after last scrape + max age", p2.At.Sub(testutil.Now), want.Sub(testutil.Now))
+	}
+}
+
+// Review 5.2 #1: when the published model's metrics go stale, the confirm tick
+// does not renew ConfirmedAt, so a read before the recompute (the API serves
+// Current) never sees old data with a new timestamp.
+func TestStaleMetricsAreNeverConfirmed(t *testing.T) {
+	s := newScraping(managedBody, 30*time.Second)
+	h := newHarness(t, s.wire)
+	h.start(time.Hour)
+	stop, p := startScraping(t, h, s, 10*time.Second) // read the scrape at +0 s
+	stop()
+	last := p.Published
+	for h.c.Now().Before(testutil.Now.Add(30 * time.Second)) {
+		h.c.Step(time.Second)
+		e := h.await(EvConfirmed)
+		h.await(EvArmed)
+		last = e.Published
+	}
+	h.c.Step(time.Second)                            // +31 s: the scrape at +0 s is stale
+	e := testutil.Recv(t, h.ev, "the tick at +31 s") // PF14: the tick goes first
+	if e.Kind != EvConfirmRefused {
+		t.Fatalf("the tick at +31 s: event %d, want a refused confirmation", e.Kind)
+	}
+	if cur := h.e.Current(); cur.Model != last.Model || !cur.ConfirmedAt.Equal(last.ConfirmedAt) || !e.At.After(cur.ConfirmedAt) {
+		t.Fatalf("read after the stale tick: model %p confirmed %v; want %p as confirmed at %v", cur.Model, cur.ConfirmedAt, last.Model, last.ConfirmedAt)
+	}
+	if after := h.await(EvPublished); !stale(after.Published) {
+		t.Fatal("the recompute after the refused tick must show metrics stale")
 	}
 }
 

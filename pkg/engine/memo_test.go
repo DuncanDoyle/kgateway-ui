@@ -17,6 +17,7 @@ import (
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/cache"
+	"github.com/DuncanDoyle/snellius/pkg/collect"
 	"github.com/DuncanDoyle/snellius/pkg/ctrlmetrics"
 	"github.com/DuncanDoyle/snellius/pkg/diagnose"
 	"github.com/DuncanDoyle/snellius/pkg/health"
@@ -688,5 +689,32 @@ func TestEndpointsChangeRerunsCheck(t *testing.T) {
 	})
 	if e.Compute(); runs != 3 {
 		t.Fatalf("a changed Service must run the check: %d runs, want 3", runs)
+	}
+}
+
+// Review 5.2 #2: without a max age the xDS check sets no wake time; a scrape
+// of equal content with a new CollectedAt, published later than it was taken,
+// still restamps the memoized result as an uncached compute stamps it.
+func TestMemoRestampsScrapeTimeWithoutMaxAge(t *testing.T) {
+	engine := func(noMemo bool) (*Engine, *time.Time, *collect.Store) {
+		n := testutil.Now
+		store := collect.New(nil, func() time.Time { return n })
+		cfg := config(nil, metricsAt(testutil.Now), func() time.Time { return n })
+		cfg.Snapshots, cfg.Collected, cfg.NoMemo = &memoSource{base: snapshot(t), now: &n}, store.Snapshot, noMemo
+		return New(cfg), &n, store
+	}
+	e, now, store := engine(false)
+	plain, pnow, pstore := engine(true)
+	for i := range 3 {
+		scraped := testutil.Now.Add(time.Duration(i) * 10 * time.Second)
+		*now, *pnow = scraped.Add(time.Second), scraped.Add(time.Second)
+		r, _ := metricsAt(scraped).Get("kgw.kgateway")
+		res := ctrlmetrics.Results{ByInstall: map[string]ctrlmetrics.Result{"kgw.kgateway": r}}
+		ctrlmetrics.Publish(store, res) // at now, a second after the scrape
+		ctrlmetrics.Publish(pstore, res)
+		got, want := xdsResult(t, e.Compute()), xdsResult(t, plain.Compute())
+		if !got.CollectedAt.Equal(scraped) || !reflect.DeepEqual(got, want) {
+			t.Fatalf("scrape %d: memoized %v, uncached %v; want the scrape time %v", i, got.CollectedAt, want.CollectedAt, scraped)
+		}
 	}
 }

@@ -188,3 +188,23 @@ func ReportedVersion(col collect.Snapshot, id string) (v string, ok bool) {
 	}
 	return r.Metrics.BuildVersion()
 }
+
+// StalePrint implements collect.Aging: it covers the installs whose entry is
+// stale at now, so an entry turning stale changes the engine's source print.
+func (r Results) StalePrint(now time.Time) uint64 {
+	h := fnv.New64a()
+	for _, id := range sortedKeys(r.ByInstall, cmp.Compare[string]) {
+		if r.ByInstall[id].Stale(now, r.MaxAge) {
+			_, _ = h.Write([]byte(id))
+			_, _ = h.Write([]byte{0})
+		}
+	}
+	return h.Sum64()
+}
+
+// StampFor implements collect.Stamped: install's entry's CollectedAt, which
+// checks 001 and 024 stamp their results with.
+func (r Results) StampFor(install string) (time.Time, bool) {
+	e, ok := r.ByInstall[install]
+	return e.CollectedAt, ok
+}

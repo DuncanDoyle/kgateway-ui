@@ -446,7 +446,8 @@ func (e *Engine) compute() *Published {
 	}
 	maps.DeleteFunc(e.diags, func(id string, _ *diagMemo) bool { return states[id] == nil })
 	m.Next = next.next
-	p := &Published{Model: m, Source: Source{Cache: snap.Source, Kinds: kc.String(), Catalog: cat.Key(), Collected: col.Print}, ConfirmedAt: snap.TakenAt}
+	p := &Published{Model: m, Source: Source{Cache: snap.Source, Kinds: kc.String(), Catalog: cat.Key(), Collected: col.Print, Stale: col.StalePrint(now)},
+		ConfirmedAt: snap.TakenAt}
 	return p
 }
 
