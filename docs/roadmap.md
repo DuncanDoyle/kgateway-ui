@@ -90,7 +90,7 @@ The UI product is renamed Snellius: "See the whole picture.", "Kubernetes Gatewa
 **Status:** Not started
 **Docs:** `docs/phases/phase-5/`
 
-The base becomes implementation-independent Kubernetes Gateway API. kgateway is plugin #1, on the same extension seam later editions use (D-061). No multi-implementation support is claimed; a core-only build gets a CI smoke test against Envoy Gateway on kind, as proof the seam holds.
+The base becomes implementation-independent Kubernetes Gateway API. kgateway is plugin #1, on the same extension seam later editions use (D-061). No multi-implementation support is claimed; a core-only build is checked in a private compatibility CI, outside this repo, as proof the seam holds.
 
 Rough sub-phases:
 1. G1: a neutral install and detector, and a default scope.
@@ -98,7 +98,7 @@ Rough sub-phases:
 3. G3: dedupe the kgw23, kgw24 and kgw25 rule sets; extract a generic view A; delegation becomes optional.
 4. G4: a kgateway pack for checks, kinds and condition types.
 5. G5: web vocabulary and the delegation tab as contributions.
-6. G6: the Envoy Gateway smoke test in CI.
+6. G6: the private compatibility check of a core-only build.
 
 Why now: about 60% of the code is already generic, and the refactor is cheaper before the Policies phase adds kgateway policy semantics. Hooks run per install or per stage, so there is no measurable performance cost. Memory is the tight budget (+39.3 of 48 MiB retained heap), so the core owns the shared cache.
 

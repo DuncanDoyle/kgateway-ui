@@ -1066,13 +1066,13 @@ Measured on the reference machine, 5 runs per world:
    - kgateway stays the name of the observed implementation in all content about it.
    - Finding codes keep the `KGWUI-` prefix, so the API does not break.
    - This supersedes one bullet of D-008: "The default theme carries the kgateway identity" becomes "The default theme carries the Snellius identity". The rest of D-008 stands: all identity flows from theme tokens, and downstreams override them. The roadmap's UX requirement 3 ("kgateway identity") changes the same way.
-2. **New Phase 5 — Generic Gateway API core.** The base becomes implementation-independent Kubernetes Gateway API. kgateway is plugin #1, on the same extension seam later editions use. No multi-implementation support is claimed. A core-only build gets a CI smoke test against Envoy Gateway on kind, as proof the seam holds. Rough sub-phases:
+2. **New Phase 5 — Generic Gateway API core.** The base becomes implementation-independent Kubernetes Gateway API. kgateway is plugin #1, on the same extension seam later editions use. No multi-implementation support is claimed. A core-only build is checked in a private compatibility CI, outside this repo, as proof the seam holds (wording amended 2026-11-08). Rough sub-phases:
    - G1: a neutral install and detector, and a default scope.
    - G2: controller metrics behind the collector seam; kgateway-only checks move into a kgateway pack.
    - G3: dedupe the kgw23, kgw24 and kgw25 rule sets; extract a generic view A; delegation becomes optional.
    - G4: a kgateway pack for checks, kinds and condition types.
    - G5: web vocabulary and the delegation tab as contributions.
-   - G6: the Envoy Gateway smoke test in CI.
+   - G6: the private compatibility check of a core-only build.
 3. **Renumbering.** The old Phases 4–11 become 6–13. Closed records (Phase 1–3 designs, plans, complete files, reviews, and D-001 … D-060) keep the old numbers. Read them with this map:
 
 | Old | New | Phase |
