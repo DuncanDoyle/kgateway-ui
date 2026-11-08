@@ -194,6 +194,8 @@ The evidence from Phases 6–8 (backends, policies, the route tester) is what ma
 
 **Design questions:** offline validation of suggested YAML (CRD schemas; a server-side dry-run needs write access); whether a kgateway debugging skill ships with the MCP server; how suggestions are evaluated before release.
 
+**Idea to design (user, 2026-11-08): the agent proposes a test request.** To confirm a hypothesis ("the 503 is the empty endpoint slice"), the assistant proposes one route-tester request (Phase 8). A human reviews it and clicks Send; the agent never sends traffic itself. Same guardrails as D-064. The response goes back to the assistant as evidence. It is one request to confirm a diagnosis, not a test run.
+
 ## Milestones outside the phase sequence
 - **Extension seam proof (after Phase 2):** runs as Phase 3 sub-phase 3.0 (2026-11-01). Besides kinds and detection, it adds the seams a downstream needs to ship a whole feature without forking: API endpoints, background collectors, check inputs, capabilities, a published shell package, in-page slots and chart extension values. `examples/downstream` uses every seam and runs in CI, so the proof is kept rather than thrown away. This validates D-003 before later phases build on it.
 - **MCP server (after Phase 3):** API v1 exposed as MCP tools: installs, findings with their evidence and suggested fixes, and the computed views. It grows as later phases add API, such as the route tester (Phase 8). It is a thin, read-only adapter over the API. It goes through the same `Authorizer` and adds no new data access. Any agent, cloud or local, can then diagnose a kgateway install and propose fixes. Needs Phase 3.1's stable finding IDs, and API v1 released.
