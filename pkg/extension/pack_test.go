@@ -226,3 +226,31 @@ func TestWithPackRejectsBadNames(t *testing.T) {
 		}
 	}
 }
+
+// names are the checks' names, in order.
+func names(cs []health.Check) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.Name())
+	}
+	return out
+}
+
+// A pack's checks run only on its installs: the kgateway pack's installs get
+// health.Upstream in its order, any other install the core checks. WithChecks
+// adds to the default pack: kgateway in New, the core in NewCore.
+func TestChecksForPerPack(t *testing.T) {
+	r := New(WithChecks("ACME-", stubCheck{}))
+	if got, want := names(r.ChecksFor("kgateway")), append(names(health.Upstream()), "stub"); !slices.Equal(got, want) {
+		t.Errorf("kgateway checks %v, want %v", got, want)
+	}
+	for _, impl := range []string{"", "unknown"} {
+		if got, want := names(r.ChecksFor(impl)), names(health.Core()); !slices.Equal(got, want) {
+			t.Errorf("checks for %q: %v, want the core's %v", impl, got, want)
+		}
+	}
+	core := NewCore(WithChecks("ACME-", stubCheck{}))
+	if got, want := names(core.ChecksFor("")), append(names(health.Core()), "stub"); !slices.Equal(got, want) {
+		t.Errorf("NewCore checks %v, want %v", got, want)
+	}
+}

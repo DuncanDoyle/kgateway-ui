@@ -95,7 +95,9 @@ type Config struct {
 
 // Hooks are one install's pack hooks (extension.Impl). A nil Scope assumes all
 // namespaces, nil Settings reads none, nil Version is "", nil Reported reports
-// none, nil ExperimentalOnly marks no kind and nil RulesFor is Config.RulesFor.
+// none, nil ExperimentalOnly marks no kind, nil RulesFor is Config.RulesFor and
+// nil Checks is Config.Checks. A RulesFor that returns no Rules gives the
+// install no rule set: no computed views and no delegation candidates.
 type Hooks struct {
 	Scope    install.ScopeProvider
 	Settings func(install.Install) install.Settings
@@ -105,6 +107,10 @@ type Hooks struct {
 	// values; false keeps the last one, so the rule set does not flip.
 	Reported         func(install.Install, collect.Snapshot) (string, bool)
 	ExperimentalOnly func(kinds.Served, install.Install) bool
+	// Checks run on the install, in registration order: the core's and its pack's.
+	Checks []health.Check
+	// Conditions are the install's condition types beyond Gateway API's.
+	Conditions health.ConditionTypes
 }
 
 // InstallModel is everything the API serves about one install.
@@ -208,7 +214,7 @@ func New(cfg Config) *Engine {
 			Reported: func(i install.Install, col collect.Snapshot) (string, bool) {
 				return ctrlmetrics.ReportedVersion(col, i.ID())
 			},
-			ExperimentalOnly: install.UpstreamExperimentalOnly}
+			ExperimentalOnly: install.UpstreamExperimentalOnly, Conditions: health.KgatewayConditions()}
 		cfg.HooksFor = func(install.Install) Hooks { return legacy }
 	}
 	if cfg.DelegationBounds == (computed.Bounds{}) {
@@ -356,9 +362,11 @@ func (e *Engine) compute() *Published {
 	firstSeen := e.firstSeen(now)
 	// Views first: one persistence step over every install's checks precedes health.
 	type run struct {
-		res   install.Resolved
-		owned *install.Owned
-		sel   computed.Selection
+		res    install.Resolved
+		owned  *install.Owned
+		sel    computed.Selection
+		checks []health.Check
+		conds  health.ConditionTypes
 	}
 	var runs []run
 	var views []*computed.Views
@@ -368,17 +376,30 @@ func (e *Engine) compute() *Published {
 			continue
 		}
 		res.ReportedVersion = e.reportedVersion(res.Install, col)
-		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.rulesFor(res.Install)}
+		h := e.cfg.HooksFor(res.Install)
+		r := run{res: res, owned: asg.PerInstall[res.ID()], sel: e.rulesFor(res.Install), checks: h.Checks, conds: h.Conditions}
+		if r.checks == nil {
+			r.checks = e.cfg.Checks
+		}
+		if r.sel.Rules == nil && r.owned != nil && len(r.owned.Declared) > 0 {
+			// Delegation is a rule set's semantics: without one there are no candidates.
+			o := *r.owned
+			o.Declared = nil
+			r.owned = &o
+		}
 		runs = append(runs, r)
 		m := e.views[res.ID()]
 		if m == nil {
 			m = &viewsMemo{}
 		}
 		memos[res.ID()] = m
-		v := computeViews(m, r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		var v *computed.Views
+		if r.sel.Rules != nil {
+			v = computeViews(m, r.sel, res, r.owned, snap, served, e.decode, e.cfg.DelegationBounds)
+		}
 		views = append(views, v)
 		// Each cap hit is logged once per distinct value, as rejections are (rules §5.7).
-		if c := v.Delegation.Cap; c != "" && !e.caps[res.ID()+"\x00"+c] {
+		if c := capOf(v); c != "" && !e.caps[res.ID()+"\x00"+c] {
 			e.caps[res.ID()+"\x00"+c] = true
 			e.cfg.Logger.Warn("delegation compute cap hit; later work is unknown", "install", res.ID(), "cap", c)
 		}
@@ -412,7 +433,7 @@ func (e *Engine) compute() *Published {
 		}
 		rep := health.Evaluate(health.Input{Install: res, Owned: owned, Assignment: asg, Snapshot: snap, Served: served, KindsChange: kc, Catalog: cat,
 			FirstSeen: firstSeen, Verify: ver, Now: now, Platform: e.cfg.Platform, ProxyMode: e.cfg.ProxyMode,
-			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel}, e.cfg.Checks, rt)
+			Computed: views[i], Views: e.decode, Process: proc, GatewayAPI: gatewayAPI(r.sel), Rules: r.sel, Conditions: &r.conds}, r.checks, rt)
 		if !rep.Next.IsZero() {
 			next.add(rep.Next, false) // a grace end or a check's WakeAt
 		}
@@ -447,6 +468,14 @@ func (e *Engine) reportedVersion(i install.Install, col collect.Snapshot) string
 		delete(e.reported, id)
 	}
 	return e.reported[id]
+}
+
+// capOf is v's delegation cap hit, "" without views.
+func capOf(v *computed.Views) string {
+	if v == nil {
+		return ""
+	}
+	return v.Delegation.Cap
 }
 
 // rulesFor selects i's rule set with its pack's hooks.

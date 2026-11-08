@@ -43,6 +43,9 @@ func (p *persistence) step(now time.Time, checks []computed.CheckResult, graceEn
 func (p *persistence) persist(now time.Time, views []*computed.Views, graceEnd func(computed.CheckResult) time.Time) (next time.Time) {
 	p.run++
 	for _, v := range views {
+		if v == nil {
+			continue // an install without a rule set
+		}
 		if at := p.visit(now, v.Checks, graceEnd); !at.IsZero() && (next.IsZero() || at.Before(next)) {
 			next = at
 		}

@@ -64,6 +64,9 @@ type Registry struct {
 	version          func(install.Install) string
 	reported         func(install.Install, collect.Snapshot) (string, bool)
 	experimentalOnly func(kinds.Served, install.Install) bool
+	conditions       health.ConditionTypes
+	// checkPack names the pack each check belongs to, by check name; a core check has none.
+	checkPack map[string]string
 	// impls are the hooks of the other packs, and of the core once a default pack is set, by name.
 	impls map[string]Impl
 
@@ -117,8 +120,9 @@ func WithScopeProvider(p install.ScopeProvider) Option { return func(r *Registry
 // WithScopeVerifier replaces the scope verifier.
 func WithScopeVerifier(v scopeverify.Verifier) Option { return func(r *Registry) { r.Verifier = v } }
 
-// WithChecks adds health checks; by convention their finding codes start with
-// prefix, such as "ACME-". A reserved or repeated prefix adds nothing and Registry.Err reports it.
+// WithChecks adds health checks to the default pack (kgateway in New, the
+// core in NewCore); by convention their finding codes start with prefix, such
+// as "ACME-". A reserved or repeated prefix adds nothing and Registry.Err reports it.
 func WithChecks(prefix string, c ...health.Check) Option {
 	return func(r *Registry) {
 		switch {
@@ -129,6 +133,9 @@ func WithChecks(prefix string, c ...health.Check) Option {
 		default:
 			r.prefixes[prefix] = true
 			r.Checks = append(r.Checks, c...)
+			for _, ch := range c {
+				r.checkPack[ch.Name()] = r.pack
+			}
 		}
 	}
 }
@@ -204,6 +211,7 @@ func NewCore(opts ...Option) *Registry {
 		Authorizer: api.AllowAll{},
 		Commands:   diagnose.Kubectl{},
 		impls:      map[string]Impl{},
+		checkPack:  map[string]string{},
 		prefixes:   map[string]bool{UpstreamPrefix: true},
 	}
 	for _, o := range opts {

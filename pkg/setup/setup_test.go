@@ -195,6 +195,7 @@ func fakeClients(t *testing.T, objs []runtime.Object) (*dynamicfake.FakeDynamicC
 type oneShot struct {
 	eng *engine.Engine
 	clk *clocktesting.FakeClock
+	cfg setup.Config
 }
 
 func newOneShot(t *testing.T, ctx context.Context, objs []runtime.Object) *oneShot {
@@ -205,17 +206,18 @@ func newOneShot(t *testing.T, ctx context.Context, objs []runtime.Object) *oneSh
 // newOneShotWith is newOneShot over reg.
 func newOneShotWith(t *testing.T, ctx context.Context, objs []runtime.Object, reg *extension.Registry) *oneShot {
 	t.Helper()
-	return oneShotSequence(t, ctx, objs, reg, emptyScraper{}, true)
+	return oneShotSequence(t, ctx, objs, reg, emptyScraper{}, true, false)
 }
 
 // oneShotSequence is the ctrlmetrics package's one-shot sequence over objs and
 // reg, scraping with s; without publish, no metrics reach the engine.
-func oneShotSequence(t *testing.T, ctx context.Context, objs []runtime.Object, reg *extension.Registry, s ctrlmetrics.Scraper, publish bool) *oneShot {
+// classOnly turns class-only installs on.
+func oneShotSequence(t *testing.T, ctx context.Context, objs []runtime.Object, reg *extension.Registry, s ctrlmetrics.Scraper, publish, classOnly bool) *oneShot {
 	t.Helper()
 	dyn, kube := fakeClients(t, objs)
 	clk := clocktesting.NewFakeClock(t0)
 	cfg, err := setup.Build(setup.Clients{Dynamic: dyn, Kube: kube, Discovery: kube.Discovery(), Metadata: fakeMetadata(t)},
-		setup.Options{MetricsInterval: time.Hour, Clock: clk}, reg)
+		setup.Options{MetricsInterval: time.Hour, Clock: clk, ClassOnlyInstalls: classOnly}, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +239,7 @@ func oneShotSequence(t *testing.T, ctx context.Context, objs []runtime.Object, r
 		ctrlmetrics.Publish(cfg.Collected, ctrlmetrics.CollectOnce(ctx, s, installs, setup.MetricsMaxAge(time.Hour)))
 	}
 	cfg.Engine.Snapshots = fixed{snap}
-	return &oneShot{eng: engine.New(cfg.Engine), clk: clk}
+	return &oneShot{eng: engine.New(cfg.Engine), clk: clk, cfg: cfg}
 }
 
 func (o *oneShot) at(now time.Time) *engine.Model {

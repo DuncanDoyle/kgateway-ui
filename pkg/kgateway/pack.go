@@ -41,3 +41,6 @@ func ExperimentalOnly(k kinds.Served, i install.Install) bool {
 
 // ProxyMode returns the GatewayParameters resolution of self-managed proxies.
 func ProxyMode() proxymode.Resolver { return proxymode.GatewayParameters{} }
+
+// Conditions are kgateway's route condition types beyond Gateway API's.
+func Conditions() health.ConditionTypes { return health.KgatewayConditions() }

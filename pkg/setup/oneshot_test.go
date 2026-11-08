@@ -48,13 +48,13 @@ func TestOneShotMetricsMatchTheApp(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	objs := world()
-	one := oneShotSequence(t, ctx, objs, extension.New(), rejectingScraper{}, true).at(t0)
+	one := oneShotSequence(t, ctx, objs, extension.New(), rejectingScraper{}, true, false).at(t0)
 	app := newRunningWith(t, ctx, objs, rejectingScraper{}).first(t)
 	got, want := rejected(one), rejected(app)
 	if want == "" || got != want {
 		t.Fatalf("one-shot 001 %q, app 001 %q", got, want)
 	}
-	none := oneShotSequence(t, ctx, objs, extension.New(), rejectingScraper{}, false).at(t0)
+	none := oneShotSequence(t, ctx, objs, extension.New(), rejectingScraper{}, false, false).at(t0)
 	if r := rejected(none); r != "" {
 		t.Fatalf("without Publish: 001 %s", r)
 	}

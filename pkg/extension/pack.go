@@ -43,6 +43,8 @@ type Impl struct {
 	Process          process.Source
 	ProxyStats       proxystats.Source
 	Commands         diagnose.Commands
+	// Conditions are the implementation's condition types beyond Gateway API's.
+	Conditions health.ConditionTypes
 }
 
 // Pack is one implementation's contributions to the core. Its Name is stamped
@@ -107,6 +109,9 @@ func WithPack(p Pack) Option {
 		r.Kinds = kinds.Dedupe(append(r.Kinds, p.Kinds...))
 		r.Detectors = append(stamp(p.Name, p.Detectors), r.Detectors...)
 		r.Checks = append(r.Checks, p.Checks...)
+		for _, c := range p.Checks {
+			r.checkPack[c.Name()] = p.Name
+		}
 		for _, f := range p.Collectors {
 			r.packCollectors = append(r.packCollectors, packCollector{pack: p.Name, build: f})
 		}
@@ -117,6 +122,22 @@ func WithPack(p Pack) Option {
 type packCollector struct {
 	pack  string
 	build func(CollectorEnv) Collector
+}
+
+// ChecksFor returns the checks that run on installs of pack impl, in
+// registration order: the core's and that pack's. WithChecks adds checks to
+// the default pack, so they run on its installs.
+func (r *Registry) ChecksFor(impl string) []health.Check {
+	if _, known := r.impls[impl]; !known && impl != r.pack {
+		impl = "" // an install no registered pack claims gets the core's checks
+	}
+	out := make([]health.Check, 0, len(r.Checks))
+	for _, c := range r.Checks {
+		if p := r.checkPack[c.Name()]; p == "" || p == impl {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // PackCollectors builds every pack's collectors with env, in registration
@@ -149,20 +170,23 @@ func (r *Registry) ImplFor(i install.Install) Impl {
 // currentImpl is the default pack's hooks, held in the Registry fields.
 func (r *Registry) currentImpl() Impl {
 	return Impl{Scope: r.Scope, Verifier: r.Verifier, Settings: r.settings, RulesFor: r.RulesFor, Version: r.version, Reported: r.reported,
-		ExperimentalOnly: r.experimentalOnly, ProxyMode: r.ProxyMode, Process: r.Process, ProxyStats: r.ProxyStats, Commands: r.Commands}
+		ExperimentalOnly: r.experimentalOnly, ProxyMode: r.ProxyMode, Process: r.Process, ProxyStats: r.ProxyStats, Commands: r.Commands,
+		Conditions: r.conditions}
 }
 
 // setImpl makes im the default pack's hooks.
 func (r *Registry) setImpl(im Impl) {
 	r.Scope, r.Verifier, r.settings, r.RulesFor, r.version, r.reported = im.Scope, im.Verifier, im.Settings, im.RulesFor, im.Version, im.Reported
 	r.experimentalOnly, r.ProxyMode, r.Process, r.ProxyStats, r.Commands = im.ExperimentalOnly, im.ProxyMode, im.Process, im.ProxyStats, im.Commands
+	r.conditions = im.Conditions
 }
 
 // kgatewayPack is pack #1, built from pkg/kgateway.
 func kgatewayPack() Pack {
 	return Pack{Name: kgateway.Name, Kinds: kgateway.Kinds(), Detectors: []install.Detector{kgateway.Detector()}, Checks: kgateway.Checks(),
 		Impl: Impl{Scope: kgateway.Scope(), Settings: kgateway.Settings, RulesFor: kgateway.RulesFor, Version: kgateway.Version, Reported: kgateway.Reported,
-			ExperimentalOnly: kgateway.ExperimentalOnly, ProxyMode: kgateway.ProxyMode(), Process: process.Kube{}, Commands: diagnose.Kubectl{}},
+			ExperimentalOnly: kgateway.ExperimentalOnly, ProxyMode: kgateway.ProxyMode(), Process: process.Kube{}, Commands: diagnose.Kubectl{},
+			Conditions: kgateway.Conditions()},
 		Collectors: []func(CollectorEnv) Collector{metricsCollector, proxyStatsCollector, controllerLogsCollector}}
 }
 

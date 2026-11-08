@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/labels"
@@ -98,6 +99,10 @@ type Config struct {
 	Changes *trigger.Signal
 }
 
+// noRuleSet is the rule-set choice of a pack without one, such as the core's
+// for a class-only install: no computed views.
+func noRuleSet(string) computed.Selection { return computed.Selection{} }
+
 // MetricsMaxAge is the age beyond which a metrics result is stale: three
 // collection intervals, so a stalled collector cannot keep an old result green.
 func MetricsMaxAge(interval time.Duration) time.Duration { return 3 * interval }
@@ -156,6 +161,19 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 		now = o.Clock.Now
 	}
 	collected := collect.New(changes, now)
+	// Each pack's checks are listed once; HooksFor runs several times per install and compute.
+	var mu sync.Mutex
+	checksFor := map[string][]health.Check{}
+	checks := func(impl string) []health.Check {
+		mu.Lock()
+		defer mu.Unlock()
+		cs, ok := checksFor[impl]
+		if !ok {
+			cs = reg.ChecksFor(impl)
+			checksFor[impl] = cs
+		}
+		return cs
+	}
 	verifier := reg.Verifier
 	if verifier == nil {
 		// A mismatch must outlast two collections before it is reported (design §4.4).
@@ -169,8 +187,12 @@ func Build(c Clients, o Options, reg *extension.Registry) (Config, error) {
 			ProxyMode: reg.ProxyMode, RulesFor: reg.RulesFor, Process: reg.Process, Collected: collected.Snapshot,
 			HooksFor: func(i install.Install) engine.Hooks {
 				im := reg.ImplFor(i)
-				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: im.RulesFor, Version: im.Version, Reported: im.Reported,
-					ExperimentalOnly: im.ExperimentalOnly}
+				rules := im.RulesFor
+				if rules == nil {
+					rules = noRuleSet
+				}
+				return engine.Hooks{Scope: im.Scope, Settings: im.Settings, RulesFor: rules, Version: im.Version, Reported: im.Reported,
+					ExperimentalOnly: im.ExperimentalOnly, Checks: checks(i.Impl), Conditions: im.Conditions}
 			},
 			Triggers: changes, Clock: o.Clock, ClassOnly: o.ClassOnlyInstalls,
 			// The other bounds stay zero: the walker gives each its default.

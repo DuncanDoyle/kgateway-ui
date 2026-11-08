@@ -220,6 +220,8 @@ For downstream builds and one-shot callers, these names are removed:
 | `ctrlmetrics.Collector.Get`, `Collector.OnResult` | `Collector.Run` takes a publish function; the store notifies |
 
 - `health.AllInputs()` no longer declares metrics.
+- A pack's checks run only on the installs it claimed; a class-only install runs the core checks. `WithChecks` adds checks to the default pack, kgateway in `extension.New`. `Registry.ChecksFor` lists an install's checks.
+- `extension.Impl` gains `Reported` (the version the controller reports) and `Conditions` (route condition types beyond Gateway API's). A pack without `RulesFor` gives its installs no rule set: no computed views and no delegation.
 - The pack's collector names, `controller-metrics`, `proxy-stats` and `controller-logs`, stay reserved. `WithCollectors` cannot take them.
 - A one-shot caller collects once. The `ctrlmetrics` Go doc has the full sequence:
 

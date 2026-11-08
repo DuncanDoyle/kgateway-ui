@@ -179,6 +179,35 @@ type Input struct {
 	GatewayAPI func(kgatewayMinor string) (bundle string, ok bool)
 	// Rules is the install's rule set; one without a PolicyTargeter raises no computed KGWUI-016.
 	Rules computed.Selection
+	// Conditions are the install's condition types beyond Gateway API's; nil
+	// means KgatewayConditions, as for a caller that builds Input itself.
+	Conditions *ConditionTypes
+}
+
+// ConditionTypes are an implementation's route condition types beyond
+// Gateway API's (Phase 5 design §9).
+type ConditionTypes struct {
+	// RouteOptional are judged on a route parent when present.
+	RouteOptional []string
+	// RouteRejected carry a replaced or dropped rule, KGWUI-015, when False.
+	RouteRejected []string
+}
+
+// KgatewayConditions are kgateway's: kgateway.dev/Programmed, and the
+// replaced rule on Accepted (2.3) or kgateway.dev/Programmed (2.4 on).
+func KgatewayConditions() ConditionTypes {
+	return ConditionTypes{RouteOptional: []string{kgatewayProgrammed}, RouteRejected: []string{"Accepted", kgatewayProgrammed}}
+}
+
+// kgatewayProgrammed is kgateway's route condition type.
+const kgatewayProgrammed = "kgateway.dev/Programmed"
+
+// conditions returns in.Conditions, or KgatewayConditions when it is unset.
+func (in Input) conditions() ConditionTypes {
+	if in.Conditions == nil {
+		return KgatewayConditions()
+	}
+	return *in.Conditions
 }
 
 // ProcessData is one install's controller and per-Gateway proxy processes

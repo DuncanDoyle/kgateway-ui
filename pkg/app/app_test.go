@@ -1731,4 +1731,11 @@ func TestCoreRegistryServesClassOnlyInstalls(t *testing.T) {
 	if len(meta.Kinds) == 0 || slices.ContainsFunc(meta.Kinds, func(k kinds.Served) bool { return k.Group == kinds.KgatewayGroup }) {
 		t.Fatalf("meta kinds %+v, want Gateway API kinds only", meta.Kinds)
 	}
+	// Without a rule set the pages serve status only.
+	base := "/api/v1/installs/example.com~2Fgateway"
+	for _, path := range []string{base + "/gateways/infra/edge", base + "/routes/gateway.networking.k8s.io/HTTPRoute/shop/r"} {
+		if code := getJSON(t, srv, path, nil); code != http.StatusOK {
+			t.Errorf("GET %s: %d", path, code)
+		}
+	}
 }

@@ -233,7 +233,7 @@ var (
 	listenerRequired = []string{"Accepted", "Programmed"}
 	listenerOptional = []string{"ResolvedRefs"}
 	routeRequired    = []string{"Accepted", "ResolvedRefs"}
-	routeOptional    = []string{"kgateway.dev/Programmed"}
+	routeOptional    = []string{kgatewayProgrammed}
 	policyRequired   = []string{"Accepted"}
 	policyOptional   = []string{"Attached"}
 )
@@ -451,7 +451,7 @@ func (c conditionsCheck) Run(ctx RunContext) ([]Finding, CheckResult) {
 				pendingFor(r.Obj, p, noControllerStatus+" for "+extra, FreshnessNeverWritten, 0)
 				continue
 			}
-			evaluate(r.Obj, p, st.Conditions, routeRequired, routeOptional, extra, nil)
+			evaluate(r.Obj, p, st.Conditions, routeRequired, in.conditions().RouteOptional, extra, nil)
 		}
 	}
 	// Routes whose parent does not exist. A parent of a kind the cache cannot
