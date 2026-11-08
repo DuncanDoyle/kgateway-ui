@@ -9,8 +9,8 @@ Status: implementing (design and plan approved by the user 2026-11-08; branch du
 ### Queue
 - [x] Q1 Sub-phase 5.1 (G1) packs, class-only installs, default scope — phases/phase-5/phase-5.1-complete.md
 - [x] Q2 Sub-phase 5.2 (G2) metrics and checks into the pack — phases/phase-5/phase-5.2-complete.md (Task 6a posts at merge)
-- [ ] Q3 Sub-phase 5.3 (G3) rule sets, view A, delegation (Tasks 8–10) ← CURRENT
-- [ ] Q4 Sub-phase 5.4 (G4) the rest of the kgateway pack (Tasks 11–12)
+- [x] Q3 Sub-phase 5.3 (G3) rule sets, view A, delegation — phases/phase-5/phase-5.3-complete.md
+- [ ] Q4 Sub-phase 5.4 (G4) the rest of the kgateway pack (Tasks 11–12) ← CURRENT
 - [ ] Q5 Sub-phase 5.5 (G5) web (Tasks 13–15)
 - [ ] Q6 Sub-phase 5.6 (G6) the compatibility check and close (Tasks 16–18)
 
