@@ -4,15 +4,20 @@
 Phase: 5 — Generic Gateway API core
 Base: 169712c8be01e08f8832490df281a81219576174
 Docs: docs/phases/phase-5/
-Status: design in progress (branch duncandoyle/phase5Design); user answered all four open questions 2026-11-08 (design rows 8, 10, 12, 17); waiting for design approval; Phase 4 closed 2026-11-07 (phases/phase-4/phase-4-complete.md, released as v0.5.0)
+Status: implementing (design and plan approved by the user 2026-11-08; branch duncandoyle/genericCore)
 
 ### Queue
-(empty; filled from the Phase 5 design and plan)
+- [ ] Q1 Sub-phase 5.1 (G1) packs, class-only installs, default scope (plan Tasks 1–5) ← CURRENT
+- [ ] Q2 Sub-phase 5.2 (G2) metrics and checks into the pack (Tasks 6, 6a, 7)
+- [ ] Q3 Sub-phase 5.3 (G3) rule sets, view A, delegation (Tasks 8–10)
+- [ ] Q4 Sub-phase 5.4 (G4) the rest of the kgateway pack (Tasks 11–12)
+- [ ] Q5 Sub-phase 5.5 (G5) web (Tasks 13–15)
+- [ ] Q6 Sub-phase 5.6 (G6) the compatibility check and close (Tasks 16–18)
 
 ### Exit gates
 - [ ] tests/vet pass (observed)
 - [ ] all queue items done or deferred
-- [ ] design+plan cross-model review + triage: docs/phases/phase-5/reviews/design-codex.md
+- [x] design+plan cross-model review + triage: docs/phases/phase-5/reviews/design-codex.md (+ design-codex-r2.md)
 - [ ] phase cross-model review + triage: docs/phases/phase-5/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-5-complete.md written, roadmap updated, tracked items closed
