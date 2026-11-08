@@ -15,7 +15,7 @@ Data age is measured on the server's clock: age = (browser now + offset) − col
 | Input / action | Expected |
 |---|---|
 | Server clock 35 min behind the browser, data fresh | Not stale; "Last checked 0s ago"; states keep their value |
-| Server clock 35 min ahead, then polls fail | Stale after two poll intervals, as with equal clocks |
+| Server clock 35 min ahead, then polls fail | Stale after two poll intervals, give or take 1 s (`Date` has 1 s resolution) |
 | Equal clocks (difference within the `Date` header's 1 s resolution plus latency) | Unchanged from v0.5.0 |
 | Tab hidden, then shown (D-063 hold) | Unchanged: the clock holds until the first poll settles, or 10 s |
 
