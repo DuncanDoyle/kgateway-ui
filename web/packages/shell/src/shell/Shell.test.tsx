@@ -2,6 +2,7 @@ import { css } from "@emotion/react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SWRConfig } from "swr";
+import { resetClockForTests } from "../api/clock";
 import type { Readiness } from "../api/types";
 import { stubApi, testSWR } from "../test/render";
 import { useThemeSwitch } from "../theme/ThemeProvider";
@@ -52,6 +53,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
+  resetClockForTests();
 });
 
 it("redirects / to the only install", async () => {
@@ -325,6 +327,29 @@ it("confirmedAt keeps an idle install summary fresh in the switcher and the head
     "[data-testid=controller-readiness]",
   ) as HTMLElement;
   expect(within(ready).queryByTestId("health-icon-unknown")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
+  const item = screen.getByRole("menuitem", { name: /b\/two/ });
+  expect(within(item).getByTestId("health-icon-healthy")).toBeInTheDocument();
+});
+
+it("a cluster clock 35 min behind the browser keeps a just-confirmed summary known in the switcher and the header", async () => {
+  const serverNow = () => Date.now() - 35 * 60_000;
+  const confirmedAt = new Date(serverNow()).toISOString();
+  stubApi(
+    {
+      "/api/v1/installs": [
+        { ...inst("a/one", { state: "ready", ready: 2, desired: 2 }, confirmedAt), confirmedAt },
+        { ...inst("b/two", { state: "ready", ready: 2, desired: 2 }, confirmedAt), confirmedAt },
+      ],
+      "/api/v1/meta": meta,
+    },
+    serverNow,
+  );
+  mount("/i/a.one");
+  const ready = (await screen.findByText("Controller: 2 of 2 ready")).closest(
+    "[data-testid=controller-readiness]",
+  ) as HTMLElement;
+  await waitFor(() => expect(within(ready).queryByTestId("health-icon-unknown")).toBeNull());
   await userEvent.click(screen.getByRole("button", { name: /switch install/i }));
   const item = screen.getByRole("menuitem", { name: /b\/two/ });
   expect(within(item).getByTestId("health-icon-healthy")).toBeInTheDocument();

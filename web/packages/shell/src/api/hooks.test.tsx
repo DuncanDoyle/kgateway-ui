@@ -2,7 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { DataAge } from "../pages/DataAge";
 import { renderWithTheme, stubApi } from "../test/render";
 import { ApiError, apiFetch } from "./client";
-import { resetClockForTests, useNow } from "./clock";
+import { observeServerDate, resetClockForTests, trackRequest, useNow } from "./clock";
 import {
   isLinkable,
   isStale,
@@ -422,5 +422,99 @@ describe("after a hidden tab is shown again", () => {
       await vi.advanceTimersByTimeAsync(2 * POLL_MS + 1000);
     });
     expect(screen.getByText(/^Data is stale/)).toBeInTheDocument();
+  });
+});
+
+// region Clock skew (4.3)
+const SKEW = 35 * 60_000;
+
+/** Serves installs collected now on a server clock skew() ms off the browser's; after fail() the backend is unreachable. */
+function skewedInstalls(skew: () => number) {
+  let down = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      if (down) throw new TypeError("Failed to fetch");
+      const at = Date.now() + skew();
+      return new Response(JSON.stringify([{ id: "a.one", computedAt: new Date(at).toISOString() }]), {
+        status: 200,
+        headers: { Date: new Date(at).toUTCString() },
+      });
+    }),
+  );
+  return { fail: () => (down = true) };
+}
+
+function NowProbe() {
+  return <p>{new Date(useNow()).toISOString()}</p>;
+}
+
+describe("data age on the server's clock", () => {
+  afterEach(() => {
+    act(() => setVisibility("visible"));
+    resetClockForTests();
+  });
+
+  it("a server clock 35 min behind keeps fresh data fresh", async () => {
+    skewedInstalls(() => -SKEW);
+    renderWithTheme(<AgeProbe />);
+    expect(await screen.findByText("Last checked 0s ago")).toBeInTheDocument();
+    expect(screen.queryByText(/stale/)).toBeNull();
+  });
+
+  it("a server clock 35 min ahead still turns stale when polls fail", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const api = skewedInstalls(() => SKEW);
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    api.fail();
+    // Date has 1 s resolution, so a skewed clock is known to ±0.5 s; allow one extra second.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * POLL_MS + 2000);
+    });
+    expect(screen.getByText(/^Data is stale\. Last checked 1[1-3]s ago/)).toBeInTheDocument();
+  });
+
+  it("equal clocks read as before: a Date header cut to the second leaves useNow on the browser clock", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-17T12:00:00.900Z"));
+    skewedInstalls(() => 0);
+    await apiFetch("/api/v1/installs");
+    renderWithTheme(<NowProbe />);
+    expect(screen.getByText("2026-10-17T12:00:00.000Z")).toBeInTheDocument();
+  });
+
+  it("a skew learnt while the clock is held does not move the held time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-17T12:00:00Z"));
+    renderWithTheme(<NowProbe />);
+    act(() => setVisibility("hidden"));
+    vi.setSystemTime(Date.parse("2026-10-17T12:09:00Z"));
+    const settled = trackRequest();
+    act(() => setVisibility("visible"));
+    // Another request answers on a clock 35 min ahead while the first is still pending.
+    act(() => observeServerDate(new Date(Date.now() + SKEW).toUTCString()));
+    expect(screen.getByText("2026-10-17T12:00:00.000Z")).toBeInTheDocument();
+    settled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText("2026-10-17T12:44:00.500Z")).toBeInTheDocument();
+  });
+
+  it("a server clock that fell 35 min behind while the tab was hidden does not read as stale once shown", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let skew = 0;
+    skewedInstalls(() => skew);
+    renderWithTheme(<AgeProbe />);
+    await screen.findByText(/^Last checked/);
+    await hideFor(9 * 60_000);
+    skew = -SKEW;
+    act(() => setVisibility("visible"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByText(/^Last checked [0-2]s ago/)).toBeInTheDocument();
+    expect(screen.queryByText(/stale/)).toBeNull();
   });
 });

@@ -202,6 +202,10 @@ Saved theme choices carry over. Finding codes keep the `KGWUI-` prefix, so API v
 
 ## Upgrade notes
 
+### v0.5.1 (sub-phase 4.3)
+
+- Data age and "stale" now read the server's clock (from each response's `Date` header), so a cluster clock ahead of or behind the browser no longer marks fresh data stale or hides stale data.
+
 ### Stabilization (sub-phase 3.5)
 
 - On kgateway 2.5, a policy selector that matches nothing is a computed KGWUI-016 warning again; named targets still come from the controller's `TargetNotFound`.
