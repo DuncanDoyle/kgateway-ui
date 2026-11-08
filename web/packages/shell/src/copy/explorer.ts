@@ -625,6 +625,7 @@ export const processesCopy = {
 };
 export const dataPlaneCopy = {
   title: "Data plane", // S388
+  notAvailable: "Not available for this controller",
   rejecting: "Proxies reject this Gateway's config", // S305
   unavailable: "Rejects cannot be read right now", // S451
   evidenceRestricted: "Details hidden: they name objects you cannot view.", // S452

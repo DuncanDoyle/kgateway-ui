@@ -3,10 +3,12 @@ import styled from "@emotion/styled";
 import { Calculator, Clock, Lock, type LucideIcon, Minus } from "lucide-react";
 import { type ReactNode, useContext } from "react";
 import type { Computed } from "../api/exploreTypes";
+import { useInstallFeature } from "../api/hooks";
 import { computedCopy } from "../copy/explorer";
 import { HealthIcon } from "../health/HealthIcon";
 import { StaleView } from "../health/staleView";
 import { stateLabel } from "../health/state";
+import { useInstallId } from "../shell/extension";
 import { Tooltip } from "../shell/Tooltip";
 import type { HealthState } from "../theme/tokens";
 
@@ -91,6 +93,11 @@ export function joinSentences(parts: string[]): string {
   return `${parts.map((p) => p.replace(/\.+$/, "")).join(". ")}.`;
 }
 
+/** False only where the install is known to have no computed views (design §10). */
+function useComputed(): boolean {
+  return useInstallFeature(useInstallId(), "computed") !== false;
+}
+
 function NeutralIcon({ glyph: Glyph, kind }: { glyph: LucideIcon; kind: string }) {
   return (
     <Neutral data-testid={`computed-icon-${kind}`} aria-hidden="true">
@@ -154,6 +161,7 @@ interface ComputedChipProps {
 
 /** The outlined "Computed" chip alone, e.g. in a column header whose cells are computed. */
 export function ComputedChip({ label }: ComputedChipProps) {
+  if (!useComputed()) return null;
   return (
     <Tooltip label={label} placement="start" wrap>
       {/* Focusable so keyboard users can read the tooltip. */}
@@ -211,6 +219,7 @@ interface ComputedBadgeProps {
 
 /** Marks a fact the UI computed: an outlined "Computed" chip whose tooltip names the rule, then its check state and note. */
 export function ComputedBadge({ computed, compact, chip = true, extra, stylesOverride }: ComputedBadgeProps) {
+  const shown = useComputed();
   const stale = useContext(StaleView);
   const all = stateItems(computed, stale);
   // Restricted carries no note on the wire; never show one even if sent (design §7.4).
@@ -226,6 +235,7 @@ export function ComputedBadge({ computed, compact, chip = true, extra, stylesOve
       <span data-text="">{s.text}</span>
     </Item>
   ));
+  if (!shown) return null;
   return (
     <Wrap data-testid="computed-badge" $compact={!!compact} $stylesOverride={stylesOverride}>
       {chip ? <ComputedChip label={full} /> : null}

@@ -1,4 +1,5 @@
 import { Component, type ReactNode, useMemo } from "react";
+import { useFeatureCheck } from "../api/hooks";
 import type { Finding, Ref } from "../api/types";
 import { useShellExtension } from "./extension";
 
@@ -7,6 +8,8 @@ import { useShellExtension } from "./extension";
 export interface DetailContext {
   installId: string;
   ref: Ref;
+  /** The page's detail as the API sent it; undefined until it loads. */
+  detail?: unknown;
 }
 
 /** A tab on a detail page, after the core tabs; its id is its ?tab= value. */
@@ -14,6 +17,10 @@ export interface DetailTabContribution {
   id: string;
   label: string;
   render: (ctx: DetailContext) => ReactNode;
+  /** Shown only where the install has this feature (InstallSummary.features). */
+  feature?: string;
+  /** Whether the loaded object has the tab; a deep link keeps it while the detail loads. */
+  applies?: (ctx: DetailContext) => boolean;
 }
 
 /** A titled section on a detail page's Overview, after the core content. */
@@ -134,6 +141,38 @@ export function useDetailTabContributions(ref: Ref, coreIds: readonly string[]):
       return true;
     });
   }, [all, core]);
+}
+
+/**
+ * The contributed tabs shown for ref: a tab's feature must not be missing from the install, and applies must hold for
+ * the loaded detail. While either is unknown, only the tab ?tab= asks for keeps its place, so a deep link never jumps.
+ */
+export function useShownDetailTabs(
+  installId: string,
+  ref: Ref,
+  detail: unknown,
+  coreIds: readonly string[],
+  asked: string | null,
+): DetailTabContribution[] {
+  const all = useDetailTabContributions(ref, coreIds);
+  const has = useFeatureCheck(installId);
+  return useMemo(() => {
+    const ctx: DetailContext = { installId, ref, detail };
+    return all.filter((t) => {
+      const feature = t.feature === undefined ? true : has(t.feature);
+      let applies: boolean | undefined = detail === undefined && t.applies ? undefined : true;
+      if (t.applies && detail !== undefined) {
+        try {
+          applies = t.applies(ctx);
+        } catch (err) {
+          warnFailed(`detail-tab:${t.id}`, err);
+          applies = false;
+        }
+      }
+      if (feature === false || applies === false) return false;
+      return (feature === true && applies === true) || asked === t.id;
+    });
+  }, [all, has, installId, ref, detail, asked]);
 }
 
 /** Contributed sections for ref's kind. */
