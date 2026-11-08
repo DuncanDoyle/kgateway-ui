@@ -3,15 +3,18 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/DuncanDoyle/snellius/internal/testutil"
 	"github.com/DuncanDoyle/snellius/pkg/engine"
+	"github.com/DuncanDoyle/snellius/pkg/explore"
 	"github.com/DuncanDoyle/snellius/pkg/health"
 	"github.com/DuncanDoyle/snellius/pkg/install"
 	"github.com/DuncanDoyle/snellius/pkg/kgateway"
@@ -176,5 +179,52 @@ func TestClassOnlyRouteIgnoresKgatewayConditions(t *testing.T) {
 		if flagged != tc.judged || cond != tc.judged {
 			t.Errorf("%s: not-programmed %v, deciding condition %q; want judged by kgateway.dev/Programmed %v", tc.route, flagged, row.Parents[0].ConditionType, tc.judged)
 		}
+	}
+}
+
+// Route freshness reads the install's own condition types (Phase 5 design §9):
+// a stale kgateway condition does not hold back a class-only route, a pack's own
+// stale optional condition does, and a kgateway route keeps today's freshness.
+func TestRouteFreshnessUsesInstallConditions(t *testing.T) {
+	foreign := testutil.GwRef("infra", "foreign")
+	// stale is a generation-2 route whose Accepted and ResolvedRefs are current and whose cond is not.
+	stale := func(name string, p objects.ParentRef, controller, cond string) *unstructured.Unstructured {
+		cs := []metav1.Condition{testutil.Cond("Accepted", metav1.ConditionTrue, "Accepted"),
+			testutil.Cond("ResolvedRefs", metav1.ConditionTrue, "ResolvedRefs"), testutil.Cond(cond, metav1.ConditionTrue, "Programmed")}
+		cs[0].ObservedGeneration, cs[1].ObservedGeneration = 2, 2
+		u := testutil.HTTPRoute("shop", name, []objects.ParentRef{p}, testutil.RouteParent{Ref: p, Controller: controller, Conds: cs})
+		u.SetGeneration(2)
+		return u
+	}
+	attachment := func(srv *httptest.Server, id, name string) explore.Attachment {
+		for _, r := range get[Page[RouteRow]](t, srv, "/api/v1/installs/"+id+"/routes?limit=200", 200).Items {
+			if r.Ref.Name == name && len(r.Parents) == 1 {
+				return r.Parents[0].Attachment
+			}
+		}
+		t.Fatalf("install %s: no route shop/%s with one parent", id, name)
+		return ""
+	}
+	objs := world(stale("co", foreign, "example.com/other", "kgateway.dev/Programmed"),
+		stale("kg", edgeRef, testutil.Controller, "kgateway.dev/Programmed"))
+	h := newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: packHooks, classOnly: true}, objs...)
+	if got := attachment(h.srv, "example.com~2Fother", "co"); got != explore.AttachmentAccepted {
+		t.Errorf("class-only route with a stale kgateway condition: %q, want accepted", got)
+	}
+	if got := attachment(h.srv, "kgw.kgateway", "kg"); got != explore.AttachmentPending {
+		t.Errorf("kgateway route with a stale kgateway.dev/Programmed: %q, want pending", got)
+	}
+
+	// A pack whose optional condition is example.com/Ready: its stale entry holds the route back.
+	own := func(i install.Install) engine.Hooks {
+		if i.Impl == "" {
+			return engine.Hooks{Conditions: health.ConditionTypes{RouteOptional: []string{"example.com/Ready"}}}
+		}
+		return packHooks(i)
+	}
+	h = newHarness(t, setup{detectors: []install.Detector{kgwDetector{}}, hooks: own, classOnly: true},
+		world(stale("co", foreign, "example.com/other", "example.com/Ready"))...)
+	if got := attachment(h.srv, "example.com~2Fother", "co"); got != explore.AttachmentPending {
+		t.Errorf("route with the install's own stale optional condition: %q, want pending", got)
 	}
 }

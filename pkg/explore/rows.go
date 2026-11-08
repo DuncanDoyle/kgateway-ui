@@ -301,7 +301,7 @@ func (b *builder) fromStatus(i int, p objects.ParentRef) ParentLink {
 		r.Flags |= FlagPending
 		return l
 	}
-	if why := health.RoutePending(r.Obj, st.Conditions); why != "" {
+	if why := health.RoutePendingFor(r.Obj, st.Conditions, b.conds); why != "" {
 		l.Attachment, l.Pending = AttachmentPending, why
 		r.Flags |= FlagPending
 		return l

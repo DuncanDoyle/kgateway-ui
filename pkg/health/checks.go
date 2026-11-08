@@ -569,9 +569,15 @@ func pendingReason(u *unstructured.Unstructured, cs []metav1.Condition, required
 }
 
 // RoutePending returns why one status.parents entry of route u is not
-// current under the rules the resource status check applies, or "" when it is.
+// current under the rules the resource status check applies to a kgateway
+// install, or "" when it is. RoutePendingFor takes the install's own types.
 func RoutePending(u *unstructured.Unstructured, cs []metav1.Condition) string {
 	return pendingReason(u, cs, routeRequired, routeOptional)
+}
+
+// RoutePendingFor is RoutePending for an install whose condition types are ct.
+func RoutePendingFor(u *unstructured.Unstructured, cs []metav1.Condition, ct ConditionTypes) string {
+	return pendingReason(u, cs, routeRequired, ct.RouteOptional)
 }
 
 // GatewayPending is RoutePending for a Gateway or ListenerSet status block.
