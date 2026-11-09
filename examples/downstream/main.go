@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"embed"
+	"flag"
 	"io/fs"
 	"log"
 	"net/http"
-	"time"
+	"os"
 
 	"k8s.io/utils/clock"
 
 	"github.com/DuncanDoyle/snellius/pkg/api"
 	"github.com/DuncanDoyle/snellius/pkg/app"
+	"github.com/DuncanDoyle/snellius/pkg/cli"
 	"github.com/DuncanDoyle/snellius/pkg/extension"
 	"github.com/DuncanDoyle/snellius/pkg/objects"
 )
@@ -24,15 +26,25 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := app.Run(context.Background(), "", options(ui), extensions(clock.RealClock{})...); err != nil {
+	// The stock binary's flags; the UI is this build's own
+	kubeconfig, o, err := cli.Parse(flag.CommandLine, os.Args[1:])
+	if err != nil {
+		os.Exit(2)
+	}
+	o.UI = ui
+	if err := app.Run(context.Background(), kubeconfig, o, extensions(clock.RealClock{})...); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// options are the backend settings. Both intervals must be positive; these
-// are the stock binary's defaults.
+// options are the stock binary's defaults with ui as the UI.
 func options(ui fs.FS) app.Options {
-	return app.Options{UI: ui, PollInterval: 30 * time.Second, MetricsInterval: 10 * time.Second}
+	_, o, err := cli.Parse(flag.NewFlagSet("downstream", flag.ContinueOnError), nil)
+	if err != nil {
+		panic(err)
+	}
+	o.UI = ui
+	return o
 }
 
 // extensions are what this build adds to the stock UI. The types are in
