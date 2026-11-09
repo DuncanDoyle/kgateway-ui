@@ -178,6 +178,23 @@ func TestCheckWaitsForASyncedDefaultBuild(t *testing.T) {
 	}
 }
 
+// A pass cut short by the deadline reports the last complete pass's failures, not only the timeout.
+func TestSettleKeepsTheLastCompletePass(t *testing.T) {
+	var calls atomic.Int32
+	ui := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		<-r.Context().Done() // every later pass hangs until the deadline
+	}))
+	t.Cleanup(ui.Close)
+	errs := Settle(context.Background(), http.DefaultClient, env(ui.URL, ui.URL), 300*time.Millisecond, 10*time.Millisecond)
+	if !mentions(errs, "want one install") {
+		t.Fatalf("errors %v, want the first pass's failure", errs)
+	}
+}
+
 // Env reads every input from the environment and rejects a missing one.
 func TestEnvFromOS(t *testing.T) {
 	for k, v := range map[string]string{"COMPAT_CONTROLLER": controller, "COMPAT_GATEWAY": "infra/edge", "COMPAT_ROUTE": "shop/web",

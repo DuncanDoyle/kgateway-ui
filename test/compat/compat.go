@@ -55,15 +55,21 @@ var packCodes = []string{health.CodeXDSRejected, health.CodeScopeMismatch, healt
 	health.CodeComputedDisagrees, health.CodeRuleReplaced, health.CodePolicyTargetNotFound, health.CodeVersionSkew,
 	health.CodeConfigWithheld, health.CodeProxyConfigWarming, health.CodeProxyDisconnected}
 
-// Settle runs Check every `every` until it passes or timeout ends, and returns the last errors.
+// Settle runs Check every `every` until it passes or timeout ends, and returns the last complete pass's errors.
 func Settle(ctx context.Context, c *http.Client, e Env, timeout, every time.Duration) []error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	var last []error
 	for {
 		errs := Check(ctx, c, e)
 		if len(errs) == 0 {
 			return nil
 		}
+		// A pass the deadline cut short says only "deadline exceeded"; the pass before it says why.
+		if ctx.Err() != nil && last != nil {
+			return last
+		}
+		last = errs
 		select {
 		case <-ctx.Done():
 			return errs
