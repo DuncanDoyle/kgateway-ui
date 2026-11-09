@@ -15,6 +15,7 @@ Status: not started
 - [ ] design+plan cross-model review + triage
 - [ ] phase cross-model review + triage
 - [ ] decisions.md / design / plan in sync with code
+- [ ] snellius.dev matches the user-visible changes (program P-006; `npm run sync:findings` for finding codes)
 - [ ] phase-6-complete.md written, roadmap updated, tracked items closed
 
 ## Sub-phase

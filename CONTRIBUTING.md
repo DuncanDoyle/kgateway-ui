@@ -25,4 +25,5 @@ make help    # every target
 - Keep a PR to one change, and say what it changes and how you tested it.
 - Add or update tests for the behaviour you change. CI runs the Go tests, the linters, the web tests and the kind suite against several kgateway versions.
 - API v1 (`/api/v1/...`) and the page URLs are stable: add fields, never change or remove them.
+- A change users can see (pages, findings, flags, chart values, install steps) also updates the user docs at [snellius.dev](https://snellius.dev), in [DuncanDoyle/snellius.dev](https://github.com/DuncanDoyle/snellius.dev). Link that PR from yours.
 - The design, decisions and roadmap live in [`docs/`](docs/). For a larger change, open an issue first so we can agree on the approach.

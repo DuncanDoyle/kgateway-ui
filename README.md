@@ -6,7 +6,7 @@
   </picture>
 </h1>
 
-<p align="center"><strong>See the whole picture.</strong><br>Kubernetes Gateway Management &amp; Observability</p>
+<p align="center"><strong>See the whole picture.</strong><br>Kubernetes Gateway Management &amp; Observability<br><a href="https://snellius.dev">snellius.dev</a> · <a href="https://snellius.dev/docs/quick-start/">Quick start</a> · <a href="https://snellius.dev/docs/">Docs</a></p>
 
 Snellius is a read-only UI for Kubernetes Gateway API, built for kgateway. It shows the health of each controller install at a glance, why an install is unhealthy, and an inventory of what it manages: GatewayClasses, Gateways, routes and policies.
 
