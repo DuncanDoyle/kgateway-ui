@@ -12,13 +12,13 @@ Status: implementing (design and plan approved by the user 2026-11-08; branch du
 - [x] Q3 Sub-phase 5.3 (G3) rule sets, view A, delegation — phases/phase-5/phase-5.3-complete.md
 - [x] Q4 Sub-phase 5.4 (G4) the rest of the kgateway pack — phases/phase-5/phase-5.4-complete.md
 - [x] Q5 Sub-phase 5.5 (G5) web — phases/phase-5/phase-5.5-complete.md
-- [ ] Q6 Sub-phase 5.6 (G6) the compatibility check and close (Tasks 16–18) ← CURRENT
+- [x] Q6 Sub-phase 5.6 (G6) the compatibility check and close — phases/phase-5/phase-5.6-complete.md
 
 ### Exit gates
-- [ ] tests/vet pass (observed)
-- [ ] all queue items done or deferred
+- [x] tests/vet pass (observed)
+- [x] all queue items done or deferred
 - [x] design+plan cross-model review + triage: docs/phases/phase-5/reviews/design-codex.md (+ design-codex-r2.md)
-- [ ] phase cross-model review + triage: docs/phases/phase-5/reviews/phase-codex.md
+- [x] phase cross-model review + triage: docs/phases/phase-5/reviews/phase-codex.md
 - [ ] decisions.md / design / plan in sync with code
 - [ ] phase-5-complete.md written, roadmap updated, tracked items closed
 
