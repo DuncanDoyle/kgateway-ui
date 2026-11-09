@@ -26,15 +26,16 @@ export function renderWithTheme(ui: ReactElement, opts: { path?: string; themeId
   );
 }
 
-/** Stubs fetch with a map of path → JSON body (status 200) or [status, body]. */
-export function stubApi(routes: Record<string, unknown>) {
+/** Stubs fetch with a map of path → JSON body (status 200) or [status, body]; serverNow sets each response's Date. */
+export function stubApi(routes: Record<string, unknown>, serverNow?: () => number) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
       const r = routes[url];
-      if (r === undefined) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+      const headers = serverNow ? { Date: new Date(serverNow()).toUTCString() } : undefined;
+      if (r === undefined) return new Response(JSON.stringify({ error: "not found" }), { status: 404, headers });
       const [status, body] = Array.isArray(r) && typeof r[0] === "number" ? (r as [number, unknown]) : [200, r];
-      return new Response(JSON.stringify(body), { status });
+      return new Response(JSON.stringify(body), { status, headers });
     }),
   );
 }
