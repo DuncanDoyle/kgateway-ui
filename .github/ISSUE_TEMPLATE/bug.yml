@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in Snellius is wrong or broken.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. A screenshot helps.
+    validations:
+      required: true
+  - type: input
+    id: snellius
+    attributes:
+      label: Snellius version
+      description: On the About page (ⓘ in the header), or the chart version.
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: kgateway
+    attributes:
+      label: kgateway version
+      placeholder: "2.5.0"
+    validations:
+      required: true
+  - type: input
+    id: finding
+    attributes:
+      label: Finding code
+      description: If the bug is about a finding, its code.
+      placeholder: KGWUI-013
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Steps, and the YAML of the objects involved. Remove secrets first.
+      render: yaml

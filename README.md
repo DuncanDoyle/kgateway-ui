@@ -458,6 +458,8 @@ kgateway v2.3.11, v2.4.7 and v2.5.0, tested on kind in CI. On 2.3 and 2.4 a poli
 
 ## Contributing
 
+[CONTRIBUTING.md](CONTRIBUTING.md) covers bug reports, building and pull requests; report security issues as [SECURITY.md](SECURITY.md) explains.
+
 The design, implementation plans, decisions and roadmap live in [`docs/`](docs/). Start with [`docs/roadmap.md`](docs/roadmap.md) and [`docs/phase-status.md`](docs/phase-status.md).
 
 CI's `hygiene` job reads its term list from the repository secret `FORBIDDEN_TERMS`. Same-repo PRs and pushes fail without it; fork PRs, which get no secrets, skip the check with a warning.
