@@ -229,7 +229,7 @@ Today `app.go:255-298` builds the metrics scraper for every build. The engine re
 |---|---|
 | checks 001, 024 (`health/xds.go:118-133`, `withheld.go`) | declare `Collected: [ctrlmetrics.Key]`; read their install's entry |
 | the scope verifier (`scopeverify.Input.Metrics`) | the input carries the collected snapshot; the kgateway verifier reads its entry |
-| the reported version (`engine.go:412`) | the kgateway `Impl.Version(install.Install, collect.Snapshot)` hook reads `BuildVersion()` from the entry |
+| the reported version (`engine.go:412`) | the kgateway `Impl.Reported(install.Install, collect.Snapshot)` hook reads `BuildVersion()` from the entry; `Impl.Version` keeps its signature (D-066) |
 | the gateway data-plane detail (`api/details.go:331`) | reads the entry from `Model.Collected`, the collected snapshot the computation used, so it shows the same evidence as the checks |
 | the model freshness (`Model.MetricsRead`, `Source.Metrics`) | `Model.Collected` (new) holds the snapshot read once per computation (`engine.go:313`); its fingerprints feed the source key |
 | the memo print (`memo.go:103`) | collected keys, as for every collector |

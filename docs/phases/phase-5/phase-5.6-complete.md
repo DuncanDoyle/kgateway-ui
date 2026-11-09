@@ -1,7 +1,7 @@
 # Phase 5.6 — The compatibility check and close (Complete)
 
 **Completed:** 2026-11-09; PR CI green on `c7e6c73` (core-only image included) and the first private compatibility run passed
-**Range:** bc65504..971323c (branch `duncandoyle/genericCore`)
+**Range:** bc65504..c7e6c73 (branch `duncandoyle/genericCore`)
 
 ## Summary
 A `compat`-tagged smoke test (`test/compat`) and a Playwright spec check what a core-only build must do against any Gateway API controller: the default build claims nothing, the core build shows a status-only install with present and empty `packs` and `features`, and no process surfaces. Public CI only vets that test and builds the core-only image; behavioural runs happen in a private compatibility CI outside this repo (D-065). An informational CI job builds kgwctl `main` against this tree and never blocks a merge. The README documents packs, `NewCore`, class-only installs behind the chart value, and the v0.6.0 upgrade notes for Go and frontend callers.
@@ -20,7 +20,7 @@ None.
 - `make bench` on 971323c (`bench-5.6.txt`): every budget passes. Retained heap +23.4 MiB over the 2.1 baseline at Large, +40.0 MiB worst (budget 48); warm 33.5 / 44.5 / 49.1 ms (budget 150); cold 47 / 52 / 66 ms.
 
 ## Notes for later phases
-- The first private compatibility run has not happened; expect setup fixes there.
+- The first private compatibility run needed two fixes: authenticated release downloads in the private CI, and `c7e6c73` here (the harness kept a stale error when its deadline cut a pass short).
 
 ## Deferred / open
-- `make image-core` not built locally (Docker unavailable); CI builds it once pushed.
+- None. CI built the core-only image on `c7e6c73`.

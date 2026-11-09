@@ -65,8 +65,8 @@ func Settle(ctx context.Context, c *http.Client, e Env, timeout, every time.Dura
 		if len(errs) == 0 {
 			return nil
 		}
-		// A pass the deadline cut short says only "deadline exceeded"; the pass before it says why.
-		if ctx.Err() != nil && last != nil {
+		// A pass the deadline cut short with only timeouts says nothing new; the pass before it says why.
+		if ctx.Err() != nil && last != nil && onlyTimeouts(errs) {
 			return last
 		}
 		last = errs
@@ -76,6 +76,16 @@ func Settle(ctx context.Context, c *http.Client, e Env, timeout, every time.Dura
 		case <-time.After(every):
 		}
 	}
+}
+
+// onlyTimeouts reports whether every error is the deadline or a cancellation.
+func onlyTimeouts(errs []error) bool {
+	for _, err := range errs {
+		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+			return false
+		}
+	}
+	return true
 }
 
 // Check makes one pass over the assertions of design §12.1 and returns every failure.
@@ -107,7 +117,7 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 	base := e.UIURL + "/api/v1/installs/" + id
 	var gws api.Page[api.GatewayListRow]
 	if err := get(ctx, c, base+"/gateways?limit=200", &gws); err != nil {
-		fail("%v", err)
+		fail("%w", err)
 	} else if j := slices.IndexFunc(gws.Items, func(r api.GatewayListRow) bool { return r.Ref.String() == e.Gateway }); j < 0 {
 		fail("Gateway %s not listed", e.Gateway)
 	} else if h := gws.Items[j].Health; h == health.StateError || h == health.StateUnknown || h == "" {
@@ -115,7 +125,7 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 	}
 	var routes api.Page[api.RouteRow]
 	if err := get(ctx, c, base+"/routes?limit=200", &routes); err != nil {
-		fail("%v", err)
+		fail("%w", err)
 	} else if j := slices.IndexFunc(routes.Items, func(r api.RouteRow) bool {
 		return r.Ref.Kind == "HTTPRoute" && r.Ref.String() == e.Route
 	}); j < 0 {
@@ -128,7 +138,7 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 	// 3. No kgateway kind, no pack, and no feature. Both lists are sent empty: an absent one means an older server.
 	var meta api.MetaResponse
 	if err := get(ctx, c, e.UIURL+"/api/v1/meta", &meta); err != nil {
-		fail("%v", err)
+		fail("%w", err)
 	} else {
 		if k := slices.IndexFunc(meta.Kinds, func(k kinds.Served) bool { return k.Group == kinds.KgatewayGroup }); k >= 0 {
 			fail("/meta lists %s/%s", meta.Kinds[k].Group, meta.Kinds[k].Kind)
@@ -143,7 +153,7 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 	// 4. No finding with a kgateway pack code.
 	var h api.HealthResponse
 	if err := get(ctx, c, base+"/health", &h); err != nil {
-		fail("%v", err)
+		fail("%w", err)
 	}
 	for _, f := range h.Findings {
 		if slices.Contains(packCodes, f.Code) {
@@ -154,11 +164,11 @@ func Check(ctx context.Context, c *http.Client, e Env) []error {
 	var defMeta api.MetaResponse
 	var def []api.InstallSummary
 	if err := get(ctx, c, e.DefaultUIURL+"/api/v1/meta", &defMeta); err != nil {
-		fail("default build: %v", err)
+		fail("default build: %w", err)
 	} else if !defMeta.Synced {
 		fail("default build has not synced yet")
 	} else if err := get(ctx, c, e.DefaultUIURL+"/api/v1/installs", &def); err != nil {
-		fail("default build: %v", err)
+		fail("default build: %w", err)
 	}
 	for _, s := range def {
 		if slices.Contains(s.ControllerNames, e.Controller) {

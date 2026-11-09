@@ -8,7 +8,7 @@ Open an [issue](https://github.com/DuncanDoyle/snellius/issues/new/choose). For 
 
 ## Build and test
 
-You need Go 1.26, Node 22, Docker and [kind](https://kind.sigs.k8s.io) for the end-to-end suite.
+You need Go 1.26 and Node 22. The end-to-end suite also needs Docker, [kind](https://kind.sigs.k8s.io), `kubectl` and `helm`.
 
 ```sh
 make build   # the SPA and the Go binary, with the SPA embedded

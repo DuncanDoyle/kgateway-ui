@@ -3,6 +3,7 @@ package compat
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -192,6 +193,60 @@ func TestSettleKeepsTheLastCompletePass(t *testing.T) {
 	errs := Settle(context.Background(), http.DefaultClient, env(ui.URL, ui.URL), 300*time.Millisecond, 10*time.Millisecond)
 	if !mentions(errs, "want one install") {
 		t.Fatalf("errors %v, want the first pass's failure", errs)
+	}
+}
+
+// A pass the deadline cuts short keeps a fresh failure it found before the timeout.
+func TestSettleKeepsAFreshFailureInACutPass(t *testing.T) {
+	core := serve(t, extension.NewCore(), true)
+	// Pass 1 must be a complete pass, so start once the core build has synced.
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		if resp, err := http.Get(core + "/api/v1/installs"); err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("core build did not sync")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var passes atomic.Int32
+	// Pass 1 passes here; from pass 2, /meta lists a pack and /health hangs until the deadline.
+	ui := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/installs" {
+			passes.Add(1)
+		}
+		later := passes.Load() >= 2
+		if later && strings.HasSuffix(r.URL.Path, "/health") {
+			<-r.Context().Done()
+			return
+		}
+		resp, err := http.Get(core + r.URL.RequestURI())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var v map[string]any
+		if later && r.URL.Path == "/api/v1/meta" && json.NewDecoder(resp.Body).Decode(&v) == nil {
+			v["packs"] = []string{"kgateway"}
+			_ = json.NewEncoder(w).Encode(v)
+			return
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	t.Cleanup(ui.Close)
+	// The default build never syncs, so pass 1 fails on that alone.
+	def := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"synced":false,"kinds":[],"packs":["kgateway"]}`))
+	}))
+	t.Cleanup(def.Close)
+	errs := Settle(context.Background(), http.DefaultClient, env(ui.URL, def.URL), 2*time.Second, 10*time.Millisecond)
+	if !mentions(errs, "/meta packs") {
+		t.Fatalf("errors %v, want the cut pass's fresh /meta failure", errs)
 	}
 }
 
